@@ -578,6 +578,67 @@ pub unsafe extern "C" fn inline_encoded_word_block_compare(
     }
 }
 
+/// Writes an inline encoded word block as a fixed-width big-endian byte
+/// string.
+///
+/// Original: `FUN_08350890` @ 0x08350890 (196-byte full extent:
+/// 180-byte instruction body at 0x08350890..0x08350944, trailing literal
+/// pool words at 0x08350948..0x08350950, and the next function's prologue at
+/// 0x08350954). A complete ARM decode finds three plain inbound `bl` sites
+/// (`0x0830a8f4`, `0x0831930c`, `0x083233c8`) and zero predicated `bl` sites.
+///
+/// The encoded count is decoded with `0x4b6143ff`, negated when signed, and
+/// requires four output bytes per limb. The payload limbs are decoded with
+/// `0x3399e27f`; their bytes are written least-significant first while the
+/// destination cursor walks backward, yielding a zero-padded big-endian
+/// representation. Deliberate deviation: none.
+///
+/// # Safety
+/// `source` must point to an inline encoded word block. When `byte_count` is
+/// large enough for its decoded limb count, `destination` must be writable for
+/// `byte_count` bytes and the block must contain every decoded limb.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inline_encoded_word_block_write_be_bytes(
+    byte_count: u32,
+    destination: *mut u8,
+    source: *const InlineEncodedWordBlock,
+) {
+    let decoded_count = (*source)
+        .encoded_count
+        .wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+    let word_count = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+
+    if byte_count < (word_count as u32).wrapping_shl(2) {
+        return;
+    }
+
+    let mut remaining = byte_count;
+    let mut word_index = 0i32;
+    let mut decoded_word = 0u32;
+    let mut bit_shift = 32u32;
+    while remaining != 0 {
+        if bit_shift == 32 {
+            decoded_word = 0;
+            if word_index < word_count {
+                decoded_word = (*source.cast::<u32>().add(word_index as usize + 1))
+                    .wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+                word_index = word_index.wrapping_add(1);
+            }
+            bit_shift = 0;
+        }
+        remaining -= 1;
+        let byte = ((decoded_word >> bit_shift) as u8).wrapping_mul(0xe9);
+        *destination.add(remaining as usize) = byte;
+        bit_shift += 8;
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -589,9 +650,9 @@ mod tests {
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
         copy_inline_encoded_word_block, encoded_word_block_is_zero, encoded_word_block_set_int,
         encoded_word_block_sign, inline_encoded_word_block_compare,
-        inline_encoded_word_block_test_bit, EncodedWordBlock, InlineEncodedWordBlock,
+        inline_encoded_word_block_test_bit, inline_encoded_word_block_write_be_bytes,
+        EncodedWordBlock, InlineEncodedWordBlock,
     };
-
 
     const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
     const ENCODED_WORD_MULTIPLIER: u32 = 0xd561_a67f;
@@ -1176,6 +1237,54 @@ mod tests {
                 );
             }
         }
+    }
+
+
+    #[test]
+    fn inline_block_byte_writer_reverses_limbs_and_zero_pads() {
+        let block = inline_block(
+            2,
+            &[
+                0x1122_3344u32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+                0xaabb_ccddu32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+            ],
+        );
+        let mut destination = [0xff; 10];
+
+        unsafe {
+            inline_encoded_word_block_write_be_bytes(
+                destination.len() as u32,
+                destination.as_mut_ptr(),
+                block.as_ptr().cast(),
+            );
+        }
+
+        assert_eq!(
+            destination,
+            [0, 0, 0xba, 0x33, 0xac, 0x25, 0x79, 0xf2, 0x6b, 0xe4]
+        );
+    }
+
+    #[test]
+    fn inline_block_byte_writer_rejects_too_small_destination_without_writing() {
+        let block = inline_block(
+            -2,
+            &[
+                0x1122_3344u32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+                0xaabb_ccddu32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE),
+            ],
+        );
+        let mut destination = [0xa5; 7];
+
+        unsafe {
+            inline_encoded_word_block_write_be_bytes(
+                destination.len() as u32,
+                destination.as_mut_ptr(),
+                block.as_ptr().cast(),
+            );
+        }
+
+        assert_eq!(destination, [0xa5; 7]);
     }
 
 

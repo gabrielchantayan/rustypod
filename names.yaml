@@ -122425,3 +122425,29 @@ functions:
       mask bit absent from that initial mask; it returns zero after the
       suffix has no such bit. Target pointers remain u32 words. Deliberate
       deviations: none.
+
+  # --- Inline encoded word block byte writer ---
+  - address: 0x08350890
+    ghidra: FUN_08350890
+    name: inline_encoded_word_block_write_be_bytes
+    size: 196
+    sig: "void inline_encoded_word_block_write_be_bytes(u32 byte_count, u8 *destination, const InlineEncodedWordBlock *source)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: byte_count
+      param_2/r6: destination
+      param_3/lr: source
+      r3: word_index
+      r0: decoded_word
+      r1: bit_shift
+    notes: >-
+      Raw osos.dec establishes the 196-byte full extent: the 180-byte
+      instruction body ends at 0x08350944, its three literal-pool words
+      occupy 0x08350948..0x08350950, and the next function starts at
+      0x08350954. Complete ARM decoding finds three inbound plain
+      unconditional BL callers at 0x0830a8f4, 0x0831930c, and 0x083233c8,
+      with zero predicated BL callers; the body contains no BL. It decodes
+      an inline encoded limb count, validates the byte capacity, then emits
+      decoded limbs from low to high into the destination backward, producing
+      a zero-padded big-endian byte string. Deliberate deviations: none.
