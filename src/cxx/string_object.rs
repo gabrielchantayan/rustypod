@@ -2172,6 +2172,65 @@ pub unsafe extern "C" fn string_object_suffix(
     string_object_assign_utf8_capped(out, cursor, selected);
 }
 
+/// string_object_path_basename — original: `FUN_082a21b8` @ load address
+/// **0x082a21b8** (172 bytes, 0x082a21b8..0x082a2260; the next independently
+/// linked function begins at 0x082a2264). Raw ARM contains seven plain `bl`
+/// instructions and zero predicated `bl` instructions; whole-image decoding
+/// finds three direct inbound plain `bl` call sites.
+///
+/// Selects the final path component of `source` into `out`. It scans decoded
+/// codepoints, treating `\`, `/`, and `:` as component separators. A `#`
+/// escapes a following `\`, `/`, or `#`; for every other following codepoint,
+/// it rewinds the decoder and treats that codepoint normally. With no
+/// separator it copy-constructs `out`; otherwise it delegates the selected
+/// codepoint suffix to [`string_object_suffix`]. The second and fourth ABI
+/// arguments are unused by the raw body. No deliberate deviations.
+///
+/// # Safety
+///
+/// `out` must be writable StringObject storage and `source` must be a valid
+/// readable StringObject. Its non-NULL payload must be NUL-terminated and
+/// readable under the permissive UTF-8 decoder's access rules.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_path_basename(
+    out: *mut StringObject,
+    _context: *const u8,
+    source: *const StringObject,
+    _unused: u32,
+) {
+    let mut cursor = string_object_c_str(source);
+    let mut codepoint_index = 0i32;
+    let mut last_separator = -1i32;
+
+    loop {
+        let codepoint = utf8_next_codepoint(&mut cursor);
+        if codepoint == 0 {
+            break;
+        }
+
+        codepoint_index = codepoint_index.wrapping_add(1);
+        if codepoint == b'#' as u32 {
+            let escaped = utf8_next_codepoint(&mut cursor);
+            if escaped == b'\\' as u32 || escaped == b'/' as u32 || escaped == b'#' as u32 {
+                codepoint_index = codepoint_index.wrapping_add(1);
+            } else {
+                utf8_prev_codepoint(&mut cursor);
+            }
+        } else if codepoint == b'\\' as u32 || codepoint == b'/' as u32 || codepoint == b':' as u32 {
+            last_separator = codepoint_index;
+        }
+    }
+
+    if last_separator == -1 {
+        string_object_copy_construct(out, source);
+        return;
+    }
+
+    let count = utf8_codepoint_count_safe((*source).payload) as i32;
+    string_object_suffix(out, source, count.wrapping_sub(last_separator));
+}
+
 /// Keeps the searcher's comparison as an out-of-line call. Without this
 /// barrier, LLVM absorbs the existing ADS `memcmp` port into the search loop,
 /// erasing the original call boundary at 0x082a51e0.
@@ -4433,6 +4492,46 @@ pub(crate) mod tests {
             &[(out_ptr as usize, 2, 0)],
         );
         assert_eq!(destination, [b'Z', 0, 0xa5, 0xa5]);
+    }
+
+    #[test]
+    fn path_basename_honors_escaped_and_unescaped_separators() {
+        let mut payload = *b"root/#/leaf:tail\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let mut destination = [0xa5u8; 8];
+        let mut out = substring_garbage_out();
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        let bench = assign_cstr_bench(destination.as_mut_ptr());
+        unsafe {
+            string_object_path_basename(out_ptr, core::ptr::null(), &source, 0);
+            assert_eq!(
+                (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(out_ptr as usize, 5, 0)],
+            );
+        }
+        assert_eq!(&destination[..5], b"tail\0");
+        drop(bench);
+
+        let mut payload = *b"dir/\xc3\xa9\0";
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let mut destination = [0xa5u8; 4];
+        let mut out = substring_garbage_out();
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        unsafe {
+            string_object_path_basename(out_ptr, core::ptr::null(), &source, 0);
+            assert_eq!(
+                (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(out_ptr as usize, 3, 0)],
+            );
+        }
+        assert_eq!(&destination[..3], b"\xc3\xa9\0");
     }
 
     /// A fresh object for the UTF-16 assignment tests; the payload word is a
