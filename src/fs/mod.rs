@@ -37,6 +37,8 @@ pub mod cache_block;
 pub mod disk_block;
 /// Cache-entry slot preparation and writeback @ 0x082e48bc.
 pub mod cache_block_prepare;
+/// Flushes a pending cache request and its drive metadata @ 0x082b172c.
+pub mod cache_request_flush;
 /// Cache-entry writeback through the storage-block writer @ 0x082e4b4c.
 pub mod cache_entry_flush;
 /// Clears cache-entry transient fields while retaining its context link @ 0x082e4b84.
