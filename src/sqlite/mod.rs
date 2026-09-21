@@ -152,6 +152,7 @@ pub mod expr_list_height;
 pub mod expr_list_walk;
 pub mod expr_new;
 pub mod expr_span;
+pub mod resolve_compound_select;
 pub mod fix_expr;
 pub mod fix_expr_list;
 pub mod fix_init;

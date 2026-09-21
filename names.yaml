@@ -43415,6 +43415,27 @@ functions:
       testing::TRACED_ALLOC_TEST_LOCK (the ata_cmd allocator tests now
       take the same lock instead of a private one).
 
+  - address: 0x08367fb8
+    ghidra: FUN_08367fb8
+    name: sqlite_resolve_compound_select_expr
+    size: 104
+    sig: "i32 sqlite_resolve_compound_select_expr(NameContext *context, Expr *expr)"
+    module: sqlite/resolve_compound_select
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: expr
+    notes: >-
+      Raw ARM establishes the 104-byte executable extent 0x08367fb8..0x08368020;
+      0x08368020 begins the invalid-name format literal and 0x08368038 is the
+      next real function. It contains exactly three direct unconditional BL words
+      (0x08367fe8, 0x08367ff8, 0x08368010), with no predicated BL. NULL succeeds,
+      TK_JOIN_KW (0x17) becomes TK_ID (0x58), and all other expressions resolve
+      names then must be constant; otherwise sqlite_error_msg receives the token
+      at +0x1c. sqlite_resolve_expr_names @ 0x083787a8 and
+      sqlite_expr_is_constant @ 0x083784bc remain absolute stock calls on target:
+      their walker callbacks consume caller frames and have no callable Rust
+      identity. Host tests use explicit dispatch slots for those boundaries.
   - address: 0x083784bc
     ghidra: FUN_083784bc
     name: sqlite_expr_is_constant
