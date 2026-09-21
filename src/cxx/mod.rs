@@ -247,6 +247,7 @@ pub mod stream_state_set;
 pub mod stream_write_cstr;
 pub mod shared_handle_owner_destroy;
 pub mod opaque_vtable_record_copy_construct;
+pub mod opaque_vtable_record_construct;
 pub mod opaque_shared_record_construct;
 pub mod ostream_insert_cstr;
 pub mod ostream_insert_string;
