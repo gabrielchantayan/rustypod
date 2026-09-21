@@ -40585,6 +40585,30 @@ functions:
       Btree inTrans moves after widened pointer slots, the deliberate layout
       adaptation needed to avoid overlap outside the 32-bit target.
 
+  # ---- Paired tracked allocation release (src/sqlite/release_tracked_pair.rs) ----
+  - address: 0x082c369c
+    ghidra: FUN_082c369c
+    name: release_tracked_pair
+    size: 40
+    sig: "void release_tracked_pair(void *pair)"
+    module: sqlite/release_tracked_pair
+    status: ported
+    renames:
+      param_1/r0/r4: pair
+      param_1+0x00: first_payload
+      param_1+0x04: second_payload
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte extent
+      0x082c369c..0x082c36c3: push {r4,lr}; copy pair to r4; load and plain-BL
+      tracked_free for word +0x00, then for word +0x04; zero r0; clear +0x00
+      and +0x04; pop {r4,pc}. The next separately linked function begins with
+      push {r4,lr} at 0x082c36c4. The body has two unconditional plain BL
+      calls, both to tracked_free @ 0x083906f4, and no predicated BL calls.
+      Both payloads are released before either field is cleared. Rust retains
+      the target fields as u32 words so their offsets do not widen on 64-bit
+      hosts; this is the sole deliberate representation deviation.
+
   # ---- B-tree cursor root movement (src/sqlite/move_to_root.rs) ----
   - address: 0x082c3528
     ghidra: FUN_082c3528
