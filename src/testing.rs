@@ -310,6 +310,9 @@ pub mod hints {
     // 0x1d50_0000: dedicated to ui/indexed_rect's raw-u32 rectangle-table
     // fixture; mappings never unmap, so no other user may share it.
     pub const INDEXED_RECT_COPY_OFFSET: usize = 0x1d50_0000;
+    // 0x1d60_0000: dedicated to cxx/keyed_record_find_string_match's raw-u32
+    // owner, entry, candidate and C-string fixture; mappings never unmap.
+    pub const KEYED_RECORD_FIND_STRING_MATCH: usize = 0x1d60_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0x1f10_0000: dedicated to cxx/tokenizer_next_string's raw-u32 UTF-16

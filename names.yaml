@@ -71113,6 +71113,44 @@ functions:
       the stock all-loads-before-stores ordering for overlapping buffers and
       prevent LLVM from substituting a copy intrinsic.
 
+  # --- Keyed record string match ---
+  - address: 0x082a1df8
+    ghidra: FUN_082a1df8
+    name: keyed_record_find_string_match
+    size: 92
+    sig: "void *keyed_record_find_string_match(void *owner, u32 key_a, u32 key_b)"
+    module: cxx/keyed_record_find_string_match
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: key_a
+      param_3/r2: key_b
+      iVar1/r0: key_pair_entry
+      iVar4/r4: candidate
+      iVar3/r0: comparison
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent from 0x082a1df8
+      through the return at 0x082a1e50; the next independently linked
+      function starts at 0x082a1e54. Decoding the body finds exactly three
+      internal plain bl instructions (0x082a1e54, 0x082a50b0, 0x08276d64)
+      and none predicated. CodeGraph identifies three inbound callers:
+      0x0807a3a0, 0x08104294, and 0x0810453c. The body preserves r1/r2
+      into the adjacent key-pair table search at 0x082a1e54, then scans
+      32-byte records from owner+0x2c up to owner+0x30. It obtains each
+      record's NULL-safe C string through string_object_c_str @ 0x082a50b0
+      and returns the first record whose string is UTF-8-equal, via
+      utf8_strcmp_safe @ 0x08276d64, to the matching table entry's +0x10
+      word; absent a key-pair entry or matching candidate it returns NULL.
+      The key-pair search remains an explicit firmware seam at 0x082a1e54;
+      it is independently identified by its raw 44-byte linear scan over
+      owner+0x44..+0x48 of 28-byte entries matching the r1/r2 pair. Host
+      fixtures use target-width pointer words because host pointers are
+      wider; ARM calls string_object_c_str directly. match.py reports a
+      structural diff (31 Rust instructions versus 23 stock): the seam's
+      volatile function-pointer dispatch and LLVM's additional frame account
+      for it. Host tests cover absent keys, a later UTF-8 candidate match,
+      and NULL payloads matching the shared empty string.
+
   # --- Opaque record payload length ---
   - address: 0x082a1ec0
     ghidra: FUN_082a1ec0
