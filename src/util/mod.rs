@@ -79,6 +79,7 @@ pub mod four_word_record;
 pub mod four_word_sentinel_init;
 pub mod first_entry_payload;
 pub mod four_component_pixel_average;
+pub mod four_byte_nonzero_to_ff_mask;
 pub mod four_component_pixel_average_four;
 pub mod global_state;
 pub mod global_slot_release;
