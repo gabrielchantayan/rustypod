@@ -62243,6 +62243,37 @@ functions:
       token succeeds, and absent or mismatched registry tokens fail when
       owner_valid is zero.
 
+  - address: 0x082a3744
+    ghidra: FUN_082a3744
+    name: string_object_assign_from_opaque_utf16_source
+    size: 92
+    sig: "void string_object_assign_from_opaque_utf16_source(OpaqueUtf16Source *source, StringObject *destination)"
+    module: cxx/string_object
+    status: identified
+    renames:
+      param_1/r0/r4: source
+      param_2/r1/r5: destination
+      "*(source->vtable + 0x08)": source_has_utf16
+      FUN_0827639c: string_object_assign_cstr
+      FUN_08055a90: opaque_utf16_source_read
+      FUN_082765a8: string_object_assign_utf16
+    notes: >-
+      BLOCKED: raw osos.dec words establish the exact 92-byte extent
+      0x082a3744..0x082a379f. The separately linked zero literal at
+      0x082a37a0 is the empty C string, and the next function starts with
+      push {r4,lr} at 0x082a37a4. Raw ARM has three direct plain,
+      unconditional BL instructions (0x0827639c, 0x08055a90, and
+      0x082765a8), zero predicated BL instructions, and one indirect BLX
+      through source's vtable +0x08. A complete raw image branch scan finds
+      three inbound plain-BL call sites at 0x0812cb20, 0x08132ad4, and
+      0x0813cff0. The vtable query selects assignment of the literal empty
+      C string on zero; otherwise unported, unnamed 0x08055a90 receives
+      source +0x08, writes a u16 count at stack +4 and UTF-16 units at stack
+      +6, then those values feed string_object_assign_utf16. Although its
+      output shape is visible, 0x08055a90 forwards undocumented state through
+      0x080b4318, so its required source invariants and produced UTF-16
+      contents are not established. A Rust callback or semantic helper seam
+      would invent that callee contract; no faithful port is possible yet.
   - address: 0x082a3e14
     ghidra: FUN_082a3e14
     name: scoped_context_assign_string
