@@ -124150,3 +124150,30 @@ functions:
       reuses VDBE_REAL_VALUE_OPS.change_encoding, whose target default is
       the verified retailOS address 0x083869f4 and whose host tests install
       a recorder.
+  - address: 0x082b516c
+    ghidra: FUN_082b516c
+    name: fragment_list_append
+    size: 200
+    sig: "void fragment_list_append(u32 *list, u32 fragment_count, const u32 *source_pointers, const u16 *fragment_lengths)"
+    module: h264/fragment_list_append
+    status: ported
+    renames:
+      param_1/r0/r9: list
+      param_2/r1/r6: fragment_count
+      param_3/r2: source_pointers
+      param_4/r3/r10: fragment_lengths
+      FUN_082b39f8: fragment_storage_reserve
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte body
+      0x082b516c..0x082b5233; ldr r0,[r1,#0x10] at 0x082b5234 begins the
+      next independently linked function. Whole-image A32 decoding finds
+      three inbound plain BL calls (0x082b651c, 0x082b68c8, 0x082b6b28),
+      zero predicated inbound BL calls, and two outbound plain BL calls:
+      0x082b39f8 and the 0x08037db0 veneer for __rt_memcpy. The wrapper sums
+      u16 fragment lengths, records the count in the list header, reserves
+      contiguous payload storage, writes big-endian payload offsets, copies
+      each fragment, and updates the free-unit and count halfwords. The
+      unported 0x082b39f8 helper remains a verified four-register seam;
+      target builds invoke its address and host tests install a recording
+      seam. Deliberate deviations: none.
