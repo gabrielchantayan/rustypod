@@ -34,6 +34,9 @@ pub mod expression_dependency_mask;
 /// `cg_dependency_mask_lookup` @ `0x082d07f8` — maps a dependency-table
 /// identifier to its 64-bit position mask.
 pub mod dependency_mask_lookup;
+/// `cg_dependency_tail_has_uncovered_mask` @ 0x083672e4 — checks whether
+/// a suffix of expression entries introduces a dependency absent from a mask.
+pub mod dependency_tail_has_uncovered_mask;
 /// `file_has_directory_entry` @ 0x082a548c — platform-file directory-entry
 /// sentinel predicate in the JIT address block.
 pub mod file_directory_entry;

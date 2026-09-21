@@ -874,6 +874,10 @@ pub mod hints {
     // raw-u32 collection, entry, expression-node, and context fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const CG_EXPRESSION_COLLECTION_DEPENDENCY_MASK: usize = 0xd500_0000;
+    // 0xda10_0000: dedicated to codegen/dependency_tail_has_uncovered_mask's
+    // raw-u32 rule, entry, and expression-node fixture; mappings never unmap,
+    // so no other user may share this hint.
+    pub const CG_DEPENDENCY_TAIL_HAS_UNCOVERED_MASK: usize = 0xda10_0000;
     // 0x8400_0000: dedicated to util/fixed_matrix_cursor's raw-u32 base
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const FIXED_MATRIX_CURSOR: usize = 0x8400_0000;
