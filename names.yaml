@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a1cac
+    ghidra: FUN_082a1cac
+    name: timespec_is_after
+    size: 56
+    sig: "u32 timespec_is_after(const i32 *left, const i32 *right)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      "*left+0x0/r2": left_seconds
+      "*right+0x0/r3": right_seconds
+      left+0x4/r0: left_nanoseconds
+      right+0x4/r1: right_nanoseconds
+    notes: >-
+      Raw osos.dec words establish the exact 14-instruction A32 body
+      0x082a1cac..0x082a1ce3: it loads both seconds words, compares them
+      unsigned, and only on equality loads and compares the nanoseconds
+      words signed; the next independently linked function begins at
+      0x082a1ce4. Full-image A32 branch decoding finds three inbound plain
+      BL call sites (0x081fe588, 0x081fe5d8, and 0x081ffebc), zero
+      predicated inbound BL forms, and no internal BL instructions. It
+      returns one exactly when left is lexicographically after right with
+      unsigned seconds and signed nanoseconds. The callers are the POSIX
+      wait/deadline machinery; the first two sites are in FUN_081fe3fc and
+      the third is in FUN_081ffd54. No deliberate deviations.
   - address: 0x082b478c
     ghidra: FUN_082b478c
     name: lowest_set_bit_one_based

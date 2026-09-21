@@ -2673,6 +2673,50 @@ pub unsafe extern "C" fn timespec_is_nonzero(ts: *const i32) -> bool {
     }
     core::ptr::read_unaligned(ts.add(1)) != 0
 }
+ 
+/// timespec_is_after — original: `FUN_082a1cac` @ 0x082a1cac
+/// (**56 bytes, 0x082a1cac..0x082a1ce3; 3 plain `bl` callers, no predicated
+/// `bl` callers — verified from `osos.dec`**).
+///
+/// Compares `{ seconds, nanoseconds }` pairs lexicographically: seconds are
+/// unsigned, and nanoseconds break a seconds tie as signed values. Returns
+/// one precisely when `left` is later than `right`; otherwise returns zero.
+/// The assembly reads nanoseconds only after equal seconds.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to readable, four-byte-aligned
+/// two-word timespec pairs.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timespec_is_after(left: *const i32, right: *const i32) -> u32 {
+    let left_seconds = left.read() as u32;
+    let right_seconds = right.read() as u32;
+    if left_seconds != right_seconds {
+        return (left_seconds > right_seconds) as u32;
+    }
+    (left.add(1).read() > right.add(1).read()) as u32
+}
+
+#[cfg(test)]
+#[test]
+fn timespec_is_after_uses_unsigned_seconds_and_signed_nanoseconds() {
+    let lower_seconds = [0_i32, i32::MAX];
+    let higher_seconds = [-1_i32, i32::MIN];
+    let lower_nanoseconds = [7_i32, -1];
+    let higher_nanoseconds = [7_i32, 0];
+    let equal = [7_i32, -1];
+
+    unsafe {
+        assert_eq!(timespec_is_after(lower_seconds.as_ptr(), higher_seconds.as_ptr()), 0);
+        assert_eq!(timespec_is_after(higher_seconds.as_ptr(), lower_seconds.as_ptr()), 1);
+        assert_eq!(timespec_is_after(lower_nanoseconds.as_ptr(), higher_nanoseconds.as_ptr()), 0);
+        assert_eq!(timespec_is_after(higher_nanoseconds.as_ptr(), lower_nanoseconds.as_ptr()), 1);
+        assert_eq!(timespec_is_after(lower_nanoseconds.as_ptr(), equal.as_ptr()), 0);
+    }
+}
 
 /// fixed16_cos — original: `FUN_082572e4` @ 0x082572e4 (192 bytes of
 /// code plus the two literal-pool words at 0x082573a4/0x082573a8; true
