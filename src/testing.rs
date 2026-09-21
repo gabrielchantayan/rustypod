@@ -1206,6 +1206,10 @@ pub mod hints {
     // unmap, so each mapping site has its own hint.
     pub const SHARED_HANDLE_INITIALIZE: usize = 0x5300_0000;
     pub const VTABLE_SHARED_HANDLE_CONSTRUCT: usize = 0x5400_0000;
+    // 0x5500_0000: dedicated to cxx/basic_ostream_construct's target-width
+    // stream, locale, facet table, and shared-object fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const BASIC_OSTREAM_CONSTRUCT: usize = 0x5500_0000;
     // 0x5350_0000: dedicated to ui/collection_first_item_word_at_1c's raw-u32
     // owner, collection, and item fixture; mappings never unmap, so no other
     // user may share this hint.
