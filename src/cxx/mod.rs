@@ -228,6 +228,7 @@ pub mod string_pair_word_uninitialized_copy;
 pub mod named_object_cache;
 pub mod string_range_destroy;
 pub mod string_vector_destruct;
+pub mod lazy_string_tables_initialize;
 pub mod event_list_tree_record_link;
 pub mod string_vector_record_link;
 pub mod string_vector_record_range_destroy;

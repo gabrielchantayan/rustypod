@@ -1884,6 +1884,11 @@ pub mod hints {
     // 0x8220_0000: dedicated to fs/cache_request_flush's target-width
     // request and descriptor fixture; mappings never unmap.
     pub const CACHE_REQUEST_FLUSH: usize = 0x8220_0000;
+    // 0x6f00_0000: dedicated to cxx/lazy_string_tables_initialize's two
+    // raw-u32 opaque-table fixtures; mappings never unmap, so no other user
+    // may share these hints.
+    pub const LAZY_STRING_TABLES_INITIALIZE_FIRST: usize = 0x6f00_0000;
+    pub const LAZY_STRING_TABLES_INITIALIZE_SECOND: usize = 0x6f10_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
