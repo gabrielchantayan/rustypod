@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082dfdc0
+    ghidra: FUN_082dfdc0
+    name: fat_lfn_fragment_note
+    size: 48
+    sig: "u32 *fat_lfn_fragment_note(FatLfnFragmentState *state, u32 directory, u32 entry_index)"
+    module: fs/fat_lfn_fragment
+    status: ported
+    renames:
+      param_1/r0: state
+      param_1+0: fragment_count
+      param_1+4: entry_index
+      param_1+12: current_directory
+      param_1+16: previous_directory
+      param_2/r1: directory
+      param_3/r2: entry_index
+    notes: >-
+      Raw osos.dec words establish the true 48-byte extent
+      0x082dfdc0..0x082dfdef; push {r4-r9,sl,lr} at 0x082dfdf0 begins the
+      next independent function. Whole-image ARM decoding finds two inbound
+      plain BL instructions (0x082e117c and 0x082e11cc), one inbound
+      predicated BLNE instruction (0x082e2858), and no outbound calls. The
+      leaf increments the FAT LFN fragment count, initializes or changes its
+      current directory while retaining a displaced value, and records the
+      directory-entry index. Ghidra labels the body void, but raw code leaves
+      r0 unchanged; Rust returns state explicitly to preserve that observed
+      ABI result. match.py reports the expected LLVM frame and reordered
+      independent stores, with the same conditional state transitions.
   - address: 0x082e0194
     ghidra: FUN_082e0194
     name: fat_lfn_short_name_checksum
