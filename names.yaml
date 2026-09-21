@@ -122451,3 +122451,25 @@ functions:
       an inline encoded limb count, validates the byte capacity, then emits
       decoded limbs from low to high into the destination backward, producing
       a zero-padded big-endian byte string. Deliberate deviations: none.
+  - address: 0x0834be0c
+    ghidra: FUN_0834be0c
+    name: input_dispatch
+    size: 48
+    sig: "u32 input_dispatch(u8 *input, u32 length, u8 *state)"
+    module: util/input_dispatch
+    status: ported
+    renames:
+      param_1/r0: input
+      param_2/r1: length
+      param_3/r2: state
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte body
+      0x0834be0c..0x0834be3c; the next independently linked function begins
+      at 0x0834be3c. It has three inbound plain BL sites at 0x08321800,
+      0x08323ff8, and 0x083243a0, zero predicated BL sites, and no BL
+      instructions of its own. NULL input returns length; every non-NULL input
+      tail-branches to unported 0x08317f9c with r0=length, r1=input, and
+      r2=state. The Rust ARM payload uses an absolute literal veneer for that
+      relocated tail transfer; host tests use a callback seam. Ghidra's
+      0x0834be0c body incorrectly absorbs the separately linked function
+      beginning at 0x0834be3c.
