@@ -105,6 +105,7 @@ pub mod operation_destroy;
 pub mod element_reference_item;
 pub mod element_reference_item_count;
 pub mod element_reference_target_field_210;
+pub mod element_reference_target_flag_bit_0;
 pub mod element_reference_cookie;
 pub mod element_reference_persistent_id;
 pub mod element_reference_construct_string;
