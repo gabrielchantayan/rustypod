@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082d7bd4
+    ghidra: FUN_082d7bd4
+    name: hash_table_visit_with_context
+    size: 28
+    sig: "void hash_table_visit_with_context(u8 *table, void (*callback)(u32, u32), u32 context)"
+    module: cxx/hash_table_visit_with_context
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r3: callback
+      param_3/[sp]: context
+      FUN_080846f4: hash_table_bucket_chain_visitor
+    notes: >-
+      Raw osos.dec words e92d4008 e1a03001 e58d2000 e3a02000 e3a01001
+      ebf6b2c1 e8bd9000 establish the exact 28-byte body
+      0x082d7bd4..0x082d7bef; push {r4-r6,lr} at 0x082d7bf0 begins the next
+      independently linked function. ARM decoding finds two inbound plain BL
+      calls at 0x08073394 and 0x080733a4, zero predicated inbound BL calls,
+      and one outbound plain BL to FUN_080846f4 at 0x080846f4. It forwards
+      table, callback, and context to that resident bucket-chain visitor with
+      mode=1 and the mode-zero callback NULL. FUN_080846f4 has no names.yaml
+      entry and remains a fixed-address target seam; host tests verify mode,
+      NULL callback, and forwarding for null/non-null table values and zero/
+      u32::MAX contexts. Deliberate deviations: none.
   - address: 0x082d8e30
     ghidra: FUN_082d8e30
     name: pager_page_unlink
