@@ -135,7 +135,7 @@
 //!   read, [`obj_cmp`] implements upstream's body — length first, then
 //!   `memcmp` over `data` — which the `length` @ +0x0c/+0x10 layout
 //!   recovered from `OBJ_obj2txt` @ 0x0805f110 corroborates.
-use crate::drivers::ata_cmd::traced_alloc;
+use crate::drivers::ata_cmd::{traced_alloc, traced_free};
 use crate::runtime::rt_div::__rt_udiv;
 use core::ffi::c_void;
 
@@ -345,6 +345,33 @@ unsafe fn lhash_expand() -> LhashExpand {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_EXPAND)) }
 }
 
+/// `lh_contract` @ 0x080eecfc, the unported table-shrink worker.
+pub type LhashContract = unsafe extern "C" fn(table: *mut Lhash);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_lhash_contract(table: *mut Lhash) {
+    let contract: LhashContract = unsafe { core::mem::transmute(0x080e_ecfcusize) };
+    unsafe { contract(table) };
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_lhash_contract(_table: *mut Lhash) {
+    panic!("lh_delete requires the lh_contract worker 0x080eecfc")
+}
+
+/// Active `lh_contract` worker. The volatile load preserves the target call.
+#[cfg(target_os = "none")]
+pub static mut LHASH_CONTRACT: LhashContract = firmware_lhash_contract;
+
+#[cfg(not(target_os = "none"))]
+pub static mut LHASH_CONTRACT: LhashContract = missing_lhash_contract;
+
+#[inline(always)]
+unsafe fn lhash_contract() -> LhashContract {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LHASH_CONTRACT)) }
+}
+
+
 /// lh_insert — original: `FUN_082d7c48` @ 0x082d7c48 (192 bytes).
 ///
 /// Clears `table->error`; grows the table when
@@ -414,6 +441,44 @@ pub unsafe extern "C" fn lh_retrieve(table: *mut Lhash, key: *const c_void) -> *
         (*table).num_retrieve = (*table).num_retrieve.wrapping_add(1);
         (*node).data
     }
+}
+
+/// lh_delete — retailOS `FUN_082d7b28` @ `0x082d7b28` (144 bytes,
+/// `0x082d7b28..0x082d7bb7`; the next real function begins at
+/// `0x082d7bb8`). Raw ARM decoding finds three unconditional outbound `bl`
+/// instructions (`getrn`, `traced_free`, `__rt_udiv`) and one predicated
+/// `blls` to `lh_contract`; the disassembly identifies three plain inbound
+/// `bl` call sites and no predicated inbound call.
+///
+/// OpenSSL `lh_delete`: clear `error`, resolve `key`'s bucket, unlink and
+/// release its first node if present, update delete/miss and item counters,
+/// then contract when the post-delete load is at or below `down_load`.
+/// Deliberate deviation: unported `getrn` and `lh_contract` remain volatile
+/// fixed-address seams; the already ported `traced_free` and `__rt_udiv` are
+/// called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn lh_delete(table: *mut Lhash, key: *const c_void) -> *mut c_void {
+    (*table).error = 0;
+    let mut hash = 0;
+    let bucket = lhash_getrn()(table, key, core::ptr::addr_of_mut!(hash));
+    let node = bucket.read();
+    if node.is_null() {
+        (*table).num_no_delete = (*table).num_no_delete.wrapping_add(1);
+        return core::ptr::null_mut();
+    }
+
+    bucket.write((*node).next);
+    let data = (*node).data;
+    traced_free(node.cast::<u8>());
+    (*table).num_delete = (*table).num_delete.wrapping_add(1);
+    (*table).num_items = (*table).num_items.wrapping_sub(1);
+    if (*table).num_nodes > 16
+        && __rt_udiv((*table).num_items.wrapping_shl(8), (*table).num_nodes) <= (*table).down_load
+    {
+        lhash_contract()(table);
+    }
+    data
 }
 
 /// The `obj_objs` table: a DER-sorted array of `ASN1_OBJECT *`.
@@ -797,6 +862,7 @@ mod tests {
             HOST_ADDED_SLOT = core::ptr::null_mut();
             LHASH_GETRN = missing_lhash_getrn;
             LHASH_EXPAND = missing_lhash_expand;
+            LHASH_CONTRACT = missing_lhash_contract;
             HOST_NID_OBJS = core::ptr::null_mut();
         }
 
@@ -1017,6 +1083,65 @@ mod tests {
         assert_eq!(table.error, 0);
         assert_eq!(table.num_retrieve, 2);
         assert_eq!(table.num_retrieve_miss, 1);
+        clear(guard);
+    }
+
+    #[test]
+    fn deletion_unlinks_counts_misses_and_contracts_at_the_threshold() {
+        static mut NODE: LhashNode = LhashNode {
+            data: core::ptr::null_mut(),
+            next: core::ptr::null_mut(),
+        };
+        static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
+        static mut CONTRACT_CALLS: u32 = 0;
+
+        unsafe extern "C" fn resolve(
+            _table: *mut Lhash,
+            _key: *const c_void,
+            hash: *mut u32,
+        ) -> *mut *mut LhashNode {
+            *hash = 0x2468_ace0;
+            core::ptr::addr_of_mut!(BUCKET)
+        }
+
+        unsafe extern "C" fn record_contract(_table: *mut Lhash) {
+            CONTRACT_CALLS = CONTRACT_CALLS.wrapping_add(1);
+        }
+
+        let guard = LHASH_TEST_LOCK.lock();
+        let data = 1usize as *mut c_void;
+        let successor = 2usize as *mut LhashNode;
+        let mut table = Lhash::empty();
+        table.num_nodes = 17;
+        table.num_items = 1;
+        table.down_load = 0;
+        table.num_delete = u32::MAX;
+        table.error = -7;
+        unsafe {
+            NODE = LhashNode { data, next: successor };
+            BUCKET = core::ptr::addr_of_mut!(NODE);
+            CONTRACT_CALLS = 0;
+            LHASH_GETRN = resolve;
+            LHASH_CONTRACT = record_contract;
+        }
+        assert_eq!(unsafe { lh_delete(&mut table, core::ptr::null()) }, data);
+        assert_eq!(unsafe { BUCKET }, successor);
+        assert_eq!(table.error, 0);
+        assert_eq!(table.num_delete, 0, "the target counter wraps");
+        assert_eq!(table.num_no_delete, 0);
+        assert_eq!(table.num_items, 0);
+        assert_eq!(unsafe { CONTRACT_CALLS }, 1, "zero load contracts at equality");
+
+        unsafe {
+            BUCKET = core::ptr::null_mut();
+            table.error = 4;
+        }
+        assert!(unsafe { lh_delete(&mut table, core::ptr::null()) }.is_null());
+        assert_eq!(table.error, 0);
+        assert_eq!(table.num_delete, 0);
+        assert_eq!(table.num_no_delete, 1);
+        assert_eq!(table.num_items, 0);
+        assert_eq!(unsafe { CONTRACT_CALLS }, 1);
         clear(guard);
     }
 
