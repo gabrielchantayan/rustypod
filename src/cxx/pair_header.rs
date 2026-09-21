@@ -141,6 +141,48 @@ pub unsafe extern "C" fn pair_header_grand_base_reset(
     )
 }
 
+/// pair_header_element_array_copy_construct — original: `FUN_082ab20c` @
+/// `0x082ab20c` (40 bytes; source:
+/// `ipod-decomp/decomp/c/029/082ab20c_FUN_082ab20c.c`).
+///
+/// Three plain `bl` call sites (0x0810eb48, 0x08240be4, and 0x082495e4) and
+/// zero predicated forms were verified by decoding every A32 BL encoding in
+/// `osos.dec`. The exact body ends at 0x082ab233; the independently linked
+/// `cpp_array_construct` begins at 0x082ab234. It rotates the five-word ADS
+/// `(destination, source, element_size, element_count, element_initializer)`
+/// convention into the eleven-word `FUN_082b498c` ABI:
+/// `(destination, element_count, element_size, 0, source,
+/// element_initializer, 0, 0, 0, 0, 0)`. Its sole plain BL targets the
+/// unported forwarding wrapper `FUN_082ab344` at 0x082ab344, which makes that
+/// helper call; r0 returns unchanged through both wrappers.
+///
+/// Deliberate deviation: the unported shared helper stays behind the existing
+/// exact-ABI [`PAIR_HEADER_ELEMENT_ARRAY_OPS`] seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_element_array_copy_construct(
+    destination: *mut u32,
+    source: u32,
+    element_size: u32,
+    element_count: u32,
+    element_initializer: u32,
+) -> *mut u32 {
+    let reset = core::ptr::addr_of!(PAIR_HEADER_ELEMENT_ARRAY_OPS.reset).read_volatile();
+    reset(
+        destination,
+        element_count,
+        element_size,
+        ARRAY_ALLOCATION_HEADER_BYTES,
+        source,
+        element_initializer,
+        0,
+        ARRAY_ALLOCATOR_CALLBACK,
+        ARRAY_ALLOCATOR_CONTEXT,
+        ARRAY_ALLOCATION_FLAGS,
+        ARRAY_ZERO_INITIALIZE,
+    )
+}
+
 /// pair_header_grand_base_body_construct — original: `FUN_08185b98` @
 /// `0x08185b98` (16 bytes; source:
 /// `ipod-decomp/decomp/c/015/08185b98_FUN_08185b98.c`).
@@ -1421,6 +1463,85 @@ mod tests {
                     ARRAY_ALLOCATOR_CONTEXT as usize,
                     ARRAY_ALLOCATION_FLAGS as usize,
                     ARRAY_ZERO_INITIALIZE as usize,
+                ]
+            );
+        }
+    }
+
+    /// `FUN_082ab20c` places its source word in helper slot five, rotates
+    /// count before size, and preserves the helper's raw return pointer.
+    #[test]
+    fn element_array_copy_construct_forwards_source_and_return() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: recording_element_array_reset,
+        });
+        unsafe {
+            reset_recording();
+            let mut storage = vec![FILL; BASE_WORDS + 8];
+            let destination = storage.as_mut_ptr().add(1 + GRAND_BASE_BODY_OFFSET_WORDS);
+
+            assert_eq!(
+                pair_header_element_array_copy_construct(
+                    destination,
+                    0x1122_3344,
+                    0x24,
+                    2,
+                    0x5566_7788,
+                ),
+                destination.add(4),
+            );
+            assert_eq!(core::ptr::addr_of!(ARRAY_CALLS).read_volatile(), 1);
+            assert_eq!(
+                seen_array_args(),
+                [
+                    destination as usize,
+                    2,
+                    0x24,
+                    0,
+                    0x1122_3344,
+                    0x5566_7788,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ]
+            );
+        }
+    }
+
+    /// Empty arrays retain the same ABI routing; neither the wrapper nor the
+    /// helper call substitutes a source or initializer value.
+    #[test]
+    fn element_array_copy_construct_forwards_empty_array_edge_case() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: recording_element_array_reset,
+        });
+        unsafe {
+            reset_recording();
+            let mut storage = vec![FILL; BASE_WORDS + 8];
+            let destination = storage.as_mut_ptr().add(1 + GRAND_BASE_BODY_OFFSET_WORDS);
+
+            assert_eq!(
+                pair_header_element_array_copy_construct(destination, 0, u32::MAX, 0, 0),
+                destination.add(4),
+            );
+            assert_eq!(
+                seen_array_args(),
+                [
+                    destination as usize,
+                    0,
+                    u32::MAX as usize,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
                 ]
             );
         }

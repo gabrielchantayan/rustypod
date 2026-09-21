@@ -41,6 +41,37 @@ functions:
       inbound BL call sites are the callers FUN_082b47bc, FUN_082b4814,
       and FUN_082c6430. The Rust loop deliberately retains the original
       mask-walk rather than using trailing_zeros; no semantic deviations.
+  - address: 0x082ab20c
+    ghidra: FUN_082ab20c
+    name: pair_header_element_array_copy_construct
+    size: 40
+    sig: "u32 *pair_header_element_array_copy_construct(u32 *destination, u32 source, u32 element_size, u32 element_count, u32 element_initializer)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: element_size
+      param_4/r3: element_count
+      param_5/[sp]: element_initializer
+      FUN_082ab344: element_array_helper_adapter
+      FUN_082b498c: element_array_helper
+    notes: >-
+      Raw osos.dec words e92d401c e1a0e002 e59d2010 e1a0c003 e3a03000
+      e88d000c e1a0300e e1a0200c eb000044 e8bd801c establish the exact
+      40-byte A32 body 0x082ab20c..0x082ab233; 0x082ab234 begins the next
+      independently linked function. Whole-image aligned A32 decoding finds
+      exactly three inbound plain BL calls at 0x0810eb48, 0x08240be4, and
+      0x082495e4, zero predicated inbound BL forms, and one outbound plain BL
+      to FUN_082ab344 at 0x082ab344. It forwards
+      (destination, source, element_size, element_count, element_initializer)
+      through FUN_082ab344 to the eleven-word FUN_082b498c ABI as
+      (destination, element_count, element_size, 0, source,
+      element_initializer, 0, 0, 0, 0, 0). Ghidra's void result is incorrect:
+      raw r0 passes unchanged through the helper call and all three callers
+      use it as the constructed-array cursor. Deliberate deviation: the
+      unported helper remains behind the existing exact-ABI
+      PAIR_HEADER_ELEMENT_ARRAY_OPS seam; no new seam was created.
   - address: 0x082d6648
     ghidra: FUN_082d6648
     name: tagged_pointer_u16_init
