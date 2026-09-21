@@ -186,6 +186,7 @@ pub mod opaque_context_drain;
 pub mod opaque_context_set_limit;
 pub mod opaque_header_literal_construct;
 pub mod opaque_layout_construct;
+pub mod opaque_layout_initialize;
 pub mod return_constant_0x52;
 pub mod opaque_pair_copy_from_word8;
 pub mod opaque_string_owner_destroy;

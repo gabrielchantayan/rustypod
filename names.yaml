@@ -109970,11 +109970,31 @@ functions:
       returns layout unchanged, including NULL. Raw decoding of the five
       inbound branch words finds plain unconditional BL at 0x081e6b70,
       0x0826287c, 0x0839e898, 0x0839ea04, and 0x0839f3e0; no predicated BL
-      reaches this address. The initializer is unported: target builds call
-      its verified fixed address, while host tests use a volatile callback seam
-      to prove exactly one verbatim forwarding call and return identity for
-      live and NULL pointers. Deliberate codegen deviation: that seam lowers
-      to indirect BLX rather than stock's direct BL.
+      reaches this address. The initializer is ported as
+      `cxx/opaque_layout_initialize`; the wrapper calls it directly and
+      discards its status. Deliberate codegen deviation: Rust's direct call may
+      lower differently from stock's direct BL while retaining the contract.
+
+  # --- Opaque layout-record initializer ---
+  - address: 0x082e7bf0
+    ghidra: FUN_082e7bf0
+    name: opaque_layout_initialize
+    size: 76
+    sig: "u32 opaque_layout_initialize(u32 *layout)"
+    module: cxx/opaque_layout_initialize
+    status: ported
+    vars:
+      param_1/r0: layout
+    notes: >-
+      Raw osos.dec words establish the 76-byte instruction body
+      0x082e7bf0..0x082e7c3c, followed by literal 0x50544841 at 0x082e7c3c;
+      the next real function begins at 0x082e7c40. Whole-image ARM decoding
+      finds exactly three inbound BL instructions: plain BL at 0x080ccbfc and
+      0x08261db0, plus predicated BLNE at 0x082e813c. NULL returns status
+      0x1a. Otherwise the initializer writes the fixed ten-word 40-byte layout
+      record, including tag 0x50544841, and returns zero. Rust deliberately
+      uses ordered word-indexed stores rather than the stock STM/STR register
+      schedule; each resulting field value and status is preserved.
 
   # --- OpenGL ES pixel-format to retail layout-kind mapper ---
   - address: 0x08260468
