@@ -3687,6 +3687,47 @@ pub unsafe extern "C" fn string_id_record_equals(
     }
 }
 
+/// path_chain_to_string — original: `FUN_082a2118` @ 0x082a2118 (104 bytes;
+/// **4 direct `bl` calls**, all unconditional and no predicated calls).
+///
+/// The raw ARM begins at `push {r3,r4,r5,r6,r7,lr}` and ends at
+/// `pop {r3,r4,r5,r6,r7,pc}` @ 0x082a217c; the next independently linked
+/// function starts at 0x082a2180. It default-constructs `out`, then walks
+/// the target-layout chain at `context + 0x1c`. For each node with a non-NULL
+/// successor it prepends `\` as one UTF-16 unit and then prepends the C string
+/// in the node's embedded StringObject at +0x0c. The terminal node is omitted.
+///
+/// The target build calls the established StringObject ports directly. Host
+/// builds read the embedded object's four-byte payload word explicitly: host
+/// pointers are wider, so casting a target +0x0c subobject to `StringObject`
+/// would apply the wrong payload offset.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn path_chain_to_string(out: *mut StringObject, context: *const u8) {
+    string_default_construct(out);
+    let mut node = core::ptr::read(context.add(0x1c).cast::<u32>()) as usize as *const u8;
+
+    while !node.is_null()
+        && core::ptr::read(node.add(0x1c).cast::<u32>()) != 0
+    {
+        let separator = b'\\' as u16;
+        string_object_insert_utf16(out, 0, &separator, 1);
+        #[cfg(target_os = "none")]
+        let name = string_object_c_str(node.add(0x0c).cast::<StringObject>());
+        #[cfg(not(target_os = "none"))]
+        let name = {
+            let payload = core::ptr::read(node.add(0x10).cast::<u32>());
+            if payload == 0 {
+                core::ptr::addr_of!(STRING_OBJECT_EMPTY_CSTR)
+            } else {
+                payload as usize as *const u8
+            }
+        };
+        string_object_insert_cstr(out, 0, name);
+        node = core::ptr::read(node.add(0x1c).cast::<u32>()) as usize as *const u8;
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
@@ -5129,6 +5170,71 @@ pub(crate) mod tests {
         }
         guard
     }
+    static mut PATH_CHAIN_BUFFERS: [[u8; 32]; 4] = [[0; 32]; 4];
+    static mut PATH_CHAIN_ALLOCATION_INDEX: usize = 0;
+
+    unsafe extern "C" fn recording_path_chain_allocate(
+        this: *mut StringObject, size: usize, flags: u32,
+    ) -> *mut u8 {
+        let index = core::ptr::read_volatile(core::ptr::addr_of!(PATH_CHAIN_ALLOCATION_INDEX));
+        let out = core::ptr::addr_of_mut!(PATH_CHAIN_BUFFERS)
+            .cast::<u8>()
+            .add(index * 32);
+        core::ptr::addr_of_mut!(PATH_CHAIN_ALLOCATION_INDEX).write(index + 1);
+        (*core::ptr::addr_of_mut!(ASSIGN_CSTR_ALLOCATE_CALLS)).push((this as usize, size, flags));
+        let old = (*this).payload;
+        if old.is_null() { out.write(0); }
+        else { core::ptr::copy_nonoverlapping(old, out, strlen_safe_plus1(old)); }
+        (*this).payload = out;
+        out
+    }
+
+    #[test]
+    fn path_chain_to_string_prepends_nonterminal_names_and_separators() {
+        use crate::testing::{hints, try_map_u32_slab};
+
+        let Some(slab) = try_map_u32_slab(hints::PATH_CHAIN_TO_STRING, 0x1000) else { return; };
+        unsafe {
+            slab.write_bytes(0, 0x1000);
+            let first = slab.add(0x100);
+            let second = slab.add(0x140);
+            let terminal = slab.add(0x180);
+            let first_name = slab.add(0x300);
+            let second_name = slab.add(0x320);
+            first_name.copy_from_nonoverlapping(b"A\0".as_ptr(), 2);
+            second_name.copy_from_nonoverlapping(b"B\0".as_ptr(), 2);
+            slab.add(0x1c).cast::<u32>().write_unaligned(first as usize as u32);
+            first.add(0x10).cast::<u32>().write_unaligned(first_name as usize as u32);
+            first.add(0x1c).cast::<u32>().write_unaligned(second as usize as u32);
+            second.add(0x10).cast::<u32>().write_unaligned(second_name as usize as u32);
+            second.add(0x1c).cast::<u32>().write_unaligned(terminal as usize as u32);
+
+            let _bench = assign_cstr_bench(core::ptr::null_mut());
+            PATH_CHAIN_BUFFERS = [[0; 32]; 4];
+            PATH_CHAIN_ALLOCATION_INDEX = 0;
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
+                recording_path_chain_allocate;
+            let mut out = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+            path_chain_to_string(&mut out, slab);
+            assert_eq!(core::slice::from_raw_parts(out.payload, 5), b"B\\A\\\0");
+            assert_eq!(PATH_CHAIN_ALLOCATION_INDEX, 4);
+        }
+    }
+
+    #[test]
+    fn path_chain_to_string_constructs_empty_output_for_a_null_head() {
+        let context = [0u8; 32];
+        let mut out = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+
+        unsafe { path_chain_to_string(&mut out, context.as_ptr()); }
+
+        assert!(core::ptr::eq(out.vtable, &STRING_OBJECT_VTABLE));
+        assert!(out.payload.is_null());
+    }
+
     /// Successive virtual allocations used by the concatenation test. The
     /// preserving middle allocation has 32-byte backing on both sides.
     static mut CONCAT_ALLOCATION_RESULTS: [usize; 3] = [0; 3];

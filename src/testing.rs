@@ -454,6 +454,9 @@ pub mod hints {
     // silently on every host.
     pub const ELEMENT_REFERENCE_PERSISTENT_ID: usize = 0x5a00_0000;
     pub const TIMED_TRANSITION: usize = 0x5c00_0000;
+    // 0x5c10_0000: dedicated to cxx/string_object's raw-u32 path-chain
+    // context, nodes, and C-string fixture; mappings never unmap.
+    pub const PATH_CHAIN_TO_STRING: usize = 0x5c10_0000;
     // 0x5b00_0000: dedicated to app/transition_page_clone's raw-u32 source,
     // destination, and transition fixtures; mappings never unmap, so no other
     // test may share this hint.
