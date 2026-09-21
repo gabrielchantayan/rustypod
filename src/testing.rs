@@ -556,6 +556,9 @@ pub mod hints {
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const CTYPE_ISDIGIT: usize = 0x7d00_0000;
+    // 0x7d10_0000: dedicated to app/context_index_matches_context_field_f40's
+    // target-width context and index-table fixture; mappings never unmap.
+    pub const CONTEXT_INDEX_MATCHES_CONTEXT_FIELD_F40: usize = 0x7d10_0000;
     // 0x1230_0000: dedicated to util/indexed_state_set_and_poll's raw-u32
     // state-table and selected-record fixture; mappings never unmap, so no
     // other user may share this hint.
