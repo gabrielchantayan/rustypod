@@ -68946,6 +68946,29 @@ functions:
       veneer's target body) directly instead of the veneer. match.py:
       same load/lsl #2/bl memcpy/reload-count/store structure; the diff
       is the crate fp frame and register allocation.
+  - address: 0x082d27d4
+    ghidra: FUN_082d27d4
+    name: word_list_trim_trailing_zeros
+    size: 68
+    sig: "void word_list_trim_trailing_zeros(WordList *list)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1: list
+    notes: >-
+      Removes zero-valued words only from the end of a nonempty WordList.
+      Raw osos.dec words decode to a 17-instruction leaf from 0x082d27d4
+      through bx lr at 0x082d2814; the next function's push {r4-r9,lr}
+      starts at 0x082d2818, confirming Ghidra's 68-byte extent. It loads
+      entries[count - 1], returns unchanged if nonzero, otherwise walks
+      backward until a nonzero word or index -1, then writes index + 1 to
+      count. Raw instruction decoding verifies zero plain and zero
+      predicated BL instructions in this function. The count must be
+      nonzero: stock performs the initial count-1 indexed load without a
+      guard. match.py preserves the initial tail load/test and backward
+      scan/store shape; LLVM adds the crate frame and changes register
+      allocation/loop layout. Host tests cover a nonzero tail, interior
+      zero preserved, trailing-zero trim, and all-zero list.
   - address: 0x082cf7bc
     ghidra: FUN_082cf7bc
     name: word_list_modular_square_assign
