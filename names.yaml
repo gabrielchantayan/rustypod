@@ -124787,3 +124787,31 @@ functions:
       control-flow entry whose required live-register contract is not
       recoverable as a Rust callable ABI, it cannot be ported faithfully.
       Deliberate deviation: none; no Rust symbol or hook is created.
+
+  # --- Scoped-context owner byte +0x8f bit-3 predicate (app) ---
+  - address: 0x082a2db0
+    ghidra: FUN_082a2db0
+    name: scoped_context_owner_byte_8f_bit_3
+    size: 52
+    sig: "u32 scoped_context_owner_byte_8f_bit_3(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars:
+      param_1/r0/r4: this
+      param_1+0x00: vtable
+      vtable+0x08: scoped_context_validity
+      param_1+0x08: owner
+      owner+0x8f: capability_byte
+    notes: >-
+      Raw osos.dec words establish the exact thirteen-instruction, 52-byte A32
+      body 0x082a2db0..0x082a2de0; the push at 0x082a2de4 begins the next
+      independently entered function. Complete aligned A32 decoding finds
+      three inbound plain BL calls and zero predicated BL calls; the body has
+      one indirect BLX through vtable slot +0x08. The virtual validity result
+      gates an owner byte load at +0x8f, then AND #8 / LSR #3 returns that bit
+      as 0 or 1. A zero validity result returns zero without dereferencing the
+      owner. The virtual callee has no recovered semantic identity, so the port
+      reuses the existing ScopedContext vtable model rather than inventing a
+      callee seam. Deliberate deviation: Rust branches where ADS predicates
+      the owner-byte load and bit extraction; the gate, target byte, and result
+      remain identical.
