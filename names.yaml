@@ -64335,6 +64335,33 @@ functions:
       r4` return; differing by the crate's fp frame and the loop rotated so
       the first decode is peeled.
 
+  - address: 0x082a4ea4
+    ghidra: FUN_082a4ea4
+    name: bit_set_find_next_set
+    size: 68
+    sig: "u32 bit_set_find_next_set(BitSet *set, u32 start_bit)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r5: set
+      param_2/r4: start_bit
+      FUN_082a4ee8: bit_set_contains
+    notes: >-
+      Finds the first set bit at or after start_bit, returning bit_capacity
+      when no set bit remains. EXTENT - raw osos.dec decodes from 0x082a4ea4
+      through the `pop {r4, r5, r6, pc}` at 0x082a4ee4; the next separately
+      linked function opens at 0x082a4ee8 with `mov r2, r1`, giving the true
+      68-byte extent. CALL SITES - raw ARM B/BL decoding finds 3 unconditional
+      BLs (0x0815f8c4, 0x0815f96c, 0x0815fa14) and 0 predicated BLs. BODY -
+      while `set->bit_capacity > start_bit`, call bit_set_contains; return
+      start_bit when it is nonzero, otherwise increment with ARM-wrapping add.
+      Returning capacity is therefore both the exhausted-search sentinel and
+      the result for an initially out-of-range start_bit. CALLEE -
+      bit_set_contains @ 0x082a4ee8 is already ported; Rust calls it directly
+      rather than reproducing the stock BL. TESTS - mapped target-width
+      backing words cover a found bit at 3, a cross-word result at 32,
+      exhaustion, an initially-at-capacity start, and a set padding bit beyond
+      capacity that must not be observed.
   - address: 0x082a4ee8
     ghidra: FUN_082a4ee8
     name: bit_set_contains
