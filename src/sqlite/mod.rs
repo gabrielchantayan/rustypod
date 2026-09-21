@@ -187,6 +187,7 @@ pub mod get_temp_range;
 pub mod get_temp_reg;
 pub mod hash_clear;
 pub mod integrity_check_append_msg;
+pub mod integrity_check_ref;
 pub mod is_nan;
 pub mod is_rowid;
 pub mod hash_find;

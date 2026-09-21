@@ -42523,6 +42523,34 @@ functions:
       deviation: pointers remain target-width u32 fields rather than host
       pointers, preserving ARM offsets on 64-bit host tests.
 
+  - address: 0x082c2938
+    ghidra: FUN_082c2938
+    name: integrity_check_ref
+    size: 92
+    sig: "i32 integrity_check_ref(IntegrityCheck *check, i32 page, const char *context)"
+    module: sqlite/integrity_check_ref
+    status: ported
+    renames:
+      param_1/r0: check
+      param_2/r1: page
+      param_3/r2: context
+      "check+0x08": nPage
+      "check+0x0c": anRef
+    notes: >-
+      SQLite 3.5.x checkRef. Raw bytes verify the 92-byte code extent
+      0x082c2938..0x082c2990 (pop {r4,pc}); the next bytes at 0x082c2994
+      are the two diagnostic literals. Decoding every aligned ARM B/BL
+      immediate in osos.dec finds three inbound direct calls, all
+      unconditional bl: 0x082c25c4, 0x082c26d4, and 0x082c2a10; no
+      predicated inbound calls. The sole outbound call is a plain bl to
+      integrity_check_append_msg @ 0x082c2438. Page zero returns success.
+      An invalid page, including a wrapping signed reverse index, diagnoses
+      then returns success. A first reference increments zero to one and
+      returns zero; a second reference diagnoses; later values increment
+      with ARM wrapping arithmetic and return one. Deliberate deviation:
+      its C r3 variadic page argument is the established one-word explicit
+      VaList passed to integrity_check_append_msg.
+
 
   # ---- SQLite VFS access wrapper, sqlite3OsAccess (src/sqlite/os_access.rs) ----
   - address: 0x0837dae0
