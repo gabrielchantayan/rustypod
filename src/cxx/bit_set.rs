@@ -1,6 +1,7 @@
 //! retailOS's **bit set** — a heap-backed vector of bits with a running
-//! cardinality — and its seven ported members: arbitrary-bit test, the pre-split
-//! bit test, bit write, bit clear, clear-all, destruction, and UTF-8 bulk insert.
+//! cardinality — and its eight ported members: arbitrary-bit test, next-set-bit
+//! search, the pre-split test, bit write, bit clear, clear-all, destruction,
+//! and UTF-8 bulk insert.
 //! Everything below is decoded from the raw words of `work/firmware/osos.dec`, not from Ghidra.
 //!
 //! ## The class
@@ -258,6 +259,39 @@ pub unsafe extern "C" fn bit_set_clear_all(set: *mut BitSet) {
 pub unsafe extern "C" fn bit_set_contains(set: *mut BitSet, bit: u32) -> u32 {
     bit_set_test(set, bit >> 5, bit & 31)
 }
+/// bit_set_find_next_set — original: `FUN_082a4ea4` @ 0x082a4ea4
+/// (**68 bytes**, 0x082a4ea4..0x082a4ee8; the next separately linked function
+/// begins `mov r2, r1` at 0x082a4ee8, so Ghidra's extent is exact). **3 plain
+/// `bl` call sites, 0 predicated `bl`**, binary-scanned by decoding every ARM
+/// B/BL word in `osos.dec`: 0x0815f8c4, 0x0815f96c, and 0x0815fa14.
+///
+/// Starting at `start_bit`, tests each bit in ascending order until it finds
+/// one set or reaches `set->bit_capacity`; it returns the found bit index or
+/// the capacity sentinel when none remains. The ARM `add` wraps if traversal
+/// reaches `u32::MAX`, exactly as `wrapping_add` does here.
+///
+/// Deliberate deviation: the stock body calls [`bit_set_contains`] with a
+/// real `bl`; this port invokes the already ported direct sibling instead.
+/// Volatile capacity loads preserve the original's load before every test and
+/// its fresh capacity load on the exhausted return.
+///
+/// # Safety
+///
+/// `set` must point at a live [`BitSet`] whose word storage covers every bit
+/// below `bit_capacity`. The original performs no NULL check.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_find_next_set(set: *mut BitSet, mut start_bit: u32) -> u32 {
+    let capacity = core::ptr::addr_of!((*set).bit_capacity);
+    while core::ptr::read_volatile(capacity) > start_bit {
+        if bit_set_contains(set, start_bit) != 0 {
+            return start_bit;
+        }
+        start_bit = start_bit.wrapping_add(1);
+    }
+    core::ptr::read_volatile(capacity)
+}
+
 
 /// bit_set_test — original: `FUN_082a4ef8` @ 0x082a4ef8
 /// (24 bytes, 0x082a4ef8..0x082a4f10; the next function opens `push {r4, lr}`
@@ -510,6 +544,11 @@ mod tests {
             .map(|slab| slab as usize)
             .unwrap_or(0)
     });
+    static FIND_NEXT_SET_SLAB: LazyLock<usize> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_FIND_NEXT_SET, WORDS_BYTES)
+            .map(|slab| slab as usize)
+            .unwrap_or(0)
+    });
 
     /// A [`BitSet`] backed by the one persistent u32-addressable test slab.
     /// Callers hold [`TEST_LOCK`] while using it.
@@ -526,6 +565,25 @@ mod tests {
         Some(BitSet {
             bit_capacity: (words.len() * 32) as u32,
             cardinality,
+            words: slab as u32,
+            heap_tag: 0,
+            reserved: [0; 3],
+        })
+    }
+
+    fn find_next_set(words: &[u32], bit_capacity: u32) -> Option<BitSet> {
+        assert!(words.len() <= WORDS_CAPACITY);
+        let slab = *FIND_NEXT_SET_SLAB;
+        if slab == 0 {
+            return None;
+        }
+        unsafe {
+            core::ptr::write_bytes(slab as *mut u8, 0, WORDS_BYTES);
+            core::ptr::copy_nonoverlapping(words.as_ptr(), slab as *mut u32, words.len());
+        }
+        Some(BitSet {
+            bit_capacity,
+            cardinality: 0,
             words: slab as u32,
             heap_tag: 0,
             reserved: [0; 3],
@@ -901,6 +959,38 @@ mod tests {
             assert_eq!(bit_set_contains(set, 95), 0, "last bit of word 2");
             assert_eq!(bit_set_contains(set, 127), 1, "last bit of word 3");
         }
+    }
+
+    // --- bit_set_find_next_set @ 0x082a4ea4 ---
+
+    #[test]
+    fn find_next_set_returns_the_first_set_bit_or_capacity_sentinel() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = find_next_set(&[1 << 3, 1], 64) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+        let set = core::ptr::addr_of_mut!(set);
+
+        unsafe {
+            assert_eq!(bit_set_find_next_set(set, 0), 3);
+            assert_eq!(bit_set_find_next_set(set, 3), 3);
+            assert_eq!(bit_set_find_next_set(set, 4), 32);
+            assert_eq!(bit_set_find_next_set(set, 32), 32);
+            assert_eq!(bit_set_find_next_set(set, 33), 64);
+            assert_eq!(bit_set_find_next_set(set, 64), 64);
+        }
+    }
+
+    #[test]
+    fn find_next_set_does_not_scan_padding_bits_past_capacity() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut set) = find_next_set(&[0, 1 << 8], 35) else {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        };
+
+        assert_eq!(unsafe { bit_set_find_next_set(&mut set, 0) }, 35);
     }
 
     // --- bit_set_test @ 0x082a4ef8 ---
