@@ -41535,6 +41535,38 @@ functions:
       load_be32 / sqlite3Get4byte @ 0x0837a158.
 
   # ---- Scouted in 0x08360000-0x0838ffff, identified only ----
+  - address: 0x08367a64
+    ghidra: FUN_08367a64
+    name: clear_page_overflow_cells
+    size: 168
+    sig: "i32 clear_page_overflow_cells(MemPage *page)"
+    module: sqlite/clear_page_overflow_cells
+    status: ported
+    renames:
+      param_1/r0: page
+      param_1_plus_1: overflow_count
+      param_1_plus_4: is_leaf
+      param_1_plus_0e: cell_offset
+      param_1_plus_14: n_cell
+      param_1_plus_40: shared
+      param_1_plus_44: data
+      FUN_0837a158: load_be32
+      FUN_08367b0c: clear_overflow_cell
+    notes: >-
+      Raw ARM establishes the exact 168-byte extent
+      0x08367a64..0x08367b0c: the next separately linked function starts
+      with push {r4-r7,lr}. A whole-image ARM B/BL scan finds three inbound
+      plain BL callers (0x082b67c8, 0x082b67e4, 0x082b6b68) and no
+      predicated calls. The body itself has four unconditional BL
+      instructions: two to load_be32 (0x0837a158) and two to the unported
+      clear_overflow_cell helper (0x08367b0c). Leaf pages return immediately.
+      Other pages resolve every two-byte big-endian cell offset, release the
+      big-endian word at that cell, then process the right-child word at
+      data + data[8]. It clears overflow_count (+0x01) only after the final
+      helper call, even when that call returns an error. Rust ports load_be32;
+      target builds retain a direct call to the unported helper and host
+      tests substitute a private dispatch seam. Tests cover the leaf fast
+      path, cell/right-child order, and failure preserving overflow_count.
   - address: 0x083766f4
     ghidra: FUN_083766f4
     name: sqlite_error
