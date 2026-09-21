@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082b478c
+    ghidra: FUN_082b478c
+    name: lowest_set_bit_one_based
+    size: 48
+    sig: "u32 lowest_set_bit_one_based(u32 value)"
+    module: util/lowest_set_bit_one_based
+    status: ported
+    vars:
+      param_1: value
+      r0: index_then_result
+      r1: bit_mask
+      r2: value
+    notes: >-
+      Raw osos.dec words establish the exact extent
+      0x082b478c..0x082b47bc: `movs r2,r0; bxeq lr; mov r0,#1; mov
+      r1,#1`, followed by the mask-walk loop and closing `bx lr`; the
+      next function begins with `stmdb sp!,{r4-r6,lr}` at 0x082b47bc.
+      The routine returns zero for zero, otherwise scans bit masks from
+      least to most significant and returns the one-based index of the
+      first set bit. Ghidra's `void` signature is incorrect: all three
+      direct callers consume r0 as that index. Raw instruction decoding
+      finds zero internal BL instructions, plain or predicated; three
+      inbound BL call sites are the callers FUN_082b47bc, FUN_082b4814,
+      and FUN_082c6430. The Rust loop deliberately retains the original
+      mask-walk rather than using trailing_zeros; no semantic deviations.
   - address: 0x082d6648
     ghidra: FUN_082d6648
     name: tagged_pointer_u16_init
