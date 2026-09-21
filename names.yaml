@@ -66182,6 +66182,41 @@ functions:
       selector) and a fake-vtable end-to-end through the default
       dispatcher body.
 
+  - address: 0x082bcf38
+    ghidra: FUN_082bcf38
+    name: cg_first_availability
+    size: 96
+    sig: "u32 cg_first_availability(void)"
+    module: codegen/first_availability
+    status: ported
+    renames:
+      uVar1/r4: board_version_high
+      iVar2/r0: first_probe_status
+      FUN_080e624c: board_version
+      FUN_082bc5b8: cg_first_probe_status
+      FUN_080dd2c8: cg_mode_is_active
+      FUN_080cc950: cg_mode_limit
+    notes: >-
+      Raw osos.dec establishes the true 96-byte instruction extent
+      0x082bcf38..0x082bcf97; the next independently linked function begins
+      at 0x082bcf98. Complete aligned ARM BL decoding finds four plain,
+      unconditional calls at 0x082bcf3c, 0x082bcf44, 0x082bcf70, and
+      0x082bcf7c, with no predicated BL calls. Ghidra reports only three
+      calls because it omits the initial board_version query. The function
+      always reads board_version's high halfword, immediately rejects
+      first-probe status 2, and for status 3 maps versions 4/7/12/20 to
+      limit 6 and every other version to limit 7. It then rejects an active
+      mode or a mode limit greater than or equal to that selected limit;
+      every other path returns available (0). board_version is called
+      directly through its existing Rust port. The three unported callees
+      remain literal ARM veneers and replaceable host seams; their names
+      state only their verified return roles. match.py exits 1 with the
+      expected structural diff: LLVM creates a larger frame, folds the four
+      version comparisons into a bit test, and emits veneer calls for the
+      three unported callees. Host tests cover status-2 rejection, non-3
+      pass-through, both limit choices, equality rejection, and active-mode
+      rejection.
+
   - address: 0x082bcd2c
     ghidra: FUN_082bcd2c
     name: cg_wait_and_dispatch
