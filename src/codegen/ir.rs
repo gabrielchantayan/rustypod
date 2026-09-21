@@ -408,6 +408,10 @@ pub const CG_CODEGEN_LITERAL_SLOTS: usize = 0x20c / 4;
 /// `cg_codegen_t + 0x214` — next four-byte output offset assigned to a new
 /// literal-slot cache entry.
 pub const CG_CODEGEN_LITERAL_NEXT: usize = 0x214 / 4;
+/// `cg_codegen_t + 0x210` — label bound at the generated literal pool.
+/// `cg_emit_helper_call` attaches its PC-relative-load fixup here.
+pub const CG_CODEGEN_LITERAL_POOL_LABEL: usize = 0x210 / 4;
+
 /// `cg_codegen_buffer_t + 0x804` — current output position, read by
 /// [`cg_buffer_current_offset`].
 pub const CG_CODEGEN_OUTPUT_OFFSET: usize = 0x804 / 4;
@@ -1016,6 +1020,35 @@ pub unsafe extern "C" fn cg_literal_slot_find_or_create(
     }
     word(link.read(), 2).read()
 }
+/// cg_emit_helper_call — original: `FUN_082beb4c` @ `0x082beb4c`
+/// (132 bytes including the final four-byte literal at `0x082bebcc`;
+/// Ghidra's 128-byte body stops before it; **5 plain `bl` call sites,
+/// 0 predicated `bl` call sites**).
+///
+/// Emits an indirect helper call into generated ARM: `mov lr, pc`, then a
+/// PC-relative `ldr pc, [pc, #imm12]` targeting `helper`'s cached
+/// literal-pool slot. The literal-pool label fixup is registered after the
+/// first instruction. The original looks up the same slot three times; keep
+/// all three calls and use the third result before encoding the final load.
+///
+/// Deliberate deviations: none. The raw tail branch becomes a normal Rust
+/// call to [`cg_buffer_emit_word`], preserving its emitted word and all
+/// observable buffer operations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_helper_call(codegen: *mut CgCodegen, helper: usize) {
+    let output = slot(codegen as *mut u8, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer;
+    cg_buffer_emit_word(output, 0xe1a0_e00f);
+    let literal_pool_label =
+        slot(codegen as *mut u8, CG_CODEGEN_LITERAL_POOL_LABEL).read() as *mut CgLabel;
+    cg_label_add_fixup(codegen, literal_pool_label, 0);
+    cg_literal_slot_find_or_create(codegen, helper, 0);
+    cg_literal_slot_find_or_create(codegen, helper, 0);
+    let literal_offset = cg_literal_slot_find_or_create(codegen, helper, 0);
+    let load = 0xe59f_f000 | literal_offset.wrapping_sub(8) as u32 & 0x0fff;
+    cg_buffer_emit_word(output, load);
+}
+
 
 
 /// cg_codegen_buffer_create — original: `FUN_082c22b0` @ 0x082c22b0
@@ -4235,7 +4268,7 @@ mod tests {
         module: [usize; 2],
         proc: [usize; 9],
         block: [usize; 5],
-        codegen: [usize; 5],
+        codegen: [usize; CG_CODEGEN_LITERAL_NEXT + 1],
         output: [usize; CG_CODEGEN_OUTPUT_OFFSET + 1],
     }
 
@@ -4247,7 +4280,7 @@ mod tests {
                 module: [0; 2],
                 proc: [0; 9],
                 block: [0; 5],
-                codegen: [0; 5],
+                codegen: [0; CG_CODEGEN_LITERAL_NEXT + 1],
                 output: [0; CG_CODEGEN_OUTPUT_OFFSET + 1],
             });
             f.module[CG_MODULE_HEAP] = heap as usize;
@@ -10191,6 +10224,39 @@ mod tests {
             );
             cg_heap_destroy(heap);
         }
+        teardown();
+    }
+
+    #[test]
+    fn emit_helper_call_emits_the_indirect_call_and_one_literal_slot() {
+        let _g = setup();
+        let mut f = Fixture::new(64);
+        let mut label = [0usize; CG_LABEL_BYTES / 4];
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = cooperating_page_pointer;
+            COOP_ARENA = [0; 64];
+            f.codegen[CG_CODEGEN_LITERAL_POOL_LABEL] = label.as_mut_ptr() as usize;
+            f.codegen[CG_CODEGEN_LITERAL_NEXT] = 0x24;
+            f.output[CG_CODEGEN_OUTPUT_OFFSET] = 2;
+
+            cg_emit_helper_call(f.codegen_ptr(), 0x0802_5f88);
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+            let arena = &*core::ptr::addr_of!(COOP_ARENA);
+            assert_eq!(u32::from_le_bytes(arena[4..8].try_into().unwrap()), 0xe1a0_e00f);
+            assert_eq!(u32::from_le_bytes(arena[8..12].try_into().unwrap()), 0xe59f_f01c);
+            assert_eq!(f.output[CG_CODEGEN_OUTPUT_OFFSET], 12);
+            let fixup = label[CG_LABEL_FIXUPS] as *mut u8;
+            assert!(!fixup.is_null(), "the label owns the new fixup record");
+            assert_eq!(word(fixup, CG_LABEL_FIXUP_OFFSET).read(), 8);
+            assert_eq!(
+                f.codegen[CG_CODEGEN_LITERAL_NEXT],
+                0x28,
+                "three identical cache lookups reserve one literal word"
+            );
+        }
+        drop(f);
         teardown();
     }
 

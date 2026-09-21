@@ -29181,6 +29181,27 @@ functions:
   #   cg_inst_t (base)       +0 next  +4 block  +8 kind (u8)
   #                          +9 opcode (u8)  +0xc first derived field
 
+  - address: 0x082beb4c
+    ghidra: FUN_082beb4c
+    name: cg_emit_helper_call
+    size: 132
+    sig: "void cg_emit_helper_call(cg_codegen_t *codegen, uintptr_t helper)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1: codegen, param_2: helper}
+    notes: >-
+      Raw ARM establishes the true extent 0x082beb4c..0x082bebd0: 128 bytes
+      of instructions followed by the literal 0xe1a0e00f at 0x082bebcc;
+      0x082bebd0 starts the next function. Decoding every ARM B/BL word in
+      that extent finds five plain bl sites (0x082beb60, 0x082beb70,
+      0x082beb80, 0x082beb90, 0x082bebb4) and no predicated bl. Emits
+      `mov lr,pc`, records a tag-0 fixup against codegen+0x210's
+      literal-pool label, performs the three raw-identical literal-slot
+      lookups, then emits `ldr pc,[pc,#imm12]` with
+      imm12=(literal_offset-8)&0xfff, then tail-branches to
+      cg_buffer_emit_word. The Rust port makes that tail branch a normal call;
+      emitted-word and buffer effects are unchanged.
+
   - address: 0x082c1254
     ghidra: FUN_082c1254
     name: cg_literal_slot_find_or_create
