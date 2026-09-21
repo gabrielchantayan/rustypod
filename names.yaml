@@ -54618,6 +54618,30 @@ functions:
       crate's fp frame and the read_unaligned ldrb/orr
       funnels, the accepted plist_node_child_count profile.
 
+  - address: 0x082a1c78
+    ghidra: FUN_082a1c78
+    name: timespec_is_at_or_after
+    size: 52
+    sig: "u32 timespec_is_at_or_after(const i32 *left, const i32 *right)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: left (the first { +0x00 unsigned seconds, +0x04 signed nanoseconds } pair)
+      param_2: right (the second { +0x00 unsigned seconds, +0x04 signed nanoseconds } pair)
+    notes: >-
+      Lexicographic timespec comparator: returns 1 exactly when left is at or
+      after right. Raw osos.dec words establish the true 52-byte extent
+      0x082a1c78..0x082a1cab, ending immediately before the next real
+      function at 0x082a1cac. It loads and compares seconds as unsigned words;
+      only on equality does it load and compare nanoseconds signed. Raw ARM
+      B/BL decode finds three direct plain bl callers (0x08195f00,
+      0x08195f70, 0x08196294), no predicated bl callers, and no internal
+      callees. The callers use it while expiring and selecting timed wait
+      nodes. Deliberate deviations: none. Host tests cover unsigned-second
+      ordering, signed-nanosecond tie-breaking, and equality. match.py reports
+      the expected structural diff (exit 1): same word loads, unsigned
+      seconds comparison, signed nanoseconds tie-break, and normalized 0/1
+      result, with LLVM's frame and branch layout differing from ADS.
   - address: 0x080e97ac
     ghidra: FUN_080e97ac
     name: fixed16_cos

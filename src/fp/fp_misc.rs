@@ -2673,6 +2673,51 @@ pub unsafe extern "C" fn timespec_is_nonzero(ts: *const i32) -> bool {
     }
     core::ptr::read_unaligned(ts.add(1)) != 0
 }
+
+/// timespec_is_at_or_after — original: `FUN_082a1c78` @ `0x082a1c78`
+/// (**52 bytes, 0x082a1c78..0x082a1cab; 3 plain `bl` callers, zero
+/// predicated `bl` callers — verified from `osos.dec`; the next real
+/// function begins at 0x082a1cac**).
+///
+/// Compares `{ seconds, nanoseconds }` pairs lexicographically. Seconds are
+/// unsigned words; nanoseconds break an equal-seconds tie as signed values.
+/// Returns one when `left` is at or after `right`, otherwise zero. As in the
+/// ARM body, nanoseconds are loaded only after equal seconds.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to readable, four-byte-aligned
+/// two-word timespec pairs.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timespec_is_at_or_after(left: *const i32, right: *const i32) -> u32 {
+    let left_seconds = left.read() as u32;
+    let right_seconds = right.read() as u32;
+    if left_seconds != right_seconds {
+        return (left_seconds > right_seconds) as u32;
+    }
+    (left.add(1).read() >= right.add(1).read()) as u32
+}
+
+#[cfg(test)]
+#[test]
+fn timespec_is_at_or_after_uses_unsigned_seconds_signed_nanoseconds_and_equality() {
+    let lower_seconds = [0_i32, i32::MAX];
+    let higher_seconds = [-1_i32, i32::MIN];
+    let lower_nanoseconds = [7_i32, -1];
+    let higher_nanoseconds = [7_i32, 0];
+    let equal = [7_i32, -1];
+
+    unsafe {
+        assert_eq!(timespec_is_at_or_after(lower_seconds.as_ptr(), higher_seconds.as_ptr()), 0);
+        assert_eq!(timespec_is_at_or_after(higher_seconds.as_ptr(), lower_seconds.as_ptr()), 1);
+        assert_eq!(timespec_is_at_or_after(lower_nanoseconds.as_ptr(), higher_nanoseconds.as_ptr()), 0);
+        assert_eq!(timespec_is_at_or_after(higher_nanoseconds.as_ptr(), lower_nanoseconds.as_ptr()), 1);
+        assert_eq!(timespec_is_at_or_after(lower_nanoseconds.as_ptr(), equal.as_ptr()), 1);
+    }
+}
  
 /// timespec_is_after — original: `FUN_082a1cac` @ 0x082a1cac
 /// (**56 bytes, 0x082a1cac..0x082a1ce3; 3 plain `bl` callers, no predicated
