@@ -124114,3 +124114,39 @@ functions:
       positive-length little-endian u32 limb arrays from the highest limb
       downward and returns 1, -1, or 0 using unsigned comparisons. Deliberate
       deviations: none.
+  - address: 0x082b78b0
+    ghidra: FUN_082b78b0
+    name: sqlite_bind_text
+    size: 180
+    sig: "i32 sqlite_bind_text(Vdbe *statement, i32 parameter_index, void *text, i32 length, u8 encoding, void *destructor)"
+    module: sqlite/bind_text
+    status: ported
+    renames:
+      param_1/r0: statement
+      param_2/r1: parameter_index
+      param_3/r2: text
+      param_4/r3: length
+      param_5/stack: encoding
+      param_6/stack: destructor
+      FUN_083974e4: vdbe_unbind
+      FUN_0838c158: sqlite3VdbeMemSetStr
+      FUN_083869f4: sqlite3VdbeChangeEncoding
+      FUN_083766f4: sqlite_error
+      FUN_0836f468: sqlite_api_exit
+    notes: >-
+      Raw osos.dec establishes 0x082b78b0..0x082b7963: e92d43f8 begins
+      this body, e8bd83f8 at 0x082b7960 returns, and e92d4070 at
+      0x082b7964 begins the next function. The body has five outbound
+      plain BL instructions (0x082b78dc, 0x082b7914, 0x082b793c,
+      0x082b7950, 0x082b795c) and zero predicated BL instructions. Its
+      three inbound plain BL callers are sqlite3_bind_text-like wrappers
+      at 0x0838ef38, 0x0838ef84, and 0x0838f0e0. This is SQLite 3.5's
+      bindText: NULL statement returns SQLITE_MISUSE; vdbeUnbind validates
+      and clears the one-based parameter; non-NULL text is installed into
+      aVar[index-1]; non-NULL destructor requests recoding to
+      db->pVfs->enc (+8,+0x14,+0x59); sqlite_error then sqlite_api_exit
+      process the successful install or recode result. Deliberate
+      deviation: sqlite3VdbeChangeEncoding remains unported, so the port
+      reuses VDBE_REAL_VALUE_OPS.change_encoding, whose target default is
+      the verified retailOS address 0x083869f4 and whose host tests install
+      a recorder.
