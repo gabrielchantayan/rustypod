@@ -3284,6 +3284,62 @@ pub unsafe extern "C" fn utf8_prev_codepoint(cursor: *mut *const u8) -> u32 {
 
     0
 }
+/// Counts nonempty path components in a StringObject — original:
+/// `FUN_082a549c` @ 0x082a549c (136 bytes, all code;
+/// 0x082a549c..0x082a5524).
+///
+/// Raw osos.dec establishes four plain `bl` instruction sites and no
+/// predicated `bl` sites: `string_object_c_str` once,
+/// `utf8_next_codepoint` twice, and `utf8_prev_codepoint` once. These are
+/// three distinct callees, which explains Ghidra's three-callee report.
+///
+/// The function obtains the object's NULL-safe C string, walks its permissive
+/// UTF-8 codepoints, and counts runs not separated by `:`, `/`, or `\`. When
+/// `collapse_backslash_separator_runs` is nonzero, a backslash immediately
+/// followed by `/` or `\` consumes both codepoints without ending the current
+/// component. It rewinds the speculative lookahead through
+/// [`utf8_prev_codepoint`] otherwise, preserving the original decoder's
+/// malformed-sequence behavior. `this` remains unguarded, as in retailOS.
+///
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_path_component_count(
+    this: *const StringObject,
+    collapse_backslash_separator_runs: i32,
+) -> i32 {
+    let mut cursor = string_object_c_str(this);
+    let mut count = 0i32;
+    let mut in_component = false;
+
+    loop {
+        let codepoint = utf8_next_codepoint(&mut cursor);
+        if codepoint == 0 {
+            if in_component {
+                count = count.wrapping_add(1);
+            }
+            return count;
+        }
+
+        if collapse_backslash_separator_runs != 0 && codepoint == b'\\' as u32 {
+            let following_codepoint = utf8_next_codepoint(&mut cursor);
+            if following_codepoint == b'/' as u32 || following_codepoint == b'\\' as u32 {
+                continue;
+            }
+            utf8_prev_codepoint(&mut cursor);
+        }
+
+        if codepoint == b':' as u32 || codepoint == b'/' as u32 || codepoint == b'\\' as u32 {
+            if in_component {
+                count = count.wrapping_add(1);
+            }
+            in_component = false;
+        } else {
+            in_component = true;
+        }
+    }
+}
+
 
 /// utf16_code_unit_count_safe — original: FUN_08277164 @ 0x08277164
 /// (36 bytes). Return zero for NULL, otherwise count nonzero halfwords
@@ -8303,6 +8359,32 @@ pub(crate) mod tests {
         assert_eq!(bounded_codepoints(b"a\xc3\xa9b\0", 3), 2);
         // A decoder-zero lead terminates the walk before the bound.
         assert_eq!(bounded_codepoints(b"a\xf0\x9f\x92\xA9b\0", 6), 1);
+    }
+
+    // ---- string_object_path_component_count -------------------------
+
+    fn path_component_count(bytes: &[u8], collapse_backslash_separator_runs: i32) -> i32 {
+        let object = StringObject {
+            vtable: core::ptr::null(),
+            payload: bytes.as_ptr() as *mut u8,
+        };
+        unsafe { string_object_path_component_count(&object, collapse_backslash_separator_runs) }
+    }
+
+    #[test]
+    fn string_object_path_component_count_ignores_empty_separator_runs() {
+        assert_eq!(path_component_count(b"\0", 0), 0);
+        assert_eq!(path_component_count(b"://alpha\\\\beta/\0", 0), 2);
+        assert_eq!(path_component_count(b"\xc3\xa9/\xe2\x82\xac\0", 0), 2);
+    }
+
+    #[test]
+    fn string_object_path_component_count_collapses_backslash_separator_pairs_when_enabled() {
+        assert_eq!(path_component_count(b"a\\/b\0", 0), 2);
+        assert_eq!(path_component_count(b"a\\/b\0", 1), 1);
+        assert_eq!(path_component_count(b"a\\\\b\0", 0), 2);
+        assert_eq!(path_component_count(b"a\\\\b\0", 1), 1);
+        assert_eq!(path_component_count(b"a\\b\0", 1), 2);
     }
 
     // ---- utf8_strcmp_safe -------------------------------------------
