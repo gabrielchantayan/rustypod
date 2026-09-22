@@ -7,6 +7,7 @@ pub mod clone_slot_source;
 pub mod coordinate_origin;
 pub mod coordinate_owner_initial_dispatch;
 pub mod display_pending_nibbles;
+pub mod display_pending_selector;
 pub mod tracked_object_register;
 pub mod display_refresh;
 pub mod color;
