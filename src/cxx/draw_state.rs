@@ -64,20 +64,17 @@
 //!   literal-pool constant, the default-target descriptor @ 0x08a77c3c
 //!   (binary-verified from osos.dec).
 //!
-//! Deviations: all three callees are unported, so they ride the
-//! [`DRAW_STATE_CONSTRUCT_OPS`] dispatch slots (the settings.rs
-//! `SETTINGS_CTOR` pattern). The `embedded_pair_construct` default is
-//! faithful — the callee is 12 bytes and fully decoded. The `body_init`
-//! default is a documented zeroing stub (the real constant pattern is
-//! the callee's to write, not this caller's) and the `surface_attach`
-//! default stores only the surface identity at +0x1c, skipping the rect
-//! copy, which needs the firmware global's +0x98 contents a host cannot
-//! read; on a 64-bit host that store is a pointer-sized word (the
-//! pfr_face_done face-word model). **Not hook-ready** until the two
-//! larger callees are ported and wired in as defaults: with the stubs,
-//! the record carries zeroed flags/colors and no clip rect. There is no
-//! NULL guard on `this`, matching the original's unconditional
-//! `add r0, r0, #0x20`.
+//! Deviations: `embedded_pair_construct` and `surface_attach` still ride
+//! [`DRAW_STATE_CONSTRUCT_OPS`] so host tests can model their external
+//! dependencies. `body_init` is now the faithful default
+//! [`draw_state_body_init`]; its device-global two-word source is represented
+//! by the raw-image snapshot on hosts. The surface-attach default still
+//! stores only the surface identity at +0x1c, skipping the rect copy, which
+//! needs the firmware global's +0x98 contents a host cannot read; on a
+//! 64-bit host that store is a pointer-sized word (the pfr_face_done
+//! face-word model). The constructor remains not hook-ready until
+//! `surface_attach` is ported as its default. There is no NULL guard on
+//! `this`, matching the original's unconditional `add r0, r0, #0x20`.
 
 use crate::cxx::draw_state_color::{
     DRAW_STATE_BACKGROUND_COLOR_OFFSET,
@@ -112,19 +109,82 @@ const DRAW_STATE_AUXILIARY_BYTE_WORD_INDEX: usize = 10;
 pub const DRAW_STATE_DEFAULT_SURFACE_ADDRESS: usize = 0x08a77c3c;
 
 /// Faithful default for the fully decoded embedded pair constructor @
-/// 0x081598a4: zero the two words, return the argument. Pointer-sized
-/// words on host (the pfr_face_done face-word model).
+/// 0x081598a4: zero the two target-width words, return the argument.
 unsafe extern "C" fn embedded_pair_construct_stub(member: *mut u8) -> *mut u8 {
-    (member as *mut usize).write(0);
-    (member as *mut usize).add(1).write(0);
+    member.cast::<u32>().write(0);
+    member.cast::<u32>().add(1).write(0);
     member
 }
 
-/// Zeroing stub for the unported body initializer @ 0x082630f0 (the
-/// settings.rs `SETTINGS_CTOR` zeroing-stub precedent). Deterministic,
-/// but NOT the original's constant pattern — see the module header.
-unsafe extern "C" fn body_init_stub(this: *mut u8) {
-    core::ptr::write_bytes(this, 0, DRAW_STATE_SIZE);
+/// The two-word global source loaded with `ldm r2,{r2,r3}` by body_init.
+/// It is a target-width address, not a host pointer.
+const DRAW_STATE_BODY_DEFAULT_PAIR_ADDRESS: *const u32 = 0x089c_c8e4 as *const u32;
+
+/// Host snapshot of the two source words in osos.dec at
+/// [`DRAW_STATE_BODY_DEFAULT_PAIR_ADDRESS`].
+#[cfg(not(target_os = "none"))]
+const DRAW_STATE_BODY_DEFAULT_PAIR: [u32; 2] = [0x6461_676f, 0x7568_7369];
+
+#[inline(always)]
+unsafe fn draw_state_body_default_pair() -> (u32, u32) {
+    #[cfg(target_os = "none")]
+    {
+        (
+            DRAW_STATE_BODY_DEFAULT_PAIR_ADDRESS.read(),
+            DRAW_STATE_BODY_DEFAULT_PAIR_ADDRESS.add(1).read(),
+        )
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        (DRAW_STATE_BODY_DEFAULT_PAIR[0], DRAW_STATE_BODY_DEFAULT_PAIR[1])
+    }
+}
+
+/// draw_state_body_init — original: `FUN_082630f0` @ **0x082630f0**
+/// (116 code bytes through `bx lr`, followed by its 4-byte literal pool;
+/// the next real function starts at 0x08263168; 3 plain BL callers, 0
+/// predicated BL callers).
+///
+/// Initializes the 0x44-byte draw-state body: zeroes the first two words,
+/// writes two one-valued words, makes the style and foreground opaque black,
+/// makes the background opaque white, clears the surface slot, copies two
+/// words from the firmware global at 0x089cc8e4 to +0x20/+0x24, and clears
+/// +0x28 through +0x43. There is no NULL or alignment guard.
+///
+/// Deliberate deviation: host builds use the exact two-word osos.dec snapshot
+/// of that device global; target builds load it directly. Volatile stores
+/// retain the original's individual write order and prevent LLVM from
+/// replacing the clear sequence with a bulk-memory builtin.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn draw_state_body_init(record: *mut u8) {
+    let zero = 0u32;
+    let one = 1u32;
+    let opaque = 0xffu8;
+    record.cast::<u32>().write_volatile(zero);
+    record.add(4).cast::<u32>().write_volatile(zero);
+    record.add(8).cast::<u32>().write_volatile(one);
+    record.add(12).cast::<u32>().write_volatile(one);
+    record.add(DRAW_STATE_STYLE_OFFSET).write_volatile(0);
+    record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET).write_volatile(0);
+    record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET + 1).write_volatile(0);
+    record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET + 2).write_volatile(0);
+    record.add(DRAW_STATE_FOREGROUND_COLOR_OFFSET + 3).write_volatile(opaque);
+    record.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET).write_volatile(opaque);
+    record.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET + 1).write_volatile(opaque);
+    record.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET + 2).write_volatile(opaque);
+    record.add(DRAW_STATE_BACKGROUND_COLOR_OFFSET + 3).write_volatile(opaque);
+    record.add(DRAW_STATE_SURFACE_OFFSET).cast::<u32>().write_volatile(zero);
+    let (pair_first, pair_second) = draw_state_body_default_pair();
+    record.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET).cast::<u32>().write_volatile(pair_first);
+    record.add(DRAW_STATE_EMBEDDED_PAIR_OFFSET + 4).cast::<u32>().write_volatile(pair_second);
+    record.add(0x28).write_volatile(0);
+    record.add(0x2c).cast::<u32>().write_volatile(zero);
+    record.add(0x30).cast::<u32>().write_volatile(zero);
+    record.add(0x34).cast::<u32>().write_volatile(zero);
+    record.add(0x38).cast::<u32>().write_volatile(zero);
+    record.add(0x3c).cast::<u32>().write_volatile(zero);
+    record.add(0x40).cast::<u32>().write_volatile(zero);
 }
 
 /// Stub for the unported surface attach @ 0x08264518: stores the
@@ -153,11 +213,11 @@ pub struct DrawStateConstructOps {
     pub surface_attach: unsafe extern "C" fn(this: *mut u8, surface: usize),
 }
 
-/// Wired defaults: the faithful embedded-pair stub and the two
-/// documented partial stubs (see the module header).
+/// Wired defaults: the faithful embedded-pair and body initializers, plus the
+/// documented partial surface-attach stub (see the module header).
 pub const DEFAULT_DRAW_STATE_CONSTRUCT_OPS: DrawStateConstructOps = DrawStateConstructOps {
     embedded_pair_construct: embedded_pair_construct_stub,
-    body_init: body_init_stub,
+    body_init: draw_state_body_init,
     surface_attach: surface_attach_stub,
 };
 
@@ -495,6 +555,32 @@ mod tests {
         unsafe { (*core::ptr::addr_of!(INIT_CALLS)).clone() }
     }
 
+    fn expected_body(record: &mut [u8]) {
+        record[..8].fill(0);
+        record[8..16].copy_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0]);
+        record[DRAW_STATE_STYLE_OFFSET..DRAW_STATE_FOREGROUND_COLOR_OFFSET + 3].fill(0);
+        record[DRAW_STATE_FOREGROUND_COLOR_OFFSET + 3] = 0xff;
+        record[DRAW_STATE_BACKGROUND_COLOR_OFFSET..DRAW_STATE_BACKGROUND_COLOR_OFFSET + 4]
+            .fill(0xff);
+        record[DRAW_STATE_SURFACE_OFFSET..DRAW_STATE_EMBEDDED_PAIR_OFFSET].fill(0);
+        record[DRAW_STATE_EMBEDDED_PAIR_OFFSET..DRAW_STATE_EMBEDDED_PAIR_OFFSET + 4]
+            .copy_from_slice(&0x6461_676fu32.to_ne_bytes());
+        record[DRAW_STATE_EMBEDDED_PAIR_OFFSET + 4..DRAW_STATE_EMBEDDED_PAIR_OFFSET + 8]
+            .copy_from_slice(&0x7568_7369u32.to_ne_bytes());
+        record[0x28] = 0;
+        record[0x2c..DRAW_STATE_SIZE].fill(0);
+    }
+
+    #[test]
+    fn body_init_writes_constant_pattern_pair_and_nothing_past_record() {
+        let mut storage = [0xa5u8; DRAW_STATE_SIZE + 4];
+        unsafe { draw_state_body_init(storage.as_mut_ptr()) };
+
+        let mut expected = [0xa5u8; DRAW_STATE_SIZE + 4];
+        expected_body(&mut expected);
+
+        assert_eq!(storage, expected);
+    }
     #[test]
     fn construct_chains_pair_body_surface_in_order_and_returns_this() {
         let mut record = [0xa5u8; DRAW_STATE_SIZE];
@@ -548,23 +634,21 @@ mod tests {
     }
 
     #[test]
-    fn default_stubs_zero_the_record_and_store_only_the_surface_identity() {
-        // No bench: the wired defaults. The faithful pair stub zeroes
-        // +0x20/+0x24, the body stub zeroes the 0x44-byte body, and the
-        // surface stub stores the default-surface identity at +0x1c
-        // (pointer-sized on host) — and nothing else.
+    fn default_initializers_write_the_body_and_store_only_the_surface_identity() {
+        // No bench: the wired defaults. The faithful pair constructor runs
+        // first, body_init writes its documented byte pattern, and the
+        // surface stub stores only the default-surface identity at +0x1c.
         let mut record = [0xa5u8; DRAW_STATE_SIZE + 0x10];
         let this = record.as_mut_ptr();
 
         let returned = unsafe { draw_state_construct(this) };
 
         assert_eq!(returned, this);
-        let mut expected = [0u8; DRAW_STATE_SIZE + 0x10];
+        let mut expected = [0xa5u8; DRAW_STATE_SIZE + 0x10];
+        expected_body(&mut expected);
         let surface_slot = DRAW_STATE_SURFACE_OFFSET;
         expected[surface_slot..surface_slot + core::mem::size_of::<usize>()]
             .copy_from_slice(&DRAW_STATE_DEFAULT_SURFACE_ADDRESS.to_ne_bytes());
-        // The guard bytes past the record stay 0xa5.
-        expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
         assert_eq!(record, expected);
     }
 
@@ -613,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn construct_with_surface_default_stubs_preserve_guard_and_surface() {
+    fn construct_with_surface_default_initializers_preserve_guard_and_surface() {
         let mut record = [0xa5u8; DRAW_STATE_SIZE + 0x10];
         let this = record.as_mut_ptr();
         let surface = 0x0876_5432;
@@ -621,10 +705,10 @@ mod tests {
         let returned = unsafe { draw_state_construct_with_surface(this, surface) };
 
         assert_eq!(returned, this);
-        let mut expected = [0u8; DRAW_STATE_SIZE + 0x10];
+        let mut expected = [0xa5u8; DRAW_STATE_SIZE + 0x10];
+        expected_body(&mut expected);
         expected[DRAW_STATE_SURFACE_OFFSET..DRAW_STATE_SURFACE_OFFSET + core::mem::size_of::<usize>()]
             .copy_from_slice(&surface.to_ne_bytes());
-        expected[DRAW_STATE_SIZE..].copy_from_slice(&[0xa5u8; 0x10]);
         assert_eq!(record, expected);
     }
 

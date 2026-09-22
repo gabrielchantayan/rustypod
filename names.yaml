@@ -128009,3 +128009,33 @@ functions:
       derives only from this verified contract. Deliberate deviation: target
       builds call the exact stock load address, while host tests install a
       recording seam and prove count truncation plus every forwarded argument.
+
+  # --- draw-state record body initializer ---
+  - address: 0x082630f0
+    ghidra: FUN_082630f0
+    name: draw_state_body_init
+    size: 116
+    sig: "void draw_state_body_init(u8 *record)"
+    module: cxx/draw_state
+    status: ported
+    renames:
+      param_1/r0: record
+      DAT_08263164: DRAW_STATE_BODY_DEFAULT_PAIR_ADDRESS (0x089cc8e4)
+    notes: >-
+      Raw A32 establishes the 116-byte instruction extent from mov r1,#0 at
+      0x082630f0 through bx lr at 0x08263160; the following word
+      0x089cc8e4 at 0x08263164 is this function's literal-pool pointer, and
+      the next real function begins at 0x08263168 with push {r2,r3,r4,lr}.
+      It initializes the 0x44-byte draw-state record with zero words at
+      +0/+4, one words at +8/+c, style zero, foreground {0,0,0,0xff},
+      background {0xff,0xff,0xff,0xff}, a zero surface slot at +0x1c, the
+      two words loaded together from 0x089cc8e4 at +0x20/+0x24, and zeroes
+      +0x28 through +0x43. The three inbound direct calls are unconditional
+      plain bl at 0x08264588, 0x082645bc, and 0x08264690; there are no
+      predicated BL callers and no BL instruction in the body. Target builds
+      load the firmware global directly; host builds use its exact osos.dec
+      two-word snapshot. Volatile stores deliberately preserve the observed
+      individual write ordering and avoid LLVM bulk-clear substitution. Host
+      coverage proves every initialized byte, the two global words, and a
+      guard immediately past the record. match.py structural review records
+      the matching scalar stores, global pair load/copy, and clear tail.
