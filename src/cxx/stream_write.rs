@@ -121,6 +121,33 @@ pub unsafe extern "C" fn stream_write(
     (stream_write_core_ops().core)(stream, length, data, written, 0)
 }
 
+/// stream_write_mode_6 — original: `FUN_08277ef4` @ 0x08277ef4 (28 bytes,
+/// 3 unconditional `bl` call sites, 0 predicated `bl` call sites).
+///
+/// The verified body is seven words at 0x08277ef4..0x08277f0c; the next
+/// function begins at 0x08277f10 with `push {r0-r11,lr}`. It preserves the
+/// fourth argument through `ip`, reserves the first stacked argument word by
+/// pushing `{r3,lr}`, stores 6 in that word, restores the fourth argument,
+/// and calls the shared core @ 0x082789b8. Thus it forwards `(stream, length,
+/// data, written, 6)` and returns the core status verbatim.
+///
+/// # Deviations
+///
+/// The shared core is unported, so this uses [`STREAM_WRITE_CORE_OPS`] rather
+/// than inventing its behavior. The original's pushed r3 is dead before the
+/// call; passing the literal mode directly preserves the observable call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_write_mode_6(
+    stream: *mut u8,
+    length: u32,
+    data: *const u8,
+    written: *mut u32,
+) -> u32 {
+    (stream_write_core_ops().core)(stream, length, data, written, 6)
+}
+
+
 #[cfg(test)]
 pub(crate) static STREAM_WRITE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
@@ -270,5 +297,44 @@ mod tests {
 
         assert_eq!(written, 0, "the core stores 0 through written first");
         assert_eq!(status, 0x15, "the error-byte-set no-progress status");
+    }
+
+    #[test]
+    fn mode_six_forwards_all_arguments_and_status_verbatim() {
+        let mut stream = [0u8; 8];
+        let data = [0xabu8, 0xcd, 0xef];
+        let mut written = u32::MAX;
+        let (_lock, previous) = install(5);
+
+        let status = unsafe {
+            stream_write_mode_6(stream.as_mut_ptr(), 3, data.as_ptr(), &mut written)
+        };
+        restore(previous);
+
+        let recorder = RECORDER.lock();
+        assert_eq!(recorder.calls, 1);
+        assert_eq!(recorder.stream, stream.as_ptr() as usize);
+        assert_eq!(recorder.length, 3);
+        assert_eq!(recorder.data, data.as_ptr() as usize);
+        assert_eq!(recorder.written, &written as *const u32 as usize);
+        assert_eq!(recorder.mode, Some(6));
+        assert_eq!(status, 5);
+    }
+
+    #[test]
+    fn mode_six_zero_length_null_data_reaches_the_core() {
+        let (_lock, previous) = install(0x15);
+        let mut written = 0u32;
+
+        let status = unsafe {
+            stream_write_mode_6(core::ptr::null_mut(), 0, core::ptr::null(), &mut written)
+        };
+        restore(previous);
+
+        let recorder = RECORDER.lock();
+        assert_eq!(recorder.calls, 1, "the wrapper has no input guard");
+        assert_eq!(recorder.length, 0);
+        assert_eq!(recorder.mode, Some(6));
+        assert_eq!(status, 0x15);
     }
 }

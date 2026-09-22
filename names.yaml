@@ -78858,6 +78858,33 @@ functions:
       inflated because LLVM inlined the crate's five-instruction strlen
       instead of emitting the original's `bl 0x8392478`.
 
+
+  # --- C++ framework: buffered-stream write front end (mode 6) ---
+  - address: 0x08277ef4
+    ghidra: FUN_08277ef4
+    name: stream_write_mode_6
+    size: 28
+    sig: "u32 stream_write_mode_6(void *stream, u32 length, const u8 *data, u32 *written)"
+    module: cxx/stream_write
+    status: ported
+    vars: {param_1: stream, param_2: length, param_3: data, param_4: written}
+    renames:
+      FUN_082789b8: "stream_write_core seam (unported, reached through STREAM_WRITE_CORE_OPS)"
+    notes: >-
+      Verified from raw osos.dec: 28 bytes, seven words, no literal pool,
+      0x08277ef4..0x08277f0c inclusive; the next real function starts at
+      0x08277f10 with `push {r0-r11,lr}`. The wrapper saves r3 in ip,
+      pushes {r3,lr} to reserve the first stacked argument word, stores 6
+      there, restores the fourth argument from ip, then bl 0x082789b8 and
+      returns its r0 status through pop {ip,pc}. A full binary decode found
+      exactly 3 incoming plain bl calls (0x0828b750, 0x0828b780,
+      0x0828b794), zero predicated bl calls, and no tail branches.
+      Algorithm: forward (stream, length, data, written, 6) to the shared
+      buffered-stream write core. The fifth argument's meaning is not
+      established, so it is named mode without invented semantics.
+      Deviation: 0x082789b8 is unported; the port dispatches through the
+      existing volatile STREAM_WRITE_CORE_OPS seam. Passing literal 6
+      replaces the dead pushed r3 stack setup while preserving the core call.
   # --- C++ framework: buffered-stream write front end (mode 0) ---
   - address: 0x0827899c
     ghidra: FUN_0827899c
