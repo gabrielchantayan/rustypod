@@ -13,6 +13,7 @@ pub mod application_resource_provider;
 pub mod default_selection_traversal_token;
 pub mod application_message_post_global;
 pub mod application_global_slot_is_clear;
+pub mod anchor_identifier_find;
 pub mod application_string_registry;
 pub mod animation;
 pub mod identity_noop;

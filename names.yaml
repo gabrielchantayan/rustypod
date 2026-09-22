@@ -26324,6 +26324,38 @@ functions:
       The Rust port calls every established direct port; only that flush is a
       fixed-address device call and an injectable host seam.
 
+  - address: 0x0828b50c
+    ghidra: FUN_0828b50c
+    name: anchor_identifier_find
+    size: 144
+    sig: "u32 anchor_identifier_find(void *context, void *owner, const void *name)"
+    module: app/anchor_identifier_find
+    status: ported
+    renames:
+      param_1/r0: context_unused
+      param_2/r4: owner
+      param_3/r10: name
+      "[owner + 0x3c]": anchor_collection
+      "[candidate + 0x00]": anchor_identifier
+      "[candidate + 0x0c]": name_payload
+      "anchor_collection vtable + 0x40": indexed_candidate
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082a50b0: string_object_c_str
+      FUN_08276d64: utf8_strcmp_safe
+    notes: >-
+      Raw osos.dec establishes the true 144-byte extent
+      0x0828b50c..0x0828b59c; the following independent function begins at
+      0x0828b59c. Decoding the body finds exactly three plain BL instructions
+      (utf8_codepoint_count_safe, string_object_c_str, and utf8_strcmp_safe),
+      zero predicated BL instructions, and one virtual BLX through collection
+      vtable slot +0x40. Empty or NULL name payloads return zero before reading
+      owner. Otherwise the body enumerates owner+0x3c's collection, compares
+      each candidate's raw +0x0c payload to name's NULL-safe C string, and
+      returns the first equal candidate's +0x00 identifier; no match returns
+      zero. The runtime-selected virtual accessor is modeled by target-width
+      word dispatch on device and a widened host-vtable fixture; the three
+      verified direct callees remain direct Rust calls.
+
   - address: 0x0828b1d4
     ghidra: FUN_0828b1d4
     name: field_dc_as_class_4a80
