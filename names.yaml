@@ -127613,3 +127613,30 @@ functions:
       this is a leaf accessor. Deliberate host deviation: the ABI string
       addresses and record fields remain u32 target words, so the port uses
       word indices rather than host pointer layout assumptions.
+
+  # --- Escaped path-marker removal ---
+  - address: 0x0826bd10
+    ghidra: FUN_0826bd10
+    name: path_escape_remove_markers
+    size: 200
+    sig: "void path_escape_remove_markers(StringObject *out, const StringObject *source, u32 marker, u32 replacement, u8 *changed)"
+    module: cxx/path_escape_record
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      param_3/r2: marker
+      param_4/r3: replacement
+      param_5/[sp+0]: changed
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte extent
+      0x0826bd10..0x0826bdd7: `push {r0-r12,lr}` at entry through
+      `pop {r4-r11,pc}` at 0x0826bdd4; the next independently linked
+      function begins at 0x0826bdd8. Full-image A32 decoding finds exactly
+      three inbound plain BL call sites (0x08118098, 0x08118648, and
+      0x0826bc78), zero predicated inbound BL call sites, and seven direct
+      calls in the body: six plain BL instructions plus one predicated BLNE.
+      It default-constructs out, scans source by decoded codepoint, and
+      removes marker only before marker, slash, or backslash; replacement is
+      prepended to the retained escaped codepoint when nonzero and changed is
+      set. Every direct callee is ported. Deliberate deviation: none.
