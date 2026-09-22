@@ -26191,6 +26191,25 @@ functions:
       The port consequently exposes the verified no-op controller/mode
       callback rather than inventing a setter or destructor identity.
 
+  - address: 0x0828a078
+    ghidra: FUN_0828a078
+    name: object_release_virtual_members
+    size: 44
+    sig: "void object_release_virtual_members(void *object)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      param_1[6]/r0+0x18: owned_member
+    notes: >-
+      Raw osos.dec words establish the 44-byte body from 0x0828a078 through
+      0x0828a0a0, with object_sequence_id_assign beginning at 0x0828a0a4.
+      It calls virtual slot +0x0c on object, then tail-dispatches virtual slot
+      +0x30 on the unguarded owned-member pointer at object +0x18. A complete
+      ARM B/BL word scan found three inbound plain unconditional BL sites and
+      no predicated BL forms. The host port deliberately uses native-width
+      fixture pointers; target builds preserve firmware u32 pointer words.
+
   - address: 0x0828a0a4
     ghidra: FUN_0828a0a4
     name: object_sequence_id_assign

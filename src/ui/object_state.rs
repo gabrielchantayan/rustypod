@@ -112,6 +112,66 @@ pub unsafe extern "C" fn object_nested_attribute(object: *const u8) -> u8 {
 }
 
 
+type ObjectVirtualMethod = unsafe extern "C" fn(*mut u8);
+
+const OBJECT_DESTROY_SLOT: usize = 3;
+const OWNED_MEMBER_OFFSET: usize = 24;
+const OWNED_MEMBER_DESTROY_SLOT: usize = 12;
+
+#[cfg(not(target_os = "none"))]
+#[repr(C)]
+struct HostObjectVirtualTable {
+    slots: [ObjectVirtualMethod; OWNED_MEMBER_DESTROY_SLOT + 1],
+}
+
+#[inline(always)]
+unsafe fn object_virtual_method(object: *mut u8, slot: usize) -> ObjectVirtualMethod {
+    #[cfg(target_os = "none")]
+    {
+        let vtable = object.cast::<u32>().read() as usize as *const u32;
+        core::mem::transmute(vtable.add(slot).read() as usize)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        (*object.cast::<*const HostObjectVirtualTable>().read()).slots[slot]
+    }
+}
+
+#[inline(always)]
+unsafe fn object_owned_member(object: *mut u8) -> *mut u8 {
+    #[cfg(target_os = "none")]
+    {
+        object.add(OWNED_MEMBER_OFFSET).cast::<u32>().read() as usize as *mut u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        object.add(OWNED_MEMBER_OFFSET).cast::<*mut u8>().read()
+    }
+}
+
+/// object_release_virtual_members — original: `FUN_0828a078` @ `0x0828a078`
+/// (44 bytes; three direct inbound `bl` call sites, all unconditional; no
+/// predicated `bl` forms).
+///
+/// Raw ARM words establish the complete extent: `push {r4,lr}` at entry
+/// through the final `bx r1` at `0x0828a0a0`; the next function begins at
+/// `0x0828a0a4`. It first dispatches `object` through virtual slot `+0x0c`,
+/// then loads the owned-member pointer at `object + 0x18` and tail-dispatches
+/// that member through virtual slot `+0x30`. Both pointer chains are
+/// unguarded, and the second dispatch follows the first so it observes any
+/// member replacement the first virtual method makes.
+///
+/// Deliberate deviation: host builds use native-width vtable and member
+/// pointers to exercise the two dynamic calls. Target builds retain the
+/// firmware's 32-bit pointer words and slot offsets.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_release_virtual_members(object: *mut u8) {
+    object_virtual_method(object, OBJECT_DESTROY_SLOT)(object);
+    let owned_member = object_owned_member(object);
+    object_virtual_method(owned_member, OWNED_MEMBER_DESTROY_SLOT)(owned_member);
+}
+
 /// The UI sequence identifier state (original global @ `0x089c_fcc4`).
 ///
 /// The firmware reaches this runtime-initialized word through the literal at
@@ -1823,6 +1883,39 @@ mod tests {
         sequence_id: u32,
         suffix: [u8; 4],
     }
+    #[repr(C)]
+    struct VirtualMemberOwner {
+        vtable: *const HostObjectVirtualTable,
+        padding: [u8; 16],
+        owned_member: *mut u8,
+        marker: u8,
+    }
+
+    #[repr(C)]
+    struct VirtualMember {
+        vtable: *const HostObjectVirtualTable,
+        marker: u8,
+    }
+
+    static VIRTUAL_MEMBER_CALL_ORDER: core::sync::atomic::AtomicUsize =
+        core::sync::atomic::AtomicUsize::new(0);
+
+    unsafe extern "C" fn destroy_virtual_member_owner(owner: *mut u8) {
+        assert_eq!(
+            VIRTUAL_MEMBER_CALL_ORDER.fetch_add(1, core::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        (*owner.cast::<VirtualMemberOwner>()).marker = 0xa5;
+    }
+
+    unsafe extern "C" fn destroy_virtual_member(member: *mut u8) {
+        assert_eq!(
+            VIRTUAL_MEMBER_CALL_ORDER.fetch_add(1, core::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        (*member.cast::<VirtualMember>()).marker = 0x5a;
+    }
+
 
     fn seed_object_sequence_id(value: u32) {
         unsafe {
@@ -1833,6 +1926,37 @@ mod tests {
     fn object_sequence_id() -> u32 {
         unsafe { core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_SEQUENCE_ID)) }
     }
+    unsafe extern "C" fn noop_virtual_member_destroy(_: *mut u8) {}
+
+    #[test]
+    fn releases_owner_then_its_owned_member_through_their_virtual_slots() {
+        let mut owner_slots = [noop_virtual_member_destroy as ObjectVirtualMethod; 13];
+        owner_slots[OBJECT_DESTROY_SLOT] = destroy_virtual_member_owner;
+        let owner_vtable = HostObjectVirtualTable { slots: owner_slots };
+
+        let mut member_slots = [noop_virtual_member_destroy as ObjectVirtualMethod; 13];
+        member_slots[OWNED_MEMBER_DESTROY_SLOT] = destroy_virtual_member;
+        let member_vtable = HostObjectVirtualTable { slots: member_slots };
+        let mut member = VirtualMember {
+            vtable: &member_vtable,
+            marker: 0,
+        };
+        let mut owner = VirtualMemberOwner {
+            vtable: &owner_vtable,
+            padding: [0xcc; 16],
+            owned_member: core::ptr::addr_of_mut!(member).cast(),
+            marker: 0,
+        };
+
+        assert_eq!(core::mem::offset_of!(VirtualMemberOwner, owned_member), OWNED_MEMBER_OFFSET);
+        VIRTUAL_MEMBER_CALL_ORDER.store(0, core::sync::atomic::Ordering::SeqCst);
+        unsafe { object_release_virtual_members(core::ptr::addr_of_mut!(owner).cast()) };
+
+        assert_eq!(owner.marker, 0xa5);
+        assert_eq!(member.marker, 0x5a);
+        assert_eq!(VIRTUAL_MEMBER_CALL_ORDER.load(core::sync::atomic::Ordering::SeqCst), 2);
+    }
+
 
 
     #[test]
