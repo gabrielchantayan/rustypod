@@ -70,7 +70,6 @@
 //! 0x0839f28c is the C++ copy-assignment operator itself: slot-pointer-guarded
 //! slot-1 release followed by attach, returning `dst`.
 
-#[cfg(not(target_os = "none"))]
 use crate::cxx::string_object::{string_object_destroy, StringObject};
 use crate::heap::veneers::{operator_delete, operator_delete_tag3, operator_new};
 use crate::kernel::sync_mutex::{mutex_create, mutex_delete, mutex_lock, mutex_unlock, Mutex};
@@ -2085,34 +2084,26 @@ pub unsafe extern "C" fn refcounted_body_release(slot: *mut *mut RefcountedBody)
     slot.write(core::ptr::null_mut());
 }
 
-/// Implementation disposal behind [`refcounted_body_release_owned`]:
-/// original `FUN_0827948c` @ 0x0827948c (44 bytes, unported). The raw
-/// body is `push {r4,lr}; mov r4,r0; ldr r0,[r0]; cmp r0,#0; ldrne r1,[r0];
-/// ldrne r1,[r1,#4]; blxne r1; add r0,r4,#4; bl 0x08277484; sub r0,r0,#4;
-/// pop {r4,pc}` — i.e. when the implementation's first word (a callback
-/// interface pointer) is non-NULL it calls virtual slot 1 (+4) on that
-/// interface, then runs the ported plain destructor
-/// [`string_object_destroy`] on the two-word StringObject member at byte
-/// offset +4 and returns `this` (the destructor returns its argument;
-/// the `sub` undoes the `add`). On the firmware target this is a direct
-/// call to the still-unported ROM address; host builds model it
-/// faithfully — every callee on the chain is either data-driven (the
-/// interface vtable) or ported ([`string_object_destroy`]).
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn dispose_implementation(implementation: *mut u8) -> *mut u8 {
-    let dispose: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        core::mem::transmute(0x0827_948cusize);
-    dispose(implementation)
-}
-
-/// Host model of the 0x0827948c disposal — see the target twin above.
-/// The StringObject member sits one pointer word into the implementation
-/// (target byte offset +4; host fixtures widen it like every other
-/// pointer field, so the member never overlaps the callback word).
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn dispose_implementation(implementation: *mut u8) -> *mut u8 {
+/// `implementation_dispose` — original: `FUN_0827948c` @ `0x0827948c`
+/// (44 bytes; 3 inbound plain `bl` call sites, no inbound predicated `bl`
+/// calls; the body makes no plain `bl` calls and one predicated `blxne`).
+///
+/// Raw `osos.dec` words establish the complete body through `pop {r4,pc}` at
+/// `0x0827948c..0x082794b7`; the next real function begins at `0x082794b8`
+/// with `ldr r1,[r0,#4]`. When the callback interface at `this + 0` is
+/// non-NULL, dispatch its vtable slot 1 (`+4`), then destroy the embedded
+/// [`StringObject`] at target offset `+4` and return the original `this`.
+///
+/// Deliberate deviation: host pointers are wider than target words, so the
+/// embedded StringObject follows one host pointer word there. On ARM this is
+/// exactly target offset `+4`; `#[repr(C)]` preserves that target layout.
+///
+/// # Safety
+/// `implementation` must point to an implementation object containing a
+/// callback interface pointer followed by a valid [`StringObject`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn implementation_dispose(implementation: *mut u8) -> *mut u8 {
     let callback = (implementation as *const *mut u8).read();
     if !callback.is_null() {
         let vtable = (callback as *const *const usize).read();
@@ -2143,7 +2134,7 @@ unsafe fn dispose_implementation(implementation: *mut u8) -> *mut u8 {
 /// invokes vtable slot 7 (+0x1c) on the implementation and never frees
 /// it, this instantiation OWNS its implementation: when the NULL-guarded
 /// word at body+0 is non-NULL it runs the disposal @ 0x0827948c (see
-/// [`dispose_implementation`]) and tag-2-deletes the implementation
+/// [`implementation_dispose`]) and tag-2-deletes the implementation
 /// block through `operator_delete` (0x082aad24, ported) with the
 /// disposal's return value. Everything else matches the sibling: NULL
 /// body early-out (the slot is left untouched), refcount decremented
@@ -2190,7 +2181,7 @@ pub unsafe extern "C" fn refcounted_body_release_owned(slot: *mut *mut Refcounte
         if !implementation.is_null() {
             // The disposal returns `this`, and that return feeds the
             // tag-2 delete directly (the ARM never reloads r0).
-            let implementation = dispose_implementation(implementation);
+            let implementation = implementation_dispose(implementation);
             operator_delete(implementation);
         }
 
@@ -4528,7 +4519,7 @@ mod tests {
         }
 
         /// Records the callback interface's virtual slot 1, dispatched by
-        /// the host model of the 0x0827948c implementation disposal.
+        /// `implementation_dispose` @ 0x0827948c.
         unsafe extern "C" fn recording_callback_release(callback: *mut u8) {
             (*core::ptr::addr_of_mut!(EVENTS)).push(Event::CallbackRelease(callback as usize));
         }
@@ -5134,6 +5125,29 @@ mod tests {
                 ],
                 "lock/dispose/delete/unlock/teardown ordering follows the ARM body"
             );
+        }
+
+        /// A NULL callback skips the predicated virtual call but still destroys
+        /// the embedded StringObject and returns the original implementation.
+        #[test]
+        fn implementation_dispose_null_callback_releases_embedded_string() {
+            let _bench = bench();
+            let mut payload = 0x5a_u8;
+            let mut implementation: [usize; 3] = [0, 0, &mut payload as *mut u8 as usize];
+            let implementation_ptr = implementation.as_mut_ptr() as *mut u8;
+            let payload_ptr = &mut payload as *mut u8;
+
+            let returned = unsafe { implementation_dispose(implementation_ptr) };
+
+            assert_eq!(returned, implementation_ptr);
+            assert_eq!(
+                implementation[1],
+                &crate::cxx::string_object::STRING_OBJECT_VTABLE
+                    as *const crate::cxx::string_object::StringObjectVtable
+                    as usize
+            );
+            assert_eq!(implementation[2], 0);
+            assert_eq!(events(), std::vec![Event::HeapFree(payload_ptr as usize, 0x34)]);
         }
 
         /// A NULL implementation word skips the disposal AND its tag-2
