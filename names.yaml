@@ -128100,3 +128100,30 @@ functions:
       coverage proves every initialized byte, the two global words, and a
       guard immediately past the record. match.py structural review records
       the matching scalar stores, global pair load/copy, and clear tail.
+
+  # --- PHTA-tagged state mode setter veneer ---
+  - address: 0x08261d9c
+    ghidra: thunk_FUN_082e7c78
+    name: phta_tagged_state_set_mode
+    size: 4
+    sig: "u32 phta_tagged_state_set_mode(PhtaTaggedState *state, u32 mode)"
+    module: cxx/phta_tagged_state_set_mode
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: mode
+      "state+0": PHTA_TAG
+      "state+0x1c": mode
+      FUN_082e7c78: verified unnamed tail target
+    notes: >-
+      Raw osos.dec establishes the assigned veneer as exactly one instruction,
+      `b 0x082e7c78`, at 0x08261d9c; mov r0,#0x52 at 0x08261da0 begins the
+      next independently entered function. Whole-image aligned A32 decoding
+      finds three inbound plain BL calls at 0x0839e8dc, 0x0839ea48, and
+      0x0839f424, with zero inbound predicated BL calls. The verified tail
+      target checks non-null r0, tag 0x41544850 at +0, and r1 in {1,2}; it
+      stores r1 at +0x1c and returns zero, otherwise returns 0x1a without a
+      store. The target has no names.yaml entry or established identity, so
+      the Rust port implements its leaf behavior directly instead of
+      inventing a callee seam. Host tests cover null, mismatched tag, every
+      accepted mode, invalid modes, and rejected-write preservation.
