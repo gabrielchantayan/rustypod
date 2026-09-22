@@ -47,6 +47,7 @@ pub mod component_vtable_slot_08_tail_dispatch;
 pub mod owner_vtable_slot_ec_tail_dispatch;
 pub mod word_08_set_then_slot_18_dispatch;
 pub mod component_vtable_slot_208_tail_dispatch;
+pub mod vtable_slot_4c_then_2c_dispatch;
 pub mod context_activity;
 pub mod context_line_terminator;
 pub mod context_child_handle;
