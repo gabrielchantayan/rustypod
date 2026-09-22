@@ -99528,6 +99528,37 @@ functions:
       host seams. Tests cover both flag paths, address adjustments, unchanged
       zero and all-one arguments, and forwarded return values.
 
+  # --- PhotoBrowse slideshow constructor ---
+  - address: 0x0822ba68
+    ghidra: FUN_0822ba68
+    name: photo_browse_slideshow_construct
+    size: 120
+    sig: "void *photo_browse_slideshow_construct(void *context, const void *descriptor)"
+    module: app/photo_browse_slideshow_construct
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: descriptor
+      DAT_0822badc: photo_browse_slideshow_vtable
+      FUN_08214568: unported base constructor
+      FUN_08214eb0: unported nested constructor
+      FUN_08208614: unported nested state constructor
+    notes: >-
+      Raw osos.dec corrects Ghidra's 116-byte instruction-body extent: 29
+      instruction words at 0x0822ba68..0x0822bad8 followed by vtable literal
+      0x089a0910 at 0x0822badc, for a 120-byte extent through 0x0822badf; the
+      next function starts at 0x0822bae0. It invokes three
+      unported constructor targets, initializes the ported descriptor slots and
+      two ported shared-cell handles with NULL payloads, writes one at nested
+      state +0x2c8, and clears word +0x898. Decoding every ARM B/BL immediate
+      finds exactly three direct inbound plain bl calls (0x081b7d68,
+      0x081cd624, and 0x08220540), zero predicated calls, and no tail branches.
+      Deliberate deviations: unported targets remain fixed ARM addresses but
+      use host-replaceable seams; LLVM emits indirect blx calls for those seams
+      and does not preserve retail instruction ordering. Host tests verify
+      forwarded inputs, the three constructor paths, all direct field writes,
+      descriptor initialization, and NULL shared-cell slots.
+
   # --- Registry-class-0x8780 dispatch state ---
   - address: 0x081a3ed4
     ghidra: FUN_081a3ed4
