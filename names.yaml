@@ -75195,6 +75195,34 @@ functions:
       dropped "ldr r1,[chunk,#4]" - LLVM sees that cxx_array_dealloc
       ignores its count argument and elides the load.
 
+  # --- framework object with two strings ---
+  - address: 0x0826bff4
+    ghidra: FUN_0826bff4
+    name: framework_string_pair_construct
+    size: 64
+    sig: "FrameworkStringPair *framework_string_pair_construct(FrameworkStringPair *storage, u32 context)"
+    module: cxx/framework_string_pair_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: context
+      r4: context (saved)
+      DAT_0826c030: FRAMEWORK_STRING_PAIR_VTABLE
+      FUN_08275bb8: framework_object_construct
+      FUN_08277440: string_default_construct
+    notes: >-
+      True extent is 64 bytes from 0x0826bff4 through the vtable literal
+      0x089a59c0 at 0x0826c030; the next real function begins at
+      0x0826c034. Decoding all 15 code words verifies three unconditional
+      direct bl calls and zero predicated bl calls: framework_object_construct
+      once, followed by string_default_construct for the adjacent target
+      StringObject fields at +0x04 and +0x0c. It then replaces the root
+      vtable, clears byte +0x14 and words +0x18/+0x20, and stores context at
+      +0x1c before returning the original storage pointer. Host builds write
+      the two strings as target-width words because the ported string
+      constructor uses host-width pointers there; ARM builds call the ported
+      constructor directly.
+
   # --- fixed-block pool (class-specific operator new) ---
   - address: 0x0826c0d8
     ghidra: FUN_0826c0d8
