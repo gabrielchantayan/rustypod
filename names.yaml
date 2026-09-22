@@ -129701,3 +129701,31 @@ functions:
       exhaustion. The dynamic slot target remains deliberately unnamed;
       host fixtures use native-width semantic pointer layouts, while target
       builds use volatile 32-bit firmware words.
+
+  - address: 0x08206754
+    ghidra: FUN_08206754
+    name: slot_buffers_release
+    size: 120
+    sig: "i32 slot_buffers_release(void *slots)"
+    module: app/slot_buffers_release
+    status: ported
+    renames:
+      param_1/r0: slots
+      DAT_082067cc: global_pool_control
+      FUN_08228360: lock_service_lock
+      FUN_0826f758: pool_free
+      FUN_08228388: lock_service_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent
+      0x08206754..0x082067cc; the next word is the global PoolControl pointer
+      literal 0x08a0e13c and 0x082067d0 starts the next function. The body
+      iterates four 0x20-byte slots: it locks each +0x62c mutex through the
+      service at slots+0x624, clears the +0x640 length word, frees a nonzero
+      +0x63c allocation through the global pool, clears that pointer, then
+      unlocks. A nonzero lock status returns 3 immediately. Raw decoding finds
+      three unconditional direct bl instructions in the body and no predicated
+      bl: lock_service_lock 0x08228360, pool_free 0x0826f758, and
+      lock_service_unlock 0x08228388. Host builds use a private global-pool
+      static and no-op the lock pair because widened host Mutex fields cannot
+      inhabit the target's 4-byte-aligned slot field; target builds call the
+      ported lock-service adapters directly.

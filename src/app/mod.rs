@@ -231,6 +231,7 @@ pub mod image_format_descriptor_slot;
 pub mod image_format_descriptor_slots_initialize;
 pub mod photo_browse_slideshow_construct;
 pub mod lock_service;
+pub mod slot_buffers_release;
 pub mod interface_guard_base_dispatch;
 pub mod input_capabilities;
 pub mod input_delta_feedback_update;
