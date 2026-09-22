@@ -24685,6 +24685,27 @@ functions:
       deviation - LLVM normalizes the 0/1 with `clz`/`lsr #5` instead of
       the original's `movne`/`moveq`.
 
+  - address: 0x081fc508
+    ghidra: FUN_081fc508
+    name: client_mutex_return_thunk
+    size: 28
+    sig: "not a standalone callable function"
+    status: identified
+    notes: >-
+      Blocked from porting: raw osos.dec words establish that 0x081fc508 is
+      an internal instruction, not an ABI entry point. The preceding word at
+      0x081fc504 is `push {r4, lr}`; 0x081fc508 is `mov r4, r0`, followed by
+      `add r0, r0, #0x24` and `bl 0x082621a4`. The branch target is itself
+      `pop {r4, pc}`, the epilogue of the separately entered function at
+      0x08262170, so it returns through the frame opened at 0x081fc504.
+      A normal call directly to 0x081fc508 has no matching saved-register
+      frame and would pop the caller's frame; Rust cannot faithfully expose
+      it as a standalone C ABI symbol. The following words through
+      0x081fc520 are unreachable after that epilogue call; the next real
+      function begins at 0x081fc524 (`state_flags_set`). Ghidra's 28-byte
+      extent and three `bl` call sites therefore do not establish a portable
+      function boundary. No callee seam was created: 0x082621a4 is an
+      instruction inside another function, not a callable callee.
   - address: 0x081fc524
     ghidra: FUN_081fc524
     name: state_flags_set
