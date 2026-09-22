@@ -33125,6 +33125,28 @@ functions:
       is the crate fp frame, the ops-table blx indirections and LLVM
       inlining timer_schedule_shim's argument rotation.
 
+  - address: 0x08291e58
+    ghidra: FUN_08291e58
+    name: tail_object_vtable_word_callback
+    size: 28
+    sig: "usize tail_object_vtable_word_callback(void *object_prefix, u32 word, usize discarded_r2, usize forwarded_r3)"
+    module: cxx/tail_object_vtable_word_callback
+    status: ported
+    renames:
+      param_1/r0: object_prefix
+      param_2/r1: word
+      r3: forwarded_r3
+    notes: >-
+      Raw osos.dec establishes the exact seven-instruction 28-byte body
+      0x08291e58..0x08291e73: it adjusts the receiver by +8, spills word
+      to the stack, and calls vtable slot +0x1c through BLX. The next real
+      function starts at 0x08291e74. Decoding callers finds two plain BL
+      calls at 0x08291f18 and 0x08291f98 plus one predicated BLNE at
+      0x08186f14; no other direct calls target this address. The callback
+      return passes through r0. Host callback pointers use native-width
+      vtable entries; Rust represents the private ARM stack spill with a
+      local u32 and expresses BLX as a normal call. These are deliberate
+      host/layout deviations that preserve observable callback ABI.
   - address: 0x08291fb4
     ghidra: FUN_08291fb4
     name: string_object_opaque_base_destroy
