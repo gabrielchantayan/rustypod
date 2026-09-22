@@ -644,6 +644,41 @@ unsafe fn assign_cstr_clear_op() -> unsafe extern "C" fn(*mut StringObject) {
         STRING_OBJECT_ASSIGN_CSTR_OPS.clear_payload
     ))
 }
+/// string_object_ensure_capacity — original: `FUN_08275d9c` @ **0x08275d9c**
+/// (60 bytes). Raw `osos.dec` words establish the complete A32 body from
+/// `0x08275d9c` through `pop {r4,pc}` at `0x08275dd4`; `0x08275dd8` begins
+/// the next function. The body has one direct plain `bl` to
+/// `strlen_safe_plus1` @ `0x08275e20` and one predicated `blxcc` through
+/// vtable slot `+0x08`.
+///
+/// Returns the current payload pointer. A zero request does not inspect the
+/// payload. Otherwise it measures the payload's inclusive C-string length
+/// (NULL is one) and invokes the allocation virtual slot as
+/// `(this, requested_size, 1)` only when that length is strictly less than
+/// `requested_size`. The allocation slot owns any replacement and this
+/// routine returns the payload word it observes afterward.
+///
+/// Deliberate deviation: the ROM vtable contains target addresses, so the
+/// existing injectable `STRING_OBJECT_ASSIGN_CSTR_OPS` models its slot
+/// `+0x08` on hosts; target behavior is otherwise direct.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_ensure_capacity(
+    this: *mut StringObject,
+    requested_size: usize,
+) -> *mut u8 {
+    if requested_size != 0 {
+        // Preserve the retail direct call to 0x08275e20 rather than inlining
+        // its byte loop into this wrapper.
+        let len_plus1: unsafe extern "C" fn(*const u8) -> usize =
+            core::ptr::read_volatile(&(strlen_safe_plus1 as unsafe extern "C" fn(*const u8) -> usize));
+        if len_plus1((*this).payload) < requested_size {
+            assign_cstr_allocate_op()(this, requested_size, 1);
+        }
+    }
+    (*this).payload
+}
+
 
 /// string_object_assign_cstr — original: `FUN_0827639c` @ 0x0827639c
 /// (100 bytes).
@@ -9396,6 +9431,55 @@ pub(crate) mod tests {
             assert_eq!(string_object_find_codepoint(&null_payload_object, 0, 0), -1);
         }
     }
+    #[test]
+    fn ensure_capacity_only_dispatches_for_a_strictly_larger_request() {
+        let mut payload = *b"album\0";
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let allocation = [0xa5u8; 16];
+        let _bench = assign_cstr_bench(allocation.as_ptr() as *mut u8);
+
+        unsafe {
+            assert_eq!(string_object_ensure_capacity(this, 0), payload.as_mut_ptr());
+            assert_eq!(string_object_ensure_capacity(this, payload.len()), payload.as_mut_ptr());
+            assert_eq!(string_object_ensure_capacity(this, payload.len() + 1), payload.as_mut_ptr());
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, payload.len() + 1, 1)],
+            "only a request larger than the inclusive payload length dispatches slot +0x08"
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
+            "this wrapper never reaches vtable slot +0x0c"
+        );
+    }
+
+    #[test]
+    fn ensure_capacity_treats_a_null_payload_as_one_byte_and_returns_the_payload_word() {
+        let mut replacement = [0u8; 8];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(replacement.as_mut_ptr());
+
+        unsafe {
+            assert!(string_object_ensure_capacity(this, 1).is_null());
+            assert!(string_object_ensure_capacity(this, 2).is_null());
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 2, 1)]
+        );
+    }
+
     #[test]
     fn primary_string_record_c_str_reads_primary_or_empty_payload() {
         let mut label = *b"label\0";
