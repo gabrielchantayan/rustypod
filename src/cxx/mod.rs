@@ -213,6 +213,7 @@ pub mod opaque_context_mutex_destroy;
 pub mod tagged_allocation_release;
 pub mod tagged_context_dispatch;
 pub mod tagged_context_dequeue;
+pub mod tagged_context_enqueue;
 pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
