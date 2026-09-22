@@ -154,6 +154,7 @@ pub mod entry_match_next;
 pub mod entry_match_successor;
 pub mod entry_match_source_payload;
 pub mod entry_match_index;
+pub mod message_error_code_from_flags;
 pub mod event_code_queue;
 pub mod event_subscription_init;
 pub mod event_code_dispatch;

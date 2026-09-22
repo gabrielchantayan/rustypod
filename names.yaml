@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820429c
+    ghidra: FUN_0820429c
+    name: message_error_code_from_flags
+    size: 28
+    sig: "u32 message_error_code_from_flags(u32 first_flag, u32 second_flag)"
+    module: app/message_error_code_from_flags
+    status: ported
+    renames:
+      param_1/r0: first_flag
+      param_2/r1: second_flag
+      r0: message_error_code
+    notes: >-
+      Raw osos.dec establishes the exact seven-instruction, 28-byte A32 body
+      0x0820429c..0x082042b7; the push at 0x082042b8 begins the next real
+      function. Decoding the three inbound BL words independently confirms
+      plain calls at 0x081dcd88, 0x081dce48, and 0x0820fe40, with zero
+      predicated BL call forms and no outgoing calls. A zero first flag
+      returns 0x3b without consulting the second; otherwise a zero second
+      flag returns 0x2c and two nonzero flags return 0x20. Each caller passes
+      the result as the fourth argument to the message constructor at
+      0x08204434.
   - address: 0x08223630
     ghidra: FUN_08223630
     name: pool_client_reset
