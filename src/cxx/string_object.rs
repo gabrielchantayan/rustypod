@@ -417,6 +417,14 @@ pub struct StringObject {
     /// 0x34) and NULLs the word.
     pub payload: *mut u8,
 }
+/// Two consecutive StringObjects destroyed by
+/// [`string_object_pair_destroy`]. On ARM `first` and `second` occupy
+/// +0x00..+0x07 and +0x08..+0x0f respectively.
+#[repr(C)]
+pub struct StringObjectPair {
+    pub first: StringObject,
+    pub second: StringObject,
+}
 
 /// The opaque virtual member at word +6 in [`StringObjectWithOwnedMember`].
 /// Its vtable's second ARM word is the destructor entry reached by
@@ -1961,6 +1969,30 @@ pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut 
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
     this
+}
+
+/// string_object_pair_destroy — original: `FUN_082677e0` @ **0x082677e0**
+/// (24 bytes, 0x082677e0..0x082677f7; next function begins at
+/// 0x082677f8). Raw ARM has **3 inbound plain `bl` call sites**
+/// (0x0826819c, 0x082681c4, 0x083e38b4) and zero inbound predicated `bl`
+/// call sites; its body has one plain `bl` and one tail `b`, both to
+/// `string_object_destroy` @ 0x08277484.
+///
+/// Destroys `second` first, then `first`, returning the original pair
+/// pointer. The first return is deliberately used to derive the base:
+/// `add r0,r0,#8; bl destroy; sub r0,r0,#8; b destroy`. There is no NULL
+/// guard and no deleting-destructor behavior.
+///
+/// Deliberate deviation: the target's 8-byte member stride is represented by
+/// named `repr(C)` fields, so the callee return is rebased with the address
+/// of `first` rather than a literal byte subtraction on pointer-widened hosts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_pair_destroy(
+    this: *mut StringObjectPair,
+) -> *mut StringObjectPair {
+    string_object_destroy(core::ptr::addr_of_mut!((*this).second));
+    string_object_destroy(core::ptr::addr_of_mut!((*this).first)).cast()
 }
 
 /// string_object_with_owned_member_destroy — original: `FUN_0828a148` @
@@ -6789,6 +6821,31 @@ pub(crate) mod tests {
             &STRING_OBJECT_VTABLE as *const _ as usize,
             "the vtable store precedes the release call (str before bl)"
         );
+    }
+
+    #[test]
+    fn pair_destroy_releases_second_then_first_and_returns_the_pair() {
+        let _bench = bench();
+        let mut pair = StringObjectPair {
+            first: StringObject {
+                vtable: 0x1111_1111 as *const StringObjectVtable,
+                payload: 0xaaaa_aaaa as *mut u8,
+            },
+            second: StringObject {
+                vtable: 0x2222_2222 as *const StringObjectVtable,
+                payload: 0xbbbb_bbbb as *mut u8,
+            },
+        };
+        let this = &mut pair as *mut StringObjectPair;
+        unsafe {
+            assert_eq!(string_object_pair_destroy(this), this);
+        }
+        assert_eq!(pair.first.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(pair.second.vtable, &STRING_OBJECT_VTABLE as *const _);
+        let calls = release_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, core::ptr::addr_of!(pair.second) as usize);
+        assert_eq!(calls[1].0, core::ptr::addr_of!(pair.first) as usize);
     }
 
     #[test]

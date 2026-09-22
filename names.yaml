@@ -30159,6 +30159,30 @@ functions:
       performs the same single volatile TECNT read, while avoiding a new
       dispatch seam for the unported wrapper.
 
+  - address: 0x082677e0
+    ghidra: FUN_082677e0
+    name: string_object_pair_destroy
+    size: 24
+    sig: "StringObjectPair *string_object_pair_destroy(StringObjectPair *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: this
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the six-instruction extent
+      0x082677e0..0x082677f7: `push {r4,lr}; add r0,r0,#8; bl
+      0x08277484; pop {r4,lr}; sub r0,r0,#8; b 0x08277484`; the next real
+      function starts at 0x082677f8. Whole-image ARM branch decoding finds
+      three inbound direct plain BL callers (0x0826819c, 0x082681c4, and
+      0x083e38b4) and zero predicated forms. The body has one plain BL and
+      one tail B, both to the existing string_object_destroy port. It releases
+      the two adjacent StringObject members in descending address order and
+      returns the base derived from the second member destructor's return.
+      The unidentified containing class is named structurally. On hosts,
+      repr(C) named fields replace ARM's fixed 8-byte stride, preserving the
+      same member identities when pointers widen.
+
   - address: 0x0826c994
     ghidra: FUN_0826c994
     name: opaque_string_owner_destroy
