@@ -129987,3 +129987,28 @@ functions:
       LLVM to substitute a bulk memset; match.py confirms that structure, with
       only LLVM's standard prologue/epilogue and choice of r1 instead of r2
       differing from retail ARM.
+
+  - address: 0x081fca8c
+    ghidra: FUN_081fca8c
+    name: vtable_slot_10_optional_word
+    size: 36
+    sig: "u32 vtable_slot_10_optional_word(void *object, u32 index)"
+    module: cxx/vtable_slot_10_optional_word
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: index
+      "[object + 0x0]": vtable
+      "[vtable + 0x10]": optional_word_method
+      puVar1/r0: result
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte extent
+      0x081fca8c..0x081fcab0; 0x081fcab0 begins the next real function.
+      The body has no direct BL instructions and one indirect BLX through
+      object->vtable slot +0x10. Whole-image A32 B/BL decoding finds exactly
+      three inbound plain BL instructions at 0x081f01a8, 0x081f0f70, and
+      0x08214c90, with zero predicated BL forms. It calls the unidentified
+      virtual method with object and index, returns 0xffffffff if the method
+      returns NULL, otherwise loads the result's first word. Target builds
+      index the native four-byte vtable slot; host fixtures use native-width
+      entries because host function pointers cannot fit retailOS u32 words.

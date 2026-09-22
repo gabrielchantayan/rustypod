@@ -425,6 +425,7 @@ pub mod vtable_slot_1b4_decrement_nonzero;
 pub mod vtable_slot_40_result_word_at;
 pub mod vtable_slot_40_result_word_at_alt;
 pub mod vtable_word_callback;
+pub mod vtable_slot_10_optional_word;
 pub mod vtable_word_callback_repeat;
 pub mod two_string_record_assign;
 pub mod guarded_vtable_slot_04_dispatch;
