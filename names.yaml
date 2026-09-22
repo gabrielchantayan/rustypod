@@ -126190,3 +126190,35 @@ functions:
       +0xd4 overlaps the target Rect at +0xdc when its pointer field widens
       to eight bytes. Host tests cover nonempty union, empty-source
       preservation, and clearing the active global.
+  - address: 0x0828addc
+    ghidra: FUN_0828addc
+    name: target_selection_activate
+    size: 104
+    sig: "u32 target_selection_activate(void *owner, void *target)"
+    module: cxx/target_selection_activate
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: target
+      "owner+0xdc": current_target
+      "owner+0x4e4": active_flag
+      FUN_08275b9c: opaque_target_tag_check
+      FUN_0828ae4c: optional_vtable_slot_18_result
+      FUN_0828b81c: opaque_owner_selection_follow_up
+      FUN_0828a8d0: opaque_owner_target_follow_up
+    notes: >-
+      Raw osos.dec words establish the exact 104-byte A32 body
+      0x0828addc..0x0828ae43; 0x0828ae44 and 0x0828ae48 are the return-code
+      literals 0x41a2 and 0x41a3, and 0x0828ae4c begins the next independently
+      entered function. The body contains exactly four plain BL instructions,
+      to FUN_08275b9c, FUN_0828ae4c, FUN_0828b81c, and FUN_0828a8d0, and zero
+      predicated BL forms. Full-image A32 decoding finds three inbound plain
+      BL call sites at 0x0828a5f8, 0x0828b088, and 0x0828b0c8, with zero
+      predicated inbound BL forms. It checks target against tag 0x4b00; a
+      rejection returns 0x41a2. On acceptance it uses the existing slot-0x18
+      dispatcher, maps owner+0x4e4 to one only when it was zero, stores target
+      at owner+0xdc, calls both follow-ups in order, and returns 0x41a3.
+      The opaque helper identities are deliberately not invented. Rust uses
+      exact-address firmware calls and host seams for the three unported
+      callees; target fields use byte offsets to avoid host pointer-width
+      layout changes.
