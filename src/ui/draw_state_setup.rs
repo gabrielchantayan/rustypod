@@ -31,12 +31,8 @@ use core::ptr;
 
 use crate::ui::rect::{rect_intersect, Rect};
 use crate::ui::render_context::ui_element_resolve_render_context;
+use crate::ui::render_context_transform::render_context_transform_rect;
 use crate::ui::shown_state::ui_element_is_shown;
-
-/// The unported render-coordinate transform called by `FUN_082a25d8`.
-/// It translates a UI element bounds rectangle in the resolved context.
-#[cfg(target_os = "none")]
-static RENDER_CONTEXT_RECT_TRANSFORM_ADDRESS: usize = 0x0828_cb64;
 
 /// ABI of `FUN_0828cb64`: mutate `rect` into `render_context` coordinates.
 pub type DrawStateRenderTransform = unsafe extern "C" fn(render_context: *mut u8, rect: *mut Rect);
@@ -186,19 +182,16 @@ struct DrawStateSetupFields {
 
 const _: () = assert!(size_of::<DrawStateSetupFields>() == 0x44);
 
-/// Target default: invoke the original unported transform at 0x0828cb64.
+/// Target default: invoke the ported render-coordinate transform.
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_render_transform(render_context: *mut u8, rect: *mut Rect) {
-    let address = ptr::read_volatile(ptr::addr_of!(RENDER_CONTEXT_RECT_TRANSFORM_ADDRESS));
-    let transform: DrawStateRenderTransform = core::mem::transmute(address);
-    transform(render_context, rect);
+    render_context_transform_rect(render_context, rect);
 }
 
-/// Host calls must explicitly supply a behavioral model for the unresolved
-/// firmware transform rather than silently claiming an unverified result.
+/// Host default invokes the ported render-coordinate transform.
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_render_transform(_render_context: *mut u8, _rect: *mut Rect) {
-    panic!("FUN_0828cb64 is unported; install DRAW_STATE_RENDER_TRANSFORM")
+unsafe extern "C" fn firmware_render_transform(render_context: *mut u8, rect: *mut Rect) {
+    render_context_transform_rect(render_context, rect);
 }
 
 #[cfg(test)]
@@ -211,15 +204,10 @@ unsafe extern "C" fn test_render_transform(_render_context: *mut u8, rect: *mut 
 
 
 /// The render-coordinate transform called after copying a shown element's
-/// bounds. Target builds dispatch directly to retailOS; host tests replace
-/// the unavailable firmware body with a model.
-#[cfg(target_os = "none")]
+/// bounds. Production builds use the ported function; tests retain a local
+/// model so their draw-state fixtures need not construct child contexts.
+#[cfg(any(target_os = "none", not(test)))]
 pub static mut DRAW_STATE_RENDER_TRANSFORM: DrawStateRenderTransform = firmware_render_transform;
-
-/// Host default deliberately fails loudly because the real transform has not
-/// yet been ported. Test builds substitute a deterministic coordinate model.
-#[cfg(all(not(target_os = "none"), not(test)))]
-pub static mut DRAW_STATE_RENDER_TRANSFORM: DrawStateRenderTransform = missing_render_transform;
 
 #[cfg(all(not(target_os = "none"), test))]
 pub static mut DRAW_STATE_RENDER_TRANSFORM: DrawStateRenderTransform = test_render_transform;
