@@ -126795,3 +126795,26 @@ functions:
       and the i32::MAX to i32::MIN wrap. Rust uses u32 word indexing for
       +0x8c so the target layout remains correct on 64-bit hosts. No
       deliberate behavior deviation.
+
+  - address: 0x0827d324
+    ghidra: FUN_0827d324
+    name: fixed16_matrix_identity_init
+    size: 92
+    sig: "void fixed16_matrix_identity_init(u8 *matrix_with_leading_word)"
+    module: util/fixed16_matrix_identity_init
+    status: ported
+    renames:
+      param_1/r0: matrix_with_leading_word
+    notes: >-
+      Raw osos.dec words establish the exact 92-byte A32 body from
+      0x0827d324 through pop {r4,r5,r6,r7,r8,r9,sl,pc} at 0x0827d37c;
+      0x0827d380 begins the next independently linked function. The
+      initializer leaves word 0 untouched and writes the following sixteen
+      words as a Q16.16 4-by-4 identity matrix: 0x00010000 at offsets
+      0x4, 0x18, 0x2c, and 0x40, zero at every other matrix offset.
+      Whole-image A32 decoding finds no direct BL instruction in the body,
+      three inbound unconditional plain BL call sites (from FUN_08142b20,
+      FUN_0816e8cc, and FUN_0827b5a8), and no predicated BL forms. The
+      target export preserves the retail instruction sequence exactly;
+      the host implementation deliberately uses byte stores before
+      unaligned word writes so unaligned host fixtures remain defined.
