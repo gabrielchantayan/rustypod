@@ -127394,3 +127394,34 @@ functions:
       pool; its C also misattributes the literal handler as the constructor
       result. No Rust module or hook is added until the shutdown handler's
       actual entry and behavior are recovered.
+
+  - address: 0x082722a0
+    ghidra: FUN_082722a0
+    name: view_resource_provider_assign
+    size: 68
+    sig: "void view_resource_provider_assign(ViewBase *view, ResourceProvider *replacement)"
+    module: ui/view_resource_provider_assign
+    status: ported
+    renames:
+      param_1/r5: view
+      param_2/r4: replacement
+      "view+0x14": resource_provider
+      FUN_08124dbc: resource_provider_detach_view
+      FUN_08124af4: resource_provider_attach_view
+    notes: >-
+      Raw osos.dec words e92d4070 e1a05000 e5900014 e1a04001 e1500001
+      08bd8070 e3500000 13a02000 11a01005 1bfacabc e3540000 11a01005
+      11a00004 e5854014 18bd4070 1afaca04 e8bd8070 establish the exact
+      68-byte extent 0x082722a0..0x082722e3. The next real function begins
+      at 0x082722e4 with `mov r0,#0; bx lr`; Ghidra incorrectly includes its
+      much larger successor. The body returns when view+0x14 already equals
+      replacement. Otherwise it calls resource_provider_detach_view
+      (0x08124dbc) only for a non-NULL old provider with (old, view, 0),
+      stores replacement, then tail-branches to resource_provider_attach_view
+      (0x08124af4) only when replacement is non-NULL. Whole-image A32 branch
+      decoding finds exactly three inbound plain BL calls at 0x081d2344,
+      0x082045e8, and 0x08272464, with zero predicated inbound BL calls.
+      The body itself has one predicated BLNE and zero plain BL calls, plus
+      its predicated BNE tail branch. The two established fixed-target seams
+      from ui/view_base are reused; Rust turns the tail branch into that seam
+      call so host tests can observe it. No NULL or ownership guard is added.
