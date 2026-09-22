@@ -294,6 +294,8 @@ pub mod hints {
     // 0x1c50_0000: dedicated to app/collection_entry_teardown's target-width
     // owner fixture; mappings never unmap, so no other user may share it.
     pub const COLLECTION_ENTRY_TEARDOWN: usize = 0x1c50_0000;
+    // Dedicated target-width bucket fixture for vtable_file_record_inner_iterator_begin.
+    pub const VTABLE_FILE_RECORD_INNER_ITERATOR_BEGIN: usize = 0x1c60_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
     // session and pending-event fixture; mappings never unmap, so no other
     // user may share this hint.

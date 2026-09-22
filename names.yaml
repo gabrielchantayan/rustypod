@@ -72190,6 +72190,35 @@ functions:
       src/app/vtable_set.rs::file_record_lookup_hit_returns_the_slot_value
       / file_record_lookup_miss_returns_null
       / file_record_lookup_routes_registry_and_key_verbatim_to_the_search.
+  - address: 0x0821c4c8
+    ghidra: FUN_0821c4c8
+    name: vtable_file_record_inner_iterator_begin
+    size: 36
+    sig: "void vtable_file_record_inner_iterator_begin(iter: *mut u32, registry: *mut u8, key: u32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0/r4: iter
+      param_2/r1: registry
+      param_3/r2: key
+      FUN_0812d160: vtable_file_record_lookup
+      FUN_081dde18: file_record_iterator_begin
+    notes: >-
+      Raw firmware establishes the exact 36-byte body
+      0x0821c4c8..0x0821c4ec: save iter in r4; call
+      vtable_file_record_lookup(registry, key); restore iter as r0 and
+      tail-branch to file_record_iterator_begin(iter, bucket). There are
+      three inbound plain BL sites at 0x0811cc30, 0x0811ce0c, and
+      0x0811d030, and no predicated inbound BL sites; the body itself has
+      one plain BL at 0x0821c4d8 and one tail B at 0x0821c4e8. Both
+      callees are already ported in app/vtable_set and are called directly.
+      Deliberate deviation: none. The Rust source calls the shared
+      initializer normally, but the verified ARM release code emits the
+      same tail branch. Host tests cover lookup-hit bucket initialization
+      and NULL lookup's empty iterator state. match.py: same lookup-call
+      then iterator initialization structure; the only diff is the crate
+      frame and unresolved direct-call relocations.
+
   - address: 0x0811d21c
     ghidra: FUN_0811d21c
     name: vtable_query_4c_read_eight_byte_record

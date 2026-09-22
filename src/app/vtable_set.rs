@@ -3538,10 +3538,12 @@ unsafe extern "C" fn teardown_outer_next_unported(_iter: *mut u32, _key_out: *mu
     0
 }
 
-/// The inner-iterator begin behind the `bl 0x0821c4c8` at 0x0811d030
-/// inside [`vtable_file_record_teardown`]. `FUN_0821c4c8` @ 0x0821c4c8
-/// (36 bytes; **3 `bl` call sites**, grep on `decomp/osos.asm`;
-/// **unported**):
+/// vtable_file_record_inner_iterator_begin — original: `FUN_0821c4c8`
+/// @ 0x0821c4c8 (36 bytes exactly, 0x0821c4c8..0x0821c4ec; nine
+/// instructions; **3 inbound plain `bl` call sites**, 0 predicated
+/// inbound `bl` sites, binary-scanned). Its body has one plain `bl` to
+/// [`vtable_file_record_lookup`] and one tail `b` to
+/// [`file_record_iterator_begin`].
 ///
 /// ```text
 /// 0821c4c8  stmdb sp!, {r4, lr}
@@ -3555,24 +3557,35 @@ unsafe extern "C" fn teardown_outer_next_unported(_iter: *mut u32, _key_out: *mu
 /// 0821c4e8  b     0x081dde18        @ tail: iterator_begin(iter, bucket)
 /// ```
 ///
-/// Looks the outer key up in the registry through the ported
-/// [`vtable_file_record_lookup`] (0x0812d160) and tail-branches into
-/// the ported shared [`file_record_iterator_begin`] over the resulting
-/// bucket. The unported wrapper remains a no-op by default; host tests
-/// install a recording mock via `core::ptr::addr_of_mut!`.
+/// Looks the outer key up in the registry, then initializes `iter` over
+/// the resulting bucket. Deliberate deviation: none; the source uses an
+/// ordinary call, and the verified ARM release code tail-branches to the
+/// shared initializer as the original does.
+///
+/// # Safety
+///
+/// `iter` must address six writable target-width words. `registry` reaches
+/// the lookup unchecked, matching ARM.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_inner_iterator_begin(
+    iter: *mut u32,
+    registry: *mut u8,
+    key: u32,
+) {
+    let bucket = vtable_file_record_lookup(registry, key);
+    file_record_iterator_begin(iter, bucket);
+}
+
+/// The inner-iterator begin used by [`vtable_file_record_teardown`].
+///
+/// The seam remains so teardown's scripted traversal tests can substitute
+/// this operation; its wired default is the ported original.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN: unsafe extern "C" fn(
     iter: *mut u32,
     registry: *mut u8,
     key: u32,
-) = teardown_inner_begin_unported;
-
-/// Default inner-iterator begin: a no-op (see the seam's doc).
-unsafe extern "C" fn teardown_inner_begin_unported(
-    _iter: *mut u32,
-    _registry: *mut u8,
-    _key: u32,
-) {
-}
+) = vtable_file_record_inner_iterator_begin;
 
 /// file_record_iterator_next — original: `FUN_081ddde8` @ 0x081ddde8
 /// (48 bytes exactly, 0x081ddde8..0x081dde18 — twelve instructions, no
@@ -4826,7 +4839,7 @@ pub(crate) mod tests {
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_OUTER_NEXT)
                     .write_volatile(teardown_outer_next_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_INNER_BEGIN)
-                    .write_volatile(teardown_inner_begin_unported);
+                    .write_volatile(vtable_file_record_inner_iterator_begin);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
                     .write_volatile(iterator_state_cleanup);
                 core::ptr::addr_of_mut!(ITERATOR_STATE_LINK)
@@ -11557,5 +11570,54 @@ pub(crate) mod tests {
             assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0xdead_beef);
         }
     }
+    #[test]
+    fn inner_iterator_begin_looks_up_the_bucket_then_initializes_iterator_state() {
+        let Some(bucket) = try_map_u32_slab(hints::VTABLE_FILE_RECORD_INNER_ITERATOR_BEGIN, 0x100) else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_file_record_inner_iterator_begin"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        unsafe {
+            let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
+            (*registry).vtable = &INS_SCRIPTED_VTABLE;
+            INS_SCRIPTED_INDEX_OF_RESULT = 0;
+            INS_SCRIPTED_INDEX_OF_KEY = 0;
+            INS_SCRIPTED_INSTANCE = bucket.cast();
+            bucket.write(0);
+
+            let mut iter = [0xa5a5_a5a5u32; ITERATOR_WORDS];
+            vtable_file_record_inner_iterator_begin(iter.as_mut_ptr(), registry.cast(), 0xface_cafe);
+
+            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0xface_cafe);
+            assert_eq!(iter[0], bucket as u32, "lookup result is iterator word zero");
+            assert_eq!(iter[1], bucket as u32, "state owner is the looked-up bucket");
+            assert_eq!(iter[3], (-2i32) as u32, "iterator starts before the first item");
+            assert_eq!(iter[5], 0, "constructor clears the state link word");
+        }
+    }
+
+    #[test]
+    fn inner_iterator_begin_initializes_a_null_lookup_as_an_empty_iterator() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        unsafe {
+            let registry = core::ptr::addr_of_mut!(INS_LOOKUP_FAKE);
+            (*registry).vtable = &INS_SCRIPTED_VTABLE;
+            INS_SCRIPTED_INDEX_OF_RESULT = -1;
+            INS_SCRIPTED_ENTRY_AT_CALLS = 0;
+
+            let mut iter = [0xa5a5_a5a5u32; ITERATOR_WORDS];
+            vtable_file_record_inner_iterator_begin(iter.as_mut_ptr(), registry.cast(), 0x1357_9bdf);
+
+            assert_eq!(INS_SCRIPTED_INDEX_OF_KEY, 0x1357_9bdf);
+            assert_eq!(INS_SCRIPTED_ENTRY_AT_CALLS, 0);
+            assert_eq!(iter[0], 0);
+            assert_eq!(iter[1], 0);
+            assert_eq!(iter[3], (-2i32) as u32);
+            assert_eq!(iter[5], 0);
+        }
+    }
+
 }
 
