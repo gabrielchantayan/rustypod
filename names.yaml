@@ -1659,6 +1659,35 @@ functions:
       target object is addressed with byte offsets to preserve its 32-bit
       layout on hosts; Rust expresses the terminal ARM B as a normal call
       and return.
+  # --- App transition cleanup ---
+  - address: 0x082962d8
+    ghidra: FUN_082962d8
+    name: app_transition_cleanup
+    size: 132
+    sig: "void app_transition_cleanup(void *state)"
+    module: app/app_transition_cleanup
+    status: ported
+    renames:
+      param_1/r0: state
+      "[state + 0x25c]": cleanup_state
+      "[state + 0x294]": phase_five_argument
+      "[state + 0x298]": phase_one_argument
+      "[state + 0x2b4]": lazy_handle
+      FUN_081bbf98: lazy_handle_manager_get
+      FUN_081bc07c: lazy_handle_manager_release
+    notes: >-
+      Raw osos.dec establishes the 132-byte extent exactly:
+      0x082962d8..0x0829635c, with the distinct next function's push at
+      0x0829635c. Whole-image aligned A32 B/BL-immediate decoding finds three
+      inbound unconditional plain BL callers (0x0829673c, 0x08296940, and
+      0x082969d4), no predicated BL callers, 12 unconditional direct BLs in
+      the body, and the final B tail call to lazy_handle_manager_release.
+      The jump table selects a cascading cleanup suffix for state values 0
+      through 6; other values begin directly at the common tail. The unported
+      cleanup targets retain address-specific host seams rather than invented
+      identities. The port calls the already ported lazy manager accessor and
+      release routines directly. Deliberate deviation: the terminal ARM tail
+      branch is a normal Rust call and return.
   - address: 0x082a331c
     ghidra: FUN_082a331c
     name: object_has_resolved_flag_0x800
