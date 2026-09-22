@@ -1,6 +1,7 @@
 //! Time library (mktime/localtime/gmtime).
 pub mod civil;
 pub mod clock_state;
+pub mod daylight_saving_offset_is_nonzero;
 pub mod current_day_and_seconds;
 pub mod current_mac_epoch_seconds;
 pub mod current_mac_epoch_seconds_raw;

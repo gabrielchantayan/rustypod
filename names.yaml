@@ -125935,3 +125935,32 @@ functions:
       vtable slot are explicit seams; ARM defaults call the retailOS
       addresses and literal target offsets. Host tests exercise omitted
       optional outputs/calls and wrapping availability with advancing.
+
+
+  # --- Daylight-saving offset predicate (time/daylight_saving_offset_is_nonzero) ---
+  - address: 0x08291e24
+    ghidra: FUN_08291e24
+    name: daylight_saving_offset_is_nonzero
+    size: 52
+    sig: "u32 daylight_saving_offset_is_nonzero(void)"
+    module: time/daylight_saving_offset_is_nonzero
+    status: ported
+    renames:
+      FUN_08172124: instance_of_class_6000
+      FUN_080ab558: current_utc_offset_query
+      local_10/sp+4: base_utc_offset_minutes
+      uStack_c/sp+0: daylight_saving_minutes
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte A32 extent
+      0x08291e24..0x08291e57: `push {r2,r3,r4,lr}; bl 0x08172124; cmp r0,#0;
+      beq; mov r1,sp; add r0,sp,#4; bl 0x080ab558; ldrb r0,[sp]; cmp r0,#0;
+      movne r0,#1; bne; mov r0,#0; pop {r2,r3,r4,pc}`. The next real function
+      begins at 0x08291e58 with `push {r3,lr}`. Complete raw A32 branch
+      decoding finds exactly three inbound plain BL calls at 0x08127730,
+      0x08140630, and 0x081fa620, with zero predicated BL forms. It returns
+      zero if the class-0x6000 singleton is absent; otherwise it queries both
+      UTC-offset outputs and normalizes the daylight-saving byte as zero/one,
+      ignoring the signed base offset and query return. Rust initializes the
+      two output locals and volatile-reads the ignored base output so LLVM
+      preserves the original non-NULL output pointer; the original's incoming
+      stack values are overwritten by the verified callee before observation.
