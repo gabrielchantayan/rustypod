@@ -323,6 +323,80 @@ pub unsafe extern "C" fn mov_chain_table_lookup_tagged_value(
 
 
 
+/// mov_chain_table_release_range — original: `FUN_0820caf4` @ 0x0820caf4
+/// (184 bytes, 0x0820caf4..0x0820cbac; **3 inbound plain `bl` calls** at
+/// 0x081e42fc, 0x081e432c, and 0x081e4708; no predicated inbound forms).
+/// Raw A32 decoding finds three unconditional outbound `bl` calls
+/// (`lock_service_lock`, `mov_chain_table_set_tag`, and
+/// `mov_chain_table_next`) plus the unconditional unlock call at 0x0820cb94;
+/// no predicated BL instructions. The `push` at 0x0820cbac starts the next
+/// real function, confirming Ghidra's 184-byte extent.
+///
+/// Locks `manager`, then follows links from `start` until `end`, setting each
+/// visited entry's +0x10 word to `u32::MAX` and its tag byte to one. `*count`
+/// is zeroed after a successful lock and increments after each successful
+/// link read. A corrupt link or more than 128 successful reads returns two;
+/// an unlock failure also returns two.
+///
+/// # Deviations
+///
+/// None. The tag-setter status is deliberately ignored, as in stock. The
+/// direct +0x10 write is performed before its bounds-checked link read; like
+/// the ARM code, callers must provide a valid `start` unless it equals `end`.
+///
+/// # Safety
+///
+/// `manager` must point to a live [`MovChainTableManager`] and `count` to a
+/// writable `u32`. Each visited index before `end` must name a table entry.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_chain_table_release_range")]
+pub unsafe extern "C" fn mov_chain_table_release_range(
+    manager: *mut MovChainTableManager,
+    start: u32,
+    end: u32,
+    count: *mut u32,
+) -> i32 {
+    let mutex = unsafe { core::ptr::addr_of_mut!((*manager).mutex) };
+    let lock_service = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*manager).lock_service)) };
+    if unsafe { lock_service_lock(lock_service, mutex) } != MOV_CHAIN_TABLE_OK {
+        return MOV_CHAIN_TABLE_ERR;
+    }
+
+    unsafe { core::ptr::write(count, 0) };
+    let mut current = start;
+    let mut status = MOV_CHAIN_TABLE_OK;
+    while current != end {
+        let entries = unsafe {
+            core::ptr::addr_of_mut!((*manager).table.entries).cast::<MovChainEntry>()
+        };
+        let entry = entries.wrapping_add(current as usize);
+        unsafe { core::ptr::write(core::ptr::addr_of_mut!((*entry).field_10), u32::MAX) };
+        unsafe { mov_chain_table_set_tag(core::ptr::addr_of_mut!((*manager).table), current, 1) };
+
+        let mut next = current;
+        if unsafe { mov_chain_table_next(core::ptr::addr_of!((*manager).table), current, &mut next) }
+            != MOV_CHAIN_TABLE_OK
+        {
+            status = MOV_CHAIN_TABLE_ERR;
+            break;
+        }
+        current = next;
+        let next_count = unsafe { core::ptr::read(count) }.wrapping_add(1);
+        unsafe { core::ptr::write(count, next_count) };
+        if next_count > MOV_CHAIN_TABLE_SLOTS as u32 {
+            status = MOV_CHAIN_TABLE_ERR;
+            break;
+        }
+    }
+
+    if unsafe { lock_service_unlock(lock_service, mutex) } != MOV_CHAIN_TABLE_OK {
+        MOV_CHAIN_TABLE_ERR
+    } else {
+        status
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,4 +719,66 @@ mod tests {
         assert_eq!(rc, MOV_CHAIN_TABLE_ERR);
         assert_eq!(out, 0);
     }
+    /// A range releases every entry before the end cursor, counting the
+    /// successful link reads and preserving the end entry.
+    #[test]
+    fn release_range_marks_each_entry_before_end() {
+        let mut manager = fresh_manager();
+        manager.table.entries[4].next = 9;
+        manager.table.entries[9].next = 12;
+        manager.table.entries[12].next = 33;
+        for index in [4usize, 9, 12, 33] {
+            manager.table.entries[index].tag = 0x55;
+            manager.table.entries[index].field_10 = index as u32;
+        }
+        let mut count = POISON;
+
+        let rc = unsafe { mov_chain_table_release_range(&mut manager, 4, 33, &mut count) };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_OK);
+        assert_eq!(count, 3);
+        for index in [4usize, 9, 12] {
+            assert_eq!(manager.table.entries[index].tag, 1);
+            assert_eq!(manager.table.entries[index].field_10, u32::MAX);
+        }
+        assert_eq!(manager.table.entries[33].tag, 0x55);
+        assert_eq!(manager.table.entries[33].field_10, 33);
+    }
+
+    /// Equal cursors take the post-lock exit: count is cleared but no entry
+    /// is touched, including an otherwise corrupt start slot.
+    #[test]
+    fn release_range_equal_cursors_only_clears_count() {
+        let mut manager = fresh_manager();
+        manager.table.entries[127].tag = 0x42;
+        manager.table.entries[127].field_10 = 0x1234;
+        manager.table.entries[127].next = 0x80;
+        let mut count = POISON;
+
+        let rc = unsafe { mov_chain_table_release_range(&mut manager, 127, 127, &mut count) };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_OK);
+        assert_eq!(count, 0);
+        assert_eq!(manager.table.entries[127].tag, 0x42);
+        assert_eq!(manager.table.entries[127].field_10, 0x1234);
+    }
+
+    /// The current entry is changed before a corrupt link reports two; the
+    /// failed read does not increment the count.
+    #[test]
+    fn release_range_marks_before_corrupt_link_error() {
+        let mut manager = fresh_manager();
+        manager.table.entries[7].tag = 0x42;
+        manager.table.entries[7].field_10 = 0x1234;
+        manager.table.entries[7].next = 0x80;
+        let mut count = POISON;
+
+        let rc = unsafe { mov_chain_table_release_range(&mut manager, 7, 8, &mut count) };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_ERR);
+        assert_eq!(count, 0);
+        assert_eq!(manager.table.entries[7].tag, 1);
+        assert_eq!(manager.table.entries[7].field_10, u32::MAX);
+    }
+
 }
