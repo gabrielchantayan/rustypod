@@ -178,6 +178,7 @@ pub mod global_callback_unregister;
 pub mod global_timer_cleanup;
 pub mod linked_list_merge_by_word_4;
 pub mod global_callback_register;
+pub mod global_word_list_prepend;
 pub mod handler_list_activate;
 pub mod handler_context;
 pub mod framework_root_message_post;
