@@ -603,6 +603,10 @@ pub mod hints {
     // 0x6600_0000: dedicated to crypto/bio_free's raw-u32 BIO/method
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BIO_FREE: usize = 0x6600_0000;
+    // 0x6da0_0000: dedicated to cxx/byte_vector_owner_push_back's raw-u32
+    // owner and backing-storage fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const BYTE_VECTOR_OWNER_PUSH_BACK: usize = 0x6da0_0000;
     // 0x7200_0000: dedicated to crypto/bio_copy_next_retry's raw-u32 BIO
     // chain fixture; mappings never unmap, so no other user may share this
     // hint.
