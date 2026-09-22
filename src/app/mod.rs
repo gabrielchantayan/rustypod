@@ -114,6 +114,7 @@ pub mod object_state_initialize;
 pub mod indexed_item_value;
 pub mod indexed_virtual_value;
 pub mod indexed_string_resource_fallback;
+pub mod record_preferred_string;
 pub mod registration_handle_current_status;
 pub mod configured_path_prefix_matches;
 pub mod encoded_field_prefix_size;
