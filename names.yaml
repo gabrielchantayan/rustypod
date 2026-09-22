@@ -129904,3 +129904,33 @@ functions:
       which terminates through heap_panic. Otherwise it clamps to maximum, returns
       zero for a zero maximum, and returns floor(value*255/maximum). Both callees
       are already ported and called directly; no deliberate deviation is introduced.
+
+  - address: 0x081ffc68
+    ghidra: FUN_081ffc68
+    name: media_player_enabled_update
+    size: 140
+    sig: "u32 media_player_enabled_update(void *this, u32 enabled, i32 kind, u32 value)"
+    module: app/media_player_enabled_update
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: enabled
+      param_3/r2: kind
+      param_4/r3: value
+      FUN_08259594: media_player_interface_get
+      "vtable+0x90": media_player_enabled
+      "vtable+0x8c": set_media_player_enabled
+      FUN_081fe954: slot_table_register
+      FUN_081fea54: slot_table_clear
+    notes: >-
+      Raw ARM is 35 instruction words, 140 bytes, from 0x081ffc68 through
+      0x081ffcf0; the next real function begins at 0x081ffcf4. It canonicalizes
+      r1 to 0/1, invokes media_player_interface_get, reads its vtable +0x90
+      state, clears slot-table id 13 when r2 is zero or registers
+      {r2, r3, 0} otherwise, and calls vtable +0x8c only when that state
+      differs. Returns 0. Raw decode finds exactly three unconditional direct
+      bl calls (getter, register, clear), zero predicated direct bl calls,
+      one unconditional dynamic blx (+0x90), and one predicated blxne
+      (+0x8c). Host tests use native-width vtable pointers and a getter seam;
+      target builds use target-width volatile vtable words and the existing
+      media_player_interface_get port.

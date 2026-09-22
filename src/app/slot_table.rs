@@ -85,6 +85,7 @@ pub static mut SLOTS: [Slot; SLOT_COUNT] = [FREE_SLOT; SLOT_COUNT];
 /// Releases slot `index`, returning 0. An `index` of 17 or more is
 /// refused with [`SLOT_INDEX_OUT_OF_RANGE`] and nothing is written.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn slot_table_clear(_this: *mut u8, index: i32) -> u32 {
     if index >= SLOT_COUNT as i32 {
         return SLOT_INDEX_OUT_OF_RANGE;
