@@ -126,6 +126,7 @@ pub mod indexed_virtual_value;
 pub mod indexed_string_resource_fallback;
 pub mod record_preferred_string;
 pub mod registration_handle_current_status;
+pub mod registration_handle_try_select_current_record;
 pub mod configured_path_prefix_matches;
 pub mod encoded_field_prefix_size;
 pub mod firmware_query_low_byte;
