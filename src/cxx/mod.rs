@@ -94,6 +94,7 @@ pub mod tagged_record_from_context_key;
 pub mod draw_state;
 pub mod draw_state_font;
 pub mod draw_state_text_width;
+pub mod draw_state_wrapped_text_height;
 pub mod draw_state_text;
 pub mod draw_state_color;
 pub mod draw_state_fill;
