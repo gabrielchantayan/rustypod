@@ -129209,3 +129209,30 @@ functions:
       returns the constructed controller. Deliberate deviation: host builds
       dispatch through explicit test seams; target builds call the existing
       verified Rust ports directly.
+
+  - address: 0x0821583c
+    ghidra: FUN_0821583c
+    name: deque_front_dispatch
+    size: 116
+    sig: "u32 deque_front_dispatch(u8 *deque, u32 argument)"
+    module: cxx/deque_front_dispatch
+    status: ported
+    renames:
+      param_1/r0: deque
+      param_2/r1: argument
+      FUN_083d7610: container_is_empty_alias_7610
+      FUN_082156f0: deque_front_remove (identity unconfirmed)
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent
+      0x0821583c..0x082158af, ending at pop {r4-r6,pc}; the independently
+      linked next function begins at 0x082158b0. It has two unconditional
+      plain bl instructions (the byte-identical container_is_empty alias at
+      0x083d7610 and 0x082156f0), zero predicated plain bl instructions,
+      three indirect blx instructions, and two predicated indirect blxne
+      instructions. An empty deque returns zero. Otherwise 0x082156f0 removes
+      the front object, vtable +0x10 receives argument, vtable +0x18 supplies
+      status, and its low bit conditionally dispatches release at +0x04.
+      The dispatch result is returned. FUN_082156f0 has no verified Rust
+      identity or port: target builds call its verified address and host tests
+      install a typed seam. Rust lowers indirect blx instructions to typed
+      calls; no other deviations.
