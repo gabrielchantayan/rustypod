@@ -94,6 +94,7 @@ pub mod controller_context_scope_dispatch;
 pub mod controller_screen_dispatch;
 pub mod controller_opaque_item_vector;
 pub mod controller_timer_pair;
+pub mod controller_timer_pair_construct;
 pub mod controller_timer_pair_destruct;
 pub mod controller_scoped_notification_refresh;
 pub mod controller_transition_volume_post;
