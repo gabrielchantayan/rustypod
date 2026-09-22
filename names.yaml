@@ -34386,6 +34386,33 @@ functions:
       match.py (exit 1, diff expected): same cmp/bxeq/ldr/cmp/streq/bx
       core; the only diff is LLVM's usual fp/lr frame.
 
+  - address: 0x0825e154
+    ghidra: FUN_0825e154
+    name: video_engine_mode_selector_index
+    size: 100
+    sig: "i32 video_engine_mode_selector_index(u32 mode_selector)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: mode_selector
+      r0: index
+      r12: literal_mode_selector
+    notes: >-
+      Raw ARM establishes the exact 100-byte extent
+      0x0825e154..0x0825e1b4: `bx lr` terminates the body and 0x0825e1b8 is
+      the literal 0x1e01, followed by the independently linked next function
+      at 0x0825e1bc. It maps selectors 0->0, 0x1e00->1, 0x1e01->2,
+      0x1e02->3, 0x1e03->4, and 0x150a->5; all other input words return -1.
+      The ordered compare tree loads 0x1e01 from its adjacent literal and has
+      no outbound calls, mutable globals, or pointer accesses. A complete
+      aligned B/BL-immediate decode finds three inbound plain bl sites
+      (0x08255e1c, 0x08255e28, and 0x08255e34) and no predicated bl sites.
+      Rust replaces the comparison tree and immutable literal load with a
+      match over the complete mapping; this is the sole deliberate structural
+      deviation. Host tests cover every recognized selector, adjacent rejected
+      selectors, and u32::MAX. match.py is expected to show a structural diff
+      because LLVM is not ARM ADS.
+
   - address: 0x0825e1bc
     ghidra: FUN_0825e1bc
     name: video_engine_type_selector_index
