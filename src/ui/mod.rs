@@ -34,6 +34,7 @@ pub mod manager;
 pub mod manager_pending_operation;
 pub mod table_slot_allocate;
 pub mod render_context;
+pub mod render_context_transform;
 pub mod render_context_invalidate;
 pub mod render_context_suspend;
 pub mod render_context_release_resource;

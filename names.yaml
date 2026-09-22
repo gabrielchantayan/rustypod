@@ -28342,6 +28342,33 @@ functions:
       cover active old-bounds invalidation, inactive/contextless skips,
       flag stores, the -1 suppression branch, and a live refresh.
 
+  - address: 0x0828cb64
+    ghidra: FUN_0828cb64
+    name: render_context_transform_rect
+    size: 52
+    sig: "void render_context_transform_rect(RenderContext *render_context, Rect *rect)"
+    module: ui/render_context_transform
+    status: ported
+    renames:
+      param_1/r2: render_context
+      param_2/r0: rect
+      "render_context+0x78": child_context
+      "render_context+0x80": transform_disabled
+      "child_context+0x80/+0x84": horizontal_vertical_origin
+      FUN_0826c574: rect_offset
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte extent:
+      0x0828cb64..0x0828cb98, ending at bx lr; the next distinct function
+      opens with mov r2,r0 at 0x0828cb98. Decoding every ARM
+      branch-with-link word finds three direct unconditional bl call sites
+      and no predicated bl forms. If render_context+0x80 is non-zero the
+      rectangle is untouched. Otherwise a non-NULL child at +0x78 supplies
+      signed horizontal/vertical origins at +0x80/+0x84, negated and
+      tail-branched to rect_offset (0x0826c574), translating left/right and
+      top/bottom with wrapping arithmetic. The Rust call replaces that tail
+      branch; host fixtures use native-width pointers at +0x78 while target
+      builds use the retail aligned 32-bit layout.
+
   - address: 0x0828cccc
     ghidra: FUN_0828cccc
     name: coordinate_owner_select_display_layer
