@@ -145,6 +145,50 @@ pub unsafe extern "C" fn validate_and_dispatch_tagged_context(
 
     tagged_context_dispatch(context, tagged_input, ptr::null())
 }
+/// `dispatch_tagged_context_with_selector` — original:
+/// `thunk_FUN_082e7ff8` @ **0x08262910** (4-byte veneer branching to the
+/// 120-byte `0x082e7ff8..0x082e806f` body). Raw ARM decoding verifies one
+/// plain `bl` in the body and no predicated calls; the terminal transfer is a
+/// tail `b` to `0x080c96d8`.
+///
+/// Validates a context, tagged input, and non-NULL selector before optionally
+/// initializing a marked context and dispatching all three original arguments.
+///
+/// # Deliberate deviations
+///
+/// The two unported retailOS targets are the same fixed-address target calls
+/// and host seams used by `validate_and_dispatch_tagged_context`; the tail
+/// branch is represented by a normal call whose result is returned.
+///
+/// # Safety
+///
+/// All pointers must be NULL or point to an aligned readable `u32`. Non-NULL
+/// values must satisfy the opaque initializer and dispatcher contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dispatch_tagged_context_with_selector(
+    context: *mut u32,
+    tagged_input: *mut u32,
+    selector: *const u32,
+) -> u32 {
+    if context.is_null()
+        || tagged_input.is_null()
+        || tagged_input.read() != TAGGED_INPUT_MAGIC
+        || selector.is_null()
+    {
+        return INVALID_TAGGED_CONTEXT;
+    }
+
+    if context.read() == CONTEXT_MAGIC {
+        let status = opaque_context_initialize(context, ptr::null());
+        if status != 0 {
+            return status;
+        }
+    }
+
+    tagged_context_dispatch(context, tagged_input, selector)
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -307,5 +351,43 @@ mod tests {
         assert_eq!(result, 0x77);
         assert_eq!(unsafe { INITIALIZE_CALLS }, 0);
         assert_eq!(unsafe { DISPATCH_CALLS }, 1);
+    }
+
+    #[test]
+    fn selector_is_required_before_any_seam_call() {
+        let (_guard, _restore) = install_recorders(0, 0);
+        let mut context = CONTEXT_MAGIC;
+        let mut tagged_input = TAGGED_INPUT_MAGIC;
+
+        let result = unsafe {
+            dispatch_tagged_context_with_selector(&mut context, &mut tagged_input, ptr::null())
+        };
+
+        assert_eq!(result, INVALID_TAGGED_CONTEXT);
+        assert_eq!(unsafe { INITIALIZE_CALLS }, 0);
+        assert_eq!(unsafe { DISPATCH_CALLS }, 0);
+    }
+
+    #[test]
+    fn matching_context_initializes_then_dispatches_supplied_selector() {
+        let (_guard, _restore) = install_recorders(0, 0x5a);
+        let mut context = CONTEXT_MAGIC;
+        let mut tagged_input = TAGGED_INPUT_MAGIC;
+        let selector = 0xa5a5_5a5a;
+        let context_ptr = ptr::addr_of_mut!(context);
+        let tagged_input_ptr = ptr::addr_of_mut!(tagged_input);
+        let selector_ptr = ptr::addr_of!(selector);
+
+        let result = unsafe {
+            dispatch_tagged_context_with_selector(context_ptr, tagged_input_ptr, selector_ptr)
+        };
+
+        assert_eq!(result, 0x5a);
+        assert_eq!(unsafe { INITIALIZE_CALLS }, 1);
+        assert_eq!(unsafe { SEEN_INITIALIZE_SELECTOR }, ptr::null());
+        assert_eq!(unsafe { DISPATCH_CALLS }, 1);
+        assert_eq!(unsafe { SEEN_CONTEXT }, context_ptr);
+        assert_eq!(unsafe { SEEN_INPUT }, tagged_input_ptr);
+        assert_eq!(unsafe { SEEN_DISPATCH_SELECTOR }, selector_ptr);
     }
 }
