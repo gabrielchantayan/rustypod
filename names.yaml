@@ -21633,6 +21633,36 @@ functions:
       intra-archive bl relocation instead of ADS's r4/lr frame. Same
       NOT-HOOK-READY caveat as the singleton getters.
 
+  - address: 0x082596f4
+    ghidra: FUN_082596f4
+    name: counted_u16_to_cxx_string
+    size: 72
+    sig: "void counted_u16_to_cxx_string(counted: *const u16, output: *mut *mut u8)"
+    module: cxx/counted_u16_to_cxx_string
+    status: ported
+    renames:
+      param_1: counted (u16 count followed by UTF-16 units)
+      param_2: output (COW basic_string<char> object)
+      local_10: temporary (two-word StringObject)
+      FUN_082773b4: string_object_construct_from_utf16 (ported, cxx/string_object)
+      FUN_08276db4: string_object_text_normalize (unported, shared STRING_OBJECT_TEXT_NORMALIZE seam)
+      FUN_082a50b0: string_object_c_str (ported, cxx/string_object)
+      FUN_083d8ca0: cxx_string_assign_cstr (ported, cxx/string)
+      FUN_08275d74: string_object_release_payload (ported, cxx/string_object)
+    notes: >-
+      Raw words establish the true extent 0x082596f4..0x0825973c: the
+      following 0x0825973c push begins settings_notification_hub_get.
+      Decoding every ARM BL word in osos.dec finds exactly three inbound
+      unconditional calls (0x082a19e0, 0x082a1a28, 0x082a1a64) and zero
+      predicated calls. The body creates a temporary StringObject from
+      counted+1 and counted[0], normalizes it through the still-unported
+      FUN_08276db4 boundary, assigns its C string to output, restores the
+      base vtable literal 0x089a6044, and releases its payload. The port
+      uses the existing modeled vtable and direct canonical ports for the
+      four identified callees; FUN_08276db4 remains the shared volatile
+      STRING_OBJECT_TEXT_NORMALIZE seam. Host tests verify unit/count
+      forwarding, zero-count execution, and the five-call order.
+
   - address: 0x0825a0c0
     ghidra: FUN_0825a0c0
     name: lazy_singleton_0x8c_interface_get
