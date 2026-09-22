@@ -119513,6 +119513,32 @@ functions:
       existing ports directly and retains aligned u32 word offsets on hosts.
 
 
+  - address: 0x082156f0
+    ghidra: FUN_082156f0
+    name: deque_front_remove
+    size: 64
+    sig: "void *deque_front_remove(BlockDeque *deque)"
+    module: cxx/deque_front_dispatch
+    status: ported
+    renames:
+      param_1/r0/r5: deque
+      r4: front_object
+      FUN_083d7610: container_is_empty_alias_7610
+      FUN_083da34c: deque_iter_assign_alias_a34c
+      FUN_083df490: unported_deque_pop_front_member
+    notes: >-
+      Raw osos.dec fixes the 64-byte extent through pop {r4,r5,r6,pc} at
+      0x0821572c; the next independently linked push begins at 0x08215730.
+      Whole-image A32 branch decoding finds two unconditional plain BL callers
+      (0x08215674 and 0x0821585c) and one predicated BLNE caller at
+      0x082155bc. The function returns NULL when deque+0x20 is zero; otherwise
+      it copies the begin iterator to its stack, saves the copied current-word
+      object pointer, calls the verified but unported 0x083df490 pop-front
+      member, and returns that saved pointer. The established iterator-copy
+      port replaces the direct call; the unported pop member uses a typed
+      target-address boundary and a host recorder. Tests cover the empty path
+      and confirm the front pointer is saved before the pop call.
+
   - address: 0x08214614
     ghidra: FUN_08214614
     name: locked_state_copy
