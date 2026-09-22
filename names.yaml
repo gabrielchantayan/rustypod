@@ -129338,3 +129338,28 @@ functions:
       This is zero for an aligned value. The port retains the literal
       modulo-2^32 arithmetic for zero and non-power-of-two alignments; no
       deliberate deviations.
+  - address: 0x082815d4
+    ghidra: FUN_082815d4
+    name: mpeg_audio_frame_find
+    size: 168
+    sig: "u32 mpeg_audio_frame_find(const MpegAudioContext *context, const u8 **cursor_out, u32 *frame_size_out, u32 scan_limit, u32 *skipped_out)"
+    module: util/mpeg_audio_frame_find
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: cursor_out
+      param_3/r2: frame_size_out
+      param_4/r3: scan_limit
+      param_5/stack: skipped_out
+      FUN_08281d48: mpeg_audio_header_matches_context
+      FUN_08281af4: mpeg_audio_frame_size
+    notes: >-
+      Raw osos.dec establishes the exact 0x082815d4..0x0828167b extent;
+      the next independently entered function begins at 0x0828167c.
+      Whole-image A32 decoding finds three inbound plain BL calls
+      (0x0828171c, 0x0828184c, and 0x08281934) and zero predicated inbound
+      BL calls. The function makes two plain outbound BL calls, to the
+      already ported mpeg_audio_header_matches_context (0x08281d48) and
+      mpeg_audio_frame_size (0x08281af4), then searches byte-by-byte for
+      the first compatible big-endian MPEG audio frame header. No deliberate
+      deviations.
