@@ -79659,6 +79659,43 @@ functions:
       two adjacent flag strb into one strh and CSE-ing away the second
       of the original's two header-slot reloads, and the crate's fp
       frame.
+  - address: 0x08261850
+    ghidra: FUN_08261850
+    name: tagged_context_enqueue
+    size: 64
+    sig: "u32 tagged_context_enqueue(void *unused, void *owner, const u32 *value)"
+    module: cxx/tagged_context_enqueue
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1/r4: owner
+      param_3/r2/r5: value
+      "owner+0x00": embedded PosixMutex
+      "owner+0x1c": tagged_context
+      "owner+0x38": elem4 deque
+      FUN_08261e20: posix_mutex_lock veneer
+      FUN_083df278: deque_push_back_elem4
+      FUN_08262914/FUN_082e7f78: opaque context activation
+      FUN_08261e24: posix_mutex_unlock veneer
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent
+      0x08261850..0x08261890: push {r3,r4,r5,lr} through
+      pop {r3,r4,r5,pc}; the following push at 0x08261890 starts the
+      independently linked tagged_context_dequeue body. The sixteen words
+      have four plain unconditional outgoing BL calls and zero predicated BL
+      calls: lock via 0x08261e20, deque_push_back_elem4 at 0x083df278,
+      activate via the 0x08262914 veneer to 0x082e7f78, then unlock via
+      0x08261e24. Thus Ghidra's reported three calls omits the final unlock.
+      The body ignores r0, locks owner +0x00, appends the r2 word to its elem4
+      deque at +0x38 by stack-materializing its address, activates owner +0x1c,
+      unlocks, and returns activation r0; mutex return values are ignored.
+      Whole-image A32 decoding finds nine inbound plain BL calls and no inbound
+      predicated BL calls. Deliberate deviation: the unported activation target
+      remains a fixed-address indirect target call and a volatile host seam;
+      the existing mutex and deque ports are called directly. Host test proves
+      append-before-activation order through the observed deque value, context
+      offset, activation-status propagation, and an initial nonempty deque
+      fast path.
   - address: 0x08261890
     ghidra: FUN_08261890
     name: tagged_context_dequeue
