@@ -126870,3 +126870,27 @@ functions:
       rebased by -0xa8. Host tests use explicit seams for the two unported
       direct callees and target-width virtual dispatch; target builds call
       the verified retail addresses directly. No target behavior deviation.
+
+  - address: 0x0827c240
+    ghidra: FUN_0827c240
+    name: vtable_slot_1c_then_slot_08_dispatch
+    size: 32
+    sig: "void vtable_slot_1c_then_slot_08_dispatch(u8 *receiver)"
+    module: cxx/vtable_slot_1c_then_slot_08_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      "*receiver/r1": first_vtable
+      "first_vtable+0x1c/r1": first_dispatch
+      r0_after_first_dispatch: returned_object
+      "*returned_object/r1": second_vtable
+      "second_vtable+0x08/r1": second_dispatch
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte A32 body at
+      0x0827c240..0x0827c25f, followed by the next separately linked
+      function at 0x0827c260. It calls receiver.vtable[7] through BLX and
+      tail-dispatches vtable[2] of that returned object. Complete aligned A32
+      B/BL decoding finds three plain inbound BL callers at 0x08159bec,
+      0x08159bf4, and 0x08159bfc, with no predicated BL callers. Virtual
+      method identities and semantics remain unrecovered; the port preserves
+      their observed r0-only ABI without inventing a callee identity.
