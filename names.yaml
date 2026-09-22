@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822b060
+    ghidra: thunk_FUN_08214368
+    name: object_set_word_0x20
+    size: 4
+    sig: "void object_set_word_0x20(u8 *object, u32 value)"
+    module: util/object_set_word_0x20
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: value
+      FUN_08214368: object_set_word_0x20
+    notes: >-
+      Raw osos.dec establishes this as a four-byte veneer at 0x0822b060:
+      `b 0x08214368`. The target begins with `str r1,[r0,#0x20]`; the
+      following word at 0x0822b064 is `push {r4,lr}`, the next real function
+      boundary. Whole-image A32 decoding finds three inbound unconditional
+      plain BL callers and zero predicated inbound BL forms. The veneer has
+      no BL calls. It tail-branches to the identically behaving target, so
+      Rust implements that verified store directly rather than introducing a
+      seam for an unnamed callee. The unchecked aligned store deliberately
+      preserves stock NULL and invalid-pointer fault behavior.
   - address: 0x0822c494
     ghidra: FUN_0822c494
     name: derived_object_construct
