@@ -35108,6 +35108,28 @@ functions:
       stand-in data word rather than mapped GPIO MMIO; ARM reads the exact
       volatile register address.
 
+  # --- GPIO pin level predicate ---
+  - address: 0x082743a0
+    ghidra: FUN_082743a0
+    name: gpio_pin_is_high
+    size: 60
+    sig: "u32 gpio_pin_is_high(u32 pin_id)"
+    module: drivers/gpio_pin_is_high
+    status: ported
+    renames:
+      param_1/r0: pin_id
+      local_8[0]/[sp]: pin_level
+      FUN_0836b6cc: gpio_pin_read
+    notes: >-
+      Raw ARM confirms the 60-byte extent at 0x082743a0..0x082743db; the
+      next independently entered function begins at 0x082743dc. A full raw
+      ARM scan finds three direct plain unconditional bl callers at
+      0x0813b0c0, 0x0813b124, and 0x0813b16c, with zero predicated bl
+      callers. The 0xc8 no-pin sentinel returns 0 without a GPIO read;
+      otherwise gpio_pin_read supplies a normalized level that is returned
+      as false or true. Rust uses a local u32 instead of the ARM stack slot;
+      the callee call and observable result are unchanged.
+
   # --- GPIO output pin drive ---
   - address: 0x0836b744
     ghidra: FUN_0836b744
