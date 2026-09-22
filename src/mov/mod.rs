@@ -10,6 +10,7 @@ pub mod atom_tree_has_offsets;
 pub mod atom_node;
 pub mod chain_table;
 pub mod chain_table_find_predecessor;
+pub mod chain_table_count_steps;
 pub mod esds_descriptor_size;
 pub mod fatal_mov_cleanup_no_op;
 pub mod fatal_mov_chunk_offsets_cleanup_no_op;
