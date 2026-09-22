@@ -128695,3 +128695,28 @@ functions:
       match.py reports the expected LLVM jump-table dispatch and frame in
       place of retail's comparison branch chain while preserving all four
       packing masks, shifts, and zero default.
+  - address: 0x082305a8
+    ghidra: FUN_082305a8
+    name: music_selection_controller_construct
+    size: 56
+    sig: "void *music_selection_controller_construct(void *this, const char *name)"
+    module: app/music_selection_controller_construct
+    status: ported
+    vars:
+      param_1/r0/r2: this
+      param_2/r1: name
+      DAT_082305dc: music-selection-controller vtable (0x089a0e5c)
+      FUN_08134db4: silver_controller_construct (ported)
+      FUN_0822e110: music_selection_state_reset (ported)
+    notes: >-
+      Raw osos.dec words establish the 56-byte A32 extent
+      0x082305a8..0x082305e0: push {r4,lr}; two unconditional bl calls;
+      vtable literal 0x089a0e5c at 0x082305dc; and pop {r4,pc}. The cmp at
+      0x082305e0 is the next independently entered function. The body chains
+      silver_controller_construct, installs its vtable, resets the inherited
+      music-selection state, clears bytes +0xb0 and +0xc5, and sets +0xc4.
+      Whole-image A32 immediate-branch decoding finds exactly three inbound
+      plain bl callers (0x08230c48, 0x08231dac, 0x08233f64) and zero
+      predicated bl callers. Target builds call the two verified ported
+      callees directly; the host-only seam permits isolated caller/order
+      tests, with no target behavioral deviation.

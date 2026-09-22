@@ -265,6 +265,7 @@ pub mod media_player_transition_dispatch;
 pub mod media_player;
 pub mod media_player_resource_value;
 pub mod music_selection_state_reset;
+pub mod music_selection_controller_construct;
 pub mod class_9400_current_item_matches_media_player;
 pub mod media_player_queue_refresh;
 pub mod media_player_pending_item;
