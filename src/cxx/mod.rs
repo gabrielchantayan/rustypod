@@ -185,6 +185,7 @@ mod object_state;
 pub mod opaque_type_tag_is_allowed;
 pub mod opaque_allocation_release_089062ec;
 pub mod opaque_result_destroy;
+pub mod opaque_result_construct;
 pub mod opaque_record_destroy_and_release;
 pub mod opaque_record_word_at_0c;
 pub mod opaque_record_word_at_10;
