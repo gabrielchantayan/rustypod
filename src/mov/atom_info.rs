@@ -80,13 +80,13 @@
 //!
 //! # Deviations
 //!
-//! - Four unported callees dispatch through [`MOV_ATOM_INFO_OPS`] (the
-//!   `app/event_hub.rs` pattern): target builds transmute the ROM addresses
-//!   0x08280114 / 0x080a3ea0 / 0x0814d1ac / 0x0814d270, so this symbol IS
-//!   hook-ready on device; host defaults are inert (NULL table root, NULL
-//!   node, zeroed getters — the miss path) and every test installs recording
-//!   models. The payload-offset getter @ 0x0814d230 is now the direct
-//!   [`crate::mov::atom_node::mov_atom_node_get_offset`] port.
+//! - Three unported callees dispatch through [`MOV_ATOM_INFO_OPS`] (the
+//!   `app/event_hub.rs` pattern): the table-root accessor now calls the
+//!   direct [`crate::mov::atom_table_root::mov_atom_table_root`] port on
+//!   target builds; the remaining ROM addresses 0x080a3ea0 / 0x0814d1ac /
+//!   0x0814d270 remain hook-ready. Host defaults are inert (NULL table root,
+//!   NULL node, zeroed getters — the miss path) and every test installs
+//!   recording models.
 //! - The r0 incoming argument is dropped unread by the original
 //!   (`mov r0, r1` @ 0x081c8040 before any use); the port keeps it as
 //!   `_this` purely to preserve the ABI slot. Observed callers pass
@@ -117,11 +117,10 @@ pub struct MovAtomInfoOps {
     pub flag_get: unsafe extern "C" fn(node: *mut u8) -> u8,
 }
 
-/// Target default: the ROM handle dereference @ 0x08280114.
+/// Target default: the direct port of the handle dereference @ 0x08280114.
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_table_root(table: *mut u8) -> *mut u8 {
-    let f: unsafe extern "C" fn(*mut u8) -> *mut u8 = core::mem::transmute(0x0828_0114usize);
-    f(table)
+    crate::mov::atom_table_root::mov_atom_table_root(table.cast()) as usize as *mut u8
 }
 
 /// Host default: inert — no table. The query then takes the miss path.
