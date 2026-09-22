@@ -129497,3 +129497,38 @@ functions:
       indexes. match.py structural output preserves the unsigned comparison,
       predicated scaled address/store, and 0/2 status result; LLVM adds its
       standard frame and uses r3 as a temporary for the table pointer.
+
+  - address: 0x0820caf4
+    ghidra: FUN_0820caf4
+    name: mov_chain_table_release_range
+    size: 184
+    sig: "i32 mov_chain_table_release_range(MovChainTableManager *manager, u32 start, u32 end, u32 *count)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: manager
+      param_2/r1: start
+      param_3/r2: end
+      param_4/r3: count
+      local_18: current
+      "*(manager + current * 20 + 16)": manager.table.entries[current].field_10
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent
+      0x0820caf4..0x0820cbac: the push at 0x0820caf4 is followed by the
+      lock, range walk, and unlock; the next push at 0x0820cbac begins a
+      separate function. Whole-image A32 B/BL decoding finds three inbound
+      plain BL calls (0x081e42fc, 0x081e432c, 0x081e4708), zero predicated
+      inbound forms, and four outbound unconditional BLs: lock at 0x0820cb10,
+      set_tag at 0x0820cb44, next at 0x0820cb54, and unlock at 0x0820cb94;
+      no outbound BL is predicated. After the successful lock it clears
+      *count, then for each current index before end writes -1 to entry +0x10,
+      tags the entry 1, reads its next link, and increments count. A bad link
+      or count becoming 129 returns two; equal start/end returns zero after
+      only clearing count. The tag setter result is intentionally ignored.
+      No deliberate deviations: repr(C) manager entries preserve target
+      20-byte stride and wrapping raw entry addressing retains stock's
+      unchecked +0x10 store before the accessor's bounds check. Host tests
+      cover a three-entry range, equal cursors, and the mark-before-corrupt-
+      link error ordering. match.py reports the same lock/store/set-tag/
+      next/count/unlock structure; LLVM's larger frame and status flow are
+      accepted structural differences.
