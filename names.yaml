@@ -129587,3 +129587,37 @@ functions:
       successful-link limit. match.py reports the same clear/call/status/
       count/limit/next-cursor structure; LLVM keeps the count in a register
       and uses a larger frame, rather than the stock stack local.
+
+  - address: 0x082088ac
+    ghidra: FUN_082088ac
+    name: dispatch_indexed_handle_actions
+    size: 72
+    sig: "void dispatch_indexed_handle_actions(void *owner, const u32 *indices, u32 count, const IndexedObject *indexed_object)"
+    module: util/dispatch_indexed_handle_actions
+    status: ported
+    renames:
+      param_1/r0: owner (saved but unused)
+      param_2/r1/r5: indices
+      param_3/r2/r6: count
+      param_4/r3/r7: indexed_object
+      FUN_0811f270: indexed_slot_pointer
+      FUN_083d61d0: handle_deref_or_null_alias_61d0
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte A32 extent
+      0x082088ac..0x082088f3: a distinct function starts at 0x082088f4
+      with push {lr}. Raw caller decoding finds exactly three inbound plain
+      bl calls at 0x0821b7d8, 0x0821b80c, and 0x0821b85c, with no predicated
+      inbound calls. Its body has two unconditional direct bl calls,
+      indexed_slot_pointer @ 0x0811f270 and the established
+      handle_deref_or_null alias @ 0x083d61d0; one unconditional indirect
+      blx through the resolved object's vtable slot +0x24; and no predicated
+      calls. The routine returns immediately when indexed_object is NULL.
+      Otherwise it reads each u32 index, resolves its slot in indexed_object,
+      dereferences the selected C++ handle, and calls slot 9 of the resolved
+      object's vtable. owner is saved by the prologue but is otherwise dead.
+      No deliberate deviations: the two direct calls use their existing Rust
+      ports and the virtual dispatch remains a target-width indirect call.
+      Host tests cover the NULL short circuit, zero count without an index
+      read, and ordered dispatch of every input index. match.py is expected
+      to show Rust's iterator/control-flow shape while retaining the null
+      guard, indexed lookup, handle dereference, and vtable dispatch.
