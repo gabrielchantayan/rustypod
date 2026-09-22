@@ -26260,6 +26260,23 @@ functions:
       up.
     renames: {}
 
+  - address: 0x0827f1a8
+    ghidra: FUN_0827f1a8
+    name: selected_decimal_digit_increment
+    size: 108
+    sig: "void selected_decimal_digit_increment(void *owner)"
+    module: app/selected_decimal_digit_increment
+    status: ported
+    vars:
+      param_1: "owner"
+      piVar2: "selected_string"
+      iVar1: "codepoint"
+      uVar3: "replacement"
+    notes: >-
+      True extent is 0x0827f1a8..0x0827f217: 104 bytes of instructions followed by the selector literal 0x53747220 at 0x0827f214; the next real function starts at 0x0827f218. Raw ARM decoding verifies two unconditional BL calls (0x082a52c8 string_object_codepoint_at and unported 0x08276840), zero predicated BL calls, and one vtable +0x58 BX tail dispatch, for three call sites total. Select the embedded StringObject at +0x6c unless word +0xa0 equals one, then use +0xa4. Read the signed index at +0x8c, increment the codepoint, clear bit 16, clamp values above ASCII '9' to '0', invoke 0x08276840, then notify with selector 0x53747220 and index + 0x5795.
+      Deliberate host deviation: the unported 0x08276840 body and virtual dispatch are injectable seams; the target retains both retail pointer dispatches while calling the ported string_object_codepoint_at directly.
+    renames: {}
+
   - address: 0x0827f218
     ghidra: FUN_0827f218
     name: instance_of_class_5780

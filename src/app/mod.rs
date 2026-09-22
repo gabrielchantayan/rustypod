@@ -222,6 +222,7 @@ pub mod input_feedback_controller;
 pub mod feedback_level_dispatch;
 pub mod feedback_level_mode_set;
 pub mod input_action_index;
+pub mod selected_decimal_digit_increment;
 pub mod input_sequence_item_acquire;
 pub mod managed_entry;
 pub mod managed_entry_selector;
