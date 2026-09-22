@@ -55,6 +55,7 @@ unsafe fn flags(object: *mut u8) -> u32 {
 /// Returns 1 when the object's state word holds **every** bit of
 /// `mask`, else 0 (`bics` + `movne`/`moveq`). An empty mask is
 /// vacuously contained and returns 1, as in the original.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn state_flags_contain(object: *mut u8, mask: u32) -> u32 {
     u32::from(mask & !flags(object) == 0)

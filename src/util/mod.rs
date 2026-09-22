@@ -198,6 +198,7 @@ pub mod selector_record_address;
 pub mod selector_slot_address;
 pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
+pub mod client_completion_notify;
 pub mod state_flags;
 pub mod selected_or_all_entry_range;
 pub mod ring_buffer_used_bytes;

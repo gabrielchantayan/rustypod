@@ -24689,6 +24689,24 @@ functions:
       CLIENT_RESERVE_OPS: its count default is u32::MAX, which takes the
       at-or-above return without a false low-capacity event until the
       materializer is ported; notification is unreachable on that path.
+  - address: 0x081fbf1c
+    ghidra: FUN_081fbf1c
+    name: client_completion_notify
+    size: 76
+    sig: "u32 client_completion_notify(u8 *client, u32 notify_parent)"
+    module: util/client_completion_notify
+    status: ported
+    vars: {param_1: client, param_2: notify_parent}
+    notes: >-
+      Binary-verified 76-byte completion gate: one plain bl to
+      state_flags_contain(client, 0x10000), one predicated blne to the
+      unported parent notifier 0x0818a41c, and no other calls. Returns 1
+      only when the flag is present and the unsigned +0x18 produced count
+      is <= +0x1c expected count. A nonzero notify_parent sends event 5 to
+      *(client+4), with client as the third argument. The notification
+      body is behind CLIENT_COMPLETION_NOTIFY_OPS; its target default
+      deliberately suppresses this unavailable external side effect until
+      0x0818a41c is ported, while host tests record the exact tuple.
   - address: 0x081fc3f4
     ghidra: FUN_081fc3f4
     name: state_flags_contain
