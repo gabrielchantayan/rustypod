@@ -1269,6 +1269,10 @@ pub mod hints {
     // 0xe100_0000: dedicated to app/opaque_record_source_copy_item's raw-u32
     // record-table fixture; mappings never unmap, so no other user may share it.
     pub const OPAQUE_RECORD_SOURCE_COPY_ITEM: usize = 0xe100_0000;
+    // 0xe200_0000: dedicated to app/opaque_record_source_find_at_or_after's
+    // raw-u32 record-table fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const OPAQUE_RECORD_SOURCE_FIND_AT_OR_AFTER: usize = 0xe200_0000;
     // 0x5800_0000: dedicated to heap/memh_handle's target-width handle
     // fixture; mappings never unmap, so no other user may share it.
     pub const MEMH_HANDLE_DESTROY: usize = 0x5800_0000;
