@@ -128756,3 +128756,37 @@ functions:
       Host tests cover literal identities, marker substitution, and ordinary
       name delegation. match.py structural review confirms the base-call,
       strcmp, conditional base-call/default split.
+  - address: 0x0822e00c
+    ghidra: FUN_0822e00c
+    name: view_event_prepare_resource_provider
+    size: 140
+    sig: "u32 view_event_prepare_resource_provider(u8 *view)"
+    module: app/view_event_prepare_resource_provider
+    status: ported
+    renames:
+      param_1/r0: view
+      DAT_0822e098: resource_provider_refresh_counter
+      FUN_08173848: app_screen_get
+      FUN_081b803c: singleton_class_7f80
+      FUN_08124a9c: resource_provider_contains_view
+      FUN_08124af4: resource_provider_attach_view
+      FUN_081b6ee8: resource_provider_refresh
+      FUN_081b6f94: resource_provider_update_refreshed
+      FUN_0810de48: view_event_apply_mapped_staged_flags
+    notes: >-
+      Raw osos.dec establishes the exact 140-byte extent from the push at
+      0x0822e00c through the tail branch at 0x0822e094; the literal pool
+      begins at 0x0822e098 and the next function begins at 0x0822e09c.
+      Decoding every body word finds six unconditional outbound BL calls plus
+      the predicated BLEQ at 0x0822e038, and three inbound plain BL callers
+      (0x08230634, 0x08231914, and 0x08233e98). It attaches a missing view to
+      the class-0x7f80 resource provider, increments the global counter at
+      0x08a09dd0 when provider+0xc5 is clear, refreshes at 50, otherwise
+      refreshes immediately and clears provider+0xc5. Both refresh paths
+      reproduce FUN_081b6f94 by setting provider+0xeb from nonzero bytes at
+      +0xe8 and +0xe9, then invoke the ported mapped-staged-flags wrapper.
+      resource_provider_attach_view and resource_provider_refresh are
+      target-address/host-mock seams because they remain unported. match.py
+      reports the expected LLVM operation-table BLX calls and expanded
+      provider+0xeb update, while retaining the membership guard, 50-event
+      gate, both refresh paths, counter reset, and final mapped-flag apply.
