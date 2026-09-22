@@ -1183,6 +1183,97 @@ pub unsafe extern "C" fn video_engine_disable_status(status: *mut u8) {
     video_engine_set_property(0x0de1, 0x2800, 0x2600);
 }
 
+/// Firmware entry of the video configuration selector (`FUN_0827cef4`,
+/// unported). It updates the engine's active configuration kind.
+#[cfg(target_os = "none")]
+const VIDEO_CONFIGURATION_SELECTOR_ADDR: usize = 0x0827_cef4;
+
+/// Firmware entry of the video configuration update wrapper (`FUN_082d1a68`,
+/// unported). It silently ignores the request when no engine is installed.
+#[cfg(target_os = "none")]
+const VIDEO_CONFIGURATION_UPDATE_ADDR: usize = 0x082d_1a68;
+
+type VideoConfigurationSelector = unsafe extern "C" fn(u32);
+type VideoConfigurationUpdate = unsafe extern "C" fn(*const u32);
+
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_CONFIGURATION_SELECTOR: Option<VideoConfigurationSelector> = None;
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_CONFIGURATION_UPDATE: Option<VideoConfigurationUpdate> = None;
+
+/// Host only: install the two resident calls made by
+/// [`video_engine_apply_configuration`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_video_configuration_calls(
+    selector: Option<VideoConfigurationSelector>,
+    update: Option<VideoConfigurationUpdate>,
+) {
+    *addr_of_mut!(MOCK_VIDEO_CONFIGURATION_SELECTOR) = selector;
+    *addr_of_mut!(MOCK_VIDEO_CONFIGURATION_UPDATE) = update;
+}
+
+unsafe fn select_video_configuration(selector: u32) {
+    #[cfg(target_os = "none")]
+    {
+        let select: VideoConfigurationSelector =
+            core::mem::transmute(VIDEO_CONFIGURATION_SELECTOR_ADDR);
+        select(selector);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match *addr_of!(MOCK_VIDEO_CONFIGURATION_SELECTOR) {
+            Some(select) => select(selector),
+            None => panic!("video_engine_apply_configuration requires selector 0x0827cef4"),
+        }
+    }
+}
+
+unsafe fn update_video_configuration(configuration: *const u32) {
+    #[cfg(target_os = "none")]
+    {
+        let update: VideoConfigurationUpdate =
+            core::mem::transmute(VIDEO_CONFIGURATION_UPDATE_ADDR);
+        update(configuration);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match *addr_of!(MOCK_VIDEO_CONFIGURATION_UPDATE) {
+            Some(update) => update(configuration),
+            None => panic!("video_engine_apply_configuration requires updater 0x082d1a68"),
+        }
+    }
+}
+
+/// video_engine_apply_configuration — retailOS `FUN_0827cfe4` @
+/// **0x0827cfe4** (28 bytes, `0x0827cfe4..0x0827d000`).
+///
+/// Reads the configuration selector at word 11 (+0x44), installs it through
+/// `FUN_0827cef4`, then tail-transfers the configuration pointer at +0x04 to
+/// the video-engine update wrapper at `0x082d1a68`. Raw `osos.dec` proves
+/// that Ghidra's 108-byte extent is false: the `b 0x082d1a68` at 0x0827cffc
+/// ends this function and the next independently linked function begins with
+/// `push {r2,r3,r4,r5,r6,r7,r8,lr}` at 0x0827d000. The true body has one
+/// plain outbound `bl` and no predicated `bl`; CodeGraph's recovered caller
+/// graph independently identifies its three plain direct callers
+/// (0x08142b20, 0x0816e8cc, and 0x0825bd98).
+///
+/// # Deliberate deviation
+///
+/// Rust performs the stock tail branch as a normal call to the verified
+/// resident wrapper. Both callees remain unported; host tests install seams
+/// and target builds call their exact firmware addresses.
+///
+/// # Safety
+///
+/// `configuration` must identify readable storage through word 11. The
+/// retailOS code performs no null or bounds validation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_apply_configuration(configuration: *const u32) {
+    select_video_configuration(configuration.add(11).read());
+    update_video_configuration(configuration.add(1));
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -2184,6 +2275,54 @@ mod tests {
             set_mock_instance(ptr::null_mut());
             set_mock_notify_status_change(None);
             set_mock_dispatch(None);
+        }
+    }
+
+    static mut CONFIGURATION_SELECTOR: Option<u32> = None;
+    static mut CONFIGURATION_POINTER: Option<*const u32> = None;
+
+    unsafe extern "C" fn record_configuration_selector(selector: u32) {
+        *addr_of_mut!(CONFIGURATION_SELECTOR) = Some(selector);
+    }
+
+    unsafe extern "C" fn record_configuration_update(configuration: *const u32) {
+        *addr_of_mut!(CONFIGURATION_POINTER) = Some(configuration);
+    }
+
+    #[test]
+    fn apply_configuration_reads_word_11_and_forwards_pointer_at_word_1() {
+        let _guard = LOCK.lock();
+        let mut configuration = [0u32; 12];
+        configuration[11] = u32::MAX;
+        unsafe {
+            CONFIGURATION_SELECTOR = None;
+            CONFIGURATION_POINTER = None;
+            set_mock_video_configuration_calls(
+                Some(record_configuration_selector),
+                Some(record_configuration_update),
+            );
+            video_engine_apply_configuration(configuration.as_ptr());
+            assert_eq!(CONFIGURATION_SELECTOR, Some(u32::MAX));
+            assert_eq!(CONFIGURATION_POINTER, Some(configuration.as_ptr().add(1)));
+            set_mock_video_configuration_calls(None, None);
+        }
+    }
+
+    #[test]
+    fn apply_configuration_does_not_suppress_a_zero_selector() {
+        let _guard = LOCK.lock();
+        let configuration = [0u32; 12];
+        unsafe {
+            CONFIGURATION_SELECTOR = None;
+            CONFIGURATION_POINTER = None;
+            set_mock_video_configuration_calls(
+                Some(record_configuration_selector),
+                Some(record_configuration_update),
+            );
+            video_engine_apply_configuration(configuration.as_ptr());
+            assert_eq!(CONFIGURATION_SELECTOR, Some(0));
+            assert_eq!(CONFIGURATION_POINTER, Some(configuration.as_ptr().add(1)));
+            set_mock_video_configuration_calls(None, None);
         }
     }
 }
