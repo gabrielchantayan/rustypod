@@ -1,4 +1,4 @@
-//! The twenty-nine lazily-constructed framework singletons. Every one is the
+//! The thirty lazily-constructed framework singletons. Every one is the
 //! same four-step idiom over its own cache word, its own allocation
 //! size and its own constructor:
 //!
@@ -35,6 +35,7 @@
 //! | 0x081b5440 | [`singleton_class_9400`] | 0x22c | 0x089cc170 | 0x081b6628 | 22 |
 //! | 0x08264740 | [`app_boot_metrics_channel_get`] | 0xac | 0x089cc918 | 0x08266990 | 20 |
 //! | 0x081cbbb0 | [`photo_browse_slideshow_get`] | 0x8fc | 0x08a09e00 | 0x081cd5b8 | 18 |
+//! | 0x0825a6b8 | [`lazy_singleton_0x44_08a09f64_get`] | 0x44 | 0x089d0294 | 0x0825a8d4 | 3 |
 //! | 0x0825a6e8 | [`lazy_singleton_0x44`] | 0x44 | 0x08a09f64 | 0x0825aa58 | 14 |
 //! | 0x08259740 | [`lazy_singleton_0xa0`] | 0xa0 | 0x089cc958 | 0x08259278 | 12 |
 //! | 0x08259770 | [`event_listener_kind_10_get`] | 0x44 | 0x08a09f6c | 0x0825939c | 10 |
@@ -409,6 +410,8 @@ pub struct SingletonCtors {
     pub singleton_0x40: Constructor,
     /// The 0x44 object's ctor @ 0x0825aa58.
     pub singleton_0x44: Constructor,
+    /// The 0x44 object's ctor @ 0x0825a8d4.
+    pub singleton_0x44_08a09f64: Constructor,
     /// Registry-class-0x6280 ctor @ 0x0811c7fc.
     pub class_6280: Constructor,
     /// Stage-progress-tracker ctor @ 0x081fa440.
@@ -513,6 +516,7 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     singleton_0x40: zeroing_singleton_0x40_ctor,
     time_source: zeroing_time_source_ctor,
     singleton_0x44: zeroing_singleton_0x44_ctor,
+    singleton_0x44_08a09f64: zeroing_singleton_0x44_ctor,
     class_6280: zeroing_class_6280_ctor,
     stage_progress_tracker: zeroing_stage_progress_tracker_ctor,
     class_9300: zeroing_class_9300_ctor,
@@ -666,6 +670,10 @@ pub static mut TIME_SOURCE_INSTANCE: *mut u8 = core::ptr::null_mut();
 /// the pool literal @ 0x0825b6ac — the next word after the settings
 /// store's cache @ 0x089cc948).
 pub static mut SINGLETON_0X40: *mut u8 = core::ptr::null_mut();
+
+/// The unidentified 0x44 singleton (original cache word @ 0x089d0294, pool
+/// literal @ 0x0825a6e4).
+pub static mut SINGLETON_0X44_08A09F64: *mut u8 = core::ptr::null_mut();
 
 /// The unidentified 0x44 singleton (original cache word @ 0x08a09f64, pool
 /// literal @ 0x0825a714).
@@ -1724,6 +1732,47 @@ pub unsafe extern "C" fn event_listener_kind_10_get() -> *mut u8 {
 }
 
 
+/// lazy_singleton_0x44_08a09f64_get — original: `FUN_0825a6b8` @
+/// **0x0825a6b8** (44 code bytes plus its pool word @ 0x0825a6e4 =
+/// **48 bytes** true extent; **3 direct plain `bl` call sites, 0
+/// predicated `bl`**, verified by decoding every A32 branch word in
+/// `osos.dec`).
+///
+/// ```text
+/// 0825a6b8  push {r4, lr}
+/// 0825a6bc  ldr  r4, [pc, #32]      @ = 0x089d0294 (pool @ 0x0825a6e4)
+/// 0825a6c0  ldr  r0, [r4]
+/// 0825a6c4  cmp  r0, #0
+/// 0825a6c8  bne  0x0825a6dc
+/// 0825a6cc  mov  r0, #0x44
+/// 0825a6d0  bl   0x082aadd4         @ operator new
+/// 0825a6d4  bl   0x0825a8d4         @ constructor
+/// 0825a6d8  str  r0, [r4]
+/// 0825a6dc  ldr  r0, [r4]           @ reload the slot before returning
+/// 0825a6e0  pop  {r4, pc}
+/// 0825a6e4  .word 0x089d0294
+/// ```
+///
+/// Returns the 0x44-byte object's cached constructor result. A NULL cache
+/// allocates through [`operator_new`], invokes unported `FUN_0825a8d4`, stores
+/// its result even when NULL, then reloads the cache. The three callers only
+/// establish virtual slots +0x24, +0x2c, and +0x30; no class identity is
+/// recoverable, so the symbol records the verified extent and cache address.
+///
+/// Deliberate deviations: the runtime RW cache is represented by
+/// [`SINGLETON_0X44_08A09F64`] and the unported constructor by the
+/// `singleton_0x44_08a09f64` seam's zeroing default. It is not hook-ready
+/// until `FUN_0825a8d4` is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0x44_08a09f64_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0X44_08A09F64);
+    lazy_singleton(cache, SINGLETON_0X44_SIZE, || unsafe {
+        ctor!(singleton_0x44_08a09f64)
+    })
+}
+
+
 /// lazy_singleton_0x44 — original: `FUN_0825a6e8` @ **0x0825a6e8**
 /// (44 code bytes plus its pool word @ 0x0825a714 = **48 bytes** true
 /// extent; **14 direct `bl` call sites, all unconditional — 0 predicated,
@@ -1997,6 +2046,7 @@ mod tests {
                 genius_mixes_task: recording_ctor,
                 time_source: recording_ctor,
                 singleton_0x40: recording_ctor,
+                singleton_0x44_08a09f64: recording_ctor,
                 singleton_0x44: recording_ctor,
                 class_6280: recording_ctor,
                 stage_progress_tracker: recording_ctor,
@@ -2053,6 +2103,7 @@ mod tests {
         SINGLETON_0X40 = ptr::null_mut();
         TIME_SOURCE_INSTANCE = ptr::null_mut();
         SINGLETON_0X44 = ptr::null_mut();
+        SINGLETON_0X44_08A09F64 = ptr::null_mut();
         CLASS_6280_INSTANCE = ptr::null_mut();
         STAGE_PROGRESS_TRACKER = ptr::null_mut();
         CLASS_9300_INSTANCE = ptr::null_mut();
@@ -3768,6 +3819,31 @@ mod tests {
         unsafe {
             assert!(event_listener_kind_10_get().is_null());
             assert!(event_listener_kind_10_get().is_null());
+            assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
+            assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn cache_08a09f64_allocates_constructs_caches_and_retries_after_null() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0x44_08a09f64_get(), constructed());
+            assert_eq!(lazy_singleton_0x44_08a09f64_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![SINGLETON_0X44_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SINGLETON_0X44_08A09F64)),
+                constructed()
+            );
+        }
+        restore(guard);
+
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0x44_08a09f64_get().is_null());
+            assert!(lazy_singleton_0x44_08a09f64_get().is_null());
             assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 2);
             assert_eq!((*ptr::addr_of!(CTOR_BLOCKS)).len(), 2);
         }
