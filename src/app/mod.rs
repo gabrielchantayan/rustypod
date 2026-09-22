@@ -482,3 +482,4 @@ pub mod item_collection_dispatch;
 pub mod ui_object_construct;
 pub mod enumerated_handle_collection;
 pub mod transfer_slot_resource_release;
+pub mod controller_mark_pending_and_dispatch;
