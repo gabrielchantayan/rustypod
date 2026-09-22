@@ -546,6 +546,53 @@ pub unsafe extern "C" fn cxx_string_pair_entry_copy_ctor(
         second
     }
 }
+/// cxx_string_pair_entry_copy_ctor_base — retailOS `FUN_08257f80` @
+/// `0x08257f80` (40 bytes; three direct, unconditional `bl` call sites at
+/// 0x0811b4d4, 0x0811bd04, and 0x0811c6e4; no predicated `bl` call sites).
+///
+/// Raw ARM spans 0x08257f80..0x08257fa8; the independent destructor at
+/// 0x08257fa8 fixes the true extent. It COW-copies the two one-word strings
+/// at +0x00 and +0x04 through `cxx_string_copy_ctor`, then copies the
+/// unexamined +0x08 word and returns the original destination. Unlike
+/// [`cxx_string_pair_entry_copy_ctor`], this ABI has no unused owner
+/// argument and returns the entry base. No deliberate deviations.
+///
+/// # Safety
+///
+/// `destination` and `source` must designate valid 12-byte target-layout
+/// entries. The original has no null guard and neither does this port.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_entry_copy_ctor_base(
+    destination: *mut CxxStringPairRangeEntry,
+    source: *const CxxStringPairRangeEntry,
+) -> *mut CxxStringPairRangeEntry {
+    #[cfg(target_arch = "arm")]
+    {
+        cxx_string_copy_ctor_opaque(
+            core::ptr::addr_of_mut!((*destination).first),
+            core::ptr::addr_of!((*source).first),
+        );
+        cxx_string_copy_ctor_opaque(
+            core::ptr::addr_of_mut!((*destination).second),
+            core::ptr::addr_of!((*source).second),
+        );
+        (destination as *mut u8).add(8).cast::<u32>().write((*source).trailing);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        cxx_string_copy_ctor(
+            core::ptr::addr_of_mut!((*destination).first),
+            core::ptr::addr_of!((*source).first),
+        );
+        cxx_string_copy_ctor(
+            core::ptr::addr_of_mut!((*destination).second),
+            core::ptr::addr_of!((*source).second),
+        );
+        (*destination).trailing = (*source).trailing;
+    }
+    destination
+}
 
 /// cxx_string_pair_destroy — original @ 0x0825c8fc (32 bytes).
 ///
@@ -2562,6 +2609,40 @@ mod tests {
                 b"leaked\0",
             );
             assert_eq!(destination.trailing, source.trailing);
+        }
+    }
+
+    #[test]
+    fn pair_entry_copy_ctor_base_returns_entry_and_copies_all_three_words() {
+        let _guard = arena();
+        unsafe {
+            let mut source_first: *mut u8 = core::ptr::null_mut();
+            let mut source_second: *mut u8 = core::ptr::null_mut();
+            build(&mut source_first, b"first");
+            build(&mut source_second, b"second");
+            let source = CxxStringPairRangeEntry {
+                first: source_first,
+                second: source_second,
+                trailing: 0xdeaf_beef,
+            };
+            let mut destination = CxxStringPairRangeEntry {
+                first: core::ptr::null_mut(),
+                second: core::ptr::null_mut(),
+                trailing: 0,
+            };
+
+            assert_eq!(
+                cxx_string_pair_entry_copy_ctor_base(
+                    core::ptr::addr_of_mut!(destination),
+                    core::ptr::addr_of!(source),
+                ),
+                core::ptr::addr_of_mut!(destination),
+            );
+            assert_eq!(destination.first, source.first);
+            assert_eq!(destination.second, source.second);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_eq!((*data_rep(source.second)).refcount, 1);
+            assert_eq!(destination.trailing, 0xdeaf_beef);
         }
     }
 
