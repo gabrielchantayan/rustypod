@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082725ec
+    ghidra: FUN_082725ec
+    name: byte_source_propagate_unresolved
+    size: 80
+    sig: "void byte_source_propagate_unresolved(void *source, u32 index, u32 value)"
+    module: null
+    status: identified
+    renames:
+      param_1/r0: source
+      param_2/r1: index
+      param_3/r2: value
+      FUN_082725c0: byte_source_at
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent 0x082725ec..0x0827263b:
+      `push {r4,r5,lr}` at 0x082725ec through `pop {r4,r5,pc}` at
+      0x08272638, with the next instruction at 0x0827263c. Full-image A32
+      decoding finds exactly three inbound plain BL call sites
+      (0x08118f30, 0x081194b4, 0x0828bd54), zero predicated inbound BL call
+      sites, and one unconditional BL in the body at 0x0827261c to the
+      already ported byte_source_at at 0x082725c0. Ghidra's C claims this
+      traverses child sources after updating a byte and dirty flag. Raw code
+      instead compares byte_source_at's byte return with r2, conditionally
+      reloads the child pointer only on inequality, and branches on equality
+      to 0x082725ec after r0 still holds the byte return. That re-enters the
+      prologue with a non-pointer r0 and cannot implement the claimed
+      traversal faithfully. No Rust seam or port is added until this
+      control-flow contradiction is resolved from additional firmware
+      evidence.
   - address: 0x08275fec
     ghidra: thunk_FUN_08276050
     name: tail_call_retail_utf8_validate_three_byte
