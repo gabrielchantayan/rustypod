@@ -23,6 +23,50 @@ const FORMAT_RGB565: u32 = 0x0565;
 const FORMAT_RGB565_ALTERNATE: u32 = 0x2565;
 const FORMAT_RGBA4444: u32 = 0x1444;
 
+/// `color_pack_rgb565` — original: `FUN_08272090` @ 0x08272090 (28 bytes;
+/// **3 unconditional `bl` call sites**, no predicated calls).
+///
+/// Raw ARM words establish the complete leaf body: `and r0,#0xf8; mov r0,
+/// lsl #8; and r1,#0xfc; orr r0,r1,lsl #3; and r1,r2,#0xf8; orr r0,r1,lsr
+/// #3; bx lr`. The preceding `pop {r4,r5,pc}` at 0x0827208c closes
+/// [`color_pack_for_format`], and the next `ldrb r2,[r1]` at 0x082720ac
+/// begins the distinct unaligned colour-copy helper.
+///
+/// Packs R/G/B into the firmware's RGB565 bit layout. It has no callees,
+/// memory accesses, validation, or deliberate behavioral deviations; the
+/// `u32` return preserves the ARM return register even though the packed value
+/// occupies 16 bits.
+
+/// Packs R/G/B components into RGB565.
+///
+/// The low three red/blue and low two green bits are discarded, exactly as the
+/// original masks before shifting.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn color_pack_rgb565(red: u32, green: u32, blue: u32) -> u32 {
+    ((red & 0xf8) << 8) | ((green & 0xfc) << 3) | ((blue & 0xf8) >> 3)
+}
+
+#[cfg(test)]
+mod rgb565_tests {
+    use super::color_pack_rgb565;
+
+    #[test]
+    fn packs_full_scale_primary_colours() {
+        assert_eq!(color_pack_rgb565(0xff, 0x00, 0x00), 0xf800);
+        assert_eq!(color_pack_rgb565(0x00, 0xff, 0x00), 0x07e0);
+        assert_eq!(color_pack_rgb565(0x00, 0x00, 0xff), 0x001f);
+        assert_eq!(color_pack_rgb565(0xff, 0xff, 0xff), 0xffff);
+    }
+
+    #[test]
+    fn discards_low_component_bits_and_high_input_bits() {
+        assert_eq!(color_pack_rgb565(0x07, 0x03, 0x07), 0);
+        assert_eq!(color_pack_rgb565(0xffff_fff8, 0xffff_fffc, 0xffff_fff8), 0xffff);
+        assert_eq!(color_pack_rgb565(0x12, 0x34, 0x56), 0x11aa);
+    }
+}
+
 /// Packs 8-bit R/G/B/A components into the pixel format selected by `format`.
 ///
 /// `0x0565` and `0x2565` yield RGB565; `0x1444` yields RGBA4444 in the
