@@ -127695,3 +127695,30 @@ functions:
       avoid truncating callback pointers; target builds use volatile u32 reads
       at the verified retail offsets. Host test verifies slot-seven selection,
       argument forwarding, return propagation, and exactly one dispatch.
+  - address: 0x08268680
+    ghidra: FUN_08268680
+    name: stream_read_u64
+    size: 76
+    sig: "u64 stream_read_u64(StreamReader *reader, u32 offset, const u8 **cursor)"
+    module: cxx/stream_read_u64
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_2/r1: offset
+      param_3/r2: cursor
+      "reader+0x00": vtable
+      "reader+0x04": callback_context
+      "vtable+0x20": byte_callback
+    notes: >-
+      Raw osos.dec words establish the exact 19-instruction, 76-byte A32 body
+      0x08268680..0x082686cb: push {r2,r3,r4,lr}; aligned ldr/ldrd-equivalent
+      reads fetch two words at *cursor + offset; *cursor advances by eight;
+      then an indirect blx through reader vtable slot +0x20 receives
+      (reader+4, scratch_words, 8, 1), after which ldrd returns the possibly
+      transformed scratch value. The next independently entered function
+      begins at 0x082686cc. The body has zero plain BL and zero predicated BL
+      instructions, plus one indirect BLX. Ghidra identifies three direct
+      call sites; its C xrefs resolve two callers (0x08268a44, 0x08269768).
+      Rust deliberately represents the ARM stack scratch as two u32 words to
+      preserve target word layout on hosts with wider pointers and different
+      u64 alignment; no target behavior deviation.
