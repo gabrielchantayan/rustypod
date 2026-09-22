@@ -97465,6 +97465,39 @@ functions:
       a poisoned main-list sentinel, and lock/unlock completion. match.py
       structurally differs at the host-test seam indirection, as expected.
 
+  # --- global word-list prepend ---
+  - address: 0x08292994
+    ghidra: FUN_08292994
+    name: global_word_list_prepend
+    size: 100
+    sig: "void global_word_list_prepend(u32 value)"
+    module: app/global_word_list_prepend
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_082929f8: global_word_list_08ad2c98
+      "*(u32 *)(global_word_list + 0x10)": sentinel
+      "*(u32 *)(global_word_list + 0x14)": count
+      local_04: node
+      local_08: previous_first
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent: 24 ARM words from
+      push {r2,r3,r4,r5,r6,lr} at 0x08292994 through pop
+      {r2,r3,r4,r5,r6,pc} at 0x082929f4, followed by the one-word literal
+      pool at 0x082929f8; the next independently linked function starts at
+      0x082929fc. Decoding every direct ARM B/BL immediate finds three inbound
+      calls, all unconditional plain bl; there are no predicated forms. Its
+      only outbound call is the unported 12-byte node-pool acquire routine at
+      0x083dd78c, whose verified two-argument ABI is
+      (GlobalWordList *, u32 single). The body acquires a node with single=0,
+      stores r0 at node +0x08, prepends it to the circular list headed by the
+      +0x10 sentinel word, and increments the +0x14 count with ARM wrapping
+      arithmetic. Target builds retain the fixed-address acquire call; host
+      tests install a recording seam because that callee has no ported
+      names.yaml entry. Tests cover zero as an opaque value, LIFO insertion,
+      circular forward/back links, count increments, and the required zero
+      single argument.
+
   # --- JPEG stream byte reader ---
   - address: 0x082105b0
     ghidra: FUN_082105b0
