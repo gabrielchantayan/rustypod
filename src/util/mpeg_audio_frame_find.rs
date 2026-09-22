@@ -107,6 +107,28 @@ mod tests {
     }
 
     #[test]
+    fn skips_compatible_headers_with_invalid_frame_sizes() {
+        let context = context_for(FREE_BITRATE_HEADER);
+        let bytes = [0xff, 0xfb, 0xf0, 0, 0xff, 0xfb, 0, 0, 0];
+        let mut cursor = bytes.as_ptr();
+        let mut frame_size = 0;
+        let mut skipped = u32::MAX;
+
+        assert_eq!(unsafe {
+            mpeg_audio_frame_find(
+                context.as_ptr().cast(),
+                &mut cursor,
+                &mut frame_size,
+                5,
+                &mut skipped,
+            )
+        }, 0);
+        assert_eq!(cursor, unsafe { bytes.as_ptr().add(4) });
+        assert_eq!(frame_size, 128);
+        assert_eq!(skipped, 4);
+    }
+
+    #[test]
     fn reports_exhaustion_without_changing_candidate_outputs() {
         let context = context_for(FREE_BITRATE_HEADER);
         let bytes = [0u8; 7];
