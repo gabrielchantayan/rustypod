@@ -108085,6 +108085,37 @@ functions:
       +0x34 offset remains correct on 64-bit hosts; this is layout fidelity,
       not a behavioral deviation.
 
+  - address: 0x082540dc
+    ghidra: FUN_082540dc
+    name: matrix_state_apply_six_coordinate_transform
+    size: 76
+    sig: "void matrix_state_apply_six_coordinate_transform(MatrixState *state, i32 first_start, i32 first_end, i32 second_start, i32 second_end, i32 third_start, i32 third_end)"
+    module: util/matrix_state_apply_six_coordinate_transform
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1: first_start
+      param_3/r2: first_end
+      param_4/r3/lr: second_start
+      param_5/stack: second_end
+      param_6/stack: third_start
+      param_7/stack: third_end
+      "sp+0x0c": transform
+      FUN_08256d98: fixed_matrix_from_six_coordinates (unported seam)
+      FUN_0824d548: matrix_state_apply_transform
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent from the push at
+      0x082540dc through pop {r4, pc} at 0x08254124; 0x08254128 starts the
+      next independent push prologue. Whole-image A32 decoding finds three
+      inbound BL call sites: plain unconditional bl at 0x082540d4 and
+      0x082d1d40, plus predicated blge at 0x089ede4c. The body itself has two
+      plain unconditional BL calls and no predicated calls. It constructs a
+      0x44-byte Q16.16 matrix from three signed coordinate pairs at
+      0x08256d98, then supplies that temporary to matrix_state_apply_transform.
+      The constructor has no recovered identity beyond this observed ABI, so
+      the ARM implementation deliberately preserves a literal retail veneer
+      and host tests use a callback seam; no other deviations.
+
 
   # --- Unflagged collection item count (util/collection_unflagged_count) ---
   - address: 0x0826b984

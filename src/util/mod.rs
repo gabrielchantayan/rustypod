@@ -76,6 +76,7 @@ pub mod framed_word_buffer_decode;
 pub mod font_face_ensure_ready;
 pub mod glyph_fit_engine;
 pub mod matrix_state_apply_transform;
+pub mod matrix_state_apply_six_coordinate_transform;
 pub mod fixed_matrix_cursor;
 pub mod fixed16_matrix_identity_init;
 pub mod field_access;
