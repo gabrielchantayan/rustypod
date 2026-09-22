@@ -127146,3 +127146,33 @@ functions:
       rather than inventing the unresolved virtual method identity. Firmware
       reads the aligned target pointer at +0x10; host fixtures use an unaligned
       pointer read solely for host layout portability.
+
+
+  - address: 0x08275d9c
+    ghidra: FUN_08275d9c
+    name: string_object_ensure_capacity
+    size: 60
+    sig: "u8 *string_object_ensure_capacity(StringObject *this, usize requested_size)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: requested_size
+      FUN_08275e20: strlen_safe_plus1
+      "this+0x00": vtable
+      "this+0x04": payload
+      "vtable+0x08": allocate_payload
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte A32 body from 0x08275d9c
+      through pop {r4,pc} at 0x08275dd4; 0x08275dd8 begins the next real
+      function. The body has one plain direct BL to strlen_safe_plus1 @
+      0x08275e20 and one predicated BLXCC through vtable slot +0x08. Raw
+      whole-image A32 decoding finds three inbound plain BL calls at
+      0x081a41e8, 0x0828fdcc, and 0x0829a020, with no predicated inbound BL
+      calls. A zero request bypasses the payload; otherwise its inclusive
+      string length (NULL is one) is compared unsigned against requested_size.
+      Only a strictly larger request dispatches slot +0x08 as
+      (this, requested_size, 1), and the post-dispatch payload word is
+      returned. The virtual method identity remains unrecovered. Rust uses the
+      established injectable StringObject slot +0x08 seam because host vtables
+      retain ROM identities; no algorithmic behavior is changed.
