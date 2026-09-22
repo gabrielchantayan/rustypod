@@ -128512,3 +128512,23 @@ functions:
       base construction, child order, field writes, and final initializer call;
       its additional frame, literal-mediated blx calls, and local scope word
       are required by the Rust target-address boundaries.
+  - address: 0x08257bc4
+    ghidra: FUN_08257bc4
+    name: message_payload_buffer
+    size: 8
+    sig: "u32 message_payload_buffer(payload: *const u32) -> u32"
+    module: app/message_payload_buffer
+    status: ported
+    vars: {param_1: payload}
+    notes: >-
+      Raw osos.dec words establish the exact A32 body and boundary:
+      ldr r0,[r0,#0xc]; bx lr at 0x08257bc4..0x08257bcb, followed by the
+      next independently entered function's push {r4,r5,r6,lr} at
+      0x08257bcc. An aligned whole-image A32 branch decode finds three
+      inbound plain bl calls (0x081d7210, 0x081d7228, 0x081d7ebc) and zero
+      predicated bl calls. This reads the +0x0c payload-buffer word of the
+      16-byte nested UI-message payload constructed by FUN_08257bcc: its
+      constructor stores zero for an empty payload, otherwise the allocated
+      copy of the supplied bytes. The port returns u32 rather than a host
+      pointer deliberately, preserving the target's four-byte field layout
+      on 64-bit host tests. No behavioral deviations.
