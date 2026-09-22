@@ -128945,3 +128945,39 @@ functions:
       callee identities are not recovered. A narrow implementation of only
       the first seven words would incorrectly omit the fall-through body;
       no Rust seam or port is added until that control flow is recovered.
+
+  # --- mode-selected locked handle constructor ---
+  - address: 0x0822afec
+    ghidra: FUN_0822afec
+    name: mode_selected_handle_construct
+    size: 36
+    sig: "void mode_selected_handle_construct(RefcountedBody **slot, u8 *state, u8 *arg2, u8 *arg3)"
+    module: app/mode_selected_handle_construct
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: state
+      param_3/r2: arg2
+      param_4/r3: arg3
+      param_2_plus_0x14: readiness_handle
+      param_2_plus_0x24: readiness_flags
+      param_2_plus_0x5f8: mode_selected_flags
+      FUN_081fca10: mutex_handoff_lock
+      FUN_081fcb5c: locked_handle_build_unported
+      FUN_081fca40: mutex_handoff_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte entry body
+      0x0822afec..0x0822b010: the next separately entered function begins at
+      0x0822b020. It has zero plain BL and zero predicated BL instructions.
+      The three inbound calls are unconditional plain BL at 0x081cbc84,
+      0x081cc704, and 0x0822afac; no predicated inbound BL form is present.
+      With a zero state+0x14 word or clear state+0x24 bit 0, it writes a NULL
+      target-width handle to slot and returns. Otherwise state+0x5f8 bit 0
+      selects handoff +0x330 or +0x38 and tail-branches to byte-identical
+      sequences at 0x08208444 or 0x08214acc. Those sequences call the ported
+      mutex_handoff_lock, call unrecovered 0x081fcb5c with all four ABI words,
+      then tail-branch to the ported mutex_handoff_unlock. Rust shares the
+      duplicate tail sequences and calls the mutex ports directly; 0x081fcb5c
+      remains a fixed-address ARM seam with a host recording seam. match.py
+      necessarily reports a structural difference because it follows Ghidra's
+      incorrect 172-byte contiguous extent through unrelated entries.
