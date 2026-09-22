@@ -150,6 +150,7 @@ pub mod u16_code_dispatch;
 pub mod keyed_event_binding;
 pub mod keyed_record_pair_lookup;
 pub mod event_hub;
+pub mod message_payload_buffer;
 pub mod event_listener_controller_available;
 pub mod event_list;
 pub mod observer_list_register;
