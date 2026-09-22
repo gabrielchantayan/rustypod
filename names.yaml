@@ -17703,6 +17703,24 @@ functions:
       place of the original's cmp #0x99 with ls/hi predication —
       semantically identical boundary.
 
+  - address: 0x08280114
+    ghidra: FUN_08280114
+    name: mov_atom_table_root
+    size: 8
+    sig: "u32 mov_atom_table_root(const u32 *table_handle)"
+    module: mov/atom_table_root
+    status: ported
+    vars: {param_1/r0: table_handle}
+    notes: >-
+      MOV atom-table handle accessor. Raw osos.dec words e5900000/e12fff1e
+      establish the exact 8-byte extent 0x08280114..0x0828011b: ldr r0,[r0];
+      bx lr. The next real function starts at 0x0828011c (push {r4,lr}).
+      Three direct plain BL callers at 0x081c7e78, 0x081c8048, and 0x081d8354
+      were independently decoded from the raw firmware; there are no predicated
+      BL calls. Returns the four-byte word zero of the table handle, the MOV
+      atom-tree root. Rust deliberately represents the field and result as u32,
+      not host pointers, preserving the ARM four-byte field width on 64-bit hosts.
+
   # --- Block-deque element -> region accessors (heap/block_region) ---
   - address: 0x082801f8
     ghidra: FUN_082801f8
