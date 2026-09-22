@@ -26206,6 +26206,32 @@ functions:
       the same value into the caller's word at +0x0c. Host builds model the
       firmware word with OBJECT_SEQUENCE_ID.
 
+  - address: 0x0828a148
+    ghidra: FUN_0828a148
+    name: string_object_with_owned_member_destroy
+    size: 40
+    sig: "StringObjectWithOwnedMember *string_object_with_owned_member_destroy(StringObjectWithOwnedMember *this)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1[6]: owned_member
+    notes: >-
+      Raw osos.dec establishes the 40-byte extent from `push {r4,lr}` at
+      0x0828a148 through the tail `b 0x08277484` at 0x0828a16c; the next
+      function starts at 0x0828a170. A full ARM branch-word scan found three
+      inbound unconditional BL sites (0x081033dc, 0x083d17c0, 0x083d1804)
+      and zero predicated inbound calls. The body itself has zero plain BL
+      calls and one predicated `blxne`: it NULL-guards the opaque member
+      pointer at +0x18, calls that member's unrecognized vtable slot +4,
+      then tail-branches to the ported string_object_destroy @ 0x08277484
+      over the StringObject base. The port preserves the unknown member as a
+      typed opaque virtual object rather than assigning an invented callee
+      identity; its target-leading words +0x08..+0x14 remain u32s to avoid
+      widening target pointer spacing on host fixtures. match.py reports the
+      expected structural difference: LLVM hoists the NULL guard before its
+      non-leaf frame and lowers the tail target to the local Rust symbol.
+
   - address: 0x0828a978
     ghidra: FUN_0828a978
     name: notes_dispatcher_status_strings
