@@ -96,6 +96,7 @@ pub mod controller_timer_pair;
 pub mod controller_scoped_notification_refresh;
 pub mod controller_transition_volume_post;
 pub mod controller_string_state_reconcile;
+pub mod view_event_prepare_resource_provider;
 pub mod volume_controller_post_commands;
 pub mod volume_controller_post_byte_90_code;
 pub mod volume_limit_state_refresh_if_pending;
