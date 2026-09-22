@@ -42,6 +42,10 @@ pub mod hints {
     // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
     // shared-cache, and Schema fixture; mappings never unmap.
     pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;
+    // 0x6d70_0000: dedicated to app/anchor_identifier_find's target-width
+    // owner, collection, StringObject, and candidate fixtures; mappings never
+    // unmap, so no other user may share this hint.
+    pub const ANCHOR_IDENTIFIER_FIND: usize = 0x6d70_0000;
     // 0x6b10_0000 / 0x6b20_0000: dedicated to sqlite/append_owned_pointer's
     // target-width owner and pointer-array fixtures; mappings never unmap.
     pub const SQLITE_APPEND_OWNED_POINTER_GROW: usize = 0x6b10_0000;
