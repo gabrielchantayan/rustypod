@@ -63520,6 +63520,38 @@ functions:
       construction always overwrites +0x00 with the descriptor. No deliberate
       deviations.
 
+  - address: 0x08283ed0
+    ghidra: FUN_08283ed0
+    name: context_scope_complete_selection
+    size: 108
+    sig: "i32 context_scope_complete_selection(void *scope, u32 index, u32 selector, u32 reverse_flag)"
+    module: app/context_scope_complete_selection
+    status: ported
+    renames:
+      param_1/r0: scope
+      param_2/r1: index
+      param_3/r2: selector
+      param_4/r3: reverse_flag
+      "scope vtable+0xc": subject_available
+      "scope+0x4": subject
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_08048a0c: plst_task_complete
+      FUN_08061378: plst_element_notify_teardown
+    notes: >-
+      The raw 27 instructions occupy 0x08283ed0..0x08283f3c; the following
+      cmp r1,#0 starts context_scope_capture, so Ghidra's 108-byte extent is
+      exact. Decoding every aligned B/BL word in osos.dec finds exactly three
+      inbound plain bl calls (0x080484e4, 0x0816ebf4, 0x0817a798), no
+      predicated calls, two direct body bl calls (plst_task_complete and
+      plst_element_notify_teardown), and one vtable blx at scope vtable+0xc.
+      The latter has no recovered semantic name and remains a volatile
+      availability seam; the two named callees default to their Rust ports.
+      On an available scope, subject+0x04 is queried by
+      ui_plst_slot_item_at(subject, selector, reverse_flag, index). A nonzero
+      task whose completion returns zero is followed by subject teardown
+      notification and returns one; all other paths return zero. Target
+      pointer fields remain u32 words, preserving ARM offsets on 64-bit hosts.
+
   - address: 0x08283f3c
     ghidra: FUN_08283f3c
     name: context_scope_capture
