@@ -46,6 +46,7 @@ pub mod collection_release_first_occupied;
 pub mod component_vtable_slot_12_payload_tail_dispatch;
 pub mod component_vtable_slot_08_tail_dispatch;
 pub mod owner_vtable_slot_ec_tail_dispatch;
+pub mod owner_prefix_vtable_slot_30_tail_dispatch;
 pub mod word_08_set_then_slot_18_dispatch;
 pub mod component_vtable_slot_208_tail_dispatch;
 pub mod vtable_slot_4c_then_2c_dispatch;

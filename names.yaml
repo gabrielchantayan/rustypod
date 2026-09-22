@@ -10641,6 +10641,30 @@ functions:
       address directly; host tests use a volatile recorder solely to prove the
       passed field address, write effect, and preserved owner return.
 
+  # --- Owner-prefix vtable +0x30 tail dispatch ---
+  - address: 0x08214d34
+    ghidra: FUN_08214d34
+    name: owner_prefix_vtable_slot_30_tail_dispatch
+    size: 12
+    sig: "u32 owner_prefix_vtable_slot_30_tail_dispatch(u32 *address_after_owner_prefix)"
+    module: cxx/owner_prefix_vtable_slot_30_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: address_after_owner_prefix
+      r1: vtable_slot_30
+    notes: >-
+      Raw osos.dec establishes the exact 12-byte extent: e5b012d8
+      (ldr r1,[r0,#-0x2d8]!), e5911030 (ldr r1,[r1,#0x30]), then e12fff11
+      (bx r1); 0x08214d40 is the next distinct push prologue. Whole-image
+      ARM B/BL decoding finds exactly three inbound plain bl calls at
+      0x08214a94, 0x08214d4c, and 0x08214da8, with zero predicated bl calls.
+      The wrapper changes r0 to the owner prefix 0x2d8 bytes before its input
+      and tail-dispatches that prefix's unrecovered vtable +0x30 slot. Ghidra
+      incorrectly renders the negative pre-index offset as positive and
+      mistakes the terminal bx as a no-argument indirect call. Target assembly
+      retains the three original instructions; the host adapter uses a typed,
+      native-width vtable callback to test the verified receiver and slot.
+
   - address: 0x082141bc
     ghidra: FUN_082141bc
     name: pool_base_construct
