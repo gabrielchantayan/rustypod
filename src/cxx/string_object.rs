@@ -1970,6 +1970,34 @@ pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut 
     release_payload_op()(this);
     this
 }
+/// string_object_destroy_08201610 — original: `FUN_08201610` @
+/// 0x08201610 (32 bytes, 0x08201610..0x0820162f; the literal at 0x08201630
+/// belongs to this body and the next function starts at 0x08201634). **3
+/// inbound direct plain `bl` calls**, at 0x08201b28, 0x083d1b40, and
+/// 0x083d1b84, and zero predicated inbound calls, verified by whole-image A32
+/// branch decoding. Its body makes one plain `bl` to
+/// `string_object_release_payload` @ 0x08275d74 and no predicated calls.
+///
+/// This separately linked plain destructor plants the same StringObject vtable
+/// literal (0x089a6044), releases the payload, and returns `this`. It is
+/// instruction-for-instruction equivalent in behavior to the separately
+/// exported `string_object_destroy` @ 0x08277484; it remains a distinct
+/// symbol because hooks target its own firmware entry.
+///
+/// Deliberate deviations: the ROM vtable address is represented by
+/// [`STRING_OBJECT_VTABLE`], and the already-ported release callee is reached
+/// through [`STRING_OBJECT_OPS`] so host tests can observe it.
+#[cfg_attr(target_os = "none", link_section = ".text.string_object_destroy_08201610")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_destroy_08201610(
+    this: *mut StringObject,
+) -> *mut StringObject {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    release_payload_op()(this);
+    this
+}
+
 
 /// string_object_pair_destroy — original: `FUN_082677e0` @ **0x082677e0**
 /// (24 bytes, 0x082677e0..0x082677f7; next function begins at
@@ -6822,6 +6850,28 @@ pub(crate) mod tests {
             "the vtable store precedes the release call (str before bl)"
         );
     }
+    #[test]
+    fn destroy_08201610_plants_the_vtable_then_releases_and_returns_this() {
+        let _bench = bench();
+        let mut object = StringObject {
+            vtable: 0xdead_beef as *const StringObjectVtable,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = &mut object as *mut StringObject;
+        unsafe {
+            assert_eq!(string_object_destroy_08201610(this), this);
+        }
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        let calls = release_calls();
+        assert_eq!(calls.len(), 1, "the destructor calls release exactly once");
+        assert_eq!(calls[0].0, this as usize);
+        assert_eq!(
+            calls[0].1,
+            &STRING_OBJECT_VTABLE as *const _ as usize,
+            "the vtable store precedes the one release call"
+        );
+    }
+
 
     #[test]
     fn pair_destroy_releases_second_then_first_and_returns_the_pair() {
