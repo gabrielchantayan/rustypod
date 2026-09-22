@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08281d48
+    ghidra: FUN_08281d48
+    name: mpeg_audio_header_matches_context
+    size: 32
+    sig: "u32 mpeg_audio_header_matches_context(const void *context, u32 header)"
+    module: util/mpeg_audio_header_matches_context
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: header
+      "context+0x38/r0": saved_header
+      DAT_08281d68: MPEG_HEADER_COMPATIBILITY_MASK
+    notes: >-
+      Raw osos.dec words establish the exact eight-instruction A32 body
+      0x08281d48..0x08281d67: ldr r2,[pc,#0x18]; ldr r0,[r0,#0x38]; and r1,
+      r1,r2; and r0,r0,r2; cmp r1,r0; movne r0,#3; moveq r0,#0; bx lr.
+      The literal mask at 0x08281d68 is 0xfffe0c00; the next separately
+      entered function starts at 0x08281d6c. Full-image A32 decoding finds
+      three inbound plain BL call sites (0x08281624, 0x08281f10, and
+      0x082826e8), zero predicated inbound BL call sites, and no outgoing BL
+      calls. It compares the MPEG audio header synchronization, version, and
+      sample-rate bits with the saved aligned header at context +0x38,
+      returning zero when they match and status 3 otherwise. No deliberate
+      deviations.
   - address: 0x08290704
     ghidra: FUN_08290704
     name: task_base_construct
