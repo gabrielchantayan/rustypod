@@ -75619,6 +75619,34 @@ functions:
       r1 reused for the fourth); the only diff is the crate-standard fp
       prologue/epilogue in place of the bare bx lr.
 
+  # --- fixed task-message payload copy ---
+  - address: 0x0827210c
+    ghidra: FUN_0827210c
+    name: copy_seven_words
+    size: 48
+    sig: "void copy_seven_words(u32 *dst, const u32 *src)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: dst (seven-word destination)
+      param_2/r1: src (seven-word source)
+    notes: >-
+      Raw A32 is push {lr}; three individual ldr/str word pairs for
+      offsets +0x00, +0x04, and +0x08; then ldm r1,{r1,r2,r3,ip} and
+      stm r0+0x0c,{r1,r2,r3,ip}; pop {pc}. The true 48-byte extent ends
+      at 0x0827213b; 0x0827213c begins the next function. Binary decoding
+      finds exactly three direct BL callers, all unconditional
+      (0x0812c0b4, 0x0812c284, 0x0812c5f8), and no predicated BL callers.
+      Callers use it to copy the seven-word task-message payload between a
+      message cell and caller storage. The Rust port preserves the observed
+      load/store order with volatile aligned u32 accesses; this deliberately
+      prevents LLVM from substituting a bulk-copy builtin. It adds no NULL,
+      bounds, alignment, or overlap check. Host tests cover all seven opaque
+      words with boundary guards and a forward-overlap case against the
+      instruction-order model. match.py shows the same three initial loads
+      and stores plus four loads followed by four stores; LLVM uses explicit
+      offsets instead of the original add/ldm/stm grouping.
+
   # --- draw-state record: the foreground colour setter ---
   - address: 0x0826319c
     ghidra: FUN_0826319c
