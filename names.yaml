@@ -338,7 +338,6 @@ functions:
       two plain outgoing BL calls to __rt_udiv, one in each layer branch;
       no predicated outgoing calls. Host tests substitute fixed-table
       fixtures; target code uses the retailOS bases directly.
-  - address: 0x082815d4
     ghidra: FUN_082815d4
     name: mpeg_audio_frame_find
     size: 168
@@ -129316,3 +129315,26 @@ functions:
       identity or port: target builds call its verified address and host tests
       install a typed seam. Rust lowers indirect blx instructions to typed
       calls; no other deviations.
+  - address: 0x082142d8
+    ghidra: FUN_082142d8
+    name: alignment_padding
+    size: 20
+    sig: "u32 alignment_padding(u32 value, u32 alignment)"
+    module: util/alignment_padding
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: alignment
+      r2: alignment_mask
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte A32 extent
+      0x082142d8..0x082142eb: `bx lr` at 0x082142e8 ends the five-instruction
+      leaf and the following `push {lr}` at 0x082142ec begins the next real
+      function. Full-image aligned A32 decoding finds exactly three inbound
+      plain BL call sites (0x0814d81c, 0x082142c8, and 0x0821431c), zero
+      predicated inbound BL forms, and no outbound calls. It subtracts one
+      from alignment, masks value with that result, subtracts the remainder
+      from alignment, and masks again to return wrapping alignment padding.
+      This is zero for an aligned value. The port retains the literal
+      modulo-2^32 arithmetic for zero and non-power-of-two alignments; no
+      deliberate deviations.
