@@ -17,6 +17,7 @@ pub mod application_message_post_global;
 pub mod application_global_slot_is_clear;
 pub mod anchor_identifier_find;
 pub mod application_string_registry;
+pub mod callback_queue_entry_destruct;
 pub mod animation;
 pub mod identity_noop;
 pub mod artwork_slot_available;
