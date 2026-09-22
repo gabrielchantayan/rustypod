@@ -10641,6 +10641,36 @@ functions:
       address directly; host tests use a volatile recorder solely to prove the
       passed field address, write effect, and preserved owner return.
 
+  # --- Owner-prefix pending-handle reset ---
+  - address: 0x08214a84
+    ghidra: FUN_08214a84
+    name: owner_prefix_pending_handle_reset
+    size: 72
+    sig: "void owner_prefix_pending_handle_reset(u8 *state)"
+    module: app/owner_prefix_pending_handle_reset
+    status: ported
+    renames:
+      param_1/r0: state
+      local_10: empty_handle
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x08214a84..0x08214ac8; 0x08214acc begins the next distinct PUSH
+      prologue. The body has five unconditional direct BL instructions,
+      calling 0x0822bdc0, owner_prefix_vtable_slot_30_tail_dispatch
+      (0x08214d34), shared_cell_construct (0x083b5090),
+      shared_cell_assign (0x083b50e4), and shared_cell_release
+      (0x083b524c), with no predicated BL forms. Whole-image A32 decoding
+      finds exactly three incoming plain BL call sites at 0x08214654,
+      0x082147c4, and 0x08214dc4, with zero predicated incoming calls.
+      It first invokes the unresolved state reset at 0x0822bdc0, then
+      dispatches the owner prefix's vtable +0x30 slot, assigns an empty
+      temporary shared-cell handle to state+0x2f4, and writes bytes 1 and 0
+      at +0x2f0 and +0x2f1. The callee at 0x0822bdc0 has no established
+      semantic identity, so it remains a verified resident-address target
+      call; host tests use a recording seam. Host pointers cannot fit the
+      target's four-byte handle slot, so host execution writes the observed
+      empty u32 handle only.
+
   # --- Owner-prefix vtable +0x30 tail dispatch ---
   - address: 0x08214d34
     ghidra: FUN_08214d34
