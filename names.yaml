@@ -126542,3 +126542,29 @@ functions:
       bound and the original's no-table-null-check contract after a positive
       count. Host tests cover the null-provider early exit, negative count,
       unavailable qualifying record, and inclusive endpoint threshold.
+
+
+  # --- object subobject pointer at +0x3c ---
+  - address: 0x08280834
+    ghidra: FUN_08280834
+    name: object_subobject_0x3c
+    size: 8
+    sig: "void *object_subobject_0x3c(void *object)"
+    module: util/object_subobject_0x3c
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: subobject_at_0x3c
+    notes: >-
+      Raw osos.dec words e280003c (add r0,r0,#0x3c) and e12fff1e (bx lr)
+      establish the exact eight-byte body at 0x08280834..0x0828083b. The
+      next independently entered function begins with push {r4,r5,r6,r7,lr}
+      at 0x0828083c, so Ghidra's extent is exact. Whole-image A32
+      B/BL-immediate decoding finds exactly three inbound plain unconditional
+      bl calls — 0x08115d64, 0x081f0980, and 0x0822b404 — and no predicated
+      bl calls; this leaf has no outbound calls. It returns the unchecked byte
+      address object+0x3c with ARM wrapping-add semantics. Callers use that
+      address as a virtual-dispatch receiver, but the concrete object type is
+      unrecovered, so the offset-preserving name does not invent one.
+      Deliberate deviations: none. Host tests cover a null non-dereference
+      and aligned plus unaligned object addresses.

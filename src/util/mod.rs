@@ -125,6 +125,7 @@ pub mod object_flags_take;
 pub mod object_flag_0x10_is_set;
 pub mod object_flag_status_code;
 pub mod object_byte_0x21;
+pub mod object_subobject_0x3c;
 pub mod mpeg_audio_header_matches_context;
 pub mod mpeg_audio_frame_size;
 pub mod mpeg_audio_frame_find;
