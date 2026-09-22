@@ -83,6 +83,7 @@ pub mod glyph_range_contains_character;
 pub mod context_callback_dispatch;
 pub mod default_selector_dispatch;
 pub mod context;
+pub mod context_submit_u32;
 pub mod controller_layout_dispatch;
 pub mod controller_base_construct;
 pub mod controller_candidate_notify;

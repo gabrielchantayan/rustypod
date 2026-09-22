@@ -128127,3 +128127,28 @@ functions:
       the Rust port implements its leaf behavior directly instead of
       inventing a callee seam. Host tests cover null, mismatched tag, every
       accepted mode, invalid modes, and rejected-write preservation.
+  - address: 0x08261d88
+    ghidra: FUN_08261d88
+    name: context_submit_u32
+    size: 20
+    sig: "u32 context_submit_u32(void *context, u32 value)"
+    module: app/context_submit_u32
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: value
+      local_8/[sp]: value_slot
+      FUN_082e7cb0: unnamed_context_value_submitter
+    notes: >-
+      Raw osos.dec words establish the exact five-instruction A32 extent
+      0x08261d88..0x08261d9b: push {r3,lr}; str r1,[sp]; mov r1,sp; bl
+      0x082e7cb0; pop {r12,pc}. The next separately entered function begins
+      at 0x08261d9c with the tail branch `b 0x082e7c78`. Full-image A32
+      decoding finds three inbound plain BL call sites (0x0839e8c8,
+      0x0839ea34, 0x0839f410), zero predicated inbound BL forms, one
+      unconditional internal BL, and zero predicated internal BL forms.
+      It materializes value in a four-byte stack slot and passes that slot to
+      the unported callee with context. Ghidra declares void, but the raw
+      pop leaves the callee's r0 unchanged; Rust returns that observable ABI
+      value. The callee has no recovered identity, so target code calls its
+      verified address and host tests use a replaceable seam.
