@@ -1643,6 +1643,24 @@ functions:
       Rust uses a normal return-position call instead of the conditional tail
       branch; no caller-observable result register is defined by this void
       function.
+  - address: 0x08274404
+    ghidra: FUN_08274404
+    name: base64_char_value
+    size: 84
+    sig: "u8 base64_char_value(u32 char_code)"
+    module: crypto/base64_char_value
+    status: ported
+    renames:
+      param_1/r0: char_code
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent
+      0x08274404..0x08274457; 0x08274458 begins the next independently
+      linked function. It maps ASCII Base64 alphabet characters to six-bit
+      values: A-Z to 0-25, a-z to 26-51, 0-9 to 52-61, '+' to 62, and '/'
+      to 63; every other 32-bit input returns 0xff. A whole-image raw A32
+      branch decode finds exactly 3 incoming plain BL calls
+      (0x0812e948, 0x081b1db4, 0x082744a4) and no predicated BL calls.
+      Deliberate deviations: none.
   - address: 0x08274458
     ghidra: FUN_08274458
     name: base64_table_char
