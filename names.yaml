@@ -22216,6 +22216,37 @@ functions:
       is examined before the count is tested. Deviation - the table is
       the crate static SLOT_RECORDS, zeroed (block_mgr.rs precedent).
 
+  - address: 0x081feac4
+    ghidra: FUN_081feac4
+    name: media_player_query_index_select
+    size: 180
+    sig: "u32 media_player_query_index_select(void *this, u32 requested_index, i32 register_callback, i32 callback_kind)"
+    module: app/media_player_query_index_select
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: requested_index
+      param_3/r2: register_callback
+      param_4/r3: callback_kind
+      FUN_082597a0: query_object_create
+      FUN_08259594: media_player_interface_get
+      FUN_081fea54: slot_table_clear
+      FUN_081fe954: slot_table_register
+      FUN_083e75d0: query_object_release_slot
+    notes: >-
+      Raw ARM is 45 words from 0x081feac4 through 0x081feb74; the next
+      separately linked function begins at 0x081feb78. It creates a
+      mode-zero query object, calls its vtable +0x1e4 limit slot, and returns
+      4 when requested_index is at or above that limit. Otherwise it reads
+      the media interface's vtable +0x80 current index, clears slot 6 when
+      register_callback is zero or registers callback_kind/current_index/0,
+      then calls vtable +0x7c only when current_index differs. The query is
+      released via its vtable +0x1c on either path. Five unconditional direct
+      bl instructions (not the three Ghidra-reported sites), no predicated
+      direct bl, two unconditional dynamic blx, and one predicated dynamic
+      blxne decode from osos.dec. The dynamic vtable target identities remain
+      intentionally unresolved.
+
   - address: 0x081fe954
     ghidra: FUN_081fe954
     name: slot_table_register
