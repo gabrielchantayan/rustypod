@@ -28,6 +28,7 @@ pub mod callback_result_build;
 pub mod collection_item_at;
 pub mod clear_optional_byte;
 pub mod clear_u16_three_word_record;
+pub mod clear_opaque_record_state;
 pub mod bswap;
 pub mod bswap_four_u32s_inplace;
 pub mod context_field;
