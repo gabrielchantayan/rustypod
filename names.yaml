@@ -128178,6 +128178,35 @@ functions:
       manager; its concrete type remains unidentified, so byte offsets name
       the verified fields. Rust preserves the target's byte and aligned-word
       store widths with volatile accesses to prevent LLVM store coalescing.
+  - address: 0x08261ad0
+    ghidra: FUN_08261ad0
+    name: opaque_context_take_mode_one
+    size: 68
+    sig: "u32 opaque_context_take_mode_one(void *context, void **payload_out, void **record_out)"
+    module: cxx/opaque_context_take_mode_one
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1/r5: payload_out
+      param_3/r2/r6: record_out
+      "context+0x9c": child
+      FUN_08261890: opaque_context_take_record (unported retailOS seam)
+      FUN_08261a58: opaque_context_process_record (unported retailOS tail target seam)
+    notes: >-
+      Raw osos.dec establishes the real 68-byte A32 extent
+      0x08261ad0..0x08261b13: push {r4,r5,r6,lr}, one unconditional bl
+      0x08261aec -> 0x08261890, then the predicated tail branch
+      0x08261b08 -> 0x08261a58, with the following push at 0x08261b14 as
+      the next independently entered function. Ghidra's 188-byte extent
+      incorrectly absorbs the preceding shared target at 0x08261a58. A
+      whole-image aligned A32 decode finds exactly three inbound plain bl
+      calls (0x0818a78c, 0x081e6a4c, 0x08257840) and zero inbound predicated
+      bl calls; the true body has one plain outgoing bl and zero predicated
+      bl calls. It requests one record from child +0x9c with mode one and
+      zero fourth argument, returns 0x27 when none is available, otherwise
+      tail-forwards the record and original outputs to 0x08261a58. The two
+      callee identities are unrecovered, so target builds use their verified
+      addresses and host tests replace both seams; no behavior is invented.
   - address: 0x08261c48
     ghidra: FUN_08261c48
     name: opaque_context_array_construct

@@ -52,6 +52,7 @@ pub mod context_activity;
 pub mod context_line_terminator;
 pub mod context_child_handle;
 pub mod context_record_resolve;
+pub mod opaque_context_take_mode_one;
 pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
 pub mod deque_layout_copy;
