@@ -126,6 +126,7 @@ pub mod object_flag_0x10_is_set;
 pub mod object_flag_status_code;
 pub mod object_byte_0x21;
 pub mod mpeg_audio_header_matches_context;
+pub mod mpeg_audio_frame_size;
 pub mod object_byte_0x4_low_bit_is_clear;
 pub mod object_word_0x8_low_byte;
 pub mod object_set_byte_0x27;
