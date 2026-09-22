@@ -10640,6 +10640,36 @@ functions:
       address directly; host tests use a volatile recorder solely to prove the
       passed field address, write effect, and preserved owner return.
 
+  # --- Owner pending-handle reset ---
+  - address: 0x0820840c
+    ghidra: FUN_0820840c
+    name: owner_pending_handle_reset
+    size: 56
+    sig: "void owner_pending_handle_reset(u8 *state)"
+    module: app/owner_pending_handle_reset
+    status: ported
+    renames:
+      param_1/r0: state
+      FUN_081fcae4: owner_state_reset
+      FUN_083b5090: shared_cell_construct
+      FUN_083b50e4: shared_cell_assign
+      FUN_083b524c: shared_cell_release
+    notes: >-
+      Raw ARM words establish the exact 56-byte extent
+      0x0820840c..0x08208440; 0x08208444 starts the next distinct PUSH
+      prologue. It has four unconditional outbound BL instructions, not the
+      three reported by Ghidra: 0x081fcae4, shared_cell_construct
+      (0x083b5090), shared_cell_assign (0x083b50e4), and
+      shared_cell_release (0x083b524c). Whole-image A32 decoding finds two
+      incoming plain BL sites (0x08208258, 0x08208378) and zero predicated BL
+      sites. The unresolved 0x081fcae4 target is a fixed-address firmware
+      seam; its identity is deliberately not invented. It invokes that reset,
+      clears state+0x2c0, then assigns an empty temporary shared-cell handle
+      to state+0x2c4. On hosts, the target's four-byte +0x2c4 slot is modeled
+      by its observed zero u32 result because a native-width pointer cannot
+      safely occupy that target offset; target builds call the ported
+      shared-cell helpers directly.
+
   # --- Owner-prefix pending-handle reset ---
   - address: 0x08214a84
     ghidra: FUN_08214a84
