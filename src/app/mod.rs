@@ -48,6 +48,7 @@ pub mod clamped_mode_position;
 pub mod clamped_mode_position_adjust;
 pub mod class_8c00;
 pub mod settings_value_scale;
+pub mod range_value_to_u8;
 pub mod buffer_refill_request;
 pub mod buffer_transfer_initialize;
 pub mod record_dispatch_result;
