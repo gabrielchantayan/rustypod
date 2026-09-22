@@ -418,6 +418,37 @@ pub struct StringObject {
     pub payload: *mut u8,
 }
 
+/// The opaque virtual member at word +6 in [`StringObjectWithOwnedMember`].
+/// Its vtable's second ARM word is the destructor entry reached by
+/// `FUN_0828a148`.
+#[repr(C)]
+pub struct OpaqueOwnedMemberVtable {
+    /// Undecoded virtual slot at +0.
+    pub first_slot: usize,
+    /// +0x04 on ARM — the virtual destructor called by the owner.
+    pub destroy: unsafe extern "C" fn(*mut OpaqueOwnedMember),
+}
+
+/// An otherwise opaque polymorphic member owned by
+/// [`StringObjectWithOwnedMember`].
+#[repr(C)]
+pub struct OpaqueOwnedMember {
+    pub vtable: *const OpaqueOwnedMemberVtable,
+}
+
+/// The decoded prefix of an unidentified object with a [`StringObject`] base
+/// and an owned polymorphic member at ARM word +6 / byte +0x18.
+///
+/// On the target `string` occupies words +0/+1 and `opaque_words` occupies
+/// words +2 through +5. `repr(C)` preserves the member identity on hosts
+/// where the pointer-bearing StringObject is wider.
+#[repr(C)]
+pub struct StringObjectWithOwnedMember {
+    pub string: StringObject,
+    pub opaque_words: [u32; 4],
+    pub owned_member: *mut OpaqueOwnedMember,
+}
+
 /// Two opaque leading words followed by the six StringObject members
 /// destroyed by [`string_object_array6_destroy`]. On ARM the members occupy
 /// +0x08 through +0x30; the leading words at +0x00 and +0x04 are not touched
@@ -1791,6 +1822,33 @@ pub unsafe extern "C" fn string_object_release_payload(this: *mut StringObject) 
 pub unsafe extern "C" fn string_object_destroy(this: *mut StringObject) -> *mut StringObject {
     (*this).vtable = &STRING_OBJECT_VTABLE;
     release_payload_op()(this);
+    this
+}
+
+/// string_object_with_owned_member_destroy — original: `FUN_0828a148` @
+/// 0x0828a148 (40 bytes).
+///
+/// Raw ARM begins with `push {r4,lr}` and ends in the tail `b 0x08277484` at
+/// 0x0828a16c; the next function begins at 0x0828a170. It has **3 inbound
+/// plain BL call sites**, zero inbound predicated calls, and makes **0 plain
+/// BL calls** plus **1 predicated BLX call**: when the pointer at word +6 is
+/// non-NULL, it dispatches the member's vtable slot +4 with that member as
+/// `r0`. It then tail-dispatches [`string_object_destroy`] over its own
+/// StringObject base and returns the original `this`.
+///
+/// Deliberate deviation: the class and its member remain unidentified, so
+/// target words +2 through +5 are retained as opaque u32s while the verified
+/// virtual destructor slot is modeled as a typed `repr(C)` vtable field.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_with_owned_member_destroy(
+    this: *mut StringObjectWithOwnedMember,
+) -> *mut StringObjectWithOwnedMember {
+    let member = (*this).owned_member;
+    if !member.is_null() {
+        ((*(*member).vtable).destroy)(member);
+    }
+    string_object_destroy(core::ptr::addr_of_mut!((*this).string));
     this
 }
 
@@ -3864,6 +3922,65 @@ pub(crate) mod tests {
     /// The dispatch slot is process-global, so sibling C++ module tests use
     /// this lock alongside this module's own destruction tests.
     pub(crate) static STRING_OBJECT_OPS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    static mut OWNED_MEMBER_DESTROY_CALLS: Vec<usize> = Vec::new();
+
+    unsafe extern "C" fn record_owned_member_destroy(member: *mut OpaqueOwnedMember) {
+        (*core::ptr::addr_of_mut!(OWNED_MEMBER_DESTROY_CALLS)).push(member as usize);
+    }
+
+    #[test]
+    fn string_object_with_owned_member_destroy_skips_null_member_and_destroys_base() {
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        unsafe {
+            (*core::ptr::addr_of_mut!(OWNED_MEMBER_DESTROY_CALLS)).clear();
+        }
+        let mut owner = StringObjectWithOwnedMember {
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            opaque_words: [0; 4],
+            owned_member: core::ptr::null_mut(),
+        };
+
+        let result = unsafe { string_object_with_owned_member_destroy(&mut owner) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(owner));
+        assert_eq!(owner.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(unsafe { (*core::ptr::addr_of!(OWNED_MEMBER_DESTROY_CALLS)).is_empty() });
+    }
+
+    #[test]
+    fn string_object_with_owned_member_destroy_dispatches_member_slot_before_base() {
+        let _lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        let vtable = OpaqueOwnedMemberVtable {
+            first_slot: 0,
+            destroy: record_owned_member_destroy,
+        };
+        let mut member = OpaqueOwnedMember { vtable: &vtable };
+        let mut owner = StringObjectWithOwnedMember {
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+            opaque_words: [0xfeed_face; 4],
+            owned_member: core::ptr::addr_of_mut!(member),
+        };
+        unsafe {
+            (*core::ptr::addr_of_mut!(OWNED_MEMBER_DESTROY_CALLS)).clear();
+        }
+
+        let result = unsafe { string_object_with_owned_member_destroy(&mut owner) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(owner));
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(OWNED_MEMBER_DESTROY_CALLS)).as_slice() },
+            &[core::ptr::addr_of_mut!(member) as usize],
+        );
+        assert_eq!(owner.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(owner.opaque_words, [0xfeed_face; 4]);
+    }
 
     static STRING_OBJECT_DIFFERS_STATIC_OBJECT_TEST_LOCK: parking_lot::Mutex<()> =
         parking_lot::Mutex::new(());
