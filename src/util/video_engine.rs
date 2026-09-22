@@ -124,6 +124,38 @@ pub extern "C" fn video_engine_type_selector_index(type_selector: u32) -> i32 {
         _ => -1,
     }
 }
+/// video_engine_mode_selector_index — retailOS `FUN_0825e154` @
+/// **0x0825e154** (100 bytes, `0x0825e154..0x0825e1b4`; the next independent
+/// function begins at `0x0825e1bc`).
+///
+/// Maps the five recognized mode selectors to their compact video-engine
+/// indices: 0 -> 0, 0x1e00 -> 1, 0x1e01 -> 2, 0x1e02 -> 3, 0x1e03 -> 4, and
+/// 0x150a -> 5. Every other word returns -1. Raw ARM loads the 0x1e01
+/// comparison value from the literal at 0x0825e1b8 and implements the mapping
+/// as an ordered comparison tree. Its true 100-byte body has no outbound calls;
+/// a complete aligned B/BL-immediate decode finds three direct inbound plain
+/// `bl` sites (0x08255e1c, 0x08255e28, and 0x08255e34) and no predicated
+/// `bl` sites.
+///
+/// # Deliberate deviations
+///
+/// Rust expresses the comparison tree as a match and inlines the immutable
+/// literal value 0x1e01. This preserves the complete word-to-index mapping
+/// without introducing a target-memory dependency.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn video_engine_mode_selector_index(mode_selector: u32) -> i32 {
+    match mode_selector {
+        0 => 0,
+        0x1e00 => 1,
+        0x1e01 => 2,
+        0x1e02 => 3,
+        0x1e03 => 4,
+        0x150a => 5,
+        _ => -1,
+    }
+}
+
 /// Firmware entry of the output-transform setter (`FUN_0824e0c0`, unported).
 ///
 /// The raw helper stores its four input words at engine offsets +0x8a4,
@@ -1329,6 +1361,22 @@ mod tests {
         assert_eq!(video_engine_type_selector_index(0x1ff), -1);
         assert_eq!(video_engine_type_selector_index(0x208), -1);
         assert_eq!(video_engine_type_selector_index(u32::MAX), -1);
+    }
+
+    #[test]
+    fn mode_selector_index_maps_recognized_words_and_rejects_neighbors() {
+        assert_eq!(video_engine_mode_selector_index(0), 0);
+        assert_eq!(video_engine_mode_selector_index(0x1e00), 1);
+        assert_eq!(video_engine_mode_selector_index(0x1e01), 2);
+        assert_eq!(video_engine_mode_selector_index(0x1e02), 3);
+        assert_eq!(video_engine_mode_selector_index(0x1e03), 4);
+        assert_eq!(video_engine_mode_selector_index(0x150a), 5);
+        assert_eq!(video_engine_mode_selector_index(1), -1);
+        assert_eq!(video_engine_mode_selector_index(0x1509), -1);
+        assert_eq!(video_engine_mode_selector_index(0x150b), -1);
+        assert_eq!(video_engine_mode_selector_index(0x1dff), -1);
+        assert_eq!(video_engine_mode_selector_index(0x1e04), -1);
+        assert_eq!(video_engine_mode_selector_index(u32::MAX), -1);
     }
 
     const FRAME_SLOT_FIXTURE_LEN: usize = 0x1000;
