@@ -126222,3 +126222,36 @@ functions:
       exact-address firmware calls and host seams for the three unported
       callees; target fields use byte offsets to avoid host pointer-width
       layout changes.
+  - address: 0x0828a678
+    ghidra: FUN_0828a678
+    name: notes_view_reset_resources
+    size: 104
+    sig: "void notes_view_reset_resources(void *receiver)"
+    module: app/notes_view_reset_resources
+    status: ported
+    renames:
+      param_1/r4: receiver
+      "receiver+0x58/r0": embedded_state
+      "receiver+0xd8/r0": owned_object
+      FUN_08178d64: embedded_state_destroy
+      "owned_object.vtable+0x04/r1": owned_object_release
+      "receiver.vtable+0x58/r3": message_dispatch
+      DAT_0828a6e4: MESSAGE_CATEGORY_STR_SPACE
+      DAT_0828a6e0: FIRST_RESOURCE_ID
+      DAT_0828a6e8: SECOND_RESOURCE_ID
+    notes: >-
+      Raw osos.dec words establish the exact 26-instruction, 104-byte A32
+      body 0x0828a678..0x0828a6df; its three-word literal pool occupies
+      0x0828a6e0..0x0828a6eb and 0x0828a6ec starts the next independently
+      entered function. The body has one unconditional direct BL to the
+      unported 0x08178d64 helper, zero predicated direct BL forms, and three
+      indirect BLX calls: release through the owned object's vtable +0x04
+      and two ordered receiver vtable +0x58 notifications. Whole-image A32
+      decoding finds three inbound plain BL call sites and no predicated
+      inbound forms. It destroys embedded state at +0x58, releases and
+      clears the nullable target-width object word at +0xd8, then sends
+      category 0x53747220 (Str ) with resource IDs 0x419c and 0x419d.
+      Host-only seams cover the unported direct helper and both dynamic
+      calls. Target code deliberately calls 0x08178d64 by its verified raw
+      address because its semantic identity is not established; no named
+      callee seam was invented.
