@@ -6,6 +6,7 @@ pub mod deque_push_back_elem4;
 pub mod block_mgr;
 pub mod block_region;
 pub mod client_commit;
+pub mod client_available_blocks;
 pub mod client_erase;
 pub mod client_return_region;
 pub mod client_reserve;

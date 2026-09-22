@@ -24702,6 +24702,29 @@ functions:
       load/modify/store - no lock, no LDREX, no interrupt guard, exactly
       as in the original.
 
+  - address: 0x081fc578
+    ghidra: FUN_081fc578
+    name: client_available_blocks
+    size: 168
+    sig: "i32 client_available_blocks(u8 *client)"
+    module: heap/client_available_blocks
+    status: ported
+    vars: {param_1: client, iVar1: available, iVar3: manager_available}
+    notes: >-
+      Binary-verified extent 0x081fc578..0x081fc620 (the next real
+      function begins at 0x081fc620). Raw ARM decoding finds five plain
+      `bl` instructions and no predicated `bl`: client mutex lock
+      (0x082621a8), state_flags_contain twice (0x081fc3f4), manager mutex
+      lock/unlock (0x0818a1bc/0x0818a1c4), then client mutex unlock
+      (0x082621ac). The Ghidra three-call-site count misses the repeated
+      state flag helper and one mutex operation. Under client+0x24, the
+      0x40000-without-0x10000 path returns client+0x50 minus client+0x18;
+      every other path computes client+0x1c minus client+0x18, returns a
+      negative result directly, otherwise locks the manager at client+4
+      and caps it at manager+0x14. The existing REGION_MUTEX_OPS seam
+      models the verified C++ mutex thunks; their return values are
+      intentionally discarded exactly as in the original.
+
   - address: 0x081fc6f0
     ghidra: FUN_081fc6f0
     name: state_flags_overlap
