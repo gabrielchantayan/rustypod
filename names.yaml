@@ -127951,3 +127951,30 @@ functions:
       FlaggedPair layout; no NULL, alignment, or bounds guard exists. Rust
       uses volatile stores to retain that observed store order; no deliberate
       target-behavior deviation.
+
+  # --- Draw-state wrapped-text height adapter ---
+  - address: 0x08264054
+    ghidra: FUN_08264054
+    name: draw_state_wrapped_text_height
+    size: 76
+    sig: "i32 draw_state_wrapped_text_height(void *draw_state, const u8 *text, i32 layout_limit, i32 line_spacing)"
+    module: cxx/draw_state_wrapped_text_height
+    status: ported
+    renames:
+      param_1/r0: draw_state
+      param_2/r1: text
+      param_3/r2: layout_limit
+      param_4/r3: line_spacing
+      FUN_080f0048: utf8_codepoint_count_permissive
+      FUN_08263bb8: text_layout_height
+    notes: >-
+      Raw osos.dec establishes a 76-byte A32 body at
+      0x08264054..0x0826409f, followed immediately by the next function at
+      0x082640a0. It has two unconditional outgoing BL instructions
+      (0x0826406c to the ported permissive UTF-8 counter and 0x08264098 to
+      the unported layout-height routine), with no predicated BL. The first
+      result is narrowed with lsl/lsr #16 before the second call, which
+      receives the original r0/r1/r2/r3, zero as its sixth argument, and
+      NULL as its seventh. Rust preserves that narrowing and argument order;
+      its volatile seam dispatches to resident 0x08263bb8 on target and a
+      host-test recorder otherwise. No target-behavior deviation.
