@@ -129532,3 +129532,33 @@ functions:
       link error ordering. match.py reports the same lock/store/set-tag/
       next/count/unlock structure; LLVM's larger frame and status flow are
       accepted structural differences.
+
+  - address: 0x0820c9ec
+    ghidra: FUN_0820c9ec
+    name: mov_chain_table_count_steps
+    size: 96
+    sig: "i32 mov_chain_table_count_steps(const MovChainTable *table, u32 start, u32 end, u32 *count)"
+    module: mov/chain_table_count_steps
+    status: ported
+    renames:
+      param_1/r0/r5: table
+      param_2/r1: start
+      param_3/r2/r4: end
+      param_4/r3: count
+      local_10: current
+      FUN_0820c8a0: mov_chain_table_next
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent
+      0x0820c9ec..0x0820ca4b: the next separately linked function begins
+      with push {r4,r5,r6,r7,r8,lr} at 0x0820ca4c. Whole-image A32 decoding
+      finds exactly three inbound plain unconditional bl calls at 0x081e4c40,
+      0x081e4c64, and 0x081e4d4c, zero predicated forms, and one outbound
+      unconditional bl to the established mov_chain_table_next seam at
+      0x0820c8a0. The routine clears *count, follows next-slot links from
+      start until end, and increments *count after each successful link read.
+      A bad link or the 129th successful read returns 2; reaching end first
+      returns 0. No NULL checks or cycle detection are added. Host tests cover
+      equal cursors, multi-link counts, corrupt-link ordering, and the 129th
+      successful-link limit. match.py reports the same clear/call/status/
+      count/limit/next-cursor structure; LLVM keeps the count in a register
+      and uses a larger frame, rather than the stock stack local.
