@@ -119133,6 +119133,35 @@ functions:
       would require unverified dispatch seams for both callees, so none was
       introduced.
 
+  - address: 0x0822b064
+    ghidra: FUN_0822b064
+    name: flagged_collection_value_lookup
+    size: 100
+    sig: "u32 flagged_collection_value_lookup(u8 *owner, u32 key)"
+    module: util/flagged_collection_value_lookup
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: key
+      FUN_08208488: virtual_collection_lookup
+      FUN_08214b10: bounded_collection_lookup
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent
+      0x0822b064..0x0822b0c4: ldrb owner+0x5f8; tst bit 0; add owner+0x330
+      and branch-equal to 0x08208488, or add owner+0x38 and branch-not-equal
+      to 0x08214b10. The next independently entered function starts at
+      0x0822b0c8 with push {r4,lr}; Ghidra's 144-byte extent wrongly absorbs
+      that and the next prologue. Decoding all aligned A32 BL encodings finds
+      three incoming plain BL calls at 0x08142574, 0x081b7240, and 0x081cc09c,
+      with zero predicated incoming BL forms. The 100-byte dispatcher contains
+      no BL or BLX instructions; its two B transfers are tail dispatches.
+      The two targets perform the separately verified virtual and bounded
+      collection lookups, including mutex handoff. Their identities remain
+      deliberately descriptive because neither target has a names.yaml entry.
+      The Rust port calls the target addresses rather than tail-branching;
+      host dispatches preserve branch choice, selected context, key, and
+      result while avoiding 64-bit host-pointer assumptions.
+
   - address: 0x0822b0e4
     ghidra: FUN_0822b0e4
     name: context_shared_cell_payload_word_or_default
