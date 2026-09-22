@@ -101,4 +101,5 @@ pub mod standard_cipher_table_five;
 pub mod standard_cipher_table_six;
 pub mod rand_bytes;
 pub mod sha1_digest;
+pub mod sha1_update_payload;
 pub mod ensure_initialized;
