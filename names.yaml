@@ -105877,6 +105877,31 @@ functions:
       member_release_if_present Rust body rather than adding a duplicate
       dispatch seam; the target's unspecified post-release r0 is represented
       by the void Rust ABI, because every verified caller ignores it.
+  - address: 0x0820a45c
+    ghidra: thunk_FUN_08214348
+    name: member_release_if_present
+    size: 4
+    sig: "void member_release_if_present(MemberReleaseOwner *owner)"
+    module: app/member_release
+    status: ported
+    renames:
+      param_1/r0: owner
+      FUN_0822aa34: member_release_if_present_tail_veneer
+      FUN_08214348: conditional_member_release_tail_target
+      FUN_081f0530: list_cursor_release (ported)
+    notes: >-
+      Raw osos.dec establishes this exact 4-byte function as `b 0x0822aa34`;
+      the next separately linked function begins at 0x0820a460. The veneer
+      passes r0 unchanged through 0x0822aa34 to FUN_08214348, whose 32-byte
+      body reads owner+0x14 and invokes list_cursor_release only when that
+      word is nonzero. Full-image decoding of every ARM B/BL immediate finds
+      exactly three direct BL callers, all unconditional and zero predicated:
+      0x0810087c, 0x081743d0, and 0x081746bc. There are zero direct B tails
+      into this veneer and no aligned raw image word equals 0x0820a45c.
+      Deliberate deviation: this semantic veneer reuses the existing
+      member_release_if_present Rust body rather than adding a duplicate
+      dispatch seam; the target's unspecified post-release r0 is represented
+      by the void Rust ABI because every verified caller ignores it.
 
   # --- Identified vtable flagged-pair constructor ---
   - address: 0x08205a38

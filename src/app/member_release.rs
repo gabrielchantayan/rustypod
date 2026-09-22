@@ -1,23 +1,28 @@
-//! `member_release_if_present` — original veneers: `thunk_FUN_08214348` @
-//! `0x082201f4` and `0x0822aa34` (**4 bytes each**). The former is one
-//! `b 0x0822aa34`; the assigned veneer is one `b 0x08214348`, whose 32-byte
-//! body reads the owner word at `+0x14` and calls `FUN_081f0530` only when
-//! that word is non-NULL. The next separately linked functions after the two
-//! veneers begin at `0x082201f8` and `0x0822aa38`, respectively.
+//! `member_release_if_present` — original conditional tail target:
+//! `FUN_08214348` @ `0x08214348` (32 bytes). Its three 4-byte veneers are
+//! `thunk_FUN_08214348` @ `0x0820a45c`, `0x082201f4`, and `0x0822aa34`.
+//! The assigned `0x0820a45c` veneer is exactly `b 0x0822aa34`; the next
+//! separately linked function begins at `0x0820a460`.
 //!
-//! **The `0x0822aa34` veneer has 7 direct `bl` call sites, all unconditional,
-//! zero predicated**, verified by decoding every ARM B/BL word in `osos.dec`:
-//! 0x081b757c, 0x081cc8bc, 0x081cc8f0, 0x081cc9fc, 0x081cce0c, 0x081ccf6c,
-//! and 0x08220470. Its two inbound plain-B tails are 0x0820a45c and
-//! 0x082201f4; no aligned image word equals the veneer address, so it is not
-//! directly dispatched as data.
+//! **`0x0820a45c` has 3 direct `bl` call sites, all unconditional and zero
+//! predicated:** `0x0810087c`, `0x081743d0`, and `0x081746bc`, verified by
+//! decoding every ARM B/BL immediate in `osos.dec`. Its one tail branch
+//! reaches the final veneer, which tail-branches to `FUN_08214348`. That body
+//! reads the owner word at `+0x14` and calls `FUN_081f0530` only when it is
+//! non-NULL. The outer veneers do not otherwise change arguments or results.
+//!
+//! The final `0x0822aa34` veneer has 7 direct `bl` call sites, all
+//! unconditional, zero predicated, at 0x081b757c, 0x081cc8bc, 0x081cc8f0,
+//! 0x081cc9fc, 0x081cce0c, 0x081ccf6c, and 0x08220470. Its inbound
+//! plain-B tails are `0x0820a45c` and `0x082201f4`; no aligned image word
+//! equals any veneer address, so they are not directly dispatched as data.
 //!
 //! The member is the list state accepted by the ported
 //! [`crate::cxx::list_cursor_release::list_cursor_release`] operation. The
 //! stock destination leaves an otherwise unspecified `r4` in `r0` after the
 //! call; every verified caller ignores it, and this Rust ABI is `void`.
-//! Deliberate deviation: both stock tail branches are flattened into this
-//! existing Rust body, avoiding a duplicate dispatch seam.
+//! Deliberate deviation: all stock tail branches are flattened into this
+//! existing Rust body, avoiding duplicate dispatch seams.
 
 /// Target-sized prefix of an object holding a releasable member at +0x14.
 /// Pointer-like target fields remain `u32` so this layout is 24 bytes on
