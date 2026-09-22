@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822b054
+    ghidra: FUN_0822b054
+    name: shared_cell_field_copy
+    size: 12
+    sig: "u32 *shared_cell_field_copy(u32 *dst, const u32 *source)"
+    module: cxx/shared_cell_field_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: source
+      FUN_083b50c8: shared_cell_copy_construct_primary
+    notes: >-
+      Raw osos.dec decodes 0x0822b054 as `add r1,r1,#0x800; add
+      r1,r1,#0x94; b 0x083b50c8`; 0x0822b060 is the next real function
+      boundary. Thus this 12-byte thunk copy-constructs dst from the
+      source object's +0x894 shared-cell field. Whole-image A32 decoding
+      finds three inbound unconditional plain BL calls (0x081b70ec,
+      0x081cbe58, and 0x08220434), zero predicated BL calls, and no
+      outbound BL calls. The resolved target is the already ported
+      shared_cell_copy_construct_primary: copy the target-width cell
+      pointer and increment non-NULL cell +4 refcount with u32 wrapping.
+      Rust inlines the verified tail target rather than creating a call
+      seam, keeping this veneer independently hookable; host fixtures use
+      low-address raw-u32 storage because firmware pointers are 32-bit.
   - address: 0x0822b060
     ghidra: thunk_FUN_08214368
     name: object_set_word_0x20

@@ -223,6 +223,10 @@ pub mod hints {
     // 0x7f90_0000: dedicated to cxx/opaque_context_activate's target-width
     // context, child, and selected-record fixture; mappings never unmap.
     pub const OPAQUE_CONTEXT_ACTIVATE: usize = 0x7f90_0000;
+    // 0x7fa0_0000 / 0x7fb0_0000: dedicated to cxx/shared_cell_field_copy's
+    // raw-u32 object, slot, and shared-cell fixtures; mappings never unmap.
+    pub const SHARED_CELL_FIELD_COPY: usize = 0x7fa0_0000;
+    pub const SHARED_CELL_FIELD_COPY_NULL: usize = 0x7fb0_0000;
     pub const BTREE_PARSE_CELL: usize = 0x1000_0000;
     // 0xb100_0000: dedicated to util/bounded_word_bit_set_contains's raw-u32
     // word-bitmap fixture; mappings never unmap, so no other user may share it.

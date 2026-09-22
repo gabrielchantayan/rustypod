@@ -232,6 +232,7 @@ pub mod scaled_cursor;
 pub mod selector_item_base;
 pub mod shared_cell;
 pub mod shared_handle_initialize;
+pub mod shared_cell_field_copy;
 pub mod shared_record_construct;
 pub mod shared_record_create;
 pub mod shared_reference_owner_destroy;
