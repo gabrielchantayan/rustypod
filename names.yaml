@@ -2205,6 +2205,37 @@ functions:
       predicated bl forms or direct tail-B callers. Host tests cover cursor
       advancement, adjacent-halfword preservation, component-bit truncation,
       and an offset RGBA record. match.py structural review was completed.
+  # --- RGB8 cursor reader to RGBA8 ---
+  - address: 0x082605ac
+    ghidra: FUN_082605ac
+    name: rgb8_cursor_read_rgba8
+    size: 68
+    sig: "void rgb8_cursor_read_rgba8(u8 *components, u32 unused, const u8 **input_cursor)"
+    module: cxx/rgb8_cursor_read_rgba8
+    status: ported
+    renames:
+      param_1/r0: components
+      param_2/r1: unused
+      param_3/r2: input_cursor
+      r1: input_then_first_then_zero
+      r3: input_plus_one_then_second
+      r12: input_plus_two_then_third
+      lr: input_plus_three
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte, seventeen-word A32 body from
+      push {lr} at 0x082605ac through pop {pc} at 0x082605ec; the next
+      separately linked function begins at 0x082605f0. Full-image decoding of
+      every aligned A32 B/BL-immediate word finds exactly three inbound plain
+      BL call sites at 0x0825e698, 0x0825e6e8, and 0x08260310, zero predicated
+      BL forms, and zero direct tail-B callers. The leaf advances input_cursor
+      to input+3 through three ordered stores, reads input[0..3), then writes
+      those bytes to components[0..3) followed by a zero alpha byte at
+      components[3]. Host tests cover cursor advancement, alpha initialization,
+      and every overlapping RGBA8 output position. match.py reports the expected
+      LLVM frame and register-allocation differences while retaining the three
+      cursor updates, three byte loads, three byte stores, and alpha clear.
+      Deliberate deviation: volatile Rust accesses preserve the ARM-observed
+      ordering against LLVM optimization.
   # --- RGB8 cursor writer ---
   - address: 0x0826056c
     ghidra: FUN_0826056c
