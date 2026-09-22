@@ -126644,6 +126644,44 @@ functions:
       ported callees directly; host tests use typed seams to observe their order
       and arguments. Reference C: decomp/c/027/082803c0_FUN_082803c0.c.
 
+  # --- controller string-state reconciliation ---
+  - address: 0x0827f484
+    ghidra: FUN_0827f484
+    name: controller_string_state_reconcile
+    size: 172
+    sig: "u32 controller_string_state_reconcile(u8 *controller, u32 alternate)"
+    module: app/controller_string_state_reconcile
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: alternate
+      "[controller + 0x68]": state_result
+      "[controller + 0x6c]": primary_string
+      "[controller + 0x74]": secondary_string
+      "[controller + 0x8c]": retry_count
+      "[controller + 0x94]": mismatch_flag
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_08277484: string_object_destroy
+      FUN_082aad4c: string_object_equals
+      FUN_08276474: string_object_assign_payload
+      FUN_0827ef04: opaque_state_recovery
+    notes: >-
+      Raw osos.dec establishes 172 code bytes from the push at 0x0827f484
+      through the return at 0x0827f52c; 0x0827f530 starts the next independently
+      entered function. Ghidra's 156-byte extent ends before the alternate
+      branch at 0x0827f508. The raw body contains six plain unconditional BL
+      instructions and one predicated BLNE. Whole-image A32 decoding finds
+      exactly three inbound plain BL sites (0x0827eb6c, 0x0827f94c,
+      0x0827fa64) and no predicated inbound BL sites. It clears retry_count,
+      constructs and destroys a temporary four-space StringObject, reports a
+      secondary-string mismatch through string_object_assign_payload, then
+      compares secondary_string with primary_string. alternate returns the
+      inverse equality predicate and records mismatch_flag; otherwise mismatch
+      invokes FUN_0827ef04, stores its result, and clears byte 0x089caf44.
+      FUN_0827ef04 has no verified semantic identity, so target Rust calls its
+      exact address through a narrow typed seam and host tests replace it.
+      Deliberate deviations: none.
+
   # --- volume-limit pending-state refresh ---
   - address: 0x0827f6a8
     ghidra: FUN_0827f6a8
