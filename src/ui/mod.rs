@@ -133,6 +133,7 @@ pub mod record_lookup_value_word;
 pub mod input_state_transition;
 
 pub mod passkey_mask_indicators;
+pub mod passkey_mask_indicator_countdown;
 pub mod mode_state;
 pub mod view_base;
 pub mod view_transition_mode;

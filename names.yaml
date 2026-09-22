@@ -126710,3 +126710,27 @@ functions:
       The resident callee has no verified semantic identity, so target Rust
       calls its exact address and host tests use a narrow seam. No deliberate
       behavior deviation.
+  - address: 0x0827f2ac
+    ghidra: FUN_0827f2ac
+    name: passkey_mask_indicator_countdown_tick
+    size: 36
+    sig: "u32 passkey_mask_indicator_countdown_tick(u32 *object)"
+    module: ui/passkey_mask_indicator_countdown
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x8c/r1": mask_indicator_countdown
+      FUN_0827f098: refresh_passkey_mask_indicators
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte A32 body from
+      0x0827f2ac through pop {r4,pc} at 0x0827f2cc; 0x0827f2d0 begins the
+      next separately linked function. The signed countdown word at +0x8c is
+      decremented and reset to 3 only when the post-decrement value is
+      negative, then refresh_passkey_mask_indicators is called with the
+      original object pointer and 1 is returned. Whole-image A32 decoding
+      finds one unconditional direct BL in the body (0x0827f2c4) and three
+      inbound unconditional plain BL calls (0x0813fb20, 0x08140098, and
+      0x0820ea44); there are no predicated BL calls. Rust deliberately uses
+      u32 word indexing for +0x8c so the target layout remains correct on
+      64-bit hosts; the called view seam supplies the recovered vtable
+      dispatch behavior.
