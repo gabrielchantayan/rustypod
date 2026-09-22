@@ -189,6 +189,60 @@ pub unsafe extern "C" fn template_binding_name_or_controller_default(
         &CONTROLLER_NAME_DEFAULT_CSTR
     }
 }
+/// Marker and replacement literals for
+/// [`template_binding_name_or_firmware_default`].
+///
+/// The raw literal-pool words at 0x08216e90 and 0x08216e94 are respectively
+/// 0x083eae78 and 0x083eaf04. Both point into executable bytes; the marker is
+/// the 17-byte prefix ending at the first following NUL, while the replacement
+/// is an empty C string beginning at a `mov r0,#0` encoding.
+pub const FIRMWARE_NAME_MARKER_CSTR_ADDRESS: usize = 0x083eae78;
+pub const FIRMWARE_NAME_DEFAULT_CSTR_ADDRESS: usize = 0x083eaf04;
+pub static FIRMWARE_NAME_MARKER_CSTR: [u8; 18] = [
+    0x02, 0x11, 0xc1, 0xe3, 0x81, 0x20, 0x21, 0xe0, 0x7f, 0x04, 0x12, 0xe3,
+    0x0e, 0x06, 0x12, 0x03, 0x18, 0x00,
+];
+static FIRMWARE_NAME_DEFAULT_CSTR: u8 = 0;
+
+/// template_binding_name_or_firmware_default — original: `FUN_08216e64` @
+/// 0x08216e64 (44 bytes of code; the next function begins at 0x08216e90).
+/// It has 3 inbound plain `bl` call sites and no predicated inbound `bl`
+/// sites, binary-scanned over `osos.dec`; its body has two unconditional
+/// direct calls and one conditional tail branch.
+///
+/// Calls [`template_binding_name_or_default`] and compares its result with
+/// the literal at [`FIRMWARE_NAME_MARKER_CSTR_ADDRESS`]. Equality returns the
+/// literal at [`FIRMWARE_NAME_DEFAULT_CSTR_ADDRESS`]; inequality tail-calls
+/// the base accessor again with the original `this`.
+///
+/// Deliberate deviation: Rust renders the conditional tail branch as a normal
+/// call. The two executable-byte literals are modeled for host testing; target
+/// builds return the original replacement address.
+///
+/// # Safety
+///
+/// `this` must satisfy [`template_binding_name_or_default`]'s contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn template_binding_name_or_firmware_default(
+    this: *mut u8,
+) -> *const u8 {
+    if strcmp(
+        template_binding_name_or_default(this),
+        FIRMWARE_NAME_MARKER_CSTR.as_ptr(),
+    ) != 0 {
+        return template_binding_name_or_default(this);
+    }
+    #[cfg(target_os = "none")]
+    {
+        FIRMWARE_NAME_DEFAULT_CSTR_ADDRESS as *const u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        &FIRMWARE_NAME_DEFAULT_CSTR
+    }
+}
+
 
 /// ROM address of the one-byte sentinel compared by
 /// [`template_binding_name_or_special_default`] (literal-pool word @
@@ -361,6 +415,30 @@ mod tests {
 
         let result =
             unsafe { template_binding_name_or_controller_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, name.as_ptr());
+    }
+
+    #[test]
+    fn firmware_marker_selects_the_binary_verified_default() {
+        let mut name = FIRMWARE_NAME_MARKER_CSTR;
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result = unsafe { template_binding_name_or_firmware_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, &FIRMWARE_NAME_DEFAULT_CSTR as *const u8);
+        assert_eq!(unsafe { result.read() }, 0);
+        assert_eq!(FIRMWARE_NAME_MARKER_CSTR_ADDRESS, 0x083eae78);
+        assert_eq!(FIRMWARE_NAME_DEFAULT_CSTR_ADDRESS, 0x083eaf04);
+    }
+
+    #[test]
+    fn firmware_marker_prefix_repeats_the_base_accessor_result() {
+        let mut name = FIRMWARE_NAME_MARKER_CSTR;
+        name[16] ^= 1;
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result = unsafe { template_binding_name_or_firmware_default(object.as_mut_ptr()) };
 
         assert_eq!(result, name.as_ptr());
     }
