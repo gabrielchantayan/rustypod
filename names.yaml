@@ -128641,3 +128641,30 @@ functions:
       copy of the supplied bytes. The port returns u32 rather than a host
       pointer deliberately, preserving the target's four-byte field layout
       on 64-bit host tests. No behavioral deviations.
+  # --- Vincent JIT: pixel-component packing ---
+  - address: 0x0823a5d8
+    ghidra: FUN_0823a5d8
+    name: cg_pack_color
+    size: 212
+    sig: "u32 cg_pack_color(i32 pixel_format, const u8 *components)"
+    module: codegen/cg_color_pack
+    status: ported
+    vars: {param_1/r0: pixel_format, param_2/r1: components}
+    notes: >-
+      Raw osos.dec establishes the exact 212-byte, 53-word leaf extent
+      0x0823a5d8..0x0823a6ac: its last instruction is bx lr at
+      0x0823a6a8 and the next real function starts with push at 0x0823a6ac.
+      The body contains no BL instructions. Whole-image decoding of every
+      ARM B/BL immediate finds exactly three direct callers, all
+      unconditional bl (0x0823f8c4, 0x0823f93c, 0x0823f960), and zero
+      predicated BL callers. It packs four RGBA component bytes for selector
+      4 as big-endian RGBA8888, 5 as RGB565, 6 as RGBA4444, and 7 as
+      RGBA5551; all other selectors return zero before dereferencing the
+      component pointer. Deliberate deviation: the Rust match reads bytes in
+      semantic component order rather than the retail register-allocation
+      load order; each selected path reads the same immutable bytes and
+      preserves the output. Host tests cover every format, low-bit
+      truncation, zero components, and unsupported selectors with NULL input.
+      match.py reports the expected LLVM jump-table dispatch and frame in
+      place of retail's comparison branch chain while preserving all four
+      packing masks, shifts, and zero default.
