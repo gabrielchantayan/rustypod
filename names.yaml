@@ -127667,3 +127667,31 @@ functions:
       removes marker only before marker, slash, or backslash; replacement is
       prepended to the retained escaped codepoint when nonzero and changed is
       set. Every direct callee is ported. Deliberate deviation: none.
+
+  # --- vtable slot +0x1c result-word tail dispatch ---
+  - address: 0x08268e34
+    ghidra: FUN_08268e34
+    name: vtable_slot_0x1c_result_word
+    size: 20
+    sig: "u32 vtable_slot_0x1c_result_word(VtableSlot1cObject *object)"
+    module: util/vtable_slot_0x1c_result_word
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x00": vtable
+      "object+0x04": callback_argument
+      "vtable+0x1c": result_word
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte body at
+      0x08268e34..0x08268e47: mov r2,r0; ldr r2,[r2]; ldr r0,[r0,#4];
+      ldr r2,[r2,#0x1c]; bx r2. The next independent function begins at
+      0x08268e48. The body has no direct BL or BLX instructions. Whole-image
+      A32 decoding finds exactly three inbound plain BL callers at 0x08269318,
+      0x082696e4, and 0x082caa64, with zero predicated BL callers. It tail-
+      dispatches vtable slot +0x1c with object word +0x04 and returns that
+      virtual method result. The virtual method identity remains unrecovered,
+      so no callee seam is invented. Deliberate host deviation: host fixtures
+      model the vtable and callback argument as native-width repr(C) fields to
+      avoid truncating callback pointers; target builds use volatile u32 reads
+      at the verified retail offsets. Host test verifies slot-seven selection,
+      argument forwarding, return propagation, and exactly one dispatch.
