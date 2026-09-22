@@ -51,6 +51,9 @@
 //! - `cxx_string_replace_core` — original: `FUN_083d865c` @ 0x083d865c
 //!   (552 bytes, 3 call sites). The class's only splice primitive;
 //!   everything below funnels through it.
+//! - `cxx_string_replace_all` — original: `FUN_0825c444` @ 0x0825c444
+//!   (184 bytes, 3 direct unconditional `bl` call sites). Replaces every
+//!   occurrence of one COW string with another through the mutation core.
 //! - `cxx_string_replace_cstr` — original: `FUN_083d8624` @ 0x083d8624
 //!   (56 bytes, 3 call sites). `replace(pos, n1, const char*, n2)`.
 //! - `cxx_string_append_substr` — original: `FUN_083d8564` @ 0x083d8564
@@ -1024,6 +1027,72 @@ pub unsafe extern "C" fn cxx_string_replace_core(
         (*string).add(new_length as usize).write(0);
     }
     (*string).add(pos as usize)
+}
+
+/// cxx_string_replace_all — original: `FUN_0825c444` @ 0x0825c444
+/// (184 bytes, 3 direct unconditional `bl` call sites: diagnostic dispatch,
+/// [`memcmp`], and [`cxx_string_replace_core`]).
+///
+/// Scans `string` one byte at a time for `needle` and replaces each exact
+/// match with `replacement`. After every splice it deliberately retries the
+/// same offset; replacement text is therefore searchable too. The original
+/// does not special-case an empty needle, so it loops forever for one; this
+/// port preserves that behavior.
+///
+/// Deliberate deviation: the diagnostic/throw dispatch at 0x08266abc is
+/// routed through the existing [`report_error`] seam and falls through when
+/// it returns, matching retailOS's reachable behavior.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_replace_all(
+    _unused: *mut u8,
+    string: *mut *mut u8,
+    needle: *const *mut u8,
+    replacement: *const *mut u8,
+) {
+    let needle_data = *needle;
+    let needle_length = (*data_rep(needle_data)).length;
+    if needle_length > MAX_CAPACITY {
+        report_error(needle_length, MAX_CAPACITY);
+    }
+
+    let mut offset = 0u32;
+    loop {
+        let string_data = *string;
+        let string_length = (*data_rep(string_data)).length;
+        if offset.wrapping_add(needle_length) > string_length {
+            return;
+        }
+        #[cfg(target_os = "none")]
+        let matches = core::ptr::read_volatile(
+            &(memcmp as unsafe extern "C" fn(*const u8, *const u8, usize) -> i32),
+        )(
+            string_data.add(offset as usize),
+            needle_data,
+            needle_length as usize,
+        ) == 0;
+        #[cfg(not(target_os = "none"))]
+        let matches = memcmp(
+            string_data.add(offset as usize),
+            needle_data,
+            needle_length as usize,
+        ) == 0;
+        if matches {
+            let replacement_data = *replacement;
+            let replacement_length = (*data_rep(replacement_data)).length;
+            cxx_string_replace_core(
+                string,
+                offset,
+                needle_length,
+                replacement_data,
+                replacement_length,
+                0,
+                replacement_length,
+            );
+        } else {
+            offset = offset.wrapping_add(1);
+        }
+    }
 }
 
 /// cxx_string_replace_cstr — original: `FUN_083d8624` @ 0x083d8624
@@ -3151,6 +3220,36 @@ mod tests {
             assert_eq!(CODES.load(Ordering::SeqCst), RANGE_ERROR_CODE);
             assert_eq!(text(&mut slot), b"Zabc", "no clamp: source[5] is spliced in");
             (*core::ptr::addr_of_mut!(CXX_STRING_OPS)).report_error = saved;
+        }
+    }
+
+    #[test]
+    fn replace_all_retries_the_splice_offset_and_stops_on_a_miss() {
+        let _guard = arena();
+        unsafe {
+            let mut string: *mut u8 = core::ptr::null_mut();
+            let mut needle: *mut u8 = core::ptr::null_mut();
+            let mut replacement: *mut u8 = core::ptr::null_mut();
+            build(&mut string, b"aaaa");
+            build(&mut needle, b"aa");
+            build(&mut replacement, b"a");
+
+            cxx_string_replace_all(
+                core::ptr::null_mut(),
+                &mut string,
+                &needle,
+                &replacement,
+            );
+            assert_eq!(text(&mut string), b"a", "each replacement is searched again");
+
+            build(&mut needle, b"z");
+            cxx_string_replace_all(
+                core::ptr::null_mut(),
+                &mut string,
+                &needle,
+                &replacement,
+            );
+            assert_eq!(text(&mut string), b"a", "a missing needle leaves the string untouched");
         }
     }
 

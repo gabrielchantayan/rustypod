@@ -31522,6 +31522,27 @@ functions:
       needle ABI. Host tests cover found, miss/no out-store, first match,
       and the exclusive end bound.
 
+  - address: 0x0825c444
+    ghidra: FUN_0825c444
+    name: cxx_string_replace_all
+    size: 184
+    sig: "void cxx_string_replace_all(void *owner, char **string, const char *const *needle, const char *const *replacement)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: string, param_3/r2: needle, param_4/r3: replacement, iVar3/r4: offset, iVar5/r5: needle_length, piVar6/r6: needle, piVar2/r8: replacement}
+    renames: {FUN_08266abc: cxx_new_handler_dispatch, FUN_08030f64: memcmp, FUN_083d865c: cxx_string_replace_core}
+    notes: >-
+      Raw ARM is exactly 46 instructions at 0x0825c444-0x0825c4f8;
+      0x0825c4fc is a literal zero and FUN_0825c504 begins after its
+      mov r0,r0 padding. The function has three direct unconditional bl
+      calls (cxx_new_handler_dispatch, memcmp, and cxx_string_replace_core)
+      and no predicated bl. It scans string byte offsets for a needle COW
+      string, then replaces each match through the existing mutation core
+      without advancing the offset, so newly inserted text is searched too.
+      An empty needle therefore never terminates, deliberately preserved.
+      The length-error dispatch uses the established CXX_STRING_OPS seam;
+      retailOS falls through if that dispatch returns.
+
   - address: 0x0825c870
     ghidra: FUN_0825c870
     name: utf8_encode_codepoint
