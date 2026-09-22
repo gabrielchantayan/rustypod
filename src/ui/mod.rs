@@ -141,6 +141,7 @@ pub mod mode_state;
 pub mod view_base;
 pub mod view_resource_provider_assign;
 pub mod view_transition_mode;
+pub mod view_lifecycle_mode;
 pub mod view_interaction_mode;
 pub mod range_view;
 pub mod range_release;
