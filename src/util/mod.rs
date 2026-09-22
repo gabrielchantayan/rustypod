@@ -183,6 +183,7 @@ pub mod raster_span_setup;
 pub mod replace_owned_pointer;
 pub mod range_state;
 pub mod request_queue_clear_matching_entries;
+pub mod queue_match_and_promote;
 pub mod dynamic_array_remove;
 pub mod unique_word_array_insert;
 pub mod singly_linked_list_remove;
