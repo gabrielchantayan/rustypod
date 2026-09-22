@@ -499,9 +499,20 @@ pub unsafe extern "C" fn pool_alloc(
     core::ptr::null_mut()
 }
 
-/// pool_alloc_v0 veneer — original @ 0x0826f73c (28 bytes): `pool_alloc`
-/// with variant 0 (move-preserving heap entry @ 0x0819d2f0).
+/// pool_alloc_v0 veneer — original: `FUN_0826f73c` @ 0x0826f73c (28 bytes).
+///
+/// Verified call count: three plain unconditional `bl` sites
+/// (0x0817f2c8, 0x08206830, and 0x08206864), with no predicated `bl`
+/// sites. Preserves the caller's `uncached` fourth argument, supplies stack
+/// argument `variant = 0`, and calls `pool_alloc`, selecting the
+/// move-preserving heap entry @ 0x0819d2f0. It returns that result unchanged.
+///
+/// Deliberate deviation: this direct veneer calls the existing Rust
+/// `pool_alloc`, whose heap call reaches the swappable `POOL_OPS.heap_alloc_alt`
+/// seam for host testing.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.pool_alloc_v0")]
+#[inline(never)]
 pub unsafe extern "C" fn pool_alloc_v0(
     pool: *mut PoolControl,
     size: usize,
@@ -1042,6 +1053,21 @@ mod tests {
             BUMP = 8;
             let ptr = pool_alloc_v0(pool, 0x40, 1, 0);
             assert!(!ptr.is_null());
+            assert_eq!(ALLOC_ALT_CALLS, 1);
+            assert_eq!(ALLOC_CALLS, 0);
+        }
+    }
+
+    #[test]
+    fn alloc_v0_preserves_uncached_and_uses_alt_heap_entry() {
+        let _lock = mock_pool();
+        unsafe {
+            let pool = ready_pool();
+            BUMP = 8;
+            let ptr = pool_alloc_v0(pool, 0x40, 2, 1);
+            assert!(!ptr.is_null());
+            assert_eq!(ptr as usize & UNCACHED_MARK, UNCACHED_MARK);
+            assert_eq!(FLUSH_CALLS, 1, "veneer preserves uncached == 1");
             assert_eq!(ALLOC_ALT_CALLS, 1);
             assert_eq!(ALLOC_CALLS, 0);
         }

@@ -10351,6 +10351,33 @@ functions:
       destruction runs even with an already-clear ready flag, leaves the
       control allocation to the caller, and returns the base-dtor result.
 
+  - address: 0x0826f73c
+    ghidra: FUN_0826f73c
+    name: pool_alloc_v0
+    size: 28
+    sig: "void *pool_alloc_v0(PoolControl *pool, size_t size, size_t align_class, size_t uncached)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: size
+      param_3/r2: align_class
+      param_4/r3: uncached
+      param_5/stack: variant (constant 0)
+      FUN_0826f6a0: pool_alloc
+    notes: >-
+      Raw ARM establishes the exact 28-byte extent 0x0826f73c..0x0826f758:
+      mov ip,r3; push {r3,lr}; write zero as the outgoing fifth stack
+      argument; restore uncached to r3; bl pool_alloc 0x0826f6a0; pop
+      {r3,pc}. The next real function begins at 0x0826f758. Decoding every
+      ARM B/BL word in osos.dec finds exactly three inbound direct calls, all
+      unconditional plain bl (0x0817f2c8, 0x08206830, 0x08206864), and no
+      predicated bl calls. It selects pool_alloc variant 0, the
+      move-preserving heap entry 0x0819d2f0, and returns its result unchanged.
+      Rust delegates to the existing pool_alloc port; its indirect
+      POOL_OPS.heap_alloc_alt dispatch is the deliberate host-test seam
+      deviation from the direct retail call.
+
   - address: 0x0826f780
     ghidra: FUN_0826f780
     name: pool_alloc_v1
