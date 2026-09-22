@@ -31695,6 +31695,27 @@ functions:
       source NULL/first-byte branch, strlen-plus-one request, NULL-result
       return, source copy, and +0xc fallback are retained.
 
+  - address: 0x08276400
+    ghidra: FUN_08276400
+    name: string_object_assign_cstr_bounded
+    size: 116
+    sig: "void string_object_assign_cstr_bounded(StringObject *this, const char *source, int max_len)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: this, param_2: source, unaff_r6: max_len, iVar4: requested_size, iVar5: destination}
+    notes: >-
+      Raw words establish the exact 116-byte range 0x08276400..0x08276474:
+      push {r4,r5,r6,lr} through pop {r4,r5,r6,pc}, followed by the next
+      push at 0x08276474. The body has two direct unconditional BL calls
+      (FUN_08275de8, then the 0x08037db0 __rt_memcpy veneer), one
+      unconditional indirect BLX through vtable +0x08, and no predicated BL.
+      NULL source or max_len <= 0 dispatches vtable +0x0c. Otherwise the
+      0x08275de8 loop yields min(strlen(source), max_len)+1; slot +0x08
+      receives (this, size, 0), a NULL result returns, and __rt_memcpy copies
+      size-1 bytes before the helper writes its own terminator. The existing
+      STRING_OBJECT_ASSIGN_CSTR_OPS seam models the unrecovered virtual
+      callees, and the existing __rt_memcpy port replaces the ROM veneer.
+
   - address: 0x08276474
     ghidra: FUN_08276474
     name: string_object_assign_payload
