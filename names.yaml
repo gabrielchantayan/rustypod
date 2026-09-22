@@ -126818,3 +126818,30 @@ functions:
       target export preserves the retail instruction sequence exactly;
       the host implementation deliberately uses byte stores before
       unaligned word writes so unaligned host fixtures remain defined.
+
+  - address: 0x0827cfe4
+    ghidra: FUN_0827cfe4
+    name: video_engine_apply_configuration
+    size: 28
+    sig: "void video_engine_apply_configuration(const u32 *configuration)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: configuration
+      "configuration+0x44/r0": selector
+      FUN_0827cef4: video_configuration_selector
+      FUN_082d1a68: video_configuration_update
+    notes: >-
+      Raw osos.dec establishes the true seven-instruction A32 body at
+      0x0827cfe4..0x0827cfff: it loads configuration+0x44, calls
+      FUN_0827cef4, adds four to the original configuration pointer, restores
+      r4/lr, then tail-branches to FUN_082d1a68. The next real function starts
+      at 0x0827d000 with push {r2,r3,r4,r5,r6,r7,r8,lr}; Ghidra's 108-byte
+      extent is false because it absorbs that successor. The body has one
+      plain outgoing BL and no predicated BL forms. Recovered C caller edges
+      identify three inbound plain BL callers: 0x08142b20, 0x0816e8cc, and
+      0x0825bd98. The two raw callees remain unported verified resident seams;
+      Rust expresses the tail branch as a normal call. Host tests prove that
+      word 11 is selected exactly, including zero and all-bits-set values, and
+      that configuration+0x04 reaches the update wrapper.
+
