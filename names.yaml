@@ -126643,3 +126643,32 @@ functions:
       non-NULL paths clear handle+4 and handle+8. Target builds call the three
       ported callees directly; host tests use typed seams to observe their order
       and arguments. Reference C: decomp/c/027/082803c0_FUN_082803c0.c.
+
+  # --- volume-limit pending-state refresh ---
+  - address: 0x0827f6a8
+    ghidra: FUN_0827f6a8
+    name: volume_limit_state_refresh_if_pending
+    size: 36
+    sig: "u32 volume_limit_state_refresh_if_pending(u8 *object)"
+    module: app/volume_limit_state_refresh_if_pending
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xb4/r0": state
+      "object+0xac/r1": refresh_argument
+      FUN_0827fae0: unnamed_resident_refresh_routine
+    notes: >-
+      Raw osos.dec words establish the true 36-byte A32 body at
+      0x0827f6a8..0x0827f6cb: push {r4,lr}; mov r4,r0; ldr r0,[r0,#0xb4];
+      cmp r0,#3; addeq r1,r4,#0xac; moveq r0,r4; bleq 0x0827fae0; ldr
+      r0,[r4,#0xb4]; pop {r4,pc}. The next independently entered function
+      begins at 0x0827f6cc with push {r4,lr}; Ghidra's 36-byte extent is
+      exact. Whole-image A32 decoding finds exactly three
+      inbound plain unconditional BL call sites (0x08113030, 0x0820e8d8,
+      and 0x08227f80), zero predicated inbound BL forms, zero plain outbound
+      BL forms, and one predicated BLEQ to the unnamed resident routine at
+      0x0827fae0. It reads object+0xb4, calls that routine only for state 3
+      with (object, object+0xac), then reloads and returns object+0xb4.
+      The resident callee has no verified semantic identity, so target Rust
+      calls its exact address and host tests use a narrow seam. No deliberate
+      behavior deviation.

@@ -94,6 +94,7 @@ pub mod controller_scoped_notification_refresh;
 pub mod controller_transition_volume_post;
 pub mod volume_controller_post_commands;
 pub mod volume_controller_post_byte_90_code;
+pub mod volume_limit_state_refresh_if_pending;
 pub mod configuration_entry;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
