@@ -1100,6 +1100,10 @@ pub mod hints {
     // resource fixture; mappings never unmap, so no other user may share this
     // hint.
     pub const RENDER_CONTEXT_RELEASE_RESOURCE: usize = 0xa800_0000;
+    // 0xa900_0000: dedicated to ui/render_context_release_presentation's
+    // raw-u32 context, slot, and presentation fixtures; mappings never unmap,
+    // so no other user may share this hint.
+    pub const RENDER_CONTEXT_RELEASE_PRESENTATION: usize = 0xa900_0000;
     // 0x1337_0000: dedicated to app/transfer_slot_resource_release's raw-u32
     // transfer-slot and resource fixture; mappings never unmap, so no other
     // user may share this hint.

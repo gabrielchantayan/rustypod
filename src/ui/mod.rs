@@ -36,6 +36,7 @@ pub mod render_context;
 pub mod render_context_invalidate;
 pub mod render_context_suspend;
 pub mod render_context_release_resource;
+pub mod render_context_release_presentation;
 pub mod render_owner_clip;
 pub mod render_request_from_descriptor;
 pub mod render_cell_state;
