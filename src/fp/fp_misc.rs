@@ -2579,6 +2579,42 @@ pub unsafe extern "C" fn milliseconds_to_timespec(out: *mut i32, milliseconds: i
     out.write(seconds);
     out.add(1).write(remainder.wrapping_mul(1_000_000));
 }
+/// timespec_add — original: `FUN_08261ed8` @ `0x08261ed8`
+/// (**76 bytes**, 19 ARM instructions through `bx lr` at `0x08261f20`;
+/// the next real function starts at `0x08261f28`, after the literal
+/// `0xc4653600` at `0x08261f24`). A complete ARM B/BL-immediate decode
+/// finds **3 unconditional `bl` callers** (0x08262508, 0x0826251c, and
+/// 0x082627c4), zero predicated call forms, and no calls within its body.
+///
+/// Adds `addend` to `out` as a signed `{ seconds, nanoseconds }` pair.
+/// It first writes the wrapping seconds sum, then writes the wrapping
+/// nanoseconds sum. While nanoseconds is at least 1_000_000_000, it adds
+/// -1_000_000_000 nanoseconds and increments seconds, preserving the
+/// original's normalization and overflow behavior. Returns `out` unchanged
+/// in r0.
+///
+/// Deliberate deviation: none. The firmware uses aligned `ldr`/`str` word
+/// accesses, so this port retains that ABI alignment requirement. Ghidra
+/// misses the r0 passthrough and reports `void`; the raw listing and its
+/// caller at 0x082627c4 establish the pointer return.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.timespec_add")]
+#[inline(never)]
+pub unsafe extern "C" fn timespec_add(out: *mut i32, addend: *const i32) -> *mut i32 {
+    let mut seconds = out.read().wrapping_add(addend.read());
+    out.write(seconds);
+
+    let mut nanoseconds = out.add(1).read().wrapping_add(addend.add(1).read());
+    out.add(1).write(nanoseconds);
+    while nanoseconds >= 1_000_000_000 {
+        nanoseconds = core::hint::black_box(nanoseconds.wrapping_add(-1_000_000_000));
+        seconds = seconds.wrapping_add(1);
+        out.add(1).write(nanoseconds);
+        out.write(seconds);
+    }
+    out
+}
+
 
 /// timespec_subtract — original: `FUN_08262ab8` @ `0x08262ab8`
 /// (96 bytes, binary-verified: 92 bytes of code through `pop
@@ -6120,6 +6156,33 @@ mod tests {
     fn milliseconds_to_timespec_keeps_signed_division_at_i32_bounds() {
         assert_eq!(millis_to_timespec(i32::MAX), [2_147_483, 647_000_000]);
         assert_eq!(millis_to_timespec(i32::MIN), [-2_147_483, -648_000_000]);
+    }
+
+    // ---- timespec_add ----
+
+    fn add_timespec(mut out: [i32; 2], addend: [i32; 2]) -> [i32; 2] {
+        unsafe { timespec_add(out.as_mut_ptr(), addend.as_ptr()) };
+        out
+    }
+
+    #[test]
+    fn timespec_add_normalizes_only_nanoseconds_at_one_billion() {
+        for (out, addend, expected) in [
+            ([3, 999_999_999], [4, 0], [7, 999_999_999]),
+            ([3, 999_999_999], [4, 1], [8, 0]),
+            ([3, -1_000_000_000], [4, 0], [7, -1_000_000_000]),
+            ([0, i32::MAX], [0, 0], [2, 147_483_647]),
+        ] {
+            assert_eq!(add_timespec(out, addend), expected, "{out:?} + {addend:?}");
+        }
+    }
+
+    #[test]
+    fn timespec_add_preserves_same_pair_aliasing() {
+        let mut pair = [1, 600_000_000];
+        let returned = unsafe { timespec_add(pair.as_mut_ptr(), pair.as_ptr()) };
+        assert_eq!(pair, [3, 200_000_000]);
+        assert_eq!(returned, pair.as_mut_ptr());
     }
 
     // ---- timespec_to_milliseconds ----

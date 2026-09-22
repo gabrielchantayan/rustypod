@@ -66180,6 +66180,34 @@ functions:
       Deliberate deviation: Rust gets the ADS r1 remainder through the
       ported __rt_sdivmod out-parameter; output and signed truncation match.
 
+  - address: 0x08261ed8
+    ghidra: FUN_08261ed8
+    name: timespec_add
+    size: 76
+    sig: "i32 *timespec_add(i32 *out, const i32 *addend)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: addend
+      DAT_08261f24: negative_nanoseconds_per_second (-1000000000)
+    notes: >-
+      Raw osos.dec has 19 ARM instructions from 0x08261ed8 through bx lr
+      at 0x08261f20, then the 0xc4653600 literal at 0x08261f24; the next
+      real function starts at 0x08261f28, making the true extent 76 bytes.
+      It adds signed {seconds, nanoseconds} pairs in place, then repeatedly
+      subtracts 1000000000 nanoseconds and increments seconds while the
+      nanoseconds result is at least 1000000000. Every arithmetic operation
+      wraps at 32 bits. The unchanged r0 establishes the pointer return
+      Ghidra omits. Decoding every ARM B/BL immediate finds exactly three
+      direct call sites, all unconditional bl (0x08262508, 0x0826251c,
+      0x082627c4), zero predicated forms, and no body calls. Deliberate
+      deviation: none; the port retains the original aligned ldr/str
+      requirement. Host tests cover the 1000000000 boundary, negative
+      nanoseconds, maximum positive signed nanoseconds, r0 passthrough, and
+      same-pair aliasing. match.py structural review is expected to differ
+      in frame and loop register allocation only.
+
   - address: 0x082621dc
     ghidra: FUN_082621dc
     name: mutex_destroy_return_this
