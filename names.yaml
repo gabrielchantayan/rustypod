@@ -128720,3 +128720,39 @@ functions:
       predicated bl callers. Target builds call the two verified ported
       callees directly; the host-only seam permits isolated caller/order
       tests, with no target behavioral deviation.
+
+  # --- template binding controller-name override ---
+  - address: 0x0822e09c
+    ghidra: FUN_0822e09c
+    name: template_binding_name_or_controller_default
+    size: 52
+    sig: "const char *template_binding_name_or_controller_default(void *this)"
+    module: app/template_binding
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_081346e4: template_binding_name_or_default
+      thunk_FUN_08391e44: strcmp_veneer
+      DAT_0822e0c8: controller_name_marker
+      DAT_0822e0cc: controller_name_default
+    notes: >-
+      Raw osos.dec establishes eleven code words from 0x0822e09c through the
+      pop {r4,pc} at 0x0822e0c4, followed by the two-word literal pool at
+      0x0822e0c8 and 0x0822e0cc; the next separately linked function begins
+      at 0x0822e0d0. The true extent is therefore 52 bytes including its
+      literal pool. Decoding every incoming ARM B/BL immediate finds three
+      plain BL callers and no predicated BL callers. The body has two
+      unconditional direct BL instructions (template_binding_name_or_default
+      and strcmp_veneer) and no predicated BL; its bne is a tail transfer to
+      template_binding_name_or_default, not a third BL.
+
+      The wrapper compares the base accessor result against the recovered
+      "CntrlHistoryFn" marker. Equality returns the default literal; inequality
+      restores this and invokes the base accessor again. The target literals
+      are 0x083f6b08 and 0x083f6b44. The marker is modeled by its recovered
+      bytes; the replacement target is not host-addressable and is represented
+      by a distinct empty-string object on host while target builds return the
+      literal address. This is the only deliberate representation deviation.
+      Host tests cover literal identities, marker substitution, and ordinary
+      name delegation. match.py structural review confirms the base-call,
+      strcmp, conditional base-call/default split.
