@@ -102195,6 +102195,30 @@ functions:
       tests prove the five exact stores, guard-word preservation, returned
       pointer, and source/storage alias ordering.
 
+  - address: 0x0827263c
+    ghidra: FUN_0827263c
+    name: pointer_pair_record_initialize
+    size: 44
+    sig: "PointerPairRecord *pointer_pair_record_initialize(PointerPairRecord *record, u32 first, u32 second)"
+    module: util/pointer_pair_record_initialize
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: first
+      param_3/r2: second
+      "record+0x00..0x06": cleared_prefix
+      "record+0x08": first
+      "record+0x0c": second
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte A32 body at
+      0x0827263c..0x08272668: it clears bytes 5 and 6, stores the two
+      supplied target words, calls FUN_0827259c to clear bytes 0..6, and
+      returns r0 unchanged. A whole-image A32 decode finds three inbound
+      plain unconditional bl calls at 0x0828a120, 0x0828a134, and
+      0x0828bfc8, with no predicated bl calls. FUN_0827259c has no names.yaml
+      entry; its identity is therefore not asserted beyond its verified
+      seven-byte clear behavior.
+
   - address: 0x08272800
     ghidra: FUN_08272800
     name: video_engine_release_one_handle_and_delete
