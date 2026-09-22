@@ -511,6 +511,9 @@ pub mod hints {
     // 0x7fa0_0000: dedicated to cxx/bit_set's next-set-bit search fixture;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const BIT_SET_FIND_NEXT_SET: usize = 0x7fa0_0000;
+    // 0xc000_0000: dedicated to cxx/bit_set's copy-constructor source
+    // fixture; fixture mappings never unmap, so no other user may share it.
+    pub const BIT_SET_COPY_SOURCE: usize = 0xc000_0000;
     // 0xd900_0000: dedicated to cxx/timer_stop_then_clear_bit_set's raw-u32
     // embedded bit-set and timer fixture; mappings never unmap, so no other
     // user may share this hint.

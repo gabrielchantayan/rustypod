@@ -126,6 +126,8 @@
 use crate::cxx::string_object::utf8_next_codepoint;
 use crate::heap::veneers::{free_wrapper, malloc_wrapper};
 use crate::libc::memzero::memzero_aligned;
+use crate::libc::memcpy::memcpy_forward_words;
+
 
 /// The 16-byte bit set. Every field is target-width so the layout stays
 /// exact in 64-bit host tests, where a real pointer would not fit in
@@ -201,6 +203,54 @@ pub unsafe extern "C" fn bit_set_construct(
     bit_set_clear_all(set);
     set
 }
+/// bit_set_copy_construct — original: `FUN_082747e4` @ **0x082747e4**
+/// (**80 bytes**, 0x082747e4..0x08274830; the next separately linked
+/// constructor begins with `push {r4, r5, r6, lr}` at 0x08274834 and no
+/// literal pool intervenes. **3 plain `bl` call sites, 0 predicated `bl`**,
+/// binary-scanned by decoding every B/BL word in `osos.dec`: 0x0816f49c,
+/// 0x0816f4b0, and 0x0816f4c4).
+///
+/// Copies the source set's bit capacity, cardinality, and allocator-tag byte;
+/// allocates a fresh `((bit_capacity + 31) >> 5) * 4` byte word buffer with
+/// that tag; then copies exactly that buffer span. The byte count preserves
+/// the ARM wrapping add. The two stock calls are `malloc_wrapper` @
+/// 0x080eb67c and the IRAM memcpy veneer @ 0x08037df8, which forwards to
+/// [`memcpy_forward_words`].
+///
+/// Deliberate deviation: this calls the already ported memcpy body directly
+/// through a volatile function pointer rather than adding a veneer seam. The
+/// aligned forward-copy behavior is identical and the volatile load prevents
+/// LLVM from replacing the call with a builtin.
+///
+/// # Safety
+///
+/// `destination` must point to writable [`BitSet`] storage. `source` must
+/// point to a live set whose word buffer and the allocation result are valid,
+/// aligned buffers of `((source.bit_capacity + 31) >> 5) * 4` bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bit_set_copy_construct(
+    destination: *mut BitSet,
+    source: *const BitSet,
+) -> *mut BitSet {
+    let bit_capacity = (*source).bit_capacity;
+    let byte_count = ((bit_capacity.wrapping_add(31) >> 5) << 2) as usize;
+    (*destination).bit_capacity = bit_capacity;
+    (*destination).cardinality = (*source).cardinality;
+    (*destination).heap_tag = (*source).heap_tag;
+
+    let allocate =
+        core::ptr::read_volatile(&(malloc_wrapper as unsafe extern "C" fn(usize, usize) -> *mut u8));
+    let words = allocate(byte_count, (*source).heap_tag as usize);
+    (*destination).words = words as usize as u32;
+
+    let copy = core::ptr::read_volatile(
+        &(memcpy_forward_words as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+    );
+    copy(words, (*source).words as usize as *const u8, byte_count);
+    destination
+}
+
 
 /// bit_set_clear_all — original: `FUN_082747b8` @ **0x082747b8**
 /// (**44 bytes**, 0x082747b8..0x082747e4; the next separately linked copy
@@ -577,6 +627,12 @@ mod tests {
             .map(|slab| slab as usize)
             .unwrap_or(0)
     });
+    static COPY_SOURCE_SLAB: LazyLock<usize> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_COPY_SOURCE, WORDS_BYTES)
+            .map(|slab| slab as usize)
+            .unwrap_or(0)
+    });
+
     static CLEAR_ALL_SLAB: LazyLock<usize> = LazyLock::new(|| {
         crate::testing::try_map_u32_slab(crate::testing::hints::BIT_SET_CLEAR_ALL, WORDS_BYTES)
             .map(|slab| slab as usize)
@@ -676,6 +732,71 @@ mod tests {
                 }
             }
         };
+    }
+
+    #[test]
+    fn copy_construct_allocates_and_copies_only_the_rounded_word_span() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let source_words = *COPY_SOURCE_SLAB;
+        let destination_words = *CONSTRUCT_SLAB;
+        if source_words == 0 || destination_words == 0 {
+            assert!(crate::testing::note_missing_u32_fixture("cxx/bit_set"));
+            return;
+        }
+        unsafe {
+            core::ptr::write_bytes(source_words as *mut u8, 0xa5, WORDS_BYTES);
+            (source_words as *mut u32).write(0x0123_4567);
+            (source_words as *mut u32).add(1).write(0x89ab_cdef);
+            core::ptr::write_bytes(destination_words as *mut u8, 0x5a, WORDS_BYTES);
+        }
+        crate::heap::veneers::tests::set_alloc_ret(destination_words as *mut u8);
+        let source = BitSet {
+            bit_capacity: 33,
+            cardinality: 17,
+            words: source_words as u32,
+            heap_tag: 0x3a,
+            reserved: [0xa5; 3],
+        };
+        let mut destination = BitSet {
+            bit_capacity: 0,
+            cardinality: 0,
+            words: 0,
+            heap_tag: 0,
+            reserved: [0x5a; 3],
+        };
+
+        let returned = unsafe { bit_set_copy_construct(&mut destination, &source) };
+
+        assert_eq!(returned, core::ptr::addr_of_mut!(destination));
+        assert_eq!(crate::heap::veneers::tests::alloc_log(), (1, 8, 0x3a));
+        assert_eq!(destination.bit_capacity, 33);
+        assert_eq!(destination.cardinality, 17);
+        assert_eq!(destination.words, destination_words as u32);
+        assert_eq!(destination.heap_tag, 0x3a);
+        assert_eq!(destination.reserved, [0x5a; 3], "copy constructor never writes padding");
+        unsafe {
+            assert_eq!((destination_words as *const u32).read(), 0x0123_4567);
+            assert_eq!((destination_words as *const u32).add(1).read(), 0x89ab_cdef);
+            assert_eq!((destination_words as *const u32).add(2).read(), 0x5a5a_5a5a);
+        }
+        unsafe { (destination_words as *mut u32).write(0xfeed_beef) };
+        let wrapping_source = BitSet {
+            bit_capacity: u32::MAX - 30,
+            cardinality: u32::MAX,
+            words: source_words as u32,
+            heap_tag: 0x78,
+            reserved: [0; 3],
+        };
+        unsafe { bit_set_copy_construct(&mut destination, &wrapping_source) };
+        assert_eq!(crate::heap::veneers::tests::alloc_log(), (2, 0, 0x78));
+        assert_eq!(destination.bit_capacity, u32::MAX - 30);
+        assert_eq!(destination.cardinality, u32::MAX);
+        assert_eq!(destination.heap_tag, 0x78);
+        assert_eq!(
+            unsafe { (destination_words as *const u32).read() },
+            0xfeed_beef,
+            "a wrapping zero-byte copy is inert",
+        );
     }
 
     #[test]
