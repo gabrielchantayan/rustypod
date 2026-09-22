@@ -15,17 +15,13 @@
 use crate::cxx::string::{cxx_string_default_ctor, cxx_string_replace_core};
 use super::xml_decode_codepoint_and_reset::{XmlCodepointDecoderOps, XmlUtf8Decoder, XML_CODEPOINT_DECODER_OPS};
 use super::xml_input_is_exhausted::{xml_input_is_exhausted, XmlInput};
-use super::xml_skip_whitespace::{XmlWhitespaceOps, XML_WHITESPACE_OPS};
+use super::xml_codepoint_is_whitespace::xml_codepoint_is_whitespace;
 
 #[inline(always)]
 unsafe fn decoder_ops() -> XmlCodepointDecoderOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(XML_CODEPOINT_DECODER_OPS)) }
 }
 
-#[inline(always)]
-unsafe fn whitespace_ops() -> XmlWhitespaceOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(XML_WHITESPACE_OPS)) }
-}
 
 /// Collects XML input bytes through either delimiter.
 ///
@@ -53,7 +49,7 @@ pub unsafe extern "C" fn xml_collect_until_delimiter(
         }
         let codepoint = unsafe { super::xml_decode_codepoint_and_reset::xml_decode_codepoint_and_reset(input.cast::<XmlUtf8Decoder>()) };
         if trim_trailing_whitespace != 0
-            && unsafe { (whitespace_ops().is_xml_whitespace)(input_slot.cast(), codepoint, codepoint) } != 0
+            && unsafe { xml_codepoint_is_whitespace(input_slot.cast(), codepoint, codepoint) } != 0
             && unsafe { (*output).sub(4).cast::<u32>().read() } != 0
         {
             return;
@@ -71,13 +67,11 @@ mod tests {
     use super::*;
     use super::super::xml_decode_codepoint_and_reset::{DEFAULT_XML_CODEPOINT_DECODER_OPS, XML_CODEPOINT_DECODER_OPS_LOCK};
     use super::super::xml_input_is_exhausted::{DEFAULT_XML_INPUT_OPS, XmlInputOps, XML_INPUT_OPS};
-    use super::super::xml_skip_whitespace::DEFAULT_XML_WHITESPACE_OPS;
     use core::ptr;
 
     static mut CODEPOINTS: [u32; 4] = [0; 4];
     static mut INDEX: usize = 0;
     static mut EXHAUSTED_AFTER: usize = 0;
-    static mut RESETS: u32 = 0;
 
     unsafe extern "C" fn next_codepoint(_input: *mut XmlUtf8Decoder) -> u32 {
         unsafe {
@@ -91,11 +85,6 @@ mod tests {
         unsafe { u32::from(INDEX >= EXHAUSTED_AFTER) }
     }
 
-    unsafe extern "C" fn whitespace(_slot: *mut *mut u8, codepoint: u32, duplicate: u32) -> u32 {
-        assert_eq!(codepoint, duplicate);
-        unsafe { RESETS += 1; }
-        u32::from(matches!(codepoint, 0x20 | 9 | 10 | 13))
-    }
 
     fn install(values: &[u32], exhausted_after: usize) {
         unsafe {
@@ -103,10 +92,8 @@ mod tests {
             CODEPOINTS[..values.len()].copy_from_slice(values);
             INDEX = 0;
             EXHAUSTED_AFTER = exhausted_after;
-            RESETS = 0;
             XML_CODEPOINT_DECODER_OPS = XmlCodepointDecoderOps { decode_codepoint: next_codepoint };
             XML_INPUT_OPS = XmlInputOps { is_exhausted: exhausted };
-            XML_WHITESPACE_OPS = XmlWhitespaceOps { is_xml_whitespace: whitespace };
         }
     }
 
@@ -114,7 +101,6 @@ mod tests {
         unsafe {
             XML_CODEPOINT_DECODER_OPS = DEFAULT_XML_CODEPOINT_DECODER_OPS;
             XML_INPUT_OPS = DEFAULT_XML_INPUT_OPS;
-            XML_WHITESPACE_OPS = DEFAULT_XML_WHITESPACE_OPS;
         }
     }
 
@@ -127,7 +113,6 @@ mod tests {
         let mut output = ptr::null_mut();
         unsafe { xml_collect_until_delimiter(&mut output, &mut slot, b'>' as u32, 0, 1); }
         assert_eq!(unsafe { INDEX }, 1);
-        assert_eq!(unsafe { RESETS }, 0);
         restore();
     }
 
@@ -140,7 +125,6 @@ mod tests {
         let mut output = ptr::null_mut();
         unsafe { xml_collect_until_delimiter(&mut output, &mut slot, b'>' as u32, b'/' as u32, 1); }
         assert_eq!(unsafe { INDEX }, 1);
-        assert_eq!(unsafe { RESETS }, 0);
         restore();
     }
 

@@ -31542,6 +31542,26 @@ functions:
       stores only +0, +1, +3, +4; destination[2] is untouched instead
       of receiving a third continuation byte. The function returns void.
 
+  - address: 0x0825d2fc
+    ghidra: FUN_0825d2fc
+    name: xml_codepoint_is_whitespace
+    size: 28
+    sig: "unsigned int xml_codepoint_is_whitespace(void **reader_slot, unsigned int codepoint, unsigned int duplicate_codepoint)"
+    module: util/xml_codepoint_is_whitespace
+    status: ported
+    renames:
+      param_1/r0: reader_slot (ignored)
+      param_2/r1: codepoint
+      param_3/r2: duplicate_codepoint (ignored)
+    notes: >-
+      Raw osos.dec words at 0x0825d2fc..0x0825d314 are cmp r1,#0x20;
+      cmpne r1,#9; cmpne r1,#0xd; cmpne r1,#0xa; moveq r0,#1; movne r0,#0;
+      bx lr. Thus it reads only r1 and returns one exactly for XML's ASCII
+      whitespace codepoints U+0020, U+0009, U+000D, and U+000A. The next
+      function begins at 0x0825d318. Raw inspection of all three inbound
+      calls at 0x0825d330, 0x0825d36c, and 0x0825d450 finds plain
+      unconditional bl instructions and no predicated bl call sites.
+
   - address: 0x0825d318
     ghidra: FUN_0825d318
     name: xml_decode_skip_whitespace
@@ -31554,7 +31574,7 @@ functions:
       uVar1/r2/r0: codepoint
       FUN_0825d5dc: xml_decode_codepoint (unported seam)
       FUN_0825d7c4: xml_decode_codepoint_and_reset (ported)
-      FUN_0825d2fc: xml_codepoint_is_whitespace (unported seam)
+      FUN_0825d2fc: xml_codepoint_is_whitespace (ported, called direct)
     notes: >-
       Raw ARM is exactly 0x0825d318..0x0825d353: it loads *reader_slot and
       calls 0x0825d5dc once without clearing decoder state, duplicates the
@@ -31607,7 +31627,7 @@ functions:
       param_1/r0/r4: reader_slot
       uVar1/r2/r0: codepoint
       FUN_0825d7c4: xml_decode_codepoint_and_reset (ported)
-      FUN_0825d2fc: xml_codepoint_is_whitespace (unported seam)
+      FUN_0825d2fc: xml_codepoint_is_whitespace (ported, called direct)
     notes: >-
       Raw ARM is exactly 0x0825d354..0x0825d383: save reader_slot,
       load *reader_slot, call 0x0825d7c4, duplicate its codepoint into

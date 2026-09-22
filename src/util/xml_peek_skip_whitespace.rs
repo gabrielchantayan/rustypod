@@ -109,9 +109,6 @@ mod tests {
         XmlCodepointDecoderOps, DEFAULT_XML_CODEPOINT_DECODER_OPS,
         XML_CODEPOINT_DECODER_OPS, XML_CODEPOINT_DECODER_OPS_LOCK,
     };
-    use super::super::xml_skip_whitespace::{
-        XmlWhitespaceOps, DEFAULT_XML_WHITESPACE_OPS, XML_WHITESPACE_OPS,
-    };
     use core::ptr;
     use std::sync::MutexGuard;
 
@@ -128,13 +125,6 @@ mod tests {
         decoded[index]
     }
 
-    unsafe extern "C" fn xml_whitespace_predicate(
-        _reader_slot: *mut *mut u8,
-        codepoint: u32,
-        _duplicate_codepoint: u32,
-    ) -> u32 {
-        u32::from(matches!(codepoint, 0x20 | 0x09 | 0x0d | 0x0a))
-    }
 
     unsafe extern "C" fn position_before_current(_reader: *mut XmlUtf8Decoder) -> u32 {
         let calls = unsafe { ptr::addr_of!(POSITION_CALLS).read_volatile() };
@@ -170,9 +160,6 @@ mod tests {
             XML_CODEPOINT_DECODER_OPS = XmlCodepointDecoderOps {
                 decode_codepoint: queued_next_codepoint,
             };
-            XML_WHITESPACE_OPS = XmlWhitespaceOps {
-                is_xml_whitespace: xml_whitespace_predicate,
-            };
             XML_PEEK_OPS = XmlPeekOps {
                 position_before_current,
                 restore_position,
@@ -189,7 +176,6 @@ mod tests {
     fn restore(guard: MutexGuard<'static, ()>) {
         unsafe {
             XML_CODEPOINT_DECODER_OPS = DEFAULT_XML_CODEPOINT_DECODER_OPS;
-            XML_WHITESPACE_OPS = DEFAULT_XML_WHITESPACE_OPS;
             XML_PEEK_OPS = DEFAULT_XML_PEEK_OPS;
             ptr::addr_of_mut!(DECODED).write_volatile([0; 3]);
             ptr::addr_of_mut!(DECODE_INDEX).write_volatile(0);

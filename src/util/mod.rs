@@ -304,6 +304,7 @@ pub mod xor_c6_in_place;
 pub mod xor_6b_in_place;
 pub mod xor_8d_in_place;
 pub mod xml_collect_until_delimiter;
+pub mod xml_codepoint_is_whitespace;
 pub mod xml_decode_codepoint_and_reset;
 pub mod xml_decode_skip_whitespace;
 pub mod xml_peek_skip_whitespace;
