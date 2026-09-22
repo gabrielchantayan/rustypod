@@ -36967,24 +36967,21 @@ functions:
       two bodies are byte-identical modulo bl displacements except for
       the final drop's implementation disposal. Where the sibling runs
       vtable slot 7 (+0x1c) and never frees the impl, this instantiation
-      OWNS it: the NULL-guarded impl word is passed through the disposal
-      @ 0x0827948c (44 bytes, unported: calls virtual slot 1 (+4) on the
-      impl's first-word callback interface when non-NULL, then the ported
-      string_object_destroy @ 0x08277484 on the two-word StringObject
-      member at impl+4, returning this) and the disposal's return feeds
-      tag-2 operator_delete @ 0x082aad24 directly. Everything else
-      matches the sibling: NULL body early-out, wrapping subs decrement
-      (zero underflows to -1 and takes the shared path - tested),
-      non-final drop unlocks and NULLs the slot, final drop unlocks
-      through a fresh slot load, then mutex_delete @ 0x0807f650 plus
-      tag-2 delete on the reloaded mutex word, clears the mutex field,
-      tag-2-deletes the body, NULLs the slot. Target dispatch to the
-      unported 0x0827948c goes through a transmuted direct call
-      (release.rs pattern); host builds model it faithfully - its whole
-      chain is data-driven or ported. Codegen deviation: LLVM inlines
-      the ported mutex helpers and deletes (ROM_KERNEL dispatch via
-      literal-pool blx included), so match.py shows a larger body with
-      the same guard/decrement/dispose/unlock/teardown structure.
+      OWNS it: the NULL-guarded impl word is passed through the ported
+      implementation_dispose @ 0x0827948c (44 bytes: calls virtual slot 1
+      (+4) on the impl's first-word callback interface when non-NULL, then
+      the ported string_object_destroy @ 0x08277484 on the two-word
+      StringObject member at impl+4, returning this) and the disposal's
+      return feeds tag-2 operator_delete @ 0x082aad24 directly. Everything
+      else matches the sibling: NULL body early-out, wrapping subs decrement
+      (zero underflows to -1 and takes the shared path - tested), non-final
+      drop unlocks and NULLs the slot, final drop unlocks through a fresh slot
+      load, then mutex_delete @ 0x0807f650 plus tag-2 delete on the reloaded
+      mutex word, clears the mutex field, tag-2-deletes the body, NULLs the
+      slot. Codegen deviation: LLVM inlines the ported mutex helpers and
+      deletes (ROM_KERNEL dispatch via literal-pool blx included), so
+      match.py shows a larger body with the same
+      guard/decrement/dispose/unlock/teardown structure.
 
   - address: 0x0839d198
     ghidra: FUN_0839d198
@@ -62698,6 +62695,35 @@ functions:
       match.py structural: `push {fp,lr}; mov fp,sp; pop {fp,lr};
       b string_object_destroy` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
+
+  - address: 0x0827948c
+    ghidra: FUN_0827948c
+    name: implementation_dispose
+    size: 44
+    sig: "void *implementation_dispose(void *implementation)"
+    module: cxx/handle
+    status: ported
+    vars:
+      param_1: implementation
+      iVar1: callback
+      iVar2: callback_vtable
+    renames:
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec words establish the 44-byte body from push {r4,lr} at
+      0x0827948c through pop {r4,pc} at 0x082794b4; the next separately
+      linked function begins at 0x082794b8 with ldr r1,[r0,#4]. Decoding
+      direct ARM branch words finds 3 inbound unconditional BL call sites
+      and no predicated BL call sites. The body makes no plain BL calls:
+      its sole dynamic call is predicated blxne r1 after loading virtual
+      slot 1 (+4) from the non-NULL callback interface at implementation
+      +0. It then calls the ported string_object_destroy @ 0x08277484 on
+      the embedded StringObject at target offset +4 and returns the
+      original implementation pointer. Host pointer fields widen, so the
+      host fixture and implementation place the StringObject one host word
+      after the callback; on ARM that remains exactly +4. Host tests cover
+      callback dispatch and the NULL-callback path, including the embedded
+      string payload release and returned pointer.
 
   # --- the framework's scoped context token (vtable 0x089a5b30) ---
 
