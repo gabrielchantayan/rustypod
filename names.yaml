@@ -129100,3 +129100,33 @@ functions:
       absolute literal veneer to preserve the tail-transfer ABI after moving
       out of the original PC-relative branch range; the host seam verifies r0
       forwarding and return propagation.
+
+  - address: 0x08218604
+    ghidra: FUN_08218604
+    name: resource_record_find
+    size: 132
+    sig: "u32 resource_record_find(void *owner, void *resource, u32 key, u32 extra)"
+    module: app/resource_record_find
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: resource
+      param_3/r2: key
+      param_4/r3: extra
+      uVar2/r4: result
+      FUN_081d0b48: owner_resource_lookup
+      FUN_08184b24: load_cros_resource_list
+      FUN_08184cf4: opaque_collection_entry_data_at
+    notes: >-
+      Raw extent is 0x08218604..0x08218688: 33 A32 instruction words ending
+      in pop {r3,r4,r5,pc}; the next separately linked code begins at
+      0x08218688. Complete raw A32 BL decoding finds three inbound plain BL
+      calls at 0x08218958, 0x082189f8, and 0x08218a3c, with zero predicated
+      BL forms. The body has three outgoing plain BL calls and one predicated
+      indirect blxne virtual release. When owner +0x17c matches resource it
+      calls unported 0x081d0b48 with owner +0x178, key twice, resource, and
+      extra. Otherwise it constructs a CROS list from resource +0x68, accepts
+      only a positive signed elem4 vector count, obtains entry zero data,
+      performs the original data +8 byte read, and releases the temporary
+      through vtable slot +4. The unported direct lookup remains a fixed target
+      address with a host seam; host temporary owners use native-width vtables.
