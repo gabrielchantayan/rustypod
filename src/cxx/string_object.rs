@@ -1120,6 +1120,41 @@ pub unsafe extern "C" fn string_object_insert_utf16_cstr(
     insert_utf16_units(this, index, source, count);
 }
 
+/// string_object_replace_codepoint — original: `FUN_08276840` @
+/// `0x08276840` (156 bytes, `0x08276840..0x082768dc`; the distinct next
+/// entry is `string_object_append_cstr` at `0x082768dc`). Raw ARM decoding
+/// verifies three inbound direct `bl` calls, all unconditional and zero
+/// predicated; the body has six unconditional direct `bl` calls.
+///
+/// A zero replacement returns before reading the object. For a nonzero
+/// replacement, resolve `index`; a NULL result or terminator returns. When
+/// the decoded current and replacement codepoints have equal encoded widths,
+/// rewrite in place. Otherwise erase exactly one codepoint and insert the
+/// replacement's low UTF-16 code unit, retaining the retail truncation on the
+/// resize path. The existing virtual allocator boundary is used by erase and
+/// insertion; no additional deviation is introduced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_replace_codepoint(
+    this: *mut StringObject, index: i32, replacement: u32,
+) {
+    if replacement == 0 { return; }
+
+    let mut current_cursor = string_object_codepoint_ptr(this, index);
+    if current_cursor.is_null() || current_cursor.read() == 0 { return; }
+
+    let destination = current_cursor as *mut u8;
+    let current = utf8_next_codepoint(&mut current_cursor);
+    if utf8_codepoint_byte_width(current) == utf8_codepoint_byte_width(replacement) {
+        let mut destination = destination;
+        super::string_encoding::utf8_write_codepoint(&mut destination, replacement);
+    } else {
+        string_object_erase(this, index, 1);
+        let code_unit = replacement as u16;
+        string_object_insert_utf16(this, index, &code_unit, 1);
+    }
+}
+
 /// string_object_erase — original: FUN_08276900 @ 0x08276900 (212 bytes).
 /// Read the payload first, returning for NULL payload, negative index or
 /// nonpositive count. Walk to the start and end by literal-NUL-guarded
@@ -5452,6 +5487,42 @@ pub(crate) mod tests {
                 recording_insert_allocate;
         }
         guard
+    }
+
+    #[test]
+    fn replace_codepoint_rewrites_equal_width_sequences_without_allocating() {
+        let mut text = [b'A', 0xc2, 0xa2, b'Z', 0];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: text.as_mut_ptr(),
+        };
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe { string_object_replace_codepoint(&mut object, 1, 0x00e9) };
+
+        assert_eq!(&text, &[b'A', 0xc3, 0xa9, b'Z', 0]);
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() });
+    }
+
+    #[test]
+    fn replace_codepoint_resizes_through_low_utf16_code_unit() {
+        let mut old = [b'x', 0xc2, 0xa2, b'y', 0, 0, 0, 0];
+        let mut relocated = [0xa5u8; 32];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: old.as_mut_ptr(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = insert_bench(relocated.as_mut_ptr());
+
+        unsafe {
+            string_object_replace_codepoint(this, 1, 0x0100_0041);
+            assert_eq!(core::slice::from_raw_parts(object.payload, 4), b"xAy\0");
+        }
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 1), (this as usize, 32, 1)]
+        );
     }
     static mut PATH_CHAIN_BUFFERS: [[u8; 32]; 8] = [[0; 32]; 8];
     static mut PATH_CHAIN_ALLOCATION_INDEX: usize = 0;

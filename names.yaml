@@ -77402,6 +77402,34 @@ functions:
       that count from index zero. NUL, mismatch, NULL payload and malformed
       decoding retain retail behavior. ARM review: 32 LLVM instructions versus
       25 ADS; equivalent cursor spill, decode loop, and conditional erase.
+  - address: 0x08276840
+    ghidra: FUN_08276840
+    name: string_object_replace_codepoint
+    size: 156
+    sig: "void string_object_replace_codepoint(StringObject *this, int index, unsigned int replacement)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: "this"
+      param_2: "index"
+      param_3: "replacement"
+      local_1c: "current_cursor"
+      local_20: "destination"
+    notes: >-
+      Raw osos.dec words establish the 156-byte all-code body
+      0x08276840..0x082768dc; the next real entry begins at 0x082768dc.
+      All three inbound direct BL instructions are unconditional, with zero
+      predicated BL references. The body issues six unconditional direct BL
+      calls: string_object_codepoint_ptr, utf8_next_codepoint,
+      utf8_codepoint_byte_width twice, then either utf8_write_codepoint or
+      string_object_erase followed by string_object_insert_utf16. A zero
+      replacement returns before object access. Nonzero replacement resolves
+      index, rejects NULL/terminator, and rewrites in place when encoded widths
+      match. A width change erases one codepoint and inserts the replacement's
+      low UTF-16 code unit; this 16-bit truncation is retained. The existing
+      virtual allocator seam is inherited from erase and insertion; no new
+      deliberate deviation.
+
   - address: 0x082768dc
     ghidra: FUN_082768dc
     name: string_object_append_cstr
