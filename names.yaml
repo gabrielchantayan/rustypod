@@ -126845,3 +126845,28 @@ functions:
       word 11 is selected exactly, including zero and all-bits-set values, and
       that configuration+0x04 reaches the update wrapper.
 
+  - address: 0x0827c704
+    ghidra: FUN_0827c704
+    name: vtable_089a8414_construct
+    size: 64
+    sig: "void *vtable_089a8414_construct(void *storage, const u8 *payload)"
+    module: cxx/vtable_089a8414_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: payload
+      DAT_0827c744: VTABLE_089A8414
+      FUN_0827c2ec: opaque_base_construct
+      FUN_0827ca64: opaque_member_construct
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 body at
+      0x0827c704..0x0827c743. Literal 0x0827c744 is 0x089a8414; the next
+      independently entered function starts at 0x0827c748. The body contains
+      two plain direct BL calls (to 0x0827c2ec and 0x0827ca64), zero
+      predicated BL calls, and one indirect BLX through vtable slot +0x28.
+      It base-constructs storage with selector zero, installs 0x089a8414,
+      obtains a value through slot +0x28, constructs the embedded member at
+      +0xa8 from that value and payload, and returns the member result
+      rebased by -0xa8. Host tests use explicit seams for the two unported
+      direct callees and target-width virtual dispatch; target builds call
+      the verified retail addresses directly. No target behavior deviation.
