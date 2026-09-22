@@ -64532,10 +64532,10 @@ functions:
       against this symbol; it should differ only in the crate frame and
       the volatile dispatch seam.
 
-  - address: 0x082640a0
-    ghidra: FUN_082640a0
+  - address: 0x082641a4
+    ghidra: FUN_082641a4
     name: draw_state_line_to
-    size: 140
+    size: 112
     sig: "void draw_state_line_to(u8 *draw_state, i32 x, i32 y)"
     module: cxx/draw_state_line
     status: ported
@@ -64545,22 +64545,19 @@ functions:
       param_3/r2: y (local line endpoint y)
       FUN_080e7870: draw_line_engine (unported dispatcher)
     notes: >-
-      Exact 140-byte extent verified from raw ARM: 0x082640a0 starts
-      `push {r4,r5,lr}` and 0x0826412c starts the distinct next
-      function with `push {r4,r5,r6,r7,lr}`. Five direct call sites
-      (0x0826ce88, 0x0826cecc, 0x0826cfcc, 0x0826d2ec, 0x0826d418)
-      are unconditional bl instructions; no predicated bl or tail b
-      reaches it. It reads current point words +0/+4 as the first local
-      endpoint, translates both endpoints by origin +0x2c/+0x30 with
-      wrapping adds, calls 0x080e7870 with surface +0x1c plus 4,
-      thickness 1, foreground +0x11, style +0x10, clip +0x34, and
-      scaled selector 0, then writes the supplied endpoint to +0/+4
-      after the call. This establishes line_to as the current-point
-      sibling of draw_state_line. Deliberate deviation: the verified
-      unported engine uses the existing DRAW_STATE_LINE_OPS volatile seam;
-      target builds invoke its retail address and host tests use a
-      recorder. Host tests cover current-point consumption and post-call
-      update, wrapping coordinates, and record-tail preservation.
+      Exact 112-byte extent verified from osos.dec: 0x082641a4 begins
+      `push {r4,r5,r6,lr}` and 0x08264214 starts the distinct next
+      function with `stm r0,{r1,r2}`. The function has one unconditional
+      outgoing bl to 0x080e7870; its three direct inbound bl sites are
+      unconditional, with zero predicated bl forms. It reads current point
+      words +0/+4 as the first local endpoint, translates both endpoints by
+      origin +0x2c/+0x30 with wrapping adds, calls the line engine with
+      surface +0x1c plus 4, thickness 1, foreground +0x11, style +0x10,
+      clip +0x34, and scaled selector 0, then stores the supplied endpoint
+      to +0/+4 after the call. The current-point use and `move_to` sibling
+      establish line_to semantics. Deliberate deviation: the unported engine
+      uses DRAW_STATE_LINE_OPS; target builds call 0x080e7870 and host tests
+      install a recorder.
   - address: 0x08087870
     ghidra: FUN_08087870
     name: draw_horizontal_line

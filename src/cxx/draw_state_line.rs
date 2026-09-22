@@ -6,9 +6,9 @@
 //! record (cxx/draw_state.rs): draws a one-pixel-wide foreground line
 //! between two record-local points and makes the second point the
 //! record's current point. Its adjacent helpers are `draw_state_line_to`
-//! @ 0x082641a4 (112 bytes, unported), which draws from that current
-//! point, and `draw_state_move_to` @ 0x08264214 (8 bytes), which changes
-//! the current point without drawing.
+//! @ 0x082641a4 (112 bytes), which draws from that current point, and
+//! `draw_state_move_to` @ 0x08264214 (8 bytes), which changes the current
+//! point without drawing.
 //!
 //! Decoded from the raw ARM at 0x0826412c:
 //!
@@ -269,19 +269,21 @@ pub unsafe extern "C" fn draw_state_line(this: *mut u8, x1: i32, y1: i32, x2: i3
     state.current_y = y2;
 }
 
-/// draw_state_line_to — original: `FUN_082640a0` @ 0x082640a0 (140 bytes;
-/// 5 unconditional `bl` call sites, zero predicated `bl`, binary-scanned).
+/// draw_state_line_to — original: `FUN_082641a4` @ 0x082641a4 (112 bytes;
+/// `0x082641a4..0x08264214`; **3 plain `bl` call sites and 0 predicated
+/// `bl` call sites**, verified from the raw ARM branch encodings).
 ///
-/// The complete extent is 0x082640a0..0x0826412c: raw ARM starts with
-/// `push {r4,r5,lr}` and the next real function starts at 0x0826412c.
-/// It loads the record's current point as the first local endpoint, adds
-/// both endpoints to the +0x2c/+0x30 origin with wrapping ARM `add`, calls
-/// the same unported line engine as [`draw_state_line`], then writes the
-/// supplied endpoint to current-point words +0/+4 after that call.
+/// Decoded raw instructions load the current point from +0/+4, translate
+/// it and the supplied local endpoint by the +0x2c/+0x30 origin using
+/// wrapping ARM `add`, then call the existing line-engine dispatcher with
+/// a one-pixel thickness, foreground +0x11, style +0x10, clip +0x34, and
+/// zero scaled selector. `stm r4,{r5,r6}` updates the current point only
+/// after the engine returns.
 ///
-/// Deliberate deviations: `FUN_080e7870` remains the existing
-/// [`DRAW_STATE_LINE_OPS`] seam. Target builds call its verified retail
-/// address; host tests install its recorder.
+/// Deliberate deviation: `FUN_080e7870` remains the existing
+/// [`DRAW_STATE_LINE_OPS`] volatile seam. Target builds call its verified
+/// retail address; host tests install a recorder. The fixed-width surface
+/// field is read as `u32`, not a host pointer.
 ///
 /// # Safety
 ///
@@ -522,6 +524,22 @@ mod tests {
             assert_eq!((seen.x2, seen.y2), (142, 860));
             assert_eq!(seen.point_during_call, (-777, 555));
             assert_eq!((record.state.current_x, record.state.current_y), (42, 900));
+        });
+    }
+
+    #[test]
+    fn line_to_forwards_a_degenerate_current_point_without_preupdating_it() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            let base = record.base();
+
+            unsafe { draw_state_line_to(base, -777, 555) };
+
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!((seen.x1, seen.y1), (-677, 515));
+            assert_eq!((seen.x2, seen.y2), (-677, 515));
+            assert_eq!(seen.point_during_call, (-777, 555));
+            assert_eq!((record.state.current_x, record.state.current_y), (-777, 555));
         });
     }
 
