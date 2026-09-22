@@ -129154,3 +129154,32 @@ functions:
       claimed: target Rust calls its verified address, while host tests use a
       locked seam. Rust deliberately lowers the predicated BLX and tail branch
       to ordinary conditional and direct-call control flow.
+
+  - address: 0x082177fc
+    ghidra: FUN_082177fc
+    name: construct_controller_timer_pair
+    size: 140
+    sig: "void *construct_controller_timer_pair(void *this, const char *name)"
+    module: app/controller_timer_pair_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+      r4: controller
+      DAT_08217888: controller_timer_pair_vtable
+      FUN_08134db4: silver_controller_construct
+      FUN_082aadd4: operator_new
+      FUN_0811108c: timer_schedule_shim
+    notes: >-
+      Raw osos.dec establishes the exact 140-byte extent
+      0x082177fc..0x08217887: 34 A32 instruction words through pop
+      {r4,pc}, followed by vtable literal 0x08993760 at 0x08217888; the
+      next real function begins at 0x0821788c. The body has five plain
+      unconditional bl instructions and zero predicated bl instructions:
+      one silver_controller_construct call, two operator_new(0x2c) calls,
+      and two timer_schedule_shim(controller, timer, 0, 0) calls. It
+      installs the vtable, clears the derived +0xb0..+0xc8 fields while
+      retaining two allocated timer pointers at +0xb8 and +0xc4, then
+      returns the constructed controller. Deliberate deviation: host builds
+      dispatch through explicit test seams; target builds call the existing
+      verified Rust ports directly.

@@ -1095,6 +1095,9 @@ pub mod hints {
     // 0x8c00_0000: dedicated to app/controller_timer_pair_destruct's raw-u32
     // controller, timer, and optional-object fixture; mappings never unmap.
     pub const CONTROLLER_TIMER_PAIR_DESTRUCTOR: usize = 0x8c00_0000;
+    // 0x8d00_0000: dedicated to app/controller_timer_pair_construct's raw-u32
+    // controller and timer fixture; mappings never unmap.
+    pub const CONTROLLER_TIMER_PAIR_CONSTRUCT: usize = 0x8d00_0000;
     pub const TUNING_TIMER_SEQUENCE: usize = 0xb800_0000;
     // 0x9a00_0000: dedicated to cxx/string_object's case-folded
     // resource-construction fixture; it carries the provider-chain head as
