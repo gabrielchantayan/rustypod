@@ -371,6 +371,7 @@ pub mod request_callback_state_reset;
 pub mod standard_request_validate;
 pub mod pending_object_pair_release;
 pub mod pending_object_release;
+pub mod pending_payload_list_clear;
 pub mod queue_complete;
 pub mod tail_call_retail_queue_complete;
 pub mod completion_gate;
