@@ -128152,3 +128152,29 @@ functions:
       pop leaves the callee's r0 unchanged; Rust returns that observable ABI
       value. The callee has no recovered identity, so target code calls its
       verified address and host tests use a replaceable seam.
+  - address: 0x08261ce8
+    ghidra: FUN_08261ce8
+    name: clear_opaque_record_state
+    size: 28
+    sig: "void clear_opaque_record_state(void *record)"
+    module: util/clear_opaque_record_state
+    status: ported
+    renames:
+      param_1/r0: record
+      "record+0x0": status
+      "record+0x1": mode
+      "record+0x4": owner
+      "record+0x8": pending
+      "record+0xc": payload
+    notes: >-
+      Raw osos.dec establishes the exact seven-instruction A32 body at
+      0x08261ce8..0x08261d03: mov r1,#0; strb r1,[r0]; strb r1,[r0,#1];
+      str r1,[r0,#4]; strb r1,[r0,#8]; str r1,[r0,#12]; bx lr. The next
+      independently entered function starts at 0x08261d04 with push {r4,lr}.
+      Full-image A32 decoding finds three inbound plain BL call sites
+      (0x08261828, 0x08261aa4, 0x08261d0c), zero predicated inbound BL
+      forms, and no internal calls. The three callers clear this sparse
+      16-byte record state before returning it to the surrounding record
+      manager; its concrete type remains unidentified, so byte offsets name
+      the verified fields. Rust preserves the target's byte and aligned-word
+      store widths with volatile accesses to prevent LLVM store coalescing.
