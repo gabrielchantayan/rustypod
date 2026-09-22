@@ -62,6 +62,7 @@ pub mod segmented_iter_post_increment;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod buffered_read_context_destroy;
+pub mod stream_read_u64;
 pub mod empty_destructor;
 pub mod empty_destructor_1e741c;
 pub mod empty_destructor_1d6030;
