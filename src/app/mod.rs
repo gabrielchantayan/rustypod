@@ -118,6 +118,7 @@ pub mod transfer_slot_buffer;
 pub mod double_buffer;
 pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
+pub mod demo_mode_slot_18c_dispatch;
 pub mod fallback_keyed_object;
 pub mod flag_2c_is_one;
 pub mod tracker_event_log_noop;
