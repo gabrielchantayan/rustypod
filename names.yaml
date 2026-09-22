@@ -75276,6 +75276,32 @@ functions:
       predicated or tail branches. The port keeps the u32 ARM return
       register representation and adds no range or format validation.
 
+  - address: 0x08272090
+    ghidra: FUN_08272090
+    name: color_pack_rgb565
+    size: 28
+    sig: "u32 color_pack_rgb565(u32 red, u32 green, u32 blue)"
+    module: cxx/color_pack
+    status: ported
+    renames:
+      param_1/r0: red
+      param_2/r1: green
+      param_3/r2: blue
+    notes: >-
+      Raw ARM decoding fixes the complete leaf extent at 0x08272090..0x082720ac:
+      `and r0,r0,#0xf8; mov r0,r0,lsl #8; and r1,r1,#0xfc; orr
+      r0,r0,r1,lsl #3; and r1,r2,#0xf8; orr r0,r0,r1,lsr #3; bx lr`.
+      The preceding 0x0827208c `pop {r4,r5,pc}` closes color_pack_for_format
+      and 0x082720ac begins the next unaligned colour-copy helper, proving the
+      28-byte boundary without a literal pool. The leaf packs RGB565 as
+      ((R&0xf8)<<8)|((G&0xfc)<<3)|((B&0xf8)>>3). Binary scanning finds three
+      direct unconditional BL callers (0x080749cc, 0x080b31f4, 0x080b33c4),
+      no predicated BL callers, no direct tail B callers, and no callee.
+      The Rust u32 result preserves the ARM return register; no validation or
+      behavioral deviation was introduced. match.py reports a structural
+      compiler difference (ARM ADS's direct masks versus LLVM's shifted-mask
+      sequence and frame), not a semantic discrepancy.
+
   # --- big-endian u32 cursor reader ---
   - address: 0x0825ec18
     ghidra: FUN_0825ec18
