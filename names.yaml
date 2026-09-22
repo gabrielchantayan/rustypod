@@ -129779,3 +129779,31 @@ functions:
       The paired getter at 0x0820440c consumes +0x14 before the destructor at
       0x08204464 releases it. Host code deliberately uses raw target offsets:
       its pointers are wider than the target's four-byte owned-array word.
+
+  - address: 0x0820440c
+    ghidra: FUN_0820440c
+    name: vtable_089917a4_observable_array_take
+    size: 40
+    sig: "u32 vtable_089917a4_observable_array_take(ObservableArrayTakeOwner *owner)"
+    module: cxx/vtable_089917a4_observable_array_take
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_1_deref: vtable
+      vtable_plus_0x08: lifecycle
+      param_1_plus_0x14: owned_array
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent: ten ARM words from
+      push {r4,lr} at 0x0820440c through pop {r4,pc} at 0x08204430; the next
+      real function begins at 0x08204434. Full-image ARM branch decoding finds
+      exactly three inbound direct plain bl calls at 0x081dcda0, 0x081dce60,
+      and 0x0820fe58, with zero predicated direct bl calls. The body has no
+      direct bl instructions and one unconditional indirect blx through this
+      object's vtable slot +0x08. It dispatches that unresolved lifecycle
+      callback with owner in r0, then loads the owned ObservableArray target
+      word at +0x14, clears it, and returns its former value. The constructor
+      at 0x08204434 initializes that word and the destructor at 0x08204464
+      destroys it, so the clear transfers ownership to the caller. The dynamic
+      slot target remains deliberately unnamed. Rust uses a native-width typed
+      host callback with repr(C) layout and target-only offset assertions;
+      its typed call is the intentional representation of the blx.
