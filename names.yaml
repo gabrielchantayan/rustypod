@@ -77992,6 +77992,31 @@ functions:
       mutex edge case, then verify the final free receives the owner and
       tag 10.
 
+  # --- crypto: legacy SHA-1 payload update wrapper ---
+  - address: 0x08273618
+    ghidra: FUN_08273618
+    name: sha1_update_payload
+    size: 20
+    sig: "u32 sha1_update_payload(void *owner, const u8 *input, u32 input_len)"
+    module: crypto/sha1_update_payload
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: input
+      param_3/r2: input_len
+      FUN_08065224: legacy_sha1_update
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte extent 0x08273618..0x0827362b:
+      push {r4,lr}; add r0,r0,#4; bl 0x08065224; mov r0,#0; pop {r4,pc}.
+      The next real function starts at 0x0827362c with push
+      {r0,r1,r4-r11,lr}. Decoding the target calls independently finds three
+      unconditional plain BL callers and no predicated BL callers. The wrapper
+      advances the opaque owner to its SHA-1 payload, forwards r1 and r2
+      unchanged to the legacy worker, discards its result, and returns zero.
+      The worker has not yet been ported; Rust represents it as an explicit
+      replaceable ABI seam at 0x08065224. Host tests cover the +4 payload
+      adjustment, zero-length and nonzero-length forwarding, and the forced
+      zero return despite a nonzero worker result.
   # --- ui: RGB565 weighted blend ---
   - address: 0x08273fb0
     ghidra: FUN_08273fb0
