@@ -111913,6 +111913,34 @@ functions:
       host tests use a below-4GiB target-layout fixture. match.py reports the
       expected structural diff: Rust lowers the tail transfer as direct reads.
 
+  # --- Opaque record-source entry lookup ---
+  - address: 0x0827b434
+    ghidra: FUN_0827b434
+    name: opaque_record_source_entry_lookup
+    size: 68
+    sig: "i32 opaque_record_source_entry_lookup(const OpaqueRecordSourceEntryTable *source, u32 index, u8 *output)"
+    module: app/opaque_record_source_entry_lookup
+    status: ported
+    renames:
+      param_1/r0/r4: source
+      param_2/r1/r5: index
+      param_3/r2/r6: output
+      "source+0x04": provider
+      "source+0x08": entry_table
+      FUN_081c1cdc: provider_entry_count
+    notes: >-
+      Raw osos.dec establishes the true 68-byte extent from 0x0827b434 through
+      0x0827b478: it pushes r4-r6/lr, obtains the signed provider entry count
+      through the source word at +0x04, compares it unsigned against index,
+      checks the entry table at +0x08, then copies exactly four words from
+      entry_table + index * 16 to output. The next function begins at
+      0x0827b478. The body has one plain unconditional BL to 0x081c1cdc.
+      Whole-image ARM B/BL-immediate decoding finds exactly three inbound BL
+      calls, all plain unconditional at 0x081a1980, 0x081a19d8, and
+      0x081a1a20; there are no predicated inbound BL calls. The port calls the
+      existing verified opaque_record_source_entry_count accessor rather than
+      creating another seam for the still-unnamed provider_entry_count helper.
+
   - address: 0x08279338
     ghidra: FUN_08279338
     name: path_object_join_cstr
