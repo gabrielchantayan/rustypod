@@ -33432,6 +33432,30 @@ functions:
       vtable dispatch; host builds use a callback seam because host pointers
       are eight bytes. Host test proves root forwarding, notification order,
       and the intentional low-12-bit restore.
+  - address: 0x08292ce8
+    ghidra: FUN_08292ce8
+    name: demo_mode_slot_18c_dispatch
+    size: 32
+    sig: "void demo_mode_slot_18c_dispatch(u32 argument)"
+    module: app/demo_mode_slot_18c_dispatch
+    status: ported
+    renames:
+      param_1/r0: argument
+      FUN_081883fc: demo_mode_instance (ported)
+      vtable+0x18c: demo_mode_slot_18c
+    notes: >-
+      Raw ARM establishes the exact 32-byte extent
+      0x08292ce8..0x08292d08: `push {r4,lr}` through `bx r2`; the next
+      separately linked function begins at 0x08292d08. The body contains one
+      plain direct BL to demo_mode_instance and no predicated BL instructions,
+      then tail-dispatches the returned TCDemoMode object's vtable slot +0x18c
+      with the preserved argument. Whole-image immediate-branch decoding finds
+      two plain inbound BL sites (0x082194c8 and 0x082268e4) and one BLNE
+      site (0x08219498). The slot identity is not recovered, so its
+      offset-qualified behavior-only name avoids inventing a callee identity.
+      Target assembly preserves the direct call, four-byte vtable lookup, and
+      terminal tail branch; host tests use a typed native-vtable fixture
+      because function pointers exceed the target slot width.
   - address: 0x08292d08
     ghidra: FUN_08292d08
     name: controller_history_select_with_callback
