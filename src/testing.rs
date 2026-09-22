@@ -1039,6 +1039,10 @@ pub mod hints {
     // active-matrix fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const MATRIX_STATE_APPLY_TRANSFORM: usize = 0xd600_0000;
+    // 0xd700_0000: dedicated to util/matrix_state_apply_six_coordinate_transform's
+    // raw-u32 active-matrix fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const MATRIX_STATE_APPLY_SIX_COORDINATE_TRANSFORM: usize = 0xd700_0000;
     
     // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
     // object/payload fixture; mappings never unmap, so no other user may share it.
