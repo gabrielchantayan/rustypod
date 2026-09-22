@@ -126591,3 +126591,37 @@ functions:
       unrecovered, so the offset-preserving name does not invent one.
       Deliberate deviations: none. Host tests cover a null non-dereference
       and aligned plus unaligned object addresses.
+
+  # --- refcounted allocation-handle release ---
+  - address: 0x082803c0
+    ghidra: FUN_082803c0
+    name: refcounted_allocation_handle_release
+    size: 112
+    sig: "void refcounted_allocation_handle_release(RefcountedAllocationHandle *handle)"
+    module: cxx/refcounted_allocation_handle_release
+    status: ported
+    renames:
+      param_1/r0: handle
+      "handle + 0x04": cell
+      "handle + 0x08": cache
+      "cell + 0x00": reference_count
+      "cell + 0x04": allocation
+      "cell + 0x08": mutex
+      FUN_080e7970: free_wrapper
+      thunk_FUN_082e83d8: posix_mutex_unlock_veneer
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 112-byte extent
+      0x082803c0..0x0828042f: pop {r4,r5,r6,pc} at 0x0828042c ends this
+      body, and push {r4,r5,r6,lr} at 0x08280430 starts the next independently
+      entered function. Raw ARM decoding finds four plain direct bl instructions
+      and zero predicated bl: free_wrapper @ 0x080e7970, the posix mutex-unlock
+      veneer @ 0x082621ac twice, and operator_delete @ 0x082aad24. Ghidra's
+      108-byte extent is four bytes short and misidentifies the unlock target
+      as thunk_FUN_082e83d8, though the veneer at 0x082621ac tail-branches to
+      that ported body. A NULL cell leaves handle untouched. Otherwise the
+      signed count wraps down; only zero frees allocation with tag 0x2b, clears
+      cell+4, unlocks cell+8, and deletes the cell. Both final and non-final
+      non-NULL paths clear handle+4 and handle+8. Target builds call the three
+      ported callees directly; host tests use typed seams to observe their order
+      and arguments. Reference C: decomp/c/027/082803c0_FUN_082803c0.c.
