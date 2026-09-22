@@ -9,25 +9,20 @@
 //! wrapper. The `u32::MAX` error/EOF sentinel is classified and returned.
 //! Raw ARM has 10 verified static `bl` call sites, all unconditional.
 //!
-//! `FUN_0825d5dc` and `FUN_0825d2fc` remain unported. Target builds reach
-//! their fixed firmware addresses through the existing volatile seams; host
-//! tests install callbacks. This is the sole deliberate deviation.
+//! `FUN_0825d2fc` is now ported as
+//! [`super::xml_codepoint_is_whitespace::xml_codepoint_is_whitespace`].
 
 use super::xml_decode_codepoint_and_reset::{
     xml_decode_codepoint_and_reset, XmlCodepointDecoderOps, XmlUtf8Decoder,
     XML_CODEPOINT_DECODER_OPS,
 };
-use super::xml_skip_whitespace::{XmlWhitespaceOps, XML_WHITESPACE_OPS};
+use super::xml_codepoint_is_whitespace::xml_codepoint_is_whitespace;
 
 #[inline(always)]
 unsafe fn decoder_ops() -> XmlCodepointDecoderOps {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(XML_CODEPOINT_DECODER_OPS)) }
 }
 
-#[inline(always)]
-unsafe fn whitespace_ops() -> XmlWhitespaceOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(XML_WHITESPACE_OPS)) }
-}
 
 /// `xml_decode_skip_whitespace` — original: `FUN_0825d318` @ `0x0825d318`
 /// (60 bytes; 10 binary-verified unconditional `bl` call sites).
@@ -43,7 +38,7 @@ pub unsafe extern "C" fn xml_decode_skip_whitespace(reader_slot: *mut *mut u8) -
         (decoder_ops().decode_codepoint)(reader_slot.read().cast::<XmlUtf8Decoder>())
     };
     loop {
-        if unsafe { (whitespace_ops().is_xml_whitespace)(reader_slot, codepoint, codepoint) } == 0 {
+        if unsafe { xml_codepoint_is_whitespace(reader_slot, codepoint, codepoint) } == 0 {
             return codepoint;
         }
         codepoint = unsafe {
@@ -60,14 +55,12 @@ mod tests {
     use super::super::xml_decode_codepoint_and_reset::{
         DEFAULT_XML_CODEPOINT_DECODER_OPS, XML_CODEPOINT_DECODER_OPS_LOCK,
     };
-    use super::super::xml_skip_whitespace::DEFAULT_XML_WHITESPACE_OPS;
     use core::ptr;
     use std::sync::MutexGuard;
     use std::vec::Vec;
 
     static mut DECODED: Vec<u32> = Vec::new();
     static mut DECODE_INDEX: usize = 0;
-    static mut PREDICATE_CALLS: Vec<(*mut *mut u8, u32, u32)> = Vec::new();
 
     unsafe extern "C" fn queued_decode(reader: *mut XmlUtf8Decoder) -> u32 {
         let index = unsafe { ptr::addr_of!(DECODE_INDEX).read_volatile() };
@@ -79,16 +72,6 @@ mod tests {
         value
     }
 
-    unsafe extern "C" fn xml_whitespace_predicate(
-        reader_slot: *mut *mut u8,
-        codepoint: u32,
-        duplicate_codepoint: u32,
-    ) -> u32 {
-        unsafe {
-            (*ptr::addr_of_mut!(PREDICATE_CALLS)).push((reader_slot, codepoint, duplicate_codepoint));
-        }
-        u32::from(matches!(codepoint, 0x20 | 0x09 | 0x0d | 0x0a))
-    }
 
     fn install(decoded: &[u32]) -> MutexGuard<'static, ()> {
         let guard = XML_CODEPOINT_DECODER_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -96,12 +79,8 @@ mod tests {
             XML_CODEPOINT_DECODER_OPS = XmlCodepointDecoderOps {
                 decode_codepoint: queued_decode,
             };
-            XML_WHITESPACE_OPS = XmlWhitespaceOps {
-                is_xml_whitespace: xml_whitespace_predicate,
-            };
             *ptr::addr_of_mut!(DECODED) = decoded.to_vec();
             DECODE_INDEX = 0;
-            (*ptr::addr_of_mut!(PREDICATE_CALLS)).clear();
         }
         guard
     }
@@ -109,10 +88,8 @@ mod tests {
     fn restore(guard: MutexGuard<'static, ()>) {
         unsafe {
             XML_CODEPOINT_DECODER_OPS = DEFAULT_XML_CODEPOINT_DECODER_OPS;
-            XML_WHITESPACE_OPS = DEFAULT_XML_WHITESPACE_OPS;
             (*ptr::addr_of_mut!(DECODED)).clear();
             DECODE_INDEX = 0;
-            (*ptr::addr_of_mut!(PREDICATE_CALLS)).clear();
         }
         drop(guard);
     }
@@ -131,7 +108,6 @@ mod tests {
             assert_eq!(xml_decode_skip_whitespace(reader_slot), b'<' as u32);
             assert_eq!(reader.state, 7);
             assert_eq!(ptr::addr_of!(DECODE_INDEX).read_volatile(), 1);
-            assert_eq!((*ptr::addr_of!(PREDICATE_CALLS)).as_slice(), &[(reader_slot, b'<' as u32, b'<' as u32)]);
         }
         restore(guard);
     }
@@ -150,14 +126,6 @@ mod tests {
             assert_eq!(xml_decode_skip_whitespace(reader_slot), b'X' as u32);
             assert_eq!(reader.state, 0);
             assert_eq!(ptr::addr_of!(DECODE_INDEX).read_volatile(), 3);
-            assert_eq!(
-                (*ptr::addr_of!(PREDICATE_CALLS)).as_slice(),
-                &[
-                    (reader_slot, 0x20, 0x20),
-                    (reader_slot, 0x09, 0x09),
-                    (reader_slot, b'X' as u32, b'X' as u32),
-                ]
-            );
         }
         restore(guard);
     }
