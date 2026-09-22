@@ -127768,3 +127768,31 @@ functions:
       from the stored end pointer. Rust uses u32 target addresses rather than
       host pointers to preserve the retail 4-byte object layout; no target
       behavior deviation.
+
+  # --- C++ flagged-pair constructor ---
+  - address: 0x08267b84
+    ghidra: FUN_08267b84
+    name: flagged_pair_construct
+    size: 12
+    sig: "void flagged_pair_construct(FlaggedPair *pair, u32 first, u8 flag, u32 second)"
+    module: cxx/flagged_pair_construct
+    status: ported
+    renames:
+      param_1/r0: pair
+      param_2/r1: first
+      param_3/r2: flag
+      param_4/r3: second
+      "pair+0x00": first
+      "pair+0x04": second
+      "pair+0x08": flag
+    notes: >-
+      Raw osos.dec establishes the exact three-instruction, 12-byte A32 body
+      0x08267b84..0x08267b8f: stm r0,{r1,r3}; strb r2,[r0,#8]; bx lr. The
+      next independently entered function is the empty destructor at
+      0x08267b90. There are exactly three direct inbound calls, all
+      unconditional plain bl at 0x0807a424, 0x08104238, and 0x082968e8, with
+      no predicated bl calls. The constructor stores the two supplied opaque
+      words then the full supplied flag byte into the existing 12-byte
+      FlaggedPair layout; no NULL, alignment, or bounds guard exists. Rust
+      uses volatile stores to retain that observed store order; no deliberate
+      target-behavior deviation.
