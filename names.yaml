@@ -129677,3 +129677,27 @@ functions:
       read, and ordered dispatch of every input index. match.py is expected
       to show Rust's iterator/control-flow shape while retaining the null
       guard, indexed lookup, handle dereference, and vtable dispatch.
+  - address: 0x08206ff4
+    ghidra: FUN_08206ff4
+    name: pending_payload_list_clear
+    size: 72
+    sig: "void pending_payload_list_clear(PendingPayloadList *owner)"
+    module: app/pending_payload_list_clear
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x20": pending_head
+      "owner+0x24": pending_tail
+      "*pending_head/r0": payload_vtable
+      "pending_head+0x40/r5": next
+    notes: >-
+      Raw osos.dec establishes the exact 0x08206ff4..0x0820703b extent;
+      0x0820703c begins the next real function. Three plain inbound BL calls
+      are at 0x08206edc, 0x08206fa8, and 0x082070d8; there are no predicated
+      inbound BL forms. The body has no plain BL instructions and one
+      predicated indirect blxne. It traverses the +0x20 pending-node chain,
+      calls non-NULL node payload-vtable slot +0x4 with the node in r0,
+      advances +0x20 for each successor, and clears +0x20/+0x24 on
+      exhaustion. The dynamic slot target remains deliberately unnamed;
+      host fixtures use native-width semantic pointer layouts, while target
+      builds use volatile 32-bit firmware words.
