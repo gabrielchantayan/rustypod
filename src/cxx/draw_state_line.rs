@@ -227,6 +227,61 @@ pub unsafe extern "C" fn draw_state_move_to(draw_state: *mut u8, x: i32, y: i32)
 }
 
 
+/// `draw_state_line_between_points` — original: `FUN_082640a0` @
+/// 0x082640a0 (140 bytes; 0x082640a0..0x0826412c; 5 plain direct inbound
+/// `bl` call sites, zero predicated forms, and one unconditional outgoing
+/// `bl` to `FUN_080e7870`), verified from raw ARM branch encodings.
+///
+/// Loads two aligned local `(x, y)` pairs, translates both by the draw
+/// state's +0x2c/+0x30 origin with wrapping ARM `add`, and draws a
+/// one-pixel foreground line through the existing line-engine dispatcher.
+/// It then stores the second unmodified local pair in the current-point
+/// words +0/+4, after the engine returns. The five callers use this helper
+/// for rectangle edges, establishing the point-pair interface.
+///
+/// Deliberate deviation: `FUN_080e7870` remains the existing
+/// [`DRAW_STATE_LINE_OPS`] volatile seam. The fixed-width surface field is
+/// read as `u32`, rather than a host pointer; the point pairs are explicit
+/// aligned `i32` words, matching the original `ldr` instructions.
+///
+/// # Safety
+///
+/// `draw_state` must point to a writable, word-aligned complete
+/// [`DrawStateRecord`]. `start_point` and `end_point` must each point to
+/// two readable, word-aligned `i32` coordinates.
+#[cfg_attr(target_os = "none", link_section = ".text.draw_state_line_between_points")]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn draw_state_line_between_points(
+    draw_state: *mut u8,
+    start_point: *const i32,
+    end_point: *const i32,
+) {
+    let start_x = unsafe { *start_point };
+    let start_y = unsafe { *start_point.add(1) };
+    let end_x = unsafe { *end_point };
+    let end_y = unsafe { *end_point.add(1) };
+    let engine = draw_state_line_ops().line_engine;
+    let state = unsafe { &mut *(draw_state as *mut DrawStateRecord) };
+    unsafe {
+        engine(
+            state.surface as usize + 4,
+            state.origin_x.wrapping_add(start_x),
+            state.origin_y.wrapping_add(start_y),
+            state.origin_x.wrapping_add(end_x),
+            state.origin_y.wrapping_add(end_y),
+            1,
+            state.foreground.as_ptr(),
+            state.style as i32,
+            state.clip_rect.as_ptr(),
+            0,
+        );
+    }
+    state.current_x = end_x;
+    state.current_y = end_y;
+}
+
+
 /// draw_state_line — original: `FUN_0826412c` @ 0x0826412c (120 bytes;
 /// 39 `bl` call sites, binary-scanned).
 ///
@@ -510,6 +565,62 @@ mod tests {
             assert_eq!((seen.x1, seen.y1), (105, -35));
             assert_eq!((seen.x2, seen.y2), (105, -35));
             assert_eq!((record.state.current_x, record.state.current_y), (5, 5));
+        });
+    }
+
+    #[test]
+    fn between_points_forwards_both_pairs_and_updates_current_point_after_call() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            let start = [3, 7];
+            let end = [42, 900];
+
+            unsafe {
+                draw_state_line_between_points(record.base(), start.as_ptr(), end.as_ptr());
+            }
+
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!((seen.x1, seen.y1), (103, -33));
+            assert_eq!((seen.x2, seen.y2), (142, 860));
+            assert_eq!(seen.point_during_call, (-777, 555));
+            assert_eq!((record.state.current_x, record.state.current_y), (42, 900));
+        });
+    }
+
+    #[test]
+    fn between_points_wraps_each_coordinate_like_arm_add() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            record.state.origin_x = i32::MAX;
+            record.state.origin_y = i32::MIN;
+            let start = [1, -1];
+            let end = [i32::MAX, 0];
+
+            unsafe {
+                draw_state_line_between_points(record.base(), start.as_ptr(), end.as_ptr());
+            }
+
+            let seen = unsafe { SEEN }.expect("engine called");
+            assert_eq!((seen.x1, seen.y1), (i32::MIN, i32::MAX));
+            assert_eq!((seen.x2, seen.y2), (-2, i32::MIN));
+        });
+    }
+
+    #[test]
+    fn between_points_preserves_everything_but_current_point() {
+        with_recorder(|| {
+            let mut record = Record::new();
+            let before = record.state_bytes().to_vec();
+            let start = [-5, 8];
+            let end = [-5, 8];
+
+            unsafe {
+                draw_state_line_between_points(record.base(), start.as_ptr(), end.as_ptr());
+            }
+
+            assert_eq!((record.state.current_x, record.state.current_y), (-5, 8));
+            assert_eq!(&record.state_bytes()[8..], &before[8..]);
+            assert!(record.guards_intact());
         });
     }
 

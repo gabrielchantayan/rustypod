@@ -64487,6 +64487,38 @@ functions:
       byte load, low-tag-to-bit-2 derivation, and final byte store; LLVM
       reverses the independent pair-store order and adds a non-null-only
       frame, so its mnemonic diff is expected.
+  - address: 0x082640a0
+    ghidra: FUN_082640a0
+    name: draw_state_line_between_points
+    size: 140
+    sig: "void draw_state_line_between_points(u8 *draw_state, const i32 *start_point, const i32 *end_point)"
+    module: cxx/draw_state_line
+    status: ported
+    renames:
+      param_1/r0: draw_state (the 0x44-byte scoped draw-state record)
+      param_2/r1: start_point (aligned local x/y pair)
+      param_3/r2: end_point (aligned local x/y pair)
+      FUN_080e7870: draw_line_engine (unported dispatcher)
+    notes: >-
+      Exact 140-byte extent verified from osos.dec: 0x082640a0 begins
+      `push {r4,r5,lr}` and 0x0826412c begins the distinct sibling
+      `push {r4,r5,r6,r7,lr}`. The body contains one unconditional outgoing
+      bl to 0x080e7870 and no predicated bl forms. Full-image ARM B/BL
+      decoding finds five unconditional inbound bl sites (0x0826ce88,
+      0x0826cecc, 0x0826cfcc, 0x0826d2ec, and 0x0826d418), zero predicated
+      forms, and no tail b calls. It loads two aligned local x/y pairs,
+      translates both with wrapping additions against origin words
+      +0x2c/+0x30, and calls the existing line engine with surface +4,
+      thickness 1, foreground +0x11, style byte +0x10, clip +0x34, and
+      scaled selector 0. It stores the unmodified second pair to current
+      point +0/+4 after the engine returns. Its five callers draw rectangle
+      edges, establishing point-pair semantics. Deliberate deviation:
+      unported 0x080e7870 uses the existing volatile DRAW_STATE_LINE_OPS
+      seam; target builds call that verified address and host tests install
+      a recorder. The surface remains a fixed-width u32 and pair accesses
+      are aligned i32 words, preserving the ARM record layout and ldr
+      behavior. Host tests cover operand forwarding, post-call current-point
+      update, wrapping translation, degenerate pairs, and record guards.
   - address: 0x0826412c
     ghidra: FUN_0826412c
     name: draw_state_line
