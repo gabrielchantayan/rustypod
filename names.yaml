@@ -10803,6 +10803,32 @@ functions:
       tests cover both the stopped no-op and running stop/reprogram/restart
       paths using the existing TIMER_RESET_4000 fixture slab.
 
+  - address: 0x08216e64
+    ghidra: FUN_08216e64
+    name: template_binding_name_or_firmware_default
+    size: 44
+    sig: "const char *template_binding_name_or_firmware_default(void *this)"
+    module: app/template_binding
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Raw ARM establishes the 44-byte code extent
+      0x08216e64..0x08216e90: the next function starts `push {r4,r5,r6,lr}`
+      at 0x08216e90. Three incoming direct calls are plain bl, with no
+      predicated bl callers. The body calls the already ported
+      template_binding_name_or_default @ 0x081346e4, compares its result
+      with strcmp @ 0x08391e38 against the literal-pool marker 0x083eae78,
+      then returns the literal-pool default 0x083eaf04 on equality or
+      conditionally tail-branches to the base accessor on inequality. Both
+      literals point into executable bytes: the 18-byte modeled marker is
+      02 11 c1 e3 81 20 21 e0 7f 04 12 e3 0e 06 12 03 18 00 and the default
+      starts with NUL. No seam: both callees are existing direct Rust ports.
+      Rust renders the conditional tail branch as a normal call and models
+      the literals for hosts while returning the original default address on
+      target. match.py sees the preserved base-accessor calls and conditional
+      selection; LLVM inlines strcmp, so its byte loop replaces the retail
+      strcmp bl.
+
   - address: 0x08216d70
     ghidra: FUN_08216d70
     name: stop_progress_layout_transition
