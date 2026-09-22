@@ -552,6 +552,9 @@ pub mod hints {
     // 0x7c10_0000: dedicated to heap/word_buffer's raw-u32 comparator
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const MARKED_WORD_BUFFER_COMPARE: usize = 0x7c10_0000;
+    // 0x6d90_0000: dedicated to app/notes_view_reset_resources's raw-u32
+    // owned-object fixture; mappings never unmap, so no other user may share it.
+    pub const NOTES_VIEW_RESET_RESOURCES: usize = 0x6d90_0000;
 
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
