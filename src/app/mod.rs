@@ -4,6 +4,7 @@ pub mod app_motor;
 pub mod app_boot_metrics_submit;
 pub mod app_screen_cached_position;
 pub mod app_state_cleanup;
+pub mod app_transition_cleanup;
 pub mod app_screen_position_decrement_if_flagged;
 pub mod app_screen_update_position;
 pub mod visible_range_recompute;
