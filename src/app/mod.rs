@@ -36,6 +36,7 @@ pub mod class_8900_prid_60f3_first_byte;
 pub mod class_8900_prid_60f1_first_byte;
 pub mod prid_checked_word_c0;
 pub mod collection_weight_dispatch;
+pub mod collection_item_find_eligible_at;
 pub mod collection_entry_teardown;
 pub mod class_8900_work_queue;
 pub mod class_8900_queued_work_construct;
