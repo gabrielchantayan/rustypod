@@ -126019,3 +126019,36 @@ functions:
       two output locals and volatile-reads the ignored base output so LLVM
       preserves the original non-NULL output pointer; the original's incoming
       stack values are overwritten by the verified callee before observation.
+  - address: 0x0828d9b4
+    ghidra: FUN_0828d9b4
+    name: render_context_invalidate_rect
+    size: 124
+    sig: "void render_context_invalidate_rect(RenderContext *context, const Rect *rect)"
+    module: ui/render_context_invalidate
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r7: rect
+      DAT_0828da30: active_render_context (0x089cc8a0)
+      "context+0x78": owner
+      "context+0xd4": dirty_mutex
+      "context+0xdc": dirty_rect
+      FUN_0811e2e4: ui_current_window
+      FUN_0807f5c4: mutex_lock
+      FUN_0826c3d8: rect_union
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent:
+      0x0828d9b4..0x0828da30 is 116 bytes of code, the word at
+      0x0828da30 is the 0x089cc8a0 literal, and the separately linked next
+      function starts at 0x0828da34. The body has five plain bl instructions
+      at four sites (ui_current_window twice), zero predicated bl forms, and
+      one unconditional indirect blx through owner->vtable+0x5c. It stores
+      context to active_render_context+0x10, skips the dirty update when the
+      current window or optional owner has a nonzero byte at +0x101,
+      otherwise locks +0xd4, unions rect into +0xdc, unlocks, then clears the
+      global. The global is represented by a crate static; on host builds the
+      lock pair is intentionally a no-op because the 4-byte target mutex at
+      +0xd4 overlaps the target Rect at +0xdc when its pointer field widens
+      to eight bytes. Host tests cover nonempty union, empty-source
+      preservation, and clearing the active global.
