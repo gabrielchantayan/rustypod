@@ -58703,6 +58703,27 @@ functions:
       `strne` out-count store kept; LLVM uses a frame pointer and an
       indirect blx for the fixed-address helper instead of the original's
       direct bl.
+  - address: 0x08267848
+    ghidra: FUN_08267848
+    name: two_string_record_destroy
+    size: 28
+    sig: "TwoStringRecord *two_string_record_destroy(TwoStringRecord *this)"
+    module: cxx/two_string_record_assign
+    status: ported
+    renames:
+      param_1: this
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM extent is exactly 0x08267848..0x08267863: `push {r4,lr}`;
+      add r0,#0x14; bl 0x08277484; sub r0,#8; bl 0x08277484; sub
+      r0,#0xc; pop {r4,pc}. The next separately linked function starts at
+      0x08267864. The two calls destroy the TwoStringRecord members at +0x14
+      and +0x0c in reverse order, then derive the original record base from
+      the final callee return. Whole-image ARM B/BL decoding finds three
+      inbound unconditional BL sites (0x08267e48, 0x08267e78, 0x083e3c64)
+      and zero predicated sites. The existing repr(C) record uses named
+      members to retain target identity under host pointer widening; the port
+      calls the already ported string_object_destroy directly.
   - address: 0x08267864
     ghidra: FUN_08267864
     name: two_string_record_assign
