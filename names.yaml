@@ -65231,6 +65231,39 @@ functions:
       wraps to zero. match.py structural review is expected to retain the
       size round-up, volatile fill call, and cardinality store while differing
       in register allocation and frame details.
+  - address: 0x082747e4
+    ghidra: FUN_082747e4
+    name: bit_set_copy_construct
+    size: 80
+    sig: "BitSet *bit_set_copy_construct(BitSet *destination, const BitSet *source)"
+    module: cxx/bit_set
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r4: destination
+      r5: source
+      r6: byte_count
+      FUN_080eb67c: malloc_wrapper
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_08000188: memcpy_forward_words
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte extent
+      0x082747e4..0x08274834: the final `pop {r4, r5, r6, pc}` is at
+      0x08274830 and 0x08274834 opens bit_set_construct with
+      `push {r4, r5, r6, lr}`, with no literal pool between. The constructor
+      copies bit_capacity, cardinality, and heap-tag byte; allocates
+      `((bit_capacity + 31) >> 5) << 2` bytes through malloc_wrapper with the
+      copied tag; stores the new target-width words pointer; then copies the
+      full rounded span through the IRAM memcpy veneer. The add wraps modulo
+      2^32 exactly as ARM. A whole-image A32 branch decode independently finds
+      3 incoming plain `bl` sites (0x0816f49c, 0x0816f4b0, 0x0816f4c4) and
+      zero predicated `bl` sites. Rust calls the ported memcpy body through a
+      volatile function pointer rather than creating a veneer seam, preserving
+      a real aligned forward-copy call without LLVM builtin substitution. Host
+      coverage proves 33 bits allocate/copy exactly two words, preserves the
+      next destination word and destination padding, forwards the tag, and
+      returns destination.
   - address: 0x08274834
     ghidra: FUN_08274834
     name: bit_set_construct
