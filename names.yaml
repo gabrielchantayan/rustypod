@@ -129828,3 +129828,31 @@ functions:
       slot target remains deliberately unnamed. Rust uses a native-width typed
       host callback with repr(C) layout and target-only offset assertions;
       its typed call is the intentional representation of the blx.
+
+  - address: 0x08203458
+    ghidra: FUN_08203458
+    name: selection_state_copy_item_at
+    size: 24
+    sig: "u32 selection_state_copy_item_at(SelectionState *selection_state, i32 item_index, u32 fallback_item)"
+    module: app/selection_state_copy_item_at
+    status: ported
+    renames:
+      param_1/r0: selection_state
+      param_2/r1: item_index
+      param_3/r2: output_item
+      param_4/r3: fallback_item
+      local_8: item
+      param_1_plus_0xe8: embedded_array
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent: six ARM words from
+      push {r3,lr} at 0x08203458 through pop {r3,pc} at 0x0820346c; the next
+      real function starts at 0x08203470. The sole body BL is plain and
+      unconditional to unresolved FUN_082a4d10, with no predicated BL.
+      Independent raw disassembly finds three inbound plain direct BL sites
+      (0x082034e0, 0x082036d0, 0x08203738) and zero predicated inbound BL
+      sites. The wrapper puts fallback_item in a stack output word, passes
+      selection_state+0xe8, item_index, and its address to FUN_082a4d10, then
+      returns the output word while ignoring the callee's boolean result.
+      FUN_082a4d10 dynamically selects a virtual copy callback and has no
+      recovered concrete identity, so target Rust calls its fixed retail
+      address and host tests replace only that explicit typed boundary.
