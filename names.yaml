@@ -74,6 +74,38 @@ functions:
       two plain outgoing BL calls to __rt_udiv, one in each layer branch;
       no predicated outgoing calls. Host tests substitute fixed-table
       fixtures; target code uses the retailOS bases directly.
+  - address: 0x082815d4
+    ghidra: FUN_082815d4
+    name: mpeg_audio_frame_find
+    size: 168
+    sig: "u32 mpeg_audio_frame_find(const void *context, const u8 **cursor_out, u32 *frame_size_out, u32 scan_limit, u32 *skipped_out)"
+    module: util/mpeg_audio_frame_find
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: cursor_out
+      param_3/r2: frame_size_out
+      param_4/r3: scan_limit
+      param_5/[sp]: skipped_out
+      local_34: context
+      pbVar2/r4: cursor
+      uVar3/r5: skipped
+      uVar4/r8: status
+      uVar5/r9: header
+      FUN_08281d48: mpeg_audio_header_matches_context
+      FUN_08281af4: mpeg_audio_frame_size
+    notes: >-
+      Raw osos.dec establishes the exact 42-instruction A32 body
+      0x082815d4..0x0828167b; the next separately entered function begins
+      at 0x0828167c. The scanner reads each candidate as four big-endian
+      bytes, calls mpeg_audio_header_matches_context, then calls
+      mpeg_audio_frame_size only on a matching header. A successful candidate
+      stores its original byte address and frame size, returns zero, and
+      reports its skipped-byte count; exhaustion reports scan_limit and
+      returns 3. Full-image A32 decoding finds three inbound plain BL call
+      sites (0x0828171c, 0x0828184c, 0x08281934), zero predicated inbound BL
+      call sites, two plain outgoing BL calls (0x08281624 and 0x08281640),
+      and no predicated outgoing calls. No deliberate deviations.
   - address: 0x08290704
     ghidra: FUN_08290704
     name: task_base_construct
