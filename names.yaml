@@ -29220,6 +29220,33 @@ functions:
       reproduced as a private Rust helper in the module; the retail
       0x082a2468 symbol stays unported rather than becoming a second
       exported seam.
+  - address: 0x0826b91c
+    ghidra: FUN_0826b91c
+    name: collection_item_find_eligible_at
+    size: 104
+    sig: "void *collection_item_find_eligible_at(CollectionOwner *owner, u32 ordinal)"
+    module: app/collection_item_find_eligible_at
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r5: ordinal
+      r4: eligible_index
+      r6: result
+      "owner+0x04": collection
+      "item+0x04": eligibility_flags
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+      FUN_0829d3c0: item_is_eligible
+    notes: >-
+      Raw ARM proves the 104-byte extent 0x0826b91c..0x0826b984; the next
+      function begins at 0x0826b984. Decoding every instruction in that range
+      finds four plain direct BL instructions (cursor_init, item_is_eligible,
+      cursor_advance, cursor_invalidate) and no predicated BL. It walks the
+      collection at owner+4 and returns the zero-based ordinalth item whose
+      flag byte at +4 has bit zero clear, otherwise NULL. The verified
+      one-instruction item_is_eligible predicate (~item[4] & 1) is inlined,
+      avoiding an unnecessary exported seam.
   - address: 0x0826ec14
     ghidra: FUN_0826ec14
     name: ui_element_invalidate_region
