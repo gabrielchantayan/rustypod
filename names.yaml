@@ -129965,3 +129965,25 @@ functions:
       (+0x8c). Host tests use native-width vtable pointers and a getter seam;
       target builds use target-width volatile vtable words and the existing
       media_player_interface_get port.
+
+
+  - address: 0x081fd5f4
+    ghidra: FUN_081fd5f4
+    name: zero_five_words
+    size: 28
+    sig: "u32 *zero_five_words(u32 *dst)"
+    module: util/zero_five_words
+    status: ported
+    renames:
+      param_1/r0: dst
+    notes: >-
+      Raw osos.dec establishes the exact seven-instruction, 28-byte A32 body
+      from 0x081fd5f4 through 0x081fd60f; the following ldr pc, [pc, #-4] at
+      0x081fd610 begins a veneer, not this function. Independent raw decoding
+      finds three inbound plain BL calls at 0x081d612c, 0x081f1adc, and
+      0x08267c40, with zero predicated BL calls. The leaf writes zero to five
+      consecutive aligned u32 words and returns dst unchanged. Volatile Rust
+      stores deliberately preserve those five word writes rather than allowing
+      LLVM to substitute a bulk memset; match.py confirms that structure, with
+      only LLVM's standard prologue/epilogue and choice of r1 instead of r2
+      differing from retail ARM.
