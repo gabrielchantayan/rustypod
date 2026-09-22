@@ -129363,3 +129363,33 @@ functions:
       mpeg_audio_frame_size (0x08281af4), then searches byte-by-byte for
       the first compatible big-endian MPEG audio frame header. No deliberate
       deviations.
+
+  - address: 0x08211e20
+    ghidra: FUN_08211e20
+    name: collection_item_process_if_limit
+    size: 64
+    sig: "u32 collection_item_process_if_limit(void *context, u32 item_present, u32 *processed_count, u32 limit)"
+    module: app/collection_item_process_if_limit
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: item_present
+      param_3/r2: processed_count
+      param_4/r3: limit
+      FUN_08211ca4: collection_item_process_within_limit (identity unconfirmed)
+      FUN_08211d34: collection_item_process_at_limit (identity unconfirmed)
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 extent
+      0x08211e20..0x08211e5f: `cmp r1,#0; push {r4,lr}; moveq r0,#0;
+      popeq {r4,pc}` returns zero without touching the count for an absent
+      item; the following `push {r1-r9,lr}` at 0x08211e60 starts the next
+      independently linked function. Whole-image A32 decoding finds three
+      inbound plain BL calls (0x08211a88, 0x08211ab4, 0x08211ae0), zero
+      predicated inbound BL forms, two outbound unconditional plain BLs
+      (0x08211e40 -> 0x08211ca4 and 0x08211e54 -> 0x08211d34), and zero
+      predicated outbound BLs. For a present item, it calls 0x08211ca4 and
+      increments *processed_count if that word is below limit; otherwise it
+      calls 0x08211d34 and leaves the count unchanged, then returns one.
+      Callee identities are not claimed: ARM calls their verified addresses
+      and host tests use typed seams. Rust's explicit branch/return flow is
+      equivalent to the ARM's predicated early return; no behavioral deviation.

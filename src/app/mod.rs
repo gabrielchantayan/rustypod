@@ -40,6 +40,7 @@ pub mod collection_weight_dispatch;
 pub mod collection_item_find_eligible_at;
 pub mod collection_entry_teardown;
 pub mod class_8900_work_queue;
+pub mod collection_item_process_if_limit;
 pub mod class_8900_queued_work_construct;
 pub mod clamped_mode_position;
 pub mod clamped_mode_position_adjust;
