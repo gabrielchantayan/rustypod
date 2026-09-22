@@ -34386,6 +34386,30 @@ functions:
       match.py (exit 1, diff expected): same cmp/bxeq/ldr/cmp/streq/bx
       core; the only diff is LLVM's usual fp/lr frame.
 
+  - address: 0x0825e1bc
+    ghidra: FUN_0825e1bc
+    name: video_engine_type_selector_index
+    size: 120
+    sig: "i32 video_engine_type_selector_index(u32 type_selector)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: type_selector
+      r0: index
+    notes: >-
+      Raw ARM establishes the 120-byte extent
+      0x0825e1bc..0x0825e230; 0x0825e234 begins the next independent
+      function. It subtracts 0x200, bounds-checks the result against 7,
+      then dispatches through an eight-entry branch table. The mapping is
+      0x200->0, 0x201->1, 0x202->3, 0x203->4, 0x204->6, 0x205->2,
+      0x206->5, and 0x207->7; every other selector returns -1. Complete
+      aligned B/BL-immediate decoding of osos.dec finds exactly three
+      direct inbound plain bl sites (0x0824cd98, 0x0824f5c4, 0x082553f0)
+      and no predicated bl sites. The three callers convert a type selector
+      before storing its byte index in video-engine state and latch error
+      0x500 on -1. No callees, globals, literal pool, or deliberate
+      behavioral deviation. Rust's match replaces the original branch table
+      while preserving its complete input/output mapping.
   - address: 0x08252bec
     ghidra: FUN_08252bec
     name: video_engine_get

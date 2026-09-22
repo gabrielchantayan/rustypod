@@ -92,6 +92,38 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+
+/// video_engine_type_selector_index — retailOS `FUN_0825e1bc` @
+/// **0x0825e1bc** (120 bytes, `0x0825e1bc..0x0825e230`; the next distinct
+/// function begins at `0x0825e234`).
+///
+/// Maps video-engine type selectors 0x200 through 0x207 to their sparse
+/// internal indices: 0, 1, 3, 4, 6, 2, 5, and 7, respectively. Every other
+/// selector returns -1. Raw ARM implements this as a bounds-checked jump table
+/// with eight return blocks; its 120-byte extent has no literal pool or calls.
+/// A complete aligned B/BL-immediate scan of `osos.dec` finds three direct
+/// inbound plain `bl` sites (0x0824cd98, 0x0824f5c4, 0x082553f0) and no
+/// predicated `bl` sites.
+///
+/// # Deliberate deviations
+///
+/// Rust expresses the jump table as a selector match. It preserves every
+/// returned word and has no pointer or state dependencies.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn video_engine_type_selector_index(type_selector: u32) -> i32 {
+    match type_selector {
+        0x200 => 0,
+        0x201 => 1,
+        0x202 => 3,
+        0x203 => 4,
+        0x204 => 6,
+        0x205 => 2,
+        0x206 => 5,
+        0x207 => 7,
+        _ => -1,
+    }
+}
 /// Firmware entry of the output-transform setter (`FUN_0824e0c0`, unported).
 ///
 /// The raw helper stores its four input words at engine offsets +0x8a4,
@@ -1283,6 +1315,21 @@ mod tests {
     use core::ptr;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
+
+    #[test]
+    fn type_selector_index_preserves_sparse_order_and_rejects_boundaries() {
+        assert_eq!(video_engine_type_selector_index(0x200), 0);
+        assert_eq!(video_engine_type_selector_index(0x201), 1);
+        assert_eq!(video_engine_type_selector_index(0x202), 3);
+        assert_eq!(video_engine_type_selector_index(0x203), 4);
+        assert_eq!(video_engine_type_selector_index(0x204), 6);
+        assert_eq!(video_engine_type_selector_index(0x205), 2);
+        assert_eq!(video_engine_type_selector_index(0x206), 5);
+        assert_eq!(video_engine_type_selector_index(0x207), 7);
+        assert_eq!(video_engine_type_selector_index(0x1ff), -1);
+        assert_eq!(video_engine_type_selector_index(0x208), -1);
+        assert_eq!(video_engine_type_selector_index(u32::MAX), -1);
+    }
 
     const FRAME_SLOT_FIXTURE_LEN: usize = 0x1000;
     static FRAME_SLOT_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
