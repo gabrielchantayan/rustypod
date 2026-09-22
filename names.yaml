@@ -58754,6 +58754,30 @@ functions:
       layout when StringObject pointers widen on host. match.py reports the
       same two nested-call positions and scalar-copy order; its additional
       frame setup and volatile seam load replace the retail direct second BL.
+  - address: 0x08268210
+    ghidra: FUN_08268210
+    name: byte_vector_owner_push_back
+    size: 56
+    sig: "void byte_vector_owner_push_back(void *owner, u32 value)"
+    module: cxx/byte_vector_owner_push_back
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      "owner+0x14/r0": byte_vector
+      FUN_083e1188: byte_vector_insert
+    notes: >-
+      Raw A32 establishes the exact 56-byte extent 0x08268210..0x08268247:
+      the next separately linked constructor starts at 0x08268248. Full-image
+      decoding finds three inbound plain BL call sites (0x08213ed0, 0x0821a370,
+      0x0821a454), zero predicated inbound BL sites, one plain internal BL to
+      0x083e1188, and zero predicated internal BLs. It treats owner+0x14 as a
+      three-word byte vector. If end differs from capacity, it increments end
+      before conditionally storing the low byte of value at the old end. When
+      full, it calls the verified vector insertion ABI at 0x083e1188 with
+      (vector, end, &low_byte). The grow helper remains retailOS: target code
+      calls its fixed address and host tests replace the seam; the owner layout
+      is deliberately represented by the target byte offset.
   - address: 0x082774a8
     ghidra: FUN_082774a8
     name: string_object_assign

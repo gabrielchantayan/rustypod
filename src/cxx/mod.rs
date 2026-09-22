@@ -269,6 +269,7 @@ pub mod string_from_vtable_slot_50;
 pub mod string_from_vtable_slot_58;
 pub mod string_word_record;
 pub mod string_byte_vector_record;
+pub mod byte_vector_owner_push_back;
 pub mod string_object_initial_sort_key;
 pub mod record_range_stable_sort;
 pub mod text_buffer;
