@@ -126947,3 +126947,31 @@ functions:
       plain unconditional BL calls, with no predicated BL form. The opaque
       vtable and concrete record type are deliberately not invented; Rust
       uses byte offsets and u32 stores to preserve target layout on hosts.
+
+  - address: 0x0827a154
+    ghidra: FUN_0827a154
+    name: ui_dispatch_slot_20_result_is_zero
+    size: 40
+    sig: "usize ui_dispatch_slot_20_result_is_zero(void *state, usize forwarded_r1, usize forwarded_r2, usize forwarded_r3)"
+    module: ui/dispatch_slot_20_result_is_zero
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x10/r0": dispatch_record
+      FUN_0811f598: ui_dispatch_vtable_slot_20
+      r1: forwarded_r1
+      r2: forwarded_r2
+      r3: forwarded_r3
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body from 0x0827a154
+      through pop {r4,pc} at 0x0827a178; 0x0827a17c begins the next real
+      function. It contains one plain direct BL, at 0x0827a164 to the verified
+      ui_dispatch_vtable_slot_20 thunk, and no predicated BL instructions.
+      A null state+0x10 dispatch record returns zero without dispatching.
+      Otherwise, the thunk's slot +0x20 result is mapped from zero to one;
+      nonzero results pass through unchanged. Raw A32 call decoding establishes
+      three plain inbound BL call sites and no predicated inbound BL calls.
+      The slot thunk is already ported, so this port composes that verified seam
+      rather than inventing the unresolved virtual method identity. Firmware
+      reads the aligned target pointer at +0x10; host fixtures use an unaligned
+      pointer read solely for host layout portability.
