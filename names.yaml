@@ -126300,3 +126300,32 @@ functions:
       calls. Target code deliberately calls 0x08178d64 by its verified raw
       address because its semantic identity is not established; no named
       callee seam was invented.
+  - address: 0x08286ad4
+    ghidra: FUN_08286ad4
+    name: directional_resource_record_construct
+    size: 160
+    sig: "DirectionalResourceRecord *directional_resource_record_construct(DirectionalResourceRecord *out, DirectionalResourceProvider *provider, u32 unused_2, u32 unused_3)"
+    module: app/directional_resource_record_construct
+    status: ported
+    renames:
+      param_1/r8: out
+      param_2/r5: provider
+      param_2+0x38: owner
+      param_2+0xec: source
+      "provider.vtable+0x1a8": construct_object
+      "source.vtable+0x170": current_resource
+      FUN_08275b9c: object_cast_to_class
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec establishes the 40-instruction, 160-byte A32 body
+      0x08286ad4..0x08286b73. The three following words at
+      0x08286b74..0x08286b7f are its literal pool, and 0x08286b80 starts
+      the next independently entered function. The body has five
+      unconditional direct BL instructions, one predicated BLEQ
+      (heap_panic), and one indirect BLX through provider.vtable+0x1a8.
+      It casts owner to class 0x287, resolves literal keys 0x70724944 and
+      0x64794944 against three separately-read current-resource values,
+      then stamps the constructed object and results into out. The
+      unported direct resolver at 0x0814376c is invoked by verified address
+      on target and through a host seam; no retail identity is invented.
+      The trivial stack-record initializer at 0x08287278 is inlined.

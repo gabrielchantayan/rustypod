@@ -11,6 +11,7 @@ pub mod visible_range_recompute;
 pub mod active_service_handler_readiness;
 pub mod application_resource_provider;
 pub mod default_selection_traversal_token;
+pub mod directional_resource_record_construct;
 pub mod application_message_post_global;
 pub mod application_global_slot_is_clear;
 pub mod anchor_identifier_find;
