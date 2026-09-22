@@ -129729,3 +129729,24 @@ functions:
       static and no-op the lock pair because widened host Mutex fields cannot
       inhabit the target's 4-byte-aligned slot field; target builds call the
       ported lock-service adapters directly.
+
+  - address: 0x08204464
+    ghidra: FUN_08204464
+    name: vtable_089917a4_observable_array_destroy
+    size: 24
+    sig: "Vtable089917a4ObservableArray *vtable_089917a4_observable_array_destroy(Vtable089917a4ObservableArray *this)"
+    module: cxx/vtable_089917a4_observable_array_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0820447c: vtable_089917a4
+      FUN_083e749c: observable_array_owned_destroy
+    notes: >-
+      Raw osos.dec establishes extent 0x08204464..0x0820447c: the next real
+      function is 0x08204480 (`bx lr`), while 0x0820447c is the vtable literal
+      0x089917a4. The destructor writes that vtable at this+0, destroys and
+      tag-2 deletes the nullable owned ObservableArray at this+0x14, then
+      returns this. Raw ARM decoding finds one direct plain bl in the body to
+      observable_array_owned_destroy and no predicated bl; the three inbound
+      direct bl callers are 0x081dcd70, 0x081dce30, and 0x0820fe28. Ghidra's
+      `param_1 + 5` is the same target-word offset.
