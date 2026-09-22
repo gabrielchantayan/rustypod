@@ -42,6 +42,29 @@ functions:
       non-head entry, and otherwise tail-dispatches the table miss handler.
       FUN_082432c8 and its operation tables remain unnamed, so the device
       port calls its verified retail address while host tests install seams.
+  - address: 0x08240a14
+    ghidra: FUN_08240a14
+    name: queue_refresh_and_match_kind_two
+    size: 36
+    sig: "u32 queue_refresh_and_match_kind_two(u32 *context)"
+    module: util/queue_refresh_and_match_kind_two
+    status: ported
+    renames:
+      param_1/r0: context
+      FUN_082419b0: refresh_queue_match_state
+      FUN_08243778: queue_match_and_promote
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent
+      0x08240a14..0x08240a38: the following push at 0x08240a38 begins the
+      next real function. Full-image A32 decoding finds three inbound plain BL
+      callers (0x08253b4c, 0x08253b60, and 0x08253b94), zero predicated inbound
+      BL forms, one unconditional outbound BL at 0x08240a1c to unnamed
+      FUN_082419b0, zero predicated outbound BL forms, and a tail B at
+      0x08240a34 to queue_match_and_promote (FUN_08243778). It refreshes the
+      context's queue-match state then tail-dispatches kind 2 with context
+      words +0x44 and +0x40 and subobject +0x6c. FUN_082419b0 remains unnamed,
+      so target code calls its verified retail address while host tests install
+      seams for both fixed calls.
   - address: 0x08256d40
     ghidra: FUN_08256d40
     name: fixed28_divide_round_up

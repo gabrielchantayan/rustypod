@@ -548,6 +548,9 @@ pub mod hints {
     // 0x6c20_0000: dedicated to util/queue_match_and_promote's raw-u32
     // intrusive queue and entry fixture; mappings never unmap.
     pub const QUEUE_MATCH_AND_PROMOTE: usize = 0x6c20_0000;
+    // 0x6d60_0000: dedicated to util/queue_refresh_and_match_kind_two's
+    // target-width context fixture; mappings never unmap.
+    pub const QUEUE_REFRESH_AND_MATCH_KIND_TWO: usize = 0x6d60_0000;
     // 0x6f20_0000: dedicated to util/bit_buffer_set_bit's raw-u32 byte
     // storage fixture; mappings never unmap, so no other user may share it.
     pub const BIT_BUFFER_SET_BIT: usize = 0x6f20_0000;
