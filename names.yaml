@@ -129879,3 +129879,28 @@ functions:
       FUN_082a4d10 dynamically selects a virtual copy callback and has no
       recovered concrete identity, so target Rust calls its fixed retail
       address and host tests replace only that explicit typed boundary.
+  - address: 0x082004f0
+    ghidra: FUN_082004f0
+    name: range_value_to_u8
+    size: 92
+    sig: "u32 range_value_to_u8(const RangeValueEncoding *range, u32 value)"
+    module: app/range_value_to_u8
+    status: ported
+    renames:
+      param_1/r0: range
+      param_2/r1: value
+      param_1_plus_0x2d4: maximum
+      param_1_plus_0x2d8: offset
+      FUN_08030f44: heap_panic
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte A32 body 0x082004f0..0x0820054b:
+      push {r4,lr} at entry through pop {r4,pc} at 0x08200548; the next real
+      function begins at 0x0820054c. Independent raw decoding finds three inbound
+      plain BL calls at 0x081ff820, 0x081ffbe8, and 0x08200b00, with zero
+      predicated inbound BL calls. The body has one plain BL to __rt_udiv and one
+      predicated BLHI to heap_panic. With maximum == 255, values at or below offset
+      return zero and higher values return value-offset unless that exceeds 255,
+      which terminates through heap_panic. Otherwise it clamps to maximum, returns
+      zero for a zero maximum, and returns floor(value*255/maximum). Both callees
+      are already ported and called directly; no deliberate deviation is introduced.
