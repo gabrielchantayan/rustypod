@@ -79659,6 +79659,40 @@ functions:
       two adjacent flag strb into one strh and CSE-ing away the second
       of the original's two header-slot reloads, and the crate's fp
       frame.
+  - address: 0x08261890
+    ghidra: FUN_08261890
+    name: tagged_context_dequeue
+    size: 164
+    sig: "void *tagged_context_dequeue(void *unused, void *owner, u32 wait, const u32 *selector)"
+    module: cxx/tagged_context_dequeue
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1/r4/r8: owner
+      param_3/r2/r7: wait
+      param_4/r3/r6: selector
+      FUN_082e8390: posix_mutex_lock
+      FUN_082e83d8: posix_mutex_unlock
+      FUN_082e8070: validate_and_dispatch_tagged_context
+      FUN_082e7ff8: dispatch_tagged_context_with_selector
+      FUN_083d7600: container_is_empty_alias_7600
+      FUN_083dff40: deque_front_elem4
+      FUN_083df194: deque_pop_front_elem4
+    notes: >-
+      Raw osos.dec establishes the exact 164-byte extent
+      0x08261890..0x08261934: the next independent body starts with
+      `push {r3,r4,r5,r6,r7,lr}` at 0x08261934. The body has nine plain
+      unconditional bl instructions and no predicated bl: lock; dispatch with
+      and without selector; two empty checks; front; pop; and unlock. r0 is
+      saved nowhere and unread; r1 is the owner. Under owner mutex +0x00 it
+      examines the elem4 deque at +0x38. A zero wait flag only probes it;
+      otherwise it dispatches the tagged context at +0x1c until dispatch
+      reports a nonzero status or the deque becomes nonempty. It returns the
+      front word and removes it, or NULL if still empty, then always unlocks.
+      The front helper at 0x083dff40 is unported but its raw behavior is
+      iterator dereference, so Rust reads the deque begin cursor directly.
+      Target calls use existing lock, dispatch, empty, and pop ports; host
+      tests install operation seams for those boundaries.
   - address: 0x082628f4
     ghidra: FUN_082628f4
     name: clock_source_base_construct

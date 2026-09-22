@@ -1924,6 +1924,9 @@ pub mod hints {
     // 0x8140_0000: dedicated to cxx/condition_queue_dequeue's target-width
     // queue, node, and item fixture; mappings never unmap.
     pub const CONDITION_QUEUE_DEQUEUE: usize = 0x8140_0000;
+    // 0x4b70_0000: dedicated to cxx/tagged_context_dequeue's target-width
+    // owner, deque, and front-item fixture; mappings never unmap.
+    pub const TAGGED_CONTEXT_DEQUEUE: usize = 0x4b70_0000;
     // 0x8150_0000 / 0x8160_0000: dedicated to sqlite/triggers_exist's
     // target-width table and trigger-chain fixtures; mappings never unmap.
     pub const SQLITE_TRIGGERS_EXIST: usize = 0x8150_0000;
