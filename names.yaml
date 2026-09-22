@@ -31364,6 +31364,38 @@ functions:
       deviation), and LLVM forming the id equality as sub/clz/lsr
       instead of cmpeq/moveq/movne (same 0/1 result).
 
+  - address: 0x0825a6b8
+    ghidra: FUN_0825a6b8
+    name: lazy_singleton_0x44_08a09f64_get
+    size: 44
+    sig: "void *lazy_singleton_0x44_08a09f64_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      piVar1: cache (pointer to cache word @ 0x089d0294)
+      iVar2: constructed (the constructor's return)
+      FUN_082aadd4: operator_new (ported in heap/veneers, called directly)
+      FUN_0825a8d4: singleton_0x44_08a09f64_ctor (unported; singleton_0x44_08a09f64 seam)
+    vars: {DAT_0825a6e4: SINGLETON_0X44_08A09F64_PTR (pool literal holding &cache)}
+    notes: >-
+      Raw osos.dec words e92d4010 e59f4020 e5940000 e3500000 1a000003
+      e3a00044 eb0141bf eb00007e e5840000 e5940000 e8bd8010 establish
+      44 bytes of code from 0x0825a6b8 through 0x0825a6e0, followed by
+      pool word 0x089d0294 at 0x0825a6e4; the next real function begins
+      at 0x0825a6e8 with push {r4,lr}. Complete aligned A32 branch decoding
+      finds three inbound plain BL sites (0x081a6c48, 0x081aaf60,
+      0x081af2a8), zero predicated BL sites, and zero plain B sites. The
+      body calls operator_new(0x44) then the unported constructor
+      0x0825a8d4 when the cache is NULL, stores its result even when NULL,
+      reloads the cache, and returns it. The three callers only establish
+      virtual slots +0x24, +0x2c, and +0x30, so no class identity is
+      recoverable. Deliberate deviations: Rust models the runtime RW cache
+      as a crate static and calls the unported constructor through a dispatch
+      seam with its documented zeroing default; it is not hook-ready until
+      0x0825a8d4 is ported. match.py reports the expected frame and
+      volatile-seam BLX structural differences while preserving the
+      load/test/cold-allocate/construct/store/reload shape.
+
   - address: 0x082598f8
     ghidra: FUN_082598f8
     name: settings_notification_hub_get
