@@ -127978,3 +127978,34 @@ functions:
       NULL as its seventh. Rust preserves that narrowing and argument order;
       its volatile seam dispatches to resident 0x08263bb8 on target and a
       host-test recorder otherwise. No target-behavior deviation.
+
+  # --- Counted text-layout render adapter ---
+  - address: 0x082633f0
+    ghidra: FUN_082633f0
+    name: text_layout_render_counted
+    size: 76
+    sig: "void text_layout_render_counted(void *target, const u8 *text, i32 layout_limit, u32 mode)"
+    module: ui/text_layout_render_counted
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1: text
+      param_3/r2: layout_limit
+      param_4/r3: mode
+      FUN_080f0048: utf8_codepoint_count_permissive
+      FUN_082631fc: text_layout_renderer (unported direct callee)
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte A32 body at
+      0x082633f0..0x0826343b: it ends in pop {r1,r2,r3,r4,r5,r6,r7,pc},
+      and the next independently entered function begins at 0x0826343c.
+      The body has two unconditional outgoing plain BL instructions
+      (0x08263408 to the ported permissive UTF-8 counter and 0x08263434 to
+      unported 0x082631fc), with no predicated BL. A whole-image raw A32
+      decode finds three incoming unconditional plain BL calls at
+      0x081b3294, 0x0820de3c, and 0x08290c9c, with no predicated callers.
+      It counts text, narrows the result to its low halfword, then forwards
+      target, text, count, layout_limit, mode, and two zero words to the
+      second callee. The 0x082631fc identity is not claimed; its seam name
+      derives only from this verified contract. Deliberate deviation: target
+      builds call the exact stock load address, while host tests install a
+      recording seam and prove count truncation plus every forwarded argument.
