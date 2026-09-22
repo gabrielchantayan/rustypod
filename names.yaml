@@ -32786,6 +32786,29 @@ functions:
       untouched. The port represents the target's 4-byte header and six
       8-byte members as a repr(C) StringObjectArray6, preserving member
       identity on pointer-widened hosts.
+  - address: 0x08201610
+    ghidra: FUN_08201610
+    name: string_object_destroy_08201610
+    size: 32
+    sig: "StringObject *string_object_destroy_08201610(StringObject *this)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1/r0: this
+      DAT_08201630: STRING_OBJECT_VTABLE_ADDRESS
+    notes: >-
+      Raw osos.dec words establish the true 32-byte body from the push at
+      0x08201610 through pop {r4,pc} at 0x0820162c; 0x08201630 is its
+      0x089a6044 literal and the next real function begins at 0x08201634.
+      Whole-image A32 branch decoding finds three inbound direct plain BL
+      calls (0x08201b28, 0x083d1b40, 0x083d1b84) and zero predicated BL
+      calls. The body stores that StringObject vtable, makes one plain BL to
+      the ported string_object_release_payload @ 0x08275d74, and returns
+      this. It is a separately linked behavioral duplicate of
+      string_object_destroy @ 0x08277484, retained as a unique hook symbol;
+      the port deliberately models the ROM vtable as STRING_OBJECT_VTABLE and
+      uses the existing STRING_OBJECT_OPS release seam for host observability.
+
   - address: 0x08277484
     ghidra: FUN_08277484
     name: string_object_destroy
