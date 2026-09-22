@@ -127176,3 +127176,44 @@ functions:
       returned. The virtual method identity remains unrecovered. Rust uses the
       established injectable StringObject slot +0x08 seam because host vtables
       retain ROM identities; no algorithmic behavior is changed.
+
+  # --- identified registered-listener collection accessor ---
+  - address: 0x08275434
+    ghidra: FUN_08275434
+    name: registered_listener_collection_get
+    size: 84
+    sig: "ObservableArray *registered_listener_collection_get(void)"
+    module: app/registered_listener_collection
+    status: identified
+    renames:
+      DAT_0827547c: registered_listener_collection_guard
+      DAT_08275480: registered_listener_collection
+      DAT_08275484: registered_listener_collection_shutdown_handler
+      DAT_0827548c: dso_handle
+      FUN_08271cec: observable_array_construct
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      BLOCKED from faithful porting. Raw osos.dec establishes 72 instruction
+      bytes at 0x08275434..0x08275478, followed by the three-word literal pool
+      at 0x0827547c..0x08275484; the next independently entered function
+      begins at 0x08275488, so the true extent is 84 bytes. The code tests bit
+      zero of guard 0x089cc8d4, acquires it through cxa_guard_acquire @
+      0x082ab31c, constructs the fixed 16-byte observable array at
+      0x089cc8e0 through the ported observable_array_construct @ 0x08271cec,
+      registers its constructor return through cxa_atexit @ 0x082ab1c8 with
+      literal handler 0x08a7a244 and __dso_handle 0x089ca09c, releases the
+      guard through cxa_guard_release @ 0x082ab338, then returns the fixed
+      collection address. The handler literal is executable ARM code but is
+      not a recovered function entry: raw words at 0x08a7a244 begin
+      `ldr r1,[r0]; ldr r2,[r1,#4]; mov r1,r5; blx r2`, relying on r5 without
+      an entry prologue. Its callable shutdown semantics therefore cannot be
+      identified from this accessor or safely replaced with a named Rust
+      handler. The target has four plain internal BL calls and no predicated
+      BL calls. Whole-image A32 branch decoding finds exactly three inbound
+      plain BL calls at 0x082750bc, 0x082753c4, and 0x082756b4, with no
+      predicated inbound BL calls. Ghidra's 72-byte body omits the literal
+      pool; its C also misattributes the literal handler as the constructor
+      result. No Rust module or hook is added until the shutdown handler's
+      actual entry and behavior are recovered.
