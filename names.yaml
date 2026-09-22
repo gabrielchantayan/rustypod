@@ -940,6 +940,8 @@ functions:
       two plain unconditional bl instructions, both to cxx_array_dealloc
       (0x08266f2c), and no predicated bl instructions. There are three plain
       inbound bl call sites: 0x08268fc4, 0x0826a740, and 0x083d24c0.
+
+
       It treats table words +4/+8/+12 as a bucket allocation, bucket count,
       and current-bucket cursor. It clears each bucket below buckets + count*4,
       walks its word-0 intrusive chain, and deallocates each node from node-16.
@@ -126355,3 +126357,36 @@ functions:
       inbound calls. Deliberate deviation: host builds substitute that
       fixed-address tail edge with a callback seam; ARM preserves it with a
       relocation-safe veneer.
+
+  # --- Opaque record-source threshold lookup ---
+  - address: 0x0828443c
+    ghidra: FUN_0828443c
+    name: opaque_record_source_find_at_or_after
+    size: 120
+    sig: "i32 opaque_record_source_find_at_or_after(const OpaqueRecordSource *source, u32 position)"
+    module: app/opaque_record_source_find_at_or_after
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: position
+      "source+0x04": record_table
+      "record_table+0x50*index": record
+      "record+0x04": available_word
+      "record+0x14": end_position
+      FUN_082841f8: opaque_record_source_item_count
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte body from push
+      {r4,r5,r6,lr} at 0x0828443c through pop {r4,r5,r6,pc} at
+      0x082844b0; 0x082844b4 opens the distinct next function. It rejects
+      source+0x00 == 0, calls the ported item-count wrapper, rejects its
+      negative i32 result, then visits count 80-byte records at source+0x04.
+      The first record satisfying end_position (+0x14) >= position and a
+      nonzero available_word (+0x04) yields its zero-based index; otherwise
+      it returns -1. Complete B/BL-immediate decoding finds exactly three
+      inbound direct plain unconditional bl calls — 0x081a1b7c, 0x081a1c00,
+      0x081a1f88 — and no predicated bl calls. The body has one plain bl
+      (0x08284458 to opaque_record_source_item_count) and no predicated bl.
+      Deliberate deviation: none; the Rust loop retains the signed count
+      bound and the original's no-table-null-check contract after a positive
+      count. Host tests cover the null-provider early exit, negative count,
+      unavailable qualifying record, and inclusive endpoint threshold.
