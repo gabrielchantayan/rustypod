@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08291d90
+    ghidra: FUN_08291d90
+    name: record_lookup_value_word
+    size: 20
+    sig: "u32 record_lookup_value_word(void *context, u32 key)"
+    module: ui/record_lookup_value_word
+    status: ported
+    renames:
+      param_1/r0: context_then_record
+      param_2/r1: key
+      FUN_08291da4: record_lookup
+      "record+0x58/r0": value_word
+    notes: >-
+      Raw osos.dec words establish the exact five-instruction A32 extent
+      0x08291d90..0x08291da3: push {r4,lr}; bl 0x08291da4; cmp r0,#0;
+      ldrne r0,[r0,#0x58]; pop {r4,pc}. The next independently entered
+      function begins at 0x08291da4 with push {r4,lr}. Full-image A32
+      decoding finds three inbound plain BL calls (0x0816ddec, 0x081fa620,
+      0x0829b778), zero predicated inbound BL forms, one unconditional
+      internal BL, and zero predicated internal BL forms. The adjacent
+      unported record lookup receives context and key; this function returns
+      zero for NULL or its result's aligned u32 at +0x58. Rust retains the
+      original target call through address 0x08291da4 and uses a host-test
+      dispatch seam; no behavior is deliberately changed.
   - address: 0x0829cf88
     ghidra: FUN_0829cf88
     name: object_word_0x1c_is_nonzero

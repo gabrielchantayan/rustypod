@@ -125,6 +125,7 @@ pub mod selection_clear_and_stop_timer;
 pub mod selection_schedule_timer;
 pub mod window_list_find_by_key;
 pub mod notification_dispatch;
+pub mod record_lookup_value_word;
 pub mod input_state_transition;
 
 pub mod passkey_mask_indicators;
