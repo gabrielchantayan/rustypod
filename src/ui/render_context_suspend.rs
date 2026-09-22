@@ -35,14 +35,12 @@ use crate::ui::rect::{rect_is_empty, Rect};
 
 /// ABI of the setup operation at retailOS address 0x0828c700.
 type RenderContextEnsurePresentation = unsafe extern "C" fn(*mut u8);
-/// ABI of the presentation release operation at retailOS address 0x0828cd54.
-type RenderContextReleaseSlot = unsafe extern "C" fn(*mut u8, *mut u32);
+use crate::ui::render_context_release_presentation::render_context_release_presentation;
 
 /// Unported calls preserved by [`render_context_set_suspended`].
 #[derive(Clone, Copy)]
 struct RenderContextSuspendOps {
     ensure_presentation: RenderContextEnsurePresentation,
-    release_presentation: RenderContextReleaseSlot,
 }
 
 #[cfg(target_os = "none")]
@@ -52,32 +50,21 @@ unsafe extern "C" fn firmware_ensure_presentation(context: *mut u8) {
 }
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_presentation(context: *mut u8, slot: *mut u32) {
-    let release: RenderContextReleaseSlot = core::mem::transmute(0x0828_cd54usize);
-    release(context, slot);
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_ensure_presentation(_context: *mut u8) {}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_release_slot(_context: *mut u8, _slot: *mut u32) {}
 
 #[cfg(target_os = "none")]
 const DEFAULT_RENDER_CONTEXT_SUSPEND_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
     ensure_presentation: firmware_ensure_presentation,
-    release_presentation: firmware_release_presentation,
 };
 
 #[cfg(not(target_os = "none"))]
 const DEFAULT_RENDER_CONTEXT_SUSPEND_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
     ensure_presentation: missing_ensure_presentation,
-    release_presentation: missing_release_slot,
 };
 
-/// Active presentation operations. Volatile loading retains all three target
-/// call boundaries instead of allowing LLVM to fold an unwired host default.
+/// Active presentation operations. Volatile loading retains the target call
+/// boundary instead of allowing LLVM to fold an unwired host default.
 static mut RENDER_CONTEXT_SUSPEND_OPS: RenderContextSuspendOps = DEFAULT_RENDER_CONTEXT_SUSPEND_OPS;
 
 #[inline(always)]
@@ -137,11 +124,10 @@ pub unsafe extern "C" fn render_context_set_suspended(context: *mut u8, suspende
             return presentation_in_use;
         }
 
-        let ops = render_context_suspend_ops();
         if ptr::addr_of!((*context_fields).presentation_resource).read() != 0 {
             render_context_release_resource(context, ptr::addr_of_mut!((*context_fields).presentation_resource));
         }
-        (ops.release_presentation)(context, ptr::addr_of_mut!((*context_fields).presentation));
+        render_context_release_presentation(context, ptr::addr_of_mut!((*context_fields).presentation));
         return 0;
     }
 
@@ -180,15 +166,8 @@ mod tests {
         RELEASE_LOG.fetch_add(1, Ordering::SeqCst);
     }
 
-    unsafe extern "C" fn record_presentation_release(_context: *mut u8, slot: *mut u32) {
-        RELEASE_LOG.fetch_add(10, Ordering::SeqCst);
-        slot.write(0);
-    }
+    unsafe extern "C" fn record_presentation_cleanup() {}
 
-    const TEST_OPS: RenderContextSuspendOps = RenderContextSuspendOps {
-        ensure_presentation: record_ensure,
-        release_presentation: record_presentation_release,
-    };
 
     unsafe fn reset_context(context: *mut RenderContext) {
         ptr::write_bytes(context.cast::<u8>(), 0, size_of::<RenderContext>());
@@ -214,8 +193,12 @@ mod tests {
 
         unsafe {
             let old_ops = RENDER_CONTEXT_SUSPEND_OPS;
-            RENDER_CONTEXT_SUSPEND_OPS = TEST_OPS;
-
+            let old_cleanup = crate::ui::render_context_release_presentation::PRESENTATION_CLEANUP;
+            RENDER_CONTEXT_SUSPEND_OPS = RenderContextSuspendOps {
+                ensure_presentation: record_ensure,
+            };
+            crate::ui::render_context_release_presentation::PRESENTATION_CLEANUP =
+                record_presentation_cleanup;
             reset_context(context);
             ptr::addr_of_mut!((*context).suspend_state).write(1);
             assert_eq!(render_context_set_suspended(storage, 1), 1);
@@ -237,12 +220,12 @@ mod tests {
             assert_eq!(ptr::addr_of!((*context).presentation).read(), 0x44);
 
             reset_context(context);
-            ptr::addr_of_mut!((*context).presentation).write(0x44);
+            ptr::addr_of_mut!((*context).presentation).write(resource as usize as u32);
             ptr::addr_of_mut!((*resource).vtable).write(&RESOURCE_VTABLE);
             ptr::addr_of_mut!((*context).presentation_resource).write(resource as usize as u32);
             RELEASE_LOG.store(0, Ordering::SeqCst);
             assert_eq!(render_context_set_suspended(storage, 1), 0);
-            assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 11);
+            assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 1);
             assert_eq!(ptr::addr_of!((*context).presentation_resource).read(), 0);
             assert_eq!(ptr::addr_of!((*context).presentation).read(), 0);
 
@@ -259,11 +242,13 @@ mod tests {
             assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 1);
 
             reset_context(context);
-            ptr::addr_of_mut!((*context).presentation).write(1);
+            ptr::addr_of_mut!((*resource).vtable).write(&RESOURCE_VTABLE);
+            ptr::addr_of_mut!((*context).presentation).write(resource as usize as u32);
             assert_eq!(render_context_set_suspended(storage, 0x100), 0);
             assert_eq!(ptr::addr_of!((*context).suspend_state).read(), 0);
-            assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 21);
+            assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 1);
 
+            crate::ui::render_context_release_presentation::PRESENTATION_CLEANUP = old_cleanup;
             RENDER_CONTEXT_SUSPEND_OPS = old_ops;
         }
     }

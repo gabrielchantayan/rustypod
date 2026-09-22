@@ -28484,6 +28484,33 @@ functions:
       render_context+0x2c - +0x24, stride +0x28 - +0x20, image+0x08 height,
       flags 2, image+0x04 plane0, and zero plane1..3. Host tests cover
       RGB565 geometry/plane forwarding plus grayscale and wrapping stride.
+  - address: 0x0828cd54
+    ghidra: FUN_0828cd54
+    name: render_context_release_presentation
+    size: 60
+    sig: "void render_context_release_presentation(void *context, u32 *presentation_slot)"
+    module: ui/render_context_release_presentation
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r4: presentation_slot
+      "context+0xf8": presentation_cleanup_required
+      "*presentation_slot": presentation
+      "presentation->vtable+0x04": release
+      FUN_082929fc: unresolved_presentation_cleanup (unported)
+    notes: >-
+      Raw osos.dec words prove the exact 60-byte extent from 0x0828cd54
+      through 0x0828cd8c; push {r4,lr} opens the body and the next distinct
+      function begins at 0x0828cd90. Decoding all raw ARM BL-immediate words
+      finds three inbound callers, all plain unconditional bl, and no
+      predicated callers. The body has one plain bl to the unresolved
+      zero-argument routine at 0x082929fc and one predicated blxne through
+      the presentation vtable +0x04, with context preserved in r0. A zero
+      byte at context+0xf8 invokes the direct routine; otherwise a nonzero
+      presentation is released, and the slot is always cleared. ARM uses the
+      exact recovered instruction sequence. Host builds use an installable
+      seam for the unidentified direct callee and the existing typed virtual
+      release port to avoid widening target u32 pointers.
   - address: 0x0828d4e0
     ghidra: FUN_0828d4e0
     name: render_context_release_resource
@@ -28524,7 +28551,7 @@ functions:
       "context+0x78": owner
       FUN_0828c700: render_context_ensure_presentation (unported)
       FUN_0828d4e0: render_context_release_resource (unported)
-      FUN_0828cd54: render_context_release_presentation (unported)
+      FUN_0828cd54: render_context_release_presentation
       FUN_0826ec9c: ui_element_invalidate
     notes: >-
       Raw osos.dec verifies the exact 148-byte extent: push {r4,lr} begins
