@@ -128844,3 +128844,30 @@ functions:
       reports the expected LLVM operation-table BLX calls and expanded
       provider+0xeb update, while retaining the membership guard, 50-event
       gate, both refresh paths, counter reset, and final mapped-flag apply.
+  - address: 0x0822b2a8
+    ghidra: FUN_0822b2a8
+    name: context_link_dispatch_workflow
+    size: 312
+    sig: "u32 context_link_dispatch_workflow(void *context, u32 request)"
+    status: identified
+    renames:
+      param_1/r0: context
+      param_2/r1: request
+      "context+0x14/r0": context_link
+      "context+0x24/r0": dispatch_flags
+      FUN_081f0ec4: retail_081f0ec4
+    notes: >-
+      Ghidra's reported 108-byte extent is not a true function boundary.
+      Raw osos.dec establishes a 312-byte body at
+      0x0822b2a8..0x0822b3df: the apparent boundary at 0x0822b314 falls
+      through into additional code, and the real epilogue is
+      `mov r0,r5; pop {r1-r7,pc}` at 0x0822b3d8..0x0822b3df. The body starts
+      with the three inbound plain BL callers (0x081b7574, 0x081b7870, and
+      0x081b7f68), but raw decoding finds substantially more than Ghidra's
+      claimed three internal BL calls before the real epilogue. Its first
+      conditional tail branch is to unrecovered 0x081f0ec4 after testing
+      context+0x14 and context+0x24 bit 0. The fall-through path has opaque
+      calls and stack-backed output construction whose complete ABI and
+      callee identities are not recovered. A narrow implementation of only
+      the first seven words would incorrectly omit the fall-through body;
+      no Rust seam or port is added until that control flow is recovered.
