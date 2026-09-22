@@ -77992,6 +77992,33 @@ functions:
       mutex edge case, then verify the final free receives the owner and
       tag 10.
 
+  # --- ui: RGB565 weighted blend ---
+  - address: 0x08273fb0
+    ghidra: FUN_08273fb0
+    name: rgb565_weighted_blend
+    size: 76
+    sig: "u16 rgb565_weighted_blend(u16 first, u16 second, i32 phase)"
+    module: ui/rgb565_weighted_blend
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: phase
+      r3: second_weight
+      r12: expanded_color
+      DAT_08273ffc: ROUND_BIAS
+      DAT_08274000: EXPANDED_RGB565_MASK
+    notes: >-
+      Raw ARM establishes a 76-byte executable extent
+      0x08273fb0..0x08273ffc. Literal words at 0x08273ffc and 0x08274000
+      supply the packed rounding bias and mask; the next push begins at
+      0x08274004. The body has no BL or BLX instructions. Raw decoding of
+      callers finds three plain, unconditional inbound BL instructions at
+      0x08273e98, 0x082740d0, and 0x082741dc, with no predicated BL calls.
+      It expands RGB565 green into a high lane, combines the two packed
+      colours with Q5 phase and complementary weights, applies each product's
+      retailOS lane bias, masks, and repacks RGB565. Host tests cover both
+      endpoint weights, phase quantization boundaries, and all packed lanes.
   # --- ui: RGB565 byte-opacity blend ---
   - address: 0x080966f4
     ghidra: FUN_080966f4
