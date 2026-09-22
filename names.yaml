@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822c494
+    ghidra: FUN_0822c494
+    name: derived_object_construct
+    size: 20
+    sig: "u32 *derived_object_construct(u32 *storage, u32 first, u32 second)"
+    module: app/derived_object_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: first
+      param_3/r2: second
+      FUN_081d6380: unported_base_construct
+      DAT_0822c4a8: derived_vtable_089a09f8
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent
+      0x0822c494..0x0822c4a8; 0x0822c4a8 is its literal-pool word and
+      0x0822c4ac begins the next real function. Whole-image A32 decoding
+      finds three inbound unconditional plain BL callers and no predicated
+      inbound BL forms. The body has one unconditional direct BL at
+      0x0822c498 to unnamed FUN_081d6380, no predicated BL forms, then
+      installs vtable 0x089a09f8 at the returned object's first word.
+      FUN_081d6380 has no recovered semantic identity, so target builds
+      call its verified address and host tests use a narrow constructor seam.
   - address: 0x08243778
     ghidra: FUN_08243778
     name: queue_match_and_promote
