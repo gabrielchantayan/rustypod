@@ -25,13 +25,13 @@ pub type BaseConstruct = unsafe extern "C" fn(*mut u32, u32, u32) -> *mut u32;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn base_construct(storage: *mut u32, first: u32, second: u32) -> *mut u32 {
+pub(crate) unsafe fn base_construct(storage: *mut u32, first: u32, second: u32) -> *mut u32 {
     let construct: BaseConstruct = core::mem::transmute(0x081d_6380usize);
     construct(storage, first, second)
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_base_construct(storage: *mut u32, _first: u32, _second: u32) -> *mut u32 {
+pub(crate) unsafe extern "C" fn missing_base_construct(storage: *mut u32, _first: u32, _second: u32) -> *mut u32 {
     storage
 }
 
@@ -41,7 +41,7 @@ pub static mut BASE_CONSTRUCT: BaseConstruct = missing_base_construct;
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn base_construct(storage: *mut u32, first: u32, second: u32) -> *mut u32 {
+pub(crate) unsafe fn base_construct(storage: *mut u32, first: u32, second: u32) -> *mut u32 {
     BASE_CONSTRUCT(storage, first, second)
 }
 
@@ -65,10 +65,8 @@ pub unsafe extern "C" fn derived_object_construct(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::BASE_CONSTRUCT_TEST_LOCK;
     use core::ptr;
-    use parking_lot::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut SEEN: (*mut u32, u32, u32) = (ptr::null_mut(), 0, 0);
     static mut RETURNED: *mut u32 = ptr::null_mut();
 
@@ -79,7 +77,7 @@ mod tests {
 
     #[test]
     fn forwards_constructor_registers_and_installs_derived_vtable_on_returned_object() {
-        let _guard = TEST_LOCK.lock();
+        let _guard = BASE_CONSTRUCT_TEST_LOCK.lock();
         let mut storage = [0x1111_1111u32; 2];
         let mut returned = [0x2222_2222u32; 2];
 

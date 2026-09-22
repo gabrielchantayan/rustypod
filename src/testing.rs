@@ -2252,3 +2252,6 @@ pub static MEDIA_PLAYER_TRANSITION_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
 /// Serializes host tests that mutate the fixed record table at `0x083e9d94`.
 pub static FIXED_RECORD_U16_LOOKUP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that replaces the unported `FUN_081d6380` base
+/// constructor seam shared by derived-object constructor ports.
+pub static BASE_CONSTRUCT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
