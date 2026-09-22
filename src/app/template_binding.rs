@@ -135,6 +135,61 @@ pub unsafe extern "C" fn template_binding_name_or_default(this: *mut u8) -> *con
     &NAME_DEFAULT_CSTR
 }
 
+/// Marker and replacement literals for [`template_binding_name_or_controller_default`].
+///
+/// The raw literal-pool words at 0x0822e0c8 and 0x0822e0cc are respectively
+/// 0x083f6b08 and 0x083f6b44. Their target addresses do not hold host-readable
+/// C strings, so the host model retains the recovered marker bytes and a
+/// distinct replacement object.
+pub static CONTROLLER_NAME_MARKER_CSTR: [u8; 15] = *b"CntrlHistoryFn\0";
+static CONTROLLER_NAME_DEFAULT_CSTR: u8 = 0;
+
+/// template_binding_name_or_controller_default — original: `FUN_0822e09c` @
+/// 0x0822e09c (44 code bytes plus the two-word literal pool at
+/// 0x0822e0c8..0x0822e0cf; 52 bytes total). Raw ARM begins with `push
+/// {r4,lr}` and its final `pop {r4,pc}` is at 0x0822e0c4; the next separately
+/// linked function begins at 0x0822e0d0. It has **3 inbound plain `bl` call
+/// sites**, zero predicated inbound `bl` sites, two unconditional direct
+/// calls in its body, and one `bne` tail transfer.
+///
+/// Calls [`template_binding_name_or_default`] and compares that result with
+/// `"CntrlHistoryFn"`. A match returns this override's literal default;
+/// otherwise it deliberately invokes the base accessor a second time and
+/// tail-returns its result. The two raw literals are modeled for host testing:
+/// the marker's recovered bytes are exact, while the replacement's target
+/// address is preserved below rather than treated as a host pointer.
+///
+/// Deliberate deviation: a Rust call replaces the tail branch, and the
+/// replacement's unresolvable target pointer is represented by a distinct
+/// host empty-string object. Both direct callees are existing Rust ports.
+///
+/// # Safety
+///
+/// `this` must satisfy [`template_binding_name_or_default`]'s contract.
+pub const CONTROLLER_NAME_MARKER_CSTR_ADDRESS: usize = 0x083f6b08;
+pub const CONTROLLER_NAME_DEFAULT_CSTR_ADDRESS: usize = 0x083f6b44;
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn template_binding_name_or_controller_default(
+    this: *mut u8,
+) -> *const u8 {
+    if strcmp(
+        template_binding_name_or_default(this),
+        CONTROLLER_NAME_MARKER_CSTR.as_ptr(),
+    ) != 0 {
+        return template_binding_name_or_default(this);
+    }
+    #[cfg(target_os = "none")]
+    {
+        CONTROLLER_NAME_DEFAULT_CSTR_ADDRESS as *const u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        &CONTROLLER_NAME_DEFAULT_CSTR
+    }
+}
+
 /// ROM address of the one-byte sentinel compared by
 /// [`template_binding_name_or_special_default`] (literal-pool word @
 /// 0x08212bf4 holds this address, binary-verified).
@@ -279,6 +334,35 @@ mod tests {
         assert_eq!(NAME_DEFAULT_CSTR, 0);
         assert_eq!(NAME_SENTINEL_CSTR_ADDRESS, 0x083e267c);
         assert_eq!(NAME_DEFAULT_CSTR_ADDRESS, 0x083e266c);
+    }
+
+    #[test]
+    fn controller_marker_and_default_keep_the_literal_pool_identities() {
+        assert_eq!(CONTROLLER_NAME_MARKER_CSTR, *b"CntrlHistoryFn\0");
+        assert_eq!(CONTROLLER_NAME_MARKER_CSTR_ADDRESS, 0x083f6b08);
+        assert_eq!(CONTROLLER_NAME_DEFAULT_CSTR_ADDRESS, 0x083f6b44);
+    }
+
+    #[test]
+    fn controller_marker_selects_the_override_default() {
+        let mut name = CONTROLLER_NAME_MARKER_CSTR;
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result =
+            unsafe { template_binding_name_or_controller_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, &CONTROLLER_NAME_DEFAULT_CSTR as *const u8);
+    }
+
+    #[test]
+    fn other_controller_names_repeat_the_base_accessor_result() {
+        let mut name = *b"TCNotesDispatcher\0";
+        let mut object = object_with_name(name.as_mut_ptr());
+
+        let result =
+            unsafe { template_binding_name_or_controller_default(object.as_mut_ptr()) };
+
+        assert_eq!(result, name.as_ptr());
     }
 
     #[test]
