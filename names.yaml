@@ -28384,6 +28384,25 @@ functions:
       being copied through the ROM memcpy veneer into a private stack image;
       the original never exposes or mutates that scratch image.
 
+  - address: 0x0828ccb0
+    ghidra: FUN_0828ccb0
+    name: configure_display_pending_selector
+    size: 28
+    sig: "void configure_display_pending_selector(Display *display, i32 selector)"
+    module: ui/display_pending_selector
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: selector
+      FUN_0828d6cc: configure_display_pending_nibbles
+    notes: >-
+      Raw osos.dec proves the true 28-byte extent: seven ARM instructions at
+      0x0828ccb0..0x0828cccc, ending with pop {r2,r3,r4,pc}; the separately
+      linked next function opens at 0x0828cccc. Decoding every ARM B/BL
+      immediate finds exactly 3 direct callers, all unconditional bl and no
+      predicated forms: 0x0819981c, 0x0819a678, and 0x0819a848. The wrapper
+      passes its display and selector to configure_display_pending_nibbles
+      with -1 for each nibble, retaining all four pending nibble values.
   - address: 0x0828d6cc
     ghidra: FUN_0828d6cc
     name: configure_display_pending_nibbles

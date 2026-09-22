@@ -387,6 +387,23 @@ mod tests {
     }
 
     #[test]
+    fn selector_wrapper_retains_every_pending_nibble() {
+        let guard = install_recorder();
+        let display = 0x1234usize as *mut Display;
+
+        unsafe {
+            DISPLAY_PENDING_STATE.selector = 0;
+            DISPLAY_PENDING_NIBBLES = [1, 2, 3, 4];
+            crate::ui::display_pending_selector::configure_display_pending_selector(display, 1);
+
+            assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
+            assert_eq!(DISPLAY_PENDING_NIBBLES, [1, 2, 3, 4]);
+            assert_eq!(FORWARDED, Some((display, 1, [1, 2, 3, 4])));
+        }
+        restore_recorder(guard);
+    }
+
+    #[test]
     fn invalid_input_changes_nothing_and_skips_the_display_callee() {
         let guard = install_recorder();
         let display = 0x1234usize as *mut Display;
@@ -394,7 +411,7 @@ mod tests {
         unsafe {
             DISPLAY_PENDING_STATE.selector = 1;
             DISPLAY_PENDING_NIBBLES = [4, 5, 6, 7];
-            configure_display_pending_nibbles(display, 0, 4, 16, 6, 7);
+            crate::ui::display_pending_selector::configure_display_pending_selector(display, 2);
 
             assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
             assert_eq!(DISPLAY_PENDING_NIBBLES, [4, 5, 6, 7]);
