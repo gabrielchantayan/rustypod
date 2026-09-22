@@ -129750,3 +129750,32 @@ functions:
       observable_array_owned_destroy and no predicated bl; the three inbound
       direct bl callers are 0x081dcd70, 0x081dce30, and 0x0820fe28. Ghidra's
       `param_1 + 5` is the same target-word offset.
+
+  - address: 0x08204434
+    ghidra: FUN_08204434
+    name: vtable_089917a4_observable_array_construct
+    size: 44
+    sig: "void *vtable_089917a4_observable_array_construct(void *storage, const void *first_pair, const void *second_pair, u32 mode)"
+    module: cxx/vtable_089917a4_observable_array_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: first_pair
+      param_3/r2: second_pair
+      in_r3: mode
+      DAT_08204460: vtable_089917a4
+      FUN_0811050c: vtable_two_pair_base_construct
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte code extent
+      0x08204434..0x08204460; 0x08204460 is the literal-pool vtable word
+      0x089917a4, and 0x08204464 begins the separately linked destructor.
+      The sole body BL is plain and unconditional to ported
+      vtable_two_pair_base_construct at 0x0811050c, with no predicated BL.
+      The constructor passes r0-r2 through to that base, replaces its vtable
+      with 0x089917a4, clears the owned ObservableArray target word at +0x14,
+      sets byte +0x18, and stores only mode's low halfword at +0x1a. Decoding
+      every ARM B/BL word in osos.dec finds three plain direct BL callers
+      (0x081dcd98, 0x081dce58, and 0x0820fe50) and no predicated callers.
+      The paired getter at 0x0820440c consumes +0x14 before the destructor at
+      0x08204464 releases it. Host code deliberately uses raw target offsets:
+      its pointers are wider than the target's four-byte owned-array word.
