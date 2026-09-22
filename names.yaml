@@ -126329,3 +126329,29 @@ functions:
       unported direct resolver at 0x0814376c is invoked by verified address
       on target and through a host seam; no retail identity is invented.
       The trivial stack-record initializer at 0x08287278 is inlined.
+  - address: 0x08284c2c
+    ghidra: FUN_08284c2c
+    name: controller_mark_pending_and_dispatch
+    size: 12
+    sig: "u32 controller_mark_pending_and_dispatch(void *controller, u32 dispatch_mode)"
+    module: app/controller_mark_pending_and_dispatch
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: dispatch_mode
+      "controller+0x5c": pending
+      FUN_08285708: unported shared controller dispatcher
+    notes: >-
+      Raw osos.dec establishes the exact three-instruction, 12-byte extent
+      0x08284c2c..0x08284c37: mov r1,#1; strb r1,[r0,#0x5c]; b
+      0x08285708. The push {r4-r8,lr} at 0x08284c38 is the next independent
+      function boundary, correcting Ghidra's overextended body. The port
+      preserves incoming r1 as dispatch_mode despite Ghidra recovering only
+      r0, stamps controller+0x5c pending=1, and tail-branches through a
+      literal veneer to the verified but semantically unported dispatcher at
+      0x08285708. The body has zero plain and zero predicated internal BL
+      calls. Raw A32 decoding independently finds exactly three inbound
+      plain BL sites (0x08284b14, 0x08284b64, 0x0828550c) and no predicated
+      inbound calls. Deliberate deviation: host builds substitute that
+      fixed-address tail edge with a callback seam; ARM preserves it with a
+      relocation-safe veneer.
