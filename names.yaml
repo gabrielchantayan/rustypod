@@ -79751,6 +79751,39 @@ functions:
       conditional initializer/early return, NULL selector, and final
       dispatcher transfer; the diffs are the host/target seam `blx`
       calls, LLVM frame, and literal-pool words.
+  - address: 0x08262910
+    ghidra: thunk_FUN_082e7ff8
+    name: dispatch_tagged_context_with_selector
+    size: 4
+    sig: "u32 dispatch_tagged_context_with_selector(u32 *context, u32 *tagged_input, const u32 *selector)"
+    module: cxx/tagged_context_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1/r5: tagged_input
+      param_3/r2/r6: selector
+      DAT_082e8068: tagged_input_magic_0x4d555458
+      DAT_082e806c: context_magic_0x434e4453
+      FUN_082e7e54: opaque_context_initialize (unported seam)
+      FUN_080c96d8: opaque_context_dispatch (unported seam)
+    notes: >-
+      Raw osos.dec word 0xea0215b8 is a four-byte "b 0x082e7ff8" veneer;
+      sibling veneers at 0x0826290c and 0x08262914 delimit its true extent
+      without a literal pool. The target body is 0x082e7ff8..0x082e806f:
+      112 instruction bytes followed by the 0x4d555458 and 0x434e4453
+      literals, with the next push prologue at 0x082e8070. Whole-image ARM
+      branch decoding finds zero direct plain or predicated bl instructions
+      targeting the veneer despite Ghidra's three reported call sites; the
+      target body contains one plain bl to 0x082e7e54 and no predicated calls,
+      then tail-branches to 0x080c96d8. It returns 0x1a when context, tagged
+      input, or selector is NULL, or when tagged_input[0] differs from
+      0x4d555458. A context marked 0x434e4453 is initialized with a NULL
+      selector and propagates a nonzero status; otherwise dispatch receives
+      all three original arguments. Deliberate deviation: the tail branch is
+      a Rust call returning its result; both unidentified target calls use
+      existing target-address seams and host-test replacements. Tests cover
+      NULL selector rejection and initialization/dispatch ordering with the
+      supplied selector.
   - address: 0x08262914
     ghidra: thunk_FUN_082e7f78
     name: opaque_context_activate
