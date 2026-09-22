@@ -943,6 +943,33 @@ functions:
       right-child edges until a left-child edge (including the header sentinel)
       is found. Target links remain u32 words to preserve their 32-bit offsets
       on hosts; deliberate deviations: none.
+  # --- pool deque begin cursor getter ---
+  - address: 0x081fbf70
+    ghidra: FUN_081fbf70
+    name: pool_deque_begin_cursor_get
+    size: 8
+    sig: "u32 pool_deque_begin_cursor_get(const PoolBase *this)"
+    module: heap/pool_deque_begin_cursor
+    status: ported
+    renames:
+      FUN_081fbf70: pool_deque_begin_cursor_get
+      param_1/r0: this
+      "this_plus_0x4c": deque.begin.cur
+      r0 return: begin_cursor
+    notes: >-
+      Raw osos.dec words at 0x081fbf70 are e590004c and e12fff1e:
+      `ldr r0,[r0,#0x4c]` followed by `bx lr`. The independently linked next
+      accessor starts at 0x081fbf78, confirming the eight-byte extent. Full
+      image decoding finds exactly three direct inbound calls, all plain
+      unconditional BL at 0x082079d0, 0x08207b44, and 0x08207fcc; there are
+      zero predicated BL calls, direct tail branches, and aligned raw-word
+      references. The port reads PoolBase.deque.begin.cur through its named
+      target-layout field and converts the recovered host pointer to its
+      target-width u32 representation. There is no NULL check, matching
+      firmware. Host tests cover zero, one, high-bit, and all-one cursor
+      values while proving the getter does not mutate adjacent iterator words.
+      No deliberate deviations.
+
   - address: 0x083b58b8
     ghidra: FUN_083b58b8
     name: red_black_tree_advance_cursor_copy
