@@ -126922,3 +126922,28 @@ functions:
       0x08159bf4, and 0x08159bfc, with no predicated BL callers. Virtual
       method identities and semantics remain unrecovered; the port preserves
       their observed r0-only ABI without inventing a callee identity.
+  - address: 0x0827b2d8
+    ghidra: FUN_0827b2d8
+    name: opaque_record_initialize
+    size: 44
+    sig: "u8 *opaque_record_initialize(u8 *record, u32 first_value, u32 second_value)"
+    module: util/opaque_record_initialize
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: first_value
+      param_3/r2: second_value
+      DAT_0827b304: opaque_record_vtable
+      "record+0x00": vtable
+      "record+0x0c": first_value
+      "record+0x1c": second_value
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte A32 body at
+      0x0827b2d8..0x0827b304: it returns r0 unchanged, stores literal
+      0x089a60f0 at +0, clears target-width words at +4, +8, +16, and +24,
+      clears byte +20, then stores r1 at +12 and r2 at +28. The next real
+      function begins at 0x0827b308 after the literal at 0x0827b304. Raw ARM
+      disassembly and the three caller statements establish three inbound
+      plain unconditional BL calls, with no predicated BL form. The opaque
+      vtable and concrete record type are deliberately not invented; Rust
+      uses byte offsets and u32 stores to preserve target layout on hosts.
