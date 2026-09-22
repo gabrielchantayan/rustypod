@@ -1975,6 +1975,11 @@ pub mod hints {
     // 0x8260_0000: dedicated to ui/view_resource_provider_assign's
     // target-width view and provider fixtures; mappings never unmap.
     pub const VIEW_RESOURCE_PROVIDER_ASSIGN: usize = 0x8260_0000;
+    // 0x6da0_0000 / 0x6db0_0000: dedicated to
+    // app/opaque_record_vector_last_entry's target-width owner and vector
+    // fixtures; mappings never unmap, so no other user may share them.
+    pub const OPAQUE_RECORD_VECTOR_LAST_ENTRY: usize = 0x6da0_0000;
+    pub const OPAQUE_RECORD_VECTOR_LAST_ENTRY_WRAP: usize = 0x6db0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

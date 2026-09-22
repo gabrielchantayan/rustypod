@@ -127746,3 +127746,25 @@ functions:
       Rust deliberately represents the ARM stack scratch as two u32 words to
       preserve target word layout on hosts with wider pointers and different
       u64 alignment; no target behavior deviation.
+
+  - address: 0x08267f60
+    ghidra: FUN_08267f60
+    name: opaque_record_vector_last_entry
+    size: 16
+    sig: "u32 opaque_record_vector_last_entry(u32 owner_address)"
+    module: app/opaque_record_vector_last_entry
+    status: ported
+    renames:
+      param_1/r0: owner_address
+      "owner+0x04": vector
+      "vector+0x30": end_address
+    notes: >-
+      Raw osos.dec establishes the exact four-instruction, 16-byte A32 body
+      0x08267f60..0x08267f6f: ldr r0,[r0,#4]; ldr r0,[r0,#0x30]; sub
+      r0,r0,#0x20; bx lr. The next independently entered function begins at
+      0x08267f70. Decoding all immediate A32 B/BL words finds three direct
+      inbound calls, all plain unconditional bl, and no predicated BL calls.
+      The helper returns the final 32-byte vector entry by subtracting 0x20
+      from the stored end pointer. Rust uses u32 target addresses rather than
+      host pointers to preserve the retail 4-byte object layout; no target
+      behavior deviation.
