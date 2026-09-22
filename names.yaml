@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08243778
+    ghidra: FUN_08243778
+    name: queue_match_and_promote
+    size: 204
+    sig: "u32 queue_match_and_promote(u32 *queue, u32 kind, u32 value, u32 miss_value)"
+    module: util/queue_match_and_promote
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_2/r1: kind
+      param_3/r2: value
+      param_4/r3: miss_value
+      FUN_082432c8: select_queue_operation
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent
+      0x08243778..0x08243843; the push at 0x08243844 begins the next real
+      function. Full-image A32 decoding finds two inbound plain BL callers
+      (0x082426b4 and 0x08252864), zero predicated inbound BL forms, one
+      unconditional outbound BL at 0x08243790 to unnamed FUN_082432c8, zero
+      predicated outbound BL forms, plus the verified indirect BLX matcher
+      dispatch at 0x082437c0 and indirect tail BX miss dispatch at
+      0x08243840. It selects a kind-indexed operation table, scans the
+      intrusive queue at header offsets +0x10/+0x14, promotes a matched
+      non-head entry, and otherwise tail-dispatches the table miss handler.
+      FUN_082432c8 and its operation tables remain unnamed, so the device
+      port calls its verified retail address while host tests install seams.
   - address: 0x08256d40
     ghidra: FUN_08256d40
     name: fixed28_divide_round_up

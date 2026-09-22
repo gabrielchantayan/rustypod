@@ -545,6 +545,9 @@ pub mod hints {
     // 0x6f10_0000: dedicated to util/bit_buffer_copy's raw-u32 cursor and
     // output-buffer fixture; mappings never unmap, so no other user may share it.
     pub const BIT_BUFFER_COPY: usize = 0x6f10_0000;
+    // 0x6c20_0000: dedicated to util/queue_match_and_promote's raw-u32
+    // intrusive queue and entry fixture; mappings never unmap.
+    pub const QUEUE_MATCH_AND_PROMOTE: usize = 0x6c20_0000;
     // 0x6f20_0000: dedicated to util/bit_buffer_set_bit's raw-u32 byte
     // storage fixture; mappings never unmap, so no other user may share it.
     pub const BIT_BUFFER_SET_BIT: usize = 0x6f20_0000;
