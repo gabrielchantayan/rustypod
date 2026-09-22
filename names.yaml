@@ -58754,6 +58754,34 @@ functions:
       layout when StringObject pointers widen on host. match.py reports the
       same two nested-call positions and scalar-copy order; its additional
       frame setup and volatile seam load replace the retail direct second BL.
+  - address: 0x082679c4
+    ghidra: FUN_082679c4
+    name: opaque_result_construct
+    size: 52
+    sig: "OpaqueResult *opaque_result_construct(OpaqueResult *this)"
+    module: cxx/opaque_result_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_08267958: opaque_result_base_construct
+      FUN_08277440: string_default_construct
+    notes: >-
+      Raw A32 establishes the exact 52-byte extent 0x082679c4..0x082679f7:
+      `push {r4,lr}`, one unconditional BL to the separately linked base
+      constructor at 0x08267958, a single zero materialization, nine stores at
+      +0x2c through +0x4c, and `pop {r4,pc}`. The next real function starts
+      at 0x082679f8. Whole-image decoding finds three unconditional inbound BL
+      sites (0x0807a404, 0x0810493c, 0x082968c4) and no predicated inbound BL
+      sites; the body has one unconditional internal BL and no predicated
+      internal BLs. The verified 0x08267958 base constructor default-constructs
+      StringObjects at +0, +8, +0x14, +0x1c, and +0x24 through
+      string_default_construct @ 0x08277440, clears the opaque +0x10 word, and
+      returns this. This port performs those known base-constructor operations
+      directly rather than adding a second exported seam for 0x08267958, then
+      clears the three target-width vector headers. `repr(C)` named fields
+      preserve target member semantics despite widened host pointers. match.py
+      reports the expanded base construction and LLVM's memclr helper in place
+      of the retail single base BL and nine scalar stores.
   - address: 0x08268210
     ghidra: FUN_08268210
     name: byte_vector_owner_push_back
