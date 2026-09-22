@@ -719,6 +719,53 @@ pub unsafe extern "C" fn string_object_assign_payload(
     strcpy(destination, payload);
 }
 
+/// string_object_assign_cstr_bounded — original: `FUN_08276400` @
+/// 0x08276400 (116 bytes).
+///
+/// Raw `osos.dec` words establish the complete extent: `e92d4070` at
+/// 0x08276400 through `e8bd8070` at 0x08276470; the next function starts
+/// with `e92d4070` at 0x08276474. The body makes three unconditional calls:
+/// `bl` 0x08275de8, an indirect `blx` through vtable slot +0x08, and `bl`
+/// 0x08037db0 (`__rt_memcpy`); it has no predicated `bl` calls.
+///
+/// Bounds a caller-owned C string to `max_len`: it requests
+/// `min(strlen(source), max_len) + 1` bytes through virtual slot +0x08,
+/// copies only the non-NUL bytes, and writes the terminating NUL itself.
+/// A NULL source or non-positive bound calls virtual slot +0x0c; an
+/// allocation failure returns without copying or clearing.
+///
+/// The two virtual callees remain the existing
+/// [`STRING_OBJECT_ASSIGN_CSTR_OPS`] seam; their identities are unrecovered.
+/// Calling the existing `__rt_memcpy` port directly replaces the ROM veneer
+/// at 0x08037db0 without changing its non-overlap contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_cstr_bounded(
+    this: *mut StringObject,
+    source: *const u8,
+    max_len: i32,
+) {
+    if source.is_null() || max_len <= 0 {
+        assign_cstr_clear_op()(this);
+        return;
+    }
+
+    let mut copied_len = 0usize;
+    let limit = max_len as usize;
+    while copied_len < limit && unsafe { source.add(copied_len).read() } != 0 {
+        copied_len += 1;
+    }
+
+    let destination = assign_cstr_allocate_op()(this, copied_len + 1, 0);
+    if destination.is_null() {
+        return;
+    }
+    unsafe {
+        __rt_memcpy(destination, source, copied_len);
+        destination.add(copied_len).write(0);
+    }
+}
+
 /// string_object_assign_bytes — original: `FUN_08277188` @ 0x08277188
 /// (88 bytes, all code; next function starts at 0x082771e0; **4 direct `bl`
 /// call sites** — all unconditional, zero predicated).
@@ -4354,6 +4401,70 @@ pub(crate) mod tests {
             "both branch forms dispatch vtable slot +0xc with only this"
         );
         assert_eq!(object.payload, 0x2222_2222 as *mut u8);
+    }
+
+    #[test]
+    fn assign_cstr_bounded_stops_at_nul_and_copies_only_non_nul_bytes() {
+        let mut destination = [0xa5u8; 16];
+        let source = [b'h', b'i', 0, b'x', b'y', b'z'];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_cstr_bounded(this, source.as_ptr(), source.len() as i32) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 3, 0)]
+        );
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+        assert_eq!(&destination[..4], &[b'h', b'i', 0, 0xa5]);
+    }
+
+    #[test]
+    fn assign_cstr_bounded_terminates_an_unterminated_prefix() {
+        let mut destination = [0xa5u8; 16];
+        let source = [b'a', b'b', b'c', b'd'];
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe { string_object_assign_cstr_bounded(this, source.as_ptr(), 3) };
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, 4, 0)]
+        );
+        assert_eq!(&destination[..5], &[b'a', b'b', b'c', 0, 0xa5]);
+    }
+
+    #[test]
+    fn assign_cstr_bounded_null_zero_and_negative_bounds_only_clear() {
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: 0x2222_2222 as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let source = [b'x'];
+        let _bench = assign_cstr_bench(0x3333_3333 as *mut u8);
+
+        unsafe {
+            string_object_assign_cstr_bounded(this, core::ptr::null(), 1);
+            string_object_assign_cstr_bounded(this, source.as_ptr(), 0);
+            string_object_assign_cstr_bounded(this, source.as_ptr(), -1);
+        }
+
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() });
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize, this as usize, this as usize]
+        );
     }
 
     #[test]
