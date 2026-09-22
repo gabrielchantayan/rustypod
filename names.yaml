@@ -127479,3 +127479,33 @@ functions:
       its predicated BNE tail branch. The two established fixed-target seams
       from ui/view_base are reused; Rust turns the tail branch into that seam
       call so host tests can observe it. No NULL or ownership guard is added.
+
+  # --- Virtual slot +0x4c result reporter ---
+  - address: 0x08271a00
+    ghidra: FUN_08271a00
+    name: vtable_slot_4c_then_2c_dispatch
+    size: 60
+    sig: "i32 vtable_slot_4c_then_2c_dispatch(void *this)"
+    module: cxx/vtable_slot_4c_then_2c_dispatch
+    status: ported
+    renames:
+      param_1: this
+      iVar1: result
+    notes: >-
+      Raw osos.dec establishes the true 60-byte extent: `push
+      {r4,r5,r6,lr}` at 0x08271a00 through `pop {r4,r5,r6,pc}` at
+      0x08271a38, with the next independent function at 0x08271a3c.
+      The body has no immediate BL: it calls vtable word +0x4c through
+      unconditional `blx r2`, compares the i32 return to -1, then calls
+      vtable word +0x2c through `blxne r2` only when non-sentinel. It
+      returns the first result unchanged. Full-image immediate B/BL
+      decoding and osos.asm both find two inbound plain `bl` callers
+      (0x0819e3cc and 0x082776b8), zero predicated BL callers, and no
+      immediate BL body calls. This contradicts Ghidra's reported three
+      BL call sites; the raw image is authoritative. The virtual method
+      identities remain unrecovered, so no callee seam is invented.
+      Deliberate host deviation: vtable entries use native-width `usize`
+      rather than target u32 words so callback pointers are not truncated;
+      the target build preserves word slots +0x4c and +0x2c. Focused host
+      tests cover forwarding a non-sentinel result and suppressing the
+      second dispatch for -1.
