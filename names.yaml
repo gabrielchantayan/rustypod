@@ -35917,6 +35917,26 @@ functions:
       record + 4 then record + 0, restores the saved record pointer to r0,
       and returns it. The pair fields are otherwise untouched.
 
+  - address: 0x08257f80
+    ghidra: FUN_08257f80
+    name: cxx_string_pair_entry_copy_ctor_base
+    size: 40
+    sig: "CxxStringPairRangeEntry *cxx_string_pair_entry_copy_ctor_base(CxxStringPairRangeEntry *destination, const CxxStringPairRangeEntry *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: source, r4: source}
+    renames: {FUN_083d8c30: cxx_string_copy_ctor}
+    notes: >-
+      Raw ARM words e92d4010 e1a04001 eb060328 e2841004 e2800004
+      eb060325 e5941008 e2400004 e5801008 e8bd8010 establish the exact
+      40-byte extent 0x08257f80..0x08257fa7; the independent destructor
+      begins at 0x08257fa8. It COW-copies the two one-word strings at +0x00
+      and +0x04 through cxx_string_copy_ctor @ 0x083d8c30, copies the
+      unexamined +0x08 word, and restores the entry base as its return.
+      Decoding every aligned ARM B/BL immediate in osos.dec finds three
+      direct unconditional inbound bl sites (0x0811b4d4, 0x0811bd04,
+      0x0811c6e4) and zero predicated forms. No deliberate deviations.
+
   - address: 0x08257fa8
     ghidra: FUN_08257fa8
     name: cxx_string_pair_entry_destroy
