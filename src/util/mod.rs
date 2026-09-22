@@ -65,6 +65,7 @@ pub mod dos_wildcard_match_including_deleted;
 pub mod drive;
 pub mod digest_byte_count_add;
 pub mod fixed;
+pub mod fixed28_divide_round_up;
 pub mod fixed_record_u16_lookup;
 pub mod fixed_matrix_identity;
 pub mod fixed_matrix_copy;

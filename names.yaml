@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08256d40
+    ghidra: FUN_08256d40
+    name: fixed28_divide_round_up
+    size: 52
+    sig: "i32 fixed28_divide_round_up(i32 numerator, i32 denominator)"
+    module: util/fixed28_divide_round_up
+    status: ported
+    renames:
+      param_1/r0: numerator
+      param_2/r1: denominator
+      FUN_0802ee34: __aeabi_ldivmod
+      r0:r1: scaled_numerator_then_quotient
+      r2:r3: sign_extended_denominator
+    notes: >-
+      Raw osos.dec establishes the exact 13-instruction, 52-byte A32 body
+      0x08256d40..0x08256d73; the ldr r2,[r0] at 0x08256d74 begins the next
+      separately entered function. It forms numerator * 2^29 as a signed
+      i64, calls the already ported __aeabi_ldivmod with the sign-extended
+      denominator, adds one to the quotient, and returns its arithmetic
+      right shift by one (the low word). Full-image A32 decoding finds three
+      inbound plain BL call sites (0x0824fd10, 0x0824fd34, 0x0824fee0), zero
+      predicated inbound BL forms, one plain outbound BL at 0x08256d5c, and
+      zero predicated outbound BL forms. Host tests cover signed fractional
+      quotients, extrema, and both divisor signs. match.py reports the
+      expected LLVM frame and rrx funnel-shift spelling differences while
+      preserving the signed extension, scale, runtime BL, carry add, and
+      64-bit right shift. Division by zero retains the existing
+      __aeabi_ldivmod port's documented zero-quotient deviation from the ADS
+      divide-by-zero handler; no additional deviation is introduced.
   - address: 0x082725ec
     ghidra: FUN_082725ec
     name: byte_source_propagate_unresolved
