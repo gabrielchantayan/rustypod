@@ -76,6 +76,7 @@ use super::string_object::{
 use crate::app::facade_for_selector::facade_for_selector;
 use crate::app::path_probe::{interface_guard_base_construct, InterfaceGuard};
 use crate::heap::block_deque::deque_seg_capacity;
+use crate::heap::veneers::operator_new;
 
 /// Literal-pool word at 0x08278f94, installed before derived cleanup.
 pub const TRANSITION_ADDON_VTABLE_ADDRESS: usize = 0x089a_60bc;
@@ -126,6 +127,17 @@ pub const TRANSITION_ADDON_FACADE_BYTE_OFFSET: usize = 0x38;
 /// +0x3c — word receiving the 0x081a81bc alignment constant (0x20).
 pub const TRANSITION_ADDON_ALIGNMENT_OFFSET: usize = 0x3c;
 
+
+/// Target-layout result of [`silver_controller_transition_addon_handle_construct`].
+///
+/// On ARM, `addon` occupies word zero and `path` starts at byte +4. The native
+/// fields intentionally widen on hosts so [`StringObject`] retains its real
+/// pointer-bearing representation.
+#[repr(C)]
+pub struct TransitionAddonHandle {
+    pub addon: *mut u8,
+    pub path: StringObject,
+}
 #[inline(always)]
 unsafe fn read_u32_unaligned(address: *const u8) -> u32 {
     (address as *const u32).read_unaligned()
@@ -667,6 +679,49 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
     let this = vector.sub(TRANSITION_ADDON_VECTOR_OFFSET);
     register_with_owner_op()(this);
     this
+}
+
+/// silver_controller_transition_addon_handle_construct — original:
+/// `FUN_08279428` @ 0x08279428 (100 bytes, 0x08279428..0x0827948c; the next
+/// separately linked function begins at 0x0827948c). **4 plain `bl` calls**
+/// and zero predicated `bl` calls, verified by decoding the 25 raw ARM words:
+/// `string_object_copy_construct`, `operator_new(0x54)`,
+/// `string_object_c_str`, and
+/// [`silver_controller_transition_addon_construct_from_cstr`].
+///
+/// Initializes the caller-owned handle with a null addon pointer, copy-constructs
+/// its embedded path from `source`, allocates 0x54 bytes, then constructs the
+/// from-C-string transition addon with `(path.c_str(), flag, base_hint,
+/// 0x10000, 1, 0)`. The constructor's return, including a shifted return, is
+/// stored in `addon`; the function returns the original handle storage. No
+/// allocation-failure guard exists: a NULL allocation still reaches the
+/// constructor, exactly as the raw call sequence does.
+///
+/// Deliberate deviation: target word offsets are represented by
+/// [`TransitionAddonHandle`]'s `repr(C)` fields so native host pointers can
+/// widen without corrupting the embedded [`StringObject`]. All four callees
+/// are established Rust ports; no new seam is introduced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn silver_controller_transition_addon_handle_construct(
+    handle: *mut TransitionAddonHandle,
+    source: *const StringObject,
+    flag: u32,
+    base_hint: u32,
+) -> *mut TransitionAddonHandle {
+    (*handle).addon = core::ptr::null_mut();
+    super::string_object::string_object_copy_construct(&mut (*handle).path, source);
+    let storage = operator_new(0x54);
+    (*handle).addon = silver_controller_transition_addon_construct_from_cstr(
+        storage,
+        super::string_object::string_object_c_str(&(*handle).path),
+        flag,
+        base_hint,
+        0x1_0000,
+        1,
+        0,
+    );
+    handle
 }
 
 #[cfg(test)]
@@ -1323,6 +1378,7 @@ mod tests {
             construct_calls(),
             vec![
                 ConstructCall::StringMember {
+
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
                 },
@@ -1363,6 +1419,54 @@ mod tests {
                 assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET + offset)), 0);
             }
         }
+    }
+
+    #[repr(align(8))]
+    struct AddonStorage([u8; 0x54]);
+
+    #[test]
+    fn handle_construct_copies_empty_path_and_forwards_fixed_constructor_arguments() {
+        let mut source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut handle = core::mem::MaybeUninit::<TransitionAddonHandle>::uninit();
+        let mut addon_storage = AddonStorage([0; 0x54]);
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        crate::heap::veneers::tests::set_alloc_ret(addon_storage.0.as_mut_ptr());
+        unsafe {
+            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
+        }
+        let _guard = construct_from_cstr_guard(
+            install_construct_defaults(),
+            construct_from_cstr_stand_in,
+        );
+
+        let returned = unsafe {
+            silver_controller_transition_addon_handle_construct(
+                handle.as_mut_ptr(),
+                &mut source,
+                0x7f,
+                0xcafe_babe,
+            )
+        };
+        let handle = unsafe { &mut *handle.as_mut_ptr() };
+        assert!(core::ptr::eq(returned, handle));
+        assert_eq!(handle.addon, addon_storage.0.as_mut_ptr());
+        assert_eq!(
+            crate::heap::veneers::tests::alloc_log(),
+            (1, 0x54, 2),
+            "the raw operator-new call has tag 2 and no NULL guard"
+        );
+
+        let calls = construct_calls();
+        assert!(matches!(
+            calls.as_slice(),
+            [
+                ConstructCall::StringMember { source, .. },
+                ConstructCall::Walk { selector: 1 }
+            ] if unsafe { *(*source as *const u8) } == 0
+        ));
     }
 
     #[test]

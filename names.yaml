@@ -62696,6 +62696,25 @@ functions:
       b string_object_destroy` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  - address: 0x08279428
+    ghidra: FUN_08279428
+    name: silver_controller_transition_addon_handle_construct
+    size: 100
+    sig: "TransitionAddonHandle *silver_controller_transition_addon_handle_construct(TransitionAddonHandle *handle, const StringObject *source, u32 flag, u32 base_hint)"
+    module: cxx/transition_addon
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the 100-byte extent from 0x08279428 through
+      0x08279488; implementation_dispose begins separately at 0x0827948c.
+      Decoding every B/BL word gives four plain BL calls and zero predicated BL
+      calls, correcting Ghidra's three-callee report: string_object_copy_construct
+      @ 0x082773e0, operator_new(0x54) @ 0x082aadd4, string_object_c_str
+      @ 0x082a50b0, and the ported from-C-string transition-addon constructor
+      @ 0x08278dc4. It nulls handle->addon, copy-constructs handle->path, then
+      stores that constructor's returned pointer after passing the fixed tail
+      arguments 0x10000, 1, and 0. The repr(C) host handle deliberately widens
+      pointer fields so its embedded StringObject remains valid off target.
+
   - address: 0x0827948c
     ghidra: FUN_0827948c
     name: implementation_dispose
