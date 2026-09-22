@@ -58726,6 +58726,30 @@ functions:
       opaque. `repr(C)` gives the target 32-bit member order on ARM while
       allowing StringObject pointers to widen on host tests; no behavioral
       deviation is made.
+  - address: 0x082678d4
+    ghidra: FUN_082678d4
+    name: record_string_byte_vector_destroy
+    size: 64
+    sig: "StringByteVectorRecord *record_string_byte_vector_destroy(StringByteVectorRecord *this)"
+    module: cxx/record_string_byte_vector_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM decoding establishes the exact 64-byte extent
+      0x082678d4..0x08267913: the next separately linked entry begins at
+      0x08267914. The body has one direct unconditional BL to
+      cxx_array_dealloc @ 0x08266f2c and a tail B to string_object_destroy @
+      0x08277484; no internal predicated BL appears. Its three direct inbound
+      BL sites are 0x08268054, 0x0826807c, and 0x083e3ebc, all unconditional;
+      no predicated inbound call forms were found. It walks the byte-vector
+      range at target offsets +12/+16 with an empty body (trivial byte
+      destructors), releases backing storage as (begin, capacity - begin, 0),
+      then tail-destroys the embedded StringObject and returns this. The port
+      omits the semantically dead walk and uses named repr(C) members to
+      preserve target ordering when host pointers widen.
   - address: 0x08267914
     ghidra: FUN_08267914
     name: record_string_byte_vector_assign
