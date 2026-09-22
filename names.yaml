@@ -16,6 +16,19 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08223630
+    ghidra: FUN_08223630
+    name: pool_client_reset
+    size: 152
+    sig: "u32 pool_client_reset(PoolClientResetState *state, i32 wait)"
+    module: heap/pool_client_reset
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 0x08223630..0x082236c8 extent. It has
+      10 plain unconditional BL instructions and no predicated BL forms.
+      It locks +0x8, commits an attached client, optionally polls the
+      verified but still unnamed 0x081fc8b4 boundary around one
+      queue_wait(+0x48, +0x44), clears +0x4c/+0x44, then tail-unlocks.
   - address: 0x0822b054
     ghidra: FUN_0822b054
     name: shared_cell_field_copy

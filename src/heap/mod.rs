@@ -57,6 +57,7 @@ pub mod two_buffer_owner;
 pub mod three_buffer_owner;
 pub mod three_buffer_owner_create;
 pub mod pool_client;
+pub mod pool_client_reset;
 pub mod registration_node_construct;
 pub mod queue_wait;
 pub mod queue_wait_status;
