@@ -1937,6 +1937,9 @@ pub mod hints {
     // 0x8240_0000: dedicated to util/selected_or_all_entry_range's
     // target-width owner and entry-list fixture; mappings never unmap.
     pub const SELECTED_OR_ALL_ENTRY_RANGE: usize = 0x8240_0000;
+    // 0x8250_0000: dedicated to util/segment_cursor_snapshot's target-width
+    // cursor, source, and segment fixture; mappings never unmap.
+    pub const SEGMENT_CURSOR_SNAPSHOT: usize = 0x8250_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
