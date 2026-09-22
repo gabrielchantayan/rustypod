@@ -1092,6 +1092,9 @@ pub mod hints {
     // controller and timer fixtures; mappings never unmap, so no other user
     // may share this hint.
     pub const DUAL_CONTROLLER_TIMER_STOP: usize = 0x8b00_0000;
+    // 0x8c00_0000: dedicated to app/controller_timer_pair_destruct's raw-u32
+    // controller, timer, and optional-object fixture; mappings never unmap.
+    pub const CONTROLLER_TIMER_PAIR_DESTRUCTOR: usize = 0x8c00_0000;
     pub const TUNING_TIMER_SEQUENCE: usize = 0xb800_0000;
     // 0x9a00_0000: dedicated to cxx/string_object's case-folded
     // resource-construction fixture; it carries the provider-chain head as
@@ -2222,6 +2225,9 @@ pub static IAP_PACKET_EVENT_SCHEDULE_OPS_TEST_LOCK: std::sync::Mutex<()> =
 /// behind `app::animation::scheduler_table`. The animation and refcounted
 /// base-destruction ports both unlink nodes through this one host model.
 pub static SCHEDULER_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes tests that replace controller_timer_pair_destruct's host seams.
+pub static CONTROLLER_TIMER_PAIR_DESTRUCTOR_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
 /// Serializes every host test that swaps
 /// `app::opaque_keyed_collection_item_at::OPAQUE_KEYED_COLLECTION_VECTOR`.
 /// Both keyed-collection accessors install host selectors into this shared

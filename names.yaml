@@ -129130,3 +129130,27 @@ functions:
       performs the original data +8 byte read, and releases the temporary
       through vtable slot +4. The unported direct lookup remains a fixed target
       address with a host seam; host temporary owners use native-width vtables.
+
+  - address: 0x082178a4
+    ghidra: FUN_082178a4
+    name: destruct_controller_timer_pair
+    size: 80
+    sig: "void destruct_controller_timer_pair(u8 *controller)"
+    module: app/controller_timer_pair_destruct
+    status: ported
+    renames:
+      param_1/r0: controller
+      FUN_0812c6b0: timer_stop
+      FUN_0812bf84: timer_stop_then_trace
+      FUN_08134e98: base_controller_destructor (identity unconfirmed)
+    notes: >-
+      Raw ARM establishes the exact 80-byte extent 0x082178a4..0x082178f4:
+      19 instruction words followed by the vtable literal 0x08993760; the next
+      function starts at 0x082178f4. The body contains four direct plain BL
+      instructions (timer_stop and timer_stop_then_trace for each timer at
+      +0xb8 and +0xc4) plus one predicated indirect blxne through the optional
+      object at +0xc8. It installs the vtable, performs those calls in order,
+      then tail-branches to 0x08134e98. That base-destructor identity is not
+      claimed: target Rust calls its verified address, while host tests use a
+      locked seam. Rust deliberately lowers the predicated BLX and tail branch
+      to ordinary conditional and direct-call control flow.
