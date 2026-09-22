@@ -72520,6 +72520,33 @@ functions:
       one stm r0,{r1,r2} (value-identical: vtable at +0x00, NULL at
       +0x04) and adds the crate fp frame.
 
+  - address: 0x08279300
+    ghidra: FUN_08279300
+    name: string_object_assign_cstr_returning_this
+    size: 20
+    sig: "StringObject *string_object_assign_cstr_returning_this(StringObject *this, const char *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this (saved in r4, passed to the assignment callee, and returned)
+      param_2/r1: source (unchanged across the wrapper's direct call)
+      r4: this (preserved return value)
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      Raw osos.dec words at 0x08279300 are e92d4010/e1a04000/ebfff423/
+      e1a00004/e8bd8010: push {r4,lr}; mov r4,r0; bl
+      string_object_assign_cstr @ 0x0827639c; mov r0,r4; pop {r4,pc}.
+      The next real function starts at 0x08279314, establishing a 20-byte
+      all-code extent. Full-image ARM branch decoding finds three inbound
+      unconditional BL calls and zero predicated BL calls; the Ghidra
+      caller at 0x080741e4 is instead a predicated B, not a call. The
+      wrapper passes source through unchanged to the ported assignment
+      callee and returns this even if that callee clears the object or
+      allocation fails. Deliberate deviation: the Rust port calls the
+      modeled direct callee instead of its ROM address. Host tests cover
+      nonempty allocation/copy forwarding, empty-source clear forwarding,
+      and return identity.
+
   - address: 0x08279314
     ghidra: FUN_08279314
     name: path_object_assign_from_string_object

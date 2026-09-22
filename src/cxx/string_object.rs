@@ -1334,6 +1334,27 @@ pub unsafe extern "C" fn string_object_assign(
     }
     this
 }
+/// string_object_assign_cstr_returning_this — original: `FUN_08279300` @
+/// 0x08279300 (20 bytes, all code; the next separately linked function
+/// starts at 0x08279314; three inbound plain `bl` calls, zero predicated).
+///
+/// Raw ARM is `push {r4,lr}; mov r4,r0; bl string_object_assign_cstr; mov
+/// r0,r4; pop {r4,pc}`. It assigns the caller-owned C string through the
+/// existing `string_object_assign_cstr` implementation and returns `this`,
+/// preserving r1 across the call as the source argument.
+///
+/// Deliberate deviation: the port calls the modeled direct callee rather than
+/// branching to its ROM load address.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_assign_cstr_returning_this(
+    this: *mut StringObject,
+    source: *const u8,
+) -> *mut StringObject {
+    string_object_assign_cstr(this, source);
+    this
+}
+
 
 /// string_object_construct_from_cstr — original: `FUN_08277304` @
 /// 0x08277304 (44 bytes: 40 code + the 4-byte vtable literal @
@@ -6175,6 +6196,53 @@ pub(crate) mod tests {
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
             std::vec![this as usize],
             "it reaches vtable slot +0xc through the ported assign_payload"
+        );
+    }
+
+    // ---- string_object_assign_cstr_returning_this ---------------------
+
+    #[test]
+    fn assign_cstr_returning_this_forwards_nonempty_source_and_preserves_identity() {
+        let mut destination = [0xa5u8; 16];
+        let source = *b"track\0";
+        let mut object = StringObject {
+            vtable: &STRING_OBJECT_VTABLE,
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        assert_eq!(
+            unsafe { string_object_assign_cstr_returning_this(this, source.as_ptr()) },
+            this
+        );
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, source.len(), 0u32)]
+        );
+        assert_eq!(&destination[..source.len()], &source[..]);
+    }
+
+    #[test]
+    fn assign_cstr_returning_this_forwards_empty_source_to_clear_slot() {
+        let mut object = StringObject {
+            vtable: &STRING_OBJECT_VTABLE,
+            payload: 0xcafe_f00d as *mut u8,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(0x6666_6666 as *mut u8);
+
+        assert_eq!(
+            unsafe { string_object_assign_cstr_returning_this(this, b"\0".as_ptr()) },
+            this
+        );
+        assert!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() }
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![this as usize]
         );
     }
 
