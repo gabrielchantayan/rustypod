@@ -139,6 +139,7 @@ pub mod passkey_mask_indicator_countdown;
 pub mod passkey_mask_indicator_cycle;
 pub mod mode_state;
 pub mod view_base;
+pub mod view_resource_provider_assign;
 pub mod view_transition_mode;
 pub mod view_interaction_mode;
 pub mod range_view;

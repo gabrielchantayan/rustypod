@@ -235,6 +235,11 @@ pub const DEFAULT_VIEW_BASE_RESOURCE_OPS: ViewBaseResourceOps = ViewBaseResource
 /// The active binding operations. Host tests replace this with recorders.
 pub static mut VIEW_BASE_RESOURCE_OPS: ViewBaseResourceOps = DEFAULT_VIEW_BASE_RESOURCE_OPS;
 
+#[cfg(test)]
+pub(crate) static VIEW_BASE_RESOURCE_OPS_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+
 #[inline(always)]
 unsafe fn view_resource_provider(view: *mut ViewBase) -> *mut ResourceProvider {
     core::ptr::addr_of!((*view).resources).read_volatile() as usize as *mut ResourceProvider
@@ -727,7 +732,7 @@ mod tests {
     use crate::app::resource_chain::ResourceProviderVTable;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
-    use parking_lot::{Mutex, MutexGuard};
+    use parking_lot::MutexGuard;
     use std::vec::Vec;
 
     const SLAB_LEN: usize = 0x1000;
@@ -738,7 +743,7 @@ mod tests {
     const PARENT_OFFSET: usize = 0x780;
 
     /// Ops-table swaps and the slab are global; serialize the tests.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    use super::VIEW_BASE_RESOURCE_OPS_TEST_LOCK as TEST_LOCK;
 
     struct Fixture {
         _guard: MutexGuard<'static, ()>,
