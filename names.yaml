@@ -129393,3 +129393,37 @@ functions:
       Callee identities are not claimed: ARM calls their verified addresses
       and host tests use typed seams. Rust's explicit branch/return flow is
       equivalent to the ARM's predicated early return; no behavioral deviation.
+
+  - address: 0x0820f018
+    ghidra: FUN_0820f018
+    name: tt_interpolate_delta
+    size: 132
+    sig: "i32 tt_interpolate_delta(u8 *interpreter, i32 origin_start, i32 origin_end, i32 current, const InterpolationReference *reference)"
+    module: ft/interpolate_delta
+    status: ported
+    renames:
+      param_1/r0: interpreter
+      param_2/r1: origin_start
+      param_3/r2: origin_end
+      param_4/r3: current
+      param_5: reference
+      param_5_plus_4: reference_start
+      param_5_plus_12: reference_end
+      FUN_08031568: __rt_sdiv
+    notes: >-
+      Raw osos.dec establishes the true 132-byte extent
+      0x0820f018..0x0820f09c; Ghidras 108-byte extent truncates the
+      bne continuation at 0x0820f07c, which contains mul followed by the
+      sole unconditional internal bl to __rt_sdiv at 0x0820f094. There
+      are no predicated BL instructions. The decompiler call graph has
+      three inbound callers (0x0820eea0, 0x0820f28c, and 0x08212f68).
+      It computes ((reference_end-reference_start)*(current-origin_start))
+      /(origin_end-origin_start), truncating the result to signed 16 bits.
+      A zero origin span returns the signed-16-bit reference span only when
+      origin_end is nonzero, otherwise zero. Rust retains ARM wrapping
+      subtraction/multiplication and calls the ported signed division core.
+      Deliberate deviation: InterpolationReference models only the verified
+      four target words because the surrounding TrueType interpreter type
+      remains unrecovered; repr(C) retains the +4 and +12 target offsets.
+      match.py --size 132 reports the same span/division/multiply structure
+      with the expected LLVM frame and direct-call relocation differences.
