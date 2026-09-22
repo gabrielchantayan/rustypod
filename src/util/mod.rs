@@ -142,6 +142,7 @@ pub mod object_word_0x1c_is_nonzero;
 pub mod object_record_at;
 pub mod object_release_slot1;
 pub mod obfuscated_buffer_prepare;
+pub mod opaque_record_initialize;
 pub mod xor_index_key;
 pub mod object_word_payload_resolve;
 pub mod object_word_payload_dispatch;
