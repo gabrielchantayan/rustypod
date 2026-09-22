@@ -126734,3 +126734,30 @@ functions:
       u32 word indexing for +0x8c so the target layout remains correct on
       64-bit hosts; the called view seam supplies the recovered vtable
       dispatch behavior.
+
+  - address: 0x0827f284
+    ghidra: FUN_0827f284
+    name: passkey_mask_indicator_cycle_advance
+    size: 40
+    sig: "u32 passkey_mask_indicator_cycle_advance(u32 *object)"
+    module: ui/passkey_mask_indicator_cycle
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x8c/r1": mask_indicator_cycle
+      FUN_0827f098: refresh_passkey_mask_indicators
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body from
+      0x0827f284 through pop {r4,pc} at 0x0827f2a8; 0x0827f2ac begins the
+      separately linked passkey_mask_indicator_countdown_tick. Whole-image
+      A32 decoding finds one unconditional direct BL in the body, at
+      0x0827f29c to refresh_passkey_mask_indicators, and exactly three
+      inbound unconditional plain BL call sites (0x0813fafc, 0x08140074,
+      and 0x0820ea20); there are no predicated BL forms. The signed word at
+      object+0x8c is incremented with ARM wrapping arithmetic and reset to
+      zero only when its signed post-increment value exceeds 3; the original
+      object then reaches refresh_passkey_mask_indicators and the function
+      returns 1. The signed comparison deliberately preserves negative values
+      and the i32::MAX to i32::MIN wrap. Rust uses u32 word indexing for
+      +0x8c so the target layout remains correct on 64-bit hosts. No
+      deliberate behavior deviation.
