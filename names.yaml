@@ -97346,6 +97346,31 @@ functions:
       0x0807d548 predicate is represented directly as its verified signed
       comparison.
 
+  # --- input feedback controller accessor ---
+  - address: 0x08294d98
+    ghidra: FUN_08294d98
+    name: input_feedback_controller_get
+    size: 12
+    sig: "void *input_feedback_controller_get(void)"
+    module: app/input_feedback_controller
+    status: ported
+    renames:
+      DAT_08294da4: input_feedback_globals_089d049c
+      "*(void **)(input_feedback_globals + 0x10)": input_feedback_controller
+    notes: >-
+      Raw osos.dec establishes the exact 12-byte extent: ldr r0,[pc,#4];
+      ldr r0,[r0,#0x10]; bx lr. The next independently linked function starts
+      at 0x08294da8; the trailing literal at 0x08294da4 is 0x089d049c.
+      Decoding direct calls in raw ARM finds three inbound calls at 0x081a544c,
+      0x081a5700, and 0x08289838, all unconditional plain bl; there are zero
+      predicated bl forms. It returns the runtime-owned pointer word at
+      0x089d04ac as-is, without construction, validation, or a NULL guard.
+      The same globals block supplies the feedback adjustment halfword at
+      0x089d04a0 to input_delta_feedback_update, while callers inspect fields
+      in this returned controller, establishing the controller role without
+      inventing its concrete class. Target builds use the exact three-word ARM
+      body and literal pool; host tests use a native-width pointer seam because
+      a 32-bit firmware pointer field cannot hold 64-bit fixture addresses.
   # --- global callback unregistration ---
   - address: 0x082928d8
     ghidra: FUN_082928d8
