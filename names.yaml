@@ -33608,6 +33608,36 @@ functions:
       calls the existing three ports directly; host tests inject all calls
       and a local table because retail RAM is unmapped.
 
+  - address: 0x082931e4
+    ghidra: FUN_082931e4
+    name: registered_entry_cancel_complete
+    size: 124
+    sig: "void registered_entry_cancel_complete(void *controller, u32 entry_id)"
+    module: app/registered_entry_cancel_complete
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: entry_id
+      r4: entry_id
+      r5: registration_entry
+      r6: controller
+    notes: >-
+      Raw osos.dec disassembly establishes the exact extent
+      0x082931e4..0x08293260: the following word is the registration-table
+      literal 0x089d04c4 and 0x08293264 starts the next push prologue. It has
+      three inbound direct plain bl call sites (0x081052fc and 0x08160b50 /
+      0x08160b58), no predicated bl sites, five outbound plain bl calls, and
+      two tail b dispatches. It locks controller+0, invokes the unrecovered
+      channel operation 0x081073f8 on controller+0x34 and entry_id, finds the
+      0x18-byte registration record, and either unlocks then tail-posts its
+      +4 mailbox cell when byte +0x11 is zero, or repeatedly invokes
+      unrecovered 0x082938f8(controller, record key, 1) until zero then
+      unlocks. Target builds call the existing mutex/key/mailbox ports and the
+      verified unrecovered addresses; host tests inject all effects. Rust
+      expresses stock tail branches as normal returns. match.py reports the
+      same branch split and drain loop; LLVM adds its usual frame and uses
+      indirect blx for the two deliberately unrecovered call targets.
+
   - address: 0x0824f1e8
     ghidra: FUN_0824f1e8
     name: video_frame_dispatch_operation
