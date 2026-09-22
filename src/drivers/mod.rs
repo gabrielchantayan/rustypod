@@ -40,6 +40,7 @@ pub mod event_loop_callback;
 pub mod gpio;
 pub mod gpio_cmd;
 pub mod gpio_pin_read;
+pub mod gpio_pin_is_high;
 pub mod gpio_port_registers_load;
 pub mod gpio_pin_write;
 pub mod gpioic;
