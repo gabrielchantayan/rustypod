@@ -272,6 +272,7 @@ pub mod ostream_insert_string;
 pub mod stream_write_owner_construct;
 pub mod logs_data_file_path_construct;
 pub mod string_object;
+pub mod counted_u16_to_cxx_string;
 pub mod string_object_remove_trailing_codepoint;
 pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
