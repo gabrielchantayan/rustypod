@@ -365,6 +365,7 @@ pub mod standard_request_validate;
 pub mod pending_object_pair_release;
 pub mod pending_object_release;
 pub mod queue_complete;
+pub mod tail_call_retail_queue_complete;
 pub mod completion_gate;
 pub mod queued_message;
 pub mod object_child_count_is_positive;

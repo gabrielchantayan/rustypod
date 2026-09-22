@@ -129049,3 +129049,25 @@ functions:
       remains a fixed-address ARM seam with a host recording seam. match.py
       necessarily reports a structural difference because it follows Ghidra's
       incorrect 172-byte contiguous extent through unrelated entries.
+  - address: 0x08220534
+    ghidra: thunk_FUN_0822b5e0
+    name: tail_call_retail_queue_complete
+    size: 4
+    sig: "u32 tail_call_retail_queue_complete(void *state)"
+    module: app/tail_call_retail_queue_complete
+    status: ported
+    renames:
+      param_1/r0: state
+      FUN_0822b5e0: queue_complete
+    notes: >-
+      Raw osos.dec establishes the true four-byte thunk extent
+      0x08220534..0x08220537: A32 word 0xea002c29 is an unconditional tail
+      branch to 0x0822b5e0, and the next separately linked function begins at
+      0x08220538. Raw A32 decoding of the complete caller set finds three
+      inbound plain BL calls at 0x08142b90, 0x0817a98c, and 0x0817a9c8, with
+      zero predicated BL forms and no outgoing BL in the thunk. It forwards
+      the state pointer in r0 directly to queue_complete and propagates that
+      target's r0 result. The relocated Rust ARM payload deliberately uses an
+      absolute literal veneer to preserve the tail-transfer ABI after moving
+      out of the original PC-relative branch range; the host seam verifies r0
+      forwarding and return propagation.
