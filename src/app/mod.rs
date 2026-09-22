@@ -261,6 +261,7 @@ pub mod mode_selected_handle_construct;
 pub mod mode_two_attachment;
 pub mod media_now_playing_controller_noop;
 pub mod mode_selected_position;
+pub mod mode_selected_position_validate;
 pub mod playback_action_flags;
 pub mod mode_selected_extent;
 pub mod mode_selected_position_set;

@@ -128946,6 +128946,37 @@ functions:
       the first seven words would incorrectly omit the fall-through body;
       no Rust seam or port is added until that control flow is recovered.
 
+  # --- mode-selected position shared-cell validation ---
+  - address: 0x0822aee0
+    ghidra: FUN_0822aee0
+    name: mode_selected_position_validate
+    size: 112
+    sig: "u32 mode_selected_position_validate(u8 *state, u32 selected_position)"
+    module: app/mode_selected_position_validate
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: selected_position
+      param_1_plus_0x890: selected_position_cell
+      FUN_0822b684: mode_selected_byte
+      FUN_08143474: prepare_selected_position_cell_unported
+      FUN_083b516c: shared_cell_assign_secondary
+      FUN_083b52a0: shared_cell_release_secondary
+      FUN_083b5134: shared_cell_construct_secondary
+      FUN_083b51a8: shared_cell_slot_ne_secondary
+    notes: >-
+      Raw ARM extent is exactly 112 bytes, 0x0822aee0..0x0822af50, ending
+      before the distinct function at 0x0822af50. It has seven direct BL
+      instructions, all unconditional, at 0x0822aef0, 0x0822af04,
+      0x0822af10, 0x0822af18, 0x0822af24, 0x0822af30, and 0x0822af3c; there
+      are zero predicated BL instructions. A nonzero mode_selected_byte returns
+      zero. Otherwise the unrecovered 0x08143474 prepares a temporary
+      shared-cell handle from selected_position; the function assigns it to
+      state+0x890, releases the temporary, and returns whether the destination
+      differs from an empty constructed handle. The unported helper is a
+      fixed-address ARM seam and injectable host seam; host slots deliberately
+      use native-width pointers while target accesses remain at recovered
+      32-bit-word offsets.
   # --- mode-selected locked handle constructor ---
   - address: 0x0822afec
     ghidra: FUN_0822afec
