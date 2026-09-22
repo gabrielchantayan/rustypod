@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08281080
+    ghidra: FUN_08281080
+    name: video_engine_disable_status
+    size: 68
+    sig: "void video_engine_disable_status(u8 *status)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: status
+      "status+0x0b": enabled
+      FUN_08281140: video_engine_status_change_notifier
+      FUN_082d2314: video_engine_set_property
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte A32 body at
+      0x08281080..0x082810c0, followed by literal words 0x2801 and 0xde1;
+      the next separately linked function begins at 0x082810cc. It returns
+      if status+0x0b is clear; otherwise clears it, calls the opaque
+      FUN_08281140 with status, then calls video_engine_set_property with
+      (0xde1,0x2801,0x2600) and tail-branches to it with
+      (0xde1,0x2800,0x2600). Complete aligned A32 B/BL decoding finds one
+      plain inbound BL at 0x0827ba1c plus predicated BLNE and BLCS calls at
+      0x0827ba28 and 0x0827ba34; the body makes two plain outbound BL calls
+      and one tail B. FUN_08281140 has no verified semantic identity beyond
+      receiving the transitioned object, so the Rust port uses a narrow
+      resident-entry/mock seam; the property wrapper is already ported and
+      called directly. Host tests prove the clear no-op and, for a set byte,
+      the clear-before-notify ordering and exact property sequence. match.py
+      reports the expected LLVM frame/prologue and resident seam BLX
+      differences while retaining the guard, byte clear, notifier and two
+      property calls.
   - address: 0x08281d48
     ghidra: FUN_08281d48
     name: mpeg_audio_header_matches_context

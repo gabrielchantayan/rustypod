@@ -1108,6 +1108,81 @@ pub unsafe extern "C" fn video_engine_install(
     1
 }
 
+/// Firmware entry of the status-change notifier (`FUN_08281140`, unported).
+#[cfg(target_arch = "arm")]
+const VIDEO_ENGINE_NOTIFY_STATUS_CHANGE_ADDR: usize = 0x0828_1140;
+
+/// ABI of the opaque notifier reached after a status-byte transition.
+type VideoEngineNotifyStatusChange = unsafe extern "C" fn(*mut u8);
+
+/// Host-test stand-in for `FUN_08281140`.
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_NOTIFY_STATUS_CHANGE: Option<VideoEngineNotifyStatusChange> = None;
+
+/// Host only: install the notifier called after the status byte is cleared.
+#[cfg(not(target_arch = "arm"))]
+pub unsafe fn set_mock_notify_status_change(
+    notify: Option<VideoEngineNotifyStatusChange>,
+) {
+    *addr_of_mut!(MOCK_NOTIFY_STATUS_CHANGE) = notify;
+}
+
+/// Calls the opaque resident notifier after a video status transition.
+#[inline]
+unsafe fn notify_status_change(status: *mut u8) {
+    #[cfg(target_arch = "arm")]
+    {
+        let notify: VideoEngineNotifyStatusChange =
+            core::mem::transmute(VIDEO_ENGINE_NOTIFY_STATUS_CHANGE_ADDR);
+        notify(status);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        match *addr_of!(MOCK_NOTIFY_STATUS_CHANGE) {
+            Some(notify) => notify(status),
+            None => panic!("video_engine_disable_status requires notifier 0x08281140"),
+        }
+    }
+}
+
+/// video_engine_disable_status — retailOS `FUN_08281080` @ **0x08281080**
+/// (68 bytes, `0x08281080..0x082810c0`, followed by its two literal words;
+/// the next distinct function begins at `0x082810cc`).
+///
+/// Raw ARM has two outbound plain `bl` instructions (`FUN_08281140` then
+/// `video_engine_set_property`) and one tail `b` to
+/// `video_engine_set_property`. A complete aligned B/BL-immediate decode of
+/// `osos.dec` finds three inbound calls: one plain `bl` at 0x0827ba1c and
+/// two predicated calls, `blne` at 0x0827ba28 and `blcs` at 0x0827ba34.
+///
+/// If `status[11]` is zero, returns without calls. Otherwise it clears that
+/// byte, notifies the opaque status-change handler with the original pointer,
+/// then sets video-engine property `(0xde1, 0x2801, 0x2600)` followed by
+/// `(0xde1, 0x2800, 0x2600)`.
+///
+/// # Deliberate deviation
+///
+/// `FUN_08281140` has no verified semantic identity beyond receiving the
+/// transitioned status object, so target builds transfer to its resident entry
+/// and host tests install a recording seam. The already-ported property
+/// wrapper is called directly rather than reproducing its tail branch.
+///
+/// # Safety
+///
+/// `status` must identify writable storage through byte offset 11. The
+/// retailOS body performs no pointer validation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_disable_status(status: *mut u8) {
+    if status.add(11).read() == 0 {
+        return;
+    }
+    status.add(11).write(0);
+    notify_status_change(status);
+    video_engine_set_property(0x0de1, 0x2801, 0x2600);
+    video_engine_set_property(0x0de1, 0x2800, 0x2600);
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -2042,6 +2117,73 @@ mod tests {
             assert_eq!(INSTALL_CALL_COUNT, 1);
             assert_eq!(INSTALL_CALLS[0], Some((ptr::null_mut(), ptr::null_mut())));
             set_mock_video_engine_installers(None, None, None);
+        }
+    }
+
+    // --- video_engine_disable_status (FUN_08281080) ---
+
+    static mut STATUS_NOTIFY: Option<(*mut u8, u8)> = None;
+    static mut STATUS_PROPERTIES: [Option<(*mut u8, u32, u32, u32)>; 2] = [None; 2];
+    static mut STATUS_PROPERTY_COUNT: usize = 0;
+
+    unsafe extern "C" fn record_status_notify(status: *mut u8) {
+        *addr_of_mut!(STATUS_NOTIFY) = Some((status, status.add(11).read()));
+    }
+
+    unsafe extern "C" fn record_status_property(
+        engine: *mut u8,
+        command: u32,
+        key: u32,
+        value: u32,
+    ) {
+        let index = *addr_of!(STATUS_PROPERTY_COUNT);
+        (*addr_of_mut!(STATUS_PROPERTIES))[index] = Some((engine, command, key, value));
+        *addr_of_mut!(STATUS_PROPERTY_COUNT) = index + 1;
+    }
+
+    #[test]
+    fn disable_status_ignores_an_already_clear_status() {
+        let _guard = LOCK.lock();
+        let mut status = [0u8; 12];
+        unsafe {
+            *addr_of_mut!(STATUS_NOTIFY) = None;
+            *addr_of_mut!(STATUS_PROPERTY_COUNT) = 0;
+            set_mock_notify_status_change(Some(record_status_notify));
+            set_mock_dispatch(Some(record_status_property));
+            video_engine_disable_status(status.as_mut_ptr());
+            assert_eq!(STATUS_NOTIFY, None);
+            assert_eq!(STATUS_PROPERTY_COUNT, 0);
+            set_mock_notify_status_change(None);
+            set_mock_dispatch(None);
+        }
+    }
+
+    #[test]
+    fn disable_status_clears_notifies_then_sets_both_properties() {
+        let _guard = LOCK.lock();
+        let mut status = [0u8; 12];
+        let mut engine = [0u8; 16];
+        status[11] = 0xff;
+        unsafe {
+            *addr_of_mut!(STATUS_NOTIFY) = None;
+            *addr_of_mut!(STATUS_PROPERTIES) = [None; 2];
+            *addr_of_mut!(STATUS_PROPERTY_COUNT) = 0;
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_notify_status_change(Some(record_status_notify));
+            set_mock_dispatch(Some(record_status_property));
+            video_engine_disable_status(status.as_mut_ptr());
+            assert_eq!(status[11], 0);
+            assert_eq!(STATUS_NOTIFY, Some((status.as_mut_ptr(), 0)));
+            assert_eq!(
+                STATUS_PROPERTIES,
+                [
+                    Some((engine.as_mut_ptr(), 0x0de1, 0x2801, 0x2600)),
+                    Some((engine.as_mut_ptr(), 0x0de1, 0x2800, 0x2600)),
+                ]
+            );
+            set_mock_instance(ptr::null_mut());
+            set_mock_notify_status_change(None);
+            set_mock_dispatch(None);
         }
     }
 }
