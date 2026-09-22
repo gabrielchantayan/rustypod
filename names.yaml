@@ -128178,3 +128178,32 @@ functions:
       manager; its concrete type remains unidentified, so byte offsets name
       the verified fields. Rust preserves the target's byte and aligned-word
       store widths with volatile accesses to prevent LLVM store coalescing.
+  - address: 0x08261c48
+    ghidra: FUN_08261c48
+    name: opaque_context_array_construct
+    size: 88
+    sig: "void *opaque_context_array_construct(void *this, i32 element_count)"
+    module: cxx/opaque_context_array_construct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: element_count
+      FUN_08261b58: mutex_opaque_context_base_construct
+      FUN_08261b70: opaque_child_context_construct (unported retailOS seam)
+      FUN_08261934: opaque_context_array_initialize (unported retailOS seam)
+    notes: >-
+      Raw osos.dec decoding establishes the exact 88-byte instruction extent
+      0x08261c48..0x08261c9c: push {r3,r4,r5,lr}, six unconditional bl
+      instructions, and pop {r3,r4,r5,pc}; the next separately linked push at
+      0x08261ca0 is the real boundary. The body builds the 0x38-byte
+      mutex/opaque-context base, invokes the 0x64-byte child constructor at
+      this+0x38 and this+0x9c, zeroes words +0x100/+0x108, stores the signed
+      element count at +0x104, then delegates array allocation and per-element
+      initialization to 0x08261934. There are three inbound direct plain bl
+      callers (0x0818b3a4, 0x081e6b44, 0x08257898) and no predicated inbound
+      forms. The child and array callee class identities are unrecovered, so
+      target builds call their verified fixed addresses and host tests replace
+      those boundaries; no behavior is invented. match.py review preserves the
+      base construction, child order, field writes, and final initializer call;
+      its additional frame, literal-mediated blx calls, and local scope word
+      are required by the Rust target-address boundaries.

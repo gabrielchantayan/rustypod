@@ -145,6 +145,7 @@ pub mod magic_tagged_object;
 pub mod phta_tagged_state_set_mode;
 pub mod mutex;
 pub mod mutex_opaque_context_construct;
+pub mod opaque_context_array_construct;
 pub mod mutex_opaque_context_acquire;
 pub mod mutex_opaque_context_release_default;
 pub mod mutex_destroy;
