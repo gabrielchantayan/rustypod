@@ -17941,6 +17941,29 @@ functions:
       differ because LLVM emits calls to the Rust lock/unlock ports rather
       than the retail direct bl instructions.
 
+  - address: 0x082805fc
+    ghidra: FUN_082805fc
+    name: region_ref_not_equal
+    size: 16
+    sig: "u32 region_ref_not_equal(const void *lhs, const void *rhs)"
+    module: heap/block_region
+    status: ported
+    renames:
+      param_1: lhs
+      param_2: rhs
+    notes: >-
+      Binary-verified extent: 16 bytes at 0x082805fc..0x0828060c; the next
+      function begins at 0x0828060c. The four raw ARM words are push
+      {r4,lr}, bl 0x08280578, eor r0,r0,#1, and pop {r4,pc}. Full raw
+      B/BL decoding finds three unconditional bl call sites and no
+      predicated forms. It returns the logical inverse of
+      region_ref_equal: both reference words (+0x4 and +0x8) must match.
+      Callee 0x08280578 has no names.yaml entry or Rust export; its identity
+      and lock/read/unlock behavior were verified from its 64-byte raw body.
+      The device wrapper therefore calls that retail address directly, while
+      the host model reproduces it for tests. This is the only deliberate
+      deviation; both paths return canonical 0/1.
+
   # --- byte-order swap cluster (0x0805dc24..0x0805dd88) ---
   - address: 0x0805dc24
     ghidra: FUN_0805dc24
