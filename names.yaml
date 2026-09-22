@@ -113982,6 +113982,46 @@ functions:
       accessor. Host tests cover absent records, selector preservation on the
       absent path, and zero versus nonzero virtual status results.
 
+  # --- registration-handle current-record command wrapper ---
+  - address: 0x0820d5ec
+    ghidra: FUN_0820d5ec
+    name: registration_handle_try_select_current_record
+    size: 140
+    sig: "i32 registration_handle_try_select_current_record(void *const *context_source, u32 selector_first, u32 command, u32 selector_second)"
+    module: app/registration_handle_try_select_current_record
+    status: ported
+    renames:
+      param_1/r4: context_source
+      param_1_deref: context
+      param_2/r5: selector_first
+      param_3/r6: command
+      param_4/r3: selector_second
+      local_sp: registration_handle_wrapper
+      FUN_081c877c: registration_handle_wrapper_init
+      FUN_0829dd28: current_record_handle_from_owner
+      "vtable_plus_0x20": current_record_command
+      FUN_0820d598: registration_handle_current_status_is_nonzero
+      FUN_081c869c: registration_maintenance
+      FUN_081c87c4: registration_handle_wrapper_destroy
+    notes: >-
+      Raw osos.dec establishes the true 140-byte extent from the push at
+      0x0820d5ec through the final branch at 0x0820d674; the next separately
+      linked function begins at 0x0820d678. Whole-image ARM B/BL-immediate
+      decoding finds exactly three inbound plain unconditional bl calls at
+      0x0820a10c, 0x0820a16c, and 0x0821bf94, with zero predicated direct bl
+      forms. The body has six unconditional direct bl instructions and one
+      dynamic blx through vtable+0x20. It initializes a stack registration
+      wrapper using context_source+0 and both selector words, then returns one
+      when no current record exists. Otherwise it calls the record's +0x20
+      command with command and literal mode 1. A nonzero command result calls
+      the 0x0820d598 wrapper with selector_second forced to zero and returns
+      one; a zero result calls registration_maintenance on the original context,
+      destroys the wrapper, and returns zero. The command and maintenance
+      virtual/helper identities are deliberately not inferred beyond their
+      observed effects. Host builds use named wrapper fields to reproduce the
+      target owner + slot*0x14 + 4 lookup despite widened pointers; the typed
+      vtable preserves the ARM +0x20 slot selection.
+
   # --- opaque object flag 0x100 accessor ---
   - address: 0x081fb5c8
     ghidra: FUN_081fb5c8
