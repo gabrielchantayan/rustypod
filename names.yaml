@@ -64930,6 +64930,35 @@ functions:
       Host tests (2) prove exact field copies with both padding ranges and
       a post-record guard preserved, source non-mutation, and propagation
       of a shifted member-constructor return into the copy destination.
+  - address: 0x08264c2c
+    ghidra: FUN_08264c2c
+    name: logs_data_file_path_construct
+    size: 88
+    sig: "StringObject *logs_data_file_path_construct(StringObject *this)"
+    module: cxx/logs_data_file_path_construct
+    status: ported
+    renames:
+      param_1: this
+      local_18: logs_data_file_path
+      FUN_08277304: string_object_construct_from_cstr
+    notes: >-
+      Raw osos.dec words establish the complete 88-byte A32 body at
+      0x08264c2c..0x08264c80: push {r0-r4,lr}; load four literal-pool
+      words; right-shift each once in descending stack-word order; mask
+      the final word to 24 bits; then call
+      string_object_construct_from_cstr @ 0x08277304 and return its r0.
+      The next word at 0x08264c84 is the literal pool, not code. Decoding
+      the transformed little-endian stack words yields the exact C string
+      "/Logs/Data File". The body has one outgoing plain BL
+      (0x08264c7c -> 0x08277304), zero outgoing predicated BL, and three
+      incoming plain BL call sites (0x08112f80, 0x08264b38, 0x0826582c)
+      with zero predicated callers. The port uses the already-ported
+      StringObject constructor directly and materializes the decoded static
+      byte string instead of reproducing the stack-local shift/mask
+      obfuscation; callee arguments and resulting object state are
+      identical. Host test verifies the fixed NUL-terminated path, returned
+      storage pointer, vtable initialization, and the allocation-failure
+      state provided by the existing host virtual-allocation seam.
   - address: 0x0826467c
     ghidra: FUN_0826467c
     name: draw_state_construct
