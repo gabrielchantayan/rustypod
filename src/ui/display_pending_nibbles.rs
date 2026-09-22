@@ -39,8 +39,20 @@ use crate::drivers::display::{display_get, Display, SECONDARY_DISPLAY_ID};
 /// masked nibbles into a display's pending state.
 pub type DisplaySetPendingNibbles = unsafe extern "C" fn(*mut Display, u8, *const u8);
 
-/// Original global byte at `0x089cc8a0`; `-1` leaves it unchanged.
-static mut DISPLAY_PENDING_SELECTOR: u8 = 0;
+/// Original three-byte state block at `0x089cc8a0`. The pending-nibble
+/// selector is byte 0; `apply_display_transition` owns bytes 1 and 2.
+#[repr(C)]
+struct DisplayPendingState {
+    selector: u8,
+    transition_secondary: u8,
+    transition_primary: u8,
+}
+
+static mut DISPLAY_PENDING_STATE: DisplayPendingState = DisplayPendingState {
+    selector: 0,
+    transition_secondary: 0,
+    transition_primary: 0,
+};
 /// Original four-byte global block at `0x089cc8b8`; a `-1` input retains its
 /// corresponding byte.
 static mut DISPLAY_PENDING_NIBBLES: [u8; 4] = [0; 4];
@@ -119,7 +131,7 @@ pub unsafe extern "C" fn configure_display_pending_nibbles(
     }
 
     if selector >= 0 {
-        ptr::write_volatile(ptr::addr_of_mut!(DISPLAY_PENDING_SELECTOR), selector as u8);
+        ptr::write_volatile(ptr::addr_of_mut!(DISPLAY_PENDING_STATE.selector), selector as u8);
     }
 
     let updates = [first, second, third, fourth];
@@ -132,9 +144,106 @@ pub unsafe extern "C" fn configure_display_pending_nibbles(
         }
     }
 
-    let retained_selector = ptr::read_volatile(ptr::addr_of!(DISPLAY_PENDING_SELECTOR));
+    let retained_selector = ptr::read_volatile(ptr::addr_of!(DISPLAY_PENDING_STATE.selector));
     let retained_nibbles = ptr::addr_of!(DISPLAY_PENDING_NIBBLES).cast::<u8>();
     set_display_pending_nibbles(display, retained_selector, retained_nibbles);
+}
+
+/// ABI shared by the three unported display routines reached from
+/// `apply_display_transition`. Their broader identities are deliberately not
+/// inferred; each verified address takes a display and one word and returns a
+/// retailOS status.
+type DisplayTransitionCallee = unsafe extern "C" fn(*mut Display, u32) -> u32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_transition_first(display: *mut Display, value: u32) -> u32 {
+    let callee: DisplayTransitionCallee = core::mem::transmute(0x081d_8ae8usize);
+    callee(display, value)
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_transition_second(display: *mut Display, value: u32) -> u32 {
+    let callee: DisplayTransitionCallee = core::mem::transmute(0x081d_8db8usize);
+    callee(display, value)
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_transition_finish(display: *mut Display, value: u32) -> u32 {
+    let callee: DisplayTransitionCallee = core::mem::transmute(0x081d_8ed0usize);
+    callee(display, value)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_display_transition_callee(_display: *mut Display, _value: u32) -> u32 {
+    0
+}
+
+#[cfg(target_os = "none")]
+static mut DISPLAY_TRANSITION_FIRST: DisplayTransitionCallee = firmware_transition_first;
+#[cfg(target_os = "none")]
+static mut DISPLAY_TRANSITION_SECOND: DisplayTransitionCallee = firmware_transition_second;
+#[cfg(target_os = "none")]
+static mut DISPLAY_TRANSITION_FINISH: DisplayTransitionCallee = firmware_transition_finish;
+#[cfg(not(target_os = "none"))]
+static mut DISPLAY_TRANSITION_FIRST: DisplayTransitionCallee = missing_display_transition_callee;
+#[cfg(not(target_os = "none"))]
+static mut DISPLAY_TRANSITION_SECOND: DisplayTransitionCallee = missing_display_transition_callee;
+#[cfg(not(target_os = "none"))]
+static mut DISPLAY_TRANSITION_FINISH: DisplayTransitionCallee = missing_display_transition_callee;
+
+/// apply_display_transition — original: `FUN_0828d774` @ `0x0828d774`
+/// (124 bytes, `0x0828d774..0x0828d7f0`: 120 instruction bytes followed by
+/// the literal `0x089cc8a0`; the next function opens at `0x0828d7f0`).
+/// **3 direct `bl` calls, all unconditional, plus one tail `b`** — verified
+/// from the raw ARM words; Ghidra's 204-byte extent absorbs the next routine.
+///
+/// Validates two boolean mode values before any side effect, defaults a null
+/// display to `display_get(1)`, stores the values in bytes +2 and +1 of the
+/// shared pending-state block, then invokes the two direct display routines.
+/// It tail-calls `0x081d8ed0` with whether `finish_mode` is zero, preserving
+/// that routine's status. Invalid modes return the incoming display word.
+///
+/// # Deliberate deviations
+///
+/// The stock RW block is represented by [`DISPLAY_PENDING_STATE`]. The three
+/// unported callees remain verified-address volatile seams; host tests install
+/// recorders rather than assigning identities beyond their observed ABI.
+///
+/// # Safety
+///
+/// A non-null `display` must be a live [`Display`], as required by all three
+/// unchecked retailOS callees.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn apply_display_transition(
+    mut display: *mut Display,
+    primary_mode: u32,
+    secondary_mode: u32,
+    finish_mode: u32,
+) -> usize {
+    if primary_mode > 1 || secondary_mode > 1 {
+        return display as usize;
+    }
+
+    if display.is_null() {
+        display = display_get(SECONDARY_DISPLAY_ID as u32);
+    }
+
+    ptr::write_volatile(
+        ptr::addr_of_mut!(DISPLAY_PENDING_STATE.transition_primary),
+        primary_mode as u8,
+    );
+    ptr::write_volatile(
+        ptr::addr_of_mut!(DISPLAY_PENDING_STATE.transition_secondary),
+        secondary_mode as u8,
+    );
+
+    let first = ptr::read_volatile(ptr::addr_of!(DISPLAY_TRANSITION_FIRST));
+    first(display, primary_mode);
+    let second = ptr::read_volatile(ptr::addr_of!(DISPLAY_TRANSITION_SECOND));
+    second(display, secondary_mode);
+    let finish = ptr::read_volatile(ptr::addr_of!(DISPLAY_TRANSITION_FINISH));
+    finish(display, (finish_mode == 0) as u32) as usize
 }
 
 #[cfg(test)]
@@ -147,6 +256,7 @@ mod tests {
 
     unsafe extern "C" fn record_pending_nibbles(
         display: *mut Display,
+
         selector: u8,
         nibbles: *const u8,
     ) {
@@ -157,11 +267,96 @@ mod tests {
             nibbles.add(3).read_volatile(),
         ]));
     }
+    static mut TRANSITION_CALLS: [Option<(*mut Display, u32)>; 3] = [None; 3];
+
+    unsafe extern "C" fn record_transition_first(display: *mut Display, value: u32) -> u32 {
+        TRANSITION_CALLS[0] = Some((display, value));
+        3
+    }
+
+    unsafe extern "C" fn record_transition_second(display: *mut Display, value: u32) -> u32 {
+        TRANSITION_CALLS[1] = Some((display, value));
+        4
+    }
+
+    unsafe extern "C" fn record_transition_finish(display: *mut Display, value: u32) -> u32 {
+        TRANSITION_CALLS[2] = Some((display, value));
+        7
+    }
+
+    unsafe fn install_transition_recorders() {
+        DISPLAY_TRANSITION_FIRST = record_transition_first;
+        DISPLAY_TRANSITION_SECOND = record_transition_second;
+        DISPLAY_TRANSITION_FINISH = record_transition_finish;
+        TRANSITION_CALLS = [None; 3];
+    }
+
+    unsafe fn restore_transition_recorders() {
+        DISPLAY_TRANSITION_FIRST = missing_display_transition_callee;
+        DISPLAY_TRANSITION_SECOND = missing_display_transition_callee;
+        DISPLAY_TRANSITION_FINISH = missing_display_transition_callee;
+    }
+
+    #[test]
+    fn transition_validates_before_mutation_and_preserves_tail_status() {
+        let guard = install_recorder();
+        let display = 0x1234usize as *mut Display;
+
+        unsafe {
+            DISPLAY_PENDING_STATE.transition_primary = 1;
+            DISPLAY_PENDING_STATE.transition_secondary = 1;
+            install_transition_recorders();
+
+            assert_eq!(apply_display_transition(display, 2, 0, 0), display as usize);
+            assert_eq!(DISPLAY_PENDING_STATE.transition_primary, 1);
+            assert_eq!(DISPLAY_PENDING_STATE.transition_secondary, 1);
+            assert_eq!(TRANSITION_CALLS, [None; 3]);
+
+            assert_eq!(apply_display_transition(display, 1, 0, 0), 7);
+            assert_eq!(DISPLAY_PENDING_STATE.transition_primary, 1);
+            assert_eq!(DISPLAY_PENDING_STATE.transition_secondary, 0);
+            assert_eq!(TRANSITION_CALLS, [
+                Some((display, 1)),
+                Some((display, 0)),
+                Some((display, 1)),
+            ]);
+            restore_transition_recorders();
+        }
+        restore_recorder(guard);
+    }
+
+    #[test]
+    fn transition_uses_secondary_display_for_null_input() {
+        let display_guard = crate::drivers::display::DISPLAY_TEST_LOCK.lock();
+        let guard = install_recorder();
+
+        unsafe {
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 1;
+            let secondary = ptr::addr_of_mut!(crate::drivers::display::SECONDARY_DISPLAY);
+            install_transition_recorders();
+
+            assert_eq!(apply_display_transition(ptr::null_mut(), 0, 1, 2), 7);
+            assert_eq!(TRANSITION_CALLS, [
+                Some((secondary, 0)),
+                Some((secondary, 1)),
+                Some((secondary, 0)),
+            ]);
+
+            restore_transition_recorders();
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 0;
+        }
+        restore_recorder(guard);
+        drop(display_guard);
+    }
 
     fn install_recorder() -> MutexGuard<'static, ()> {
         let guard = DISPLAY_PENDING_NIBBLES_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe {
-            DISPLAY_PENDING_SELECTOR = 0;
+            DISPLAY_PENDING_STATE = DisplayPendingState {
+                selector: 0,
+                transition_secondary: 0,
+                transition_primary: 0,
+            };
             DISPLAY_PENDING_NIBBLES = [0; 4];
             DISPLAY_SET_PENDING_NIBBLES = record_pending_nibbles;
             FORWARDED = None;
@@ -180,11 +375,11 @@ mod tests {
         let display = 0x1234usize as *mut Display;
 
         unsafe {
-            DISPLAY_PENDING_SELECTOR = 0;
+            DISPLAY_PENDING_STATE.selector = 0;
             DISPLAY_PENDING_NIBBLES = [1, 2, 3, 4];
             configure_display_pending_nibbles(display, 1, -1, 15, -1, 0);
 
-            assert_eq!(DISPLAY_PENDING_SELECTOR, 1);
+            assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
             assert_eq!(DISPLAY_PENDING_NIBBLES, [1, 15, 3, 0]);
             assert_eq!(FORWARDED, Some((display, 1, [1, 15, 3, 0])));
         }
@@ -197,11 +392,11 @@ mod tests {
         let display = 0x1234usize as *mut Display;
 
         unsafe {
-            DISPLAY_PENDING_SELECTOR = 1;
+            DISPLAY_PENDING_STATE.selector = 1;
             DISPLAY_PENDING_NIBBLES = [4, 5, 6, 7];
             configure_display_pending_nibbles(display, 0, 4, 16, 6, 7);
 
-            assert_eq!(DISPLAY_PENDING_SELECTOR, 1);
+            assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
             assert_eq!(DISPLAY_PENDING_NIBBLES, [4, 5, 6, 7]);
             assert_eq!(FORWARDED, None);
         }
