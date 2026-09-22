@@ -127509,3 +127509,27 @@ functions:
       the target build preserves word slots +0x4c and +0x2c. Focused host
       tests cover forwarding a non-sentinel result and suppressing the
       second dispatch for -1.
+
+  - address: 0x08271380
+    ghidra: FUN_08271380
+    name: record_preferred_string
+    size: 20
+    sig: "u32 record_preferred_string(const u32 *record)"
+    module: app/record_preferred_string
+    status: ported
+    renames:
+      param_1/r0: record
+      "record+0x08": default_string
+      "record+0x28": preferred_string
+    notes: >-
+      Raw osos.dec establishes the true 20-byte extent
+      0x08271380..0x08271393: `ldr r1,[r0,#0x28]`, `cmp r1,#0`, `ldreq
+      r0,[r0,#0x08]`, `movne r0,r1`, and `bx lr`. The next independent
+      function starts at 0x08271394. Full-image A32 decoding and osos.asm
+      find exactly three inbound plain BL call sites (0x08108d00,
+      0x08109b24, and 0x0810a118), zero predicated inbound BL call sites,
+      and no BL instructions in the body. It returns the nonzero record word
+      at +0x28, otherwise the word at +0x08. No callee seam is needed:
+      this is a leaf accessor. Deliberate host deviation: the ABI string
+      addresses and record fields remain u32 target words, so the port uses
+      word indices rather than host pointer layout assumptions.
