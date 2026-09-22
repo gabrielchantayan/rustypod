@@ -13,6 +13,9 @@
 //! `cg_virtual_reg_create` alone has **835 `bl` call sites**, more than
 //! any other unported function in osos.
 pub mod block;
+/// `cg_pack_color` @ 0x0823a5d8 — packs RGBA component bytes into the
+/// pipeline's RGBA8888, RGB565, RGBA4444, or RGBA5551 representations.
+pub mod cg_color_pack;
 pub mod block_ref;
 /// `cg_arm_immediate_rotation` @ 0x082be96c — recognizes literals the
 /// Vincent ARM code generator can encode as an immediate or its complement.
