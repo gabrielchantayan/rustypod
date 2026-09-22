@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08275fec
+    ghidra: thunk_FUN_08276050
+    name: tail_call_retail_utf8_validate_three_byte
+    size: 4
+    sig: "u32 tail_call_retail_utf8_validate_three_byte(const u8 *bytes, i32 len, u32 initial_byte)"
+    module: util/tail_call_retail_utf8_validate_three_byte
+    status: ported
+    renames:
+      param_1/r0: bytes
+      param_2/r1: len
+      param_3/r2: initial_byte
+      FUN_08276050: retail_utf8_validate_three_byte
+    notes: >-
+      Raw osos.dec establishes the true four-byte thunk extent
+      0x08275fec..0x08275fef: the A32 word 0xea000017 is an unconditional
+      tail branch to 0x08276050. The next real function begins at 0x08275ff0.
+      Full-image disassembly scanning finds three inbound plain BL call sites
+      (0x08079f24, 0x08116050, 0x0817a670), zero predicated inbound BL forms,
+      and no instructions within the thunk besides its tail branch. Its target
+      consumes the observed bounded three-byte UTF-8 validation ABI. Rust uses
+      a target literal veneer because the relocated payload cannot encode the
+      original PC-relative branch; target assembly preserves r0-r3, and the
+      host seam verifies r0-r2 forwarding and r0 return propagation.
   - address: 0x08281080
     ghidra: FUN_08281080
     name: video_engine_disable_status
