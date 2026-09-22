@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08290704
+    ghidra: FUN_08290704
+    name: task_base_construct
+    size: 76
+    sig: "void *task_base_construct(void *this, u32 priority, const StringObject *name, u32 scheduler, u8 active, u32 timeout)"
+    module: cxx/task_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: priority
+      param_3/r2: name
+      param_4/r3: scheduler
+      param_5/[sp]: active
+      param_6/[sp+4]: timeout
+      DAT_08290750: TASK_BASE_VTABLE_ADDRESS
+      FUN_082773e0: string_object_copy_construct
+      FUN_0808e294: mailbox_slot_create
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte A32 body
+      0x08290704..0x0829074f; literal 0x08290750 is 0x089a7160 and
+      0x08290754 starts the next independently entered deleting destructor.
+      Full-image A32 decoding finds three inbound plain BL calls
+      (0x0819c208, 0x081b91cc, 0x082027ac), zero predicated inbound BL
+      forms, and two internal plain BLs: string_object_copy_construct @
+      0x082773e0 and mailbox_slot_create @ 0x0808e294. It plants the
+      task-base vtable at +0, zeroes +4, copy-constructs its StringObject
+      at +8, writes scheduler/priority/active/timeout at +0x10/+0x14/+0x18/
+      +0x1c, clears +0x20/+0x21, creates the mailbox slot at +0x24, and
+      returns this. Rust uses target byte offsets because host pointers are
+      wider than target words; host-only call seams expose the two direct
+      target calls. No target behavior deviation.
   - address: 0x08291d90
     ghidra: FUN_08291d90
     name: record_lookup_value_word
