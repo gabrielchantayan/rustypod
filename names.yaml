@@ -63339,6 +63339,33 @@ functions:
       callback dispatch and the NULL-callback path, including the embedded
       string payload release and returned pointer.
 
+
+  - address: 0x082317a4
+    ghidra: FUN_082317a4
+    name: scoped_context_dispatch_and_store_result
+    size: 96
+    sig: "void scoped_context_dispatch_and_store_result(void *object, u32 argument, u32 value)"
+    module: app/scoped_context_dispatch_and_store_result
+    vars: {param_1: object, param_2: argument, param_3: value, FUN_08270394: scoped_context_construct, FUN_08270414: scoped_context_destroy}
+    renames:
+      FUN_082a4460: context_result_if_available
+    status: ported
+    notes: >-
+      Raw osos.dec decoding establishes the complete 96-byte body from push
+      {r4,r5,r6,lr} at 0x082317a4 through pop {r4,r5,r6,pc} at 0x08231800;
+      the next function begins at 0x08231804. It has exactly three
+      unconditional plain BL calls (scoped_context_construct @ 0x08270394,
+      the unported predicate @ 0x082a4460, and scoped_context_destroy @
+      0x08270414), no predicated BL calls, plus one indirect BLX through
+      object+4's vtable slot +0x170. It constructs a zero-mode ScopedContext
+      on the stack, dispatches that virtual method with (receiver, argument,
+      context), conditionally resolves a word into object+0x28, stores value
+      at object+0x2c, then destroys the token. The virtual target and direct
+      0x082a4460 callee have no established concrete identity, so the target
+      port retains physical dispatch and calls the original firmware address;
+      host tests use structural callbacks because host pointers are wider than
+      target words. Tests cover both available and unavailable result paths.
+
   # --- the framework's scoped context token (vtable 0x089a5b30) ---
 
   - address: 0x0826fda0

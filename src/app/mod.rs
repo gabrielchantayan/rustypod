@@ -81,6 +81,7 @@ pub mod callback_target_reset;
 pub mod locked_callback_predicate;
 pub mod glyph_range_contains_character;
 pub mod context_callback_dispatch;
+pub mod scoped_context_dispatch_and_store_result;
 pub mod default_selector_dispatch;
 pub mod context;
 pub mod context_submit_u32;
