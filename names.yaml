@@ -129467,3 +129467,33 @@ functions:
       remains unrecovered; repr(C) retains the +4 and +12 target offsets.
       match.py --size 132 reports the same span/division/multiply structure
       with the expected LLVM frame and direct-call relocation differences.
+
+  - address: 0x0820ce70
+    ghidra: FUN_0820ce70
+    name: mov_chain_table_set_tag
+    size: 28
+    sig: "i32 mov_chain_table_set_tag(MovChainTable *table, u32 index, u8 tag)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      param_3/r2: tag
+      "*(table + index * 20 + 8)": table.entries[index].tag
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte A32 extent
+      0x0820ce70..0x0820ce8b: cmp r1,#128; addlo r1,r1,r1,lsl#2;
+      addlo r0,r0,r1,lsl#2; strlo r2,[r0,#8]; movlo r0,#0; movhs r0,#2;
+      bx lr. The following push {r4,lr} at 0x0820ce8c is the next real
+      function boundary, so Ghidra's reported size is exact and there is no
+      literal pool. Whole-image A32 B/BL decoding finds exactly three direct
+      inbound plain BL calls (0x0820c9c4, 0x0820cb44, 0x0820ce48), zero
+      predicated BL forms, and no callee calls. It bounds-checks the unsigned
+      slot index, then writes the supplied byte at the verified +0x08 tag
+      field of its 20-byte MOV chained-table entry. Valid indexes return zero;
+      invalid indexes leave memory untouched and return two. No deliberate
+      deviations: repr(C) MovChainEntry preserves the target byte offset, and
+      the Rust branch implements the ARM predicates. Host tests cover both
+      indexes. match.py structural output preserves the unsigned comparison,
+      predicated scaled address/store, and 0/2 status result; LLVM adds its
+      standard frame and uses r3 as a temporary for the table pointer.

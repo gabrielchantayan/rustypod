@@ -20,6 +20,11 @@
 //!   forms**, verified by decoding every ARM B/BL word in `osos.dec`:
 //!   0x081e451c, 0x081e4748, 0x081e4ce4, 0x081e4cfc, 0x081e4fd4,
 //!   0x081e4fec, 0x081e51e8, and 0x081e5378.
+//! - [`mov_chain_table_set_tag`] — original: `FUN_0820ce70` @ 0x0820ce70
+//!   (**28 bytes**, 0x0820ce70..0x0820ce8c, 7 instructions, no literal
+//!   pool). **3 direct call sites, all unconditional `bl`; 0 predicated
+//!   forms**, verified by decoding every ARM B/BL word in `osos.dec`:
+//!   0x0820c9c4, 0x0820cb44, and 0x0820ce48.
 //! - [`mov_chain_table_lookup_tagged_value`] — original: `FUN_0820ccc0` @
 //!   0x0820ccc0 (136 bytes; **7 call sites, all unconditional `bl`**).
 //!
@@ -216,6 +221,42 @@ pub unsafe extern "C" fn mov_chain_table_set_next(
         MOV_CHAIN_TABLE_ERR
     }
 }
+/// mov_chain_table_set_tag — original: `FUN_0820ce70` @ 0x0820ce70
+/// (28 bytes, 0x0820ce70..0x0820ce8c; **3 call sites, all unconditional
+/// `bl`, 0 predicated forms** — counted by decoding every ARM B/BL word in
+/// `osos.dec`: 0x0820c9c4, 0x0820cb44, and 0x0820ce48).
+///
+/// Writes `tag` to the +0x08 tag byte of table entry `index`. The raw
+/// `cmp` and predicated address arithmetic/store make indexes 0..127 update
+/// their own entry and return [`MOV_CHAIN_TABLE_OK`]; all other `u32` values
+/// leave the table untouched and return [`MOV_CHAIN_TABLE_ERR`].
+///
+/// # Deviations
+///
+/// None. No NULL guard is added; stock faults when a valid index reaches the
+/// store. `MovChainEntry`'s `#[repr(C)]` layout retains the target byte
+/// offset despite host pointer width.
+///
+/// # Safety
+///
+/// `table` must point to a writable [`MovChainTable`] when `index < 128`;
+/// it is not NULL-checked, matching stock.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_chain_table_set_tag")]
+pub unsafe extern "C" fn mov_chain_table_set_tag(
+    table: *mut MovChainTable,
+    index: u32,
+    tag: u8,
+) -> i32 {
+    if index < MOV_CHAIN_TABLE_SLOTS as u32 {
+        unsafe { core::ptr::write(core::ptr::addr_of_mut!((*table).entries[index as usize].tag), tag) };
+        MOV_CHAIN_TABLE_OK
+    } else {
+        MOV_CHAIN_TABLE_ERR
+    }
+}
+
 
 /// mov_chain_table_lookup_tagged_value — original: `FUN_0820ccc0` @
 /// 0x0820ccc0 (136 bytes, 0x0820ccc0..0x0820cd48; **7 call sites, all
@@ -482,6 +523,51 @@ mod tests {
         assert_eq!(table.entries[0].next, 10);
         assert_eq!(table.entries[127].next, 20);
     }
+    /// The tag setter changes only byte +0x08 of the selected entry. This
+    /// covers both boundary slots and proves adjacent fields remain intact.
+    #[test]
+    fn tag_setter_writes_selected_entry_byte() {
+        let mut table = fresh_table();
+        for (i, entry) in table.entries.iter_mut().enumerate() {
+            let i = i as u32;
+            entry.field_00 = 0x1000 + i;
+            entry.field_04 = 0x2000 + i;
+            entry.tag = i as u8;
+            entry.next = 0x3000 + i;
+            entry.field_10 = 0x4000 + i;
+        }
+
+        assert_eq!(unsafe { mov_chain_table_set_tag(&mut table, 0, 0xa5) }, MOV_CHAIN_TABLE_OK);
+        assert_eq!(unsafe { mov_chain_table_set_tag(&mut table, 127, 0x5a) }, MOV_CHAIN_TABLE_OK);
+
+        assert_eq!(table.entries[0].tag, 0xa5);
+        assert_eq!(table.entries[127].tag, 0x5a);
+        assert_eq!(table.entries[1].tag, 1);
+        assert_eq!(table.entries[0].field_04, 0x2000);
+        assert_eq!(table.entries[127].next, 0x307f);
+        assert_eq!(table.entries[127].field_10, 0x407f);
+    }
+
+    /// The `strlo` skips every store beginning at index 128, including
+    /// high-bit values, while returning the same status error.
+    #[test]
+    fn tag_setter_out_of_range_indexes_leave_table_unchanged() {
+        let mut table = fresh_table();
+        table.entries[0].tag = 0x11;
+        table.entries[127].tag = 0x22;
+
+        for index in [128u32, 129, 0x8000_0000, 0xffff_ffff] {
+            assert_eq!(
+                unsafe { mov_chain_table_set_tag(&mut table, index, 0xff) },
+                MOV_CHAIN_TABLE_ERR,
+                "index {index:#x}",
+            );
+        }
+
+        assert_eq!(table.entries[0].tag, 0x11);
+        assert_eq!(table.entries[127].tag, 0x22);
+    }
+
 
     /// The +0x00 value is returned only for a tag-3 entry whose +0x10 word
     /// matches, and the lookup preserves the other entries.
