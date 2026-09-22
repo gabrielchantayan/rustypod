@@ -125742,3 +125742,33 @@ functions:
       start <= key < end; equal bounds are empty. Callers use it to bound
       an offset before reading or writing its associated byte table.
       Deliberate deviations: none.
+
+  # --- Segment cursor snapshot (util/segment_cursor_snapshot) ---
+  - address: 0x082974cc
+    ghidra: FUN_082974cc
+    name: segment_cursor_snapshot
+    size: 104
+    sig: "u32 segment_cursor_snapshot(void *cursor, void **payload, u32 *byte_count, u32 advance, u32 *available)"
+    module: util/segment_cursor_snapshot
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: payload
+      param_3/r2: byte_count
+      param_4/r3: advance
+      param_5/[sp+0x18]: available
+      FUN_082142ec: unresolved_segment_payload
+      FUN_08297588: unresolved_cursor_advance
+    notes: >-
+      Raw osos.dec establishes the true 104-byte A32 extent
+      0x082974cc..0x08297530; 0x08297534 begins the next function with
+      `ldr ip,[pc,#8]`. Complete raw A32 branch decoding finds exactly three
+      inbound plain bl at 0x0814a454, 0x0814a558, and 0x083d37e0, with zero
+      predicated bl. The body calls the unrecovered payload resolver
+      0x082142ec, stores its pointer result, reads the current segment's +0x08
+      byte count, optionally calls source vtable slot +0x38 and subtracts
+      cursor +0x08, then conditionally calls the advance helper 0x08297588;
+      it returns one. Both unported direct callees and the host's widened
+      vtable slot are explicit seams; ARM defaults call the retailOS
+      addresses and literal target offsets. Host tests exercise omitted
+      optional outputs/calls and wrapping availability with advancing.
