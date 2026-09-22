@@ -139,6 +139,41 @@ pub(crate) const DEFAULT_TASK_MESSAGE_POST_OPS: TaskMessagePostOps = TaskMessage
 
 /// Active seams for the unported allocation and queue-post operations.
 pub static mut TASK_MESSAGE_POST_OPS: TaskMessagePostOps = DEFAULT_TASK_MESSAGE_POST_OPS;
+/// copy_seven_words — original: `FUN_0827210c` @ **0x0827210c**
+/// (**48 bytes**, 0x0827210c..0x0827213b; the next function starts at
+/// 0x0827213c).
+///
+/// **3 direct `bl` callers, all unconditional; 0 predicated `bl` callers**,
+/// verified by decoding every A32 branch-with-link word in `osos.dec`
+/// (0x0812c0b4, 0x0812c284, 0x0812c5f8).
+///
+/// Copies seven aligned 32-bit words from `src` to `dst`. It loads and stores
+/// words 0, 1, and 2 individually, then loads all of words 3 through 6 before
+/// storing that final group, preserving the source's observable overlap order.
+///
+/// Deliberate deviation: volatile accesses prevent LLVM from replacing the
+/// fixed word sequence with a bulk-copy builtin. No NULL, bounds, alignment,
+/// or overlap check is added; callers must provide seven readable source words
+/// and seven writable destination words, exactly as the original requires.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn copy_seven_words(dst: *mut u32, src: *const u32) {
+    unsafe {
+        dst.write_volatile(src.read_volatile());
+        dst.add(1).write_volatile(src.add(1).read_volatile());
+        dst.add(2).write_volatile(src.add(2).read_volatile());
+
+        let word3 = src.add(3).read_volatile();
+        let word4 = src.add(4).read_volatile();
+        let word5 = src.add(5).read_volatile();
+        let word6 = src.add(6).read_volatile();
+        dst.add(3).write_volatile(word3);
+        dst.add(4).write_volatile(word4);
+        dst.add(5).write_volatile(word5);
+        dst.add(6).write_volatile(word6);
+    }
+}
+
 /// post_without_wait — original: `FUN_080f117c` @ **0x080f117c**
 /// (**40 bytes** exactly, 0x080f117c..0x080f11a4; the next real function
 /// starts with `push {r0,r1,r4,r5,r6,lr}` at 0x080f11a4).
@@ -177,9 +212,6 @@ pub unsafe extern "C" fn post_without_wait(
 /// post returns 0 and becomes 1 here; a failed post returns the cell to the
 /// pool and becomes 0. On allocation failure, only tag `0x5765_656c` invokes
 /// the observed allocation-failure helper with stack-local `{wait, message}`.
-///
-/// Deliberate deviation: the fixed 28-byte copy is expressed directly instead
-/// of calling unported `FUN_0827210c`; its exact word order is preserved.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_message_post(
@@ -194,12 +226,7 @@ pub unsafe extern "C" fn task_message_post(
         }
         return 0;
     }
-    unsafe {
-        let word0 = message.read(); let word1 = message.add(1).read(); let word2 = message.add(2).read();
-        let word4 = message.add(4).read(); let word5 = message.add(5).read(); let word6 = message.add(6).read();
-        cell.add(1).write(word0); cell.add(2).write(word1); cell.add(3).write(word2);
-        cell.add(4).write(message.add(3).read()); cell.add(5).write(word4); cell.add(6).write(word5); cell.add(7).write(word6);
-    }
+    unsafe { copy_seven_words(cell.add(1), message) };
     let ops = unsafe { core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read_volatile() };
     let result = unsafe {
         if wait == 0 { post_without_wait(reply_queue, target_queue, cell, flags, flags) }
@@ -478,6 +505,34 @@ pub(crate) mod tests {
         RECEIVE_CALL.lock().replace((queue, first, auxiliary as usize));
         unsafe { result.add(1).write_volatile(core::ptr::addr_of!(MOCK_RECEIVE_CELL).read_volatile()) };
         0
+    }
+
+    #[test]
+    fn copy_seven_words_preserves_all_words_and_boundary_guards() {
+        let source = [0x0000_0000, 0xffff_ffff, 0x1234_5678, 0x89ab_cdef, 4, 5, 6];
+        let mut destination = [0xa5a5_a5a5; 9];
+
+        unsafe { copy_seven_words(destination.as_mut_ptr().add(1), source.as_ptr()) };
+
+        assert_eq!(&destination[1..8], &source);
+        assert_eq!(destination[0], 0xa5a5_a5a5);
+        assert_eq!(destination[8], 0xa5a5_a5a5);
+    }
+
+    #[test]
+    fn copy_seven_words_matches_instruction_order_when_overlapping() {
+        let mut actual = [0u32, 1, 2, 3, 4, 5, 6, 7, 8];
+        let mut expected = actual;
+
+        for index in 0..3 {
+            expected[index + 1] = expected[index];
+        }
+        let tail = [expected[3], expected[4], expected[5], expected[6]];
+        expected[4..8].copy_from_slice(&tail);
+
+        unsafe { copy_seven_words(actual.as_mut_ptr().add(1), actual.as_ptr()) };
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
