@@ -228,6 +228,7 @@ pub mod global_word_list_prepend;
 pub mod handler_list_activate;
 pub mod handler_context;
 pub mod framework_root_message_post;
+pub mod framework_root_post_message_kind;
 pub mod framework_root;
 pub mod liti_class_check;
 pub mod liti_field_class_check;
