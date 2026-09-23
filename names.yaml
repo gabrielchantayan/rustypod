@@ -29104,6 +29104,29 @@ functions:
       Host seams replace only the firmware global and tail target; the ARM
       build retains the exact instruction sequence and target veneer.
 
+  - address: 0x081f9248
+    ghidra: FUN_081f9248
+    name: activity_media_player_cleanup
+    size: 56
+    sig: "void activity_media_player_cleanup(void *activity, u32 finish)"
+    module: app/activity_media_player_cleanup
+    status: ported
+    vars:
+      FUN_08259594: media_player_interface_get
+      "vtable+0xbc": unresolved_media_player_finish_slot_bc
+      FUN_081bb3d0: tick_accumulator_reset_timing_state
+    notes: >-
+      Raw ARM words establish the true 56-byte extent
+      0x081f9248..0x081f9280: the next independently linked push {r4,lr}
+      begins at 0x081f9280. A nonzero finish calls
+      media_player_interface_get, dispatches its vtable+0xbc entry with the
+      activity and activity+0x8c word, clears activity+0x88, then tail-branches
+      to FUN_081bb3d0 with the six-word block at activity+0xb8. Binary scan
+      finds three inbound unconditional BLs (0x08216d94, 0x0821d528,
+      0x0821fcb8) and zero predicated BLs. The ARM build retains the direct
+      getter call, dynamic BLX, and tail veneer. Host tests substitute only the
+      firmware-owned getter and use a target-width pointer fixture for +0xb8.
+
   # --- Batch: the UI rectangle primitives (ui/rect) ---
   # Field layout recovered from the binary, QuickDraw order:
   # +0x0 top, +0x4 left, +0x8 bottom, +0xc right, all signed 32-bit.
