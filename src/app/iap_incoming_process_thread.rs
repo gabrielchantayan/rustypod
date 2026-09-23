@@ -318,6 +318,135 @@ pub unsafe extern "C" fn iap_incoming_process_thread_register_client(
     );
     (iap_thread_register_client_ops().register_client)(thread, &deadline, client, unread_seed)
 }
+/// Dispatch seams for the two unported direct callees of
+/// [`iap_incoming_process_thread_submit_message`]. The target defaults retain
+/// the retail call targets; host tests install a recorder.
+#[derive(Clone, Copy)]
+pub struct IapThreadMessageSubmitOps {
+    pub submit_message: unsafe extern "C" fn(*mut u8, u32, u32, *mut *mut u8) -> i32,
+    pub set_handler_pending: unsafe extern "C" fn(*mut u8, i32, u32),
+    pub release_message: unsafe extern "C" fn(*mut u8),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_submit_message(
+    thread: *mut u8,
+    message_code: u32,
+    message_size: u32,
+    message: *mut *mut u8,
+) -> i32 {
+    let f: unsafe extern "C" fn(*mut u8, u32, u32, *mut *mut u8) -> i32 =
+        core::mem::transmute(0x081d_6ee0usize);
+    f(thread, message_code, message_size, message)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_submit_message(
+    _thread: *mut u8,
+    _message_code: u32,
+    _message_size: u32,
+    _message: *mut *mut u8,
+) -> i32 {
+    0
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_set_handler_pending(
+    handler_table: *mut u8,
+    selector: i32,
+    pending: u32,
+) {
+    let f: unsafe extern "C" fn(*mut u8, i32, u32) = core::mem::transmute(0x0819_4120usize);
+    f(handler_table, selector, pending)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_set_handler_pending(
+    _handler_table: *mut u8,
+    _selector: i32,
+    _pending: u32,
+) {
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_release_message(message: *mut u8) {
+    let vtable = *(message as *const u32);
+    let release: unsafe extern "C" fn(*mut u8) = core::mem::transmute(*((vtable as *const u32).add(1)));
+    release(message);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_release_message(_message: *mut u8) {}
+
+pub const DEFAULT_IAP_THREAD_MESSAGE_SUBMIT_OPS: IapThreadMessageSubmitOps =
+    IapThreadMessageSubmitOps {
+        submit_message: firmware_submit_message,
+        set_handler_pending: firmware_set_handler_pending,
+        release_message: firmware_release_message,
+    };
+
+pub static mut IAP_THREAD_MESSAGE_SUBMIT_OPS: IapThreadMessageSubmitOps =
+    DEFAULT_IAP_THREAD_MESSAGE_SUBMIT_OPS;
+
+#[inline(always)]
+fn iap_thread_message_submit_ops() -> IapThreadMessageSubmitOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_MESSAGE_SUBMIT_OPS)) }
+}
+
+/// iap_incoming_process_thread_submit_message — original: `FUN_081d7100` @
+/// 0x081d7100 (**172 bytes**, 0x081d7100..0x081d71ac). The next real function
+/// starts at 0x081d71b0; 0x081d71ac is this function's 0x501 literal.
+/// The body has five unconditional direct `bl`, one predicated `blge`, and
+/// one predicated virtual `blx`.
+///
+/// Reads the message selector at +4, rejects lifecycle state -2, and otherwise
+/// submits the four-byte message pointer with code 0x501. A successful submit
+/// transfers ownership; when requested, it marks that service handler pending.
+/// Failed or rejected submissions release the retained message through vtable
+/// slot +4. Deliberate deviation: the two unported direct callees and host
+/// virtual release dispatch through [`IAP_THREAD_MESSAGE_SUBMIT_OPS`]; target
+/// builds retain 0x081d6ee0, 0x08194120, and the recovered vtable slot.
+///
+/// # Safety
+///
+/// `thread` must have a target-width handler-table pointer at +0x150.
+/// `message`, when non-NULL, must have a target-width vtable word at +0 and
+/// signed selector word at +4.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_submit_message(
+    thread: *mut u8,
+    message: *mut u8,
+    mark_pending: u32,
+) -> i32 {
+    let selector = *((message as *const u32).add(1)) as i32;
+    if crate::app::service_handler_availability::service_handler_lifecycle_state(
+        *(thread.add(0x150) as *const u32) as *mut u8,
+        selector,
+    ) != -2 {
+        let mut submitted_message = message;
+        let status = (iap_thread_message_submit_ops().submit_message)(
+            thread,
+            0x501,
+            4,
+            &mut submitted_message,
+        );
+        if status == 0x21 {
+            if mark_pending != 0 {
+                let handler_table = (*(thread.add(0x150) as *const u32) as *mut u8).add(4);
+                (iap_thread_message_submit_ops().set_handler_pending)(handler_table, selector, 1);
+            }
+            return status;
+        }
+        if status == 0 {
+            return status;
+        }
+        (iap_thread_message_submit_ops().release_message)(submitted_message);
+        return status;
+    }
+    (iap_thread_message_submit_ops().release_message)(message);
+    0
+}
 
 /// Indirect dispatch for the one unported callee (see the function's
 /// deviation note). Host tests install a recording model; a later port
@@ -1135,5 +1264,148 @@ mod slot_wait_tests {
             iap_incoming_process_thread_slot_wait as *const () as usize,
             iap_incoming_process_thread_slot_poll as *const () as usize
         );
+    }
+}
+
+#[cfg(test)]
+mod message_submit_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::app::service_handler_availability::{
+        replace_service_handler_lifecycle_state, SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK,
+    };
+    use crate::testing::{hints, try_map_u32_slab};
+    use core::ptr;
+    use parking_lot::Mutex;
+    use std::sync::LazyLock;
+
+    const THREAD_OFFSET: usize = 0;
+    const HANDLER_TABLE_OFFSET: usize = 0x200;
+    const MESSAGE_OFFSET: usize = 0x400;
+    const REPLACEMENT_OFFSET: usize = 0x440;
+    static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::IAP_THREAD_MESSAGE_SUBMIT, 0x1000).map(|pointer| pointer as usize)
+    });
+    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    static mut SUBMIT_STATUS: i32 = 0;
+    static mut REPLACEMENT: *mut u8 = ptr::null_mut();
+    static mut SUBMIT_CALLS: u32 = 0;
+    static mut PENDING_CALL: Option<(*mut u8, i32, u32)> = None;
+    static mut RELEASED: *mut u8 = ptr::null_mut();
+
+    unsafe extern "C" fn submit(
+        _thread: *mut u8,
+        code: u32,
+        size: u32,
+        message: *mut *mut u8,
+    ) -> i32 {
+        assert_eq!(code, 0x501);
+        assert_eq!(size, 4);
+        SUBMIT_CALLS += 1;
+        *message = REPLACEMENT;
+        SUBMIT_STATUS
+    }
+
+    unsafe extern "C" fn set_pending(table: *mut u8, selector: i32, pending: u32) {
+        PENDING_CALL = Some((table, selector, pending));
+    }
+
+    unsafe extern "C" fn release(message: *mut u8) {
+        RELEASED = message;
+    }
+
+    unsafe fn fixture() -> Option<(*mut u8, *mut u8, *mut u8)> {
+        let base = (*SLAB)? as *mut u8;
+        base.write_bytes(0, 0x1000);
+        let thread = base.add(THREAD_OFFSET);
+        let handlers = base.add(HANDLER_TABLE_OFFSET);
+        let message = base.add(MESSAGE_OFFSET);
+        *(thread.add(0x150) as *mut u32) = handlers as u32;
+        (message as *mut u32).add(1).write(1);
+        Some((thread, handlers, message))
+    }
+
+    #[test]
+    fn accepted_submission_marks_the_selected_handler_without_releasing() {
+        let _ops = OPS_LOCK.lock();
+        let _lifecycle = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock();
+        let Some((thread, handlers, message)) = (unsafe { fixture() }) else { return };
+        unsafe {
+            let old_state = replace_service_handler_lifecycle_state(1, 0);
+            let old_ops = ptr::read_volatile(ptr::addr_of!(IAP_THREAD_MESSAGE_SUBMIT_OPS));
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = IapThreadMessageSubmitOps {
+                submit_message: submit,
+                set_handler_pending: set_pending,
+                release_message: release,
+            };
+            SUBMIT_STATUS = 0x21;
+            REPLACEMENT = message;
+            SUBMIT_CALLS = 0;
+            PENDING_CALL = None;
+            RELEASED = ptr::null_mut();
+
+            assert_eq!(iap_incoming_process_thread_submit_message(thread, message, 1), 0x21);
+            assert_eq!(SUBMIT_CALLS, 1);
+            assert_eq!(PENDING_CALL, Some((handlers.add(4), 1, 1)));
+            assert!(RELEASED.is_null());
+
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = old_ops;
+            replace_service_handler_lifecycle_state(1, old_state);
+        }
+    }
+
+    #[test]
+    fn failed_submission_releases_the_message_pointer_rewritten_by_the_callee() {
+        let _ops = OPS_LOCK.lock();
+        let _lifecycle = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock();
+        let Some((thread, _, message)) = (unsafe { fixture() }) else { return };
+        unsafe {
+            let old_state = replace_service_handler_lifecycle_state(1, 0);
+            let old_ops = ptr::read_volatile(ptr::addr_of!(IAP_THREAD_MESSAGE_SUBMIT_OPS));
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = IapThreadMessageSubmitOps {
+                submit_message: submit,
+                set_handler_pending: set_pending,
+                release_message: release,
+            };
+            SUBMIT_STATUS = 12;
+            REPLACEMENT = message.add(REPLACEMENT_OFFSET - MESSAGE_OFFSET);
+            SUBMIT_CALLS = 0;
+            PENDING_CALL = None;
+            RELEASED = ptr::null_mut();
+
+            assert_eq!(iap_incoming_process_thread_submit_message(thread, message, 1), 12);
+            assert_eq!(SUBMIT_CALLS, 1);
+            assert_eq!(RELEASED, REPLACEMENT);
+            assert_eq!(PENDING_CALL, None);
+
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = old_ops;
+            replace_service_handler_lifecycle_state(1, old_state);
+        }
+    }
+
+    #[test]
+    fn lifecycle_state_minus_two_releases_without_submitting() {
+        let _ops = OPS_LOCK.lock();
+        let _lifecycle = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock();
+        let Some((thread, _, message)) = (unsafe { fixture() }) else { return };
+        unsafe {
+            let old_state = replace_service_handler_lifecycle_state(1, -2);
+            let old_ops = ptr::read_volatile(ptr::addr_of!(IAP_THREAD_MESSAGE_SUBMIT_OPS));
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = IapThreadMessageSubmitOps {
+                submit_message: submit,
+                set_handler_pending: set_pending,
+                release_message: release,
+            };
+            SUBMIT_CALLS = 0;
+            RELEASED = ptr::null_mut();
+
+            assert_eq!(iap_incoming_process_thread_submit_message(thread, message, 1), 0);
+            assert_eq!(SUBMIT_CALLS, 0);
+            assert_eq!(RELEASED, message);
+
+            IAP_THREAD_MESSAGE_SUBMIT_OPS = old_ops;
+            replace_service_handler_lifecycle_state(1, old_state);
+        }
     }
 }

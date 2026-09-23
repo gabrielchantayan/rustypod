@@ -64050,6 +64050,41 @@ functions:
       2, the absent-handler result while still calling the state predicate,
       and the observable final gate reload.
 
+  - address: 0x081d7100
+    ghidra: FUN_081d7100
+    name: iap_incoming_process_thread_submit_message
+    size: 172
+    sig: "i32 iap_incoming_process_thread_submit_message(u8 *thread, u8 *message, u32 mark_pending)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0/r5: thread (0x240-byte CIapIncomingProcessThread context)
+      param_2/r1/local_1c: message (owned pointer, submitted by address)
+      param_3/r2/r7: mark_pending
+      iVar1/r0/r1: selector (signed message +0x4 word)
+      iVar3/r4: status
+      DAT_081d71ac: message_submit_code (0x501)
+      FUN_080f68e8: message_selector_read (+0x4 word getter, inlined)
+      FUN_08138b84: service_handler_lifecycle_state
+      FUN_081d6ee0: unported message-submit body (IAP_THREAD_MESSAGE_SUBMIT_OPS seam)
+      FUN_08194120: unported handler-pending setter (IAP_THREAD_MESSAGE_SUBMIT_OPS seam)
+      "message vtable+0x4": virtual release slot
+    notes: >-
+      Raw ARM extent is exactly 172 bytes, 0x081d7100..0x081d71ac:
+      43 instruction words ending in pop, followed by the 0x501 literal at
+      0x081d71ac. The next separately linked function begins at 0x081d71b0
+      with ldr r0,[r0,#0x150]; Ghidra's 172-byte extent is therefore exact.
+      The body reads the message selector, rejects lifecycle state -2, then
+      submits the address of its message local with code 0x501 and size four.
+      Status 0x21 transfers ownership and optionally marks the selected
+      handler pending; status zero also transfers ownership; every other
+      status and the rejected state release through virtual slot +4. Raw
+      instruction decode finds five unconditional direct bl, one predicated
+      blge (heap_panic inside service_handler_lifecycle_state), and one
+      predicated virtual blxne release. Deliberate deviations: the unported
+      0x081d6ee0 submit body, 0x08194120 pending setter, and host virtual
+      release dispatch use IAP_THREAD_MESSAGE_SUBMIT_OPS; target defaults
+      retain both verified direct addresses and recover the vtable slot.
   - address: 0x081d71c0
     ghidra: FUN_081d71c0
     name: iap_incoming_process_thread_instance
