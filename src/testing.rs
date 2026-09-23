@@ -2411,3 +2411,5 @@ pub static SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK: parking_lot::Mutex<()> =
 /// Serializes host tests that replace transfer_slot_reconcile's unported
 /// `FUN_081e39e8` advance seam.
 pub static TRANSFER_SLOT_RECONCILE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Serializes host tests that replace the singleton mode-dispatch target.
+pub static SINGLETON_MODE_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());

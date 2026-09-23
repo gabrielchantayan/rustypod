@@ -133617,3 +133617,28 @@ functions:
       The first, third, and fourth callees have no recovered semantic identity,
       so firmware builds retain target-address calls and host tests use narrow
       recording seams; this is the deliberate deviation.
+
+  - address: 0x0817df88
+    ghidra: FUN_0817df88
+    name: singleton_mode_dispatch_if_state_three_or_four
+    size: 36
+    sig: "void singleton_mode_dispatch_if_state_three_or_four(const u8 *state, u32 mode)"
+    module: app/singleton_mode_dispatch_if_state_three_or_four
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1/r4: mode
+      FUN_0829cf40: byte_is_three_or_four
+      FUN_081ded14: lazy_singleton_0x28
+      FUN_081df0e4: singleton_mode_dispatch
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04001 eb047bea e3500000 08bd8010
+      eb01835c e1a01004 e8bd4010 ea01844d establish the exact 36-byte
+      extent 0x0817df88..0x0817dfab; push {r4,lr} at 0x0817dfac starts the
+      next real function. The body has two plain unconditional BL instructions
+      (0x0829cf40 and 0x081ded14), zero predicated BL forms, then a tail B to
+      0x081df0e4. It dispatches mode through the lazy 0x28-byte singleton only
+      when the input state byte is 3 or 4. Ghidra's 100-byte extent incorrectly
+      absorbs the following functions. The tail target has no verified identity:
+      target builds call its retail address while host builds use a recording
+      seam. The predicate and lazy singleton are direct calls to existing ports.
