@@ -29142,6 +29142,33 @@ functions:
       residue unobservable. Host test records the own queue base and exact
       code 0x16 through the existing enqueue hook.
 
+
+  - address: 0x081a5a28
+    ghidra: FUN_081a5a28
+    name: class_8c00_post_event_code_15
+    size: 8
+    sig: "void class_8c00_post_event_code_15(EventCodeQueue *this)"
+    module: app/class_8c00
+    status: ported
+    renames:
+      param_1/r0: this (EventCodeQueue base of class-0x8c00)
+      r1: event_code_15
+      FUN_081de270: event_code_queue_post (tail branch, ported in app/event_code_queue)
+    notes: >-
+      Raw osos.dec establishes the exact eight-byte extent
+      0x081a5a28..0x081a5a30: `mov r1, #15; b 0x081de270`; 0x081a5a30
+      starts volume_controller_post_byte_90_code with `push {r4, lr}`.
+      Ghidra incorrectly folds event_code_queue_post's mutex-lock, queue-push,
+      and mutex-unlock body into this wrapper. Decoding every immediate A32
+      B/BL word in osos.dec finds exactly three inbound direct plain bl sites,
+      all unconditional, at 0x0810a8dc, 0x081cdfc8, and 0x0822df64; there are
+      no predicated bl call sites. Two direct tail-b sites are 0x081014bc and
+      0x0825aa3c. This class-0x8c00 method selects event code 15 and
+      tail-branches to the ported event_code_queue_post on its unoffset
+      event-code-queue base. Rust calls that port directly rather than
+      preserving the tail branch; its void contract makes the stock r0 residue
+      unobservable. Host test records the own queue base and exact code 15
+      through the existing enqueue hook.
   - address: 0x081a5a30
     ghidra: FUN_081a5a30
     name: volume_controller_post_byte_90_code
