@@ -28,6 +28,10 @@ const _: () = assert!(core::mem::offset_of!(StageProgressTracker, completed_base
 const _: () = assert!(core::mem::offset_of!(StageProgressTracker, total_budget) == 0x0c);
 const _: () = assert!(core::mem::offset_of!(StageProgressTracker, stage_budgets) == 0x10);
 
+/// The unported total-budget setter reached through its local veneer at
+/// 0x081b9150. It stores the supplied total into the keeper when present.
+pub type SetTotalBudget = unsafe extern "C" fn(*mut u32);
+
 /// The unported running-deadline setter reached through its local veneer at
 /// 0x081b9154. It stores the supplied deadline into the keeper when present.
 pub type SetRunningDeadline = unsafe extern "C" fn(u32);
@@ -37,8 +41,15 @@ pub type WaitForCurrentStage = unsafe extern "C" fn(*mut StageProgressTracker);
 
 #[derive(Clone, Copy)]
 pub struct StageProgressOps {
+    pub set_total_budget: SetTotalBudget,
     pub set_running_deadline: SetRunningDeadline,
     pub wait_for_current_stage: WaitForCurrentStage,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_set_total_budget(total_budget: *mut u32) {
+    let setter: SetTotalBudget = core::mem::transmute(0x081b9150usize);
+    setter(total_budget);
 }
 
 #[cfg(target_os = "none")]
@@ -55,9 +66,15 @@ unsafe extern "C" fn retail_wait_for_current_stage(tracker: *mut StageProgressTr
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_STAGE_PROGRESS_OPS: StageProgressOps = StageProgressOps {
+    set_total_budget: retail_set_total_budget,
     set_running_deadline: retail_set_running_deadline,
     wait_for_current_stage: retail_wait_for_current_stage,
 };
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_set_total_budget(_: *mut u32) {
+    panic!("install stage progress host operations before setting the total budget")
+}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_set_running_deadline(_: u32) {
@@ -71,6 +88,7 @@ unsafe extern "C" fn missing_wait_for_current_stage(_: *mut StageProgressTracker
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_STAGE_PROGRESS_OPS: StageProgressOps = StageProgressOps {
+    set_total_budget: missing_set_total_budget,
     set_running_deadline: missing_set_running_deadline,
     wait_for_current_stage: missing_wait_for_current_stage,
 };
@@ -91,6 +109,41 @@ unsafe fn ops() -> StageProgressOps {
     STAGE_PROGRESS_OPS
 }
 
+/// stage_progress_tracker_ctor — original: `FUN_081fa440` @ **0x081fa440**
+/// (**60 bytes**; **3 plain unconditional `bl` call sites, 0 predicated BL
+/// forms** — binary-verified by decoding every ARM B/BL word in `osos.dec`;
+/// the next real function opens at 0x081fa47c).
+///
+/// Clears the 0x2c-byte tracker, sets the deadline keeper's running deadline
+/// to zero, then tail-calls the keeper's total-budget setter with the address
+/// of the tracker `total_budget` word. The return value is that word address,
+/// because the tail-called setter preserves `r0`.
+///
+/// The ARM code uses four direct stores followed by `memzero_aligned` for the
+/// seven budget words. This port uses volatile stores to preserve the writes
+/// and prevent LLVM from replacing the clear with an unavailable libc helper.
+/// The two unported keeper setters use the existing target veneers and the
+/// `StageProgressOps` host seam.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stage_progress_tracker_ctor(
+    tracker: *mut StageProgressTracker,
+) -> *mut u32 {
+    (*tracker).current_stage = 0;
+    core::ptr::addr_of_mut!((*tracker).progress).write_volatile(0);
+    core::ptr::addr_of_mut!((*tracker).completed_base).write_volatile(0);
+    core::ptr::addr_of_mut!((*tracker).total_budget).write_volatile(0);
+    let budgets = core::ptr::addr_of_mut!((*tracker).stage_budgets).cast::<u32>();
+    for index in 0..7 {
+        budgets.add(index).write_volatile(0);
+    }
+
+    let total_budget = core::ptr::addr_of_mut!((*tracker).total_budget);
+    let operations = ops();
+    (operations.set_running_deadline)(0);
+    (operations.set_total_budget)(total_budget);
+    total_budget
+}
 /// stage_progress_set — original: `FUN_081fa378` @ **0x081fa378**
 /// (**56 bytes**; **5 `bl` call sites, all unconditional — 0 predicated** —
 /// verified by decoding every ARM B/BL word in `osos.dec`; the next real entry
@@ -224,6 +277,17 @@ mod tests {
     unsafe extern "C" fn record_deadline(deadline: u32) {
         DEADLINE = deadline;
         DEADLINE_CALLS += 1;
+        SETTER_SEQUENCE = SETTER_SEQUENCE * 10 + 1;
+    }
+
+    static mut TOTAL_BUDGET: *mut u32 = core::ptr::null_mut();
+    static mut TOTAL_BUDGET_CALLS: u32 = 0;
+    static mut SETTER_SEQUENCE: u32 = 0;
+
+    unsafe extern "C" fn record_total_budget(total_budget: *mut u32) {
+        TOTAL_BUDGET = total_budget;
+        TOTAL_BUDGET_CALLS += 1;
+        SETTER_SEQUENCE = SETTER_SEQUENCE * 10 + 2;
     }
 
     static mut WAIT_CALLS: u32 = 0;
@@ -250,15 +314,41 @@ mod tests {
     unsafe fn install_recording_ops() -> StageProgressOps {
         let saved = STAGE_PROGRESS_OPS;
         STAGE_PROGRESS_OPS = StageProgressOps {
+            set_total_budget: record_total_budget,
             set_running_deadline: record_deadline,
             wait_for_current_stage: record_wait,
         };
         DEADLINE = 0;
         DEADLINE_CALLS = 0;
+        TOTAL_BUDGET = core::ptr::null_mut();
+        TOTAL_BUDGET_CALLS = 0;
+        SETTER_SEQUENCE = 0;
         WAIT_CALLS = 0;
         WAIT_STAGE = 0;
         WAIT_PROGRESS = 0;
         saved
+    }
+
+    #[test]
+    fn constructor_preserves_padding_zeros_tracker_and_resets_deadline_keeper() {
+        let _guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            let saved = install_recording_ops();
+            let mut storage = [0xffff_ffffu32; 11];
+            let tracker = storage.as_mut_ptr().cast::<StageProgressTracker>();
+
+            let total_budget = stage_progress_tracker_ctor(tracker);
+
+            assert_eq!(storage[0], 0xffff_ff00, "the first byte store leaves padding intact");
+            assert_eq!(&storage[1..], &[0; 10]);
+            assert_eq!(total_budget, core::ptr::addr_of_mut!((*tracker).total_budget));
+            assert_eq!(DEADLINE, 0);
+            assert_eq!(DEADLINE_CALLS, 1);
+            assert_eq!(TOTAL_BUDGET, total_budget);
+            assert_eq!(TOTAL_BUDGET_CALLS, 1);
+            assert_eq!(SETTER_SEQUENCE, 12, "running deadline precedes total budget");
+            STAGE_PROGRESS_OPS = saved;
+        }
     }
 
     #[test]
