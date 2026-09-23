@@ -3932,6 +3932,56 @@ pub unsafe extern "C" fn iterator_state_previous(state: *mut u32, out: *mut u8) 
     let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
     fetch(state, out)
 }
+///
+/// collection_find_previous_handler — original: `FUN_081b52b8` @
+/// 0x081b52b8 (140 bytes exactly, 0x081b52b8..0x081b5344; 35
+/// instructions, no literal pool; five in-body `bl`s and one plain direct
+/// `bl` caller at 0x081b5360, zero predicated direct `bl` callers,
+/// independently decoded from `osos.dec`).
+///
+/// Starting at `*cursor`, constructs a 20-byte collection iterator and walks
+/// backward until it fetches an entry whose first word equals `key`. On a
+/// match, it copies the yielded second and third words to `callback_out` and
+/// `context_out`, updates `*cursor` with the iterator's current index, drops
+/// the iterator, and returns one. Exhaustion drops the iterator and returns
+/// zero without touching any caller out-slot. Deliberate deviations: the
+/// port directly calls the already ported iterator family rather than
+/// preserving the ARM stack frame and branch layout; target-width iterator
+/// words remain `u32`.
+///
+/// # Safety
+///
+/// `owner` must be a valid collection handle for the iterator family,
+/// `cursor`, `callback_out`, and `context_out` must be writable, and each
+/// yielded entry must provide three readable 32-bit words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn collection_find_previous_handler(
+    owner: *mut u8,
+    key: u32,
+    callback_out: *mut u32,
+    context_out: *mut u32,
+    cursor: *mut i32,
+) -> u32 {
+    let mut state = core::mem::MaybeUninit::<[u32; 5]>::uninit();
+    let mut entry = core::mem::MaybeUninit::<[u32; 3]>::uninit();
+    let state = state.as_mut_ptr().cast::<u32>();
+    let entry = entry.as_mut_ptr().cast::<u32>();
+    iterator_state_construct(state, owner, cursor.read());
+
+    while iterator_state_previous(state, entry.cast()) != 0 {
+        if entry.read() == key {
+            callback_out.write(entry.add(1).read());
+            context_out.write(entry.add(2).read());
+            cursor.write(iterator_state_current_index(state));
+            iterator_state_cleanup(state);
+            return 1;
+        }
+    }
+
+    iterator_state_cleanup(state);
+    0
+}
 
 /// Byte offset of the observer-list head word inside the owner object
 /// (`ldr r2, [r0, #0xc]`) — the list [`iterator_state_release`] walks.
@@ -11616,6 +11666,80 @@ pub(crate) mod tests {
             assert_eq!(iter[1], 0);
             assert_eq!(iter[3], (-2i32) as u32);
             assert_eq!(iter[5], 0);
+        }
+    }
+
+    // ---- collection_find_previous_handler (0x081b52b8) ---------------
+
+    unsafe extern "C" fn reverse_search_refresh(state: *mut u32) {
+        state.add(1).write((state.add(2).read() as i32 - 1) as u32);
+    }
+
+    unsafe extern "C" fn reverse_search_fetch(state: *mut u32, out: *mut u8) -> u32 {
+        match state.add(2).read() as i32 {
+            2 => {
+                out.cast::<u32>().write(0x1111_1111);
+                out.cast::<u32>().add(1).write(0x2222_2222);
+                out.cast::<u32>().add(2).write(0x3333_3333);
+                1
+            }
+            1 => {
+                out.cast::<u32>().write(0xfeed_beef);
+                out.cast::<u32>().add(1).write(0x4444_4444);
+                out.cast::<u32>().add(2).write(0x5555_5555);
+                1
+            }
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn collection_find_previous_handler_skips_nonmatching_entries_and_preserves_outputs_on_exhaustion() {
+        let Some(owner) = try_map_u32_slab(hints::COLLECTION_FIND_PREVIOUS_HANDLER, 0x100) else {
+            assert!(crate::testing::note_missing_u32_fixture("collection_find_previous_handler"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(owner, 0, 0x100);
+            owner.cast::<u32>().add(1).write(4);
+            core::ptr::addr_of_mut!(ITERATOR_STATE_REFRESH).write_volatile(reverse_search_refresh);
+            core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(reverse_search_fetch);
+
+            let mut cursor = 3;
+            let mut callback = 0xa5a5_a5a5;
+            let mut context = 0x5a5a_5a5a;
+            assert_eq!(
+                collection_find_previous_handler(
+                    owner,
+                    0xfeed_beef,
+                    &mut callback,
+                    &mut context,
+                    &mut cursor,
+                ),
+                1
+            );
+            assert_eq!((callback, context, cursor), (0x4444_4444, 0x5555_5555, 1));
+
+            cursor = 0;
+            callback = 0xa5a5_a5a5;
+            context = 0x5a5a_5a5a;
+            assert_eq!(
+                collection_find_previous_handler(
+                    owner,
+                    0xfeed_beef,
+                    &mut callback,
+                    &mut context,
+                    &mut cursor,
+                ),
+                0
+            );
+            assert_eq!(
+                (callback, context, cursor),
+                (0xa5a5_a5a5, 0x5a5a_5a5a, 0),
+                "an empty reverse walk leaves all caller out-slots untouched"
+            );
         }
     }
 
