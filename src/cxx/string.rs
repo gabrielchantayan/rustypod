@@ -107,6 +107,7 @@
 //!   one-to-one.
 
 use crate::heap::veneers::{operator_delete, operator_new_checked};
+use crate::heap::veneers::cxx_array_dealloc;
 use crate::cxx::string_object::{string_object_c_str, StringObject};
 use crate::libc::memcmp::memcmp;
 use crate::libc::memmove::memmove;
@@ -678,6 +679,156 @@ pub unsafe extern "C" fn cxx_string_pair_range_destroy(
         cxx_string_release(core::ptr::addr_of_mut!((*first).second));
         cxx_string_release(core::ptr::addr_of_mut!((*first).first));
         first = first.add(1);
+    }
+}
+
+/// cxx_string_pair_vector_owner_destroy — retailOS `FUN_081df500` @
+/// 0x081df500 (80 bytes, 0x081df500..0x081df54f).
+///
+/// Raw A32 has three unconditional outbound `bl` instructions—to
+/// [`cxx_string_pair_range_destroy`] @ 0x083e2f48, signed divide
+/// [`crate::runtime::rt_div::__rt_sdiv`] @ 0x08031568, and
+/// [`cxx_array_dealloc`] @ 0x08266f2c—and no predicated `bl`. Whole-image
+/// A32 decoding finds three inbound plain `bl` callers (0x0825b460,
+/// 0x0825b494, and 0x083e1600) and no predicated inbound calls.
+///
+/// It writes the raw 32-bit owner tag loaded from 0x081df550, destroys the
+/// 12-byte string-pair records in its embedded vector, then releases its
+/// backing allocation with `(capacity - begin) / 12` and a zero element-size
+/// argument. The signed division and count remain even though the deallocation
+/// veneer discards both auxiliary arguments. Deliberate deviations: none.
+#[repr(C)]
+pub struct CxxStringPairVectorOwner {
+    /// Raw owner tag at target offset +0x00.
+    pub tag: u32,
+    /// Unexamined target word at +0x04.
+    pub reserved: u32,
+    /// Embedded vector begin at target offset +0x08.
+    pub begin: u32,
+    /// Embedded vector end at target offset +0x0c.
+    pub end: u32,
+    /// Embedded vector capacity at target offset +0x10.
+    pub capacity: u32,
+}
+
+const CXX_STRING_PAIR_VECTOR_OWNER_TAG: u32 = 0xe92d_43f0;
+
+type StringPairRangeDestroy = unsafe fn(*mut u8, *mut u8, *mut u8);
+type ArrayDealloc = unsafe extern "C" fn(*mut u8, usize, usize);
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_vector_owner_destroy(
+    owner: *mut CxxStringPairVectorOwner,
+) -> *mut CxxStringPairVectorOwner {
+    unsafe {
+        cxx_string_pair_vector_owner_destroy_with(
+            owner,
+            |unused, first, last| {
+                cxx_string_pair_range_destroy(
+                    unused,
+                    first.cast::<CxxStringPairRangeEntry>(),
+                    last.cast::<CxxStringPairRangeEntry>(),
+                );
+            },
+            cxx_array_dealloc,
+        )
+    }
+}
+
+#[inline(always)]
+unsafe fn cxx_string_pair_vector_owner_destroy_with(
+    owner: *mut CxxStringPairVectorOwner,
+    destroy_range: StringPairRangeDestroy,
+    release: ArrayDealloc,
+) -> *mut CxxStringPairVectorOwner {
+    unsafe {
+        (*owner).tag = CXX_STRING_PAIR_VECTOR_OWNER_TAG;
+        let begin = (*owner).begin;
+        let end = (*owner).end;
+        let capacity = (*owner).capacity;
+        destroy_range(
+            core::ptr::addr_of_mut!((*owner).begin).cast(),
+            begin as usize as *mut u8,
+            end as usize as *mut u8,
+        );
+        let element_count = core::hint::black_box(
+            crate::runtime::rt_div::__rt_sdiv(capacity.wrapping_sub(begin) as i32, 12) as usize,
+        );
+        release(begin as usize as *mut u8, element_count, core::hint::black_box(0));
+        owner
+    }
+}
+
+#[cfg(test)]
+mod cxx_string_pair_vector_owner_destroy_tests {
+    use super::*;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    static RANGE_UNUSED: AtomicUsize = AtomicUsize::new(0);
+    static RANGE_FIRST: AtomicUsize = AtomicUsize::new(0);
+    static RANGE_LAST: AtomicUsize = AtomicUsize::new(0);
+    static DEALLOC_STORAGE: AtomicUsize = AtomicUsize::new(0);
+    static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static DEALLOC_SIZE: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+    unsafe fn record_range(unused: *mut u8, first: *mut u8, last: *mut u8) {
+        RANGE_UNUSED.store(unused as usize, Ordering::SeqCst);
+        RANGE_FIRST.store(first as usize, Ordering::SeqCst);
+        RANGE_LAST.store(last as usize, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn record_dealloc(storage: *mut u8, count: usize, element_size: usize) {
+        DEALLOC_STORAGE.store(storage as usize, Ordering::SeqCst);
+        DEALLOC_COUNT.store(count, Ordering::SeqCst);
+        DEALLOC_SIZE.store(element_size, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn tags_owner_destroys_range_and_releases_capacity_in_target_elements() {
+        let mut owner = CxxStringPairVectorOwner {
+            tag: 0,
+            reserved: 0xfeed_face,
+            begin: 0x1000,
+            end: 0x1018,
+            capacity: 0x1030,
+        };
+
+        let result = unsafe {
+            cxx_string_pair_vector_owner_destroy_with(&mut owner, record_range, record_dealloc)
+        };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(owner));
+        assert_eq!(owner.tag, CXX_STRING_PAIR_VECTOR_OWNER_TAG);
+        assert_eq!(owner.reserved, 0xfeed_face);
+        assert_eq!(RANGE_UNUSED.load(Ordering::SeqCst), (&mut owner.begin as *mut u32) as usize);
+        assert_eq!(RANGE_FIRST.load(Ordering::SeqCst), 0x1000);
+        assert_eq!(RANGE_LAST.load(Ordering::SeqCst), 0x1018);
+        assert_eq!(DEALLOC_STORAGE.load(Ordering::SeqCst), 0x1000);
+        assert_eq!(DEALLOC_COUNT.load(Ordering::SeqCst), 4);
+        assert_eq!(DEALLOC_SIZE.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn empty_vector_still_destroys_range_and_releases_zero_elements() {
+        let mut owner = CxxStringPairVectorOwner {
+            tag: u32::MAX,
+            reserved: 0,
+            begin: 0x2000,
+            end: 0x2000,
+            capacity: 0x2000,
+        };
+
+        unsafe {
+            cxx_string_pair_vector_owner_destroy_with(&mut owner, record_range, record_dealloc);
+        }
+
+        assert_eq!(owner.tag, CXX_STRING_PAIR_VECTOR_OWNER_TAG);
+        assert_eq!(RANGE_FIRST.load(Ordering::SeqCst), 0x2000);
+        assert_eq!(RANGE_LAST.load(Ordering::SeqCst), 0x2000);
+        assert_eq!(DEALLOC_STORAGE.load(Ordering::SeqCst), 0x2000);
+        assert_eq!(DEALLOC_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(DEALLOC_SIZE.load(Ordering::SeqCst), 0);
     }
 }
 
