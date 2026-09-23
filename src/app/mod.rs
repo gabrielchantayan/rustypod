@@ -262,6 +262,7 @@ pub mod iap_packet_completion;
 pub mod iap_packet_completion_event;
 pub mod iap_packet_completion_schedule;
 pub mod iap_packet_event_dispatch;
+pub mod iap_packet_notification_broadcast;
 pub mod iap_packet_event_schedule;
 pub mod itunesdb_read_default_field;
 pub mod image_format;

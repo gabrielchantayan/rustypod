@@ -133134,3 +133134,34 @@ functions:
       scheduler singleton once rather than twice because no intervening call
       can change it; host tests use a private wheel table. The vtable remains
       an address constant because the decrypted 0x0898xxxx page is stale.
+
+  - address: 0x0819614c
+    ghidra: FUN_0819614c
+    name: broadcast_iap_packet_notification
+    size: 100
+    sig: "void broadcast_iap_packet_notification(void *unused_context, const u8 *packet)"
+    module: app/iap_packet_notification_broadcast
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: packet
+      "packet+0x22": notification_byte
+      DAT_081961ac: iap_packet_notification_context_slot (global @ 0x089ccc04)
+      "context+0x2e0": notification_mutex
+      thunk_FUN_082e8390: posix_mutex_lock_veneer_a
+      FUN_08257b60: event_hub_broadcast
+      thunk_FUN_082e83d8: posix_mutex_unlock_veneer_a
+    notes: >-
+      Raw osos.dec establishes the 100-byte extent 0x0819614c..0x081961af:
+      23 A32 code words through pop {r4,pc} at 0x081961a8, then the owned
+      literal 0x089ccc04 at 0x081961ac; the next real function starts at
+      0x081961b0. It has exactly three outbound plain unconditional BL calls
+      (0x08196184 -> posix_mutex_lock veneer 0x08261e20,
+      0x08196198 -> event_hub_broadcast, and 0x081961a0 ->
+      posix_mutex_unlock veneer 0x08261e24), with zero predicated BL forms.
+      It creates a 0x410-byte stack payload and writes only bytes 0=0x80,
+      8=0x0f, 9=0x85, and 10=packet+0x22 before broadcasting event kind 12
+      with arg zero while context+0x2e0 is locked. Deliberate deviation: the
+      target uses the literal-backed context slot directly; host tests use a
+      recording seam. The rest of the payload deliberately remains
+      uninitialized, matching retailOS.
