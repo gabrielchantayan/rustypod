@@ -581,6 +581,9 @@ pub mod hints {
     // showcase and timer fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SHOWCASE_CLEAR_TIMER_SLOTS: usize = 0xd980_0000;
+    // 0xd940_0000: dedicated to app/input_sequence_find_item's raw-u32
+    // owner, collection, and item fixtures; mappings never unmap.
+    pub const INPUT_SEQUENCE_FIND_ITEM: usize = 0xd940_0000;
     // 0xda00_0000: dedicated to app/showcase_pending_queues_complete's
     // raw-u32 Showcase, slot queues, and queue-completion state fixture;
     // mappings never unmap, so no other test may reuse this hint.
