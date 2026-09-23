@@ -551,6 +551,9 @@ pub mod hints {
     // slot-deadline wrapper fixture; mappings never unmap, so no other user
     // may share it.
     pub const IAP_THREAD_SLOT_DEADLINE: usize = 0x6c40_0000;
+    // 0x6cc0_0000: dedicated to app/iap_incoming_process_thread's
+    // slot-release fixture; mappings never unmap, so no other user may share it.
+    pub const IAP_THREAD_SLOT_RELEASE: usize = 0x6cc0_0000;
     // 0x6d80_0000: dedicated to util/unique_word_array_insert's raw-u32
     // header and backing-array fixture; mappings never unmap, so no other user
     // may share this hint.
