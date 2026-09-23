@@ -54091,6 +54091,38 @@ functions:
       b"emit". The 0x0807a2e8 callee identity is deliberately not claimed:
       the port exposes only a queue/cell seam, calls its retailOS address on
       target, and requires an installed host operation for tests.
+  # --- Task-message dispatch ---
+  - address: 0x0812bfcc
+    ghidra: FUN_0812bfcc
+    name: task_message_dispatch
+    size: 188
+    sig: "void task_message_dispatch(void)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      FUN_080cb828: current_task_ctx_block
+      FUN_0812c5dc: task_message_receive
+      FUN_081b5344: task_message_find_first_handler
+      FUN_081b52b8: collection_find_previous_handler
+      FUN_080ed958: mqueue_node_recycle
+      DAT_0812c084: task_message_quit_tag
+      local_2c: message
+      local_30: auxiliary_node
+      local_34: handler
+      local_38: handler_context
+    notes: >-
+      Raw osos.dec establishes a 188-byte extent: 184 instruction bytes at
+      0x0812bfcc..0x0812c084, followed by literal 0x71756974 (b"tiuq");
+      the next real function begins at 0x0812c088. Whole-image A32 decoding
+      finds exactly three direct BL callers, all unconditional
+      (0x0839d978, 0x0839daf8, 0x0839dde0), and no predicated BL callers.
+      The body has three unconditional BLs, one BLNE, and one indirect BLX.
+      It receives from current_task_ctx_block()+0x1c, walks the optional
+      +0x20 handler collection until a callback accepts the message, recycles
+      a non-NULL auxiliary node, and exits after processing b"tiuq". The
+      first lookup helper at 0x081b5344 remains deliberately unnamed; its
+      raw call interface is exposed as a host seam, while the later lookup
+      uses the ported collection_find_previous_handler.
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
   - address: 0x0812c6b0
