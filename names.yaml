@@ -134101,6 +134101,28 @@ functions:
       original arguments reach it. Rust returns after that call rather than
       performing the original tail branch; the observable call ABI is
       unchanged.
+  - address: 0x08168330
+    ghidra: FUN_08168330
+    name: context_primary_target_is_present
+    size: 16
+    sig: "u32 context_primary_target_is_present(const u32 *context)"
+    module: app/context_primary_target_is_present
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x20": primary_target
+      r0: primary_target_present
+    notes: >-
+      Raw osos.dec establishes the exact 16-byte A32 body
+      0x08168330..0x0816833f: `ldr r0,[r0,#0x20]; cmp r0,#0; movne r0,#1;
+      bx lr`. The identical four-word predicate at 0x08168340 is separately
+      entered, establishing the next real function boundary. The leaf has no
+      outgoing direct BL instructions or predicated direct BL forms. A
+      complete aligned raw A32 branch-immediate decode finds exactly three
+      inbound unconditional plain BL sites at 0x081683d4, 0x08168488, and
+      0x081684bc, and zero predicated inbound BL forms. It reads the
+      target-width primary_target word at context+0x20 and returns a
+      normalized zero or one predicate. Deliberate deviations: none.
   - address: 0x08168350
     ghidra: FUN_08168350
     name: context_secondary_target_set
