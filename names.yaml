@@ -61406,6 +61406,29 @@ functions:
       Ghidra's claimed tail call to 0x08275d74 is therefore false. Porting
       would require inventing semantics for executable data, so this remains
       identified rather than a guessed Rust seam.
+  - address: 0x08198f88
+    ghidra: FUN_08198f88
+    name: lifecycle_view_construct
+    size: 180
+    sig: "void *lifecycle_view_construct(void *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/lifecycle_view
+    vars: {param_1/r0/r4: view, param_2/r1: resources, param_3/r2: controller, param_4/r3: parent, param_5/r5: spec, DAT_0819903c: LIFECYCLE_VIEW_VTABLE_ADDRESS, DAT_08199040: INITIAL_DATA_SOURCE, FUN_0826f26c: view_base_construct, FUN_08198ae0: initialize_derived_state, thunk_EXT_FUN_22000020: __rt_memcpy}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 180 code bytes at 0x08198f88..0x0819903c:
+      push, stacked-spec reload, base constructor, derived vtable and mode
+      setup, derived initializer, memcpy, two clearing loops, return. The
+      two following words are literals (0x08989b70 and 0x083e2e3e); the next
+      real function begins at 0x08199044. ARM word decoding finds exactly
+      three unconditional BL instructions (0x0826f26c, 0x08198ae0, and ROM
+      __rt_memcpy via 0x08037db0), zero predicated BL instructions, and two
+      predicated BLT loop branches. The +0xaa source is in the undecrypted
+      0x083ee1c1..0x083f25ec region, but the port preserves its runtime
+      address and copies through the target's ROM memcpy; host tests record
+      that address and length instead of claiming unavailable bytes. The
+      0x08198ae0 callee has no established class identity, so it remains the
+      narrowly named initialize_derived_state seam.
+
   # --- retailOS UI: the styled-text view widget ---
   - address: 0x0819b9e0
     ghidra: FUN_0819b9e0
