@@ -47,6 +47,7 @@ pub mod resource_slot_table_initialize;
 pub mod class_6800;
 pub mod class_6000_property;
 pub mod class_6000_property_6045_i8;
+pub mod class6000_property_60bc_u16;
 pub mod class_8780_dispatch_state;
 pub mod class_9300_remove_inactive_items;
 pub mod selection_mode_validate;
