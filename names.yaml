@@ -132762,3 +132762,26 @@ functions:
       of fixed state 0x08b20b3c, releases the guard, and always returns that
       state address. The fixed state has no recovered semantic identity, so
       the Rust name describes only its observed guarded reset behavior.
+
+  # --- Lock-state byte accessor ---
+  - address: 0x081a6304
+    ghidra: FUN_081a6304
+    name: lock_state_byte_at_0xcc
+    size: 8
+    sig: "u8 lock_state_byte_at_0xcc(const u8 *lock_state)"
+    module: app/lock_state_byte
+    status: ported
+    renames:
+      param_1/r0: lock_state
+      param_1_plus_0xcc: lock_state_byte
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte A32 body
+      0x081a6304..0x081a6308: ldrb r0,[r0,#0xcc]; bx lr. The next real
+      function begins at 0x081a630c. A full-image aligned A32 decode finds
+      exactly three inbound unconditional bl sites (0x081099ac, 0x0812fe84,
+      and 0x082306e4), no predicated bl forms, and no outbound calls.
+      Callers first obtain the shared lock-state object through 0x081a5500;
+      this accessor returns its byte at +0xcc. LLVM's frame setup/teardown
+      replaces the stock bare bx lr but preserves the result and load. The
+      field's exact boolean interpretation remains unverified, so the name
+      deliberately preserves the offset.
