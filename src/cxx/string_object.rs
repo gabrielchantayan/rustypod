@@ -3142,6 +3142,24 @@ pub struct StringIdRecord {
     pub id: i32,
 }
 
+/// The target-layout context initialized by
+/// [`five_string_id_record_context_construct`]. The first two words are
+/// opaque dispatch/header pointers from the firmware literal pool; the
+/// remaining scalar prefix and five records are copied from the source.
+#[repr(C)]
+pub struct FiveStringIdRecordContext {
+    /// +0x00..+0x04 — opaque literal-pool header words.
+    pub header_words: [u32; 2],
+    /// +0x08..+0x10 — copied verbatim.
+    pub words: [u32; 3],
+    /// +0x14 — copied verbatim.
+    pub flag: u8,
+    /// +0x18..+0x67 — five 0x10-byte records on target.
+    pub records: [StringIdRecord; 5],
+    /// +0x68 — copied verbatim.
+    pub trailing_word: u32,
+}
+
 /// string_id_record_destroy — original: `FUN_08258c80` @ 0x08258c80
 /// (24 bytes: 20 code + the 4-byte vtable literal @ 0x08258c98;
 /// 113 `bl` call sites, binary-scanned).
@@ -3333,6 +3351,41 @@ pub unsafe extern "C" fn string_id_record_copy_construct(
     let record = (base as *mut u8).sub(core::mem::size_of::<usize>()) as *mut StringIdRecord;
     (*record).id = (*source).id;
     record
+}
+
+/// five_string_id_record_context_construct — original: `FUN_08197954` @
+/// 0x08197954 (136 bytes: 128 code plus the two 4-byte literal-pool words
+/// at 0x081979d4 and 0x081979d8; the next independently linked function
+/// starts at 0x081979dc, binary-verified against osos.dec). Five direct
+/// plain `bl` calls target [`string_id_record_copy_construct`] @ 0x08258c2c;
+/// there are zero predicated `bl` calls.
+///
+/// Initializes an opaque 0x6c-byte target context: installs the two literal
+/// header words 0x08989b60 and 0x089a6600, copies the three-word-plus-byte
+/// scalar prefix, copy-constructs each of five adjacent StringIdRecords, then
+/// copies the trailing word. The callers pass this context to its first-word
+/// virtual dispatch after construction; its class identity remains unknown.
+///
+/// Deviation: the opaque header remains `u32` words rather than modeled host
+/// pointers, preserving the target's serialized values and 4-byte layout on
+/// 64-bit host fixtures. The five chained constructors use the existing
+/// host-safe [`string_id_record_copy_construct`] port; on ARM they retain the
+/// original 0x10-byte record stride and direct call target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn five_string_id_record_context_construct(
+    destination: *mut FiveStringIdRecordContext,
+    source: *const FiveStringIdRecordContext,
+) {
+    (*destination).header_words = [0x0898_9b60, 0x089a_6600];
+    (*destination).words = (*source).words;
+    (*destination).flag = (*source).flag;
+    string_id_record_copy_construct(&mut (*destination).records[0], &(*source).records[0]);
+    string_id_record_copy_construct(&mut (*destination).records[1], &(*source).records[1]);
+    string_id_record_copy_construct(&mut (*destination).records[2], &(*source).records[2]);
+    string_id_record_copy_construct(&mut (*destination).records[3], &(*source).records[3]);
+    string_id_record_copy_construct(&mut (*destination).records[4], &(*source).records[4]);
+    (*destination).trailing_word = (*source).trailing_word;
 }
 
 /// Default [`STRING_OBJECT_ASSIGN`] stub: the self-assignment-guard
@@ -9605,6 +9658,60 @@ pub(crate) mod tests {
             let empty = primary_string_record_c_str(&record);
             assert!(!empty.is_null());
             assert_eq!(*empty, 0, "NULL primary payload selects the empty C string");
+        }
+    }
+
+    #[test]
+    fn five_record_context_construct_sets_header_copies_prefix_records_and_tail() {
+        let _bench = copy_bench();
+        let source = FiveStringIdRecordContext {
+            header_words: [0x1111_1111, 0x2222_2222],
+            words: [0x3333_3333, 0x4444_4444, 0x5555_5555],
+            flag: 0xa5,
+            records: core::array::from_fn(|index| StringIdRecord {
+                vtable: (0x1000 + index) as *const StringIdRecordVtable,
+                string: StringObject {
+                    vtable: (0x2000 + index) as *const StringObjectVtable,
+                    payload: (0x3000 + index) as *mut u8,
+                },
+                id: [-1, 0, 0x1f03, i32::MIN, i32::MAX][index],
+            }),
+            trailing_word: 0xdead_beef,
+        };
+        let mut destination = FiveStringIdRecordContext {
+            header_words: [0; 2],
+            words: [0; 3],
+            flag: 0,
+            records: core::array::from_fn(|_| StringIdRecord {
+                vtable: core::ptr::null(),
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: core::ptr::null_mut(),
+                },
+                id: 0,
+            }),
+            trailing_word: 0,
+        };
+
+        unsafe {
+            five_string_id_record_context_construct(&mut destination, &source);
+        }
+
+        assert_eq!(destination.header_words, [0x0898_9b60, 0x089a_6600]);
+        assert_eq!(destination.words, source.words);
+        assert_eq!(destination.flag, source.flag);
+        assert_eq!(destination.trailing_word, source.trailing_word);
+        assert_eq!(
+            destination.records.iter().map(|record| record.id).collect::<Vec<_>>(),
+            source.records.iter().map(|record| record.id).collect::<Vec<_>>(),
+            "each record's +0xc id is copied by its chained constructor"
+        );
+        let calls = copy_calls();
+        assert_eq!(calls.len(), 5, "the body chains exactly five direct record copies");
+        for index in 0..5 {
+            assert_eq!(calls[index].0, core::ptr::addr_of!(destination.records[index].string) as usize);
+            assert_eq!(calls[index].1, core::ptr::addr_of!(source.records[index].string) as usize);
+            assert_eq!(calls[index].2, &STRING_ID_RECORD_VTABLE as *const _ as usize);
         }
     }
 
