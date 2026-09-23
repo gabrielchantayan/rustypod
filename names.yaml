@@ -131294,3 +131294,34 @@ functions:
       delta is supplied in both r2 and r3. The unported adjustment callee is
       a typed fixed-address target call and host recording seam; the retail
       memcpy is an equivalent explicit volatile ten-byte copy.
+
+  - address: 0x081d9918
+    ghidra: FUN_081d9918
+    name: registration_slot_release
+    size: 108
+    sig: "void registration_slot_release(RegistrationSlotManager *manager, u32 slot_index)"
+    module: app/registration_slot_release
+    status: ported
+    renames:
+      param_1/r0: manager
+      param_2/r1: slot_index
+      param_1_plus_0x28c: lock_context
+      iVar2/r4: slot
+      piVar1/r0: object
+      iVar3/r6: refcount
+      FUN_08228360: slot_lock_wrapper
+      FUN_08228388: slot_unlock_wrapper
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte extent
+      0x081d9918..0x081d9984: the next independently entered function starts
+      with push {r3-r7,lr} at 0x081d9984. It has one internal plain BL to
+      the slot-lock wrapper @ 0x08228360, one indirect BLX through object
+      vtable slot +0x04, and a final tail B to the corresponding unlock wrapper
+      @ 0x08228388. Whole-image A32 B/BL decoding finds three inbound direct
+      BL callers: one plain BL at 0x081d9ab8 and two predicated BLNE calls at
+      0x081d9750 and 0x081d9880. For indices below 32 it locks slot+0x0c,
+      decrements a non-NULL slot object's nonzero signed count at slot+0x14,
+      clears the object pointer and state byte at final release, dispatches
+      vtable +0x04, stores the decremented count, and unlocks. Deliberate
+      deviations: wrapper calls are direct ported mutex helper calls; host
+      vtables use native-width slots.

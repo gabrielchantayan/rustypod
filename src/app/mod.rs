@@ -409,6 +409,7 @@ pub mod pointer_queue_wait_ready;
 pub mod query_param_list;
 pub mod registry;
 pub mod registration_handle;
+pub mod registration_slot_release;
 pub mod selector_pair_init;
 pub mod range_append_boundary_newline;
 pub mod range_result_collect;
