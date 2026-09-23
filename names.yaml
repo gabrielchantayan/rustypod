@@ -132023,3 +132023,26 @@ functions:
       0x081cb6f8. Deliberate deviation: Rust represents the tail branch as a
       normal call because the target returns void, preserving all
       caller-observable behavior.
+  - address: 0x081cbbe8
+    ghidra: FUN_081cbbe8
+    name: set_clamped_mode_position_from_lower_offset
+    size: 12
+    sig: "void set_clamped_mode_position_from_lower_offset(void *state, u32 offset)"
+    module: app/clamped_mode_position_from_lower_offset
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: offset
+      "state+0x8bc": lower_position
+      FUN_081cc5b8: set_clamped_mode_position
+    notes: >-
+      Raw osos.dec words 0xe59028bc, 0xe0821001, and 0xea000270 establish the
+      exact 12-byte body 0x081cbbe8..0x081cbbf3: ldr r2,[r0,#0x8bc]; add
+      r1,r2,r1; b 0x081cc5b8. The next independently entered function starts
+      at 0x081cbbf4 with push {r4,lr}. This body has no direct BL instructions.
+      A whole-image A32 decode finds two inbound plain unconditional BL sites
+      at 0x0810ce10 and 0x0810d3ec, plus one predicated BLNE at 0x081cb720.
+      It adds the lower position and offset with wrapping arithmetic, then
+      tail-branches to set_clamped_mode_position. Deliberate deviation: Rust
+      uses a normal call because the callee returns void, preserving all
+      observable behavior.
