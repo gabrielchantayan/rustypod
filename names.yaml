@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e2ba8
+    ghidra: FUN_081e2ba8
+    name: buffer_transfer_submit_byte
+    size: 200
+    sig: "u32 buffer_transfer_submit_byte(void *state, u32 byte)"
+    module: app/buffer_transfer_submit_byte
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: byte
+      "state+0x2d4": transfer_dispatcher
+      "state+0x2e3": outstanding_transfer_count
+      DAT_081e2c64: transfer_byte_lock
+      DAT_081e2c68: published_transfer_byte
+      DAT_081e2c6c: request_timeout_ms
+    notes: >-
+      Raw osos.dec establishes the true 200-byte extent
+      0x081e2ba8..0x081e2c6f: the 188-byte instruction body ends at
+      0x081e2c63, followed by the three-word literal pool; push {r4-r6,lr}
+      at 0x081e2c70 begins the next real function. Decoding every instruction
+      word finds six outbound plain unconditional bl calls at 0x081e2be8,
+      0x081e2bfc, 0x081e2c10, 0x081e2c20, 0x081e2c40, and 0x081e2c54;
+      there are no predicated outbound bl forms. The three direct incoming
+      calls are plain bl at 0x081e24fc and 0x081e28f0 plus predicated bleq at
+      0x081e276c.
+      A non-null dispatcher and fewer than four outstanding transfers dispatch
+      the input byte as operation 8, kind 6. A null request returns 28; a
+      successful request publishes the byte under the literal lock then
+      processes it with the literal 3000 ms timeout. Four or more outstanding
+      transfers cancel and report
+      (8,0,13,4). The six called routines and locked byte lack recovered
+      semantic identities, so target builds retain their verified addresses and
+      host tests use a narrow operations seam. match.py reports LLVM frame and
+      callback-indirection differences; the verified control-flow branches,
+      byte reads, call order, and constants are preserved.
   - address: 0x081ee008
     ghidra: FUN_081ee008
     name: selection_available
