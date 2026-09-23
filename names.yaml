@@ -133587,3 +133587,33 @@ functions:
       then posts code 0x2503 carrying controller +0x70 only if removal made
       the vector empty. FUN_083e9eb8 is inlined as a volatile forward word
       copy; its concrete semantic identity remains unrecovered.
+
+  - address: 0x0817e0fc
+    ghidra: FUN_0817e0fc
+    name: owned_context_destroy
+    size: 100
+    sig: "void owned_context_destroy(u8 *owned_context, u32 requested_value)"
+    module: app/owned_context_destroy
+    status: ported
+    renames:
+      param_1/r0: owned_context
+      param_2/r1: requested_value
+      "owned_context+0": destruction_state
+      "owned_context+4": scoped_context
+      FUN_0826ffec: unresolved_context_prepare
+      FUN_082a2ac0: scoped_context_owner_byte_8f_bit_2
+      FUN_082a2de4: unresolved_owner_value_at_0x60
+      FUN_0826fd38: unresolved_context_apply_value
+    notes: >-
+      Raw osos.dec words establish the exact 100-byte A32 body
+      0x0817e0fc..0x0817e15f; push {r4,r5,r6,lr} at 0x0817e160 begins the
+      next independently entered function. The body has four unconditional
+      plain direct BL instructions (0x0817e11c, 0x0817e128, 0x0817e140, and
+      0x0817e14c), zero predicated BL forms, and no BLX. The three inbound
+      direct plain BL calls are at 0x0817c000, 0x0817ccd4, and 0x0817d8bc,
+      with no predicated inbound forms. It returns unchanged for state byte
+      5; otherwise it prepares the scoped subobject at +4, conditionally
+      substitutes the owner value, conditionally applies it, then writes 6.
+      The first, third, and fourth callees have no recovered semantic identity,
+      so firmware builds retain target-address calls and host tests use narrow
+      recording seams; this is the deliberate deviation.
