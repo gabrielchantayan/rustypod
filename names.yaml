@@ -135459,3 +135459,37 @@ functions:
       and slot name are unknown, so the Rust name remains offset-qualified;
       ARM uses one global-assembly fragment for exact target-width dispatch
       and tail control flow, while host uses typed vtable fixtures.
+  - address: 0x0812d628
+    ghidra: FUN_0812d628
+    name: registered_listener_dispatch
+    size: 148
+    sig: "u32 registered_listener_dispatch(void *owner, u32 event, void *entry)"
+    module: app/registered_listener_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner (unused)
+      param_2/r1: event
+      param_3/r2: entry
+      DAT_0812d6bc: global_registry_pointer (0x089cc8dc)
+      "registry-vtable+0x3c": entry_at
+      "entry+0x98": handler
+      "handler-vtable+0x2c": handler_is_active
+      "handler-vtable+0x1c": handler_dispatch
+      FUN_082753bc: registered_listener_notify
+    notes: >-
+      Raw osos.dec establishes the exact 148-byte A32 body
+      0x0812d628..0x0812d6bb; its owned global-registry literal is at
+      0x0812d6bc and push {r2,r3,r4,r5,r6,lr} at 0x0812d6c0 begins the next
+      real function. A whole-image aligned A32 branch decode finds three
+      inbound plain unconditional BL sites (0x08126688, 0x081b13ac, and
+      0x0828a1f8) and zero predicated inbound BL sites. The body has one
+      unconditional direct BL to already ported registered_listener_notify,
+      two unconditional indirect BLX calls, and one predicated BLXNE call.
+      It enumerates the global registry, dispatches only active handlers, and
+      adds the final dispatch output word to registered_listener_notify's
+      result. The registry and all virtual methods are unported, so target
+      code accesses their verified offsets while host tests use typed seams;
+      their concrete identities are deliberately not invented. match.py
+      reports the same registry loop, vtable offsets, conditional dispatch,
+      final direct call, and addition, with expected LLVM prologue and loop
+      shape differences from ARM ADS.
