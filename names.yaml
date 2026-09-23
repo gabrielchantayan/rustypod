@@ -29008,6 +29008,35 @@ functions:
       0x081d23f8` @ 0x081b8194). CLASS NOT NAMED, same reason as
       0x081eb0c4.
 
+  - address: 0x0816de24
+    ghidra: FUN_0816de24
+    name: opaque_vtable_string_owner_construct
+    size: 40
+    sig: "OpaqueVtableStringOwner *opaque_vtable_string_owner_construct(OpaqueVtableStringOwner *this, const void *src_pair_at_4, const void *src_pair_at_12)"
+    module: cxx/opaque_vtable_string_owner_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: src_pair_at_4
+      param_3/r2: src_pair_at_12
+      DAT_0816de50: opaque_vtable_string_owner_vtable
+      FUN_0811050c: vtable_two_pair_base_construct
+      FUN_08277440: string_default_construct
+      FUN_081b4e24: store_u32_pair
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte A32 body
+      0x0816de24..0x0816de4f: it calls vtable_two_pair_base_construct, stores
+      vtable literal 0x08988958 at this+0, default-constructs the StringObject
+      at target offset +0x14, clears the two trailing words at +0x1c, and
+      returns this. Literal-pool word 0x0816de50 is data; the next real
+      function begins at 0x0816de54. The body has exactly three plain BL calls
+      (0x0811050c, 0x08277440, and 0x081b4e24) and zero predicated BL calls.
+      Ghidra's 44-byte size incorrectly includes the literal pool. The port
+      calls the existing Rust base and StringObject constructors directly, and
+      writes the terminal pair directly rather than creating a duplicate pair
+      store seam. Host tests cover all initialized fields, return identity, and
+      the base constructor's ordered source-alias behavior.
+
   - address: 0x0816de54
     ghidra: FUN_0816de54
     name: opaque_vtable_string_owner_destroy
