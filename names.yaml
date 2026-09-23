@@ -29008,6 +29008,32 @@ functions:
       0x081d23f8` @ 0x081b8194). CLASS NOT NAMED, same reason as
       0x081eb0c4.
 
+  - address: 0x0816de54
+    ghidra: FUN_0816de54
+    name: opaque_vtable_string_owner_destroy
+    size: 24
+    sig: "OpaqueVtableStringOwner *opaque_vtable_string_owner_destroy(OpaqueVtableStringOwner *this)"
+    module: cxx/opaque_vtable_string_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0816de6c: opaque_vtable_string_owner_vtable
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body
+      0x0816de54..0x0816de6b: `ldr r1,[pc,#16]; push {r4,lr}; str r1,[r0],#20;
+      bl 0x08277484; sub r0,r0,#20; pop {r4,pc}`. The literal pool is at
+      0x0816de6c; a one-word veneer follows at 0x0816de70, and the next real
+      function starts at 0x0816de74. Whole-image A32 branch decoding finds
+      three inbound direct unconditional BL calls (0x0815fb9c, 0x081dc6d4,
+      0x081dcb18) and zero predicated BL forms. The body has one plain BL to
+      the ported string_object_destroy and no predicated BL. It installs vtable
+      0x08988958, destroys the embedded StringObject at target offset +0x14,
+      and returns this; the unknown four words between them are untouched. The
+      Rust layout deliberately uses usize for the target vtable word, preserving
+      the ARM +0x14 StringObject offset while allowing native aligned host
+      pointers in fixtures. Host test verifies return identity, both vtable
+      writes, null payload preservation, and opaque-word preservation.
   - address: 0x0816df60
     ghidra: FUN_0816df60
     name: lazy_singleton_0x3c
