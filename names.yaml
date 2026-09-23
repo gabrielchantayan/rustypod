@@ -134704,3 +134704,13 @@ functions:
       inspection finds three inbound unconditional plain BL sites at
       0x0814d860, 0x0814d8b8, and 0x081a860c, with zero predicated BL forms.
       The body contains zero BL or BLX instructions. No deliberate deviations.
+
+  - address: 0x0814bb18
+    ghidra: FUN_0814bb18
+    name: application_client_cleanup
+    size: 140
+    sig: "void application_client_cleanup(u8 *this)"
+    module: app/application_client_cleanup
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 0x0814bb18..0x0814bba4. Three inbound plain BL sites and no predicated BL sites; clears cleanup state, returns an attached client, then broadcasts or transfers the handle.
