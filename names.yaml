@@ -133667,3 +133667,34 @@ functions:
       preserve the predicate gates, status conversion, mode selection, and
       shared tail dispatch; LLVM adds its standard frame and literal indirect
       tail call.
+
+  - address: 0x0817c0b0
+    ghidra: FUN_0817c0b0
+    name: plst_file_element_create
+    size: 156
+    sig: "i32 plst_file_element_create(void *context_ignored, u8 *owner, u8 **element_out)"
+    module: ui/plst_file_element_create
+    status: ported
+    renames:
+      param_1/r0: context_ignored
+      param_2/r1: owner
+      param_3/r2: element_out
+      DAT_0817c148: file_tag
+      FUN_08037db8: memzero_aligned
+      FUN_0805e36c: unresolved_plst_factory
+      FUN_08067274: plst_element_store_counted_string
+      FUN_0805bc34: unresolved_plst_linker
+      FUN_08067300: set_navigation_mode
+    notes: >-
+      Raw words e92d4030 e24ddf81 e1a05001 e3a01c02 through e8bd8030,
+      followed by literal 0x66696c65 at 0x0817c148, establish the true
+      156-byte extent 0x0817c0b0..0x0817c14b; push {r4,lr} at 0x0817c14c
+      is the next real function. The body has four plain unconditional BL
+      instructions (0x08037db8, 0x0805e36c, 0x08067274, 0x0805bc34) and
+      zero predicated BL forms. It clears a 512-byte counted-string buffer,
+      creates a zero-flags "file" element from owner+0xf60, stores the empty
+      string, links element+0x48 to owner+0xf04, sets bit 7 at +0x18c, then
+      applies the low halfword at (*(owner+0xf00)+0x18). The first argument
+      is unused. The memzero IRAM veneer is replaced with the existing port;
+      factory and linker identities are not established in names.yaml, so
+      target builds retain their verified retail ABIs through narrow seams.

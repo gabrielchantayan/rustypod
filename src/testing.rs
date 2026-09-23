@@ -2084,6 +2084,10 @@ pub mod hints {
     // 0x8220_0000: dedicated to fs/cache_request_flush's target-width
     // request and descriptor fixture; mappings never unmap.
     pub const CACHE_REQUEST_FLUSH: usize = 0x8220_0000;
+    // 0x8290_0000: dedicated to ui/plst_file_element_create's target-width
+    // owner, factory output, registry, and navigation-source fixture; mappings
+    // never unmap, so no other user may share this hint.
+    pub const PLST_FILE_ELEMENT_CREATE: usize = 0x8290_0000;
     // 0x6f00_0000: dedicated to cxx/lazy_string_tables_initialize's two
     // raw-u32 opaque-table fixtures; mappings never unmap, so no other user
     // may share these hints.
