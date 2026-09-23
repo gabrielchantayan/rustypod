@@ -64981,6 +64981,31 @@ functions:
       b service_manager_instance` - the original's tail branch plus the
       target's mandatory non-leaf frame pointer.
 
+  # --- State-dependent handle metric ---
+  - address: 0x081323ac
+    ghidra: FUN_081323ac
+    name: ui_state_dependent_handle_metric
+    size: 152
+    sig: "u32 ui_state_dependent_handle_metric(StateDependentHandleMetricObject *object)"
+    module: ui/state_dependent_handle_metric
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_081325b4: state_is_first_metric
+      FUN_08132658: state_is_first_metric_alternate
+      FUN_08132d80: state_is_second_metric
+      FUN_0813263c: state_is_third_metric
+      FUN_083d606c: handle_deref_or_null_alias_606c
+    notes: >-
+      Raw ARM establishes the exact 152-byte extent 0x081323ac..0x08132444;
+      the next separately linked function begins at 0x08132444. Decoding every
+      ARM B/BL immediate in osos.dec finds exactly three direct inbound bl sites
+      (0x08130af4, 0x081314d4, and 0x08132118), all unconditional, with no
+      predicated direct callers. Active objects select handle word +4 according
+      to state +0x1a: first for 2/5/7, second for 0/5/7, and third for 1/5/7.
+      The three stock predicate callees are inlined from verified raw behavior;
+      the existing handle_deref_or_null port supplies the shared handle access.
+
   # --- Media-player interface status ---
   - address: 0x0813921c
     ghidra: FUN_0813921c

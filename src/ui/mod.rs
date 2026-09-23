@@ -71,6 +71,7 @@ pub mod object_vtable_result_word;
 pub mod resource_release;
 pub mod lazy_resource_state;
 pub mod object_state;
+pub mod state_dependent_handle_metric;
 pub mod shared_context_pair_38;
 pub mod sub_record_lookup;
 pub mod range_byte_lookup;
