@@ -404,6 +404,7 @@ pub mod queued_message_post_bytes;
 pub mod object_child_count_is_positive;
 pub mod queued_message_create_and_post;
 pub mod pointer_queue;
+pub mod pointer_queue_wait_ready;
 pub mod query_param_list;
 pub mod registry;
 pub mod registration_handle;
