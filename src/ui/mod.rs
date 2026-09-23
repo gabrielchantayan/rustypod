@@ -97,6 +97,7 @@ pub mod plst_selector_normalize;
 pub mod plst_slot_materialize;
 pub mod plst_linked_item_count;
 pub mod plst_slot_position;
+pub mod plst_record_type;
 pub mod tdat_class_check;
 pub mod tdat_message_dispatch;
 pub mod tdat_counter_addrefs;
