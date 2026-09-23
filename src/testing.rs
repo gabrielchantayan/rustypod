@@ -926,6 +926,10 @@ pub mod hints {
     // active-context, packet, owner and pending-node fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const IAP_PACKET_COMPLETION_EVENT: usize = 0xf180_0000;
+    // 0xf1c0_0000: dedicated to app/iap_incoming_process_thread's raw-u32
+    // thread, service-handler-table, and message fixtures; mappings never
+    // unmap, so no other port may share this hint.
+    pub const IAP_THREAD_MESSAGE_SUBMIT: usize = 0xf1c0_0000;
     // 0xf200_0000: dedicated to app/context_scope_selector's raw-u32
     // subject/context fixture; mappings never unmap, so no other user may
     // share this hint.
