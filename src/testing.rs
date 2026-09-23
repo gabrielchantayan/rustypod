@@ -1208,6 +1208,9 @@ pub mod hints {
     // 0xa500_0000: dedicated to heap/client_reserve's raw-u32 client and
     // manager fixture; mappings never unmap, so no other user may share it.
     pub const CLIENT_RESERVE: usize = 0xa500_0000;
+    // 0xa600_0000: dedicated to heap/client_request_update's raw-u32 client
+    // and manager fixture; mappings never unmap, so no other user may share it.
+    pub const CLIENT_REQUEST_UPDATE: usize = 0xa600_0000;
     // 0xb100_0000: dedicated to heap/client_available_blocks's raw-u32
     // client and manager fixture; mappings never unmap, so no other user may
     // share this hint.

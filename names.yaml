@@ -24689,6 +24689,27 @@ functions:
       CLIENT_RESERVE_OPS: its count default is u32::MAX, which takes the
       at-or-above return without a false low-capacity event until the
       materializer is ported; notification is unreachable on that path.
+  - address: 0x081fbed0
+    ghidra: FUN_081fbed0
+    name: client_request_update
+    size: 76
+    sig: "void client_request_update(u8 *client, u32 byte_limit, u32 request_kind)"
+    module: heap/client_request_update
+    status: ported
+    vars: {param_1: client, param_2: byte_limit, param_3: request_kind}
+    notes: >-
+      Raw osos.dec extent is exactly 0x081fbed0..0x081fbf1c: the next
+      function begins with `push {r4,lr}` at 0x081fbf1c, disproving
+      Ghidra's overextended control flow. It has one plain bl (POSIX mutex
+      lock veneer 0x082621a8), one predicated blne (manager_event_notify
+      0x0818a3b4), and a final tail branch to POSIX mutex unlock veneer
+      0x082621ac. The three direct inbound calls are plain BL at
+      0x0814b9e4, 0x081ba580, and 0x0821ac8c; no predicated inbound BL
+      calls. Under client+0x24, it compares byte_limit at +0x48 and
+      request_kind at +0x40, stores both and sends manager+0x04 event 10
+      only when either differs. Rust invokes the already-ported lock,
+      notify, and unlock symbols directly; the final retail tail branch is
+      deliberately a normal call.
   - address: 0x081fbf1c
     ghidra: FUN_081fbf1c
     name: client_completion_notify
