@@ -16,6 +16,24 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817c044
+    ghidra: FUN_0817c044
+    name: swap_selector_one_two
+    size: 40
+    sig: "u32 swap_selector_one_two(u32 context, u32 selector)"
+    module: app/swap_selector_one_two
+    status: ported
+    renames:
+      param_1/r0: context (ignored)
+      param_2/r1: selector
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body
+      0x0817c044..0x0817c06b; push {r4,r6,lr} at 0x0817c06c begins the next
+      real function. The body returns 2 for selector 1, 1 for selector 2,
+      and 0 otherwise; r0 is unused. It has zero outgoing plain BL,
+      zero outgoing predicated BL, and no BLX. An independent full-image
+      reference count establishes three inbound plain BL sites and zero
+      predicated inbound BL forms. Ghidra reports the same mapping.
   - address: 0x0818b9f0
     ghidra: FUN_0818b9f0
     name: container_flag_0x10_if_nonempty
