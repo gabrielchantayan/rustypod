@@ -131264,3 +131264,33 @@ functions:
       (capacity - begin) / 12, releases begin with that count and element
       size zero, and returns owner. Target pointer fields are u32 to retain
       their target offsets on 64-bit hosts. Deliberate deviations: none.
+
+  - address: 0x081dd858
+    ghidra: FUN_081dd858
+    name: datetime_adjust_and_store
+    size: 92
+    sig: "u32 datetime_adjust_and_store(DateTimeController *controller, u32 delta)"
+    module: app/datetime_adjust
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1/r2/r3: delta
+      FUN_081dd80c: active_datetime_field_selector
+      FUN_081e8f78: date_time_adjust (unported fixed-address boundary)
+      FUN_08037db0: __rt_memcpy
+      FUN_08272230: resource_chain_write
+      DAT_081dd8b4: RESOURCE_KIND_DTTM ("DtTm")
+    notes: >-
+      Raw osos.dec establishes the 92-byte instruction body
+      0x081dd858..0x081dd8b3; the word at 0x081dd8b4 is the "DtTm" kind
+      literal and the next function starts there. Whole-image A32 B/BL
+      decoding finds exactly three inbound plain BL calls at 0x081dd744,
+      0x081dd7f4, and 0x081dd84c, with no predicated BL forms. The body
+      selects a field code through the mode-dependent selector at controller
+      +0x138/+0x140..+0x148, calls 0x081e8f78 on its packed DateTime at
+      +0x14c, then copies controller+0x164's exact ten bytes to the "DtTm"
+      resource (id controller+0x44) on the chain at +0x38 with flags 10.
+      Ghidra drops the fourth argument to 0x081e8f78: raw r3 flow proves
+      delta is supplied in both r2 and r3. The unported adjustment callee is
+      a typed fixed-address target call and host recording seam; the retail
+      memcpy is an equivalent explicit volatile ten-byte copy.

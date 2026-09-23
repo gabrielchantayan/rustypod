@@ -152,6 +152,7 @@ pub mod transfer_slot_reconcile;
 pub mod double_buffer;
 pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
+pub mod datetime_adjust;
 pub mod notes_view_reset_resources;
 pub mod demo_mode_slot_18c_dispatch;
 pub mod fallback_keyed_object;
