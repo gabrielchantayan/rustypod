@@ -93503,6 +93503,33 @@ functions:
       raw offsets because the host's embedded Mutex is wider than its 8-byte
       ARM layout.
 
+  # --- Showcase pending-queue completion ---
+  - address: 0x081b6fb4
+    ghidra: FUN_081b6fb4
+    name: showcase_pending_queues_complete
+    size: 64
+    sig: "void showcase_pending_queues_complete(void *showcase)"
+    module: app/showcase_pending_queues_complete
+    status: ported
+    renames:
+      param_1/r0: showcase
+      r4: slot_index
+      r5: slot_record
+      r6: showcase
+      "slot_record+0x88": queue
+      FUN_081b7f9c: showcase_queue_has_pending_entry
+      FUN_0822b5e0: queue_complete
+    notes: >-
+      Raw osos.dec establishes the exact all-code extent
+      0x081b6fb4..0x081b6ff4: the following push at 0x081b6ff4 begins a
+      separately linked function. Its three direct inbound call sites are
+      unconditional BL at 0x081b6aac, 0x081b6e78, and 0x081b6f58; there are
+      zero predicated inbound BL forms. Its body has one unconditional BL to
+      showcase_queue_has_pending_entry and one predicated BLNE to
+      queue_complete. For each of four 24-byte slots it tests the queue pointer
+      at showcase + slot*0x18 + 0x88 and completes only a pending queue, then
+      writes one to showcase+0xea. Deliberate host deviation: opaque target
+      pointers remain u32 words and all fields use verified raw offsets.
   # --- Showcase slot queue pending-entry predicate ---
   - address: 0x081b7f9c
     ghidra: FUN_081b7f9c

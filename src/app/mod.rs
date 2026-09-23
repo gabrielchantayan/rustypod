@@ -484,6 +484,7 @@ pub mod settings_mode_set;
 pub mod validated_singleton_0x89c;
 pub mod showcase_queue_has_pending_entry;
 pub mod showcase_slot_pending_queue;
+pub mod showcase_pending_queues_complete;
 pub mod screen_base;
 pub mod screen_layout;
 pub mod singleton_state;
