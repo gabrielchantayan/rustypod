@@ -131637,3 +131637,25 @@ functions:
       propagated unlock status. Reference C: decomp/c/019/081d66fc_FUN_081d66fc.c;
       Ghidra incorrectly extends it through the unlock tail and mis-types
       the post-tail code as part of this function.
+
+  - address: 0x081d6034
+    ghidra: FUN_081d6034
+    name: copy_eighteen_records_and_tail
+    size: 84
+    sig: "void *copy_eighteen_records_and_tail(void *dst, const void *src) -> dst"
+    module: app/copy_eighteen_records_and_tail
+    status: ported
+    vars: {param_1/r5: dst, param_2/r6: src, uVar3/r4: record_index}
+    notes: >-
+      Raw osos.dec words establish the 84-byte extent 0x081d6034..0x081d6087;
+      0x081d6088 begins the next function with push {r4,lr}, so Ghidra\047s
+      reported 88 bytes includes that next prologue word. Binary-wide A32
+      decoding finds exactly three inbound unconditional plain BL sites at
+      0x08208210, 0x0821462c, and 0x0822aaf0, no predicated inbound BL sites,
+      and one unconditional outbound BL at 0x081d6064 to the 0x08037df8
+      IRAM veneer for memcpy_forward_words. It preserves dst +0, copies 18
+      consecutive 36-byte records at +4 by storing each record\047s terminal
+      word before forwarding its preceding 32 bytes to memcpy, then copies
+      the two trailing words at +0x28c and +0x290. Rust uses the already-
+      ported memcpy body instead of modeling the IRAM veneer; the discarded
+      advanced-destination return is not observable.

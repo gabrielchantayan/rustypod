@@ -24,6 +24,7 @@ pub mod context_lifecycle_slot_0x2c;
 pub mod application_string_registry;
 pub mod callback_queue_entry_destruct;
 pub mod animation;
+pub mod copy_eighteen_records_and_tail;
 pub mod identity_noop;
 pub mod artwork_slot_available;
 pub mod device_property_read_integer;
