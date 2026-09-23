@@ -77,6 +77,9 @@ pub mod hints {
     // object fixtures; mappings never unmap, so no other user may share either hint.
     pub const OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_DESTROY: usize = 0x7ec0_0000;
     pub const OPAQUE_OBSERVABLE_ARRAY_PAYLOAD_DESTROY_NULL: usize = 0x7ed0_0000;
+    // 0x7ee0_0000: dedicated to cxx/vtable_08990af8_destruct's target-width
+    // owner and embedded observable-array fixtures; mappings never unmap.
+    pub const VTABLE_08990AF8_DESTRUCT: usize = 0x7ee0_0000;
     // 0x7f40_0000: dedicated to runtime/trim_ctype_whitespace's raw-u32
     // LC_CTYPE table fixture; mappings never unmap, so no other user may
     // share this hint.
