@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ccc78
+    ghidra: FUN_081ccc78
+    name: byte_state_set_and_notify
+    size: 52
+    sig: "u32 byte_state_set_and_notify(void *receiver, u32 new_state)"
+    module: app/byte_state_set_and_notify
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: new_state
+      r4: old_state
+      "receiver+0x8e0": state_byte
+      "receiver.vtable+0x58/r3": unresolved_message_dispatch
+      DAT_081ccca4: RESOURCE_ID (0x848f)
+      DAT_081ccca8: MESSAGE_CATEGORY (0x424d6170)
+    notes: >-
+      Raw osos.dec words establish a 44-byte A32 instruction body
+      0x081ccc78..0x081ccca3, followed by the two-word literal pool
+      0x081ccca4..0x081cccab; 0x081cccac begins the next independently
+      entered function, so this function's true extent is 52 bytes. The body
+      has zero direct BL instructions and one predicated indirect BLXNE
+      through receiver vtable slot +0x58. A full-image A32 decode finds three
+      inbound plain BL call sites at 0x0810cce0, 0x0810cd3c, and 0x0810d1f0,
+      with zero predicated inbound forms. It saves the old zero-extended byte
+      at receiver+0x8e0, stores new_state's low byte, and returns the old byte.
+      Its comparison uses the full r1 word before truncation, so it sends
+      category 0x424d6170 and resource ID 0x848f when old_state differs from
+      new_state even if their low bytes match. The virtual callee has no
+      recovered semantic identity; target code retains target-width dispatch
+      and host tests use a narrow recording seam.
   - address: 0x081cd2d8
     ghidra: FUN_081cd2d8
     name: slideshow_delay_set
