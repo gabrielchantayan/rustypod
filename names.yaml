@@ -130524,3 +130524,29 @@ functions:
       and volatile host seam. Host tests cover allocation, constructor-result
       caching, and forwarding a NULL allocation. match.py reports the expected
       LLVM stack frame and indirect host-seam call structural diff (exit 1).
+
+
+  - address: 0x081f5014
+    ghidra: FUN_081f5014
+    name: string_word_record_copy_assign
+    size: 32
+    sig: "StringWordRecord *string_word_record_copy_assign(StringWordRecord *this, const StringWordRecord *source)"
+    module: cxx/string_word_record
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      field_00: string
+      field_08: value
+      FUN_082774a8: string_object_assign
+    notes: >-
+      Raw osos.dec words e92d4070 e1a05001 e1a04000 eb020920 e5950008
+      e5840008 e1a00004 e8bd8070 establish the exact 32-byte A32 extent
+      0x081f5014..0x081f5033; the push at 0x081f5034 begins the next real
+      function. Whole-image A32 branch decoding finds three inbound plain BL
+      sites at 0x083e8140, 0x083e87d4, and 0x083e87f0, with zero predicated
+      inbound BL forms. The body has one plain BL to the ported
+      string_object_assign @ 0x082774a8 and no predicated calls. It assigns
+      the embedded StringObject at +0, copies source word +8 to this+8, and
+      returns this. repr(C) named fields preserve those ARM offsets despite
+      widened host pointers; no deliberate behavioral deviation.

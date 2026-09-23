@@ -53,9 +53,12 @@ pub unsafe extern "C" fn string_word_record_copy_construct(
 }
 
 /// string_word_record_copy_assign — original: `FUN_081f5014` @
-/// `0x081f5014` (24 bytes, six ARM words; the next separately linked
-/// function starts with `push {r4,lr}` at `0x081f5034`). Binary-verified
-/// against osos.dec:
+/// `0x081f5014` (32 bytes, eight ARM words; the next separately linked
+/// function starts with `push {r4,lr}` at `0x081f5034`). Whole-image raw A32
+/// decoding finds **3 inbound plain `bl` call sites** (`0x083e8140`,
+/// `0x083e87d4`, `0x083e87f0`) and zero predicated inbound BL forms. The body
+/// has one plain BL to `string_object_assign` @ `0x082774a8` and no predicated
+/// calls.
 ///
 /// ```text
 /// push {r4, r5, r6, lr}
@@ -68,17 +71,14 @@ pub unsafe extern "C" fn string_word_record_copy_construct(
 /// pop  {r4, r5, r6, pc}
 /// ```
 ///
-/// The record class's copy-ASSIGNMENT operator (the sibling of the copy
-/// constructor above): the embedded [`StringObject`] is reassigned through
-/// the ported [`string_object_assign`] @ `0x082774a8` — which carries the
-/// address-based self-assignment guard — and the opaque word at +8 is
-/// copied outright. `this` is returned unconditionally.
-///
-/// Kept private: `FUN_081f5014` is not separately ported (its only caller
-/// is the loop below), so its verified body is modeled here one call deep,
-/// preserving the original's nested-call structure.
+/// The record class's copy-assignment operator reassigns the embedded
+/// [`StringObject`] through [`string_object_assign`], then copies the opaque
+/// word at +8. It returns `this` unconditionally. Deliberate deviations:
+/// none; `repr(C)` fields express the ARM +0 and +8 accesses without applying
+/// target byte offsets to widened host pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-unsafe fn string_word_record_copy_assign(
+pub unsafe extern "C" fn string_word_record_copy_assign(
     this: *mut StringWordRecord,
     source: *const StringWordRecord,
 ) -> *mut StringWordRecord {
@@ -128,9 +128,9 @@ unsafe fn string_word_record_copy_assign(
 ///
 /// Deliberate deviations: the loop steps whole [`StringWordRecord`]
 /// strides instead of the literal `0xc` so widened host pointers keep the
-/// 12-byte ARM layout semantics, and the per-record `bl 0x081f5014` goes
-/// to the private [`string_word_record_copy_assign`] model above (the
-/// helper itself is not separately ported). No behavioral difference.
+/// 12-byte ARM layout semantics. Its per-record call targets the separately
+/// exported [`string_word_record_copy_assign`] port directly. No behavioral
+/// difference.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn string_word_record_copy_backward(
@@ -266,6 +266,42 @@ mod tests {
             assert_eq!(record.string.payload, source_text.as_mut_ptr());
             assert_eq!(record.value, 0x89ab_cdef);
             assert_eq!(COPY_ALLOCATION, None);
+        }
+    }
+
+    #[test]
+    fn copy_assign_reassigns_the_string_and_copies_the_opaque_word() {
+        let _bench = copy_assign_bench();
+        let mut source_text = *b"assign\0";
+        let source = StringWordRecord {
+            string: StringObject {
+                vtable: 0xdead_beefusize as *const StringObjectVtable,
+                payload: source_text.as_mut_ptr(),
+            },
+            value: u32::MAX,
+        };
+        let mut destination = StringWordRecord {
+            string: StringObject {
+                vtable: 0xdead_beefusize as *const StringObjectVtable,
+                payload: core::ptr::null_mut(),
+            },
+            value: 0,
+        };
+
+        unsafe {
+            let destination_ptr: *mut StringWordRecord = &mut destination;
+            assert_eq!(string_word_record_copy_assign(destination_ptr, &source), destination_ptr);
+            assert_eq!(destination.string.payload, core::ptr::addr_of_mut!(COPY_STORAGE).cast());
+            assert_eq!(&COPY_STORAGE[..7], b"assign\0");
+            assert_eq!(destination.value, u32::MAX);
+            assert_eq!(
+                COPY_ALLOCATION,
+                Some((
+                    core::ptr::addr_of_mut!(destination.string) as usize,
+                    7,
+                    0,
+                ))
+            );
         }
     }
 
