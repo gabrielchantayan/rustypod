@@ -134284,3 +134284,26 @@ functions:
       nonempty and NULL/empty payload argument forwarding. match.py reports
       the expected structural diff: LLVM uses a smaller frame and turns the
       final post/return into a tail branch, preserving its r0 status.
+
+  - address: 0x08165bfc
+    ghidra: FUN_08165bfc
+    name: empty_destructor_165bfc
+    size: 4
+    sig: "void *empty_destructor_165bfc(void *this)"
+    module: cxx/empty_destructor_165bfc
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      Raw osos.dec word e12fff1e at 0x08165bfc is `bx lr`, so the true
+      four-byte extent is exact; 0x08165c00 begins the separate
+      `mov r0,#0; bx lr` function. Whole-image decoding of aligned ARM B/BL
+      instructions finds exactly three direct inbound calls, all unconditional
+      plain bl at 0x08054efc, 0x081500d0, and 0x081500d8; there are zero
+      predicated bl forms and no tail B callers. Each caller supplies a
+      stack-resident object pointer in r0 and discards the result. This is an
+      empty non-deleting C++ destructor: it reads and writes no object byte and
+      returns `this` unchanged. Rust preserves that pointer result, including
+      for NULL and unaligned input. Deliberate deviation: a target-only
+      separate text section prevents LLVM from merging this distinct BL target
+      with other empty destructor bodies.
