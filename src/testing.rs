@@ -2086,6 +2086,9 @@ pub mod hints {
     // 0x6e30_0000: dedicated to cxx/tagged_bit_set_insert_utf8's target-width
     // BitSet word-storage fixture; mappings never unmap.
     pub const TAGGED_BIT_SET_INSERT_UTF8: usize = 0x6e30_0000;
+    // 0x6e40_0000: dedicated to util/vtable_slot_0x5c_result_is_three's
+    // target-width object and vtable fixture; mappings never unmap.
+    pub const VTABLE_SLOT_0X5C_RESULT_IS_THREE: usize = 0x6e40_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

@@ -295,6 +295,7 @@ pub mod vtable_slot_0x1c_result_word;
 pub mod vtable_slot_0x40_result_word;
 pub mod subobject_vtable_slot_0x40_result_word;
 pub mod vtable_slot_40_release_each;
+pub mod vtable_slot_0x5c_result_is_three;
 pub mod wang_hash;
 pub mod hash_word;
 pub mod free_index_table_grow;
