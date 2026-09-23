@@ -318,6 +318,202 @@ pub unsafe extern "C" fn iap_incoming_process_thread_register_client(
     );
     (iap_thread_register_client_ops().register_client)(thread, &deadline, client, unread_seed)
 }
+/// Indirect dispatch for the unported slot-deadline setter @ 0x081d6e68.
+/// Target builds retain the retail implementation; host tests record its
+/// ephemeral deadline argument.
+#[derive(Clone, Copy)]
+pub struct IapThreadSlotDeadlineOps {
+    pub set_slot_deadline: unsafe extern "C" fn(
+        thread: *mut u8,
+        index: u32,
+        deadline: *const IapThreadRegistrationDeadline,
+    ) -> i32,
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_set_slot_deadline(
+    thread: *mut u8,
+    index: u32,
+    deadline: *const IapThreadRegistrationDeadline,
+) -> i32 {
+    let f: unsafe extern "C" fn(*mut u8, u32, *const IapThreadRegistrationDeadline) -> i32 =
+        core::mem::transmute(0x081d_6e68usize);
+    f(thread, index, deadline)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_set_slot_deadline(
+    _thread: *mut u8,
+    _index: u32,
+    _deadline: *const IapThreadRegistrationDeadline,
+) -> i32 {
+    0
+}
+
+pub const DEFAULT_IAP_THREAD_SLOT_DEADLINE_OPS: IapThreadSlotDeadlineOps =
+    IapThreadSlotDeadlineOps {
+        set_slot_deadline: firmware_set_slot_deadline,
+    };
+
+/// Active deadline setter, loaded volatile so target dispatch remains a seam.
+pub static mut IAP_THREAD_SLOT_DEADLINE_OPS: IapThreadSlotDeadlineOps =
+    DEFAULT_IAP_THREAD_SLOT_DEADLINE_OPS;
+
+#[inline(always)]
+fn iap_thread_slot_deadline_ops() -> IapThreadSlotDeadlineOps {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_DEADLINE_OPS))
+    }
+}
+
+/// iap_incoming_process_thread_set_slot_deadline — original:
+/// `FUN_081d6eb4` @ 0x081d6eb4 (**44 bytes**, 0x081d6eb4..0x081d6ee0;
+/// the next real function begins with `push {r4,r5,r6,r7,r8,lr}`).
+/// Raw ARM words verify **two unconditional `bl` instructions** and zero
+/// predicated `bl` instructions.
+///
+/// Converts `timeout_millis` to the signed `{seconds, nanos}` pair used by a
+/// registration slot, then delegates to the unported locked slot setter @
+/// 0x081d6e68. The setter validates `index`, resolves the slot, and copies
+/// the pair into its object at offsets +0x1c/+0x20.
+///
+/// # Deviations
+///
+/// The unported setter remains behind [`IAP_THREAD_SLOT_DEADLINE_OPS`]:
+/// target builds call its retail address and host tests install a recorder.
+///
+/// # Safety
+///
+/// `thread` and `index` must satisfy the slot setter's context and bounds
+/// contracts. The internal deadline is stack-local and valid only for that call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_set_slot_deadline(
+    thread: *mut u8,
+    index: u32,
+    timeout_millis: i32,
+) -> i32 {
+    let mut deadline = IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
+    milliseconds_to_timespec(
+        (&mut deadline as *mut IapThreadRegistrationDeadline).cast(),
+        timeout_millis,
+    );
+    (iap_thread_slot_deadline_ops().set_slot_deadline)(thread, index, &deadline)
+}
+
+#[cfg(test)]
+mod slot_deadline_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{Mutex, MutexGuard};
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut THREAD: *mut u8 = core::ptr::null_mut();
+    static mut INDEX: u32 = 0;
+    static mut DEADLINE: IapThreadRegistrationDeadline =
+        IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
+    static mut CALLS: u32 = 0;
+
+    unsafe extern "C" fn record_slot_deadline(
+        thread: *mut u8,
+        index: u32,
+        deadline: *const IapThreadRegistrationDeadline,
+    ) -> i32 {
+        THREAD = thread;
+        INDEX = index;
+        DEADLINE = core::ptr::read(deadline);
+        CALLS += 1;
+        -7
+    }
+
+    struct Bench {
+        _lock: MutexGuard<'static, ()>,
+        previous_ops: IapThreadSlotDeadlineOps,
+    }
+
+    fn bench() -> Bench {
+        let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous_ops = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_DEADLINE_OPS))
+        };
+        unsafe {
+            THREAD = core::ptr::null_mut();
+            INDEX = 0;
+            DEADLINE = IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
+            CALLS = 0;
+            core::ptr::write_volatile(
+                core::ptr::addr_of_mut!(IAP_THREAD_SLOT_DEADLINE_OPS),
+                IapThreadSlotDeadlineOps {
+                    set_slot_deadline: record_slot_deadline,
+                },
+            );
+        }
+        Bench {
+            _lock: lock,
+            previous_ops,
+        }
+    }
+
+    impl Drop for Bench {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(IAP_THREAD_SLOT_DEADLINE_OPS),
+                    self.previous_ops,
+                );
+            }
+        }
+    }
+
+    unsafe fn thread_fixture() -> Option<*mut u8> {
+        match try_map_u32_slab(hints::IAP_THREAD_SLOT_DEADLINE, 4) {
+            Some(pointer) => Some(pointer),
+            None => {
+                note_missing_u32_fixture(
+                    "app::iap_incoming_process_thread::slot_deadline",
+                );
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn forwards_slot_and_positive_millisecond_deadline() {
+        let bench = bench();
+        let Some(thread) = (unsafe { thread_fixture() }) else {
+            return;
+        };
+        unsafe {
+            assert_eq!(
+                iap_incoming_process_thread_set_slot_deadline(thread, 28, 1_001),
+                -7
+            );
+            assert_eq!(CALLS, 1);
+            assert_eq!(THREAD, thread);
+            assert_eq!(INDEX, 28);
+            assert_eq!(DEADLINE.seconds, 1);
+            assert_eq!(DEADLINE.nanos, 1_000_000);
+        }
+        core::mem::drop(bench);
+    }
+
+    #[test]
+    fn preserves_signed_remainder_for_negative_milliseconds() {
+        let bench = bench();
+        let Some(thread) = (unsafe { thread_fixture() }) else {
+            return;
+        };
+        unsafe {
+            iap_incoming_process_thread_set_slot_deadline(thread, 0, -1_001);
+            assert_eq!(DEADLINE.seconds, -1);
+            assert_eq!(DEADLINE.nanos, -1_000_000);
+        }
+        core::mem::drop(bench);
+    }
+}
+
 /// Dispatch seams for the two unported direct callees of
 /// [`iap_incoming_process_thread_submit_message`]. The target defaults retain
 /// the retail call targets; host tests install a recorder.

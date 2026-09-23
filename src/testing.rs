@@ -547,6 +547,10 @@ pub mod hints {
     // flight take the next free slots, and a collision skips tests
     // silently on every host.
     pub const IAP_THREAD_SLOT_WAIT: usize = 0x6c00_0000;
+    // 0x6c40_0000: dedicated to app/iap_incoming_process_thread's
+    // slot-deadline wrapper fixture; mappings never unmap, so no other user
+    // may share it.
+    pub const IAP_THREAD_SLOT_DEADLINE: usize = 0x6c40_0000;
     // 0x6d80_0000: dedicated to util/unique_word_array_insert's raw-u32
     // header and backing-array fixture; mappings never unmap, so no other user
     // may share this hint.
