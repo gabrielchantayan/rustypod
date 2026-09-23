@@ -243,6 +243,7 @@ pub mod global_transition_callback_dispatch;
 pub mod global_transition_callback_presence;
 pub mod global_observer_unregister;
 pub mod genius_request_wait_ready;
+pub mod genius_request_selection_is_complete;
 pub mod global_callback_unregister;
 pub mod global_timer_cleanup;
 pub mod linked_list_merge_by_word_4;

@@ -776,6 +776,10 @@ pub mod hints {
     // reference/target/collection fixtures; mappings never unmap, so no other
     // user may share this hint.
     pub const ELEMENT_REFERENCE_ITEM_COUNT: usize = 0x7900_0000;
+    // 0x7910_0000: dedicated to app/genius_request_selection_is_complete's
+    // request, element-reference, target, and collection fixture; mappings
+    // never unmap, so no other user may share this hint.
+    pub const GENIUS_REQUEST_SELECTION_IS_COMPLETE: usize = 0x7910_0000;
     // 0xa800_0000: dedicated to ui/element_reference_target_field_210's
     // raw-u32 reference/target fixture; mappings never unmap, so no other
     // user may share this hint.
