@@ -59938,6 +59938,30 @@ functions:
       0x0811f7e8. Focused host tests cover one-byte-only copying, independent
       source and destination offsets, and aliasing.
 
+  - address: 0x0813b214
+    ghidra: FUN_0813b214
+    name: ui_mailbox_task_construct
+    size: 64
+    sig: "void *ui_mailbox_task_construct(void *task, const u8 *source, u32 payload)"
+    module: ui/mailbox_task_construct
+    status: ported
+    renames:
+      param_1: task
+      param_2: source
+      param_3: payload
+    notes: >-
+      Raw osos.dec establishes the 64-byte extent 0x0813b214..0x0813b254:
+      60 bytes of A32 instructions followed by the required literal
+      0x08984dcc at 0x0813b250; the next function begins with `push {r4,lr}`
+      at 0x0813b254. The body has exactly two direct plain BL instructions,
+      ui_copy_byte @ 0x0811f7e8 and mailbox_slot_create @ 0x0808e294, and no
+      predicated BL. It installs the opaque literal at +0, copies source[0]
+      to +4, writes 1 at +5, creates a mailbox in the target-word slot +8,
+      stores payload at +0xc, writes 2 at +0x10, and returns task. The
+      vtable identity remains intentionally opaque. Host tests use a one-word
+      sentinel for the mailbox because a host pointer is wider than the
+      target's four-byte slot; target builds call mailbox_slot_create.
+
   - address: 0x0811ca48
     ghidra: FUN_0811ca48
     name: app_string_resolve

@@ -28,6 +28,7 @@ pub unsafe extern "C" fn ui_store_byte(destination: *mut u8, value: u8) {
 /// Both pointers are the firmware's unsafe ABI: they must designate valid
 /// readable and writable bytes respectively, need no alignment, and are not
 /// NULL-checked.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ui_copy_byte(destination: *mut u8, source: *const u8) {
     let value = unsafe { source.read() };

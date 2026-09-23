@@ -3,6 +3,7 @@
 pub mod block_map;
 pub mod byte_store;
 pub mod checked_byte_block_forwarder;
+pub mod mailbox_task_construct;
 pub mod clone_slot_source;
 pub mod coordinate_origin;
 pub mod coordinate_owner_initial_dispatch;
