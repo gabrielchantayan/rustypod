@@ -132935,3 +132935,38 @@ functions:
       FUN_081a2d04: singleton_0x34_construct (unported seam)
     notes: >-
       Raw osos.dec words e92d4010 e59f4020 e5940008 e3500000 1a000003 e3a00034 eb04212e eb0000f9 e5840008 e5940008 e8bd8010 089cc878 establish 44 instruction bytes followed by the cache literal, for a 48-byte true extent through 0x081a292b; the next real function starts at 0x081a292c with push {r3,r4,r5,lr}. Whole-image A32 branch decoding finds three direct unconditional BL callers and zero predicated BL callers. On cache miss, allocate 0x34 bytes through operator_new, invoke the unported constructor, store its returned pointer even if NULL, reload, and return the cache. Deliberate deviations: the runtime cache is a crate static and the constructor dispatches through the singleton_0x34_089cc878 seam with a zeroing default, matching the existing singleton family; not hook-ready until the constructor is ported. Host tests cover one allocation/construction on a cache miss, cache reuse, returned-pointer caching, and retries after a NULL constructor result. match.py reports the expected structural difference: Rust adds its frame and indirect constructor seam while retaining the cache test, 0x34 allocation, constructor call, store, and reload.
+
+  - address: 0x0819c9e0
+    ghidra: FUN_0819c9e0
+    name: app_runtime_state_reset
+    size: 124
+    sig: "void app_runtime_state_reset(void)"
+    module: app/app_runtime_state_reset
+    status: ported
+    renames:
+      DAT_0819ca44: first_timer_0x08a779d0
+      DAT_0819ca48: timer_state_running
+      DAT_0819ca4c: runtime_mutex_0x089cb29c
+      DAT_0819ca50: second_timer_0x08a779f0
+      DAT_0819ca54: first_buffer_0x08a7794c
+      DAT_0819ca58: second_buffer_0x08a77b0e
+      FUN_08076954: timer_trace_assert
+      thunk_EXT_FUN_2200027c: iram_memzero_aligned_veneer
+      DAT_08037dcc: iram_memzero_veneer
+    notes: >-
+      Raw osos.dec words establish the exact 124-byte extent: 100 bytes of
+      code at 0x0819c9e0..0x0819ca43 followed by six literal-pool words at
+      0x0819ca44..0x0819ca58; the next real function opens with push
+      {r4,r5,r6,lr} at 0x0819ca5c. Independent decoding of every B/BL
+      immediate word in the body finds three calls: two predicated bleq to
+      timer_trace_assert @ 0x08076954 and one plain unconditional bl to the
+      0x08037db8 IRAM memzero_aligned veneer. The final b 0x08037dc8 is a
+      tail dispatch to the IRAM memzero veneer, not a BL call. If either
+      global timer's +0x18 state is 'run ' (0x72756e20), trace/assert it;
+      clear bytes +2..+4 of the global runtime mutex; clear the first word
+      and following 127 bytes of first_buffer; then clear 127 bytes of the
+      unaligned second_buffer. The Rust port calls the established
+      timer_trace_assert seam and loads memzero_aligned/memzero through
+      volatile function pointers instead of reproducing their IRAM veneers,
+      preventing LLVM AEABI clear substitution. Host builds use isolated
+      fixed-global fixtures; target builds use the verified literal addresses.
