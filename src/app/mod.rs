@@ -534,6 +534,7 @@ pub mod screen_layout;
 pub mod singleton_state;
 pub mod slot_table;
 pub mod registered_listener_notify;
+pub mod registered_listener_dispatch;
 pub mod task_context_observable_dispatch;
 pub mod slot_request_release;
 pub mod slot_signal_reset;

@@ -340,6 +340,10 @@ pub mod hints {
     // mappings never unmap, so no other port may share either hint.
     pub const COLLECTION_COUNT_ELIGIBLE_ENTRIES: usize = 0x1c90_0000;
     pub const COLLECTION_COUNT_ELIGIBLE_ENTRIES_EMPTY: usize = 0x1ca0_0000;
+    // 0x1cb0_0000: dedicated to app/registered_listener_dispatch's
+    // target-width entry fixture; mappings never unmap, so no other port may
+    // share this hint.
+    pub const REGISTERED_LISTENER_DISPATCH: usize = 0x1cb0_0000;
     // Dedicated target-width bucket fixture for vtable_file_record_inner_iterator_begin.
     pub const VTABLE_FILE_RECORD_INNER_ITERATOR_BEGIN: usize = 0x1c60_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
