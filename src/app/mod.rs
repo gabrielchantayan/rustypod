@@ -184,6 +184,7 @@ pub mod rb_tree_pool_destruct;
 pub mod opaque_tree_vector_destruct;
 pub mod event_payload_message;
 pub mod event_source;
+pub mod event_source_find_payload;
 pub mod facade_registry_walk;
 pub mod facade_for_selector;
 pub mod fixed3_assign;

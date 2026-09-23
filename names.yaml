@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e04e4
+    ghidra: FUN_081e04e4
+    name: event_source_find_payload
+    size: 100
+    sig: "void event_source_find_payload(const void *unused, const void *entries, u32 count, u32 key, u32 *out)"
+    module: app/event_source_find_payload
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: entries
+      param_3/r2: count
+      param_4/r3: key
+      param_5/[sp+0x20]: out
+      DAT_081e0548: event_source_tag
+      FUN_08184f98: ptr_vector_at
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte A32 body
+      0x081e04e4..0x081e0547; literal 0x000003f1 is at 0x081e0548 and
+      push {r4,lr} at 0x081e054c begins the next real function. Its sole
+      outbound call is the plain unconditional bl at 0x081e0510 to the
+      already ported ptr_vector_at; there are no predicated outbound bl forms.
+      The three direct inbound calls are the plain bl instructions at
+      0x081e07c8, 0x081e07dc, and 0x081e07f0. It scans entries through the
+      verified vector accessor using a signed-16-bit index, selects tag
+      0x3f1, compares payload+0 to key, and writes payload+4 to out only on
+      a match. The first ABI argument is unused. The port deliberately calls
+      the existing accessor seam directly rather than creating a duplicate
+      address boundary.
   - address: 0x081e22c0
     ghidra: FUN_081e22c0
     name: guarded_static_object_get
