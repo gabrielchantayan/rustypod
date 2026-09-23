@@ -132023,6 +132023,33 @@ functions:
       0x081cb6f8. Deliberate deviation: Rust represents the tail branch as a
       normal call because the target returns void, preserving all
       caller-observable behavior.
+  - address: 0x081cb3e0
+    ghidra: FUN_081cb3e0
+    name: container_item_count_or_zero
+    size: 40
+    sig: "i32 container_item_count_or_zero(const void *object)"
+    module: cxx/container_item_count_or_zero
+    status: ported
+    renames:
+      param_1/r4: object
+      "object+4": embedded_container
+      "object+0x24": item_count
+      FUN_083d75d0: container_is_empty_alias_75d0
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte extent
+      0x081cb3e0..0x081cb408: push {r4,lr}; copy object to r4; add r0,#4;
+      bl 0x083d75d0; cmp r0,#0; ldreq r0,[r4,#0x24]; movne r0,#0;
+      moveq r0,r0,lsl #16; moveq r0,r0,asr #16; pop {r4,pc}. The next real
+      function begins at 0x081cb408. Whole-image A32 decoding finds exactly
+      three inbound direct calls, all unconditional plain bl (0x0815aabc,
+      0x0815b1a8, 0x0815b290), and no predicated BL forms. It returns zero
+      for an empty embedded container; otherwise it sign-extends the i16
+      item count at object+0x24. The target is the existing byte-identical
+      container_is_empty alias @ 0x083d75d0; no separate callee identity was
+      invented. Rust uses that existing ported seam and otherwise has no
+      deliberate deviations. Host tests cover the empty case and negative
+      and maximum positive i16 counts.
+
   - address: 0x081cbbe8
     ghidra: FUN_081cbbe8
     name: set_clamped_mode_position_from_lower_offset
