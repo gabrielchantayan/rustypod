@@ -135087,3 +135087,35 @@ functions:
       forms. It returns zero for a NULL result pointer, otherwise result+0x14.
       Deliberate deviation: repr(C) pointer fields retain ARM target offsets
       and widen for host fixtures.
+
+  # --- query-object display-name resolver ---
+  - address: 0x0813c2ec
+    ghidra: FUN_0813c2ec
+    name: query_object_display_name
+    size: 168
+    sig: "void query_object_display_name(StringObject *out, const u8 *query)"
+    module: ui/query_object_display_name
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: query
+      "[query + 0x40]": object
+      "[backend + 0xf64]": resource_table
+      local_20c: counted
+      auStack_20a: utf16_units
+    notes: >-
+      Raw A32 establishes the true extent from push {r4,r5,lr} at
+      0x0813c2ec through the unconditional branch to cleanup at 0x0813c388,
+      plus the eight-byte "iPod\0" literal at 0x0813c38c..0x0813c393; the
+      next independently linked function starts at 0x0813c394. Ghidra's
+      160-byte report omits the literal. Whole-image ARM immediate decoding
+      finds three inbound unconditional plain BL calls (0x08111d50,
+      0x082981a4, 0x082a193c) and no predicated BL calls. The body has ten
+      unconditional plain BL instructions and no predicated BL instructions.
+      It tests object_resource_count(query+0x40), constructs "iPod" on zero,
+      otherwise resolves the kind-1/kind-2 backend, reads its first resource
+      element through backend+0xf64, obtains its counted UTF-16 text, assigns
+      a temporary StringObject, and copy-constructs out unless that text is
+      empty (then it constructs "iPod"). The temporary is always destroyed.
+      Target pointer fields are loaded as u32 so host fixtures preserve their
+      four-byte firmware offsets; all identified callees are existing ports.

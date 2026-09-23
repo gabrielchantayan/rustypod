@@ -44,6 +44,7 @@ pub mod render_owner_clip;
 pub mod render_request_from_descriptor;
 pub mod render_cell_state;
 pub mod object_resource_count;
+pub mod query_object_display_name;
 pub mod object_resource_counted_string;
 pub mod object_resource_string;
 pub mod object_resource_table_counted_string;
