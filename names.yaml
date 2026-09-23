@@ -57930,6 +57930,28 @@ functions:
       store to +8, return this; LLVM adds the crate-standard frame-
       pointer prologue and keeps `this` in r5 across the call (the
       original relies on the base constructor preserving r0).
+  - address: 0x08152410
+    ghidra: FUN_08152410
+    name: fixed_value_assign
+    size: 104
+    sig: "void fixed_value_assign(FixedValue *dst, const FixedValue *src)"
+    module: app/fixed3_assign
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+    notes: >-
+      FixedValue copy-assignment operator. Raw ARM establishes the true
+      104-byte extent from 0x08152410 through bx lr at 0x08152474; the next
+      function starts at 0x08152478. It makes no outgoing BL calls. Decoding
+      inbound branch words finds three plain unconditional bl call sites
+      (0x0828100c, 0x08281018, 0x08281024), no predicated BL forms, and no
+      data-word references. It copies words +0x04, +0x08, +0x0c, and +0x10,
+      then merges the two low flag bits bytewise and the upper 30 bits as a
+      word; the final +0x14 word equals src's full word. The Rust port keeps
+      the ascending volatile word-access order and replaces only that
+      unobservable intermediate byte-store sequence with one volatile word
+      store, preserving dst's +0x00 vtable word.
   - address: 0x081384a0
     ghidra: FUN_081384a0
     name: refcounted_base_destroy
