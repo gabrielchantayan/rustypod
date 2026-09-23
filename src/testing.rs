@@ -2134,6 +2134,9 @@ pub mod hints {
     // 0x6e40_0000: dedicated to util/vtable_slot_0x5c_result_is_three's
     // target-width object and vtable fixture; mappings never unmap.
     pub const VTABLE_SLOT_0X5C_RESULT_IS_THREE: usize = 0x6e40_0000;
+    // 0x6e50_0000: dedicated to fs/fat_entry_write's target-width volume
+    // context and FAT data fixture; mappings never unmap.
+    pub const FAT_ENTRY_WRITE: usize = 0x6e50_0000;
     // 0x7df0_0000: dedicated to app/associated_object_word_at_0c_or_negative_one's
     // target-width object and associated-object fixture; mappings never unmap.
     pub const ASSOCIATED_OBJECT_WORD_AT_0C: usize = 0x7df0_0000;

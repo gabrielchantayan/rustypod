@@ -133300,3 +133300,26 @@ functions:
       0x0818d354 confirms the five-argument ABI. Deliberate deviation: Rust
       models the unresolved virtual interface by target-width pointer words on
       device and native-width vtable pointers in host tests.
+  - address: 0x0818d69c
+    ghidra: FUN_0818d69c
+    name: fat_entry_write
+    size: 216
+    sig: "u32 fat_entry_write(u8 *volume, u32 entry, u32 value)"
+    module: fs/fat_entry_write
+    status: ported
+    renames:
+      param_1/r0: volume
+      param_2/r1: entry
+      param_3/r2: value
+      "volume+0x42c": fat_format
+      "volume+0x458": fat_table
+    notes: >-
+      Raw osos.dec establishes the exact 216-byte A32 body
+      0x0818d69c..0x0818d773; push {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr} at
+      0x0818d774 begins the next real function. Whole-image aligned A32
+      decoding finds three inbound direct BL calls: plain BL at 0x0818d0a4
+      and 0x0818d0b4, and predicated BLEQ at 0x0818d0cc. There are no
+      outbound BL instructions. Format 0x10 stores the low 16 bits little
+      endian, format 0x20 clears value bits 31..28 then stores four
+      little-endian bytes, and all other formats pack a 12-bit FAT entry
+      while preserving its neighboring nibble. No deliberate deviations.
