@@ -127,7 +127,8 @@ mod tests {
 
     fn resource_owner(provider: &mut ResourceBackedClass6000) -> Class8900 {
         Class8900 {
-            state_below_cache: [0; 12],
+            vtable: core::ptr::null(),
+            state_below_cache: [0; 11],
             cached_6031: 0,
             state_below_store: [0; 209],
             store: &mut provider.class,
