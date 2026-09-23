@@ -135199,3 +135199,45 @@ functions:
       for the slot. It always returns zero. The dynamic clock slot has no
       proposed callee identity; target code re-resolves it from the
       constructed object's vtable, while host tests inject that read.
+
+  # --- cxx: casefolded UTF-16 temporary with ligature-prefix detection ---
+  - address: 0x08132678
+    ghidra: FUN_08132678
+    name: string_object_casefold_utf16_and_detect_ae_oe
+    size: 216
+    sig: "void string_object_casefold_utf16_and_detect_ae_oe(void *owner, u16 **out_utf16, bool *has_ae_or_oe)"
+    module: cxx/string_object
+    status: identified
+    renames:
+      param_1/r0/r6: owner
+      param_2/r1/r8: out_utf16
+      param_3/r2/r9: has_ae_or_oe
+      "owner+0x1c": string
+      "owner+0x20": string.payload
+      r7: utf16_buffer
+      r4: utf16_index
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082aad74: operator_new_tag3
+      FUN_082a50b0: string_object_c_str
+      FUN_082767d8: utf8_to_utf16
+      FUN_08276fbc: unicode_casefold_byte
+      FUN_082a5170: string_object_find_utf8_prefix
+    notes: >-
+      Raw osos.dec establishes the exact 216-byte A32 code extent
+      0x08132678..0x0813274f. Four following words at 0x08132750..0x0813275f
+      are the owned NUL-terminated needles "oe", "OE", "ae", and "AE"; the
+      next real function starts at 0x08132760. An independent whole-image A32
+      branch decode finds exactly three inbound plain unconditional BL sites
+      (0x08131888, 0x08132830, and 0x08133274) and zero predicated inbound BL
+      sites. The body has nine unconditional direct BL instructions and zero
+      predicated BL instructions: count UTF-8 codepoints from owner+0x20,
+      allocate (count + 1) u16 elements through operator_new_tag3, decode the
+      embedded StringObject at owner+0x1c to UTF-16, casefold each nonzero
+      unit, store the buffer through out_utf16, then set has_ae_or_oe when any
+      of the four ASCII needles occurs at or after UTF-8 codepoint index zero. Deferred:
+      unicode_casefold_byte @ 0x08276fbc is not faithfully recoverable. Its
+      sub-0x100 table is runtime-replaced or relocated; raw osos.dec bytes at
+      its literal table address do not contain the required mapping. Because
+      every nonzero UTF-16 unit is transformed through that table before the
+      caller receives the buffer, a Rust port or seam would fabricate observable
+      output. Deliberate deviations: none; this function remains identified.
