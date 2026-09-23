@@ -63,7 +63,9 @@
 //!   object's own vtable, so hooks that replace the object or its
 //!   vtable are honored verbatim.
 
-use crate::app::resource_chain::ResourceKind;
+use crate::app::event_code_queue::{event_code_queue_post, EventCodeQueue};
+use crate::app::resource_chain::{resource_chain_write, ResourceKind, ResourceProvider, ResourceProviderVTable};
+use crate::app::singletons::singleton_class_8c00;
 
 /// The property key this getter always binds (arg2 of the slot +0xdc
 /// call; formed in the original as 0x6000 + 0x31).
@@ -115,8 +117,11 @@ pub struct Class6000 {
 /// is the class's unported state.
 #[repr(C)]
 pub struct Class8900 {
-    /// +0x00..+0x2c, not decoded by this port.
-    pub state_below_cache: [u32; 12],
+    /// +0x00 — resource-provider vtable. Slot +0x58 is read below after
+    /// the class-0x6000 write.
+    pub vtable: *const ResourceProviderVTable,
+    /// +0x04..+0x2c, not decoded by this port.
+    pub state_below_cache: [u32; 11],
     /// +0x30 — cached value of property 0x6031; 0 = cold.
     pub cached_6031: u32,
     /// +0x34..+0x374, not decoded by this port.
@@ -173,6 +178,44 @@ pub unsafe extern "C" fn class_8900_set_cached_property_6031(
     (*this).cached_6031 = value;
 }
 
+/// class_8900_store_6031_and_post_event — original: `FUN_081ed8f8` @
+/// `0x081ed8f8` (**80 bytes** exactly; next real function begins at
+/// `0x081ed958`). Raw A32 decoding finds **3 plain `bl` calls**, no
+/// predicated `bl` calls, and one indirect `blx` through this object's
+/// vtable slot +0x58.
+///
+/// Writes `value` to the class-0x6000 provider chain under raw kind
+/// `0x70724944` and id `0x6031`, then reads raw kind `0x70724944` / id
+/// `0x891f` through this object's slot +0x58. Finally it obtains the
+/// class-0x8c00 singleton and posts event code 21. The write and read
+/// results are deliberately ignored, exactly as the ARM body does.
+///
+/// Deliberate deviations: the ARM `blx` is a typed virtual call through
+/// `ResourceProviderVTable::read`, and the final queue post is a normal
+/// call rather than the original's separate `bl` pair.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class_8900_store_6031_and_post_event(
+    this: *mut Class8900,
+    value: u32,
+) {
+    const RAW_KIND: ResourceKind = ResourceKind(0x7072_4944);
+    const WRITE_ID: u32 = 0x6031;
+    const READ_ID: u32 = 0x891f;
+    const EVENT_CODE: u32 = 21;
+
+    resource_chain_write(
+        (*this).store as *mut ResourceProvider,
+        RAW_KIND,
+        WRITE_ID,
+        value,
+        0,
+    );
+    let read = (*(*this).vtable).read;
+    read(this as *mut ResourceProvider, RAW_KIND, READ_ID);
+    event_code_queue_post(singleton_class_8c00() as *mut EventCodeQueue, EVENT_CODE);
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -181,6 +224,10 @@ mod tests {
     use super::*;
     use std::boxed::Box;
     use std::vec::Vec;
+    use crate::app::event_code_queue::{EventCodeQueueHooks, EVENT_CODE_QUEUE_HOOKS};
+    use crate::app::singletons::CLASS_8C00_INSTANCE;
+    use crate::kernel::sync_mutex::Mutex;
+    use core::ptr;
 
     /// What the slot +0xdc shim observed.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -196,6 +243,63 @@ mod tests {
     static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static mut CALLS: Vec<Call> = Vec::new();
     static mut ANSWER: u32 = 0;
+    static mut RESOURCE_CALLS: Vec<(u32, u32, u32, u32)> = Vec::new();
+    static mut EVENT_CODES: Vec<u32> = Vec::new();
+
+    unsafe extern "C" fn record_event(_queue: *mut u8, code: *const u32) {
+        EVENT_CODES.push(*code);
+    }
+
+    unsafe extern "C" fn record_resource_read(
+        _provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+    ) -> u32 {
+        RESOURCE_CALLS.push((0, kind.0, id, 0));
+        0
+    }
+
+    unsafe extern "C" fn record_resource_write(
+        _provider: *mut ResourceProvider,
+        kind: ResourceKind,
+        id: u32,
+        value: u32,
+        flags: u32,
+    ) -> u32 {
+        RESOURCE_CALLS.push((1, kind.0, id, value));
+        assert_eq!(flags, 0);
+        1
+    }
+
+    unsafe extern "C" fn reject_resource_replacement(
+        _provider: *mut ResourceProvider,
+        _replacement: *mut ResourceProvider,
+    ) -> u32 {
+        0
+    }
+
+    unsafe extern "C" fn miss_resource(
+        _provider: *mut ResourceProvider,
+        _kind: ResourceKind,
+        _id: u32,
+        _found: *mut *mut u8,
+    ) -> u32 {
+        0
+    }
+
+    const RESOURCE_VTABLE: ResourceProviderVTable = ResourceProviderVTable {
+        slots_below: [None; 22],
+        read: record_resource_read,
+        slot_5c: None,
+        replacement_allowed: reject_resource_replacement,
+        find: miss_resource,
+        write: record_resource_write,
+    };
+
+    #[repr(C)]
+    struct ResourceBackedClass6000 {
+        provider: ResourceProvider,
+    }
 
     /// The scripted vtable slot +0xdc: records the call, answers
     /// [`ANSWER`].
@@ -230,7 +334,8 @@ mod tests {
         let mut store = Box::new(Class6000 { vtable: &VTABLE });
         let store_ptr = &mut *store as *mut Class6000;
         let this = Box::new(Class8900 {
-            state_below_cache: [0; 12],
+            vtable: core::ptr::null(),
+            state_below_cache: [0; 11],
             cached_6031: cached,
             state_below_store: [0; 209],
             store: store_ptr,
@@ -331,5 +436,50 @@ mod tests {
         assert_eq!((first, second), (0x6033, 0x6033));
         assert_eq!(this.cached_6031, 0);
         assert_eq!(unsafe { CALLS.len() }, 2, "no caching in the getter");
+    }
+    #[test]
+    fn stores_raw_6031_value_reads_891f_and_posts_event_21() {
+        let _guard = TEST_LOCK.lock();
+        unsafe {
+            RESOURCE_CALLS.clear();
+            EVENT_CODES.clear();
+            let old_instance = CLASS_8C00_INSTANCE;
+            let old_hooks = EVENT_CODE_QUEUE_HOOKS;
+            let mut queue = Box::new(EventCodeQueue {
+                vtable: ptr::null(),
+                pad_04: 0,
+                queue: [0; 10],
+                word_30: 0,
+                mutex: Mutex { sem_cell: ptr::null_mut(), unused: 0 },
+            });
+            CLASS_8C00_INSTANCE = (&mut *queue as *mut EventCodeQueue).cast();
+            EVENT_CODE_QUEUE_HOOKS = EventCodeQueueHooks { enqueue: record_event };
+
+            let mut store = ResourceBackedClass6000 {
+                provider: ResourceProvider {
+                    vtable: &RESOURCE_VTABLE,
+                    state_below_next: [ptr::null_mut(); 4],
+                    next: ptr::null_mut(),
+                },
+            };
+            let mut this = Class8900 {
+                vtable: &RESOURCE_VTABLE,
+                state_below_cache: [0; 11],
+                cached_6031: 0,
+                state_below_store: [0; 209],
+                store: (&mut store as *mut ResourceBackedClass6000).cast(),
+            };
+            for value in [0, u32::MAX] {
+                RESOURCE_CALLS.clear();
+                class_8900_store_6031_and_post_event(&mut this, value);
+                assert_eq!(
+                    RESOURCE_CALLS.as_slice(),
+                    [(1, 0x7072_4944, 0x6031, value), (0, 0x7072_4944, 0x6031, 0), (0, 0x7072_4944, 0x891f, 0)],
+                );
+            }
+            assert_eq!(EVENT_CODES.as_slice(), [21, 21]);
+            EVENT_CODE_QUEUE_HOOKS = old_hooks;
+            CLASS_8C00_INSTANCE = old_instance;
+        }
     }
 }

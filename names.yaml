@@ -28194,6 +28194,42 @@ functions:
       frame around it.
 
 
+  - address: 0x081ed8f8
+    ghidra: FUN_081ed8f8
+    name: class_8900_store_6031_and_post_event
+    size: 80
+    sig: "void class_8900_store_6031_and_post_event(Class8900 *this, u32 value)"
+    module: app/class_8900
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: value
+      "[this + 0x378]": class_6000_provider_chain
+      DAT_081ed94c: raw_resource_kind_0x70724944
+      DAT_081ed948: resource_id_0x6031
+      DAT_081ed950: resource_id_0x891f
+      "[this.vtable + 0x58]": resource_read
+      FUN_08272230: resource_chain_write
+      FUN_081a5500: singleton_class_8c00
+      FUN_081de270: event_code_queue_post
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent 0x081ed8f8..0x081ed947:
+      the next real function starts at 0x081ed958; 0x081ed948..0x081ed954 is
+      this function's four-word literal pool. The body has three unconditional
+      direct BL instructions (resource_chain_write, singleton_class_8c00,
+      event_code_queue_post), zero predicated BL forms, and one indirect BLX
+      through this+0 vtable slot +0x58. It writes value to this+0x378's
+      resource-provider chain as (kind 0x70724944, id 0x6031, flags 0), reads
+      (kind 0x70724944, id 0x891f) through this object's slot +0x58, then posts
+      event code 21 to the class-0x8c00 singleton. Both resource results are
+      deliberately ignored. The kind literals have no independently verified
+      semantic spelling, so they remain raw u32 tags. Class8900 now explicitly
+      models its +0 vtable, preserving +0x30 and +0x378 on ARM. Host tests
+      exercise zero and u32::MAX writes, both virtual reads, and event-21
+      enqueue; cargo test passes. match.py exit 1 is its expected structural
+      diff: LLVM uses a standard frame and materializes literal arguments
+      differently, while retaining the two virtual dispatches and three
+      direct-call stages.
   - address: 0x0810a7b8
     ghidra: FUN_0810a7b8
     name: singleton_class_6200
