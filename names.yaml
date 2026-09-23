@@ -130550,3 +130550,24 @@ functions:
       the embedded StringObject at +0, copies source word +8 to this+8, and
       returns this. repr(C) named fields preserve those ARM offsets despite
       widened host pointers; no deliberate behavioral deviation.
+  - address: 0x081f3fe8
+    ghidra: FUN_081f3fe8
+    name: iteration_index_initialize
+    size: 8
+    sig: "void iteration_index_initialize(u8 *index, u8 value)"
+    module: cxx/iteration_index_initialize
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: value
+      "*index/r0": iteration_index
+    notes: >-
+      Raw osos.dec establishes the exact two-instruction, eight-byte A32 body
+      0x081f3fe8..0x081f3fef: strb r1,[r0]; bx lr. The following bx lr at
+      0x081f3ff0 is the separately linked empty destructor entry, so it is
+      not part of this function. Full-image aligned A32 decoding finds three
+      inbound plain BL calls and zero predicated BL forms; the leaf has no
+      outbound calls. The three callers initialize a one-byte range iteration
+      index before passing it to FUN_081f3d68. Rust preserves the unchecked
+      byte store; match.py reports only LLVMs frame/prologue around the same
+      strb. No deliberate deviations.
