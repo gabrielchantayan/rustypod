@@ -396,6 +396,33 @@ functions:
       The virtual callee has no recovered semantic identity, so host tests use
       a narrow dispatch seam while target builds invoke its target-width
       function pointer directly.
+  # --- Vtable flag prefix constructor ---
+  - address: 0x08135ba4
+    ghidra: FUN_08135ba4
+    name: vtable_flag_construct
+    size: 20
+    sig: "void *vtable_flag_construct(void *this, u32 payload)"
+    module: cxx/vtable_flag_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      FUN_081b6968: vtable_flag_payload_construct
+      DAT_08135bb8: derived_vtable (0x08984a44)
+    notes: >-
+      Raw osos.dec confirms the 20-byte ARM function from push {lr} at
+      0x08135ba4 through pop {pc} at 0x08135bb4, followed by literal
+      0x08984a44 at 0x08135bb8; the next separately linked function begins
+      at 0x08135bbc. Whole-image decoding finds three unconditional plain bl
+      callers at 0x08148054, 0x08148644, and 0x081e1670, with no predicated
+      bl callers. The sole direct callee is the unconditional plain bl at
+      0x08135ba8 to 0x081b6968 (vtable_flag_payload_construct); it receives
+      the original this and payload. This port invokes that existing direct
+      Rust port, overwrites the returned object's +0 vtable word with
+      0x08984a44, and returns the same pointer. Tests cover payload forwarding,
+      literal installation, the base flag clear, and an untouched trailing
+      sentinel. No class identity beyond observed vtable behavior is claimed.
+
   - address: 0x081d5e2c
     ghidra: FUN_081d5e2c
     name: parse_result_scope_construct
