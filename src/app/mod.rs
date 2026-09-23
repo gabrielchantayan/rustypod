@@ -202,6 +202,7 @@ pub mod genius_request_wait_ready;
 pub mod global_callback_unregister;
 pub mod global_timer_cleanup;
 pub mod linked_list_merge_by_word_4;
+pub mod linked_node_status_set;
 pub mod global_callback_register;
 pub mod global_word_list_prepend;
 pub mod handler_list_activate;

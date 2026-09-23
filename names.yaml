@@ -130465,3 +130465,34 @@ functions:
       format preservation. match.py exits 1 with LLVMs frame, branch, and
       register-allocation differences while preserving the input offsets,
       format cases, stores, and zeroing sequence.
+
+  - address: 0x081f507c
+    ghidra: FUN_081f507c
+    name: linked_node_status_set
+    size: 56
+    sig: "void linked_node_status_set(u32 root, u32 status)"
+    module: app/linked_node_status_set
+    status: ported
+    renames:
+      param_1/r0: root
+      param_2/r1: status
+      iVar1/r2: node
+      field_34: owner
+      field_3d: status_byte
+      field_40: next
+      field_90: owner_status3_word_90
+      field_ac: owner_status3_word_ac
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte A32 extent
+      0x081f507c..0x081f50b3; the ldr at 0x081f50b4 begins the next real
+      function. Whole-image raw A32 decoding finds three inbound plain BL sites
+      at 0x0803c2dc, 0x0805bba4, and 0x081b11dc, with zero predicated inbound
+      BL forms and zero outbound calls. The leaf writes the low status byte at
+      +0x3d through a +0x40 intrusive chain until a null link or root cycle.
+      A full status value of 3 additionally clears the root owner's +0xac and
+      +0x90 words when root+0x34 is nonzero. Target pointers remain u32 words
+      so host layouts preserve retailOS offsets; volatile owner writes preserve
+      the retail store order. Host tests cover both
+      root-terminated and null-terminated chains, low-byte truncation, the
+      exact status-3 conditional, and owner clearing. match.py structural
+      output is expected from LLVM register allocation and exits 1.
