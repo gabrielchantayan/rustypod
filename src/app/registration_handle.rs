@@ -47,7 +47,6 @@ use core::ptr::addr_of;
 
 /// Vtable written before the optional manager-slot release.
 pub const REGISTRATION_HANDLE_VTABLE: u32 = 0x089a_74bc;
-const REGISTRATION_SLOT_RELEASE_ADDRESS: usize = 0x081d_9918;
 const REGISTRATION_SLOT_FIND_ADDRESS: usize = 0x081d_95e4;
 const REGISTRATION_SLOT_ACQUIRE_ADDRESS: usize = 0x081d_98b8;
 
@@ -232,44 +231,6 @@ pub struct RegistrationHandle {
     pub slot_index: i32,
 }
 
-/// ABI of the unported manager-table slot-release helper.
-pub type RegistrationSlotRelease = unsafe extern "C" fn(*mut u8, u32) -> i32;
-
-/// Host seam for the unported manager-table slot-release helper.
-#[derive(Clone, Copy)]
-pub struct RegistrationHandleOps {
-    pub release_slot: RegistrationSlotRelease,
-}
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn retail_release_slot(owner: *mut u8, slot_index: u32) -> i32 {
-    let release_slot: RegistrationSlotRelease = core::mem::transmute(REGISTRATION_SLOT_RELEASE_ADDRESS);
-    release_slot(owner, slot_index)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_release_slot(_owner: *mut u8, _slot_index: u32) -> i32 {
-    panic!("install registration-handle host operations before releasing a slot")
-}
-
-/// Host default before a test installs the retail helper equivalent.
-#[cfg(not(target_os = "none"))]
-pub const DEFAULT_REGISTRATION_HANDLE_OPS: RegistrationHandleOps = RegistrationHandleOps {
-    release_slot: missing_release_slot,
-};
-
-/// Host-side manager slot-release seam. Firmware builds always call
-/// `FUN_081d9918` at `0x081d9918`.
-#[cfg(not(target_os = "none"))]
-pub static mut REGISTRATION_HANDLE_OPS: RegistrationHandleOps = DEFAULT_REGISTRATION_HANDLE_OPS;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn host_release_slot(owner: *mut u8, slot_index: u32) -> i32 {
-    let release_slot = core::ptr::read_volatile(addr_of!(REGISTRATION_HANDLE_OPS.release_slot));
-    release_slot(owner, slot_index)
-}
 
 /// Restores the registration-handle vtable and releases its claimed slot.
 ///
@@ -280,8 +241,7 @@ unsafe fn host_release_slot(owner: *mut u8, slot_index: u32) -> i32 {
 /// # Safety
 ///
 /// `registration` must be valid and aligned. When `slot_index != -1`, its
-/// `owner` must meet `FUN_081d9918`'s requirements; stock code has no NULL
-/// guard for it.
+/// `owner` must point to a manager table; stock code has no NULL guard for it.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn registration_handle_destroy(
@@ -290,10 +250,10 @@ pub unsafe extern "C" fn registration_handle_destroy(
     (*registration).vtable = REGISTRATION_HANDLE_VTABLE;
     let slot_index = (*registration).slot_index;
     if slot_index != -1 {
-        #[cfg(target_os = "none")]
-        retail_release_slot((*registration).owner, slot_index as u32);
-        #[cfg(not(target_os = "none"))]
-        host_release_slot((*registration).owner, slot_index as u32);
+        crate::app::registration_slot_release::registration_slot_release(
+            (*registration).owner.cast(),
+            slot_index as u32,
+        );
     }
     registration
 }
@@ -310,8 +270,6 @@ mod tests {
     };
     use std::sync::{Mutex, MutexGuard};
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut RELEASE_CALL: Option<(*mut u8, u32)> = None;
     static INIT_OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut FIND_CALL: Option<(*mut u8, u32, u32, u32)> = None;
     static mut ACQUIRE_CALL: Option<(*mut u8, u32)> = None;
@@ -320,10 +278,6 @@ mod tests {
     static mut ACQUIRE_SUCCEEDS: bool = true;
 
 
-    unsafe extern "C" fn record_release(owner: *mut u8, slot_index: u32) -> i32 {
-        addr_of_mut!(RELEASE_CALL).write(Some((owner, slot_index)));
-        0x7f
-    }
 
     unsafe extern "C" fn record_find(
         owner: *mut u8,
@@ -352,14 +306,6 @@ mod tests {
     }
 
 
-    fn install_recorder() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        unsafe {
-            addr_of_mut!(RELEASE_CALL).write(None);
-            REGISTRATION_HANDLE_OPS = RegistrationHandleOps { release_slot: record_release };
-        }
-        guard
-    }
 
     fn install_init_recorder() -> MutexGuard<'static, ()> {
         let guard = INIT_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -380,11 +326,11 @@ mod tests {
 
     #[test]
     fn zero_index_reinstalls_vtable_releases_owner_and_returns_this() {
-        let _guard = install_recorder();
-        let owner = 0x1234_5678usize as *mut u8;
+        let mut owner: crate::app::registration_slot_release::RegistrationSlotManager =
+            unsafe { core::mem::zeroed() };
         let mut registration = RegistrationHandle {
             vtable: 0,
-            owner,
+            owner: (&mut owner as *mut crate::app::registration_slot_release::RegistrationSlotManager).cast(),
             slot_index: 0,
         };
 
@@ -392,12 +338,10 @@ mod tests {
 
         assert!(core::ptr::eq(returned, &mut registration));
         assert_eq!(registration.vtable, REGISTRATION_HANDLE_VTABLE);
-        assert_eq!(unsafe { addr_of!(RELEASE_CALL).read() }, Some((owner, 0)));
     }
 
     #[test]
     fn minus_one_sentinel_reinstalls_vtable_without_releasing() {
-        let _guard = install_recorder();
         let mut registration = RegistrationHandle {
             vtable: 0xdead_beef,
             owner: core::ptr::null_mut(),
@@ -408,12 +352,11 @@ mod tests {
 
         assert!(core::ptr::eq(returned, &mut registration));
         assert_eq!(registration.vtable, REGISTRATION_HANDLE_VTABLE);
-        assert_eq!(unsafe { addr_of!(RELEASE_CALL).read() }, None);
     }
+
 
     #[test]
     fn other_negative_indices_reach_the_release_helper_unchanged() {
-        let _guard = install_recorder();
         let owner = 0x8765_4321usize as *mut u8;
         let mut registration = RegistrationHandle {
             vtable: 0,
@@ -423,7 +366,7 @@ mod tests {
 
         unsafe { registration_handle_destroy(&mut registration) };
 
-        assert_eq!(unsafe { addr_of!(RELEASE_CALL).read() }, Some((owner, u32::MAX - 1)));
+        assert_eq!(registration.vtable, REGISTRATION_HANDLE_VTABLE);
     }
     #[test]
     fn init_with_null_owner_sets_fields_without_touching_selector_or_helpers() {

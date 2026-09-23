@@ -224,8 +224,8 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
     use crate::app::registration_handle::{
-        RegistrationHandleInitOps, RegistrationHandleOps, DEFAULT_REGISTRATION_HANDLE_INIT_OPS,
-        DEFAULT_REGISTRATION_HANDLE_OPS, REGISTRATION_HANDLE_INIT_OPS, REGISTRATION_HANDLE_OPS,
+        RegistrationHandleInitOps, DEFAULT_REGISTRATION_HANDLE_INIT_OPS,
+        REGISTRATION_HANDLE_INIT_OPS,
     };
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
@@ -267,9 +267,6 @@ mod tests {
         ptr::null_mut()
     }
 
-    unsafe extern "C" fn release_current_record(_owner: *mut u8, _slot: u32) -> i32 {
-        0
-    }
 
     unsafe extern "C" fn dispatch_current_record(record: *mut u8, status: u32) -> i32 {
         CURRENT_RECORD_STATUS_CALL = Some((record, status));
@@ -281,16 +278,12 @@ mod tests {
             find_slot: DEFAULT_REGISTRATION_HANDLE_INIT_OPS.find_slot,
             acquire_slot: acquire,
         };
-        REGISTRATION_HANDLE_OPS = RegistrationHandleOps {
-            release_slot: release_current_record,
-        };
         RECORD_MANAGER_CURRENT_RECORD_STATUS = dispatch_current_record;
         CURRENT_RECORD_STATUS_CALL = None;
     }
 
     unsafe fn restore_current_record_ops() {
         REGISTRATION_HANDLE_INIT_OPS = DEFAULT_REGISTRATION_HANDLE_INIT_OPS;
-        REGISTRATION_HANDLE_OPS = DEFAULT_REGISTRATION_HANDLE_OPS;
         RECORD_MANAGER_CURRENT_RECORD_STATUS = missing_current_record_status;
         CURRENT_RECORD_STATUS_CALL = None;
     }
