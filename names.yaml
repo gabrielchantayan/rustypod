@@ -134888,3 +134888,33 @@ functions:
       distinct non-NULL prior object, and stores the replacement at +0x3c.
       Deliberate deviation: the unresolved factory and virtual release remain
       verified target-address calls; host tests use replaceable seams.
+
+  - address: 0x0814485c
+    ghidra: FUN_0814485c
+    name: animation_property_pair_init
+    size: 108
+    sig: "void animation_property_pair_init(AnimationPropertyPairOwner *owner, u32 unused, i32 from, i32 to)"
+    module: app/animation_property_pair_init
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      param_2/r1: unused
+      param_3/r2/r5: from
+      param_4/r3/r6: to
+      "owner+0xc0": current_value
+      "owner+0xc4": from_value
+      "owner+0xc8": to_value
+      "owner+0xcc": animation
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte extent
+      0x0814485c..0x081448c7; push {r4,lr} at 0x081448c8 is the next real
+      function. The body has eight plain unconditional BL instructions and
+      zero predicated BL instructions: operator_new twice, fixed_value_init
+      twice, operator_new, animation_init, and release_refcounted_value twice.
+      It tail-branches to timing_wheel_insert_global. It creates Q16.16
+      endpoint values from from/to << 16, stores them at owner+0xc4/+0xc8,
+      constructs the owner current-value animation at +0xcc, releases the
+      temporary endpoint references, and inserts that animation globally.
+      Ghidra's three-call-site accounting is incomplete. Deliberate
+      deviations: none. Host tests verify allocation sizes/tag, signed Q16.16
+      conversion, target-width owner slots, and animation endpoint order.

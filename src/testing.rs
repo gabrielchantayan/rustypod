@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6f50_0000: dedicated to util/video_engine's target-width controller,
     // engine, frame-table, and frame-record fixture; mappings never unmap.
     pub const VIDEO_ENGINE_PRESENT_DEFAULT_FRAME: usize = 0x6f50_0000;
+    // 0xe100_0000: dedicated to app/animation_property_pair_init's owner,
+    // fixed-value endpoints, and animation fixture; mappings never unmap.
+    pub const ANIMATION_PROPERTY_PAIR_INIT: usize = 0xe100_0000;
     // 0x6f10_0000 / 0x6f20_0000: dedicated to
     // app/datetime_adjust's target-width controller, selector, and provider
     // fixtures; mappings never unmap, so no other port may share either hint.
