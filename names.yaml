@@ -131183,3 +131183,33 @@ functions:
       Deliberate deviations: none. match.py reports LLVM's different frame
       and branch layout while retaining the field tests, four direct calls,
       28 allocation status, 3000-ms delay, and event arguments.
+  - address: 0x081df500
+    ghidra: FUN_081df500
+    name: cxx_string_pair_vector_owner_destroy
+    size: 80
+    sig: "CxxStringPairVectorOwner *cxx_string_pair_vector_owner_destroy(CxxStringPairVectorOwner *owner)"
+    module: cxx/string
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      "owner+0x00": tag
+      "owner+0x08": begin
+      "owner+0x0c": end
+      "owner+0x10": capacity
+      DAT_081df550: cxx_string_pair_vector_owner_tag
+      FUN_083e2f48: cxx_string_pair_range_destroy
+      FUN_08031568: __rt_sdiv
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x081df500..0x081df54f: the following word at 0x081df550 is the
+      literal loaded into owner +0, despite also decoding as a plausible A32
+      push instruction. The body has exactly three unconditional plain BL
+      calls, to cxx_string_pair_range_destroy, __rt_sdiv, and
+      cxx_array_dealloc; no predicated BL forms. Whole-image A32 decoding
+      finds three inbound plain BL callers at 0x0825b460, 0x0825b494, and
+      0x083e1600, with no predicated inbound calls. It tags owner, destroys
+      the embedded [begin,end) 12-byte string-pair range, computes signed
+      (capacity - begin) / 12, releases begin with that count and element
+      size zero, and returns owner. Target pointer fields are u32 to retain
+      their target offsets on 64-bit hosts. Deliberate deviations: none.
