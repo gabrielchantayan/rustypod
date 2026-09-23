@@ -2168,6 +2168,12 @@ pub mod hints {
     // fixtures; mappings never unmap, so no other user may share either hint.
     pub const CONTEXT_SECONDARY_TARGET_SET: usize = 0x7dc0_0000;
     pub const CONTEXT_SECONDARY_TARGET_SET_NON_NULL: usize = 0x7dd0_0000;
+    // 0x6f60_0000 / 0x6f70_0000 / 0x6f80_0000: dedicated to
+    // app/work_record_assign_value's target-width record and object fixtures;
+    // mappings never unmap, so each test uses a distinct address.
+    pub const WORK_RECORD_ASSIGN_VALUE: usize = 0x6f60_0000;
+    pub const WORK_RECORD_ASSIGN_VALUE_UNCHANGED: usize = 0x6f70_0000;
+    pub const WORK_RECORD_ASSIGN_VALUE_SAME_OBJECT: usize = 0x6f80_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
