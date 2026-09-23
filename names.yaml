@@ -134394,3 +134394,24 @@ functions:
       first opaque record word with the fixed virtual-dispatch pointer. The
       literal's class identity is not established, so the record remains
       intentionally opaque. Deliberate deviations: none.
+
+  - address: 0x08160cf0
+    ghidra: FUN_08160cf0
+    name: plst_record_type
+    size: 12
+    sig: "u32 plst_record_type(const u8 *record)"
+    module: ui/plst_record_type
+    status: ported
+    renames:
+      param_1/r0: record
+      param_1_plus_0x0e: type_and_flags
+      r0: record_type
+    notes: >-
+      Raw osos.dec establishes the true 12-byte extent 0x08160cf0..0x08160cfc:
+      ldrb r0,[r0,#0x0e] / and r0,r0,#0x1f / bx lr. The separately linked
+      next accessor starts at 0x08160cfc. Independent A32 decoding finds
+      exactly three inbound plain unconditional bl sites (0x081608b4,
+      0x08160904, and 0x08160918) and zero predicated bl sites. The accessor
+      returns the low five type bits of a PLST record's header byte at +0x0e;
+      upper bits are flags and are discarded. Rust preserves the ARM u32
+      result and direct byte read with no deliberate deviations.
