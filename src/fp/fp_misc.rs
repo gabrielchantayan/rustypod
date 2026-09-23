@@ -741,12 +741,9 @@ static mut QUERY_OBJECT_DESTROY_OPS: QueryObjectDestroyOps = QueryObjectDestroyO
 pub static mut QUERY_OBJECT_CONSTRUCT: usize = 0x0813_e474;
 
 /// Host-swappable entry point for the query-object name getter
-/// `FUN_0813c2ec` @ 0x0813c2ec (160 bytes, unported): resolves the
-/// query object's display name into the two-word [`StringObject`] at
-/// `out` (through the inner object's backend and the id word its +0xf64
-/// pointer carries, defaulting to a static name when the inner object
-/// has none). The target build calls the fixed firmware address
-/// directly; host tests swap this writable cell.
+/// [`crate::ui::query_object_display_name::query_object_display_name`] at
+/// `0x0813c2ec`. Target builds call the local Rust port directly; host tests
+/// retain this writable cell to isolate the higher-level COW-string wrapper.
 #[cfg(not(target_os = "none"))]
 pub static mut QUERY_OBJECT_NAME: usize = 0x0813_c2ec;
 
@@ -805,8 +802,7 @@ pub unsafe extern "C" fn query_object_create_with_id(id: u32, mode: u32) -> *mut
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn query_object_name(out: *mut StringObject, query: *const u8) {
-    let name: QueryNameFn = core::mem::transmute(0x0813_c2ecusize);
-    name(out, query);
+    crate::ui::query_object_display_name::query_object_display_name(out, query);
 }
 
 #[cfg(not(target_os = "none"))]
@@ -872,11 +868,10 @@ pub unsafe extern "C" fn query_object_destroy_port(query: *mut u8) -> *mut u8 {
 /// cxx/string.rs; `string` is the one-word string object, a `char **`):
 ///
 /// 1. construct the 72-byte stack-local query object with id byte 0 and
-///    mode 0 (`FUN_0813e474` @ 0x0813e474, unported, behind the
-///    [`QUERY_OBJECT_CONSTRUCT`] seam),
-/// 2. resolve its display name into a two-word [`StringObject`]
-///    (`FUN_0813c2ec` @ 0x0813c2ec, unported, behind the
-///    [`QUERY_OBJECT_NAME`] seam),
+///    mode 0 through the [`QUERY_OBJECT_CONSTRUCT`] seam,
+/// 2. resolve its display name into a two-word [`StringObject`] through the
+///    ported `query_object_display_name` @ 0x0813c2ec (host wrapper tests
+///    retain the [`QUERY_OBJECT_NAME`] seam),
 /// 3. read the name's C string ([`string_object_c_str`] @ 0x082a50b0,
 ///    ported) and measure it ([`strlen`] @ 0x08392478, ported),
 /// 4. allocate a string rep with capacity max(0x20, length) and the
