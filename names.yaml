@@ -132354,3 +132354,27 @@ functions:
       with zero predicated BL forms; the leaf has no outbound calls. It
       returns whether the aligned target-width word at object+0x1b0 is
       nonzero, normalized to zero or one. No deliberate deviations.
+
+  - address: 0x081bbf78
+    ghidra: FUN_081bbf78
+    name: lazy_handle_manager_is_initialized
+    size: 32
+    sig: "u32 lazy_handle_manager_is_initialized(LazyHandleManager *manager)"
+    module: app/lazy_handle_manager_is_initialized
+    status: ported
+    renames:
+      param_1/r0: manager
+      "[manager + 0x0]": mutex
+      "[manager + 0xc]": initialized
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte extent
+      0x081bbf78..0x081bbf97: the distinct lazy_handle_manager_get begins at
+      0x081bbf98 with ldr r0,[pc,#64]. The body has two direct unconditional
+      plain BL instructions, mutex_lock and mutex_unlock, and no predicated BL
+      instructions. Ghidra's three inbound BL call sites agree with the three
+      independently identified callers. It locks manager+0, reads the byte at
+      manager+0xc, unlocks manager+0, and returns the byte zero-extended in
+      r0. No deliberate deviations: the existing LazyHandleManager and Mutex
+      ports supply the verified layout and call boundaries.
