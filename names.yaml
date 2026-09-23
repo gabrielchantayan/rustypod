@@ -133187,3 +133187,33 @@ functions:
       plain BL calls. Full-image A32 decoding found three inbound plain
       unconditional BL sites and no predicated inbound BL forms. Deliberate
       deviation: none.
+
+  - address: 0x08193fb8
+    ghidra: FUN_08193fb8
+    name: service_manager_secondary_handler_initialize
+    size: 200
+    sig: "void service_manager_secondary_handler_initialize(u32 *slot_table, i32 slot)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      FUN_08030f44: heap_panic
+      FUN_08165520: service_manager_instance
+      FUN_08165558: service_manager_initialization_state_get
+      FUN_080e2540: service_manager_notification
+    notes: >-
+      Ghidra's 52-byte extent is wrong. Raw osos.dec shows that the apparent
+      terminal mov r0,r0 at 0x08193fe8 falls through into the body at
+      0x08193fec, which returns at 0x0819407c; 0x08194080 is the next real
+      function. The true extent is therefore 200 bytes,
+      0x08193fb8..0x08194080. The selected 0x20-byte record has words +0,
+      +4, +0xc, +0x10, +0x18 and halfword +0x1c cleared, with +0x14 set to
+      -1 and +0x08 preserved. It then reads the manager ready byte, clears
+      all records' +0x18 words for ready states 1 and 2, otherwise reports
+      state 3 when any +0xc bit zero is set and state 2 otherwise. There are
+      three outbound plain BL calls and one predicated BLGE heap_panic;
+      full-image A32 decoding found three inbound plain unconditional BL
+      sites (0x08190fa8, 0x08191018, 0x081925f4) and no predicated inbound
+      BL forms. Deliberate deviation: unported 0x080e2540 is a host seam;
+      target builds invoke its retail address.

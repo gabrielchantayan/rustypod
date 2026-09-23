@@ -12,7 +12,7 @@
 //! | 0x08193e64 | [`service_manager_secondary_handler_state_flags_set`] | 32 | 4 direct |
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
-//! | 0x08193efc | [`service_manager_secondary_handler_kind_get`] | 20 | 7 direct |
+//! | 0x08193fb8 | [`service_manager_secondary_handler_initialize`] | 200 | 3 direct |
 //! | 0x08194110 | [`service_handler_set`] | 16 | 5 direct |
 //! | 0x081941a4 | [`service_handler_state_set`] | 20 | 4 direct |
 //! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
@@ -169,8 +169,8 @@ pub unsafe extern "C" fn service_manager_initialization_state_get(
 
 /// Serializes host tests that replace the singleton slot.
 #[cfg(test)]
-pub(crate) static SERVICE_MANAGER_INSTANCE_TEST_LOCK: std::sync::Mutex<()> =
-    std::sync::Mutex::new(());
+pub(crate) static SERVICE_MANAGER_INSTANCE_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
 
 /// service_manager_instance — original: `FUN_08165520` @ 0x08165520
 /// (24 bytes: five instructions plus the trailing holder literal @
@@ -596,6 +596,142 @@ mod secondary_handler_has_events_get_tests {
                 service_manager_secondary_handler_has_events_get(table.as_ptr().add(8), -1),
                 1,
             );
+        }
+    }
+}
+
+/// service_manager_secondary_handler_initialize — original: `FUN_08193fb8`
+/// @ 0x08193fb8 (200 bytes; 3 direct, unconditional inbound `bl` call
+/// sites).
+///
+/// Ghidra's 52-byte extent is incomplete: the apparent final `mov r0,r0` at
+/// 0x08193fe8 falls through into the body at 0x08193fec, which returns with
+/// `pop {r2-r6,pc}` at 0x0819407c. The next real function starts at
+/// 0x08194080. The entry clears a selected 0x20-byte secondary-handler
+/// record, preserving word `+0x08`; it then reads the service-manager
+/// constructed/ready bytes, clears all three records' event masks when ready
+/// is 1 or 2, otherwise promotes notification state 2 to 3 when any status
+/// word `+0x0c` has bit zero set, and passes that state to retailOS
+/// 0x080e2540.
+///
+/// Raw ARM has three plain outbound `bl` calls (service-manager instance,
+/// initialization-state get, and 0x080e2540) plus one predicated `blge`
+/// (`heap_panic`); full-image A32 decoding finds three inbound plain `bl`
+/// sites (0x08190fa8, 0x08191018, 0x081925f4) and no predicated inbound
+/// calls. Deliberate deviation: the unported 0x080e2540 notification routine
+/// is an explicit host seam; the target build calls its retail address.
+///
+/// # Safety
+///
+/// `slot_table` must address three aligned eight-word records. As in the
+/// firmware, negative `slot` values are unchecked and address before it.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_initialize(
+    slot_table: *mut u32,
+    slot: i32,
+) {
+    if slot >= 3 {
+        heap_panic();
+    }
+    let record = slot_table.wrapping_offset(slot.wrapping_shl(3) as isize);
+    core::ptr::write(record, 0);
+    core::ptr::write(record.add(1), 0);
+    core::ptr::write(record.add(3), 0);
+    core::ptr::write(record.add(4), 0);
+    core::ptr::write(record.add(5), u32::MAX);
+    core::ptr::write(record.add(6), 0);
+    core::ptr::write(record.add(7), 0);
+
+    service_manager_instance();
+    let mut constructed = 0u8;
+    let mut ready = 4u8;
+    service_manager_initialization_state_get(
+        core::ptr::null_mut(),
+        &mut constructed,
+        &mut ready,
+    );
+
+    let notification_state = if ready == 1 || ready == 2 {
+        for current_slot in 0..3 {
+            core::ptr::write(slot_table.add(current_slot * 8 + 6), 0);
+        }
+        1
+    } else {
+        let mut statuses = 0;
+        for current_slot in 0..3 {
+            statuses |= core::ptr::read(slot_table.add(current_slot * 8 + 3));
+        }
+        if statuses & 1 != 0 { 3 } else { 2 }
+    };
+    invoke_unported_service_manager_notification(notification_state);
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn invoke_unported_service_manager_notification(notification_state: i32) {
+    let routine: unsafe extern "C" fn(i32) =
+        core::mem::transmute(0x080e_2540usize);
+    routine(notification_state);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_service_manager_notification(_notification_state: i32) {
+    panic!("install the service-manager notification host seam before calling service_manager_secondary_handler_initialize")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut SERVICE_MANAGER_NOTIFICATION: unsafe extern "C" fn(i32) =
+    missing_service_manager_notification;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn invoke_unported_service_manager_notification(notification_state: i32) {
+    core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_MANAGER_NOTIFICATION))(notification_state);
+}
+
+#[cfg(test)]
+mod secondary_handler_initialize_tests {
+    use super::*;
+
+    static mut NOTIFICATION_STATE: i32 = 0;
+
+    unsafe extern "C" fn record_notification(notification_state: i32) {
+        NOTIFICATION_STATE = notification_state;
+    }
+
+    #[test]
+    fn clears_selected_record_and_notifies_pending_state() {
+        let _guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
+        let mut table = [0xdead_beefu32; 24];
+        table[3] = 1;
+        unsafe {
+            SERVICE_MANAGER_INSTANCE = table.as_mut_ptr().cast();
+            SERVICE_MANAGER_CONSTRUCTED = 0;
+            SERVICE_MANAGER_READY = 0;
+            SERVICE_MANAGER_NOTIFICATION = record_notification;
+            service_manager_secondary_handler_initialize(table.as_mut_ptr(), 1);
+            assert_eq!(&table[8..16], &[0, 0, 0xdead_beef, 0, 0, u32::MAX, 0, 0]);
+            assert_eq!(NOTIFICATION_STATE, 3);
+            SERVICE_MANAGER_INSTANCE = core::ptr::null_mut();
+        }
+    }
+
+    #[test]
+    fn clears_all_event_masks_when_manager_is_ready() {
+        let _guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
+        let mut table = [0xdead_beefu32; 24];
+        unsafe {
+            SERVICE_MANAGER_INSTANCE = table.as_mut_ptr().cast();
+            SERVICE_MANAGER_CONSTRUCTED = 1;
+            SERVICE_MANAGER_READY = 2;
+            SERVICE_MANAGER_NOTIFICATION = record_notification;
+            service_manager_secondary_handler_initialize(table.as_mut_ptr(), 0);
+            assert_eq!(table[6], 0);
+            assert_eq!(table[14], 0);
+            assert_eq!(table[22], 0);
+            assert_eq!(NOTIFICATION_STATE, 1);
+            SERVICE_MANAGER_INSTANCE = core::ptr::null_mut();
         }
     }
 }
@@ -1318,13 +1454,13 @@ mod tests {
 
     /// Installs `instance` and returns the lock guard; the slot is
     /// restored to its NULL pre-init state by `clear`.
-    fn publish(instance: *mut u8) -> std::sync::MutexGuard<'static, ()> {
-        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn publish(instance: *mut u8) -> parking_lot::MutexGuard<'static, ()> {
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         unsafe { ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_INSTANCE), instance) };
         guard
     }
 
-    fn clear(guard: std::sync::MutexGuard<'static, ()>) {
+    fn clear(guard: parking_lot::MutexGuard<'static, ()>) {
         unsafe { ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_INSTANCE), ptr::null_mut()) };
         drop(guard);
     }
@@ -1332,8 +1468,8 @@ mod tests {
     fn publish_initialization_state(
         constructed: u8,
         ready: u8,
-    ) -> std::sync::MutexGuard<'static, ()> {
-        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    ) -> parking_lot::MutexGuard<'static, ()> {
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         unsafe {
             ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_CONSTRUCTED), constructed);
             ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_READY), ready);
@@ -1341,7 +1477,7 @@ mod tests {
         guard
     }
 
-    fn clear_initialization_state(guard: std::sync::MutexGuard<'static, ()>) {
+    fn clear_initialization_state(guard: parking_lot::MutexGuard<'static, ()>) {
         unsafe {
             ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_CONSTRUCTED), 0);
             ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_READY), 0);
@@ -1397,7 +1533,7 @@ mod tests {
 
     #[test]
     fn the_slot_starts_null_like_the_uninitialized_holder_word() {
-        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         assert!(unsafe { ptr::read_volatile(ptr::addr_of!(SERVICE_MANAGER_INSTANCE)) }.is_null());
         drop(guard);
     }
@@ -1652,7 +1788,7 @@ mod service_handler_reset_tests {
     #[test]
     fn clears_selected_secondary_record_and_sets_primary_record() {
         let _reset_lock = RESET_TEST_LOCK.lock();
-        let _instance_lock = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap();
+        let _instance_lock = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         unsafe {
             let mut manager = [0u32; 59];
             let old_instance = SERVICE_MANAGER_INSTANCE;

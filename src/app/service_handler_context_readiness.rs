@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn context_presence_selector_boundary_and_lifecycle_state_control_readiness() {
-        let _manager_lock = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap();
+        let _manager_lock = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         let _lifecycle_lock = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap();
         let manager = 1usize as *mut u8;
         let old_manager = unsafe { SERVICE_MANAGER_INSTANCE };

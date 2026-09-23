@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn dispatches_selected_slots_in_order_then_forwards_event_seven() {
         let _ops_guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _instance_guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _instance_guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
         let Some(slab) = try_map_u32_slab(hints::SERVICE_HANDLER_MASKED_EVENT_DISPATCH, 4096) else {
             note_missing_u32_fixture("service_handler_masked_event_dispatch");
             return;
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn zero_mask_returns_without_reading_manager_or_dispatching() {
         let _ops_guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let _instance_guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _instance_guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
 
         unsafe {
             install_recorders();
