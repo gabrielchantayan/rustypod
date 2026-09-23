@@ -26403,6 +26403,31 @@ functions:
       image, so the name records only the verified literals. A missing
       singleton still faults at the unguarded vtable load, matching stock.
 
+  - address: 0x08172a0c
+    ghidra: FUN_08172a0c
+    name: class6000_property_60ac_is_602e
+    size: 44
+    sig: "bool class6000_property_60ac_is_602e(void *store)"
+    module: app/class6000_property_60ac_is_602e
+    status: ported
+    renames:
+      param_1: store
+      iVar1: property_value
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte executable extent
+      0x08172a0c..0x08172a38: `push {r4,lr}; ldr r1,[r0]; mov r2,#0x6000;
+      ldr r3,[r1,#0xdc]; add r1,r2,#0xac; blx r3; sub r12,r0,#0x6000;
+      subs r12,r12,#0x2e; movne r0,#0; moveq r0,#1; pop {r4,pc}`. The next
+      real function begins at 0x08172a38. Decoding every immediate ARM B/BL
+      word finds exactly three inbound direct call sites, all plain
+      unconditional bl (0x08114808, 0x08116e14, 0x081a74cc), and no
+      predicated bl call sites. The body has no direct bl instructions and
+      one unconditional indirect blx through vtable slot +0xdc. It dispatches
+      that slot as `(store, 0x60ac)` and returns whether its result is
+      0x602e. Neither property nor virtual slot semantics are established;
+      Rust retains their verified literals and expresses the indirect blx as
+      a typed call without target behavioral deviation.
+
   - address: 0x08172c44
     ghidra: FUN_08172c44
     name: class6000_property_60bc_u16
