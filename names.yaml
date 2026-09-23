@@ -29055,6 +29055,34 @@ functions:
       standing in for `bl 0x081fa070`, `[r4]` instead of `[r4, #0x1c]`
       for the crate cache, and LLVM rotating the cache-hit exit.
 
+  - address: 0x081f7a20
+    ghidra: FUN_081f7a20
+    name: volume_controller_reschedule_timer
+    size: 40
+    sig: "void volume_controller_reschedule_timer(void *volume_controller)"
+    module: app/volume_controller_reschedule_timer
+    status: ported
+    vars:
+      "param_1+0xc0": volume_controller_timer
+      FUN_0812c6b0: timer_stop
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw osos.dec words establish the true 40-byte extent
+      0x081f7a20..0x081f7a48: save the controller, load its target-width
+      timer pointer at +0xc0, call timer_stop, reload the pointer, load the
+      10000-ms literal at 0x081f7a48, call timer_start_after, reload the
+      pointer, restore, and tail-branch to timer_restart. The next separately
+      linked entry begins at 0x081f7a4c. Whole-image A32 decoding finds zero
+      inbound plain BL calls and exactly three predicated inbound BL calls:
+      BLNE at 0x081f78d8 and 0x081f7a18, and BLEQ at 0x081f9094. The
+      internal body has two unconditional direct BL instructions and one
+      unconditional tail B. The port calls the three already-ported timer
+      functions directly; Rust represents the final tail branch as an
+      ordinary void call, whose residual ARM r0 is unobservable. Host test
+      maps the u32 timer pointer below 4 GiB and proves the 10000-ms period,
+      final running state, four trace calls, and one final arm.
+
   - address: 0x081f77d4
     ghidra: FUN_081f77d4
     name: media_player_slot_b4_then_volume_controller_update

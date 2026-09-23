@@ -2021,6 +2021,9 @@ pub mod hints {
     // 0x6f30_0000: dedicated to app/activity_media_player_cleanup's
     // target-width six-word activity-cleanup fixture; mappings never unmap.
     pub const ACTIVITY_MEDIA_PLAYER_CLEANUP: usize = 0x6f30_0000;
+    // 0x6f40_0000: dedicated to app/volume_controller_reschedule_timer's
+    // target-width controller and embedded timer fixture; mappings never unmap.
+    pub const VOLUME_CONTROLLER_RESCHEDULE_TIMER: usize = 0x6f40_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
