@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ee008
+    ghidra: FUN_081ee008
+    name: selection_available
+    size: 64
+    sig: "u32 selection_available(const void *selection)"
+    module: app/selection_available
+    status: ported
+    renames:
+      param_1/r0: selection
+      DAT_081ee044: selection_record_table
+      r1: primary_or_fallback_index
+      r2: selection_record_table
+      r0: available
+    notes: >-
+      Raw osos.dec words establish the true 64-byte extent
+      0x081ee008..0x081ee047: the 60-byte instruction body ends at bx lr,
+      then literal 0x08a79240 occupies 0x081ee044; the next separately
+      entered function begins at 0x081ee048. Decoding every ARM B/BL word
+      independently finds exactly three inbound direct calls, all plain
+      unconditional bl at 0x0808cef8, 0x080d1a84, and 0x0821ecc8; there are
+      no predicated bl calls. The function returns 1 for a nonzero byte +0x10
+      in the 20-byte record selected by selection+0x24. If that byte is zero,
+      it returns whether the same byte is nonzero in a fallback record selected
+      by selection+0x1c from table-0x2a8. The fixed table has no recovered
+      semantic type, so the Rust port uses verified byte offsets; its host-only
+      replaceable table base is solely a test fixture seam. match.py reports a
+      structural diff because LLVM chooses table-0x2a8 as its literal and
+      early-returns after a primary hit; both paths preserve the verified reads
+      and normalized 0/1 result.
   - address: 0x0820429c
     ghidra: FUN_0820429c
     name: message_error_code_from_flags
