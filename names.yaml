@@ -61171,6 +61171,36 @@ functions:
       is the crate's fp prologue/epilogue and LLVM's register allocation
       plus a hoisted head-NULL pre-test.
 
+  - address: 0x08143474
+    ghidra: FUN_08143474
+    name: shared_payload_select_kind
+    size: 160
+    sig: "void shared_payload_select_kind(SharedCell **slot, u32 kind)"
+    module: cxx/shared_payload_select_kind
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: kind
+      puVar1/r1: state
+      piVar2/r4: cell
+      iVar3/r0: payload
+      FUN_081436d0: configure_shared_payload_kind
+    notes: >-
+      Raw ARM spans exactly 0x08143474..0x08143513 (160 bytes); the literal
+      pool word at 0x08143514 and next push prologue at 0x08143518 establish
+      the boundary. Complete A32 B/BL decoding finds three incoming plain BL
+      calls, with zero predicated BL forms and no direct tail branches. The
+      body has six plain outbound BL calls and zero predicated BL calls: it
+      allocates 12 bytes, stores {0x08985d98, -1, 0}, reads the slot's shared
+      payload, and calls the unported kind configurator at 0x081436d0 only
+      for a non-NULL payload. A zero configurator result builds an empty local
+      secondary shared-cell handle, releases the input slot through
+      shared_cell_release_secondary, assigns that empty handle, and destroys
+      the local. The otherwise unused 12-byte allocation is retained
+      intentionally because raw ARM performs it unconditionally. Deliberate
+      deviation: target builds call the verified but unported configurator by
+      address; host tests install an explicit seam for that one dependency.
+
   - address: 0x0814376c
     ghidra: FUN_0814376c
     name: resource_chain_find_with_selector

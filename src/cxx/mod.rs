@@ -245,6 +245,7 @@ pub mod settings;
 pub mod scaled_cursor;
 pub mod selector_item_base;
 pub mod shared_cell;
+pub mod shared_payload_select_kind;
 pub mod shared_handle_initialize;
 pub mod shared_cell_field_copy;
 pub mod shared_record_construct;
