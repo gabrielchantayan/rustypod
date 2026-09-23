@@ -130962,3 +130962,36 @@ functions:
       the Rust port calls this identified but unported callee at 0x081e5100;
       its replaceable host seam exists only because firmware addresses cannot
       be executed by host tests.
+  - address: 0x081e41a4
+    ghidra: FUN_081e41a4
+    name: mov_chain_timeout_prepare
+    size: 144
+    sig: "i32 mov_chain_timeout_prepare(u8 *state)"
+    module: app/mov_chain_timeout_prepare
+    status: ported
+    renames:
+      param_1/r0: state
+      "state->vtable+0x3c": state_virtual_callback
+      "state+0x1391": callback_succeeded
+      "state+0x139c": timeout_state
+      "state+0x13a0": state_mutex
+      FUN_08228360: lock_service_lock
+      FUN_08228388: lock_service_unlock
+      FUN_082283c4: timeout_configuration_adapter
+    notes: >-
+      Raw A32 words establish the exact 144-byte instruction body
+      0x081e41a4..0x081e4233; the 0x00002710 timeout literal at 0x081e4234
+      is outside that extent, and the push at 0x081e4238 begins the next real
+      function. Direct A32 decoding finds four unconditional outbound BL
+      instructions at 0x081e41c0, 0x081e41fc, 0x081e420c, and 0x081e4218,
+      with zero predicated direct BL forms, plus the unconditional virtual BLX
+      through state-vtable slot +0x3c at 0x081e41d8. Ghidra's three call sites
+      name the three unique direct destinations, not all four instructions.
+      The body locks state+0x13a0, invokes the virtual callback, and when it
+      returns nonzero stores one at state+0x1391 then configures state+0x139c
+      with 10000. It unlocks after every successful lock; the timeout failure
+      maps to three, while a zero callback status skips setup and returns the
+      unlock status. FUN_082283c4 has no recovered identity, so target Rust
+      calls its verified address and host tests install a role-based seam.
+      Host tests cover callback-zero timeout skipping, successful timeout
+      configuration including its exact pointer/value, and timeout failure.
