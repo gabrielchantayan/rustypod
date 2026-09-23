@@ -22266,6 +22266,39 @@ functions:
       acquire failure, absent deactivation, descriptor cleanup ordering, and
       no-descriptor cleanup.
 
+  - address: 0x0817f408
+    ghidra: FUN_0817f408
+    name: app_controller_release_mode_resource
+    size: 236
+    sig: "void app_controller_release_mode_resource(AppController *parent, Resource *resource)"
+    module: ui/app_controller_release_mode_resource
+    status: ported
+    renames:
+      param_1/r0/r4: parent
+      param_2/r1/r6: resource
+      r5: mode_slot
+      r7: resource_owner
+      "resource+0x11d": mode
+      "resource+0x3c": owner_link
+      "parent+0xd0": active_resource_count
+      "parent+slot+0xd4": slot_active
+      FUN_081842e8: resource_mode_slot
+      FUN_082a2670: resource_owner_lookup
+      FUN_0828d504: resource_owner_prepare
+      FUN_0828e5b0: resource_owner_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec corrects Ghidra's 100-byte extent: the fall-through at
+      0x0817f46c uses r4, r5, and r8 saved by the prologue, and the function
+      ends at 0x0817f4f3 immediately before the next push at 0x0817f4f4.
+      There are eleven outbound plain BL instructions, one predicated BLEQ
+      action call, and one internal BLT; the three recovered inbound direct
+      calls are plain BL with no recovered predicated form. Modes 1..4 map to
+      slots 0..3; invalid modes return before side effects. The target port
+      preserves the vtable +0xa0 stop dispatch and all verified fixed-address
+      calls. Unported callees are named only for their observed roles and use
+      a replaceable host operation seam; no class identity is asserted.
+
   - address: 0x0817f6b0
     ghidra: FUN_0817f6b0
     name: app_controller_opaque_item_vector_nonempty
