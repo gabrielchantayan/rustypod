@@ -133642,3 +133642,28 @@ functions:
       absorbs the following functions. The tail target has no verified identity:
       target builds call its retail address while host builds use a recording
       seam. The predicate and lazy singleton are direct calls to existing ports.
+
+  - address: 0x0817de2c
+    ghidra: FUN_0817de2c
+    name: state_status_dispatch
+    size: 96
+    sig: "void state_status_dispatch(u8 *state)"
+    module: app/state_status_dispatch
+    status: ported
+    renames:
+      param_1/r0: state
+    notes: >-
+      Raw osos.dec words verify the 96-byte extent (0x0817de2c..0x0817de87);
+      0x0817de8c starts the next independent function. Three direct incoming
+      unconditional bl sites are 0x0817d7e8, 0x0817dc74, and 0x0817dde8;
+      zero predicated forms. The body gates state bytes 3/4, then tests the
+      embedded scoped-context owner bit 3. Set converts context+4 and tail
+      dispatches mode 2; clear requires context+8 == 1000, converts zero,
+      and tail dispatches mode 0. Both share the original epilogue at
+      0x081b0de84 and branch to 0x081b0fe8. Deliberate deviation: the
+      unported downstream IRAM target has no recovered identity; target code
+      invokes the verified shared-tail ABI at 0x081b0fe8 while host tests use
+      DISPATCH_STATUS_MODE. match.py exits 1 with a structural diff: both
+      preserve the predicate gates, status conversion, mode selection, and
+      shared tail dispatch; LLVM adds its standard frame and literal indirect
+      tail call.
