@@ -28786,6 +28786,27 @@ functions:
       references occur. The record class and trailer field identity remain
       unidentified, so the port names only this verified storage role. No
       deliberate deviations.
+  - address: 0x0814d78c
+    ghidra: FUN_0814d78c
+    name: record_header_clear_high_flags
+    size: 24
+    sig: "void record_header_clear_high_flags(u32 *record, u32 flags)"
+    module: util/record_header_clear_high_flags
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: flags
+      uVar1/r1: selected_high_flags
+      uVar2/r2: header
+    notes: >-
+      Raw ARM has six instructions from 0x0814d78c through 0x0814d7a0; the
+      push {r4, lr} at 0x0814d7a4 starts the next real function, confirming
+      Ghidra's 24-byte extent. It loads record[0], ANDs flags with that
+      header and 0xff000000, then BICs exactly those selected high-byte bits
+      from the original header before storing it. The result is equivalently
+      `record[0] &= !(flags & 0xff000000)`. Three direct callers use plain
+      unconditional BL (0x0814d620, 0x0814d82c, and 0x081a8298); no
+      predicated BL calls occur. No deliberate deviations.
   - address: 0x0814d51c
     ghidra: FUN_0814d51c
     name: record_body_size
