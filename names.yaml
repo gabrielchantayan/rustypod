@@ -29165,6 +29165,30 @@ functions:
       tail-branching. Host test proves the sequential 12/8-byte tag-2
       allocations, only-kind initialization, FIFO node, +0x25 guard write,
       and mailbox token post.
+  - address: 0x081df4a8
+    ghidra: FUN_081df4a8
+    name: strided_record_find_by_key
+    size: 40
+    sig: "void *strided_record_find_by_key(const StridedRecordArray *records, u32 key)"
+    module: app/strided_record_find_by_key
+    status: ported
+    renames:
+      param_1: records
+      param_2: key
+      iVar1: candidate
+      DAT_081df488: strided_record_array_end
+    notes: >-
+      Raw words establish the exact 40-byte extent
+      0x081df4a8..0x081df4d0: the next independently linked function opens
+      `ldr r0, [r0, #8]` at 0x081df4d0. The body loads begin and end from
+      records+0x08/+0x0c, scans 12-byte opaque records, compares each +0x08
+      word to key, and returns the matching record or end sentinel. Raw
+      decoding and the three callers at 0x081df378, 0x081df3b4, and
+      0x081df494 verify three direct unconditional BL call sites and zero
+      predicated BL forms. Ghidra's void return and extra parameters are
+      wrong: only r0/r1 are read and r0 remains the candidate. No deliberate
+      deviations; host tests cover an empty range, a match after a prefix,
+      and an absent key.
   - address: 0x081df9ac
     ghidra: FUN_081df9ac
     name: command_dispatch_by_name_single_arg
