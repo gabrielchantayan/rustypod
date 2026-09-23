@@ -131603,3 +131603,37 @@ functions:
       model the runtime-initialized 0x089ccb50 slot with a fixture; tests cover
       NULL, the selector-three rejection boundary, ready and non-ready state
       zero, and ready selector -1.
+
+  - address: 0x081d66fc
+    ghidra: FUN_081d66fc
+    name: iap_incoming_process_thread_slot_release
+    size: 100
+    sig: "u32 iap_incoming_process_thread_slot_release(u8 *this, u32 index)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r5: this
+      param_2/r6: index
+      param_1+0x114/r4: registry_mutex
+      param_1+0x154+index*8/r5: slot
+      FUN_08257cb4: registration_poll
+      FUN_08257d08: registration_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent
+      0x081d66fc..0x081d6760; 0x081d6760 begins the distinct next function
+      with `push {r0-r11,lr}`. Aligned A32 decoding finds five outbound plain
+      BL instructions (mutex-lock veneer 0x08261e20, heap_panic, poll,
+      registration destructor, operator_delete), zero predicated BL forms,
+      and exactly three inbound plain BL sites at 0x08139ea0, 0x081f26f4,
+      and 0x081f2708. Under the +0x114 registry mutex it bounds-checks the
+      29-entry +0x154 table, rejects an empty slot fatally, polls, then
+      re-reads the object word: a live slot is destroyed/freed, while a poll
+      that clears it skips those calls. It clears both slot words and
+      tail-branches to mutex unlock. The Rust port uses canonical mutex helpers
+      for the two alias veneers; its poll/destructor/delete seam is wired to
+      firmware/ported behavior on target and recording host tests prove callback
+      order, poll-side removal, both boundary slots, slot clearing, and
+      propagated unlock status. Reference C: decomp/c/019/081d66fc_FUN_081d66fc.c;
+      Ghidra incorrectly extends it through the unlock tail and mis-types
+      the post-tail code as part of this function.

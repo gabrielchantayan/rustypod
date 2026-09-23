@@ -915,6 +915,275 @@ pub unsafe extern "C" fn iap_incoming_process_thread_slot_wait(
     (iap_thread_slot_wait_ops().wait_slot_object)(slot_object);
     posix_mutex_unlock(mutex)
 }
+/// Indirect dependencies of [`iap_incoming_process_thread_slot_release`].
+/// The condition-variable destructor is unported; host tests also replace
+/// delete because their u32-address fixtures are not heap allocations.
+#[derive(Clone, Copy)]
+pub struct IapThreadSlotReleaseOps {
+    pub poll_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
+    pub destroy_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
+    pub delete_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_release_poll_slot_object(slot_object: *mut u8) {
+    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_7cb4usize);
+    f(slot_object);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_release_poll_slot_object(_slot_object: *mut u8) {}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_destroy_slot_object(slot_object: *mut u8) {
+    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_7d08usize);
+    f(slot_object);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_destroy_slot_object(_slot_object: *mut u8) {}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_delete_slot_object(slot_object: *mut u8) {
+    crate::heap::veneers::operator_delete(slot_object);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_delete_slot_object(_slot_object: *mut u8) {}
+
+pub const DEFAULT_IAP_THREAD_SLOT_RELEASE_OPS: IapThreadSlotReleaseOps =
+    IapThreadSlotReleaseOps {
+        poll_slot_object: firmware_release_poll_slot_object,
+        destroy_slot_object: firmware_destroy_slot_object,
+        delete_slot_object: firmware_delete_slot_object,
+    };
+
+pub static mut IAP_THREAD_SLOT_RELEASE_OPS: IapThreadSlotReleaseOps =
+    DEFAULT_IAP_THREAD_SLOT_RELEASE_OPS;
+
+#[inline(always)]
+fn iap_thread_slot_release_ops() -> IapThreadSlotReleaseOps {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_RELEASE_OPS)) }
+}
+
+/// iap_incoming_process_thread_slot_release — original: `FUN_081d66fc` @
+/// 0x081d66fc (**100 bytes**, 0x081d66fc..0x081d6760; the next real
+/// function begins with `push {r0-r11,lr}`). Raw-word decoding finds
+/// **5 plain `bl` calls and zero predicated `bl` forms** in the body;
+/// raw whole-image branch decoding finds **three** direct incoming `bl`
+/// sites (0x08139ea0, 0x081f26f4, 0x081f2708), agreeing with Ghidra.
+///
+/// Locks the 29-entry registration table, validates `index` and its object
+/// word, polls, then re-reads the slot. If it remains live, destroys and frees
+/// its condition variable object; it clears both slot words, tail-unlocks,
+/// and returns the unlock status.
+///
+/// Deliberate deviations: the original calls lock/unlock alias veneers
+/// 0x08261e20/0x08261e24 directly; this uses their canonical ports.
+/// Poll (0x08257cb4) and destruction (0x08257d08) remain indirect seams.
+/// The target delete seam routes to the ported `operator_delete`; its host
+/// default is inert because fixture addresses are not allocations.
+///
+/// # Safety
+///
+/// `this` must name a live 0x240-byte context with an initialized mutex
+/// and a live registration object in the selected slot.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_slot_release(
+    this: *mut u8,
+    index: u32,
+) -> u32 {
+    let mutex = this.wrapping_add(REGISTRY_MUTEX_OFFSET) as *mut PosixMutex;
+    posix_mutex_lock(mutex);
+    if index >= SLOT_COUNT {
+        heap_panic();
+    }
+    let slot = this.wrapping_add(SLOT_TABLE_OFFSET + index as usize * SLOT_STRIDE);
+    let slot_object = *(slot as *const u32) as *mut u8;
+    if slot_object.is_null() {
+        heap_panic();
+    }
+    let ops = iap_thread_slot_release_ops();
+    (ops.poll_slot_object)(slot_object);
+    let slot_object = *(slot as *const u32) as *mut u8;
+    if !slot_object.is_null() {
+        (ops.destroy_slot_object)(slot_object);
+        (ops.delete_slot_object)(slot_object);
+    }
+    (slot as *mut u32).write(0);
+    (slot.wrapping_add(4) as *mut u32).write(0);
+    posix_mutex_unlock(mutex)
+}
+
+#[cfg(test)]
+mod slot_release_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{Mutex, MutexGuard};
+    use std::vec::Vec;
+
+    const SLAB_LEN: usize = 0x300;
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut SLAB: *mut u8 = core::ptr::null_mut();
+    static mut EVENTS: Vec<(u8, usize)> = Vec::new();
+    static mut CLEAR_OWNER: bool = false;
+    static mut POLL_CLEAR_SLOT: *mut u32 = core::ptr::null_mut();
+
+    struct Bench {
+        _lock: MutexGuard<'static, ()>,
+        previous_ops: IapThreadSlotReleaseOps,
+        available: bool,
+    }
+
+    unsafe fn slab() -> *mut u8 {
+        if SLAB.is_null() {
+            SLAB = try_map_u32_slab(hints::IAP_THREAD_SLOT_RELEASE, SLAB_LEN)
+                .unwrap_or_else(|| {
+                    note_missing_u32_fixture("app::iap_incoming_process_thread::slot_release");
+                    core::ptr::null_mut()
+                });
+        }
+        SLAB
+    }
+
+    unsafe fn set_word(offset: usize, value: u32) {
+        (slab().wrapping_add(offset) as *mut u32).write_volatile(value);
+    }
+
+    unsafe fn fake_slot_object(n: usize) -> u32 {
+        slab().wrapping_add(0x240 + n * 4) as usize as u32
+    }
+
+    unsafe extern "C" fn mock_poll(slot_object: *mut u8) {
+        assert_eq!(
+            (*(slab().wrapping_add(REGISTRY_MUTEX_OFFSET) as *mut PosixMutex)).owner,
+            crate::kernel::posix_mutex::PRE_KERNEL_THREAD
+        );
+        EVENTS.push((0, slot_object as usize));
+        if !POLL_CLEAR_SLOT.is_null() {
+            POLL_CLEAR_SLOT.write(0);
+        }
+    }
+
+    unsafe extern "C" fn mock_destroy(slot_object: *mut u8) {
+        EVENTS.push((1, slot_object as usize));
+    }
+
+    unsafe extern "C" fn mock_delete(slot_object: *mut u8) {
+        EVENTS.push((2, slot_object as usize));
+        if CLEAR_OWNER {
+            let mutex = slab().wrapping_add(REGISTRY_MUTEX_OFFSET) as *mut PosixMutex;
+            (*mutex).owner = 0;
+            (*mutex).recursion = 0;
+        }
+    }
+
+    fn bench() -> Bench {
+        let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let available = unsafe { !slab().is_null() };
+        let previous_ops = unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_RELEASE_OPS))
+        };
+        if available {
+            unsafe {
+                core::ptr::write_bytes(slab(), 0, SLAB_LEN);
+                EVENTS.clear();
+                CLEAR_OWNER = false;
+                POLL_CLEAR_SLOT = core::ptr::null_mut();
+                core::ptr::write_volatile(
+                    core::ptr::addr_of_mut!(IAP_THREAD_SLOT_RELEASE_OPS),
+                    IapThreadSlotReleaseOps {
+                        poll_slot_object: mock_poll,
+                        destroy_slot_object: mock_destroy,
+                        delete_slot_object: mock_delete,
+                    },
+                );
+            }
+        }
+        Bench { _lock: lock, previous_ops, available }
+    }
+
+    impl Drop for Bench {
+        fn drop(&mut self) {
+            if self.available {
+                unsafe {
+                    core::ptr::write_volatile(
+                        core::ptr::addr_of_mut!(IAP_THREAD_SLOT_RELEASE_OPS),
+                        self.previous_ops,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn release_orders_callbacks_and_clears_both_slot_words() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            let offset = SLOT_TABLE_OFFSET + 7 * SLOT_STRIDE;
+            let object = fake_slot_object(7);
+            set_word(offset, object);
+            set_word(offset + 4, 0xa5a5_5a5a);
+            assert_eq!(iap_incoming_process_thread_slot_release(slab(), 7), 0);
+            assert_eq!(EVENTS.as_slice(), &[(0, object as usize), (1, object as usize), (2, object as usize)]);
+            assert_eq!((slab().wrapping_add(offset) as *const u32).read_volatile(), 0);
+            assert_eq!((slab().wrapping_add(offset + 4) as *const u32).read_volatile(), 0);
+        }
+    }
+
+    #[test]
+    fn release_skips_destroy_and_delete_when_poll_removes_the_slot() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            let offset = SLOT_TABLE_OFFSET + 4 * SLOT_STRIDE;
+            let object = fake_slot_object(4);
+            set_word(offset, object);
+            set_word(offset + 4, 0xfeed_face);
+            POLL_CLEAR_SLOT = slab().wrapping_add(offset) as *mut u32;
+            assert_eq!(iap_incoming_process_thread_slot_release(slab(), 4), 0);
+            assert_eq!(EVENTS.as_slice(), &[(0, object as usize)]);
+            assert_eq!((slab().wrapping_add(offset + 4) as *const u32).read_volatile(), 0);
+        }
+    }
+
+    #[test]
+    fn release_accepts_the_first_and_last_slots() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            for index in [0usize, 28] {
+                let object = fake_slot_object(index);
+                set_word(SLOT_TABLE_OFFSET + index * SLOT_STRIDE, object);
+                assert_eq!(iap_incoming_process_thread_slot_release(slab(), index as u32), 0);
+            }
+            assert_eq!(EVENTS.len(), 6);
+        }
+    }
+
+    #[test]
+    fn release_forwards_the_unlock_status() {
+        let bench = bench();
+        if !bench.available {
+            return;
+        }
+        unsafe {
+            set_word(SLOT_TABLE_OFFSET + SLOT_STRIDE, fake_slot_object(1));
+            CLEAR_OWNER = true;
+            assert_eq!(iap_incoming_process_thread_slot_release(slab(), 1), 0x05);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
