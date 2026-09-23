@@ -1305,6 +1305,9 @@ pub mod hints {
     // 0x9f00_0000: dedicated to mov/chunk_offset_table_load_window's raw-u32
     // table fixture; mappings never unmap, so no other user may share this hint.
     pub const MOV_CHUNK_OFFSET_TABLE_LOAD_WINDOW: usize = 0x9f00_0000;
+    // 0x9f10_0000: dedicated to mov/sample_size_table_load_window's raw-u32
+    // table fixture; mappings never unmap, so no other user may share this hint.
+    pub const MOV_SAMPLE_SIZE_TABLE_LOAD_WINDOW: usize = 0x9f10_0000;
     // 0x9d00_0000: dedicated to util/linked_list_append's raw-u32 anchor
     // and intrusive-node fixture; mappings never unmap, so no other user may
     // share this hint.
