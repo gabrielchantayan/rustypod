@@ -22152,6 +22152,32 @@ functions:
       (that RW page is runtime-initialized; the image holds stale UI
       strings there), zeroed = the pre-init state.
 
+  - address: 0x081ee278
+    ghidra: FUN_081ee278
+    name: utf16_next_whitespace_delimited_range
+    size: 116
+    sig: "void utf16_next_whitespace_delimited_range(Utf16Range *out, Utf16TokenCursor *state)"
+    module: util/utf16_next_whitespace_delimited_range
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: state
+      param_2_plus_0x04: end
+      param_2_plus_0x08: cursor
+      FUN_081ee250: skip_utf16_space_or_tab
+      FUN_081ee228: scan_utf16_non_space_or_tab
+      FUN_081bb69c: u32_pair_store
+      FUN_081bb6a4: u32_pair_copy
+    notes: >-
+      Raw ARM establishes the exact 116-byte body from 0x081ee278 through
+      0x081ee2e8; the next real function starts at 0x081ee2ec. The raw words
+      contain four direct call sites, all unconditional bl (none predicated):
+      skip leading U+0020/U+0009, scan the following non-whitespace span,
+      store the pair, then copy it to out. The state is target-width words:
+      end at +0x04 and cursor at +0x08. A non-NULL cursor below end is
+      advanced to the token end; NULL or cursor >= end produces {0,0} without
+      changing state. The Rust port deliberately inlines all four tiny leaf
+      calls (two scans and two-word store/copy), avoiding unverified seams.
   - address: 0x081ee17c
     ghidra: FUN_081ee17c
     name: cursor_init

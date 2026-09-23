@@ -666,6 +666,10 @@ pub mod hints {
     // parser and character-class-table fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const PARSER_SCAN_TO_CLASS_BOUNDARY: usize = 0x7f30_0000;
+    // 0x7f35_0000: dedicated to util/utf16_next_whitespace_delimited_range's
+    // raw-u32 UTF-16 cursor and range fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const UTF16_NEXT_WHITESPACE_DELIMITED_RANGE: usize = 0x7f35_0000;
     // 0x8300_0000: dedicated to sqlite/index_key_info's raw-u32 Index,
     // KeyInfo, collation-array, and tracked-allocation fixtures; mappings
     // never unmap, so no other user may share this hint.
