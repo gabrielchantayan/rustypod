@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08164e24
+    ghidra: FUN_08164e24
+    name: encoded_field_layout_validate
+    size: 120
+    sig: "void encoded_field_layout_validate(const u8 *field)"
+    module: mov/encoded_field_layout_validate
+    status: ported
+    renames:
+      param_1/r0: field
+      r4: field
+      r5: primary_field_size
+      r6: optional_field_size
+      FUN_08164ec4: tagged_header_low_bits
+      FUN_08164e9c: encoded_field_prefix_size
+      FUN_08164de8: mov_checked_flagged_width
+      FUN_08164db8: optional_prefix_size
+      FUN_08164c80: optional_flagged_byte
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte A32 body
+      0x08164e24..0x08164e9b; the next word at 0x08164e9c starts the
+      separately linked encoded_field_prefix_size function. The body has five
+      unconditional BLs (tagged_header_low_bits, encoded_field_prefix_size,
+      mov_checked_flagged_width, optional_prefix_size, and
+      optional_flagged_byte) plus one predicated BLCS heap_panic. Ghidra finds
+      three direct inbound BL callers. The function adds the low header tag
+      and primary prefix; a nonzero optional width adds its optional prefix,
+      marker byte, and bit-4 byte, then validates that the complete field plus
+      two trailing bytes is below 26. The optional-prefix helper is expressed
+      by calling encoded_field_prefix_size on field+1, preserving its checked
+      semantics without adding an otherwise redundant Rust port. Deliberate
+      deviations: none.
   - address: 0x08169be0
     ghidra: FUN_08169be0
     name: panel_set_scale_mode
