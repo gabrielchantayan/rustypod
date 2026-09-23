@@ -1084,6 +1084,10 @@ pub mod hints {
     // element, and collection-header fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const PLST_LINKED_ITEM_COUNT: usize = 0xfa00_0000;
+    // 0xfa10_0000: dedicated to app/selection_context_nested_u16's raw-u32
+    // context, tail-target, nested record, and header fixture; mappings never
+    // unmap, so no other port may share it.
+    pub const SELECTION_CONTEXT_NESTED_U16: usize = 0xfa10_0000;
     // 0xfb00_0000: dedicated to ui/tdat_message_dispatch's raw-u32 virtual
     // handler and context fixture; mappings never unmap, so no other user may
     // share this hint.

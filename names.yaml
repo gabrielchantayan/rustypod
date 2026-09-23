@@ -132893,3 +132893,32 @@ functions:
       nonzero leaves output unchanged and returns zero. The concrete method
       identity is unverified, so the name records only its observed readiness
       role. Host vtables are pointer-width representations of target slots.
+
+  # --- Selection-context nested u16 veneer (src/app/selection_context_nested_u16.rs) ---
+  - address: 0x081a3178
+    ghidra: FUN_081a3178
+    name: selection_context_nested_u16
+    size: 8
+    sig: "u16 selection_context_nested_u16(const void *context)"
+    module: app/selection_context_nested_u16
+    status: ported
+    renames:
+      param_1/r0: context
+      param_1_plus_0x44: nested_selection_context
+      nested_selection_context_plus_0xf50: nested_record
+      nested_record_plus_0x40: header
+      header_plus_0x2e: unrecovered_u16
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte A32 veneer
+      0x081a3178..0x081a317f: ldr r0,[r0,#0x44]; b 0x08054214. The push at
+      0x081a3180 begins the next real function; Ghidra instead follows the
+      tail target and reports its logic as this function. A full-image aligned
+      A32 decode finds exactly three inbound plain unconditional BL sites
+      (0x0815fd24, 0x081b4b18, 0x0820aad0), zero predicated BL forms, and no
+      direct B tails. The tail target at 0x08054214 has no recovered semantic
+      identity, so the port deliberately inlines its verified reads rather
+      than creating a callee seam. It returns zero for a null +0xf50 record;
+      otherwise it follows +0xf50 then +0x40 and reads u16 +0x2e. This makes
+      the ARM export nine instructions instead of the stock two-instruction
+      veneer, as confirmed by match.py, while retaining the observed result
+      and target-width u32 pointer fields.

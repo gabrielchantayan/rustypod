@@ -144,6 +144,7 @@ pub mod locked_owned_context_destroy;
 pub mod controller_event_category_index;
 pub mod controller_event_is_enabled;
 pub mod controller_history_select;
+pub mod selection_context_nested_u16;
 pub mod controller_history_select_core;
 pub mod context_scope;
 pub mod context_scope_complete_selection;
