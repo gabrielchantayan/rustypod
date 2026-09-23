@@ -135403,3 +135403,33 @@ functions:
       collection-processing path. Deliberate deviation: LLVM lowers the
       equivalent Rust predicate to a lookup table rather than the stock
       predicated comparison chain; behavior and normalized u32 result match.
+  - address: 0x0812ed60
+    ghidra: FUN_0812ed60
+    name: container_view_construct_state_1
+    size: 64
+    sig: "ContainerViewState1 *container_view_construct_state_1(ContainerViewState1 *view, ResourceProvider *resources, void *controller, void *parent, const ContainerViewState1Spec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: resources
+      param_3/r2: controller
+      param_4/r3: parent
+      param_5/stack: spec
+      DAT_0812eda0: CONTAINER_VIEW_STATE_1_VTABLE_ADDRESS
+    notes: >-
+      Raw osos.dec words establish the exact 64-byte extent
+      0x0812ed60..0x0812ed9f: 60 bytes of A32 code followed by its owned
+      vtable literal 0x08983f2c at 0x0812eda0; cmp r0,#0 at 0x0812eda4
+      starts the next real function. A whole-image aligned A32 branch decode
+      finds exactly three inbound plain unconditional BL sites (0x0812ea70,
+      0x081e9bf8, and 0x081fb008) and zero predicated inbound BL sites. The
+      body has one unconditional direct BL to container_view_construct
+      (0x08158778) and zero predicated BL instructions. It forwards all five
+      constructor arguments, installs the derived vtable, clears words +0xec
+      and +0xf4, stores one at byte +0xf0, and copies spec halfwords +0x5c
+      and +0x5e to +0xe8 and +0xea. The concrete class identity is unrecovered,
+      so the port names its verified state effect rather than inventing a widget
+      role. Deliberate deviation: retaining view across the base constructor
+      replaces target-only register shuffling without changing the return
+      identity or stores.
