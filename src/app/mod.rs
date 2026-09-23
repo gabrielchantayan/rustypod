@@ -574,3 +574,4 @@ pub mod controller_mark_pending_and_dispatch;
 pub mod opaque_record_vector_last_entry;
 pub mod selection_state_copy_item_at;
 pub mod owner_prefix_pending_handle_reset;
+pub mod lock_state_byte;
