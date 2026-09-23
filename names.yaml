@@ -134497,3 +134497,39 @@ functions:
       0x08093af8 and 0x0807ea68 before returning a pointer. Its semantic
       identity and ABI are not established, so creating a Rust seam or
       reconstructing this initializer would invent the callee contract.
+
+  - address: 0x081559ac
+    ghidra: FUN_081559ac
+    name: stream_state_get_or_create
+    size: 204
+    sig: "u8 *stream_state_get_or_create(void)"
+    module: app/stream_state_get_or_create
+    status: ported
+    renames:
+      DAT_08155a78: stream_state_global
+      r4: stream_state
+      r5: embedded_cursor
+      auStack_4c: last_cursor
+      auStack_3c: first_cursor
+      "stream_state+0x04": embedded_cursor
+      "stream_state+0x2c": cursor_guard
+      "stream_state+0x30": first_condvar
+      "stream_state+0x3c": six_entry_state
+      "stream_state+0x40": second_condvar
+    notes: >-
+      Raw osos.dec words establish the true 204-byte extent
+      0x081559ac..0x08155a77, including the literal global-pointer word at
+      0x08155a78; the next real function starts at 0x08155a7c. The body has
+      nine plain outbound BL instructions and zero predicated forms:
+      operator_new(76) at 0x082aadd4, opaque cursor initialization at
+      0x083dee30 twice, opaque cursor copy at 0x083da21c twice, opaque range
+      insertion at 0x083ea230, opaque cursor destruction at 0x083deecc,
+      condvar_init at 0x0807f680 twice, and the unported six-entry state
+      initializer at 0x081c9470. A complete raw A32 branch decode finds three
+      inbound plain BL sites (0x08155990, 0x08155a84, 0x08155aa8) and zero
+      predicated forms. The global at 0x089d00a8 is a lazy pointer cache:
+      NULL allocates and initializes the 76-byte state, then publishes it;
+      non-NULL returns unchanged. The cursor and state callees have no
+      established semantic identity in names.yaml, so target code calls their
+      verified addresses while host tests expose narrow ABI seams. Deliberate
+      deviation: host builds replace the live global cache with test storage.
