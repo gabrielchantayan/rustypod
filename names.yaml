@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bd63c
+    ghidra: FUN_081bd63c
+    name: associated_object_word_at_0c_or_negative_one
+    size: 24
+    sig: "i32 associated_object_word_at_0c_or_negative_one(void *receiver, void *object)"
+    module: app/associated_object_word_at_0c_or_negative_one
+    status: ported
+    renames:
+      param_1/r0: receiver_ignored
+      param_2/r1: object
+      "object+0x244": associated_object_target_pointer
+      "associated_object+0xc": signed_value
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte A32 body
+      0x081bd63c..0x081bd653: cmp r1,#0; ldrne r0,[r1,#0x244]; cmpne
+      r0,#0; ldrne r0,[r0,#0xc]; mvneq r0,#0; bx lr. The next independently
+      entered function starts at 0x081bd654 with cmp r1,#0. A full-image
+      aligned A32 decode finds exactly three inbound unconditional plain bl
+      calls at 0x081bd44c, 0x081bd500, and 0x081bdc10, with no predicated
+      inbound bl forms; this function has no outbound BL forms. It ignores
+      r0, follows the u32 target pointer at object+0x244, and returns that
+      associated object's signed +0xc word, or -1 if either pointer is null.
+      Deliberate deviation: direct Rust branches replace predicated A32
+      instructions while retaining unchecked target-width pointer reads.
   - address: 0x081ccc78
     ghidra: FUN_081ccc78
     name: byte_state_set_and_notify
