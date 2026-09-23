@@ -131659,3 +131659,31 @@ functions:
       the two trailing words at +0x28c and +0x290. Rust uses the already-
       ported memcpy body instead of modeling the IRAM veneer; the discarded
       advanced-destination return is not observable.
+  - address: 0x081d5fe0
+    ghidra: FUN_081d5fe0
+    name: selector_record_first_word
+    size: 24
+    sig: "u32 selector_record_first_word(const u8 *table, u32 selector)"
+    module: app/selector_record_first_word
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: selector
+      "table+0x24": selector_records
+      "selector_records+selector*0x24": selector_record
+    notes: >-
+      Raw osos.dec words 0xe3510011, 0x90811181, 0x90800101,
+      0x95900024, 0x83e00000, and 0xe12fff1e establish the exact
+      24-byte A32 body 0x081d5fe0..0x081d5ff7; str r1,[r0] at
+      0x081d5ff8 begins the next real function. The body has no outbound
+      plain or predicated BL calls. Whole-image A32 decoding finds three
+      inbound plain BL calls at 0x0811f080, 0x0811f27c, and 0x0811f2a4,
+      zero predicated BL calls, and the conditional tail branch bne at
+      0x08208668. It returns the first word in the 36-byte record at
+      table+0x24+selector*0x24 for unsigned selectors through 17; selectors
+      18 and above return 0xffffffff without dereferencing table. No callee
+      seam is needed, and the Rust unsigned bound and aligned word read
+      deliberately preserve the retail behavior.
+      match.py reports LLVM's frame setup, early default return, and equivalent
+      scaled-address arithmetic; its unsigned guard and selected-word load
+      retain the retail control flow.
