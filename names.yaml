@@ -24668,6 +24668,21 @@ functions:
       layer_bind_surface precedent - a real bl target LLVM would
       otherwise inline into its callers).
 
+  - address: 0x081fbe44
+    ghidra: FUN_081fbe44
+    name: client_byte_limit
+    size: 8
+    sig: "u32 client_byte_limit(const u8 *client)"
+    module: heap/client_byte_limit
+    status: ported
+    vars: {param_1/r0: client}
+    notes: >-
+      Raw osos.dec extent is exactly 0x081fbe44..0x081fbe4c: `ldr r0,
+      [r0,#0x48]; bx lr`. It returns the client's requested byte limit at
+      +0x48. The three inbound direct calls are plain BL at 0x08207960,
+      0x08207988, and 0x082079f4; no predicated BL calls. The three uses in
+      the block-manager balancing loop treat the result as a byte count.
+      Deliberate deviations: none.
   - address: 0x081fbe4c
     ghidra: FUN_081fbe4c
     name: client_reserve
