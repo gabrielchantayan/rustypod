@@ -26286,6 +26286,33 @@ functions:
       deviation exists.
 
 
+  - address: 0x08171be4
+    ghidra: FUN_08171be4
+    name: class6000_read_ui32_property_6063
+    size: 24
+    sig: "u32 *class6000_read_ui32_property_6063(Class6000 *store)"
+    module: app/class_6000_property
+    status: ported
+    renames:
+      param_1/r0: store
+      "[store + 0x00]": vtable
+      "[vtable + 0xe0]": read_typed
+      DAT_08171bfc: RESOURCE_KIND_UI32
+    notes: >-
+      Raw osos.dec words establish the 24-byte extent: e5901000 e3a02a06
+      e591c0e0 e59f3004 e2821063 e12fff1c through 0x08171bf8, followed by
+      literal-pool word 0x55693332 ("Ui32") at 0x08171bfc; 0x08171c00 begins
+      the next real function. Direct ARM branch decoding finds three inbound
+      plain unconditional bl instructions at 0x0813f120, 0x081edfe4, and
+      0x08227d80; no predicated bl reaches it. It loads store->vtable and
+      tail-dispatches slot +0xe0 as read_typed(store, 0x6063, 0x6000, "Ui32"),
+      preserving the raw pointer result. The key has no recovered semantic
+      identity beyond its verified class, value, and type tag. Ghidra drops
+      the first three tail-call arguments because it mistakes bx ip for an
+      indirect call. Deliberate deviation: Rust expresses that terminal
+      virtual tail dispatch as a typed call; vtable-load order, all four
+      arguments, and unguarded NULL behavior match stock.
+
   - address: 0x08171fdc
     ghidra: FUN_08171fdc
     name: class6000_read_ui32_property_6056
