@@ -414,6 +414,7 @@ pub mod object_subobject_at_0c;
 pub mod object_word_at_d4_or_zero;
 pub mod associated_object_word_at_0c_or_negative_one;
 pub mod once_initializer;
+pub mod arena_message_post;
 pub mod own_target_notification_post;
 pub mod pair_header_destruct;
 pub mod parse_result;

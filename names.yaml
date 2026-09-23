@@ -134249,3 +134249,38 @@ functions:
       callees remain fixed-address calls on target and host callbacks in the
       test build. Deliberate deviations: none to the observable call order,
       argument values, or target-width descriptor layout.
+
+  - address: 0x08166d3c
+    ghidra: FUN_08166d3c
+    name: arena_message_post
+    size: 76
+    sig: "void arena_message_post(void *ctx, u32 message_code, MessageTarget *target, const u8 *bytes, u32 byte_count, usize reply_queue)"
+    module: app/arena_message_post
+    status: ported
+    renames:
+      param_1/r0: ctx_unused
+      param_2/r1/r6: message_code
+      param_3/r2/r4: target
+      param_4/r3/r5: bytes
+      param_5/sp+0x20/r7: byte_count
+      param_6/sp+0x24/r8: reply_queue
+      FUN_08103400: message_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08103464: queued_message_construct
+      FUN_08110fdc: queued_message_post
+    notes: >-
+      Raw osos.dec words establish the true 76-byte A32 body
+      0x08166d3c..0x08166d87: nineteen words ending in
+      `pop {r3,r4,r5,r6,r7,r8,r9,pc}`. The following `and r0,r1,#0xff` at
+      0x08166d8c begins the next real function, correcting Ghidra's
+      80-byte extent. Whole-image ARM B/BL decoding finds three direct
+      inbound plain BL calls and zero predicated forms; the body itself has
+      four direct BLs, in order: message_arena_pool, fixed_block_pool_alloc
+      with size 12, queued_message_construct, and queued_message_post.
+      It never reads ctx/r0. The constructed envelope receives
+      (message_code, bytes, byte_count), then posts to target with no_wait
+      1, reply_queue forwarded unchanged, and flags 0. Rust directly uses
+      all four existing ports. Host tests cover allocation size/order plus
+      nonempty and NULL/empty payload argument forwarding. match.py reports
+      the expected structural diff: LLVM uses a smaller frame and turns the
+      final post/return into a tail branch, preserving its r0 status.
