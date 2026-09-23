@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08130134
+    ghidra: FUN_08130134
+    name: collection_entry_action_clear
+    size: 92
+    sig: "void collection_entry_action_clear(u8 *owner)"
+    module: app/collection_entry_action_clear
+    status: ported
+    renames:
+      param_1/r0: owner
+      r4: owner
+      auStack_18/sp: iterator_state
+      local_4/sp+0x14: entry
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+    notes: >-
+      Raw ARM is exactly 92 bytes, 0x08130134..0x08130190, ending before the
+      distinct function prologue at 0x08130190. Decoding every ARM direct-call
+      encoding across osos.dec finds three unconditional BL callers
+      (0x08114030, 0x08114cc4, and 0x081ca2b8) and zero predicated BL callers.
+      The body makes two direct calls to the already ported iterator seams and
+      one register-indirect BLX through each yielded entry's vtable+0x180
+      action. It constructs the 20-byte iterator for owner+0x18 at position
+      -2, dispatches each action, drops the iterator, then clears owner+0x70.
+      Rust zero-initializes the iterator local because its constructor owns
+      every field later read; host tests use native-width vtables while target
+      dispatch retains target-width slot addressing.
   - address: 0x08164e24
     ghidra: FUN_08164e24
     name: encoded_field_layout_validate
