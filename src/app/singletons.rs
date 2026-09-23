@@ -277,6 +277,9 @@ pub const CLASS_7F80_SIZE: usize = 0x1d4;
 /// Allocation size of the unidentified 0x3c singleton
 /// (`mov r0, #0x3c`).
 pub const SINGLETON_0X3C_SIZE: usize = 0x3c;
+/// Allocation size of the unidentified 0x34 singleton (`mov r0, #0x34`).
+pub const SINGLETON_0X34_SIZE: usize = 0x34;
+
 
 /// Allocation size of the unidentified 0x8c singleton (`mov r0, #0x8c`).
 pub const SINGLETON_0X8C_SIZE: usize = 0x8c;
@@ -383,6 +386,9 @@ pub struct SingletonCtors {
     pub class_7f80: Constructor,
     /// The 0x3c object's ctor @ 0x0816e2ac.
     pub singleton_0x3c: Constructor,
+    /// The 0x34 object's ctor @ 0x081a2d04.
+    pub singleton_0x34_089cc878: Constructor,
+
     /// The 0x8c object's ctor @ 0x08160534.
     pub singleton_0x8c: Constructor,
     /// The 0x28 object's ctor @ 0x081df284.
@@ -453,6 +459,8 @@ zeroing_ctor!(zeroing_class_8900_ctor, CLASS_8900_SIZE);
 zeroing_ctor!(zeroing_class_6200_ctor, CLASS_6200_SIZE);
 zeroing_ctor!(zeroing_class_7f80_ctor, CLASS_7F80_SIZE);
 zeroing_ctor!(zeroing_singleton_0x3c_ctor, SINGLETON_0X3C_SIZE);
+zeroing_ctor!(zeroing_singleton_0x34_ctor, SINGLETON_0X34_SIZE);
+
 zeroing_ctor!(zeroing_singleton_0x8c_ctor, SINGLETON_0X8C_SIZE);
 zeroing_ctor!(zeroing_class_8c00_ctor, CLASS_8C00_SIZE);
 zeroing_ctor!(zeroing_singleton_0x28_ctor, SINGLETON_0X28_SIZE);
@@ -503,6 +511,8 @@ pub(crate) const DEFAULT_SINGLETON_CTORS: SingletonCtors = SingletonCtors {
     class_6200: zeroing_class_6200_ctor,
     class_7f80: zeroing_class_7f80_ctor,
     singleton_0x3c: zeroing_singleton_0x3c_ctor,
+    singleton_0x34_089cc878: zeroing_singleton_0x34_ctor,
+
     singleton_0x8c: zeroing_singleton_0x8c_ctor,
     class_8c00: zeroing_class_8c00_ctor,
     singleton_0x28: zeroing_singleton_0x28_ctor,
@@ -678,6 +688,10 @@ pub static mut SINGLETON_0X44_08A09F64: *mut u8 = core::ptr::null_mut();
 /// The unidentified 0x44 singleton (original cache word @ 0x08a09f64, pool
 /// literal @ 0x0825a714).
 pub static mut SINGLETON_0X44: *mut u8 = core::ptr::null_mut();
+/// The unidentified 0x34 singleton (original cache word @ 0x089cc878, pool
+/// literal @ 0x081a2928).
+pub static mut SINGLETON_0X34_089CC878: *mut u8 = core::ptr::null_mut();
+
 
 /// The registry-class-0x6280 singleton (original: the word @
 /// 0x089cc30c, the pool literal @ 0x0811b2ec).
@@ -1730,6 +1744,30 @@ pub unsafe extern "C" fn event_listener_kind_10_get() -> *mut u8 {
         ctor!(event_listener_kind_10)
     })
 }
+/// lazy_singleton_0x34_089cc878_get — original: `FUN_081a28fc` @
+/// **0x081a28fc** (44 code bytes plus pool word @ 0x081a2928 =
+/// **48 bytes true extent**; **3 direct plain `bl` call sites, 0 predicated
+/// `bl`**, verified by decoding every A32 branch word in `osos.dec`).
+///
+/// Loads cache word @ 0x089cc878. On NULL, allocates exactly 0x34 bytes
+/// through `operator_new`, constructs it with `FUN_081a2d04`, stores that
+/// return, reloads the cache, and returns it. The raw words establish the
+/// next real function at 0x081a292c (`push {r3,r4,r5,lr}`).
+///
+/// Deliberate deviations: the runtime RW cache is represented by
+/// [`SINGLETON_0X34_089CC878`] and unported `FUN_081a2d04` by the
+/// `singleton_0x34_089cc878` seam's zeroing default. It is not hook-ready
+/// until that constructor is ported.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0x34_089cc878_get() -> *mut u8 {
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0X34_089CC878);
+    lazy_singleton(cache, SINGLETON_0X34_SIZE, || unsafe {
+        ctor!(singleton_0x34_089cc878)
+    })
+}
+
+
 
 
 /// lazy_singleton_0x44_08a09f64_get — original: `FUN_0825a6b8` @
@@ -2034,6 +2072,8 @@ mod tests {
                 class_6200: recording_ctor,
                 class_7f80: recording_ctor,
                 singleton_0x3c: recording_ctor,
+                singleton_0x34_089cc878: recording_ctor,
+
                 singleton_0x8c: recording_ctor,
                 singleton_0x4c: recording_ctor,
                 singleton_0xd0: recording_ctor,
@@ -2104,6 +2144,8 @@ mod tests {
         TIME_SOURCE_INSTANCE = ptr::null_mut();
         SINGLETON_0X44 = ptr::null_mut();
         SINGLETON_0X44_08A09F64 = ptr::null_mut();
+        SINGLETON_0X34_089CC878 = ptr::null_mut();
+
         CLASS_6280_INSTANCE = ptr::null_mut();
         STAGE_PROGRESS_TRACKER = ptr::null_mut();
         CLASS_9300_INSTANCE = ptr::null_mut();
@@ -2128,6 +2170,7 @@ mod tests {
     #[test]
     fn the_app_boot_metrics_channel_allocates_constructs_and_caches() {
         let guard = mock(constructed());
+
         unsafe {
             assert_eq!(app_boot_metrics_channel_get(), constructed());
             assert_eq!(app_boot_metrics_channel_get(), constructed());
@@ -2145,6 +2188,35 @@ mod tests {
                 ptr::read_volatile(ptr::addr_of!(APP_BOOT_METRICS_CHANNEL)),
                 constructed(),
                 "the constructor return, rather than the raw allocation, is cached"
+            );
+        }
+        restore(guard);
+    }
+    #[test]
+    fn the_0x34_singleton_allocates_constructs_and_caches() {
+        let guard = mock(constructed());
+        unsafe {
+            assert_eq!(lazy_singleton_0x34_089cc878_get(), constructed());
+            assert_eq!(lazy_singleton_0x34_089cc878_get(), constructed());
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![SINGLETON_0X34_SIZE]);
+            assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![arena()]);
+            assert_eq!(
+                ptr::read_volatile(ptr::addr_of!(SINGLETON_0X34_089CC878)),
+                constructed()
+            );
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn a_null_returning_0x34_ctor_retries_on_every_call() {
+        let guard = mock(ptr::null_mut());
+        unsafe {
+            assert!(lazy_singleton_0x34_089cc878_get().is_null());
+            assert!(lazy_singleton_0x34_089cc878_get().is_null());
+            assert_eq!(
+                *ptr::addr_of!(ALLOC_SIZES),
+                std::vec![SINGLETON_0X34_SIZE, SINGLETON_0X34_SIZE]
             );
         }
         restore(guard);

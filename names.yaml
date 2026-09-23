@@ -132922,3 +132922,16 @@ functions:
       the ARM export nine instructions instead of the stock two-instruction
       veneer, as confirmed by match.py, while retaining the observed result
       and target-width u32 pointer fields.
+  - address: 0x081a28fc
+    ghidra: FUN_081a28fc
+    name: lazy_singleton_0x34_089cc878_get
+    size: 48
+    sig: "void *lazy_singleton_0x34_089cc878_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      DAT_081a2928: singleton_0x34_089cc878_cache
+      FUN_082aadd4: operator_new
+      FUN_081a2d04: singleton_0x34_construct (unported seam)
+    notes: >-
+      Raw osos.dec words e92d4010 e59f4020 e5940008 e3500000 1a000003 e3a00034 eb04212e eb0000f9 e5840008 e5940008 e8bd8010 089cc878 establish 44 instruction bytes followed by the cache literal, for a 48-byte true extent through 0x081a292b; the next real function starts at 0x081a292c with push {r3,r4,r5,lr}. Whole-image A32 branch decoding finds three direct unconditional BL callers and zero predicated BL callers. On cache miss, allocate 0x34 bytes through operator_new, invoke the unported constructor, store its returned pointer even if NULL, reload, and return the cache. Deliberate deviations: the runtime cache is a crate static and the constructor dispatches through the singleton_0x34_089cc878 seam with a zeroing default, matching the existing singleton family; not hook-ready until the constructor is ported. Host tests cover one allocation/construction on a cache miss, cache reuse, returned-pointer caching, and retries after a NULL constructor result. match.py reports the expected structural difference: Rust adds its frame and indirect constructor seam while retaining the cache test, 0x34 allocation, constructor call, store, and reload.
