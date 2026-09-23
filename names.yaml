@@ -45,7 +45,35 @@ functions:
       structural diff because LLVM chooses table-0x2a8 as its literal and
       early-returns after a primary hit; both paths preserve the verified reads
       and normalized 0/1 result.
-  - address: 0x0820429c
+  - address: 0x081e46b0
+    ghidra: FUN_081e46b0
+    name: transfer_slot_process
+    size: 188
+    sig: "u32 transfer_slot_process(void *context, u32 slot_index, u32 source, u32 *transferred)"
+    module: app/transfer_slot_process
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: slot_index
+      param_3/r2: source
+      param_4/r3: transferred
+      "context+0x1060": mov_chain_table_manager
+      "slot+0x1240": chain_head
+      "slot+0x1244": saved_source
+      "slot+0x1254": remaining
+      "context+0x1074": total_remaining
+    notes: >-
+      Raw osos.dec establishes the exact 47-instruction, 188-byte A32 body
+      0x081e46b0..0x081e476b; the add r2,r1,r1,lsl #2 at 0x081e476c begins
+      the next real function. Decoding every word finds three outbound plain
+      unconditional bl calls at 0x081e46e4 (FUN_0820c8f4), 0x081e4708
+      (FUN_0820caf4), and 0x081e4748 (FUN_0820c8d8), with no predicated bl
+      forms. The three inbound direct calls are predicated bleq at 0x081e4150
+      and 0x081e4cd4 plus plain bl at 0x081e4790. It
+      finds source's predecessor, releases source through saved_source,
+      subtracts the released count, and reconnects the predecessor. The
+      caller's fifth stack argument to FUN_0820caf4 is unused by that
+      verified four-argument callee, so the Rust call omits it.
   - address: 0x081e476c
     ghidra: FUN_081e476c
     name: transfer_slot_try_process
@@ -60,22 +88,21 @@ functions:
       "slot+0x1244": saved_source
       "slot+0x125c": source
       "slot+0x1284": disabled
-      FUN_081e46b0: unported_transfer_slot_process
+      FUN_081e46b0: transfer_slot_process
     notes: >-
       Raw osos.dec establishes the exact 17-instruction, 68-byte A32 body
       0x081e476c..0x081e47af; the ldr r0,[r0,#0x54] at 0x081e47b0 begins the
       next real function. Decoding the body independently finds one plain
-      unconditional outbound BL at 0x081e4790 to unnamed FUN_081e46b0 and no
-      predicated BL forms. The three inbound direct calls are plain BL at
+      unconditional outbound bl at 0x081e4790 to transfer_slot_process and no
+      predicated bl forms. The three inbound direct calls are plain bl at
       0x081e5a54, 0x081e5b38, and 0x081e5bdc, with no predicated call forms.
       The slot is context + slot_index * 0x50. A set byte at +0x1284 skips the
       call; otherwise it forwards source +0x125c and a stack output pointer to
-      FUN_081e46b0. A nonzero result returns 3; zero or a skipped call restores
-      source from +0x1244 and returns 0. The callee has no recovered semantic
-      identity, so target code calls its verified retail address and host tests
-      install a narrow seam. Raw code leaves the stack output word uninitialized,
-      but the callee immediately zeros it; Rust initializes it to zero without
-      an observable change.
+      transfer_slot_process. A nonzero result returns 3; zero or a skipped call
+      restores source from +0x1244 and returns 0. Raw code leaves the stack
+      output word uninitialized, but the callee immediately zeros it; Rust
+      initializes it to zero without an observable change.
+  - address: 0x0820429c
     ghidra: FUN_0820429c
     name: message_error_code_from_flags
     size: 28
