@@ -134436,3 +134436,32 @@ functions:
       returns the low five type bits of a PLST record's header byte at +0x0e;
       upper bits are flags and are discarded. Rust preserves the ARM u32
       result and direct byte read with no deliberate deviations.
+  - address: 0x0815a554
+    ghidra: FUN_0815a554
+    name: lookup_result_initialize
+    size: 40
+    sig: "u32 * lookup_result_initialize(u32 *result)"
+    module: app/lookup_result_initialize
+    status: identified
+    renames:
+      param_1/r0: result
+      r4: result
+      FUN_0815a50c: lookup_result_resolve
+      "result+0x00": status
+      "result+0x04": value
+      "result+0x08": resolved_data
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body
+      0x0815a554..0x0815a57b; the following word at 0x0815a57c begins the
+      next real function. The body zeroes result+0 and result+4, calls
+      0x0815a50c with result in r0, stores its return value at result+8, and
+      returns result. It has one unconditional direct BL (0x0815a50c), zero
+      predicated direct BL instructions, and no BLX. An independent
+      whole-image A32 branch decode finds three inbound plain BL sites at
+      0x08264bf8, 0x082658e8, and 0x082664e0, with zero predicated inbound
+      BL forms. Deferred: names.yaml has no entry for 0x0815a50c. Raw code
+      shows that callee obtains global state, calls 0x0827216c with two
+      literal arguments, validates three returned bytes, and may call
+      0x08093af8 and 0x0807ea68 before returning a pointer. Its semantic
+      identity and ABI are not established, so creating a Rust seam or
+      reconstructing this initializer would invent the callee contract.
