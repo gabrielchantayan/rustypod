@@ -135493,3 +135493,33 @@ functions:
       reports the same registry loop, vtable offsets, conditional dispatch,
       final direct call, and addition, with expected LLVM prologue and loop
       shape differences from ARM ADS.
+
+  - address: 0x0812cd08
+    ghidra: FUN_0812cd08
+    name: action_context_is_ready
+    size: 96
+    sig: "u32 action_context_is_ready(void *primary, void *context)"
+    module: app/action_context_readiness
+    status: ported
+    renames:
+      param_1/r0: primary
+      param_2/r1: context
+      r4: context
+      "primary-vtable+0x90": primary_ready_query
+      "context-vtable+0x08": context_ready_query
+      "context-vtable+0x164": context_value_query
+    notes: >-
+      Raw osos.dec words establish the exact 96-byte extent
+      0x0812cd08..0x0812cd68; push {r2,r3,r4,r5,r6,r7,r8,lr} at 0x0812cd68
+      begins the next real function. A whole-image aligned A32 branch decode
+      finds three inbound plain unconditional BL sites (0x0821d824, 0x0821e9e4,
+      and 0x0821ec40) and zero predicated BL sites. The body has no direct BL:
+      it calls three vtable methods through unconditional BLX. It first requires
+      primary-vtable+0x90 and context-vtable+0x08 to return nonzero, then
+      returns one exactly when the u64 returned by context-vtable+0x164 has a
+      nonzero low or high word. The concrete classes and virtual-method
+      identities are unverified and deliberately unnamed. Host tests use ABI
+      seams because target vtables contain four-byte function-address words;
+      match.py reports the same three indirect dispatches, short-circuit
+      branches, and u64 nonzero normalization, with expected LLVM frame and
+      OR-based final comparison differences from ARM ADS.
