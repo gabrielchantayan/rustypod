@@ -33,6 +33,7 @@ pub mod animation;
 pub mod copy_eighteen_records_and_tail;
 pub mod identity_noop;
 pub mod artwork_slot_available;
+pub mod artwork_cache_prepare;
 pub mod device_property_read_integer;
 pub mod resource_registration_reset;
 pub mod resource_load_dispatch;

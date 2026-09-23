@@ -132560,3 +132560,30 @@ functions:
       stores one at state+0xe9. The callee has no recovered semantic identity:
       ARM code preserves the verified target address through a literal-loaded
       BLX; the sole deliberate deviation is the narrow host callback seam.
+
+  - address: 0x081b6cec
+    ghidra: FUN_081b6cec
+    name: artwork_cache_prepare
+    size: 96
+    sig: "void artwork_cache_prepare(u8 *cache)"
+    module: app/artwork_cache_prepare
+    status: ported
+    renames:
+      param_1/r0: cache
+      cache_plus_0x18: mutex
+      cache_plus_0x20: state
+      cache_plus_0xe8: reset_byte
+      cache_plus_0xea: pending_artwork
+      FUN_081b76b0: showcase_clear_timer_slots_and_stop
+      FUN_081b753c: retail_pending_artwork_release
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent
+      0x081b6cec..0x081b6d4c: the next independently linked function starts
+      at 0x081b6d4c. Full-image A32 decoding finds exactly two inbound plain
+      unconditional BL sites (0x080ff070 and 0x08158f1c) and zero predicated
+      inbound BL forms, despite Ghidra's three-site report. The body locks
+      cache+0x18, treats a zero +0x20 state as fatal through heap_panic,
+      clears Showcase timer slots, clears +0xe8, conditionally invokes
+      0x081b753c when +0xea is nonzero, stamps state one, then unlocks.
+      The existing port directly supplies 0x081b76b0; the identity-unrecovered
+      0x081b753c is an address-verified target call and narrow host seam.
