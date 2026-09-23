@@ -262,6 +262,7 @@ pub mod tagged_payload_signed_field_sum;
 pub mod tracker_array_diagnostic_no_op;
 pub mod tracker_f_table_diagnostic_no_op;
 pub mod three_pointer_select;
+pub mod three_record_secondary_value;
 pub mod u16_le_store_last_byte;
 pub mod offset_table_entry_span;
 pub mod span_validation;

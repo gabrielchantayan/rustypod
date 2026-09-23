@@ -133165,3 +133165,25 @@ functions:
       target uses the literal-backed context slot directly; host tests use a
       recording seam. The rest of the payload deliberately remains
       uninitialized, matching retailOS.
+
+  - address: 0x08194190
+    ghidra: FUN_08194190
+    name: three_record_secondary_value
+    size: 20
+    sig: "u32 three_record_secondary_value(const ThreeRecord *records, i32 index)"
+    module: util/three_record_secondary_value
+    status: ported
+    renames:
+      param_1/r0: records
+      param_2/r1: index
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte code extent
+      0x08194190..0x081941a4, ending with bx lr; the next real function
+      begins at 0x081941a4. The signed cmp r1,#3 / blge pair rejects only
+      indices >= 3, so negative indices intentionally address preceding
+      0x20-byte records. It returns the selected record's word +0x04.
+      There is one outbound predicated BL (BLGE heap_panic) and no outbound
+      plain BL calls. Full-image A32 decoding found three inbound plain
+      unconditional BL sites and no predicated inbound BL forms. Deliberate
+      deviation: none.
