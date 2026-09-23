@@ -82,6 +82,7 @@ pub mod buffer_transfer_initialize;
 pub mod buffer_transfer_submit_byte;
 pub mod record_dispatch_result;
 pub mod buffer_pool_get_or_create;
+pub mod stream_state_get_or_create;
 pub mod beeper_construct;
 pub mod vtable_state_construct;
 pub mod buffered_stream_flush_pending;
