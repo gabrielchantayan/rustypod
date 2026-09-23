@@ -131876,3 +131876,41 @@ functions:
       Host tests cover zero, one, the high bit, u32::MAX, and preservation of
       adjacent words. No deliberate deviations. match.py reports the same
       load; LLVM adds its standard frame-pointer prologue/epilogue.
+
+  - address: 0x081cddd8
+    ghidra: FUN_081cddd8
+    name: tagged_bit_set_insert_utf8
+    size: 132
+    sig: "void tagged_bit_set_insert_utf8(TaggedBitSetProvider *tagged_provider, u32 unused, const u8 *text)"
+    module: cxx/tagged_bit_set_insert_utf8
+    status: ported
+    renames:
+      param_1/r0: tagged_provider
+      param_2/r1: unused
+      param_3/r2: text
+      "provider+0x00": vtable
+      "vtable+0x28": get_bit_set
+      FUN_08276214: utf8_next_codepoint
+      FUN_082a4ef8: bit_set_test
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte A32 body
+      0x081cddd8..0x081cde5b: push {r3,r4,r5,r6,r7,lr} through pop
+      {r3,r4,r5,r6,r7,pc}; the next real function begins at 0x081cde5c
+      with push {r2,r3,r4,lr}. Whole-image A32 decoding finds three inbound
+      unconditional plain BL sites at 0x081cde80, 0x081cdea0, and
+      0x081cdec0, and no predicated inbound BL sites. The body has two
+      unconditional direct BL calls (ported utf8_next_codepoint @
+      0x08276214 and bit_set_test @ 0x082a4ef8), no predicated BL, and one
+      indirect BLX through vtable slot +0x28. It clears tag bit 0 from the
+      provider, returns for NULL provider or NULL virtual result, then walks
+      text while its literal cursor byte is nonzero. Each decoded codepoint
+      is split into word/bit; only a clear bit increments BitSet cardinality
+      and is ORed into the word. The decoder's zero result does not end this
+      loop: an invalid/four-byte lead inserts bit zero and advances three
+      bytes before the next literal-byte test. The virtual receiver and slot
+      identity remain unrecovered, so Rust models only the verified typed
+      dispatch contract; unused r1 is retained in the ABI. Host tests cover
+      tag-bit clearing, duplicate suppression, multibyte placement,
+      invalid-lead zero insertion, and both NULL early returns. match.py
+      reports the same null gates, virtual call, decoder/test calls, and
+      cardinality/OR update; LLVM adds its frame and loop layout.
