@@ -133217,3 +133217,27 @@ functions:
       sites (0x08190fa8, 0x08191018, 0x081925f4) and no predicated inbound
       BL forms. Deliberate deviation: unported 0x080e2540 is a host seam;
       target builds invoke its retail address.
+
+  - address: 0x08193f10
+    ghidra: FUN_08193f10
+    name: service_handler_slot_secondary_value_set
+    size: 20
+    sig: "void service_handler_slot_secondary_value_set(u32 *slot_table, i32 slot, u32 value)"
+    module: app/service_handler_slot_secondary_value_set
+    status: ported
+    renames:
+      param_1/r0: slot_table
+      param_2/r1: slot
+      param_3/r2: value
+      "slot_record+0x14": secondary_value
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte code extent
+      0x08193f10..0x08193f24, ending with bx lr; the next real function
+      begins at 0x08193f24. The signed cmp r1,#3 / blge pair rejects only
+      slots >= 3, so negative slots intentionally address preceding 0x20-byte
+      records. It stores r2 at selected record word +0x14. There is one
+      outbound predicated BL (BLGE heap_panic) and no outbound plain BL calls.
+      Full-image A32 decoding found three inbound plain unconditional BL sites
+      (0x081647ac, 0x08190f6c, and 0x081925b8) and no predicated inbound BL
+      forms. Deliberate deviation: none.
