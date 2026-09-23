@@ -78475,6 +78475,28 @@ functions:
       device addresses until direct ports replace them. Host tests cover sign
       normalization, both workers' success/failure effects, all four
       different-sign magnitude orders, and exact-magnitude positive zero.
+  - address: 0x081d85d8
+    ghidra: FUN_081d85d8
+    name: owner_slot_0c_vtable_slot_28_dispatch
+    size: 16
+    sig: "u32 owner_slot_0c_vtable_slot_28_dispatch(void *owner)"
+    module: heap/owner_slot_0c_vtable_slot_28_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x0c": interface
+      "interface+0x00": vtable
+      "vtable+0x28": dispatch
+    notes: >-
+      Raw osos.dec establishes the 16-byte extent
+      0x081d85d8..0x081d85e7: ldr r0,[r0,#0xc]; ldr r1,[r0];
+      ldr r1,[r1,#0x28]; bx r1. This is a tail virtual dispatch, not a
+      veneer; it returns the slot's r0 result without a local return edge.
+      A full raw ARM B/BL scan found three direct inbound calls, all plain
+      bl at 0x08209620, 0x082096fc, and 0x082097a8, with no predicated bl.
+      The interface and slot identities are not established beyond their
+      verified offsets. Host tests model widened host pointers structurally;
+      the ARM build retains the four retail instructions verbatim.
   - address: 0x081d85e8
     ghidra: FUN_081d85e8
     name: owned_pair_destroy_and_deallocate
