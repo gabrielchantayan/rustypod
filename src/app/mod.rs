@@ -433,6 +433,7 @@ pub mod service_handler_slot_state_reset;
 pub mod service_handler_slot_initialize;
 pub mod service_handler_slot_state_set;
 pub mod silver_controller;
+pub mod controller_transition_request;
 pub mod silver_list_table;
 pub mod silver_list_table_resource;
 pub mod stage_progress;
