@@ -134563,3 +134563,29 @@ functions:
       instructions versus 52 retail instructions): LLVM uses indirect `blx`
       calls for the opaque target seams and materializes the layout offsets
       from the returned hierarchy pointer.
+
+  # ---- Transition-page animation target reset (src/app/transition_page_reset_animation_targets.rs) ----
+  - address: 0x08152478
+    ghidra: FUN_08152478
+    name: transition_page_reset_animation_targets
+    size: 128
+    sig: "void transition_page_reset_animation_targets(u8 *page)"
+    module: app/transition_page_reset_animation_targets
+    status: ported
+    renames:
+      param_1/r0: page
+      uVar1/r1: value
+      uVar1/r3: value
+    notes: >-
+      Raw osos.dec words establish the exact 128-byte body at
+      0x08152478..0x081524f8; the following push {r4, lr} begins the next
+      function. It reads six indirect default-record pointers from the shared
+      context at page+0x128 (+0x34 through +0x48), copies each record+0x04
+      value into page slots +0x0c, +0x24, +0x3c, +0x54, +0x6c, and +0x84,
+      and clears their adjacent aux words. Full raw instruction decoding finds
+      three incoming unconditional BL instructions (0x081527a0, 0x08152a18,
+      and 0x08152b60) and no predicated BL forms. The Rust port preserves the
+      volatile 32-bit target-layout loads and store ordering; host testing uses
+      a mapped u32-address fixture to cover all six records and untouched
+      adjacent words. match.py confirms the same load/store sequence; LLVM
+      chooses r2 rather than ADS r3 and emits a standard frame prologue.

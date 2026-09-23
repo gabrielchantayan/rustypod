@@ -603,6 +603,10 @@ pub mod hints {
     // owner, stream object, and native-width vtable fixture; mappings never
     // unmap, so no other test may reuse it.
     pub const STREAM_WRITE_OWNER_DESTROY: usize = 0x6e60_0000;
+    // 0x6e70_0000: dedicated to app/transition_page_reset_animation_targets
+    // raw-u32 page, shared-context, and default-record fixture; mappings never
+    // unmap, so no other test may reuse it.
+    pub const TRANSITION_PAGE_RESET_ANIMATION_TARGETS: usize = 0x6e70_0000;
     // 0x6f00_0000: dedicated to app/service_handler_pending_event_reset's
     // session fixture; mappings never unmap, so no other test may reuse it.
     pub const SERVICE_HANDLER_PENDING_EVENT_RESET: usize = 0x6f00_0000;
