@@ -610,6 +610,32 @@ functions:
       inbound BL call sites are the callers FUN_082b47bc, FUN_082b4814,
       and FUN_082c6430. The Rust loop deliberately retains the original
       mask-walk rather than using trailing_zeros; no semantic deviations.
+  - address: 0x081f0888
+    ghidra: FUN_081f0888
+    name: context_lifecycle_rearm
+    size: 40
+    sig: "void context_lifecycle_rearm(u8 *context)"
+    module: app/context_lifecycle_rearm
+    status: ported
+    renames:
+      param_1/r0: context
+      param_1_plus_0x50/r0: lifecycle_guard
+      FUN_0807f6a0: mutex_unlock
+      FUN_0814b460: framework_root_get
+      FUN_0814b4b4: framework_root_context_operation
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent 0x081f0888..0x081f08b0:
+      push {r4,lr}, save context, unlock context+0x50, obtain the framework root,
+      invoke 0x0814b4b4 with (root, context), then tail-branch to mutex_lock on
+      context+0x50. The push at 0x081f08b0 starts the next real function. Whole-image
+      A32 decoding finds exactly three inbound direct BL calls, all predicated BLNE at
+      0x081f0650, 0x081f12b4, and 0x081f13ac; there are zero plain inbound BL calls.
+      The body has three plain outbound BL instructions and zero predicated outbound
+      BL instructions, followed by its tail B. mutex_unlock, framework_root_get, and
+      mutex_lock are ported direct calls. The 0x0814b4b4 callee has no names.yaml
+      entry, so target builds call its verified address and host tests use a narrow
+      role-based seam. No behavioral deviations.
   - address: 0x082ab20c
     ghidra: FUN_082ab20c
     name: pair_header_element_array_copy_construct
