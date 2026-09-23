@@ -142,6 +142,7 @@ pub mod object_set_byte_0x27;
 pub mod object_set_byte_0x18;
 pub mod object_set_word_0x40;
 pub mod object_set_word_0x20;
+pub mod object_assign_word_0x20_and_dispatch_slot_8;
 pub mod object_selected_payload_index;
 pub mod object_word_0xc0;
 pub mod object_word_0x18_is_nonzero;

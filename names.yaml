@@ -134149,3 +134149,31 @@ functions:
       deviation: Rust directly calls rather than tail-dispatches, retaining
       target-width vtable access on device builds and a recording seam in
       host tests.
+
+  - address: 0x08168314
+    ghidra: FUN_08168314
+    name: object_assign_word_0x20_and_dispatch_slot_8
+    size: 28
+    sig: "void *object_assign_word_0x20_and_dispatch_slot_8(void *owner, void *target)"
+    module: util/object_assign_word_0x20_and_dispatch_slot_8
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: target
+      r2: owner
+      r0: target_and_return_value
+      "owner+0x20": target_pointer
+      "target.vtable+0x08": unresolved_target_vtable_slot_8
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte A32 body
+      0x08168314..0x0816832f: mov r2,r0; movs r0,r1; str r1,[r2,#0x20];
+      ldrne r1,[r0]; ldrne r1,[r1,#8]; bxne r1; bx lr. The next real
+      function begins at 0x08168330. It stores target at owner+0x20 and,
+      when target is non-NULL, tail-dispatches target vtable slot +0x08
+      with target in r0; the method return register passes through. An
+      independent full-image A32 decode finds exactly three inbound plain bl
+      sites (0x081683bc, 0x081684d0, and 0x081686d4) and no predicated bl
+      forms. The vtable method identity remains unestablished. Deliberate
+      deviation: Rust uses a conditional branch instead of predicated A32
+      instructions; host tests use a dispatch seam because host pointers do
+      not fit the retailOS four-byte vtable layout.
