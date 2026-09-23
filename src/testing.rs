@@ -1317,6 +1317,10 @@ pub mod hints {
     // state, table, and entry fixtures; mappings never unmap, so no other
     // user may share this hint.
     pub const INDEXED_TIMESTAMP_BOUNDS: usize = 0x8d10_0000;
+    // 0x8d30_0000: dedicated to app/timestamp_index_seek's raw-u32 table
+    // and timestamp fixtures; mappings never unmap, so no other user may
+    // share this hint.
+    pub const TIMESTAMP_INDEX_SEEK: usize = 0x8d30_0000;
     // 0x8d20_0000: dedicated to app/indexed_timestamp_window_bounds's raw-u32
     // context, state, table, and entry fixtures; mappings never unmap, so no
     // other user may share this hint.
