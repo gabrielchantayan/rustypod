@@ -859,6 +859,7 @@ pub unsafe extern "C" fn layer_reconfigure_thunk(layer: *mut u8, surface: *mut u
 ///
 /// Renamed from the earlier scouting note's `layer_suspend`: this half
 /// *enables*, so "suspend" read backwards.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn layer_force_enable(layer: *mut u8) -> u8 {
     if byte(layer, DISABLED) == 0 {

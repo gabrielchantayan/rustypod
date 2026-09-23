@@ -148,7 +148,7 @@
 
 use core::ffi::c_void;
 
-use crate::drivers::display_layer::layer_restore_enable;
+use crate::drivers::display_layer::{layer_force_enable, layer_restore_enable};
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 use crate::runtime::shutdown_chain::cxa_atexit;
 use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
@@ -632,6 +632,62 @@ pub unsafe extern "C" fn display_lock_existing_layers(display: *mut Display) {
 
 
 /// The `driver->vtable[0x68]` ABI used only by
+/// [`display_force_layers_visible`]. The raw target is a virtual entry, not
+/// a separately decoded firmware function, so no callee identity is claimed.
+type PanelForce = unsafe extern "C" fn(*mut u8, u32);
+
+/// display_force_layers_visible — original: `FUN_081d89d0` @ `0x081d89d0`
+/// (**116 bytes**, `0x081d89d0..0x081d8a44`; the next real function opens
+/// with `push {r4,r5,r6,lr}` at `0x081d8a44`). **3 direct call sites: 2
+/// plain `bl` and 1 predicated `blxne` virtual dispatch**, verified from the
+/// raw ARM words.
+///
+/// Marks forced layers visible. If a driver exists, calls its vtable entry
+/// +0x68 with zero. Only the secondary display then raises its two deferred
+/// panel flags, force-enables every constructed layer, stops layer activity,
+/// and clears the activity latch.
+///
+/// # Deliberate deviations
+///
+/// The vtable entry's target is not independently identified. This port
+/// dispatches through its verified ABI rather than inventing a callee seam.
+///
+/// # Safety
+///
+/// `display` must be live. A non-NULL driver must begin with a vtable whose
+/// entry 26 has the `PanelForce` ABI. Each non-NULL layer must satisfy
+/// [`layer_force_enable`]'s requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_force_layers_visible(display: *mut Display) -> u32 {
+    core::ptr::addr_of_mut!((*display).forced_layers_visible).write_volatile(1);
+
+    let driver = core::ptr::addr_of!((*display).driver).read_volatile();
+    if !driver.is_null() {
+        let vtable = (driver as *const *const PanelForce).read_volatile();
+        vtable.add(0x68 / 4).read_volatile()(driver, 0);
+    }
+
+    if core::ptr::addr_of!((*display).display_id).read_volatile() == SECONDARY_DISPLAY_ID {
+        core::ptr::addr_of_mut!((*display).panel_command_pending).write_volatile(1);
+        core::ptr::addr_of_mut!((*display).panel_parameter_pending).write_volatile(1);
+
+        let mut index = 0;
+        while index < LAYER_SLOT_COUNT {
+            let layer = layer_slot(display, index as u32).read_volatile();
+            if !layer.is_null() {
+                layer_force_enable(layer);
+            }
+            index += 1;
+        }
+        (layer_activity_stop_hook())(display);
+        core::ptr::addr_of_mut!((*display).layers_active).write_volatile(0);
+    }
+
+    0
+}
+
+/// The `driver->vtable[0x68]` ABI used only by
 /// [`display_restore_forced_layers`]. The raw target is a virtual entry, not
 /// a separately decoded firmware function, so no callee identity is claimed.
 type PanelRestore = unsafe extern "C" fn(*mut u8, u32);
@@ -1098,6 +1154,21 @@ mod tests {
         vtable: *const PanelRestore,
     }
 
+    static mut PANEL_FORCE_CALLS: usize = 0;
+    static mut LAST_PANEL_FORCE_DRIVER: *mut u8 = core::ptr::null_mut();
+    static mut LAST_PANEL_FORCE_ARGUMENT: u32 = u32::MAX;
+
+    unsafe extern "C" fn recording_panel_force(driver: *mut u8, argument: u32) {
+        PANEL_FORCE_CALLS += 1;
+        LAST_PANEL_FORCE_DRIVER = driver;
+        LAST_PANEL_FORCE_ARGUMENT = argument;
+    }
+
+    #[repr(C)]
+    struct TestForcePanel {
+        vtable: *const PanelForce,
+    }
+
 
     #[repr(C)]
     struct TestLayerDriver {
@@ -1142,6 +1213,51 @@ mod tests {
     fn restore_activity_mocks(guard: DisplayMutexGuard<'static, ()>) {
         unsafe { DISPLAY_HOOKS = DEFAULT_DISPLAY_HOOKS };
         drop(guard);
+    }
+
+    #[test]
+    fn force_layers_only_transitions_secondary_display_and_dispatches_panel() {
+        let guard = install_activity_mocks();
+        let vtable = [recording_panel_force as PanelForce; 0x68 / 4 + 1];
+        let mut panel_vtable = vtable.as_ptr();
+        let driver = &mut panel_vtable as *mut *const PanelForce as *mut u8;
+        let mut layers = [
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+            TestLayer([0; LAYER_OBJECT_SIZE]),
+        ];
+        let mut d = display(INTERNAL_DISPLAY_ID as u8, driver);
+        for (index, layer) in layers.iter_mut().enumerate() {
+            d.layers[index] = layer.0.as_mut_ptr();
+        }
+        d.layers_active = 1;
+
+        unsafe {
+            PANEL_FORCE_CALLS = 0;
+            LAST_PANEL_FORCE_DRIVER = core::ptr::null_mut();
+            LAST_PANEL_FORCE_ARGUMENT = u32::MAX;
+
+            assert_eq!(display_force_layers_visible(&mut d), 0);
+            assert_eq!(d.forced_layers_visible, 1);
+            assert_eq!(d.panel_command_pending, 0);
+            assert_eq!(d.panel_parameter_pending, 0);
+            assert_eq!(d.layers_active, 1);
+            assert_eq!(ACTIVITY_STOP_CALLS, 0);
+
+            d.display_id = SECONDARY_DISPLAY_ID;
+            assert_eq!(display_force_layers_visible(&mut d), 0);
+            assert_eq!(d.panel_command_pending, 1);
+            assert_eq!(d.panel_parameter_pending, 1);
+            assert_eq!(d.layers_active, 0);
+            assert_eq!(ACTIVITY_STOP_CALLS, 1);
+            assert_eq!(PANEL_FORCE_CALLS, 2);
+            assert_eq!(LAST_PANEL_FORCE_DRIVER, driver);
+            assert_eq!(LAST_PANEL_FORCE_ARGUMENT, 0);
+        }
+        restore_activity_mocks(guard);
     }
 
     #[test]
