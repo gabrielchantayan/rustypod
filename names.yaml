@@ -28108,6 +28108,39 @@ functions:
       and its own frame shape.
 
 
+  - address: 0x081ec31c
+    ghidra: FUN_081ec31c
+    name: class_8900_apply_directory_transition
+    size: 128
+    sig: "void class_8900_apply_directory_transition(Class8900 *this, u32 index)"
+    module: app/class_8900_apply_directory_transition
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      DAT_081ec39c: directory_transition_records
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_08275b9c: object_cast_to_class
+      FUN_08272230: resource_chain_write
+      FUN_0811e2e4: ui_current_window
+      FUN_08258ba0: lazy_singleton_0x80
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte code extent
+      0x081ec31c..0x081ec39c; the next real function begins at
+      0x081ec3a8, after the three-word inline transition-string record at
+      0x081ec39c. The body contains five plain direct BL instructions
+      (task_ctx_field_0x30, object_cast_to_class, resource_chain_write,
+      ui_current_window, lazy_singleton_0x80), zero predicated BL
+      instructions, one predicated BLXNE through the current window's
+      vtable +0xd8, and two unconditional BLX instructions through vtable
+      slots +0x74 and +0x24. This corrects the assignment's three-BL
+      scouting count. It indexes 12-byte records at 0x089cc3cc, dispatches
+      their +4 action word through the current task's checked class-0x80
+      object, writes the address of their +8 inline string as
+      ("DirP", 0x6066, string, 4) to this+0x378's provider chain,
+      conditionally notifies the active window, then notifies the lazy
+      0x80 singleton. Host coverage records the nonzero-index action,
+      string address, receiver, and all four effects in retail order.
   - address: 0x081ec268
     ghidra: FUN_081ec268
     name: class_8900_cached_property_6031

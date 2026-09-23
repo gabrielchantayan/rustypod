@@ -34,6 +34,7 @@ pub mod class_6000_property_6045_i8;
 pub mod class_8780_dispatch_state;
 pub mod class_9300_remove_inactive_items;
 pub mod class_8900;
+pub mod class_8900_apply_directory_transition;
 pub mod selection_available;
 pub mod class_6280_set_position;
 pub mod class_6280_clear_pending_and_post_resource;
