@@ -135143,3 +135143,32 @@ functions:
       empty (then it constructs "iPod"). The temporary is always destroyed.
       Target pointer fields are loaded as u32 so host fixtures preserve their
       four-byte firmware offsets; all identified callees are existing ports.
+
+  # --- pending-event timer rearm ---
+  - address: 0x0813957c
+    ghidra: FUN_0813957c
+    name: pending_event_timer_rearm
+    size: 124
+    sig: "u32 pending_event_timer_rearm(u8 *session)"
+    module: app/pending_event_timer_rearm
+    status: ported
+    renames:
+      param_1/r0: session
+      "[session + 0x04]": pending_event_head
+      "[session + 0x2c8]": iap_timer_slot
+      local_18: clock
+      iStack_20: timespec
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent
+      0x0813957c..0x081395f7: push {r0-r6,lr} opens the body, pop
+      {r4-r6,pc} terminates it, and the next independently linked function
+      begins at 0x081395f8. The body has nine unconditional plain BL
+      instructions and one dynamic BLX through clock vtable +0xc; no
+      predicated BL. Whole-image A32 branch-immediate decoding finds three
+      incoming unconditional plain BL sites and no predicated BL sites. It
+      polls the IAP incoming-process timer slot, then for a non-null pending
+      head reads the runtime clock vtable, converts its timespec to
+      milliseconds, sets the slot deadline to head+0x08 minus now, and waits
+      for the slot. It always returns zero. The dynamic clock slot has no
+      proposed callee identity; target code re-resolves it from the
+      constructed object's vtable, while host tests inject that read.
