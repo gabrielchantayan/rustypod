@@ -133408,6 +133408,25 @@ functions:
       sibling initializes the callback table and dispatches enabled 24-byte
       records, so its unrecovered concrete identity is not invented. Target
       builds call its verified fixed address; host tests use a recording seam.
+  - address: 0x0818a1bc
+    ghidra: FUN_0818a1bc
+    name: block_manager_mutex_lock
+    size: 8
+    sig: "u32 block_manager_mutex_lock(u8 *block_manager)"
+    module: heap/block_manager_mutex_lock
+    status: ported
+    vars: {param_1/r0: block_manager}
+    notes: >-
+      Raw osos.dec words e2800f52 ea035ff8 establish the complete A32 body
+      0x0818a1bc..0x0818a1c4: add r0,r0,#0x148 then tail b 0x082621a8,
+      the verified posix_mutex_lock veneer. The next real function starts
+      with the sibling lock/unlock thunk at 0x0818a1c4, so Ghidra
+      incorrectly decompiles past the true function boundary. Binary-wide
+      A32 decoding finds three inbound direct plain BL calls at 0x081fc4c8,
+      0x081fc5e0, and 0x08207cdc; no predicated BL calls. The helper passes
+      the unchecked block-manager mutex at +0x148 to the existing
+      REGION_MUTEX_OPS lock seam. Deliberate deviation: the direct tail
+      branch becomes an observable indirect call for host fixtures.
   - address: 0x0818a1c4
     ghidra: FUN_0818a1c4
     name: block_manager_mutex_unlock
