@@ -402,6 +402,98 @@ pub unsafe extern "C" fn container_view_construct_state_80(
     view
 }
 
+/// A concrete container view whose recovered tail consists of two copied
+/// halfwords, two cleared words, and a byte set to one.
+#[repr(C)]
+pub struct ContainerViewState1 {
+    /// +0x00..+0xe8 — constructed by [`container_view_construct`].
+    pub base: ContainerView,
+    /// +0xe8 — copied from the caller's fifth argument +0x5c.
+    pub word_5c: u16,
+    /// +0xea — copied from the caller's fifth argument +0x5e.
+    pub word_5e: u16,
+    /// +0xec — cleared after the chained construction.
+    pub word_ec: u32,
+    /// +0xf0 — set to one.
+    pub state: u8,
+    /// +0xf1..+0xf4 — untouched by this constructor.
+    pub padding: [u8; 3],
+    /// +0xf4 — cleared after the chained construction.
+    pub word_f4: u32,
+}
+
+const _: [u8; 0xf8] = [0; core::mem::size_of::<ContainerViewState1>()];
+
+/// The six-byte concrete-spec tail this constructor reads after the shared
+/// [`ViewSpec`] prefix.
+#[repr(C)]
+pub struct ContainerViewState1Spec {
+    /// +0x00..+0x5c — forwarded to the base constructors unchanged.
+    pub base: ViewSpec,
+    /// +0x5c — copied to [`ContainerViewState1::word_5c`].
+    pub word_5c: u16,
+    /// +0x5e — copied to [`ContainerViewState1::word_5e`].
+    pub word_5e: u16,
+}
+
+const _: [u8; 0x60] = [0; core::mem::size_of::<ContainerViewState1Spec>()];
+const _: [u8; 0x5c] = [0; core::mem::offset_of!(ContainerViewState1Spec, word_5c)];
+const _: [u8; 0x5e] = [0; core::mem::offset_of!(ContainerViewState1Spec, word_5e)];
+
+const _: [u8; 0xe8] = [0; core::mem::offset_of!(ContainerViewState1, word_5c)];
+const _: [u8; 0xea] = [0; core::mem::offset_of!(ContainerViewState1, word_5e)];
+const _: [u8; 0xec] = [0; core::mem::offset_of!(ContainerViewState1, word_ec)];
+const _: [u8; 0xf0] = [0; core::mem::offset_of!(ContainerViewState1, state)];
+const _: [u8; 0xf4] = [0; core::mem::offset_of!(ContainerViewState1, word_f4)];
+
+/// The concrete class vtable literal at 0x0812eda0.
+pub const CONTAINER_VIEW_STATE_1_VTABLE_ADDRESS: u32 = 0x0898_3f2c;
+
+
+/// `container_view_construct_state_1` — original: `FUN_0812ed60` @
+/// 0x0812ed60 (64 bytes: 60 bytes of code plus the vtable literal
+/// 0x08983f2c at 0x0812eda0; 0x0812eda4 begins the next function).
+///
+/// Raw ARM forwards all five ABI arguments to [`container_view_construct`],
+/// replaces the vtable, clears +0xec and +0xf4, stores one at +0xf0, then
+/// copies halfwords from `spec + 0x5c` and `spec + 0x5e` to +0xe8 and +0xea.
+/// Three direct, unconditional inbound `bl` sites (0x0812ea70, 0x081e9bf8,
+/// and 0x081fb008), no predicated inbound `bl` sites, and one unconditional
+/// outbound `bl` to `container_view_construct` were verified by decoding
+/// every A32 branch word in `osos.dec`.
+///
+/// The concrete class identity and vtable role are unrecovered, so the Rust
+/// name records the verified state write rather than inventing a widget role.
+/// Retaining `view` across the base call replaces target-only register
+/// shuffling without changing the returned pointer or stores.
+///
+/// # Safety
+/// `view`, `spec`, and all arguments forwarded to
+/// [`container_view_construct`] must satisfy that constructor's safety
+/// requirements. `spec` must additionally be readable through +0x5f.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_state_1(
+    view: *mut ContainerViewState1,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ContainerViewState1Spec,
+) -> *mut ContainerViewState1 {
+    container_view_construct(view.cast::<ContainerView>(), resources, controller, parent, spec.cast::<ViewSpec>());
+    core::ptr::addr_of_mut!((*view).base.vtable).write_volatile(CONTAINER_VIEW_STATE_1_VTABLE_ADDRESS);
+    core::ptr::addr_of_mut!((*view).word_ec).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).state).write_volatile(1);
+    core::ptr::addr_of_mut!((*view).word_f4).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).word_5c).write_volatile(
+        core::ptr::addr_of!((*spec).word_5c).read_volatile(),
+    );
+    core::ptr::addr_of_mut!((*view).word_5e).write_volatile(
+        core::ptr::addr_of!((*spec).word_5e).read_volatile(),
+    );
+    view
+}
+
 
 /// container_view_children — original: `FUN_081586e0` @ 0x081586e0
 /// (8 bytes exactly: `add r0, r0, #0xa8; bx lr`, no literal pool;
@@ -916,6 +1008,44 @@ mod tests {
         assert_eq!(view.base.config, 0xfeed_beef);
         assert_eq!(view.state, 0x80);
         assert_eq!(view.padding, [0xcd; 3], "the byte store must not widen");
+        assert_eq!(*trace(), std::vec!["linkage_base", "initialize", "container_initialize", "refresh_clip_rect"]);
+    }
+
+    #[test]
+    fn state_1_constructor_copies_spec_tail_and_preserves_byte_padding() {
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        let mut view: Box<ContainerViewState1> =
+            Box::new(unsafe { core::mem::transmute([0xcdu8; size_of::<ContainerViewState1>()]) });
+        let spec = ContainerViewState1Spec {
+            base: spec(0xfeed_beef, 0),
+            word_5c: 0x1234,
+            word_5e: 0xabcd,
+        };
+        let this = &mut *view as *mut ContainerViewState1;
+
+        let returned = unsafe {
+            container_view_construct_state_1(
+                this,
+                0x1234usize as *mut ResourceProvider,
+                core::ptr::null_mut(),
+                0x5678usize as *mut u8,
+                &spec,
+            )
+        };
+
+        assert_eq!(returned, this);
+        assert_eq!(size_of::<ContainerViewState1>(), 0xf8);
+        assert_eq!(offset_of!(ContainerViewState1, word_5c), 0xe8);
+        assert_eq!(offset_of!(ContainerViewState1, state), 0xf0);
+        assert_eq!(view.base.vtable, 0x0898_3f2c);
+        assert_eq!(view.base.config, 0xfeed_beef);
+        assert_eq!(view.word_5c, 0x1234);
+        assert_eq!(view.word_5e, 0xabcd);
+        assert_eq!(view.word_ec, 0);
+        assert_eq!(view.state, 1);
+        assert_eq!(view.padding, [0xcd; 3], "the byte store must not widen");
+        assert_eq!(view.word_f4, 0);
         assert_eq!(*trace(), std::vec!["linkage_base", "initialize", "container_initialize", "refresh_clip_rect"]);
     }
 
