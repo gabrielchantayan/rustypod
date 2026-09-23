@@ -39,6 +39,9 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x6f50_0000: dedicated to util/video_engine's target-width controller,
+    // engine, frame-table, and frame-record fixture; mappings never unmap.
+    pub const VIDEO_ENGINE_PRESENT_DEFAULT_FRAME: usize = 0x6f50_0000;
     // 0x6f10_0000 / 0x6f20_0000: dedicated to
     // app/datetime_adjust's target-width controller, selector, and provider
     // fixtures; mappings never unmap, so no other port may share either hint.

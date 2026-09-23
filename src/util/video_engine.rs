@@ -2503,3 +2503,141 @@ mod tests {
         }
     }
 }
+/// `video_engine_present_default_frame` — retailOS `FUN_08167460` @
+/// **0x08167460** (56 bytes, `0x08167460..0x08167497`; `push {r2,r3,r4,lr}`
+/// at 0x08167498 begins the next real function). Raw A32 decoding verifies
+/// three unconditional plain `bl` instructions (0x0827b5a8, 0x082d14e0, and
+/// 0x08273a54) and no predicated `bl` instructions.
+///
+/// It first invokes the still-unported retail routine at 0x0827b5a8 with the
+/// controller's target-width word at +0x128. It then obtains the active
+/// video frame payload and presents the packed descriptor
+/// `{ payload: u32, width: 320, height: 240 }` through 0x08273a54.
+///
+/// # Deliberate deviations
+///
+/// The two unnamed retail callees remain fixed-address calls on ARM and
+/// replaceable callbacks on hosts. The descriptor uses an explicit
+/// target-width `u32` payload field so its ARM layout remains six bytes on
+/// 64-bit hosts.
+///
+/// # Safety
+///
+/// `controller` must point to at least 0x12c readable bytes, with a valid
+/// target word at +0x128. The installed video-engine singleton and its frame
+/// chain must meet [`video_engine_get_frame_payload`]'s safety requirements.
+#[repr(C)]
+struct DefaultFrameDescriptor {
+    payload: u32,
+    width: u16,
+    height: u16,
+}
+
+const RETAIL_PREPARE_DEFAULT_FRAME_ADDR: usize = 0x0827_b5a8;
+const RETAIL_PRESENT_DEFAULT_FRAME_ADDR: usize = 0x0827_3a54;
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_prepare_default_frame(_: u32) {}
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_present_default_frame(_: *const DefaultFrameDescriptor) {}
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_PREPARE_DEFAULT_FRAME: unsafe extern "C" fn(u32) = missing_prepare_default_frame;
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_PRESENT_DEFAULT_FRAME: unsafe extern "C" fn(*const DefaultFrameDescriptor) =
+    missing_present_default_frame;
+
+unsafe fn retail_prepare_default_frame(argument: u32) {
+    #[cfg(target_arch = "arm")]
+    {
+        let call: unsafe extern "C" fn(u32) =
+            core::mem::transmute(RETAIL_PREPARE_DEFAULT_FRAME_ADDR);
+        call(argument);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(MOCK_PREPARE_DEFAULT_FRAME))(argument);
+    }
+}
+
+unsafe fn retail_present_default_frame(descriptor: *const DefaultFrameDescriptor) {
+    #[cfg(target_arch = "arm")]
+    {
+        let call: unsafe extern "C" fn(*const DefaultFrameDescriptor) =
+            core::mem::transmute(RETAIL_PRESENT_DEFAULT_FRAME_ADDR);
+        call(descriptor);
+    }
+    #[cfg(not(target_arch = "arm"))]
+    {
+        core::ptr::read_volatile(core::ptr::addr_of!(MOCK_PRESENT_DEFAULT_FRAME))(descriptor);
+    }
+}
+
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_present_default_frame(controller: *const u8) {
+    retail_prepare_default_frame(controller.add(0x128).cast::<u32>().read());
+    let mut payload = core::ptr::null_mut();
+    video_engine_get_frame_payload(&mut payload);
+    let descriptor = DefaultFrameDescriptor {
+        payload: payload as usize as u32,
+        width: 320,
+        height: 240,
+    };
+    retail_present_default_frame(&descriptor);
+}
+
+#[cfg(test)]
+mod default_frame_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, try_map_u32_slab};
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut PREPARE_ARGUMENT: u32 = 0;
+    static mut PRESENTED: Option<(u32, u16, u16)> = None;
+
+    unsafe extern "C" fn record_prepare(argument: u32) {
+        PREPARE_ARGUMENT = argument;
+    }
+
+    unsafe extern "C" fn record_present(descriptor: *const DefaultFrameDescriptor) {
+        PRESENTED = Some(((*descriptor).payload, (*descriptor).width, (*descriptor).height));
+    }
+
+    #[test]
+    fn prepares_controller_and_presents_active_320_by_240_frame() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(slab) = try_map_u32_slab(hints::VIDEO_ENGINE_PRESENT_DEFAULT_FRAME, 0x2000) else {
+            return;
+        };
+        unsafe {
+            let controller = slab;
+            controller.add(0x128).cast::<u32>().write(0x1234_5678);
+            let engine = slab.add(0x400);
+            let table = slab.add(0x1000);
+            let record = slab.add(0x1100);
+            engine.add(0xa8c).cast::<u32>().write(table as usize as u32);
+            table.add(0x34).cast::<u32>().write(record as usize as u32);
+            record.add(0x68).cast::<u32>().write(0x3456_7890);
+
+            let old_instance = instance();
+            let old_prepare = MOCK_PREPARE_DEFAULT_FRAME;
+            let old_present = MOCK_PRESENT_DEFAULT_FRAME;
+            set_mock_instance(engine);
+            MOCK_PREPARE_DEFAULT_FRAME = record_prepare;
+            MOCK_PRESENT_DEFAULT_FRAME = record_present;
+            PREPARE_ARGUMENT = 0;
+            PRESENTED = None;
+
+            video_engine_present_default_frame(controller);
+
+            assert_eq!(PREPARE_ARGUMENT, 0x1234_5678);
+            assert_eq!(PRESENTED, Some((0x3456_7890, 320, 240)));
+            set_mock_instance(old_instance);
+            MOCK_PREPARE_DEFAULT_FRAME = old_prepare;
+            MOCK_PRESENT_DEFAULT_FRAME = old_present;
+        }
+    }
+}
