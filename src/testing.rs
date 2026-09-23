@@ -2025,6 +2025,10 @@ pub mod hints {
     // 0x6f30_0000: dedicated to app/activity_media_player_cleanup's
     // target-width six-word activity-cleanup fixture; mappings never unmap.
     pub const ACTIVITY_MEDIA_PLAYER_CLEANUP: usize = 0x6f30_0000;
+    // 0x6f50_0000: dedicated to app/linked_node_status_set's target-width
+    // intrusive node ring and owner fixture; mappings never unmap, so no other
+    // port may share this hint.
+    pub const LINKED_NODE_STATUS_SET: usize = 0x6f50_0000;
     // 0x6f40_0000: dedicated to app/volume_controller_reschedule_timer's
     // target-width controller and embedded timer fixture; mappings never unmap.
     pub const VOLUME_CONTROLLER_RESCHEDULE_TIMER: usize = 0x6f40_0000;
