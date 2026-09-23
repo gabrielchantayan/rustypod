@@ -130193,3 +130193,30 @@ functions:
       the expected structural diff: the same three allocator/constructor/post
       calls, literal vtable store, ordered payload stores, result test, and
       virtual destructor branch, with a larger LLVM frame and no ARM ldrd.
+  - address: 0x081fb41c
+    ghidra: FUN_081fb41c
+    name: queued_message_post_bytes
+    size: 136
+    sig: "u32 queued_message_post_bytes(MessageTarget *target, u32 message_code, const u8 *bytes, u32 byte_count)"
+    module: app/queued_message_post_bytes
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1: message_code
+      param_3/r2: bytes
+      param_4/stack: byte_count
+      FUN_08103400: message_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08103464: queued_message_construct
+      FUN_08110fdc: queued_message_post
+    notes: >-
+      Raw osos.dec establishes the exact 136-byte A32 extent
+      0x081fb41c..0x081fb4a3; the push at 0x081fb4a4 begins the next real
+      function. Full-image decoding finds three inbound unconditional BL
+      callers (0x0814bf78, 0x0814c00c, and 0x0814c0e8), zero predicated
+      inbound BL forms, and three unconditional outbound BL instructions to
+      message_arena_pool, fixed_block_pool_alloc, and queued_message_construct,
+      followed by queued_message_post and an indirect vtable +4 BLX release
+      dispatch. It allocates and constructs a 12-byte owned-byte queued
+      message, posts it with no_wait=1 and zero reply/flags, collapses a
+      nonzero post result to one, and releases the envelope on failure.
