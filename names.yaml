@@ -16,6 +16,26 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816f650
+    ghidra: FUN_0816f650
+    name: collection_cursor_set_index
+    size: 8
+    sig: "void collection_cursor_set_index(u32 *cursor, u32 index)"
+    module: app/collection_cursor_set_index
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: index
+      "cursor+0x18": current_index
+    notes: >-
+      Raw osos.dec words establish the exact 8-byte A32 body:
+      `str r1,[r0,#0x18]` at 0x0816f650 followed by `bx lr` at 0x0816f654.
+      The next real function begins at 0x0816f658 with `push {r4,lr}`, so
+      Ghidra's extent is exact. The leaf stores index in cursor+0x18 with no
+      NULL, bounds, or value guard and has no outgoing calls. An independent
+      whole-image A32 branch decode finds three inbound plain BL sites
+      (0x081badfc, 0x081baf98, 0x081bb09c) and zero predicated BL sites.
+      Deliberate deviations: none.
   - address: 0x0817a224
     ghidra: FUN_0817a224
     name: object_byte_0x946_is_two
