@@ -133881,3 +133881,36 @@ functions:
       The unported word setter 0x08067b20, scheduler 0x080dc3e8, and virtual
       dispatch retain verified target seams; host tests inject them. match.py
       reviewed after the ARM release build.
+
+  - address: 0x0816f508
+    ghidra: FUN_0816f508
+    name: six_bit_set_state_construct
+    size: 180
+    sig: "void *six_bit_set_state_construct(void *storage, u32 first_capacity, u32 second_capacity, u32 third_capacity)"
+    module: app/six_bit_set_state_construct
+    status: ported
+    renames:
+      param_1/r0/r4: storage
+      param_2/r1/r8: first_capacity
+      param_3/r2/r6: second_capacity
+      param_4/r3/r7: third_capacity
+      DAT_0816f5bc: bit_set_state_record_construct
+      iVar2/r0: constructed_records
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent
+      0x0816f508..0x0816f5bb: the following word at 0x0816f5bc is the
+      0x08182e10 element-constructor literal, and 0x0816f5c0 begins a
+      separate destructor with `push {r4,lr}`. The body has eight direct
+      unconditional BL instructions (cpp_array_construct once, condvar_init
+      once, operator_new three times, and bit_set_construct three times) and
+      no predicated BL. A complete raw A32 branch-immediate scan finds three
+      inbound plain BL calls at 0x08132ebc, 0x0813348c, and 0x08133f88, with
+      zero predicated inbound BL calls. It creates six 12-byte records at
+      storage+0x14, initializes the condition variable at +0x5c, creates
+      three tag-0 bit sets at +0x04/+0x08/+0x0c from the capacity arguments,
+      clears +0x10 and each record's +0x1a halfword, then returns storage.
+      Deliberate deviation: Rust uses byte offsets for the anonymous object
+      rather than a host-pointer-bearing struct, preserving its target
+      32-bit layout on host builds. Host tests prove the six halfword stores
+      have their exact 12-byte stride and do not overwrite adjacent bytes;
+      match.py reviewed the ARM release structure after build.

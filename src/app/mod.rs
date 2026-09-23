@@ -96,6 +96,7 @@ pub mod category_is_below_three;
 pub mod synchronized_selection_transition;
 pub mod flagged_base_construct;
 pub mod work_record_construct;
+pub mod six_bit_set_state_construct;
 pub mod callback_target_dispatch;
 pub mod callback_queue;
 pub mod callback_target_slot_14_dispatch;
