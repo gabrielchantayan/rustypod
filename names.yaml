@@ -135066,3 +135066,24 @@ functions:
       seam. Host tests cover the disabled early return and provider-resolved
       path, including target-width owner fields, tagged metric signs, helper
       arguments, and the +3 adjustment.
+
+  - address: 0x0813e5f4
+    ghidra: FUN_0813e5f4
+    name: shared_payload_nested_result_word
+    size: 16
+    sig: "u32 shared_payload_nested_result_word(const SharedPayload *payload)"
+    module: cxx/shared_payload_nested_result_word
+    status: ported
+    renames:
+      param_1/r0: payload
+      "[payload + 0x40]": result
+      "[result + 0x14]": value
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0813e5f4..0x0813e603: ldr r0,[r0,#0x40]; cmp r0,#0; ldrne
+      r0,[r0,#0x14]; bx lr. The next independently terminating body starts at
+      0x0813e604. Complete A32 decoding finds three incoming plain BL call
+      sites (0x081b7618, 0x081cc7e0, 0x0829df94) and zero predicated BL
+      forms. It returns zero for a NULL result pointer, otherwise result+0x14.
+      Deliberate deviation: repr(C) pointer fields retain ARM target offsets
+      and widen for host fixtures.
