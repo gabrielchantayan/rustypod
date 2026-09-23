@@ -29,6 +29,7 @@ pub mod clock_config;
 pub mod codec;
 pub mod display;
 pub mod internal_display_layers;
+pub mod panel_scale_mode;
 pub mod surface_config_copy;
 pub mod secondary_display_layers;
 pub mod display_layer;

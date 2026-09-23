@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08169be0
+    ghidra: FUN_08169be0
+    name: panel_set_scale_mode
+    size: 120
+    sig: "i32 panel_set_scale_mode(void *panel, u32 mode)"
+    module: drivers/panel_scale_mode
+    status: ported
+    renames:
+      param_1/r0: panel
+      param_2/r1: mode
+      DAT_08169c5c: panel_scale_state
+      "panel_scale_state+0x01": mode
+      "panel_scale_state+0x18": scale_bits
+      "panel_scale_state+0x24": scaled_count
+      "panel_scale_state+0x28": scale_limit_bits
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte A32 code extent
+      0x08169be0..0x08169be58: the following words at 0x08169be5c,
+      0x08169be60, and 0x08169be64 are the literal pool
+      (0x089cc9b4, 3.0f, and 0.5625f), and the next real function starts at
+      0x08169be68. Ghidra's 124-byte extent absorbs the first literal word.
+      Mode >= 2 returns -1 before touching state. Modes 0 and 1 store the
+      mode byte and a 0.75f scale limit; mode 1 then computes
+      __fdiv(__fscalb(scale, 2), 3.0f), replaces count with
+      (count << 2) / 3 through __rt_udiv, sets the 0.5625f limit, and calls
+      the notification entry at 0x0816a530 with the panel and mode. Raw
+      instruction decoding finds four unconditional body BL instructions
+      (__fscalb, __fdiv, __rt_udiv, and 0x0816a530) and zero predicated BL
+      instructions. The 0x0816a530 callee remains unnamed; firmware builds
+      call its original address, while host tests replace it with a recording
+      callback. Host tests cover both valid modes and the side-effect-free
+      invalid-mode boundary.
   - address: 0x0816f650
     ghidra: FUN_0816f650
     name: collection_cursor_set_index
