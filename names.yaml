@@ -131056,3 +131056,37 @@ functions:
       match.py reports LLVM's larger frame, synthesized offsets, and literal
       load, while retaining the lookup call, zero-status branch, +0x7fff8
       record load, success store, and 0/3 status split.
+  - address: 0x081e2e30
+    ghidra: FUN_081e2e30
+    name: request_callback_state_complete_iap_packet
+    size: 152
+    sig: "u32 request_callback_state_complete_iap_packet(RequestCallbackState *state)"
+    module: app/request_callback_state_complete_iap_packet
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x2d4": pending_request_payload
+      "state+0x2e2": reply_progress[2]
+      FUN_080f6da0: iap_packet_create
+      FUN_081e2ff4: complete_iap_packet_and_schedule_event
+      FUN_081e2ae8: request_callback_state_reset
+      FUN_08257b60: event_hub_broadcast
+    notes: >-
+      Raw osos.dec establishes the true 152-byte extent 0x081e2e30..0x081e2ec7:
+      37 A32 instruction words through pop {r2,r3,r4,r5,r6,pc} at 0x081e2ec0,
+      followed by the 0x00000bb8 delay literal; the next independently linked
+      function begins with push {r4-r6,lr} at 0x081e2ec8. The body has four
+      unconditional plain BL calls (0x081e2e6c -> iap_packet_create,
+      0x081e2e84 -> complete_iap_packet_and_schedule_event, 0x081e2ea4 ->
+      request_callback_state_reset, and 0x081e2eb8 -> event_hub_broadcast)
+      and no predicated BL forms, correcting Ghidra's three-call count.
+      Whole-image A32 decoding finds three inbound plain BL calls
+      (0x081e25e8, 0x081e281c, and 0x081e2940) and no predicated inbound
+      calls. It creates an empty lingo-8 command-4 packet from a nonzero
+      pending payload while reply_progress[2] is below four, schedules its
+      completion with state zero and a 3000-ms delay, and returns 28 on
+      allocation failure. At progress four or higher it clears callback state
+      and broadcasts event (8,0,13,4); otherwise the default return is 11.
+      Deliberate deviations: none. match.py reports LLVM's different frame
+      and branch layout while retaining the field tests, four direct calls,
+      28 allocation status, 3000-ms delay, and event arguments.
