@@ -130610,3 +130610,31 @@ functions:
       index before passing it to FUN_081f3d68. Rust preserves the unchecked
       byte store; match.py reports only LLVMs frame/prologue around the same
       strb. No deliberate deviations.
+  - address: 0x081f1024
+    ghidra: FUN_081f1024
+    name: context_dispatch_and_register_if_idle
+    size: 124
+    sig: "u32 context_dispatch_and_register_if_idle(u8 *context)"
+    module: app/context_dispatch_and_register_if_idle
+    status: ported
+    renames:
+      param_1/r0: context
+      FUN_0807f5c4: context_lifecycle_lock
+      FUN_081f08f8: idle_context_prepare
+      FUN_0807f6a0: context_lifecycle_unlock
+      FUN_0814b460: current_context_registry
+      FUN_0814b51c: register_context
+      FUN_081f0724: idle_context_message_post
+    notes: >-
+      Raw osos.dec establishes the true 124-byte extent
+      0x081f1024..0x081f10a0, including the trailing literal at 0x081f109c;
+      the push at 0x081f10a0 begins the next real function. Direct A32
+      decoding finds seven unconditional outbound BL instructions at
+      0x081f1030, 0x081f1044, 0x081f104c, 0x081f1050, 0x081f1058,
+      0x081f107c, and 0x081f1094, and zero predicated outbound BL forms.
+      It locks context +0x50, returns zero after unlocking
+      if byte +0x70 is nonzero, otherwise prepares the context, unlocks it,
+      registers it with the current registry, and posts 0x52800004 with
+      arguments zero, zero, one when registration succeeds. The six callees
+      have no recovered full identities, so the target port calls their
+      verified retail addresses and host tests install role-based seams.
