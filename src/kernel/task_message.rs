@@ -334,6 +334,148 @@ pub unsafe extern "C" fn task_message_receive(
     }
 }
 
+/// Queue-handler lookup boundaries used by [`task_message_dispatch`].
+///
+/// `FUN_081b5344` has not been named from raw evidence. Its call setup proves
+/// only that it initializes a handler lookup; the already ported
+/// `collection_find_previous_handler` is the subsequent lookup operation.
+/// Callback and context outputs are `usize` so host fixtures do not truncate
+/// their function pointers; they are 32-bit target words on ARM.
+#[derive(Clone, Copy)]
+pub struct TaskMessageDispatchOps {
+    pub current_context: unsafe extern "C" fn() -> *mut u32,
+    pub find_first_handler: unsafe extern "C" fn(*mut u8, u32, *mut usize, *mut usize, *mut i32) -> u32,
+    pub find_previous_handler: unsafe extern "C" fn(*mut u8, u32, *mut usize, *mut usize, *mut i32) -> u32,
+}
+
+type TaskMessageHandler = unsafe extern "C" fn(*mut u32, usize) -> u32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_current_task_context() -> *mut u32 {
+    unsafe { crate::kernel::task::current_task_ctx_block().cast() }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_current_task_context() -> *mut u32 {
+    panic!("task_message_dispatch requires current task context")
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_find_first_handler(
+    owner: *mut u8, key: u32, callback: *mut usize, context: *mut usize, cursor: *mut i32,
+) -> u32 {
+    let find: unsafe extern "C" fn(*mut u8, u32, *mut usize, *mut usize, *mut i32) -> u32 =
+        unsafe { core::mem::transmute(0x081b_5344usize) };
+    unsafe { find(owner, key, callback, context, cursor) }
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_find_previous_handler(
+    owner: *mut u8, key: u32, callback: *mut usize, context: *mut usize, cursor: *mut i32,
+) -> u32 {
+    unsafe {
+        crate::app::vtable_set::collection_find_previous_handler(
+            owner, key, callback.cast(), context.cast(), cursor,
+        )
+    }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_find_handler(
+    _owner: *mut u8, _key: u32, _callback: *mut usize, _context: *mut usize, _cursor: *mut i32,
+) -> u32 {
+    panic!("task_message_dispatch requires handler helper 0x081b5344")
+}
+
+const DEFAULT_TASK_MESSAGE_DISPATCH_OPS: TaskMessageDispatchOps = TaskMessageDispatchOps {
+    current_context: {
+        #[cfg(target_os = "none")]
+        { firmware_current_task_context }
+        #[cfg(not(target_os = "none"))]
+        { missing_current_task_context }
+    },
+    find_first_handler: {
+        #[cfg(target_os = "none")]
+        { firmware_find_first_handler }
+        #[cfg(not(target_os = "none"))]
+        { missing_find_handler }
+    },
+    find_previous_handler: {
+        #[cfg(target_os = "none")]
+        { firmware_find_previous_handler }
+        #[cfg(not(target_os = "none"))]
+        { missing_find_handler }
+    },
+};
+
+/// Active lookup boundaries for task-message handler dispatch.
+pub static mut TASK_MESSAGE_DISPATCH_OPS: TaskMessageDispatchOps = DEFAULT_TASK_MESSAGE_DISPATCH_OPS;
+
+/// The terminal task message, literal `b"tiuq"` at 0x0812c084.
+const TASK_MESSAGE_QUIT_TAG: u32 = 0x7175_6974;
+
+/// task_message_dispatch — original: `FUN_0812bfcc` @ **0x0812bfcc**
+/// (**188 bytes** true extent: 184 bytes of instructions through 0x0812c084,
+/// then the `b"tiuq"` literal; the next real function begins at 0x0812c088).
+///
+/// **3 direct `bl` callers, all unconditional; 0 predicated direct `bl`
+/// callers** (0x0839d978, 0x0839daf8, 0x0839dde0). The body has three
+/// unconditional direct `bl` instructions, one `blne`, and one indirect
+/// `blx`, verified by decoding every instruction word in `osos.dec`.
+///
+/// Receives messages from the current task context's queue at +0x1c. For a
+/// non-NULL handler collection at +0x20, it finds a matching handler for the
+/// message tag, invokes candidates until one returns nonzero, then recycles
+/// the receive auxiliary node when present. It stops only after processing
+/// the `b"tiuq"` message.
+///
+/// Deliberate deviations: the unnamed first-lookup helper @ 0x081b5344 and
+/// host-width callback pointers are explicit seams. Rust expresses the
+/// indirect `blx` as a typed call and the conditional recycle as an ordinary
+/// `if`; target queue, callback, and context words remain 32-bit.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_message_dispatch() {
+    let context = unsafe { core::ptr::addr_of!(TASK_MESSAGE_DISPATCH_OPS.current_context).read_volatile()() };
+    let queue = unsafe { context.add(7).read_volatile() as usize };
+    loop {
+        let mut message = [0u32; TASK_MESSAGE_CELL_PAYLOAD_WORDS];
+        let mut auxiliary = core::ptr::null_mut::<u8>();
+        unsafe { task_message_receive(queue, message.as_mut_ptr(), core::ptr::addr_of_mut!(auxiliary).cast()) };
+
+        let handlers = unsafe { context.add(8).read_volatile() as usize as *mut u8 };
+        if !handlers.is_null() {
+            let ops = unsafe { core::ptr::addr_of!(TASK_MESSAGE_DISPATCH_OPS).read_volatile() };
+            let mut callback = 0usize;
+            let mut callback_context = 0usize;
+            let mut cursor = 0i32;
+            let mut found = unsafe {
+                (ops.find_first_handler)(
+                    handlers, message[0], &mut callback, &mut callback_context, &mut cursor,
+                )
+            };
+            while found != 0 {
+                let handler: TaskMessageHandler = unsafe { core::mem::transmute(callback) };
+                if unsafe { handler(message.as_mut_ptr(), callback_context) } != 0 {
+                    break;
+                }
+                found = unsafe {
+                    (ops.find_previous_handler)(
+                        handlers, message[0], &mut callback, &mut callback_context, &mut cursor,
+                    )
+                };
+            }
+        }
+
+        if !auxiliary.is_null() {
+            unsafe { crate::kernel::mqueue::mqueue_node_recycle(auxiliary.cast()) };
+        }
+        if message[0] == TASK_MESSAGE_QUIT_TAG {
+            return;
+        }
+    }
+}
+
 /// task_message_post_sync — original: `FUN_0812bf70` @ 0x0812bf70 (20
 /// bytes).
 ///
@@ -407,6 +549,7 @@ unsafe fn task_message_transport() -> *mut u32 {
 unsafe fn task_message_ring_write(ring: *mut u32, mut source: *const u8, len: u32) -> u32 {
     let mask = ring.add(5).read_volatile();
     let start = ring.add(2).read_volatile();
+
     let read = ring.add(3).read_volatile();
     let mut write = ring.add(4).read_volatile();
     if len > mask.wrapping_sub(write.wrapping_sub(read).wrapping_add(start) & mask) {
@@ -530,6 +673,43 @@ pub(crate) mod tests {
         RECEIVE_CALL.lock().replace((queue, first, auxiliary as usize));
         unsafe { result.add(1).write_volatile(core::ptr::addr_of!(MOCK_RECEIVE_CELL).read_volatile()) };
         0
+    }
+
+    static DISPATCH_EVENTS: StdMutex<Vec<(u32, usize)>> = StdMutex::new(Vec::new());
+    static mut DISPATCH_CONTEXT: *mut u32 = core::ptr::null_mut();
+    static mut DISPATCH_RECEIVES: u32 = 0;
+    static mut DISPATCH_NEXT: u32 = 0;
+
+    unsafe extern "C" fn mock_dispatch_context() -> *mut u32 {
+        unsafe { core::ptr::addr_of!(DISPATCH_CONTEXT).read_volatile() }
+    }
+    unsafe extern "C" fn mock_dispatch_receive(_: usize, result: *mut u32, _: *mut u8) -> u32 {
+        let receive = unsafe { core::ptr::addr_of!(DISPATCH_RECEIVES).read_volatile() };
+        unsafe { core::ptr::addr_of_mut!(DISPATCH_RECEIVES).write_volatile(receive + 1) };
+        let cell = unsafe { core::ptr::addr_of!(MOCK_RECEIVE_CELL).read_volatile() as usize as *mut u32 };
+        unsafe {
+            cell.add(1).write_volatile(if receive == 0 { 0x1234_5678 } else { TASK_MESSAGE_QUIT_TAG });
+            result.add(1).write_volatile(cell as usize as u32);
+        }
+        0
+    }
+    unsafe extern "C" fn mock_first_handler(_: *mut u8, _: u32, callback: *mut usize, context: *mut usize, _: *mut i32) -> u32 {
+        unsafe { callback.write(mock_decline as usize); context.write(0x11); }
+        1
+    }
+    unsafe extern "C" fn mock_next_handler(_: *mut u8, _: u32, callback: *mut usize, context: *mut usize, _: *mut i32) -> u32 {
+        let next = unsafe { core::ptr::addr_of!(DISPATCH_NEXT).read_volatile() };
+        unsafe { core::ptr::addr_of_mut!(DISPATCH_NEXT).write_volatile(next + 1) };
+        if next == 0 {
+            unsafe { callback.write(mock_accept as usize); context.write(0x22); }
+            1
+        } else { 0 }
+    }
+    unsafe extern "C" fn mock_decline(message: *mut u32, context: usize) -> u32 {
+        DISPATCH_EVENTS.lock().push((unsafe { message.read_volatile() }, context)); 0
+    }
+    unsafe extern "C" fn mock_accept(message: *mut u32, context: usize) -> u32 {
+        DISPATCH_EVENTS.lock().push((unsafe { message.read_volatile() }, context)); 1
     }
 
     #[test]
@@ -726,6 +906,40 @@ pub(crate) mod tests {
             assert_eq!(TASK_MESSAGE_FREE_LIST.head.cast::<u32>(), cell);
             assert_eq!(TASK_MESSAGE_FREE_LIST.tail.cast::<u32>(), cell);
         }
+    }
+
+    #[test]
+    fn dispatches_candidates_until_handled_then_stops_after_terminal_message() {
+        let _guard = OPS_LOCK.lock();
+        let Some(slab) = try_map_u32_slab(hints::TASK_MESSAGE_RECEIVE, 0x100) else { return };
+        let cell = slab.cast::<u32>();
+        let mut context = [0u32; 9];
+        unsafe {
+            cell.write_volatile(0);
+            for word in 2..8 { cell.add(word).write_volatile(0); }
+            TASK_MESSAGE_POOL_MUTEX = Mutex { sem_cell: core::ptr::null_mut(), unused: 0 };
+            TASK_MESSAGE_FREE_LIST = ListHead { head: core::ptr::null_mut(), tail: core::ptr::null_mut() };
+            MOCK_RECEIVE_CELL = cell as usize as u32;
+            DISPATCH_CONTEXT = context.as_mut_ptr();
+            DISPATCH_RECEIVES = 0;
+            DISPATCH_NEXT = 0;
+            DISPATCH_EVENTS.lock().clear();
+            context[7] = 0x89cb_0000;
+            context[8] = 1;
+            TASK_MESSAGE_RECEIVE_OPS = TaskMessageReceiveOps { receive_cell: mock_dispatch_receive };
+            TASK_MESSAGE_DISPATCH_OPS = TaskMessageDispatchOps {
+                current_context: mock_dispatch_context,
+                find_first_handler: mock_first_handler,
+                find_previous_handler: mock_next_handler,
+            };
+            task_message_dispatch();
+            TASK_MESSAGE_RECEIVE_OPS = DEFAULT_TASK_MESSAGE_RECEIVE_OPS;
+            TASK_MESSAGE_DISPATCH_OPS = DEFAULT_TASK_MESSAGE_DISPATCH_OPS;
+        }
+        assert_eq!(
+            DISPATCH_EVENTS.lock().as_slice(),
+            &[(0x1234_5678, 0x11), (0x1234_5678, 0x22), (TASK_MESSAGE_QUIT_TAG, 0x11)]
+        );
     }
 
     #[test]
