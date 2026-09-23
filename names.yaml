@@ -133042,3 +133042,34 @@ functions:
       None of the five direct retail callees has a recovered semantic identity
       in names.yaml, so the target body retains their verified addresses and
       host tests use narrow address-named callback seams.
+
+  # --- COW-string record vector destructor ---
+  - address: 0x08197c28
+    ghidra: FUN_08197c28
+    name: cxx_string_vector_record_destroy
+    size: 64
+    sig: "StringVectorRecord *cxx_string_vector_record_destroy(StringVectorRecord *this)"
+    module: cxx/string_vector_record_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1_plus_0x00: string
+      param_1_plus_0x04: records_begin
+      param_1_plus_0x08: records_end
+      param_1_plus_0x0c: records_capacity
+      FUN_083e2230: cxx_string_vector_record_range_destroy
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen ARM words
+      from stmdb sp!,{r4,r5,r6,lr} at 0x08197c28 through ldmia
+      sp!,{r4,r5,r6,pc} at 0x08197c64; the next independently linked function
+      starts at 0x08197c68. Decoding every word in the body finds exactly three
+      plain unconditional bl instructions and no predicated bl forms: range
+      destruction at 0x083e2230, cxx_array_dealloc at 0x08266f2c, and
+      cxx_string_release at 0x083d8b04. It destroys the sixteen-byte
+      {COW-string,CxxStringVector} range in the vector at +4, deallocates its
+      backing capacity with (capacity - begin) >> 4 and r2=0, then releases
+      the leading COW string and returns this. Deliberate deviations: named
+      fields preserve the target's 32-bit word layout when host pointers widen;
+      all three verified call boundaries are retained.

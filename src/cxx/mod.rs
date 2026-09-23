@@ -259,6 +259,7 @@ pub mod lazy_string_tables_initialize;
 pub mod event_list_tree_record_link;
 pub mod string_vector_record_link;
 pub mod string_vector_record_range_destroy;
+pub mod string_vector_record_destroy;
 pub mod string_map;
 pub mod basic_ios_initialize;
 pub mod streambuf_slot_peek_equal;
