@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081cd2d8
+    ghidra: FUN_081cd2d8
+    name: slideshow_delay_set
+    size: 24
+    sig: "void slideshow_delay_set(void *state, u32 delay)"
+    module: app/slideshow_delay_set
+    status: ported
+    renames:
+      param_1/r0: slideshow_state
+      param_2/r1: delay
+      "state+0x8c8": delay
+      "vtable+0x58": unresolved_slideshow_message_dispatch
+      DAT_081cd2f0: slideshow_delay_message_category (0x848e)
+      DAT_081cd2f4: resource_kind_string (0x53747220, "Str ")
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte instruction body
+      0x081cd2d8..0x081cd2ef. Its two literal words are at 0x081cd2f0 and
+      0x081cd2f4; push {r4-r9,sl,lr} at 0x081cd2f8 begins the next real
+      function. A binary-wide A32 decode finds exactly three inbound plain
+      unconditional bl calls at 0x0810d690, 0x081ccb54, and 0x081cd4d8, with
+      no predicated bl calls. The body contains no direct bl instruction:
+      it stores delay at state+0x8c8 then tail-dispatches its vtable +0x58
+      slot with r1=0x53747220 ("Str ") and r2=0x848e. The virtual callee has
+      no recovered semantic identity, so the ARM port retains the exact
+      target-width dispatch and host tests install a narrow recording seam.
   - address: 0x081d2018
     ghidra: FUN_081d2018
     name: framework_root_post_message_kind
