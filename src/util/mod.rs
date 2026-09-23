@@ -146,6 +146,7 @@ pub mod object_selected_payload_index;
 pub mod object_word_0xc0;
 pub mod object_word_0x18_is_nonzero;
 pub mod object_word_0x1c_is_nonzero;
+pub mod object_word_0x1b0_is_nonzero;
 pub mod object_record_at;
 pub mod object_release_slot1;
 pub mod obfuscated_buffer_prepare;
