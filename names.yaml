@@ -22203,6 +22203,31 @@ functions:
       vtables. Ghidra incorrectly declared this pointer-returning body
       void.
 
+  - address: 0x081818b4
+    ghidra: FUN_081818b4
+    name: resource_arena_prepare
+    size: 148
+    sig: "void resource_arena_prepare(void *state)"
+    module: app/resource/prepare
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x58": pending_element_ids_begin
+      "state+0x5c": pending_element_ids_end
+      DAT_08181948: resource_arena_prepare_guard
+      FUN_0816df60: lazy_singleton_0x3c
+      FUN_0816df90: element_registry_remove_for_id
+      FUN_08183f04: resource_arena_prepare_finish_unidentified
+    notes: >-
+      Raw ARM establishes the true 148-byte extent
+      0x081818b4..0x08181948: it starts with `push {r4-r8,lr}`, ends in
+      `b 0x08183f04`, and the next function begins at 0x0818194c with
+      `ldrb r0,[r0,#0xcc]`. Three unconditional direct BL instructions
+      occur at 0x081818d0, 0x081818d8, and 0x08181908; there are no
+      predicated BL instructions. The helper raises guard byte 0x089cc640,
+      removes each pending identifier through the ported singleton and
+      registry helper, resets the range to empty, lowers the guard, and
+      tail-dispatches to the verified but unidentified 0x08183f04 boundary.
   - address: 0x0817f1c0
     ghidra: FUN_0817f1c0
     name: resource_arena_set_active

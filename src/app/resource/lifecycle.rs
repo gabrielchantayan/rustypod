@@ -28,7 +28,6 @@ use crate::heap::types::HeapDescriptor;
 
 const RESOURCE_ARENA_DESCRIPTOR_SIZE: usize = 0x398;
 const RESOURCE_ARENA_EXTENT_WORD_ADDRESS: usize = 0x083e_235c;
-const RESOURCE_ARENA_PREPARE_ADDRESS: usize = 0x0818_18b4;
 const LAZY_HANDLE_ACQUIRE_ADDRESS: usize = 0x081b_bff0;
 const LAZY_HANDLE_RELEASE_ADDRESS: usize = 0x081b_c07c;
 
@@ -146,12 +145,6 @@ unsafe fn host_ops() -> ResourceArenaOps {
     ptr::read_volatile(addr_of!(RESOURCE_ARENA_OPS))
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn retail_prepare(state: *mut ResourceArenaState) {
-    let prepare: ResourceArenaPrepare = core::mem::transmute(RESOURCE_ARENA_PREPARE_ADDRESS);
-    prepare(state)
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -228,7 +221,7 @@ pub unsafe extern "C" fn resource_arena_set_active(state: *mut ResourceArenaStat
     }
 
     #[cfg(target_os = "none")]
-    retail_prepare(state);
+    super::prepare::resource_arena_prepare(state.cast());
     #[cfg(not(target_os = "none"))]
     (host_ops().prepare)(state);
 
