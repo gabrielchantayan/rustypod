@@ -2040,6 +2040,9 @@ pub mod hints {
     // 0x6f40_0000: dedicated to app/volume_controller_reschedule_timer's
     // target-width controller and embedded timer fixture; mappings never unmap.
     pub const VOLUME_CONTROLLER_RESCHEDULE_TIMER: usize = 0x6f40_0000;
+    // 0x8270_0000: dedicated to app/transfer_slot_process's target-width
+    // transfer context and MOV manager fixture; mappings never unmap.
+    pub const TRANSFER_SLOT_PROCESS: usize = 0x8270_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
