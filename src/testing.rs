@@ -2140,6 +2140,9 @@ pub mod hints {
     // 0x7df0_0000: dedicated to app/associated_object_word_at_0c_or_negative_one's
     // target-width object and associated-object fixture; mappings never unmap.
     pub const ASSOCIATED_OBJECT_WORD_AT_0C: usize = 0x7df0_0000;
+    // 0x7de0_0000: dedicated to app/resource/prepare's target-width state
+    // and identifier-range fixture; mappings never unmap.
+    pub const RESOURCE_ARENA_PREPARE: usize = 0x7de0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
