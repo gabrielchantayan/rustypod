@@ -133073,3 +133073,29 @@ functions:
       the leading COW string and returns this. Deliberate deviations: named
       fields preserve the target's 32-bit word layout when host pointers widen;
       all three verified call boundaries are retained.
+
+  - address: 0x08197954
+    ghidra: FUN_08197954
+    name: five_string_id_record_context_construct
+    size: 136
+    sig: "void five_string_id_record_context_construct(FiveStringIdRecordContext *destination, const FiveStringIdRecordContext *source)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: destination, param_2: source}
+    renames:
+      FUN_08258c2c: string_id_record_copy_construct
+      DAT_081979d4: five_record_context_header_word_0 (0x08989b60)
+      DAT_081979d8: five_record_context_header_word_1 (0x089a6600)
+    notes: >-
+      Raw osos.dec decodes to 32 ARM instructions through 0x081979d0 plus two
+      literal-pool words at 0x081979d4 and 0x081979d8; 0x081979dc is the
+      next independently linked function, so the true extent is 136 bytes.
+      The body has five direct plain bl calls, all to string_id_record_copy_construct @
+      0x08258c2c, and zero predicated bl calls. It installs opaque header
+      words 0x08989b60 and 0x089a6600, copies source +0x08..+0x14, copy-
+      constructs five adjacent 0x10-byte StringIdRecords at +0x18..+0x58,
+      then copies source +0x68. The first header word is called through by
+      all four direct callers; its context class remains unidentified. Host
+      layout uses u32 header words and native-widened record fields so the
+      serialized target words and ARM offsets are preserved while the already
+      ported record-copy seam remains testable.
