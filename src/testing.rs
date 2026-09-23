@@ -335,6 +335,11 @@ pub mod hints {
     // target-width owner fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const COLLECTION_ENTRY_ACTION_CLEAR: usize = 0x1c80_0000;
+    // 0x1c90_0000 / 0x1ca0_0000: dedicated to
+    // app/collection_count_eligible_entries' target-width owner fixtures;
+    // mappings never unmap, so no other port may share either hint.
+    pub const COLLECTION_COUNT_ELIGIBLE_ENTRIES: usize = 0x1c90_0000;
+    pub const COLLECTION_COUNT_ELIGIBLE_ENTRIES_EMPTY: usize = 0x1ca0_0000;
     // Dedicated target-width bucket fixture for vtable_file_record_inner_iterator_begin.
     pub const VTABLE_FILE_RECORD_INNER_ITERATOR_BEGIN: usize = 0x1c60_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32

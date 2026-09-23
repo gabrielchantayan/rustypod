@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08130090
+    ghidra: FUN_08130090
+    name: collection_count_eligible_entries
+    size: 156
+    sig: "void collection_count_eligible_entries(u8 *owner, u32 *count_out)"
+    module: app/collection_count_eligible_entries
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: count_out
+      r4: count_out
+      r5: eligibility_threshold
+      auStack_1c/sp: iterator_state
+      local_4/sp+0x18: entry
+      DAT_08130128: eligibility_threshold (0x00069780)
+      "entry-vtable+0x178": current_target
+      "entry-vtable+0x0c4": is_eligible
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+    notes: >-
+      Raw ARM spans 156 bytes, 0x08130090..0x0813012c: 152 instruction bytes
+      followed by the 0x00069780 literal at 0x08130128; the veneer at
+      0x0813012c is the next distinct boundary. Binary decoding finds three
+      unconditional direct BL callers and zero predicated direct BL callers
+      (0x0812f8d8, 0x0812fbb0, and 0x0812fea8). The routine initializes
+      *count_out to zero, traverses owner+0x18 with the established
+      iterator-state triplet, and counts an entry if vtable+0x178 returns a
+      nonzero value below 0x69780, or if it returns zero and vtable+0x0c4
+      returns nonzero. Rust directly calls the already ported iterator family;
+      it zero-initializes the otherwise uninitialized iterator local, whose
+      constructor owns every field read. Host tests use native-width vtables,
+      while target dispatch retains four-byte slot addressing.
   - address: 0x08130134
     ghidra: FUN_08130134
     name: collection_entry_action_clear
