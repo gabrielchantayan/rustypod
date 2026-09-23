@@ -76,14 +76,19 @@ use crate::app::fixed_value::FixedValue;
 /// Members in the record: three `FixedValue`s, 0x48 bytes total.
 pub const FIXED3_MEMBERS: usize = 3;
 
-/// `FixedValue::operator=` — original: `FUN_08152410` @ 0x08152410 (104
-/// bytes; 3 `bl` call sites, all inside `fixed3_assign`).
+/// `FixedValue::operator=` — original: `FUN_08152410` @ 0x08152410
+/// (104 bytes, 0x08152410..0x08152478; three direct, unconditional inbound
+/// `bl` call sites, no predicated inbound `bl` forms, and no calls made by
+/// this leaf).
 ///
-/// Copies the payload words (+0x04..+0x17) of the scalar at `src` onto
-/// the scalar at `dst`, preserving `dst`'s vtable. See the module
-/// header for why the original's flags-byte merge is a plain word copy.
+/// Copies the five payload words (+0x04..+0x17) of the scalar at `src` onto
+/// the scalar at `dst`, preserving `dst`'s +0x00 vtable word. The retail
+/// byte-level bitfield stores at +0x14 have the same final state as the
+/// volatile word store below; that deliberate deviation avoids exposing
+/// intermediate byte states which no stock caller can observe.
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-unsafe fn fixed_value_assign(dst: *mut FixedValue, src: *const FixedValue) {
+pub unsafe extern "C" fn fixed_value_assign(dst: *mut FixedValue, src: *const FixedValue) {
     // Ascending field order, each load before its store — the original's
     // ldr/str pairs.
     let value = core::ptr::read_volatile(core::ptr::addr_of!((*src).value_q16));
@@ -174,6 +179,27 @@ mod tests {
         assert_eq!(dst[0].vtable, 0xdead_0000);
         assert_eq!(dst[1].vtable, 0xdead_0001);
         assert_eq!(dst[2].vtable, 0xdead_0002);
+    }
+
+    #[test]
+    fn single_member_assignment_preserves_vtable_and_copies_every_payload_word() {
+        let mut dst = dirty(0xdead_beef, 0x11);
+        let src = dirty(0xcafe_babe, 0x77);
+
+        unsafe { fixed_value_assign(&mut dst, &src) };
+
+        assert_eq!(dst.vtable, 0xdead_beef);
+        assert_eq!(words(&dst), words(&src));
+    }
+
+    #[test]
+    fn single_member_self_assignment_is_a_noop() {
+        let mut value = dirty(0xfeed_face, 0x33);
+        let before = (value.vtable, words(&value));
+
+        unsafe { fixed_value_assign(&mut value, &value) };
+
+        assert_eq!((value.vtable, words(&value)), before);
     }
 
     #[test]
