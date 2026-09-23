@@ -217,6 +217,7 @@ pub mod return_constant_0x52;
 pub mod opaque_pair_copy_from_word8;
 pub mod opaque_string_owner_destroy;
 pub mod opaque_vtable_string_owner_destroy;
+pub mod opaque_vtable_string_owner_assign_z_source;
 pub mod opaque_four_word_copy_from_word7;
 pub mod opaque_header_payload_construct;
 pub mod opaque_context_destroy;
