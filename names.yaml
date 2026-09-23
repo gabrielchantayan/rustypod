@@ -131852,3 +131852,27 @@ functions:
       seams for tests. match.py reports the same branch and allocation
       structure; LLVM emits indirect blx calls for those target seams and
       adds its standard frame-pointer prologue.
+
+  - address: 0x081d0df8
+    ghidra: FUN_081d0df8
+    name: service_status_word
+    size: 8
+    sig: "u32 service_status_word(const u8 *service)"
+    module: app/service_status_word
+    status: ported
+    renames:
+      param_1/r0: service
+      "service+0x08": status_word
+    notes: >-
+      Raw osos.dec words 0xe5900008 and 0xe12fff1e establish the exact
+      8-byte A32 body at 0x081d0df8..0x081d0dff: ldr r0,[r0,#8]; bx lr.
+      The next real function begins at 0x081d0e00 with push {r4,lr}.
+      Whole-image A32 decoding finds exactly three inbound unconditional
+      plain BL sites at 0x08125ea4, 0x0819ab78, and 0x082246e0, with zero
+      predicated inbound BL sites. There are no outbound plain or predicated
+      BL calls. The callers use the loaded word as a zero/nonzero service
+      status; the leaf only returns the aligned word at service+0x08, without
+      validation or mutation. Rust performs that same aligned word load.
+      Host tests cover zero, one, the high bit, u32::MAX, and preservation of
+      adjacent words. No deliberate deviations. match.py reports the same
+      load; LLVM adds its standard frame-pointer prologue/epilogue.
