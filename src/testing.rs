@@ -47,6 +47,9 @@ pub mod hints {
     pub const REGISTRY_DISPLAY_CLIENT_CONSTRUCT: usize = 0x6f30_0000;
     pub const DATETIME_ADJUST_AND_STORE: usize = 0x6f10_0000;
     pub const DATETIME_ADJUST_AND_STORE_INVALID_MODE: usize = 0x6f20_0000;
+    // 0x6f40_0000: dedicated to app/iap_packet's target-width service
+    // validity and descriptor-table fixture; mappings never unmap.
+    pub const IAP_SERVICE_DESCRIPTOR_FOR_OWNER_MODE: usize = 0x6f40_0000;
     // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
     // shared-cache, and Schema fixture; mappings never unmap.
     pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;

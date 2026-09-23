@@ -107767,6 +107767,34 @@ functions:
       native function pointers cannot fit in the firmware's four-byte vtable
       slots. Those seams have no target effect.
 
+  # --- iAP service descriptor lookup ---
+  - address: 0x0818dcec
+    ghidra: FUN_0818dcec
+    name: iap_service_descriptor_for_owner_mode
+    size: 56
+    sig: "void *iap_service_descriptor_for_owner_mode(u32 owner_mode)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      r0: owner_mode/service_index/service_descriptor
+      FUN_08192124: iap_packet_owner_mode_index
+      DAT_0818dd24: iap_service_owner_mode_valid
+      DAT_0818dd28: iap_service_descriptor_base
+    notes: >-
+      Raw ARM is exactly 56 bytes from 0x0818dcec through the final pop at
+      0x0818dd20, followed by literal-pool words 0x089ca8e6 and 0x08a256b0
+      at 0x0818dd24 and 0x0818dd28; the next separately linked function
+      starts at 0x0818dd2c. It maps owner mode through
+      iap_packet_owner_mode_index, accepts indices 0 and 1 only, and returns
+      NULL unless the corresponding runtime validity byte is nonzero; a hit
+      returns base + index * 0x124. Decoding every aligned ARM B/BL immediate
+      in osos.dec found exactly three direct inbound calls, all unconditional
+      plain bl at 0x08111e9c, 0x081155c8, and 0x0811564c; there are no
+      predicated bl forms. No new callee seam is introduced: the existing
+      iap_packet_owner_mode_index port is called directly. Target reads the
+      original runtime tables; host tests substitute mapped target-width
+      fixture bases only.
+
   # --- iAP packet owner-mode index ---
   - address: 0x08192124
     ghidra: FUN_08192124
