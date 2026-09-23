@@ -4675,6 +4675,38 @@ functions:
       is deliberately not inferred. Rust uses a native-width typed host vtable
       callback rather than the target's four-byte vtable word; a dedicated text
       section prevents folding with the byte-identical 0x083e72b0 port.
+  # --- relative record list dispatch ---
+  - address: 0x081579a4
+    ghidra: FUN_081579a4
+    name: dispatch_relative_record_list
+    size: 124
+    sig: "void dispatch_relative_record_list(void *owner, void *records, void *target, void *callback)"
+    module: util/dispatch_relative_record_list
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: records
+      param_3/r2: target
+      param_4/r3: callback
+      local_14/r9: saved_task
+      local_18/r6: record_count
+      local_1c/r5: record_index
+      local_20/r4: record
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte extent: 31 ARM words from
+      push {r3-r11,lr} at 0x081579a4 through pop {r3-r11,pc} at 0x08157a1c;
+      the next independent function begins at 0x08157a20. Full-image ARM
+      decoding finds exactly three inbound direct callers, all plain
+      unconditional bl at 0x0816a8a0, 0x081b4f7c, and 0x082861f0; there are
+      zero predicated direct calls. The body has exactly three unconditional
+      direct bl calls and no predicated bl calls: it saves the framework task
+      target from 0x08110c44, restores it through 0x08110ca8 before each
+      record, then calls the unported dispatcher at 0x0826e4f0. A NULL target
+      selects owner +0x38. It iterates a signed-16-bit index against records
+      +0x00 and advances each record by its signed relative word + four bytes;
+      the dispatcher receives record +0x04. Target builds call these verified
+      addresses directly; host tests install an operation seam. The dispatcher
+      identity is deliberately not inferred beyond dispatching a record.
   # --- owned guarded slot +0x04 replacement ---
   - address: 0x083e73a0
     ghidra: FUN_083e73a0
