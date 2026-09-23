@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d5e2c
+    ghidra: FUN_081d5e2c
+    name: parse_result_scope_construct
+    size: 40
+    sig: "u8 *parse_result_scope_construct(u8 *scope)"
+    module: app/parse_result_scope_construct
+    status: ported
+    renames:
+      param_1/r0: scope
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte extent
+      0x081d5e2c..0x081d5e53: `push {r4,lr}; add r0,r0,#0x20; bl
+      0x083b45ec; mov r3,#0; mov r2,#0; mov r1,#0; add r0,r0,#0x14; bl
+      0x08283168; sub r0,r0,#0x34; pop {r4,pc}`. The next real function
+      starts at 0x081d5e54 with `push {r4,lr}`. This constructs the
+      0x38-byte parser scope by clearing its aligned two-word member at
+      +0x20 and initializing the parser-result record at +0x34 to
+      {status: 0, code: 0, detail: 0}, then returns scope. Three inbound
+      calls are plain unconditional bl and none is predicated. The two
+      established callees preserve r0, so the second call's returned
+      scope+0x34 is rebased by subtracting 0x34. Deliberate deviation:
+      direct Rust offsets replace register rebasing while preserving the
+      same writes and return value. Host tests cover exact member bounds,
+      guard bytes, and repeated initialization.
   - address: 0x081d9690
     ghidra: FUN_081d9690
     name: selector_pair_write
