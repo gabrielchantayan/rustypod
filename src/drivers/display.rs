@@ -231,8 +231,10 @@ pub struct Display {
     /// +0x9e: requests the stored panel parameter be applied on activity
     /// start; both force and restore transitions raise it.
     pub panel_parameter_pending: u8,
-    /// +0x9f..+0xa1: state and panel arguments this module does not touch.
-    pub reserved_9f_a1: [u8; 3],
+    /// +0x9f..+0xa0: state this module does not touch.
+    pub reserved_9f_a0: [u8; 2],
+    /// +0xa1: parameter supplied to the panel driver's vtable slot +0x20.
+    pub panel_parameter: u8,
     /// +0xa2: requests the pending panel command when activity starts.
     pub panel_command_pending: u8,
     /// +0xa3..+0xa4: state this module does not touch.
@@ -421,7 +423,8 @@ const ZEROED_DISPLAY: Display = Display {
     layers_active: 0,
     reserved_99_9d: [0; 5],
     panel_parameter_pending: 0,
-    reserved_9f_a1: [0; 3],
+    reserved_9f_a0: [0; 2],
+    panel_parameter: 0,
     panel_command_pending: 0,
     reserved_a3_a4: [0; 2],
     forced_layers_visible: 0,
@@ -850,6 +853,57 @@ pub unsafe extern "C" fn display_set_clear_color(display: *mut Display, color: u
     core::ptr::addr_of_mut!((*display).clear_color).write_volatile(color);
 }
 
+/// Panel driver vtable prefix used by [`display_set_panel_parameter`].
+///
+/// The first eight target words lead to the observed slot at +0x20. Pointer
+/// fields deliberately model target words rather than host byte offsets.
+#[repr(C)]
+struct PanelDriverVtable {
+    reserved_00_1c: [*const (); 8],
+    apply_parameter: unsafe extern "C" fn(*mut u8) -> u32,
+}
+
+/// display_set_panel_parameter — original: `FUN_081d8db8` @ `0x081d8db8`
+/// (**76 bytes**, `0x081d8db8..0x081d8e04`; the next real function begins at
+/// `0x081d8e04`). **3 direct plain `bl` callers and no predicated `bl`
+/// callers**, verified by decoding every ARM branch-immediate word in
+/// `osos.dec`: `0x08259cd4`, `0x08259ce4`, and `0x0828d7d4`.
+///
+/// Stores `parameter` at display+0xa1. An inactive non-internal display
+/// defers the driver operation by setting +0xa2. Every internal display and
+/// every active non-internal display invokes its panel driver's vtable slot
+/// +0x20 with the driver object as its sole argument. A nonzero driver status
+/// becomes retailOS status 7; otherwise the function returns 0.
+///
+/// # Deliberate deviations
+///
+/// The recovered vtable prefix uses native pointer fields so the slot is
+/// represented by a word index on host tests as well as at its target +0x20
+/// offset. The callback's identity is not inferred beyond its raw ABI.
+///
+/// # Safety
+///
+/// `display` and its driver/vtable must be live whenever the immediate path
+/// is selected; the ARM routine performs no pointer guards.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_panel_parameter(
+    display: *mut Display,
+    parameter: u8,
+) -> u32 {
+    core::ptr::addr_of_mut!((*display).panel_parameter).write_volatile(parameter);
+
+    if (*display).display_id != 0 && (*display).layers_active == 0 {
+        core::ptr::addr_of_mut!((*display).panel_command_pending).write_volatile(1);
+        return 0;
+    }
+
+    let driver = core::ptr::addr_of!((*display).driver).read_volatile();
+    let vtable = (driver as *const *const PanelDriverVtable).read_volatile();
+    let status = ((*vtable).apply_parameter)(driver);
+    if status != 0 { 7 } else { 0 }
+}
+
 #[cfg(test)]
 pub(crate) static DISPLAY_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
@@ -935,11 +989,64 @@ mod tests {
             layers_active: 0,
             reserved_99_9d: [0; 5],
             panel_parameter_pending: 0,
-            reserved_9f_a1: [0; 3],
+            reserved_9f_a0: [0; 2],
+            panel_parameter: 0,
             panel_command_pending: 0,
             reserved_a3_a4: [0; 2],
             forced_layers_visible: 0,
             reserved_a6_a7: [0; 2],
+        }
+    }
+    static mut PANEL_PARAMETER_CALLS: usize = 0;
+    static mut LAST_PANEL_PARAMETER_DRIVER: *mut u8 = core::ptr::null_mut();
+    static mut PANEL_PARAMETER_STATUS: u32 = 0;
+
+    unsafe extern "C" fn record_panel_parameter(driver: *mut u8) -> u32 {
+        PANEL_PARAMETER_CALLS += 1;
+        LAST_PANEL_PARAMETER_DRIVER = driver;
+        PANEL_PARAMETER_STATUS
+    }
+
+    #[test]
+    fn panel_parameter_defers_only_for_an_inactive_non_internal_display() {
+        let _guard = DISPLAY_TEST_LOCK.lock();
+        let mut d = display(SECONDARY_DISPLAY_ID, core::ptr::null_mut());
+
+        unsafe {
+            assert_eq!(display_set_panel_parameter(&mut d, 0xa5), 0);
+        }
+
+        assert_eq!(d.panel_parameter, 0xa5);
+        assert_eq!(d.panel_command_pending, 1);
+    }
+
+    #[test]
+    fn panel_parameter_invokes_driver_and_maps_status() {
+        let _guard = DISPLAY_TEST_LOCK.lock();
+        let vtable = PanelDriverVtable {
+            reserved_00_1c: [core::ptr::null(); 8],
+            apply_parameter: record_panel_parameter,
+        };
+        let mut driver_vtable = &vtable as *const PanelDriverVtable;
+        let driver = &mut driver_vtable as *mut *const PanelDriverVtable as *mut u8;
+        let mut d = display(INTERNAL_DISPLAY_ID as u8, driver);
+
+        unsafe {
+            PANEL_PARAMETER_CALLS = 0;
+            LAST_PANEL_PARAMETER_DRIVER = core::ptr::null_mut();
+            PANEL_PARAMETER_STATUS = 0;
+            assert_eq!(display_set_panel_parameter(&mut d, 3), 0);
+            assert_eq!(PANEL_PARAMETER_CALLS, 1);
+            assert_eq!(LAST_PANEL_PARAMETER_DRIVER, driver);
+            assert_eq!(d.panel_parameter, 3);
+            assert_eq!(d.panel_command_pending, 0);
+
+            d.display_id = SECONDARY_DISPLAY_ID;
+            d.layers_active = 1;
+            PANEL_PARAMETER_STATUS = 1;
+            assert_eq!(display_set_panel_parameter(&mut d, 4), 7);
+            assert_eq!(PANEL_PARAMETER_CALLS, 2);
+            assert_eq!(d.panel_parameter, 4);
         }
     }
     #[repr(C, align(8))]

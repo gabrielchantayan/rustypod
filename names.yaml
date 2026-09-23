@@ -78682,6 +78682,41 @@ functions:
       flag value, and adjacent-byte preservation. match.py structural review
       expects three ordered byte stores and the mov-immediate.
 
+  - address: 0x081d8db8
+    ghidra: FUN_081d8db8
+    name: display_set_panel_parameter
+    size: 76
+    sig: "u32 display_set_panel_parameter(Display *display, u8 parameter)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: parameter
+      field_0x90: display_id
+      field_0x94: driver
+      field_0x98: layers_active
+      field_0xa1: panel_parameter
+      field_0xa2: panel_command_pending
+      vtable_slot_0x20: apply_parameter
+    notes: >-
+      Raw osos.dec establishes the true 76-byte extent,
+      0x081d8db8..0x081d8e04: 19 ARM instructions through `pop {r4,pc}`;
+      the separate next function starts with `mov r0,#0` at 0x081d8e04.
+      Decoding every ARM B/BL immediate in the image finds exactly three
+      inbound direct calls, all plain unconditional `bl` and none predicated:
+      0x08259cd4, 0x08259ce4, and 0x0828d7d4. It stores the byte argument at
+      display+0xa1. Only a non-internal display (+0x90 != 0) with inactive
+      layers (+0x98 == 0) sets +0xa2 and returns zero. All other states load
+      display+0x94, dispatch the driver through its vtable slot +0x20 with
+      the driver as r0, and map a nonzero result to status 7. The callback's
+      identity is not inferred beyond this verified ABI. The Rust vtable
+      prefix models target words with repr(C) pointer fields, avoiding host
+      pointer-width byte-offset assumptions. Host tests cover the deferred
+      path, internal and active immediate paths, argument storage, callback
+      receiver, and status mapping. match.py reports the same dispatch and
+      return structure; LLVM uses a frame pointer and schedules the deferred
+      block after the call path.
+
   - address: 0x081d8cfc
     ghidra: FUN_081d8cfc
     name: display_set_clear_color
