@@ -39,6 +39,11 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x6f10_0000 / 0x6f20_0000: dedicated to
+    // app/datetime_adjust's target-width controller, selector, and provider
+    // fixtures; mappings never unmap, so no other port may share either hint.
+    pub const DATETIME_ADJUST_AND_STORE: usize = 0x6f10_0000;
+    pub const DATETIME_ADJUST_AND_STORE_INVALID_MODE: usize = 0x6f20_0000;
     // 0x6b00_0000: dedicated to sqlite/schema_get's target-width Btree,
     // shared-cache, and Schema fixture; mappings never unmap.
     pub const SQLITE_SCHEMA_GET: usize = 0x6b00_0000;
