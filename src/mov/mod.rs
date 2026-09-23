@@ -20,6 +20,7 @@ pub mod fatal_mov_object_cleanup_no_op;
 pub mod fatal_mov_cleanup_08153bc0_no_op;
 pub mod optional_flagged_byte;
 pub mod checked_flagged_width;
+pub mod encoded_field_layout_validate;
 pub mod chain_value_span;
 pub mod chain_segment_bounds;
 pub mod mov_parser_slot_14_is_set;
