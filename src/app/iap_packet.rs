@@ -594,6 +594,123 @@ fn owner_mode_index_does_not_narrow_before_matching() {
     assert_eq!(iap_packet_owner_mode_index(0xffff_ff04), 0xff);
 }
 
+const IAP_SERVICE_OWNER_MODE_VALID: *const u8 = 0x089c_a8e6 as *const u8;
+const IAP_SERVICE_DESCRIPTOR_BASE: *mut u8 = 0x08a2_56b0 as *mut u8;
+const IAP_SERVICE_DESCRIPTOR_STRIDE: usize = 0x124;
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_IAP_SERVICE_OWNER_MODE_VALID: *const u8 = core::ptr::null();
+#[cfg(not(target_os = "none"))]
+static mut HOST_IAP_SERVICE_DESCRIPTOR_BASE: *mut u8 = core::ptr::null_mut();
+
+#[inline(always)]
+unsafe fn iap_service_owner_mode_valid() -> *const u8 {
+    #[cfg(target_os = "none")]
+    { IAP_SERVICE_OWNER_MODE_VALID }
+    #[cfg(not(target_os = "none"))]
+    { core::ptr::read_volatile(core::ptr::addr_of!(HOST_IAP_SERVICE_OWNER_MODE_VALID)) }
+}
+
+#[inline(always)]
+unsafe fn iap_service_descriptor_base() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    { IAP_SERVICE_DESCRIPTOR_BASE }
+    #[cfg(not(target_os = "none"))]
+    { core::ptr::read_volatile(core::ptr::addr_of!(HOST_IAP_SERVICE_DESCRIPTOR_BASE)) }
+}
+
+/// iap_service_descriptor_for_owner_mode — original: `FUN_0818dcec` @
+/// `0x0818dcec` (**56 bytes, `0x0818dcec..0x0818dd24`** — 14 instructions;
+/// the next separately linked function starts at `0x0818dd2c`, after this
+/// function's two literal-pool words). **3 direct plain `bl` call sites and
+/// no predicated `bl` call sites**, verified by decoding every ARM branch word
+/// in `osos.dec`.
+///
+/// Maps an iAP owner framing mode through [`iap_packet_owner_mode_index`].
+/// Only service indices 0 and 1 are eligible; a nonzero corresponding byte
+/// in the runtime service-validity table selects its 0x124-byte descriptor.
+/// All other modes, indices, and unavailable entries return NULL.
+///
+/// # Deviations
+///
+/// The target reads the runtime tables at `0x089ca8e6` and `0x08a256b0`.
+/// Host tests install mapped target-width fixture bases in their place; this
+/// does not affect target code.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.iap_service_descriptor_for_owner_mode")]
+pub extern "C" fn iap_service_descriptor_for_owner_mode(owner_mode: u32) -> *mut u8 {
+    let service_index = iap_packet_owner_mode_index(owner_mode);
+    if service_index >= 2 {
+        return core::ptr::null_mut();
+    }
+
+    unsafe {
+        if iap_service_owner_mode_valid().add(service_index as usize).read_volatile() == 0 {
+            core::ptr::null_mut()
+        } else {
+            iap_service_descriptor_base().add(service_index as usize * IAP_SERVICE_DESCRIPTOR_STRIDE)
+        }
+    }
+}
+
+#[cfg(test)]
+mod service_descriptor_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use std::sync::{LazyLock, Mutex};
+
+    const FIXTURE_LEN: usize = 0x1000;
+    static LOCK: Mutex<()> = Mutex::new(());
+    static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::IAP_SERVICE_DESCRIPTOR_FOR_OWNER_MODE, FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+
+    unsafe fn reset() -> *mut u8 {
+        let base = FIXTURE.expect("fixture mapping was checked") as *mut u8;
+        base.write_bytes(0, FIXTURE_LEN);
+        HOST_IAP_SERVICE_OWNER_MODE_VALID = base;
+        HOST_IAP_SERVICE_DESCRIPTOR_BASE = base.add(0x400);
+        base
+    }
+
+    #[test]
+    fn service_descriptor_requires_a_recognized_mode_and_available_entry() {
+        let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        if FIXTURE.is_none() {
+            assert!(note_missing_u32_fixture("app/iap_packet service descriptor"));
+            return;
+        }
+        unsafe {
+            let base = reset();
+            assert!(iap_service_descriptor_for_owner_mode(1).is_null());
+            assert!(iap_service_descriptor_for_owner_mode(0).is_null());
+            assert!(iap_service_descriptor_for_owner_mode(4).is_null());
+            assert!(iap_service_descriptor_for_owner_mode(0x0000_0102).is_null());
+
+            base.add(1).write(1);
+            assert_eq!(iap_service_descriptor_for_owner_mode(2), base.add(0x400 + IAP_SERVICE_DESCRIPTOR_STRIDE));
+        }
+    }
+
+    #[test]
+    fn service_descriptor_uses_the_target_stride_for_each_eligible_index() {
+        let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        if FIXTURE.is_none() {
+            assert!(note_missing_u32_fixture("app/iap_packet service descriptor"));
+            return;
+        }
+        unsafe {
+            let base = reset();
+            base.write(1);
+            assert_eq!(iap_service_descriptor_for_owner_mode(1), base.add(0x400));
+        }
+    }
+}
+
 /// iap_packet_owner_mode_from_index — original: `FUN_0819214c` @
 /// `0x0819214c` (**40 bytes, 0x0819214c..0x08192174** — 10 instructions,
 /// no literal pool; the next separately linked function starts at
