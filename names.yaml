@@ -132196,3 +132196,29 @@ functions:
       Firmware retains the native layout and indirect dispatch. Host tests
       cover absent selected records plus zero and nonzero dispatch results,
       including preservation of the status argument.
+  - address: 0x081c55c8
+    ghidra: FUN_081c55c8
+    name: timestamp_index_seek
+    size: 132
+    sig: "void timestamp_index_seek(void *state, i32 target_timestamp)"
+    module: app/timestamp_index_seek
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: target_timestamp
+      "state+0x40": timestamp_index_table
+      "state+0xa4": selected_index
+      "timestamp_index_table+0x0": timestamp_count
+      "timestamp_index_table+0x4": timestamps
+    notes: >-
+      Raw osos.dec words establish the exact 132-byte A32 instruction body
+      0x081c55c8..0x081c564b; push {r3,lr} at 0x081c564c begins the next
+      independently entered function. A full-image A32 decode finds three
+      inbound plain unconditional BL calls at 0x081c5dbc, 0x081c6c34, and
+      0x081c6ee8, with zero predicated BL calls. The function chooses the
+      final index when its signed timestamp is at most the target; otherwise
+      it retains the existing index for the (previous,current] interval or
+      linearly finds the first signed timestamp at least the target. The port
+      deliberately models only the verified target-width state and table
+      prefixes, and preserves the original linear scan and unchecked caller
+      preconditions.
