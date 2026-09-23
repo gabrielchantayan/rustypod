@@ -133269,3 +133269,34 @@ functions:
       Full-image A32 decoding found three inbound plain unconditional BL sites
       (0x081647ac, 0x08190f6c, and 0x081925b8) and no predicated inbound BL
       forms. Deliberate deviation: none.
+
+  # --- Chunked opaque-interface transfer ---
+  - address: 0x0818d774
+    ghidra: FUN_0818d774
+    name: chunked_interface_transfer
+    size: 152
+    sig: "u32 chunked_interface_transfer(void *context, u32 unit_index, u8 *source, u32 remaining_units, u32 *transferred_units)"
+    module: app/chunked_interface_transfer
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: unit_index
+      param_3/r2: source
+      param_4/r3: remaining_units
+      param_5/stack: transferred_units
+      "context+0x478": transfer_interface
+      "transfer_interface.vtable+0x08": transfer_chunk
+      "transfer_interface.vtable+0x2c": transfer_stride
+    notes: >-
+      Raw osos.dec words establish the exact 152-byte A32 body
+      0x0818d774..0x0818d80c; the next independently linked function begins
+      at 0x0818d80c. The body has two outgoing indirect blx calls and no
+      predicated call. A complete image decode finds three unconditional
+      inbound bl sites (0x0818d520, 0x0818d580, 0x0818d5e8) and no predicated
+      inbound bl forms. It gets the unit stride through vtable slot +0x2c,
+      submits at most 32 units through +0x08, and advances index, count, and
+      source by stride times the successful chunk length; the first nonzero
+      submission result returns zero. Ghidra's recovered caller
+      0x0818d354 confirms the five-argument ABI. Deliberate deviation: Rust
+      models the unresolved virtual interface by target-width pointer words on
+      device and native-width vtable pointers in host tests.
