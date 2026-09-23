@@ -133474,3 +133474,33 @@ functions:
       mutex at +0x148 to the existing REGION_MUTEX_OPS unlock seam. Deliberate
       deviation: the direct tail branch becomes an observable indirect call
       for host fixtures.
+
+  - address: 0x08184794
+    ghidra: FUN_08184794
+    name: controller_directional_command
+    size: 104
+    sig: "DirectionalResourceRecord *controller_directional_command(AppControllerPendingCommand *controller, u32 command, u32 argument)"
+    module: app/controller_directional_command
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: command
+      param_3/r2: argument
+      "controller+0x34": directional_provider_selector_object
+      "selector_object.vtable+0xe4": unresolved_directional_provider_selector
+      FUN_08275b9c: object_cast_to_class
+      FUN_08182c78: command_record_resolve_or_allocate
+      FUN_08286ad4: directional_resource_record_construct
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte A32 body
+      0x08184794..0x081847fb; push {r4-r8,lr} at 0x081847fc begins the next
+      real function. The body contains two unconditional direct BL, one
+      unconditional indirect BLX, zero predicated BL forms, and an
+      unconditional plain-B tail call. It selects a controller provider through
+      vtable slot +0xe4, returns the selected pointer if command is zero or the
+      selection is NULL, downcasts non-NULL input to class 0x1700, resolves the
+      (command, argument) record with allocation enabled, and constructs
+      directional-resource records in that record and controller+0x88. The
+      virtual selector has no recovered semantic identity: target builds retain
+      target-width dispatch and host tests use a narrow selector seam; the ARM
+      tail branch is a normal Rust call with the same returned pointer.
