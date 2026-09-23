@@ -9,6 +9,10 @@
 //! - [`trace_buffer_slot_acquire_global`] — original: `FUN_08149f48` @
 //!   `0x08149f48` (**32-byte raw extent**: seven instructions plus the final
 //!   tail branch; **six unconditional `bl` call sites, no predicated forms**).
+//! - [`trace_buffer_slot_presence_matches`] — original: `FUN_08149f68` @
+//!   `0x08149f68` (**56-byte raw extent; three unconditional `bl` callers,
+//!   no predicated `bl` forms**).
+
 
 //!
 //! ## Stock algorithm
@@ -258,6 +262,32 @@ pub unsafe extern "C" fn trace_buffer_slot_acquire_global(
     trace_buffer_slot_acquire(trace_buffer_get().cast::<TraceBuffer>(), selector, entry_guard)
 }
 
+/// trace_buffer_slot_presence_matches — original: `FUN_08149f68` @
+/// `0x08149f68` (56 bytes, next distinct function at `0x08149fa0`; three
+/// unconditional `bl` callers at `0x08149fc8`, `0x0814a184`, and
+/// `0x0814a200`, no predicated forms).
+///
+/// Validates the unsigned seven-word slot index and whether its target word
+/// has the requested presence state. It returns zero only when `selector` is
+/// in `0..7` and the word is NULL exactly when `present` is zero; every other
+/// case returns the stock error value two. Raw ARM performs a normal aligned
+/// word load only after the bounds check. Deliberate deviation: none.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.trace_buffer_slot_presence_matches")]
+pub unsafe extern "C" fn trace_buffer_slot_presence_matches(
+    slots: *const u32,
+    selector: u32,
+    present: u32,
+) -> u32 {
+    if selector < 7 && (slots.add(selector as usize).read() == 0) == (present == 0) {
+        0
+    } else {
+        2
+    }
+}
+
+
 
 /// trace_buffer_slot_acquire — original: `FUN_0814a130` @ `0x0814a130`
 /// (144 bytes, next distinct function at `0x0814a1c0`).
@@ -448,6 +478,23 @@ mod tests {
             mutex_unlock_counted(entry_guard);
         }
         restore(guard);
+    }
+
+    #[test]
+    fn slot_presence_matches_checks_boundaries_and_requested_null_state() {
+        let slots = [0, 0x10, 0, u32::MAX, 1, 0, 2];
+
+        unsafe {
+            assert_eq!(trace_buffer_slot_presence_matches(slots.as_ptr(), 0, 0), 0);
+            assert_eq!(trace_buffer_slot_presence_matches(slots.as_ptr(), 6, 1), 0);
+            assert_eq!(trace_buffer_slot_presence_matches(slots.as_ptr(), 1, 0), 2);
+            assert_eq!(trace_buffer_slot_presence_matches(slots.as_ptr(), 2, 1), 2);
+            assert_eq!(trace_buffer_slot_presence_matches(slots.as_ptr(), 7, 0), 2);
+            assert_eq!(
+                trace_buffer_slot_presence_matches(slots.as_ptr(), u32::MAX, 1),
+                2,
+            );
+        }
     }
 
     #[test]
