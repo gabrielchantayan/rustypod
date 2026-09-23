@@ -133914,3 +133914,26 @@ functions:
       32-bit layout on host builds. Host tests prove the six halfword stores
       have their exact 12-byte stride and do not overwrite adjacent bytes;
       match.py reviewed the ARM release structure after build.
+  - address: 0x0816f11c
+    ghidra: FUN_0816f11c
+    name: opaque_vtable_payload_construct
+    size: 16
+    sig: "void *opaque_vtable_payload_construct(void *this, u32 payload)"
+    module: cxx/opaque_vtable_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_0816f12c: OPAQUE_VTABLE_PAYLOAD_VTABLE_ADDRESS (0x08988ad8)
+    notes: >-
+      Raw osos.dec establishes a 12-byte A32 instruction body:
+      `ldr r2,[pc,#8]; str r1,[r0,#4]; str r2,[r0]; bx lr`. The literal word
+      at 0x0816f12c is 0x08988ad8 and 0x0816f130 is the next independently
+      entered function, making the true function extent 16 bytes. A
+      whole-image aligned A32 decode finds exactly three inbound unconditional
+      plain BL sites (0x081356d4, 0x08173760, and 0x081c934c), zero
+      predicated inbound BL forms, and no outbound BL forms. It stores payload
+      at this+0x04, then the opaque vtable literal at this+0x00, and returns
+      this unchanged in r0. The literal's dispatch targets have no recovered
+      semantic identity, so no callee seam was invented. Deliberate
+      deviation: volatile Rust stores preserve the observed order.
