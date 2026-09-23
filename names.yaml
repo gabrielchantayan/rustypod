@@ -132133,3 +132133,32 @@ functions:
       and zero-selector release. match.py shows the same guards, clear/store,
       allocation, and initializer dispatch, with expected ABI-frame and
       volatile-seam differences.
+
+  - address: 0x081ca490
+    ghidra: FUN_081ca490
+    name: resource_owner_replace_slot_1b4
+    size: 28
+    sig: "void resource_owner_replace_slot_1b4(void *owner, u32 selector)"
+    module: ui/resource_owner_replace_slot_1b4
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/[sp+0]: selector
+      "owner+0x1b4": resource_slot
+      "owner+0xfc": initializer_context
+      "owner+0xf8": selector_slot
+      FUN_081ca6f8: replace_owned_resource
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte A32 extent
+      0x081ca490..0x081ca4ab: push {r3,lr}; str r1,[sp]; add r1,r0,#0x1b4;
+      add r3,r0,#0xf8; add r2,r0,#0xfc; bl 0x081ca6f8; pop {r3,pc}.
+      The next independently entered function begins at 0x081ca4ac with
+      push {r4-r7,lr}. This wrapper has one plain unconditional BL and no
+      predicated BL. Whole-image A32 branch decoding finds three inbound
+      plain BL sites at 0x08141110, 0x0814113c, and 0x08141154, with no
+      predicated BL sites. It forwards owner, owner+0x1b4, owner+0xfc,
+      owner+0xf8, and selector to the already ported replace_owned_resource.
+      Deliberate deviation: Rust uses a normal five-argument call rather
+      than explicitly placing selector on the stack; the target ABI preserves
+      the same call arguments. Host tests cover equal-selector preservation
+      and zero-selector release through the fixed target-width offsets.

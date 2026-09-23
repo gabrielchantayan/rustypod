@@ -163,5 +163,6 @@ pub mod comma_input_guard;
 pub mod element_refresh;
 pub mod apply_mode_dimensions;pub mod object_stack_push;
 pub mod replace_owned_resource;
+pub mod resource_owner_replace_slot_1b4;
 
 pub mod mutex_handoff_guarded_reset;
