@@ -134067,3 +134067,37 @@ functions:
       this unchanged in r0. The literal's dispatch targets have no recovered
       semantic identity, so no callee seam was invented. Deliberate
       deviation: volatile Rust stores preserve the observed order.
+
+  # --- Vtable-slot context dispatch wrapper ---
+  - address: 0x081688e4
+    ghidra: FUN_081688e4
+    name: vtable_slot_1bc_context_dispatch
+    size: 48
+    sig: "void vtable_slot_1bc_context_dispatch(void *output, const void *prototype, void *object)"
+    module: app/vtable_slot_1bc_context_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: output
+      param_2/r1/r5: prototype
+      param_3/r2: object
+      "object->vtable+0x1bc": context_getter
+      r0: returned_context
+      FUN_08168838: retail_context_helper
+    notes: >-
+      Raw osos.dec establishes the true 48-byte extent
+      0x081688e4..0x08168913: push {r4,r5,r6,lr}, preserve output and
+      prototype, load object->vtable+0x1bc, call it through blx r1 with
+      object in r0, restore output/prototype and tail-branch to 0x08168838.
+      The next separately entered function begins at 0x08168914. Ghidra's
+      216-byte extent incorrectly absorbs that adjacent function and assigns
+      its calls to this wrapper. Complete aligned raw A32 decoding finds no
+      direct outbound bl instructions or predicated direct bl forms here,
+      only the one unconditional indirect blx; whole-image branch decoding
+      finds one inbound plain bl (0x0812f964) and zero predicated inbound
+      forms. The unresolved slot and tail target have no established semantic
+      identity, so the names describe their observed roles without inventing
+      a callee. Target builds call 0x08168838 directly; host tests replace it
+      with a recording callback and prove the slot result plus all three
+      original arguments reach it. Rust returns after that call rather than
+      performing the original tail branch; the observable call ABI is
+      unchanged.
