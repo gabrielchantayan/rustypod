@@ -135577,3 +135577,32 @@ functions:
       match.py reports the same three indirect dispatches, short-circuit
       branches, and u64 nonzero normalization, with expected LLVM frame and
       OR-based final comparison differences from ARM ADS.
+  - address: 0x0812b018
+    ghidra: FUN_0812b018
+    name: input_sequence_find_item
+    size: 104
+    sig: "void *input_sequence_find_item(InputSequence *owner, i32 action_index, u32 mode)"
+    module: app/input_sequence_find_item
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r4: action_index
+      param_3/r2: mode
+      "owner+0xa8": primary_collection
+      "owner+0xac": alternate_collection
+      "item+0x10": signed_action_index
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+    notes: >-
+      Raw osos.dec words establish the exact 104-byte body
+      0x0812b018..0x0812b07c; the next separately linked function begins
+      at 0x0812b080. The body has four unconditional BL instructions and no
+      predicated BL instructions: cursor_init once, cursor_advance once, and
+      cursor_invalidate on both the match and exhaustion exits (three distinct
+      callee addresses, explaining Ghidra's three-call report). It selects
+      owner+0xac when mode is zero and owner+0xa8 otherwise, walks that
+      collection, and returns the first item whose signed byte +0x10 equals
+      action_index; all exits invalidate the cursor. The Rust port reads the
+      target-width collection fields as u32 word indices rather than host
+      pointer fields, preserving +0xa8/+0xac on 64-bit hosts.
