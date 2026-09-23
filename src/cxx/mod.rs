@@ -11,6 +11,7 @@ pub mod generic_descriptor_lookup;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod string_record;
 pub mod record_work_pump;
+pub mod work_record_teardown;
 pub mod string_object_word_merge;
 pub mod array_element_at;
 pub mod sorted_pointer_array_insert;

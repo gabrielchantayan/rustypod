@@ -63413,6 +63413,36 @@ functions:
       untouched, mid-walk set swap (the reload), empty string; fixtures
       in testing::hints::STRING_RECORD (new).
 
+  - address: 0x0814848c
+    ghidra: FUN_0814848c
+    name: teardown_work
+    size: 84
+    sig: "void teardown_work(WorkRecord *record)"
+    module: cxx/work_record_teardown
+    status: ported
+    renames:
+      param_1: record
+      FUN_0814848c: teardown_work
+      target_at_08: final_target
+      target_at_14: first_target
+      target_at_30: mode_target
+    notes: >-
+      Raw ARM words establish the exact 84-byte extent 0x0814848c..0x081484df;
+      the next real function starts with push {r4, r5, r6, lr} at 0x081484e0.
+      Decoding every B/BL instruction in osos.dec finds three unconditional
+      direct inbound bl call sites (0x081482cc, 0x08148590, 0x08148698), no
+      predicated calls, and no direct tail branch. The function invokes vtable
+      slot +0x1c at record+0x14 with record+0x04, conditionally invokes the
+      same slot at +0x30 with +0x14 when word +0x5c equals three, then tail
+      dispatches the slot at +0x08 with the latest target. No virtual callee
+      identity is inferred. Deliberate deviations: Rust represents the final
+      tail dispatch as a normal call because its return is unobserved; host
+      vtables use widened function pointers. Host tests cover both mode paths
+      and verify callback order and forwarded target pointers. match.py exits
+      1 with an expected structural diff: LLVM adds a frame and uses
+      post-indexed addressing, but retains the three slot +0x1c dispatches and
+      the mode-three branch.
+
   - address: 0x08148578
     ghidra: FUN_08148578
     name: pump_record_work_queue
