@@ -132510,3 +132510,26 @@ functions:
       callers and no outgoing BL instructions. Deliberate deviation:
       Rust expresses the tail branch as a normal call and return, preserving
       the call condition and all observable memory effects.
+  - address: 0x081b759c
+    ghidra: FUN_081b759c
+    name: resource_slot_table_initialize
+    size: 72
+    sig: "void resource_slot_table_initialize(u8 *state)"
+    module: app/resource_slot_table_initialize
+    status: ported
+    renames:
+      param_1/r0: state
+      DAT_081b75e4: RESOURCE_SLOT_TABLE_ADDRESS (0x083eb2e0)
+      FUN_081b7d2c: retail_resource_slot_initialize
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte extent
+      0x081b759c..0x081b75e3; 0x081b75e4 is the literal 0x083eb2e0 and the
+      next real function starts at 0x081b75e8 with push {r4,r5,r6,r7,r8,lr}.
+      The body contains one plain unconditional BL at 0x081b75c4 and no
+      predicated BL forms. A binary-wide A32 decode finds three inbound plain
+      BL calls at 0x081b6a80, 0x081b6e28, and 0x081b6f30, with no predicated
+      inbound calls. It invokes 0x081b7d2c four times for state+0x88 plus
+      0x18-byte strides, drawing paired words from 0x083eb2e0 and +0x10, then
+      stores one at state+0xe9. The callee has no recovered semantic identity:
+      ARM code preserves the verified target address through a literal-loaded
+      BLX; the sole deliberate deviation is the narrow host callback seam.
