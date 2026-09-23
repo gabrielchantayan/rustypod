@@ -134197,3 +134197,30 @@ functions:
       deviation: Rust uses a conditional branch instead of predicated A32
       instructions; host tests use a dispatch seam because host pointers do
       not fit the retailOS four-byte vtable layout.
+
+  - address: 0x08167b1c
+    ghidra: FUN_08167b1c
+    name: timer_step_value_destroy
+    size: 52
+    sig: "TimerStepValue *timer_step_value_destroy(TimerStepValue *this)"
+    module: app/timer_step_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_08167b50: TIMER_STEP_VALUE_VTABLE
+      FUN_082739e0: release_refcounted_value
+      FUN_081384a0: refcounted_base_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte A32 body: thirteen words
+      from 0x08167b1c through its unconditional tail branch at 0x08167b4c;
+      the literal pool word at 0x08167b50 is 0x0898806c and the next
+      separately linked function begins at 0x08167b54. Full-image aligned
+      A32 decoding independently finds exactly three inbound plain BL sites
+      (0x08153258, 0x08167604, 0x08167b10), with no predicated BL forms.
+      It restores the class vtable, NULL-guarded releases driver +0x1c then
+      step +0x18, and tail-branches to refcounted_base_destroy(this). The
+      Rust port calls the already-ported release and base-destructor seams
+      directly; that preserves the observable order and return identity,
+      while tail-call formation remains an intentional code-generation
+      deviation. Host test proves both releases, the base-vtable transition,
+      return identity, and preservation of fields outside the base teardown.

@@ -98,7 +98,7 @@ use crate::app::animation::{timing_wheel_insert, timing_wheel_remove};
 use crate::app::animation::SCHEDULER_SINGLETON_GLOBAL;
 #[cfg(not(target_os = "none"))]
 use crate::app::animation::TIMING_WHEEL_BUCKETS;
-use crate::app::fixed_value::{refcounted_base_init, value_aux_max, FixedValue};
+use crate::app::fixed_value::{refcounted_base_destroy, refcounted_base_init, value_aux_max, FixedValue};
 use crate::app::refcounted_value::{release_refcounted_value, retain_value};
 
 /// Firmware load address of the class vtable literal (pool word at
@@ -228,6 +228,41 @@ pub unsafe extern "C" fn timer_step_value_init(
     // 08167ae8..08167af0: link into the timing wheel at bucket rank-1.
     timing_wheel_insert(table, this.cast());
     this
+}
+
+/// `timer_step_value_destroy` — retailOS `FUN_08167b1c` @ `0x08167b1c`.
+///
+/// The raw body is exactly **52 bytes**: thirteen ARM instruction words
+/// from `0x08167b1c` through the tail branch at `0x08167b4c`; the next
+/// separately linked function begins at `0x08167b50`. Binary decoding finds
+/// **three** direct, plain unconditional `bl` call sites
+/// (`0x08153258`, `0x08167604`, `0x08167b10`) and no predicated calls.
+///
+/// Releases the driver at `+0x1c`, then the step value at `+0x18`, restores
+/// the derived vtable literal `0x0898806c`, and destroys the shared
+/// refcounted timing-wheel base. The stock final transfer is an
+/// unconditional tail branch to `refcounted_base_destroy`; the direct Rust
+/// call deliberately preserves its observable destruction order and return
+/// value without requiring tail-call code generation.
+///
+/// # Safety
+///
+/// `this` must reference a writable target-layout [`TimerStepValue`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn timer_step_value_destroy(
+    this: *mut TimerStepValue,
+) -> *mut TimerStepValue {
+    let driver = (*this).driver_value;
+    if driver != 0 {
+        release_refcounted_value(driver as usize as *mut u8);
+    }
+    let step = (*this).step_value;
+    if step != 0 {
+        release_refcounted_value(step as usize as *mut u8);
+    }
+    (*this).vtable = TIMER_STEP_VALUE_VTABLE;
+    refcounted_base_destroy(this.cast()).cast()
 }
  
 /// timer_step_value_set_values — retailOS `FUN_08167980` @ `0x08167980`
@@ -575,6 +610,38 @@ mod tests {
                 ],
                 "all eight words, nothing else touched"
             );
+        }
+    }
+
+    #[test]
+    fn destructor_releases_driver_then_step_and_delegates_to_the_base() {
+        let _lock = take_lock();
+        let Some(f) = fixture() else {
+            note_missing_u32_fixture("app::timer_step_value");
+            return;
+        };
+        unsafe {
+            dirty_node(f.node);
+            counted_scalar(f.driver, 0);
+            counted_scalar(f.step, 0);
+            (*f.driver).flags = 0b1110;
+            (*f.step).flags = 0b1110;
+            (*f.node).driver_value = f.driver as usize as u32;
+            (*f.node).step_value = f.step as usize as u32;
+
+            assert_eq!(timer_step_value_destroy(f.node), f.node);
+
+            assert_eq!((*f.driver).flags, 0b1010, "driver +0x1c is released");
+            assert_eq!((*f.step).flags, 0b1010, "step +0x18 is released");
+            assert_eq!(
+                (*f.node).vtable,
+                crate::app::fixed_value::REFCOUNTED_BASE_VTABLE,
+                "the final base destruction replaces the derived vtable"
+            );
+            assert_eq!((*f.node).opaque_04, 0x1111_1111);
+            assert_eq!((*f.node).rank, 0xcafe_babe);
+            assert_eq!((*f.node).driver_value, f.driver as usize as u32);
+            assert_eq!((*f.node).step_value, f.step as usize as u32);
         }
     }
 
