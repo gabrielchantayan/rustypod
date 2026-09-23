@@ -256,6 +256,7 @@ pub mod liti_indexed_entry_lookup;
 pub mod nested_liti_class_check;
 pub mod h264_decode_forwarder;
 pub mod handle_slot_18_predicate_and_state_is_two;
+pub mod object_byte_0x946_is_two;
 pub mod context_shared_cell_payload_word;
 pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;

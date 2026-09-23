@@ -16,6 +16,24 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817a224
+    ghidra: FUN_0817a224
+    name: object_byte_0x946_is_two
+    size: 20
+    sig: "u32 object_byte_0x946_is_two(const void *object)"
+    module: app/object_byte_0x946_is_two
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x946": byte_at_0x946
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte A32 body
+      0x0817a224..0x0817a237; stmdb sp!,{r4-r8,lr} at 0x0817a238 begins the
+      next real function. It loads the opaque object's byte at +0x946 and
+      returns one exactly when that byte is two. An independent full-image
+      decode establishes three inbound plain BL sites (0x0817addc,
+      0x0817ae44, 0x0817c8ec) and zero predicated inbound BL forms. The
+      leaf body has zero outgoing plain or predicated BL calls and no BLX.
   - address: 0x0817c044
     ghidra: FUN_0817c044
     name: swap_selector_one_two
