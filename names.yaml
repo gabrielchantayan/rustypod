@@ -132453,3 +132453,36 @@ functions:
       and wrapping index + 1. The unported resolver is an explicit
       address-named seam: ARM calls retailOS at 0x081bad78 while host tests
       install a recorder.
+  - address: 0x081b9db8
+    ghidra: FUN_081b9db8
+    name: registry_display_client_construct
+    size: 208
+    sig: "u8 *registry_display_client_construct(u8 *allocation, void *arg1, u32 arg2, void *arg3, void *arg4, u32 on_secondary_display)"
+    module: app/registry_display_client_construct
+    status: ported
+    renames:
+      DAT_081b9e7c: REGISTRY_DISPLAY_CLIENT_VTABLE (0x0898c5f4)
+      DAT_081b9e80: REGISTRY_DISPLAY_CLIENT_OBSERVER_VTABLE (0x08989918)
+      DAT_081b9e84: RESOURCE_KEY_SLST (0x534c7374)
+      FUN_0811e478: unresolved parent constructor (verified retail seam)
+      FUN_0810dddc: registry_observer_base_construct (direct, ported)
+      FUN_08135040: registry_set_observer (direct, ported)
+      FUN_0819fdb0: unresolved registry getter (verified retail seam)
+      FUN_0811cc00: unresolved registry lookup (verified retail seam)
+      FUN_081d8870: display_get (direct, ported)
+    notes: >-
+      Raw osos.dec establishes 49 instruction words, 196 code bytes from
+      0x081b9db8 through the return at 0x081b9e78, followed by its three-word
+      literal pool at 0x081b9e7c..0x081b9e87; the next real function begins
+      at 0x081b9e88, so the true extent is 208 bytes. Full-image aligned A32
+      decoding finds exactly three inbound plain unconditional BL sites
+      (0x08187a98, 0x08187b5c, 0x081b9778), zero predicated BL sites, and
+      eight outgoing plain BL calls. It runs the unresolved six-argument
+      parent constructor with a normalized final boolean, installs its vtable,
+      allocates and constructs an eight-byte observer, installs that observer
+      at client+0xa8, clears and initializes fields +0x108..+0x128, resolves
+      resource key "SLst", and records display 0 or 1 with a matching
+      sentinel word. Deliberate deviations: the three identity-unresolved
+      callees are address-verified operations on target and deterministic host
+      seams in tests; target-width pointer fields are stored as u32 words so
+      host pointer width cannot alter retail offsets.
