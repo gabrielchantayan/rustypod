@@ -142,6 +142,7 @@ pub mod encoded_field_prefix_size;
 pub mod firmware_query_low_byte;
 pub mod dual_pool_screen;
 pub mod transfer_slot_buffer;
+pub mod transfer_slot_try_process;
 pub mod double_buffer;
 pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
