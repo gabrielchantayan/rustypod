@@ -135200,6 +135200,30 @@ functions:
       proposed callee identity; target code re-resolves it from the
       constructed object's vtable, while host tests inject that read.
 
+  # --- record kind 6/7 predicate ---
+  - address: 0x08132658
+    ghidra: FUN_08132658
+    name: record_kind_is_six_or_seven
+    size: 24
+    sig: "u32 record_kind_is_six_or_seven(const u8 *record)"
+    module: app/record_kind_is_six_or_seven
+    status: ported
+    renames:
+      param_1/r0: record
+      "[record + 0x1a]": kind
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent
+      0x08132658..0x0813266f: ldrb r0,[r0,#0x1a], compare against 7 and then
+      (when unequal) 6, and return one or zero. The next independently linked
+      body begins at 0x08132670. The body has zero BL instructions. Whole-image
+      A32 branch-immediate decoding finds exactly three inbound plain
+      unconditional BL sites (0x081323d8, 0x08132a84, 0x08132da8) and zero
+      predicated BL sites. It recognizes only kind values 6 and 7 at record
+      offset 0x1a. The record type and kind-value meanings are unrecovered, so
+      the semantic name intentionally states only verified behavior. Deliberate
+      deviation: LLVM emits an equivalent mask/subtract/CLZ membership test
+      rather than the firmware's conditional comparisons.
+
   # --- cxx: casefolded UTF-16 temporary with ligature-prefix detection ---
   - address: 0x08132678
     ghidra: FUN_08132678
