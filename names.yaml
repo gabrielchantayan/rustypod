@@ -130908,3 +130908,28 @@ functions:
       arguments zero, zero, one when registration succeeds. The six callees
       have no recovered full identities, so the target port calls their
       verified retail addresses and host tests install role-based seams.
+  - address: 0x081e43cc
+    ghidra: FUN_081e43cc
+    name: mov_chain_table_load_segment_bounds
+    size: 140
+    sig: "i32 mov_chain_table_load_segment_bounds(u8 *state, i32 segment_index)"
+    module: mov/chain_segment_bounds
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: segment_index
+      DAT_081e4458: state_relative_segment_alternate_flags
+      FUN_081e32a8: mov_chain_table_load_span
+    notes: >-
+      Raw osos.dec words establish the true 140-byte extent
+      0x081e43cc..0x081e4457; the literal 0x000013b0 at 0x081e4458 is
+      state-relative IRAM-mirror data, and the add at 0x081e445c starts the
+      next real function. Direct A32 decoding finds two unconditional outbound
+      BL instructions at 0x081e43f8 and 0x081e4430, zero predicated outbound
+      BL forms, and three inbound unconditional plain BL call sites with zero
+      predicated inbound forms. It resolves the primary index at +0x1240, then
+      resolves +0x1264 or +0x1248 according to state-relative byte +0x13b0;
+      after both successes it replaces +0x126c with its resolved start plus
+      length using ARM wrapping addition. Rust uses the existing verified
+      mov_chain_table_load_span seam and word indices so 32-bit firmware
+      fields retain their offsets on 64-bit hosts; no behavioral deviation.
