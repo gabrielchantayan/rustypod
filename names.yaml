@@ -78475,6 +78475,33 @@ functions:
       device addresses until direct ports replace them. Host tests cover sign
       normalization, both workers' success/failure effects, all four
       different-sign magnitude orders, and exact-magnitude positive zero.
+  - address: 0x081d85e8
+    ghidra: FUN_081d85e8
+    name: owned_pair_destroy_and_deallocate
+    size: 44
+    sig: "void owned_pair_destroy_and_deallocate(void *owner)"
+    module: heap/owned_pair_destroy_and_deallocate
+    status: ported
+    renames:
+      param_1/r4: owner
+      "owner+0x08": pair
+      "pair+0x04": resource
+    notes: >-
+      Raw osos.dec establishes the true 44-byte extent
+      0x081d85e8..0x081d8613, not Ghidra's premature 28-byte boundary:
+      after delete(pair), the reachable continuation at 0x081d8604 clears
+      owner+8 and owner+4 before pop {r4,pc}; 0x081d8614 begins the next
+      independently entered virtual-dispatch thunk. The body has two plain
+      internal bl calls: pair destruction @ 0x081a8204, which tag-3 deletes
+      pair+4 then clears both pair words, and operator_delete @ 0x082aad24
+      for the pair. A full raw ARM B/BL scan found three direct incoming
+      calls: plain bl @ 0x081d8778 and 0x081f4d00, plus predicated bleq @
+      0x081f4d4c. A null pair leaves owner unchanged. The Rust port inlines
+      the verified pair-destruction sequence because 0x081a8204 has no
+      established semantic name; its tag-3 and tag-2 allocator seams are
+      the already ported operator_delete_tag3 and operator_delete. It uses
+      u32 word accesses deliberately so target pointer fields remain
+      four bytes apart on 64-bit host tests.
   # --- display object: the six-layer compositor root ---
   - address: 0x081d89d0
     ghidra: FUN_081d89d0

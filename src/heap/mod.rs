@@ -55,6 +55,7 @@ pub mod report_runtime_error;
 pub mod pool;
 pub mod releasable_buffer;
 pub mod owned_buffer;
+pub mod owned_pair_destroy_and_deallocate;
 pub mod bucket_chain_table;
 pub mod zeroing_buffer;
 pub mod two_buffer_owner;
