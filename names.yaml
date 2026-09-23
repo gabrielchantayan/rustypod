@@ -133562,3 +133562,28 @@ functions:
       virtual selector has no recovered semantic identity: target builds retain
       target-width dispatch and host tests use a narrow selector seam; the ARM
       tail branch is a normal Rust call with the same returned pointer.
+  - address: 0x0817e9b8
+    ghidra: FUN_0817e9b8
+    name: app_controller_opaque_item_remove
+    size: 196
+    sig: "void app_controller_opaque_item_remove(AppControllerOpaqueItemRemoval *controller, u32 item_id)"
+    module: app/controller_opaque_item_remove
+    status: ported
+    renames:
+      param_1: controller
+      param_2: item_id
+      FUN_0817f6b0: app_controller_opaque_item_vector_nonempty
+      FUN_083e9eb8: word_copy_forward
+      FUN_08103550: message_arena_alloc
+      FUN_081034b0: queued_message_construct_word
+      FUN_08110fdc: queued_message_post
+    notes: >-
+      Raw osos.dec establishes a 196-byte extent, 0x0817e9b8..0x0817ea7b: 47
+      instruction words followed by pool words at 0x0817ea74 and 0x0817ea78;
+      the next separately entered function starts at 0x0817ea7c. The body has
+      five plain BL calls (0x0817e9d8, 0x0817ea3c, 0x0817ea4c, 0x0817ea58,
+      0x0817ea70), one predicated BLNE at 0x0817ea10, and no tail branch. It
+      removes the first matching 4-byte opaque item from controller +0x58,
+      then posts code 0x2503 carrying controller +0x70 only if removal made
+      the vector empty. FUN_083e9eb8 is inlined as a volatile forward word
+      copy; its concrete semantic identity remains unrecovered.
