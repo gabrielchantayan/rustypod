@@ -29080,6 +29080,29 @@ functions:
       firmware global and tail target; the ARM build retains the exact
       instruction sequence and target veneer.
 
+  - address: 0x081f9008
+    ghidra: FUN_081f9008
+    name: media_player_slot_ac_dispatch
+    size: 24
+    sig: "u32 media_player_slot_ac_dispatch(void)"
+    module: app/media_player_slot_ac_dispatch
+    status: ported
+    vars:
+      FUN_08259594: media_player_interface_get
+      "vtable+0xac": unresolved_media_player_interface_slot_ac
+    notes: >-
+      Raw ARM words prove the 24-byte extent 0x081f9008..0x081f9020:
+      push {r4,lr}; call media_player_interface_get; load its vtable and
+      slot +0xac; pop {r4,lr}; bx the loaded slot. The incoming r0 is
+      overwritten by the getter, so the slot receives only the returned
+      interface as this and its r0 result passes through unchanged. The next
+      function opens at 0x081f9020 with push {r4-r8,lr}. Decoding aligned
+      ARM branch words finds three inbound direct plain BL callers and zero
+      predicated BL callers; this function has one outbound direct plain BL,
+      no predicated BL, and one indirect BX tail dispatch. The virtual slot
+      has no recovered semantic identity, so the port names its verified
+      structural role. The host build substitutes the firmware getter with a
+      seam; ARM retains the exact instruction sequence.
   - address: 0x081f9120
     ghidra: FUN_081f9120
     name: volume_controller_adjust
