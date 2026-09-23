@@ -62,6 +62,7 @@ pub mod error_latch;
 pub mod video_engine_property_slot;
 pub mod cursor_read_be_bytes;
 pub mod dispatch_if_optional_link_valid;
+pub mod dispatch_relative_record_list;
 pub mod dispatch_indexed_handle_actions;
 pub mod dos_wildcard_match_including_deleted;
 pub mod drive;
