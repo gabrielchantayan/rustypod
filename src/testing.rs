@@ -2046,6 +2046,9 @@ pub mod hints {
     // 0x8270_0000: dedicated to app/transfer_slot_process's target-width
     // transfer context and MOV manager fixture; mappings never unmap.
     pub const TRANSFER_SLOT_PROCESS: usize = 0x8270_0000;
+    // 0x8280_0000: dedicated to app/transfer_slot_reconcile's target-width
+    // transfer context and MOV chain-table fixture; mappings never unmap.
+    pub const TRANSFER_SLOT_RECONCILE: usize = 0x8280_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -2311,3 +2314,6 @@ pub static BASE_CONSTRUCT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex
 /// `app::selection_state_copy_item_at::ARRAY_COPY_DISPATCH`.
 pub static SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK: parking_lot::Mutex<()> =
     parking_lot::Mutex::new(());
+/// Serializes host tests that replace transfer_slot_reconcile's unported
+/// `FUN_081e39e8` advance seam.
+pub static TRANSFER_SLOT_RECONCILE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());

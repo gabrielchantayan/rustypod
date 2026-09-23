@@ -146,6 +146,7 @@ pub mod dual_pool_screen;
 pub mod transfer_slot_buffer;
 pub mod transfer_slot_try_process;
 pub mod transfer_slot_process;
+pub mod transfer_slot_reconcile;
 pub mod double_buffer;
 pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
