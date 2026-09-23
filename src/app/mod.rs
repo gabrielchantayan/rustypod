@@ -31,6 +31,7 @@ pub mod device_property_read_integer;
 pub mod resource_registration_reset;
 pub mod resource_load_dispatch;
 pub mod resource_record_find;
+pub mod resource_slot_acquire;
 pub mod class_6800;
 pub mod class_6000_property;
 pub mod class_6000_property_6045_i8;

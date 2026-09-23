@@ -102,6 +102,9 @@ pub mod hints {
     pub const INDEXED_RECORD_POINTER_AND_VALUE_FIRST: usize = 0x7c00_0000;
     pub const INDEXED_RECORD_POINTER_AND_VALUE_SECOND: usize = 0x7c10_0000;
     pub const ELEMENT_ARRAY_ONE_BASED_AT: usize = 0x083d_0000;
+    // 0x2350_0000: dedicated to app/resource_slot_acquire's target-width
+    // pool and slot fixtures; mappings never unmap, so no other user may share it.
+    pub const RESOURCE_SLOT_ACQUIRE: usize = 0x2350_0000;
     // 0x7e90_0000: dedicated to cxx/list_release_chain_destroy's raw-u32
     // object and sentinel fixtures; mappings never unmap.
     pub const LIST_RELEASE_CHAIN_DESTROY: usize = 0x7e90_0000;
