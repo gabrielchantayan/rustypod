@@ -131914,3 +131914,32 @@ functions:
       invalid-lead zero insertion, and both NULL early returns. match.py
       reports the same null gates, virtual call, decoder/test calls, and
       cardinality/OR update; LLVM adds its frame and loop layout.
+
+  - address: 0x081cda30
+    ghidra: FUN_081cda30
+    name: buffer_pool_get_or_create
+    size: 48
+    sig: "u32 *buffer_pool_get_or_create(void)"
+    module: app/buffer_pool_get_or_create
+    status: ported
+    renames:
+      DAT_081cda60: BUFFER_POOL_GLOBAL
+      FUN_082aadd4: operator_new
+      FUN_081cd904: buffer_pool_storage_initialize
+    notes: >-
+      Raw osos.dec words e92d4070 e59f4024 e5940000 e3500000 1a000004
+      e3a0003c eb0374e1 e1a05000 ebffffab e5845000 e5940000 e8bd8070
+      establish the exact 48-byte body 0x081cda30..0x081cda5f; the literal
+      0x089cfe74 follows at 0x081cda60 and the next real function begins at
+      0x081cda64 with push {r4,lr}. Whole-image A32 branch decoding finds
+      three inbound unconditional plain BL sites and zero predicated inbound
+      BL sites. The body has two unconditional direct BL calls, operator_new
+      @ 0x082aadd4 with size 0x3c and the unported table initializer @
+      0x081cd904, and no predicated BL calls. It returns a cached 15-word
+      pointer table; when the global is NULL, it allocates the table,
+      initializes it, stores it into the global, then reloads and returns it.
+      The initializer's pointer-table ABI is established by its raw stores but
+      its semantic identity remains unresolved, so target Rust calls its
+      verified address and host tests use a narrow seam rather than inventing
+      a callee. match.py verifies the lazy cache branch, 0x3c allocation,
+      initialization call, publication store, and returned pointer structure.
