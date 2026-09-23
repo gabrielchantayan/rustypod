@@ -131943,3 +131943,28 @@ functions:
       verified address and host tests use a narrow seam rather than inventing
       a callee. match.py verifies the lazy cache branch, 0x3c allocation,
       initialization call, publication store, and returned pointer structure.
+
+  - address: 0x081cd5ac
+    ghidra: FUN_081cd5ac
+    name: set_clamped_mode_position_from_upper_offset
+    size: 12
+    sig: "void set_clamped_mode_position_from_upper_offset(u8 *state, u32 offset)"
+    module: app/clamped_mode_position_from_upper_offset
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: offset
+      "state+0x8c0": upper_position
+      FUN_081cc5b8: set_clamped_mode_position
+    notes: >-
+      Raw osos.dec words e59028c0 e0821001 eafffbff establish the exact
+      12-byte body at 0x081cd5ac..0x081cd5b7; the separately linked next
+      function begins at 0x081cd5b8 with push {r4,r5,r6,r7,r8,lr}. It loads
+      upper_position from state+0x8c0, adds offset with A32 wrapping
+      arithmetic, then unconditional-tail-branches to the ported
+      set_clamped_mode_position at 0x081cc5b8. The body contains zero direct
+      BL calls. Whole-image A32 decoding finds two inbound unconditional plain
+      BL sites at 0x0810cd68 and 0x0810d028 plus one predicated BLNE site at
+      0x081cb6f8. Deliberate deviation: Rust represents the tail branch as a
+      normal call because the target returns void, preserving all
+      caller-observable behavior.
