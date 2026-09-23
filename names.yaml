@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e22c0
+    ghidra: FUN_081e22c0
+    name: guarded_static_object_get
+    size: 88
+    sig: "void *guarded_static_object_get(void)"
+    module: app/guarded_static_object
+    status: ported
+    renames:
+      DAT_081e2308: guarded_static_object_guard
+      DAT_081e230c: guarded_static_object
+      DAT_081e2310: dso_handle
+      DAT_081e2314: guarded_static_object_destructor_word
+      FUN_081e2358: guarded_static_object_constructor
+    notes: >-
+      Raw osos.dec establishes the 88-byte extent 0x081e22c0..0x081e2317:
+      72 instruction bytes end at 0x081e2307 and the four-word literal pool
+      ends at 0x081e2317; the next real function begins at 0x081e2318.
+      Decoding every A32 B/BL immediate finds exactly three inbound plain bl
+      calls at 0x0808cd68, 0x081e60e0, and 0x081e61ac, with no predicated BL
+      calls. The slow path tests guard bit zero, calls cxa_guard_acquire @
+      0x082ab31c, invokes the unported constructor @ 0x081e2358 for fixed
+      object 0x08a762c8, registers its return with cxa_atexit @ 0x082ab1c8
+      using handler word 0x081d74bc and __dso_handle 0x089ca09c, then calls
+      cxa_guard_release @ 0x082ab338.
+      All paths return the fixed object rather than the constructor result.
+      The constructor and handler identities are deliberately not invented:
+      target code retains their verified addresses while host tests install a
+      recording constructor and an inert handler. match.py reports LLVM's
+      larger frame and indirect seam calls; guard branches, call order, and
+      return object match the retail control flow.
   - address: 0x081e2ba8
     ghidra: FUN_081e2ba8
     name: buffer_transfer_submit_byte
