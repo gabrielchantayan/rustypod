@@ -132719,3 +132719,28 @@ functions:
       six trailing words. It returns zero whenever a client was present.
       Deliberate deviation: unresolved direct callees use verified
       fixed-address calls on target and explicit operations in host tests.
+  - address: 0x081a8fd0
+    ghidra: FUN_081a8fd0
+    name: guarded_global_state_get
+    size: 68
+    sig: "u32 *guarded_global_state_get(void)"
+    module: app/guarded_global_state
+    status: ported
+    renames:
+      DAT_081a900c: guarded_global_state_guard
+      DAT_081a9010: guarded_global_state
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec words establish a 60-byte A32 instruction extent
+      0x081a8fd0..0x081a900c, followed by the two-word literal pool at
+      0x081a900c..0x081a9014; the next real function starts at 0x081a9014,
+      so the complete extent is 68 bytes. The body has one unconditional BL,
+      cxa_guard_acquire (0x082ab31c), and one predicated BLNE,
+      cxa_guard_release (0x082ab338). The three inbound direct calls are
+      plain BL at 0x0809037c, 0x0827957c, and 0x08283bf0; no predicated
+      inbound BL forms target this address. It tests bit zero of guard
+      0x08a0e6e4; on successful acquisition it clears the word at +0x14
+      of fixed state 0x08b20b3c, releases the guard, and always returns that
+      state address. The fixed state has no recovered semantic identity, so
+      the Rust name describes only its observed guarded reset behavior.
