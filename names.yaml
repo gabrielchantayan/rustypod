@@ -63098,6 +63098,32 @@ functions:
       archive reports the same call/literal/store/zero/store skeleton;
       the expected differences are LLVM's fp frame and the archive
       relocation rendering the direct callee as the local symbol.
+  - address: 0x08143978
+    ghidra: FUN_08143978
+    name: screen_base_parent_construct
+    size: 24
+    sig: "Class6800 *screen_base_parent_construct(Class6800 *storage, u32 initial_target, u32 create_link)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: initial_target
+      param_3/r2: create_link
+      puVar1/r0: this
+      FUN_08272418: screen_base_parent_direct_construct
+      DAT_0814398c: SCREEN_BASE_PARENT_VTABLE_ADDRESS
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent
+      0x08143978..0x08143990: five A32 instructions followed by the
+      0x08985da8 vtable literal at 0x0814398c; the next real function
+      begins at 0x08143990. Decoding every ARM B/BL word found exactly
+      three incoming unconditional BL call sites (0x08124690, 0x081e15a0,
+      and 0x081f458c), zero predicated BL forms, and one unconditional
+      body BL to the unported direct parent at 0x08272418. The wrapper
+      forwards all three arguments, uses the parent r0 for the literal
+      vtable store, and returns that pointer without NULL guards. The
+      parent identity is deliberately not inferred: firmware builds call
+      its fixed address and host coverage installs an explicit seam.
   - address: 0x081439a8
     ghidra: FUN_081439a8
     name: screen_base_parent_construct_with_task_target
