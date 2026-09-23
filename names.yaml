@@ -27807,6 +27807,27 @@ functions:
       __rt_udiv calls and string_object_format. It splits milliseconds into
       hours, within-hour minutes, seconds, and residual milliseconds, then
       chooses the short format only when include_milliseconds is zero.
+  - address: 0x0815de58
+    ghidra: FUN_0815de58
+    name: active_state_reset_and_dispatch
+    size: 76
+    sig: "void active_state_reset_and_dispatch(ActiveState *state)"
+    module: app/active_state_reset_and_dispatch
+    status: ported
+    vars: {param_1/r0: state, r3: state, DAT_0815dea4: completion_kind, DAT_0815dea8: completion_action}
+    notes: >-
+      Raw osos.dec establishes the 76-byte extent 0x0815de58..0x0815deac:
+      68 bytes of ARM instructions followed by the 0x56d1 and 0x2a2a2a2a
+      literal words, with the next function beginning with push at
+      0x0815deac. Independent decoding of every ARM BL target finds three
+      callers: one unconditional plain bl at 0x08126090 and two predicated
+      blne calls at 0x0815cb24 and 0x0815d6d4. The body has one predicated
+      blne to 0x081d0fc4 when state+0x48 is nonzero; that recovered but
+      unported callee clears words +0x10 and +0x20 of the passed object.
+      The port clears state+0x4c, writes three to state+0x7c, then dispatches
+      state vtable slot +0x58 with 0x2a2a2a2a and 0x56d1. Rust makes the
+      unobservable tail dispatch an ordinary final call and provides host-only
+      seams for the fixed-address and target-width virtual calls.
   - address: 0x0815e1ac
     ghidra: FUN_0815e1ac
     name: instance_of_class_5680
