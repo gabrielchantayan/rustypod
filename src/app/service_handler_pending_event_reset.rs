@@ -211,7 +211,7 @@ mod tests {
     struct Fixture {
         _reset_ops: std::sync::MutexGuard<'static, ()>,
         _take_ops: std::sync::MutexGuard<'static, ()>,
-        _instance: std::sync::MutexGuard<'static, ()>,
+        _instance: parking_lot::MutexGuard<'static, ()>,
         old_take_ops: PendingEventTakeOps,
         old_reset_ops: ServiceHandlerPendingEventResetOps,
     }
@@ -220,7 +220,7 @@ mod tests {
         unsafe fn new() -> Self {
             let reset_ops = RESET_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
             let take_ops = PENDING_EVENT_TAKE_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-            let instance = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let instance = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
             let old_take_ops = ptr::read_volatile(ptr::addr_of!(PENDING_EVENT_TAKE_OPS));
             let old_reset_ops = ptr::read_volatile(ptr::addr_of!(SERVICE_HANDLER_PENDING_EVENT_RESET_OPS));
             PENDING_EVENT_TAKE_OPS = PendingEventTakeOps {
