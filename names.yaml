@@ -20877,6 +20877,29 @@ functions:
       twin of berec_read_u32. 4 call sites, binary-scanned, all in the
       format-header parser cluster @ 0x081f3b54..0x081f3c80.
 
+  - address: 0x081bd848
+    ghidra: FUN_081bd848
+    name: opaque_record_string_pair_destroy
+    size: 28
+    sig: "OpaqueRecordStringPair *opaque_record_string_pair_destroy(OpaqueRecordStringPair *this)"
+    module: cxx/opaque_record_string_pair_destroy
+    status: ported
+    renames:
+      param_1: this
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM words establish the seven-instruction, 28-byte extent
+      0x081bd848..0x081bd863; the next real function begins at 0x081bd864
+      with push {r4,lr}. Whole-image A32 branch decoding finds three inbound
+      direct plain BL sites (0x081bcff4, 0x081bd040, 0x081bd30c), zero
+      predicated BL sites, and no tail branch. The body adds 0x254, calls
+      string_object_destroy, subtracts 8, calls string_object_destroy again,
+      then subtracts 0x24c to return the original record. The record's class
+      identity is unrecovered, so the port names only its observed pair of
+      embedded StringObjects at +0x24c and +0x254. Host pointer widening is
+      deliberately modeled with repr(C) named fields rather than target byte
+      offsets; this preserves the target layout and destruction order.
+
   - address: 0x081bd910
     ghidra: FUN_081bd910
     name: path_lengths_ok
