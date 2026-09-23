@@ -2151,6 +2151,11 @@ pub mod hints {
     // 0x7de0_0000: dedicated to app/resource/prepare's target-width state
     // and identifier-range fixture; mappings never unmap.
     pub const RESOURCE_ARENA_PREPARE: usize = 0x7de0_0000;
+    // 0x7dc0_0000 / 0x7dd0_0000: dedicated to
+    // app/context_secondary_target_set's target-width context and target
+    // fixtures; mappings never unmap, so no other user may share either hint.
+    pub const CONTEXT_SECONDARY_TARGET_SET: usize = 0x7dc0_0000;
+    pub const CONTEXT_SECONDARY_TARGET_SET_NON_NULL: usize = 0x7dd0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

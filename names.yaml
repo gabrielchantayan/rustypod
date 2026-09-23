@@ -134101,3 +134101,29 @@ functions:
       original arguments reach it. Rust returns after that call rather than
       performing the original tail branch; the observable call ABI is
       unchanged.
+  - address: 0x08168350
+    ghidra: FUN_08168350
+    name: context_secondary_target_set
+    size: 28
+    sig: "void context_secondary_target_set(u32 *context, u32 target)"
+    module: app/context_secondary_target_set
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: target
+      "context+0x24": secondary_target
+      "target.vtable+0x10": unresolved_target_notify
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte A32 body
+      0x08168350..0x0816836b: mov r2,r0; movs r0,r1; str r1,[r2,#0x24];
+      ldrne r0,[r0]; ldrne r1,[r1,#0x10]; bxne r1; bx lr. The next real
+      function starts at 0x0816836c with push {r3,r4-r7,lr}. It has no
+      direct outgoing plain or predicated BL instructions; its sole call is
+      the predicated indirect BXNE through target vtable slot +0x10. A
+      full-image aligned A32 decode finds two inbound plain BL sites
+      (0x081683b0 and 0x081684f0) and one predicated BLEQ site
+      (0x08168394). It stores target at context+0x24 and, when target is
+      nonzero, dispatches target through that vtable slot. Deliberate
+      deviation: Rust directly calls rather than tail-dispatches, retaining
+      target-width vtable access on device builds and a recording seam in
+      host tests.
