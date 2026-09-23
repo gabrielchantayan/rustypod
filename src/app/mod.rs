@@ -538,6 +538,7 @@ pub mod activity_media_player_cleanup;
 pub mod transition_container_construct;
 pub mod timer_reset;
 pub mod timer_step_value;
+pub mod two_value_wheel_node;
 pub mod tuning_timer;
 pub mod task_registry;
 pub mod token_parser;
