@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bb6c8
+    ghidra: FUN_081bb6c8
+    name: video_engine_set_selector_0x2889_if_changed
+    size: 36
+    sig: "void video_engine_set_selector_0x2889_if_changed(const u32 *value)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: value
+      r0/r1: new_value
+      DAT_081bb6ec: video_engine_selector_0x2889_last_value
+      DAT_081bb6f0: VIDEO_ENGINE_SELECTOR_0X2889
+      FUN_082d0cb8: video_engine_set_selector_value
+    notes: >-
+      Raw osos.dec establishes the 36-byte A32 body
+      0x081bb6c8..0x081bb6e8: it volatile-loads *value, compares it with
+      0xd009401c, returns unchanged values, otherwise stores the new word
+      and BNE tail-branches to video_engine_set_selector_value(0x2889,
+      new_value). The next independent function is 0x081bb6f4; the words
+      at 0x081bb6ec and 0x081bb6f0 are this function's literal pool.
+      Ghidra joins the next wrapper and invents three outgoing calls. A
+      full-image aligned A32 decode finds exactly three inbound plain bl
+      sites (0x0827d3e8, 0x0827d4c8, 0x0827d5bc), no predicated inbound bl
+      forms, and no outbound bl forms. Deliberate deviation: Rust directly
+      calls the ported selector wrapper instead of tail-branching; target
+      builds retain the volatile firmware word while host tests use a private
+      equivalent.
+
   - address: 0x081bd63c
     ghidra: FUN_081bd63c
     name: associated_object_word_at_0c_or_negative_one

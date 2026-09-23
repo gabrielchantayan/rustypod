@@ -1012,6 +1012,55 @@ pub unsafe extern "C" fn video_engine_set_selector_value(selector: u32, value: u
         set_selector_value(engine, selector, value);
     }
 }
+/// Firmware address of the last value sent through selector 0x2889.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_SELECTOR_0X2889_LAST_VALUE_ADDR: usize = 0xd009_401c;
+
+/// Host-test stand-in for the selector-0x2889 last-value word.
+#[cfg(not(target_os = "none"))]
+static mut VIDEO_ENGINE_SELECTOR_0X2889_LAST_VALUE: u32 = 0;
+
+/// video_engine_set_selector_0x2889_if_changed — retailOS `FUN_081bb6c8` @
+/// **0x081bb6c8** (36 bytes, `0x081bb6c8..0x081bb6e8`). The next separately
+/// linked function begins at 0x081bb6f4; the intervening words at
+/// 0x081bb6ec and 0x081bb6f0 are this function's literal pool.
+///
+/// Raw ARM loads `*value`, compares it with the volatile word at
+/// 0xd009401c, and returns unchanged values without further work. On change,
+/// it stores the word and conditionally tail-branches to
+/// [`video_engine_set_selector_value`] with selector 0x2889 and the new
+/// value. The 36-byte body contains no outbound `bl` instructions. A
+/// full-image aligned A32 decode finds three inbound unconditional plain `bl`
+/// calls (0x0827d3e8, 0x0827d4c8, and 0x0827d5bc) and no predicated `bl`
+/// calls. Ghidra's 36-byte body at this address is wrong: it joins this
+/// function with the following wrapper and invents three outgoing calls.
+///
+/// # Deliberate deviations
+///
+/// Rust uses a direct call rather than the original conditional tail branch;
+/// it preserves the sole observable state transition and downstream selector
+/// dispatch. Target builds access the original volatile word; host builds use
+/// an equivalent private word for deterministic tests.
+///
+/// # Safety
+///
+/// `value` must point to a readable aligned `u32`; retailOS performs no
+/// validation before loading it.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_selector_0x2889_if_changed(value: *const u32) {
+    let value = value.read_volatile();
+    #[cfg(target_os = "none")]
+    let last_value = VIDEO_ENGINE_SELECTOR_0X2889_LAST_VALUE_ADDR as *mut u32;
+    #[cfg(not(target_os = "none"))]
+    let last_value = core::ptr::addr_of_mut!(VIDEO_ENGINE_SELECTOR_0X2889_LAST_VALUE);
+
+    if last_value.read_volatile() != value {
+        last_value.write_volatile(value);
+        video_engine_set_selector_value(0x2889, value);
+    }
+}
+
 
 /// Firmware entry of the video-engine control/value dispatcher
 /// (`FUN_0824e074`, unported).
@@ -2184,6 +2233,39 @@ mod tests {
                     Some((engine.as_mut_ptr(), selector, value))
                 );
             }
+            set_mock_instance(ptr::null_mut());
+            set_mock_set_selector_value(None);
+        }
+    }
+
+    #[test]
+    fn selector_0x2889_only_dispatches_changed_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        let first = 0x2600;
+        let second = u32::MAX;
+        unsafe {
+            VIDEO_ENGINE_SELECTOR_0X2889_LAST_VALUE = 0;
+            SELECTOR_VALUE_RECORDED = None;
+            set_mock_set_selector_value(Some(record_selector_value));
+            set_mock_instance(engine.as_mut_ptr());
+
+            video_engine_set_selector_0x2889_if_changed(&first);
+            assert_eq!(
+                SELECTOR_VALUE_RECORDED,
+                Some((engine.as_mut_ptr(), 0x2889, first))
+            );
+
+            SELECTOR_VALUE_RECORDED = None;
+            video_engine_set_selector_0x2889_if_changed(&first);
+            assert_eq!(SELECTOR_VALUE_RECORDED, None);
+
+            video_engine_set_selector_0x2889_if_changed(&second);
+            assert_eq!(
+                SELECTOR_VALUE_RECORDED,
+                Some((engine.as_mut_ptr(), 0x2889, second))
+            );
+
             set_mock_instance(ptr::null_mut());
             set_mock_set_selector_value(None);
         }
