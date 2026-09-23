@@ -132287,3 +132287,23 @@ functions:
       the established Rust u32_window_reader directly; host tests install an
       ABI-equivalent volatile seam because target-width table pointers cannot
       hold native host pointers.
+
+  - address: 0x081c38b0
+    ghidra: FUN_081c38b0
+    name: object_word_0x1b0_is_nonzero
+    size: 16
+    sig: "u32 object_word_0x1b0_is_nonzero(const u8 *object)"
+    module: util/object_word_0x1b0_is_nonzero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x1b0": presence_word
+    notes: >-
+      Raw osos.dec words establish the exact four-instruction, 16-byte A32
+      extent 0x081c38b0..0x081c38bf: ldr r0,[r0,#0x1b0]; movs r0,r0; movne
+      r0,#1; bx lr. The push at 0x081c38c0 starts the next independently
+      entered function. Full-image A32 decoding finds three inbound plain
+      unconditional BL calls at 0x081c56bc, 0x081c5c34, and 0x081c7ec4,
+      with zero predicated BL forms; the leaf has no outbound calls. It
+      returns whether the aligned target-width word at object+0x1b0 is
+      nonzero, normalized to zero or one. No deliberate deviations.
