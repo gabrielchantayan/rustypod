@@ -121804,6 +121804,39 @@ functions:
       result advances window_index and returns zero; any nonzero result maps
       to 3. The helper's stronger identity is unestablished, so target Rust
       calls its fixed address and host tests install the verified ABI seam.
+  - address: 0x081c538c
+    ghidra: FUN_081c538c
+    name: mov_sample_size_table_load_window
+    size: 120
+    sig: "u32 mov_sample_size_table_load_window(MovSampleSizeParser *parser, u32 index)"
+    module: mov/sample_size_table_load_window
+    status: ported
+    renames:
+      param_1/r0/r5: parser
+      param_2/r1/r4: index
+      r6: window_count
+      r7: sample_size_table
+      "[parser + 0x18]": sample_size_table
+      "[parser + 0xf0]": payload_base_lo
+      "[parser + 0xf4]": payload_base_hi
+      "[sample_size_table + 0x00]": fixed_sample_size
+      "[sample_size_table + 0x04]": sample_count
+      "[sample_size_table + 0x08]": window_index
+      "[sample_size_table + 0x0c]": entries
+      FUN_081c3960: u32_window_reader
+    notes: >-
+      Raw osos.dec is exactly 120 bytes from 0x081c538c through the branch at
+      0x081c5400; 0x081c5404 begins the next separately linked function with
+      push {r3,r4,r5,r6,r7,lr}. The body has one unconditional plain BL, to
+      the ported u32_window_reader at 0x081c3960, and no predicated BL calls.
+      Whole-image A32 decoding finds three inbound plain BL calls at
+      0x081c5ddc, 0x081c6c24, and 0x081c7464; there are no inbound predicated
+      BL calls. A nonzero fixed sample size returns zero immediately. Otherwise
+      it caps the per-sample stsz window at 0x8000 and the remaining sample
+      count, reads entries from payload_base + index*4 + 20, then records
+      window_index on success. Reader failure maps to 3. Target builds call
+      the ported reader directly; host tests use an ABI-equivalent seam because
+      the parser retains target-width pointer fields.
   - address: 0x081c3960
     ghidra: FUN_081c3960
     name: u32_window_reader
