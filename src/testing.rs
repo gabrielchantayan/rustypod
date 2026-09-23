@@ -2469,3 +2469,6 @@ pub static SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK: parking_lot::Mutex<()> =
 pub static TRANSFER_SLOT_RECONCILE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// Serializes host tests that replace the singleton mode-dispatch target.
 pub static SINGLETON_MODE_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Serializes host tests that replace the slot-`+0xd8` wrapper's terminal
+/// command-dispatcher getter seam.
+pub static OBJECT_SLOT_D8_NOTIFY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

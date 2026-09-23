@@ -135433,3 +135433,29 @@ functions:
       role. Deliberate deviation: retaining view across the base constructor
       replaces target-only register shuffling without changing the return
       identity or stores.
+  - address: 0x0812d78c
+    ghidra: FUN_0812d78c
+    name: object_slot_d8_notify_demo_mode_then_get_dispatcher
+    size: 44
+    sig: "void *object_slot_d8_notify_demo_mode_then_get_dispatcher(void *object)"
+    module: app/object_slot_d8_notify_demo_mode_then_get_dispatcher
+    status: ported
+    vars:
+      param_1/r0: object
+      r4: object
+      FUN_081883fc: demo_mode_instance
+      FUN_08204538: command_dispatcher_get_veneer
+    notes: >-
+      Raw words at 0x0812d78c decode as `push {r4,lr}; mov r4,r0; bl
+      0x081883fc; mov r1,r0; ldr r0,[r4]; ldr r2,[r0,#0xd8]; mov r0,r4;
+      blx r2; mov r0,r4; pop {r4,lr}; b 0x08204538`. The next real
+      function is the standalone `bx lr` at 0x0812d7b8, so Ghidra's
+      44-byte extent is correct. The raw call-site count is 3 plain BL
+      and 0 predicated BL. It resolves TCDemoMode through the ported
+      demo_mode_instance accessor, invokes the otherwise unidentified
+      object's vtable +0xd8 slot with `(object, demo_mode)`, then
+      tail-branches to the 4-byte command_dispatcher_get veneer
+      (0x08204538 -> 0x081dfa20). Deliberate deviations: the object class
+      and slot name are unknown, so the Rust name remains offset-qualified;
+      ARM uses one global-assembly fragment for exact target-width dispatch
+      and tail control flow, while host uses typed vtable fixtures.
