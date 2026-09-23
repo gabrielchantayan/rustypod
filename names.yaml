@@ -22177,6 +22177,26 @@ functions:
       both fast paths, the bit-0-clear nonzero-guard case, constructor-result
       versus fixed-object return, and the observed object extent.
 
+  - address: 0x08167ef0
+    ghidra: FUN_08167ef0
+    name: recording_buffer_slot_table_reset
+    size: 56
+    sig: "void recording_buffer_slot_table_reset(void *buffer, u32 keep_pending_marker)"
+    module: app/recording_buffer_slot_table_reset
+    status: ported
+    vars: {param_1: buffer, param_2: keep_pending_marker}
+    notes: >-
+      Raw osos.dec decodes from 0x08167ef0 through bx lr at 0x08167f24; the
+      next real function begins at 0x08167f28, establishing the 56-byte extent.
+      It conditionally clears buffer+0x338 when keep_pending_marker is zero,
+      unconditionally clears words +0x330, +0x334, and +0x33c, then clears
+      word +0x38 in each of 64 twelve-byte records. The body has zero direct
+      plain bl calls and one predicated blt loop back edge. Decoding all ARM
+      B/BL words in osos.dec found exactly three direct inbound call sites
+      (0x08149270, 0x08167c7c, and 0x0827dcb0); all are unconditional bl.
+      Rust retains ordered volatile target-width stores; its range loop
+      deliberately replaces the retail conditional branch-with-link back edge.
+
   - address: 0x081c8a84
     ghidra: FUN_081c8a84
     name: list_find_by_id16
