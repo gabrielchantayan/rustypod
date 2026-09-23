@@ -144,6 +144,21 @@ unsafe fn current_record_status(record: *mut u8, status: u32) -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(RECORD_MANAGER_CURRENT_RECORD_STATUS))(record, status)
 }
 
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn current_record_status_6c(record: *mut u8, status: u32) -> i32 {
+    let vtable = record.cast::<u32>().read() as usize;
+    let dispatch = (vtable as *const u32).add(0x6c / 4).read() as usize;
+    core::mem::transmute::<usize, CurrentRecordStatus>(dispatch)(record, status)
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn current_record_status_6c(record: *mut u8, status: u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(RECORD_MANAGER_CURRENT_RECORD_STATUS))(record, status)
+}
+
+
 /// record_manager_current_record_status_failed — original: `FUN_081c8544` @
 /// `0x081c8544` (128 bytes; four plain direct `bl` calls, zero predicated).
 ///
@@ -210,6 +225,81 @@ pub unsafe extern "C" fn record_manager_current_record_status_failed(
     registration_handle_destroy(registration);
     failed as u32
 }
+
+/// record_manager_current_record_status_6c_failed — original:
+/// `FUN_081c85c4` @ `0x081c85c4` (128 bytes,
+/// `0x081c85c4..0x081c8644`; the next independently linked function begins
+/// at `0x081c8644`). Raw ARM decoding finds four plain direct `bl` calls
+/// (`0x081d9698`, `0x081d96a0`, `0x0829e1b4`, and `0x081d9734`) and zero
+/// predicated direct `bl` calls.
+///
+/// Builds a kind-two registration for `record_manager + 0xa0c` from
+/// `selector`, then reports failure when no selected record exists or that
+/// record's vtable slot `+0x6c` returns nonzero for `status`. It always
+/// destroys the registration before returning.
+///
+/// Deliberate deviation: on 64-bit hosts, the temporary registration is
+/// copied to an explicit three-word target-layout view before the
+/// target-width current-record lookup, and dispatch uses
+/// [`RECORD_MANAGER_CURRENT_RECORD_STATUS`] because a target vtable word
+/// cannot hold a host function pointer. Firmware retains the native layout
+/// and indirect vtable dispatch.
+///
+/// # Safety
+///
+/// `record_manager + 0xa0c` must meet the registration helper and selected
+/// record-handle requirements. A nonzero selected handle must identify an
+/// object whose vtable slot `+0x6c` has this function's ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_manager_current_record_status_6c_failed(
+    record_manager: *mut u8,
+    status: u32,
+    selector: u32,
+) -> u32 {
+    use crate::app::current_record_handle::{current_record_handle, CurrentRecordCursor};
+    use crate::app::registration_handle::{
+        registration_handle_destroy, registration_handle_init, RegistrationHandle,
+    };
+    use crate::app::selector_pair_init::selector_pair_init;
+
+    let mut selector_pair = [0u32; 2];
+    selector_pair_init(selector_pair.as_mut_ptr(), selector, 0);
+
+    let mut registration = core::mem::MaybeUninit::<RegistrationHandle>::uninit();
+    let registration = registration_handle_init(
+        registration.as_mut_ptr(),
+        record_manager.add(0xa0c),
+        2,
+        selector_pair.as_ptr(),
+    );
+
+    #[cfg(target_os = "none")]
+    let record = current_record_handle(registration.cast::<CurrentRecordCursor>()) as *mut u8;
+
+    #[cfg(not(target_os = "none"))]
+    let record = {
+        #[repr(C)]
+        struct TargetRegistrationHandle {
+            vtable: u32,
+            owner: u32,
+            slot_index: i32,
+        }
+        let target_registration = TargetRegistrationHandle {
+            vtable: (*registration).vtable,
+            owner: (*registration).owner as usize as u32,
+            slot_index: (*registration).slot_index,
+        };
+        current_record_handle(
+            core::ptr::addr_of!(target_registration).cast::<CurrentRecordCursor>(),
+        ) as *mut u8
+    };
+
+    let failed = record.is_null() || current_record_status_6c(record, status) != 0;
+    registration_handle_destroy(registration);
+    failed as u32
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -441,6 +531,48 @@ mod tests {
 
             CURRENT_RECORD_STATUS_RESULT = -1;
             assert_eq!(record_manager_current_record_status_failed(manager, 0, 9), 1);
+            restore_current_record_ops();
+        }
+        restore(lock);
+    }
+
+    #[test]
+    fn current_record_status_6c_handles_absent_and_status_returning_records() {
+        let lock = reset();
+        unsafe {
+            install_current_record_ops(reject_current_record);
+            assert_eq!(record_manager_current_record_status_6c_failed(storage(), 7, 3), 1);
+            assert_eq!(CURRENT_RECORD_STATUS_CALL, None);
+            restore_current_record_ops();
+        }
+
+        let Some(base) = *CURRENT_RECORD_FIXTURE else {
+            assert!(note_missing_u32_fixture("app::record_manager current-record status 6c"));
+            restore(lock);
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            base.write_bytes(0, 0x2000);
+            let records = base.add(0x1000);
+            records.add(4).cast::<u32>().write(0x1234_5678);
+            let manager = base;
+            manager.add(0xa0c + 4).cast::<u32>().write(records as usize as u32);
+            manager.add(0xa0c + 8).cast::<i32>().write(0);
+
+            install_current_record_ops(acquire_current_record);
+            CURRENT_RECORD_STATUS_RESULT = 0;
+            assert_eq!(
+                record_manager_current_record_status_6c_failed(manager, 0xfeed_face, 9),
+                0
+            );
+            assert_eq!(
+                CURRENT_RECORD_STATUS_CALL,
+                Some((0x1234_5678usize as *mut u8, 0xfeed_face))
+            );
+
+            CURRENT_RECORD_STATUS_RESULT = -1;
+            assert_eq!(record_manager_current_record_status_6c_failed(manager, 0, 9), 1);
             restore_current_record_ops();
         }
         restore(lock);
