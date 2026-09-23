@@ -134714,3 +134714,27 @@ functions:
     status: ported
     notes: >-
       Raw osos.dec establishes 0x0814bb18..0x0814bba4. Three inbound plain BL sites and no predicated BL sites; clears cleanup state, returns an attached client, then broadcasts or transfers the handle.
+
+  # ---- Fifteen-second embedded timer re-arm (src/app/timer_rearm_after_15000.rs) ----
+  - address: 0x0814b490
+    ghidra: FUN_0814b490
+    name: timer_rearm_after_15000
+    size: 32
+    sig: "void timer_rearm_after_15000(u8 *object)"
+    module: app/timer_rearm_after_15000
+    status: ported
+    renames:
+      param_1/r0: object
+      r0: timer
+      r1: delay
+    notes: >-
+      Raw osos.dec establishes the exact eight-instruction A32 extent
+      0x0814b490..0x0814b4b0; the following literal is 15000 and the next
+      function begins at 0x0814b4b4. Whole-image A32 decoding finds exactly
+      three incoming unconditional plain BL sites (0x0814ab44, 0x0814b0d4,
+      and 0x0814b25c), with zero predicated BL sites. The body passes the
+      embedded timer at object+0x54 and 15000 ms to timer_start_after
+      (0x0812c63c), then tail-branches to timer_restart (0x0812bf4c). Rust
+      uses a normal final call in place of the tail branch; both verified
+      callees are direct ports, so no seam was introduced. match.py reports
+      the expected structural diff because LLVM expands the two timer ports.
