@@ -22,3 +22,4 @@ pub mod chain_value_span;
 pub mod mov_parser_slot_14_is_set;
 
 pub mod atom_range_parse;
+pub mod atom_header_read_width;

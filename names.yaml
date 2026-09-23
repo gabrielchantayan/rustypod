@@ -21369,6 +21369,23 @@ functions:
       fault, as stock. Host tests use a dedicated u32-addressable slab and
       cover NULL, a complete three-link tree, and an unparsed node on every
       recursive link.
+  - address: 0x081f3d44
+    ghidra: FUN_081f3d44
+    name: mov_atom_header_read_width
+    size: 36
+    sig: "u32 mov_atom_header_read_width(const u8 *parser)"
+    module: mov/atom_header_read_width
+    status: ported
+    vars: {param_1/r0: parser}
+    notes: >-
+      Raw ARM words establish the exact 36-byte body
+      0x081f3d44..0x081f3d68; the next real function begins with push
+      {r4,r5,r6,r7,r8,r9,sl,lr} at 0x081f3d68. Complete-image A32 decoding
+      finds three incoming direct plain BL call sites (0x081f3e44,
+      0x081f3e6c, and 0x081f3f28) and zero predicated BL call sites. The
+      body has zero BL instructions. It loads parser byte zero, returns 8
+      for values 0 and 1, 6 for 2, and 10 for every other value. No
+      deliberate deviations.
   - address: 0x081f3d68
     ghidra: FUN_081f3d68
     name: mov_atom_range_parse
