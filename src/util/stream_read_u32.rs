@@ -30,7 +30,9 @@ pub struct EndianWordReader {
 /// Vtable prefix used by [`EndianWordReader`].
 #[repr(C)]
 pub struct EndianWordReaderVtable {
-    pub slots_00_28: [usize; 11],
+    pub slots_00_14: [usize; 6],
+    pub ready_18: unsafe extern "C" fn(this: *mut EndianWordReader) -> i32,
+    pub slots_1c_28: [usize; 4],
     pub read_2c: unsafe extern "C" fn(this: *mut EndianWordReader, buf: *mut u8, len: u32) -> i32,
 }
 
@@ -84,8 +86,13 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn unused_ready(_reader: *mut EndianWordReader) -> i32 {
+        unreachable!()
+    }
     static VTABLE: EndianWordReaderVtable = EndianWordReaderVtable {
-        slots_00_28: [0; 11],
+        slots_00_14: [0; 6],
+        ready_18: unused_ready,
+        slots_1c_28: [0; 4],
         read_2c: recording_read,
     };
 

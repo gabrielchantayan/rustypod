@@ -132865,3 +132865,31 @@ functions:
       count and assigns the following units to the StringObject at +0x64.
       The IRAM veneer resolves to ported memzero_aligned; the unported
       producer is a verified-address target seam with host replacement.
+
+  # --- Conditional native-endian stream word-pair reader (src/util/stream_read_u32_pair_if_ready.rs) ---
+  - address: 0x081a3724
+    ghidra: FUN_081a3724
+    name: stream_read_u32_pair_if_ready
+    size: 72
+    sig: "u32 stream_read_u32_pair_if_ready(void *context, EndianWordReader *reader, u32 *output)"
+    module: util/stream_read_u32_pair_if_ready
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: reader
+      param_3/r2: output
+      vtable_slot_0x18: reader_ready
+      FUN_08275c88: stream_read_u32
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte A32 extent
+      0x081a3724..0x081a376b; the next independently entered function begins
+      at 0x081a376c. The body has two unconditional direct bl instructions,
+      both to ported stream_read_u32 (0x08275c88), and one unconditional
+      indirect blx through reader vtable slot +0x18; no body calls are
+      predicated. Full-image decoding finds exactly three inbound direct
+      calls at 0x081a300c, 0x081a376c, and 0x081a4440: all unconditional
+      plain bl, with no predicated forms. The +0x18 method gates two
+      consecutive native-endian word reads into output[0] and output[1];
+      nonzero leaves output unchanged and returns zero. The concrete method
+      identity is unverified, so the name records only its observed readiness
+      role. Host vtables are pointer-width representations of target slots.
