@@ -107,6 +107,44 @@ pub static mut RESOURCE_LIST_OPS: ResourceListInitialize = DEFAULT_RESOURCE_LIST
 unsafe fn resource_list_initialize() -> ResourceListInitialize {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RESOURCE_LIST_OPS)) }
 }
+
+/// The unported encoded-record loader `FUN_08184b5c`.
+pub type ResourceListPopulate = unsafe extern "C" fn(
+    list: *mut ResourceList,
+    records: *const u8,
+    record_bytes: u32,
+);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_resource_list_populate(
+    list: *mut ResourceList,
+    records: *const u8,
+    record_bytes: u32,
+) {
+    let populate: ResourceListPopulate = unsafe { core::mem::transmute(0x0818_4b5cusize) };
+    unsafe { populate(list, records, record_bytes) };
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_resource_list_populate(
+    _list: *mut ResourceList,
+    _records: *const u8,
+    _record_bytes: u32,
+) {
+    panic!("resource_list_clone_factory requires record loader 0x08184b5c")
+}
+
+/// Active encoded-record loader. The target default calls retailOS; host tests
+/// replace it to observe the factory's conditional call boundary.
+#[cfg(target_os = "none")]
+pub static mut RESOURCE_LIST_POPULATE: ResourceListPopulate = firmware_resource_list_populate;
+#[cfg(not(target_os = "none"))]
+pub static mut RESOURCE_LIST_POPULATE: ResourceListPopulate = missing_resource_list_populate;
+
+#[inline(always)]
+unsafe fn resource_list_populate() -> ResourceListPopulate {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RESOURCE_LIST_POPULATE)) }
+}
 /// The unported list-finalization helper `FUN_08184d08`.
 pub type ResourceListBeforeDestroy = unsafe extern "C" fn(list: *mut ResourceList);
 
@@ -271,6 +309,41 @@ pub unsafe extern "C" fn load_resource_list(
     list
 }
 
+/// resource_list_clone_factory — original: `FUN_08184ed0` @ `0x08184ed0`.
+///
+/// Verified extent is 72 bytes, `0x08184ed0..0x08184f17`; the next real
+/// function starts at `0x08184f18` with `push {r3-r7,lr}`. The body has two
+/// plain `bl` calls (to `operator_new` and `load_resource_list`) and one
+/// predicated `blne` (to the unported encoded-record loader). Three inbound
+/// direct calls decode as plain `bl`.
+///
+/// Allocates a 0x24-byte [`ResourceList`], initializes it with four zero ABI
+/// words, and, only when `entry + 4` is nonzero, loads the encoded records at
+/// `entry + 8` using the byte count stored at `entry + 0`. The allocation is
+/// deliberately not NULL-checked before initialization, matching retailOS.
+///
+/// Deliberate deviation: `FUN_08184b5c` remains an explicit volatile seam:
+/// target builds call its verified address and host tests install a fixture.
+///
+/// # Safety
+///
+/// `entry` must identify at least 12 readable bytes. The allocation and
+/// initializer contracts are inherited from [`operator_new`] and
+/// [`load_resource_list`]; when `entry + 4` is nonzero, its encoded record
+/// range must satisfy `FUN_08184b5c`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_list_clone_factory(entry: *const u8) -> *mut ResourceList {
+    let list = unsafe { operator_new(core::mem::size_of::<ResourceList>()) }.cast::<ResourceList>();
+    let list = unsafe { load_resource_list(list, 0, 0, 0, 0) };
+    let record_present = unsafe { entry.add(4).cast::<u32>().read() };
+    if record_present != 0 {
+        let record_bytes = unsafe { entry.cast::<u32>().read() };
+        unsafe { resource_list_populate()(list, entry.add(8), record_bytes) };
+    }
+    list
+}
+
 /// load_cros_resource_list — original: `FUN_08184b24` @ `0x08184b24`
 /// (56 bytes: 52 instruction bytes plus the `0x534f5243` literal-pool word
 /// at `0x08184b58`; the next function begins at `0x08184b5c`).
@@ -313,6 +386,9 @@ mod tests {
     static CROS_ALLOCATION_SIZE: AtomicUsize = AtomicUsize::new(0);
     static CROS_ALLOCATION_TAG: AtomicUsize = AtomicUsize::new(0);
     static mut CROS_ALLOCATED_LIST: MaybeUninit<ResourceList> = MaybeUninit::uninit();
+    static POPULATE_CALLS: AtomicU32 = AtomicU32::new(0);
+    static SEEN_RECORDS: AtomicUsize = AtomicUsize::new(0);
+    static SEEN_RECORD_BYTES: AtomicU32 = AtomicU32::new(0);
 
     unsafe extern "C" fn recording_initialize(
         list: *mut ResourceList,
@@ -353,6 +429,17 @@ mod tests {
         core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast::<ResourceList>().cast::<u8>()
     }
 
+    unsafe extern "C" fn recording_populate(
+        list: *mut ResourceList,
+        records: *const u8,
+        record_bytes: u32,
+    ) {
+        assert_eq!(list as usize, SEEN_LIST.load(Ordering::SeqCst));
+        POPULATE_CALLS.fetch_add(1, Ordering::SeqCst);
+        SEEN_RECORDS.store(records as usize, Ordering::SeqCst);
+        SEEN_RECORD_BYTES.store(record_bytes, Ordering::SeqCst);
+    }
+
     struct CrosHeapOpsRestore {
         heap: crate::heap::veneers::HeapVeneerOps,
         default_heap: *mut crate::heap::types::HeapDescriptorDescriptor,
@@ -365,6 +452,16 @@ mod tests {
                     .write_volatile(self.heap);
                 core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
                     .write_volatile(self.default_heap);
+            }
+        }
+    }
+
+    struct PopulateRestore(ResourceListPopulate);
+
+    impl Drop for PopulateRestore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(RESOURCE_LIST_POPULATE).write_volatile(self.0);
             }
         }
     }
@@ -459,6 +556,58 @@ mod tests {
         core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
             .write_volatile(1usize as *mut crate::heap::types::HeapDescriptorDescriptor);
         DestroyOpsRestore { before_destroy, state_destroy, heap, default_heap }
+    }
+
+    #[test]
+    fn clone_factory_initializes_then_loads_only_present_encoded_records() {
+        let _lock = TEST_LOCK.lock();
+        let previous_initialize = unsafe { core::ptr::addr_of!(RESOURCE_LIST_OPS).read_volatile() };
+        let _initialize_restore = OpsRestore(previous_initialize);
+        let previous_populate = unsafe {
+            core::ptr::addr_of!(RESOURCE_LIST_POPULATE).read_volatile()
+        };
+        let _populate_restore = PopulateRestore(previous_populate);
+        let previous_heap = unsafe {
+            core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile()
+        };
+        let previous_default_heap = unsafe {
+            core::ptr::addr_of!(crate::heap::types::DEFAULT_HEAP).read_volatile()
+        };
+        let _heap_restore = CrosHeapOpsRestore {
+            heap: previous_heap,
+            default_heap: previous_default_heap,
+        };
+
+        unsafe {
+            core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).write(MaybeUninit::zeroed());
+            core::ptr::addr_of_mut!(RESOURCE_LIST_OPS).write_volatile(recording_initialize);
+            core::ptr::addr_of_mut!(RESOURCE_LIST_POPULATE).write_volatile(recording_populate);
+            let mut heap = previous_heap;
+            heap.alloc = recording_cros_allocation;
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(heap);
+            core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                .write_volatile(1usize as *mut crate::heap::types::HeapDescriptorDescriptor);
+        }
+
+        for (record_bytes, present) in [(0x1020_3040, 1), (0xa1b2_c3d4, 0)] {
+            let entry = [record_bytes, present, 0x5566_7788];
+            INIT_CALLS.store(0, Ordering::SeqCst);
+            POPULATE_CALLS.store(0, Ordering::SeqCst);
+
+            let result = unsafe { resource_list_clone_factory(entry.as_ptr().cast()) };
+
+            assert_eq!(result, core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast());
+            assert_eq!(INIT_CALLS.load(Ordering::SeqCst), 1);
+            assert_eq!(SEEN_PROVIDER.load(Ordering::SeqCst), 0);
+            assert_eq!(SEEN_RESOURCE_DATA.load(Ordering::SeqCst), 0);
+            assert_eq!(SEEN_PARSER.load(Ordering::SeqCst), 0);
+            assert_eq!(SEEN_OPTIONS.load(Ordering::SeqCst), 0);
+            assert_eq!(POPULATE_CALLS.load(Ordering::SeqCst), present);
+            if present != 0 {
+                assert_eq!(SEEN_RECORDS.load(Ordering::SeqCst), unsafe { entry.as_ptr().add(2) } as usize);
+                assert_eq!(SEEN_RECORD_BYTES.load(Ordering::SeqCst), record_bytes);
+            }
+        }
     }
 
     #[test]

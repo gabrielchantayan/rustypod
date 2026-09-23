@@ -25548,6 +25548,34 @@ functions:
       three ported callees directly; host tests prove the allocation size/tag
       and every initializer argument.
 
+  - address: 0x08184ed0
+    ghidra: FUN_08184ed0
+    name: resource_list_clone_factory
+    size: 72
+    sig: "ResourceList *resource_list_clone_factory(const u8 *entry)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: entry
+      uVar1/r0/r5: list
+      FUN_082aadd4: operator_new
+      FUN_08184fd4: load_resource_list
+      FUN_08184b5c: resource-list encoded-record loader (RESOURCE_LIST_POPULATE seam; unported)
+    notes: >-
+      Raw words e92d4038 e1a04000 e3a00024 eb0497bc e3a03000 e3a02000
+      e3a01000 e58d3000 eb000037 e1a05000 e5940004 e3500000 15941008
+      15942000 11a00005 1bffff12 e1a00005 e8bd8038 establish the exact
+      72-byte extent 0x08184ed0..0x08184f17; the next real function begins
+      at 0x08184f18 with `push {r3-r7,lr}`. Ghidra's size is exact. The body
+      makes two plain BL calls, to operator_new(0x24) and
+      load_resource_list(list, 0, 0, 0, 0), plus one predicated BLNE to
+      FUN_08184b5c(list, entry+8, entry[0]) only when entry[1] is nonzero.
+      Complete raw A32 branch decoding finds three inbound direct call sites,
+      all plain BL: 0x08180200, 0x081e0154, and 0x081e01fc. It deliberately
+      retains the unported record loader as the volatile RESOURCE_LIST_POPULATE
+      seam; target builds call 0x08184b5c directly and host tests verify both
+      the nonzero and zero condition.
+
   - address: 0x08184bd4
     ghidra: FUN_08184bd4
     name: copy_first_entry_payload
