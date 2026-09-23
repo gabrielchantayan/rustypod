@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
+pub mod opaque_object_apply_mode_five;
 pub mod registry_display_client_construct;
 pub mod byte_state_construct;
 pub mod app_boot_metrics_submit;

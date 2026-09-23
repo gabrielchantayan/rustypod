@@ -132785,3 +132785,28 @@ functions:
       replaces the stock bare bx lr but preserves the result and load. The
       field's exact boolean interpretation remains unverified, so the name
       deliberately preserves the offset.
+
+  # --- Fixed mode-5 opaque-object wrapper (src/app/opaque_object_apply_mode_five.rs) ---
+  - address: 0x081a5a58
+    ghidra: FUN_081a5a58
+    name: opaque_object_apply_mode_five
+    size: 8
+    sig: "void opaque_object_apply_mode_five(void *object)"
+    module: app/opaque_object_apply_mode_five
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: mode_5
+      FUN_081de270: opaque_object_apply_mode
+    notes: >-
+      Raw osos.dec words e3a01005 ea00e203 establish the exact 8-byte
+      extent 0x081a5a58..0x081a5a60: mov r1,#5 then an unconditional tail
+      branch to 0x081de270. The next independently linked function begins
+      at 0x081a5a60 with stmdb sp!,{r4,r5,r6,lr}; Ghidra incorrectly joins
+      that successor and invents three calls. Decoding every aligned A32
+      B/BL-immediate word in osos.dec finds exactly two inbound direct calls
+      (0x0817c8a4 and 0x0817ca14), both unconditional plain bl, with zero
+      predicated bl forms. The target 0x081de270 is unported; its verified
+      ABI accepts object and a mode word. Rust calls a literal-address target
+      seam with mode 5 rather than expressing the terminal ARM branch; host
+      tests record the exact forwarded pointer and fixed mode.
