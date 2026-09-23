@@ -554,6 +554,10 @@ pub mod hints {
     // raw-u32 Showcase, slot queues, and queue-completion state fixture;
     // mappings never unmap, so no other test may reuse this hint.
     pub const SHOWCASE_PENDING_QUEUES_COMPLETE: usize = 0xda00_0000;
+    // 0xda80_0000: dedicated to app/showcase_initialization_complete's raw-u32
+    // Showcase state fixture; mappings never unmap, so no other test may
+    // share this hint.
+    pub const SHOWCASE_INITIALIZATION_COMPLETE: usize = 0xda80_0000;
     // 0xdb00_0000: dedicated to ui/selection_schedule_timer's target-width
     // controller, timer, and bit-set fixture; mappings never unmap.
     pub const SELECTION_SCHEDULE_TIMER: usize = 0xdb00_0000;

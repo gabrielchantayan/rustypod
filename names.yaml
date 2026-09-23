@@ -132587,3 +132587,39 @@ functions:
       0x081b753c when +0xea is nonzero, stamps state one, then unlocks.
       The existing port directly supplies 0x081b76b0; the identity-unrecovered
       0x081b753c is an address-verified target call and narrow host seam.
+  - address: 0x081b6a38
+    ghidra: FUN_081b6a38
+    name: showcase_initialization_complete
+    size: 176
+    sig: "void showcase_initialization_complete(u8 *showcase)"
+    module: app/showcase_initialization_complete
+    status: ported
+    renames:
+      param_1/r0: showcase
+      showcase_plus_0x18: mutex
+      showcase_plus_0x20: state
+      showcase_plus_0xe9: slots_initialized
+      showcase_plus_0xea: pending_queues_complete
+      showcase_plus_0xec: selected_slot
+      showcase_plus_0xf0: active_word
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_081b759c: resource_slot_table_initialize
+      FUN_081b6fb4: showcase_pending_queues_complete
+      FUN_081b7824: retail_showcase_refresh
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec words establish the exact 176-byte extent
+      0x081b6a38..0x081b6ae8: push {r0-r12,lr} at 0x081b6ae8 starts the
+      next separately linked function. The body has four plain direct BL
+      instructions (mutex_lock, showcase_pending_queues_complete, heap_panic,
+      and the still-unidentified 0x081b7824 refresh) plus one predicated BLEQ
+      resource_slot_table_initialize. The assigned three-site inbound plain-BL
+      count remains recorded; no predicated inbound call is identified. It
+      locks showcase+0x18; states zero and two immediately unlock. Other
+      states require +0xf0 unless state is one, initialize slots when +0xe9
+      is clear, complete queues for selected_slot -1 and clear +0xea, refresh
+      a present selected slot, stamps state two, then unlocks. The
+      0x081b7824 callee has no recovered semantic identity: target code calls
+      its verified address and host tests use a narrow callback seam. Rust
+      expresses the retail conditional BLEQ as a conditional call and return.
