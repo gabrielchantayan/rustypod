@@ -78476,6 +78476,38 @@ functions:
       normalization, both workers' success/failure effects, all four
       different-sign magnitude orders, and exact-magnitude positive zero.
   # --- display object: the six-layer compositor root ---
+  - address: 0x081d89d0
+    ghidra: FUN_081d89d0
+    name: display_force_layers_visible
+    size: 116
+    sig: "u32 display_force_layers_visible(Display *display)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r5: display
+      param_1_plus_0x94: driver
+      param_1_plus_0x98: layers_active
+      param_1_plus_0x9e: panel_parameter_pending
+      param_1_plus_0xa2: panel_command_pending
+      param_1_plus_0xa5: forced_layers_visible
+      FUN_08120654: layer_force_enable
+      FUN_081d9270: layer_activity_stop
+    notes: >-
+      Raw osos.dec and the next push {r4,r5,r6,lr} at 0x081d8a44 establish
+      the true 116-byte extent 0x081d89d0..0x081d8a43. It contains three
+      outbound call sites: predicated blxne through driver vtable +0x68 at
+      0x081d89f4, predicated blne layer_force_enable at 0x081d8a20, and plain
+      bl layer_activity_stop at 0x081d8a34. It sets +0xa5, calls the driver
+      with zero when present, and only for display id 1 sets +0xa2/+0x9e,
+      force-enables non-NULL layers, stops activity, and clears +0x98.
+      Deliberate deviations: the unrecognized vtable target is dispatched
+      through its verified ABI; the unported activity stop uses the existing
+      display hook seam. layer_force_enable is explicitly no-inline so this
+      remains a real call boundary. Host tests cover both display-id paths,
+      sparse valid layer objects, panel dispatch arguments, and activity
+      teardown. match.py reports LLVM frame, unrolled-loop, and hook
+      indirection differences while preserving all gates, slot visits, and
+      calls.
   - address: 0x081d89a8
     ghidra: FUN_081d89a8
     name: display_lock_existing_layers
