@@ -134533,3 +134533,33 @@ functions:
       established semantic identity in names.yaml, so target code calls their
       verified addresses while host tests expose narrow ABI seams. Deliberate
       deviation: host builds replace the live global cache with test storage.
+
+  - address: 0x08153140
+    ghidra: FUN_08153140
+    name: object_layout_construct
+    size: 208
+    sig: "void *object_layout_construct(void *storage, void *shared)"
+    module: app/object_layout_construct
+    status: ported
+    vars: {param_1: storage, param_2: shared, iVar2: hierarchy, puVar3: value}
+    notes: >-
+      Raw osos.dec words establish the exact instruction extent
+      0x08153140..0x0815320f. The five literal-pool words at
+      0x08153210..0x08153223 are separate; 0x08153224 opens the next real
+      function with `cmp r0,#0`. Complete A32 decoding finds three inbound
+      direct plain BL sites at 0x080f7614, 0x080f7638, and 0x080f7654, with
+      zero predicated inbound BL sites. The body contains fifteen plain BL
+      instructions and zero predicated BL instructions: four opaque hierarchy
+      constructors at 0x08280fc0, operator_new(0xdc), its opaque default
+      constructor at 0x0827bc9c, six animation_default_init calls at
+      0x08166c5c, and three refcounted_base_init calls at 0x08138460.
+      It installs the outer and inner vtables, retains supplied shared storage
+      or constructs a 0xdc-byte default, initializes six embedded animation
+      values, then initializes three derived refcounted values and returns the
+      enclosing object. The opaque constructors have no recovered semantic
+      identities, so target builds call their verified addresses and host
+      builds use narrow seams; all identified callees call their existing Rust
+      resulting nested layout. match.py prints a structural diff (62 Rust
+      instructions versus 52 retail instructions): LLVM uses indirect `blx`
+      calls for the opaque target seams and materializes the layout offsets
+      from the returned hierarchy pointer.
