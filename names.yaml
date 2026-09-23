@@ -132970,3 +132970,28 @@ functions:
       volatile function pointers instead of reproducing their IRAM veneers,
       preventing LLVM AEABI clear substitution. Host builds use isolated
       fixed-global fixtures; target builds use the verified literal addresses.
+  - address: 0x0819adfc
+    ghidra: FUN_0819adfc
+    name: selection_index_adjust
+    size: 100
+    sig: "u32 selection_index_adjust(void *object, i32 delta)"
+    module: util/selection_index_adjust
+    status: ported
+    renames:
+      param_1/r4: object
+      param_2/r5: delta
+      FUN_080ffa00: retail_item_count
+      FUN_0819ae74: retail_refresh_selection
+      FUN_082040ec: retail_selection_context
+      FUN_08203e48: retail_set_selection
+      FUN_081bb29c: retail_continuation
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent
+      0x0819adfc..0x0819ae5f: zero delta takes popeq and returns the incoming
+      r0; otherwise it updates object word +0xb0, wraps the index against the
+      count, refreshes and publishes it, then tail-branches to 0x081bb29c
+      with r0=1. The next real function begins at 0x0819ae60. The body has
+      five plain unconditional BL instructions and no predicated BL forms.
+      None of the five direct retail callees has a recovered semantic identity
+      in names.yaml, so the target body retains their verified addresses and
+      host tests use narrow address-named callback seams.
