@@ -14,6 +14,7 @@ pub mod app_screen_update_position;
 pub mod visible_range_recompute;
 pub mod active_service_handler_readiness;
 pub mod service_handler_context_readiness;
+pub mod showcase_clear_timer_slots;
 pub mod service_status_word;
 pub mod application_resource_provider;
 pub mod default_selection_traversal_token;

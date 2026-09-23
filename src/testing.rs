@@ -546,6 +546,10 @@ pub mod hints {
     // embedded bit-set and timer fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const TIMER_STOP_THEN_CLEAR_BIT_SET: usize = 0xd900_0000;
+    // 0xd980_0000: dedicated to app/showcase_clear_timer_slots's raw-u32
+    // showcase and timer fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SHOWCASE_CLEAR_TIMER_SLOTS: usize = 0xd980_0000;
     // 0xdb00_0000: dedicated to ui/selection_schedule_timer's target-width
     // controller, timer, and bit-set fixture; mappings never unmap.
     pub const SELECTION_SCHEDULE_TIMER: usize = 0xdb00_0000;

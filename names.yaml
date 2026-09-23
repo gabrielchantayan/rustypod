@@ -132486,3 +132486,27 @@ functions:
       callees are address-verified operations on target and deterministic host
       seams in tests; target-width pointer fields are stored as u32 words so
       host pointer width cannot alter retail offsets.
+  - address: 0x081b76b0
+    ghidra: FUN_081b76b0
+    name: showcase_clear_timer_slots_and_stop
+    size: 44
+    sig: "void showcase_clear_timer_slots_and_stop(Showcase *showcase)"
+    module: app/showcase_clear_timer_slots
+    status: ported
+    renames:
+      param_1/r0: showcase
+      showcase_plus_0x1c0: timer
+      showcase_plus_0x1c4..0x1d0: timer_slots
+      FUN_0812c6b0: timer_stop
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte extent
+      0x081b76b0..0x081b76dc: the next independently linked function starts
+      with `push {r4, lr}` at 0x081b76dc. The body writes zero to four
+      consecutive words at showcase+0x1c4..+0x1d0, then loads the u32 timer
+      pointer at +0x1c0. A zero pointer returns; a nonzero pointer reaches a
+      conditional tail branch to the already ported timer_stop @ 0x0812c6b0.
+      Independent raw decoding of the three callers finds plain BL sites at
+      0x081b6d28, 0x081b7760, and 0x081b783c; there are zero predicated BL
+      callers and no outgoing BL instructions. Deliberate deviation:
+      Rust expresses the tail branch as a normal call and return, preserving
+      the call condition and all observable memory effects.
