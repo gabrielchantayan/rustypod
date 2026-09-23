@@ -104,8 +104,7 @@ unsafe extern "C" fn firmware_advance_work(record: *mut u8) {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_teardown_work(record: *mut u8) {
-    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0814_848cusize);
-    f(record)
+    super::work_record_teardown::teardown_work(record.cast())
 }
 
 #[cfg(not(target_os = "none"))]
