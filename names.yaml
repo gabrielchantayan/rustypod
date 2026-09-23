@@ -131687,3 +131687,27 @@ functions:
       match.py reports LLVM's frame setup, early default return, and equivalent
       scaled-address arithmetic; its unsigned guard and selected-word load
       retain the retail control flow.
+
+  - address: 0x081d5f90
+    ghidra: FUN_081d5f90
+    name: image_format_descriptor_slot_count
+    size: 8
+    sig: "u32 image_format_descriptor_slot_count(const ImageFormatDescriptorSlots *slots)"
+    module: app/image_format_descriptor_slot_count
+    status: ported
+    renames:
+      param_1/r0: slots
+      "slots+0x290": descriptor_count
+    notes: >-
+      Raw osos.dec words 0xe5900290 and 0xe12fff1e establish the exact
+      8-byte A32 body at 0x081d5f90..0x081d5f97: ldr r0,[r0,#0x290];
+      bx lr. The independently linked next function starts at 0x081d5f98
+      with mov r3,r1. Whole-image A32 decoding finds exactly three inbound
+      unconditional plain BL sites at 0x0811f418, 0x081f0d14, and
+      0x0821b278, with zero predicated inbound BL sites. There are no
+      outbound plain or predicated BL calls. The word is initialized to zero
+      by image_format_descriptor_slots_initialize and incremented by
+      image_format_descriptor_slot_set; callers use it as the populated
+      descriptor count. Rust performs the same aligned word read with no
+      NULL, extent, or alignment guard. Host tests cover an ordinary count,
+      adjacent-word preservation, and u32::MAX. No deliberate deviations.
