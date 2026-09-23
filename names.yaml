@@ -135265,3 +135265,25 @@ functions:
       every nonzero UTF-16 unit is transformed through that table before the
       caller receives the buffer, a Rust port or seam would fabricate observable
       output. Deliberate deviations: none; this function remains identified.
+  - address: 0x081325b4
+    ghidra: FUN_081325b4
+    name: object_kind_is_two_five_or_seven
+    size: 28
+    sig: "u32 object_kind_is_two_five_or_seven(const u8 *object)"
+    module: app/object_kind_is_two_five_or_seven
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x1a": kind
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte A32 body
+      0x081325b4..0x081325cc; ldr r0,[r0,#0x80] at 0x081325d0 starts the
+      next independently entered function. The body has zero outbound plain
+      BL instructions, zero outbound predicated BL instructions, and no BLX.
+      A full-image aligned A32 decode finds exactly three inbound plain BL
+      sites (0x081323c8, 0x08132a74, and 0x08132dd0) and no predicated inbound
+      BL forms. It returns one exactly when object byte +0x1a is 2, 5, or 7.
+      Ghidra reports the same predicate; the three callers use it to choose a
+      collection-processing path. Deliberate deviation: LLVM lowers the
+      equivalent Rust predicate to a lookup table rather than the stock
+      predicated comparison chain; behavior and normalized u32 result match.
