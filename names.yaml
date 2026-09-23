@@ -29008,6 +29008,28 @@ functions:
       0x081d23f8` @ 0x081b8194). CLASS NOT NAMED, same reason as
       0x081eb0c4.
 
+  - address: 0x0816ddb4
+    ghidra: FUN_0816ddb4
+    name: opaque_vtable_string_owner_assign_z_source
+    size: 108
+    sig: "void opaque_vtable_string_owner_assign_z_source(OpaqueVtableStringOwner *this, StringObject *source)"
+    module: cxx/opaque_vtable_string_owner_assign_z_source
+    status: ported
+    vars: {param_1: this, param_2: source}
+    notes: >-
+      Raw osos.dec establishes the true A32 extent 0x0816ddb4..0x0816de1f;
+      0x0816de20 is the "Z\\0" literal and the next real function starts at
+      0x0816de24. The body has four plain, unconditional BL calls
+      (utf8_strcmp_safe @ 0x08276d64, record_lookup_value_word @ 0x08291d90,
+      unrecovered trailing-pair advance @ 0x081b4d54, and the
+      string_object_c_str thunk @ 0x082a704c), one indirect BLX through owner
+      vtable slot +0x08, and zero predicated BL calls. It dispatches that
+      slot, compares the embedded StringObject payload at +0x18 to "Z", and
+      for a non-NULL source advances the +0x1c pair with source lookup key
+      zero before assigning the source C string into the embedded StringObject.
+      Host uses explicit seams for the vtable slot and unrecovered helper;
+      target builds call their verified firmware addresses directly.
+
   - address: 0x0816de24
     ghidra: FUN_0816de24
     name: opaque_vtable_string_owner_construct
