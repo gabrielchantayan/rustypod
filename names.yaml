@@ -132073,3 +132073,27 @@ functions:
       tail-branches to set_clamped_mode_position. Deliberate deviation: Rust
       uses a normal call because the callee returns void, preserving all
       observable behavior.
+
+  - address: 0x081cabe8
+    ghidra: FUN_081cabe8
+    name: vtable_slot_0x5c_result_is_three
+    size: 48
+    sig: "u32 vtable_slot_0x5c_result_is_three(void)"
+    module: util/vtable_slot_0x5c_result_is_three
+    status: ported
+    renames:
+      FUN_0825b680: lazy_singleton_0x40
+      "object+0x0": vtable
+      "vtable+0x5c": status_method
+    notes: >-
+      Raw osos.dec words establish the exact 48-byte extent
+      0x081cabe8..0x081cac17: call the already ported lazy_singleton_0x40
+      getter at 0x0825b680; return 0 for NULL; otherwise load the object's
+      vtable and invoke its +0x5c method, returning whether its result is 3.
+      The next real function starts at 0x081cac18. Disassembly independently
+      verifies three inbound unconditional plain BL sites at 0x081cab04,
+      0x081cab50, and 0x081cad5c; no inbound predicated BL forms occur in
+      that caller cluster. The body itself has one direct BL and one indirect
+      BLX, neither predicated. Deliberate deviation: lazy_singleton_0x40's
+      documented unported constructor default cannot install a vtable, so host
+      tests install a target-width object fixture and virtual-method seam.
