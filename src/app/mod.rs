@@ -69,6 +69,7 @@ pub mod prid_checked_word_c0;
 pub mod collection_weight_dispatch;
 pub mod collection_item_find_eligible_at;
 pub mod collection_entry_teardown;
+pub mod collection_entry_action_clear;
 pub mod class_8900_work_queue;
 pub mod collection_cursor_set_index;
 pub mod collection_item_process_if_limit;
