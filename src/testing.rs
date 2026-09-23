@@ -1158,6 +1158,10 @@ pub mod hints {
     // raw-u32 active-matrix fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const MATRIX_STATE_APPLY_SIX_COORDINATE_TRANSFORM: usize = 0xd700_0000;
+    // 0xed00_0000: dedicated to ui/typeface_resource_apply's raw-u32 owner,
+    // provider, metrics, and payload fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const TYPEFACE_RESOURCE_APPLY: usize = 0xed00_0000;
     
     // 0xfe00_0000: dedicated to util/tagged_payload_signed_field_sum's raw-u32
     // object/payload fixture; mappings never unmap, so no other user may share it.

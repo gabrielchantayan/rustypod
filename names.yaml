@@ -135025,3 +135025,44 @@ functions:
       Ghidra's three-call-site accounting is incomplete. Deliberate
       deviations: none. Host tests verify allocation sizes/tag, signed Q16.16
       conversion, target-width owner slots, and animation endpoint order.
+
+  - address: 0x08140c9c
+    ghidra: FUN_08140c9c
+    name: typeface_resource_apply
+    size: 120
+    sig: "void typeface_resource_apply(u8 *owner, u8 *draw_state, u32 typeface_id, const u32 *metrics)"
+    module: ui/typeface_resource_apply
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1/r5: draw_state
+      param_3/r2/r1: typeface_id
+      "owner+0x38": resource_provider
+      "owner+0xf0": typeface_enabled
+      "owner+0xf4": typeface_helper_state
+      "owner+0xf8": text_metric
+      DAT_08140d10: RESOURCE_KIND_TYPEFACE ("Type")
+      FUN_0827216c: resource_chain_find (ported)
+      FUN_08272360: resource_chain_find_on_current_task (ported)
+      FUN_0826de74: typeface_resource_apply_helper (unported ABI seam)
+      FUN_082a1d7c: tagged_payload_signed_field_sum (ported)
+    notes: >-
+      Raw ARM establishes the true 120-byte extent 0x08140c9c..0x08140d13:
+      116 bytes of instructions ending pop {r4,r5,r6,pc} at 0x08140d0c,
+      followed by the 0x65707954 ("Type") literal at 0x08140d10. The next
+      real function starts at 0x08140d14 with push {r4,lr}; Ghidra's
+      116-byte extent drops that literal. Binary decoding finds four plain,
+      unconditional BL instructions (0x08140cd0 resource_chain_find,
+      0x08140cdc resource_chain_find_on_current_task, 0x08140cf8 helper
+      0x0826de74, and 0x08140d00 tagged_payload_signed_field_sum) and zero
+      predicated BL instructions; its three-call report misses one branch of
+      the provider selection. A zero owner+0xf0 returns before any lookup.
+      Otherwise owner+0x38 selects direct provider lookup when nonzero and
+      task-local lookup when zero; a NULL resource returns unchanged. A found
+      resource reaches the still-unported helper with owner, resource,
+      draw_state, and owner+0xf4, then owner+0xf8 receives the ported signed
+      metric sum plus three. The helper's concrete identity is unrecovered,
+      so Rust preserves only its decoded ABI behind a target call and host
+      seam. Host tests cover the disabled early return and provider-resolved
+      path, including target-width owner fields, tagged metric signs, helper
+      arguments, and the +3 adjustment.
