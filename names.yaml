@@ -133834,3 +133834,30 @@ functions:
       is unused. The memzero IRAM veneer is replaced with the existing port;
       factory and linker identities are not established in names.yaml, so
       target builds retain their verified retail ABIs through narrow seams.
+
+  # --- Event subscription and RTC synchronization ---
+  - address: 0x0816f75c
+    ghidra: FUN_0816f75c
+    name: event_subscription_rtc_sync
+    size: 216
+    sig: "void event_subscription_rtc_sync(void *receiver, u32 value)"
+    module: app/event_subscription_rtc_sync
+    status: ported
+    renames:
+      param_1/r0/r4: receiver
+      param_2/r1/r6: value
+      iVar2/r0: rtc_word_changed
+      iVar4/r0: rtc_configuration_changed
+      sVar1/r0: event_rank
+    notes: >-
+      Raw osos.dec extent is exactly 216 bytes, 0x0816f75c..0x0816f833:
+      the following words at 0x0816f834 are a literal pool, and the next
+      independently entered function begins at 0x0816f844. The body contains
+      nine unconditional direct BL instructions, no predicated direct BL, and
+      three indirect BLX calls through vtable slot +0x58. It updates the
+      receiver's event subscription and RTC state, schedules rank with delay
+      zero or 60, posts three resources and root message 0x60000004 on change,
+      then caches the static RTC word pair and marks it dirty when necessary.
+      The unported word setter 0x08067b20, scheduler 0x080dc3e8, and virtual
+      dispatch retain verified target seams; host tests inject them. match.py
+      reviewed after the ARM release build.
