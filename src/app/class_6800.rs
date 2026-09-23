@@ -779,6 +779,75 @@ pub unsafe extern "C" fn framework_base_construct(
     framework_base_initialize(this, initial_target as usize as *mut u8, create_link, core::ptr::null_mut());
     this
 }
+/// Fixed retailOS entry of the direct parent used only by
+/// [`screen_base_parent_construct`]. Its body @ 0x08272418 has not been
+/// ported, so firmware calls it in place and host tests install a seam.
+pub const SCREEN_BASE_PARENT_DIRECT_CONSTRUCT_ADDRESS: usize = 0x0827_2418;
+
+/// ABI of the unported direct parent `FUN_08272418`.
+pub type ScreenBaseParentDirectConstruct =
+    unsafe extern "C" fn(*mut Class6800, u32, u32) -> *mut Class6800;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn screen_base_parent_direct_construct(
+    storage: *mut Class6800,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut Class6800 {
+    let construct: ScreenBaseParentDirectConstruct =
+        core::mem::transmute(SCREEN_BASE_PARENT_DIRECT_CONSTRUCT_ADDRESS);
+    construct(storage, initial_target, create_link)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_screen_base_parent_direct_construct(
+    _storage: *mut Class6800,
+    _initial_target: u32,
+    _create_link: u32,
+) -> *mut Class6800 {
+    panic!("install screen-base direct parent host operation before calling it")
+}
+
+/// Host seam for the unported direct parent @ 0x08272418.
+#[cfg(not(target_os = "none"))]
+pub static mut SCREEN_BASE_PARENT_DIRECT_CONSTRUCT: ScreenBaseParentDirectConstruct =
+    missing_screen_base_parent_direct_construct;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn screen_base_parent_direct_construct(
+    storage: *mut Class6800,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut Class6800 {
+    let construct =
+        core::ptr::read_volatile(core::ptr::addr_of!(SCREEN_BASE_PARENT_DIRECT_CONSTRUCT));
+    construct(storage, initial_target, create_link)
+}
+
+/// screen_base_parent_construct — original: `FUN_08143978` @ 0x08143978
+/// (16 bytes of code plus the literal-pool word at 0x0814398c; **3 plain
+/// `bl` call sites, 0 predicated `bl` call sites**, raw-decoded from
+/// `work/firmware/osos.dec`).
+///
+/// Delegates `(storage, initial_target, create_link)` to the direct parent
+/// @ 0x08272418, plants the returned object's opaque 0x08985da8 vtable, and
+/// returns that same pointer. There are no NULL guards. Deliberate deviation:
+/// the unported direct parent's identity is not inferred; device builds call
+/// its fixed entry and host builds use the explicit seam above.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn screen_base_parent_construct(
+    storage: *mut Class6800,
+    initial_target: u32,
+    create_link: u32,
+) -> *mut Class6800 {
+    let this = screen_base_parent_direct_construct(storage, initial_target, create_link);
+    core::ptr::addr_of_mut!((*this).vtable)
+        .write_volatile(0x0898_5da8usize as *const Class6800Vtable);
+    this
+}
 
 /// framework_base_construct_with_task_target — original: `FUN_0811113c` @
 /// 0x0811113c (56 bytes of code plus the literal-pool word at 0x08111174;
@@ -1046,6 +1115,7 @@ mod tests {
         if entry.instance.is_null() || entry.class_id != key.read() {
             -1
         } else {
+
             0
         }
     }
@@ -1114,6 +1184,9 @@ mod tests {
     static mut PARENT_CALLS: usize = 0;
     static mut PARENT_STORAGE: *mut Class6800 = ptr::null_mut();
     static mut PARENT_RESULT: *mut Class6800 = ptr::null_mut();
+    static mut SCREEN_BASE_PARENT_CALLS: usize = 0;
+    static mut SCREEN_BASE_PARENT_ARGS: (*mut Class6800, u32, u32) = (ptr::null_mut(), 0, 0);
+    static mut SCREEN_BASE_PARENT_RESULT: *mut Class6800 = ptr::null_mut();
     static mut SET_TARGET_CALLS: usize = 0;
     static mut SET_TARGET_ARGS: [(*mut Class6800, *mut u8); 2] =
         [(ptr::null_mut(), ptr::null_mut()); 2];
@@ -1121,7 +1194,17 @@ mod tests {
     static mut CALL_ORDER: [u8; 4] = [0; 4];
     static mut CALL_COUNT: usize = 0;
     static mut ALLOC_CALLS: usize = 0;
+
     static mut ALLOC_ARGS: (usize, usize) = (usize::MAX, usize::MAX);
+    unsafe extern "C" fn record_screen_base_parent_direct_construct(
+        storage: *mut Class6800,
+        initial_target: u32,
+        create_link: u32,
+    ) -> *mut Class6800 {
+        SCREEN_BASE_PARENT_CALLS += 1;
+        SCREEN_BASE_PARENT_ARGS = (storage, initial_target, create_link);
+        SCREEN_BASE_PARENT_RESULT
+    }
     static mut TEST_HEAP: usize = 0;
     static mut TEST_LINK: FrameworkBaseLink = FrameworkBaseLink {
         state: 0xa5,
@@ -1319,6 +1402,10 @@ mod tests {
         CALL_COUNT = 0;
         ALLOC_CALLS = 0;
         ALLOC_ARGS = (usize::MAX, usize::MAX);
+        SCREEN_BASE_PARENT_CALLS = 0;
+        SCREEN_BASE_PARENT_ARGS = (ptr::null_mut(), 0, 0);
+        SCREEN_BASE_PARENT_RESULT = ptr::null_mut();
+        SCREEN_BASE_PARENT_DIRECT_CONSTRUCT = record_screen_base_parent_direct_construct;
         TEST_LINK = FrameworkBaseLink {
             state: 0xa5,
             unresolved_01: [0xa5; 3],
@@ -1385,6 +1472,7 @@ mod tests {
         FRAMEWORK_TASK_RESET_OPS = DEFAULT_FRAMEWORK_TASK_RESET_OPS;
         FRAMEWORK_BASE_INITIALIZE_OPS = DEFAULT_FRAMEWORK_BASE_INITIALIZE_OPS;
         crate::heap::veneers::HEAP_OPS = crate::heap::veneers::DEFAULT_HEAP_OPS;
+
         crate::heap::types::DEFAULT_HEAP = ptr::null_mut();
         CLASS_6800_VTABLE.set_target = unported_set_target;
         FRAMEWORK_BASE_VTABLE.set_target = unported_set_target;
@@ -1397,6 +1485,7 @@ mod tests {
         REGISTERED = RegistryEntry { class_id: 0, instance: ptr::null_mut() };
         CLASS_REGISTRY.vtable = ptr::null();
         RESOURCE_PROVIDER_LINK_OPS = DEFAULT_RESOURCE_PROVIDER_LINK_OPS;
+        SCREEN_BASE_PARENT_DIRECT_CONSTRUCT = missing_screen_base_parent_direct_construct;
     }
 
     unsafe fn restore_task_hooks(saved_hooks: crate::kernel::task::TaskHooks) {
@@ -1416,6 +1505,41 @@ mod tests {
             demo_mode: 0xa5a5_a5a5usize as *mut u8,
         }
     }
+    #[test]
+    fn screen_base_parent_construct_forwards_all_arguments_and_uses_parent_result() {
+        let mut storage = poisoned();
+        let mut relocated = poisoned();
+        let storage = ptr::addr_of_mut!(storage);
+        let replacement = ptr::addr_of_mut!(relocated);
+
+        unsafe {
+            let guard = install_mocks();
+            SCREEN_BASE_PARENT_RESULT = replacement;
+
+            let result = screen_base_parent_construct(storage, 0x1234_5678, 1);
+
+            assert_eq!(result, replacement, "the direct parent's r0 is returned");
+            assert_eq!(SCREEN_BASE_PARENT_CALLS, 1, "one direct parent call");
+            assert_eq!(
+                SCREEN_BASE_PARENT_ARGS,
+                (storage, 0x1234_5678, 1),
+                "all three ABI arguments pass through unchanged"
+            );
+            assert_eq!(
+                (*replacement).vtable,
+                0x0898_5da8usize as *const Class6800Vtable,
+                "the literal vtable overwrites the parent vtable"
+            );
+            assert_eq!(
+                (*replacement).default_target,
+                0xa5a5_a5a5usize as *mut u8,
+                "the wrapper touches no derived field"
+            );
+            restore();
+            drop(guard);
+        }
+    }
+
 
     #[test]
     fn linkage_parent_construct_replaces_root_vtable_and_clears_its_two_words() {
