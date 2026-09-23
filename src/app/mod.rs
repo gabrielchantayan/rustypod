@@ -147,6 +147,7 @@ pub mod volume_controller_post_byte_90_code;
 pub mod volume_limit_state_refresh_if_pending;
 pub mod volume_controller_adjust;
 pub mod volume_controller_reschedule_timer;
+pub mod timer_rearm_after_15000;
 pub mod derived_object_construct;
 pub mod derived_object_construct_0899f394;
 pub mod configuration_entry;
