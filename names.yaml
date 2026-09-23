@@ -133099,3 +133099,38 @@ functions:
       layout uses u32 header words and native-widened record fields so the
       serialized target words and ARM offsets are preserved while the already
       ported record-copy seam remains testable.
+
+  # --- Two-value timing-wheel node constructor (src/app/two_value_wheel_node.rs) ---
+  - address: 0x081977c4
+    ghidra: FUN_081977c4
+    name: two_value_wheel_node_init
+    size: 152
+    sig: "TwoValueWheelNode *two_value_wheel_node_init(TwoValueWheelNode *this, FixedValue *driver, FixedValue *step)"
+    module: app/two_value_wheel_node
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: driver
+      param_3/r2: step
+      DAT_08197854: TWO_VALUE_WHEEL_NODE_VTABLE (0x08989b48)
+      DAT_08197858: SCHEDULER_SINGLETON_GLOBAL (0x089cc7e0)
+      FUN_08138460: refcounted_base_init
+      FUN_082738e0: timing_wheel_remove
+      FUN_08273a14: retain_value
+      FUN_082739e0: release_refcounted_value
+      FUN_08273a40: value_aux_max
+      FUN_08273898: timing_wheel_insert
+    notes: >-
+      Raw osos.dec decoding establishes a 144-byte instruction body from
+      0x081977c4 through 0x08197850 followed by the two-word literal pool
+      at 0x08197854 and 0x08197858, for a true extent of 152 bytes; the next
+      real function begins at 0x0819785c. Full-image aligned A32 decoding
+      finds three inbound plain unconditional bl sites and no predicated
+      forms. The constructor initializes the refcounted prefix, installs its
+      0x08989b48 vtable, clears two value slots, defensively removes itself
+      from the timing wheel, retains driver then step, stores driver +0x1c
+      and step +0x18, sets rank to one plus their unsigned auxiliary maximum,
+      and inserts itself into the wheel. Deliberate deviation: Rust loads the
+      scheduler singleton once rather than twice because no intervening call
+      can change it; host tests use a private wheel table. The vtable remains
+      an address constant because the decrypted 0x0898xxxx page is stale.
