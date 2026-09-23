@@ -130411,3 +130411,31 @@ functions:
       frame for the remainder out-pointer and an stm for paired stores, while
       retaining the divide call, second load, conditional seven-unit backup,
       and paired bound writes.
+
+  - address: 0x081f5cdc
+    ghidra: FUN_081f5cdc
+    name: copy_surface_config
+    size: 120
+    sig: "void copy_surface_config(void *owner, const LayerConfigInput *input, u8 config[64])"
+    module: drivers/surface_config_copy
+    status: ported
+    renames:
+      param_1/r0: owner_unused
+      param_2/r1: input
+      param_3/r2: config
+      field_08: pixel_format
+      field_0c: word_c
+      field_10: word_10
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte A32 extent
+      0x081f5cdc..0x081f5d53; the push at 0x081f5d54 begins the next real
+      function. Raw A32 decoding verifies three inbound plain BL sites at
+      0x081f5c7c, 0x081f5c8c, and 0x081f602c, with zero predicated inbound
+      BL forms. The leaf copies pixel_format, maps formats 0, 2, and 3 to
+      their fixed opaque bytes, duplicates both input words into paired
+      descriptor fields, and clears four bookkeeping words. owner is passed
+      through solely to retain the verified three-register ABI and is not
+      dereferenced. Host tests cover every recognized format plus unknown
+      format preservation. match.py exits 1 with LLVMs frame, branch, and
+      register-allocation differences while preserving the input offsets,
+      format cases, stores, and zeroing sequence.

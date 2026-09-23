@@ -27,20 +27,8 @@ use super::{
     display_layer::{layer_apply_config, layer_set_global_alpha_blend},
     surface::surface_config_init,
 };
+use super::surface_config_copy::{copy_surface_config, LayerConfigInput};
 
-/// The input record at `this + 0x18` / `this + 0x1c`.
-///
-/// Both input words have established byte offsets but not an established
-/// domain meaning. The configuration copier swaps them into the descriptor's
-/// width/height pairs, so names preserve their observed locations.
-#[repr(C)]
-pub struct LayerConfigInput {
-    reserved_0_7: [u8; 8],
-    pixel_format: u8,
-    reserved_9_b: [u8; 3],
-    word_c: u32,
-    word_10: u32,
-}
 
 /// The owner layout read and written by [`configure_internal_display_layers`].
 ///
@@ -92,36 +80,6 @@ unsafe fn set_display_pending_parameters(display: *mut Display, first: u8, secon
     set(display, first, second);
 }
 
-/// Reproduces the separately linked `FUN_081f5cdc` inline, avoiding a second
-/// exported port for the helper that only prepares this function's stack
-/// descriptors.
-#[inline(always)]
-unsafe fn copy_layer_config(input: *const LayerConfigInput, config: *mut u8) {
-    let pixel_format = core::ptr::addr_of!((*input).pixel_format).read_volatile();
-    let word_c = core::ptr::addr_of!((*input).word_c).read_volatile();
-    let word_10 = core::ptr::addr_of!((*input).word_10).read_volatile();
-
-    config.write_volatile(pixel_format);
-    config.add(1).write_volatile(3);
-    match pixel_format {
-        0 => {
-            config.add(0x30).write_volatile(0x10);
-            config.add(0x31).write_volatile(0);
-            config.add(0x32).write_volatile(0xff);
-        }
-        2 => (config.add(0x30) as *mut u16).write_volatile(0x1f),
-        3 => (config.add(0x30) as *mut u32).write_volatile(0),
-        _ => {}
-    }
-    (config.add(0x10) as *mut u32).write_volatile(word_c);
-    (config.add(0x0c) as *mut u32).write_volatile(word_10);
-    (config.add(0x18) as *mut u32).write_volatile(word_c);
-    (config.add(0x14) as *mut u32).write_volatile(word_10);
-    (config.add(0x28) as *mut u32).write_volatile(0);
-    (config.add(0x24) as *mut u32).write_volatile(0);
-    (config.add(4) as *mut u32).write_volatile(0);
-    (config.add(8) as *mut u32).write_volatile(0);
-}
 
 /// configure_internal_display_layers — original: `FUN_081f5c2c` @
 /// `0x081f5c2c` (176 bytes, `0x081f5c2c..0x081f5cdc`; **9 `bl` call sites,
@@ -150,8 +108,8 @@ pub unsafe extern "C" fn configure_internal_display_layers(setup: *mut InternalD
     let layer1_config = layer1_config.as_mut_ptr().cast::<u8>();
     surface_config_init(layer5_config);
     surface_config_init(layer1_config);
-    copy_layer_config((*setup).layer1_input, layer1_config);
-    copy_layer_config((*setup).layer5_input, layer5_config);
+    copy_surface_config(setup.cast(), (*setup).layer1_input, layer1_config);
+    copy_surface_config(setup.cast(), (*setup).layer5_input, layer5_config);
     layer_apply_config(layer1, layer1_config);
     layer_apply_config(layer5, layer5_config);
     display_set_clear_color(display, 0);
