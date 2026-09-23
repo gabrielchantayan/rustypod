@@ -548,6 +548,10 @@ pub mod hints {
     // 0x6e40_0000: dedicated to app/slot_buffers_release's raw-u32 owner
     // fixture; mappings never unmap, so no other test may reuse it.
     pub const SLOT_BUFFERS_RELEASE: usize = 0x6e40_0000;
+    // 0x6e60_0000: dedicated to cxx/stream_write_owner_destroy's raw-u32
+    // owner, stream object, and native-width vtable fixture; mappings never
+    // unmap, so no other test may reuse it.
+    pub const STREAM_WRITE_OWNER_DESTROY: usize = 0x6e60_0000;
     // 0x6f00_0000: dedicated to app/service_handler_pending_event_reset's
     // session fixture; mappings never unmap, so no other test may reuse it.
     pub const SERVICE_HANDLER_PENDING_EVENT_RESET: usize = 0x6f00_0000;
