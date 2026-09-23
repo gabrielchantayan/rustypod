@@ -134307,3 +134307,38 @@ functions:
       for NULL and unaligned input. Deliberate deviation: a target-only
       separate text section prevents LLVM from merging this distinct BL target
       with other empty destructor bodies.
+
+  - address: 0x08165b84
+    ghidra: FUN_08165b84
+    name: version_info_construct
+    size: 120
+    sig: "VersionInfo *version_info_construct(VersionInfo *object, u32 tag, u32 size, u32 selector, u32 extra)"
+    module: cxx/version_info_construct
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: tag
+      param_3/r2: size
+      param_4/r3: selector
+      param_5/[sp]: extra
+      FUN_081659cc: version_size_class
+      FUN_082779c4: version_info_base_construct
+      FUN_08165a18: version_info_finalize
+      DAT_08165bf8: VERSION_INFO_VTABLE (0x08987eb0)
+    notes: >-
+      Raw osos.dec establishes the full 120-byte extent 0x08165b84..0x08165bfc:
+      29 ARM instructions (116 bytes) plus the trailing vtable literal at
+      0x08165bf8; 0x08165bfc is the next real function (`bx lr`). There are
+      three outgoing plain unconditional bl instructions (to 0x081659cc,
+      0x082779c4, and 0x08165a18) and no predicated bl instructions. It calls
+      the size-class worker with (object, selector), calls the base constructor
+      with (object, tag, size >> 4, size & 15, class, extra), overwrites word
+      +0 with 0x08987eb0 on the returned object, then reclassifies selector and
+      calls the finalizer with (returned, tag, size, class, extra). The concrete
+      class is unrecovered, so the three unported callees use literal ARM veneers
+      on target and volatile host seams; their names state only this verified role.
+      Host test verifies the split at a nonzero remainder, both classification
+      calls, all worker arguments, returned-object vtable replacement, and that
+      the input object is not substituted for the base constructor result.
+      match.py exit 1 is the expected structural diff: LLVM has a larger frame,
+      routes the three calls through local veneers, and emits 32 instructions.
