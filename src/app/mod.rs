@@ -250,6 +250,7 @@ pub mod handle_slot_18_predicate_and_state_is_two;
 pub mod context_shared_cell_payload_word;
 pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
+pub mod iap_client_global_shutdown;
 pub mod iap_packet;
 pub mod iap_service_packet_submit;
 pub mod request_callback_state_complete_iap_packet;

@@ -132689,3 +132689,33 @@ functions:
       before a match and the exhausted path's untouched outputs. match.py
       structural diff is expected from Rust's local arrays and direct Rust
       calls replacing the ARM frame/register allocation.
+
+  - address: 0x081a9ac0
+    ghidra: FUN_081a9ac0
+    name: iap_client_global_shutdown
+    size: 196
+    sig: "u32 iap_client_global_shutdown(void)"
+    module: app/iap_client_global_shutdown
+    status: ported
+    renames:
+      DAT_081a9b84: global iAP client context
+      "context+0x24": context owner
+      "context+0x28": client
+      "client.vtable+0x24": readiness query
+      "client.vtable+0x20": stop dispatch
+      FUN_083e75f4: assert query slot equals zero
+      FUN_08139b1c: client state notification
+    notes: >-
+      Raw osos.dec pins the exact 196-byte code extent
+      0x081a9ac0..0x081a9b84; the literal-pool words at 0x081a9b84 and
+      0x081a9b88 are followed by the next function prologue at
+      0x081a9b8c. Decoding the words finds 8 plain unconditional outgoing
+      bl calls and zero predicated bl calls, plus two indirect blx vtable
+      calls. Under the mutex at global context +0x24 +0x2d0, it returns
+      11 for a NULL client. Otherwise it queries vtable +0x24; a nonzero
+      result polls the registered iAP slot, clears fields, requires the
+      query-slot word at +0x40 to be zero, stops through vtable +0x20,
+      notifies client state, clears the ten-byte global marker, and clears
+      six trailing words. It returns zero whenever a client was present.
+      Deliberate deviation: unresolved direct callees use verified
+      fixed-address calls on target and explicit operations in host tests.
