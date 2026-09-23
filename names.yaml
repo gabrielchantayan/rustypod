@@ -63952,6 +63952,34 @@ functions:
       argument, and repeat calls. match.py structural review is expected to
       differ at the callback seams and Rust frame.
 
+  - address: 0x081b0e8c
+    ghidra: FUN_081b0e8c
+    name: event_loop_ui_operation_dispatch
+    size: 144
+    sig: "void event_loop_ui_operation_dispatch(u32 operation, u32 argument, u32 context)"
+    status: identified
+    renames:
+      DAT_081b0f18: event_loop_ui_operation_state
+      param_1/r0: operation
+      param_2/r1: argument
+      param_3/r2: context
+    notes: >-
+      Deferred: raw osos.dec proves 35 instruction words from 0x081b0e8c
+      through the return at 0x081b0f14, followed by its state-pointer literal
+      0x089cb230 at 0x081b0f18; the separately linked next function begins at
+      0x081b0f1c, so the true extent is 144 bytes, not Ghidra's 128. The body
+      has six direct BL instructions, all unconditional, zero predicated BL,
+      and one indirect BLX through vtable slot +0x68. Independent whole-image
+      decoding finds three inbound calls, all predicated BLNE
+      (0x081defe8, 0x081deffc, 0x081df030), and zero plain BL calls. It obtains
+      the event-handler source, dispatches its event-loop callback, reinitializes
+      the stream buffer on a zero result, invokes the unresolved vtable slot on
+      state+4 with the original three arguments, conditionally finishes a UI
+      manager operation, then stores whether state+8 differs from -1. Neither
+      0x089cb230 nor the vtable class/slot target has a names.yaml entry or a
+      recovered ABI; adding a host seam would invent that callee identity, so a
+      faithful Rust port is blocked.
+
   - address: 0x08038060
     ghidra: thunk_EXT_FUN_22007470
     name: iram_event_handler_source_veneer
