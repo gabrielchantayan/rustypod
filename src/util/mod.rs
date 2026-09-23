@@ -180,6 +180,7 @@ pub mod enum_value_bitset;
 pub mod query_object_release;
 pub mod field_query_result_release;
 pub mod record_body_size;
+pub mod record_header_clear_high_flags;
 pub mod record_read_trailer_header;
 pub mod record_store_trailer_header;
 pub mod record_stream_begin;
