@@ -479,6 +479,7 @@ pub mod triple_scaled_word_cursor_advance;
 pub mod tick_accumulator;
 pub mod timed_transition;
 pub mod progress_layout_transition;
+pub mod activity_media_player_cleanup;
 pub mod transition_container_construct;
 pub mod timer_reset;
 pub mod timer_step_value;
