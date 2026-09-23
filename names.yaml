@@ -2314,6 +2314,36 @@ functions:
       (HFS+) and two (FAT32), establishing the semantic name. The Rust port
       returns a normalized u32 truth value; this deliberately matches the
       firmware's r0 result, which retains the input value one on equality.
+  - address: 0x0814c0b8
+    ghidra: FUN_0814c0b8
+    name: callback_queue_context_post
+    size: 64
+    sig: "void callback_queue_context_post(u32 *context)"
+    module: app/callback_queue_context_post
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x58": mutex
+      "context+0x64": lifecycle
+      "lifecycle+0x30": state
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_081fbb24: callback_queue_instance_get
+      FUN_081fb41c: callback_queue_post
+    notes: >-
+      Raw osos.dec establishes the true 64-byte extent
+      0x0814c0b8..0x0814c0f7: 60 instruction bytes end with the tail branch
+      to mutex_unlock, then literal 0x00000207 is at 0x0814c0f8. The push at
+      0x0814c0fc starts the next real function. Decoding every instruction
+      independently finds exactly three outbound plain unconditional bl calls
+      (mutex_lock, callback_queue_instance_get, and callback_queue_post) and
+      zero predicated bl calls. The three inbound direct calls are plain bl at
+      0x081fb8a4, 0x081fbc54, and 0x081fbcd4; no predicated bl calls target
+      this address. It locks context+0x58, posts kind 0x207 with context as
+      payload only when context+0x64's state word +0x30 is zero, then unlocks.
+      callback_queue_post has no independently verified semantic identity
+      beyond its recovered call ABI, so target builds retain its raw address
+      and host tests use a narrow recording seam.
   - address: 0x081491a8
     ghidra: FUN_081491a8
     name: lazy_static_object_081491a8_get
