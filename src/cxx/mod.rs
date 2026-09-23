@@ -297,6 +297,7 @@ pub mod byte_vector_owner_push_back;
 pub mod string_object_initial_sort_key;
 pub mod record_range_stable_sort;
 pub mod text_buffer;
+pub mod vtable_object_construct_with_text_buffer;
 pub mod string_from_range_provider;
 pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;

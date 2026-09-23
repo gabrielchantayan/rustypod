@@ -133323,3 +133323,32 @@ functions:
       endian, format 0x20 clears value bits 31..28 then stores four
       little-endian bytes, and all other formats pack a 12-bit FAT entry
       while preserving its neighboring nibble. No deliberate deviations.
+
+  # --- Vtable object with embedded text buffer ---
+  - address: 0x0818cab4
+    ghidra: FUN_0818cab4
+    name: vtable_object_construct_with_text_buffer
+    size: 60
+    sig: "void *vtable_object_construct_with_text_buffer(void *this, u32 input_at_8, u32 input_at_12)"
+    module: cxx/vtable_object_construct_with_text_buffer
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: input_at_8
+      param_3/r2: input_at_12
+      FUN_081d6380: vtable_object_base_construct
+      FUN_08186380: text_buffer_construct_with_capacity
+      DAT_0818caec: vtable_08989a40
+    notes: >-
+      Raw osos.dec establishes the 56-byte A32 body
+      0x0818cab4..0x0818cae8, followed by literal-pool word 0x08989a40 at
+      0x0818caec; cmp r0,#0 at 0x0818caf0 starts the next real function.
+      The body has two unconditional outgoing direct BL instructions
+      (0x0818cab8 to vtable_object_base_construct and 0x0818cac8 to
+      text_buffer_construct_with_capacity), with no predicated BL. Full-image
+      decoding finds three incoming plain BL sites (0x081d6148, 0x081f1af8,
+      and 0x08267c5c) and no predicated incoming BL forms. It constructs the
+      28-byte base, installs its derived vtable, constructs the +28 text
+      buffer with capacity 50, then clears fields through +56. Deliberate
+      deviation: host builds model the embedded target-layout text-buffer
+      writes because host pointer fields are wider than ARM fields.
