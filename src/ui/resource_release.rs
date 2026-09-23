@@ -12,36 +12,26 @@ const ACTIVE_OFFSET: usize = 0x08;
 
 /// Calls needed by [`ui_resource_release`].
 ///
-/// `state` is retailOS `FUN_081f5034` @ `0x081f5034`: it lazily returns a
-/// 0x18-byte singleton. Only its resource word at +0x04 and active byte at
-/// +0x08 are observed here. `release` is `FUN_0838f764` @ `0x0838f764`,
-/// whose zero result means that the resource was released successfully.
+/// `release` is `FUN_0838f764` @ `0x0838f764`, whose zero result means that
+/// the resource was released successfully. The state getter is now the
+/// directly ported [`crate::ui::lazy_resource_state::lazy_ui_resource_state`].
 #[derive(Clone, Copy)]
 pub struct UiResourceReleaseOps {
-    pub state: unsafe extern "C" fn() -> *mut u8,
     pub release: unsafe extern "C" fn(resource: *mut u8) -> i32,
-}
-
-unsafe extern "C" fn missing_ui_resource_state() -> *mut u8 {
-    static mut EMPTY_STATE: [u32; 3] = [0; 3];
-    core::ptr::addr_of_mut!(EMPTY_STATE).cast()
 }
 
 unsafe extern "C" fn missing_ui_resource_release(_resource: *mut u8) -> i32 {
     0
 }
 
-/// Unwired resource lifecycle operations. The empty default state preserves
-/// the original early return until the surrounding UI resource subsystem is
-/// ported and installs its retailOS helpers.
+/// Unwired resource-release operation. The state getter is ported; the
+/// release helper remains an integration boundary.
 pub const DEFAULT_UI_RESOURCE_RELEASE_OPS: UiResourceReleaseOps = UiResourceReleaseOps {
-    state: missing_ui_resource_state,
     release: missing_ui_resource_release,
 };
 
-/// Active UI resource lifecycle operations. Target integration writes this
-/// once with the retailOS helper bridges; host tests temporarily install
-/// recorders.
+/// Active UI resource-release operation. Target integration writes this once
+/// with the retailOS release bridge; host tests temporarily install a recorder.
 pub static mut UI_RESOURCE_RELEASE_OPS: UiResourceReleaseOps = DEFAULT_UI_RESOURCE_RELEASE_OPS;
 
 /// Volatile dispatch prevents target builds using the defaults from folding
@@ -61,15 +51,13 @@ fn ui_resource_release_ops() -> UiResourceReleaseOps {
 ///
 /// # Deviations
 ///
-/// `FUN_081f5034` and `FUN_0838f764` are not ported. Their observed contracts
-/// are represented by [`UI_RESOURCE_RELEASE_OPS`] instead of guessed
-/// implementations; the default state is empty, so an unwired build follows
-/// the original early-return path safely.
+/// `FUN_0838f764` is not ported and remains represented by
+/// [`UI_RESOURCE_RELEASE_OPS`]. The state getter is called directly.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn ui_resource_release() -> i32 {
     let ops = ui_resource_release_ops();
-    let state = unsafe { (ops.state)() };
+    let state = unsafe { crate::ui::lazy_resource_state::lazy_ui_resource_state() };
     let resource_word = unsafe {
         (state.add(RESOURCE_OFFSET) as *const u32).read_volatile()
     };
@@ -94,57 +82,54 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::{Mutex, MutexGuard};
     #[repr(align(4))]
     struct State([u8; 12]);
 
     #[derive(Default)]
     struct Mock {
-        state: usize,
         release_result: i32,
         release_calls: usize,
         released_resource: usize,
     }
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static MOCK: Mutex<Mock> = Mutex::new(Mock {
-        state: 0,
         release_result: 0,
         release_calls: 0,
         released_resource: 0,
     });
 
-    unsafe extern "C" fn mock_state() -> *mut u8 {
-        MOCK.lock().unwrap().state as *mut u8
-    }
-
     unsafe extern "C" fn mock_release(resource: *mut u8) -> i32 {
-        let mut mock = MOCK.lock().unwrap();
+        let mut mock = MOCK.lock();
         mock.release_calls += 1;
         mock.released_resource = resource as usize;
         mock.release_result
     }
 
-    fn install_mock(state: &mut State, release_result: i32) -> (MutexGuard<'static, ()>, UiResourceReleaseOps) {
-        let lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    fn install_mock(state: &mut State, release_result: i32) -> (MutexGuard<'static, ()>, UiResourceReleaseOps, *mut u8) {
+        let lock = crate::ui::lazy_resource_state::UI_RESOURCE_STATE_TEST_LOCK.lock();
         let previous = unsafe { UI_RESOURCE_RELEASE_OPS };
-        *MOCK.lock().unwrap() = Mock {
-            state: state.0.as_mut_ptr() as usize,
+        let previous_state = unsafe { crate::ui::lazy_resource_state::UI_RESOURCE_STATE_CACHE };
+        *MOCK.lock() = Mock {
             release_result,
             ..Mock::default()
         };
         unsafe {
+            crate::ui::lazy_resource_state::UI_RESOURCE_STATE_CACHE = state.0.as_mut_ptr();
             UI_RESOURCE_RELEASE_OPS = UiResourceReleaseOps {
-                state: mock_state,
                 release: mock_release,
             };
         }
-        (lock, previous)
+        (lock, previous, previous_state)
     }
 
-    fn restore_ops(previous: UiResourceReleaseOps) {
-        unsafe { UI_RESOURCE_RELEASE_OPS = previous };
+    fn restore_ops(previous: UiResourceReleaseOps, previous_state: *mut u8) {
+        unsafe {
+            UI_RESOURCE_RELEASE_OPS = previous;
+            crate::ui::lazy_resource_state::UI_RESOURCE_STATE_CACHE = previous_state;
+        }
     }
+
 
     fn resource(state: &State) -> u32 {
         u32::from_le_bytes(state.0[RESOURCE_OFFSET..RESOURCE_OFFSET + 4].try_into().unwrap())
@@ -155,14 +140,14 @@ mod tests {
         let mut state = State([0xa5; 12]);
         state.0[RESOURCE_OFFSET..RESOURCE_OFFSET + 4].copy_from_slice(&0u32.to_le_bytes());
         let before = state.0;
-        let (_lock, previous) = install_mock(&mut state, 0);
+        let (_lock, previous, previous_state) = install_mock(&mut state, 0);
 
         let result = unsafe { ui_resource_release() };
-        restore_ops(previous);
+        restore_ops(previous, previous_state);
 
         assert_eq!(result, 0);
         assert_eq!(state.0, before, "the early return does not alter state");
-        assert_eq!(MOCK.lock().unwrap().release_calls, 0);
+        assert_eq!(MOCK.lock().release_calls, 0);
     }
 
     #[test]
@@ -172,12 +157,12 @@ mod tests {
         let mut state = State([0xa5; 12]);
         state.0[RESOURCE_OFFSET..RESOURCE_OFFSET + 4].copy_from_slice(&RESOURCE.to_le_bytes());
         let before = state.0;
-        let (_lock, previous) = install_mock(&mut state, FAILURE);
+        let (_lock, previous, previous_state) = install_mock(&mut state, FAILURE);
 
         let result = unsafe { ui_resource_release() };
-        restore_ops(previous);
+        restore_ops(previous, previous_state);
 
-        let mock = MOCK.lock().unwrap();
+        let mock = MOCK.lock();
         assert_eq!(result, FAILURE);
         assert_eq!(mock.release_calls, 1);
         assert_eq!(mock.released_resource, RESOURCE as usize);
@@ -189,13 +174,13 @@ mod tests {
         const RESOURCE: u32 = 0x0bad_f00d;
         let mut state = State([0xa5; 12]);
         state.0[RESOURCE_OFFSET..RESOURCE_OFFSET + 4].copy_from_slice(&RESOURCE.to_le_bytes());
-        let (_lock, previous) = install_mock(&mut state, 0);
+        let (_lock, previous, previous_state) = install_mock(&mut state, 0);
 
         let result = unsafe { ui_resource_release() };
-        restore_ops(previous);
+        restore_ops(previous, previous_state);
 
         assert_eq!(result, 0);
-        assert_eq!(MOCK.lock().unwrap().release_calls, 1);
+        assert_eq!(MOCK.lock().release_calls, 1);
         assert_eq!(resource(&state), 0, "successful release clears the resource word");
         assert_eq!(state.0[ACTIVE_OFFSET], 0, "successful release clears the active byte");
         for (offset, byte) in state.0.iter().enumerate() {
