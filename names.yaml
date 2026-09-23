@@ -134373,3 +134373,24 @@ functions:
       the input object is not substituted for the base constructor result.
       match.py exit 1 is the expected structural diff: LLVM has a larger frame,
       routes the three calls through local veneers, and emits 32 instructions.
+  - address: 0x081614e0
+    ghidra: FUN_081614e0
+    name: opaque_record_vtable_construct
+    size: 12
+    sig: "void opaque_record_vtable_construct(u32 *record)"
+    module: app/opaque_record_vtable_construct
+    status: ported
+    renames:
+      param_1/r0: record
+      DAT_081614ec: opaque_record_vtable (0x08987d88)
+    notes: >-
+      Raw osos.dec establishes the exact 12-byte A32 body
+      0x081614e0..0x081614eb: ldr r1,[pc,#4]; str r1,[r0]; bx lr. The
+      following aligned word at 0x081614ec is the 0x08987d88 literal, and
+      0x081614f0 begins the next real function. There are zero outgoing plain
+      or predicated BL instructions. Independent full-image decoding finds
+      three inbound unconditional plain BL sites at 0x0821be7c, 0x0821bf5c,
+      and 0x0821c034, with zero predicated inbound BL forms. It overwrites the
+      first opaque record word with the fixed virtual-dispatch pointer. The
+      literal's class identity is not established, so the record remains
+      intentionally opaque. Deliberate deviations: none.
