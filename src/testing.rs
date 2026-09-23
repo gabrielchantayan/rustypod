@@ -1031,6 +1031,9 @@ pub mod hints {
     // 0xc300_0000: dedicated to cxx/shared_cell's secondary direct-release
     // payload fixture; mappings never unmap, so no other user may share it.
     pub const SHARED_CELL_DIRECT_RELEASE_SECONDARY: usize = 0xc300_0000;
+    // 0xc400_0000: dedicated to cxx/shared_payload_select_kind's raw-u32
+    // state fixture; mappings never unmap, so no other user may share it.
+    pub const SHARED_PAYLOAD_SELECT_KIND: usize = 0xc400_0000;
     // 0xf300_0000: dedicated to fs/volume_table's raw-u32 descriptor-table
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const VOLUME_TABLE_LOOKUP: usize = 0xf300_0000;
