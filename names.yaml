@@ -134738,3 +134738,27 @@ functions:
       uses a normal final call in place of the tail branch; both verified
       callees are direct ports, so no seam was introduced. match.py reports
       the expected structural diff because LLVM expands the two timer ports.
+
+  - address: 0x0814b430
+    ghidra: FUN_0814b430
+    name: task_queue_callback_find
+    size: 44
+    sig: "u32 task_queue_callback_find(u8 *argument)"
+    module: kernel/task_queue_callback_find
+    status: ported
+    renames:
+      param_1/r0: argument
+      DAT_0814b45c: callback_predicate
+    notes: >-
+      Raw osos.dec proves the 44-byte extent 0x0814b430..0x0814b45c:
+      ten A32 instructions through 0x0814b458 followed by callback literal
+      0x08140208 at 0x0814b45c; the next independent function begins at
+      0x0814b460. It fetches current_task_ctx_block (0x080cb828), returns
+      zero for a NULL ctx->queue_pool (+0x1c), otherwise tail-branches to
+      the still-retail locked-queue callback scan at 0x080a6c0c with the
+      literal predicate and original argument. Whole-image A32 decoding
+      finds exactly three inbound unconditional plain BL sites (0x0814ac64,
+      0x0814af88, and 0x0814afa0) and zero predicated BL sites. Deliberate
+      deviation: Rust uses an indirect normal call to the verified raw
+      helper address because it cannot express the conditional ARM tail
+      branch; no identity is invented for either unported target.
