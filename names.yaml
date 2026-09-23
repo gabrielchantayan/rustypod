@@ -130155,3 +130155,41 @@ functions:
       returns NULL, otherwise loads the result's first word. Target builds
       index the native four-byte vtable slot; host fixtures use native-width
       entries because host function pointers cannot fit retailOS u32 words.
+
+  - address: 0x081fb4a4
+    ghidra: FUN_081fb4a4
+    name: media_player_operation_result_post
+    size: 124
+    sig: "void media_player_operation_result_post(void *owner, MessageTarget *target, u32 event_code, u32 value, u32 status, u32 result_handle)"
+    module: app/media_player_operation_result_post
+    status: ported
+    renames:
+      param_1/r0: owner_unused
+      param_2/r1/r8: target
+      param_3/r2/r4: event_code
+      param_4/r3/r5: value
+      param_5/stack/r6: status
+      param_6/stack/r7: result_handle
+      piVar2/r0/r4: message
+      DAT_081fb520: MEDIA_PLAYER_OPERATION_RESULT_VTABLE
+      FUN_082669e4: message_kind_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08266a48: message_kind_construct
+      FUN_08110fdc: queued_message_post
+    notes: >-
+      Raw A32 decoding establishes the 124-byte true extent
+      0x081fb4a4..0x081fb51f: 120 bytes of code plus the 0x08989968
+      vtable literal at 0x081fb520; the next function opens at 0x081fb524.
+      Three plain bl call sites and zero predicated bl call sites are
+      verified from the raw words. It allocates a 24-byte kind-0x18 message,
+      overwrites its base vtable, stores event_code/status/result_handle/value
+      at +0x08/+0x0c/+0x10/+0x14, and posts it with no_wait=1 and both
+      trailing arguments zero. A zero post result invokes the derived
+      vtable+0x04 destructor; the host test seam exists only because retail
+      vtable entries are 32-bit ARM addresses, while target code performs
+      that dispatch directly. owner is intentionally unused: no instruction
+      reads r0. Host tests cover the complete wire layout, posting arguments,
+      successful retention, and failure-only release. match.py exit 1 showed
+      the expected structural diff: the same three allocator/constructor/post
+      calls, literal vtable store, ordered payload stores, result test, and
+      virtual destructor branch, with a larger LLVM frame and no ARM ldrd.
