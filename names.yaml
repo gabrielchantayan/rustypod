@@ -133352,3 +133352,31 @@ functions:
       buffer with capacity 50, then clears fields through +56. Deliberate
       deviation: host builds model the embedded target-layout text-buffer
       writes because host pointer fields are wider than ARM fields.
+  - address: 0x0818ba34
+    ghidra: FUN_0818ba34
+    name: callback_table_construct
+    size: 48
+    sig: "u32 callback_table_construct(void *object, const void *records)"
+    module: cxx/callback_table_construct
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: records
+      "object+0x48": callback_table_state
+      "object+0x50": callback_table_sentinel
+      "object+0x54": callback_table_owner
+      FUN_0818ca9c: callback_table_state_set_owner
+      FUN_081fd578: callback_table_populate
+    notes: >-
+      Raw osos.dec words establish the true 48-byte A32 body
+      0x0818ba34..0x0818ba63: it calls 0x0818ca9c with object+0x48, -2, and
+      object, then tail-branches to 0x081fd578 with that embedded state,
+      records, and object. The next independently entered function starts at
+      0x0818ba64 with push {r1-r11,lr}; Ghidra's 172-byte extent incorrectly
+      absorbs it. A binary-wide A32 decode finds exactly three inbound plain
+      unconditional bl calls at 0x081d60ac, 0x081f1a58, and 0x08267c70, and
+      no predicated bl calls. The body has one plain bl, no predicated bl
+      forms, and its distinct direct tail branch enters 0x081fd578. That
+      sibling initializes the callback table and dispatches enabled 24-byte
+      records, so its unrecovered concrete identity is not invented. Target
+      builds call its verified fixed address; host tests use a recording seam.
