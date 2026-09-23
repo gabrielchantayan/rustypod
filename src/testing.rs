@@ -607,6 +607,11 @@ pub mod hints {
     // raw-u32 page, shared-context, and default-record fixture; mappings never
     // unmap, so no other test may reuse it.
     pub const TRANSITION_PAGE_RESET_ANIMATION_TARGETS: usize = 0x6e70_0000;
+    // 0x6eb0_0000 / 0x6ec0_0000: dedicated to
+    // app/callback_queue_context_post's target-width context and lifecycle
+    // fixtures; mappings never unmap, so no other port may share either hint.
+    pub const CALLBACK_QUEUE_CONTEXT_POST: usize = 0x6eb0_0000;
+    pub const CALLBACK_QUEUE_CONTEXT_POST_NON_IDLE: usize = 0x6ec0_0000;
     // 0x6f00_0000: dedicated to app/service_handler_pending_event_reset's
     // session fixture; mappings never unmap, so no other test may reuse it.
     pub const SERVICE_HANDLER_PENDING_EVENT_RESET: usize = 0x6f00_0000;
