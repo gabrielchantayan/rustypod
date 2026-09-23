@@ -131816,3 +131816,39 @@ functions:
       descriptor count. Rust performs the same aligned word read with no
       NULL, extent, or alignment guard. Host tests cover an ordinary count,
       adjacent-word preservation, and u32::MAX. No deliberate deviations.
+
+  - address: 0x081d1704
+    ghidra: FUN_081d1704
+    name: stream_parse_error_result
+    size: 124
+    sig: "u8 *stream_parse_error_result(u8 *stream, u32 *status_out)"
+    module: app/stream_parse_error_result
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: status_out
+      FUN_080aa848: stream_status_classify
+      FUN_082aadd4: operator_new
+      FUN_0815faec: error_object_construct
+      FUN_081b9f30: alternate_error_object_construct
+      FUN_083e74f0: error_object_assign
+    notes: >-
+      Raw osos.dec disassembly establishes the exact 124-byte A32 body
+      0x081d1704..0x081d177f: push {r3,r4,r5,lr} through pop
+      {r3,r4,r5,pc}; the next real function begins at 0x081d1780 with
+      push {r4,r5,r6,lr}. The body has seven unconditional outbound BL
+      calls (0x080aa848; 0x082aadd4 twice; 0x0815faec; 0x081b9f30; and
+      0x083e74f0), with no predicated BL. Whole-image decoding finds three
+      inbound unconditional plain BL sites (0x0808e4ec, 0x080c6c78, and
+      0x081031dc) and no predicated BL calls. It stores the stream
+      classifier status through status_out, allocates 20 bytes for statuses
+      4/5 and calls the first constructor with modes 0/1, or allocates 16
+      bytes and calls the alternate constructor for every other status;
+      it then assigns the produced object into a fresh owner and returns it.
+      Ghidra incorrectly declares both constructors void even though their
+      r0 result flows directly into the owner assignment; Rust preserves
+      that result. The unrecovered classifier, constructors, and assignment
+      call their verified retail addresses on target and use narrow host
+      seams for tests. match.py reports the same branch and allocation
+      structure; LLVM emits indirect blx calls for those target seams and
+      adds its standard frame-pointer prologue.
