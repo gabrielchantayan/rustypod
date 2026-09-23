@@ -24668,6 +24668,24 @@ functions:
       layer_bind_surface precedent - a real bl target LLVM would
       otherwise inline into its callers).
 
+  - address: 0x081fbe3c
+    ghidra: FUN_081fbe3c
+    name: client_mutex_lock
+    size: 8
+    sig: "u32 client_mutex_lock(u8 *client)"
+    module: heap/client_mutex_lock
+    status: ported
+    vars: {param_1/r0: client}
+    notes: >-
+      Raw osos.dec extent is exactly 0x081fbe3c..0x081fbe44: `add r0,
+      r0,#0x24; b 0x082621a8`. The next real function begins at
+      0x081fbe44. The tail target is the binary-verified POSIX mutex-lock
+      veneer at 0x082621a8, which branches to posix_mutex_lock @0x082e8390.
+      Three inbound direct calls are plain BL at 0x0814bb18, 0x0818a860,
+      and 0x08207c78; there are no predicated BL calls. The port forwards
+      the unchecked client+0x24 mutex address through the existing
+      REGION_MUTEX_OPS lock seam. Deliberate deviation: the direct tail
+      branch becomes the seam's indirect call so host tests can observe it.
   - address: 0x081fbe44
     ghidra: FUN_081fbe44
     name: client_byte_limit

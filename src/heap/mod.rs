@@ -17,6 +17,7 @@ pub mod client_take_region;
 pub mod client_register;
 pub mod manager_notification;
 pub mod client_mutex_unlock;
+pub mod client_mutex_lock;
 pub mod dcache;
 pub mod endian_selector;
 pub mod gateway_service1;
