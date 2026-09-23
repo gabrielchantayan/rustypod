@@ -130496,3 +130496,31 @@ functions:
       root-terminated and null-terminated chains, low-byte truncation, the
       exact status-3 conditional, and owner clearing. match.py structural
       output is expected from LLVM register allocation and exits 1.
+
+  - address: 0x081f5034
+    ghidra: FUN_081f5034
+    name: lazy_ui_resource_state
+    size: 44
+    sig: "u8 *lazy_ui_resource_state(void)"
+    module: ui/lazy_resource_state
+    status: ported
+    renames:
+      DAT_081f5060: ui_resource_state_cache
+      FUN_082aadd4: operator_new
+      FUN_081f5064: ui_resource_state_construct
+    notes: >-
+      Raw osos.dec words e92d4010 e59f4020 e5940000 e3500000 1a000003
+      e3a00018 eb02d760 eb000003 e5840000 e5940000 e8bd8010 establish
+      the exact 44-byte A32 extent 0x081f5034..0x081f505f; the push at
+      0x081f5064 begins the next real function. Whole-image A32 branch
+      decoding finds three inbound plain BL call sites and zero predicated
+      inbound BL forms. The body has two plain BL instructions: tag-2
+      operator_new(24) at 0x082aadd4 and the local constructor at
+      0x081f5064. It returns a cached pointer at 0x089cfd24; when NULL it
+      allocates 24 bytes, passes the allocation to the constructor without a
+      NULL check, stores the constructor result, then reloads it. Callers only
+      identify resource word +0x04 and active byte +0x08. The constructor's
+      identity is deliberately not guessed: it remains a fixed target call
+      and volatile host seam. Host tests cover allocation, constructor-result
+      caching, and forwarding a NULL allocation. match.py reports the expected
+      LLVM stack frame and indirect host-seam call structural diff (exit 1).

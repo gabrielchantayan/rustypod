@@ -67,6 +67,7 @@ pub mod dispatch_slot_20_result_is_zero;
 pub mod vtable_slot_24;
 pub mod object_vtable_result_word;
 pub mod resource_release;
+pub mod lazy_resource_state;
 pub mod object_state;
 pub mod shared_context_pair_38;
 pub mod sub_record_lookup;
