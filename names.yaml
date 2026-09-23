@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818b9f0
+    ghidra: FUN_0818b9f0
+    name: container_flag_0x10_if_nonempty
+    size: 44
+    sig: "u32 container_flag_0x10_if_nonempty(void *owner)"
+    module: null
+    status: identified
+    renames:
+      param_1/r0: owner
+      "owner+4": container
+      FUN_082158b0: container_is_empty
+      FUN_082158c0: container_status_flags
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte A32 body
+      0x0818b9f0..0x0818ba1b; push {r4,lr} at 0x0818ba1c begins the next
+      real function. The body has two unconditional direct BL instructions
+      (to 0x082158b0 and 0x082158c0), zero predicated direct BL
+      instructions, and no BLX. Independent inspection of every real caller
+      establishes three inbound unconditional plain BL sites at 0x0818b8dc,
+      0x0818bac8, and 0x0818bb0c, with zero predicated inbound BL forms.
+      It passes owner+4 to 0x082158b0, returns zero when that result is zero,
+      otherwise calls 0x082158c0 with the same pointer and returns status
+      bit 4 as a normalized u32. Deferred: names.yaml has no entries for
+      either callee; raw code proves that 0x082158b0 forwards its argument
+      to unported 0x083d7610, while 0x082158c0 calls unported
+      0x082156b8 then virtual slot +0x18. Their semantic identities and
+      ABIs are not established, so a Rust seam or direct reconstruction
+      would invent a callee contract.
   - address: 0x08198c28
     ghidra: FUN_08198c28
     name: event_uses_alternate_handler
