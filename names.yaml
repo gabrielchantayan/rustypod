@@ -59434,6 +59434,28 @@ functions:
       and LLVM uses a frame, same deviation shape as
       timer_schedule_shim.
 
+  - address: 0x0812c628
+    ghidra: FUN_0812c628
+    name: task_message_post_async
+    size: 20
+    sig: "u32 task_message_post_async(usize reply_queue, usize target_queue, const u32 *message, u32 flags)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r0: reply_queue
+      param_2/r1: target_queue
+      param_3/r2: message
+      param_4/r3: flags
+      FUN_0812c088: task_message_post
+    notes: >-
+      Raw osos.dec gives a 20-byte extent at 0x0812c628..0x0812c63c: push
+      {r3,lr}; str r3,[sp]; mov r3,#0; bl 0x0812c088; pop {r12,pc}. The
+      next real function starts at 0x0812c63c. Decoding every aligned ARM
+      body has one unconditional bl. It forwards reply_queue, target_queue,
+      message, and flags to task_message_post while forcing wait to zero,
+      returning the helper result. Rust represents the fifth stack argument
+      setup as a normal five-argument call; all forwarded values are
+      preserved.
   - address: 0x0812c088
     ghidra: FUN_0812c088
     name: task_message_post

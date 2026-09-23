@@ -355,6 +355,31 @@ pub unsafe extern "C" fn task_message_post_sync(
 ) -> u32 {
     unsafe { task_message_post(reply_queue, target_queue, message, 1, flags) }
 }
+/// task_message_post_async — original: `FUN_0812c628` @ **0x0812c628**
+/// (**20 bytes**, 0x0812c628..0x0812c63c; the next real function begins at
+/// 0x0812c63c).
+/// **3 direct `bl` callers: 2 unconditional and 1 `blne`** (0x08111048,
+/// 0x0812521c, 0x08148dac), verified by decoding every A32 branch-with-link
+/// word in `osos.dec`. The body makes one unconditional call and no
+/// predicated calls.
+///
+/// Posts the 3-word tagged `message` with `wait` forced to 0, forwarding the
+/// other four arguments and returning `task_message_post`'s result.
+///
+/// Deliberate deviation: the A32 push/store sequence places `flags` in the
+/// fifth stack argument before the helper call; Rust represents that ABI
+/// plumbing as a five-argument call while preserving every forwarded value.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn task_message_post_async(
+    reply_queue: usize,
+    target_queue: usize,
+    message: *const u32,
+    flags: u32,
+) -> u32 {
+    unsafe { task_message_post(reply_queue, target_queue, message, 0, flags) }
+}
+
 
 /// Target word containing the task-message transport pointer.
 const TASK_MESSAGE_TRANSPORT_SLOT: *mut *mut u32 = 0x089c_b280 as *mut *mut u32;
@@ -571,6 +596,26 @@ pub(crate) mod tests {
         assert_eq!(unsafe { post_without_wait(11, 21, cell, 0x44, 0x66) }, 0x55);
         assert_eq!(CALLS.lock().as_slice(), &[(10, 20, 0, 0), (11, 21, 0, 0x66)]);
         unsafe { core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(0) };
+        unsafe { core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
+    }
+
+    #[test]
+    fn async_post_forces_wait_off_and_forwards_all_other_arguments() {
+        let _guard = OPS_LOCK.lock();
+        let message = [0x1234_5678, 1, 2, 3, 4, 5, 6];
+        unsafe {
+            CALLS.lock().clear();
+            core::ptr::addr_of_mut!(MOCK_RESULT).write_volatile(0);
+            core::ptr::addr_of_mut!(MOCK_ALLOCATE).write_volatile(core::ptr::addr_of_mut!(MOCK_CELL.0).cast::<u32>());
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(TaskMessagePostOps {
+                allocate_cell: mock_allocate_cell, queue_send: mock_queue_send,
+                post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
+            });
+        }
+
+        assert_eq!(unsafe { task_message_post_async(0x10, 0x20, message.as_ptr(), 0x55) }, 1);
+        assert_eq!(CALLS.lock().as_slice(), &[(0x10, 0x20, 0, 0x55)]);
+
         unsafe { core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write_volatile(DEFAULT_TASK_MESSAGE_POST_OPS) };
     }
 
