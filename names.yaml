@@ -93685,6 +93685,29 @@ functions:
       cached-buffer selection, argument forwarding, guard ownership, and
       table-lock balancing.
 
+  # --- Trace-buffer selector presence validator ---
+  - address: 0x08149f68
+    ghidra: FUN_08149f68
+    name: trace_buffer_slot_presence_matches
+    size: 56
+    sig: "u32 trace_buffer_slot_presence_matches(const u32 *slots, u32 selector, u32 present)"
+    module: app/trace_buffer
+    status: ported
+    renames:
+      param_1/r0: slots (seven target words)
+      param_2/r1: selector (unsigned slot index)
+      param_3/r2: present (requested non-NULL state)
+    notes: >-
+      True raw extent is 56 instruction bytes at 0x08149f68..0x08149f9c;
+      the next distinct function begins at 0x08149fa0. It rejects selectors
+      at least seven before loading slots[selector], then returns zero exactly
+      when that word is NULL if and only if present is zero; all other cases
+      return two. Decoding every ARM B/BL word in osos.dec finds exactly three
+      direct callers, all unconditional BL: 0x08149fc8, 0x0814a184, and
+      0x0814a200; there are no predicated forms, tail branches, or aligned
+      data-word references. The Rust port retains the raw aligned u32 slot
+      layout on 64-bit hosts rather than relying on native-width pointers.
+
   # --- Trace-buffer local-static accessor ---
   - address: 0x0814a08c
     ghidra: FUN_0814a08c
