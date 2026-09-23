@@ -61171,6 +61171,29 @@ functions:
       is the crate's fp prologue/epilogue and LLVM's register allocation
       plus a hoisted head-NULL pre-test.
 
+  - address: 0x08143458
+    ghidra: FUN_08143458
+    name: shared_payload_result_word
+    size: 28
+    sig: "u32 shared_payload_result_word(const SharedPayloadSlot *slot)"
+    module: cxx/shared_payload_result_word
+    status: ported
+    renames:
+      param_1/r0: slot
+      r1: state
+      iVar1: payload
+      uVar2: result_word
+      FUN_0813e5f4: shared_payload_nested_result_word
+    notes: >-
+      Raw ARM spans exactly 0x08143458..0x08143473; the next push prologue at
+      0x08143474 proves the 28-byte extent. Complete A32 B/BL decoding finds
+      three incoming plain BL calls (0x08143548, 0x0822ae70, 0x0822aeb4) and
+      zero predicated BL forms. The function accepts only state words zero and
+      one, then tail-branches to the 20-byte nested +0x40/+0x14 lookup at
+      0x0813e5f4; all other states return zero. The Rust port intentionally
+      inlines that verified leaf rather than adding an unported callee seam.
+      Host pointer fields widen under repr(C), so the modeled target fields
+      remain distinct without assuming target byte offsets on a 64-bit host.
   - address: 0x08143474
     ghidra: FUN_08143474
     name: shared_payload_select_kind
