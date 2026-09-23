@@ -27,6 +27,7 @@ const DEFAULT_PROPERTY_6067: u32 = 0x6067;
 const RESOURCE_KIND_DIRP: ResourceKind = ResourceKind(0x4469_7250);
 
 const PROPERTY_KEY_6056: u32 = 0x6056;
+const PROPERTY_KEY_6063: u32 = 0x6063;
 const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
 
 
@@ -48,6 +49,26 @@ const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
 pub unsafe extern "C" fn class6000_read_ui32_property_6056(store: *mut Class6000) -> *mut u32 {
     let read_typed = (*(*store).vtable).read_typed;
     read_typed(store, PROPERTY_KEY_6056, CLASS_ID_6000, RESOURCE_KIND_UI32)
+}
+
+/// `class6000_read_ui32_property_6063` — original: `FUN_08171be4` @
+/// `0x08171be4` (24 bytes: five ARM instructions through `0x08171bf8` plus
+/// the `0x55693332` literal-pool word at `0x08171bfc`; the next real function
+/// begins at `0x08171c00`). **3 plain `bl` call sites** and **0 predicated
+/// `bl` call sites**, binary-verified from `osos.dec`.
+///
+/// Dispatches the class-0x6000 store's vtable slot +0xe0 as
+/// `read_typed(store, 0x6063, 0x6000, "Ui32")`, returning its raw pointer
+/// result. The property has no recovered semantic identity beyond its verified
+/// key and type tag.
+///
+/// Deliberate deviation: ARM's terminal `bx ip` virtual tail dispatch is a
+/// Rust call; its arguments, unguarded vtable loads, and result are exact.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_read_ui32_property_6063(store: *mut Class6000) -> *mut u32 {
+    let read_typed = (*(*store).vtable).read_typed;
+    read_typed(store, PROPERTY_KEY_6063, CLASS_ID_6000, RESOURCE_KIND_UI32)
 }
 
 /// `class6000_ui32_property_6056` — original: `FUN_081115cc` @ `0x081115cc`
@@ -301,6 +322,29 @@ mod tests {
                 [TypedCall {
                     store: store_ptr.cast(),
                     key: PROPERTY_KEY_6056,
+                    class_id: CLASS_ID_6000,
+                    kind: RESOURCE_KIND_UI32,
+                }],
+            );
+        }
+    }
+
+    #[test]
+    fn typed_property_6063_dispatches_with_the_exact_constants_and_preserves_null() {
+        let mut store = Store { vtable: &STORE_VTABLE };
+        let store_ptr = core::ptr::addr_of_mut!(store);
+        let _installed = install(store_ptr, core::ptr::null_mut());
+
+        let got = unsafe { class6000_read_ui32_property_6063(store_ptr.cast()) };
+
+        assert!(got.is_null());
+        unsafe {
+            assert_eq!(*core::ptr::addr_of!(CAST_CALLS), []);
+            assert_eq!(
+                *core::ptr::addr_of!(TYPED_CALLS),
+                [TypedCall {
+                    store: store_ptr.cast(),
+                    key: PROPERTY_KEY_6063,
                     class_id: CLASS_ID_6000,
                     kind: RESOURCE_KIND_UI32,
                 }],
