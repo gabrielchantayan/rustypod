@@ -132097,3 +132097,39 @@ functions:
       BLX, neither predicated. Deliberate deviation: lazy_singleton_0x40's
       documented unported constructor default cannot install a vtable, so host
       tests install a target-width object fixture and virtual-method seam.
+
+  - address: 0x081ca6f8
+    ghidra: FUN_081ca6f8
+    name: replace_owned_resource
+    size: 100
+    sig: "void replace_owned_resource(void *owner, void **resource_slot, void *context, u32 *selector_slot, u32 selector)"
+    module: ui/replace_owned_resource
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r4: resource_slot
+      param_3/r2/r7: context
+      param_4/r3/r5: selector_slot
+      param_5/[sp+0]: selector
+      FUN_082646ac: no_op_resource_destructor
+      FUN_082aad24: operator_delete
+      FUN_082aadd4: operator_new
+      FUN_082645a0: opaque_resource_initialize
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte extent at
+      0x081ca6f8..0x081ca75b; the next independently entered function
+      starts with mov ip,r3 at 0x081ca75c and push at 0x081ca760.
+      The body contains four plain unconditional BL instructions and no
+      predicated BL. Whole-image ARM branch decoding finds exactly three
+      inbound plain BL sites (0x08140ff4, 0x08141010, 0x081ca4a4), with no
+      predicated BL sites. It returns unchanged when selector_slot already
+      equals selector. Otherwise it releases and clears a non-NULL resource,
+      stores selector, and for a nonzero selector allocates 0x44 bytes then
+      initializes and stores the replacement. FUN_082646ac is raw bx lr, so
+      Rust omits that no-op call; operator_delete and operator_new use their
+      existing ports. The unported 0x082645a0 initializer remains a volatile
+      ABI seam with its observed (allocation, context, selector) arguments;
+      no callee identity is asserted. Host tests cover equality, replacement,
+      and zero-selector release. match.py shows the same guards, clear/store,
+      allocation, and initializer dispatch, with expected ABI-frame and
+      volatile-seam differences.
