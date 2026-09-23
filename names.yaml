@@ -132837,3 +132837,31 @@ functions:
       ABI accepts object and a mode word. Rust calls a literal-address target
       seam with mode 5 rather than expressing the terminal ARM branch; host
       tests record the exact forwarded pointer and fixed mode.
+
+  # --- Selection context slot label setter (src/app/selection_context_set_slot_label.rs) ---
+  - address: 0x081a3830
+    ghidra: FUN_081a3830
+    name: selection_context_set_slot_label
+    size: 80
+    sig: "void selection_context_set_slot_label(void *context, int slot)"
+    module: app/selection_context_set_slot_label
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: slot
+      param_1_plus_0x44: slot_label_source
+      param_1_plus_0x60: selected_slot
+      param_1_plus_0x64: slot_label
+      FUN_08053170: slot_label_load_utf16
+      FUN_082765a8: string_object_assign_utf16
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte A32 extent
+      0x081a3830..0x081a387f: the following push at 0x081a3880 begins a
+      sibling. The body has exactly three plain unconditional BL calls
+      (0x08037db8, 0x08053170, and 0x082765a8), with no predicated BL
+      forms. It stores slot at context+0x60; except for -1, it clears a
+      512-byte stack buffer, invokes the unported 0x08053170 producer with
+      context+0x44 and slot, then treats the first u16 as a UTF-16 unit
+      count and assigns the following units to the StringObject at +0x64.
+      The IRAM veneer resolves to ported memzero_aligned; the unported
+      producer is a verified-address target seam with host replacement.
