@@ -134632,3 +134632,24 @@ functions:
       a mapped u32-address fixture to cover all six records and untouched
       adjacent words. match.py confirms the same load/store sequence; LLVM
       chooses r2 rather than ADS r3 and emits a standard frame prologue.
+
+  # ---- Record header body-size setter (src/util/record_header_set_body_size.rs) ----
+  - address: 0x0814d6b0
+    ghidra: FUN_0814d6b0
+    name: record_header_set_body_size
+    size: 24
+    sig: "void record_header_set_body_size(u32 *record, u32 body_size)"
+    module: util/record_header_set_body_size
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: body_size
+      r2: preserved_flags
+    notes: >-
+      Raw osos.dec establishes the exact six-instruction A32 body at
+      0x0814d6b0..0x0814d6c4; push {r4,lr} at 0x0814d6c8 begins the next
+      real function. It loads record[0], masks its top byte, masks body_size
+      to 24 bits, ORs the parts, and stores the result. Direct raw caller
+      inspection finds three inbound unconditional plain BL sites at
+      0x0814d860, 0x0814d8b8, and 0x081a860c, with zero predicated BL forms.
+      The body contains zero BL or BLX instructions. No deliberate deviations.
