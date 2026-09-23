@@ -162,5 +162,6 @@ pub mod clear_pending_notify;
 pub mod comma_input_guard;
 pub mod element_refresh;
 pub mod apply_mode_dimensions;pub mod object_stack_push;
+pub mod replace_owned_resource;
 
 pub mod mutex_handoff_guarded_reset;
