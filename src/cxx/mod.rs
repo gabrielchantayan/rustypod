@@ -286,6 +286,7 @@ pub mod counted_u16_to_cxx_string;
 pub mod string_object_remove_trailing_codepoint;
 pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
+pub mod opaque_record_string_pair_destroy;
 pub mod string_object_less;
 pub mod string_from_vtable_slot_50;
 pub mod string_from_vtable_slot_58;
