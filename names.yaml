@@ -131325,3 +131325,29 @@ functions:
       vtable +0x04, stores the decremented count, and unlocks. Deliberate
       deviations: wrapper calls are direct ported mutex helper calls; host
       vtables use native-width slots.
+  - address: 0x081d9810
+    ghidra: FUN_081d9810
+    name: registration_slots_refresh
+    size: 168
+    sig: "u32 registration_slots_refresh(RegistrationSlotManager *manager)"
+    module: app/registration_slots_refresh
+    status: ported
+    renames:
+      param_1/r0: manager
+      iVar1/r5: slot
+      iVar2/r0: callback_result
+      uVar3/r6: slot_index
+      FUN_08228360: lock_service_lock
+      FUN_081d9918: registration_slot_release
+      FUN_08228388: lock_service_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 168-byte extent
+      0x081d9810..0x081d98b8: the next independently entered function starts
+      with push {r4-r7,lr} at 0x081d98b8. Decoding the body finds three plain
+      BL calls (0x081d9820, 0x081d9840, and 0x081d98a4), one predicated BLNE
+      at 0x081d9880, and one indirect BLX through object vtable slot +0x44.
+      It locks the manager and each of 32 slots, clears state two for NULL
+      objects, otherwise changes state two to four and releases the slot when
+      the vtable predicate succeeds, then unlocks every level. Deliberate
+      deviations: calls use ported mutex helpers directly; host vtables use
+      native-width entries.
