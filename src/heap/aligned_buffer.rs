@@ -108,27 +108,41 @@ pub unsafe extern "C" fn aligned_buffer_reset(buffer: *mut u8) -> *mut u8 {
     buffer
 }
 
-/// aligned_buffer_align_up — original: `FUN_081a8188` @ `0x081a8188`
-/// (16 bytes exactly, true extent `0x081a8188..0x081a8198`, immediately
-/// followed by the full align-up helper). Raw words decode to `stmdb
-/// sp!, {r3, lr}; mov r1, sp; bl 0x081a8198; ldmia sp!, {r3, pc}`.
+/// aligned_buffer_align_up_with_pad — original: `FUN_081a8198` @ `0x081a8198`
+/// (36 bytes exactly; true extent `0x081a8198..0x081a81bc`, immediately
+/// followed by `aligned_buffer_alignment`).
 ///
-/// Four direct callers (`0x080f075c`, `0x0814e0f0`, `0x0814e2c8`, and
-/// `0x082676c4`) use plain unconditional `bl`; the body has one plain
-/// `bl` and no predicated `bl` forms. It supplies a private stack slot for
-/// the callee's padding out-parameter, discards that result, and returns
-/// the input address rounded up to a 32-byte cache-line boundary.
-/// Deliberate deviations: none.
+/// Raw words decode to `and r2, r0, #0x1f; rsb r2, r2, #0x20; cmp r2,
+/// #0x20; str r2, [r1]; moveq r2, #0; add r0, r0, #0x1f; bic r0, r0,
+/// #0x1f; streq r2, [r1]; bx lr`. Three direct callers
+/// (`0x081a8190`, `0x081a81f0`, and `0x08277bb8`) use plain unconditional
+/// `bl`; there are no predicated `bl` forms and the body is a leaf.
+///
+/// Stores the distance to the next 32-byte boundary through `pad_out`, except
+/// that an already aligned address stores zero, then returns `block` rounded
+/// up to that boundary. Both calculations wrap at the target's 32-bit address
+/// boundary. Deliberate deviations: Rust exposes the two-register ABI as an
+/// unsafe exported function; otherwise none.
+///
+/// # Safety
+///
+/// `pad_out` must be writable and four-byte aligned. `block` is treated as a
+/// 32-bit target address and is not dereferenced.
 #[inline(never)]
-unsafe fn aligned_buffer_align_up_with_pad(block: *mut u8, pad_out: *mut u32) -> *mut u8 {
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn aligned_buffer_align_up_with_pad(
+    block: *mut u8,
+    pad_out: *mut u32,
+) -> *mut u8 {
     let address = block as usize as u32;
     let mut pad = (ALIGNED_BUFFER_ALIGNMENT as u32).wrapping_sub(
         address & (ALIGNED_BUFFER_ALIGNMENT as u32 - 1),
     );
+    pad_out.write_volatile(pad);
     if pad == ALIGNED_BUFFER_ALIGNMENT as u32 {
         pad = 0;
+        pad_out.write_volatile(pad);
     }
-    pad_out.write(pad);
     let aligned = address.wrapping_add(ALIGNED_BUFFER_ALIGNMENT as u32 - 1)
         & !(ALIGNED_BUFFER_ALIGNMENT as u32 - 1);
     aligned as usize as *mut u8
@@ -160,22 +174,13 @@ pub extern "C" fn aligned_buffer_align_up(block: *mut u8) -> *mut u8 {
 /// return buffer
 /// ```
 ///
-/// `size + 0x20` headroom guarantees the aligned view still leaves
-/// `size` usable bytes; 0x20 is the ARM926EJ-S cache-line size (see
-/// the module header). The allocation word is stored unconditionally
-/// (the original's `str r0, [r4, #4]` sits between the `cmp` and the
-/// `beq`), so a failed allocation leaves both words zero and the
-/// align-up is skipped — allocation failure is a valid empty buffer,
-/// exactly as the reset half expects. No NULL guard on `buffer`
-/// itself, exactly like the original.
-///
-/// The constructor calls the exported `aligned_buffer_align_up` wrapper,
-/// preserving the original two-function call structure; its internal
-/// padding store remains private to that wrapper. `operator_new_tag3` is
-/// called directly (ported in `heap/veneers` — no seam). Both words are
-/// 32-bit target words; host fixtures must sit below 4 GiB or use small
-/// integer stand-ins, which is what the tests do (the block pointer is
-/// only stored and masked, never dereferenced).
+/// `size + 0x20` headroom guarantees the aligned view still leaves `size`
+/// usable bytes. The allocation word is stored unconditionally, so a failed
+/// allocation leaves both words zero and skips the align-up. The constructor
+/// calls the exported `aligned_buffer_align_up` wrapper, preserving the
+/// original one-register call structure and deliberately discarding its
+/// stack-slot pad result. `operator_new_tag3` is called directly (ported in
+/// `heap/veneers` — no seam). Both words are target u32 values.
 ///
 /// # Safety
 ///
@@ -224,19 +229,36 @@ mod tests {
     }
 
     #[test]
-    fn align_up_rounds_every_residue_and_wraps_as_a_target_word() {
+    fn align_up_with_pad_rounds_every_residue_and_wraps_as_a_target_word() {
         for residue in 0..ALIGNED_BUFFER_ALIGNMENT as u32 {
-            let block = (ALLOCATION + residue) as usize as *mut u8;
-            let aligned = aligned_buffer_align_up(block) as usize as u32;
-            let expected = (ALLOCATION + residue).wrapping_add(0x1f) & !0x1f;
+            let address = ALLOCATION + residue;
+            let mut pad = u32::MAX;
+            let aligned = unsafe {
+                aligned_buffer_align_up_with_pad(address as usize as *mut u8, &mut pad)
+            } as usize as u32;
+            let expected = address.wrapping_add(0x1f) & !0x1f;
+            let expected_pad = if residue == 0 { 0 } else { 0x20 - residue };
             assert_eq!(aligned, expected, "residue {residue:#x}");
+            assert_eq!(pad, expected_pad, "pad for residue {residue:#x}");
+            assert_eq!(
+                aligned_buffer_align_up(address as usize as *mut u8) as usize as u32,
+                expected,
+                "wrapper result for residue {residue:#x}"
+            );
         }
 
+        let mut pad = u32::MAX;
         assert_eq!(
-            aligned_buffer_align_up(0xffff_fff1usize as *mut u8) as usize as u32,
+            unsafe {
+                aligned_buffer_align_up_with_pad(
+                    0xffff_fff1usize as *mut u8,
+                    &mut pad,
+                )
+            } as usize as u32,
             0,
             "the ARM u32 addition wraps at the address-space boundary"
         );
+        assert_eq!(pad, 0x0f, "the pad does not depend on align-up overflow");
     }
 
     #[test]
