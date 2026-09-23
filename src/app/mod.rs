@@ -462,6 +462,7 @@ pub mod range_result_collect;
 pub mod registration_handle_wrapper;
 pub mod record_manager;
 pub mod recording_buffer;
+pub mod recording_buffer_slot_table_reset;
 pub mod recording_controller;
 pub mod refcounted_value;
 pub mod refcounted_owner_callback_dispatch;
