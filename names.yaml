@@ -22233,6 +22233,41 @@ functions:
       Rust directly calls the already ported mutex/condvar functions; the
       original tail-call's scratch return is not part of this void ABI.
 
+  - address: 0x081eef50
+    ghidra: FUN_081eef50
+    name: controller_transition_request
+    size: 156
+    sig: "u32 controller_transition_request(u8 *controller, u8 *request)"
+    module: app/controller_transition_request
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: request
+      param_2_plus_0x08: embedded_string_payload
+      param_2_plus_0x0c: base_hint
+      param_2_plus_0x0d: flag
+      param_1_plus_0x28: status
+      param_1_plus_0x30: extracted_string
+      param_1_plus_0x34: pending_replacement_result
+      FUN_082aadd4: operator_new
+      FUN_082a538c: string_object_raw_payload
+      FUN_08278dc4: silver_controller_transition_addon_construct_from_cstr
+      FUN_081ef194: replace_pending_transition_addon
+      FUN_08077fd4: transition_addon_extract_string
+    notes: >-
+      Raw osos.dec words establish a 156-byte extent from 0x081eef50 through
+      0x081eeff0; the following e92d4070 starts the next real function at
+      0x081eeff4. The body has five plain unconditional BL calls and zero
+      predicated BL calls: operator_new(0x54), the eight-byte StringObject
+      payload accessor, the ported transition-addon constructor, and the two
+      role-named unported seams. Ghidra's three-call report misses two of
+      those direct BLs. It constructs an addon from request+8 with signed
+      request+12, byte request+13, and fixed (0x400, 1, 0), replaces the
+      controller pending addon, then publishes status or error 0x19; a zero
+      status extracts and forwards the addon string. The target directly calls
+      operator_new and the ported constructor; the remaining identities are
+      constrained only by their verified roles and remain volatile seams.
+
   - address: 0x08120604
     ghidra: FUN_08120604
     name: surface_config_init
