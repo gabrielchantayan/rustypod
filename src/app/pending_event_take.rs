@@ -81,11 +81,12 @@
 //!
 //! # Deviations
 //!
-//! - **The three callees are unported** and dispatch through
-//!   [`PENDING_EVENT_TAKE_OPS`] (the `ui/table_slot_allocate.rs`
-//!   pattern): target builds transmute the ROM addresses
-//!   0x08139190/0x0813908c/0x0813957c; host defaults are inert stubs
-//!   (NULL / 0) and every test installs a recording reference model.
+//! - **The search and release callees are unported** and dispatch through
+//!   [`PENDING_EVENT_TAKE_OPS`] (the `ui/table_slot_allocate.rs` pattern):
+//!   target builds transmute their ROM addresses 0x08139190/0x0813908c;
+//!   the rearm default calls the ported
+//!   [`super::pending_event_timer_rearm::pending_event_timer_rearm`].
+//!   Host tests replace all three calls with a recording reference model.
 //! - The lock/unlock go through the canonical ported
 //!   [`crate::kernel::posix_mutex::posix_mutex_lock`]/`_unlock`
 //!   directly — the original calls the 4-byte alias veneers
@@ -215,11 +216,10 @@ unsafe extern "C" fn firmware_release_node(
     0
 }
 
-/// Target default: the ROM timer rearm.
+/// Target default: the ported timer rearm.
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_rearm_timer(this: *mut u8) -> u32 {
-    let f: unsafe extern "C" fn(*mut u8) -> u32 = core::mem::transmute(0x0813_957cusize);
-    f(this)
+    super::pending_event_timer_rearm::pending_event_timer_rearm(this)
 }
 
 /// Host default: inert — the tests install their own model.

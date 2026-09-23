@@ -443,6 +443,7 @@ pub mod path_entry_probe_and_mark_present;
 pub mod playlist_pointer_marker;
 pub mod selection_context_set_slot_label;
 pub mod pending_event_take;
+pub mod pending_event_timer_rearm;
 pub mod pending_event_discard_all_for_key;
 pub mod pending_event_take_due;
 pub mod operator_cycle_advance_if_successor;
