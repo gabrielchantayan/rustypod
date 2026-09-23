@@ -33,6 +33,8 @@ pub struct OpaqueVtableStringOwner {
     pub opaque_words: [u32; 4],
     /// +0x14 on target — destroyed in place.
     pub string: StringObject,
+    /// +0x1c..+0x23 on target — cleared by the constructor, untouched here.
+    pub trailing_pair: [u32; 2],
 }
 
 /// opaque_vtable_string_owner_destroy — original: `FUN_0816de54` @ `0x0816de54`
@@ -61,6 +63,7 @@ mod tests {
                 vtable: core::ptr::null(),
                 payload: core::ptr::null_mut(),
             },
+            trailing_pair: [u32::MAX; 2],
         };
 
         let returned = unsafe { opaque_vtable_string_owner_destroy(&mut owner) };
