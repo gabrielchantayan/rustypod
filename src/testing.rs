@@ -2069,6 +2069,9 @@ pub mod hints {
     // 0x8250_0000: dedicated to util/segment_cursor_snapshot's target-width
     // cursor, source, and segment fixture; mappings never unmap.
     pub const SEGMENT_CURSOR_SNAPSHOT: usize = 0x8250_0000;
+    // 0x8270_0000: dedicated to util/segment_index_bounds's target-width
+    // context and provider fixture; mappings never unmap.
+    pub const SEGMENT_INDEX_BOUNDS: usize = 0x8270_0000;
     // 0x8260_0000: dedicated to ui/view_resource_provider_assign's
     // target-width view and provider fixtures; mappings never unmap.
     pub const VIEW_RESOURCE_PROVIDER_ASSIGN: usize = 0x8260_0000;

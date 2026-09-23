@@ -216,6 +216,7 @@ pub mod stream_buffer_free_byte_count;
 pub mod stream_handle_validate;
 pub mod stream_query_result;
 pub mod segment_cursor_snapshot;
+pub mod segment_index_bounds;
 pub mod stream_sink_dispatch;
 pub mod stream_read_be16;
 pub mod stream_read_be32;
