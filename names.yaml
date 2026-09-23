@@ -131371,3 +131371,26 @@ functions:
       the vtable predicate succeeds, then unlocks every level. Deliberate
       deviations: calls use ported mutex helpers directly; host vtables use
       native-width entries.
+
+  - address: 0x081d8f24
+    ghidra: FUN_081d8f24
+    name: six_slot_cleanup
+    size: 40
+    sig: "void six_slot_cleanup(const u32 *slots)"
+    module: app/six_slot_cleanup
+    status: ported
+    renames:
+      param_1/r0: slots
+      iVar1/r4: slot_index
+      FUN_08120700: retail_fixed_address_cleanup
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent
+      0x081d8f24..0x081d8f4c: 0x081d8f4c begins the next separately entered
+      function. Whole-image A32 B/BL decoding finds exactly three inbound
+      plain BL calls at 0x081d8e98, 0x081d8f74, and 0x081d9294, with no
+      predicated inbound BL forms. The body reads six consecutive target
+      words and invokes 0x08120700 only for nonzero values through one
+      predicated BLNE. FUN_08120700 has no names.yaml entry, so its verified
+      fixed address is preserved by an ARM veneer rather than assigning it an
+      invented identity; host builds use a recording callback only to verify
+      the observable filter and slot order.
