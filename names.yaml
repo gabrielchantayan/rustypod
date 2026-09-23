@@ -134814,3 +134814,21 @@ functions:
       deviation: Rust uses an indirect normal call to the verified raw
       helper address because it cannot express the conditional ARM tail
       branch; no identity is invented for either unported target.
+
+  - address: 0x08148dd4
+    ghidra: FUN_08148dd4
+    name: scheduler_unlock
+    size: 28
+    sig: "void scheduler_unlock(void)"
+    module: ui/scheduler_lock
+    status: ported
+    vars: {DAT_08148df0: SCHEDULER_MUTEX_ADDRESS}
+    notes: >-
+      Raw ARM establishes the 28-byte extent through 0x08148def; the next
+      word at 0x08148df0 is its literal-pool pointer 0x08a77d00. It calls
+      kernel_running (0x0809444c), returns immediately when that result is
+      zero, otherwise loads the global CountedMutex and tail-branches to
+      mutex_unlock_counted (0x0809449c). Binary scan finds 3 inbound direct
+      BL call sites (0x08148ba8, 0x08148e24, 0x082778bc), all plain and no
+      predicated BLs. Host callback seams model the unmapped global; target
+      code calls the existing ports directly.
