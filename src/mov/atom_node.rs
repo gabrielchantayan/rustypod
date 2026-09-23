@@ -406,6 +406,31 @@ pub unsafe extern "C" fn mov_atom_node_set_child_a_if_present(
     }
 }
 
+/// MOV atom node duplicate-fourcc chain getter — original: `FUN_0814d2a8` @
+/// **0x0814d2a8** (8 bytes, 0x0814d2a8..0x0814d2b0, 2 instructions, no
+/// literal pool). The next separately linked function starts at 0x0814d2b0.
+/// Raw A32 decoding finds **3 direct plain `bl` call sites** (0x081c217c,
+/// 0x081c3064, and 0x081f3b08), with zero predicated `bl` forms.
+///
+/// Loads and returns the target-width duplicate-fourcc chain word at `+0x08`
+/// with `ldr r0,[r0,#8]; bx lr`. No NULL guard: stock faults on the load.
+///
+/// # Deliberate deviations
+///
+/// The ARM release build adds a standard `push {fp,lr}` / `pop {fp,pc}`
+/// frame around the same volatile load; it leaves the AAPCS result unchanged.
+///
+/// # Safety
+///
+/// `node` must point to one readable [`MovAtomNode`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_get_dup_chain")]
+pub unsafe extern "C" fn mov_atom_node_get_dup_chain(node: *const MovAtomNode) -> u32 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).dup_chain)) }
+}
+
+
 
 /// MOV atom table clear — original: `FUN_0828011c` @ **0x0828011c** (32
 /// bytes, 0x0828011c..0x0828013c, 8 instructions, no literal pool). The
@@ -775,6 +800,36 @@ mod tests {
             assert_eq!(node.kind, 0xbb);
             assert_eq!(node.pad_22, [0xcc, 0xdd]);
             assert_eq!(node.fourcc, 0xeeee_eeee);
+        }
+    }
+
+    #[test]
+    fn gets_duplicate_chain_word_without_writing() {
+        for dup_chain in [0, u32::MAX, 0x5566_7788] {
+            let node = MovAtomNode {
+                child_a: 0x1111_1111,
+                child_b: 0x2222_2222,
+                dup_chain,
+                unused_0c: 0x4444_4444,
+                offset_lo: 0x5555_5555,
+                offset_hi: 0x6666_6666,
+                size_lo: 0x7777_7777,
+                size_hi: 0x8888_8888,
+                flag: 0x99,
+                kind: 0xaa,
+                pad_22: [0xbb, 0xcc],
+                fourcc: 0xdddd_dddd,
+            };
+            let node_ptr = core::ptr::addr_of!(node);
+
+            assert_eq!(unsafe { mov_atom_node_get_dup_chain(node_ptr) }, dup_chain);
+            assert_eq!(node.child_a, 0x1111_1111);
+            assert_eq!(node.child_b, 0x2222_2222);
+            assert_eq!(node.dup_chain, dup_chain);
+            assert_eq!(node.unused_0c, 0x4444_4444);
+            assert_eq!((node.offset_lo, node.offset_hi), (0x5555_5555, 0x6666_6666));
+            assert_eq!((node.size_lo, node.size_hi), (0x7777_7777, 0x8888_8888));
+            assert_eq!((node.flag, node.kind, node.pad_22, node.fourcc), (0x99, 0xaa, [0xbb, 0xcc], 0xdddd_dddd));
         }
     }
 
