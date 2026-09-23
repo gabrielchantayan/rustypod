@@ -130995,3 +130995,33 @@ functions:
       calls its verified address and host tests install a role-based seam.
       Host tests cover callback-zero timeout skipping, successful timeout
       configuration including its exact pointer/value, and timeout failure.
+  - address: 0x081e3950
+    ghidra: FUN_081e3950
+    name: transfer_slot_reconcile
+    size: 152
+    sig: "u32 transfer_slot_reconcile(void *context, u32 slot_index, u32 mode)"
+    module: app/transfer_slot_reconcile
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: slot_index
+      param_3/r2: mode
+      r5: slot
+      "context+0x1060": mov_chain_table
+      "slot+0x1240": transfer_state
+      "slot+0x1244": saved_source
+      "slot+0x125c": source
+      "slot+0x128e": status
+      FUN_081e39e8: transfer_slot_advance
+      FUN_0820c8a0: mov_chain_table_next
+    notes: >-
+      Raw osos.dec establishes the exact 38-instruction, 152-byte A32 body
+      0x081e3950..0x081e39e7; the push at 0x081e39e8 begins the next real
+      function. Decoding every word finds two plain unconditional outbound bl
+      calls, at 0x081e39a8 to FUN_081e39e8 and 0x081e39cc to
+      mov_chain_table_next, with no predicated bl forms. The slot accepts
+      status 0 or 1. If source differs from saved_source, mode 0 resolves
+      source through the chain table, mode 1 uses saved_source, and both call
+      the advance routine with transfer_state. The chain-table status is
+      intentionally ignored because the stock code forwards its output word
+      unconditionally.
