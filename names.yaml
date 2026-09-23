@@ -131025,3 +131025,34 @@ functions:
       the advance routine with transfer_state. The chain-table status is
       intentionally ignored because the stock code forwards its output word
       unconditionally.
+  - address: 0x081e3438
+    ghidra: FUN_081e3438
+    name: mov_chain_table_lookup_payload_word
+    size: 64
+    sig: "i32 mov_chain_table_lookup_payload_word(const u8 *context, i32 chain_index, u32 *out, u32 match_value)"
+    module: mov/chain_table
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: chain_index
+      param_3/r2: out
+      param_4/r3: match_value
+      "context+0x1060": mov_chain_table_manager
+      "context+0x1394": chain_match_value
+      local_10: matched_record
+      FUN_0820ccc0: mov_chain_table_lookup_tagged_value
+    notes: >-
+      Raw osos.dec establishes the true 64-byte extent
+      0x081e3438..0x081e3477: the following `add r0,r0,#0x1000` at
+      0x081e3478 begins the next real function. Whole-image A32 decoding
+      finds exactly three inbound plain unconditional BL callers at
+      0x081e3e94, 0x081e4a64, and 0x081e4aa8, with zero predicated inbound
+      BL forms. Its sole outbound call is the unconditional BL at 0x081e3454
+      to the already ported mov_chain_table_lookup_tagged_value. It loads the
+      manager and match word from context +0x1060 and +0x1394, respectively;
+      on success it writes the matched record's +0x7fff8 word to out and
+      returns zero, otherwise it returns three without storing. Target-width
+      pointers remain u32 values, so host tests use a unique low-address slab.
+      match.py reports LLVM's larger frame, synthesized offsets, and literal
+      load, while retaining the lookup call, zero-status branch, +0x7fff8
+      record load, success store, and 0/3 status split.

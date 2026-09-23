@@ -397,9 +397,83 @@ pub unsafe extern "C" fn mov_chain_table_release_range(
     }
 }
 
+/// mov_chain_table_lookup_payload_word — original: `FUN_081e3438` @
+/// 0x081e3438 (64 bytes, 0x081e3438..0x081e3478; **3 inbound call sites,
+/// all unconditional `bl`, 0 predicated forms** — independently counted by
+/// decoding every ARM B/BL word in `osos.dec`: 0x081e3e94, 0x081e4a64, and
+/// 0x081e4aa8).
+///
+/// Loads the MOV chain-table manager and match value from `context + 0x1060`
+/// and `context + 0x1394`, respectively, then looks up `chain_index`. On a
+/// successful lookup, the returned record pointer supplies the word at
+/// `record + 0x7fff8`; lookup failure instead returns status three and leaves
+/// `out` untouched. The only outbound call is the unconditional `bl` to
+/// [`mov_chain_table_lookup_tagged_value`] at 0x081e3454.
+///
+/// # Deviations
+///
+/// None. The target's word-sized pointers are retained as `u32` context and
+/// table values; host tests map fixtures below 4 GiB before converting them.
+///
+/// # Safety
+///
+/// `context` must expose readable words at +0x1060 and +0x1394. Its manager
+/// word must name a live [`MovChainTableManager`], and a successful lookup
+/// must return a record with a readable word at +0x7fff8. `out` must be
+/// writable on success. None are NULL-checked, matching stock.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_chain_table_lookup_payload_word")]
+pub unsafe extern "C" fn mov_chain_table_lookup_payload_word(
+    context: *const u8,
+    chain_index: i32,
+    out: *mut u32,
+    match_value: u32,
+) -> i32 {
+    let manager = unsafe {
+        core::ptr::read(context.add(0x1060).cast::<u32>()) as usize as *mut MovChainTableManager
+    };
+    let context_match_value = unsafe { core::ptr::read(context.add(0x1394).cast::<u32>()) };
+    let mut matched_record = match_value;
+    if unsafe {
+        mov_chain_table_lookup_tagged_value(manager, &mut matched_record, chain_index, context_match_value)
+    } != MOV_CHAIN_TABLE_OK {
+        return 3;
+    }
+
+    let record_end = (matched_record as usize as *const u8).wrapping_add(0x80_000);
+    let payload_word = unsafe { core::ptr::read(record_end.wrapping_sub(8).cast::<u32>()) };
+    unsafe { core::ptr::write(out, payload_word) };
+    MOV_CHAIN_TABLE_OK
+}
+
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use parking_lot::Mutex as TestMutex;
+    use std::sync::LazyLock;
+
+    const LOOKUP_FIXTURE_LEN: usize = 0x91000;
+    const LOOKUP_MANAGER_OFFSET: usize = 0x2000;
+    const LOOKUP_RECORD_OFFSET: usize = 0x10000;
+    static LOOKUP_FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::MOV_CHAIN_TABLE_LOOKUP_PAYLOAD_WORD, LOOKUP_FIXTURE_LEN)
+            .map(|pointer| pointer as usize)
+    });
+    static LOOKUP_FIXTURE_LOCK: TestMutex<()> = TestMutex::new(());
+
+    unsafe fn reset_lookup_fixture() -> Option<(*mut u8, *mut MovChainTableManager, *mut u8)> {
+        let base = (*LOOKUP_FIXTURE)? as *mut u8;
+        unsafe { base.write_bytes(0, LOOKUP_FIXTURE_LEN) };
+        let manager = unsafe { base.add(LOOKUP_MANAGER_OFFSET).cast::<MovChainTableManager>() };
+        unsafe { manager.write(fresh_manager()) };
+        let record = unsafe { base.add(LOOKUP_RECORD_OFFSET) };
+        Some((base, manager, record))
+    }
+
 
     const POISON: u32 = 0xdead_beef;
 
@@ -779,6 +853,55 @@ mod tests {
         assert_eq!(count, 0);
         assert_eq!(manager.table.entries[7].tag, 1);
         assert_eq!(manager.table.entries[7].field_10, u32::MAX);
+    }
+
+    /// The matched table record is a target-width pointer, and stock reads
+    /// exactly its +0x7fff8 word after the lookup writes the local result.
+    #[test]
+    fn lookup_payload_word_reads_matched_record_tail_word() {
+        let _guard = LOOKUP_FIXTURE_LOCK.lock();
+        let Some((context, manager, record)) = (unsafe { reset_lookup_fixture() }) else {
+            assert!(note_missing_u32_fixture("mov/chain_table lookup payload word"));
+            return;
+        };
+        unsafe {
+            core::ptr::write(context.add(0x1060).cast::<u32>(), manager as usize as u32);
+            core::ptr::write(context.add(0x1394).cast::<u32>(), 0x89ab_cdef);
+            (*manager).table.entries[37].field_00 = record as usize as u32;
+            (*manager).table.entries[37].tag = 3;
+            (*manager).table.entries[37].field_10 = 0x89ab_cdef;
+            core::ptr::write(record.add(0x7fff8).cast::<u32>(), 0x2468_ace0);
+        }
+        let mut out = POISON;
+
+        let rc = unsafe { mov_chain_table_lookup_payload_word(context, 37, &mut out, 0x55) };
+
+        assert_eq!(rc, MOV_CHAIN_TABLE_OK);
+        assert_eq!(out, 0x2468_ace0);
+    }
+
+    /// A lookup miss takes the conditional return-three path before loading
+    /// the returned record or storing through `out`.
+    #[test]
+    fn lookup_payload_word_failure_leaves_output_untouched() {
+        let _guard = LOOKUP_FIXTURE_LOCK.lock();
+        let Some((context, manager, _record)) = (unsafe { reset_lookup_fixture() }) else {
+            assert!(note_missing_u32_fixture("mov/chain_table lookup payload word"));
+            return;
+        };
+        unsafe {
+            core::ptr::write(context.add(0x1060).cast::<u32>(), manager as usize as u32);
+            core::ptr::write(context.add(0x1394).cast::<u32>(), 0x89ab_cdef);
+            (*manager).table.entries[127].field_00 = 0;
+            (*manager).table.entries[127].tag = 2;
+            (*manager).table.entries[127].field_10 = 0x89ab_cdef;
+        }
+        let mut out = POISON;
+
+        let rc = unsafe { mov_chain_table_lookup_payload_word(context, 127, &mut out, 0x55) };
+
+        assert_eq!(rc, 3);
+        assert_eq!(out, POISON);
     }
 
 }
