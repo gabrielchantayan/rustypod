@@ -31093,6 +31093,27 @@ functions:
       target-address/host-recorder seam; the now-named shared provider-vtable
       slot models +0x60 directly on both host and target. Host tests cover
       no-current, accepted, rejected, and NULL-replacement paths.
+  - address: 0x0816ecd8
+    ghidra: FUN_0816ecd8
+    name: genius_request_selection_is_complete
+    size: 52
+    sig: "u32 genius_request_selection_is_complete(const GeniusRequest *request)"
+    module: app/genius_request_selection_is_complete
+    status: ported
+    vars: {param_1/r4: request, "request+0x8": selection, "request+0x10": active, "request+0x14": element_reference}
+    notes: >-
+      Raw extent is exactly 52 bytes, from push {r4,r5,r6,lr} at 0x0816ecd8
+      through pop {r4,r5,r6,pc} at 0x0816ed08; the next separately linked
+      function begins at 0x0816ed0c with push {r4-r8,lr}. An inactive
+      request+0x10 byte returns zero without touching the element reference.
+      Otherwise the function passes request+0x14 to the ported
+      ui_element_reference_target_item_count and returns one exactly when its
+      u32 result equals request+0x8. The three direct call sites are all plain
+      unconditional BL at 0x0816ecc4, 0x0816ee7c, and 0x081de690; no
+      predicated BL call sites exist. The function body has one unconditional
+      BL to 0x082a5e48. Host tests cover inactive short-circuiting, full-u32
+      equality rather than low-halfword equality, nonzero resolve truthiness,
+      and failed resolution.
   - address: 0x082a5e48
     ghidra: FUN_082a5e48
     name: ui_element_reference_target_item_count

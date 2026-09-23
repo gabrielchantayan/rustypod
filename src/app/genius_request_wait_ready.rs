@@ -20,17 +20,18 @@
 //!
 //! ## Dispatch boundary
 //!
-//! 0x0816ecd8 and 0x0816ee74 have no `ported` entries in `names.yaml`, so the
-//! target defaults call their fixed retailOS addresses and host tests replace
-//! them through a volatile operation table. Their identities are limited to
-//! the observed ready predicate and request-advance roles; no deeper callee
-//! identity is claimed. The Timer E reader is already ported and called
-//! directly. No deliberate behavioral deviations.
+//! 0x0816ecd8 is now ported as
+//! [`genius_request_selection_is_complete`]; target builds call it directly.
+//! 0x0816ee74 remains at its fixed retailOS address, while host tests replace
+//! both helpers through a volatile operation table. The Timer E reader is
+//! already ported and called directly. No deliberate behavioral deviations.
 
 use core::ffi::c_void;
 use core::ptr;
 
 use crate::drivers::timer::usec_timer_read_seconds;
+#[cfg(target_os = "none")]
+use crate::app::genius_request_selection_is_complete::genius_request_selection_is_complete;
 
 /// Tests whether a Genius request has reached its expected completion state.
 pub type GeniusRequestReady = unsafe extern "C" fn(request: *mut c_void) -> u32;
@@ -46,8 +47,7 @@ pub struct GeniusRequestWaitOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_request_is_ready(request: *mut c_void) -> u32 {
-    let predicate: GeniusRequestReady = unsafe { core::mem::transmute(0x0816_ecd8usize) };
-    unsafe { predicate(request) }
+    unsafe { genius_request_selection_is_complete(request.cast()) }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -66,10 +66,10 @@ unsafe extern "C" fn firmware_request_advance(_request: *mut c_void) -> u32 {
     panic!("genius_request_wait_ready requires 0x0816ee74")
 }
 
-/// The two unported helpers called by [`genius_request_wait_ready`].
+/// The request-advance helper called by [`genius_request_wait_ready`].
 ///
-/// Target builds dispatch directly to retailOS; host tests install recording
-/// implementations before exercising the port.
+/// Target builds call the ported ready predicate directly and retailOS for
+/// request advance; host tests install both recording implementations.
 pub static mut GENIUS_REQUEST_WAIT_OPS: GeniusRequestWaitOps = GeniusRequestWaitOps {
     is_ready: firmware_request_is_ready,
     advance: firmware_request_advance,
