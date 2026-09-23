@@ -29111,6 +29111,33 @@ functions:
       constructor-return caching, cache-hit no-allocation, and NULL
       result retry. match.py structural review confirms the
       test/allocate/construct/store/reload shape.
+  - address: 0x081ded44
+    ghidra: FUN_081ded44
+    name: pointer_queue_wait_ready
+    size: 48
+    sig: "void pointer_queue_wait_ready(void *context)"
+    module: app/pointer_queue_wait_ready
+    status: ported
+    renames:
+      param_1/r4: context
+      "context+0x26": ready_flag
+      FUN_0839e640: retail_pointer_queue_poll_status
+      thunk_FUN_080568e8: task_sleep_thunk
+    notes: >-
+      Raw osos.dec confirms the exact twelve-instruction extent
+      0x081ded44..0x081ded74: push {r4,lr}; mov r4,r0; an initial branch
+      over the sleep body; then the 100-tick task_sleep_thunk call, the
+      queue-status poll at 0x0839e640, and the predicated ready_flag byte
+      load/test. The next independently linked function begins with push
+      {r1-r5,lr} at 0x081ded74. Decoding every ARM B/BL immediate in the
+      image finds three inbound plain unconditional BL calls at 0x08179d98,
+      0x0817af5c, and 0x0817c91c; zero predicated BL calls; and two
+      unconditional B tail sites at 0x0817a7fc and 0x0817a908. The initial
+      branch proves it always polls before sleeping, then sleeps exactly 100
+      ticks after every poll whose status or ready flag is zero. The callee
+      locks context+0x0c around its queue predicate but is not ported, so
+      target code calls its verified stock address while host tests use a
+      volatile seam. No other deviation.
   - address: 0x081ded74
     ghidra: FUN_081ded74
     name: initialize_once
