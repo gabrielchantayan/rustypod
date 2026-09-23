@@ -357,6 +357,34 @@ pub unsafe extern "C" fn class_8c00_post_event_code_1(this: *mut EventCodeQueue)
     unsafe { event_code_queue_post(this, 1) };
 }
 
+/// class_8c00_post_event_code_0x16 — original: `FUN_081a71f4` @
+/// **0x081a71f4** (8 bytes exactly, `mov r1, #0x16; b 0x081de270`; the
+/// next real function opens `push {r3, r4, r5, lr}` @ 0x081a71fc).
+/// **Three direct plain `bl` call sites**, all unconditional
+/// (0x0811c31c, 0x0817cd20, and 0x081de680), verified by decoding every
+/// immediate A32 B/BL word in osos.dec; there are no predicated `bl` call
+/// sites. The body contains no `bl`; its second instruction is a tail branch.
+///
+/// The algorithm selects event code 0x16, then tail-branches to the ported
+/// [`event_code_queue_post`]. Ghidra incorrectly assigns that shared target's
+/// mutex-lock, queue-push, and mutex-unlock body to this wrapper. Deliberate
+/// deviation: Rust uses a normal direct call rather than an ABI tail branch;
+/// the callee's void contract makes the stock r0 residue unobservable.
+///
+/// # Safety
+///
+/// `this` must be the event-code-queue base of a live class-0x8c00 object
+/// (at least 0x3c bytes, word-aligned), with a callable installed queue
+/// enqueue hook.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.class_8c00_post_event_code_0x16")]
+pub unsafe extern "C" fn class_8c00_post_event_code_0x16(this: *mut EventCodeQueue) {
+    unsafe { event_code_queue_post(this, 0x16) };
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -794,6 +822,21 @@ mod tests {
         unsafe { class_8c00_post_event_code_1(this.cast()) };
 
         assert_eq!(rearm_calls(), [RearmCall::Enqueue(queue, 1)]);
+    }
+
+    /// The 0x16 sibling keeps the queue base unchanged and selects its
+    /// literal event code before forwarding to the shared post target.
+    #[test]
+    fn wrapper_posts_event_code_0x16_to_own_queue() {
+        let _env = rearm_env();
+        let mut object = RearmObject::new(0, 0);
+        let this = object.as_ptr();
+        let queue =
+            unsafe { ptr::addr_of_mut!((*(this as *mut EventCodeQueue)).queue) as *mut u8 };
+
+        unsafe { class_8c00_post_event_code_0x16(this.cast()) };
+
+        assert_eq!(rearm_calls(), [RearmCall::Enqueue(queue, 0x16)]);
     }
 
     /// Running timer, flag clear: the full stop/reprogram/restart
