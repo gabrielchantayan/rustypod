@@ -224,6 +224,7 @@ pub mod facade_for_selector;
 pub mod fixed3_assign;
 pub mod fixed3_is_zero;
 pub mod transition_page_clone;
+pub mod transition_page_reset_animation_targets;
 pub mod fixed3_add_scaled;
 pub mod fixed3_difference;
 pub mod fixed3_sum;
