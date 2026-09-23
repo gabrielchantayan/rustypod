@@ -17,9 +17,16 @@
 //! until that constructor is ported and wired.
 
 #[cfg(not(test))]
-use crate::cxx::transition_addon::silver_controller_transition_addon_construct;
+use crate::cxx::transition_addon::{
+    silver_controller_transition_addon_construct,
+    silver_controller_transition_addon_construct_from_cstr,
+};
+#[cfg(not(test))]
 use crate::heap::veneers::operator_new;
 use core::ptr;
+
+#[cfg(test)]
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const TRANSITION_CONTAINER_LITERAL: u32 = 0x0898_665c;
 const TRANSITION_ADDON_SIZE: usize = 0x54;
@@ -80,6 +87,37 @@ unsafe fn construct_transition_addon(
 
 #[cfg(not(test))]
 #[inline(always)]
+unsafe fn construct_transition_addon_from_cstr(
+    storage: *mut u8, source: *const u8, flag: u32, base_hint: u32,
+) -> *mut u8 {
+    unsafe {
+        silver_controller_transition_addon_construct_from_cstr(
+            storage, source, flag, base_hint, 0x400, 1, 0,
+        )
+    }
+}
+
+#[cfg(test)]
+static CSTR_ADDON_ARGS: [AtomicUsize; 4] = [
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+    AtomicUsize::new(0),
+];
+
+#[cfg(test)]
+#[inline(always)]
+unsafe fn construct_transition_addon_from_cstr(
+    storage: *mut u8, source: *const u8, flag: u32, base_hint: u32,
+) -> *mut u8 {
+    CSTR_ADDON_ARGS[0].store(storage as usize, Ordering::SeqCst);
+    CSTR_ADDON_ARGS[1].store(source as usize, Ordering::SeqCst);
+    CSTR_ADDON_ARGS[2].store(flag as usize, Ordering::SeqCst);
+    CSTR_ADDON_ARGS[3].store(base_hint as usize, Ordering::SeqCst);
+    0x1234_5678usize as *mut u8
+}
+#[cfg(not(test))]
+#[inline(always)]
 unsafe fn allocate_transition_addon() -> *mut u8 {
     unsafe { operator_new(TRANSITION_ADDON_SIZE) }
 }
@@ -109,6 +147,46 @@ pub unsafe extern "C" fn transition_container_construct(
     unsafe {
         ptr::write_volatile(base.cast::<u32>(), TRANSITION_CONTAINER_LITERAL);
         let addon = construct_transition_addon(
+            allocate_transition_addon(), source, flag, base_hint,
+        );
+        ptr::write_volatile(base.add(TRANSITION_ADDON_OFFSET).cast::<u32>(), addon as usize as u32);
+    }
+    base
+}
+
+/// `transition_container_construct_from_cstr` — original: `FUN_08149c90`
+/// @ 0x08149c90.
+///
+/// **True extent: 92 bytes** — 88 executable bytes at
+/// `0x08149c90..0x08149ce4`, followed by the four-byte literal-pool word
+/// `0x0898665c` at `0x08149ce8`; the next real function begins at
+/// `0x08149cec`. Raw A32 decoding finds **3 plain unconditional `bl` calls**
+/// (base constructor 0x0816bfe4, `operator_new`, and the from-C-string
+/// transition-addon constructor 0x08278dc4), with **0 predicated direct
+/// `bl` calls**. It builds the base from its fifth argument, installs the
+/// derived vtable, allocates 0x54 bytes, constructs the C-string overload
+/// with `(source, flag, base_hint, 0x400, 1, 0)`, stores the result at +0x30,
+/// and returns the base pointer.
+///
+/// # Deliberate deviation
+///
+/// Base constructor 0x0816bfe4 remains behind
+/// [`TRANSITION_CONTAINER_BASE_CONSTRUCT`]; its default returns the supplied
+/// storage unchanged, so this export is not hook-ready until that constructor
+/// is ported and wired.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn transition_container_construct_from_cstr(
+    this: *mut u8,
+    source: *const u8,
+    flag: u32,
+    base_hint: u32,
+    kind: u32,
+) -> *mut u8 {
+    let base = unsafe { transition_container_base_construct_op()(this, kind) };
+    unsafe {
+        ptr::write_volatile(base.cast::<u32>(), TRANSITION_CONTAINER_LITERAL);
+        let addon = construct_transition_addon_from_cstr(
             allocate_transition_addon(), source, flag, base_hint,
         );
         ptr::write_volatile(base.add(TRANSITION_ADDON_OFFSET).cast::<u32>(), addon as usize as u32);
@@ -159,5 +237,27 @@ mod tests {
         assert_eq!(BASE_KIND.load(Ordering::SeqCst), 0x8000);
         assert_eq!(unsafe { result.cast::<u32>().read_volatile() }, TRANSITION_CONTAINER_LITERAL);
         assert_eq!(unsafe { result.add(TRANSITION_ADDON_OFFSET).cast::<u32>().read_volatile() }, 0x1234_5678);
+    }
+
+    #[test]
+    fn cstr_constructor_passes_arguments_and_installs_addon_at_offset() {
+        let mut storage = [0xa5u8; 0x40];
+        let source = b"transition\0";
+        let result = unsafe {
+            transition_container_construct_from_cstr(
+                storage.as_mut_ptr(), source.as_ptr(), 1, 0xfeed_beef, 0x8000,
+            )
+        };
+
+        assert_eq!(result, storage.as_mut_ptr());
+        assert_eq!(CSTR_ADDON_ARGS[0].load(Ordering::SeqCst), 1);
+        assert_eq!(CSTR_ADDON_ARGS[1].load(Ordering::SeqCst), source.as_ptr() as usize);
+        assert_eq!(CSTR_ADDON_ARGS[2].load(Ordering::SeqCst), 1);
+        assert_eq!(CSTR_ADDON_ARGS[3].load(Ordering::SeqCst), 0xfeed_beef);
+        assert_eq!(unsafe { result.cast::<u32>().read_volatile() }, TRANSITION_CONTAINER_LITERAL);
+        assert_eq!(
+            unsafe { result.add(TRANSITION_ADDON_OFFSET).cast::<u32>().read_volatile() },
+            0x1234_5678
+        );
     }
 }

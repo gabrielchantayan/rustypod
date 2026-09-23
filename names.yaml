@@ -71714,6 +71714,35 @@ functions:
       scalar_read_read_error_skips_the_finish /
       scalar_read_finish_args_and_final_return.
 
+
+  - address: 0x08149c90
+    ghidra: FUN_08149c90
+    name: transition_container_construct_from_cstr
+    size: 92
+    sig: "u8 *transition_container_construct_from_cstr(u8 *this, const u8 *source, u32 flag, u32 base_hint, u32 kind)"
+    module: app/transition_container_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r5: source
+      param_3/r6: flag
+      param_4/r7: base_hint
+      param_5/[sp,#32]: kind
+      r4: base
+    notes: >-
+      Raw osos.dec establishes 92 bytes: 88 executable bytes at
+      0x08149c90..0x08149ce4 and literal 0x0898665c at 0x08149ce8; the
+      next real function begins at 0x08149cec. The body has three plain
+      unconditional BL calls and no predicated direct BL calls: base
+      constructor 0x0816bfe4(this, kind), ported operator_new(0x54) at
+      0x082aadd4, and the ported from-C-string Silver-controller
+      transition-addon constructor at 0x08278dc4 with
+      (allocation, source, flag, base_hint, 0x400, 1, 0). It installs
+      vtable 0x0898665c at the base and stores the addon result at +0x30,
+      returning the base unconditionally. Deliberate deviation: base
+      constructor 0x0816bfe4 remains an explicit seam with an
+      identity-returning default, so this function is not hook-ready
+      until that constructor is ported.
   - address: 0x0811d724
     ghidra: FUN_0811d724
     name: vtable_file_open
