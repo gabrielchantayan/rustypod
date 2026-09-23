@@ -493,6 +493,7 @@ pub mod resource_reference_value;
 pub mod scoped_context;
 pub mod scoped_context_tdat_message;
 pub mod search_query_token_score;
+pub mod handle_vtable_sequence_dispatch;
 pub mod scoped_string_id_record_set;
 pub mod scoped_string_id_record_set_dispatch;
 pub mod selection_position_at_or_past_item_count;

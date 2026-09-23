@@ -108871,6 +108871,37 @@ functions:
       exists for 0x0813305c, so the target port calls that verified retail
       address and host tests replace it through a volatile seam.
 
+  # --- Refcounted handle three-slot vtable dispatcher ---
+  - address: 0x081317dc
+    ghidra: FUN_081317dc
+    name: handle_vtable_sequence_dispatch
+    size: 96
+    sig: "void handle_vtable_sequence_dispatch(void *output, void *owner, u32 argument)"
+    module: app/handle_vtable_sequence_dispatch
+    status: ported
+    renames:
+      param_1/r0/r6: output
+      param_2/r1/r4: owner
+      param_3/r2/r5: argument
+      param_2_plus_0x28: handle_slot
+      FUN_083d6190: handle_deref_or_null_alias_6190
+      vtable_plus_0xec: finish_slot
+      vtable_plus_0x138: populate_slot
+      vtable_plus_0x40: complete_slot
+    notes: >-
+      Raw ARM establishes the 96-byte extent from the push at 0x081317dc
+      through the tail bx r2 at 0x08131838; the next separately linked entry
+      starts at 0x0813183c. It resolves owner+0x28 independently before every
+      virtual call, using unrecovered vtable slots +0xec, +0x138, and +0x40
+      with recovered ABIs (implementation), (output, implementation, argument),
+      and (implementation, output). Raw decoding finds three direct bl
+      instructions in the body, all plain and unconditional to the
+      handle_deref_or_null alias at 0x083d6190, with zero predicated bl forms.
+      A whole-image direct-branch scan finds three inbound plain bl call sites
+      and zero predicated inbound forms. Rust deliberately makes the final
+      tail dispatch an ordinary void call and uses pointer-width host vtables;
+      target vtable entries remain four-byte words.
+
   # --- Opaque record payload accessor (app/opaque_record_payload) ---
   - address: 0x081614c0
     ghidra: FUN_081614c0
