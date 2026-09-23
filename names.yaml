@@ -63098,6 +63098,34 @@ functions:
       archive reports the same call/literal/store/zero/store skeleton;
       the expected differences are LLVM's fp frame and the archive
       relocation rendering the direct callee as the local symbol.
+  - address: 0x081439a8
+    ghidra: FUN_081439a8
+    name: screen_base_parent_construct_with_task_target
+    size: 20
+    sig: "Class6800 *screen_base_parent_construct_with_task_target(Class6800 *storage, u32 create_link)"
+    module: app/class_6800
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: create_link
+      puVar1/r0: this
+      FUN_08272474: framework_task_target_base_construct
+      DAT_081439bc: SCREEN_BASE_PARENT_VTABLE_ADDRESS
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte image extent
+      0x081439a8..0x081439bc: four A32 instructions followed by the
+      0x08985da8 vtable literal at 0x081439bc; the next real function
+      begins at 0x081439c0. Decoding every ARM B/BL word finds three
+      incoming unconditional BL call sites (0x0810ab44, 0x081a2d0c, and
+      0x081ca93c), zero predicated BL call sites, and one unconditional
+      body BL to framework_task_target_base_construct at 0x08272474.
+      The wrapper forwards storage and create_link, uses the parent's r0
+      return for the vtable store, and returns that same pointer. There are
+      no NULL guards. Host coverage proves context target forwarding, the
+      exact vtable replacement, the inherited +0x14 clear, and preservation
+      of the following derived word. Deliberate deviations: none; the
+      static image vtable remains an opaque pointer.
+
   - address: 0x08110a60
     ghidra: FUN_08110a60
     name: task_context_observable_dispatch

@@ -810,6 +810,32 @@ pub unsafe extern "C" fn framework_base_construct_with_task_target(
     framework_base_initialize(this, initial_target, create_link, core::ptr::null_mut());
     this
 }
+/// screen_base_parent_construct_with_task_target — original: `FUN_081439a8` @
+/// 0x081439a8 (16 bytes of code plus the literal-pool word at 0x081439bc;
+/// **3 plain `bl` call sites, 0 predicated calls**, binary-scanned from
+/// `work/firmware/osos.dec`).
+///
+/// Constructs the task-context-target framework base in caller-owned
+/// storage, then replaces the returned object's vtable with 0x08985da8.
+/// The direct parent [`framework_task_target_base_construct`] receives
+/// `storage` and `create_link` verbatim; its returned pointer is used for
+/// the vtable store and returned unchanged. The raw body has one direct,
+/// unconditional `bl` to that parent and no NULL guard.
+///
+/// Deliberate deviation: none. The vtable is static retailOS image data, so
+/// host and firmware builds retain its opaque image address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn screen_base_parent_construct_with_task_target(
+    storage: *mut Class6800,
+    create_link: u32,
+) -> *mut Class6800 {
+    let this = framework_task_target_base_construct(storage, create_link);
+    core::ptr::addr_of_mut!((*this).vtable)
+        .write_volatile(0x0898_5da8usize as *const Class6800Vtable);
+    this
+}
+
 /// framework_base_current_task_initial_target — original: `FUN_08110c44` @
 /// 0x08110c44 (16 bytes; **5 plain `bl` call sites and 0 predicated
 /// calls**, binary-scanned from `work/firmware/osos.dec`).
@@ -1713,6 +1739,52 @@ mod tests {
         }
         drop(task_hooks_guard);
     }
+    #[test]
+    fn screen_parent_task_target_constructor_replaces_only_the_parent_vtable() {
+        let task_hooks_guard = TASK_HOOKS_TEST_LOCK.lock();
+        let mut object = poisoned();
+        let storage = ptr::addr_of_mut!(object);
+        let target = 0x2468usize as *mut u8;
+        let mut task_context = TaskCtx::ZERO;
+        let mut node = NameNode::ZERO;
+
+        unsafe {
+            let guard = install_mocks();
+            task_context.framework_base_initial_target = target;
+            node.ctx = ptr::addr_of_mut!(task_context);
+            RUNNING_TASK_NODE = ptr::addr_of_mut!(node);
+            RUNNING_TASK_NODE_CALLS = 0;
+            let saved_hooks = ptr::read_volatile(ptr::addr_of!(TASK_HOOKS));
+            let mut hooks = saved_hooks;
+            hooks.kernel_running_node = record_running_task_node;
+            ptr::addr_of_mut!(TASK_HOOKS).write_volatile(hooks);
+
+            let result = screen_base_parent_construct_with_task_target(storage, 1);
+
+            assert_eq!(result, storage, "returns the direct parent's result");
+            assert_eq!(RUNNING_TASK_NODE_CALLS, 1, "the parent reads context once");
+            assert_eq!(PARENT_CALLS, 0, "the direct linkage parent bypasses the seam");
+            assert_eq!(
+                object.vtable,
+                0x0898_5da8usize as *const Class6800Vtable,
+                "the literal at 0x081439bc replaces the parent vtable"
+            );
+            assert_eq!(object.base_link, ptr::addr_of_mut!(TEST_LINK));
+            assert_eq!(SET_TARGET_ARGS[0], (storage, target));
+            assert!(object.default_target.is_null(), "the parent clears +0x14");
+            assert_eq!(
+                object.demo_mode,
+                0xa5a5_a5a5usize as *mut u8,
+                "the wrapper does not touch the following derived word"
+            );
+
+            restore_task_hooks(saved_hooks);
+            restore();
+            drop(guard);
+        }
+        drop(task_hooks_guard);
+    }
+
 
     #[test]
     fn resource_provider_constructor_installs_vtable_clears_link_and_sets_next() {
