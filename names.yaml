@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d5c14
+    ghidra: FUN_081d5c14
+    name: resource_slot_acquire
+    size: 116
+    sig: "void *resource_slot_acquire(u8 *pool)"
+    module: app/resource_slot_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_1_plus_0x34: slot_busy
+      param_1_plus_0x40: mutex
+      param_1_plus_0x48: available_condvar
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_080ed9dc: condvar_wait_forever
+    notes: >-
+      Raw osos.dec words establish the exact 116-byte extent
+      0x081d5c14..0x081d5c88: 0x081d5c88 begins the next independently
+      entered function with push {r0-r11,lr}. The body has three unconditional
+      plain BL instructions (0x081d5c20, 0x081d5c64, and 0x081d5c80), no
+      predicated BL instructions, plus the distinct indirect BLX r1 at
+      0x081d5c5c. It locks pool+0x40, finds and marks the first clear status
+      byte at pool+0x34, invokes that entry's vtable slot +0, unlocks and
+      returns the entry. A full pool waits on the CondVar at +0x48 and retries.
+      The virtual callee has no recovered semantic identity, so host tests use
+      a narrow dispatch seam while target builds invoke its target-width
+      function pointer directly.
   - address: 0x081d5e2c
     ghidra: FUN_081d5e2c
     name: parse_result_scope_construct
