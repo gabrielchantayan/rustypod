@@ -134224,3 +134224,28 @@ functions:
       while tail-call formation remains an intentional code-generation
       deviation. Host test proves both releases, the base-vtable transition,
       return identity, and preservation of fields outside the base teardown.
+  - address: 0x08167460
+    ghidra: FUN_08167460
+    name: video_engine_present_default_frame
+    size: 56
+    sig: "void video_engine_present_default_frame(const void *controller)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0x128": preparation_argument
+      local_10: default_frame_descriptor
+      "default_frame_descriptor+0x00": payload
+      "default_frame_descriptor+0x04": width
+      "default_frame_descriptor+0x06": height
+    notes: >-
+      Raw osos.dec words establish the exact 56-byte A32 body
+      0x08167460..0x08167497; `push {r2,r3,r4,lr}` at 0x08167498 begins the
+      next real function. It executes exactly three unconditional plain BL
+      calls (0x0827b5a8, 0x082d14e0, and 0x08273a54), with zero predicated BL
+      calls. The first receives the controller's +0x128 word. The second
+      obtains the video-engine frame payload. The final unported helper
+      receives the stack descriptor `{payload, 320, 240}`. The two unnamed
+      callees remain fixed-address calls on target and host callbacks in the
+      test build. Deliberate deviations: none to the observable call order,
+      argument values, or target-width descriptor layout.
