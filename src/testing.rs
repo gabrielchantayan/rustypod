@@ -1258,6 +1258,9 @@ pub mod hints {
     // 0x8f00_0000: dedicated to mov/chain_value_span's raw-u32 chain-value
     // record fixture; mappings never unmap, so no other user may share it.
     pub const MOV_CHAIN_TABLE_LOAD_SPAN: usize = 0x8f00_0000;
+    // 0x8f10_0000: dedicated to mov/chain_segment_bounds's raw-u32
+    // chain-value record fixtures; mappings never unmap.
+    pub const MOV_CHAIN_TABLE_LOAD_SEGMENT_BOUNDS: usize = 0x8f10_0000;
     // 0x9c00_0000: dedicated to mov/atom_table's raw-u32 node-tree and
     // factory-result fixture; mappings never unmap, so no other user may
     // share this hint.
