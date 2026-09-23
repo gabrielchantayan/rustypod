@@ -395,6 +395,7 @@ pub mod opaque_object_count_at_70;
 pub mod opaque_collection_entry_data_at;
 pub mod opaque_u16_pair_buffer;
 pub mod opaque_record_payload;
+pub mod opaque_record_vtable_construct;
 pub mod object_subobject_at_08;
 pub mod opaque_record_source_item_count;
 pub mod opaque_record_source_find_at_or_after;
