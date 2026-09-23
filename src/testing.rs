@@ -46,6 +46,9 @@ pub mod hints {
     // owner, collection, StringObject, and candidate fixtures; mappings never
     // unmap, so no other user may share this hint.
     pub const ANCHOR_IDENTIFIER_FIND: usize = 0x6d70_0000;
+    // 0x6d80_0000: dedicated to app/strided_record_find_by_key's target-width
+    // container and 12-byte record fixtures; mappings never unmap.
+    pub const STRIDED_RECORD_FIND_BY_KEY: usize = 0x6d80_0000;
     // 0x6b10_0000 / 0x6b20_0000: dedicated to sqlite/append_owned_pointer's
     // target-width owner and pointer-array fixtures; mappings never unmap.
     pub const SQLITE_APPEND_OWNED_POINTER_GROW: usize = 0x6b10_0000;
