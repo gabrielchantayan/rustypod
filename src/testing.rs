@@ -586,6 +586,10 @@ pub mod hints {
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const ARTWORK_SLOT_AVAILABILITY: usize = 0x7e00_0000;
+    // 0x6e90_0000: dedicated to app/selection_available's raw-u32 object
+    // and primary/fallback table fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const SELECTION_AVAILABLE: usize = 0x6e90_0000;
     // 0x7d00_0000: dedicated to runtime/ctype isdigit's raw-u32 LC_CTYPE
     // table fixture; mappings never unmap, so no other user may share this
     // hint.
