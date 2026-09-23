@@ -80919,6 +80919,35 @@ functions:
       ops-table blx indirection replacing the direct bl and the
       crate's fp frame, the accepted silver_controller profile.
 
+  - address: 0x081fae30
+    ghidra: FUN_081fae30
+    name: vtable_08990af8_destruct
+    size: 184
+    sig: "void *vtable_08990af8_destruct(void *this)"
+    module: cxx/vtable_08990af8_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_081faee8: vtable_08990af8
+      "this+0x24": owned vtable_08980110 object
+      "this+0x28..+0x3c": owned embedded ObservableArray allocations
+      FUN_08271d2c: observable_array_destruct
+      FUN_080fe850: vtable_08980110_construct
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 184-byte extent: 180 bytes of code
+      from 0x081fae30 through the pop at 0x081faee4, plus the vtable literal
+      0x08990af8 at 0x081faee8; the next independently entered function
+      begins at 0x081faeec. Whole-image A32 decoding finds exactly three
+      inbound plain BL sites (0x081dcd64, 0x081dce28, 0x0820fd60) and zero
+      predicated BL sites. The body has eleven plain direct BL instructions
+      and no predicated calls. It installs its destruction vtable, processes
+      non-NULL owned fields +0x3c down through +0x28 by destructing the
+      embedded ObservableArray at allocation+4 and deleting allocation, then
+      processes a non-NULL +0x24 through vtable_08980110_construct and
+      operator_delete. It returns this. The field class has no recovered
+      semantic identity, so the port's structural name and target-width
+      fields deliberately describe only verified ownership behavior.
   - address: 0x08262974
     ghidra: FUN_08262974
     name: cxx_mutex_opaque_context_acquire
