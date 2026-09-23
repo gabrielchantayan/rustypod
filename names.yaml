@@ -132255,3 +132255,35 @@ functions:
       deliberately models only the verified target-width state and table
       prefixes, and preserves the original linear scan and unchecked caller
       preconditions.
+  - address: 0x081c5198
+    ghidra: FUN_081c5198
+    name: mov_sync_sample_table_load_window
+    size: 140
+    sig: "u32 mov_sync_sample_table_load_window(void *parser, u32 index)"
+    module: mov/sync_sample_table_load_window
+    status: ported
+    renames:
+      param_1/r0: parser
+      param_2/r1: index
+      "parser+0x1b8": sync_sample_table
+      "sync_sample_table+0x0": unresolved_fixed_mode
+      "sync_sample_table+0x4": sync_sample_count
+      "sync_sample_table+0x8": window_index
+      "sync_sample_table+0xc": entries
+      "parser+0x210": atom_payload_base
+      FUN_081c3960: u32_window_reader
+    notes: >-
+      Raw osos.dec words establish the exact 140-byte A32 extent
+      0x081c5198..0x081c5223; push {r3,r4,r5,r6,r7,lr} at 0x081c5224 begins
+      the next independently entered function. The body has one plain
+      unconditional BL to u32_window_reader at 0x081c3960 and no predicated
+      BL forms. Whole-image A32 branch decoding finds two inbound plain
+      unconditional BL calls and zero predicated inbound BL calls. A null
+      sync-sample table returns status 3; a nonzero table word +0 returns zero
+      without reading. Otherwise it caps
+      the window at 0x8000 and remaining entries, calls the reader with table
+      entries and atom payload offset 20 + index*4, records index on success,
+      and maps reader failure to status 3. Deliberate deviation: target calls
+      the established Rust u32_window_reader directly; host tests install an
+      ABI-equivalent volatile seam because target-width table pointers cannot
+      hold native host pointers.
