@@ -132427,3 +132427,29 @@ functions:
       manager+0xc, unlocks manager+0, and returns the byte zero-extended in
       r0. No deliberate deviations: the existing LazyHandleManager and Mutex
       ports supply the verified layout and call boundaries.
+  - address: 0x081bac38
+    ghidra: FUN_081bac38
+    name: segment_index_bounds
+    size: 80
+    sig: "void segment_index_bounds(u32 *bounds, void *context, u32 index)"
+    module: util/segment_index_bounds
+    status: ported
+    renames:
+      param_1/r0: bounds
+      param_2/r1: context
+      param_3/r2: index
+      "context+0xec": bounds_provider
+      "bounds_provider+0x80": default_bounds
+      "context+0x1e4": segment_count
+      FUN_081bad78: resolve_segment_index_offset
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte A32 body
+      0x081bac38..0x081bac84; the next real function begins at 0x081bac88.
+      A full-image aligned A32 decode finds exactly three inbound plain bl
+      sites (0x081babf4, 0x081bad34, and 0x081bafa8), no predicated bl
+      forms, and two outbound plain bl calls to 0x081bad78. It copies the
+      provider's four default bounds then, when segment_count is at least
+      two, replaces bounds[0] and bounds[2] with resolved offsets for index
+      and wrapping index + 1. The unported resolver is an explicit
+      address-named seam: ARM calls retailOS at 0x081bad78 while host tests
+      install a recorder.
