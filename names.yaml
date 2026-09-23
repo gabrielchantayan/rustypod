@@ -132162,3 +132162,37 @@ functions:
       than explicitly placing selector on the stack; the target ABI preserves
       the same call arguments. Host tests cover equal-selector preservation
       and zero-selector release through the fixed target-width offsets.
+
+
+  # --- record-manager current-record status at vtable +0x6c ---
+  - address: 0x081c85c4
+    ghidra: FUN_081c85c4
+    name: record_manager_current_record_status_6c_failed
+    size: 128
+    sig: "u32 record_manager_current_record_status_6c_failed(void *record_manager, u32 status, u32 selector)"
+    module: app/record_manager
+    status: ported
+    renames:
+      param_1/r0: record_manager
+      param_2/r1: status
+      param_3/r2: selector
+      "record_manager+0xa0c": registration_owner
+      FUN_081d9698: selector_pair_init
+      FUN_081d96a0: registration_handle_init
+      FUN_0829e1b4: current_record_handle
+      FUN_081d9734: registration_handle_destroy
+    notes: >-
+      Raw osos.dec words establish the exact 128-byte A32 extent
+      0x081c85c4..0x081c8643; the next independently linked function begins
+      at 0x081c8644. It has four plain unconditional BL calls
+      (0x081d9698, 0x081d96a0, 0x0829e1b4, and 0x081d9734) and zero
+      predicated BL calls. It initializes selector {selector, 0}, creates a
+      kind-2 registration at record_manager+0xa0c, gets the selected record,
+      and returns one when that record is absent or its vtable slot +0x6c
+      returns nonzero for status; it always destroys the registration. On
+      64-bit hosts, Rust deliberately copies the temporary registration to a
+      three-word target-layout view before lookup and uses a host dispatch
+      seam because target vtable words cannot hold host function pointers.
+      Firmware retains the native layout and indirect dispatch. Host tests
+      cover absent selected records plus zero and nonzero dispatch results,
+      including preservation of the status argument.
