@@ -95470,6 +95470,27 @@ functions:
       preservation of every other field, and the no-dereference
       NULL-child path.
 
+  - address: 0x0814d2a8
+    ghidra: FUN_0814d2a8
+    name: mov_atom_node_get_dup_chain
+    size: 8
+    sig: "u32 mov_atom_node_get_dup_chain(const MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_1_plus_0x08: dup_chain
+    notes: >-
+      Raw ARM establishes the exact eight-byte extent
+      0x0814d2a8..0x0814d2b0: ldr r0,[r0,#8]; bx lr. The separately linked
+      next function begins at 0x0814d2b0. Decoding every ARM B/BL word in
+      osos.dec finds exactly three direct call sites, all unconditional plain
+      bl: 0x081c217c, 0x081c3064, and 0x081f3b08; zero predicated BL forms.
+      This leaf returns the MOV atom node's duplicate-fourcc chain as its
+      target-width word at +0x08. No NULL guard: stock faults on the load.
+      Deliberate codegen deviation: LLVM adds a standard frame around the
+      same volatile load; the AAPCS result and memory access are unchanged.
+
   - address: 0x0814d2b0
     ghidra: FUN_0814d2b0
     name: mov_atom_node_init
