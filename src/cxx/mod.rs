@@ -247,6 +247,7 @@ pub mod selector_item_base;
 pub mod shared_cell;
 pub mod shared_payload_select_kind;
 pub mod shared_payload_result_word;
+pub mod shared_payload_nested_result_word;
 pub mod shared_handle_initialize;
 pub mod shared_cell_field_copy;
 pub mod shared_record_construct;

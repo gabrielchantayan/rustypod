@@ -20,14 +20,14 @@ pub struct SharedPayloadSlot {
 
 #[repr(C)]
 pub struct SharedPayload {
-    _prefix: [u32; 16],
-    result: *const SharedPayloadResult,
+    pub(crate) _prefix: [u32; 16],
+    pub(crate) result: *const SharedPayloadResult,
 }
 
 #[repr(C)]
 pub struct SharedPayloadResult {
-    _prefix: [u32; 5],
-    value: u32,
+    pub(crate) _prefix: [u32; 5],
+    pub(crate) value: u32,
 }
 
 /// Returns the result word for a ready shared payload.
