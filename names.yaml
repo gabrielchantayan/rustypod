@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08198c28
+    ghidra: FUN_08198c28
+    name: event_uses_alternate_handler
+    size: 40
+    sig: "u32 event_uses_alternate_handler(const void *context, const u8 *event)"
+    module: app/event_uses_alternate_handler
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: event
+      "context+0xc8": alternate_handler
+      "event+2": event_kind
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body
+      0x08198c28..0x08198c4c; 0x08198c50 begins the next real function.
+      It loads context+0xc8, short-circuits on zero, then returns the
+      unsigned predicate (event[2] - 6) >= 12. Therefore event kinds 0..5
+      and 18..255 select the alternate handler, while 6..17 do not. The
+      assigned body contains no plain or predicated bl instructions; an
+      independent full-image reference count finds three inbound plain bl
+      sites and no predicated inbound bl forms. Ghidra reports the same
+      conditional structure. Deliberate deviation: Rust uses volatile reads
+      and ordinary valid host pointers rather than firmware-address objects.
+
   - address: 0x081bb69c
     ghidra: FUN_081bb69c
     name: u32_pair_store
