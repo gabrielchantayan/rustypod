@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d28f4
+    ghidra: FUN_081d28f4
+    name: byte_state_construct
+    size: 32
+    sig: "u8 *byte_state_construct(u8 *object, u8 initial_byte)"
+    module: app/byte_state_construct
+    status: ported
+    renames:
+      param_1/r0: object_then_embedded_state
+      param_2/r1: initial_byte
+      FUN_081f72d0: embedded_state_construct
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte extent
+      0x081d28f4..0x081d2913: `push {r4,lr}; strb r1,[r0],#8; bl
+      0x081f72d0; sub r0,r0,#8; mov r2,#0; str r2,[r0,#0x4c]; str
+      r2,[r0,#0x50]; pop {r4,pc}`. The next real function starts at
+      0x081d2914 with `push {r4,lr}`. This function has one outbound plain
+      unconditional BL and no predicated BL forms. Its three inbound direct
+      call sites are also plain unconditional BL and none is predicated. It
+      stores the initial byte, constructs the embedded state at +8, clears
+      the two trailing words through the constructor's rebased return pointer,
+      and returns the enclosing object. The embedded constructor has no
+      recovered semantic identity, so target builds call 0x081f72d0 and host
+      tests use a narrow callback seam; this is the sole deliberate deviation.
   - address: 0x081d5c14
     ghidra: FUN_081d5c14
     name: resource_slot_acquire
