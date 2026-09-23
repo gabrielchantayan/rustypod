@@ -26403,6 +26403,29 @@ functions:
       image, so the name records only the verified literals. A missing
       singleton still faults at the unguarded vtable load, matching stock.
 
+  - address: 0x08172c44
+    ghidra: FUN_08172c44
+    name: class6000_property_60bc_u16
+    size: 36
+    sig: "u16 class6000_property_60bc_u16(void *store)"
+    module: app/class6000_property_60bc_u16
+    status: ported
+    renames:
+      param_1: store
+      uVar1: property_value
+    notes: >-
+      Raw extent is 36 bytes: `push {r4,lr}; ldr r1,[r0]; mov r2,#0x6000;
+      ldr r3,[r1,#0xdc]; add r1,r2,#0xbc; blx r3; lsl r0,r0,#16;
+      lsr r0,r0,#16; pop {r4,pc}`, through 0x08172c64. The next real
+      function begins at 0x08172c68. Decoding every immediate ARM B/BL word
+      in osos.dec finds exactly 3 direct call sites (0x08223010, 0x08226c90,
+      0x082395ac), all plain unconditional bl instructions; no predicated bl
+      calls target this entry. It dispatches vtable slot +0xdc as `(store,
+      0x60bc, 0x6000, slot_address)` and zero-extends the u16 result. Neither
+      property nor slot semantics are established, so the name retains the
+      verified class and literal. Rust represents the indirect blx as a typed
+      call while preserving its arguments and low-sixteen-bit result.
+
   - address: 0x08172124
     ghidra: FUN_08172124
     name: instance_of_class_6000
