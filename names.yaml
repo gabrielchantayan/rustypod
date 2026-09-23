@@ -130933,3 +130933,32 @@ functions:
       length using ARM wrapping addition. Rust uses the existing verified
       mov_chain_table_load_span seam and word indices so 32-bit firmware
       fields retain their offsets on 64-bit hosts; no behavioral deviation.
+  - address: 0x081e4374
+    ghidra: FUN_081e4374
+    name: selection_mode_validate
+    size: 88
+    sig: "u32 selection_mode_validate(void *state, ModeSelectionReader *reader)"
+    module: app/selection_mode_validate
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: reader
+      "reader->vtable+0x08": read_mode
+      "state+0x1078": selected_mode_index
+      FUN_081e5100: find_selection_mode
+    notes: >-
+      Raw A32 decoding establishes the exact 88-byte body
+      0x081e4374..0x081e43cb; push {r3,r4,r5,r6,r7,lr} at 0x081e43cc begins
+      the next real function. The body has one unconditional direct bl to
+      FUN_081e5100, no predicated direct bl forms, and one unconditional
+      virtual blx through reader vtable slot +0x08. Whole-image branch-word
+      decoding finds three inbound direct calls, all unconditional bl at
+      0x081e34f8, 0x081e368c, and 0x081e37e0; no predicated inbound bl forms.
+      The vtable call writes a byte: 0 and 1 select the corresponding lookup
+      mode, while every other byte returns error 3. FUN_081e5100 is
+      independently verified to scan state+0x128e records of stride 0x50 up
+      to state+0x1080, writing the first matching index to state+0x1078;
+      either an invalid byte or a nonzero lookup result returns 3. On-device
+      the Rust port calls this identified but unported callee at 0x081e5100;
+      its replaceable host seam exists only because firmware addresses cannot
+      be executed by host tests.
