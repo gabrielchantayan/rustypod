@@ -18,6 +18,7 @@ pub mod application_global_slot_is_clear;
 pub mod anchor_identifier_find;
 pub mod context_dispatch_and_register_if_idle;
 pub mod context_lifecycle_rearm;
+pub mod context_lifecycle_slot_0x2c;
 pub mod application_string_registry;
 pub mod callback_queue_entry_destruct;
 pub mod animation;

@@ -636,6 +636,34 @@ functions:
       mutex_lock are ported direct calls. The 0x0814b4b4 callee has no names.yaml
       entry, so target builds call its verified address and host tests use a narrow
       role-based seam. No behavioral deviations.
+  - address: 0x081f0270
+    ghidra: FUN_081f0270
+    name: context_lifecycle_slot_0x2c_dispatch
+    size: 80
+    sig: "u32 context_lifecycle_slot_0x2c_dispatch(u8 *context)"
+    module: app/context_lifecycle_slot_0x2c
+    status: ported
+    renames:
+      param_1/r0: context
+      param_1_plus_0x48/r0: lifecycle_object
+      param_1_plus_0x50/r0: lifecycle_guard
+      lifecycle_object_vtable_plus_0x2c/r1: lifecycle_slot_0x2c
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x081f0270..0x081f02c0: the push at 0x081f0270 is followed by a
+      lock of context+0x50; a NULL lifecycle object at +0x48 unlocks and
+      returns one, otherwise `blx r1` invokes its vtable slot +0x2c with
+      that object in r0, unlocks, and returns the slot result. The push at
+      0x081f02c0 starts the next separately linked function. Raw caller
+      decoding finds exactly three inbound plain BL calls at 0x0814ac50,
+      0x0814af40, and 0x0814b0a8, with zero predicated inbound forms.
+      The body has two direct plain BL calls (mutex_lock and mutex_unlock),
+      zero predicated BL calls, and one indirect BLX. The physical
+      target-width vtable dispatch is retained on target; host builds use a
+      widened callback seam because host pointers cannot occupy the
+      firmware's four-byte +0x48 field. No target behavioral deviations.
   - address: 0x082ab20c
     ghidra: FUN_082ab20c
     name: pair_header_element_array_copy_construct
