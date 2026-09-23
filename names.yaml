@@ -130379,3 +130379,35 @@ functions:
       dispatch. It allocates and constructs a 12-byte owned-byte queued
       message, posts it with no_wait=1 and zero reply/flags, collapses a
       nonzero post result to one, and releases the envelope on failure.
+
+  - address: 0x081f7154
+    ghidra: FUN_081f7154
+    name: seven_unit_window_bounds
+    size: 64
+    sig: "void seven_unit_window_bounds(const u32 *value, u32 span, u32 bounds[2])"
+    module: util/seven_unit_window_bounds
+    status: ported
+    renames:
+      param_1/r0/r4: value
+      param_2/r1/r7: span
+      param_3/r2/r5: bounds
+      uVar2/r0: lower_bound
+      iVar1/r1: remainder
+      FUN_08079a14: udivmod_by_seven_remainder
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 extent
+      0x081f7154..0x081f7193; the push at 0x081f7194 begins the next real
+      function. The body has one outbound unconditional BL to the seven-divider
+      wrapper at 0x08079a14 and no predicated BL instructions. Independent
+      whole-image A32 B/BL decoding finds three inbound plain BL callers at
+      0x081f6ffc, 0x081f7028, and 0x081f7060, with zero predicated inbound BL
+      forms. It retains value % 7 from the helper's r1 result, computes
+      value - (remainder - span), backs the result down seven when the second
+      value load is below it, then stores that bound and bound + 7. Rust calls
+      __rt_udivmod directly because its out-pointer models the helper's r1
+      remainder; volatile loads deliberately preserve the retail body's two
+      separate value reads. match.py exits 1 with the expected larger stack
+      frame for the remainder out-pointer and an stm for paired stores, while
+      retaining the divide call, second load, conditional seven-unit backup,
+      and paired bound writes.
