@@ -25,6 +25,7 @@ pub mod visible_range_recompute;
 pub mod active_service_handler_readiness;
 pub mod service_handler_context_readiness;
 pub mod action_context_readiness;
+pub mod global_readiness_gate;
 pub mod object_activate_until_query_matches;
 pub mod playback_position_get;
 pub mod showcase_clear_timer_slots;

@@ -139610,3 +139610,26 @@ functions:
       caller now uses the port rather than its removed helper seam. match.py
       reports the same guarded virtual-dispatch structure with expected Rust
       seam indirections.
+  - address: 0x08087944
+    ghidra: FUN_08087944
+    name: global_readiness_gate_is_ready
+    size: 48
+    sig: "u32 global_readiness_gate_is_ready(void)"
+    module: app/global_readiness_gate
+    status: ported
+    renames:
+      DAT_08087970: global_readiness_gate_word (0x089caed0)
+      FUN_08149078: global_readiness_predicate
+    notes: >-
+      Raw osos.dec words establish the 48-byte extent 0x08087944..0x08087973:
+      `popne {r4,pc}` at 0x08087964 is followed by the zero return and
+      `pop {r4,pc}`, then the 0x089caed0 literal-pool word at 0x08087970;
+      0x08087974 begins the next real function. The body has one outbound
+      plain BL, to 0x08149078, and
+      no predicated BL instructions. Full-image A32 decoding finds three
+      inbound plain BL calls and no predicated forms. It loads the runtime
+      gate word at 0x089caed0, returns zero when the word is zero, otherwise
+      invokes the unported 0x08149078 predicate and normalizes its nonzero
+      result to one. Rust calls the target predicate through its fixed address
+      and uses host seams for the runtime word and predicate; no subsystem
+      identity is inferred.
