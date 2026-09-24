@@ -27566,6 +27566,31 @@ functions:
       release-dispatch tail all survive; expected differences are the
       seam load/blx for the async branch and LLVM's register allocation.
 
+  - address: 0x081032fc
+    ghidra: FUN_081032fc
+    name: object_process_request
+    size: 64
+    sig: "void object_process_request(void *object, void *request)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: request
+      FUN_0810301c: firmware_object_process_request (unported boundary)
+      FUN_0828a0a4: object_sequence_id_assign
+    notes: >-
+      Raw osos.dec words establish the 64-byte body from 0x081032fc through
+      0x08103338; the next independently linked function begins at 0x0810333c.
+      It increments the activity word at object +0x34, clears the byte at
+      +0x5a, calls unported 0x0810301c with object and request, assigns a
+      sequence id to the nested object at +0x24 through 0x0828a0a4, then
+      decrements the current activity word. A complete ARM B/BL word scan
+      finds three direct unconditional inbound BL calls
+      (0x08178ac8/0x0828b67c/0x0828b888) and no predicated BL forms. The
+      unrecognized 0x0810301c remains a volatile host-test seam whose target
+      default calls its verified firmware address; no callee identity is
+      invented.
+
   - address: 0x08103400
     ghidra: FUN_08103400
     name: message_arena_pool
