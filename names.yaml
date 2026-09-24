@@ -138225,3 +138225,32 @@ functions:
       virtually dispatched. The port is an inline-never forwarding symbol
       rather than an alias, preserving a separately hookable target; its
       normal Rust call is the deliberate tail-branch representation deviation.
+  - address: 0x080d7038
+    ghidra: FUN_080d7038
+    name: ordinal_day_to_month_day
+    size: 108
+    sig: "void ordinal_day_to_month_day(OrdinalDayRecord *record)"
+    module: time/ordinal_day_to_month_day
+    status: ported
+    renames:
+      param_1/r0/r6: record
+      r4: remaining_days
+      r5: month_index
+      DAT_080d70a4: days_in_month_table (0x089caaa0)
+      FUN_08074410: proleptic_gregorian_leap_year
+    notes: >-
+      Raw osos.dec establishes the 108-byte executable extent
+      0x080d7038..0x080d70a3; 0x080d70a4 is the one-word literal pointer
+      0x089caaa0 and 0x080d70a8 begins the next independently entered
+      function. The complete extent including the literal is 112 bytes. The
+      body has one plain direct BL to FUN_08074410 and no predicated BL
+      forms. Full A32 call-site decoding finds two plain direct callers and
+      one predicated direct caller (bleq at 0x080674ac). The function converts
+      a zero-based ordinal day in the target-layout scratch record into
+      one-based month/day fields, consuming
+      28 instead of the table's 29-day February when its decoded Gregorian
+      leap predicate says the year is common. The scatterloaded RAM table is
+      outside osos.dec; the port uses its recovered [31,29,31,...] contents.
+      FUN_08074410 lacks a names.yaml entry, so the port calls the existing
+      equivalent is_leap_year implementation rather than creating an
+      unverified seam for that address.
