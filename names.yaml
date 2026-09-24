@@ -14337,6 +14337,29 @@ functions:
       then tail-branches to ported mutex_unlock @ 0x0807f6a0. Deliberate
       deviations: the tail branch is a return-position call and the
       mutex is volatile-copied before locking so LLVM preserves the pair.
+  - address: 0x0807697c
+    ghidra: FUN_0807697c
+    name: mqueue_receive_wait_wrapper
+    size: 36
+    sig: "u32 mqueue_receive_wait_wrapper(QueuePool *pool)"
+    status: identified
+    notes: >-
+      Raw ARM establishes the 36-byte A32 body 0x0807697c..0x0807699f:
+      `push {lr}`, allocate 20 bytes, call the ported
+      mqueue_receive_wait @ 0x0807a2e8 with r1=sp+4 and r2=sp, then load
+      r0 from sp+8 and finally sp+16 before returning. The push at
+      0x080769a0 starts the next independent function. A full-image A32
+      scan finds three unconditional direct BL callers (0x080aac64,
+      0x0812c3f8, and 0x082280d4) and zero predicated BL callers. The sole
+      outbound BL is to mqueue_receive_wait.
+
+      This cannot be faithfully ported: mqueue_receive_wait/mqueue_deliver
+      writes the output-node word at sp and message words at sp+4/sp+8; no
+      instruction writes sp+16 before it is returned in r0. The r0 result is
+      therefore an uninitialized stack word despite callers dereferencing it.
+      No stable Rust return value or host behavioral contract can be inferred
+      without inventing semantics, so this remains identified.
+
 
   - address: 0x08087450
     ghidra: FUN_08087450
