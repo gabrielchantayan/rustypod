@@ -138606,3 +138606,30 @@ functions:
       not the map, and no decoded initialization path establishes its runtime
       contents. Therefore results for every input below 0x100 cannot be
       reproduced faithfully without inventing the missing callee behavior.
+  # --- ATA task-file status/error mapper ---
+  - address: 0x080c4950
+    ghidra: FUN_080c4950
+    name: ata_taskfile_status_error
+    size: 208
+    sig: "u32 ata_taskfile_status_error(void)"
+    module: drivers/ata_taskfile_status_error
+    status: ported
+    renames:
+      local_10: ready task-file register value
+      local_c: error task-file register value
+      FUN_080d7314: ata_taskfile_register_read
+      thunk_EXT_FUN_22001f78: iram_usec_delay_veneer
+      FUN_082bd4a8: debug_printf
+    notes: >-
+      Raw ARM establishes the exact 208-byte body
+      0x080c4950..0x080c4a20; 0x080c4a20 begins the first inline diagnostic
+      string rather than a callable entry. Full B/BL-immediate decoding finds
+      seven plain unconditional outbound BL instructions, no predicated BL
+      forms, and three unique callees: four task-file reads, two 1000-us
+      IRAM-delay veneer calls, and one debug printf. It retries each failed
+      register read once, returns success when ready bit 0 is clear, then
+      reports and priority-maps error bits 0, 6, 1, and 2|5 to 0x4c, 0x4f,
+      0x4d, 0x4e, or 0x51. Target calls the existing ports directly; host-only
+      diagnostics are a volatile seam for edge tests. match.py is structural
+      (exit 1 expected): LLVM emits separate retry paths and a fuller frame,
+      while preserving the reads, delay, report, masks, and priority.
