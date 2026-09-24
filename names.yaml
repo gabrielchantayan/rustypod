@@ -139230,3 +139230,27 @@ functions:
       inspect the next byte's class bit 0x08 and advance one or two bytes;
       other classes advance one byte when any bit in 0x0307 is set, otherwise
       returning the current byte pointer. No callee seam is required.
+  - address: 0x0809c79c
+    ghidra: FUN_0809c79c
+    name: kernel_object4_slot_delete
+    size: 76
+    sig: "u32 kernel_object4_slot_delete(u32 *slot)"
+    module: kernel/object4_slot_delete
+    status: ported
+    renames:
+      param_1/r0: slot
+      iVar1/r0: task_lock_result
+    notes: >-
+      Raw osos.dec A32 words establish the complete 76-byte extent
+      0x0809c79c..0x0809c7e8; the next real function starts at 0x0809c7ec
+      with `stmdb sp!, {r4,lr}`. The incoming slot is dereferenced without a
+      NULL guard. A zero id returns 0x1a. Otherwise the ROM task_lock veneer
+      (0x08037e48 -> 0x22003ea0) returns a lookup word; only zero and
+      0xffffffff continue through task_unlock (0x08037e50 -> 0x2200408c)
+      and kernel_op_dispatch (0x08037e40 -> 0x22003dc8) with opcode 4 and
+      the original slot pointer. A zero dispatcher result returns zero;
+      every other path returns 0x14. Raw branch decoding finds exactly three
+      plain BL calls (0x0809c7b4, 0x0809c7c8, 0x0809c7d4), zero predicated
+      BL calls, and no tail branch. The mask-ROM calls are modeled by
+      volatile hooks; this deliberate seam preserves arguments, call order,
+      the direct slot pointer, and result classification.
