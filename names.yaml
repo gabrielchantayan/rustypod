@@ -40971,6 +40971,34 @@ functions:
       displacements, so the port calls the canonical helper rather than adding
       a redundant dispatch seam. Host tests cover self-assignment and the
       distinct-slot non-final release/attach transition.
+  - address: 0x08113da8
+    ghidra: FUN_08113da8
+    name: global_adjustment_notification_post
+    size: 116
+    sig: "void global_adjustment_notification_post(void *ignored, i32 adjustment)"
+    module: app/global_adjustment_notification_post
+    status: ported
+    renames:
+      param_1/r0: ignored
+      param_2/r1/r4: adjustment
+      DAT_08113e1c: global_adjustment_state
+      DAT_08113e20: global_adjustment_work_cell
+      DAT_08113e28: global_adjustment_work
+    notes: >-
+      Raw ARM establishes the 116-byte extent
+      (0x08113da8..0x08113e1c); its seven-word literal pool follows, and
+      the next independently decoded function begins at 0x08113e38. The
+      words contain five plain BLs (0x082ab31c, 0x081bb450, 0x082ab1c8,
+      0x082ab338, and 0x081bb3a0) plus one predicated BLNE
+      (0x081bb29c), correcting Ghidra's count of three BL sites. The first
+      incoming argument is overwritten. If global state bit 0 is clear and
+      the work cell is acquired, it constructs and queues kind 0x15e then
+      releases the cell. It always submits the signed adjustment with zero;
+      a nonzero submission result invokes the final notification with one.
+      Callee semantic identities remain unrecovered, so the Rust port uses
+      verified target-address calls and host callback seams. Host tests cover
+      the unflagged post/negative adjustment path and the flagged,
+      zero-result path.
   - address: 0x0816c960
     ghidra: FUN_0816c960
     name: named_object_cache_ensure
