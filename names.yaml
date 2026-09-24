@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808ab4c
+    ghidra: FUN_0808ab4c
+    name: bit_buffer_ensure_capacity
+    size: 112
+    sig: "i32 bit_buffer_ensure_capacity(u32 *buffer, u32 required_bits, FtMemory *memory)"
+    module: util/bit_buffer_ensure_capacity
+    status: ported
+    renames:
+      param_1/r0/r4: buffer
+      param_2/r1: required_bits
+      param_3/r2/r0: memory
+      "buffer+0x04": logical_capacity_bits
+      "buffer+0x08": storage
+    notes: >-
+      Raw osos.dec gives the exact 112-byte body
+      0x0808ab4c..0x0808abb8: `pop {r1-r5,pc}` ends it, and the next
+      function begins at 0x0808abbc. The body computes ceil(bit_count/8)
+      for the requested and current logical capacities; when the former is
+      larger, it calls FreeType ft_mem_realloc @ 0x082cfc3c with item size
+      one, old byte count, and new byte count rounded up to eight. It writes
+      the returned storage word unconditionally, and commits the rounded
+      allocation capacity in bits only on zero error. A32 decoding finds one
+      outbound plain BL and no predicated outbound BL; whole-image decoding
+      finds three inbound plain BL and no predicated inbound BL calls.
+      Host uses a native FtMemory pointer in the third argument; on ARM this
+      is the same one-word ABI value. Tests cover no-grow rounding, successful
+      eight-byte growth, and allocation failure.
   - address: 0x080d4364
     ghidra: FUN_080d4364
     name: ft_smooth_render_generic

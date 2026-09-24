@@ -704,6 +704,9 @@ pub mod hints {
     // 0x6f20_0000: dedicated to util/bit_buffer_set_bit's raw-u32 byte
     // storage fixture; mappings never unmap, so no other user may share it.
     pub const BIT_BUFFER_SET_BIT: usize = 0x6f20_0000;
+    // 0x6f30_0000: dedicated to util/bit_buffer_ensure_capacity's target-width
+    // allocation fixture; mappings never unmap.
+    pub const BIT_BUFFER_ENSURE_CAPACITY: usize = 0x6f30_0000;
     // 0x9200_0000: dedicated to app/service_handler_status's raw-u32 query
     // object fixture; mappings never unmap, so no other user may share it.
     pub const SERVICE_HANDLER_STATUS_QUERY: usize = 0x9200_0000;

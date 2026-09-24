@@ -21,6 +21,7 @@ pub mod ber_tlv_encoded_size;
 pub mod bitfield;
 pub mod bit_buffer_copy;
 pub mod bit_buffer_set_bit;
+pub mod bit_buffer_ensure_capacity;
 pub mod byte_bit_set_mask;
 pub mod big_endian_word_bit_index;
 pub mod bounded_word_bit_set_contains;
