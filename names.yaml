@@ -136537,3 +136537,38 @@ functions:
       loads directly rather than inventing seams. It also retains the raw
       selector comparison and the stock signed count loop without null,
       alignment, or bounds checks.
+  - address: 0x0811371c
+    ghidra: FUN_0811371c
+    name: pending_transition_advance
+    size: 136
+    sig: "u32 pending_transition_advance(u8 *state)"
+    module: app/pending_transition_advance
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x4cc": pending_transition
+      "state+0x8d4": transition_subobject
+      DAT_081137a4: transition_blocker_base
+      "transition_blocker_base+0x10": transition_blocker
+      FUN_081d1f0c: pending_transition_readiness_predicate
+      FUN_081149f8: pending_transition_phase_advance
+      FUN_08111584: pending_transition_finalize
+      FUN_0812bf4c: transition_subobject_advance
+    notes: >-
+      Raw osos.dec establishes the exact 136-byte extent
+      0x0811371c..0x0811371ca3: the literal pool word at 0x081137a4 follows
+      the final B tail branch, and push {r4,lr} at 0x081137a8 starts the next
+      real function. Full-image A32 decoding finds two inbound unconditional
+      plain BL sites (0x08112eb4 and 0x08116fa8) and one predicated BL site
+      (0x084d066c). The body has four unconditional direct BL instructions
+      (0x081d1f0c, 0x081149f8 twice, and 0x08111584), no predicated direct BL
+      instructions, and two B tail branches. It returns zero for a clear
+      pending byte at +0x4cc. Otherwise a false readiness result or nonzero
+      global blocker advances phase 0x2c and, on success, tail-dispatches the
+      +0x8d4 subobject; a ready unblocked state advances 0x2d, finalizes,
+      clears the pending byte, and tail-dispatches phase 0x2e. The callees
+      have no recovered semantic identities, so ARM Rust calls their verified
+      retail addresses and host tests use ABI seams. Deliberate deviations:
+      Rust uses ordinary calls rather than the two ARM tail branches; LLVM
+      emits indirect BLX calls for the fixed-address callees, so match.py
+      reports a structural diff despite preserving the observed control flow.
