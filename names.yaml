@@ -139751,3 +139751,36 @@ functions:
       0x081670ac), no predicated bl callers, and no calls in this leaf. The
       returned value is normalized to one only when the aligned input word is
       zero. No deliberate deviations.
+  # --- Opaque lazy static object ---
+  - address: 0x08086d78
+    ghidra: FUN_08086d78
+    name: lazy_static_object_08a762a0_get
+    size: 88
+    sig: "u8 *lazy_static_object_08a762a0_get(void)"
+    module: app/lazy_static_object_08a762a0
+    status: ported
+    renames:
+      DAT_08086dc0: lazy_static_object_08a762a0_guard (0x089caf38)
+      DAT_08086dc4: lazy_static_object_08a762a0 (0x08a762a0)
+      DAT_08086dc8: dso_handle (0x089ca09c)
+      DAT_08086dcc: opaque_static_object_destructor_word (0x0815d908)
+      FUN_081687a0: lazy_static_object_08a762a0_constructor (unported)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes the true 88-byte extent: 72 bytes of code
+      from 0x08086d78 through `pop {r4,pc}` at 0x08086dbc, followed by the
+      four-word literal pool 0x08086dc0..0x08086dcc; the next real function
+      starts at 0x08086dd0. A32 decoding finds four outbound plain BL calls
+      (cxa_guard_acquire, unported constructor 0x081687a0, cxa_atexit, and
+      cxa_guard_release), no predicated BL calls, and three inbound plain BL
+      callers (0x0808cd5c, 0x0813afe8, 0x081e2360), with no predicated
+      callers. It is an ADS local-static accessor for opaque storage
+      0x08a762a0: test guard bit zero, acquire, construct, register the
+      constructor result with the common dso handle, release, then return the
+      fixed storage address. The class identity is not inferred. The unported
+      constructor is a seam; its direct stores prove only a 40-byte minimum
+      storage extent. The literal destructor word 0x0815d908 is an instruction
+      inside another function rather than an entry, so Rust deliberately
+      registers a no-op callback.
