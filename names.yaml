@@ -137000,3 +137000,27 @@ functions:
       releases the message, then clears +0x24. Rust uses a volatile host seam
       for the unported helper and native-width host vtables; ARM builds call
       0x081d71b0 and retain the observed release slot.
+  - address: 0x08104974
+    ghidra: FUN_08104974
+    name: opaque_result_owner_destroy
+    size: 32
+    sig: "OpaqueResultOwner *opaque_result_owner_destroy(OpaqueResultOwner *this)"
+    module: cxx/opaque_result_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_08104994: opaque_result_owner_vtable (0x08980a08)
+      FUN_08277484: string_object_destroy
+      FUN_082679f8: opaque_result_destroy
+    notes: >-
+      Raw osos.dec establishes the eight-instruction, 32-byte body at
+      0x08104974..0x08104993: `ldr r1,[pc,#24]; push {r4,lr}; str
+      r1,[r0],#0x5c; bl 0x08277484; sub r0,r0,#0x54; bl 0x082679f8; sub
+      r0,r0,#8; pop {r4,pc}`. The literal pool is 0x08104994; the next real
+      function begins at 0x08104998 with `ldrb r0,[r0,#0x34]`. The body has
+      two plain direct BL calls and zero predicated direct BL calls. It writes
+      vtable 0x08980a08, destroys the trailing StringObject at +0x5c, then the
+      embedded OpaqueResult at +0x08, and returns the original owner. The
+      owner type and vtable remain unidentified, so the structural name makes
+      no stronger identity claim. Rust models the target vtable literal as
+      usize for the host while repr(C) retains the ARM layout.
