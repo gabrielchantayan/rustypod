@@ -140344,3 +140344,39 @@ functions:
       changes no state, and returns its incoming r0 unchanged. The target
       port emits the original naked bx lr; host tests explicitly return the
       input word to verify this ABI-visible behavior.
+
+
+  # --- RTC nested-context +0xb1c setter (time/rtc) ---
+  - address: 0x08066cf0
+    ghidra: FUN_08066cf0
+    name: rtc_context_set_b1c_halfword
+    size: 40
+    sig: "void rtc_context_set_b1c_halfword(RtcContextOwner *owner, u16 value)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      "owner+0xf00": rtc_context
+      "rtc_context+0xb1c": opaque_halfword
+      "0x089ca58c+0x4": rtc_context_b1c_mirror
+      FUN_0805e66c: rtc_context_mark_dirty
+    notes: >-
+      Raw osos.dec words at 0x08066cf0 establish the exact 40-byte body
+      through bx lr at 0x08066d14; 0x08066d18 is its literal pool word
+      0x089ca58c and the next real function begins at 0x08066d1c. Independent
+      ARM B/BL decoding finds three unconditional plain BL callers
+      (0x0812f3c4, 0x0812f434, 0x08171688), no predicated BL callers, and one
+      unconditional B tail caller (0x0825b730). The function loads the nested
+      context from owner+0xf00, compares its u16 at +0xb1c, then only on a
+      change mirrors the u16 to 0x089ca590, stores it in the context, and
+      tail-branches to rtc_context_mark_dirty @ 0x0805e66c. The field's
+      product meaning is unrecovered. Deliberate deviations: target builds
+      access the live mirror address while host builds use a private mirror;
+      Rust calls the ported dirty marker rather than preserving the retail
+      tail branch. Host test covers equal values preserving the mirror and
+      dirty byte, plus a changed value's little-endian store, mirror, and
+      dirty transition. match.py structural (exit-1 diff expected): the same
+      owner load, halfword comparison, conditional mirror/context stores, and
+      dirty path; expected differences are the frame, materialized +0xb1c
+      offset, and direct Rust tail-call target.

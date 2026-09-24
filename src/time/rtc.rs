@@ -152,6 +152,60 @@ pub unsafe extern "C" fn rtc_context_set_configuration_byte(
     }
     1
 }
+
+/// Mirror word's halfword at `0x089ca58c + 4`, updated with the nested RTC
+/// context's +0xb1c halfword.
+#[cfg(target_os = "none")]
+const RTC_CONTEXT_B1C_MIRROR_ADDRESS: usize = 0x089c_a590;
+
+#[cfg(not(target_os = "none"))]
+static mut RTC_CONTEXT_B1C_MIRROR: u16 = 0;
+
+#[inline(always)]
+unsafe fn rtc_context_b1c_mirror() -> *mut u16 {
+    #[cfg(target_os = "none")]
+    {
+        RTC_CONTEXT_B1C_MIRROR_ADDRESS as *mut u16
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(RTC_CONTEXT_B1C_MIRROR)
+    }
+}
+
+/// rtc_context_set_b1c_halfword — original: `FUN_08066cf0` @ `0x08066cf0`
+/// (40 bytes; next real function begins at `0x08066d1c`; 3 verified direct
+/// plain `bl` call sites, no predicated `bl` call sites, and one direct `b`
+/// tail caller).
+///
+/// Load the nested RTC context through the owner's +0xf00 word and compare its
+/// unsigned halfword at +0xb1c with `value`. If it changed, mirror `value` to
+/// the halfword at `0x089ca590`, store it in the context, and mark that context
+/// dirty. Raw words `e5902f00 e2822c0b e1d231bc e1530001 159f3010 e1c310b4
+/// e1c211bc 15900f00 1affde55 e12fff1e` establish the exact body and its
+/// predicated stores/tail branch.
+///
+/// Deliberate deviation: the retail `bne` tail branch to
+/// [`rtc_context_mark_dirty`] becomes a direct Rust call; the +0xb1c field's
+/// product meaning remains unrecovered, so this uses an offset rather than a
+/// speculative layout field.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_set_b1c_halfword(
+    owner: *mut RtcContextOwner,
+    value: u16,
+) {
+    let context = unsafe { (*owner).rtc_context.cast_mut().cast::<u8>() };
+    let field = unsafe { context.add(0xb1c).cast::<u16>() };
+    if unsafe { field.read() } == value {
+        return;
+    }
+    unsafe {
+        rtc_context_b1c_mirror().write(value);
+        field.write(value);
+        rtc_context_mark_dirty(context.cast());
+    }
+}
 /// Byte offset of the opaque eight-byte context field returned by the stock
 /// source accessor.
 const RTC_CONTEXT_FIELD_OFFSET: usize = 0x38;
@@ -303,6 +357,7 @@ pub unsafe extern "C" fn build_unix_time(
     seed_hi: u32,
 ) -> i32 {
     unsafe fn store_unix_time(out: *mut u32, days: u32, secs: u32) {
+
         let seconds = (days as i32)
             .wrapping_add(-2_440_588)
             .wrapping_mul(675)
@@ -356,6 +411,9 @@ mod tests {
 
     /// Serializes host seams for FUN_080561a4's stock context getter.
     static CONTEXT_FIELD_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serializes tests that inspect the host model of the +0xb1c mirror.
+    static RTC_CONTEXT_B1C_MIRROR_LOCK: Mutex<()> = Mutex::new(());
     static mut MOCK_CONTEXT: *mut u8 = core::ptr::null_mut();
 
     unsafe extern "C" fn mock_current_context() -> *mut u8 {
@@ -769,6 +827,51 @@ mod tests {
         assert_eq!(context.reserved_to_configuration_byte, [0x3c; 0x4b]);
         assert_eq!(context.reserved_to_dirty, [0x21; 0x1f]);
         assert_eq!(context.reserved, [0x5a; 0x0c]);
+        assert_eq!(owner.reserved, [0x19; 0xf00]);
+    }
+
+    #[test]
+    fn rtc_context_set_b1c_halfword_mirrors_and_marks_only_changes() {
+        let _lock = RTC_CONTEXT_B1C_MIRROR_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut context = RtcContext {
+            reserved: [0x5a; 0x0c],
+            handle: 0xfeed_beef,
+            reserved_to_status: [0xa5; 0xb14],
+            status: 0x7f,
+            reserved_to_configuration_byte: [0x3c; 0x4b],
+            configuration_byte: 0x80,
+            reserved_to_dirty: [0x21; 0x1f],
+            dirty: 0x6d,
+        };
+        let mut owner = RtcContextOwner {
+            reserved: [0x19; 0xf00],
+            rtc_context: (&mut context as *mut RtcContext).cast_const(),
+        };
+        let field = unsafe {
+            core::ptr::addr_of_mut!(context)
+                .cast::<u8>()
+                .add(0xb1c)
+                .cast::<u16>()
+        };
+        let mirror = unsafe { rtc_context_b1c_mirror() };
+
+        unsafe {
+            field.write(0x1234);
+            mirror.write(0xabcd);
+            rtc_context_set_b1c_halfword(&mut owner, 0x1234);
+        }
+        assert_eq!(unsafe { field.read() }, 0x1234);
+        assert_eq!(unsafe { mirror.read() }, 0xabcd);
+        assert_eq!(context.dirty, 0x6d);
+
+        unsafe { rtc_context_set_b1c_halfword(&mut owner, 0xbeef) };
+        assert_eq!(unsafe { field.read() }, 0xbeef);
+        assert_eq!(unsafe { mirror.read() }, 0xbeef);
+        assert_eq!(context.dirty, 1);
+        assert_eq!(&context.reserved_to_status[0xb0c..0xb0e], &[0xef, 0xbe]);
+        assert_eq!(context.reserved_to_dirty, [0x21; 0x1f]);
         assert_eq!(owner.reserved, [0x19; 0xf00]);
     }
 
