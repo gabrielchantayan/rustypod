@@ -354,3 +354,4 @@ pub mod xml_skip_whitespace;
 
 pub mod context_namespace_provider_at;
 pub mod input_dispatch;
+pub mod resource_selector_record;
