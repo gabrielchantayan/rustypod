@@ -674,3 +674,4 @@ pub mod message_selector_read;
 pub mod retail_control_profile_apply;
 pub mod initializer_profile_dispatch;
 pub mod guarded_global_index_transform;
+pub mod string_pointer_list_join;
