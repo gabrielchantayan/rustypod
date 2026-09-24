@@ -11310,6 +11310,36 @@ functions:
       retail address. The FixA description derives only from the verified
       literal, not an inferred subsystem identity.
 
+  # --- fixed-length byte range equality predicate ---
+  - address: 0x0805d000
+    ghidra: thunk_FUN_0805d018
+    name: byte_ranges_equal
+    size: 40
+    sig: "u32 byte_ranges_equal(const u8 *first, const u8 *second, u32 len)"
+    module: libc/byte_ranges_equal
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: len
+      FUN_0805d018: byte_ranges_equal_loop
+    notes: >-
+      Raw osos.dec words at 0x0805d000 are ea000004 e4d03001 e4d1c001
+      e153000c 13a00000 112fff1e e2522001 2afffff8 e3a00001 e12fff1e.
+      The four-byte Ghidra thunk branches to 0x0805d018, which first tests
+      and decrements len then enters the internal byte-load block at
+      0x0805d004; that loop compares exactly len bytes, returns zero at the
+      first mismatch, and returns one for equal ranges, including len zero
+      without loads. 0x0805d028 begins memh_handle_destroy, establishing
+      the true shared extent as 40 bytes. Decoding every aligned ARM B/BL
+      immediate in osos.dec found exactly three inbound plain bl callers
+      (0x08047970, 0x080c5b8c, 0x080ce6c4) and zero predicated bl callers.
+      Deliberate deviation: Rust expresses the thunk and internal loop as one
+      direct function and uses volatile byte reads so LLVM cannot replace the
+      comparison with a libc builtin. #[inline(never)] retains a distinct BL
+      target; match.py against Ghidra's erroneous four-byte extent reports
+      the expected structural difference.
+
   - address: 0x0805d028
     ghidra: FUN_0805d028
     name: memh_handle_destroy
