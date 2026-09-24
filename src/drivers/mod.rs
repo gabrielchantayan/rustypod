@@ -65,6 +65,7 @@ pub mod status_gate_ready;
 pub mod storage_buffer_extent;
 pub mod storage_device_get;
 pub mod storage_backend_prepare;
+pub mod storage_backend_sector_size;
 pub mod stream_buffer_context;
 pub mod stream_transfer;
 pub mod transfer_default_mode;

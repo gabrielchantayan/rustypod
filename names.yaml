@@ -70007,6 +70007,30 @@ functions:
       port; the unported tail target remains a fixed-address target seam on
       firmware and a replaceable host callback. Host tests cover every switch
       boundary and prove only the tail cases invoke that callback.
+  # --- retailOS storage-backend sector-size query ---
+  - address: 0x080e7064
+    ghidra: FUN_080e7064
+    name: storage_backend_sector_size
+    size: 92
+    sig: "u32 storage_backend_sector_size(u32 *output)"
+    module: drivers/storage_backend_sector_size
+    status: ported
+    renames:
+      param_1: output
+      DAT_080e70c0: storage_backend_state
+      FUN_082bc7c4: storage_backend_status
+      FUN_0836bf28: storage_backend_validate_status_2
+      FUN_08369da8: storage_backend_validate_status_3
+    notes: >-
+      Raw osos.dec confirms the 92-byte body from 0x080e7064 through
+      0x080e70bf; 0x080e70c0 is the literal pool and 0x080e70c4 begins the
+      next independently entered function. The body has three plain,
+      unconditional BL calls and no predicated BL calls: storage_backend_status,
+      then one of the two unported validators selected by status 2 or 3.
+      Other statuses write zero to output and return 0x13. Successful validation
+      returns the unsigned halfword at validated backend +0x10. Firmware calls
+      the verified retail validator addresses; host tests replace them because
+      their target-width pointers cannot be dereferenced on the host.
   # --- retailOS object counted-text install from the shared context's dotted-triple word ---
   - address: 0x08055f50
     ghidra: FUN_08055f50
