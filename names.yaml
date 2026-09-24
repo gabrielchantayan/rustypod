@@ -22738,6 +22738,28 @@ functions:
       ordinary call to the existing operator_new seam because it has no
       guaranteed tail calls.
 
+  - address: 0x080b3fbc
+    ghidra: FUN_080b3fbc
+    name: day_number_day_of_month
+    size: 20
+    sig: "u8 day_number_day_of_month(u32 day_number)"
+    module: time/day_number_day_of_month
+    status: ported
+    renames:
+      param_1/r0: day_number
+      uStack_10/sp: datetime_scratch
+    notes: >-
+      Raw osos.dec establishes the exact five-instruction, 20-byte extent
+      0x080b3fbc..0x080b3fd0: `push {r1-r3,lr}; mov r1,sp; bl 0x0807eafc;
+      ldrb r0,[sp,#3]; pop {r2,r3,pc}`. The next real entry begins at
+      0x080b3fd0 with a `ldr r0,[pc,#0]; bx r0` veneer. The body has one
+      plain BL and no predicated BL; decoding every raw ARM branch finds
+      three plain inbound BL sites (0x08140fb4, 0x08141468, 0x081ca678)
+      and no predicated inbound BL. It passes an uninitialized stack
+      DateTime record to existing FUN_0807eafc then returns the record's +3
+      day byte. Deliberate deviation: MaybeUninit represents the uninitialized
+      scratch record, and the port invokes the established volatile
+      day_number_to_datetime seam rather than its direct retailOS BL.
   - address: 0x080c6080
     ghidra: FUN_080c6080
     name: mov_atom_node_destroy
