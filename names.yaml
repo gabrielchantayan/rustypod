@@ -136974,3 +136974,29 @@ functions:
       veneer path. Host tests cover already-ready objects with NULL and
       zero-handle semaphore cells; the zero ready state deliberately blocks
       until a condvar wake, as in retailOS.
+  - address: 0x081055f0
+    ghidra: FUN_081055f0
+    name: iap_incoming_process_clear_pending_message
+    size: 64
+    sig: "void iap_incoming_process_clear_pending_message(IapIncomingProcessRequest *request)"
+    module: app/iap_incoming_process_clear_pending_message
+    status: ported
+    renames:
+      param_1/r0/r4: request
+      "request+0x08": handler_index
+      "request+0x20": thread
+      "request+0x24": pending_message
+      FUN_081d71b0: unported pending-message completion helper
+      "pending_message-vtable+0x04": release
+    notes: >-
+      Raw osos.dec words establish the exact 64-byte A32 extent
+      0x081055f0..0x0810562f: `pop {r4,pc}` at 0x0810562c is the final
+      instruction and 0x08105630 begins the next real function. The body has
+      one unconditional direct BL to 0x081d71b0 and one predicated BLXNE
+      through pending_message-vtable+0x04. Independent whole-image decoding
+      finds three inbound plain BL callers (0x0810565c, 0x081056dc, and
+      0x082a9770) and zero predicated inbound forms. If request+0x24 is
+      nonzero, it calls the unported helper with request+0x20 and +0x08,
+      releases the message, then clears +0x24. Rust uses a volatile host seam
+      for the unported helper and native-width host vtables; ARM builds call
+      0x081d71b0 and retain the observed release slot.
