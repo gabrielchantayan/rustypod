@@ -138780,3 +138780,35 @@ functions:
       payload overrun. The Rust port intentionally omits the retail trace through
       FUN_0804d17c because that diagnostic has no named Rust seam; cursor state
       and status behavior are preserved.
+
+  - address: 0x080b089c
+    ghidra: FUN_080b089c
+    name: psh_dimension_append_stem_record
+    size: 160
+    sig: >-
+      i32 psh_dimension_append_stem_record(u32 *records, FtMemory *memory,
+      u32 *out_record)
+    module: ft/pshinter
+    status: ported
+    renames:
+      param_1/r4: records
+      param_2/r0: memory
+      param_3/r9: out_record
+      uVar3/r5: next_count
+      uVar1/r1: capacity
+      uVar5/r7: next_capacity
+      iVar4/r6: record
+      local_20/stack: error
+    notes: >-
+      Raw A32 words establish the 160-byte extent
+      0x080b089c..0x080b0938; the push at 0x080b093c begins the next real
+      function. It has one plain internal BL (ft_mem_realloc @ 0x082cfc3c)
+      and no predicated BL forms; binary call scanning finds three inbound
+      plain BL sites. The target-width three-word header is
+      (count, capacity, records). On exhaustion, count + 1 rounds up to an
+      eight-record capacity and ft_mem_realloc grows 16-byte records. A
+      successful append clears only record words 0 and 3, advances count,
+      and reports the record address; allocation failure reports NULL without
+      changing count or capacity. match.py confirms the grow branch,
+      realloc call, error gate, and two-word initialization structure; LLVM
+      uses a smaller frame and different register allocation.
