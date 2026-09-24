@@ -85044,6 +85044,30 @@ functions:
       (push {fp,lr} / pop {fp,pc} vs bx lr), identical to the accepted
       sibling metadata accessors at 0x0805129c/0x080512ac/0x080512c4.
 
+  # --- Packed calendar record to FAT date/time fields ---
+  - address: 0x080aacc0
+    ghidra: FUN_080aacc0
+    name: datetime_to_fat_datetime
+    size: 172
+    sig: "void datetime_to_fat_datetime(DateTime *datetime, u32 *fat_date, u32 *fat_time)"
+    module: time/datetime_to_fat
+    status: ported
+    renames:
+      param_1/r0: datetime
+      param_2/r1: fat_date
+      param_3/r2: fat_time
+    notes: >-
+      Raw ARM has a 172-byte executable body at 0x080aacc0..0x080aad6c; the
+      next separately linked function begins at 0x080aad6c. Decoding every
+      ARM B/BL word in osos.dec finds exactly three unconditional plain BL
+      callers at 0x081bd120, 0x081bd130, and 0x081bd140, with no predicated
+      BL callers or direct B tail callers. It clears only the low halfword of
+      each u32 destination, then packs DateTime second/2, minute, and hour
+      into FAT time and day, month, and wrapping year-1980 into FAT date.
+      The mask-and-merge writes preserve the destination upper halfwords;
+      the Rust port therefore retains u32 destination pointers rather than
+      reducing them to semantic u16 outputs. No deliberate deviations.
+
   # --- Macintosh epoch timestamp to local packed calendar record ---
   - address: 0x080aa95c
     ghidra: FUN_080aa95c
