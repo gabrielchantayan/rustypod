@@ -198,6 +198,7 @@ pub mod queue_refresh_and_match_kind_two;
 pub mod dynamic_array_remove;
 pub mod unique_word_array_insert;
 pub mod singly_linked_list_remove;
+pub mod singly_linked_list_unlink;
 pub mod singly_linked_list_append;
 pub mod service_manager_get;
 pub mod selector_record_address;
