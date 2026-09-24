@@ -6623,6 +6623,36 @@ functions:
       through the out pointer, and zero-on-success shape match. Reference
       C: decomp/c/003/08051400_FUN_08051400.c.
 
+  # --- entry metadata prepare-and-extract gate ---
+  - address: 0x080fe480
+    ghidra: FUN_080fe480
+    name: prepare_entry_metadata
+    size: 68
+    sig: "u32 prepare_entry_metadata(const void *owner, u32 *first, void *scratch, u32 *second)"
+    module: app/prepare_entry_metadata
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: first
+      param_3/r2: scratch
+      param_4/r3: second
+      param_1_plus_0x14: metadata
+      FUN_08051470: prepare_metadata
+      FUN_08051420: extract_metadata
+    notes: >-
+      Raw osos.dec words establish the 68-byte extent
+      0x080fe480..0x080fe4c4: the next function starts at 0x080fe4c4 with
+      `ldr r0,[r0,#4]; bx lr`. It loads owner +0x14, calls 0x08051470 with
+      scratch, returns zero on a nonzero result, then reloads owner +0x14 and
+      calls 0x08051420 with first and second. It returns one only when both
+      calls return zero. Decoding every ARM B/BL word finds exactly 3
+      unconditional BL call sites (0x0821097c, 0x082115f0, 0x082c8094), zero
+      predicated BL, and no plain-B tail callers. The helper names describe
+      only their observed contracts: 0x08051470 prepares metadata into the
+      supplied scratch storage; 0x08051420 conditionally copies metadata
+      words +0x18 and +0x1c into its two output pointers. Deliberate
+      deviation: the two unported helper calls remain direct retailOS seams.
+
   # --- opaque FreeType service metadata flag-word accessor ---
   - address: 0x080514e0
     ghidra: FUN_080514e0
