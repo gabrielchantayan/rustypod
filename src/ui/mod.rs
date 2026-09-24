@@ -88,6 +88,7 @@ pub mod candidate_is_accepted;
 pub mod object_packed_field;
 pub mod object_packed_field_ensure_one;
 pub mod plst_class_check;
+pub mod plst_task_is_active;
 pub mod plst_resource_activate;
 pub mod plst_counted_string;
 pub mod plst_file_element_create;
