@@ -135752,3 +135752,33 @@ functions:
       calls the retail target on device, and deliberately reuses the existing
       host dispatcher seam for testability. Host tests cover a non-NULL value
       and NULL forwarding; neither path releases the value.
+
+  - address: 0x08123b00
+    ghidra: FUN_08123b00
+    name: output_buffer_write_dictionary_close
+    size: 52
+    sig: "void output_buffer_write_dictionary_close(OutputBufferState *state, u32 level)"
+    module: app/output_buffer_write_dictionary_close
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: indentation level
+      FUN_08123a54: output-buffer indentation writer
+      FUN_0802f768: snprintf
+      FUN_08123c58: output-buffer C-string appender
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte A32 body
+      0x08123b00..0x08123b33. The literal "%s</dict>\n\0" occupies
+      0x08123b34..0x08123b3f, and the next real function begins at
+      0x08123b40. The body has two unconditional plain BL instructions
+      (0x08123b08 -> 0x08123a54 and 0x08123b20 -> snprintf 0x0802f768),
+      zero predicated BL instructions, and one unconditional tail B at
+      0x08123b30 -> 0x08123c58. Whole-image branch decoding finds three
+      direct incoming BL call sites, all unconditional. It writes indentation
+      for level, formats the close element into the 512-byte scratch region at
+      state+0x15, then tail-dispatches the scratch C string to 0x08123c58.
+      Ghidra incorrectly absorbs that tail target's strlen/strncat logic into
+      this wrapper. The two unported target helpers are volatile seams on host
+      and their verified firmware addresses on ARM; snprintf is called through
+      the existing Rust port. Host coverage proves level forwarding, the
+      generated close string, scratch offset, and append target.
