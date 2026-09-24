@@ -15,16 +15,18 @@
 //! `free_tag4`. Once the list is empty this routine clears the FixA word and
 //! tail-calls `free_tag4` for the owner.
 //!
-//! Deliberate deviation: the two unported direct callees remain explicit
-//! address-based dispatch boundaries. `FixA` and `FixL` are descriptions only
-//! of their verified magic words, not inferred subsystem identities; target
-//! builds invoke `0x080d21d0` and `0x080d8750`, while host tests install seams.
+//! Deliberate deviation: the now-ported validator is called directly; the
+//! unported `FixL` destructor remains an address-based dispatch boundary.
+//! `FixA` and `FixL` are descriptions only of their verified magic words, not
+//! inferred subsystem identities; target builds invoke `0x080d8750`, while host
+//! tests install its seam.
 
 use core::ptr::{addr_of, addr_of_mut};
 
+use crate::heap::fixa_validate::validate_fixa_magic;
+
 use crate::heap::veneers::free_tag4;
 
-const RETAIL_VALIDATE_FIXA: usize = 0x080d_21d0;
 const RETAIL_DESTROY_FIXL: usize = 0x080d_8750;
 
 /// Owner layout observed by `FUN_08048f48`. Pointer fields remain target-width
@@ -43,20 +45,12 @@ pub struct FixaOwner {
 
 const _: () = assert!(core::mem::size_of::<FixaOwner>() == 0x10);
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(FixaOwner, first_fixl)];
-
-/// Host replacement for the two unresolved direct callees.
+/// Host replacement for the unresolved FixL destructor.
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct FixaDestroyOps {
-    /// `FUN_080d21d0(owner)`: validates a non-NULL owner against `FixA`.
-    pub validate_fixa: unsafe extern "C" fn(owner: *mut FixaOwner) -> u32,
-    /// `FUN_080d8750(fixl)`: unlinks and releases one `FixL` node.
+    /// `FUN_080d8750(fixl)`: unlinks and releases one FixL node.
     pub destroy_fixl: unsafe extern "C" fn(fixl: *mut u8),
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_validate_fixa(_owner: *mut FixaOwner) -> u32 {
-    panic!("fixa_owner_destroy requires unresolved FUN_080d21d0")
 }
 
 #[cfg(not(target_os = "none"))]
@@ -64,15 +58,14 @@ unsafe extern "C" fn missing_destroy_fixl(_fixl: *mut u8) {
     panic!("fixa_owner_destroy requires unresolved FUN_080d8750")
 }
 
-/// Default host boundary: calling this port outside a test requires models for
-/// its two unresolved retailOS callees.
+/// Default host boundary: calling this port outside a test requires a model
+/// for its unresolved retailOS FixL destructor.
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_FIXA_DESTROY_OPS: FixaDestroyOps = FixaDestroyOps {
-    validate_fixa: missing_validate_fixa,
     destroy_fixl: missing_destroy_fixl,
 };
 
-/// Active host-only direct-callee boundary.
+/// Active host-only FixL direct-callee boundary.
 #[cfg(not(target_os = "none"))]
 pub static mut FIXA_DESTROY_OPS: FixaDestroyOps = DEFAULT_FIXA_DESTROY_OPS;
 
@@ -82,19 +75,6 @@ unsafe fn fixa_destroy_ops() -> FixaDestroyOps {
     unsafe { core::ptr::read_volatile(addr_of!(FIXA_DESTROY_OPS)) }
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn validate_fixa(owner: *mut FixaOwner) -> u32 {
-    let validate: unsafe extern "C" fn(*mut FixaOwner) -> u32 =
-        unsafe { core::mem::transmute(RETAIL_VALIDATE_FIXA) };
-    unsafe { validate(owner) }
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn validate_fixa(owner: *mut FixaOwner) -> u32 {
-    unsafe { (fixa_destroy_ops().validate_fixa)(owner) }
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -121,7 +101,7 @@ unsafe fn destroy_fixl(fixl: *mut u8) {
 #[cfg_attr(target_os = "none", link_section = ".text.fixa_owner_destroy")]
 #[inline(never)]
 pub unsafe extern "C" fn fixa_owner_destroy(owner: *mut FixaOwner) {
-    if unsafe { validate_fixa(owner) } == 0 {
+    if unsafe { validate_fixa_magic(owner.cast()) } == 0 {
         return;
     }
 
@@ -162,14 +142,6 @@ mod tests {
         try_map_u32_slab(hints::FIXA_OWNER_DESTROY, FIXTURE_LEN).map(|pointer| pointer as usize)
     });
     static mut DESTROYED: Option<Vec<usize>> = None;
-    static mut VALIDATED: Option<Vec<usize>> = None;
-
-    unsafe extern "C" fn validate_magic(owner: *mut FixaOwner) -> u32 {
-        unsafe {
-            VALIDATED.as_mut().unwrap().push(owner as usize);
-            (!owner.is_null() && addr_of!((*owner).magic).read() == FIXA_MAGIC) as u32
-        }
-    }
 
     /// Behavioral model of the observed `FixL` unlink and tag-4 release path.
     unsafe extern "C" fn unlink_and_destroy_fixl(fixl: *mut u8) {
@@ -194,14 +166,12 @@ mod tests {
     }
 
     const RECORDING_OPS: FixaDestroyOps = FixaDestroyOps {
-        validate_fixa: validate_magic,
         destroy_fixl: unlink_and_destroy_fixl,
     };
 
     unsafe fn install_recorders() {
         unsafe {
             DESTROYED = Some(Vec::new());
-            VALIDATED = Some(Vec::new());
             FIXA_DESTROY_OPS = RECORDING_OPS;
         }
     }
@@ -210,7 +180,6 @@ mod tests {
         unsafe {
             FIXA_DESTROY_OPS = DEFAULT_FIXA_DESTROY_OPS;
             DESTROYED = None;
-            VALIDATED = None;
         }
     }
 
@@ -251,7 +220,6 @@ mod tests {
 
             assert_eq!(addr_of!((*owner).magic).read(), 0);
             assert_eq!(addr_of!((*owner).first_fixl).read(), 0);
-            assert_eq!(VALIDATED.as_ref().unwrap(), &[owner as usize]);
             assert_eq!(DESTROYED.as_ref().unwrap(), &[first as usize, second as usize]);
             assert_eq!(free_log(), (3, owner.cast(), 4));
             restore_defaults();
@@ -279,7 +247,6 @@ mod tests {
 
             assert_eq!(addr_of!((*owner).magic).read(), 0xdead_beef);
             assert_eq!(addr_of!((*owner).first_fixl).read(), 0xffff_ffff);
-            assert_eq!(VALIDATED.as_ref().unwrap(), &[0, owner as usize]);
             assert!(DESTROYED.as_ref().unwrap().is_empty());
             assert_eq!(free_log().0, 0);
             restore_defaults();

@@ -11109,19 +11109,43 @@ functions:
       immediate finds seven inbound direct calls: five unconditional bl
       (0x080492ec, 0x080d712c, 0x080da97c, 0x080da990, 0x080e4334) and two
       blne (0x08049184, 0x08049190); the predicated callers independently
-      gate destruction. The initial unported 0x080d21d0 call is NULL-safe and
-      returns one only when owner[0] equals its literal 0x46697841 ("FixA").
+      The initial call is now the direct port validate_fixa_magic, which is
+      NULL-safe and returns one only when owner[0] equals its literal
+      0x46697841 ("FixA").
       While owner+0x0c is nonzero, the body calls unported 0x080d8750 with
       that head. Its raw literal is 0x4669784c ("FixL"); a valid node is
       unlinked and released through the already ported free_tag4, while an
       invalid nonzero head makes no progress, so the retail loop does not
       terminate. After draining, the function clears owner+0x00 and
-      tail-branches to free_tag4 for the owner. The Rust target retains
-      address-based calls for both unported entries; host tests use explicit
-      seams. The descriptive FixA/FixL names derive only from those verified
-      magic words, not an inferred subsystem identity. Structural review of
-      the worktree archive confirms LLVM retains the final free_tag4 tail
-      branch (R_ARM_JUMP24); only the unresolved direct calls are BLX seams.
+      tail-branches to free_tag4 for the owner. The Rust target calls the
+      ported validator directly; the unported FixL destructor retains its
+      address-based call.
+      The descriptive FixA/FixL names derive only from those verified magic
+      words, not an inferred subsystem identity. Structural review of the
+      worktree archive confirms LLVM retains the final free_tag4 tail branch
+      (R_ARM_JUMP24); only the unresolved FixL destructor is a BLX seam.
+
+  - address: 0x080d21d0
+    ghidra: FUN_080d21d0
+    name: validate_fixa_magic
+    size: 36
+    sig: "u32 validate_fixa_magic(const u32 *owner)"
+    module: heap/fixa_validate
+    status: ported
+    renames:
+      param_1/r0: owner
+      DAT_080d21f4: fixa_magic
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte instruction extent
+      0x080d21d0..0x080d21f4: the following word at 0x080d21f4 is the
+      0x46697841 ("FixA") literal pool, and the next independently linked
+      function begins at 0x080d21f8 with sub r0,r0,#0x8000. Decoding every
+      aligned ARM B/BL immediate finds three inbound direct calls, all
+      unconditional bl at 0x08048ec4, 0x08048f50, and 0x0805de24; there are
+      no predicated bl calls. The code returns zero for NULL, otherwise loads
+      owner word zero and returns one exactly when it equals FixA. Rust uses a
+      named constant rather than a literal-pool load; the NULL guard, aligned
+      word load, comparison, and u32 boolean result are unchanged.
 
   - address: 0x0805df24
     ghidra: FUN_0805df24

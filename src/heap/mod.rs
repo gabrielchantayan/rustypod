@@ -42,6 +42,7 @@ pub mod memh_resize;
 pub mod object_destroy_dispatch;
 pub mod object_base_construct;
 pub mod fixa;
+pub mod fixa_validate;
 pub mod fixa_owner_create;
 pub mod mailbox_receive_gateway;
 pub mod mailbox_receive_timed_gateway;
