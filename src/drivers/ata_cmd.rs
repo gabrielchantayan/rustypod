@@ -337,6 +337,24 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
 pub unsafe extern "C" fn ata_cmd_get_flags(cmd: *const u8) -> u32 {
     (cmd.add(FLAGS) as *const u32).read_volatile()
 }
+/// ata_cmd_get_transfer_progress — original: `FUN_081213dc` @ 0x081213dc
+/// (8 bytes exactly, `0x081213dc..0x081213e4`; the next separately entered
+/// setter begins at 0x081213e4). Three direct call sites, all unconditional
+/// plain `bl` instructions at 0x08283d38, 0x08283de4, and 0x08283e4c; no
+/// predicated `bl` calls.
+///
+/// Reads the command's current transfer progress at +0x44. The ATA transfer
+/// state machine subtracts it from the transfer length (+0x30) to find work
+/// remaining, then advances it by the completed chunk. No NULL guard or
+/// validation: the original is exactly `ldr r0,[r0,#0x44]; bx lr`.
+///
+/// No deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_transfer_progress(cmd: *const u8) -> u32 {
+    (cmd.add(OPAQUE_WORD_44) as *const u32).read_volatile()
+}
+
 
 /// ata_cmd_get_device_head — original: `FUN_081212d8` @ 0x081212d8
 /// (8 bytes exactly, `0x081212d8..0x081212df`; **4 direct `bl` call
@@ -1429,6 +1447,20 @@ mod tests {
         for flags in [0u32, 0x0000_0080, 0x0008_0000, 0xffff_ffff] {
             block.0[FLAGS..FLAGS + 4].copy_from_slice(&flags.to_le_bytes());
             assert_eq!(unsafe { ata_cmd_get_flags(block.0.as_ptr()) }, flags);
+        }
+    }
+
+    #[test]
+    fn transfer_progress_getter_reads_only_the_complete_progress_word() {
+        let mut block = poisoned();
+        for progress in [0u32, 1, 0x0000_0200, u32::MAX] {
+            block.0[OPAQUE_WORD_44..OPAQUE_WORD_44 + 4].copy_from_slice(&progress.to_le_bytes());
+            let before = block;
+            assert_eq!(
+                unsafe { ata_cmd_get_transfer_progress(block.0.as_ptr()) },
+                progress
+            );
+            assert_eq!(block, before);
         }
     }
 
