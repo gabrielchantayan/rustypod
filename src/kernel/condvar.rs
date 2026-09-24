@@ -327,6 +327,7 @@ pub unsafe extern "C" fn condvar_broadcast(condvar: *mut CondVar) {
 /// Single-shot wake: pops the FIRST waiter (if any) and signals its
 /// kernel object; the rest of the queue stays queued. Like the
 /// broadcast, the caller holds the surrounding lock.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn condvar_signal(condvar: *mut CondVar) {
     let node = list_pop_front(&mut (*condvar).waiters);

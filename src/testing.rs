@@ -348,6 +348,9 @@ pub mod hints {
     // target-width entry fixture; mappings never unmap, so no other port may
     // share this hint.
     pub const REGISTERED_LISTENER_DISPATCH: usize = 0x1cb0_0000;
+    // 0x1cd0_0000: dedicated to drivers/display_layer_reset's target-width
+    // pending-object fixture; mappings never unmap.
+    pub const LAYER_PENDING_OBJECT_STOP: usize = 0x1cd0_0000;
     // Dedicated target-width bucket fixture for vtable_file_record_inner_iterator_begin.
     pub const VTABLE_FILE_RECORD_INNER_ITERATOR_BEGIN: usize = 0x1c60_0000;
     // 0xbf00_0000: dedicated to app/pending_event_take_due's raw-u32
