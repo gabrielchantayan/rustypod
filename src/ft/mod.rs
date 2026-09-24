@@ -43,4 +43,5 @@ pub mod trace;
 pub mod trig;
 pub mod word_cursor;
 pub mod too_many_hints;
+pub mod truetype_module_callback;
 pub mod types;

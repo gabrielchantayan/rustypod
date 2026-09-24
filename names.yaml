@@ -19848,6 +19848,25 @@ functions:
       comparison to the resident strcmp at 0x08391e38. Named callers request
       "truetype" and "pshinter"; 0x0804c560 is the matching
       FT_Get_Module_Interface wrapper.
+  - address: 0x080d9ae4
+    ghidra: FUN_080d9ae4
+    name: ft_truetype_module_callback
+    size: 60
+    sig: "FtModule *ft_truetype_module_callback(FtTruetypeModuleCallbackContext **context_slot)"
+    module: ft/truetype_module_callback
+    status: ported
+    vars:
+      param_1: context_slot
+      puVar2: callback_slot
+      uVar3: truetype_module
+    notes: >-
+      TrueType module callback dispatcher. Raw ARM decoding establishes the
+      60-byte extent 0x080d9ae4..0x080d9b20; the next function begins at
+      0x080d9b24 after its literal-pool word. It loads the FreeType library
+      through context +0x60/+0x04, calls FT_Get_Module at 0x0804c500 with
+      "truetype", then invokes the context +0x140 callback only when both
+      pointers are non-null. There is one plain direct bl and no predicated
+      direct BL instructions; the callback is an indirect bx tail dispatch.
   - address: 0x0804c560
     ghidra: FUN_0804c560
     name: ft_get_module_interface
