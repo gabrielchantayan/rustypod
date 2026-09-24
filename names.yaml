@@ -136826,3 +136826,26 @@ functions:
       Full-image A32 decoding finds three plain BL callers (0x0814b6d4,
       0x0817cfbc, and 0x0818477c) and no predicated BL callers. The code
       ignores all incoming registers and returns zero.
+
+  - address: 0x08110394
+    ghidra: FUN_08110394
+    name: string_from_range_context_adapter
+    size: 8
+    sig: "void string_from_range_context_adapter(StringObject *out, void *context, const u16 *range)"
+    module: cxx/string_from_range_context_adapter
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: context
+      param_3/r2: range
+      FUN_080f020c: string_from_range
+    notes: >-
+      Raw osos.dec words e1a01002 eaff7f9b establish the 8-byte executable
+      extent: mov r1,r2; b 0x080f020c. The next independent function begins
+      with push {r4,lr} at 0x0811039c. Full-image A32 decoding finds three
+      plain BL callers (0x0816dd8c, 0x0820317c, and 0x08203228) and no
+      predicated BL callers. This is a tail-call ABI adapter: it discards the
+      middle context argument and forwards out/range to the known unported
+      string_from_range converter. Rust uses the existing RANGE_I32_OPS
+      volatile seam so target builds call the retail converter and host tests
+      can verify forwarding.

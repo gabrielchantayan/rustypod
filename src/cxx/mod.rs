@@ -309,6 +309,7 @@ pub mod record_range_stable_sort;
 pub mod text_buffer;
 pub mod vtable_object_construct_with_text_buffer;
 pub mod string_from_range_provider;
+pub mod string_from_range_context_adapter;
 pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
 pub mod path_escape_record;
