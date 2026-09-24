@@ -56059,6 +56059,28 @@ functions:
       depth == 0 instead of entering the loop; scratch NUL, table
       load, per-iteration style re-read and copy bound all present.
 
+  - address: 0x08123b40
+    ghidra: FUN_08123b40
+    name: formatted_message_emit_real
+    size: 80
+    sig: "void formatted_message_emit_real(MessageStream *stream, const char *key, const char *value, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: key, param_3: value, param_4: depth}
+    notes: >-
+      Three direct call sites, verified by decoding all ARM B/BL words in
+      osos.dec: 3 plain bl, zero predicated. Raw bytes establish the exact
+      80-byte body from 0x08123b40 through tail branch 0x08123b8c; the
+      adjacent literal at 0x08123b90 is "%s<key>%s</key>\n%s<real>%s</real>\n".
+      The function prepares stream indent at +0x215 with depth, calls the
+      ported snprintf @ 0x0802f768 to write the literal into the +0x15
+      512-byte buffer with variadic words (indent, key, indent, value),
+      then tail-branches to the unported stream append @ 0x08123c58. The
+      Rust port shares INDENT_PREPARE / STREAM_APPEND with its siblings and
+      deliberately calls then returns rather than tail-branching; the
+      formatter arguments and buffer handoff are unchanged. Host tests cover
+      the exact four-word variadic area, append handoff, and depth zero.
+
   - address: 0x0811d46c
     ghidra: FUN_0811d46c
     name: vtable_query_4c_kind4
