@@ -658,3 +658,4 @@ pub mod state_status_dispatch;
 pub mod event_subscription_rtc_sync;
 pub mod status_value_set;
 pub mod app_command_63800021_dispatch;
+pub mod message_selector_read;

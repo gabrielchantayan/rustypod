@@ -80770,6 +80770,28 @@ functions:
       with the same immediates; the only diff is LLVM's push {fp,lr} /
       pop {fp,pc} frame around the body.
 
+  - address: 0x080f68e8
+    ghidra: FUN_080f68e8
+    name: message_selector_read
+    size: 12
+    sig: "u32 message_selector_read(u8 *message)"
+    module: app/message_selector_read
+    status: ported
+    renames:
+      param_1/r0: message
+      "message+0x4": selector pointer
+      "*selector_pointer": selector
+    notes: >-
+      Raw osos.dec words establish the exact 12-byte A32 body at
+      0x080f68e8..0x080f68f3: ldr r0,[r0,#4]; ldr r0,[r0]; bx lr. The
+      push at 0x080f68f4 begins the next real function. The body makes zero
+      plain and zero predicated BL calls. Decoding every A32 direct-call word
+      finds three inbound unconditional BL callers at 0x081d6788, 0x081d7114,
+      and 0x081d7164, with zero predicated callers. It reads the target-width
+      pointer at message+4 and returns the target first word. Deliberate
+      deviations: none; Rust retains the unchecked target-width pointer and
+      aligned loads.
+
   # --- iAP (iPod Accessory Protocol): the packet class ---
   - address: 0x080f6c58
     ghidra: FUN_080f6c58
