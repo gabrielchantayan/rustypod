@@ -115,6 +115,26 @@ unsafe fn lcd_write_control(value: u32) {
 pub unsafe extern "C" fn lcd_wait_ready() {
     while unsafe { lcd_status() } & LCD_BUSY != 0 {}
 }
+/// lcd_select_register — original: `FUN_080d7b60` @ `0x080d7b60` (24 bytes;
+/// **3 verified direct `bl` call sites, all unconditional; zero predicated
+/// forms**).
+///
+/// Preserves `register_index` across the LCD readiness wait, then writes all
+/// 32 bits to the controller's register-index port (+0x04). The raw ARM body
+/// is `mov r2,r0; push {lr}; bl lcd_wait_ready; ldr r0,=0x38300000; str
+/// r2,[r0,#4]; pop {pc}` through `0x080d7b74`; `0x080d7b78` is its literal
+/// pool and `0x080d7b7c` begins the next function. It has no validation or
+/// timeout.
+///
+/// Deliberate deviation: the target store is volatile; host builds write the
+/// atomic LCD register model used by the existing LCD ports.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lcd_select_register(register_index: u32) {
+    unsafe { lcd_wait_ready() };
+    unsafe { lcd_write_word(LCD_REGISTER_INDEX_OFFSET, register_index) };
+}
+
 
 /// lcd_write_command — original: `FUN_080c99fc` @ `0x080c99fc` (76 bytes,
 /// `0x080c99fc..0x080c9a48`, including its literal pool; **5 verified direct
@@ -266,10 +286,10 @@ pub unsafe extern "C" fn lcd_end_command_transaction(saved_control: u32) {
 mod tests {
     extern crate std;
 
-    use super::{lcd_begin_command_transaction, lcd_end_command_transaction, lcd_wait_ready,
-        lcd_write_command, lcd_write_register, lcd_write_value, LcdCommandModeFn, HOST_LCD_CONTROL,
-        HOST_LCD_REGISTER_INDEX, HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS, HOST_LCD_STATUS_READS,
-        LCD_BUSY, LCD_COMMAND_MODE, LCD_COMMAND_READY};
+    use super::{lcd_begin_command_transaction, lcd_end_command_transaction, lcd_select_register,
+        lcd_wait_ready, lcd_write_command, lcd_write_register, lcd_write_value, LcdCommandModeFn,
+        HOST_LCD_CONTROL, HOST_LCD_REGISTER_INDEX, HOST_LCD_REGISTER_VALUE, HOST_LCD_STATUS,
+        HOST_LCD_STATUS_READS, LCD_BUSY, LCD_COMMAND_MODE, LCD_COMMAND_READY};
     use core::sync::atomic::{AtomicU32, Ordering};
     use parking_lot::Mutex;
     use std::sync::mpsc;
@@ -320,6 +340,19 @@ mod tests {
         unsafe { lcd_wait_ready() };
 
         assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn selects_full_width_register_after_ready_check() {
+        let _guard = TEST_LOCK.lock();
+
+        for register_index in [0, 0x0210, 0x8000_0000, u32::MAX] {
+            reset_host_controller(0);
+            unsafe { lcd_select_register(register_index) };
+            assert_eq!(HOST_LCD_REGISTER_INDEX.load(Ordering::SeqCst), register_index);
+            assert_eq!(HOST_LCD_REGISTER_VALUE.load(Ordering::SeqCst), u32::MAX);
+            assert_eq!(HOST_LCD_STATUS_READS.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[test]

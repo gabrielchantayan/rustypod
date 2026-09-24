@@ -138157,3 +138157,26 @@ functions:
       both flag bytes, and stores previous.offset plus the adjusted delta
       at current.offset. Helper 0x080db0d8 remains a deliberate stock
       call boundary because its exact policy is not yet ported.
+  - address: 0x080d7b60
+    ghidra: FUN_080d7b60
+    name: lcd_select_register
+    size: 24
+    sig: "void lcd_select_register(u32 register_index)"
+    module: drivers/lcd_write_register
+    status: ported
+    renames:
+      param_1/r0/r2: register_index
+      DAT_080d7b78: lcd_controller_base (0x38300000)
+      FUN_080ce0c8: lcd_wait_ready
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte extent:
+      e1a02000 e52de004 ebffd956 e59f0004 e5802004 e49df004 through
+      0x080d7b74; 0x080d7b78 is the 0x38300000 literal pool and
+      0x080d7b7c begins the next real function. Complete A32 branch decoding
+      finds three inbound plain unconditional BL sites and zero predicated BL
+      sites; the body makes one plain BL to lcd_wait_ready and no predicated
+      calls. It preserves register_index in r2 over the readiness poll and
+      stores all 32 bits at the LCD controller register-index port (+0x04).
+      Deliberate deviation: target MMIO writes remain volatile while host
+      tests use the existing atomic controller model; no input validation or
+      busy timeout is added.
