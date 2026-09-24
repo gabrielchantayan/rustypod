@@ -18172,6 +18172,31 @@ functions:
       PLST_ELEMENT_TEARDOWN_OPS seam (stock address on target, recorder
       seam on host).
 
+  - address: 0x0806cf80
+    ghidra: FUN_0806cf80
+    name: plst_resource_activate
+    size: 136
+    sig: "u32 plst_resource_activate(u8 *resource, u32 mode)"
+    module: ui/plst_resource_activate
+    status: ported
+    renames:
+      param_1/r5: resource
+      param_2/r6: mode
+      DAT_0806d004: resource_mutex
+    notes: >-
+      Raw ARM establishes 132 instruction bytes at 0x0806cf80..0x0806d004,
+      followed by its mutex literal 0x08a774c0 at 0x0806d004; the next
+      independent function begins at 0x0806d008, so the true extent is 136
+      bytes despite Ghidra's 132-byte code size. Three inbound direct calls
+      are all plain bl (0x08066778, 0x08066a10, 0x080ca734); the body has
+      five plain bl and no predicated bl. Under the owner-tracked mutex,
+      requires the already ported 'plst' class check, flag bit 0 at +0x1ac,
+      zero +0x1c, a zero result from unported 0x0806c228(resource+0x0c, 0),
+      and byte +0x1ae == 1 before forwarding (resource, mode) to unported
+      0x080d3570. The two unported callees remain a narrow host-injectable
+      seam rather than receiving invented identities; mutex calls use the
+      canonical port instead of the equivalent alias veneers.
+
   - address: 0x080df114
     ghidra: FUN_080df114
     name: read_plst_optional_fields

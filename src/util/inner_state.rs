@@ -718,9 +718,7 @@ struct ObjectSelectionOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_activate_resource(resource: *mut u8, mode: u32) {
-    let activate: unsafe extern "C" fn(*mut u8, u32) -> i32 =
-        core::mem::transmute(0x0806_cf80usize);
-    let _ = activate(resource, mode);
+    let _ = crate::ui::plst_resource_activate::plst_resource_activate(resource, mode);
 }
 
 #[cfg(target_os = "none")]
