@@ -4822,6 +4822,36 @@ pub unsafe extern "C" fn vtable_file_record_insert(
     }
     crate::app::registry::registry_insert(bucket.cast(), inner_key, node);
 }
+/// vtable_file_record_copy_and_insert — original: `FUN_0811c9f0` @
+/// 0x0811c9f0 (88 bytes; **4 plain `bl` calls**, no predicated `bl`:
+/// 0x080eb67c, 0x080edb74, thunk 0x08037db0 / `__rt_memcpy`, and
+/// 0x0811d0b8). Allocates a tag-0x19 buffer of `byte_count` bytes, checks
+/// the allocation, copies `source` into it, then inserts that owned buffer
+/// into the file-record registry under `key` and `inner_key`.
+///
+/// # Deviations
+///
+/// The checked-allocation call uses the existing
+/// `VTABLE_FILE_RECORD_KIND1_GUARD` seam because 0x080edb74 is unported;
+/// `malloc_wrapper`, `__rt_memcpy`, and `vtable_file_record_insert` are
+/// called directly because their Rust ports exist. The node's data field is
+/// target-width (`u32`), so the copied pointer is narrowed only at the
+/// already-documented 32-bit insertion boundary.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn vtable_file_record_copy_and_insert(
+    record: *mut u8,
+    key: u32,
+    inner_key: u32,
+    source: *const u8,
+    byte_count: usize,
+) {
+    let copy = crate::heap::veneers::malloc_wrapper(byte_count, FILE_RECORD_NODE_ALLOC_TAG);
+    let guard = core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FILE_RECORD_KIND1_GUARD));
+    guard(copy);
+    crate::libc::rt_memcpy::__rt_memcpy(copy, source, byte_count);
+    vtable_file_record_insert(record, key, inner_key, copy as usize as u32, byte_count as u32);
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -11134,6 +11164,8 @@ pub(crate) mod tests {
     static mut INS_NODE_ARENA: [u8; 0x10] = [0xa5; 0x10];
     /// The block it hands out for the miss path's `operator_new(0x28)`.
     static mut INS_REG_ARENA: [u8; 0x28] = [0; 0x28];
+    /// The owned-copy block returned before the node allocation.
+    static mut INS_COPY_ARENA: [u8; 7] = [0xa5; 7];
 
     /// The (size, tag) pairs the stub allocator observed, in order.
     static mut INS_ALLOC_LOG: [(usize, usize); 4] = [(0, 0); 4];
@@ -11243,6 +11275,9 @@ pub(crate) mod tests {
     ) -> *mut u8 {
         INS_ALLOC_LOG[INS_ALLOC_COUNT] = (size, _tag);
         INS_ALLOC_COUNT += 1;
+        if size == INS_COPY_ARENA.len() {
+            return core::ptr::addr_of_mut!(INS_COPY_ARENA).cast();
+        }
         if size == FILE_RECORD_NODE_SIZE {
             core::ptr::addr_of_mut!(INS_NODE_ARENA).cast()
         } else {
@@ -11263,6 +11298,7 @@ pub(crate) mod tests {
         INS_ALLOC_COUNT = 0;
         INS_ALLOC_LOG = [(0, 0); 4];
         INS_NODE_ARENA = [0xa5; 0x10];
+        INS_COPY_ARENA = [0xa5; 7];
     }
 
     unsafe extern "C" fn recording_insert_lookup(registry: *mut u8, key: u32) -> *mut u8 {
@@ -11502,6 +11538,53 @@ pub(crate) mod tests {
                 INS_GUARD_NODE_SNAPSHOT, [0xa5; 8],
                 "the guard runs BEFORE the node field stores (bl at 0x0811d0e0 \
                  precedes the strs at 0x0811d0e4/0x0811d0e8)"
+            );
+        }
+    }
+
+    #[test]
+    fn file_record_copy_and_insert_owns_exact_source_bytes_before_inserting() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        let _heap = HeapGuard;
+        let mut record = [0xa5u8; 0x20];
+        let source = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
+        unsafe {
+            let bucket = core::ptr::addr_of_mut!(INS_BUCKET_REGISTRY).cast::<u8>();
+            install_recording_insert(bucket);
+            let record = insert_record(&mut record);
+
+            vtable_file_record_copy_and_insert(
+                record,
+                INS_KEY,
+                INS_INNER_KEY,
+                source.as_ptr(),
+                source.len(),
+            );
+
+            assert_eq!(INS_ALLOC_COUNT, 2, "copy allocation, then the insertion node");
+            assert_eq!(
+                INS_ALLOC_LOG[..2],
+                [
+                    (source.len(), FILE_RECORD_NODE_ALLOC_TAG),
+                    (FILE_RECORD_NODE_SIZE, FILE_RECORD_NODE_ALLOC_TAG),
+                ],
+                "the source byte count is the first malloc_wrapper size"
+            );
+            assert_eq!(INS_COPY_ARENA, source, "the thunk's __rt_memcpy owns every byte");
+            assert_eq!(INS_GUARD_CALLS, 2, "both the copy and insertion allocations are guarded");
+            assert_eq!(INS_DISPATCH_COUNT, 1, "the owned block is inserted into the existing bucket");
+            assert_eq!(INS_DISPATCH_LOG[0].0, bucket as usize);
+            assert_eq!(INS_DISPATCH_LOG[0].1, INS_INNER_KEY);
+            assert_eq!(
+                INS_DISPATCH_LOG[0].2,
+                core::ptr::addr_of_mut!(INS_NODE_ARENA) as usize,
+                "the insertion still carries its fresh node"
+            );
+            assert_eq!(
+                core::ptr::addr_of_mut!(INS_NODE_ARENA).cast::<u32>().add(1).read(),
+                core::ptr::addr_of_mut!(INS_COPY_ARENA) as usize as u32,
+                "node +0x04 records the target-width owned-copy pointer"
             );
         }
     }

@@ -74440,6 +74440,35 @@ functions:
       / file_record_destruct_kind2_deletes_the_block_then_disposes_and_deletes_the_registry
       / file_record_destruct_kind2_null_members_is_a_noop.
 
+  - address: 0x0811c9f0
+    ghidra: FUN_0811c9f0
+    name: vtable_file_record_copy_and_insert
+    size: 88
+    sig: "void vtable_file_record_copy_and_insert(record: *mut u8, key: u32, inner_key: u32, source: *const u8, byte_count: usize)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0/r6: record
+      param_2/r1/r7: key
+      param_3/r2/r8: inner_key
+      param_4/r3/r4: source
+      param_5/stack-arg/r9: byte_count
+      FUN_080eb67c: malloc_wrapper (direct, ported in heap/veneers) - called (byte_count, 0x19)
+      FUN_080edb74: checked-alloc guard (unported; existing VTABLE_FILE_RECORD_KIND1_GUARD seam)
+      thunk_EXT_FUN_22000020: __rt_memcpy (thunk 0x08037db0 to ROM 0x22000020, mirrored by ported libc/rt_memcpy)
+      FUN_0811d0b8: vtable_file_record_insert (direct, ported in app/vtable_set)
+    notes: >-
+      Raw words at 0x0811c9f0..0x0811ca44 establish an 88-byte extent,
+      ending before the independent 0x0811ca48 wrapper. There are four
+      plain BLs and no predicated BLs: malloc_wrapper at 0x0811ca10,
+      checked-alloc guard at 0x0811ca18, the 0x08037db0 __rt_memcpy thunk
+      at 0x0811ca2c, and vtable_file_record_insert at 0x0811ca40.
+      The function allocates a tag-0x19 byte_count-sized block, guards it,
+      copies source into it, then inserts the owned block under key and
+      inner_key with byte_count as the payload. The unported guard reuses
+      VTABLE_FILE_RECORD_KIND1_GUARD; all other callees are direct Rust
+      ports. The copied pointer narrows at vtable_file_record_insert's
+      documented target-width node-data boundary, byte-identical on ARM.
   - address: 0x0811d0b8
     ghidra: FUN_0811d0b8
     name: vtable_file_record_insert
