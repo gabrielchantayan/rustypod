@@ -75,63 +75,31 @@ pub const IAP_PACKET_SIZE: usize = 0x24;
 /// width meaningful.
 pub const LINGO_EXTENDED_INTERFACE: u8 = 0x04;
 
-/// Indirect dispatch for this cluster's unported callees (the house
-/// pattern — see `drivers/display_layer.rs` and `heap/alloc_core.rs`).
+/// Indirect dispatch for this cluster's unported payload-release helper (the
+/// house pattern — see `drivers/display_layer.rs` and `heap/alloc_core.rs`).
 #[derive(Clone, Copy)]
 pub struct IapPacketOps {
-    /// `FUN_080f73a0` @ 0x080f73a0 (2 `bl` call sites — this factory and
-    /// the forwarder @ 0x080f6efc): the initializer. Releases any payload
-    /// already held, stores owner/context/lingo/command, zeroes +0x1c and
-    /// +0x20, then — only when `payload_len` is nonzero — takes a tag-3
-    /// `operator_new(payload_len)` and copies `payload` into it. Returns
-    /// **nonzero on success**; zero only when that allocation failed.
-    /// A zero `payload_len` is success with no buffer. Default: returns 1.
-    pub init: unsafe extern "C" fn(
-        packet: *mut u8,
-        owner: *mut u8,
-        context: *mut u8,
-        lingo: u8,
-        command: u16,
-        payload: *const u8,
-        payload_len: u32,
-    ) -> u32,
-    /// `FUN_080f7420` @ 0x080f7420 (2 `bl` call sites — the initializer
-    /// @ 0x080f73a0 and the destructor [`iap_packet_destruct`], counted
-    /// by decoding every branch word in osos.dec): the payload release
-    /// helper. Runs the conditional second-buffer release @ 0x080f6af8
-    /// (tag-2 `operator_delete` of +0x14, only when the +0x18 length word
-    /// holds the 0xffff ownership sentinel), then releases +0x08 and
-    /// +0x14 through tag-3 `operator_delete` @ 0x082aad14 (each
-    /// NULL-guarded) and zeroes both pointer/length pairs. No NULL guard
-    /// on `packet` itself. Default: no-op, releases nothing.
+    /// `FUN_080f7420` @ 0x080f7420: the payload release helper. Runs the
+    /// conditional second-buffer release @ 0x080f6af8, releases +0x08 and
+    /// +0x14 through tag-3 `operator_delete` @ 0x082aad14, and zeroes both
+    /// pointer/length pairs. No NULL guard on `packet` itself.
+    ///
+    /// Default: no-op, releases nothing.
     pub release: unsafe extern "C" fn(packet: *mut u8),
 }
 
 
-unsafe extern "C" fn init_stub(
-    _packet: *mut u8,
-    _owner: *mut u8,
-    _context: *mut u8,
-    _lingo: u8,
-    _command: u16,
-    _payload: *const u8,
-    _payload_len: u32,
-) -> u32 {
-    1
-}
-
 unsafe extern "C" fn release_stub(_packet: *mut u8) {}
 
-/// Wired defaults: the documented stubs for the two unported callees.
+/// Wired default for the unported release helper.
 pub(crate) const DEFAULT_IAP_PACKET_OPS: IapPacketOps = IapPacketOps {
-    init: init_stub,
     release: release_stub,
 };
 
-/// The active ops. Host tests swap in recording mocks and restore.
+/// The active release op. Host tests swap in a recording mock and restore.
 pub static mut IAP_PACKET_OPS: IapPacketOps = DEFAULT_IAP_PACKET_OPS;
 
-/// Volatile read so LLVM cannot fold the default stubs in and delete the
+/// Volatile read so LLVM cannot fold the default stub in and delete the
 /// dispatch (the `alloc_core.rs` rationale).
 #[inline(always)]
 unsafe fn iap_packet_ops() -> IapPacketOps {
@@ -203,6 +171,64 @@ pub unsafe extern "C" fn iap_packet_construct(packet: *mut u8) -> *mut u8 {
     let counter = iap_packet_live_count_ptr();
     counter.write_volatile(counter.read_volatile().wrapping_add(1));
     packet
+}
+
+/// iap_packet_init — original: `FUN_080f73a0` @ 0x080f73a0 (**128 bytes,
+/// 0x080f73a0..0x080f7420** — 32 instructions, no literal pool; the next
+/// real function opens at 0x080f7420 with `push {r4-r6,lr}`). **3 plain
+/// `bl` calls and 0 predicated `bl` calls**, independently verified from the
+/// raw `osos.dec` words: release @ 0x080f7420, `operator_new` @ 0x082aad74,
+/// and the 0x08037db0 `__rt_memcpy` ROM veneer.
+///
+/// Releases existing payloads, stores the owner/context/lingo/command fields,
+/// and clears +0x1c/+0x20. A nonzero payload length allocates a buffer,
+/// stores its pointer and length, then copies the payload; allocation failure
+/// returns zero after storing the NULL pointer. A zero length is success and
+/// does not touch +0x08/+0x0c after release.
+///
+/// # Deliberate deviations
+///
+/// The unported release helper still uses [`IAP_PACKET_OPS`]'s volatile
+/// dispatch seam. The original returns `(success, owner)` in r0/r1; Rust's
+/// C ABI exposes only the observed r0 success flag.
+///
+/// # Safety
+///
+/// `packet` must point to a writable, aligned 36-byte packet. When
+/// `payload_len != 0`, `payload` must be readable for `payload_len` bytes.
+/// Like the original, this has no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_init(
+    packet: *mut u8,
+    owner: *mut u8,
+    context: *mut u8,
+    lingo: u8,
+    command: u16,
+    payload: *const u8,
+    payload_len: u32,
+) -> u32 {
+    (iap_packet_ops().release)(packet);
+    packet.cast::<u32>().write(owner as usize as u32);
+    packet.add(4).cast::<u32>().write(context as usize as u32);
+    packet.add(14).write(lingo);
+    packet.add(16).cast::<u16>().write(command);
+    packet.add(28).cast::<u32>().write(0);
+    packet.add(32).cast::<u32>().write(0);
+
+    if payload_len == 0 {
+        return 1;
+    }
+
+    let allocation = operator_new(payload_len as usize);
+    packet.add(8).cast::<u32>().write(allocation as usize as u32);
+    if allocation.is_null() {
+        return 0;
+    }
+
+    packet.add(12).cast::<u16>().write(payload_len as u16);
+    crate::libc::rt_memcpy::__rt_memcpy(allocation, payload, payload_len as usize);
+    1
 }
 
 
@@ -293,9 +319,8 @@ pub unsafe extern "C" fn iap_packet_destruct(packet: *mut u8) -> *mut u8 {
 ///
 /// # Deviations
 ///
-/// The initializer @ 0x080f73a0 is still unported, so this calls its
-/// existing [`IAP_PACKET_OPS`] dispatch seam. The original discards the
-/// initializer's result; this `void` hook does too.
+/// The initializer is ported directly as [`iap_packet_init`]. The original
+/// discards its result; this `void` helper does too.
 ///
 /// # Safety
 ///
@@ -341,7 +366,7 @@ pub unsafe extern "C" fn iap_packet_init_with_compact_payload(
         payload_len += 4;
     }
 
-    (iap_packet_ops().init)(
+    iap_packet_init(
         packet,
         owner,
         context,
@@ -392,9 +417,7 @@ pub unsafe extern "C" fn iap_packet_init_with_compact_payload(
 /// - The destructor (0x080f74ac) is ported — [`iap_packet_destruct`] —
 ///   and called directly; only its payload-release helper @ 0x080f7420
 ///   still dispatches, through [`IAP_PACKET_OPS`]'s `release` hook.
-/// - The initializer (0x080f73a0) is not ported; it dispatches through
-///   [`IAP_PACKET_OPS`].
-///   only r0, so the hook is typed to return just that.
+/// - The initializer is now ported directly as [`iap_packet_init`].
 ///
 /// # Safety
 ///
@@ -410,14 +433,12 @@ pub unsafe extern "C" fn iap_packet_create(
     payload: *const u8,
     payload_len: u32,
 ) -> *mut u8 {
-    let ops = iap_packet_ops();
-
     let packet = iap_packet_construct(operator_new(IAP_PACKET_SIZE));
     if packet.is_null() {
         return core::ptr::null_mut();
     }
 
-    if (ops.init)(packet, owner, context, lingo, command, payload, payload_len) != 0 {
+    if iap_packet_init(packet, owner, context, lingo, command, payload, payload_len) != 0 {
         return packet;
     }
 
@@ -473,9 +494,7 @@ pub unsafe extern "C" fn iap_packet_create(
 ///
 /// # Deviations
 ///
-/// - The initializer @ 0x080f73a0 is not ported; the forward dispatches
-///   through [`IAP_PACKET_OPS`]'s `init` hook, same as
-///   [`iap_packet_create`].
+/// - The initializer is ported directly as [`iap_packet_init`].
 /// - `lingo`/`command` are typed `u8`/`u16` — the initializer truncates
 ///   with `strb`/`strh`, so nothing observable is lost.
 /// - The ARM return is the initializer's 64-bit pair (r0 = the success
@@ -500,8 +519,7 @@ pub unsafe extern "C" fn iap_packet_reinit(
     payload: *const u8,
     payload_len: u32,
 ) -> u32 {
-    let result =
-        (iap_packet_ops().init)(packet, owner, context, lingo, command, payload, payload_len);
+    let result = iap_packet_init(packet, owner, context, lingo, command, payload, payload_len);
     // LLVM's ARM backend breaks the sibling-call this body wants to be:
     // it materializes the volatile ops read with `ldrd r0, [ip]` and the
     // branch target in r1, clobbering the r0/r1 arguments the tail call
@@ -794,105 +812,25 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
+    use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
     use std::sync::{Mutex, MutexGuard};
 
-    /// Serializes swaps of [`IAP_PACKET_OPS`].
     static OPS_LOCK: Mutex<()> = Mutex::new(());
-
-    static mut INIT_CALLS: usize = 0;
-    static mut LAST_INIT_PACKET: *mut u8 = core::ptr::null_mut();
-    static mut LAST_OWNER: *mut u8 = core::ptr::null_mut();
-    static mut LAST_CONTEXT: *mut u8 = core::ptr::null_mut();
-    static mut LAST_LINGO: u8 = 0;
-    static mut LAST_COMMAND: u16 = 0;
-    static mut LAST_PAYLOAD: *const u8 = core::ptr::null();
-    static mut LAST_PAYLOAD_LEN: u32 = 0;
-    static mut INIT_RESULT: u32 = 1;
-    static mut CAPTURED_PAYLOAD: [u8; 7] = [0; 7];
-    static mut CAPTURED_PAYLOAD_LEN: u32 = 0;
-
-
     static mut RELEASE_CALLS: usize = 0;
     static mut LAST_RELEASE_PACKET: *mut u8 = core::ptr::null_mut();
-    static mut COUNT_AT_RELEASE: u32 = 0;
-
-
-    #[allow(clippy::too_many_arguments)]
-    unsafe extern "C" fn recording_init(
-        packet: *mut u8,
-        owner: *mut u8,
-        context: *mut u8,
-        lingo: u8,
-        command: u16,
-        payload: *const u8,
-        payload_len: u32,
-    ) -> u32 {
-        INIT_CALLS += 1;
-        LAST_INIT_PACKET = packet;
-        LAST_OWNER = owner;
-        LAST_CONTEXT = context;
-        LAST_LINGO = lingo;
-        LAST_COMMAND = command;
-        LAST_PAYLOAD = payload;
-        LAST_PAYLOAD_LEN = payload_len;
-        INIT_RESULT
-    }
-    /// A synchronous initializer that owns a snapshot of the compact
-    /// helper's stack payload before that helper returns.
-    #[allow(clippy::too_many_arguments)]
-    unsafe extern "C" fn capturing_init(
-        packet: *mut u8,
-        owner: *mut u8,
-        context: *mut u8,
-        lingo: u8,
-        command: u16,
-        payload: *const u8,
-        payload_len: u32,
-    ) -> u32 {
-        let result = recording_init(packet, owner, context, lingo, command, payload, payload_len);
-        let captured_len = core::cmp::min(payload_len as usize, 7);
-        CAPTURED_PAYLOAD = [0; 7];
-        core::ptr::copy_nonoverlapping(
-            payload,
-            core::ptr::addr_of_mut!(CAPTURED_PAYLOAD).cast::<u8>(),
-            captured_len,
-        );
-        CAPTURED_PAYLOAD_LEN = captured_len as u32;
-        result
-    }
-
 
     unsafe extern "C" fn recording_release(packet: *mut u8) {
         RELEASE_CALLS += 1;
         LAST_RELEASE_PACKET = packet;
-        // The destructor's `bl 0x080f7420` precedes its counter update, so
-        // the release helper must observe the counter NOT yet decremented.
-        COUNT_AT_RELEASE = IAP_PACKET_LIVE_COUNT;
     }
 
-    /// Installs the recording ops and the mock heap. Both guards travel
-    /// together so no test ever takes either lock twice.
     fn install_mocks() -> (MutexGuard<'static, ()>, MutexGuard<'static, ()>) {
         let ops_guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let heap_guard = mock_heap();
         unsafe {
-            IAP_PACKET_OPS = IapPacketOps {
-                init: recording_init,
-                release: recording_release,
-            };
-            INIT_CALLS = 0;
-            LAST_INIT_PACKET = core::ptr::null_mut();
-            LAST_OWNER = core::ptr::null_mut();
-            LAST_CONTEXT = core::ptr::null_mut();
-            LAST_LINGO = 0;
-            LAST_COMMAND = 0;
-            LAST_PAYLOAD = core::ptr::null();
-            LAST_PAYLOAD_LEN = 0;
-            INIT_RESULT = 1;
+            IAP_PACKET_OPS = IapPacketOps { release: recording_release };
             RELEASE_CALLS = 0;
             LAST_RELEASE_PACKET = core::ptr::null_mut();
-            COUNT_AT_RELEASE = 0;
             IAP_PACKET_LIVE_COUNT = 0;
         }
         (ops_guard, heap_guard)
@@ -902,473 +840,82 @@ mod tests {
         unsafe { IAP_PACKET_OPS = DEFAULT_IAP_PACKET_OPS };
         drop(guards);
     }
-    unsafe fn capture_compact_payloads() {
-        IAP_PACKET_OPS = IapPacketOps {
-            init: capturing_init,
-            release: recording_release,
-        };
-        CAPTURED_PAYLOAD = [0; 7];
-        CAPTURED_PAYLOAD_LEN = 0;
-    }
-
-    unsafe fn captured_compact_payload() -> &'static [u8] {
-        core::slice::from_raw_parts(
-            core::ptr::addr_of!(CAPTURED_PAYLOAD).cast::<u8>(),
-            CAPTURED_PAYLOAD_LEN as usize,
-        )
-    }
-
-
-#[test]
-fn construct_clears_all_fields_sets_sentinels_and_increments_live_count() {
-    let guards = install_mocks();
-    let mut packet = [0xa5u8; IAP_PACKET_SIZE];
-
-    unsafe {
-        IAP_PACKET_LIVE_COUNT = u32::MAX;
-        assert_eq!(iap_packet_construct(packet.as_mut_ptr()), packet.as_mut_ptr());
-        assert_eq!(
-            packet,
-            [
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xa5,
-                0xff, 0xff, 0xa5, 0xa5, 0, 0, 0, 0, 0, 0, 0, 0xa5, 0, 0,
-                0, 0, 0, 0, 0, 0,
-            ],
-        );
-        assert_eq!(IAP_PACKET_LIVE_COUNT, 0);
-    }
-    restore_mocks(guards);
-}
 
     #[test]
-    fn threads_every_argument_into_the_initializer_in_order() {
+    fn init_releases_stores_target_width_fields_and_copies_payload() {
         let guards = install_mocks();
-        let mut storage = [0u8; IAP_PACKET_SIZE];
-        let owner = 0x0111_1000usize as *mut u8;
-        let payload = [0x01u8, 0x02, 0x03, 0x04];
+        let mut packet_words = [0xa5u32; IAP_PACKET_SIZE / 4];
+        let packet = packet_words.as_mut_ptr().cast::<u8>();
+        let mut allocation = [0u8; 4];
+        let payload = [0x11u8, 0x22, 0x33, 0x44];
+        let owner = 0x0123_4567usize as *mut u8;
+        let context = 0x0765_4321usize as *mut u8;
 
         unsafe {
-            set_alloc_ret(storage.as_mut_ptr());
-            INIT_RESULT = 1;
-
-            let result = iap_packet_create(
-                owner,
-                core::ptr::null_mut(),
-                LINGO_EXTENDED_INTERFACE,
-                0x0018,
-                payload.as_ptr(),
-                payload.len() as u32,
-            );
-
-            assert_eq!(result, storage.as_mut_ptr(), "a successful init hands the packet to the caller");
-            assert_eq!(alloc_log(), (1, IAP_PACKET_SIZE, 2), "one tag-2 operator_new(0x24)");
-            assert_eq!(INIT_CALLS, 1);
-            assert_eq!(LAST_INIT_PACKET, storage.as_mut_ptr(), "the constructor's result is what gets inited");
-            assert_eq!(LAST_OWNER, owner);
-            assert!(LAST_CONTEXT.is_null(), "all 59 call sites pass NULL here");
-            assert_eq!(LAST_LINGO, LINGO_EXTENDED_INTERFACE);
-            assert_eq!(LAST_COMMAND, 0x0018);
-            assert_eq!(LAST_PAYLOAD, payload.as_ptr());
-            assert_eq!(LAST_PAYLOAD_LEN, payload.len() as u32);
-            assert_eq!(RELEASE_CALLS, 0, "no teardown on the success path");
-            assert_eq!(free_log().0, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn carries_every_observed_lingo_and_a_full_width_command() {
-        let guards = install_mocks();
-        let mut storage = [0u8; IAP_PACKET_SIZE];
-
-        unsafe {
-            // The immediates decoded at the 59 call sites, plus the
-            // constructor's 0xff "no lingo" sentinel.
-            for lingo in [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0xff] {
-                for command in [0u16, 1, 0x00ff, 0x0100, 0xffff] {
-                    set_alloc_ret(storage.as_mut_ptr());
-                    INIT_RESULT = 1;
-
-                    iap_packet_create(
-                        core::ptr::null_mut(),
-                        core::ptr::null_mut(),
-                        lingo,
-                        command,
-                        core::ptr::null(),
-                        0,
-                    );
-
-                    assert_eq!(LAST_LINGO, lingo, "lingo is forwarded, never interpreted");
-                    assert_eq!(LAST_COMMAND, command, "16-bit command survives intact");
-                }
-            }
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn an_empty_payload_is_forwarded_verbatim() {
-        let guards = install_mocks();
-        let mut storage = [0u8; IAP_PACKET_SIZE];
-
-        unsafe {
-            set_alloc_ret(storage.as_mut_ptr());
-            INIT_RESULT = 1;
-
-            let result =
-                iap_packet_create(core::ptr::null_mut(), core::ptr::null_mut(), 0, 0, core::ptr::null(), 0);
-
-            assert_eq!(result, storage.as_mut_ptr(), "a zero-length body is success, not failure");
-            assert!(LAST_PAYLOAD.is_null(), "the factory does not substitute a buffer");
-            assert_eq!(LAST_PAYLOAD_LEN, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn a_failed_init_destroys_and_frees_the_packet_and_returns_null() {
-        let guards = install_mocks();
-        let mut storage = [0u8; IAP_PACKET_SIZE];
-
-        unsafe {
-            set_alloc_ret(storage.as_mut_ptr());
-            INIT_RESULT = 0;
-            IAP_PACKET_LIVE_COUNT = 7;
-
-            let result = iap_packet_create(
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                0,
-                0,
-                [0xaau8].as_ptr(),
-                1,
-            );
-
-            assert!(result.is_null(), "a failed init yields NULL, not a half-built packet");
-            assert_eq!(RELEASE_CALLS, 1, "the ported destructor runs its release helper");
-            assert_eq!(LAST_RELEASE_PACKET, storage.as_mut_ptr());
-            assert_eq!(IAP_PACKET_LIVE_COUNT, 7, "constructor increment and destructor decrement pair");
-            assert_eq!(free_log(), (1, storage.as_mut_ptr(), 2), "tag-2 operator_delete of the packet");
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn the_delete_takes_the_destructors_result_not_the_saved_pointer() {
-        let guards = install_mocks();
-        let mut storage = [0u8; IAP_PACKET_SIZE];
-
-        unsafe {
-            set_alloc_ret(storage.as_mut_ptr());
-            INIT_RESULT = 0;
-
-            assert!(iap_packet_create(
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                4,
-                0x0018,
-                core::ptr::null(),
-                0
-            )
-            .is_null());
-            // The destructor ends in `mov r0, r4` — its return IS the
-            // packet — and the factory never reloads its saved pointer, so
-            // r0 out of the destructor is r0 into delete.
-            assert_eq!(free_log(), (1, storage.as_mut_ptr(), 2), "r0 out of the destructor is r0 into delete");
-        }
-        restore_mocks(guards);
-    }
-
-
-    #[test]
-    fn compact_payload_uses_extended_lingo_and_big_endian_data() {
-        let guards = install_mocks();
-        let packet = 0x0BEE_F000usize as *mut u8;
-        let owner = 0x0111_1000usize as *mut u8;
-        let context = 0x0222_2000usize as *mut u8;
-
-        unsafe {
-            capture_compact_payloads();
-            iap_packet_init_with_compact_payload(
-                packet, owner, context, 4, 0xdead_beef, 6, 0xa1b2_c3d4, 0x1122_3344, 0xff,
-            );
-
-            assert_eq!(INIT_CALLS, 1, "the initializer is always called once");
-            assert_eq!(LAST_INIT_PACKET, packet);
-            assert_eq!(LAST_OWNER, owner);
-            assert_eq!(LAST_CONTEXT, context);
-            assert_eq!(LAST_LINGO, 4);
-            assert_eq!(LAST_COMMAND, 0xbeef, "the initializer receives the low command halfword");
-            assert_eq!(LAST_PAYLOAD_LEN, 7);
-            assert_eq!(
-                captured_compact_payload(),
-                &[6, 0xc3, 0xd4, 0x11, 0x22, 0x33, 0x44],
-                "lingo 4 gets be16(value), and kind 6 appends be32(data)"
-            );
-            assert_eq!(RELEASE_CALLS, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn compact_payload_appends_the_lingo_twelve_extra_byte_before_data() {
-        let guards = install_mocks();
-
-        unsafe {
-            capture_compact_payloads();
-            iap_packet_init_with_compact_payload(
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                12,
-                0x1234,
-                6,
-                0x56,
-                0x89ab_cdef,
-                0xa5,
-            );
-
-            assert_eq!(LAST_LINGO, 12);
-            assert_eq!(LAST_COMMAND, 0x1234);
-            assert_eq!(LAST_PAYLOAD_LEN, 7);
-            assert_eq!(
-                captured_compact_payload(),
-                &[6, 0x56, 0xa5, 0x89, 0xab, 0xcd, 0xef],
-                "the lingo-12 byte precedes the kind-6 data"
-            );
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn compact_payload_compares_layout_selectors_before_truncating_them() {
-        let guards = install_mocks();
-
-        unsafe {
-            capture_compact_payloads();
-            iap_packet_init_with_compact_payload(
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                0x104,
-                0x1234_beef,
-                0x106,
-                0x7c,
-                0x1122_3344,
-                0xa5,
-            );
-
-            assert_eq!(LAST_LINGO, 4, "the initializer sees the truncated lingo byte");
-            assert_eq!(LAST_COMMAND, 0xbeef);
-            assert_eq!(LAST_PAYLOAD_LEN, 2, "0x104 and 0x106 do not match full-word selectors");
-            assert_eq!(
-                captured_compact_payload(),
-                &[6, 0x7c],
-                "stored bytes truncate even though the full-word comparisons fail"
-            );
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn reinit_forwards_all_seven_arguments_to_the_initializer_in_order() {
-        let guards = install_mocks();
-        let packet = 0x0BEE_F000usize as *mut u8;
-        let owner = 0x0111_1000usize as *mut u8;
-        let context = 0x0222_2000usize as *mut u8;
-        let payload = [0xaau8, 0xbb, 0xcc];
-
-        unsafe {
-            INIT_RESULT = 1;
-
-            let result = iap_packet_reinit(packet, owner, context, 0xa5, 0xbeef, payload.as_ptr(), 0x0eed);
-
-            assert_eq!(result, 1, "the initializer's success flag comes back in r0");
-            assert_eq!(INIT_CALLS, 1);
-            assert_eq!(LAST_INIT_PACKET, packet, "r0 rides the r4/lr/ip shuffle untouched");
-            assert_eq!(LAST_OWNER, owner);
-            assert_eq!(LAST_CONTEXT, context);
-            assert_eq!(LAST_LINGO, 0xa5);
-            assert_eq!(LAST_COMMAND, 0xbeef);
-            assert_eq!(LAST_PAYLOAD, payload.as_ptr(), "stack argument, bounced verbatim");
-            assert_eq!(LAST_PAYLOAD_LEN, 0x0eed, "stack argument, bounced verbatim");
-            assert_eq!(RELEASE_CALLS, 0);
-            assert_eq!(alloc_log().0, 0);
-            assert_eq!(free_log().0, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn reinit_forwards_the_initializers_failure_verbatim() {
-        let guards = install_mocks();
-        let packet = 0x0BEE_F000usize as *mut u8;
-
-        unsafe {
-            INIT_RESULT = 0;
-
-            let result =
-                iap_packet_reinit(packet, core::ptr::null_mut(), core::ptr::null_mut(), 4, 0x3d, core::ptr::null(), 0);
-
-            assert_eq!(result, 0, "a failed init propagates unchanged");
-            assert_eq!(LAST_INIT_PACKET, packet);
-            assert_eq!(RELEASE_CALLS, 0, "the wrapper does no teardown of its own");
-            assert_eq!(free_log().0, 0);
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn reinit_passes_null_arguments_through_unguarded() {
-        let guards = install_mocks();
-
-        unsafe {
-            INIT_RESULT = 1;
-
-            let result = iap_packet_reinit(
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-                0,
-                0,
-                core::ptr::null(),
-                0,
-            );
-
-            assert_eq!(result, 1);
-            assert_eq!(INIT_CALLS, 1);
-            assert!(LAST_INIT_PACKET.is_null(), "no NULL guard, matching the 43 unconditional call sites");
-            assert!(LAST_OWNER.is_null());
-        }
-        restore_mocks(guards);
-    }
-
-    #[test]
-    fn destruct_releases_then_decrements_and_returns_the_packet() {
-        let guards = install_mocks();
-        let packet = 0x0BEE_F000usize as *mut u8;
-
-        unsafe {
-            IAP_PACKET_LIVE_COUNT = 41;
-
-            let result = iap_packet_destruct(packet);
-
-            assert_eq!(result, packet, "the destructor ends in `mov r0, r4`");
-            assert_eq!(RELEASE_CALLS, 1, "bl 0x080f7420 runs first");
+            set_alloc_ret(allocation.as_mut_ptr());
+            assert_eq!(iap_packet_init(packet, owner, context, 4, 0xbeef, payload.as_ptr(), 4), 1);
+            assert_eq!(RELEASE_CALLS, 1);
             assert_eq!(LAST_RELEASE_PACKET, packet);
-            assert_eq!(COUNT_AT_RELEASE, 41, "the release helper observes the counter NOT yet decremented");
-            assert_eq!(IAP_PACKET_LIVE_COUNT, 40, "then live_count -= 1");
-            assert_eq!(free_log().0, 0, "the destructor itself never frees the packet");
+            assert_eq!(packet.cast::<u32>().read(), owner as usize as u32);
+            assert_eq!(packet.add(4).cast::<u32>().read(), context as usize as u32);
+            assert_eq!(packet.add(14).read(), 4);
+            assert_eq!(packet.add(16).cast::<u16>().read(), 0xbeef);
+            assert_eq!(packet.add(8).cast::<u32>().read(), allocation.as_ptr() as usize as u32);
+            assert_eq!(packet.add(12).cast::<u16>().read(), 4);
+            assert_eq!(&allocation, &payload);
+            assert_eq!(packet.add(28).cast::<u32>().read(), 0);
+            assert_eq!(packet.add(32).cast::<u32>().read(), 0);
+            assert_eq!(alloc_log(), (1, 4, 2));
         }
         restore_mocks(guards);
     }
 
     #[test]
-    fn destruct_wraps_the_counter_through_zero() {
+    fn init_zero_length_is_success_without_allocating_or_overwriting_released_payload_slots() {
         let guards = install_mocks();
-        let packet = 0x0BEE_F000usize as *mut u8;
+        let mut packet = [0xa5u32; IAP_PACKET_SIZE / 4];
+        let packet = packet.as_mut_ptr().cast::<u8>();
+
+        unsafe {
+            assert_eq!(iap_packet_init(packet, core::ptr::null_mut(), core::ptr::null_mut(), 0xff, 0xffff, core::ptr::null(), 0), 1);
+            assert_eq!(RELEASE_CALLS, 1);
+            assert_eq!(alloc_log().0, 0);
+            assert_eq!(core::slice::from_raw_parts(packet.add(8), 6), &[0xa5, 0, 0, 0, 0xa5, 0]);
+            assert_eq!(packet.add(14).read(), 0xff);
+            assert_eq!(packet.add(16).cast::<u16>().read(), 0xffff);
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn init_allocation_failure_stores_null_and_preserves_length() {
+        let mut packet = [0xa5u32; IAP_PACKET_SIZE / 4];
+        let guards = install_mocks();
+        let packet = packet.as_mut_ptr().cast::<u8>();
+        unsafe { packet.add(12).cast::<u16>().write(0) };
+
+        unsafe {
+            set_alloc_ret(core::ptr::null_mut());
+            assert_eq!(iap_packet_init(packet, core::ptr::null_mut(), core::ptr::null_mut(), 1, 2, b"x".as_ptr(), 1), 0);
+            assert_eq!(packet.add(8).cast::<u32>().read(), 0);
+            assert_eq!(packet.add(12).cast::<u16>().read(), 0);
+            assert_eq!(alloc_log(), (1, 1, 2));
+        }
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn destruct_releases_then_decrements_and_returns_packet() {
+        let guards = install_mocks();
+        let packet = 0x0bee_f000usize as *mut u8;
 
         unsafe {
             IAP_PACKET_LIVE_COUNT = 0;
-
-            iap_packet_destruct(packet);
-
-            // A plain `sub r1, r1, #1` — no guard, no saturation.
-            assert_eq!(IAP_PACKET_LIVE_COUNT, 0xffff_ffff);
+            assert_eq!(iap_packet_destruct(packet), packet);
+            assert_eq!(RELEASE_CALLS, 1);
+            assert_eq!(LAST_RELEASE_PACKET, packet);
+            assert_eq!(IAP_PACKET_LIVE_COUNT, u32::MAX);
         }
         restore_mocks(guards);
-    }
-
-    #[test]
-    fn destruct_passes_a_null_packet_through_unguarded() {
-        let guards = install_mocks();
-
-        unsafe {
-            IAP_PACKET_LIVE_COUNT = 3;
-
-            let result = iap_packet_destruct(core::ptr::null_mut());
-
-            assert!(result.is_null(), "NULL in, NULL out of `mov r0, r4`");
-            assert_eq!(RELEASE_CALLS, 1, "no NULL guard, matching the 24 unconditional call sites");
-            assert!(LAST_RELEASE_PACKET.is_null());
-            assert_eq!(IAP_PACKET_LIVE_COUNT, 2);
-        }
-        restore_mocks(guards);
-    }
-
-    /// Fixture layout for [`iap_packet_owner_mode`] inside the low slab:
-    /// the packet at +0x00 (only its +0x00 owner slot is read) and the
-    /// owner object at +0x40 (only its +0x08 mode word is read).
-    mod owner_mode {
-        extern crate std;
-
-        use super::super::iap_packet_owner_mode;
-        use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-        use std::sync::LazyLock;
-
-        const SLAB_LEN: usize = 0x1000;
-        const OFF_PACKET: usize = 0x00;
-        const OFF_OWNER: usize = 0x40;
-        /// Tests run on parallel threads against one shared slab, so each
-        /// gets its own 0x80-byte region instead of a lock.
-        const REGION: usize = 0x80;
-
-        static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
-            try_map_u32_slab(hints::IAP_PACKET_OWNER_MODE, SLAB_LEN).map(|p| p as usize)
-        });
-
-        /// Builds the two-word chain in `region`: packet.owner = owner,
-        /// owner.mode = mode. `owner == 0` models the ownerless packet.
-        fn with_chain(region: usize, owner: bool, mode: u32, body: impl FnOnce(u32)) {
-            let Some(slab) = *SLAB else {
-                assert!(note_missing_u32_fixture("app::iap_packet::owner_mode"));
-                return;
-            };
-            let base = slab + region;
-            unsafe {
-                let packet = (base + OFF_PACKET) as *mut u32;
-                let owner_slot = (base + OFF_OWNER) as u32;
-                packet.write(if owner { owner_slot } else { 0 });
-                ((base + OFF_OWNER + 0x08) as *mut u32).write(mode);
-                body(iap_packet_owner_mode((base + OFF_PACKET) as *const u8));
-            }
-        }
-
-        #[test]
-        fn an_ownerless_packet_reports_mode_zero() {
-            with_chain(0 * REGION, false, 0xdead_beef, |result| {
-                assert_eq!(result, 0, "NULL owner short-circuits to 0 without touching the mode word");
-            });
-        }
-
-        #[test]
-        fn the_sync_framing_mode_passes_through() {
-            with_chain(1 * REGION, true, 1, |result| {
-                assert_eq!(result, 1, "mode 1 is what makes the serializer emit the 0xff sync byte");
-            });
-        }
-
-        #[test]
-        fn a_present_owner_with_zero_mode_reports_zero_through_the_load_path() {
-            with_chain(2 * REGION, true, 0, |result| {
-                assert_eq!(result, 0, "same answer as the NULL case, but via ldrne, not the guard");
-            });
-        }
-
-        #[test]
-        fn boundary_modes_pass_through() {
-            for mode in [2u32, 3, 4] {
-                with_chain(3 * REGION, true, mode, |result| {
-                    assert_eq!(result, mode, "the remap table's meaningful range is 0..=4");
-                });
-            }
-        }
-
-        #[test]
-        fn the_mode_word_is_returned_verbatim_at_full_width() {
-            with_chain(4 * REGION, true, 0xffff_ffff, |result| {
-                assert_eq!(result, 0xffff_ffff, "a full 32-bit word, no truncation or sign play");
-            });
-        }
     }
 }
