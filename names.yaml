@@ -138503,3 +138503,26 @@ functions:
       and 0x080a3cc4. match.py is structural (exit 1 expected): LLVM replaces
       the carry loop with a bulk calculation, while the volatile global-load
       order, signed comparisons, and wrapping arithmetic are retained.
+  - address: 0x080c6d6c
+    ghidra: FUN_080c6d6c
+    name: unicode_casefold_equal
+    size: 40
+    sig: "bool unicode_casefold_equal(u32 left, u32 right)"
+    status: identified
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+    notes: >-
+      Raw osos.dec A32 establishes the exact 40-byte body
+      0x080c6d6c..0x080c6d94; the next independently callable entry is the
+      push at 0x080c6d94. It saves right in r5, calls FUN_08276fbc for left
+      and right, then returns 1 when the two resulting u32 values are equal,
+      otherwise 0. The body contains exactly two unconditional BL
+      instructions, both to FUN_08276fbc; its three direct inbound call sites
+      are unconditional BL at 0x082862b0, 0x0828630c, and 0x08286378, with
+      zero predicated BL call sites. Deferred rather than ported: the required
+      callee FUN_08276fbc uses a byte map whose literal pointer is
+      0x083ed1dd. In osos.dec, that address contains instruction/data bytes,
+      not the map, and no decoded initialization path establishes its runtime
+      contents. Therefore results for every input below 0x100 cannot be
+      reproduced faithfully without inventing the missing callee behavior.
