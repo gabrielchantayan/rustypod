@@ -121,6 +121,10 @@ use crate::libc::strcat::strncat;
 /// original with `adr r2, 0x8123650`, right after the 80-byte body).
 /// Consumes four argument words: indent, key, indent, value.
 const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n\0";
+/// The real-property format literal @ 0x08123b90 (immediately after the
+/// 80-byte body). Consumes four argument words: indent, key, indent, value.
+const PLIST_REAL_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<real>%s</real>\n\0";
+
 
 /// The dict-opening sibling's format literal @ 0x0812373c (immediately
 /// after its 68-byte body). Consumes three argument words: indent, key,
@@ -383,6 +387,44 @@ pub unsafe extern "C" fn formatted_message_emit(
         stream.buf.as_mut_ptr(),
         stream.buf.len(),
         PLIST_INTEGER_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
+/// formatted_message_emit_real — original: `FUN_08123b40` @ 0x08123b40
+/// (80 bytes; verified 3 direct call sites: 3 plain `bl`, 0 predicated).
+///
+/// Emit one indented plist real property. The raw body ends with the tail
+/// branch at 0x08123b8c; its adjacent literal begins at 0x08123b90. It
+/// prepares the indentation, formats [`PLIST_REAL_FORMAT`] into the stream's
+/// +0x15 512-byte inline buffer with `(indent, key, indent, value)`, then
+/// tail-branches to stream append at 0x08123c58.
+///
+/// Deliberate deviation: Rust calls the existing swappable
+/// [`STREAM_APPEND`] boundary and returns rather than tail-branching. The
+/// format arguments and resulting buffer are otherwise unchanged.
+///
+/// Register usage: r0 = stream, r1 = key, r2 = value C string, r3 = depth.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_emit_real(
+    stream: *mut MessageStream,
+    key: *const u8,
+    value: *const u8,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    // The original's argument area: r3 = indent, stack = {key, indent,
+    // value}; here built as an explicit four-word va_list.
+    let args: [u32; 4] = [indent as u32, key as u32, indent as u32, value as u32];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_REAL_FORMAT.as_ptr(),
         args.as_ptr(),
     );
     let text = stream.buf.as_ptr();
@@ -932,6 +974,51 @@ mod tests {
                 (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
             assert_eq!(app_stream, stream);
             assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn real_prepares_formats_and_appends_the_four_word_area() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"GammaAdjustment\0";
+        let value = b"2.2\0";
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                formatted_message_emit_real(stream, key.as_ptr(), value.as_ptr(), 3);
+            });
+            assert_eq!(PREPARE_LEG.expect("indent prepared"), (stream, 3));
+            let (fmt, cursor, end, words) = FORMAT_LEG.expect("formatter ran");
+            let buf = (*stream).buf.as_mut_ptr();
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(fmt, PLIST_REAL_FORMAT.as_ptr());
+            assert_eq!(cursor, buf as usize, "inline buffer start");
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize, "512-byte bound");
+            assert_eq!(
+                words,
+                [indent as u32, key.as_ptr() as u32, indent as u32, value.as_ptr() as u32],
+                "r3 plus stack words are (indent, key, indent, value)"
+            );
+            let (append_stream, append_text, _) =
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(append_stream, stream);
+            assert_eq!(append_text, buf);
+        }
+    }
+
+    #[test]
+    fn real_depth_zero_reaches_the_preparer_and_hands_off_the_format() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        unsafe {
+            with_mocks(echo_engine, || {
+                formatted_message_emit_real(stream, b"Gamma\0".as_ptr(), b"0\0".as_ptr(), 0);
+            });
+            assert_eq!(PREPARE_LEG.expect("indent prepared"), (stream, 0));
+            let (_, _, text) = (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
+            assert_eq!(text, &PLIST_REAL_FORMAT[..PLIST_REAL_FORMAT.len() - 1]);
         }
     }
 
