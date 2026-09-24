@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
 pub mod input_sequence_find_item;
+pub mod parser_stack_pop;
 pub mod input_sequence_item_clear_action;
 pub mod animation_property_pair_init;
 pub mod application_client_cleanup;
