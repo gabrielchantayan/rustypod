@@ -136926,3 +136926,36 @@ functions:
       inbound BL callers (0x08108c90, 0x08126db4, 0x0817087c) and no
       predicated inbound BL calls. Virtual callee identities remain
       deliberately unresolved; host tests inject both dispatches.
+
+  - address: 0x081066e8
+    ghidra: FUN_081066e8
+    name: wait_for_ready
+    size: 52
+    sig: "void wait_for_ready(ReadyWait *wait)"
+    module: kernel/ready_wait
+    status: ported
+    renames:
+      param_1/r0/r4: wait
+      param_1_plus_0x3d: ready
+      param_1_plus_0x40: mutex
+      param_1_plus_0x48: condvar
+      FUN_0807f5c4: mutex_lock
+      FUN_080ed9dc: condvar_wait_forever
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw osos.dec establishes the true 52-byte extent
+      0x081066e8..0x0810671c: thirteen ARM words from stmdb sp!,{r4,lr}
+      through the final tail b to the semaphore-signal veneer at 0x08037e10;
+      the next independently entered function begins at 0x0810671c. Decoding
+      the body finds two direct unconditional BL calls (mutex_lock @
+      0x0807f5c4 and condvar_wait_forever @ 0x080ed9dc), zero predicated BL
+      calls, and one unconditional tail B to rom_sem_signal. Raw-image
+      inbound-reference decoding finds two plain unconditional BL callers
+      (0x0811fd74 and 0x0825659c) and one predicated BLNE caller
+      (0x0828c6d0). The function locks wait+0x40, waits on wait+0x48 while
+      byte wait+0x3d is zero, then unlocks the mutex. The port uses
+      mutex_unlock for the final ROM-semaphore tail branch; its established
+      NULL and zero-handle guards are equivalent to the target's direct
+      veneer path. Host tests cover already-ready objects with NULL and
+      zero-handle semaphore cells; the zero ready state deliberately blocks
+      until a condvar wake, as in retailOS.

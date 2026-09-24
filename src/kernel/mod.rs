@@ -26,6 +26,7 @@ pub mod os_heap;
 pub mod mutex_handoff;
 pub mod posix_mutex;
 pub mod resource_op;
+pub mod ready_wait;
 pub mod sync_mutex;
 pub mod sync_sem;
 pub mod task;
