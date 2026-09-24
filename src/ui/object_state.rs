@@ -235,6 +235,56 @@ pub unsafe extern "C" fn object_sequence_id_assign(object: *mut u8) {
     object.add(0x0c).cast::<u32>().write_volatile(sequence_id);
 }
 
+type ObjectProcessRequest = unsafe extern "C" fn(*mut u8, *mut u8);
+
+/// Calls the unported request processor at `0x0810301c`.
+///
+/// Its concrete operation is not recovered, so this is a narrow fixed-address
+/// boundary rather than an invented callee identity.
+unsafe extern "C" fn firmware_object_process_request(object: *mut u8, request: *mut u8) {
+    let process: ObjectProcessRequest = core::mem::transmute(0x0810_301cusize);
+    process(object, request);
+}
+
+/// The unported request-processing call used by [`object_process_request`].
+static mut OBJECT_PROCESS_REQUEST: ObjectProcessRequest = firmware_object_process_request;
+
+#[inline(always)]
+unsafe fn object_process_request_fn() -> ObjectProcessRequest {
+    core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_PROCESS_REQUEST))
+}
+
+/// object_process_request — original: `FUN_081032fc` @ `0x081032fc`
+/// (64 bytes; three direct inbound `bl` call sites, all unconditional; no
+/// predicated `bl` forms).
+///
+/// Raw ARM words establish the exact extent from `push {r4,r5,r6,lr}` through
+/// `pop {r4,r5,r6,pc}` at `0x08103338`; the next independently linked
+/// function begins at `0x0810333c`. It increments the object word at `+0x34`,
+/// clears its byte at `+0x5a`, invokes the unported processor at `0x0810301c`
+/// with `(object, request)`, stamps the nested object at `object + 0x24`
+/// through [`object_sequence_id_assign`], then decrements the current `+0x34`
+/// word. The counter writes wrap modulo $2^{32}$.
+///
+/// Deliberate deviation: the unported processor is a volatile replaceable seam
+/// on host builds; target builds call its verified retailOS address directly.
+///
+/// # Safety
+///
+/// `object` must be writable at offsets `+0x34` and `+0x5a`, and its nested
+/// object at `+0x24` must meet [`object_sequence_id_assign`]'s requirements.
+/// `request` must satisfy the unported processor's contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_process_request(object: *mut u8, request: *mut u8) {
+    let activity_count = object.add(0x34).cast::<u32>();
+    activity_count.write_volatile(activity_count.read_volatile().wrapping_add(1));
+    object.add(0x5a).write_volatile(0);
+    object_process_request_fn()(object, request);
+    object_sequence_id_assign(object.add(0x24));
+    activity_count.write_volatile(activity_count.read_volatile().wrapping_sub(1));
+}
+
 /// The header words inspected by the indexed-object element helpers,
 /// followed by the storage-base pointer slot consumed by
 /// [`indexed_object_storage_base`].
@@ -1609,6 +1659,8 @@ mod tests {
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
     static OBJECT_SEQUENCE_ID_LOCK: Mutex<()> = Mutex::new(());
+    static OBJECT_PROCESS_REQUEST_LOCK: Mutex<()> = Mutex::new(());
+
 
     static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
     static SCALED_FIELD_TOTAL_LOCK: Mutex<()> = Mutex::new(());
@@ -1928,6 +1980,44 @@ mod tests {
     }
     unsafe extern "C" fn noop_virtual_member_destroy(_: *mut u8) {}
 
+    static mut PROCESS_REQUEST_CALLS: u32 = 0;
+    static mut PROCESS_REQUEST_OBJECT: usize = 0;
+    static mut PROCESS_REQUEST_REQUEST: usize = 0;
+
+    unsafe extern "C" fn recording_object_process_request(object: *mut u8, request: *mut u8) {
+        PROCESS_REQUEST_CALLS += 1;
+        PROCESS_REQUEST_OBJECT = object as usize;
+        PROCESS_REQUEST_REQUEST = request as usize;
+        assert_eq!(object.add(0x34).cast::<u32>().read_volatile(), 0);
+        assert_eq!(object.add(0x5a).read_volatile(), 0);
+        object.add(0x34).cast::<u32>().write_volatile(0);
+    }
+
+    struct ObjectProcessRequestReset;
+
+    impl Drop for ObjectProcessRequestReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(OBJECT_PROCESS_REQUEST)
+                    .write(firmware_object_process_request);
+            }
+        }
+    }
+
+    fn install_recording_object_process_request() -> MutexGuard<'static, ()> {
+        let guard = OBJECT_PROCESS_REQUEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            PROCESS_REQUEST_CALLS = 0;
+            PROCESS_REQUEST_OBJECT = 0;
+            PROCESS_REQUEST_REQUEST = 0;
+            core::ptr::addr_of_mut!(OBJECT_PROCESS_REQUEST).write(recording_object_process_request);
+        }
+        guard
+    }
+
+
     #[test]
     fn releases_owner_then_its_owned_member_through_their_virtual_slots() {
         let mut owner_slots = [noop_virtual_member_destroy as ObjectVirtualMethod; 13];
@@ -2031,6 +2121,37 @@ mod tests {
         assert_eq!(sequence_id(), 0);
         assert_eq!(unsafe { sequence_id_next() }, 0);
         assert_eq!(sequence_id(), 1);
+    }
+
+    #[test]
+    fn processes_the_request_between_counter_updates_and_stamps_the_nested_object() {
+        let _request_guard = install_recording_object_process_request();
+        let _sequence_guard = OBJECT_SEQUENCE_ID_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = ObjectProcessRequestReset;
+        let mut object = [0xa5u8; 0x70];
+        let mut request = [0x3cu8; 8];
+
+        object[0x34..0x38].copy_from_slice(&u32::MAX.to_le_bytes());
+        object[0x5a] = 0x92;
+        seed_object_sequence_id(u32::MAX);
+
+        unsafe {
+            object_process_request(object.as_mut_ptr(), request.as_mut_ptr());
+        }
+
+        let (calls, called_object, called_request) = unsafe {
+            (PROCESS_REQUEST_CALLS, PROCESS_REQUEST_OBJECT, PROCESS_REQUEST_REQUEST)
+        };
+        assert_eq!(calls, 1);
+        assert_eq!(called_object, object.as_mut_ptr() as usize);
+        assert_eq!(called_request, request.as_mut_ptr() as usize);
+        assert_eq!(u32::from_le_bytes(object[0x34..0x38].try_into().unwrap()), u32::MAX);
+        assert_eq!(object[0x5a], 0);
+        assert_eq!(object[0x5b], 0xa5);
+        assert_eq!(u32::from_le_bytes(object[0x30..0x34].try_into().unwrap()), 0);
+        assert_eq!(object_sequence_id(), 0);
     }
     #[test]
     fn assigns_then_advances_the_object_sequence_id() {
