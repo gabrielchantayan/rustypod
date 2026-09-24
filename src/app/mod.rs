@@ -29,6 +29,7 @@ pub mod playback_position_get;
 pub mod showcase_clear_timer_slots;
 pub mod service_status_word;
 pub mod application_resource_provider;
+pub mod media_player_set_inner_state_selector;
 pub mod default_selection_traversal_token;
 pub mod directional_resource_record_construct;
 pub mod application_message_post_global;
