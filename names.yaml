@@ -138481,3 +138481,25 @@ functions:
       fields at offsets 0, 4, and 8 plus the u16 field at offset 12, retaining
       record in r0 despite Ghidra's void signature. Deliberate deviations:
       none.
+
+  - address: 0x080c98d8
+    ghidra: FUN_080c98d8
+    name: quantized_timespec_to_milliseconds
+    size: 96
+    sig: "void quantized_timespec_to_milliseconds(const i32 *timespec, i32 *out)"
+    module: fp/fp_misc
+    status: ported
+    vars: {param_1: timespec, param_2: out, DAT_080c9938: subsecond_quantum}
+    notes: >-
+      Raw osos.dec decodes as 24 ARM words at 0x080c98d8..0x080c9934,
+      followed by three literal words; 0x080c9944 is the next real function,
+      proving the 96-byte extent. It reads {seconds,nanoseconds}, loads the
+      mutable quantum at 0x089059c0, rounds nanoseconds upward through two
+      signed ADS divisions at 0x08031568, carries each signed-at-least-1e9
+      result into seconds, and stores seconds*1000 + nanoseconds/1e6 with
+      32-bit wrapping arithmetic. Complete ARM B/BL-immediate decoding finds
+      two plain unconditional outbound bl instructions and no predicated bl;
+      the three plain unconditional inbound sites are 0x08086128, 0x0808b270,
+      and 0x080a3cc4. match.py is structural (exit 1 expected): LLVM replaces
+      the carry loop with a bulk calculation, while the volatile global-load
+      order, signed comparisons, and wrapping arithmetic are retained.

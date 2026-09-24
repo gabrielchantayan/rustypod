@@ -2521,6 +2521,57 @@ pub unsafe extern "C" fn timespec_to_milliseconds(ts: *const i32) -> u64 {
     let sec = core::ptr::read_unaligned(ts);
     (sec.wrapping_mul(1000).wrapping_add(millis_part)) as u32 as u64
 }
+/// quantized_timespec_to_milliseconds — original: `FUN_080c98d8` @
+/// `0x080c98d8` (**96 bytes**). Raw `osos.dec` words run through
+/// `pop {r4,r5,r6,pc}` at `0x080c9934`; its three literal words occupy
+/// `0x080c9938..0x080c9940`, and the next real function starts at
+/// `0x080c9944`. ARM immediate decoding finds two plain, unconditional
+/// outbound `bl` instructions, both to `__rt_sdiv` @ `0x08031568`, and no
+/// predicated `bl`; three plain unconditional inbound call sites are
+/// `0x08086128`, `0x0808b270`, and `0x080a3cc4`.
+///
+/// Rounds `timespec[1]` up to the global `0x089059c0` subsecond quantum,
+/// carries every complete billion nanoseconds into `timespec[0]`, then stores
+/// the resulting signed, wrapping millisecond count in `out`. The ARM
+/// comparison is signed, so negative quantized values do not carry.
+///
+/// Deliberate deviations: the register-pair return from each ADS division is
+/// unused here, so the port uses the existing quotient-only `__rt_sdiv`.
+/// The target's mutable global quantum is read volatile; the private helper
+/// makes its arithmetic testable on the host without mapping firmware RAM.
+/// LLVM reduces the source carry loop to a bulk carry calculation in release
+/// code; signed comparison and wrapping results remain unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.quantized_timespec_to_milliseconds")]
+#[inline(never)]
+pub unsafe extern "C" fn quantized_timespec_to_milliseconds(timespec: *const i32, out: *mut i32) {
+    let seconds = timespec.read();
+    let subsecond_quantum = core::ptr::read_volatile(0x0890_59c0 as *const i32);
+    let nanoseconds = timespec.add(1).read();
+    *out = quantized_timespec_milliseconds(seconds, nanoseconds, subsecond_quantum);
+}
+
+#[inline(always)]
+fn quantized_timespec_milliseconds(mut seconds: i32, nanoseconds: i32, subsecond_quantum: i32) -> i32 {
+    let mut quantized_nanoseconds = unsafe {
+        __rt_sdiv(
+            nanoseconds
+                .wrapping_add(subsecond_quantum)
+                .wrapping_sub(1),
+            subsecond_quantum,
+        )
+    }
+    .wrapping_mul(subsecond_quantum);
+
+    while quantized_nanoseconds >= 1_000_000_000 {
+        seconds = seconds.wrapping_add(1);
+        quantized_nanoseconds = quantized_nanoseconds.wrapping_sub(1_000_000_000);
+    }
+
+    seconds
+        .wrapping_mul(1_000)
+        .wrapping_add(unsafe { __rt_sdiv(quantized_nanoseconds, 1_000_000) })
+}
 
 /// microseconds_to_timespec — original: `FUN_08261e68` @ `0x08261e68`
 /// (40 bytes: nine instructions through `pop {r4,pc}` at `0x08261e8c`
@@ -6239,6 +6290,26 @@ mod tests {
         let max = (i32::MAX.wrapping_mul(1000)) as u32 as u64;
         assert_eq!(millis(i32::MAX, 0), max);
         assert_eq!(max >> 32, 0, "high word always zero");
+    }
+
+    // ---- quantized_timespec_to_milliseconds ----
+
+    #[test]
+    fn quantized_timespec_to_milliseconds_rounds_to_quantum_then_carries() {
+        assert_eq!(quantized_timespec_milliseconds(0, 0, 1_000_000), 0);
+        assert_eq!(quantized_timespec_milliseconds(0, 1, 1_000_000), 1);
+        assert_eq!(quantized_timespec_milliseconds(0, 1_000_000, 1_000_000), 1);
+        assert_eq!(quantized_timespec_milliseconds(2, 999_999_999, 1), 2_999);
+        assert_eq!(quantized_timespec_milliseconds(2, 999_999_999, 1_000_000), 3_000);
+    }
+
+    #[test]
+    fn quantized_timespec_to_milliseconds_keeps_signed_and_wrapping_edges() {
+        assert_eq!(quantized_timespec_milliseconds(2, -1, 1_000_000), 2_000);
+        assert_eq!(
+            quantized_timespec_milliseconds(i32::MAX, 1_000_000_000, 1),
+            i32::MIN.wrapping_mul(1_000),
+        );
     }
 
     // ---- timespec_is_nonzero ----
