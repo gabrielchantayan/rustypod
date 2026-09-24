@@ -140632,3 +140632,30 @@ functions:
       `blgt` at 0x080600c8. The callback field's concrete type is not
       recoverable, so the port retains only the observed buffer/length
       dispatch role and reaches the unported getter through a literal veneer.
+  - address: 0x0805e68c
+    ghidra: FUN_0805e68c
+    name: owned_virtual_handle_release
+    size: 68
+    sig: "i32 owned_virtual_handle_release(void **handle)"
+    module: cxx/owned_virtual_handle_release
+    status: ported
+    renames:
+      param_1/r0/r4: handle
+      "[handle + 0x0]": object
+      "[object + 0x0]": object_vtable
+      "[object_vtable + 0x0c]": object_destroy
+      "[object_vtable + 0x04]": object_release
+    notes: >-
+      Raw osos.dec words establish the exact 68-byte body
+      0x0805e68c..0x0805e6cc; the next independently entered function begins
+      at 0x0805e6d0. The body has no direct BL instructions: it makes one
+      unconditional indirect BLX through object_vtable+0x0c, reloads the
+      handle, then makes one predicated BLXNE through object_vtable+0x04.
+      Whole-image A32 decoding finds three inbound plain BL instructions at
+      0x0813832c, 0x0813835c, and 0x081383a0, with no predicated direct
+      callers. A non-NULL handle destroys its object, reloads the handle
+      because destruction may replace it, releases the replacement if non-NULL,
+      then clears the handle and returns zero. The virtual target identities
+      are not established; target builds use their verified slots and host
+      tests use native vtable fixtures because target u32 vtable words cannot
+      hold host callbacks.
