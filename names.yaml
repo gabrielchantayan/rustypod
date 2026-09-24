@@ -139409,3 +139409,29 @@ functions:
       exactly three direct unconditional BL callers (0x0809c1cc, 0x0809c1e0,
       0x0809c1f4), no predicated BL callers, and no direct B callers. No
       deliberate deviations.
+
+  - address: 0x0808fc38
+    ghidra: FUN_0808fc38
+    name: word_array_remove_prefix
+    size: 92
+    sig: "void word_array_remove_prefix(u32 *array, u32 index)"
+    module: util/word_array_remove_prefix
+    status: ported
+    renames:
+      param_1/r0: array
+      param_2/r1: index
+      "array+0x0": entries
+      "array+0x8": count
+    notes: >-
+      Raw ARM words establish the exact 92-byte extent
+      0x0808fc38..0x0808fc94; the next separately entered function starts at
+      0x0808fc94 with `stmdb sp!, {r4-r11,lr}`. The target body has zero plain
+      BL instructions and zero predicated BL instructions. Its two recovered
+      direct inbound calls are unconditional BLs at 0x08098b90 and 0x080a0254;
+      no callee seam is required. Null arrays, empty arrays, and a zero index
+      return without writes. Otherwise entries from index through count-1 move
+      forward to the first slot and count becomes count-index; an index at or
+      beyond count clears count. Rust uses volatile aligned word accesses in
+      place of the original conditional ARM instructions, deliberately
+      preventing LLVM from substituting an external memory routine. Host tests
+      cover null, empty, zero-index, middle-prefix, and at-end removal cases.
