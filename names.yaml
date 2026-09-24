@@ -138392,3 +138392,20 @@ functions:
       existing ports. Host builds use replaceable seams for those runtime
       services and diagnostics; target builds call the recovered Rust
       implementations directly. No behavioral deviation.
+
+  - address: 0x080cdd64
+    ghidra: FUN_080cdd64
+    name: offset_to_64
+    size: 8
+    sig: "u32 offset_to_64(u32 offset)"
+    module: util/offset_to_64
+    status: ported
+    renames:
+      param_1/r0: offset
+    notes: >-
+      Raw osos.dec words establish the exact 8-byte executable extent
+      0x080cdd64..0x080cdd6b: `rsb r0,r0,#0x40; bx lr`. The `push
+      {r0,r6,r7,lr}` at 0x080cdd6c starts the next independently linked
+      function. Decoding the call sites finds three plain unconditional BL
+      instructions and zero predicated BL instructions. It returns the A32
+      wrapping subtraction 64 - offset; no deliberate deviations.
