@@ -136075,3 +136075,36 @@ functions:
       Target Rust retains the verified call to 0x082987b4 and four-byte vtable
       slot addressing; host tests use an injectable seam because the lookup
       callee has no names.yaml entry and is not separately ported.
+
+  - address: 0x0811a200
+    ghidra: FUN_0811a200
+    name: status_value_set
+    size: 88
+    sig: "void status_value_set(StatusValueOwner *owner, u32 value)"
+    module: app/status_value_set
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: value
+      "owner+0xb4": status_value
+      DAT_0811a254: message_first_payload (0x4c737453)
+      FUN_082669e4: message_kind_arena_pool (ported)
+      FUN_0826c0d8: fixed_block_pool_alloc (ported)
+      FUN_0827ea20: kind_0x1f_message_construct (ported)
+      FUN_08110e4c: message_dispatch (target-only seam)
+      FUN_0806e488: unported notifier
+    notes: >-
+      Raw osos.dec corrects Ghidra's 84-byte extent: 0x0811a200..0x0811a254
+      is 84 bytes of code plus the function's literal-pool word
+      0x4c737453 at 0x0811a254, and 0x0811a258 begins the next distinct
+      push prologue, for a true 88-byte extent. The body contains five
+      direct unconditional bl instructions (at 0x0811a218, 0x0811a220,
+      0x0811a23c, 0x0811a244, and 0x0811a24c), none predicated. Decoding
+      every A32 BL across osos.dec finds exactly three direct callers
+      (0x0811a0d8, 0x0811a130, 0x0811a380), all unconditional and none
+      predicated. If owner+0xb4 is unchanged it returns immediately;
+      otherwise it stores value, allocates and constructs a 28-byte
+      kind-0x1f message with payloads (0x4c737453, 0, 0, value, 0),
+      dispatches it with a NULL target, then calls 0x0806e488 with one.
+      The two unported callees remain explicit target/host-test seams;
+      no semantic identity was invented for 0x0806e488.
