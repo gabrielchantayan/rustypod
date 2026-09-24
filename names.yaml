@@ -135606,3 +135606,39 @@ functions:
       action_index; all exits invalidate the cursor. The Rust port reads the
       target-width collection fields as u32 word indices rather than host
       pointer fields, preserving +0xa8/+0xac on 64-bit hosts.
+
+  # --- Input-sequence item action clearing ---
+  - address: 0x081293cc
+    ghidra: FUN_081293cc
+    name: input_sequence_item_clear_action
+    size: 148
+    sig: "void input_sequence_item_clear_action(u32 *item, u32 action_index)"
+    module: app/input_sequence_item_clear_action
+    vars:
+      param_1/r0: item
+      param_2/r1: action_index
+      "item+0x04": pending_node_head
+      "item+0x08": pending_action_bits
+      "item+0x0c": last_action_millis
+      "node+0x04": next_pending_node
+      "node+0x13": action_index
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 148-byte extent
+      0x081293cc..0x08129460; 0x08129464 begins the next independently
+      entered function. Its four direct BL instructions are three plain
+      (`operator_delete` @ 0x082aad24 plus `read_usec_timer_into` @
+      0x08086e24 / `usec_to_millis` @ 0x0826c5d0) and one predicated blne
+      to operator_delete. A complete raw ARM B/BL scan finds three direct
+      inbound calls: plain bl at 0x08129cb0, plus blne at 0x08129ccc and
+      0x0812ae20. A NULL pending-node head returns before changing any item
+      word. Otherwise it clears the MSB-first action bit when set, unlinks
+      and tag-2 deletes the first pending node whose byte +0x13 matches the
+      action index, then returns immediately; only no-removal paths sample
+      Timer E and store microseconds / 1000 at item+0x0c. Rust uses
+      target-width u32 pointer words for the item's embedded links; host-only
+      timer/delete seams are the deliberate deviation required to test without
+      Timer E MMIO or the retail heap. Host tests cover the NULL-head early
+      return, head removal, later-node unlink, and no-match timer conversion.
+      match.py structural review preserves the head guard, bit clear, list
+      walk, early delete returns, and timer-conversion tail.

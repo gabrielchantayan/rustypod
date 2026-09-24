@@ -2206,6 +2206,9 @@ pub mod hints {
     pub const WORK_RECORD_ASSIGN_VALUE: usize = 0x6f60_0000;
     pub const WORK_RECORD_ASSIGN_VALUE_UNCHANGED: usize = 0x6f70_0000;
     pub const WORK_RECORD_ASSIGN_VALUE_SAME_OBJECT: usize = 0x6f80_0000;
+    // 0xde80_0000: dedicated to app/input_sequence_item_clear_action's
+    // target-width item and pending-node fixture; mappings never unmap.
+    pub const INPUT_SEQUENCE_ITEM_CLEAR_ACTION: usize = 0xde80_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
