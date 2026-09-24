@@ -137887,3 +137887,26 @@ functions:
       typed replaceable host seams rather than inventing identities. Host tests
       cover the sentinel-empty case and a two-node traversal with record and
       map arguments asserted at both dispatch boundaries.
+  - address: 0x080e1f8c
+    ghidra: FUN_080e1f8c
+    name: slot_resources_release_all
+    size: 48
+    sig: "void slot_resources_release_all(void *ctx)"
+    module: app/slot_request_release
+    status: ported
+    renames:
+      param_1/r0/r5: ctx
+      r4: slot
+      FUN_080dc754: slot_resources_release
+    notes: >-
+      Raw osos.dec words establish the exact 48-byte extent
+      0x080e1f8c..0x080e1f8bb: the final instruction is `pop {r4,r5,r6,pc}`,
+      followed by the next real function's `push` at 0x080e1fbc. Full-image
+      decoding finds three inbound plain BL calls (0x080492f8, 0x08093f14,
+      and 0x080a7c3c) and zero predicated inbound forms. The body contains no
+      plain BL and one predicated `blne 0x080dc754`. It increments slot from
+      zero through 0x30 and releases each via the existing unported
+      slot_resources_release seam. Rust's ordinary loop call deliberately
+      replaces the `movne`/`blne` pair; ARM codegen retains a direct literal
+      dispatch to 0x080dc754. Host tests verify all 48 valid slots are called
+      exactly once, with no request submission.

@@ -115,6 +115,48 @@ unsafe fn slot_request_release_ops() -> SlotRequestReleaseOps {
     }
 }
 
+/// Calls the unported per-slot resource-release routine.
+///
+/// Host builds use the installed [`SlotRequestReleaseOps`]; ARM builds call
+/// retailOS at `0x080dc754`.
+///
+/// # Safety
+///
+/// `ctx` and `slot` must meet the firmware release routine's requirements.
+pub unsafe fn slot_resources_release(ctx: *mut c_void, slot: u32) {
+    let ops = unsafe { slot_request_release_ops() };
+    unsafe { (ops.release)(ctx, slot) };
+}
+
+/// Releases resources for every valid slot in `ctx`.
+///
+/// Original: `FUN_080e1f8c` @ `0x080e1f8c`, 48 bytes
+/// (`0x080e1f8c..0x080e1f8bb`); the next real function starts at
+/// `0x080e1fbc`. Full-image decoding finds three inbound plain `bl` calls
+/// and no predicated inbound BL calls. The body has one predicated `blne`,
+/// to `slot_resources_release` @ `0x080dc754`, and no plain BL calls.
+///
+/// # Algorithm
+///
+/// Counts upward from zero and conditionally calls the per-slot release
+/// routine after each increment, stopping before slot `0x31`; consequently
+/// it releases slots `1..=0x30`. Deliberate deviation: Rust expresses the
+/// stock `movne`/`blne` sequence as an ordinary loop body call. The callee is
+/// the existing unported retailOS seam, so ARM builds retain the physical
+/// dispatch and host builds use its replaceable operations.
+///
+/// # Safety
+///
+/// `ctx` must satisfy the unported release routine for each slot `1..=0x30`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn slot_resources_release_all(ctx: *mut c_void) {
+    for slot in 1..=0x30 {
+        unsafe { slot_resources_release(ctx, slot) };
+    }
+}
+
+
 /// Submits a slot request for `ctx` and releases the returned slot's
 /// resources when the submit reports a nonzero slot/result word.
 ///
@@ -140,20 +182,22 @@ pub unsafe extern "C" fn slot_request_submit_and_release(
     let ops = unsafe { slot_request_release_ops() };
     let slot = unsafe { (ops.submit)(ctx, arg1, arg2, arg3) };
     if slot != 0 {
-        unsafe { (ops.release)(ctx, slot) };
+        unsafe { slot_resources_release(ctx, slot) };
     }
 }
-
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use core::ffi::c_void;
     use core::ptr;
-    use core::sync::atomic::{AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Mutex;
 
-    use super::{slot_request_submit_and_release, SlotRequestReleaseOps, SLOT_REQUEST_RELEASE_OPS};
+    use super::{
+        slot_request_submit_and_release, slot_resources_release_all,
+        SlotRequestReleaseOps, SLOT_REQUEST_RELEASE_OPS,
+    };
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static SUBMIT_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -167,6 +211,7 @@ mod tests {
     ];
     static LAST_RELEASE_CTX: AtomicUsize = AtomicUsize::new(0);
     static LAST_RELEASE_SLOT: AtomicUsize = AtomicUsize::new(0);
+    static RELEASED_SLOTS: AtomicU64 = AtomicU64::new(0);
 
     unsafe extern "C" fn record_submit(ctx: *mut c_void, arg1: u32, arg2: u32, arg3: u32) -> u32 {
         SUBMIT_CALLS.fetch_add(1, Ordering::Relaxed);
@@ -181,6 +226,7 @@ mod tests {
         RELEASE_CALLS.fetch_add(1, Ordering::Relaxed);
         LAST_RELEASE_CTX.store(ctx as usize, Ordering::Relaxed);
         LAST_RELEASE_SLOT.store(slot as usize, Ordering::Relaxed);
+        RELEASED_SLOTS.fetch_or(1u64 << slot, Ordering::Relaxed);
     }
 
     struct OpsRestore(SlotRequestReleaseOps);
@@ -201,6 +247,7 @@ mod tests {
         }
         LAST_RELEASE_CTX.store(0, Ordering::Relaxed);
         LAST_RELEASE_SLOT.store(0, Ordering::Relaxed);
+        RELEASED_SLOTS.store(0, Ordering::Relaxed);
 
         unsafe {
             let previous = ptr::read_volatile(ptr::addr_of!(SLOT_REQUEST_RELEASE_OPS));
@@ -253,5 +300,20 @@ mod tests {
         assert_eq!(LAST_SUBMIT_ARGS[0].load(Ordering::Relaxed), 0x1000);
         assert_eq!(LAST_SUBMIT_ARGS[1].load(Ordering::Relaxed), 0x2000_0000);
         assert_eq!(LAST_SUBMIT_ARGS[2].load(Ordering::Relaxed), 0x40_0000);
+    }
+
+    #[test]
+    fn releases_every_valid_slot_once_in_ascending_range() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _restore = install_ops(0);
+        let ctx = 0xdef0usize as *mut c_void;
+
+        unsafe { slot_resources_release_all(ctx) };
+
+        assert_eq!(SUBMIT_CALLS.load(Ordering::Relaxed), 0);
+        assert_eq!(RELEASE_CALLS.load(Ordering::Relaxed), 0x30);
+        assert_eq!(LAST_RELEASE_CTX.load(Ordering::Relaxed), ctx as usize);
+        assert_eq!(LAST_RELEASE_SLOT.load(Ordering::Relaxed), 0x30);
+        assert_eq!(RELEASED_SLOTS.load(Ordering::Relaxed), (1u64 << 49) - 2);
     }
 }
