@@ -37,6 +37,36 @@ pub type DescriptorFormatCoreFn = unsafe extern "C" fn(
     descriptor: *const FormatDescriptor,
     context: *const c_void,
 ) -> i32;
+/// The four-register formatter veneer at `0x080f3c04`, which supplies the
+/// retailOS default formatter context as its fifth argument.
+pub type DefaultDescriptorFormatCoreFn = unsafe extern "C" fn(
+    destination: *mut u8,
+    capacity: u32,
+    format: *const u8,
+    descriptor: *const FormatDescriptor,
+) -> i32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_default_descriptor_format_core(
+    destination: *mut u8,
+    capacity: u32,
+    format: *const u8,
+    descriptor: *const FormatDescriptor,
+) -> i32 {
+    let worker: DefaultDescriptorFormatCoreFn = unsafe { core::mem::transmute(0x080f_3c04usize) };
+    unsafe { worker(destination, capacity, format, descriptor) }
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_default_descriptor_format_core(
+    _destination: *mut u8,
+    _capacity: u32,
+    _format: *const u8,
+    _descriptor: *const FormatDescriptor,
+) -> i32 {
+    panic!("format_with_default_descriptor requires formatter veneer 0x080f3c04")
+}
+
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_build_format_descriptor(
@@ -96,6 +126,18 @@ pub static mut DESCRIPTOR_FORMAT_CORE: DescriptorFormatCoreFn = firmware_descrip
 #[cfg(not(target_os = "none"))]
 pub static mut DESCRIPTOR_FORMAT_CORE: DescriptorFormatCoreFn = missing_descriptor_format_core;
 
+/// Active default-context formatter veneer. The target default is the stock
+/// worker; host tests install a recording worker.
+#[cfg(target_os = "none")]
+pub static mut DEFAULT_DESCRIPTOR_FORMAT_CORE: DefaultDescriptorFormatCoreFn =
+    firmware_default_descriptor_format_core;
+
+/// See the target definition.
+#[cfg(not(target_os = "none"))]
+pub static mut DEFAULT_DESCRIPTOR_FORMAT_CORE: DefaultDescriptorFormatCoreFn =
+    missing_default_descriptor_format_core;
+
+
 #[inline(always)]
 unsafe fn descriptor_builder() -> FormatDescriptorBuildFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(FORMAT_DESCRIPTOR_BUILD)) }
@@ -105,6 +147,12 @@ unsafe fn descriptor_builder() -> FormatDescriptorBuildFn {
 unsafe fn descriptor_format_core() -> DescriptorFormatCoreFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DESCRIPTOR_FORMAT_CORE)) }
 }
+
+#[inline(always)]
+unsafe fn default_descriptor_format_core() -> DefaultDescriptorFormatCoreFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(DEFAULT_DESCRIPTOR_FORMAT_CORE)) }
+}
+
 
 /// `format_with_descriptor` — original: `FUN_080caab4` @ 0x080caab4 (104
 /// bytes; 8 unconditional `bl` call sites, binary-verified).
@@ -141,6 +189,31 @@ pub unsafe extern "C" fn format_with_descriptor(
         unsafe { destination.write(0) };
     }
     0
+}
+
+/// `format_with_default_descriptor` — original: `FUN_08086d28` @ 0x08086d28
+/// (80 bytes, `0x08086d28..0x08086d78`; 2 unconditional `bl`, 0 predicated
+/// calls, binary-verified).
+///
+/// Normalizes `arguments` into a nine-word descriptor, then formats it through
+/// the retailOS default-context formatter veneer. A failed normalization
+/// returns zero; otherwise the veneer result passes through unchanged.
+///
+/// Deliberate deviation: the two stock callees remain target-only volatile
+/// dispatch slots. Host tests replace them to observe the exact forwarding.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn format_with_default_descriptor(
+    destination: *mut u8,
+    capacity: u32,
+    format: *const u8,
+    arguments: *const c_void,
+) -> i32 {
+    let mut descriptor = MaybeUninit::<FormatDescriptor>::uninit();
+    if unsafe { descriptor_builder()(arguments, descriptor.as_mut_ptr()) } == 0 {
+        return 0;
+    }
+    unsafe { default_descriptor_format_core()(destination, capacity, format, descriptor.as_ptr()) }
 }
 
 #[cfg(test)]
@@ -192,6 +265,23 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn recording_default_core(
+        destination: *mut u8,
+        capacity: u32,
+        format: *const u8,
+        descriptor: *const FormatDescriptor,
+    ) -> i32 {
+        unsafe {
+            CORE_CALLS += 1;
+            CORE_DESTINATION = destination;
+            CORE_CAPACITY = capacity;
+            CORE_FORMAT = format;
+            CORE_DESCRIPTOR = descriptor.read();
+            CORE_RESULT
+        }
+    }
+
+
     struct SeamGuard(#[allow(dead_code)] MutexGuard<'static, ()>);
 
     impl Drop for SeamGuard {
@@ -199,6 +289,8 @@ mod tests {
             unsafe {
                 core::ptr::addr_of_mut!(FORMAT_DESCRIPTOR_BUILD).write(missing_build_format_descriptor);
                 core::ptr::addr_of_mut!(DESCRIPTOR_FORMAT_CORE).write(missing_descriptor_format_core);
+                core::ptr::addr_of_mut!(DEFAULT_DESCRIPTOR_FORMAT_CORE)
+                    .write(missing_default_descriptor_format_core);
             }
         }
     }
@@ -221,6 +313,25 @@ mod tests {
         }
         SeamGuard(guard)
     }
+
+    fn install_default(build_result: i32, core_result: i32) -> SeamGuard {
+        let guard = SEAM_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            BUILD_RESULT = build_result;
+            CORE_RESULT = core_result;
+            BUILD_CALLS = 0;
+            CORE_CALLS = 0;
+            BUILD_SOURCE = core::ptr::null();
+            CORE_DESTINATION = core::ptr::null_mut();
+            CORE_CAPACITY = 0;
+            CORE_FORMAT = core::ptr::null();
+            CORE_DESCRIPTOR = [0; 9];
+            core::ptr::addr_of_mut!(FORMAT_DESCRIPTOR_BUILD).write(recording_builder);
+            core::ptr::addr_of_mut!(DEFAULT_DESCRIPTOR_FORMAT_CORE).write(recording_default_core);
+        }
+        SeamGuard(guard)
+    }
+
 
     #[test]
     fn forwards_a_normalized_descriptor_and_nonzero_core_result() {
@@ -311,5 +422,49 @@ mod tests {
         assert_eq!(unsafe { CORE_CALLS }, 1, "the zero capacity only gates final NUL storage");
         assert!(unsafe { CORE_DESTINATION }.is_null());
         assert_eq!(unsafe { CORE_CAPACITY }, 0);
+    }
+
+    #[test]
+    fn default_context_veneer_forwards_four_arguments_and_result() {
+        let _guard = install_default(1, -23);
+        let mut destination = [0xa5u8; 8];
+        let format = b"%T: %d\0";
+        let arguments = [0x0809_0000u32, 42];
+
+        let result = unsafe {
+            format_with_default_descriptor(
+                destination.as_mut_ptr(),
+                destination.len() as u32,
+                format.as_ptr(),
+                arguments.as_ptr().cast(),
+            )
+        };
+
+        assert_eq!(result, -23);
+        assert_eq!(unsafe { BUILD_CALLS }, 1);
+        assert_eq!(unsafe { CORE_CALLS }, 1);
+        assert_eq!(unsafe { BUILD_SOURCE }, arguments.as_ptr().cast());
+        assert_eq!(unsafe { CORE_DESTINATION }, destination.as_mut_ptr());
+        assert_eq!(unsafe { CORE_CAPACITY }, destination.len() as u32);
+        assert_eq!(unsafe { CORE_FORMAT }, format.as_ptr());
+        assert_eq!(unsafe { CORE_DESCRIPTOR }, [0x1020_3040, 1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn default_context_veneer_skips_formatter_after_failed_descriptor_build() {
+        let _guard = install_default(0, -23);
+
+        let result = unsafe {
+            format_with_default_descriptor(
+                core::ptr::null_mut(),
+                0,
+                b"\0".as_ptr(),
+                core::ptr::null(),
+            )
+        };
+
+        assert_eq!(result, 0);
+        assert_eq!(unsafe { BUILD_CALLS }, 1);
+        assert_eq!(unsafe { CORE_CALLS }, 0);
     }
 }
