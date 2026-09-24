@@ -138359,3 +138359,36 @@ functions:
       seam. Host tests cover zero, all special selectors, ordinary values,
       the upper bound, and oversized u32 values while proving full argument
       order. No other deviation.
+
+  - address: 0x080cdf5c
+    ghidra: FUN_080cdf5c
+    name: ata_wait_busy_or_ready
+    size: 156
+    sig: "u32 ata_wait_busy_or_ready(void)"
+    module: drivers/ata_wait_busy_or_ready
+    status: ported
+    renames:
+      DAT_080cdff8: ata_controller_context (0x089d03bc)
+      "ata_controller_context+0x18": busy_or_ready_wait_interval_usec
+      FUN_080d7314: ata_taskfile_register_read
+      thunk_EXT_FUN_22001edc: iram_usec_timer_read_veneer
+      thunk_EXT_FUN_22001ee8: iram_usec_timer_elapsed_veneer
+      FUN_080568e8: task_sleep
+      FUN_082bd4a8: debug_printf
+    notes: >-
+      Raw osos.dec establishes the exact 156-byte executable extent
+      0x080cdf5c..0x080cdff7. The following word at 0x080cdff8 is the
+      context literal 0x089d03bc, followed by inline diagnostic strings;
+      it is not executable code. Decoding every A32 BL word within that
+      extent finds seven plain unconditional BL instructions and zero
+      predicated BL instructions: timer read, two task-file reads, error
+      trace, timer elapsed, timeout trace, and task sleep. Poll status
+      register 15; on status error bit 0, obtain and trace the low byte of
+      error register 9. A failed status/error read or elapsed context
+      interval returns zero; otherwise sleep 50 ticks and retry while BUSY
+      or DRQ (0x88) remains set, returning one once clear. The timer thunk
+      targets resolve through the verified 0x22000000 IRAM mirror to the
+      existing timer ports, and the task-file reader and task sleep are
+      existing ports. Host builds use replaceable seams for those runtime
+      services and diagnostics; target builds call the recovered Rust
+      implementations directly. No behavioral deviation.
