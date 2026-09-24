@@ -140182,3 +140182,30 @@ functions:
       same direct-range branch, global load/null return, stack key, provider
       call, and +8 result adjustment; LLVM omits the stock frame on the direct
       path and adds its usual frame around the call path.
+
+  - address: 0x0806fdb4
+    ghidra: FUN_0806fdb4
+    name: resource_selector_record
+    size: 48
+    sig: "const u32 *resource_selector_record(i32 selector)"
+    module: util/resource_selector_record
+    status: ported
+    renames:
+      param_1/r0: selector
+      DAT_0806fde4: RESOURCE_SELECTOR_PROVIDER
+      DAT_0806fde8: RESOURCE_SELECTOR_RECORDS
+      FUN_08369864: namespace_provider_at
+    notes: >-
+      Raw osos.dec A32 words establish the true 48-byte body
+      0x0806fdb4..0x0806fde3: 0x0806fdec begins the next real function.
+      The first three instructions return null for a negative signed selector.
+      Selectors 0..7 use the 28-byte (seven-word) records based at the
+      0x08a0eb68 literal; selectors >=8 load the namespace-provider pointer
+      from 0x08a0eb64, subtract eight, and tail-branch to the already ported
+      namespace_provider_at. Full-image decoding finds three inbound plain BL
+      calls (0x08070290, 0x080702b0, 0x080708ec) and zero predicated BL calls;
+      the function has no outbound BL calls, only the tail B. Host builds use
+      private storage for the two fixed firmware globals. match.py exits 1
+      with the reviewed structural diff: LLVM emits a frame and tail branch,
+      while retaining the signed guard, fixed seven-word stride, provider load,
+      index subtraction, and tail call.
