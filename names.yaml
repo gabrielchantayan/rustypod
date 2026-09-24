@@ -140508,3 +140508,25 @@ functions:
       retaining the table loads, three stores, and conditional bitmap update.
       Deliberate deviations: the target calls the verified Rust
       big_endian_word_bit_index port rather than retail address 0x0836b698.
+  - address: 0x080621b4
+    ghidra: FUN_080621b4
+    name: dispatch_optional_codec
+    size: 52
+    sig: "i32 dispatch_optional_codec(u8 *buffer, u32 length)"
+    module: util/optional_codec_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: buffer
+      param_2/r1/r5: length
+      FUN_0806212c: get_optional_codec_context
+      "context+0x10": dispatch
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x080621b4..0x080621e8: `ldmia sp!,{r4,r5,r6,pc}` ends it and the
+      next function begins at 0x080621e8. It has one plain unconditional
+      BL instruction at 0x080621c0 to the unported context getter
+      0x0806212c and no predicated BL forms. Full-image decoding finds
+      three direct inbound calls: two plain calls and one predicated
+      `blgt` at 0x080600c8. The callback field's concrete type is not
+      recoverable, so the port retains only the observed buffer/length
+      dispatch role and reaches the unported getter through a literal veneer.
