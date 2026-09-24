@@ -58,6 +58,7 @@ pub mod resource_record_find;
 pub mod resource_slot_acquire;
 pub mod resource_slot_table_initialize;
 pub mod class_6800;
+pub mod class_6600_message_post;
 pub mod class_6000_property;
 pub mod class_6000_property_6045_i8;
 pub mod class6000_property_60bc_u16;
