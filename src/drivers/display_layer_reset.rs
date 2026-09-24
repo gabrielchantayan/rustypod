@@ -33,15 +33,14 @@
 //! # Algorithm
 //!
 //! Clears the layer byte at `+0x1bd`. With a non-null pending object at
-//! `+0x60`, calls the unported `0x0810667c` with `(object, 1)`, invokes its
+//! `+0x60`, calls [`layer_pending_object_set_stopped`] with `(object, 1)`, invokes its
 //! vtable slot `+0x04`, and clears the word. Otherwise it tail-calls
 //! `condvar_signal` on the embedded condition variable at `+0x80`.
 //!
 //! # Deliberate deviations
 //!
-//! The unidentified `0x0810667c` call and host vtable dispatch are explicit
-//! seams. ARM retains their verified address and slot dispatch; host tests use
-//! target-width words rather than host pointer offsets.
+//! Only host vtable dispatch is an explicit seam because target pointers are
+//! four bytes and host pointers are wider.
 
 use crate::kernel::condvar::{condvar_signal, CondVar};
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
@@ -126,18 +125,40 @@ pub unsafe extern "C" fn layer_reset(display: *mut u32) -> i32 {
     mutex_unlock(mutex);
     0
 }
-type PendingObjectStop = unsafe extern "C" fn(*mut u32, u32);
-type PendingObjectRelease = unsafe extern "C" fn(u32);
-type PendingCleanupSignal = unsafe extern "C" fn(*mut CondVar);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_pending_object_stop(object: *mut u32, flag: u32) {
-    let stop: PendingObjectStop = core::mem::transmute(0x0810_667cusize);
-    stop(object, flag);
+/// layer_pending_object_set_stopped — original: `FUN_0810667c` @
+/// `0x0810667c` (44 bytes; `0x0810667c..0x081066a8`).
+///
+/// Raw A32 decoding finds 3 plain inbound `bl` calls (0x08120728, 0x0812076c,
+/// and 0x08120844), no predicated inbound `bl` calls, 2 outbound plain `bl`
+/// calls, and a tail branch to `mutex_unlock`.
+///
+/// # Algorithm
+///
+/// Locks the object's embedded mutex at `+0x40`, stores `stopped` in its byte
+/// flag at `+0x3d`, signals the embedded condition variable at `+0x48`, then
+/// unlocks the mutex.
+///
+/// # Deliberate deviations
+///
+/// The ARM function tail-branches to `mutex_unlock`; Rust returns after the
+/// equivalent call because its caller-visible return value is unused.
+///
+/// # Safety
+///
+/// `object` must point to a live pending object with a `Mutex` at `+0x40` and
+/// a `CondVar` at `+0x48`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn layer_pending_object_set_stopped(object: *mut u32, stopped: u8) {
+    let mutex = object.cast::<u8>().add(0x40).cast::<Mutex>();
+    mutex_lock(mutex);
+    object.cast::<u8>().add(0x3d).write(stopped);
+    condvar_signal(object.cast::<u8>().add(0x48).cast::<CondVar>());
+    mutex_unlock(mutex);
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_pending_object_stop(_object: *mut u32, _flag: u32) {}
+type PendingObjectRelease = unsafe extern "C" fn(u32);
+type PendingCleanupSignal = unsafe extern "C" fn(*mut CondVar);
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_pending_cleanup_signal(condvar: *mut CondVar) {
@@ -147,10 +168,6 @@ unsafe extern "C" fn firmware_pending_cleanup_signal(condvar: *mut CondVar) {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_pending_cleanup_signal(_condvar: *mut CondVar) {}
 
-#[cfg(target_os = "none")]
-static mut PENDING_OBJECT_STOP: PendingObjectStop = firmware_pending_object_stop;
-#[cfg(not(target_os = "none"))]
-static mut PENDING_OBJECT_STOP: PendingObjectStop = missing_pending_object_stop;
 #[cfg(not(target_os = "none"))]
 static mut PENDING_OBJECT_RELEASE: PendingObjectRelease = missing_object_release;
 #[cfg(target_os = "none")]
@@ -197,10 +214,7 @@ pub unsafe extern "C" fn layer_pending_object_cleanup(layer: *mut u32) {
         return;
     }
 
-    core::ptr::read_volatile(core::ptr::addr_of!(PENDING_OBJECT_STOP))(
-        object as usize as *mut u32,
-        1,
-    );
+    layer_pending_object_set_stopped(object as usize as *mut u32, 1);
     release_pending_object(object);
     layer.add(0x60 / 4).write(0);
 }
@@ -266,12 +280,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn record_pending_stop(object: *mut u32, flag: u32) {
-        EVENTS[EVENT_COUNT] = object as usize as u32;
-        EVENT_COUNT += 1;
-        EVENTS[EVENT_COUNT] = flag;
-        EVENT_COUNT += 1;
-    }
 
     unsafe extern "C" fn record_pending_release(object: u32) {
         EVENTS[EVENT_COUNT] = object;
@@ -284,7 +292,6 @@ mod tests {
     }
 
     unsafe fn install_pending_cleanup_seams() {
-        PENDING_OBJECT_STOP = record_pending_stop;
         PENDING_OBJECT_RELEASE = record_pending_release;
         PENDING_CLEANUP_SIGNAL = record_pending_signal;
         EVENTS = [0; 6];
@@ -294,14 +301,22 @@ mod tests {
     #[test]
     fn pending_object_is_stopped_released_and_cleared_in_order() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(object) = (crate::testing::try_map_u32_slab(
+            crate::testing::hints::LAYER_PENDING_OBJECT_STOP,
+            0x100,
+        )) else {
+            crate::testing::note_missing_u32_fixture("drivers::display_layer_reset");
+            return;
+        };
         let mut storage = [0u64; 64];
         let layer = storage.as_mut_ptr().cast::<u32>();
         unsafe {
-            layer.add(0x60 / 4).write(0x1234_5678);
+            layer.add(0x60 / 4).write(object as usize as u32);
             layer.cast::<u8>().add(0x1bd).write(1);
             install_pending_cleanup_seams();
             layer_pending_object_cleanup(layer);
-            assert_eq!(&EVENTS[..EVENT_COUNT], &[0x1234_5678, 1, 0x1234_5678]);
+            assert_eq!(&EVENTS[..EVENT_COUNT], &[object as usize as u32]);
+            assert_eq!(object.add(0x3d).read(), 1);
             assert_eq!(layer.add(0x60 / 4).read(), 0);
             assert_eq!(layer.cast::<u8>().add(0x1bd).read(), 0);
         }
@@ -319,6 +334,20 @@ mod tests {
             assert_eq!(&EVENTS[..EVENT_COUNT], &[0xffff_fffe]);
             assert_eq!(layer.add(0x60 / 4).read(), 0);
             assert_eq!(layer.cast::<u8>().add(0x1bd).read(), 0);
+        }
+    }
+
+    #[test]
+    fn pending_object_stop_flag_accepts_both_callsite_values() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut storage = [0u64; 16];
+        let object = storage.as_mut_ptr().cast::<u32>();
+        unsafe {
+            object.cast::<u8>().add(0x3d).write(0xff);
+            layer_pending_object_set_stopped(object, 1);
+            assert_eq!(object.cast::<u8>().add(0x3d).read(), 1);
+            layer_pending_object_set_stopped(object, 0);
+            assert_eq!(object.cast::<u8>().add(0x3d).read(), 0);
         }
     }
 }
