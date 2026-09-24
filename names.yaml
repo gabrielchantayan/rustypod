@@ -137933,3 +137933,29 @@ functions:
       replaces the `movne`/`blne` pair; ARM codegen retains a direct literal
       dispatch to 0x080dc754. Host tests verify all 48 valid slots are called
       exactly once, with no request submission.
+
+  - address: 0x080df7f8
+    ghidra: FUN_080df7f8
+    name: indexed_mode_state_flag
+    size: 28
+    sig: "u32 indexed_mode_state_flag(i16 index)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080df814: mode_state_object_table (target RAM @ 0x08b2f648)
+      "object+0x1e0": mode_state_flag_word
+    notes: >-
+      Raw osos.dec establishes the 28-byte extent 0x080df7f8..0x080df813:
+      seven A32 words through `bx lr`; the following literal at 0x080df814 is
+      the shared mode-state object-table pointer, and the next real function
+      begins at 0x080df818. The signed low halfword of index is multiplied by
+      99, used to select a 0x18c-byte table record, and its object pointer's
+      word at +0x1e0 is loaded and masked with 0x1f. The concrete word meaning
+      is unrecovered. Full-image ARM BL decoding finds three inbound plain
+      unconditional sites (0x080df70c, 0x080df794, and 0x080df7bc) and zero
+      predicated forms; the body is a leaf with no outgoing BL instructions.
+      The Rust port reuses ui/mode_state's existing replaceable table seam,
+      preserving the target's four-byte table slots rather than host pointer
+      spacing; it deliberately adds no bounds or null checks. Host tests prove
+      distinct 0x18c-stride selections and masking of the selected word.
