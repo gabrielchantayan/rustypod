@@ -18450,6 +18450,24 @@ functions:
       match.py: LLVM loads the hook table then makes the same two-way
       cmp/beq split into the two indirect calls — same structure.
 
+  - address: 0x080a6b40
+    ghidra: thunk_FUN_080568e8
+    name: task_sleep_relay
+    size: 4
+    sig: "u32 task_sleep_relay(u32 ticks)"
+    module: kernel/task
+    status: ported
+    renames: {param_1/r0: ticks, return/r0: status}
+    notes: >-
+      Raw osos.dec word ea010cda is `b 0x080e9eb0`; the following word
+      e92d40f8 (`push {r3-r7,lr}`) begins the next function, confirming
+      the 4-byte extent. Complete ARM B/BL-immediate decoding finds three
+      plain BL callers at 0x081677b4, 0x081678ac, and 0x081678f4, with no
+      predicated BL callers. This is a pure tail relay to the already
+      ported task_sleep_thunk at 0x080e9eb0, retaining ticks in r0 and
+      returning its status unchanged. Deliberate deviation: Rust preserves
+      the forwarding ABI but LLVM need not emit a tail branch.
+
   - address: 0x080e9eb0
     ghidra: thunk_FUN_080568e8
     name: task_sleep_thunk

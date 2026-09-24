@@ -1045,6 +1045,21 @@ pub unsafe extern "C" fn task_sleep(ticks: u32) -> usize {
 pub unsafe extern "C" fn task_sleep_thunk(ticks: u32) -> usize {
     task_sleep(ticks)
 }
+/// task_sleep_relay — original: `thunk_FUN_080568e8` @ 0x080a6b40
+/// (4 bytes: `ea010cda` = `b 0x080e9eb0`; `push {r3-r7, lr}` @
+/// 0x080a6b44 starts the following function).
+///
+/// Three verified plain `bl` call sites (0x081677b4, 0x081678ac, and
+/// 0x081678f4); no predicated `bl` calls. This is a pure tail-dispatch
+/// relay to the existing 0x080e9eb0 `task_sleep_thunk`, preserving `r0`
+/// and its returned status unchanged. Deliberate deviation: the Rust call
+/// is not guaranteed to compile as a branch, but preserves the relay ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_sleep_relay(ticks: u32) -> usize {
+    task_sleep_thunk(ticks)
+}
+
 
 /// task_sleep_callback — original: `FUN_08228418` @ 0x08228418 (20 bytes,
 /// 0x08228418..0x0822842c; **6 direct `bl` call sites**: five unconditional
@@ -1681,6 +1696,23 @@ mod tests {
                 assert_eq!(task_sleep_thunk(ticks), via_callee, "ticks={ticks}");
                 drain();
             }
+        }
+    }
+
+    // ---- task_sleep_relay (0x080a6b40) --------------------------------
+
+    /// The second veneer keeps the zero/nonzero split and result of the
+    /// existing sleep thunk intact for every direct-call edge case.
+    #[test]
+    fn sleep_relay_forwards_both_service_branches_and_result() {
+        let _guard = mock_hooks();
+        unsafe {
+            assert_eq!(task_sleep_relay(1), 0xd31a);
+            assert_eq!(drain(), vec![Call::RomTimedDelay { task: 0, ticks: 1 }]);
+            assert_eq!(task_sleep_relay(0), 0x28d);
+            assert_eq!(drain(), vec![Call::RomReschedule]);
+            assert_eq!(task_sleep_relay(u32::MAX), 0xd31a);
+            assert_eq!(drain(), vec![Call::RomTimedDelay { task: 0, ticks: u32::MAX as usize }]);
         }
     }
 
