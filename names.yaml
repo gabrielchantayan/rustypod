@@ -15492,6 +15492,37 @@ functions:
       unacknowledged cases return 0xffffffce. Rust calls the three ported
       callees directly and uses u32 temporary words to preserve target
       pointer-field layout on 64-bit hosts.
+  - address: 0x0806a994
+    ghidra: FUN_0806a994
+    name: tdat_element_teardown
+    size: 104
+    sig: "void tdat_element_teardown(u8 *element)"
+    module: ui/tdat_element_teardown
+    vars:
+      param_1/r0: element
+      param_1_plus_0x34: first_plst
+      param_1_plus_0x54: tagged_handler_list
+      DAT_0806a9f8: TDAT_TEARDOWN_NOTIFY (0x7464636d)
+      FUN_0806aa3c: ui_element_is_tdat_class
+      FUN_08066bb8: tagged_list_notify (seam, unported)
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+      FUN_08061378: plst_element_notify_teardown
+      FUN_0806715c: empty_destructor
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 96 instruction bytes at
+      0x0806a994..0x0806a9f4 and the event-key literal 0x7464636d at
+      0x0806a9f8; the next separately entered function begins at 0x0806a9fc,
+      so the true function extent is 104 bytes, not Ghidra's 100. Decoding
+      every B/BL word finds three direct callers (0x08061058, 0x0826fef4,
+      and 0x0826ff70), all unconditional and zero predicated. On a valid
+      'tdat' element, notify tagged handlers at +0x54, then walk linked
+      'plst' nodes from +0x34, saving each successor before its teardown.
+      Rust directly calls the three existing ports; 0x08066bb8 remains a
+      target/host seam. The final 0x0806715c call is deliberately omitted:
+      raw bytes prove its body is only bx lr, with no observable use of the
+      element+0x8 argument.
   - address: 0x0806aa3c
     ghidra: FUN_0806aa3c
     name: ui_element_is_tdat_class
