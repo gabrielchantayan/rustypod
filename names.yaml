@@ -137397,3 +137397,25 @@ functions:
       existing __rt_memcpy port. match.py exits 1 with the expected structural
       diff: LLVM emits fixed-address BLX calls and a normal Rust frame instead
       of the stock direct BLs and saved incoming registers.
+  - address: 0x080f6e60
+    ghidra: FUN_080f6e60
+    name: iap_packet_second_buffer_length_or_zero
+    size: 28
+    sig: "u16 iap_packet_second_buffer_length_or_zero(const IapPacket *packet)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      "packet+0x18": second_buffer_length
+      r1: second_buffer_length
+      r0: result
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte A32 extent
+      0x080f6e60..0x080f6e7b; 0x080f6e7c starts the next function with
+      push {r4-r8,lr}. The seven words load the aligned u16 at packet+0x18,
+      initialize r0 to zero, compare against the 0xffff no-buffer sentinel
+      by subtracting 0xff00 then 0xff, conditionally return the loaded
+      zero-extended word, and bx lr. There are three plain unconditional BL
+      callers at 0x0810559c, 0x081055d0, and 0x0814e434; no predicated BL
+      callers. Ghidra calls the return short, but raw ldrh/movne proves the
+      observable r0 value is zero-extended, so Rust exposes u16.

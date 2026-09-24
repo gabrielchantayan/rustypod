@@ -584,6 +584,54 @@ pub unsafe extern "C" fn iap_packet_owner_mode(packet: *const u8) -> u32 {
     }
     mode
 }
+
+/// iap_packet_second_buffer_length_or_zero — original: `FUN_080f6e60` @
+/// `0x080f6e60` (**28 bytes, `0x080f6e60..0x080f6e7c`** — 7 instructions,
+/// no literal pool; the next real function starts at `0x080f6e7c` with
+/// `push {r4-r8,lr}`). **3 direct plain `bl` call sites and no predicated
+/// `bl` call sites**, verified by decoding every ARM branch word in
+/// `osos.dec`: `0x0810559c`, `0x081055d0`, and `0x0814e434`.
+///
+/// Reads the iAP packet's second-buffer length at +0x18, replacing only the
+/// `0xffff` no-buffer sentinel with zero. The three callers forward this
+/// length with the packet lingo to their completion dispatches before the
+/// packet is destroyed.
+///
+/// # Deviations
+///
+/// Ghidra types the result as `short`; the raw `ldrh` and `movne r0,r1`
+/// establish a zero-extended word result, so this uses `u16`. This preserves
+/// lengths with bit 15 set instead of treating them as negative.
+///
+/// # Safety
+///
+/// `packet` must address a readable halfword at +0x18. The original has no
+/// NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_second_buffer_length_or_zero(packet: *const u8) -> u16 {
+    let length = packet.add(0x18).cast::<u16>().read();
+    if length == u16::MAX {
+        0
+    } else {
+        length
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn second_buffer_length_replaces_only_the_no_buffer_sentinel() {
+    let mut packet = [0u32; 7];
+    let length = unsafe { packet.as_mut_ptr().cast::<u8>().add(0x18).cast::<u16>() };
+
+    for (stored, expected) in [(u16::MAX, 0), (0, 0), (1, 1), (0x8000, 0x8000), (0xfffe, 0xfffe)] {
+        unsafe {
+            length.write(stored);
+            assert_eq!(iap_packet_second_buffer_length_or_zero(packet.as_ptr().cast()), expected);
+        }
+    }
+}
+
 ///
 /// iap_packet_owner_mode_index — original: `FUN_08192124` @ `0x08192124`
 /// (**40 bytes, 0x08192124..0x0819214c** — 10 instructions, no literal
