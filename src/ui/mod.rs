@@ -164,6 +164,7 @@ pub mod geometry_changed;
 pub mod set_x_extent;
 pub mod set_y_extent;
 pub mod layout_apply_pending_offsets;
+pub mod layout_record_propagate_adjusted_offset;
 pub mod text_layout_counted_apply;
 pub mod text_layout_render_counted;
 pub mod view_scroll_position;
