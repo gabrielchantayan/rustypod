@@ -413,6 +413,11 @@ pub mod hints {
     // target-width BIO fixture; mappings never unmap.
     pub const BIO_HANDLE_WRITE: usize = 0x7e00_0000;
     pub const BIO_HANDLE_WRITE_FAILURE: usize = 0x7e10_0000;
+    // 0x7ff8_0000 and 0x7ff9_0000: dedicated to
+    // ui/object_resource_max_ordinal_for_presence's target-width fixtures;
+    // mappings never unmap.
+    pub const OBJECT_RESOURCE_MAX_ORDINAL_FOR_PRESENCE: usize = 0x7ff8_0000;
+    pub const OBJECT_RESOURCE_MAX_ORDINAL_FOR_PRESENCE_RAW_SELECTOR: usize = 0x7ff9_0000;
     pub const VIEW_TIMER: usize = 0x2000_0000;
     // 0x2100_0000: dedicated to util/raster_profile's raw-u32 active and
     // successor profile fixture; mappings never unmap, so no other user may
