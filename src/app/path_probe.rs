@@ -237,6 +237,7 @@ pub type PathFacadeSlot5c =
 pub type PathFacadeSlot54 =
     unsafe extern "C" fn(facade: *mut FacadeObject, path_object: *mut StringObject, flag_out: *mut u32) -> u32;
 
+
 /// The facade's unclassified vtable-slot-+0x68 cstr operation. The wrapper
 /// at 0x08089154 establishes only its structural ABI.
 pub type PathFacadeSlot68FromPathObject =
@@ -769,6 +770,40 @@ pub unsafe extern "C" fn path_facade_slot_68_from_cstr(
     status
 }
 
+/// path_facade_slot_54 — original: `FUN_08089214` @ **0x08089214** (80
+/// bytes; **3 plain `bl` call sites and 0 predicated `bl` call sites**,
+/// verified by decoding the raw `osos.dec` A32 words: the body runs through
+/// `pop {r4-r6,pc}` at 0x08089260 and the next distinct `push` begins at
+/// 0x08089264; inbound calls are 0x080891fc, 0x081ee750, and 0x081ef218).
+///
+/// Constructs a scoped interface guard with `base_hint`, fetches facade
+/// selector 1, invokes vtable slot +0x54 with `(facade, path_object,
+/// flag_out)`, destroys the guard, and returns that status verbatim.
+///
+/// # Deliberate deviations
+///
+/// The +0x54 operation has no recovered semantic identity, so its structural
+/// name and existing typed guard/facade seams are retained. Device defaults
+/// preserve the established ported/retailOS boundary chain; host defaults
+/// fail closed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_54(
+    path_object: *mut StringObject,
+    flag_out: *mut u32,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let slot = (*(*facade).vtable).slots[FACADE_PATH_SLOT_54_INDEX];
+    let operation: PathFacadeSlot54 = core::mem::transmute(slot);
+    let status = operation(facade, path_object, flag_out);
+    guard_dtor_fn()(guard);
+    status
+}
+
 /// path_facade_slot_54_from_cstr — original: `FUN_080891dc` @
 /// **0x080891dc** (56 bytes; **4 plain `bl` call sites and 0 predicated
 /// `bl` call sites**, independently counted by decoding every ARM B/BL word
@@ -782,11 +817,9 @@ pub unsafe extern "C" fn path_facade_slot_68_from_cstr(
 /// destroys the guard, then destroys the original path-object storage and
 /// returns the slot status verbatim.
 ///
-/// # Deliberate deviations
-///
-/// The port reuses the already-ported path-object constructor/destructor and
-/// interface-guard seams rather than exporting the separately linked
-/// 0x08089214 helper. The opaque slot retains its structural +0x54 name.
+/// The wrapper calls the separately exported [`path_facade_slot_54`] after
+/// constructing the derived path object. The opaque slot retains its
+/// structural +0x54 name.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn path_facade_slot_54_from_cstr(
@@ -798,14 +831,7 @@ pub unsafe extern "C" fn path_facade_slot_54_from_cstr(
     let path_storage = path_storage.as_mut_ptr();
     let path_object = path_object_construct(path_storage, path);
 
-    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
-    let guard = guard.as_mut_ptr();
-    guard_ctor_fn()(guard, base_hint);
-    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
-    let slot = (*(*facade).vtable).slots[FACADE_PATH_SLOT_54_INDEX];
-    let operation: PathFacadeSlot54 = core::mem::transmute(slot);
-    let status = operation(facade, path_object, flag_out);
-    guard_dtor_fn()(guard);
+    let status = path_facade_slot_54(path_object, flag_out, base_hint);
     string_object_destroy_veneer(path_storage);
     status as i32
 }
@@ -1051,6 +1077,7 @@ pub(crate) mod tests {
     static mut QUERY_RESULT: u32 = 0;
     static mut QUERY_PATH: *const u8 = core::ptr::null();
     static mut QUERY_PATH_VTABLE: usize = 0;
+    static mut QUERY_FLAG_OUT: *mut u32 = core::ptr::null_mut();
     static mut RELEASED_STORAGE: *mut StringObject = core::ptr::null_mut();
     static mut INTERFACE_QUERY_GUARD: *mut InterfaceGuard = core::ptr::null_mut();
     static mut INTERFACE_QUERY_WORD: u32 = 0;
@@ -1112,9 +1139,9 @@ pub(crate) mod tests {
         QUERY_FACADE = facade;
         QUERY_PATH = path.cast_const().cast();
         QUERY_PATH_VTABLE = (*path).vtable as usize;
+        QUERY_FLAG_OUT = _flag_out;
         QUERY_RESULT
     }
-
     unsafe extern "C" fn recording_path_facade_slot_68_from_path_object(
         path_object: *mut StringObject,
         flag_out: *mut u32,
@@ -1526,6 +1553,27 @@ pub(crate) mod tests {
                 assert_eq!(RELEASED_STORAGE as *const u8, QUERY_PATH);
                 assert_eq!(flag_out, 0xa5a5_a5a5, "the opaque slot alone owns flag_out");
             }
+        }
+    }
+
+    #[test]
+    fn slot_54_forwards_path_flag_hint_and_status_inside_guard() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            (*core::ptr::addr_of_mut!(MOCK_VTABLE)).slots[FACADE_PATH_SLOT_54_INDEX] =
+                recording_path_object_facade_slot_54 as usize;
+            QUERY_RESULT = 0xdead_beef;
+            let mut flag_out = 0xa5a5_a5a5;
+            let path = core::ptr::addr_of_mut!(PATH_OBJECT);
+
+            assert_eq!(path_facade_slot_54(path, &mut flag_out, 0x5a5a_f00d), QUERY_RESULT);
+            assert_eq!(&EVENTS[..EVENT_COUNT], &[EVENT_GUARD_CTOR, EVENT_FETCH, EVENT_QUERY, EVENT_GUARD_DTOR]);
+            assert_eq!(CTOR_HINT, 0x5a5a_f00d);
+            assert_eq!(QUERY_PATH, path.cast_const().cast());
+            assert_eq!(QUERY_FLAG_OUT, core::ptr::addr_of_mut!(flag_out));
+            assert_eq!(flag_out, 0xa5a5_a5a5, "the opaque slot alone owns flag_out");
         }
     }
 
