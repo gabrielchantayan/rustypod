@@ -279,6 +279,22 @@ pub unsafe extern "C" fn mutex_lock_veneer_d7104(mutex: *mut Mutex) {
     mutex_lock(mutex);
 }
 
+/// mutex_unlock_veneer_d710c — original: `FUN_080d710c` @ 0x080d710c
+/// (4 bytes; 3 unconditional plain `bl` call sites, zero predicated `bl`
+/// call sites).
+///
+/// Raw `osos.dec` establishes the complete one-word body
+/// `b 0x0807f6a0` (`0xeafea163`); 0x080d7110 starts a distinct tail veneer.
+/// This forwards `mutex` unchanged to [`mutex_unlock`]. Deliberate deviation:
+/// Rust expresses the tail branch as a normal call so this separately
+/// hookable entry remains a real symbol.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.mutex_unlock_veneer_d710c")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_unlock_veneer_d710c(mutex: *mut Mutex) {
+    mutex_unlock(mutex);
+}
+
 
 /// mutex_unlock — original: `FUN_0807f6a0` @ 0x0807f6a0 (8 bytes), with
 /// the guard thunk @ 0x8056710 inlined. The mutexes are non-recursive
@@ -933,6 +949,33 @@ mod tests {
             mutex_lock_veneer_d7104(&mut zero_handle);
         }
         assert_eq!(calls(), vec![Call::Wait(0x4d)]);
+    }
+
+    /// The 0x080d710c tail veneer preserves the target's NULL/zero-handle
+    /// guards and forwards a live semaphore handle unchanged.
+    #[test]
+    fn unlock_veneer_d710c_delegates_to_mutex_unlock() {
+        let _lock = mock_kernel();
+        let mut live_cell: u32 = 0x62;
+        let mut live = Mutex {
+            sem_cell: &mut live_cell,
+            unused: 0,
+        };
+        let mut null_cell = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        let mut zero_handle_cell: u32 = 0;
+        let mut zero_handle = Mutex {
+            sem_cell: &mut zero_handle_cell,
+            unused: 0,
+        };
+        unsafe {
+            mutex_unlock_veneer_d710c(&mut live);
+            mutex_unlock_veneer_d710c(&mut null_cell);
+            mutex_unlock_veneer_d710c(&mut zero_handle);
+        }
+        assert_eq!(calls(), vec![Call::Signal(0x62)]);
     }
 
 
