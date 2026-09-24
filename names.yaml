@@ -17564,6 +17564,37 @@ functions:
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
 
+  - address: 0x0809e620
+    ghidra: FUN_0809e620
+    name: timer_trace_validate
+    size: 216
+    sig: "void timer_trace_validate(u8 *timer)"
+    module: drivers/timer
+    status: identified
+    renames:
+      param_1/r0/r4: timer
+      FUN_080a6c0c: locked_callback_list_any
+      FUN_080ed9dc: condvar_wait_forever
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw osos.dec words establish the true 216-byte extent
+      0x0809e620..0x0809e6f8: code runs through pop {r4,r5,r6,pc} at
+      0x0809e6f4, followed by the 32-byte literal pool
+      0x0809e6f8..0x0809e714; the next independently linked function
+      begins with push {r3,r4,r5,lr} at 0x0809e718. The decoded body has
+      three direct BL instructions: two plain (0x0809e6cc to
+      locked_callback_list_any and 0x0809e6e0 to condvar_wait_forever)
+      and one predicated BLNE (0x0809e6b0 to mailbox_slot_post). It
+      classifies timer+0x18 as 'expi', 'run ', or another state; the
+      'run ' path removes the timer from pending-list head
+      0x089ca300 when timer+0x1c is nonzero and conditionally posts the
+      notify cell 0x089ca310, while the 'expi' path invokes
+      locked_callback_list_any(timer+0xc, 0x080cf79c, timer), then waits
+      on 0x08a1070c until the state changes and finally writes 'stop'.
+      Porting is blocked: names.yaml has no entry for the required
+      callback predicate at 0x080cf79c, so its ABI and behavior are not
+      established. Creating a TimerOps seam or guessing that predicate
+      would violate the no-invented-callee requirement.
   - address: 0x080a6c0c
     ghidra: FUN_080a6c0c
     name: locked_callback_list_any
