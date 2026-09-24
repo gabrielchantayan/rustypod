@@ -60,6 +60,12 @@
 //!   18 tail `b`, 5 predicated tail `b` — Ghidra's "36 bl" counts only
 //!   the link forms). Two instructions — `ldr r0, [r0]; b 0x080567a8`
 //!   — i.e. `csem_post(*slot)`.
+//! - `mailbox_slot_post_deferred` — `FUN_080c6928` @ 0x080c6928 (8
+//!   bytes, 0x080c6928..0x080c6930; 1 plain `bl`, 2 predicated `bl`
+//!   call sites — Ghidra's three `bl` sites omit their conditions).
+//!   `ldr r0, [r0]; b 0x080567d0`: the deferred-wake counterpart to
+//!   `mailbox_slot_post`, tail-calling `csem_post_deferred(*slot)`.
+
 //! - `mailbox_slot_signal` — `FUN_0808e2b0` @ 0x0808e2b0 (8 bytes,
 //!   0x0808e2b0..0x0808e2b8; **52 call sites**, binary-scanned by
 //!   decoding every B/BL word in osos.dec: 44 `bl`, 1 `blne`, 1 `bleq`,
@@ -350,6 +356,28 @@ pub unsafe extern "C" fn mailbox_slot_delete(slot: *mut *mut Mailbox) {
 pub unsafe extern "C" fn mailbox_slot_post(slot: *mut *mut Mailbox) {
     csem_post(*slot as *mut CountingSem);
 }
+/// mailbox_slot_post_deferred — original: `FUN_080c6928` @ 0x080c6928
+/// (8 bytes; 1 plain `bl`, 2 predicated `bl` call sites).
+///
+/// Raw words `e5900000 eafe3fa7` establish the true extent
+/// 0x080c6928..0x080c6930: `ldr r0, [r0]; b 0x080567d0`. It reloads the
+/// mailbox block from the caller's slot for every call, then invokes the
+/// deferred-wake counting-semaphore post: one token is returned and the ROM
+/// deferred wake runs only for the -1-to-zero transition. Deliberate
+/// deviation: Rust makes an ordinary call rather than the original tail
+/// branch; the slot indirection and no-NULL-guard behavior are unchanged.
+///
+/// # Safety
+///
+/// `slot` must point at a live slot whose mailbox was installed by
+/// [`mailbox_slot_create`]. Neither pointer is checked, exactly like the
+/// original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mailbox_slot_post_deferred(slot: *mut *mut Mailbox) {
+    crate::kernel::csem::csem_post_deferred(*slot as *mut CountingSem);
+}
+
 /// mailbox_slot_post_dispatch — original: `FUN_080dad28` @ 0x080dad28
 /// (12 bytes; 4 plain `bl` call sites, no predicated `bl` call sites).
 ///
@@ -834,6 +862,34 @@ pub(crate) mod tests {
                 drain(),
                 vec![Call::Wake(0x4444_0001), Call::Wake(0x4444_0002)],
                 "each call wakes the waiter of the block installed at that moment"
+            );
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_post_deferred_reloads_slot_and_wakes_deferred_waiter() {
+        let _kobj_guard = mock_hooks();
+        let _rom_guard = task_lock::tests::OPS_LOCK.lock().unwrap();
+        unsafe {
+            let saved = ROM_KERNEL;
+            let mut hooks = saved;
+            hooks.rom_svc_22001cbc = mock_deferred_wake;
+            core::ptr::addr_of_mut!(ROM_KERNEL).write(hooks);
+
+            let mut first = block(u32::MAX, 0x5555_0011);
+            let mut second = block(u32::MAX, 0x5555_0022);
+            let mut slot: *mut Mailbox = &mut first;
+            mailbox_slot_post_deferred(&mut slot);
+            slot = &mut second;
+            mailbox_slot_post_deferred(&mut slot);
+
+            core::ptr::addr_of_mut!(ROM_KERNEL).write(saved);
+            assert_eq!(first.state, 0);
+            assert_eq!(second.state, 0);
+            assert_eq!(
+                drain(),
+                vec![Call::DeferredWake(0x5555_0011), Call::DeferredWake(0x5555_0022)],
+                "each call reloads the slot and uses the deferred wake path"
             );
         }
     }
