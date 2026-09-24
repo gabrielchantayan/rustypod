@@ -227,6 +227,7 @@ pub mod scoped_global_guard_destroy;
 pub mod status_flag_priority;
 pub mod signed_clamp_i32;
 pub mod seven_unit_window_bounds;
+pub mod modulo_seven;
 pub mod status_code_map;
 pub mod skip_ascii_whitespace_and_comments;
 pub mod secondary_record_value_lookup;

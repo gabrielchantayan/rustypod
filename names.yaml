@@ -24887,6 +24887,23 @@ functions:
       with rsb r1,r1,#0x30000 as the literal 3.0 in Q16.16; it open-codes
       this same smull/lsl/orr idiom inline twice before calling out.
 
+  - address: 0x08079a14
+    ghidra: FUN_08079a14
+    name: modulo_seven
+    size: 20
+    sig: "u32 modulo_seven(u32 value)"
+    module: util/modulo_seven
+    status: ported
+    notes: >-
+      Raw osos.dec is exactly five ARM instructions from 0x08079a14 through
+      0x08079a24; the cmp at 0x08079a28 begins the next real function. It
+      calls __rt_udiv(value, 7), then moves the ADS r1 remainder to r0.
+      Independent ARM B/BL decoding finds three inbound plain BL call sites,
+      zero inbound predicated BL call sites, one plain outgoing BL, and zero
+      predicated outgoing calls. Rust obtains the r1 remainder through the
+      existing __rt_udivmod out-pointer wrapper; host tests cover every
+      residue and large unsigned inputs.
+
   - address: 0x08079a44
     ghidra: FUN_08079a44
     name: mul_shift_i32
