@@ -7582,6 +7582,38 @@ functions:
       load, with a dedicated section to preserve this hookable thunk symbol.
 
 
+  # --- counted UTF-16 relative path -> facade resolver ---
+  - address: 0x0805a770
+    ghidra: FUN_0805a770
+    name: path_facade_resolve_relative
+    size: 216
+    sig: "i32 path_facade_resolve_relative(const u8 *base_counted_path, const u8 *relative_counted_utf16, u8 *destination_counted_path, u32 *workspace)"
+    module: app/path_facade_resolve_relative
+    status: ported
+    renames:
+      param_1/r0/r5: base_counted_path (u16 prefix at +0, cstr at +2)
+      param_2/r1: relative_counted_utf16 (u16 unit count at +0, UTF-16 units at +2)
+      param_3/r2/r4: destination_counted_path (copied base prefix at +0, joined cstr at +2)
+      param_4/r3/r6: workspace (optional 0x4c-byte path-facade workspace)
+      FUN_08046d94: utf16_to_utf8_capped
+      FUN_08046a50: pascal_u8_to_cstr_bounded
+      FUN_08030ff4: strcpy
+      FUN_08392478: strlen
+      FUN_080311b4: strcat
+      FUN_0805a8e4: PATH_FACADE_RESOLVE_COUNTED_IMPL seam (unported path-facade worker)
+    notes: >-
+      Raw osos.dec disassembly confirms the exact 0x0805a770..0x0805a848
+      extent: 54 ARM words ending in `ldmia sp!,{r4-r6,pc}`, followed by
+      the 0x5c literal pool word and a distinct prologue at 0x0805a84c.
+      The body has seven unconditional plain bl instructions and one
+      predicated blne; raw direct-call scanning finds three inbound plain bl
+      sites. It converts the counted UTF-16 relative component to a bounded
+      counted UTF-8 temporary, copies the base prefix, joins the base cstr
+      and relative component with a backslash only when needed, then returns
+      the unresolved 0x0805a8e4 worker status. Rust zero-initializes unused
+      workspace words; the fixed-address worker is a host-replaceable seam
+      that fails closed off-device.
+
   # --- counted byte string -> facade probe + conditional slot dispatch ---
   - address: 0x0805a84c
     ghidra: FUN_0805a84c

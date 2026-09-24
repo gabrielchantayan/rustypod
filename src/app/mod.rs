@@ -683,3 +683,4 @@ pub mod retail_control_profile_apply;
 pub mod initializer_profile_dispatch;
 pub mod guarded_global_index_transform;
 pub mod string_pointer_list_join;
+pub mod path_facade_resolve_relative;
