@@ -136572,3 +136572,32 @@ functions:
       Rust uses ordinary calls rather than the two ARM tail branches; LLVM
       emits indirect BLX calls for the fixed-address callees, so match.py
       reports a structural diff despite preserving the observed control flow.
+
+  - address: 0x08113408
+    ghidra: FUN_08113408
+    name: playback_position_get
+    size: 48
+    sig: "u32 playback_position_get(u8 *state)"
+    module: app/playback_position_get
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x51a": pending
+      "state+0x51c": fallback_position
+      "state+0x528": cached_position
+      "state+0x52c": cached_position_valid
+      "state+0x888": playback_object
+      "playback_object.vtable+0x17c": playback_position_query
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x08113408..0x08113438: the next real function starts with
+      add r0,r0,#0x38 at 0x08113438. Full-image A32 decoding finds three
+      inbound unconditional plain BL sites (0x081125e8, 0x081f42a0, and
+      0x082118c4) and no predicated BL sites. The body has no direct BL
+      instruction; it tail-dispatches through playback_object vtable slot
+      +0x17c when the cached-valid and pending bytes are both clear, otherwise
+      returning cached_position or fallback_position respectively. The virtual
+      callee has no established semantic identity, so no named callee seam was
+      invented. Deliberate deviation: Rust represents the ARM bxeq tail
+      dispatch as a normal return from an indirect call, and host builds use a
+      replaceable ABI seam because target vtable words hold 32-bit addresses.
