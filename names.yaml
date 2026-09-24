@@ -138409,3 +138409,28 @@ functions:
       function. Decoding the call sites finds three plain unconditional BL
       instructions and zero predicated BL instructions. It returns the A32
       wrapping subtraction 64 - offset; no deliberate deviations.
+  - address: 0x080cd984
+    ghidra: FUN_080cd984
+    name: entry_table_finalize_and_append
+    size: 36
+    sig: "u32 entry_table_finalize_and_append(u32 *state, u32 completed_entry_value, u32 context)"
+    module: util/entry_table_finalize_and_append
+    status: ported
+    renames:
+      param_1/r0/r5: state
+      param_2/r1: completed_entry_value
+      param_3/r2/r4: context
+      "state+0x0c": entry_table
+      FUN_080c1050: finalize_entry
+      FUN_080b089c: append_entry
+    notes: >-
+      Raw osos.dec establishes the true 36-byte executable extent
+      0x080cd984..0x080cd9a7: `pop {r3,r4,r5,pc}` at 0x080cd9a4 returns and
+      `subs ip,r0,#0x100` at 0x080cd9a8 begins the next function. Decoding
+      the full A32 image finds three unconditional direct BL callers
+      (0x0809c100, 0x0809c118, and 0x080d9ccc) and no predicated direct BL
+      callers. The body calls 0x080c1050 then 0x080b089c with no predicated
+      calls. It finalizes the previous entry with r1, then appends a 16-byte
+      entry through state+0x0c using r2, returning the append status. Neither
+      helper has a names.yaml identity; ARM builds call their verified retail
+      addresses and host tests install ABI seams.
