@@ -139812,3 +139812,35 @@ functions:
       storage extent. The literal destructor word 0x0815d908 is an instruction
       inside another function rather than an entry, so Rust deliberately
       registers a no-op callback.
+
+  - address: 0x08086a88
+    ghidra: FUN_08086a88
+    name: sixteen_resource_slots_destroy
+    size: 80
+    sig: "void sixteen_resource_slots_destroy(SixteenResourceSlots *owner)"
+    module: heap/sixteen_resource_slots
+    status: ported
+    renames:
+      param_1/r0/r6: owner
+      "owner+0x44": resources
+      "owner+0x84": resource_flags
+      FUN_08043994: traced_free
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent,
+      0x08086a88..0x08086ad8: `b 0x08043994` is the final instruction and
+      the next independent function begins at 0x08086ad8 with push. Decoding
+      every A32 branch immediate finds three inbound direct calls, all plain
+      unconditional bl (two in FUN_080498f8 and one in FUN_080af484), and no
+      predicated inbound forms. The body has one plain bl to the ported
+      traced_free and no predicated bl; its final tail b also targets
+      traced_free. It returns on NULL; otherwise, in ascending slot order,
+      it reads resource[i] at +0x44+i*4, reads flag[i] at +0x84+i*4 only
+      for a nonzero resource, frees when flag bit 0 is set, clears both words,
+      then frees the owner. The prefix is 0xc4 bytes even though the factory
+      allocates a larger 0x14c-byte object; trailing fields are not inspected.
+      Deliberate deviation: Rust makes the final tail call an ordinary return.
+      Host tests cover NULL, flagged and unflagged resource words, ascending
+      free order, clearing every pair, and owner release. match.py reports
+      the same NULL guard, conditional flag load/test/free, ordered stores,
+      loop, and final traced_free tail structure; LLVM uses a different frame
+      and bxeq early return.
