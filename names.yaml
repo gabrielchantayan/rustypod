@@ -140827,3 +140827,36 @@ functions:
       entropy contribution exactly as the retail target does. ARM emits the
       verified branch word; the host port calls that service normally to make
       result forwarding testable.
+
+  # --- Resource-record lookup and decode wrapper (util) ---
+  - address: 0x0805ae6c
+    ghidra: FUN_0805ae6c
+    name: resource_record_find_and_decode
+    size: 92
+    sig: "u8 *resource_record_find_and_decode(u8 **table_slot, u32 directory_offset, u32 record_tag, i16 occurrence, u32 *decoded_len_out)"
+    module: util/resource_record_find_and_decode
+    status: ported
+    renames:
+      param_1/r0/r5: table_slot
+      param_2/r1: directory_offset
+      param_3/r2: record_tag
+      param_4/r3: occurrence
+      param_5/stack: decoded_len_out
+      FUN_0805af24: resource_record_find_nth
+      FUN_0805afd8: retail_resource_record_decode
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte A32 extent:
+      0x0805ae6c begins `push {r1-r5,lr}`, 0x0805aec4 is
+      `pop {r1-r5,pc}`, and the next real function begins at 0x0805aec8.
+      The body makes one plain outbound BL to 0x0805af24 and one predicated
+      BLNE to 0x0805afd8; Ghidra's three reported BL call sites are its
+      inbound-call count, not the body’s direct calls. It sign-extends the
+      low halfword of occurrence, finds a record offset with no record-value
+      output, then—only for a nonzero offset—calls the stock decoder with
+      locals for decoded length and pointer. It returns the pointer and
+      writes the length, initialized to zero, when decoded_len_out is
+      non-NULL. 0x0805af24 is the existing ported
+      resource_record_find_nth seam. 0x0805afd8 is not yet ported; its
+      verified four-argument ABI is reached by a literal ARM veneer. Host
+      tests cover failed lookup, zero-length publication, signed occurrence
+      extension, decoder argument forwarding, and both decoder outputs.

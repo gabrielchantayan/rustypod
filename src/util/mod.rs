@@ -199,6 +199,7 @@ pub mod record_stream_begin;
 pub mod record_entry_payload_length;
 pub mod record_fields_configure;
 pub mod resource_record_find_nth;
+pub mod resource_record_find_and_decode;
 pub mod raster_profile;
 pub mod raster_span_setup;
 pub mod replace_owned_pointer;
