@@ -41,6 +41,7 @@
 //! file.
 pub mod add_lock;
 pub mod tagged_reference_retain;
+pub mod opaque_context_cleanup;
 pub mod obj_bsearch;
 pub mod obj_cmp;
 pub mod asn1_integer_set;
