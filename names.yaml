@@ -54747,6 +54747,26 @@ functions:
       seam rather than the original tail branches. All target callers in
       cxx/pair_header now reach this port rather than transmuting 0x0810e908.
 
+  - address: 0x0810e93c
+    ghidra: FUN_0810e93c
+    name: draw_surface_bounds_background
+    size: 52
+    sig: "void draw_surface_bounds_background(u8 *surface)"
+    module: ui/draw_surface_background
+    status: ported
+    vars: {param_1/r4: surface, auStack_48: draw_state, param_1+0x98: bounds}
+    notes: >-
+      Raw osos.dec establishes the 52-byte extent: 0x0810e93c starts
+      `push {r4,lr}` and 0x0810e970 starts the distinct next function's
+      `push {r4-r8,lr}`. Decoding every word finds exactly three direct,
+      unconditional BL calls (0x08264570, 0x082643c0, 0x082646ac), zero
+      predicated BL forms, and no tail branch. It creates a 0x44-byte
+      draw-state stack temporary for surface, fills the four-word rectangle
+      at surface+0x98 with its background color, then invokes the shared
+      trivial destructor. The Rust port calls the already-ported constructor,
+      background fill, and destructor directly; their documented seams are
+      the sole deliberate deviation from the retail direct-call bodies.
+
   - address: 0x0810e6b4
     ghidra: FUN_0810e6b4
     name: pair_header_base_bind_payload
