@@ -1048,6 +1048,32 @@ pub unsafe extern "C" fn retail_vsnprintf(
     count
 }
 
+/// string_object_format_selected_resource — original: `FUN_08116a38` @
+/// 0x08116a38 (72 bytes: 64 code bytes plus the two 4-byte resource-ID
+/// literals at 0x08116a78 and 0x08116a7c; 3 direct plain `bl` call sites,
+/// no predicated `bl` call sites, binary-scanned).
+///
+/// Selects `"Str "` resource ID 0x0dad06c7 when `alternate == 0`, otherwise
+/// 0x0dad06c8. It obtains the current task's resource chain, resolves that
+/// string, then tail-calls [`string_object_format`] with the resolved text
+/// and the caller's va_list. `source` arrives in r1 but is never read.
+///
+/// Deliberate deviation: the raw tail `b` is a Rust call; the observable
+/// return value and arguments are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_format_selected_resource(
+    this: *mut StringObject,
+    _source: *const u8,
+    alternate: u32,
+    args: VaList,
+) -> i32 {
+    let resource_id = if alternate == 0 { 0x0dad_06c7 } else { 0x0dad_06c8 };
+    let chain_head = task_ctx_field_0x30() as usize as *mut ResourceProvider;
+    let format = resource_chain_find_string(chain_head, resource_id);
+    string_object_format(this, format, args)
+}
+
 /// string_object_format — original: `FUN_082769d4` @ 0x082769d4
 /// (68 bytes, all code — no literal-pool word; 117 `bl` call sites,
 /// binary-scanned).
@@ -7725,7 +7751,7 @@ pub(crate) mod tests {
         found: *mut *mut u8,
     ) -> u32 {
         (*core::ptr::addr_of_mut!(RESOURCE_LOOKUP_CALLS)).push((kind, id));
-        if kind == ResourceKind::STRING && id == CASEFOLD_MATCH_RESOURCE_ID {
+        if kind == ResourceKind::STRING {
             found.write(RESOURCE_LOOKUP_RESULT);
             1
         } else {
@@ -8009,6 +8035,75 @@ pub(crate) mod tests {
         assert_eq!(
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
             std::vec![(this as usize, resource_payload.len(), 0)]
+        );
+    }
+
+    #[test]
+    fn format_selected_resource_uses_zero_and_nonzero_resource_ids() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::STRING_OBJECT_RESOURCE_CASEFOLD_MATCH,
+            0x1000,
+        ) else {
+            crate::testing::note_missing_u32_fixture("cxx/string_object");
+            return;
+        };
+        let vtable = crate::app::resource_chain::ResourceProviderVTable {
+            slots_below: [None; 22],
+            read: unused_resource_read,
+            slot_5c: None,
+            replacement_allowed: unused_resource_replacement_allowed,
+            find: matching_string_resource,
+            write: unused_resource_write,
+        };
+        let mut resource_payload = *b"%s\0";
+        unsafe {
+            core::ptr::write(
+                slab.cast::<ResourceProvider>(),
+                ResourceProvider {
+                    vtable: &vtable,
+                    state_below_next: [core::ptr::null_mut(); 4],
+                    next: core::ptr::null_mut(),
+                },
+            );
+            RESOURCE_LOOKUP_CALLS.clear();
+            RESOURCE_LOOKUP_RESULT = resource_payload.as_mut_ptr();
+        }
+        let mut context = [0u32; 13];
+        context[12] = slab as usize as u32;
+        let _context = ResourceContextSlotGuard::install(context.as_mut_ptr() as *mut u8);
+        let mut destination = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let _assignment = assign_cstr_bench(core::ptr::null_mut());
+
+        unsafe {
+            for alternate in [0, 1, u32::MAX] {
+                assert_eq!(
+                    string_object_format_selected_resource(
+                        &mut destination,
+                        0xdead_beef as *const u8,
+                        alternate,
+                        core::ptr::null(),
+                    ),
+                    0,
+                );
+            }
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(RESOURCE_LOOKUP_CALLS)).clone() },
+            std::vec![
+                (ResourceKind::STRING, 0x0dad_06c7),
+                (ResourceKind::STRING, 0x0dad_06c8),
+                (ResourceKind::STRING, 0x0dad_06c8),
+            ],
+            "the raw cmp r2,#0 chooses the first ID only for zero"
+        );
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).clone() },
+            std::vec![&mut destination as *mut _ as usize; 3],
+            "the empty default formatter reaches the string object's clear slot"
         );
     }
 

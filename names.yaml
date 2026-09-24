@@ -136213,3 +136213,38 @@ functions:
       status. match.py reports the same call/guard/select/tail-post shape;
       expected differences are the Rust frame, direct-retail BLX seam, and
       synthesized zero-return epilogue.
+
+
+  # --- selected string-resource formatter ---
+  - address: 0x08116a38
+    ghidra: FUN_08116a38
+    name: string_object_format_selected_resource
+    size: 72
+    sig: "i32 string_object_format_selected_resource(StringObject *this, const u8 *source, u32 alternate, VaList args)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source (unused)
+      param_3/r2: alternate
+      param_4/r3: args
+      DAT_08116a78: primary_format_resource_id (0x0dad06c7)
+      DAT_08116a7c: alternate_format_resource_id (0x0dad06c8)
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_082769d4: string_object_format
+    notes: >-
+      Raw osos.dec establishes 64 instruction bytes from the push at
+      0x08116a38 through the tail branch at 0x08116a74, followed by its two
+      literal-pool words at 0x08116a78 and 0x08116a7c; 0x08116a80 is the next
+      independently entered function. The full true extent is therefore 72
+      bytes, despite Ghidra reporting 64. The body has exactly three plain
+      unconditional BL instructions (0x0827233c twice and 0x0827239c once)
+      and no predicated BL instructions. It selects the first resource ID only
+      when r2 is zero, resolves it from the current task resource chain, then
+      tail-branches to string_object_format with r0=this, r1=the resolved
+      format string, and r2=the original r3 va_list; r1 on entry is unused.
+      The three inbound direct BL callers are 0x08111a1c, 0x08115008, and
+      0x08115e34. Rust calls instead of tail-branching to string_object_format;
+      observable arguments and return value are unchanged. Host tests exercise
+      zero and nonzero selector boundaries through a real resource provider.
