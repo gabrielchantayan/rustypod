@@ -138129,3 +138129,31 @@ functions:
       opaque query result, except all-zero first/second/third inputs remap a
       result of 1 to 2. FUN_0814852c has no recovered identity, so ARM builds
       call its verified retail address and host tests inject an ABI seam.
+  - address: 0x080d9660
+    ghidra: FUN_080d9660
+    name: layout_record_propagate_adjusted_offset
+    size: 56
+    sig: "void layout_record_propagate_adjusted_offset(void *layout, u32 selector, LayoutRecord *previous, LayoutRecord *current)"
+    module: ui/layout_record_propagate_adjusted_offset
+    status: ported
+    renames:
+      param_1/r0: layout
+      param_2/r1: selector
+      param_3/r2/r4: previous
+      param_4/r3/r5: current
+      "previous+0x4": coordinate
+      "previous+0x8": offset
+      "previous+0xc": flags
+      "current+0x4": coordinate
+      "current+0x8": offset
+      "current+0xc": flags
+      FUN_080db0d8: adjust_layout_delta
+    notes: >-
+      Raw osos.dec establishes the 56-byte executable extent
+      0x080d9660..0x080d9697; 0x080d9698 starts the next function. The
+      body contains one unconditional direct BL (0x080db0d8) and no
+      predicated BL forms. It subtracts previous.coordinate from
+      current.coordinate, lets the stock helper adjust that delta using
+      both flag bytes, and stores previous.offset plus the adjusted delta
+      at current.offset. Helper 0x080db0d8 remains a deliberate stock
+      call boundary because its exact policy is not yet ported.
