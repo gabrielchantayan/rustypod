@@ -186,4 +186,20 @@ mod tests {
             (ENTROPY_SESSION_ACQUIRE, ENTROPY_WORD_READ, ENTROPY_SESSION_RELEASE, RTC_READ, TIMER_READ, INITIALIZED, ENTROPY_WORD, ENTROPY_SEED) = saved;
         }
     }
+
+    #[test]
+    fn veneer_forwards_to_the_rtc_seeded_service() {
+        let _lock = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        unsafe {
+            let (mut initialized, mut entropy_word, mut seed) = (1u32, 0x1234_5678u32, 0u32);
+            let saved_word = WORD;
+            WORD = entropy_word; READS = 0; RELEASED = 0;
+            let saved = (ENTROPY_SESSION_ACQUIRE, ENTROPY_WORD_READ, ENTROPY_SESSION_RELEASE, RTC_READ, TIMER_READ, INITIALIZED, ENTROPY_WORD, ENTROPY_SEED);
+            (ENTROPY_SESSION_ACQUIRE, ENTROPY_WORD_READ, ENTROPY_SESSION_RELEASE, RTC_READ, TIMER_READ, INITIALIZED, ENTROPY_WORD, ENTROPY_SEED) = (acquire, read_word, release, read_rtc, timer, core::ptr::addr_of_mut!(initialized), core::ptr::addr_of_mut!(entropy_word), core::ptr::addr_of_mut!(seed));
+            assert_eq!(crate::runtime::rtc_seeded_random_service_veneer::rtc_seeded_random_service_veneer(1, 2, 3, 4), entropy_word);
+            assert_eq!((READS, RELEASED), (1, 0xfeed_beef));
+            (ENTROPY_SESSION_ACQUIRE, ENTROPY_WORD_READ, ENTROPY_SESSION_RELEASE, RTC_READ, TIMER_READ, INITIALIZED, ENTROPY_WORD, ENTROPY_SEED) = saved;
+            WORD = saved_word;
+        }
+    }
 }
