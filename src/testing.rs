@@ -2526,3 +2526,5 @@ pub static SINGLETON_MODE_DISPATCH_TEST_LOCK: parking_lot::Mutex<()> = parking_l
 pub static OBJECT_SLOT_D8_NOTIFY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Serializes host tests that replace `app::tuning_status::SHOW_TUNING_REGION_OPS`.
 pub static SHOW_TUNING_REGION_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Serializes host tests that replace `cxx::draw_state_fill::DRAW_STATE_FILL_OPS`.
+pub static DRAW_STATE_FILL_OPS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());

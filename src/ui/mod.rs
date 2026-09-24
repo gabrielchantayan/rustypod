@@ -130,6 +130,7 @@ pub mod typeface_resource_apply;
 pub mod invalidate;
 pub mod resource_value;
 pub mod draw_state_setup;
+pub mod draw_surface_background;
 pub mod shown_state;
 pub mod set_flag_bit_3;
 pub mod default_navigation_request;
