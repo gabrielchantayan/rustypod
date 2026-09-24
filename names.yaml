@@ -10260,6 +10260,21 @@ functions:
     module: heap/stats
     status: ported
 
+  - address: 0x080e82cc
+    ghidra: FUN_080e82cc
+    name: hash_table_slot_find
+    size: 176
+    sig: "u32 *hash_table_slot_find(HashTable *table, void *key, u32 *hash_out)"
+    module: util/hash_table_slot_find
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact A32 extent 0x080e82cc..0x080e837b;
+      0x080e837c is the next real function. Decoding finds one plain bl to
+      __rt_udiv, one predicated blhi to __rt_udiv, and two indirect blx
+      callbacks; three inbound plain bl sites are 0x082d7b28, 0x082d7c48, and
+      0x082d7e0c. It hashes the key, selects a primary or secondary modulus
+      from table words +0x18/+0x10 based on remainder and +0x14, then returns
+      the slot containing the matching chain node or null insertion point.
   - address: 0x080e837c
     ghidra: FUN_080e837c
     name: log2_floor
