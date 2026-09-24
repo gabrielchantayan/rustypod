@@ -620,6 +620,7 @@ pub mod stream_selection_change;
 pub mod slideshow_delay_set;
 
 pub mod context_handle_process;
+pub mod context_timer_restart;
 pub mod context_transition_notification;
 pub mod item_collection_dispatch;
 pub mod ui_object_construct;
