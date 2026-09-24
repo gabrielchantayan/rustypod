@@ -140209,3 +140209,29 @@ functions:
       with the reviewed structural diff: LLVM emits a frame and tail branch,
       while retaining the signed guard, fixed seven-word stride, provider load,
       index subtraction, and tail call.
+  - address: 0x0806e95c
+    ghidra: FUN_0806e95c
+    name: descriptor_action_dispatch
+    size: 84
+    sig: "void *descriptor_action_dispatch(u32 *owner)"
+    module: cxx/descriptor_action_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "owner+0x08": source
+      "source+0x00": input_length
+      "source+0x08": argument
+      FUN_0806e9b0: opaque_descriptor_action_lookup
+      "action+0x08": descriptor
+      "action+0x14": action_callback
+      FUN_0803a7f0: generic_descriptor_lookup
+    notes: >-
+      Raw osos.dec words establish the exact 84-byte extent
+      0x0806e95c..0x0806e9af; 0x0806e9b0 begins the next distinct function.
+      Independent decoding confirms two plain unconditional BL calls
+      (0x0806e964 and 0x0806e994), no predicated BL calls, and one indirect
+      BLX at 0x0806e9a8 through action word +0x14. The opaque resolver at
+      0x0806e9b0 either supplies no action, an action with a nonzero descriptor
+      for generic_descriptor_lookup, or an action callback; its identity is
+      deliberately not invented. Host tests use target-width source fixtures
+      and seams for the opaque resolver, parser, and callback.
