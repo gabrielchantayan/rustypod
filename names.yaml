@@ -68616,6 +68616,32 @@ functions:
       calls 0x080e7870 while host tests install a recorder. Tests cover
       adjusted endpoints, signed-overflow wrapping, style normalization,
       style word forwarding, and every engine operand.
+  - address: 0x080878d8
+    ghidra: FUN_080878d8
+    name: text_width_accumulate
+    size: 88
+    sig: "u32 text_width_accumulate(u8 *renderer, const u8 *text, u8 *metric_context, u32 layout_flags)"
+    module: util/text_width_accumulate
+    status: ported
+    renames:
+      param_1/r0: renderer (preserved ABI argument; unused by this wrapper)
+      param_2/r1: text (NUL-terminated permissive UTF-8 input)
+      param_3/r2: metric_context (glyph metric resolver context)
+      param_4/r3: layout_flags (only bit 3 reaches glyph advance)
+      local_24/[sp+4]: metric_table (resolved glyph metric table)
+      FUN_0809e224: metric_table_resolve (unported retailOS veneer)
+      FUN_0807a0c8: utf8_next_codepoint_permissive (ported)
+      FUN_08080f18: record_dispatch_result (ported)
+    notes: >-
+      Raw ARM establishes the exact 88-byte extent: 0x080878d8 begins with
+      `push {r0,r1,r2,r3,r4,r5,r6,lr}`, returns at 0x0808792c, and the next
+      separately entered function begins at 0x08087944. Decoding every word
+      finds three plain outgoing bl calls (0x0809e224, 0x08080f18, and
+      0x0807a0c8) and zero predicated bl calls. It resolves a metric table,
+      decodes each nonzero permissive UTF-8 codepoint, and wrapping-adds the
+      signed glyph advance with layout flag bit 3 only. Deliberate deviation:
+      the unresolved resolver is a typed ARM veneer; host builds use typed seams
+      for it and the ported record_dispatch_result callee in behavioral tests.
   - address: 0x082643c0
     ghidra: FUN_082643c0
     name: draw_state_fill_rect_background
