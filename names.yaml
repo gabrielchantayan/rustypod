@@ -18609,6 +18609,23 @@ functions:
       LLVM lowers the flag switch as a jump table vs the cmp chain —
       mapping proven by the 13-case host test.
 
+  - address: 0x0807a2e8
+    ghidra: FUN_0807a2e8
+    name: mqueue_receive_wait
+    size: 92
+    sig: "u32 mqueue_receive(QueuePool *pool, u32 *out_data, QueueNode **out_node)"
+    module: kernel/mqueue
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the 92-byte A32 body 0x0807a2e8..0x0807a344;
+      the push at 0x0807a344 starts the next independent function. Locks pool+0x2c,
+      pops pool+0x40, waits on the condvar at +0x34 until a node is present, unlocks,
+      and retries until mqueue_deliver (0x080b4a88) accepts it. Raw decode finds three
+      plain BL callers (0x0807698c, 0x0812c5e8, 0x08295ec0) and no predicated BL callers.
+      The five body BLs are sem_wait, condvar_wait_forever, list_pop_front, sem_signal,
+      and mqueue_deliver; all identities are already ported. Host test verifies lock,
+      pop, unlock, two-word delivery, and persistent-node handoff.
+
   - address: 0x0805695c
     ghidra: FUN_0805695c
     name: waiter_wait

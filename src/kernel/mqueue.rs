@@ -72,7 +72,7 @@
 //! at install time.
 
 use crate::kernel::condvar::{
-    condvar_bind, condvar_signal, list_push_back, CondVar, ListHead, ListNode,
+    condvar_bind, condvar_signal, list_pop_front, list_push_back, CondVar, ListHead, ListNode,
 };
 use crate::kernel::sync_mutex::{mutex_create, Mutex};
 use crate::kernel::sync_sem::{sem_create, sem_signal, sem_wait, SemHandle};
@@ -176,6 +176,52 @@ pub static mut MQUEUE_HOOKS: MqueueHooks = DEFAULT_MQUEUE_HOOKS;
 #[inline(always)]
 fn hooks() -> MqueueHooks {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(MQUEUE_HOOKS)) }
+}
+
+/// mqueue_receive_wait — original: `FUN_0807a2e8` @ **0x0807a2e8**.
+///
+/// **92 bytes** (0x0807a2e8..0x0807a344; the `push` at 0x0807a344 starts
+/// the next independently callable function). **3 direct, unconditional
+/// `bl` callers; 0 predicated direct `bl` callers**, verified by decoding
+/// every ARM branch-with-link word in `osos.dec`: 0x0807698c, 0x0812c5e8,
+/// and 0x08295ec0. The body has five unconditional `bl` instructions.
+///
+/// Takes the delivery mutex, repeatedly waits on the delivery condvar and
+/// pops its queue until [`mqueue_deliver`] accepts a node, then releases the
+/// mutex and returns zero. `out_data` receives the node's two message words;
+/// `out_node` receives the persistent node or NULL.
+///
+/// Deliberate deviation: the ARM calls the already ported semaphore,
+/// condvar, list, and delivery functions directly. Rust routes the semaphore
+/// calls through [`MQUEUE_HOOKS`] so host tests can observe the lock order;
+/// those slots default to the real ports. The target's 32-bit layout is
+/// preserved by [`QueuePool`]'s `repr(C)` fields.
+///
+/// # Safety
+///
+/// `pool`, `out_data`, and `out_node` must be valid. The queue must
+/// eventually contain a node accepted by [`mqueue_deliver`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mqueue_receive_wait(
+    pool: *mut QueuePool, out_data: *mut u32, out_node: *mut *mut QueueNode,
+) -> u32 {
+    loop {
+        (hooks().sem_wait)((*pool).mutex.sem_cell);
+        let node = loop {
+            let node = list_pop_front(core::ptr::addr_of_mut!((*pool).queue)).cast::<QueueNode>();
+            if !node.is_null() {
+                break node;
+            }
+            crate::kernel::condvar::condvar_wait_forever(
+                core::ptr::addr_of_mut!((*pool).deliver_cv),
+            );
+        };
+        (hooks().sem_signal)((*pool).mutex.sem_cell);
+        if mqueue_deliver(node, out_data, out_node) != 0 {
+            return 0;
+        }
+    }
 }
 
 /// mqueue_deliver — original: `FUN_080b4a88` @ 0x080b4a88 (84 bytes).
@@ -681,6 +727,28 @@ mod tests {
         assert_eq!(
             f.pool.free.head, &mut n as *mut QueueNode as *mut ListNode,
             "the rejected node went back to the pool"
+        );
+    }
+
+    #[test]
+    fn receive_locks_pops_unlocks_and_delivers_a_persistent_node() {
+        let _guard = mock_hooks();
+        let mut pool = empty_pool();
+        pool.mutex.sem_cell = 0x4d55_5445 as SemHandle;
+        let mut queued = node(1, 1);
+        pool.queue.head = (&mut queued as *mut QueueNode).cast();
+        pool.queue.tail = (&mut queued as *mut QueueNode).cast();
+        let mut data = [0; 2];
+        let mut out = null_mut();
+
+        assert_eq!(unsafe { mqueue_receive_wait(&mut pool, data.as_mut_ptr(), &mut out) }, 0);
+        assert_eq!(data, queued.data);
+        assert!(core::ptr::eq(out, &mut queued));
+        assert!(pool.queue.head.is_null());
+        assert!(pool.queue.tail.is_null());
+        assert_eq!(
+            drain(),
+            vec![Call::SemWait(0x4d55_5445), Call::SemSignal(0x4d55_5445)],
         );
     }
 
