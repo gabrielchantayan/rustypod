@@ -93,6 +93,7 @@ pub mod buffer_pool_get_or_create;
 pub mod stream_state_get_or_create;
 pub mod beeper_construct;
 pub mod vtable_state_construct;
+pub mod base_vtable_state_init;
 pub mod buffered_stream_flush_pending;
 pub mod buffered_stream_close;
 pub mod six_slot_cleanup;
