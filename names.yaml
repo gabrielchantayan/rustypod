@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d4364
+    ghidra: FUN_080d4364
+    name: ft_smooth_render_generic
+    size: 732
+    sig: "i32 ft_smooth_render_generic(FtRenderer *renderer, FtGlyphSlot *slot, u32 mode, const FtVector *origin, u32 required_mode, i32 x_scale, i32 y_scale)"
+    module: ft/smooth_renderer
+    status: ported
+    renames:
+      param_1/r0: renderer
+      param_2/r1: slot
+      param_3/r2: mode
+      param_4/r3: origin
+      param_5/stack: required_mode
+      param_6/stack: x_scale
+      param_7/stack: y_scale
+    notes: >-
+      Ghidra's 124-byte extent is truncated in the middle of the body. Raw
+      osos.dec A32 establishes the 732-byte executable extent
+      0x080d4364..0x080d4640: 0x080d4640 is the literal-pool word
+      0x62697473 and the following push at 0x080d4644 begins the next
+      function. Decoding all ARM branch-immediate words finds two incoming
+      plain BL calls (0x0809aa30, 0x080b6978), no predicated incoming BL
+      calls, and seven plain plus one predicated outgoing BL calls; the
+      raster callback is an indirect BLX. This is FreeType ftsmooth.c's
+      ft_smooth_render_generic: validate format/mode, translate the outline,
+      allocate an aligned grayscale bitmap, call the raster callback, and
+      restore coordinates. Direct calls to already-ported outline and memory
+      helpers are Rust calls; their order and arguments are retained.
   - address: 0x080da620
     ghidra: FUN_080da620
     name: event_type_one_byte_store
