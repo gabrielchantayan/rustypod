@@ -137185,3 +137185,38 @@ functions:
       data[write_cursor], and advances write_cursor with & mask after each
       store. Rust keeps target pointer fields as u32 words and uses volatile
       byte and word access; no deliberate deviations.
+
+  - address: 0x080fe5a0
+    ghidra: FUN_080fe5a0
+    name: timing_wheel_node_replace_value
+    size: 88
+    sig: "void timing_wheel_node_replace_value(u32 *node, u32 *value, u32 payload)"
+    module: app/timing_wheel_node_replace_value
+    status: ported
+    renames:
+      param_1/r0/r4: node
+      param_2/r1/r6: value
+      param_3/r2/r7: payload
+      DAT_080fe5f8: scheduler_singleton_global
+      FUN_082738e0: timing_wheel_remove
+      FUN_08273a14: retain_value
+      FUN_082739e0: release_refcounted_value
+      "node+0x08": rank
+      "node+0x18": payload
+      "node+0x1c": value
+      "value+0x08": auxiliary_rank
+    notes: >-
+      Raw osos.dec establishes the true 88-byte extent
+      0x080fe5a0..0x080fe5f7 followed by the scheduler-singleton literal
+      0x089cc7e0 at 0x080fe5f8; 0x080fe5fc begins the next independently
+      linked function. Decoding the body gives exactly two plain BL calls,
+      timing_wheel_remove at 0x082738e0 and retain_value at 0x08273a14, plus
+      one predicated BLNE to release_refcounted_value at 0x082739e0. Complete
+      A32 decoding finds three inbound plain BL sites (0x0815267c,
+      0x08152798, and 0x08152ab4) and no predicated inbound forms. The
+      function removes node from the scheduler wheel, retains value, releases
+      a non-NULL old node+0x1c value, stores value and payload at +0x1c and
+      +0x18, sets rank to value+0x08 plus one with u32 wrapping, then
+      tail-branches to timing_wheel_insert at 0x08273898. Rust uses existing
+      scheduler, refcount, and wheel ports; its host scheduler-table model is
+      the only deliberate deviation.
