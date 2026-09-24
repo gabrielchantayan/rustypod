@@ -18,6 +18,7 @@ fn word_has_nul(word: u32) -> bool {
 }
 
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn strncpy(dst: *mut u8, src: *const u8, len: usize) -> *mut u8 {
     let orig_dst = dst;
     let mut dst = dst;

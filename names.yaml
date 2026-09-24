@@ -138981,3 +138981,23 @@ functions:
       the expected structural diff from the unported seams and LLVM's
       memclr/helper calls; its exit status is 1 by design when printing that
       diff.
+
+  - address: 0x080aa474
+    ghidra: FUN_080aa474
+    name: u16_cstr_buffer_assign
+    size: 36
+    sig: "i32 u16_cstr_buffer_assign(u16 tag, const char *source, u8 *buffer)"
+    module: util/u16_cstr_buffer_assign
+    status: ported
+    renames:
+      param_1/r0: tag
+      param_2/r1: source
+      param_3/r2/r4: buffer
+      FUN_080310d4: strncpy
+    notes: >-
+      Raw osos.dec words establish the 36-byte extent 0x080aa474..0x080aa497;
+      the next function starts at 0x080aa498. Full-image A32 decoding finds
+      exactly three inbound plain BL call sites (0x081a30c8, 0x081a3d10, and
+      0x081a4354), with no predicated BL calls. Stores tag as a little-endian
+      halfword at buffer+0, calls strncpy at 0x080310d4 for buffer+2 with
+      length 0xff, forces buffer[0x101] to NUL, and returns zero.
