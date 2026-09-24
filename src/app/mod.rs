@@ -135,6 +135,7 @@ pub mod callback_owner_release;
 pub mod callback_target_reset;
 pub mod active_state_reset_and_dispatch;
 pub mod selection_state_reset_and_dispatch;
+pub mod selection_state_refresh;
 pub mod locked_callback_predicate;
 pub mod glyph_range_contains_character;
 pub mod context_callback_dispatch;

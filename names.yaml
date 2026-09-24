@@ -27,7 +27,7 @@ functions:
       param_1/r0/r4: state
       "state+0x444": selection_state
       "state-vtable+0x58": completion_dispatch
-      FUN_08113a18: selection_state_refresh (unported)
+      selection_state_refresh: ported helper
       DAT_081143ac: completion_kind (0x000063d6)
       DAT_081143b0: completion_action (0x564d6178)
     notes: >-
@@ -36,12 +36,40 @@ functions:
       at 0x081143b4 is the next real function boundary. There are three
       unconditional direct BL callers (0x08113834, 0x08114d94, 0x08115078)
       and no predicated direct BL callers. This function has one unconditional
-      direct BL to the unported 0x08113a18 helper and no predicated direct BL
+      direct BL to the ported 0x08113a18 helper and no predicated direct BL
       calls; its final vtable dispatch is `bx r3`, not BL. Rust writes -1 at
-      +0x444, calls that helper, then dispatches vtable+0x58 with
-      `(state, 0x564d6178, 0x000063d6)`. Host seams represent the unported
+      +0x444, calls that ported helper, then dispatches vtable+0x58 with
+      `(state, 0x564d6178, 0x000063d6)`. Host seams represent the ported
       helper and target-width virtual call; the ARM tail dispatch is a final
       ordinary Rust call because its return value is unobserved.
+  - address: 0x08113a18
+    ghidra: FUN_08113a18
+    name: selection_state_refresh
+    size: 72
+    sig: "void selection_state_refresh(SelectionState *state)"
+    module: app/selection_state_refresh
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x30": resource_object
+      "state+0xe8": cached_resource_index
+      FUN_0805417c: object_resource_count
+      "state-vtable+0x58": selection_change_dispatch
+      DAT_08113a60: selection_change_kind (0x00006387)
+      DAT_08113a64: selection_change_action (0x564d6178)
+    notes: >-
+      Raw osos.dec establishes the 72-byte 0x08113a18..0x08113a60 extent:
+      `bx r3` at 0x08113a5c is the final instruction; the two following
+      literal-pool words end at 0x08113a68, where the next real function
+      begins with `push`. Decoding ARM B/BL words found three unconditional
+      direct BL callers (0x08113f54, 0x0811438c, and 0x081148f8), and no
+      predicated direct BL callers. The sole callee is the ported
+      object_resource_count @ 0x0805417c. Zero resource counts normalize to
+      one before subtraction, so the cached zero-based index is zero; a
+      vtable+0x58 dispatch with (state, 0x564d6178, 0x00006387) occurs only
+      when that index changes. Rust uses an ordinary final call instead of
+      the ARM tail dispatch and target-width host seams for the ported
+      resource-count helper and virtual function pointer.
   - address: 0x08130090
     ghidra: FUN_08130090
     name: collection_count_eligible_entries
