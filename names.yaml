@@ -54803,6 +54803,35 @@ functions:
       fp frame and LLVM's argument setup order. No link_section needed:
       the body is not byte-identical to any sibling adapter.
 
+  - address: 0x081246d8
+    ghidra: FUN_081246d8
+    name: tbm_app_client_cache_fill
+    size: 72
+    sig: "void tbm_app_client_cache_fill(u32 index)"
+    module: app/tbm_app_client_cache
+    status: ported
+    renames:
+      param_1/r0/r4: index
+      DAT_08124720: tbm_app_client_cache
+      DAT_08124724: tbm_app_client_pool_name
+      FUN_0826f658: pool_create
+      thunk_FUN_080568e8: task_sleep_thunk
+    notes: >-
+      Raw osos.dec confirms 18 ARM words (72 bytes) from 0x081246d8 through
+      0x0812471c; the owned literal pool is 0x08124720..0x08124730 and the
+      next function starts at 0x08124734. Complete ARM B/BL decoding finds
+      exactly three direct inbound calls: unconditional bl at 0x08124a24 and
+      0x081dc16c, plus predicated blne at 0x08124768; there are no tail
+      branches. It loops until cache[index] is non-NULL. Each failed iteration
+      calls pool_create(cache[index + 2] << 19, "TBMAppClient"), stores its
+      result into cache[index], and sleeps 20 ticks after a NULL allocation.
+      The unchecked index and wrapping ARM shift are retained. Host seams cover
+      successful creation with the exact shifted size and label, existing-slot
+      bypass, and a NULL creation retry with one 20-tick sleep. match.py
+      structural review: the target preserves the cache load, shift, create,
+      store, conditional sleep, and retry loop; LLVM adds an fp frame and
+      folds the table base plus index into one addressing instruction.
+
   - address: 0x08124794
     ghidra: FUN_08124794
     name: tbm_app_client_cache_disable

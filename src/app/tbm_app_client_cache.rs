@@ -13,12 +13,14 @@
 //! then is loaded again and returned. Like retail, the index is not validated.
 //!
 //! Deliberate deviation: host builds replace fixed runtime RAM and the
-//! unported initializer with private test seams. Firmware builds use the
-//! original RAM addresses and an ARM literal veneer to the real initializer.
+//! initializer's dependencies with private test seams. Firmware builds use
+//! the original RAM addresses and the Rust initializer port directly.
 use core::ptr;
 use crate::app::singletons::app_controller_get;
-use crate::heap::pool::{pool_destroy, PoolControl};
+use crate::heap::pool::{pool_create, pool_destroy, PoolControl};
+use crate::kernel::task::task_sleep;
 use crate::heap::veneers::operator_delete;
+const TBM_APP_CLIENT_POOL_NAME: &[u8] = b"TBMAppClient\0";
 
 /// ABI of the unported application-controller helper at `0x0817f37c`.
 pub type TbmAppClientControllerCleanup = unsafe extern "C" fn(controller: *mut u8);
@@ -83,7 +85,7 @@ retail_tbm_app_client_cache_detach:
 );
 
 
-/// ABI of the unported TBM app-client cache initializer at `0x081246d8`.
+/// ABI of the TBM app-client cache initializer at `0x081246d8`.
 pub type TbmAppClientCacheFill = unsafe extern "C" fn(index: u32);
 
 #[cfg(target_os = "none")]
@@ -95,13 +97,25 @@ const TBM_APP_CLIENT_CACHE: *const *mut u8 = 0x089c_b2dcusize as *const *mut u8;
 static mut HOST_TBM_APP_CLIENT_CACHE_DISABLED: u8 = 0;
 #[cfg(not(target_os = "none"))]
 static mut HOST_TBM_APP_CLIENT_CACHE: [*mut u8; 2] = [ptr::null_mut(); 2];
+#[cfg(not(target_os = "none"))]
+static mut HOST_TBM_APP_CLIENT_CACHE_SIZES: [u32; 2] = [0; 2];
 
 #[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_tbm_app_client_cache_fill(_index: u32) {}
-
-/// Host replacement for the retail cache initializer.
+type TbmAppClientPoolCreate = unsafe extern "C" fn(usize, *const u8) -> *mut PoolControl;
 #[cfg(not(target_arch = "arm"))]
-static mut TBM_APP_CLIENT_CACHE_FILL: TbmAppClientCacheFill = missing_tbm_app_client_cache_fill;
+type TbmAppClientSleep = unsafe extern "C" fn(u32);
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_tbm_app_client_pool_create(_size: usize, _name: *const u8) -> *mut PoolControl {
+    ptr::null_mut()
+}
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_tbm_app_client_sleep(_ticks: u32) {}
+
+#[cfg(not(target_arch = "arm"))]
+static mut TBM_APP_CLIENT_POOL_CREATE: TbmAppClientPoolCreate = missing_tbm_app_client_pool_create;
+#[cfg(not(target_arch = "arm"))]
+static mut TBM_APP_CLIENT_SLEEP: TbmAppClientSleep = missing_tbm_app_client_sleep;
 
 #[cfg(test)]
 static TBM_APP_CLIENT_CACHE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
@@ -147,33 +161,89 @@ unsafe fn clear_cache_entry(index: u32) {
         );
     }
 }
+#[inline(always)]
+unsafe fn cache_size(index: u32) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        ptr::read_volatile((TBM_APP_CLIENT_CACHE as *const u32).add(index as usize + 2))
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        ptr::read_volatile((ptr::addr_of!(HOST_TBM_APP_CLIENT_CACHE_SIZES) as *const u32).add(index as usize))
+    }
+}
+
+#[inline(always)]
+unsafe fn fill_cache_entry(index: u32, client: *mut u8) {
+    #[cfg(target_os = "none")]
+    {
+        ptr::write_volatile(TBM_APP_CLIENT_CACHE.add(index as usize) as *mut *mut u8, client);
+    }
+
+    #[cfg(not(target_os = "none"))]
+    {
+        ptr::write_volatile(
+            (ptr::addr_of_mut!(HOST_TBM_APP_CLIENT_CACHE) as *mut *mut u8).add(index as usize),
+            client,
+        );
+    }
+}
 
 #[cfg(target_arch = "arm")]
-extern "C" {
-    fn retail_tbm_app_client_cache_fill(index: u32);
+#[inline(always)]
+unsafe fn create_tbm_app_client_pool(size: usize) -> *mut u8 {
+    pool_create(size, TBM_APP_CLIENT_POOL_NAME.as_ptr()).cast()
 }
 
 #[cfg(not(target_arch = "arm"))]
-unsafe fn retail_tbm_app_client_cache_fill(index: u32) {
-    ptr::read_volatile(ptr::addr_of!(TBM_APP_CLIENT_CACHE_FILL))(index);
+#[inline(always)]
+unsafe fn create_tbm_app_client_pool(size: usize) -> *mut u8 {
+    ptr::read_volatile(ptr::addr_of!(TBM_APP_CLIENT_POOL_CREATE))(size, TBM_APP_CLIENT_POOL_NAME.as_ptr()).cast()
 }
 
-// The Rust payload cannot encode a direct ARM `bl` to the retail low-memory
-// initializer, so retain the call through a literal veneer.
 #[cfg(target_arch = "arm")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .text
-    .p2align 2
-    .globl retail_tbm_app_client_cache_fill
-    .type retail_tbm_app_client_cache_fill, %function
-retail_tbm_app_client_cache_fill:
-    ldr     pc, [pc, #-4]
-    .word   0x081246d8
-    .size retail_tbm_app_client_cache_fill, . - retail_tbm_app_client_cache_fill
-"#
-);
+#[inline(always)]
+unsafe fn sleep_after_tbm_app_client_pool_failure() {
+    task_sleep(20);
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+unsafe fn sleep_after_tbm_app_client_pool_failure() {
+    ptr::read_volatile(ptr::addr_of!(TBM_APP_CLIENT_SLEEP))(20);
+}
+
+/// Fills an empty TBM application-client cache entry.
+///
+/// Original: `FUN_081246d8` @ `0x081246d8`. Raw ARM establishes a 72-byte
+/// code extent from `0x081246d8..0x0812471c`; its literal pool runs through
+/// `0x08124730`, and `0x08124734` begins the next function. Decoding every
+/// `B`/`BL` word in `osos.dec` finds three direct callers: plain `bl` at
+/// `0x08124a24` and `0x081dc16c`, and predicated `blne` at `0x08124768`.
+///
+/// Each iteration volatile-loads cache[index]. For NULL it creates a pool of
+/// `cache_size[index] << 19` with the fixed `TBMAppClient` label, stores the
+/// result, and sleeps for 20 ticks until the stored result is non-NULL.
+/// Deliberate deviation: host tests use RAM and call seams; firmware directly
+/// uses the ported pool creation and task sleep functions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tbm_app_client_cache_fill(index: u32) {
+    loop {
+        if !cache_entry(index).is_null() {
+            return;
+        }
+        let client = create_tbm_app_client_pool(cache_size(index).wrapping_shl(19) as usize);
+        fill_cache_entry(index, client);
+        if !client.is_null() {
+            return;
+        }
+        sleep_after_tbm_app_client_pool_failure();
+    }
+}
+
+
 
 /// Returns the requested lazily initialized TBM application-client pointer.
 ///
@@ -193,7 +263,7 @@ pub unsafe extern "C" fn tbm_app_client_cache_get(index: u32) -> *mut u8 {
         return client;
     }
 
-    retail_tbm_app_client_cache_fill(index);
+    tbm_app_client_cache_fill(index);
     cache_entry(index)
 }
 
@@ -254,9 +324,11 @@ mod tests {
     use super::*;
     use parking_lot::MutexGuard;
 
-    static mut FILL_CALL_COUNT: u32 = 0;
-    static mut FILL_INDEX: u32 = u32::MAX;
-    static mut FILL_RESULT: *mut u8 = ptr::null_mut();
+    static mut POOL_CREATE_CALLS: u32 = 0;
+    static mut POOL_CREATE_SIZE: usize = 0;
+    static mut POOL_CREATE_NAME: *const u8 = ptr::null();
+    static mut POOL_CREATE_RESULTS: [*mut PoolControl; 2] = [ptr::null_mut(); 2];
+    static mut SLEEP_CALLS: u32 = 0;
     static mut DETACH_CALL_COUNT: u32 = 0;
     static mut CONTROLLER_CLEANUP_CALLS: u32 = 0;
     static mut CONTROLLER_CLEANUP_ARG: *mut u8 = ptr::null_mut();
@@ -277,11 +349,15 @@ mod tests {
         unsafe {
             HOST_TBM_APP_CLIENT_CACHE_DISABLED = 0;
             HOST_TBM_APP_CLIENT_CACHE = [ptr::null_mut(); 2];
-            TBM_APP_CLIENT_CACHE_FILL = recording_fill;
+            HOST_TBM_APP_CLIENT_CACHE_SIZES = [0; 2];
+            TBM_APP_CLIENT_POOL_CREATE = recording_pool_create;
+            TBM_APP_CLIENT_SLEEP = recording_sleep;
+            POOL_CREATE_CALLS = 0;
+            POOL_CREATE_SIZE = 0;
+            POOL_CREATE_NAME = ptr::null();
+            POOL_CREATE_RESULTS = [ptr::null_mut(); 2];
+            SLEEP_CALLS = 0;
             TBM_APP_CLIENT_CACHE_DETACH = recording_detach;
-            FILL_CALL_COUNT = 0;
-            FILL_INDEX = u32::MAX;
-            FILL_RESULT = ptr::null_mut();
             TBM_APP_CLIENT_CONTROLLER_CLEANUP = recording_controller_cleanup;
             CONTROLLER_CLEANUP_CALLS = 0;
             CONTROLLER_CLEANUP_ARG = ptr::null_mut();
@@ -341,56 +417,69 @@ mod tests {
     }
 
 
-    unsafe extern "C" fn recording_fill(index: u32) {
-        FILL_CALL_COUNT += 1;
-        FILL_INDEX = index;
-        HOST_TBM_APP_CLIENT_CACHE[index as usize] = FILL_RESULT;
+    unsafe extern "C" fn recording_pool_create(size: usize, name: *const u8) -> *mut PoolControl {
+        POOL_CREATE_SIZE = size;
+        POOL_CREATE_NAME = name;
+        let result = POOL_CREATE_RESULTS[POOL_CREATE_CALLS as usize];
+        POOL_CREATE_CALLS += 1;
+        result
+    }
+
+    unsafe extern "C" fn recording_sleep(ticks: u32) {
+        assert_eq!(ticks, 20);
+        SLEEP_CALLS += 1;
     }
 
 
     #[test]
-    fn disabled_cache_returns_null_without_filling_a_cached_entry() {
+    fn disabled_cache_returns_null_without_creating_a_cached_entry() {
         let _guard = install();
         let cached = 0x2468_ace0usize as *mut u8;
         unsafe {
             HOST_TBM_APP_CLIENT_CACHE_DISABLED = 1;
             HOST_TBM_APP_CLIENT_CACHE[0] = cached;
             assert!(tbm_app_client_cache_get(0).is_null());
-            assert_eq!(FILL_CALL_COUNT, 0);
+            assert_eq!(POOL_CREATE_CALLS, 0);
         }
     }
 
     #[test]
-    fn initialized_entry_returns_verbatim_without_initializer_call() {
+    fn initialized_entry_returns_verbatim_without_creating() {
         let _guard = install();
         let cached = 0x1357_9bdfusize as *mut u8;
         unsafe {
             HOST_TBM_APP_CLIENT_CACHE[1] = cached;
             assert_eq!(tbm_app_client_cache_get(1), cached);
-            assert_eq!(FILL_CALL_COUNT, 0);
+            assert_eq!(POOL_CREATE_CALLS, 0);
         }
     }
 
     #[test]
-    fn missing_entry_fills_then_reloads_the_requested_slot() {
+    fn missing_entry_creates_the_shifted_size_with_the_retail_name() {
         let _guard = install();
-        let filled = 0x0bad_c0deusize as *mut u8;
+        let filled = 0x0bad_c0deusize as *mut PoolControl;
         unsafe {
-            FILL_RESULT = filled;
-            assert_eq!(tbm_app_client_cache_get(1), filled);
-            assert_eq!(FILL_CALL_COUNT, 1);
-            assert_eq!(FILL_INDEX, 1);
-            assert_eq!(HOST_TBM_APP_CLIENT_CACHE[1], filled);
+            HOST_TBM_APP_CLIENT_CACHE_SIZES[1] = 7;
+            POOL_CREATE_RESULTS[0] = filled;
+            assert_eq!(tbm_app_client_cache_get(1), filled.cast());
+            assert_eq!(POOL_CREATE_CALLS, 1);
+            assert_eq!(POOL_CREATE_SIZE, 7usize << 19);
+            assert_eq!(core::slice::from_raw_parts(POOL_CREATE_NAME, TBM_APP_CLIENT_POOL_NAME.len()), TBM_APP_CLIENT_POOL_NAME);
+            assert_eq!(HOST_TBM_APP_CLIENT_CACHE[1], filled.cast());
+            assert_eq!(SLEEP_CALLS, 0);
         }
     }
 
     #[test]
-    fn missing_entry_can_remain_null_after_initializer() {
+    fn failed_creation_sleeps_then_retries_until_the_cache_entry_is_filled() {
         let _guard = install();
+        let filled = 0x1234_5678usize as *mut PoolControl;
         unsafe {
-            assert!(tbm_app_client_cache_get(0).is_null());
-            assert_eq!(FILL_CALL_COUNT, 1);
-            assert_eq!(FILL_INDEX, 0);
+            POOL_CREATE_RESULTS = [ptr::null_mut(), filled];
+            tbm_app_client_cache_fill(0);
+            assert_eq!(POOL_CREATE_CALLS, 2);
+            assert_eq!(SLEEP_CALLS, 1);
+            assert_eq!(HOST_TBM_APP_CLIENT_CACHE[0], filled.cast());
         }
     }
 }
