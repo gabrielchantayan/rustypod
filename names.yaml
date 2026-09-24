@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081131a8
+    ghidra: FUN_081131a8
+    name: counted_utf16_to_utf8
+    size: 88
+    sig: "void counted_utf16_to_utf8(unsigned short *text, unsigned char *out, unsigned int unused, int compose_canonically)"
+    module: cxx/counted_utf16_to_utf8
+    status: ported
+    renames:
+      param_1/r0: text
+      param_2/r1: out
+      param_3/r2: unused
+      param_4/r3: compose_canonically
+      FUN_081113d8: counted_utf16_canonical_compose
+    notes: >-
+      Raw osos.dec establishes the 88-byte extent 0x081131a8..0x081131ff;
+      `push {r4,lr}` at 0x08113200 is the next real function boundary.
+      Decoding every A32 BL word found three direct plain callers
+      (0x081127c0, 0x0811282c and 0x08115988) and zero predicated callers.
+      `text[0]` is the u16 count and text+2 is the UTF-16 payload. A zero
+      count writes out[0] = 0. Otherwise a nonzero r3 calls the identified
+      but unported counted UTF-16 canonical-composition worker 0x081113d8;
+      the resulting count sizes and bounds the ported UTF-16-to-UTF-8
+      conversion, and this function writes the final NUL itself. r2 is not
+      read. ARM builds call the stock worker directly; host tests use the
+      COUNTED_UTF16_CANONICAL_COMPOSE boundary until that worker is ported.
   - address: 0x08114378
     ghidra: FUN_08114378
     name: selection_state_reset_and_dispatch

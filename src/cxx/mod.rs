@@ -293,6 +293,7 @@ pub mod stream_write_owner_destroy;
 pub mod logs_data_file_path_construct;
 pub mod string_object;
 pub mod counted_u16_to_cxx_string;
+pub mod counted_utf16_to_utf8;
 pub mod string_object_remove_trailing_codepoint;
 pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
