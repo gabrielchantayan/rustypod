@@ -108315,6 +108315,34 @@ functions:
       zero-depth underflow that suppresses drain and callback traversal.
 
 
+  - address: 0x08086d28
+    ghidra: FUN_08086d28
+    name: format_with_default_descriptor
+    size: 80
+    sig: "int format_with_default_descriptor(char *destination, u32 capacity, const char *format, const void *arguments)"
+    module: printf/format_with_descriptor
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: capacity
+      param_3/r2: format
+      param_4/r3: arguments
+      auStack_38: descriptor
+      FUN_08075ff0: build_format_descriptor
+      FUN_080f3c04: default_descriptor_format_core
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent
+      0x08086d28..0x08086d78, ending before the next push at 0x08086d7c.
+      Its 20 ARM words contain two unconditional plain bl instructions
+      (0x08075ff0 and 0x080f3c04) and no predicated bl instructions. The
+      former populates a 36-byte descriptor from arguments; a zero result
+      returns zero without calling the latter. Raw decoding of 0x080f3c04
+      proves it forwards the four registers to 0x080ac954 after placing
+      0x083ecb5d in the fifth argument slot. Target dispatch slots call the
+      verified raw addresses; host tests cover forwarding, result
+      propagation, and builder failure. Helper names describe observed roles
+      only.
+
   - address: 0x080caab4
     ghidra: FUN_080caab4
     name: format_with_descriptor
