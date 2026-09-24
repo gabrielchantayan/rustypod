@@ -140154,3 +140154,31 @@ functions:
       words so host pointer width cannot change their offsets. Host tests
       prove the present and absent callback/provider paths, class-5 ex-data
       arguments, and both final clears.
+  - address: 0x0806fdec
+    ghidra: FUN_0806fdec
+    name: resource_selector_index
+    size: 76
+    sig: "i32 resource_selector_index(i32 selector)"
+    module: app/resource_selector_index
+    status: ported
+    renames:
+      param_1/r0: selector
+      DAT_0806fe38: resource_selector_provider (0x08a0eb64)
+      FUN_0836954c: namespace_provider_find
+    notes: >-
+      Raw A32 words establish the exact 76-byte extent 0x0806fdec..0x0806fe37:
+      the literal-pool word at 0x0806fe38 is the global provider address
+      0x08a0eb64, and the separately linked next function begins at
+      0x0806fe3c. The body has one unconditional direct BL to the already
+      ported namespace_provider_find @ 0x0836954c and no predicated BL forms.
+      Full-image B/BL decoding finds three unconditional direct callers
+      (0x08070274, 0x080702a4, and 0x080708e0) and zero predicated callers.
+      Selectors 1 through 8 map directly to indices 0 through 7. Every other
+      selector is stored in a stack word and its address is passed to the
+      global namespace provider; a successful lookup is offset by eight, and
+      a missing provider or failed lookup returns -1. Host builds replace the
+      fixed global word with private storage and use the existing
+      namespace-provider sort seam for the lookup test. match.py reports the
+      same direct-range branch, global load/null return, stack key, provider
+      call, and +8 result adjustment; LLVM omits the stock frame on the direct
+      path and adds its usual frame around the call path.
