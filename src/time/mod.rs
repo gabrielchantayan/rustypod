@@ -22,6 +22,7 @@ pub mod local_timestamp;
 pub mod local_to_utc;
 pub mod mktime;
 pub mod month_length;
+pub mod ordinal_day_to_month_day;
 pub mod rtc;
 pub mod utc_offset;
 pub mod utc_adjust;
