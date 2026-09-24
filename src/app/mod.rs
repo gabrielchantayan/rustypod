@@ -663,3 +663,4 @@ pub mod status_value_set;
 pub mod app_command_63800021_dispatch;
 pub mod message_selector_read;
 pub mod retail_control_profile_apply;
+pub mod initializer_profile_dispatch;
