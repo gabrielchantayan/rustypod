@@ -145,6 +145,7 @@ pub mod notification_dispatch;
 pub mod refresh_notification_state;
 pub mod record_lookup_value_word;
 pub mod input_state_transition;
+pub mod input_command_dispatch;
 
 pub mod passkey_mask_indicators;
 pub mod passkey_mask_indicator_countdown;
