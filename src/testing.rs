@@ -2213,6 +2213,9 @@ pub mod hints {
     // 0xde80_0000: dedicated to app/input_sequence_item_clear_action's
     // target-width item and pending-node fixture; mappings never unmap.
     pub const INPUT_SEQUENCE_ITEM_CLEAR_ACTION: usize = 0xde80_0000;
+    // 0x6e60_0000: dedicated to app/registered_listener_remove_by_pair's
+    // target-width listener owner and circular-list fixture; mappings never unmap.
+    pub const REGISTERED_LISTENER_REMOVE_BY_PAIR: usize = 0x6e60_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

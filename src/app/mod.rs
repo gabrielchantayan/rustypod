@@ -543,6 +543,7 @@ pub mod singleton_state;
 pub mod slot_table;
 pub mod registered_listener_notify;
 pub mod registered_listener_dispatch;
+pub mod registered_listener_remove_by_pair;
 pub mod task_context_observable_dispatch;
 pub mod slot_request_release;
 pub mod slot_signal_reset;
