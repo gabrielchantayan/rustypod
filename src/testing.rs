@@ -2254,6 +2254,9 @@ pub mod hints {
     // 0x6e70_0000: dedicated to app/selection_state_apply_index_and_dispatch's
     // target-width state and target fixture; mappings never unmap.
     pub const SELECTION_STATE_APPLY_INDEX_DISPATCH: usize = 0x6e70_0000;
+    // 0x6ea0_0000: dedicated to util/ring_write's target-width ring and data
+    // fixture; mappings never unmap, so no other port may share this hint.
+    pub const RING_WRITE: usize = 0x6ea0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
