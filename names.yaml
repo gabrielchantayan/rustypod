@@ -62667,6 +62667,31 @@ functions:
       alignments, zero through 32-bit fields, cursor commits, and a
       33-bit ARM-shift case. Rust implementation and tests:
       src/h264/bitstream.rs::bitstream_msb_read_advance.
+  # --- Class-0x6600 empty message notifier ---
+  - address: 0x080ef9c0
+    ghidra: FUN_080ef9c0
+    name: class_6600_message_post
+    size: 84
+    sig: "void class_6600_message_post(u32 message_code)"
+    module: app/class_6600_message_post
+    status: ported
+    renames:
+      param_1: message_code
+    notes: >-
+      Raw A32 decoding establishes the exact 84-byte extent
+      0x080ef9c0..0x080efa13. The next real function begins at
+      0x080efa14 with `mov r0,#1; bx lr`; Ghidra's 84-byte extent is
+      therefore correct. Full-image decoding finds three inbound call sites:
+      two predicated `bleq` at 0x08296648 and 0x08296c74, and one plain `bl`
+      at 0x08296ca0. The body has five unconditional BL instructions and no
+      predicated calls. It accepts only 0x66000000..=0x66000007, gets the
+      class-0x6600 target through instance_of_class_6600, allocates 12 bytes
+      from message_arena_pool, constructs a queued message with the input
+      code and empty payload, then posts it with no_wait=1, reply_queue=0,
+      and flags=0. There is deliberately no allocation NULL guard: stock
+      passes the allocator result directly to queued_message_construct.
+      Rust implementation and host tests:
+      src/app/class_6600_message_post.rs::class_6600_message_post.
   # --- MPEG video header parser: MSB-first bit fetch ---
   - address: 0x080efa38
     ghidra: FUN_080efa38
