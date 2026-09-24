@@ -178,3 +178,4 @@ pub mod resource_owner_replace_slot_1b4;
 pub mod app_controller_release_mode_resource;
 
 pub mod mutex_handoff_guarded_reset;
+pub mod four_slot_buffer_process;

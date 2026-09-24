@@ -137299,3 +137299,36 @@ functions:
       reading state+0x1c. The target has no verified semantic identity, so
       target builds call its fixed address while host tests inject a recording
       seam. Rust returns normally after the target rather than tail-branching.
+
+  - address: 0x080f7f08
+    ghidra: FUN_080f7f08
+    name: four_slot_buffer_process
+    size: 196
+    sig: "void four_slot_buffer_process(u8 *slots, u8 *source, u8 *destination, u32 len, u32 selected_slot)"
+    module: ui/four_slot_buffer_process
+    status: ported
+    renames:
+      param_1/r0/r4: slots
+      param_2/r1/r7: source
+      param_3/r2/r8: destination
+      param_4/r3/r6: len
+      param_5/[sp+0x28]/r5: selected_slot
+      FUN_0806e0e0: type_three_slot_consumer (unported fixed-address seam)
+      FUN_08039968: type_four_slot_transform (unported fixed-address seam)
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec establishes the exact 196-byte A32 extent from 0x080f7f08
+      through the pop return at 0x080f7fc8; 0x080f7fcc begins the next real
+      function. Decoding the body finds exactly three plain unconditional BL
+      instructions (0x0806e0e0, 0x08039968, and the 0x08037db0 veneer to ROM
+      __rt_memcpy) and zero predicated BL forms. The function treats slots as
+      four 40-byte records. For a selected in-range type-3 record, it forwards
+      the record +0x04 word and caller buffer triple to 0x0806e0e0. Independently,
+      a type-4 slot zero invokes 0x08039968 with descriptor ranges +0x08/+0x18,
+      an aligned len & ~15 prefix, then copies the len & 15 suffix from source
+      to destination. The two unported targets have no verified semantic
+      identity, so ARM builds call their fixed addresses and host tests install
+      typed recording seams. The memcpy veneer is deliberately replaced by the
+      existing __rt_memcpy port. match.py exits 1 with the expected structural
+      diff: LLVM emits fixed-address BLX calls and a normal Rust frame instead
+      of the stock direct BLs and saved incoming registers.
