@@ -17514,6 +17514,28 @@ functions:
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
 
+  - address: 0x080c6928
+    ghidra: FUN_080c6928
+    name: mailbox_slot_post_deferred
+    size: 8
+    sig: "void mailbox_slot_post_deferred(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_080567d0: csem_post_deferred
+    notes: >-
+      Raw osos.dec words `e5900000 eafe3fa7` establish the true 8-byte
+      extent 0x080c6928..0x080c6930: `ldr r0,[r0]; b 0x080567d0`. The next
+      word at 0x080c6930 (`e92d4070`) starts the following function. It
+      reloads the mailbox block from the caller-owned slot and tail-branches
+      to csem_post_deferred. Independent decoding of every aligned A32 B/BL
+      word finds three inbound link calls: one plain bl (0x08039a50) and two
+      predicated blne (0x0805c858, 0x08103ae8). Rust deliberately uses a
+      normal call instead of the tail branch, while preserving the per-call
+      dereference and no-NULL-guard behavior. Host tests cover slot
+      repointing and deferred wake behavior.
+
   - address: 0x0808e2a8
     ghidra: FUN_0808e2a8
     name: mailbox_slot_post
