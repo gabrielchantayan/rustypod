@@ -136142,3 +136142,34 @@ functions:
       inserts source bytes, and tail-dispatches the unported iterator target
       with source codepoint count minus replaced codepoint count. The target is an
       explicit injectable boundary; no callee identity was invented.
+  - address: 0x081187dc
+    ghidra: FUN_081187dc
+    name: string_object_substring_from_range
+    size: 56
+    sig: "void string_object_substring_from_range(StringObject *out, u8 *editor, const u8 *start_range, const u8 *end_range)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: editor
+      param_3/r2: start_range
+      param_4/r3: end_range
+      r4: start_index
+      r5: max_codepoints
+      r6: out
+      FUN_0828a0a4: object_sequence_id_assign
+      FUN_082a5118: string_object_substring
+    notes: >-
+      Raw osos.dec establishes 0x081187dc..0x08118813 as the complete
+      56-byte body; the next independent push prologue begins at
+      0x08118814. The body has one unconditional internal BL
+      (object_sequence_id_assign), zero predicated BL instructions, then an
+      unconditional tail B to string_object_substring @ 0x082a5118. A full
+      A32 branch scan finds three inbound plain BL callers
+      (0x08117f04, 0x081184d0, and 0x08118964), with no predicated callers.
+      It reads start_range+8 and end_range+4, assigns the sequence id of the
+      embedded StringObject at editor+0x24, and extracts that half-open
+      codepoint range. Ghidra's C follows an unrelated tail callee's
+      jumptable and is not used. The Rust port calls the already ported
+      string_object_substring directly instead of reproducing the tail branch;
+      this is the only deliberate codegen deviation.

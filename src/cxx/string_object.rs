@@ -2473,6 +2473,44 @@ pub unsafe extern "C" fn string_object_substring(
     string_object_assign_utf8_capped(out, start, max_codepoints);
 }
 
+/// string_object_substring_from_range — original: `FUN_081187dc` @
+/// 0x081187dc (56 bytes, all code; the next `push` prologue starts at
+/// 0x08118814). The body has one plain internal `bl`
+/// (`object_sequence_id_assign`) and zero predicated `bl` instructions;
+/// decoding all A32 branches also finds three plain inbound `bl` sites.
+///
+/// Assigns a sequence id to the string embedded at `editor + 0x24`, then
+/// extracts its codepoint range `[start_range + 8, end_range + 4)` into
+/// `out`. The original preserves the embedded-string address in r1 and
+/// tail-branches to [`string_object_substring`]. This port derives that
+/// address directly after the existing assignment seam and calls the ported
+/// tail target directly. Host tests perform the sequence write after extraction:
+/// target 4-byte fields put it at source+0xc, which aliases the upper half of
+/// the host's 8-byte payload pointer; the target build preserves the order.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_substring_from_range(
+    out: *mut StringObject,
+    editor: *mut u8,
+    start_range: *const u8,
+    end_range: *const u8,
+) {
+    let source = editor.add(0x24).cast::<StringObject>();
+    let start_index = start_range.cast::<i32>().add(2).read();
+    let max_codepoints = end_range.cast::<i32>().add(1).read().wrapping_sub(start_index);
+    #[cfg(target_os = "none")]
+    {
+        object_sequence_id_assign(source.cast());
+        string_object_substring(out, source, start_index, max_codepoints);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        string_object_substring(out, source, start_index, max_codepoints);
+        object_sequence_id_assign(source.cast());
+    }
+}
+
+
 /// string_object_suffix — original: `FUN_082a52e8` @ 0x082a52e8 (128
 /// bytes, all code; the next separately linked function begins at
 /// 0x082a5368). **6 direct `bl` call sites**, all unconditional, zero
@@ -5136,6 +5174,48 @@ pub(crate) mod tests {
             &[(out_ptr as usize, 3, 0)],
         );
         assert_eq!(&destination[..3], b"\xc2\xa9\0");
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+    }
+
+    #[test]
+    fn substring_from_range_assigns_the_embedded_sequence_then_extracts_it() {
+        let mut editor_words = [0u32; 16];
+        let editor_words_base = editor_words.as_mut_ptr().cast::<u8>();
+        // The target's +0x24 embedded object must land at the host
+        // StringObject alignment, while editor itself remains word-aligned.
+        let editor = unsafe {
+            editor_words_base.add((4usize.wrapping_sub(editor_words_base as usize)) & 7)
+        };
+        let source = unsafe { editor.add(0x24).cast::<StringObject>() };
+        let mut payload = *b"A\xc2\xa9\xe2\x82\xacZ\0";
+        unsafe {
+            source.write(StringObject {
+                vtable: core::ptr::null(),
+                payload: payload.as_mut_ptr(),
+            });
+        }
+        let start_range = [0u32, 0, 1];
+        let end_range = [0u32, 3];
+        let mut destination = [0xa5u8; 8];
+        let mut out = substring_garbage_out();
+        let out_ptr = core::ptr::addr_of_mut!(out);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+
+        unsafe {
+            string_object_substring_from_range(
+                out_ptr,
+                editor,
+                start_range.as_ptr().cast(),
+                end_range.as_ptr().cast(),
+            );
+        }
+
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice() },
+            &[(out_ptr as usize, 6, 0)],
+        );
+        assert_eq!(&destination[..6], b"\xc2\xa9\xe2\x82\xac\0");
         assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
         assert!(out.payload.is_null());
     }
