@@ -11113,6 +11113,28 @@ functions:
       dispatches through HEAP_OPS rather than branching directly to
       0x080e7970.
 
+  - address: 0x080df290
+    ghidra: FUN_080df290
+    name: memh_free_if_nonnull
+    size: 12
+    sig: "void memh_free_if_nonnull(void *ptr)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: ptr
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw osos.dec words e3500000 1afdf775 e12fff1e establish the complete
+      12-byte A32 body: cmp r0,#0; bne 0x0805d070; bx lr. The next word at
+      0x080df29c is mov r2,r1, a separate function's entry, disproving
+      Ghidra's oversized heap-free decompilation. Decoding every aligned ARM
+      B/BL immediate in osos.dec finds three unconditional bl callers and no
+      predicated bl caller. NULL avoids lazy heap initialization; non-NULL
+      tail-branches to the already ported tag-4 MemH free veneer. Deliberate
+      deviation: Rust makes the conditional tail branch an ordinary guarded
+      call and retains a separately exported symbol despite matching the
+      existing 0x0804938c null-guard veneer.
+
   - address: 0x0805d070
     ghidra: FUN_0805d070
     name: free_tag4
