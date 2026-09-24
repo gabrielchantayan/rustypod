@@ -136361,3 +136361,29 @@ functions:
       flag to zero enabled, clear it. Otherwise leave both unchanged. Rust
       uses private host backing for the fixed firmware global and inlines the
       verified no-op tail call.
+  - address: 0x081161d8
+    ghidra: FUN_081161d8
+    name: app_command_63800021_dispatch
+    size: 196
+    sig: "void app_command_63800021_dispatch(void *receiver)"
+    module: app/app_command_63800021_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: receiver
+      r5: command_group_none
+      r6: command_group_control
+      "receiver-vtable+0x58": dispatch
+      FUN_08114d30: dispatch_conditional_app_command
+    notes: >-
+      Raw osos.dec establishes the exact 196-byte extent
+      0x081161d8..0x0811629b, including the literal pool at
+      0x0811629c..0x081162b8; `push {r4,r5,r6,lr}` at 0x081162bc begins the
+      next independently linked function. It makes seven virtual calls through
+      receiver-vtable+0x58, with an unconditional direct BL to 0x08114d30
+      between the fourth and fifth calls, then tail-dispatches the seventh
+      virtual call. An independent whole-image A32 branch decode finds three
+      inbound plain BL sites (0x081115bc, 0x08115cac, and 0x08116354) and
+      zero predicated BL sites. The direct helper remains unported because its
+      global condition is unrelated to this wrapper; it is retained as a
+      fixed-address call on target and as a host seam. Deliberate deviations:
+      Rust expresses the final tail dispatch as a normal call.
