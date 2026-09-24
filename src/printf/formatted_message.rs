@@ -4,6 +4,9 @@
 //!
 //! - `formatted_message_emit` — original: `FUN_08123600` @ 0x08123600
 //!   (80 bytes; 83 `bl` call sites, binary-scanned).
+//! - `formatted_message_emit_unsigned` — original: `FUN_081238e0` @
+//!   0x081238e0 (80 bytes; verified 3 direct call sites: 3 plain `bl`,
+//!   0 predicated).
 //! - `formatted_message_emit_string` — original: `FUN_08123834` @
 //!   0x08123834 (132 bytes; 19 `bl` call sites, binary-scanned: 17 plain
 //!   `bl`, 2 `blne`).
@@ -121,6 +124,11 @@ use crate::libc::strcat::strncat;
 /// original with `adr r2, 0x8123650`, right after the 80-byte body).
 /// Consumes four argument words: indent, key, indent, value.
 const PLIST_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%d</integer>\n\0";
+/// The unsigned-integer sibling's format literal @ 0x08123930 (immediately
+/// after its 80-byte body). Consumes four argument words: indent, key, indent,
+/// value.
+const PLIST_UNSIGNED_INTEGER_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<integer>%u</integer>\n\0";
+
 /// The real-property format literal @ 0x08123b90 (immediately after the
 /// 80-byte body). Consumes four argument words: indent, key, indent, value.
 const PLIST_REAL_FORMAT: &[u8] = b"%s<key>%s</key>\n%s<real>%s</real>\n\0";
@@ -392,6 +400,42 @@ pub unsafe extern "C" fn formatted_message_emit(
     let text = stream.buf.as_ptr();
     (stream_append_op())(stream, text);
 }
+
+/// formatted_message_emit_unsigned — original: `FUN_081238e0` @
+/// 0x081238e0 (80 bytes; 3 direct call sites: 3 unconditional plain `bl`,
+/// 0 predicated; raw extent 0x081238e0..0x08123930).
+///
+/// Emit one indented unsigned `<integer>` plist property: prepare `depth`,
+/// format into the stream's 512-byte buffer with the adjacent `%u` literal,
+/// then tail-dispatch the buffer to stream append.
+///
+/// Deliberate deviation: the retail tail `b` to stream append @ 0x08123c58
+/// is a call through [`STREAM_APPEND`], so Rust returns after preserving the
+/// prepare/format/append sequence.
+///
+/// Register usage: r0 = stream, r1 = key, r2 = unsigned value, r3 = depth.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn formatted_message_emit_unsigned(
+    stream: *mut MessageStream,
+    key: *const u8,
+    value: u32,
+    depth: u32,
+) {
+    let stream = &mut *stream;
+    (indent_prepare_op())(stream, depth);
+    let indent = stream.indent.as_ptr();
+    let args: [u32; 4] = [indent as u32, key as u32, indent as u32, value];
+    snprintf(
+        stream.buf.as_mut_ptr(),
+        stream.buf.len(),
+        PLIST_UNSIGNED_INTEGER_FORMAT.as_ptr(),
+        args.as_ptr(),
+    );
+    let text = stream.buf.as_ptr();
+    (stream_append_op())(stream, text);
+}
+
 
 /// formatted_message_emit_real — original: `FUN_08123b40` @ 0x08123b40
 /// (80 bytes; verified 3 direct call sites: 3 plain `bl`, 0 predicated).
@@ -974,6 +1018,34 @@ mod tests {
                 (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended");
             assert_eq!(app_stream, stream);
             assert_eq!(app_text, buf, "append got the inline buffer");
+        }
+    }
+
+    #[test]
+    fn unsigned_emitter_uses_percent_u_and_preserves_u32_max() {
+        let _guard = slot_lock();
+        let mut mem = backing();
+        let stream = stream_of(&mut mem);
+        let key = b"SavedIndex\0";
+        unsafe {
+            with_mocks(snapshot_engine, || {
+                formatted_message_emit_unsigned(stream, key.as_ptr(), u32::MAX, 4);
+            });
+            assert_eq!(PREPARE_LEG.expect("indent prepared"), (stream, 4));
+            let (fmt, cursor, end, words) = FORMAT_LEG.expect("formatter ran");
+            assert_eq!(
+                core::slice::from_raw_parts(fmt, PLIST_UNSIGNED_INTEGER_FORMAT.len() - 1),
+                &PLIST_UNSIGNED_INTEGER_FORMAT[..PLIST_UNSIGNED_INTEGER_FORMAT.len() - 1],
+            );
+            let buf = (*stream).buf.as_mut_ptr();
+            assert_eq!(cursor, buf as usize);
+            assert_eq!(end, buf.add(BUFFER_CAPACITY - 1) as usize);
+            let indent = (*stream).indent.as_ptr();
+            assert_eq!(words, [indent as u32, key.as_ptr() as u32, indent as u32, u32::MAX]);
+            assert_eq!(
+                (*core::ptr::addr_of_mut!(APPEND_LEG)).take().expect("appended").0,
+                stream,
+            );
         }
     }
 
