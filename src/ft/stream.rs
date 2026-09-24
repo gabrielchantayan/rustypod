@@ -830,6 +830,106 @@ pub unsafe extern "C" fn ft_stream_free(stream: *mut FtStream, external: i32) {
         ft_mem_free(memory, stream as *mut u8);
     }
 }
+/// Dispatch ABI at `0x080d9fa0`, reached after the pathname stream is
+/// constructed by [`ft_open_path_resource_face`]. The retail wrapper clears
+/// `*resource_error`, installs its `0x00051607` resource-kind literal, then
+/// invokes the unported resource-face parser at `0x080dba7c`.
+pub type ResourceFaceDispatch = unsafe extern "C" fn(
+    library: *mut FtLibrary,
+    stream: *mut FtStream,
+    face_index: i32,
+    resource_error: *mut i32,
+    face_out: *mut u32,
+) -> i32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_resource_face_dispatch(
+    library: *mut FtLibrary,
+    stream: *mut FtStream,
+    face_index: i32,
+    resource_error: *mut i32,
+    face_out: *mut u32,
+) -> i32 {
+    let dispatch: ResourceFaceDispatch = core::mem::transmute(0x080d_9fa0usize);
+    dispatch(library, stream, face_index, resource_error, face_out)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_resource_face_dispatch(
+    _library: *mut FtLibrary,
+    _stream: *mut FtStream,
+    _face_index: i32,
+    _resource_error: *mut i32,
+    _face_out: *mut u32,
+) -> i32 {
+    panic!("resource face dispatch seam not installed")
+}
+
+/// Retail resource-face parser used by [`ft_open_path_resource_face`].
+/// Target builds call the verified `0x080d9fa0` wrapper; host tests install
+/// a recorder until its `0x080dba7c` parser is independently ported.
+pub static mut RESOURCE_FACE_DISPATCH: ResourceFaceDispatch = {
+    #[cfg(target_os = "none")]
+    {
+        firmware_resource_face_dispatch
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        missing_resource_face_dispatch
+    }
+};
+
+#[inline(always)]
+unsafe fn resource_face_dispatch() -> ResourceFaceDispatch {
+    core::ptr::read_volatile(core::ptr::addr_of!(RESOURCE_FACE_DISPATCH))
+}
+
+/// ft_open_path_resource_face — original: `FUN_080e70c4` @ `0x080e70c4`
+/// (112 bytes; 3 plain `bl` call sites, no predicated `bl` calls).
+///
+/// Builds a stack-local `FT_Open_Args` with only `FT_OPEN_PATHNAME` set,
+/// opens `pathname` into a fresh stream, and returns that error unchanged.
+/// On success it clears a local resource error, dispatches the stream and
+/// `face_index` through `0x080d9fa0`, then closes the stream regardless of
+/// the dispatch result and returns that result.
+///
+/// Deliberate deviation: the unported `0x080d9fa0` wrapper/parser uses the
+/// volatile [`RESOURCE_FACE_DISPATCH`] seam rather than a direct `bl`; target
+/// defaults to its verified load address and host tests install a recorder.
+///
+/// # Safety
+/// `library`, `pathname`, and `face_out` must be valid for the calls made by
+/// the FreeType stream constructor and resource-face dispatcher.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_open_path_resource_face(
+    library: *mut FtLibrary,
+    pathname: *mut core::ffi::c_void,
+    face_index: i32,
+    face_out: *mut u32,
+) -> i32 {
+    let args = FtOpenArgs {
+        flags: FT_OPEN_PATHNAME,
+        memory_base: core::ptr::null(),
+        memory_size: 0,
+        pathname,
+        stream: core::ptr::null_mut(),
+        driver: core::ptr::null_mut(),
+        num_params: 0,
+        params: core::ptr::null_mut(),
+    };
+    let mut resource_error = 0;
+    let mut stream = core::ptr::null_mut();
+    let error = ft_stream_new(library, &args, &mut stream);
+    if error != 0 {
+        return error;
+    }
+
+    let dispatch = resource_face_dispatch();
+    let result = dispatch(library, stream, face_index, &mut resource_error, face_out);
+    ft_stream_close(stream);
+    result
+}
 
 /// ft_stream_pos (FreeType `FT_Stream_Pos`) — original: `FUN_0804f370`
 /// @ 0x0804f370 (8 bytes: `ldr r0, [r0, #8]`, `bx lr`; 17 call sites).
@@ -3306,6 +3406,76 @@ mod tests {
             let (want_error, want_cursor) = read_fields_ref(&source, &fields, &mut want);
             assert_eq!((error, cursor), (want_error, want_cursor));
             assert_eq!(got, want);
+        }
+    }
+
+    static RESOURCE_FACE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static mut RESOURCE_FACE_SEEN: Option<(*mut FtLibrary, *mut FtStream, i32, i32, *mut u32)> = None;
+    static mut RESOURCE_FACE_FILE: [usize; 32] = [0; 32];
+    static mut RESOURCE_FACE_FILE_OWNER: [usize; 32] = [0; 32];
+
+    unsafe extern "C" fn open_resource_face_path(
+        _volume: i32,
+        _path: *const u8,
+        handle: *mut *mut core::ffi::c_void,
+    ) -> i32 {
+        RESOURCE_FACE_FILE = [0; 32];
+        RESOURCE_FACE_FILE_OWNER = [0; 32];
+        // Host pointers are eight bytes: the owner is the second pointer
+        // field. The all-zero owner has the same unlocked mutex state used
+        // by ft/system.rs's platform-file fixture.
+        RESOURCE_FACE_FILE[1] = core::ptr::addr_of_mut!(RESOURCE_FACE_FILE_OWNER) as usize;
+        *handle = core::ptr::addr_of_mut!(RESOURCE_FACE_FILE).cast();
+        1
+    }
+
+    unsafe extern "C" fn record_resource_face_dispatch(
+        library: *mut FtLibrary,
+        stream: *mut FtStream,
+        face_index: i32,
+        resource_error: *mut i32,
+        face_out: *mut u32,
+    ) -> i32 {
+        RESOURCE_FACE_SEEN = Some((library, stream, face_index, *resource_error, face_out));
+        // The production `0x080d9fa0` wrapper clears this before entering
+        // its parser. Clearing close lets the fixture avoid the file layer.
+        (*stream).close = None;
+        0x56
+    }
+
+    #[test]
+    fn open_path_resource_face_opens_dispatches_and_closes_the_stream() {
+        let _serial = RESOURCE_FACE_TEST_LOCK.lock();
+        let _memory = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            let mut memory = test_memory::reset(false);
+            let mut library = library(&mut memory);
+            let path = b"font.dfont\0";
+            let mut face = 0u32;
+            let previous_dispatch = RESOURCE_FACE_DISPATCH;
+            let previous_platform = crate::ft::system::ft_set_platform_file_ops(Some(
+                crate::ft::system::FtPlatformFileOps {
+                    open: open_resource_face_path,
+                },
+            ));
+            RESOURCE_FACE_SEEN = None;
+            RESOURCE_FACE_DISPATCH = record_resource_face_dispatch;
+
+            let result = ft_open_path_resource_face(
+                &mut library,
+                path.as_ptr() as *mut core::ffi::c_void,
+                -3,
+                &mut face,
+            );
+
+            RESOURCE_FACE_DISPATCH = previous_dispatch;
+            crate::ft::system::ft_set_platform_file_ops(previous_platform);
+            let seen = RESOURCE_FACE_SEEN.expect("resource dispatch was not called");
+            assert_eq!(result, 0x56);
+            assert_eq!(seen.0, &mut library as *mut FtLibrary);
+            assert_eq!(seen.2, -3);
+            assert_eq!(seen.3, 0);
+            assert_eq!(seen.4, core::ptr::addr_of_mut!(face));
         }
     }
 

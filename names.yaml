@@ -137753,3 +137753,35 @@ functions:
       deliberate deviations. Host tests cover empty, NULL/absent, head,
       interior, and tail removal; match.py reports the expected LLVM loop
       shape and no missing behavior.
+  - address: 0x080e70c4
+    ghidra: FUN_080e70c4
+    name: ft_open_path_resource_face
+    size: 112
+    sig: "i32 ft_open_path_resource_face(FtLibrary *library, void *pathname, i32 face_index, u32 *face_out)"
+    module: ft/stream
+    status: ported
+    renames:
+      param_1/r0/r5: library
+      param_2/r1/r4: pathname
+      param_3/r2/r6: face_index
+      param_4/r3: face_out
+      local_38/sp+8: resource_error
+      local_34/sp+12: stream
+      local_30/sp+16: open_args
+      FUN_0804f250: ft_stream_new
+      FUN_080d9fa0: resource_face_dispatch
+      FUN_0804ed9c: ft_stream_close
+    notes: >-
+      Raw osos.dec establishes the 112-byte extent 0x080e70c4..0x080e7134:
+      the final instruction is pop {r4,r5,r6,pc} at 0x080e7130 and the
+      next real function begins at 0x080e7134 with push {r4-r10,lr}.
+      It has exactly three unconditional direct BL instructions
+      (ft_stream_new, the 0x080d9fa0 resource-face wrapper, and
+      ft_stream_close), with no predicated BL calls. It builds a pathname
+      FT_Open_Args, opens the stream, forwards library/stream/face_index
+      plus a zeroed local resource-error and face_out to the wrapper, then
+      closes the stream on the successful-open path and returns the dispatch
+      result. Rust keeps the two identified stream calls direct; the unported
+      wrapper/parser is the volatile RESOURCE_FACE_DISPATCH seam, whose target
+      default is the verified 0x080d9fa0 address. Host test covers opening,
+      zeroed error forwarding, dispatch arguments, close path, and result.
