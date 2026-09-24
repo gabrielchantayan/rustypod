@@ -24730,6 +24730,26 @@ functions:
       bl; behavior is unchanged and host-tested against
       u32::from_be_bytes over every offset.
 
+  - address: 0x080743dc
+    ghidra: FUN_080743dc
+    name: read_u64_be
+    size: 16
+    sig: "u64 read_u64_be(const u8 *p)"
+    module: util/be_read
+    status: ported
+    vars: {param_1: p}
+    notes: >-
+      Raw words establish the true 16-byte extent: push {r4,lr}; bl
+      read_u64_le; pop {r4,lr}; b 0x080f15a4. The tail target is an unnamed
+      register-only 64-bit byte-reverse helper, verified from its raw body;
+      the port expresses it as swap_bytes without creating an unsupported
+      callee seam. LLVM inlines read_u64_le, so the shipped body folds the
+      call and tail branch into the equivalent eight-byte gather and return.
+      Decoding every ARM BL word in osos.dec finds exactly three plain callers
+      (0x081546d8, 0x08154718, 0x08154764) and no predicated calls. Ghidra's
+      apparent 16-byte body matches the raw extent here; the next real
+      function begins at 0x08074410.
+
   - address: 0x08076f48
     ghidra: FUN_08076f48
     name: byteswap16

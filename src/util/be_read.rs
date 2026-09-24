@@ -1,12 +1,14 @@
-//! Unaligned big-endian load pair @ 0x0807439c / 0x080743b8.
+//! Unaligned big-endian load family @ 0x0807439c..0x080743dc.
 //!
-//! These adjacent pure leaf functions assemble packed network-order values
-//! from individual `ldrb`s, which is safe at every byte alignment on the
+//! These adjacent pure functions assemble packed network-order values from
+//! individual `ldrb`s, which is safe at every byte alignment on the
 //! ARM926EJ-S. The 16-bit member gathers its two bytes directly. The 32-bit
 //! member delegates to [`read_u32_le`] @ 0x080ed748 (the ADS `__packed` u32
 //! reader) with a real `bl` and then byte-reverses the result in registers —
 //! `lsl r1, r0, #24`, `orr` of `r0 & 0xff00` shifted left 8, `orr` of
-//! `r0 & 0xff0000` shifted right 8, `orr` of `r0 >> 24`.
+//! `r0 & 0xff0000` shifted right 8, `orr` of `r0 >> 24`. The 64-bit member
+//! calls [`read_u64_le`] @ 0x080ed768 and tail-branches to an unnamed
+//! register-only 64-bit byte-reverse helper at 0x080f15a4.
 //!
 //! The raw words, rather than Ghidra's extent, establish:
 //!
@@ -17,14 +19,20 @@
 //!   0x081f3b30/0x0837a158 and `unpack_be32` @ 0x08261770 (both in
 //!   `util/beload.rs`), but a distinct firmware function from a different
 //!   object file, so it keeps its own address, symbol, and text section.
+//! - `read_u64_be` — `FUN_080743dc` @ 0x080743dc (16 bytes; 3 `bl` call
+//!   sites, all unpredicated). It calls `read_u64_le` then tail-branches to
+//!   the 64-bit byte-reverse helper.
 //!
 //! Ghidra assigns the 32-bit function 36 bytes; `pop {pc}` at 0x080743d8
 //! proves its actual 24-byte extent, with the separately linked 64-bit
 //! sibling beginning at 0x080743dc.
 //!
 //! [`read_u32_le`]: crate::util::le_read::read_u32_le
+//! [`read_u64_le`]: crate::util::le_read::read_u64_le
+//! [`load_be32`]: crate::util::beload::load_be32
+//! [`unpack_be32`]: crate::util::beload::unpack_be32
 
-use crate::util::le_read::read_u32_le;
+use crate::util::le_read::{read_u32_le, read_u64_le};
 
 /// read_u16_be — original: `FUN_0807439c` @ 0x0807439c (28 bytes; 18 `bl`
 /// call sites, all unpredicated, counted by decoding every B/BL word in
@@ -65,6 +73,25 @@ pub unsafe extern "C" fn read_u16_be(p: *const u8) -> u32 {
 #[inline(never)]
 pub unsafe extern "C" fn read_u32_be(p: *const u8) -> u32 {
     read_u32_le(p).swap_bytes()
+}
+
+/// read_u64_be — original: `FUN_080743dc` @ 0x080743dc (16 bytes; 3 plain,
+/// unpredicated `bl` call sites).
+///
+/// Unaligned big-endian u64 load: calls [`read_u64_le`] then tail-branches to
+/// 0x080f15a4, whose raw body reverses all eight bytes in `r0:r1`. The true
+/// extent runs from `push {r4,lr}` through that unconditional tail branch;
+/// 0x08074410 is the next real function boundary. No NULL or bounds check
+/// occurs. Deliberate code-generation deviation: LLVM inlines `read_u64_le`
+/// and returns after its byte-reverse rather than retaining the firmware's
+/// `bl`/tail-branch pair; the load and returned `r0:r1` value are identical.
+///
+/// [`read_u64_le`]: crate::util::le_read::read_u64_le
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.read_u64_be")]
+#[inline(never)]
+pub unsafe extern "C" fn read_u64_be(p: *const u8) -> u64 {
+    read_u64_le(p).swap_bytes()
 }
 
 #[cfg(test)]
@@ -111,6 +138,46 @@ mod tests {
         for off in 0..=buf.len() - 4 {
             let want = u32::from_be_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
             assert_eq!(unsafe { read_u32_be(buf.as_ptr().add(off)) }, want, "off={off}");
+        }
+    }
+
+    /// Every byte alignment and boundary value against the independent
+    /// standard-library big-endian decoder.
+    #[test]
+    fn read_u64_be_matches_reference() {
+        let buf = pattern(96, 53);
+        for off in 0..=buf.len() - 8 {
+            let want = u64::from_be_bytes([
+                buf[off],
+                buf[off + 1],
+                buf[off + 2],
+                buf[off + 3],
+                buf[off + 4],
+                buf[off + 5],
+                buf[off + 6],
+                buf[off + 7],
+            ]);
+            assert_eq!(unsafe { read_u64_be(buf.as_ptr().add(off)) }, want, "off={off}");
+        }
+
+        for value in [
+            0u64,
+            1,
+            0x0000_0000_0000_00ff,
+            0xff00_0000_0000_0000,
+            0x8000_0000_0000_0000,
+            0x0102_0304_0506_0708,
+            u64::MAX,
+        ] {
+            for off in 0..4usize {
+                let mut padded = vec![0xa5u8; 12];
+                padded[off..off + 8].copy_from_slice(&value.to_be_bytes());
+                assert_eq!(
+                    unsafe { read_u64_be(padded.as_ptr().add(off)) },
+                    value,
+                    "{value:#018x} off={off}"
+                );
+            }
         }
     }
 
