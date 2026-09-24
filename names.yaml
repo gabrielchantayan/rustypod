@@ -139546,3 +139546,37 @@ functions:
       query/destroy order, all forwarded arguments, the live base hint, and
       verbatim status propagation; match.py reports the same guarded virtual
       dispatch structure with expected Rust seam indirections.
+
+  - address: 0x0808918c
+    ghidra: FUN_0808918c
+    name: path_facade_slot_68
+    size: 80
+    sig: "i32 path_facade_slot_68(StringObject *path_object, u32 *flag_out, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0/r4: path_object
+      param_2/r1/r5: flag_out
+      param_3/r2: base_hint
+      FUN_08206e40: path_probe_guard_construct
+      FUN_0818a0bc: facade_for_selector
+      FUN_08206e6c: path_probe_guard_destroy
+      facade_vtable[0x68]: path facade operation (semantic identity unresolved)
+      r4: operation_status saved across guard destruction
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte instruction extent from
+      0x0808918c through 0x080891d8; the next distinct push-prologue begins
+      at 0x080891dc. A full-image A32 BL-immediate decode finds exactly three
+      inbound plain unconditional BL calls (0x08089174, 0x080ac0a0, and
+      0x081179c0) and zero predicated BL forms. The body constructs the
+      16-byte interface guard with base_hint, fetches facade selector 1, calls
+      vtable slot +0x68 with (facade, path_object, flag_out), destroys the
+      guard, and returns the slot status verbatim. The slot identity is not
+      recovered, so Rust retains the structural name and reuses existing typed
+      guard/facade seams; device defaults preserve the ported/retailOS boundary
+      chain and host defaults fail closed. Host coverage verifies guard/fetch/
+      query/destroy order, forwarded path, flag output, and base hint across
+      zero, one, and nontrivial hints and signed statuses; the stage-budget
+      caller now uses the port rather than its removed helper seam. match.py
+      reports the same guarded virtual-dispatch structure with expected Rust
+      seam indirections.

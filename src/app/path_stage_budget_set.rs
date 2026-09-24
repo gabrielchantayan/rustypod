@@ -14,9 +14,7 @@
 //! cache instead of the retail global word; its returned raw allocation is cast
 //! to the verified `StageProgressTracker` layout.
 
-use crate::app::path_probe::{
-    path_probe_via_facade, PATH_FACADE_SLOT_68_FROM_PATH_OBJECT,
-};
+use crate::app::path_probe::{path_facade_slot_68, path_probe_via_facade};
 use crate::app::singletons::stage_progress_tracker_get;
 use crate::app::stage_progress::StageProgressTracker;
 use crate::cxx::string_object::StringObject;
@@ -28,8 +26,7 @@ use crate::cxx::string_object::StringObject;
 pub unsafe extern "C" fn path_stage_budget_set(stage: u32, path_object: *mut StringObject) {
     let mut budget_kib = 0;
     if path_probe_via_facade(path_object, 0) != 0 {
-        let size_query = core::ptr::addr_of!(PATH_FACADE_SLOT_68_FROM_PATH_OBJECT).read_volatile();
-        size_query(path_object, &mut budget_kib, 0);
+        path_facade_slot_68(path_object, &mut budget_kib, 0);
         budget_kib >>= 10;
     }
 
@@ -47,9 +44,9 @@ mod tests {
     use super::*;
     use crate::app::path_probe::{
         FacadeFetch, FacadeObject, FacadeVtable, GuardConstruct, GuardDestroy, InterfaceGuard,
-        PathFacadeSlot68FromPathObject, PathProbeQuery, FACADE_PATH_PROBE_SLOT_INDEX,
-        FACADE_VTABLE_SLOTS, PATH_PROBE_FACADE_FETCH, PATH_PROBE_GUARD_CTOR,
-        PATH_PROBE_GUARD_DTOR,
+        PathFacadeSlot68, PathProbeQuery, FACADE_PATH_PROBE_SLOT_INDEX,
+        FACADE_PATH_SLOT_68_INDEX, FACADE_VTABLE_SLOTS, PATH_PROBE_FACADE_FETCH,
+        PATH_PROBE_GUARD_CTOR, PATH_PROBE_GUARD_DTOR,
     };
     use crate::app::singletons::{SINGLETON_LOCK, STAGE_PROGRESS_TRACKER};
     use core::ptr;
@@ -69,7 +66,7 @@ mod tests {
     }
     unsafe extern "C" fn path_absent(_: *mut FacadeObject, _: *mut StringObject) -> u32 { 0 }
     unsafe extern "C" fn path_present(_: *mut FacadeObject, _: *mut StringObject) -> u32 { 1 }
-    unsafe extern "C" fn report_size(_: *mut StringObject, out: *mut u32, _: u32) -> i32 {
+    unsafe extern "C" fn report_size(_: *mut FacadeObject, _: *mut StringObject, out: *mut u32) -> i32 {
         out.write(7 * 1024 + 1023);
         -1
     }
@@ -85,7 +82,6 @@ mod tests {
             let saved_ctor = ptr::read_volatile(ptr::addr_of!(PATH_PROBE_GUARD_CTOR));
             let saved_fetch = ptr::read_volatile(ptr::addr_of!(PATH_PROBE_FACADE_FETCH));
             let saved_dtor = ptr::read_volatile(ptr::addr_of!(PATH_PROBE_GUARD_DTOR));
-            let saved_size = ptr::read_volatile(ptr::addr_of!(crate::app::path_probe::PATH_FACADE_SLOT_68_FROM_PATH_OBJECT));
 
             STAGE_PROGRESS_TRACKER = ptr::addr_of_mut!(TRACKER).cast();
             TRACKER = [0; 11];
@@ -95,7 +91,7 @@ mod tests {
             PATH_PROBE_GUARD_DTOR = guard_dtor as GuardDestroy;
             VTABLE.slots[FACADE_PATH_PROBE_SLOT_INDEX] = path_absent as PathProbeQuery as usize;
             FACADE.vtable = ptr::addr_of!(VTABLE);
-            crate::app::path_probe::PATH_FACADE_SLOT_68_FROM_PATH_OBJECT = report_size as PathFacadeSlot68FromPathObject;
+            VTABLE.slots[FACADE_PATH_SLOT_68_INDEX] = report_size as PathFacadeSlot68 as usize;
 
             path_stage_budget_set(2, ptr::null_mut());
             assert_eq!(TRACKER[4 + 2], 0, "the absent-path default probe skips the size query");
@@ -109,7 +105,6 @@ mod tests {
             PATH_PROBE_GUARD_CTOR = saved_ctor;
             PATH_PROBE_FACADE_FETCH = saved_fetch;
             PATH_PROBE_GUARD_DTOR = saved_dtor;
-            crate::app::path_probe::PATH_FACADE_SLOT_68_FROM_PATH_OBJECT = saved_size;
         }
     }
 }
