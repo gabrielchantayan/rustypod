@@ -179,13 +179,19 @@ pub const FACADE_PATH_SLOT_5C_INDEX: usize = FACADE_PATH_SLOT_5C / 4;
 pub const FACADE_PATH_SLOT_54: usize = 0x54;
 /// [`FACADE_PATH_SLOT_54`] as a vtable word index.
 pub const FACADE_PATH_SLOT_54_INDEX: usize = FACADE_PATH_SLOT_54 / 4;
+/// Byte offset of the unclassified two-path operation at +0x64.
+pub const FACADE_PATH_SLOT_64: usize = 0x64;
+/// [`FACADE_PATH_SLOT_64`] as a vtable word index.
+pub const FACADE_PATH_SLOT_64_INDEX: usize = FACADE_PATH_SLOT_64 / 4;
 
 
 /// The modeled facade vtable extent: every slot up to and including the
-/// path operation slot at +0x5c. Only slots [`FACADE_PATH_PROBE_SLOT_INDEX`]
-/// and [`FACADE_PATH_SLOT_5C_INDEX`] are decoded; the rest are held as raw
-/// words (the StringIdRecordVtable serialized-slots precedent).
-pub const FACADE_VTABLE_SLOTS: usize = FACADE_PATH_SLOT_5C_INDEX + 1;
+/// unclassified operation at +0x64. Only slots
+/// [`FACADE_PATH_PROBE_SLOT_INDEX`], [`FACADE_PATH_SLOT_5C_INDEX`], and
+/// [`FACADE_PATH_SLOT_64_INDEX`] have recovered call signatures; the rest
+/// are held as raw words (the StringIdRecordVtable serialized-slots
+/// precedent).
+pub const FACADE_VTABLE_SLOTS: usize = FACADE_PATH_SLOT_64_INDEX + 1;
 
 /// The 16-byte scoped interface guard — exactly the original's r0-r3
 /// spill frame. Layout (from the constructor/destructor bodies):
@@ -235,6 +241,11 @@ pub type PathFacadeSlot54 =
 /// at 0x08089154 establishes only its structural ABI.
 pub type PathFacadeSlot68FromPathObject =
     unsafe extern "C" fn(path_object: *mut StringObject, flag_out: *mut u32, base_hint: u32) -> i32;
+
+/// The facade's unclassified vtable-slot-+0x64 operation: takes the facade
+/// object followed by two path objects and returns its status.
+pub type PathFacadeSlot64 =
+    unsafe extern "C" fn(facade: *mut FacadeObject, first_path: *mut StringObject, second_path: *mut StringObject) -> u32;
 
 /// Firmware load address of the unported slot-+0x68 helper called by
 /// [`path_facade_slot_68_from_cstr`].
@@ -356,6 +367,17 @@ unsafe extern "C" fn stub_path_facade_slot_5c(
     0
 }
 
+/// The fail-closed slot-+0x64 stand-in. Its operation is not identified, so
+/// host defaults return zero without inferring semantics.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn stub_path_facade_slot_64(
+    _facade: *mut FacadeObject,
+    _first_path: *mut StringObject,
+    _second_path: *mut StringObject,
+) -> u32 {
+    0
+}
+
 /// Boundary default for the facade accessor: calls the stock
 /// 0x0818a0bc, which remains in retailOS. The host default fails
 /// closed (the vtable_set.rs `store_ctor_unported` policy): it returns
@@ -379,6 +401,7 @@ unsafe extern "C" fn firmware_facade_fetch(
         (*vtable).slots[FACADE_PATH_PROBE_SLOT_INDEX] = stub_path_probe_query as usize;
         (*vtable).slots[FACADE_PATH_SLOT_54_INDEX] = stub_path_facade_slot_54 as usize;
         (*vtable).slots[FACADE_PATH_SLOT_5C_INDEX] = stub_path_facade_slot_5c as usize;
+        (*vtable).slots[FACADE_PATH_SLOT_64_INDEX] = stub_path_facade_slot_64 as usize;
         let facade = core::ptr::addr_of_mut!(STUB_FACADE);
         (*facade).vtable = vtable as *const FacadeVtable;
         facade
@@ -822,6 +845,41 @@ pub unsafe extern "C" fn path_facade_slot_5c(path: *const u8, base_hint: u32) ->
     guard_dtor_fn()(guard);
     status
 }
+
+/// path_facade_slot_64 — original: `FUN_080f4b6c` @ **0x080f4b6c** (80
+/// bytes; **3 plain `bl` call sites and 0 predicated `bl` call sites**,
+/// verified from raw `osos.dec` ARM words at 0x080f4b48, 0x081ef2e8, and
+/// 0x082737f4).
+///
+/// Raw words establish the extent from `push {r0-r6,lr}` through
+/// `pop {r4-r6,pc}` at 0x080f4bb8; 0x080f4bbc starts the next distinct
+/// function. Constructs a scoped interface guard with `base_hint`, fetches
+/// facade selector 1, invokes vtable slot +0x64 with `(facade, first_path,
+/// second_path)`, destroys the guard, and returns that status verbatim.
+///
+/// # Deliberate deviations
+///
+/// The +0x64 operation has no recovered semantic identity. It therefore
+/// keeps a structural name and reuses the existing guard/facade seams; their
+/// device defaults preserve the ported/retailOS boundary chain and host
+/// defaults fail closed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_64(
+    first_path: *mut StringObject,
+    second_path: *mut StringObject,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let slot = (*(*facade).vtable).slots[FACADE_PATH_SLOT_64_INDEX];
+    let operation: PathFacadeSlot64 = core::mem::transmute(slot);
+    let status = operation(facade, first_path, second_path);
+    guard_dtor_fn()(guard);
+    status
+}
 /// path_facade_slot_5c_from_cstr — original: `FUN_08084d28` @
 /// **0x08084d28** (48 bytes; **8 direct `bl` call sites**: 7
 /// unconditional and 1 `blne`, plus 1 tail `b`, verified by decoding every
@@ -1070,6 +1128,18 @@ pub(crate) mod tests {
         QUERY_RESULT as i32
     }
 
+    unsafe extern "C" fn recording_path_facade_slot_64(
+        facade: *mut FacadeObject,
+        first_path: *mut StringObject,
+        second_path: *mut StringObject,
+    ) -> u32 {
+        record(EVENT_QUERY);
+        QUERY_FACADE = facade;
+        QUERY_PATH_OBJECT = first_path;
+        QUERY_PATH = second_path.cast();
+        QUERY_RESULT
+    }
+
     unsafe extern "C" fn recording_interface_guard_deregister(
         owner_member: *mut u8,
         guard: *mut InterfaceGuard,
@@ -1307,6 +1377,7 @@ pub(crate) mod tests {
         let _lock = take_lock();
         let _restore = unsafe { SeamGuard::new() };
         unsafe {
+
             for (selector, interface, status) in [
                 (0u32, 0x1000_0000, 0u32),
                 (5, 0x2000_0004, 0x12),
@@ -1685,4 +1756,37 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn slot_64_guards_two_paths_and_returns_the_operation_status() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            let mut first = StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            };
+            let mut second = StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            };
+            for (base_hint, status) in [(0u32, 0u32), (1, 7), (0x5a5a_f00d, 0xdead_beef)] {
+                install_recording();
+                (*core::ptr::addr_of_mut!(MOCK_VTABLE)).slots[FACADE_PATH_SLOT_64_INDEX] =
+                    recording_path_facade_slot_64 as usize;
+                QUERY_RESULT = status;
+
+                assert_eq!(path_facade_slot_64(&mut first, &mut second, base_hint), status);
+                assert_eq!(
+                    &EVENTS[..EVENT_COUNT],
+                    &[EVENT_GUARD_CTOR, EVENT_FETCH, EVENT_QUERY, EVENT_GUARD_DTOR]
+                );
+                assert_eq!(CTOR_HINT, base_hint, "r2 stays live for the constructor");
+                assert_eq!(FETCH_SELECTOR, FACADE_SELECTOR);
+                assert_eq!(QUERY_FACADE, core::ptr::addr_of_mut!(MOCK_FACADE));
+                assert_eq!(QUERY_PATH_OBJECT, core::ptr::addr_of_mut!(first));
+                assert_eq!(QUERY_PATH, core::ptr::addr_of_mut!(second).cast());
+                assert_eq!(DTOR_THIS, CTOR_THIS, "the status is saved across guard destruction");
+            }
+        }
+    }
 }

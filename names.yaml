@@ -74553,6 +74553,39 @@ functions:
       is the crate fp frame and the three seams' blx dispatch in
       place of the direct bls.
 
+  - address: 0x080f4b6c
+    ghidra: FUN_080f4b6c
+    name: path_facade_slot_64
+    size: 80
+    sig: "u32 path_facade_slot_64(StringObject *first_path, StringObject *second_path, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0/r4: first_path
+      param_2/r1/r5: second_path
+      param_3/r2: base_hint
+      FUN_08206e40: path_probe_guard_construct
+      FUN_0818a0bc: facade_for_selector
+      FUN_08206e6c: path_probe_guard_destroy
+      facade_vtable[0x64]: path_facade_slot_64 operation (semantic identity unresolved)
+      r4: query_status saved across guard destruction
+    notes: >-
+      Raw osos.dec ARM words establish the exact 80-byte instruction extent
+      from 0x080f4b6c through 0x080f4bb8; the next push-prologue at
+      0x080f4bbc is a distinct function. Three direct call sites are plain,
+      unconditional BLs at 0x080f4b48, 0x081ef2e8, and 0x082737f4; no
+      predicated BL form targets this address. The function saves its first
+      two path-object arguments, constructs the 16-byte interface guard with
+      base_hint, fetches facade selector 1, and calls its vtable +0x64 slot
+      with (facade, first_path, second_path). It destroys the guard and
+      returns the slot status verbatim. The operation behind +0x64 is not
+      semantically identified, so the port uses that structural name and the
+      existing typed guard/facade seams: device builds retain their verified
+      ported/retailOS boundary chain; host defaults fail closed. Host test
+      slot_64_guards_two_paths_and_returns_the_operation_status verifies call
+      order, all three forwarded arguments, selector, status propagation, and
+      the +0x64 vtable word.
+
   - address: 0x08271598
     ghidra: FUN_08271598
     name: beeper_construct
