@@ -60201,6 +60201,32 @@ functions:
       0x0811f7e8. Focused host tests cover one-byte-only copying, independent
       source and destination offsets, and aliasing.
 
+  - address: 0x0811f8b8
+    ghidra: thunk_FUN_0813b254
+    name: ui_mailbox_task_destroy
+    size: 4
+    sig: "void *ui_mailbox_task_destroy(void *task)"
+    module: ui/mailbox_task_destroy
+    status: ported
+    renames:
+      param_1: task
+      DAT_0813b27c: ui_mailbox_task_vtable
+      FUN_080a6bec: mailbox_slot_delete
+      FUN_0811f7f4: ui_noop_f7f4
+    notes: >-
+      Raw osos.dec establishes that the assigned four-byte extent
+      0x0811f8b8..0x0811f8bc is `b 0x0813b254`; the next real function after
+      the delegated body begins at 0x0813b280. Independent whole-image
+      disassembly finds exactly three plain BL call sites to this thunk
+      (0x08393438, 0x0839350c, and 0x08393a94) and no predicated BL call
+      sites. The 40-byte delegate installs 0x08984dcc at +0, calls
+      mailbox_slot_delete on +8, calls ui_noop_f7f4 with +4, and returns the
+      original task pointer. The host port directly clears the 32-bit mailbox
+      word because host pointers are wider; target builds call
+      mailbox_slot_delete. Reference C:
+      decomp/c/011/0811f8b8_thunk_FUN_0813b254.c and
+      decomp/c/012/0813b254_FUN_0813b254.c.
+
   - address: 0x0813b214
     ghidra: FUN_0813b214
     name: ui_mailbox_task_construct
