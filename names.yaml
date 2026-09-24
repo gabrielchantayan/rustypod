@@ -140808,3 +140808,22 @@ functions:
       and output pair are forwarded to the verified still-retail wrapper.
       Rust uses a direct call-and-return rather than the ARM tail branch and
       exposes fixed-address device seams plus host recording seams.
+
+  # --- RTC-seeded random-service tail veneer (runtime) ---
+  - address: 0x0805b0cc
+    ghidra: thunk_FUN_080548ec
+    name: rtc_seeded_random_service_veneer
+    size: 4
+    sig: "u32 rtc_seeded_random_service_veneer(u32 r0, u32 r1, u32 r2, u32 r3)"
+    module: runtime/rtc_seeded_random_service_veneer
+    status: ported
+    notes: >-
+      Raw word 0xeaffe606 is `b 0x080548ec`: a four-byte tail veneer, not a
+      call or an empty destructor. The next real function begins at
+      0x0805b0d0. Full binary B/BL decoding finds one inbound plain BL
+      (0x080aac98), one inbound predicated BLEQ (0x08062168), and no other
+      inbound BL forms. The branch retains r0-r3, r4, LR, and SP, so the
+      existing rtc_seeded_random_service port receives the inherited r4
+      entropy contribution exactly as the retail target does. ARM emits the
+      verified branch word; the host port calls that service normally to make
+      result forwarding testable.
