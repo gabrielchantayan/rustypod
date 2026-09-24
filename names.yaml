@@ -140324,3 +140324,23 @@ functions:
       operations on host; the existing class-0x6600 accessor remains a Rust
       call on target. Host test proves both flagged branches, byte clears,
       arguments, and the complete observable call order.
+
+  # --- Empty UI destructor (ui/empty_destructor_0806715c) ---
+  - address: 0x0806715c
+    ghidra: FUN_0806715c
+    name: empty_destructor_0806715c
+    size: 4
+    sig: "u32 empty_destructor_0806715c(u32 this)"
+    module: ui/empty_destructor_0806715c
+    status: ported
+    renames:
+      param_1/r0: this
+    notes: >-
+      Raw osos.dec word 0xe12fff1e at 0x0806715c decodes to bx lr; the next
+      separately entered function begins at 0x08067160 with ldr
+      r2,[r0,#0xf00], establishing a four-byte extent. Direct-call decoding
+      finds two plain bl callers (0x080613a8 and 0x0806a9f0) and one
+      predicated bleq caller (0x08049350). The function reads no memory,
+      changes no state, and returns its incoming r0 unchanged. The target
+      port emits the original naked bx lr; host tests explicitly return the
+      input word to verify this ABI-visible behavior.
