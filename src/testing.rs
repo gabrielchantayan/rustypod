@@ -1019,6 +1019,10 @@ pub mod hints {
     // 0xee40_0000: dedicated to util/dynamic_array_remove's raw-u32 backing
     // storage fixture; mappings never unmap, so no other user may share it.
     pub const DYNAMIC_ARRAY_REMOVE: usize = 0xee40_0000;
+    // 0xee60_0000: dedicated to util/word_array_remove_prefix's raw-u32
+    // header and backing-word fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const WORD_ARRAY_REMOVE_PREFIX: usize = 0xee60_0000;
     // 0xee50_0000: dedicated to ft/linked_module_find_by_class's raw-u32
     // owner, linked-record, and module fixture; mappings never unmap, so no
     // other user may share this hint.

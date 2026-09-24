@@ -206,6 +206,7 @@ pub mod queue_remove_source_tail_index;
 pub mod queue_refresh_and_match_kind_two;
 pub mod dynamic_array_remove;
 pub mod unique_word_array_insert;
+pub mod word_array_remove_prefix;
 pub mod singly_linked_list_remove;
 pub mod singly_linked_list_unlink;
 pub mod singly_linked_list_append;
