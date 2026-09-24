@@ -268,7 +268,6 @@ functions:
       void signature. Deliberate deviation: this byte-identical leaf shares
       the existing store_u32_pair Rust implementation with FUN_081b4e24.
 
-  - address: 0x081bb6c8
     ghidra: FUN_081bb6c8
     name: video_engine_set_selector_0x2889_if_changed
     size: 36
@@ -136248,3 +136247,25 @@ functions:
       0x08115e34. Rust calls instead of tail-branching to string_object_format;
       observable arguments and return value are unchanged. Host tests exercise
       zero and nonzero selector boundaries through a real resource provider.
+  - address: 0x08116a24
+    ghidra: FUN_08116a24
+    name: context_restart_timer
+    size: 12
+    sig: "void context_restart_timer(u8 *context)"
+    module: app/context_timer_restart
+    status: ported
+    renames:
+      param_1/r0: context
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw osos.dec words establish the exact 12-byte body
+      0x08116a24..0x08116a2c: add r0,#0x400; add r0,#0x37c; tail B
+      timer_restart @ 0x0812bf4c. The next real function starts at
+      0x08116a30 with ldr r0,[r0,#0x30], so Ghidra's much larger extent
+      incorrectly absorbs the tail target. A full A32 branch-word scan finds
+      three plain unconditional inbound BL callers (0x08202e54, 0x08202ec0,
+      0x08202fe4) and zero predicated inbound BL callers. The port passes
+      the embedded timer at context+0x77c directly to the existing
+      timer_restart implementation; Rust uses a normal call rather than the
+      stock tail branch, whose return value is unobservable.
+
