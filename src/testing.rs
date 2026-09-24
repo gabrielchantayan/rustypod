@@ -2288,6 +2288,10 @@ pub mod hints {
     // parser state, source record, and destination buffer fixture; mappings
     // never unmap, so no other port may share this hint.
     pub const PLST_OPTIONAL_FIELDS_READ: usize = 0x6ec0_0000;
+    // 0x6fc0_0000: dedicated to util/entry_table_finalize_and_append's
+    // target-width state fixture; mappings never unmap, so no other user may
+    // share it.
+    pub const ENTRY_TABLE_FINALIZE_AND_APPEND: usize = 0x6fc0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

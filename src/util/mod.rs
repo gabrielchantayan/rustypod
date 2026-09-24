@@ -60,6 +60,7 @@ pub mod encoded_word_block_shift;
 pub mod empty_destructor_08057164;
 pub mod empty_destructor_08027698;
 pub mod error_latch;
+pub mod entry_table_finalize_and_append;
 pub mod video_engine_property_slot;
 pub mod cursor_read_be_bytes;
 pub mod dispatch_if_optional_link_valid;
