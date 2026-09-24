@@ -77,6 +77,7 @@ pub mod fatal_cleanup_no_op;
 pub mod fatal_operation_cleanup_no_op;
 pub mod framed_word_buffer_decode;
 pub mod flagged_collection_value_lookup;
+pub mod event_type_one_byte_store;
 pub mod font_face_ensure_ready;
 pub mod glyph_fit_engine;
 pub mod matrix_state_apply_transform;
