@@ -136787,3 +136787,19 @@ functions:
       Selectors above six return before loading player+0x30. Raw decoding of
       both helpers proves they are individual stores, so Rust inlines them;
       no unverified helper identity or dispatch seam is introduced.
+
+  - address: 0x08111084
+    ghidra: FUN_08111084
+    name: always_zero
+    size: 8
+    sig: "u32 always_zero()"
+    module: app/always_zero
+    status: ported
+    renames:
+      r0: zero_result
+    notes: >-
+      Raw osos.dec words e3a00000 e12fff1e establish the 8-byte extent:
+      mov r0, #0; bx lr. The next real function begins at 0x0811108c.
+      Full-image A32 decoding finds three plain BL callers (0x0814b6d4,
+      0x0817cfbc, and 0x0818477c) and no predicated BL callers. The code
+      ignores all incoming registers and returns zero.
