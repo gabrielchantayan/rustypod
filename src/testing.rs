@@ -2518,6 +2518,11 @@ pub static STRING_EXPORT_COUNTED_UTF16_TEST_LOCK: std::sync::Mutex<()> =
 pub static PATH_FACADE_PROBE_DISPATCH_COUNTED_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
+/// Serializes tests that replace the unresolved worker used by
+/// `app::path_facade_resolve_relative`.
+pub static PATH_FACADE_RESOLVE_RELATIVE_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
 
 /// Serializes every host test that swaps
 /// `util::context_field::CURRENT_TASK_CTX_BLOCK`. That slot is one shared
