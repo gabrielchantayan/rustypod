@@ -138304,3 +138304,34 @@ functions:
       records only the verified take-and-clear behavior. Target builds use
       the retail address directly; host builds substitute private storage
       to make this fixed-address operation testable.
+
+  - address: 0x080d2d1c
+    ghidra: FUN_080d2d1c
+    name: initializer_profile_dispatch
+    size: 92
+    sig: "void initializer_profile_dispatch(u32 name, u32 initializer_arg, u32 callback_arg, u32 profile)"
+    module: app/initializer_profile_dispatch
+    status: ported
+    renames:
+      param_1/r0: name
+      param_2/r1: initializer_arg
+      param_3/r2: callback_arg
+      param_4/r3: profile
+      r12: selected_size
+      FUN_080e9cbc: unported_initializer_dispatch
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte executable extent
+      0x080d2d1c..0x080d2d78: the next separately linked function begins
+      at 0x080d2d7c with `ldr r1, [r0]`; Ghidra's 96-byte extent absorbs
+      that first word. Raw A32 decoding confirms three inbound plain
+      unconditional BL callers at 0x081bbd94, 0x081bbdac, and 0x081f4c5c,
+      with zero predicated BL forms. The body contains one unconditional
+      outgoing BL to unported FUN_080e9cbc and no predicated BL form. It
+      clamps profile into 1..=11 (zero becomes 1), selects size 8 for 1,
+      0x40 for 7, 0x100 for 10, and 0x80 otherwise, then dispatches
+      (name, initializer_arg, 0, selected_size, callback_arg, 0, 0).
+      The callee's identity is not recovered, so target builds call its
+      verified retailOS address while host builds use a replaceable volatile
+      seam. Host tests cover zero, all special selectors, ordinary values,
+      the upper bound, and oversized u32 values while proving full argument
+      order. No other deviation.
