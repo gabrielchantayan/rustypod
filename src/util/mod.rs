@@ -174,6 +174,7 @@ pub mod nested_container_item_count;
 pub mod pointer_pair_record_initialize;
 pub mod no_op_destructor;
 pub mod selection_index_adjust;
+pub mod optional_codec_dispatch;
 pub mod resource_list;
 pub mod pascal_string;
 pub mod packet_record_initialize;
