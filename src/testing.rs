@@ -2216,6 +2216,9 @@ pub mod hints {
     // 0x8280_0000: dedicated to app/transfer_slot_reconcile's target-width
     // transfer context and MOV chain-table fixture; mappings never unmap.
     pub const TRANSFER_SLOT_RECONCILE: usize = 0x8280_0000;
+    // 0x8290_0000: dedicated to fs/storage_transfer_chunked's target-width
+    // temporary aligned-buffer fixture; mappings never unmap.
+    pub const STORAGE_TRANSFER_CHUNKED: usize = 0x8290_0000;
     // 0x6e30_0000: dedicated to cxx/tagged_bit_set_insert_utf8's target-width
     // BitSet word-storage fixture; mappings never unmap.
     pub const TAGGED_BIT_SET_INSERT_UTF8: usize = 0x6e30_0000;

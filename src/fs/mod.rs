@@ -84,6 +84,8 @@ pub mod error_status;
 pub mod block_window;
 /// Block-size alignment check and opaque storage-backend transfer @ 0x08077444.
 pub mod storage_transfer;
+/// Chunks a block transfer through a cleared, aligned temporary buffer @ 0x080f086c.
+pub mod storage_transfer_chunked;
 /// Opaque storage-backend dispatch through vtable slot three @ 0x08149e10.
 pub mod storage_backend_transfer;
 /// Opaque storage-backend read dispatch through vtable slot two @ 0x08149de8.
