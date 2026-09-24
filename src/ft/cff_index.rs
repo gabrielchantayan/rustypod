@@ -7,6 +7,8 @@
 
 use crate::ft::stream::{ft_stream_extract_frame, ft_stream_release_frame, ft_stream_seek, FtStream};
 use crate::ft::memory::ft_mem_free;
+use crate::ft::memory::ft_mem_alloc;
+use crate::libc::rt_memcpy::__rt_memcpy;
 use crate::libc::memzero::memzero_aligned;
 
 /// `CFF_IndexRec` as used by this retailOS build.  The index reader at
@@ -198,6 +200,60 @@ pub unsafe extern "C" fn cff_index_access_element(
     pbyte_len.write(0);
     0
 }
+/// cff_index_get_name (FreeType `cff_index_get_name`, cffload.c) — original:
+/// `FUN_080a8294` @ 0x080a8294 (132 bytes,
+/// `0x080a8294..0x080a8318`; `stmdb sp!,{r2-r8,lr}` at 0x080a8318 begins
+/// the next function). Four outgoing plain `bl` instructions and no
+/// predicated `bl` instructions are verified by decoding every ARM word in
+/// `osos.dec`: `cff_index_access_element`, `ft_mem_alloc`, the
+/// `__rt_memcpy` veneer, and `cff_index_forget_element`.
+///
+/// Accesses a custom CFF SID by index, allocates a length-plus-NUL owned copy
+/// through the index stream's memory, then relinquishes the temporary frame.
+/// Any access or allocation error returns null. A temporary frame is released
+/// after an allocation failure as well, matching the ARM cleanup path.
+///
+/// Deliberate deviation: retail uses four direct `bl` instructions, including
+/// the `0x08037db0` memcpy ROM veneer. Volatile function-pointer reads retain
+/// the existing Rust seams and prevent LLVM from inlining allocation or
+/// recognizing the copy as a builtin; the observable call order is unchanged.
+///
+/// # Safety
+/// `index` must satisfy the [`cff_index_access_element`] contract, and its
+/// stream's memory must satisfy [`ft_mem_alloc`]'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_index_get_name(index: *mut CffIndex, element: u32) -> *mut u8 {
+    let mut bytes = core::ptr::null_mut();
+    let mut byte_len = 0;
+    let access = core::ptr::read_volatile(
+        &(cff_index_access_element
+            as unsafe extern "C" fn(*mut CffIndex, u32, *mut *mut u8, *mut u32) -> i32),
+    );
+    let mut error = access(index, element, &mut bytes, &mut byte_len);
+    let mut name = core::ptr::null_mut();
+
+    if error == 0 {
+        let alloc = core::ptr::read_volatile(
+            &(ft_mem_alloc as unsafe extern "C" fn(*mut crate::ft::memory::FtMemory, i32, *mut i32) -> *mut u8),
+        );
+        name = alloc((*(*index).stream).memory, byte_len.wrapping_add(1) as i32, &mut error);
+        if error == 0 {
+            let copy = core::ptr::read_volatile(
+                &(__rt_memcpy as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+            );
+            copy(name, bytes, byte_len as usize);
+            name.add(byte_len as usize).write(0);
+        }
+        let forget = core::ptr::read_volatile(
+            &(cff_index_forget_element as unsafe extern "C" fn(*mut CffIndex, *mut *mut u8)),
+        );
+        forget(index, &mut bytes);
+    }
+
+    name
+}
+
 
 
 
@@ -473,5 +529,31 @@ mod tests {
         assert_eq!(unsafe { cff_index_access_element(&mut index, 0, &mut bytes, &mut byte_len) }, 0x55);
         assert_eq!(byte_len, 2);
         assert_eq!(bytes as usize, 0x9876);
+    }
+    #[test]
+    fn index_name_copies_custom_sid_and_rejects_missing_element() {
+        let _guard = TEST_LOCK.lock();
+        unsafe extern "C" fn alloc_name(_memory: *mut FtMemory, size: i32) -> *mut u8 {
+            std::boxed::Box::into_raw(std::vec![0u8; size as usize].into_boxed_slice()) as *mut u8
+        }
+
+        let mut data = *b"Name";
+        let mut offsets = [1u32, 5];
+        let mut memory = test_memory();
+        memory.alloc = alloc_name;
+        let mut stream = test_stream(&mut memory, None);
+        let mut index = CffIndex {
+            stream: &mut stream,
+            count: 1,
+            off_size: 1,
+            _padding: [0; 3],
+            data_offset: 0,
+            offsets: offsets.as_mut_ptr(),
+            bytes: data.as_mut_ptr(),
+        };
+
+        let name = unsafe { cff_index_get_name(&mut index, 0) };
+        assert_eq!(unsafe { core::slice::from_raw_parts(name, 5) }, b"Name\0");
+        assert!(unsafe { cff_index_get_name(&mut index, 1) }.is_null());
     }
 }
