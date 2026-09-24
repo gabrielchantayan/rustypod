@@ -136334,3 +136334,30 @@ functions:
       0x08115f38 continuation. Rust spells the tail branch as a call; host
       tests use seams while ARM calls the two ported callees directly and the
       verified continuation address.
+  - address: 0x081163cc
+    ghidra: FUN_081163cc
+    name: application_mode_transition
+    size: 64
+    sig: "u32 application_mode_transition(void *context, u32 enabled)"
+    module: app/application_mode_transition
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: enabled
+      "context+0x42c": result
+      "context+0x488": mode_transition_source
+      "context+0x494": mode_transition_destination
+      DAT_0811640c: application_mode_flag (0x089ca660)
+      FUN_082898dc: return_noop
+    notes: >-
+      Raw A32 establishes the exact 64-byte extent, 0x081163cc..0x0811640b:
+      fifteen instructions end in a tail B to 0x082898dc and the literal
+      0x089ca660 follows at 0x0811640c; push {r4,lr} at 0x08116410 begins the
+      next function. The body contains zero plain BL and zero predicated BL
+      calls. The tail target is verified by raw words as bx lr, so it preserves
+      the result loaded into r0 from context+0x42c. Ghidra reports three call
+      sites. On a transition from a clear flag to nonzero enabled, copy
+      context+0x488 to +0x494 then set the flag; on a transition from a set
+      flag to zero enabled, clear it. Otherwise leave both unchanged. Rust
+      uses private host backing for the fixed firmware global and inlines the
+      verified no-op tail call.
