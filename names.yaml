@@ -140680,3 +140680,41 @@ functions:
       count in the first word only on success. Rust deliberately performs the
       size arithmetic as wrapping u32 before converting to usize, preserving
       the target's 32-bit arithmetic on 64-bit host tests.
+
+  - address: 0x0805e310
+    ghidra: FUN_0805e310
+    name: linked_list_snapshot_create
+    size: 92
+    sig: "u32 *linked_list_snapshot_create(void *collection)"
+    module: app/linked_list_snapshot_create
+    status: ported
+    renames:
+      param_1/r0: collection
+      uVar4/r4: count
+      uVar1/r5: node
+      puVar2/r6: snapshot
+      uVar3/r3: index
+      FUN_080522a4: collection_head
+      FUN_0805d1dc: calloc_tag4
+      FUN_08053ba0: node_next
+    notes: >-
+      Raw words e92d4070 e1b04000 15904008 ebffcfe0 e1a05000 e3a00008
+      e0800104 ebfffb aa e1b06000 08bd8070 e3a03000 e5864000 ea000005
+      e0860103 e5805004 e1a00005 ebffd612 e1a05000 e2833001 e1530004
+      3afffff7 e1a00006 e8bd8070 establish the complete 92-byte A32 body
+      at 0x0805e310..0x0805e36c; 0x0805e36c starts the next function with
+      `push {r4-r10,lr}`. Decoding every aligned ARM B/BL-immediate word in
+      osos.dec finds exactly three inbound plain bl calls (0x0805045c,
+      0x080505a0, 0x08052644), zero predicated bl calls, and three plain
+      outbound bl calls. It reads a nullable collection's +0x08 count,
+      allocates `count * 4 + 8` zeroed bytes through calloc_tag4, stores the
+      count in word zero, then writes that many values from the +0x0c linked
+      chain through collection_head @ 0x080522a4 and node_next @ 0x08053ba0.
+      These two unported, unnamed accessors remain verified direct retail
+      calls on target; host-only ops provide equivalent test seams. The
+      deliberate allocator deviation is its established Rust HEAP_OPS
+      dispatch. Host tests cover a three-node ordered snapshot, the NULL
+      collection's allocated zero-count result, and allocation failure.
+      match.py reports 28 Rust instructions versus 23 retail: the direct
+      unported calls become literal-loaded `blx` calls, while the count,
+      allocation/null guard, and per-node store/traversal loop remain.
