@@ -69762,6 +69762,33 @@ functions:
       the mask-ROM veneer. cell remains intentionally unchecked and must
       be aligned, matching the ldr instruction.
 
+  - address: 0x080a3cf0
+    ghidra: FUN_080a3cf0
+    name: kernel_slot_create
+    size: 64
+    sig: "usize kernel_slot_create(usize *slot)"
+    module: kernel/kernel_slot_create
+    status: ported
+    renames:
+      param_1: slot
+      iVar1: create_status
+      thunk_EXT_FUN_22003e70: kernel_create_dispatch
+      thunk_EXT_FUN_22003dc8: kernel_op_dispatch
+    notes: >-
+      Raw words establish the exact 64-byte extent
+      0x080a3cf0..0x080a3d30; the next function starts with push {r4,lr} at
+      0x080a3d30. The unchecked slot word is zero -> EINVAL (26), otherwise
+      it is passed to the 0x08037f50 veneer for the 0x22003e70 create
+      dispatcher. A nonzero create status returns EBUSY (20); zero then
+      dispatches opcode 3 and the slot address through kernel_op_dispatch
+      (0x08037e40), returning zero only when that status is zero. The body
+      contains two unconditional internal bl and zero predicated bl; decoding
+      every ARM B/BL word finds three unconditional callers (0x080b835c,
+      0x081e229c, 0x082e82e4) and zero predicated callers. The port uses the
+      existing ROM seams. Deliberate deviation: raw 0x22003e70 saves only r0,
+      so its seam's otherwise-unused second argument is explicitly zero
+      rather than inheriting the original caller's incidental r1.
+
   - address: 0x082e8390
     ghidra: FUN_082e8390
     name: posix_mutex_lock
