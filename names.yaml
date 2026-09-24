@@ -139435,3 +139435,30 @@ functions:
       place of the original conditional ARM instructions, deliberately
       preventing LLVM from substituting an external memory routine. Host tests
       cover null, empty, zero-index, middle-prefix, and at-end removal cases.
+
+
+  - address: 0x0808cde4
+    ghidra: FUN_0808cde4
+    name: compare_clock_records
+    size: 120
+    sig: "i32 compare_clock_records(const u8 *left, const u8 *right)"
+    module: time/compare_clock_records
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      "left+0x0/u16": date_high
+      "left+0x4/u16": date_low
+      "left+0x8/u8": hour
+      "left+0x9/u8": minute
+      "left+0xa/u8": second
+    notes: >-
+      Raw osos.dec words establish the exact 120-byte executable extent
+      0x0808cde4..0x0808ce5c: the final instruction is `ldr pc,[sp],#4` at
+      0x0808ce58, and `stmdb sp!,{r4,lr}` at 0x0808ce5c begins the next real
+      function. Full A32 BL decoding finds exactly three direct unconditional
+      BL callers (0x08044a80, 0x080caa5c, and 0x080e1d58) and no predicated
+      BL callers; the leaf body has no direct calls. It compares the u16
+      pairs at offsets 0 and 4 as a date key, then bytes 8..10 as a time key,
+      returning -1, 0, or 1. Rust retains aligned halfword reads, matching the
+      original ldrh accesses; bytes 2, 3, 6, and 7 are deliberately not read.

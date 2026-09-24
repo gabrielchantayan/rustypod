@@ -20,12 +20,10 @@
 //!
 //! The unported RTC setter (`FUN_0806e7e4`) and change notifier
 //! (`FUN_0805caa8`) are fixed-address calls on target and volatile host seams.
-//! Selection and comparison inline the small unported helpers (`FUN_080caa28`
-//! and `FUN_0808cde4`) rather than adding opaque seams; this preserves their
-//! observable ordering and avoids inventing callee identities.
 
 use core::ptr;
 
+use super::compare_clock_records::compare_clock_records;
 use super::clock_state::ClockState;
 use crate::kernel::task_lock::{rom_sem_signal, rom_sem_wait};
 
@@ -92,15 +90,6 @@ unsafe fn clock_changed() -> ClockChangedFn {
     { ptr::read_volatile(ptr::addr_of!(CLOCK_CHANGED)) }
 }
 
-#[inline(always)]
-unsafe fn compare_clock_records(left: *const u8, right: *const u8) -> i32 {
-    let left_date = (ptr::read_unaligned(left.cast::<u16>()) as u32) << 16 | ptr::read_unaligned(left.add(4).cast::<u16>()) as u32;
-    let right_date = (ptr::read_unaligned(right.cast::<u16>()) as u32) << 16 | ptr::read_unaligned(right.add(4).cast::<u16>()) as u32;
-    if left_date != right_date { return if left_date < right_date { -1 } else { 1 }; }
-    let left_time = (ptr::read(left.add(8)) as u32) << 16 | (ptr::read(left.add(9)) as u32) << 8 | ptr::read(left.add(10)) as u32;
-    let right_time = (ptr::read(right.add(8)) as u32) << 16 | (ptr::read(right.add(9)) as u32) << 8 | ptr::read(right.add(10)) as u32;
-    if left_time < right_time { -1 } else if left_time > right_time { 1 } else { 0 }
-}
 
 /// sync_best_clock_source — original: `FUN_080e1d18` @ `0x080e1d18`
 /// (**152 bytes including its literal pool; four unconditional `bl` callers,
