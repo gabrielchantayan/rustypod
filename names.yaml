@@ -137563,3 +137563,33 @@ functions:
       succeeds without a call, and zero returns failure. The host port uses
       a local NUL byte instead of dereferencing the verified retail data
       address, while target_os=none retains the exact pointer.
+  - address: 0x080f3c80
+    ghidra: FUN_080f3c80
+    name: bdf_parse_i32
+    size: 172
+    sig: "i32 bdf_parse_i32(const u8 *text, const u8 **end, i32 base)"
+    module: strto/bdf_parse_i32
+    status: ported
+    renames:
+      param_1/r0: text
+      param_2/r1: end
+      param_3/r2: base
+      param_4/r3: first_byte
+      iVar2/r3: value
+      iVar3/r12: digit_class_bitmap
+      DAT_080f3d2c: octal_digit_class_bitmap (0x0890c464)
+      DAT_080f3d30: hexadecimal_digit_class_bitmap (0x0890c4a4)
+      DAT_080f3d34: decimal_digit_class_bitmap (0x0890c484)
+      DAT_080f3d38: digit_value_table (0x0890c3e4)
+    notes: >-
+      Raw osos.dec establishes the 188-byte extent 0x080f3c80..0x080f3d3b:
+      172 instruction bytes followed by four literal-pool words; the next real
+      function begins at 0x080f3d3c. The body has zero plain and zero predicated
+      direct BL calls. Full-image decoding finds three inbound plain BL sites
+      (0x0809fd60, 0x080a0004, and 0x080a0328), with zero predicated inbound
+      forms. It is the BDF readers signed integer parser: it accepts a leading
+      minus, normalizes requested bases other than 8/16 to decimal, recognizes
+      0x/0X regardless of requested base, accumulates through the selected digit
+      table with 32-bit wrapping arithmetic, and optionally returns the first
+      unparsed byte. Rust reproduces this directly; there are no deliberate
+      deviations.
