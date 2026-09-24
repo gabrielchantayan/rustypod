@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080da620
+    ghidra: FUN_080da620
+    name: event_type_one_byte_store
+    size: 32
+    sig: "u32 event_type_one_byte_store(u32 event_kind, const u8 *source)"
+    module: util/event_type_one_byte_store
+    status: ported
+    renames:
+      param_1/r0: event_kind
+      param_2/r1: source
+      DAT_080da640: runtime_event_state (0x08a7563c)
+    notes: >-
+      Raw osos.dec words establish the 32-byte executable extent
+      0x080da620..0x080da63f; 0x080da640 is the literal-pool pointer
+      0x08a7563c and 0x080da644 begins the next function. A full A32
+      disassembly scan finds two unconditional direct BL callers
+      (0x08191138 and 0x08192c18) and one predicated direct BL caller
+      (`bleq` at 0x081d765c). The leaf body has no calls. It returns zero
+      after storing source[0] at runtime_event_state+0x20 only when
+      event_kind is one and that literal pointer is non-null. The state
+      type and byte meaning are unrecovered; host tests use a private
+      pointer seam while target builds use the retail literal directly.
   - address: 0x080dc3e8
     ghidra: FUN_080dc3e8
     name: schedule_calendar_update
