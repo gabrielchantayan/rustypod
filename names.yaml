@@ -135802,6 +135802,37 @@ functions:
       the existing Rust port. Host coverage proves level forwarding, the
       generated close string, scratch offset, and append target.
 
+  - address: 0x08121df8
+    ghidra: FUN_08121df8
+    name: volume_channel_set_balance
+    size: 96
+    sig: "void volume_channel_set_balance(u32 *channel, u32 requested_balance, u32 force)"
+    module: app/volume_channel_set_balance
+    status: ported
+    renames:
+      param_1/r0: channel
+      param_2/r1: requested_balance
+      param_3/r2: force
+      "channel+0x6c": saved_level
+      "channel+0x70": primary_output_level
+      "channel+0x74": secondary_output_level
+      "channel+0x78": saved_balance
+      "channel+0x7c": primary_scale
+      "channel+0x80": secondary_scale
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte A32 entry
+      0x08121df8..0x08121e57. The following word at 0x08121e58 is the
+      0x7fff literal, and 0x08121e5c begins the next independently entered
+      function. The body has zero direct BL instructions. Whole-image A32
+      decoding finds three inbound plain BL calls at 0x08121ef0, 0x08122de0,
+      and 0x08123520, with no predicated BL calls. When a forced update or
+      changed request arrives, a request whose wrapping addition of 0x7fff is
+      at least 0xffff resets the balance to center; otherwise the request
+      selects unity for one Q15 scale and 0x7fff minus the signed balance for
+      the other. The shared level
+      scaling block is deliberately inlined so the hooked entry does not
+      depend on its unported interior. ARM's signed comparisons, wrapping
+      arithmetic, and low-word multiplication are preserved.
   - address: 0x081224e8
     ghidra: FUN_081224e8
     name: volume_channel_set_level
