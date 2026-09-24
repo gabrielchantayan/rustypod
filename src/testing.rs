@@ -39,6 +39,9 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x6f70_0000: dedicated to drivers/storage_backend_sector_size's
+    // target-width validated-backend fixture; mappings never unmap.
+    pub const STORAGE_BACKEND_SECTOR_SIZE: usize = 0x6f70_0000;
     // 0x6f50_0000: dedicated to util/video_engine's target-width controller,
     // engine, frame-table, and frame-record fixture; mappings never unmap.
     pub const VIDEO_ENGINE_PRESENT_DEFAULT_FRAME: usize = 0x6f50_0000;
