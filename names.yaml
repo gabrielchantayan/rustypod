@@ -135887,3 +135887,26 @@ functions:
       0x0820c800, with no predicated BL forms. Each caller immediately
       replaces the base vtable with a derived vtable. The port deliberately
       names only the verified four-word layout, not an unestablished class.
+
+  - address: 0x081213dc
+    ghidra: FUN_081213dc
+    name: ata_cmd_get_transfer_progress
+    size: 8
+    sig: "u32 ata_cmd_get_transfer_progress(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    renames:
+      param_1: cmd
+      "cmd+0x44": transfer_progress
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte extent:
+      ldr r0,[r0,#0x44] at 0x081213dc followed by bx lr at 0x081213e0;
+      the separately linked next function begins at 0x081213e4. Direct
+      decoding of its only caller FUN_08283d20 finds exactly three inbound
+      calls, all unconditional plain bl at 0x08283d38, 0x08283de4, and
+      0x08283e4c; no predicated bl form reaches the entry. The transfer
+      state machine subtracts this word from the command's +0x30 transfer
+      length to obtain remaining work, then advances it by the completed
+      chunk through FUN_081660c8, establishing +0x44 as current transfer
+      progress. No NULL guard or validation in the original or port; no
+      deliberate deviations.
