@@ -6,18 +6,17 @@
 //! extent are the `0x000063d6` and `0x564d6178` literal-pool words. There are
 //! three unconditional direct `bl` callers and no predicated direct `bl`
 //! callers. The function itself has one unconditional direct `bl` to the
-//! unported `FUN_08113a18` and no predicated direct `bl` calls.
+//! ported `selection_state_refresh` and no predicated direct `bl` calls.
 //!
-//! It writes -1 to the selection-state word at `+0x444`, invokes the retail
+//! It writes -1 to the selection-state word at `+0x444`, invokes the ported
 //! selection-state refresh helper, then tail-dispatches vtable slot `+0x58`
 //! with `(self, 0x564d6178, 0x63d6)`. Deliberate deviations: Rust performs an
 //! ordinary final call because the dispatch result is unobserved; host builds
-//! use seams for the unported helper and target-width virtual function pointer.
+//! use seams for the ported helper and target-width virtual function pointer.
 
 #[cfg(target_os = "none")]
 use core::mem;
 
-const REFRESH_SELECTION_STATE_ADDRESS: usize = 0x0811_3a18;
 const COMPLETION_ACTION: u32 = 0x564d_6178;
 const COMPLETION_KIND: u32 = 0x0000_63d6;
 const COMPLETION_SLOT_WORD: usize = 0x58 / 4;
@@ -52,8 +51,7 @@ pub static mut SELECTION_STATE_RESET_DISPATCH: CompletionDispatch = missing_comp
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn refresh_selection_state(state: *mut u8) {
-    let refresh: RefreshSelectionState = unsafe { mem::transmute(REFRESH_SELECTION_STATE_ADDRESS) };
-    unsafe { refresh(state); }
+    unsafe { crate::app::selection_state_refresh::selection_state_refresh(state.cast()); }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -77,8 +75,7 @@ unsafe fn dispatch_completion(state: *mut SelectionState) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SELECTION_STATE_RESET_DISPATCH))(state, COMPLETION_ACTION, COMPLETION_KIND); }
 }
 
-/// # Safety
-/// `state`, the unported refresh helper, and its vtable completion slot must
+/// `state`, the ported refresh helper, and its vtable completion slot must
 /// satisfy the unchecked retailOS contracts.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
