@@ -140659,3 +140659,24 @@ functions:
       are not established; target builds use their verified slots and host
       tests use native vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x0805e51c
+    ghidra: FUN_0805e51c
+    name: indexed_pair_table_create
+    size: 36
+    sig: "u32 *indexed_pair_table_create(u32 count)"
+    module: heap/indexed_pair_table_create
+    status: ported
+    renames:
+      param_1/r0/r4: count
+      r0: table
+      FUN_0805d1d4: malloc_tag4
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte body
+      0x0805e51c..0x0805e53f: `pop {r4,pc}` ends it and the next function
+      begins at 0x0805e540. Whole-image A32 decoding finds three inbound plain
+      BL calls (0x08086758, 0x0808d120, and 0x08095170), no predicated forms,
+      and one outbound plain BL to malloc_tag4 @ 0x0805d1d4 with no predicated
+      direct BL. It allocates `12 + count * 8` bytes with heap tag 4, storing
+      count in the first word only on success. Rust deliberately performs the
+      size arithmetic as wrapping u32 before converting to usize, preserving
+      the target's 32-bit arithmetic on 64-bit host tests.
