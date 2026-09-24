@@ -139955,3 +139955,32 @@ functions:
       so Rust inlines that proven write sequence rather than creating an
       invented callee seam. Volatile stores deliberately preserve the
       fixed-address observable writes although retailOS uses ordinary STR.
+  - address: 0x08076cbc
+    ghidra: FUN_08076cbc
+    name: panel_refresh_format_registers
+    size: 168
+    sig: "void panel_refresh_format_registers(u32 input)"
+    module: drivers/panel_format_registers
+    status: ported
+    renames:
+      param_1/r0: input
+      DAT_08076d64: panel_state (0x089cc9b4)
+      "panel_state+0x06": format_mode
+      "panel_state+0x07": format_selector
+      DAT_08076d68: lcd_controller (0x39300000)
+      DAT_08076d6c: panel_configuration_word (0x440c)
+      FUN_080e75f0: panel_format_check_bits
+    notes: >-
+      Raw osos.dec establishes the 168-byte A32 body
+      0x08076cbc..0x08076d63, followed by the three-word literal pool at
+      0x08076d64..0x08076d6c and the next real function at 0x08076d70.
+      A direct word scan finds one outbound plain BL (0x080e75f0) and zero
+      predicated outbound BL calls; it finds one inbound plain BL at
+      0x0816a318 and two predicated inbound BL calls at 0x0816a544 and
+      0x0816a568. The function derives two duplicated LCD-controller format
+      words from panel-state bytes 6 and 7, writes them at 0x3c4/0x3cc and
+      0x3c8/0x3d4, and writes 0x440c at 0x14. Rust preserves r0 for selector
+      values outside 0..=3, which Ghidra's void call signatures obscure, and
+      implements the otherwise-unidentified leaf encoder privately rather
+      than creating an unverified callee seam. Host tests install native
+      state and register fixtures; target builds use the verified addresses.
