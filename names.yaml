@@ -60753,6 +60753,39 @@ functions:
       structural report differs as expected (exit 1); sprintf/from_cstr/
       lookup/assign/release still retain their call sequence.
 
+  - address: 0x08101fec
+    ghidra: FUN_08101fec
+    name: string_table_set_decimal_fallback
+    size: 88
+    sig: "void string_table_set_decimal_fallback(u8 *table, char **key, i32 value)"
+    module: app/string_table
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      r2: value
+      FUN_0802f724: sprintf
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8d1c: cxx_string_assign
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from
+      push {r4,r5,r6,lr} at 0x08101fec through pop {r4,r5,r6,pc} at
+      0x08102040; the following word at 0x08102044 is the "%d" literal and
+      the next independent function begins at 0x08102048. It formats signed
+      value through sprintf("%d") into a 512-byte stack buffer, constructs a
+      temporary COW string, finds or inserts key's mapped-value slot in the
+      fallback table at table+0x38 through FUN_083db69c, assigns the temporary,
+      then releases it. Raw-word decoding finds five unconditional direct bl
+      instructions in the body and no predicated BL forms; independently, three
+      inbound plain BL call sites are 0x08226200, 0x082354e8, and 0x08238880.
+      Ghidra's missing third parameter and its extra cxx_string_from_cstr
+      argument are register-residue errors. Rust passes &value as sprintf's
+      explicit va-list, the deliberate stable-Rust replacement for the retail
+      variadic r2 argument. Host tests cover zero, positive, negative, and
+      signed extrema while proving fallback table arithmetic and COW assignment.
+
   - address: 0x08102048
     ghidra: FUN_08102048
     name: string_table_set_both_decimal

@@ -1145,6 +1145,43 @@ pub unsafe extern "C" fn string_table_set_hex(table: *mut u8, key: *mut *mut u8,
         crate::cxx::string::cxx_string_release(text);
     }
 }
+/// string_table_set_decimal_fallback — original: `FUN_08101fec` @
+/// 0x08101fec (88 bytes, 0x08101fec..0x08102044; **5** direct unconditional
+/// `bl` instructions, zero predicated calls). The next independent function
+/// starts at 0x08102048; the word at 0x08102044 is the `"%d"` literal.
+///
+/// Formats the signed `value` into a 512-byte stack buffer, builds a temporary
+/// COW string, finds or inserts `key`'s mapped-value slot in the fallback map
+/// at `table + 0x38`, assigns the temporary there, then releases it. There are
+/// no NULL guards.
+///
+/// Deliberate deviation: Rust passes `&value` to the ported `sprintf` veneer
+/// as its explicit va-list in place of the retail variadic r2 argument.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_decimal_fallback(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: i32,
+) {
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let arguments = &value as *const i32 as *const u32;
+    unsafe {
+        crate::printf::printf_api::sprintf(buffer, b"%d\0".as_ptr(), arguments);
+    }
+
+    let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
+    unsafe {
+        let slot = string_table_fallback_value_slot(
+            table.add(FALLBACK_TABLE_OFFSET),
+            key,
+        );
+        crate::cxx::string::cxx_string_assign(slot, text);
+        crate::cxx::string::cxx_string_release(text);
+    }
+}
 
 #[cfg(test)]
 mod set_decimal_tests {
@@ -1429,6 +1466,21 @@ mod set_hex_tests {
         text.len() as i32
     }
 
+    unsafe extern "C" fn decimal_engine(
+        fmt: *const u8,
+        putc: unsafe extern "C" fn(u8, *mut c_void),
+        context: *mut c_void,
+        arguments: *const u32,
+    ) -> i32 {
+        assert_eq!(unsafe { CStr::from_ptr(fmt.cast()).to_bytes() }, b"%d");
+        let text = std::format!("{}", unsafe { arguments.cast::<i32>().read() });
+        for byte in text.bytes() {
+            unsafe { putc(byte, context) };
+        }
+        text.len() as i32
+    }
+
+
     unsafe extern "C" fn record_map_operation(
         result: *mut StringTableInsertResult,
         map: *mut u8,
@@ -1582,6 +1634,57 @@ mod set_hex_tests {
                 assert_eq!(
                     CStr::from_ptr((*mapped_value_slot()).cast()).to_bytes(),
                     std::format!("{value:x}").as_bytes(),
+                );
+                crate::cxx::string::cxx_string_release(mapped_value_slot());
+            }
+        }
+        unsafe {
+            crate::cxx::string::cxx_string_release(ptr::addr_of_mut!(key));
+        }
+    }
+
+    #[test]
+    fn formats_signed_decimal_and_assigns_into_fallback_table_slot() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), decimal_engine);
+            ArenaGuard { ops: previous }
+        };
+        let mut key = ptr::null_mut();
+        unsafe {
+            crate::cxx::string::cxx_string_from_cstr(
+                ptr::addr_of_mut!(key),
+                b"RefreshingGenius\0".as_ptr(),
+            );
+        }
+        let table = 0x2000usize as *mut u8;
+
+        for value in [0i32, 42, -1, i32::MIN, i32::MAX] {
+            unsafe {
+                crate::cxx::string::cxx_string_from_cstr(
+                    mapped_value_slot(),
+                    b"\0".as_ptr(),
+                );
+                string_table_set_decimal_fallback(table, &mut key, value);
+                assert_eq!(
+                    LOOKUP,
+                    Some((
+                        table as usize + FALLBACK_TABLE_OFFSET,
+                        b"RefreshingGenius".to_vec(),
+                        string_table_default_value() as usize,
+                    )),
+                );
+                assert_eq!(
+                    CStr::from_ptr((*mapped_value_slot()).cast()).to_bytes(),
+                    std::format!("{value}").as_bytes(),
                 );
                 crate::cxx::string::cxx_string_release(mapped_value_slot());
             }
