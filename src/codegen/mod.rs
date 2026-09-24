@@ -26,6 +26,9 @@ pub mod availability_dispatch;
 /// `cg_first_availability` @ 0x082bcf38 — checks the first code-generator
 /// availability condition and feeds the dispatch wait loop.
 pub mod first_availability;
+/// `cg_mode_limit` @ 0x080cc950 — returns the cached code-generator mode
+/// limit or refreshes its -1 sentinel.
+pub mod mode_limit;
 /// `cg_exp_golomb_ue_read` @ 0x082c5df0 — the H.264 decoder's `ue(v)`
 /// Exp-Golomb reader. Not IR either, but it sits inside the JIT's
 /// address block (0x082c5dxx), one function away from `se(v)` @

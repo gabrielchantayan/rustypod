@@ -20389,6 +20389,29 @@ functions:
       that overflow calls the seam with (loader, count, 0) and
       propagates its return.
 
+  - address: 0x080cc950
+    ghidra: FUN_080cc950
+    name: cg_mode_limit
+    size: 36
+    sig: "i32 cg_mode_limit(void)"
+    module: codegen/mode_limit
+    status: ported
+    renames:
+      DAT_089cab58: cg_mode_limit_cache
+      FUN_082e5648: cg_mode_limit_refresh (unported seam)
+    notes: >-
+      Raw osos.dec establishes the 36-byte extent 0x080cc950..0x080cc973:
+      the next independently linked function begins at 0x080cc978. Aligned
+      ARM decoding finds one plain unconditional BL at 0x080cc968 and no
+      predicated BL calls. The function signed-loads the cached byte at
+      0x089cab58 and returns it unless it is -1; the sentinel path passes a
+      one-byte stack buffer to 0x082e5648 then signed-loads that result.
+      The target port uses the fixed cache address and a literal veneer for
+      the unported refresh callee. The initialized Rust temporary deliberately
+      replaces the target's r3-derived uninitialized stack word because the
+      callee writes the output byte on each verified path. Host tests cover
+      cached positive/negative values, sentinel dispatch, and sign extension.
+
   - address: 0x080cca60
     ghidra: FUN_080cca60
     name: cff_builder_start_point
