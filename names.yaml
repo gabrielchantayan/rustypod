@@ -19848,6 +19848,29 @@ functions:
       comparison to the resident strcmp at 0x08391e38. Named callers request
       "truetype" and "pshinter"; 0x0804c560 is the matching
       FT_Get_Module_Interface wrapper.
+  - address: 0x080d7168
+    ghidra: FUN_080d7168
+    name: ft_module_callback_dispatch
+    size: 60
+    sig: "FtModule *ft_module_callback_dispatch(FtModuleCallbackDispatchContext **context_slot)"
+    module: ft/module_callback_dispatch
+    status: ported
+    vars:
+      param_1: context_slot
+      puVar2: callback_table
+      iVar1: module
+    notes: >-
+      Raw ARM establishes the 60-byte executable extent
+      0x080d7168..0x080d71a4; its module-name literal is the word
+      0x0891da78 at 0x080d71a4, and 0x080d71a8 starts the next function.
+      It loads the FreeType library through context +0x60/+0x04, calls the
+      ported FT_Get_Module at 0x0804c500, and tail-dispatches callback-table
+      word zero at context +0x210 only when both it and the returned module
+      are non-null. The callback return is propagated. The direct body has
+      one plain BL and no predicated BL instructions; raw whole-image decoding
+      finds three plain inbound BL call sites and no predicated inbound BL
+      call sites. Host tests inject lookup because the resident literal is
+      unmapped there; target builds pass that exact literal to FT_Get_Module.
   - address: 0x080d9ae4
     ghidra: FUN_080d9ae4
     name: ft_truetype_module_callback
