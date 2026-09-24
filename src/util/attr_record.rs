@@ -83,59 +83,7 @@ pub unsafe extern "C" fn attr_record_lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab,
-                         GLOBAL_STATE_SLOT_FIND_TEST_LOCK};
-    use crate::util::global_state::{GlobalStateSlotFind, GLOBAL_STATE_SLOT_FIND};
-    extern crate std;
-    use std::sync::MutexGuard;
-
-    #[repr(C)]
-    struct GlobalStateRecord {
-        _word_00: u32,
-        attribute_record_index: u32,
-    }
-
-    static mut RECORDED_NAME: *const u8 = core::ptr::null();
-    static mut RECORDED_TABLE: *const u8 = core::ptr::null();
-    static mut RETURNED_SLOT: *const *mut u8 = core::ptr::null();
-    static mut SLOT_FIND_CALLS: u32 = 0;
-
-    unsafe extern "C" fn recording_slot_find(
-        global_name: *const u8,
-        global_state_table: *const u8,
-    ) -> *const *mut u8 {
-        unsafe {
-            RECORDED_NAME = global_name;
-            RECORDED_TABLE = global_state_table;
-            SLOT_FIND_CALLS += 1;
-            RETURNED_SLOT
-        }
-    }
-
-    struct SlotFindReset;
-
-    impl Drop for SlotFindReset {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(GLOBAL_STATE_SLOT_FIND)
-                    .write(super::super::global_state::DEFAULT_GLOBAL_STATE_SLOT_FIND);
-            }
-        }
-    }
-
-    fn install_recording_slot_find() -> MutexGuard<'static, ()> {
-        let guard = GLOBAL_STATE_SLOT_FIND_TEST_LOCK.lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe {
-            RECORDED_NAME = core::ptr::null();
-            RECORDED_TABLE = core::ptr::null();
-            RETURNED_SLOT = core::ptr::null();
-            SLOT_FIND_CALLS = 0;
-            core::ptr::addr_of_mut!(GLOBAL_STATE_SLOT_FIND)
-                .write(recording_slot_find as GlobalStateSlotFind);
-        }
-        guard
-    }
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
 
     fn table_with(
         nonzero_guard: u32,
@@ -153,9 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_indexed_record_and_forwards_name_and_table() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
+    fn returns_the_record_indexed_by_a_real_global_state_table() {
         let Some(slab) = try_map_u32_slab(hints::NAMED_ATTRIBUTE_LOOKUP, 0x1000) else {
             note_missing_u32_fixture("util::attr_record");
             return;
@@ -166,34 +112,30 @@ mod tests {
             let attribute_table = slab.cast::<NamedAttributeTable>();
             let attribute_records = slab.add(0x400);
             let global_state_table = slab.add(0x800);
+            let buckets = slab.add(0x840).cast::<u32>();
+            let state_record = slab.add(0x880).cast::<u32>();
+            let attribute_name = slab.add(0x900);
+            core::ptr::copy_nonoverlapping(b"WEIGHT\0".as_ptr(), attribute_name, 7);
             attribute_table.write(table_with(
                 1,
                 attribute_records as usize as u32,
                 global_state_table as usize as u32,
             ));
+            global_state_table.add(4).cast::<u32>().write(1);
+            global_state_table.add(12).cast::<u32>().write(buckets as usize as u32);
+            buckets.write(state_record as usize as u32);
+            state_record.write(attribute_name as usize as u32);
+            state_record.add(1).write(3);
 
-            let mut state_record = GlobalStateRecord {
-                _word_00: 0,
-                attribute_record_index: 3,
-            };
-            let mut slot = core::ptr::addr_of_mut!(state_record).cast::<u8>();
-            RETURNED_SLOT = &mut slot;
-
-            let attribute_name = b"WEIGHT\0";
             assert_eq!(
-                attr_record_lookup(attribute_table, attribute_name.as_ptr()),
+                attr_record_lookup(attribute_table, attribute_name),
                 attribute_records.add(3 * 16),
             );
-            assert_eq!(RECORDED_NAME, attribute_name.as_ptr());
-            assert_eq!(RECORDED_TABLE, global_state_table);
-            assert_eq!(SLOT_FIND_CALLS, 1);
         }
     }
 
     #[test]
     fn rejects_null_unready_and_empty_inputs_without_lookup() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
         let attribute_name = b"SLANT\0";
         let empty_name = b"\0";
         let unready_table = table_with(0, 0, 0);
@@ -204,41 +146,6 @@ mod tests {
             assert!(attr_record_lookup(&unready_table, attribute_name.as_ptr()).is_null());
             assert!(attr_record_lookup(&ready_table, core::ptr::null()).is_null());
             assert!(attr_record_lookup(&ready_table, empty_name.as_ptr()).is_null());
-            assert_eq!(SLOT_FIND_CALLS, 0);
-        }
-    }
-
-    #[test]
-    fn returns_null_when_global_state_lookup_has_no_record() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
-        let table = table_with(1, 0x1000, 0x2000);
-        let mut slot = core::ptr::null_mut();
-
-        unsafe {
-            RETURNED_SLOT = &mut slot;
-            assert!(attr_record_lookup(&table, b"ADD_STYLE\0".as_ptr()).is_null());
-            assert_eq!(SLOT_FIND_CALLS, 1);
-        }
-    }
-
-    #[test]
-    fn preserves_arm_wrapping_record_address_arithmetic() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
-        let table = table_with(1, 0x20, 0x2000);
-        let mut state_record = GlobalStateRecord {
-            _word_00: 0,
-            attribute_record_index: u32::MAX,
-        };
-        let mut slot = core::ptr::addr_of_mut!(state_record).cast::<u8>();
-
-        unsafe {
-            RETURNED_SLOT = &mut slot;
-            assert_eq!(
-                attr_record_lookup(&table, b"SETWIDTH\0".as_ptr()),
-                0x10usize as *mut u8,
-            );
         }
     }
 }

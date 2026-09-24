@@ -85980,6 +85980,34 @@ functions:
       non-one u32 values, and equal/unequal words including zero and
       u32::MAX.
 
+  # --- Global-state hashed table slot search (util/global_state) ---
+  - address: 0x08077ff0
+    ghidra: FUN_08077ff0
+    name: global_state_slot_find
+    size: 140
+    sig: "u32 *global_state_slot_find(const u8 *global_name, const void *global_state_table)"
+    module: util/global_state
+    status: ported
+    renames:
+      param_1/r7: global_name
+      param_2/r6: global_state_table
+      r5: bucket_array
+      r4: slot
+      FUN_08036f14: __rt_udiv
+      thunk_FUN_08391e38: strcmp_veneer
+    notes: >-
+      Raw `osos.dec` establishes the exact 140-byte extent
+      0x08077ff0..0x0807807c; the next function starts with
+      `push {r0-r11,lr}` at 0x0807807c. There are three incoming plain BL
+      sites (0x08078094, 0x08078160, 0x080781b4), two plain BL instructions
+      within the body (`__rt_udiv` and the strcmp veneer), and no predicated
+      BL instructions. The routine accumulates the NUL-ended name as
+      `hash = byte + hash*31`, uses the unsigned-division remainder against
+      table+4 to select a u32 slot in the bucket array at table+12, then scans
+      backward with wraparound until a NULL slot or equal record name. Rust
+      calls ported `__rt_udivmod` and `strcmp` directly rather than
+      reproducing ADS r1 return state or the strcmp veneer.
+
   # --- Opaque global-state table getter (util/global_state) ---
   - address: 0x080781b0
     ghidra: FUN_080781b0
@@ -86002,8 +86030,8 @@ functions:
       were recovered at 0x0807b2fc, 0x0809fc9c, 0x0809fd78, 0x0809fda8,
       0x080ae028, and 0x080bfbb4. The 0x0807b294 and 0x0809fc74 callers use
       their returned record as global state; table and record ownership remain
-      opaque. The unported helper is a target-ROM/host-mock seam; host tests
-      prove exact two-word forwarding and first-word result loading.
+      opaque. The helper is ported directly; host tests exercise target-width
+      bucket layout, collision comparison, backwards wraparound, and misses.
 
   # --- Stream transfer-record cursor copy (drivers/stream_transfer) ---
   - address: 0x08088ed0

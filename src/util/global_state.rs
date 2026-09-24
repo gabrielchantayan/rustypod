@@ -1,152 +1,140 @@
 //! Lookup of a global-state record by name.
 //!
-//! `global_state_get` — original: `FUN_080781b0` @ 0x080781b0 (16 bytes).
-//! Raw ARM is:
+//! `global_state_slot_find` — original: `FUN_08077ff0` @ `0x08077ff0`
+//! (**140 bytes**, `0x08077ff0..0x08077ff0`; the next independently linked
+//! function begins at `0x0807807c`). Verified three incoming plain `bl` call
+//! sites at `0x08078094`, `0x08078160`, and `0x080781b4`; the body makes two
+//! plain calls (`__rt_udiv` and the `strcmp` veneer) and no predicated calls.
 //!
-//! ```text
-//! 080781b0: push {r4, lr}
-//! 080781b4: bl   0x08077ff0
-//! 080781b8: ldr  r0, [r0]
-//! 080781bc: pop  {r4, pc}
-//! ```
-//!
-//! The unported helper `FUN_08077ff0` @ 0x08077ff0 is a 140-byte,
-//! string-hashed table-slot search. It receives the incoming name in `r0`
-//! and opaque state-table pointer in `r1`, then returns a pointer to the
-//! matching slot. This wrapper performs no lookup or validation itself: it
-//! forwards both incoming arguments unchanged and returns the slot's first
-//! word. Direct callers at 0x0807b2fc, 0x0809fc9c, 0x0809fd78, 0x0809fda8,
-//! 0x080ae028, and 0x080bfbb4 supply a name plus an in-object table pointer;
-//! the first two recovered callers use the result as a global-state record.
-//!
-//! The state-table layout and the global-state record's ownership remain
-//! unported and opaque here. On target the seam calls the original helper;
-//! host tests replace it with a recorder.
+//! Algorithm: hash the NUL-terminated name with `hash = byte + hash * 31`,
+//! use the unsigned-divide remainder to select a slot from the table's bucket
+//! array, then scan slots backward with wraparound until a NULL slot or an
+//! equal NUL-terminated name. The table stores its bucket count at `+0x04`
+//! and u32 bucket-array address at `+0x0c`; each non-NULL bucket word points
+//! to a record whose first word is its name pointer. Deliberate deviation:
+//! the port calls the already-ported `__rt_udivmod` and `strcmp` directly,
+//! rather than reproducing their ADS r1 return state and `strcmp` veneer.
 
-/// ABI of `FUN_08077ff0`: find the slot for `global_name` in the opaque
-/// `global_state_table`. The returned slot's first word is the record that
-/// [`global_state_get`] returns.
-pub type GlobalStateSlotFind = unsafe extern "C" fn(
+#[cfg(test)]
+use core::ptr;
+
+const BUCKET_COUNT_OFFSET: usize = 0x04;
+const BUCKET_ARRAY_OFFSET: usize = 0x0c;
+
+
+/// Finds the target-layout bucket slot for `global_name` in
+/// `global_state_table`. Neither input nor the bucket count is validated,
+/// matching the retail routine.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_state_slot_find(
     global_name: *const u8,
     global_state_table: *const u8,
-) -> *const *mut u8;
+) -> *mut u32 {
+    let mut hash = 0u32;
+    let mut name_cursor = global_name;
+    loop {
+        let byte = unsafe { name_cursor.read() };
+        if byte == 0 {
+            break;
+        }
+        hash = hash.wrapping_mul(31).wrapping_add(byte as u32);
+        name_cursor = unsafe { name_cursor.add(1) };
+    }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_global_state_slot_find(
-    global_name: *const u8,
-    global_state_table: *const u8,
-) -> *const *mut u8 {
-    let find_slot: GlobalStateSlotFind = unsafe { core::mem::transmute(0x0807_7ff0usize) };
-    unsafe { find_slot(global_name, global_state_table) }
+    let bucket_count = unsafe { global_state_table.add(BUCKET_COUNT_OFFSET).cast::<u32>().read() };
+    let bucket_array = unsafe {
+        global_state_table.add(BUCKET_ARRAY_OFFSET).cast::<u32>().read() as usize as *mut u32
+    };
+    let mut remainder = 0;
+    unsafe { crate::runtime::rt_div::__rt_udivmod(hash, bucket_count, &mut remainder) };
+    let first_slot = unsafe { bucket_array.add(remainder as usize) };
+    let mut slot = first_slot;
+    loop {
+        let record = unsafe { slot.read() as usize as *const u8 };
+        if record.is_null() {
+            return slot;
+        }
+        let record_name = unsafe { record.cast::<u32>().read() as usize as *const u8 };
+        if unsafe { record_name.read() } == unsafe { global_name.read() }
+            && unsafe { crate::libc::strcmp::strcmp(record_name, global_name) } == 0 {
+            return slot;
+        }
+        slot = if slot == bucket_array {
+            unsafe { bucket_array.add(bucket_count as usize - 1) }
+        } else {
+            unsafe { slot.sub(1) }
+        };
+    }
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_global_state_slot_find(
-    _global_name: *const u8,
-    _global_state_table: *const u8,
-) -> *const *mut u8 {
-    panic!("global_state_get requires table-slot helper 0x08077ff0")
-}
-
-#[cfg(target_os = "none")]
-pub(crate) const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = firmware_global_state_slot_find;
-#[cfg(not(target_os = "none"))]
-pub(crate) const DEFAULT_GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = missing_global_state_slot_find;
-
-/// Unported `FUN_08077ff0` table-slot search. Target builds dispatch to its
-/// retailOS address; host tests install a recording mock through this seam.
-pub static mut GLOBAL_STATE_SLOT_FIND: GlobalStateSlotFind = DEFAULT_GLOBAL_STATE_SLOT_FIND;
-
-/// global_state_get — original: `FUN_080781b0` @ 0x080781b0 (16 bytes).
+/// `global_state_get` — original: `FUN_080781b0` @ `0x080781b0` (16 bytes).
 ///
-/// Forwards `global_name` and `global_state_table` unchanged to the unported
-/// table-slot helper at 0x08077ff0, then loads and returns the resulting
-/// slot's first word. As in the raw ARM body, neither the slot nor its first
-/// word is checked for null or otherwise validated.
+/// Finds the name's table slot and returns its first word, with no null check
+/// or validation, exactly as the raw `bl; ldr r0,[r0]` wrapper does.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn global_state_get(
     global_name: *const u8,
     global_state_table: *const u8,
 ) -> *mut u8 {
-    let find_slot = unsafe { core::ptr::addr_of_mut!(GLOBAL_STATE_SLOT_FIND).read_volatile() };
-    unsafe { *find_slot(global_name, global_state_table) }
+    unsafe { global_state_slot_find(global_name, global_state_table).read() as usize as *mut u8 }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate std;
-    use std::sync::MutexGuard;
-    static mut RECORDED_NAME: *const u8 = core::ptr::null();
-    static mut RECORDED_TABLE: *const u8 = core::ptr::null();
-    static mut RETURNED_SLOT: *const *mut u8 = core::ptr::null();
-
-    unsafe extern "C" fn recording_slot_find(
-        global_name: *const u8,
-        global_state_table: *const u8,
-    ) -> *const *mut u8 {
-        unsafe {
-            RECORDED_NAME = global_name;
-            RECORDED_TABLE = global_state_table;
-            RETURNED_SLOT
-        }
-    }
-
-    struct SlotFindReset;
-
-    impl Drop for SlotFindReset {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(GLOBAL_STATE_SLOT_FIND)
-                    .write(DEFAULT_GLOBAL_STATE_SLOT_FIND);
-            }
-        }
-    }
-
-    fn install_recording_slot_find() -> MutexGuard<'static, ()> {
-        let guard = crate::testing::GLOBAL_STATE_SLOT_FIND_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe {
-            RECORDED_NAME = core::ptr::null();
-            RECORDED_TABLE = core::ptr::null_mut();
-            RETURNED_SLOT = core::ptr::null_mut();
-            core::ptr::addr_of_mut!(GLOBAL_STATE_SLOT_FIND).write(recording_slot_find);
-        }
-        guard
-    }
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
 
     #[test]
-    fn forwards_name_and_table_to_the_slot_helper() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
-        let name = b"volume\0";
-        let mut table = [0u8; 16];
-        let mut record = [0u8; 8];
-        let mut slot = record.as_mut_ptr();
-        unsafe {
-            RETURNED_SLOT = &mut slot;
-            assert_eq!(global_state_get(name.as_ptr(), table.as_mut_ptr()), record.as_mut_ptr());
-            assert_eq!(RECORDED_NAME, name.as_ptr());
-            assert_eq!(RECORDED_TABLE, table.as_mut_ptr());
-        }
-    }
+    fn finds_a_same_prefix_name_after_wrapping_backward() {
+        let Some(slab) = try_map_u32_slab(hints::GLOBAL_STATE_SLOT_FIND, 0x1000) else {
+            note_missing_u32_fixture("util::global_state");
+            return;
+        };
 
-    #[test]
-    fn returns_the_first_word_loaded_from_the_slot() {
-        let _guard = install_recording_slot_find();
-        let _reset = SlotFindReset;
-        let mut first_word_record = [0u8; 4];
-        let mut slot = first_word_record.as_mut_ptr();
         unsafe {
-            RETURNED_SLOT = &mut slot;
+            ptr::write_bytes(slab, 0, 0x1000);
+            let table = slab;
+            let buckets = slab.add(0x40).cast::<u32>();
+            let mismatch = slab.add(0x100).cast::<u32>();
+            let matched = slab.add(0x120).cast::<u32>();
+            let mismatch_name = slab.add(0x200);
+            let matched_name = slab.add(0x220);
+            ptr::copy_nonoverlapping(b"alpine\0".as_ptr(), mismatch_name, 7);
+            ptr::copy_nonoverlapping(b"alpha\0".as_ptr(), matched_name, 6);
+            mismatch.write(mismatch_name as usize as u32);
+            matched.write(matched_name as usize as u32);
+            table.add(BUCKET_COUNT_OFFSET).cast::<u32>().write(3);
+            table.add(BUCKET_ARRAY_OFFSET).cast::<u32>().write(buckets as usize as u32);
+
+            let first_index = 2;
+            buckets.add(first_index).write(mismatch as usize as u32);
+            buckets.add(1).write(mismatch as usize as u32);
+            buckets.write(matched as usize as u32);
             assert_eq!(
-                global_state_get(b"backlight\0".as_ptr(), core::ptr::null_mut()),
-                first_word_record.as_mut_ptr(),
+                global_state_slot_find(matched_name, table),
+                buckets,
+                "the backward scan wraps from slot zero to the last slot",
             );
-            assert_ne!(
-                global_state_get(b"backlight\0".as_ptr(), core::ptr::null_mut()),
-                &mut slot as *mut *mut u8 as *mut u8,
-            );
+            assert_eq!(global_state_get(matched_name, table), matched.cast());
+        }
+    }
+
+    #[test]
+    fn returns_the_null_bucket_slot_for_an_absent_name() {
+        let Some(slab) = try_map_u32_slab(hints::GLOBAL_STATE_SLOT_FIND, 0x1000) else {
+            note_missing_u32_fixture("util::global_state");
+            return;
+        };
+
+        unsafe {
+            ptr::write_bytes(slab, 0, 0x1000);
+            let table = slab;
+            let buckets = slab.add(0x40).cast::<u32>();
+            table.add(BUCKET_COUNT_OFFSET).cast::<u32>().write(1);
+            table.add(BUCKET_ARRAY_OFFSET).cast::<u32>().write(buckets as usize as u32);
+            assert_eq!(global_state_slot_find(b"missing\0".as_ptr(), table), buckets);
         }
     }
 }

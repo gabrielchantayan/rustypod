@@ -663,6 +663,10 @@ pub mod hints {
     // and bucket-array fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const HASH_TABLE_BUCKET_SLOT: usize = 0x6c80_0000;
+    // 0x6d00_0000: dedicated to util/global_state's raw-u32 table, bucket,
+    // record, and string fixtures; mappings never unmap, so no other test
+    // may share this hint.
+    pub const GLOBAL_STATE_SLOT_FIND: usize = 0x6d00_0000;
     // 0x6e80_0000: dedicated to app/two_value_wheel_node's target-width
     // node and FixedValue fixtures; mappings never unmap, so no other test
     // may share this hint.
