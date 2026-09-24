@@ -59909,6 +59909,32 @@ functions:
       tuple.
 
 
+  # --- UI object packed two-bit field ensure-one (ui/object_packed_field_ensure_one) ---
+  - address: 0x080616a0
+    ghidra: FUN_080616a0
+    name: ensure_object_packed_field_is_one
+    size: 64
+    sig: "bool ensure_object_packed_field_is_one(u8 *object, const u8 *selector)"
+    module: ui/object_packed_field_ensure_one
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_2/r1/r5: selector
+      FUN_08054468: object_packed_field
+      FUN_08067244: set_object_packed_field
+    notes: >-
+      Raw osos.dec words establish 64 instruction bytes at
+      0x080616a0..0x080616dc; the following push at 0x080616e0 is the
+      next independently linked function boundary. The function has two
+      unconditional bl calls to object_packed_field and one predicated bleq
+      call to set_object_packed_field; there are no literal-pool words. It
+      reads object+0x1c's two-bit field selected by selector+1, writes one
+      only when that field is zero, rereads it, and returns whether it is
+      exactly one. Its three direct callers are plain bl at 0x0803bed8,
+      0x0803bfd4, and 0x0806157c. Rust calls the already ported packed-field
+      accessor and setter directly; its branch replaces ARM's flag-predicated
+      setter call without changing the no-write nonzero path.
+
   # --- UI object packed two-bit field setter (ui/object_packed_field) ---
   - address: 0x08067244
     ghidra: FUN_08067244
