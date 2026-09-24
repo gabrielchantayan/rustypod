@@ -27722,6 +27722,37 @@ functions:
       fixture verifies the complete parent-to-helper path, including the
       final armed state and 4000 ms delay.
 
+  - address: 0x0811aa6c
+    ghidra: FUN_0811aa6c
+    name: show_tuning_region
+    size: 72
+    sig: "void show_tuning_region(u8 *controller)"
+    module: app/tuning_status
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_1_plus_0xbc: tuning state
+      param_1_plus_0xbc_plus_0x2d: tuning region
+      s_ShowTuningJapan_0811aac4: SHOW_TUNING_JAPAN
+      s_ShowTuningWorld_0811aab4: SHOW_TUNING_WORLD
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable_plus_0x11c: display tuning region
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent from stmdb sp!,
+      {r2,r3,r4,lr} at 0x0811aa6c through ldmia sp!,{r2,r3,r4,pc} at
+      0x0811aab0; the two NUL-terminated display strings begin immediately
+      after at 0x0811aab4. Decoding every A32 BL word finds three direct
+      unconditional inbound callers (0x0811a56c, 0x0811a97c, and
+      0x0811aba4), no predicated inbound BL callers, and two unconditional
+      direct BL calls in the body: cxx_string_from_cstr @ 0x083d8b5c and
+      cxx_string_release @ 0x083d8b04. The third call is a virtual BLX through
+      controller-vtable slot +0x11c, not a direct BL. It chooses
+      "ShowTuningJapan" only when the tuning-state byte +0x2d is 3, otherwise
+      "ShowTuningWorld", displays the temporary COW string, then releases it.
+      Host tests use a display seam because host pointers are wider than the
+      target's four-byte object words; target builds preserve the raw layout.
+
   - address: 0x08266a48
     ghidra: FUN_08266a48
     name: message_kind_construct
