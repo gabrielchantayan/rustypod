@@ -116,6 +116,7 @@ pub mod tdat_payload;
 pub mod pool_entry_create;
 pub mod operation_stop;
 pub mod tdat_first_plst;
+pub mod tdat_element_teardown;
 pub mod tdat_node_find;
 pub mod element_reference;
 pub mod operation_destroy;

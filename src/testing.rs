@@ -2333,6 +2333,9 @@ pub mod hints {
     // 0x6fe0_0000: dedicated to ui/flush_pending_cell's target-width cell
     // record fixture; mappings never unmap, so no other port may share it.
     pub const UI_FLUSH_PENDING_CELL: usize = 0x6fe0_0000;
+    // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
+    // element and linked 'plst' node fixture; mappings never unmap.
+    pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
