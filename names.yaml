@@ -138064,3 +138064,27 @@ functions:
       preserving the target's four-byte table slots rather than host pointer
       spacing; it deliberately adds no bounds or null checks. Host tests prove
       distinct 0x18c-stride selections and masking of the selected word.
+  - address: 0x080dac58
+    ghidra: FUN_080dac58
+    name: stream_status_normalize
+    size: 80
+    sig: "u32 stream_status_normalize(u32 first, u32 second, u32 third, u32 selector)"
+    module: app/stream_status_normalize
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r5: second
+      param_3/r2/r6: third
+      param_4/r3: selector
+      FUN_0814852c: opaque_status_query
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte executable extent
+      0x080dac58..0x080daca7; the next word at 0x080daca8 begins the distinct
+      push {r4-r7} frame. Complete A32 direct-call decoding finds three inbound
+      unconditional BL callers (0x0808e50c, 0x080c6cb8, 0x081031d4) and no
+      predicated BL callers. The body has one plain BL to unported
+      FUN_0814852c at 0x0814852c and no predicated direct BL. Selectors 1, 4,
+      and 5 return 1; selector 3 returns 3; every other selector returns the
+      opaque query result, except all-zero first/second/third inputs remap a
+      result of 1 to 2. FUN_0814852c has no recovered identity, so ARM builds
+      call its verified retail address and host tests inject an ABI seam.
