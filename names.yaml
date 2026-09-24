@@ -137024,3 +137024,21 @@ functions:
       owner type and vtable remain unidentified, so the structural name makes
       no stronger identity claim. Rust models the target vtable literal as
       usize for the host while repr(C) retains the ARM layout.
+  - address: 0x08104050
+    ghidra: FUN_08104050
+    name: opaque_object_implementation
+    size: 8
+    sig: "void *opaque_object_implementation(const void *object)"
+    module: app/opaque_object_implementation
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xe8": implementation
+    notes: >-
+      Raw osos.dec establishes the exact two-instruction, eight-byte extent:
+      `ldr r0,[r0,#0xe8]; bx lr` at 0x08104050..0x08104057; 0x08104058 starts
+      the next real function with `push {r3,r4,r5,lr}`. Full-image A32
+      decoding finds three inbound plain BL calls at 0x08235848, 0x08235990,
+      and 0x08235a90, with zero predicated BL calls. The function has no
+      internal calls and directly returns the opaque target word at object+0xe8.
+      Rust represents that unrecovered target word as `*mut u8`.
