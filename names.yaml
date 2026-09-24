@@ -135801,3 +135801,32 @@ functions:
       and their verified firmware addresses on ARM; snprintf is called through
       the existing Rust port. Host coverage proves level forwarding, the
       generated close string, scratch offset, and append target.
+
+  - address: 0x081224e8
+    ghidra: FUN_081224e8
+    name: volume_channel_set_level
+    size: 28
+    sig: "void volume_channel_set_level(u32 *channel, u32 requested_level, u32 force)"
+    module: app/volume_channel_set_level
+    status: ported
+    renames:
+      param_1/r0: channel
+      param_2/r1: requested_level
+      param_3/r2: force
+      "channel+0x6c": saved_level
+      "channel+0x70": primary_output_level
+      "channel+0x74": secondary_output_level
+      "channel+0x7c": primary_scale
+      "channel+0x80": secondary_scale
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte A32 entry
+      0x081224e8..0x08122503. It has no direct BL instructions and ends in an
+      unconditional tail B to the shared level-scaling block at 0x08122254;
+      0x08122504 begins the next independently entered function. Whole-image
+      A32 decoding finds three inbound plain BL calls at 0x08121ee0,
+      0x08122dcc, and 0x08123510, with no predicated BL calls. When a forced
+      update or changed request arrives, values below 0x8000 replace the saved
+      level. The shared block derives two outputs with signed-less-than Q15
+      scale factors, treating 0x7fff as unity; ARM's low-word multiply and
+      logical right shift are retained. Rust deliberately inlines that shared
+      tail block so the hooked entry does not depend on its unported interior.
