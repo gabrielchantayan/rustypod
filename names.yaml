@@ -140380,3 +140380,29 @@ functions:
       owner load, halfword comparison, conditional mirror/context stores, and
       dirty path; expected differences are the frame, materialized +0xb1c
       offset, and direct Rust tail-call target.
+  - address: 0x08066710
+    ghidra: FUN_08066710
+    name: resource_slot_select_item
+    size: 44
+    sig: "void resource_slot_select_item(Controller *controller, u32 slot_index, u32 item_index)"
+    module: app/resource_slot_select_item
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_2/r1: slot_index
+      param_3/r2/r1: item_index
+      "controller+0xf7c": resource_handle_table
+      "controller+0xf8c": selected_item_table
+      FUN_08052560: resource_handle_select_item
+    notes: >-
+      Raw osos.dec gives the exact 44-byte executable extent
+      0x08066710..0x0806673b; 0x0806673c begins the next function. A32
+      decoding finds one outbound plain BL at 0x08066730 to retail
+      resource_handle_select_item @ 0x08052560 and no outbound predicated BL
+      instructions. Whole-image decoding finds three inbound plain BL calls at
+      0x08058820, 0x0806870c, and 0x08068fa4, with no predicated forms. It
+      rejects slot indices above three, leaves a null-handle result word
+      untouched, otherwise selects item_index from the slot's handle and stores
+      it in the matching result slot. ARM builds call the unresolved retail
+      selector directly; host tests use a typed seam, covering slot three,
+      null handles, and out-of-range indices.

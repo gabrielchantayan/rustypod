@@ -298,6 +298,7 @@ pub mod global_transition_callback_presence;
 pub mod global_observer_unregister;
 pub mod genius_request_wait_ready;
 pub mod genius_request_selection_is_complete;
+pub mod resource_slot_select_item;
 pub mod global_callback_dispatch_cleanup;
 pub mod global_callback_unregister;
 pub mod global_timer_cleanup;
