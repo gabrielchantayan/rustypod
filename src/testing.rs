@@ -1759,6 +1759,10 @@ pub mod hints {
     // 0x4b00_0000: dedicated to app/output_buffer_reset's target-width data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const OUTPUT_BUFFER_RESET: usize = 0x4b00_0000;
+    // 0x4b10_0000: dedicated to app/output_buffer_write_dictionary_close's
+    // target-width state and variadic-string fixture; mappings never unmap,
+    // so no other user may share this hint.
+    pub const OUTPUT_BUFFER_WRITE_DICTIONARY_CLOSE: usize = 0x4b10_0000;
     // 0xe200_0000: dedicated to printf/retail_sscanf's target-width
     // varargs/output fixture; mappings never unmap, so no other user may
     // share this hint.

@@ -609,6 +609,7 @@ pub mod view_event;
 pub mod view_timer;
 pub mod strided_buffer_entry;
 pub mod output_buffer_reset;
+pub mod output_buffer_write_dictionary_close;
 pub mod stream_selection_change;
 pub mod slideshow_delay_set;
 
