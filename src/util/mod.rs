@@ -94,6 +94,7 @@ pub mod global_state;
 pub mod global_slot_release;
 pub mod growable_buffer_append;
 pub mod hash_table_chain_destroy;
+pub mod hash_table_slot_find;
 pub mod highest_set_bit;
 pub mod inner_state;
 pub mod fixed_scale_parameters;

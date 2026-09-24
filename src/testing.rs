@@ -499,6 +499,10 @@ pub mod hints {
     // registry and table fixture; mappings never unmap, so no other test may
     // reuse this hint.
     pub const TYPED_HANDLER_REGISTRY_LOOKUP: usize = 0x5000_0000;
+    // 0x5200_0000: dedicated to util/hash_table_slot_find's target-width
+    // table, bucket, node, and key fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const HASH_TABLE_SLOT_FIND: usize = 0x5200_0000;
     // 0x5100_0000: dedicated to app/type_handler_lookup's raw-u32 registry
     // fixture; mappings never unmap, so no other test may reuse this hint.
     pub const TYPE_HANDLER_LOOKUP_WRAPPER: usize = 0x5100_0000;
