@@ -80809,12 +80809,11 @@ functions:
       the packet/owner/context unchanged; lingo_word and command_word become
       the initializer's u8/u16 lingo/command. The full-word selector tests
       happen before truncation, exactly as the ARM `cmp` instructions do.
-      DEVIATION - 0x080f73a0 remains unported; the port uses the existing
-      volatile IAP_PACKET_OPS.init seam. Its return is deliberately
-      discarded, matching the original's void wrapper. Host tests cover the
-      lingo-4 big-endian u16 plus kind-6 big-endian u32 case, the lingo-12
-      extra-byte order, and high-word selector values that must not select
-      the truncated-byte layout. match.py structural review (`--lib` worktree archive) - 53 Rust instructions versus 55 original; both select the same lingo-4/lingo-12 layouts, conditionally append four big-endian data bytes, marshal the three trailing initializer arguments on the stack, and call once. LLVM zeroes the seven-byte local buffer and dispatches through the volatile ops table with `blx`, rather than the original's direct `bl 0x080f73a0`; its different frame/register allocation yields no common textual prefix.
+      DEVIATION - 0x080f73a0 is now ported directly as iap_packet_init; its
+      return remains deliberately discarded, matching the original void
+      wrapper. Host tests cover the lingo-4 big-endian u16 plus kind-6
+      big-endian u32 case, the lingo-12 extra-byte order, and high-word
+      selector values that must not select the truncated-byte layout.
   - address: 0x080f6da0
     ghidra: FUN_080f6da0
     name: iap_packet_create
@@ -80946,14 +80945,12 @@ functions:
       Since the initializer's first act is releasing any payload the
       packet already holds (release helper @ 0x080f7420), this call is
       how a request packet is turned into its reply.
-      Deviations - the initializer @ 0x080f73a0 is not ported; the
-      forward dispatches through IAP_PACKET_OPS.init, same seam
-      iap_packet_create uses. lingo/command are typed u8/u16 because
-      the initializer truncates with strb/strh - nothing observable is
-      lost. The ARM return is the initializer's 64-bit pair (r0 =
-      success flag, r1 = owner passing back out); the wrapper leaves
-      both live, but all 43 call sites discard them, so the port
-      returns just r0.
+      Deviations - the initializer @ 0x080f73a0 is ported directly as
+      iap_packet_init. lingo/command are typed u8/u16 because the initializer
+      truncates with strb/strh - nothing observable is lost. The ARM return
+      is a 64-bit pair (r0 = success flag, r1 = owner passing back out); the
+      wrapper leaves both live, but all 43 call sites discard them, so the
+      port returns just r0.
       LLVM sibcall hazard - left alone, LLVM lowers this body to a
       sibling call that materializes the volatile ops read with
       `ldrd r0,[ip]` and the branch target in r1, clobbering the
@@ -81019,6 +81016,44 @@ functions:
       `moveq r0,#0; bxeq lr` and a framed `ldr r0,[r0,#8]; pop` tail)
       instead of the original's single branchless predicated block -
       semantically identical, expected under the crate's fp frame.
+  - address: 0x080f73a0
+    ghidra: FUN_080f73a0
+    name: iap_packet_init
+    size: 128
+    sig: "u32 iap_packet_init(u8 *packet, u8 *owner, u8 *context, u8 lingo, u16 command, const u8 *payload, u32 payload_len)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r4: packet
+      param_2/r7: owner
+      param_3/r8: context
+      param_4/r9: lingo
+      param_5/sl: command
+      param_6/fp: payload
+      param_7/r5: payload_len
+      iVar1/r0: allocation
+    notes: >-
+      Initializes a 36-byte iAP packet in place. Raw osos.dec words establish
+      the exact 128-byte extent 0x080f73a0..0x080f7420: the next real
+      function starts with `push {r4-r6,lr}` at 0x080f7420. Decoding every
+      branch word independently found 3 plain BL call sites and zero
+      predicated BL call sites.
+      It first releases prior payloads, stores owner/context, truncates and
+      stores lingo/command, and zeros +0x1c/+0x20. For nonzero payload_len it
+      allocates through operator_new @ 0x082aad74, stores the returned pointer
+      at +0x08, returns zero on allocation failure, otherwise stores the low
+      u16 length at +0x0c and copies the payload through __rt_memcpy's
+      0x08037db0 ROM veneer. Zero length returns one without rewriting the
+      released payload slots. The ARM result is r0 success plus r1 owner;
+      Rust exposes the observed r0 only. The still-unported release helper
+      0x080f7420 remains behind IAP_PACKET_OPS.release; operator_new and
+      __rt_memcpy are called directly. Host tests cover copied fields and
+      payload, zero length, allocation failure, and release ordering.
+      match.py structural review: 33 Rust instructions vs 32 stock; both
+      release first, perform the same field stores and zero-length branch,
+      allocate only for nonzero lengths, store before the NULL test, then
+      copy and return success. The volatile release seam produces BLX and
+      LLVM uses a different frame/register assignment.
   - address: 0x080f745c
     ghidra: FUN_080f745c
     name: iap_packet_construct
