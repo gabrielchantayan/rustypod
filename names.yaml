@@ -10269,6 +10269,21 @@ functions:
     notes: 5-step binary-search CLZ; table @ 0x083e9b60 outside image
       (canonical table reconstructed, behavior exact). Returns 0 for input 0.
 
+  - address: 0x080e83b8
+    ghidra: FUN_080e83b8
+    name: decimal_power_of_ten
+    size: 64
+    sig: "u64 decimal_power_of_ten(u32 count)"
+    module: printf/power_of_ten
+    status: ported
+    notes: >-
+      Raw osos.dec gives 48 code bytes followed by the 1.0 and 10.0
+      soft-float literals, so the true extent is 64 bytes through 0x080e83f7;
+      0x080e83f8 begins the next function. It initializes r0:r1 to 1.0 and
+      invokes __dmul once per count with 10.0. Decoding every A32 B/BL word
+      finds three plain BL callers (0x080e8018, 0x080e8054, 0x080e8078) and
+      no predicated BL callers.
+
   - address: 0x08037e60
     ghidra: thunk_EXT_FUN_22003eb0
     name: current_task_id
