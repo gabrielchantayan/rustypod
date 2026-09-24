@@ -140748,3 +140748,34 @@ functions:
       match.py reports 28 Rust instructions versus 23 retail: the direct
       unported calls become literal-loaded `blx` calls, while the count,
       allocation/null guard, and per-node store/traversal loop remain.
+
+  - address: 0x0805bf20
+    ghidra: FUN_0805bf20
+    name: decode_result_with_fallback
+    size: 176
+    sig: "u32 decode_result_with_fallback(u32 *owner, u32 fallback_data, u32 input, void *result, u32 caller_context)"
+    module: app/decode_result_with_fallback
+    status: ported
+    renames:
+      param_1/r0/r6: owner
+      param_2/r1: fallback_data
+      param_3/r2/r7: input
+      param_4/r3/r5: result
+      param_5/stack/r8: caller_context
+      "owner+0x158": primary_decode_context
+      FUN_08065dfc: unresolved_primary_decode
+      FUN_08031140: read_word
+      FUN_0805c0c8: unresolved_fallback_decode
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte A32 body
+      0x0805bf20..0x0805bfcc: `pop {r4-r8,pc}` ends it and 0x0805bfd0 begins
+      the next function. Whole-image A32 decoding finds three inbound plain BL
+      calls (0x080482c8, 0x0805d3f8, and 0x0806c538), zero predicated forms,
+      and three outbound plain BL calls (0x08065dfc, 0x08031140, and
+      0x0805c0c8), also with zero predicated forms. It invokes the primary
+      decoder with owner+0x158, maps 0x20 to 0x30, then on zero status accepts
+      tags 3/4 with word/payload offsets +4/+8 or tags 0x300/0x400 with
+      +10/+14. A nonzero word enters the fallback decoder; zero and unknown
+      tags retain successful primary status. The unresolved callees remain
+      verified address seams on ARM and replaceable host seams; `read_word`
+      deliberately retains the target's unaligned +10 input for wide tags.

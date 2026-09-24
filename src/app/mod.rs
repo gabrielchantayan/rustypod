@@ -4,6 +4,7 @@ pub mod app_motor;
 pub mod application_mode_transition;
 pub mod input_sequence_find_item;
 pub mod parser_stack_pop;
+pub mod decode_result_with_fallback;
 pub mod parser_name_record_insert;
 pub mod input_sequence_item_clear_action;
 pub mod animation_property_pair_init;
