@@ -305,6 +305,7 @@ pub mod object_byte_0x946_is_two;
 pub mod context_shared_cell_payload_word;
 pub mod iap_incoming_client_base;
 pub mod iap_incoming_process_thread;
+pub mod iap_incoming_process_clear_pending_message;
 pub mod iap_client_global_shutdown;
 pub mod iap_packet;
 pub mod iap_service_packet_submit;
