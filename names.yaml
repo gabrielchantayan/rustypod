@@ -14470,6 +14470,30 @@ functions:
       return, same walk/break loop, LLVM merges the strne/streq splice
       pair into one predicated store and emits mla for tick+period*1000.
 
+  - address: 0x0807f234
+    ghidra: FUN_0807f234
+    name: allocator_registry_release
+    size: 32
+    sig: "void allocator_registry_release(u8 *allocator, u8 *buffer)"
+    module: heap/allocator_registry_release
+    status: ported
+    renames:
+      param_1/r0: allocator
+      param_2/r1: buffer
+      FUN_080e7970: free_wrapper
+      FUN_081bc0fc: custom allocator release ABI (unidentified)
+    notes: >-
+      Raw osos.dec words establish the true 32-byte extent
+      0x0807f234..0x0807f254; 0x0807f254 starts the next separately linked
+      decompile. The body has no BL instructions. A full ARM BL scan finds
+      exactly two plain BL callers (0x08256bc0 and 0x08256c40) and one
+      predicated BL caller (0x082534e8). `allocator == NULL` moves buffer to r0,
+      sets r1 to tag 0x38, and tail-branches to ported free_wrapper. Otherwise
+      allocator ABI at 0x081bc0fc. Deliberate deviations: Rust
+      return-position calls replace tail branches; the target custom ABI stays
+      private by address because names.yaml has no verified identity, while
+      hosts model it with free_wrapper because they cannot represent target
+      allocator registries.
   - address: 0x0807f5c4
     name: mutex_lock
     size: 8
