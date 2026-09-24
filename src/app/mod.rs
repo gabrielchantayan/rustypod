@@ -45,6 +45,7 @@ pub mod callback_queue_entry_destruct;
 pub mod animation;
 pub mod copy_eighteen_records_and_tail;
 pub mod identity_noop;
+pub mod always_zero;
 pub mod artwork_slot_available;
 pub mod showcase_initialization_complete;
 pub mod artwork_cache_prepare;
