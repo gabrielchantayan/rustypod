@@ -136688,3 +136688,43 @@ functions:
       invented. Deliberate deviation: Rust represents the ARM bxeq tail
       dispatch as a normal return from an indirect call, and host builds use a
       replaceable ABI seam because target vtable words hold 32-bit addresses.
+
+  - address: 0x081116e0
+    ghidra: FUN_081116e0
+    name: media_player_set_volume
+    size: 164
+    sig: "void media_player_set_volume(void *player, u32 volume)"
+    module: app/media_player_set_volume
+    status: ported
+    renames:
+      param_1/r0: player
+      param_2/r1: volume
+      "[player + 0x464]": volume
+      "[player + 0x488]": resource_write_gate
+      "[player + 0x494]": retry_state
+      FUN_08172124: instance_of_class_6000
+      FUN_08272230: resource_chain_write
+      DAT_08111784: RESOURCE_KIND_RAW
+      DAT_08111788: RESOURCE_ID_6031
+      DAT_0811178c: terminal_dispatch_gate
+      DAT_08111790: terminal_dispatch_second
+      DAT_08111794: terminal_dispatch_first
+    notes: >-
+      Raw osos.dec establishes the exact 164-byte executable extent
+      0x081116e0..0x08111784. Four pool words occupy
+      0x08111784..0x08111794; the next real function begins at 0x08111794.
+      Decoding every raw ARM B/BL instruction finds three inbound plain
+      unconditional BL callers and no predicated BL callers. The body has five
+      direct BL instructions (two to 0x08172124, and one each to 0x08172004,
+      empty 0x082898dc, and 0x08272230), plus its terminal vtable-slot +0x58
+      dispatch.
+      It stores volume at player+0x464, invokes unported 0x08172004 with the
+      class-0x6000 singleton and volume, and writes ("rIDP" raw 0x70724944,
+      0x6031, 0x6035, 4) through resource_chain_write when player+0x488 is
+      zero. Otherwise, a nonzero byte at 0x089ca660 and zero player+0x494
+      first set player+0x494 to 10, then perform that same write. It always
+      dispatches player vtable slot +0x58 with opaque words 0x089ca660 and
+      0x63f9. The 0x08172004 helper and final slot lack an established
+      semantic identity, so target code calls the verified ABI shapes while
+      host tests use typed seams. FUN_082898dc is an empty body and is
+      deliberately omitted.
