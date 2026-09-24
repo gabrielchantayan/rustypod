@@ -384,6 +384,7 @@ use crate::libc::memcmp::memcmp;
 use crate::libc::strlen_safe::strlen_safe;
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
 use crate::app::resource_chain::{resource_chain_find_string, ResourceProvider};
+use crate::ui::object_state::object_sequence_id_assign;
 use crate::util::context_field::task_ctx_field_0x30;
 use crate::printf::printf_api::VaList;
 
@@ -1163,6 +1164,72 @@ pub unsafe extern "C" fn string_object_insert_bytes(
     }
 }
 
+/// Target-width callback for the tail branch to `FUN_0812dde4` @ 0x0812dde4.
+///
+/// That 140-byte routine walks two polymorphic collections and advances each
+/// stored byte-range endpoint after an edit. Its collection iterators are not
+/// ported yet, so the established host-model boundary retains the full
+/// `(collection, byte_offset, codepoint_delta)` call.
+pub type TextEditOffsetAdjustFn = unsafe extern "C" fn(*mut u8, i32, i32);
+
+unsafe extern "C" fn missing_text_edit_offset_adjust(
+    _collection: *mut u8, _byte_offset: i32, _codepoint_delta: i32,
+) {}
+
+/// Tail-target boundary for `FUN_0812dde4`.
+pub static mut TEXT_EDIT_OFFSET_ADJUST: TextEditOffsetAdjustFn = missing_text_edit_offset_adjust;
+
+#[inline(always)]
+unsafe fn text_edit_offset_adjust_op() -> TextEditOffsetAdjustFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(TEXT_EDIT_OFFSET_ADJUST))
+}
+
+#[inline(always)]
+unsafe fn text_edit_codepoint_delta(source: *const u8, replaced_codepoint_count: u32) -> i32 {
+    (utf8_codepoint_count_safe(source) as u32).wrapping_sub(replaced_codepoint_count) as i32
+}
+
+/// text_edit_insert — original: `FUN_081195c4` @ 0x081195c4
+/// (112 bytes, all code; six plain `bl` instructions and zero predicated
+/// `bl` instructions, decoded from `osos.dec`). The next real function starts
+/// at 0x08119634; Ghidra's 116-byte extent includes the tail branch.
+///
+/// Assigns a new sequence id to the editor's StringObject at `editor + 0x24`,
+/// erases `replaced_codepoint_count` UTF-8 characters at `index`, inserts
+/// `source`, then tail-dispatches 0x0812dde4 to advance edit-position records
+/// by `utf8_codepoint_count(source) - replaced_codepoint_count`. The tail
+/// target's polymorphic iterator family is deliberately represented by
+/// [`TEXT_EDIT_OFFSET_ADJUST`]; its identity and exact argument tuple are
+/// raw-ARM verified, but it is not independently ported.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn text_edit_insert(
+    context: *mut u32, index: i32, replaced_codepoint_count: u32, source: *const u8,
+) {
+    let editor = context.read() as usize as *mut u8;
+    let string = editor.add(0x24).cast::<StringObject>();
+    object_sequence_id_assign(string.cast());
+    string_object_erase(string, index, replaced_codepoint_count as i32);
+    string_object_insert_bytes(string, index, source, strlen_safe(source) as u32);
+
+    let collection = context.add(7).read() as usize as *mut u8;
+    text_edit_offset_adjust_op()(collection, index, text_edit_codepoint_delta(source, replaced_codepoint_count));
+}
+
+#[cfg(test)]
+mod text_edit_insert_tests {
+    use super::text_edit_codepoint_delta;
+
+    #[test]
+    fn delta_is_codepoints_minus_replaced_characters_with_wrapping_subtraction() {
+        unsafe {
+            assert_eq!(text_edit_codepoint_delta(b"\0".as_ptr(), 0), 0);
+            assert_eq!(text_edit_codepoint_delta(b"abc\0".as_ptr(), 2), 1);
+            assert_eq!(text_edit_codepoint_delta(b"\xc3\xa9\0".as_ptr(), 2), -1);
+            assert_eq!(text_edit_codepoint_delta(b"a\0".as_ptr(), u32::MAX), 2);
+        }
+    }
+}
 #[inline(always)]
 unsafe fn insert_utf16_units(
     this: *mut StringObject, index: i32, source: *const u16, count: i32,

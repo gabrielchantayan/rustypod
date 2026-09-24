@@ -136108,3 +136108,37 @@ functions:
       dispatches it with a NULL target, then calls 0x0806e488 with one.
       The two unported callees remain explicit target/host-test seams;
       no semantic identity was invented for 0x0806e488.
+  - address: 0x081195c4
+    ghidra: FUN_081195c4
+    name: text_edit_insert
+    size: 112
+    sig: "void text_edit_insert(u32 *context, i32 index, u32 replaced_codepoint_count, const u8 *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: index
+      param_3/r2: replaced_codepoint_count
+      param_4/r3: source
+      r4: context
+      r5: source
+      r6: replaced_codepoint_count
+      r7: source_byte_count
+      r8: index
+      r9: source_codepoint_count
+      FUN_08392478: strlen
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_0828a0a4: object_sequence_id_assign
+      FUN_08276900: string_object_erase
+      FUN_08275f48: string_object_insert_bytes
+      FUN_0812dde4: text_edit_offset_adjust
+    notes: >-
+      Raw ARM establishes 0x081195c4..0x08119634 as the complete 112-byte
+      body: six unconditional BL instructions (strlen, UTF-8 count, sequence
+      assignment twice, remove-range, insert-bytes), zero predicated BL
+      instructions, then an unconditional tail B to 0x0812dde4. Ghidra's
+      116-byte extent and three-BL report are not authoritative. The routine
+      assigns the embedded string sequence id, removes the replaced range,
+      inserts source bytes, and tail-dispatches the unported iterator target
+      with source codepoint count minus replaced codepoint count. The target is an
+      explicit injectable boundary; no callee identity was invented.
