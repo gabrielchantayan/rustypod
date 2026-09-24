@@ -1425,6 +1425,9 @@ pub mod hints {
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const BTREE_MOVE_TO_ROOT: usize = 0xa400_0000;
+    // 0xa500_0000: dedicated to ui/refresh_notification_state's target-width
+    // owner and notification-target fixture; mappings never unmap.
+    pub const UI_REFRESH_NOTIFICATION_STATE: usize = 0xa500_0000;
     // 0x5d00_0000: dedicated to sqlite/move_to_child's target-width cursor,
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.

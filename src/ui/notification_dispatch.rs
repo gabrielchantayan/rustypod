@@ -11,7 +11,7 @@ const NOTIFICATION_METHOD_OFFSET: usize = 0x54;
 type NotificationMethod = unsafe extern "C" fn(*mut u8, u32, u32);
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_notification_method(_target: *mut u8, _event: u32, _one: u32) {}
+pub(crate) unsafe extern "C" fn host_notification_method(_target: *mut u8, _event: u32, _one: u32) {}
 
 /// Host-test dispatch seam. The retail vtable method has no recovered semantic
 /// identity, so only the observed ABI is named here.
