@@ -422,6 +422,10 @@ pub mod hints {
     // fixture for field_dc_as_class_4b00; mappings never unmap, so no other
     // user may share this hint.
     pub const FIELD_DC_AS_CLASS_4B00: usize = 0x6d00_0000;
+    // 0x6d10_0000: dedicated to app/context_select_item_and_dispatch's
+    // target-width owner and pair-table fixture; mappings never unmap, so no
+    // other port may share this hint.
+    pub const CONTEXT_SELECT_ITEM_AND_DISPATCH: usize = 0x6d10_0000;
     // 0x7e00_0000 and 0x7e10_0000: dedicated to crypto/bio_handle_write's
     // target-width BIO fixture; mappings never unmap.
     pub const BIO_HANDLE_WRITE: usize = 0x7e00_0000;

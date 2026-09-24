@@ -137809,3 +137809,34 @@ functions:
       wrapper/parser is the volatile RESOURCE_FACE_DISPATCH seam, whose target
       default is the verified 0x080d9fa0 address. Host test covers opening,
       zeroed error forwarding, dispatch arguments, close path, and result.
+  - address: 0x080e4f80
+    ghidra: FUN_080e4f80
+    name: context_select_item_and_dispatch
+    size: 88
+    sig: "u32 context_select_item_and_dispatch(u32 *context, u32 item_index, u32 *output)"
+    module: app/context_select_item_and_dispatch
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1/r4: item_index
+      param_3/r2/r5: output
+      "*context+4": owner
+      owner+0x1a4: first_item_table
+      owner+0x1a8: second_item_table
+      context+0x5dc: item_dispatch
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte extent
+      0x080e4f80..0x080e4fd7; the next independent function begins at
+      0x080e4fd8 with push {r4-r8,lr}. Whole-image aligned ARM decoding finds
+      three inbound plain BL calls at 0x08069d24, 0x0808032c, and 0x080c74e0,
+      with zero predicated inbound BL calls. The body has no direct plain or
+      predicated BL calls; it ends with BX r3 through context+0x5dc. It copies
+      owner+0x1b0..+0x1c4 to context+0x570..+0x584, selects one word from each
+      owner table by item_index, writes the pair to output, then tail-dispatches
+      the pair. The callback has no recovered identity: target builds use the
+      physical target-width callback pointer and host builds use a typed seam.
+      Rust returns normally after the callback rather than tail-branching.
+      match.py prints the reviewed structural diff: LLVM emits six individual
+      volatile metadata copies and a frame-pointer prologue instead of the
+      retail LDM/STM block, while preserving metadata-before-table ordering,
+      indexed pair stores, callback arguments, and terminal BX dispatch.
