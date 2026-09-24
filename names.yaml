@@ -139513,3 +139513,36 @@ functions:
       otherwise it returns 0x27. Target Rust calls the verified unported
       prelude and ROM entries through explicit seams; the host default models
       successful creation.
+
+
+  - address: 0x08089214
+    ghidra: FUN_08089214
+    name: path_facade_slot_54
+    size: 80
+    sig: "u32 path_facade_slot_54(StringObject *path_object, u32 *flag_out, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0/r4: path_object
+      param_2/r1/r5: flag_out
+      param_3/r2: base_hint
+      FUN_08206e40: path_probe_guard_construct
+      FUN_0818a0bc: facade_for_selector
+      FUN_08206e6c: path_probe_guard_destroy
+      facade_vtable[0x54]: path facade operation (semantic identity unresolved)
+      r4: query_status saved across guard destruction
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte instruction extent from
+      0x08089214 through 0x08089260; the next distinct push-prologue starts
+      at 0x08089264. A full-image A32 BL-immediate decode finds exactly three
+      inbound plain unconditional BL calls (0x080891fc, 0x081ee750, and
+      0x081ef218) and zero predicated BL forms. The body constructs the
+      16-byte interface guard with base_hint, fetches facade selector 1, calls
+      vtable slot +0x54 with (facade, path_object, flag_out), destroys the
+      guard, and returns the slot status verbatim. The slot identity is not
+      recovered, so Rust retains the structural name and reuses existing typed
+      guard/facade seams; device defaults preserve the ported/retailOS boundary
+      chain and host defaults fail closed. Host coverage verifies guard/fetch/
+      query/destroy order, all forwarded arguments, the live base hint, and
+      verbatim status propagation; match.py reports the same guarded virtual
+      dispatch structure with expected Rust seam indirections.
