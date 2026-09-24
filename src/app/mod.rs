@@ -298,6 +298,7 @@ pub mod global_callback_dispatch_cleanup;
 pub mod global_callback_unregister;
 pub mod global_timer_cleanup;
 pub mod linked_list_merge_by_word_4;
+pub mod default_context_operation;
 pub mod linked_node_status_set;
 pub mod global_callback_register;
 pub mod status_bit_4b_is_set_if_context_exists;
