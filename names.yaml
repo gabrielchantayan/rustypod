@@ -14338,6 +14338,27 @@ functions:
       deviations: the tail branch is a return-position call and the
       mutex is volatile-copied before locking so LLVM preserves the pair.
 
+  - address: 0x0808747c
+    ghidra: thunk_FUN_08076954
+    name: timer_trace_assert_veneer
+    size: 4
+    sig: "void timer_trace_assert_veneer(u8 *timer)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1: timer
+      FUN_08076954: timer_trace_assert
+    notes: >-
+      Raw osos.dec decodes to one 4-byte `b 0x08076954` word
+      (0xeaffbd34), so its true extent is 0x0808747c..0x08087480; the
+      next real function starts at 0x08087480. A complete ARM B/BL scan
+      finds 3 unconditional bl call sites (0x0811f6cc, 0x08228330, and
+      0x08296754), zero predicated bl call sites, and one unconditional
+      tail b at 0x0812bf98. It forwards the unguarded timer pointer to
+      ported timer_trace_assert at 0x08076954 without changing stack or
+      lr. Deliberate deviation: Rust emits a return-position call and a
+      dedicated section retains this independently hookable seam.
+
   - address: 0x08074ba0
     ghidra: FUN_08074ba0
     name: retail_vsnprintf
