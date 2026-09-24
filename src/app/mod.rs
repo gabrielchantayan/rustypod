@@ -523,6 +523,7 @@ pub mod resource_handle_pair_reset_notify;
 pub mod root_context_f9c_bound;
 pub mod resource_range_validate_position;
 pub mod resource_chain;
+pub mod string_object_construct_from_resource_or_cstr;
 pub mod resource_index_lookup;
 pub mod resource_child_size_lookup;
 pub mod resource_path_lookup;

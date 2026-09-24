@@ -22701,6 +22701,39 @@ functions:
       osos.dec. Rust's final tail branch is an ordinary call+return;
       its observable destruction order and void ABI are identical.
 
+  - address: 0x080c6308
+    ghidra: FUN_080c6308
+    name: string_object_construct_from_resource_or_cstr
+    size: 60
+    sig: "StringObject *string_object_construct_from_resource_or_cstr(StringObject *out, uintptr_t source, uint32_t use_resource)"
+    module: app/string_object_construct_from_resource_or_cstr
+    status: ported
+    vars:
+      param_1/r0: out
+      param_2/r1: source
+      param_3/r2: use_resource
+      r4: source
+      r5: out
+      DAT_080c6344: string_object_vtable (0x089ca8a0)
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_082a50b0: string_object_c_str
+      FUN_0827735c: string_object_construct_from_cstr
+    notes: >-
+      Raw osos.dec establishes the full 60-byte extent
+      0x080c6308..0x080c6344: code runs through the tail branch at
+      0x080c6340 and 0x080c6344 is its vtable literal; the next real
+      function begins with push {r4,lr} at 0x080c6348. Ghidra's final
+      call is wrong: raw ARM tail-branches to string_object_construct_from_cstr
+      @ 0x0827735c, not string_object_assign_payload @ 0x08276474.
+      With r2 zero, r1 is a C-string pointer; otherwise r1 is a string
+      resource id resolved through task_ctx_field_0x30 and
+      resource_chain_find_string before construction. Exactly three inbound
+      BL call sites are plain and unconditional (0x08126f68, 0x0812705c,
+      0x08127180), with zero predicated BL forms, verified by decoding every
+      ARM B/BL immediate in osos.dec. Rust's ordinary call replaces the final
+      tail branch but preserves the constructor's effects and returned out.
+
   - address: 0x080c6348
     ghidra: FUN_080c6348
     name: service_context_get
