@@ -19962,6 +19962,33 @@ functions:
       count. The Rust port uses named repr(C) fields, so 64-bit host pointers
       never corrupt the target's four-byte layout; host tests cover enabled
       extra points and signed negative offsets with disabled extra points.
+  - address: 0x080dc8a4
+    ghidra: FUN_080dc8a4
+    name: wheel_sample_latch
+    size: 48
+    sig: "void wheel_sample_latch(u32 *elapsed_out, u32 *state_out)"
+    module: kernel/wheel_sample
+    status: ported
+    renames:
+      param_1/r0: elapsed_out
+      param_2/r1: state_out
+      DAT_080dc8d4: wheel_input_state
+      FUN_080e5c64: wheel_input_capture
+      FUN_08282a70: timer_latch_delta
+    notes: >-
+      Raw osos.dec words establish the 48-byte body at
+      0x080dc8a4..0x080dc8d4: `push {r4,lr}; mov r4,r0; bl 0x080e5c64;
+      ldr r0,[pc,#0x1c]; ldr r0,[r0,#0x10]; cmp r0,#0; popeq {r4,pc};
+      bl 0x08282a70; ldr r1,[r4]; add r0,r0,r1; str r0,[r4]; pop
+      {r4,pc}`. The literal is 0x089caedc. Decoding every ARM B/BL
+      immediate independently finds three incoming plain BL calls
+      (0x080618ec, 0x0812c0b0, 0x08292a9c) and no incoming predicated BL;
+      0x0808783c is a tail B to 0x080618d0, not a call site. Algorithm:
+      capture elapsed ticks and transformed wheel state, then add the
+      timer-latch delta only when [0x089caedc+0x10] is nonzero. Host builds
+      inject the two unported, raw-verified callees through WHEEL_SAMPLE_OPS;
+      target builds call 0x080e5c64 and 0x08282a70 directly. Tests cover the
+      NULL gate, capture-before-gate ordering, and wrapping accumulation.
   - address: 0x0804ced4
     ghidra: FUN_0804ced4
     name: ft_linked_module_find_by_class
