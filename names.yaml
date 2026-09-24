@@ -139659,3 +139659,32 @@ functions:
       result to one. Rust calls the target predicate through its fixed address
       and uses host seams for the runtime word and predicate; no subsystem
       identity is inferred.
+  # --- MOV parser stream position report ---
+  - address: 0x080877f4
+    ghidra: FUN_080877f4
+    name: stream_position_report
+    size: 60
+    sig: "void stream_position_report(MovParser *parser)"
+    module: mov/stream_position_report
+    status: ported
+    renames:
+      param_1/r0: parser
+      "[parser + 0x40000]": buffered_stream
+      local_10: position_bytes_low
+      iStack_c: position_bytes_high
+      FUN_08042e70: buffered_stream_tell
+      FUN_081fa3b0: range_tracker_get (unported)
+      FUN_081fa378: range_tracker_update (unported)
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: 15 ARM words from
+      stmdb sp!,{r2,r3,r4,lr} at 0x080877f4 through ldmia
+      sp!,{r2,r3,r4,pc} at 0x0808782c; 0x08087830 begins the next function.
+      Decoding aligned ARM B/BL-immediate words finds exactly three inbound
+      direct calls, all unconditional bl (0x080946e8, 0x08094d9c, and
+      0x08095420), with no predicated BL calls. The routine obtains the
+      buffered stream's 64-bit logical byte position, ignores tell errors,
+      converts its low word to KiB, then updates range 3 of the lazily
+      obtained range tracker. The two tracker calls are unported volatile host
+      seams targeting verified retailOS addresses; LLVM consequently emits
+      indirect calls and a different prologue from retailOS. Deliberate
+      deviations: none.
