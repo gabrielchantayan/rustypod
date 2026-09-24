@@ -3204,6 +3204,36 @@ functions:
       0x0803a7f0 parser and its descriptor ABI; neither its semantic
       identity nor a Rust seam is established, so this thunk must remain
       identified rather than inventing a callee.
+  - address: 0x080a8294
+    ghidra: FUN_080a8294
+    name: cff_index_get_name
+    size: 132
+    sig: "char *cff_index_get_name(CffIndex *index, u32 element)"
+    module: ft/cff_index
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: element
+      local_20/[sp]: error
+      local_1c/[sp+4]: byte_len
+      local_18/[sp+8]: bytes
+      FUN_080d3e9c: cff_index_access_element
+      FUN_082cfaa4: ft_mem_alloc
+      thunk_EXT_FUN_22000020: __rt_memcpy
+      FUN_080d3f60: cff_index_forget_element
+    notes: >-
+      Raw words at 0x080a8294..0x080a8318 establish the 132-byte extent;
+      0x080a8318 begins the next distinct stmdb prologue. Decoding each word
+      independently finds four outgoing plain BL calls and no predicated BL
+      calls: cff_index_access_element (0x080d3e9c), ft_mem_alloc
+      (0x082cfaa4), the __rt_memcpy veneer (0x08037db0 -> 0x22000020), and
+      cff_index_forget_element (0x080d3f60). Accesses a custom CFF SID,
+      allocates and NUL-terminates an owned copy through index->stream->memory,
+      then releases the temporary frame even after allocation failure. The
+      port uses volatile calls to existing Rust seams rather than the four
+      direct retail BL instructions, preventing LLVM inlining and memcpy
+      builtin substitution while preserving their observable order. The
+      cff_sid_to_string custom-SID caller now calls this port directly.
   - address: 0x080a83c0
     ghidra: FUN_080a83c0
     name: configured_path_prefix_matches
