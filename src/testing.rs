@@ -2017,6 +2017,9 @@ pub mod hints {
     // and byte-range fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const REVERSE_BYTE_CURSOR_POP: usize = 0x9d20_0000;
+    // 0x9d50_0000: dedicated to util/byte_bit_set_mask's raw-u32 byte-bitset
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const BYTE_BIT_SET_MASK: usize = 0x9d50_0000;
     // 0xc400_0000: dedicated to ui/plst_find_by_persistent_id's raw-u32
     // 'tdat' element and linked 'plst' chain fixture; mappings never
     // unmap, so no other test may reuse this hint.
