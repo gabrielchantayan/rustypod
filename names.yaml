@@ -109618,6 +109618,34 @@ functions:
       only the MMIO word with a volatile stand-in. #[inline(never)] and a
       distinct link section preserve this direct-call hook target.
 
+  - address: 0x080ffb2c
+    ghidra: FUN_080ffb2c
+    name: secondary_record_value_lookup
+    size: 52
+    sig: "i32 secondary_record_value_lookup(u32 key)"
+    module: util/secondary_record_value_lookup
+    status: ported
+    renames:
+      param_1/r0: key
+      DAT_080ffb60: secondary_table
+      "secondary_table+0x00": value
+      "secondary_table+0x02": key
+    notes: >-
+      Raw ARM is exactly 52 instruction bytes at 0x080ffb2c..0x080ffb60:
+      its terminating bx lr is at 0x080ffb5c, followed by the literal
+      secondary-table address 0x083e9d14 and a distinct push {r4,r5,r6,lr}
+      function at 0x080ffb64. It linearly searches 32 four-byte records,
+      comparing the full u32 argument with each unsigned +0x02 halfword and
+      returning the matching record's signed +0x00 halfword; a miss returns
+      0x7fffffff. Decoding the aligned ARM B/BL immediates in osos.dec finds
+      three inbound direct calls, all unconditional plain bl at 0x080ffe28,
+      0x08203b7c, and 0x08203c90; there are no predicated forms. The target
+      reads the stock absolute table. Host builds use a private
+      layout-identical table so tests cover first-match precedence,
+      sign-extension, full-width key comparison, and misses. match.py reports
+      the same linear scan and sentinel return; LLVM additionally emits a
+      frame and uses a separate equality return block. No callee seam exists.
+
   - address: 0x080ffcf0
     ghidra: FUN_080ffcf0
     name: indexed_record_value_lookup
