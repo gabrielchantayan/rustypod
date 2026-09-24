@@ -17,20 +17,13 @@
 //!
 //! # Deliberate deviation
 //!
-//! The three SHA-1 primitives are not yet ported. Target builds therefore
-//! reach their stock entries through volatile seams, retaining the original
-//! call boundaries; host tests replace those seams to observe the ABI.
+//! `SHA1_Init` and `SHA1_Final` remain stock-entry seams. `SHA1_Update` is
+//! ported locally; its block transform remains an explicit stock-entry seam.
 
-/// The exact 352-byte stack context used by the retail wrapper.
-#[repr(C, align(4))]
-pub struct Sha1Context {
-    words: [u32; 88],
-}
+use super::sha1_update::{sha1_update, Sha1Context};
 
 /// Stock `SHA1_Init(context)` entry point.
 pub type Sha1InitFn = unsafe extern "C" fn(*mut Sha1Context);
-/// Stock `SHA1_Update(context, input, input_len)` entry point.
-pub type Sha1UpdateFn = unsafe extern "C" fn(*mut Sha1Context, *const u8, u32);
 /// Stock `SHA1_Final(context, output)` entry point.
 pub type Sha1FinalFn = unsafe extern "C" fn(*mut Sha1Context, *mut u8);
 
@@ -43,25 +36,6 @@ unsafe extern "C" fn firmware_sha1_init(context: *mut Sha1Context) {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_sha1_init(_context: *mut Sha1Context) {
     panic!("sha1_digest requires SHA1_Init worker 0x080ec1bc")
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_sha1_update(
-    context: *mut Sha1Context,
-    input: *const u8,
-    input_len: u32,
-) {
-    let update: Sha1UpdateFn = unsafe { core::mem::transmute(0x080f_4fd8usize) };
-    unsafe { update(context, input, input_len) };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_sha1_update(
-    _context: *mut Sha1Context,
-    _input: *const u8,
-    _input_len: u32,
-) {
-    panic!("sha1_digest requires SHA1_Update worker 0x080f4fd8")
 }
 
 #[cfg(target_os = "none")]
@@ -81,12 +55,6 @@ pub static mut SHA1_INIT: Sha1InitFn = firmware_sha1_init;
 #[cfg(not(target_os = "none"))]
 pub static mut SHA1_INIT: Sha1InitFn = missing_sha1_init;
 
-/// Active `SHA1_Update` seam. Host tests replace it with an ABI recorder.
-#[cfg(target_os = "none")]
-pub static mut SHA1_UPDATE: Sha1UpdateFn = firmware_sha1_update;
-#[cfg(not(target_os = "none"))]
-pub static mut SHA1_UPDATE: Sha1UpdateFn = missing_sha1_update;
-
 /// Active `SHA1_Final` seam. Host tests replace it with an ABI recorder.
 #[cfg(target_os = "none")]
 pub static mut SHA1_FINAL: Sha1FinalFn = firmware_sha1_final;
@@ -96,11 +64,6 @@ pub static mut SHA1_FINAL: Sha1FinalFn = missing_sha1_final;
 #[inline(always)]
 unsafe fn sha1_init() -> Sha1InitFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SHA1_INIT)) }
-}
-
-#[inline(always)]
-unsafe fn sha1_update() -> Sha1UpdateFn {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SHA1_UPDATE)) }
 }
 
 #[inline(always)]
@@ -126,7 +89,7 @@ pub unsafe extern "C" fn sha1_digest(input: *const u8, input_len: u32, output: *
     let context = context.as_mut_ptr();
     unsafe {
         sha1_init()(context);
-        sha1_update()(context, input, input_len);
+        sha1_update(context, input, input_len);
         sha1_final()(context, output);
     }
 }
@@ -140,13 +103,10 @@ mod tests {
     use parking_lot::Mutex;
 
     static SHA1_DIGEST_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut CALL_SEQUENCE: [u8; 3] = [0; 3];
+    static mut CALL_SEQUENCE: [u8; 2] = [0; 2];
     static mut CALL_COUNT: usize = 0;
     static mut INIT_CONTEXT: *mut Sha1Context = ptr::null_mut();
-    static mut UPDATE_CONTEXT: *mut Sha1Context = ptr::null_mut();
     static mut FINAL_CONTEXT: *mut Sha1Context = ptr::null_mut();
-    static mut UPDATE_INPUT: *const u8 = ptr::null();
-    static mut UPDATE_LEN: u32 = 0;
     static mut FINAL_OUTPUT: *mut u8 = ptr::null_mut();
 
     unsafe fn record_call(kind: u8) {
@@ -164,20 +124,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn record_sha1_update(
-        context: *mut Sha1Context,
-        input: *const u8,
-        input_len: u32,
-    ) {
-        unsafe {
-            record_call(2);
-            UPDATE_CONTEXT = context;
-            UPDATE_INPUT = input;
-            UPDATE_LEN = input_len;
-            assert_eq!((*context).words[0], 0x0123_4567);
-        }
-    }
-
     unsafe extern "C" fn record_sha1_final(context: *mut Sha1Context, output: *mut u8) {
         unsafe {
             record_call(3);
@@ -186,14 +132,13 @@ mod tests {
         }
     }
 
-    struct Sha1SeamReset(Sha1InitFn, Sha1UpdateFn, Sha1FinalFn);
+    struct Sha1SeamReset(Sha1InitFn, Sha1FinalFn);
 
     impl Drop for Sha1SeamReset {
         fn drop(&mut self) {
             unsafe {
                 SHA1_INIT = self.0;
-                SHA1_UPDATE = self.1;
-                SHA1_FINAL = self.2;
+                SHA1_FINAL = self.1;
             }
         }
     }
@@ -204,14 +149,12 @@ mod tests {
         let saved = unsafe {
             (
                 core::ptr::read_volatile(core::ptr::addr_of!(SHA1_INIT)),
-                core::ptr::read_volatile(core::ptr::addr_of!(SHA1_UPDATE)),
                 core::ptr::read_volatile(core::ptr::addr_of!(SHA1_FINAL)),
             )
         };
-        let _reset = Sha1SeamReset(saved.0, saved.1, saved.2);
+        let _reset = Sha1SeamReset(saved.0, saved.1);
         unsafe {
             SHA1_INIT = record_sha1_init;
-            SHA1_UPDATE = record_sha1_update;
             SHA1_FINAL = record_sha1_final;
         }
 
@@ -219,22 +162,16 @@ mod tests {
         let mut output = [0u8; 20];
         for (input_ptr, input_len) in [(input.as_ptr(), 3), (ptr::null(), 0)] {
             unsafe {
-                CALL_SEQUENCE = [0; 3];
+                CALL_SEQUENCE = [0; 2];
                 CALL_COUNT = 0;
                 INIT_CONTEXT = ptr::null_mut();
-                UPDATE_CONTEXT = ptr::null_mut();
                 FINAL_CONTEXT = ptr::null_mut();
-                UPDATE_INPUT = ptr::null();
-                UPDATE_LEN = 0;
                 FINAL_OUTPUT = ptr::null_mut();
                 sha1_digest(input_ptr, input_len, output.as_mut_ptr());
-                assert_eq!(CALL_SEQUENCE, [1, 2, 3]);
-                assert_eq!(CALL_COUNT, 3);
-                assert_eq!(UPDATE_INPUT, input_ptr);
-                assert_eq!(UPDATE_LEN, input_len);
+                assert_eq!(CALL_SEQUENCE, [1, 3]);
+                assert_eq!(CALL_COUNT, 2);
                 assert_eq!(FINAL_OUTPUT, output.as_mut_ptr());
-                assert_eq!(INIT_CONTEXT, UPDATE_CONTEXT);
-                assert_eq!(UPDATE_CONTEXT, FINAL_CONTEXT);
+                assert_eq!(INIT_CONTEXT, FINAL_CONTEXT);
                 assert_eq!((INIT_CONTEXT as usize) & 3, 0);
             }
         }
