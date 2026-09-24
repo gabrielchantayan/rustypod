@@ -137,6 +137,7 @@ pub mod callback_target_reset;
 pub mod active_state_reset_and_dispatch;
 pub mod selection_state_reset_and_dispatch;
 pub mod selection_state_refresh;
+pub mod selection_state_apply_index_and_dispatch;
 pub mod pending_transition_advance;
 pub mod locked_callback_predicate;
 pub mod glyph_range_contains_character;
