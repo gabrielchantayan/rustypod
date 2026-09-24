@@ -1327,6 +1327,26 @@ pub unsafe extern "C" fn timer_trace_assert(timer: *mut u8) {
     (timer_ops().trace_validate)(timer);
     mutex_unlock(&mut pending_mutex);
 }
+/// timer_trace_assert_veneer — original: `thunk_FUN_08076954` @
+/// 0x0808747c (**4 bytes**, one `b 0x08076954`; the next real function
+/// starts at 0x08087480).
+///
+/// **3 direct `bl` call sites, all unconditional; 0 predicated `bl` call
+/// sites and 1 tail `b` call site** (@ 0x0812bf98), verified by decoding
+/// every ARM `B`/`BL` word in `work/firmware/osos.dec`.
+///
+/// Transfers the unguarded `timer` argument to the already-ported
+/// [`timer_trace_assert`] without changing `lr`, stack, or the eventual
+/// return. Deliberate deviation: Rust represents the tail branch as a
+/// return-position call. The dedicated section prevents LLVM from folding
+/// this independently hookable veneer into its target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.timer_trace_assert_veneer")]
+#[inline(never)]
+pub unsafe extern "C" fn timer_trace_assert_veneer(timer: *mut u8) {
+    unsafe { timer_trace_assert(timer) }
+}
+
 
 /// timer_stop — original: `FUN_0812c6b0` @ 0x0812c6b0 (76 bytes).
 ///
@@ -1562,7 +1582,8 @@ mod tests {
     use super::*;
     use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
     use crate::testing::TIMER_OPS_TEST_LOCK as OPS_LOCK;
-    use std::sync::Mutex as StdMutex;
+    use parking_lot::Mutex as StdMutex;
+    use std::sync::MutexGuard as StdMutexGuard;
     use std::vec;
     use std::vec::Vec;
 
@@ -1606,11 +1627,11 @@ mod tests {
     static CALLS: StdMutex<Vec<Call>> = StdMutex::new(Vec::new());
 
     fn record(call: Call) {
-        CALLS.lock().unwrap().push(call);
+        CALLS.lock().push(call);
     }
 
     fn calls() -> Vec<Call> {
-        CALLS.lock().unwrap().clone()
+        CALLS.lock().clone()
     }
 
     /// Handle the mock sema ops see. Tests install the class-mutex cell
@@ -1711,9 +1732,9 @@ mod tests {
 
     /// Resets the mock state, installs the mock tables and a live class
     /// mutex, returns the lock guard that serializes table-swapping tests.
-    fn mock_env() -> std::sync::MutexGuard<'static, ()> {
+    fn mock_env() -> StdMutexGuard<'static, ()> {
         let guard = OPS_LOCK.lock().unwrap();
-        CALLS.lock().unwrap().clear();
+        CALLS.lock().clear();
         unsafe {
             let mut rom = core::ptr::addr_of!(ROM_KERNEL).read_volatile();
             rom.sema_wait = mock_sema_wait;
@@ -1804,6 +1825,36 @@ mod tests {
     fn trace_assert_forwards_null_without_a_guard() {
         let _lock = mock_env();
         unsafe { timer_trace_assert(core::ptr::null_mut()) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(0),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
+    }
+
+    /// The one-word veneer preserves its unguarded argument while forwarding
+    /// directly into the trace/assert helper.
+    #[test]
+    fn trace_assert_veneer_forwards_timer_and_null() {
+        let _lock = mock_env();
+        let mut timer = MockTimer::new(TIMER_STATE_RUNNING, 0);
+        let timer_ptr = timer.ptr();
+
+        unsafe { timer_trace_assert_veneer(timer_ptr) };
+        assert_eq!(
+            calls(),
+            vec![
+                Call::Wait(PENDING_MOCK_HANDLE),
+                Call::Validate(timer_ptr as usize),
+                Call::Signal(PENDING_MOCK_HANDLE),
+            ]
+        );
+
+        CALLS.lock().clear();
+        unsafe { timer_trace_assert_veneer(core::ptr::null_mut()) };
         assert_eq!(
             calls(),
             vec![
