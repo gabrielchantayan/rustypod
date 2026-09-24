@@ -140779,3 +140779,32 @@ functions:
       tags retain successful primary status. The unresolved callees remain
       verified address seams on ARM and replaceable host seams; `read_word`
       deliberately retains the target's unaligned +10 input for wide tags.
+
+  - address: 0x0805b73c
+    ghidra: FUN_0805b73c
+    name: validated_file_tell
+    size: 40
+    sig: "i32 validated_file_tell(const void *handle, u32 *position)"
+    module: fs/validated_file_tell
+    status: ported
+    renames:
+      param_1/r0/r4: handle
+      param_2/r1/r5: position
+      "handle+0x04": cursor_query_handle
+      FUN_08087974: opaque_handle_validate
+      FUN_0805a5f4: retail_cursor_query
+    notes: >-
+      Raw osos.dec words establish the 40-byte A32 body
+      0x0805b73c..0x0805b763: push {r4-r6,lr}, one plain bl to the
+      opaque handle validator at 0x08087974, then a tail branch to the
+      cursor-query wrapper at 0x0805a5f4; 0x0805b764 starts the next real
+      function. Ghidra's 104-byte extent incorrectly includes that sibling
+      and its two additional bl instructions. Whole-image A32 decoding finds
+      three inbound plain bl calls at 0x08042e20, 0x08042ea4, and 0x08043244,
+      with no predicated inbound calls; the true body has one plain outbound
+      bl and no predicated outbound calls. The validator's ABI and return
+      semantics are verified, but its broader identity is intentionally not
+      claimed; a nonzero status returns unchanged. On success the +0x04 word
+      and output pair are forwarded to the verified still-retail wrapper.
+      Rust uses a direct call-and-return rather than the ARM tail branch and
+      exposes fixed-address device seams plus host recording seams.

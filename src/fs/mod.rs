@@ -71,6 +71,8 @@ pub mod file_read;
 pub mod resource_reader_read_exact;
 /// Absolute resource-reader file seek @ 0x082a6ad8.
 pub mod resource_reader_seek_absolute;
+/// Validated outer-handle cursor query wrapper @ 0x0805b73c.
+pub mod validated_file_tell;
 /// HFS B-tree node fetch and validation @ 0x08053d6c.
 pub mod hfs_btree_get_node;
 /// HFS B-tree node free-space probe @ 0x08053e14.
