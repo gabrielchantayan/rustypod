@@ -60,6 +60,10 @@
 //! - `malloc_tag4` — original: `FUN_0805d1d4` @ 0x0805d1d4 (8 bytes;
 //!   23 `bl` call sites). The family's plain-alloc entry:
 //!   `mov r1, #4; b 0x080eb67c` (tail call `malloc_wrapper`).
+//! - `memh_free_if_nonnull` — original: `FUN_080df290` @ 0x080df290
+//!   (12 bytes, 3 plain `bl` call sites, no predicated `bl`). A second
+//!   NULL-guarded front-end to the tag-4 free veneer.
+
 //! - `cxx_vec_delete` — original: `FUN_0803170c` @ 0x0803170c (16 bytes).
 //!   C++ `delete[]` with destructors: cookie-driven `__cpp_finalise` walk
 //!   via the null-guard veneer @ 0x082ab254, then the tag-3 delete.
@@ -923,6 +927,38 @@ pub unsafe extern "C" fn free_tag4_if_nonnull(ptr: *mut u8) {
         free_tag4(ptr);
     }
 }
+/// memh_free_if_nonnull — original: `FUN_080df290` @ `0x080df290` (12
+/// bytes; 3 plain `bl` call sites and no predicated `bl`, verified by
+/// decoding ARM B/BL words in osos.dec). Whole body:
+///
+/// ```text
+/// 080df290:  cmp r0, #0
+/// 080df294:  bne 0x0805d070    ; free_tag4(ptr)
+/// 080df298:  bx  lr
+/// ```
+///
+/// Releases a non-NULL MemH/tag-4 allocation. NULL returns without
+/// initializing or freeing through the heap. `0x080df29c` starts a distinct
+/// function (`mov r2, r1`), so the three decoded words are the full extent.
+///
+/// Deliberate deviation: Rust uses a guarded call because it does not
+/// guarantee the retail conditional tail branch. This has the same verified
+/// algorithm as [`free_tag4_if_nonnull`] at 0x0804938c, but remains a
+/// separately exported BL target for this retail entry. A target-only empty
+/// assembly barrier prevents LLVM from folding the two hooked entries; it
+/// emits no instruction or observable behavior.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn memh_free_if_nonnull(ptr: *mut u8) {
+    #[cfg(target_os = "none")]
+    unsafe {
+        core::arch::asm!("", options(nomem, nostack, preserves_flags));
+    }
+    if !ptr.is_null() {
+        free_tag4(ptr);
+    }
+}
+
 
 /// calloc_tag4 — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes; 23 `bl`
 /// call sites, binary-verified by decoding every B/BL word in osos.dec —
@@ -2057,6 +2093,23 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_TAG, 4);
         }
     }
+    #[test]
+    fn memh_free_if_nonnull_matches_the_second_tag4_null_guard() {
+        let _lock = mock_heap();
+        unsafe {
+            memh_free_if_nonnull(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0, "NULL returns before heap initialization");
+            assert_eq!(CREATE_CALLS, 0);
+
+            memh_free_if_nonnull(BLOCK_A as *mut u8);
+            assert_eq!(FREE_CALLS, 1);
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(LAST_FREE_HEAP, core::ptr::addr_of_mut!(FAKE_HANDLE));
+            assert_eq!(LAST_FREE_PTR, BLOCK_A as *mut u8);
+            assert_eq!(LAST_FREE_TAG, 4);
+        }
+    }
+
 
     #[test]
     fn calloc_tag4_allocates_zerofilled_with_tag_4_and_runs_the_lazy_init() {
