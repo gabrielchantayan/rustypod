@@ -10477,6 +10477,32 @@ functions:
     module: heap/veneers
     status: ported
 
+  - address: 0x080ee2a0
+    ghidra: FUN_080ee2a0
+    name: global_indirect_state_word_get
+    size: 16
+    sig: "u32 global_indirect_state_word_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_080ee2b0: global_indirect_holder_literal
+      DAT_089d03bc: global_indirect_holder
+      iVar1/r0: opaque_state
+      uVar2/r0: state_word
+    notes: >-
+      Raw ARM confirms the 16-byte instruction body at 0x080ee2a0: `ldr
+      r0,[pc,#8]` (literal 0x089d03bc at 0x080ee2b0), `ldr r0,[r0,#4]`,
+      `ldr r0,[r0,#0]`, `bx lr`; the literal is data and the independently
+      linked next function starts at 0x080ee2b4. It performs two unchecked
+      pointer dereferences and returns the opaque state object's +0x0 raw u32,
+      with no ownership or bit meaning inferred. Whole-image decoding finds
+      exactly three inbound B/BL-immediate calls, all unconditional `bl`
+      (none predicated): 0x08074d74, 0x08074ef8, and 0x0836a100. The
+      0x089d03bc runtime holder reuses heap/state's packed crate-static model
+      preserving its +4 pointer slot; host tests rebind that exact slot, prove
+      +0x4 is not read, retain all u32 bits, and prove each call rereads the
+      indirection.
+
   - address: 0x080ee2b4
     ghidra: FUN_080ee2b4
     name: global_indirect_status_get

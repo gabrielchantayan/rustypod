@@ -28,6 +28,9 @@ const HOLDER_STATE_OFFSET: usize = 4;
 
 /// Byte offset of the returned raw word inside the opaque state object.
 const STATE_WORD_OFFSET: usize = 0x3c;
+/// Byte offset of the returned raw word at the start of the opaque state object.
+const STATE_ZERO_WORD_OFFSET: usize = 0;
+
 /// Byte offset of the status word inside the opaque state object.
 const STATE_STATUS_OFFSET: usize = 0x18;
 
@@ -87,6 +90,32 @@ pub unsafe extern "C" fn global_indirect_word_get() -> u32 {
     let state = global_indirect_state();
     (state.add(STATE_WORD_OFFSET) as *const u32).read()
 }
+
+/// global_indirect_state_word_get — original: `FUN_080ee2a0` @ 0x080ee2a0
+/// (16-byte instruction body; the literal at 0x080ee2b0 is data, and the
+/// independently linked next function begins at 0x080ee2b4).
+///
+/// Raw ARM is `ldr r0,[pc,#8]; ldr r0,[r0,#4]; ldr r0,[r0,#0]; bx lr`.
+/// Whole-image decoding of ARM B/BL-immediate words finds three inbound
+/// calls, all unconditional `bl` (none predicated): 0x08074d74, 0x08074ef8,
+/// and 0x0836a100.
+///
+/// Performs precisely the original's two unchecked pointer dereferences:
+/// the global holder's +4 state pointer, then that state's raw `u32` at +0.
+/// The port deliberately preserves the raw word without a null guard, cache,
+/// ownership model, or bit interpretation.
+///
+/// # Safety
+/// The holder's +4 slot must contain a non-null pointer to at least four
+/// readable bytes, aligned for the raw `u32` load. This is the original ARM
+/// load contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_indirect_state_word_get() -> u32 {
+    let state = global_indirect_state();
+    (state.add(STATE_ZERO_WORD_OFFSET) as *const u32).read()
+}
+
 
 /// global_indirect_status_get — original: `FUN_080ee2b4` @ 0x080ee2b4
 /// (16-byte instruction body, followed by the separately located literal at
@@ -193,6 +222,35 @@ mod tests {
             assert_eq!(global_indirect_status_get(), 0);
             replace_state(second.as_mut_ptr().cast());
             assert_eq!(global_indirect_status_get(), 0x8000_0015);
+            replace_state(old);
+        }
+    }
+
+    #[test]
+    fn loads_the_published_state_raw_word_at_zero() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = [0u32; 2];
+        state[0] = 0xa5a5_5a5a; // +0 is the raw result.
+        state[1] = 0x1111_1111; // +4 must not be selected.
+
+        unsafe {
+            let old = replace_state(state.as_mut_ptr().cast());
+            assert_eq!(global_indirect_state_word_get(), 0xa5a5_5a5a);
+            replace_state(old);
+        }
+    }
+
+    #[test]
+    fn state_word_get_rereads_the_holder_pointer_for_each_call() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut first = [0u32; 1];
+        let mut second = [u32::MAX; 1];
+
+        unsafe {
+            let old = replace_state(first.as_mut_ptr().cast());
+            assert_eq!(global_indirect_state_word_get(), 0);
+            replace_state(second.as_mut_ptr().cast());
+            assert_eq!(global_indirect_state_word_get(), u32::MAX);
             replace_state(old);
         }
     }
