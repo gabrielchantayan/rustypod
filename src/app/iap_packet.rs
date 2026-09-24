@@ -79,14 +79,6 @@ pub const LINGO_EXTENDED_INTERFACE: u8 = 0x04;
 /// pattern — see `drivers/display_layer.rs` and `heap/alloc_core.rs`).
 #[derive(Clone, Copy)]
 pub struct IapPacketOps {
-    /// `FUN_080f745c` @ 0x080f745c (3 `bl` call sites — this factory and
-    /// the siblings @ 0x080f6f2c and 0x080f6f8c): the default constructor.
-    /// Zeroes the object, arms +0x0e = 0xff and +0x10 = 0xffff, and bumps
-    /// the live-packet counter @ 0x089ccc24. Its whole body is stores
-    /// through r0 followed by `bx lr`, so it returns its argument
-    /// unchanged — which is the only thing this factory observes.
-    /// Default: identity, no writes.
-    pub construct: unsafe extern "C" fn(storage: *mut u8) -> *mut u8,
     /// `FUN_080f73a0` @ 0x080f73a0 (2 `bl` call sites — this factory and
     /// the forwarder @ 0x080f6efc): the initializer. Releases any payload
     /// already held, stores owner/context/lingo/command, zeroes +0x1c and
@@ -115,9 +107,6 @@ pub struct IapPacketOps {
     pub release: unsafe extern "C" fn(packet: *mut u8),
 }
 
-unsafe extern "C" fn construct_stub(storage: *mut u8) -> *mut u8 {
-    storage
-}
 
 unsafe extern "C" fn init_stub(
     _packet: *mut u8,
@@ -133,9 +122,8 @@ unsafe extern "C" fn init_stub(
 
 unsafe extern "C" fn release_stub(_packet: *mut u8) {}
 
-/// Wired defaults: the documented stubs for the three unported callees.
+/// Wired defaults: the documented stubs for the two unported callees.
 pub(crate) const DEFAULT_IAP_PACKET_OPS: IapPacketOps = IapPacketOps {
-    construct: construct_stub,
     init: init_stub,
     release: release_stub,
 };
@@ -155,9 +143,8 @@ unsafe fn iap_packet_ops() -> IapPacketOps {
 /// 0x080f74a8 — and the destructor @ 0x080f74ac — pool word @
 /// 0x080f74d0).
 ///
-/// A fixed address on target, not a crate static: the constructor is
-/// still stock firmware and increments the real word, so the hooked
-/// destructor must decrement that same word or the pairing breaks.
+/// A fixed address on target, not a crate static: both the ported
+/// constructor and destructor must update the same word.
 #[cfg(target_os = "none")]
 const IAP_PACKET_LIVE_COUNT: *mut u32 = 0x089c_cc24 as *mut u32;
 
@@ -178,6 +165,46 @@ fn iap_packet_live_count_ptr() -> *mut u32 {
         core::ptr::addr_of_mut!(IAP_PACKET_LIVE_COUNT)
     }
 }
+/// iap_packet_construct — original: `FUN_080f745c` @ 0x080f745c
+/// (**76 bytes, 0x080f745c..0x080f74a8** — 19 instructions followed by the
+/// literal-pool word 0x089ccc24 @ 0x080f74a8). The next real function opens
+/// at 0x080f74ac with `push {r4,lr}`. **3 plain `bl` call sites and 0
+/// predicated `bl` call sites**, independently counted by decoding every ARM
+/// branch word in `osos.dec`.
+///
+/// Initializes every packet field: clears its pointer, length, and flag
+/// fields; leaves its three padding gaps untouched; sets the no-lingo and
+/// no-command sentinels at +0x0e/+0x10; increments the live-packet counter
+/// at 0x089ccc24; then returns `packet`.
+///
+/// # Deviations
+///
+/// Host builds use [`IAP_PACKET_LIVE_COUNT`] for the fixed target counter.
+///
+/// # Safety
+///
+/// `packet` must point to a writable, 4-byte-aligned 36-byte iAP packet.
+/// Like the original, this has no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_construct(packet: *mut u8) -> *mut u8 {
+    packet.cast::<u32>().write(0);
+    packet.add(4).cast::<u32>().write(0);
+    packet.add(8).cast::<u32>().write(0);
+    packet.add(12).cast::<u16>().write(0);
+    packet.add(14).write(0xff);
+    packet.add(16).cast::<u16>().write(0xffff);
+    packet.add(20).cast::<u32>().write(0);
+    packet.add(24).cast::<u16>().write(0);
+    packet.add(26).write(0);
+    packet.add(28).cast::<u32>().write(0);
+    packet.add(32).cast::<u32>().write(0);
+
+    let counter = iap_packet_live_count_ptr();
+    counter.write_volatile(counter.read_volatile().wrapping_add(1));
+    packet
+}
+
 
 /// iap_packet_destruct — original: `FUN_080f74ac` @ 0x080f74ac
 /// (**36 bytes, 0x080f74ac..0x080f74d0** — 9 instructions, followed by its
@@ -365,10 +392,8 @@ pub unsafe extern "C" fn iap_packet_init_with_compact_payload(
 /// - The destructor (0x080f74ac) is ported — [`iap_packet_destruct`] —
 ///   and called directly; only its payload-release helper @ 0x080f7420
 ///   still dispatches, through [`IAP_PACKET_OPS`]'s `release` hook.
-/// - The packet constructor and initializer (0x080f745c, 0x080f73a0) are
-///   not ported; they dispatch through [`IAP_PACKET_OPS`].
-/// - The initializer's ARM return is a 64-bit pair (r0 = the success flag,
-///   r1 = the owner argument passing straight back out). The factory reads
+/// - The initializer (0x080f73a0) is not ported; it dispatches through
+///   [`IAP_PACKET_OPS`].
 ///   only r0, so the hook is typed to return just that.
 ///
 /// # Safety
@@ -387,7 +412,7 @@ pub unsafe extern "C" fn iap_packet_create(
 ) -> *mut u8 {
     let ops = iap_packet_ops();
 
-    let packet = (ops.construct)(operator_new(IAP_PACKET_SIZE));
+    let packet = iap_packet_construct(operator_new(IAP_PACKET_SIZE));
     if packet.is_null() {
         return core::ptr::null_mut();
     }
@@ -775,10 +800,6 @@ mod tests {
     /// Serializes swaps of [`IAP_PACKET_OPS`].
     static OPS_LOCK: Mutex<()> = Mutex::new(());
 
-    static mut CONSTRUCT_CALLS: usize = 0;
-    static mut LAST_STORAGE: *mut u8 = core::ptr::null_mut();
-    static mut CONSTRUCT_RESULT: *mut u8 = core::ptr::null_mut();
-
     static mut INIT_CALLS: usize = 0;
     static mut LAST_INIT_PACKET: *mut u8 = core::ptr::null_mut();
     static mut LAST_OWNER: *mut u8 = core::ptr::null_mut();
@@ -796,11 +817,6 @@ mod tests {
     static mut LAST_RELEASE_PACKET: *mut u8 = core::ptr::null_mut();
     static mut COUNT_AT_RELEASE: u32 = 0;
 
-    unsafe extern "C" fn recording_construct(storage: *mut u8) -> *mut u8 {
-        CONSTRUCT_CALLS += 1;
-        LAST_STORAGE = storage;
-        CONSTRUCT_RESULT
-    }
 
     #[allow(clippy::too_many_arguments)]
     unsafe extern "C" fn recording_init(
@@ -862,13 +878,9 @@ mod tests {
         let heap_guard = mock_heap();
         unsafe {
             IAP_PACKET_OPS = IapPacketOps {
-                construct: recording_construct,
                 init: recording_init,
                 release: recording_release,
             };
-            CONSTRUCT_CALLS = 0;
-            LAST_STORAGE = core::ptr::null_mut();
-            CONSTRUCT_RESULT = core::ptr::null_mut();
             INIT_CALLS = 0;
             LAST_INIT_PACKET = core::ptr::null_mut();
             LAST_OWNER = core::ptr::null_mut();
@@ -892,7 +904,6 @@ mod tests {
     }
     unsafe fn capture_compact_payloads() {
         IAP_PACKET_OPS = IapPacketOps {
-            construct: recording_construct,
             init: capturing_init,
             release: recording_release,
         };
@@ -908,17 +919,36 @@ mod tests {
     }
 
 
+#[test]
+fn construct_clears_all_fields_sets_sentinels_and_increments_live_count() {
+    let guards = install_mocks();
+    let mut packet = [0xa5u8; IAP_PACKET_SIZE];
+
+    unsafe {
+        IAP_PACKET_LIVE_COUNT = u32::MAX;
+        assert_eq!(iap_packet_construct(packet.as_mut_ptr()), packet.as_mut_ptr());
+        assert_eq!(
+            packet,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xa5,
+                0xff, 0xff, 0xa5, 0xa5, 0, 0, 0, 0, 0, 0, 0, 0xa5, 0, 0,
+                0, 0, 0, 0, 0, 0,
+            ],
+        );
+        assert_eq!(IAP_PACKET_LIVE_COUNT, 0);
+    }
+    restore_mocks(guards);
+}
+
     #[test]
     fn threads_every_argument_into_the_initializer_in_order() {
         let guards = install_mocks();
         let mut storage = [0u8; IAP_PACKET_SIZE];
-        let packet = 0x0BEE_F000usize as *mut u8;
         let owner = 0x0111_1000usize as *mut u8;
         let payload = [0x01u8, 0x02, 0x03, 0x04];
 
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
-            CONSTRUCT_RESULT = packet;
             INIT_RESULT = 1;
 
             let result = iap_packet_create(
@@ -930,12 +960,10 @@ mod tests {
                 payload.len() as u32,
             );
 
-            assert_eq!(result, packet, "a successful init hands the packet to the caller");
+            assert_eq!(result, storage.as_mut_ptr(), "a successful init hands the packet to the caller");
             assert_eq!(alloc_log(), (1, IAP_PACKET_SIZE, 2), "one tag-2 operator_new(0x24)");
-            assert_eq!(LAST_STORAGE, storage.as_mut_ptr(), "the block feeds the constructor");
-            assert_eq!(CONSTRUCT_CALLS, 1);
             assert_eq!(INIT_CALLS, 1);
-            assert_eq!(LAST_INIT_PACKET, packet, "the constructor's result is what gets inited");
+            assert_eq!(LAST_INIT_PACKET, storage.as_mut_ptr(), "the constructor's result is what gets inited");
             assert_eq!(LAST_OWNER, owner);
             assert!(LAST_CONTEXT.is_null(), "all 59 call sites pass NULL here");
             assert_eq!(LAST_LINGO, LINGO_EXTENDED_INTERFACE);
@@ -959,7 +987,6 @@ mod tests {
             for lingo in [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0xff] {
                 for command in [0u16, 1, 0x00ff, 0x0100, 0xffff] {
                     set_alloc_ret(storage.as_mut_ptr());
-                    CONSTRUCT_RESULT = 0x0BEE_F000usize as *mut u8;
                     INIT_RESULT = 1;
 
                     iap_packet_create(
@@ -983,17 +1010,15 @@ mod tests {
     fn an_empty_payload_is_forwarded_verbatim() {
         let guards = install_mocks();
         let mut storage = [0u8; IAP_PACKET_SIZE];
-        let packet = 0x0BEE_F000usize as *mut u8;
 
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
-            CONSTRUCT_RESULT = packet;
             INIT_RESULT = 1;
 
             let result =
                 iap_packet_create(core::ptr::null_mut(), core::ptr::null_mut(), 0, 0, core::ptr::null(), 0);
 
-            assert_eq!(result, packet, "a zero-length body is success, not failure");
+            assert_eq!(result, storage.as_mut_ptr(), "a zero-length body is success, not failure");
             assert!(LAST_PAYLOAD.is_null(), "the factory does not substitute a buffer");
             assert_eq!(LAST_PAYLOAD_LEN, 0);
         }
@@ -1004,11 +1029,9 @@ mod tests {
     fn a_failed_init_destroys_and_frees_the_packet_and_returns_null() {
         let guards = install_mocks();
         let mut storage = [0u8; IAP_PACKET_SIZE];
-        let packet = 0x0BEE_F000usize as *mut u8;
 
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
-            CONSTRUCT_RESULT = packet;
             INIT_RESULT = 0;
             IAP_PACKET_LIVE_COUNT = 7;
 
@@ -1023,9 +1046,9 @@ mod tests {
 
             assert!(result.is_null(), "a failed init yields NULL, not a half-built packet");
             assert_eq!(RELEASE_CALLS, 1, "the ported destructor runs its release helper");
-            assert_eq!(LAST_RELEASE_PACKET, packet);
-            assert_eq!(IAP_PACKET_LIVE_COUNT, 6, "and decrements the live-packet counter");
-            assert_eq!(free_log(), (1, packet, 2), "tag-2 operator_delete of the packet");
+            assert_eq!(LAST_RELEASE_PACKET, storage.as_mut_ptr());
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 7, "constructor increment and destructor decrement pair");
+            assert_eq!(free_log(), (1, storage.as_mut_ptr(), 2), "tag-2 operator_delete of the packet");
         }
         restore_mocks(guards);
     }
@@ -1034,11 +1057,9 @@ mod tests {
     fn the_delete_takes_the_destructors_result_not_the_saved_pointer() {
         let guards = install_mocks();
         let mut storage = [0u8; IAP_PACKET_SIZE];
-        let packet = 0x0BEE_F000usize as *mut u8;
 
         unsafe {
             set_alloc_ret(storage.as_mut_ptr());
-            CONSTRUCT_RESULT = packet;
             INIT_RESULT = 0;
 
             assert!(iap_packet_create(
@@ -1053,37 +1074,11 @@ mod tests {
             // The destructor ends in `mov r0, r4` — its return IS the
             // packet — and the factory never reloads its saved pointer, so
             // r0 out of the destructor is r0 into delete.
-            assert_eq!(free_log(), (1, packet, 2), "r0 out of the destructor is r0 into delete");
+            assert_eq!(free_log(), (1, storage.as_mut_ptr(), 2), "r0 out of the destructor is r0 into delete");
         }
         restore_mocks(guards);
     }
 
-    #[test]
-    fn a_null_constructed_packet_short_circuits_before_init() {
-        let guards = install_mocks();
-
-        unsafe {
-            set_alloc_ret(core::ptr::null_mut());
-            CONSTRUCT_RESULT = core::ptr::null_mut();
-
-            let result = iap_packet_create(
-                0x0111_1000usize as *mut u8,
-                core::ptr::null_mut(),
-                4,
-                0x0018,
-                core::ptr::null(),
-                0,
-            );
-
-            assert!(result.is_null());
-            assert_eq!(CONSTRUCT_CALLS, 1, "the constructor runs before the NULL test");
-            assert!(LAST_STORAGE.is_null(), "on the NULL block verbatim");
-            assert_eq!(INIT_CALLS, 0, "and the initializer never runs");
-            assert_eq!(RELEASE_CALLS, 0, "nor the destructor's release helper");
-            assert_eq!(free_log().0, 0, "nor operator_delete");
-        }
-        restore_mocks(guards);
-    }
 
     #[test]
     fn compact_payload_uses_extended_lingo_and_big_endian_data() {
@@ -1110,7 +1105,6 @@ mod tests {
                 &[6, 0xc3, 0xd4, 0x11, 0x22, 0x33, 0x44],
                 "lingo 4 gets be16(value), and kind 6 appends be32(data)"
             );
-            assert_eq!(CONSTRUCT_CALLS, 0);
             assert_eq!(RELEASE_CALLS, 0);
         }
         restore_mocks(guards);
@@ -1198,7 +1192,6 @@ mod tests {
             assert_eq!(LAST_COMMAND, 0xbeef);
             assert_eq!(LAST_PAYLOAD, payload.as_ptr(), "stack argument, bounced verbatim");
             assert_eq!(LAST_PAYLOAD_LEN, 0x0eed, "stack argument, bounced verbatim");
-            assert_eq!(CONSTRUCT_CALLS, 0, "the reinit path allocates nothing");
             assert_eq!(RELEASE_CALLS, 0);
             assert_eq!(alloc_log().0, 0);
             assert_eq!(free_log().0, 0);

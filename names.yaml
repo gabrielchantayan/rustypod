@@ -81019,6 +81019,36 @@ functions:
       `moveq r0,#0; bxeq lr` and a framed `ldr r0,[r0,#8]; pop` tail)
       instead of the original's single branchless predicated block -
       semantically identical, expected under the crate's fp frame.
+  - address: 0x080f745c
+    ghidra: FUN_080f745c
+    name: iap_packet_construct
+    size: 76
+    sig: "u8 *iap_packet_construct(u8 *packet)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0: packet
+      DAT_080f74a8: iap_packet_live_count
+    notes: >-
+      Default constructor for the 36-byte iAP packet object: clears all
+      pointer, length, and flag fields; writes the no-lingo (0xff) and
+      no-command (0xffff) sentinels at +0x0e/+0x10; increments the live
+      packet counter; returns packet unchanged. EXTENT - 76 bytes,
+      0x080f745c..0x080f74a8, 19 instructions plus literal-pool word
+      0x089ccc24 at 0x080f74a8. The next real function begins at
+      0x080f74ac with `push {r4,lr}`. Raw osos.dec words verify:
+      `mov r1,#0; str r1,[r0]; str r1,[r0,#4]; str r1,[r0,#8];
+      mov r2,#0xff; strh r1,[r0,#12]; strb r2,[r0,#14]; mvn r2,#0;
+      strh r2,[r0,#16]; str r1,[r0,#20]; strh r1,[r0,#24];
+      strb r1,[r0,#26]; str r1,[r0,#28]; str r1,[r0,#32];
+      ldr r1,[pc,#12]; ldr r2,[r1]; add r2,r2,#1; str r2,[r1]; bx lr`.
+      CALL SITES - 3 plain `bl`, all unconditional (cond=e), and 0
+      predicated `bl`, independently counted by decoding every ARM branch
+      word in osos.dec; the callers are 0x080f6da0, 0x080f6f2c, and
+      0x080f6f8c. Deviation - target updates fixed word 0x089ccc24;
+      host tests use IAP_PACKET_LIVE_COUNT. Host test covers every byte,
+      both sentinels, return identity, and counter wrap from 0xffffffff to
+      zero.
   - address: 0x080f74ac
     ghidra: FUN_080f74ac
     name: iap_packet_destruct
