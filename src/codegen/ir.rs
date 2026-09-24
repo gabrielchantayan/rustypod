@@ -4158,19 +4158,10 @@ pub static mut CG_CELL_TABLE_CELL_DESTROY: unsafe extern "C" fn(*mut u8) =
 /// the buffer word only after that helper returns. It leaves the allocator
 /// handle, tag byte, and all other cell bytes untouched.
 ///
-/// `FUN_0807f234` has two target paths. A NULL handle initializes and uses
-/// the process default allocator; a non-NULL handle is an allocator-registry
-/// object, whose live-entry match merely clears its allocation bit and whose
-/// unmatched entry frees through that object's heap. A zero heap in a
-/// non-NULL registry returns without a free; this helper still clears the
-/// cell buffer, exactly as the ARM caller does.
-///
-/// DEVIATION: the allocator-registry helper is not ported. On target this
-/// body calls its stock address with the recovered two-register ABI. Hosts
-/// have no representation for that registry, so every non-NULL buffer uses
-/// the established default-heap `free_wrapper` model (tag `0x38`); tests
-/// needing a non-default registry install [`CG_CELL_TABLE_CELL_DESTROY`].
-/// The cell's pointer fields remain target-width `u32` words on hosts.
+/// `allocator_registry_release` @ 0x0807f234 has two target paths. A NULL
+/// handle releases through the default heap with tag 0x38; a non-NULL handle
+/// dispatches to the custom allocator ABI with the same tag. The dedicated
+/// heap port owns both paths; its host model releases through the default heap.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_cell_table_cell_destroy(cell: *mut u8) {
@@ -4179,27 +4170,13 @@ pub unsafe extern "C" fn cg_cell_table_cell_destroy(cell: *mut u8) {
         return;
     }
 
-    #[cfg(target_os = "none")]
-    {
-        let allocator =
-            (cell.add(CG_CELL_ALLOCATOR) as *const u32).read_volatile() as usize as *mut u8;
-        allocator_registry_release(allocator, buffer);
-    }
-    #[cfg(not(target_os = "none"))]
-    crate::heap::veneers::free_wrapper(buffer, 0x38);
+    let allocator =
+        (cell.add(CG_CELL_ALLOCATOR) as *const u32).read_volatile() as usize as *mut u8;
+    crate::heap::allocator_registry_release::allocator_registry_release(allocator, buffer);
 
     (cell.add(CG_CELL_BUFFER) as *mut u32).write_volatile(0);
 }
 
-/// Target-only bridge to the still-stock allocator-registry release helper
-/// `FUN_0807f234`. Its ABI is `r0 = allocator, r1 = buffer`.
-#[cfg(target_os = "none")]
-#[inline(never)]
-unsafe fn allocator_registry_release(allocator: *mut u8, buffer: *mut u8) {
-    let release: unsafe extern "C" fn(*mut u8, *mut u8) =
-        core::mem::transmute(0x0807_f234usize);
-    release(allocator, buffer);
-}
 
 /// cg_cell_table_destroy — original: `FUN_0824310c` @ 0x0824310c
 /// (44 bytes; **2 `bl` call sites**, at 0x08251848 and 0x08256518).
