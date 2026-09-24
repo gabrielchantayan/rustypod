@@ -24,6 +24,7 @@ pub mod bit_buffer_set_bit;
 pub mod bit_buffer_ensure_capacity;
 pub mod byte_bit_set_mask;
 pub mod big_endian_word_bit_index;
+pub mod big_endian_bit_cell_store;
 pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
 pub mod choice_state_prune_duplicate_tail;

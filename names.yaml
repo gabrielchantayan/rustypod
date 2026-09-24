@@ -140406,3 +140406,40 @@ functions:
       it in the matching result slot. ARM builds call the unresolved retail
       selector directly; host tests use a typed seam, covering slot three,
       null handles, and out-of-range indices.
+  # --- big-endian bit-cell table update ---
+  - address: 0x0806436c
+    ghidra: FUN_0806436c
+    name: big_endian_bit_cell_store
+    size: 176
+    sig: "void big_endian_bit_cell_store(u32 channel, u32 payload, u32 bit_index, u32 group, u32 mode)"
+    module: util/big_endian_bit_cell_store
+    status: ported
+    renames:
+      param_1/r0: channel
+      param_2/r1: payload
+      param_3/r2: bit_index
+      param_4/r3: group
+      param_5/stack: mode
+      local_24: row
+      local_28: physical_bit
+      FUN_08051268: retail_table_getter
+      FUN_0836b578: clear_first_pending_map
+      FUN_0836b5fc: clear_second_pending_map
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent, 0x0806436c through
+      0x0806441b: the next independently linked function begins with
+      cmp r0,#0 at 0x0806441c. The body makes five unconditional outbound BL
+      calls (0x08051268, 0x0836b6b8, 0x0836b698, 0x0836b578, and 0x0836b5fc)
+      and no predicated BL calls. Independent raw caller decoding establishes
+      three inbound unconditional BL calls at 0x0804b3c4, 0x0813b0f4, and
+      0x0814f72c; no predicated BL or direct tail-B callers were found. It
+      obtains four target-width table pointers, derives row 6-(channel>>5)
+      and the big-endian physical bit index, clears two pending maps, writes
+      payload, logical bit index, and group cells, then sets that flag only
+      for mode two. Host tests use a below-4-GiB u32-pointer fixture and cover
+      big-endian cell selection, both pending-map calls, flag set, and flag
+      clear. match.py structural review completed with its expected exit-1
+      diff: LLVM uses indirect target calls and a different frame, while
+      retaining the table loads, three stores, and conditional bitmap update.
+      Deliberate deviations: the target calls the verified Rust
+      big_endian_word_bit_index port rather than retail address 0x0836b698.
