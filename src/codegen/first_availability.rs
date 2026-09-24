@@ -21,6 +21,8 @@ extern crate std;
 use core::ptr;
 
 use crate::sysinfo::board_version;
+#[cfg(target_arch = "arm")]
+use crate::codegen::mode_limit::cg_mode_limit;
 
 pub type FirstProbeStatus = unsafe extern "C" fn() -> u32;
 pub type ModeIsActive = unsafe extern "C" fn() -> u32;
@@ -44,7 +46,6 @@ pub static mut CG_MODE_LIMIT: ModeLimit = mode_limit_zero;
 extern "C" {
     fn retail_cg_first_probe_status() -> u32;
     fn retail_cg_mode_is_active() -> u32;
-    fn retail_cg_mode_limit() -> i32;
 }
 #[cfg(not(target_arch = "arm"))]
 unsafe fn retail_cg_first_probe_status() -> u32 {
@@ -72,10 +73,6 @@ retail_cg_first_probe_status:
 retail_cg_mode_is_active:
     ldr pc, [pc, #-4]
     .word 0x080dd2c8
-    .globl retail_cg_mode_limit
-retail_cg_mode_limit:
-    ldr pc, [pc, #-4]
-    .word 0x080cc950
 "#);
 
 /// First code-generator availability predicate at 0x082bcf38.
@@ -93,6 +90,11 @@ pub unsafe extern "C" fn cg_first_availability() -> u32 {
         } else {
             7
         };
+        #[cfg(target_arch = "arm")]
+        if retail_cg_mode_is_active() != 0 || limit <= cg_mode_limit() {
+            return 1;
+        }
+        #[cfg(not(target_arch = "arm"))]
         if retail_cg_mode_is_active() != 0 || limit <= retail_cg_mode_limit() {
             return 1;
         }
