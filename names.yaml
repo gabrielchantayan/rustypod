@@ -20469,6 +20469,32 @@ functions:
       early return, contour-error propagation, successful on-curve 16.16
       point append, and capacity-error no-append behavior.
 
+  # --- Controller state clear and settling delay ---
+  - address: 0x080bb648
+    ghidra: FUN_080bb648
+    name: clear_controller_state_and_delay
+    size: 20
+    sig: "u32 clear_controller_state_and_delay(void)"
+    module: drivers/clear_controller_state_and_delay
+    status: ported
+    renames:
+      "0x38400e00": controller_state_register
+      "0x08037ef0": iram_usec_delay_veneer
+    notes: >-
+      Raw ARM is exactly 0x080bb648..0x080bb65c: mov r0,#0; materialize
+      0x38400000; str r0,[r1,#0xe00]; mov r0,#800; tail-branch to the
+      0x08037ef0 IRAM veneer. The veneer target word is 0x22001f78, the
+      internal-RAM mirror of osos 0x08001f78 usec_delay, so this clears the
+      otherwise unidentified controller state register then waits 800
+      microseconds and returns zero. Decoding every ARM B/BL word in
+      osos.dec found three unconditional inbound bl call sites
+      (0x0836e120, 0x0836e178, and 0x0836e1ac), no predicated bl calls, and
+      one separate tail branch at 0x0836e1e4. No DATA word holds this address,
+      so it is not virtually dispatched. Host builds replace only the fixed
+      MMIO register with an atomic model; the shared Timer E seam preserves
+      the full delay behavior. The host test proves the state clear and the
+      complete 800-usec wait across u32 counter wrap.
+
   # --- FreeType 2 Type 1 glyph-outline builder ---
   - address: 0x080bb65c
     ghidra: FUN_080bb65c
