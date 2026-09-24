@@ -137272,3 +137272,30 @@ functions:
       nonzero; otherwise it calls the helper with zero and writes the returned
       byte there. ARM builds call the retail address; host builds use a seam
       because the helper has no established semantic identity.
+  - address: 0x080f80b4
+    ghidra: FUN_080f80b4
+    name: buffer_transfer_submit
+    size: 48
+    sig: "void buffer_transfer_submit(void *state, u32 length, u32 auxiliary)"
+    module: app/buffer_transfer_submit
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1/r3: length
+      param_3/r2/r1: auxiliary
+      "state+0x1c": state_value
+      "state+0x1e": mode
+      FUN_080f7d5c: buffer_transfer_submit_target (unported)
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte A32 extent
+      0x080f80b4..0x080f80e4: the next real function begins at 0x080f80e4
+      with push {r4,lr}. The twelve instruction body has zero outbound plain
+      BL and zero predicated BL forms; its final B tail-transfers to the
+      unported 0x080f7d5c target. A complete aligned A32 branch decode finds
+      exactly three inbound direct plain BL call sites (0x081f4a54,
+      0x081f4aa4, and 0x081f4b0c) and zero predicated forms. Mode zero sends
+      (auxiliary, state+0x1c, length) to the tail target, mode one sends
+      (state+0x1c, auxiliary, length), and every other mode returns without
+      reading state+0x1c. The target has no verified semantic identity, so
+      target builds call its fixed address while host tests inject a recording
+      seam. Rust returns normally after the target rather than tail-branching.
