@@ -148,6 +148,7 @@ pub mod selection_state_refresh;
 pub mod selection_state_apply_index_and_dispatch;
 pub mod pending_transition_advance;
 pub mod locked_callback_predicate;
+pub mod locked_callback_list_any;
 pub mod glyph_range_contains_character;
 pub mod context_callback_dispatch;
 pub mod context_select_item_and_dispatch;

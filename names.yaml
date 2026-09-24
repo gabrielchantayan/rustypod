@@ -17564,6 +17564,31 @@ functions:
       sites, binary-verified; among them the pool base-subobject dtor
       (bl @ 0x08214240).
 
+  - address: 0x080a6c0c
+    ghidra: FUN_080a6c0c
+    name: locked_callback_list_any
+    size: 108
+    sig: "u32 locked_callback_list_any(LockedCallbackList *list, LockedCallbackPredicate predicate, u32 context)"
+    module: app/locked_callback_list_any
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: predicate
+      param_3/r2: context
+      FUN_08056510: sem_wait
+      FUN_08056710: sem_signal
+    notes: >-
+      Raw osos.dec words establish the complete 108-byte A32 body
+      0x080a6c0c..0x080a6c77; the push at 0x080a6c78 starts the next real
+      function. It waits on the semaphore slot at list+0x2c, traverses the
+      inclusive list+0x40 head through list+0x44 tail chain, and invokes
+      predicate(node, context) only where node byte +0x10 is nonzero. A
+      nonzero predicate result stops traversal and becomes return one;
+      otherwise it returns zero. The body contains exactly two plain BL
+      instructions (sem_wait and sem_signal) and one predicated BLXNE
+      callback dispatch. Ported directly through the already-ported
+      semaphore wrappers; no deliberate deviations.
+
   - address: 0x080c6928
     ghidra: FUN_080c6928
     name: mailbox_slot_post_deferred
