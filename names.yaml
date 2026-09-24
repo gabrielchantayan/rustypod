@@ -135990,3 +135990,28 @@ functions:
       key order, sentinel comparison, and successor-after-erase iteration
       are preserved. match.py exits 1 with the expected structural diff:
       crate frame and volatile seam blx calls replace the direct calls.
+  - address: 0x0811ddc0
+    ghidra: FUN_0811ddc0
+    name: parser_stack_pop
+    size: 60
+    sig: "void *parser_stack_pop(void *stack)"
+    module: app/parser_stack_pop
+    status: ported
+    renames:
+      param_1/r0: stack
+      "stack+4": count
+      r4: stack
+      r5: index
+      FUN_082987b4: stack_item_lookup
+      "stack-vtable+0x2c": remove_at
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte A32 body
+      0x0811ddc0..0x0811ddfb; cmp r0,#0 at 0x0811ddfc begins the next real
+      function. Independent whole-image ARM branch decoding finds three inbound
+      plain BL sites (0x08117e80, 0x08119a24, and 0x08119a48) and zero
+      predicated inbound BL forms. The body calls unported 0x082987b4 with
+      stack and count-1, then invokes stack-vtable+0x2c with the same values,
+      returning the lookup result while discarding the removal return value.
+      Target Rust retains the verified call to 0x082987b4 and four-byte vtable
+      slot addressing; host tests use an injectable seam because the lookup
+      callee has no names.yaml entry and is not separately ported.
