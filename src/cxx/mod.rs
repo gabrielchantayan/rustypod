@@ -8,6 +8,7 @@ pub mod container_item_count_or_zero;
 pub mod tagged_bit_set_insert_utf8;
 pub mod basic_ostream_construct;
 pub mod generic_descriptor_lookup;
+pub mod descriptor_action_dispatch;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod string_record;
 pub mod record_work_pump;
