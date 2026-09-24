@@ -22701,6 +22701,31 @@ functions:
       osos.dec. Rust's final tail branch is an ordinary call+return;
       its observable destruction order and void ABI are identical.
 
+  - address: 0x080c6348
+    ghidra: FUN_080c6348
+    name: service_context_get
+    size: 32
+    sig: "void *service_context_get(void)"
+    module: app/context_scope
+    status: ported
+    vars:
+      FUN_0807f254: system_root_get
+      DAT_0807f268: system_root_object (0x089ca674)
+      "root+0x30": service_context
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM is exactly eight words from 0x080c6348 through 0x080c6364:
+      `push {r4,lr}; bl 0x0807f254; ldr r0,[r0,#0x30]; cmp r0,#0;
+      bleq 0x08030f44; bl 0x0807f254; ldr r0,[r0,#0x30]; pop {r4,pc}`.
+      The next separately linked function starts at 0x080c6368. Three direct
+      inbound calls are plain, unconditional BL instructions (0x0825b714,
+      0x0825b71c, and 0x082a1b94); zero are predicated. The first root walk
+      asserts a non-NULL service context, then the second independently reads
+      and returns it. Rust uses context_scope's existing volatile
+      APP_ROOT_OBJECT model for the unported root getter and reads the field as
+      a u32 target word, preserving its +0x30 address on 32-bit ARM and a
+      64-bit host. match.py reports the expected structural diff: LLVM inlines
+      the root getter model and branches around the non-returning heap_panic.
   - address: 0x081f3aa0
     ghidra: FUN_081f3aa0
     name: mov_atom_tree_has_offsets

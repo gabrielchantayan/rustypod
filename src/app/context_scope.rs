@@ -153,6 +153,41 @@ pub(crate) unsafe fn app_root_object() -> *mut u8 {
 unsafe fn field(object: *const u8, offset: usize) -> u32 {
     object.add(offset).cast::<u32>().read()
 }
+/// service_context_get — original: `FUN_080c6348` @ 0x080c6348 (**32 bytes**,
+/// exactly eight ARM instructions through `pop {r4, pc}`; the next function
+/// begins at 0x080c6368). **3 direct plain `bl` call sites, 0 predicated
+/// forms**, verified against the decoded ARM words and call targets.
+///
+/// Fetches the system root through the asserting getter at 0x0807f254, reads
+/// its service-context word at +0x30, and enters
+/// [`crate::heap::veneers::heap_panic`] when that word is NULL. It then fetches
+/// the root again and returns that second root's +0x30 word. The second read is
+/// deliberate: it is the source's second `bl 0x0807f254`, not a preserved
+/// first result.
+///
+/// Deliberate deviation: the unported asserting root getter is expressed
+/// directly through this module's established [`APP_ROOT_OBJECT`] model. The
+/// service-context field remains a 32-bit target word, rather than a host
+/// pointer field, so +0x30 has the same address on both builds.
+///
+/// # Safety
+///
+/// [`APP_ROOT_OBJECT`] must name a readable root object containing a readable
+/// word at +0x30. On a non-null first root, its +0x30 word must be nonzero;
+/// otherwise the original takes the non-returning panic path.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn service_context_get() -> *mut u8 {
+    let first_root = unsafe { app_root_object() };
+    let first_context = unsafe { field(first_root, ROOT_CONTEXT_OFFSET) };
+    if first_context == 0 {
+        crate::heap::veneers::heap_panic();
+    }
+
+    let second_root = unsafe { app_root_object() };
+    unsafe { field(second_root, ROOT_CONTEXT_OFFSET) as usize as *mut u8 }
+}
+
 
 /// context_scope_capture — original: `FUN_08283f3c` @ 0x08283f3c
 /// (56 bytes: 52 code, 0x08283f3c..0x08283f6c, plus the 4-byte global literal
@@ -575,6 +610,54 @@ mod tests {
             unsafe { self.base.add(object + offset).cast::<u32>().write(value) };
         }
     }
+    #[test]
+    fn service_context_get_reads_the_root_service_context_word() {
+        let _lock = APP_ROOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(fixture) = RootFixture::map() else {
+            note_missing_u32_fixture("service_context_get_reads_the_root_service_context_word");
+            return;
+        };
+        let context = fixture.at(CONTEXT_AT);
+        fixture.put(ROOT_AT, ROOT_CONTEXT_OFFSET, context as u32);
+
+        let returned = unsafe {
+            APP_ROOT_OBJECT = fixture.at(ROOT_AT);
+            let result = service_context_get();
+            APP_ROOT_OBJECT = core::ptr::null_mut();
+            result
+        };
+
+        assert_eq!(returned, context);
+    }
+
+    #[test]
+    fn service_context_get_does_not_cache_the_service_context() {
+        let _lock = APP_ROOT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(fixture) = RootFixture::map() else {
+            note_missing_u32_fixture("service_context_get_does_not_cache_the_service_context");
+            return;
+        };
+        let first_context = fixture.at(CONTEXT_AT);
+        let second_context = fixture.at(OWNER_AT);
+        fixture.put(ROOT_AT, ROOT_CONTEXT_OFFSET, first_context as u32);
+
+        let (first, second) = unsafe {
+            APP_ROOT_OBJECT = fixture.at(ROOT_AT);
+            let first = service_context_get();
+            fixture.put(ROOT_AT, ROOT_CONTEXT_OFFSET, second_context as u32);
+            let second = service_context_get();
+            APP_ROOT_OBJECT = core::ptr::null_mut();
+            (first, second)
+        };
+
+        assert_eq!(first, first_context);
+        assert_eq!(second, second_context);
+    }
+
 
     #[test]
     fn default_construction_plants_the_descriptor_and_zeroes_the_record() {
