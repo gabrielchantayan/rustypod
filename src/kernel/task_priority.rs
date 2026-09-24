@@ -70,6 +70,26 @@ pub unsafe extern "C" fn task_priority_set(task: u32, priority: u32) -> u32 {
     gateway_dispatch()(request.as_mut_ptr());
     task
 }
+/// current_task_priority_set — original: `FUN_080e4300` @ `0x080e4300`
+/// (12 bytes; next real function begins at `0x080e430c`).
+///
+/// Raw words `e1a01000 e3a00000 eafd4ef0` move the requested priority from
+/// `r0` to `r1`, replace `r0` with the RTXC current-task selector zero, then
+/// tail-branch through the `task_priority_set` veneer at `0x08037ed0`.
+/// Decoding every ARM B/BL word in osos.dec finds three inbound plain `bl`
+/// calls (0x080935c4, 0x080f5540, 0x081f4974), zero predicated `bl`; the
+/// function body has zero `bl` and one unconditional tail `b`.
+///
+/// Deliberate deviation: Rust makes the veneer target an ordinary call to the
+/// existing volatile gateway seam rather than preserving the literal tail
+/// branch. Its observable result remains the selector zero returned by
+/// `task_priority_set`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn current_task_priority_set(priority: u32) -> u32 {
+    task_priority_set(0, priority)
+}
+
 
 /// task_priority_get — original: `thunk_EXT_FUN_22003e44` @ `0x08037ec8`
 /// (Ghidra reports 4 bytes; verified extent 8 bytes: `ldr pc, [pc, #-4]`
@@ -162,6 +182,8 @@ mod tests {
         match call {
             0 => assert_eq!(words, &[0x1b, 2, 0, 2]),
             1 => assert_eq!(words, &[0x1b, u32::MAX, u32::MAX, u32::MAX]),
+            2 => assert_eq!(words, &[0x1b, 0, 0, 0]),
+            3 => assert_eq!(words, &[0x1b, u32::MAX, 0, u32::MAX]),
             _ => panic!("unexpected gateway dispatch"),
         }
         words.copy_from_slice(&[0xa5a5_a5a5; 4]);
@@ -184,13 +206,14 @@ mod tests {
         drop(guard);
     }
 
-    #[test]
     fn forwards_priority_record_and_preserves_task_return_word() {
         let guard = install_recorder();
         unsafe {
             assert_eq!(task_priority_set(0, 2), 0);
             assert_eq!(task_priority_set(u32::MAX, u32::MAX), u32::MAX);
-            assert_eq!(addr_of!(CALLS).read(), 2);
+            assert_eq!(current_task_priority_set(0), 0);
+            assert_eq!(current_task_priority_set(u32::MAX), 0);
+            assert_eq!(addr_of!(CALLS).read(), 4);
         }
         restore(guard);
     }
