@@ -140119,3 +140119,38 @@ functions:
       reported third call is an adjacent-wrapper attribution error. Rust
       makes the terminal branch a normal call while preserving r0/r1 and its
       return value; null providers retain the callee's null result.
+
+  # --- opaque crypto context teardown ---
+  - address: 0x0806fe48
+    ghidra: FUN_0806fe48
+    name: opaque_crypto_context_cleanup
+    size: 88
+    sig: "void opaque_crypto_context_cleanup(u32 *context)"
+    module: crypto/opaque_context_cleanup
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      "context+0x44": cleanup_callback
+      "context+0x54": providers
+      "context+0x6c": ex_data
+      FUN_083697ac: namespace_provider_each_then_destroy
+      FUN_080439e0: crypto_free_ex_data
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent:
+      0x0806fe48..0x0806fea0 is 84 bytes of A32 code plus the
+      0x08065d2c callback literal; the next independently entered function
+      starts at 0x0806fea4 with push {r4,lr}. Direct-branch decoding finds
+      three inbound plain BL callers (0x08060418, 0x08060428, 0x0806feac)
+      and no predicated direct callers. The body has two plain direct BLs
+      (namespace_provider_each_then_destroy and crypto_free_ex_data) plus
+      one predicated indirect BLXNE through context+0x44. It calls that
+      optional callback with context, drains a nonzero +0x54 providers object
+      through the verified literal callback 0x08065d2c, clears +0x54, calls
+      CRYPTO_free_ex_data(5, context, context+0x6c), then clears +0x6c and
+      +0x70 in order. The literal callback starts in a
+      condition-code-sensitive sequence and its concrete identity remains
+      unrecovered; target builds call it at its verified address while host
+      tests use a volatile seam. Context target fields are addressed as u32
+      words so host pointer width cannot change their offsets. Host tests
+      prove the present and absent callback/provider paths, class-5 ex-data
+      arguments, and both final clears.
