@@ -368,16 +368,8 @@ unsafe extern "C" fn default_pthread_mutexattr_init(attr: *mut u8) -> u32 {
     }
 }
 
-unsafe extern "C" fn default_kernel_object_allocate(kind: u32, out: *mut u32) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let allocate: KernelObjectAllocate = core::mem::transmute(0x0808b1c0usize);
-        allocate(kind, out)
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        host_kernel_object_allocate(kind, out)
-    }
+unsafe extern "C" fn default_kernel_object_allocate(_kind: u32, out: *mut u32) -> u32 {
+    crate::kernel::object3_allocate::kernel_object3_allocate(out)
 }
 
 pub const DEFAULT_POSIX_MUTEX_INIT_OPS: PosixMutexInitOps = PosixMutexInitOps {
