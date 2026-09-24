@@ -138895,3 +138895,26 @@ functions:
       host callback seams; its final ordinary return replaces the tail branch.
       LLVM folds the cxa_guard_release call because the established port is a
       deliberate no-op; this preserves its observable behavior.
+  - address: 0x080aa7c0
+    ghidra: FUN_080aa7c0
+    name: status_bit_4b_is_set_if_context_exists
+    size: 44
+    sig: "u32 status_bit_4b_is_set_if_context_exists(void)"
+    module: app/status_bit_4b_is_set_if_context_exists
+    status: ported
+    renames:
+      DAT_080aa7ec: status_context_pointer (0x089cda20)
+      FUN_081c08cc: status_bit_4b_is_set
+    notes: >-
+      Raw osos.dec establishes the 44-byte function extent 0x080aa7c0..0x080aa7eb:
+      the final instruction is at 0x080aa7e8 and the literal-pool
+      context pointer at 0x080aa7ec is outside the executable body; the push
+      at 0x080aa7f0 begins the next real function. Full-image A32 decoding
+      finds three unconditional direct BL callers (0x080fd0cc, 0x080fd0e8,
+      and 0x081500a4) and no predicated direct BL callers. The body has one
+      plain direct BL to the unported 0x081c08cc status helper and no
+      predicated calls. It returns zero when the context-pointer word is
+      zero; otherwise it normalizes that helper result to zero or one. The
+      helper reads status property 0x4b and tests bit two. Its exact semantic
+      identity remains unrecovered, so target builds call its verified retail
+      address and host tests use a narrow volatile seam.
