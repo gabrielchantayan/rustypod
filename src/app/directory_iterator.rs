@@ -12,6 +12,8 @@ use crate::app::path_object_construct::{path_object_construct, path_object_defau
 use crate::app::path_probe::{
     FacadeFetch, FacadeObject, FacadeVtable, InterfaceGuard, PATH_PROBE_FACADE_FETCH,
 };
+#[cfg(test)]
+use crate::app::path_probe::FACADE_VTABLE_SLOTS;
 #[cfg(target_os = "none")]
 use crate::app::path_probe::interface_guard_base_construct;
 #[cfg(not(target_os = "none"))]
@@ -494,7 +496,7 @@ mod tests {
     static mut ITEMS: [*mut u8; 2] = [ptr::null_mut(); 2];
     static mut FRONT_INDEX: usize = 0;
     static mut FACADE: *mut FacadeObject = ptr::null_mut();
-    static mut MOCK_VTABLE: FacadeVtable = FacadeVtable { slots: [0; 24] };
+    static mut MOCK_VTABLE: FacadeVtable = FacadeVtable { slots: [0; FACADE_VTABLE_SLOTS] };
     static mut MOCK_FACADE: FacadeObject = FacadeObject { vtable: ptr::null() };
 
     const CONSTRUCT_EVENT_QUEUE_DEFAULT: u8 = 1;
@@ -624,7 +626,7 @@ mod tests {
         ITEMS = [0x1111usize as *mut u8, 0x2222usize as *mut u8];
         FRONT_INDEX = 0;
         let vtable = core::ptr::addr_of_mut!(MOCK_VTABLE);
-        (*vtable).slots = [0; 24];
+        (*vtable).slots = [0; FACADE_VTABLE_SLOTS];
         (*vtable).slots[DIRECTORY_ITERATOR_RELEASE_SLOT_INDEX] = recording_release as usize;
         FACADE = core::ptr::addr_of_mut!(MOCK_FACADE);
         (*FACADE).vtable = vtable;
