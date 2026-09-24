@@ -198,6 +198,7 @@ pub mod nested_object_value_at_4;
 pub mod nested_object_value_at_14;
 pub mod mode;
 pub mod object_flags;
+pub mod pfr_extra_items_skip;
 mod object_state;
 pub mod opaque_type_tag_is_allowed;
 pub mod opaque_allocation_release_089062ec;
