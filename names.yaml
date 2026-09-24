@@ -136728,3 +136728,34 @@ functions:
       semantic identity, so target code calls the verified ABI shapes while
       host tests use typed seams. FUN_082898dc is an empty body and is
       deliberately omitted.
+
+  - address: 0x08111664
+    ghidra: FUN_08111664
+    name: media_player_reset_default_resource
+    size: 56
+    sig: "void media_player_reset_default_resource(void *player)"
+    module: app/media_player_reset_default_resource
+    status: ported
+    renames:
+      param_1/r0: player
+      "[player + 0x30]": inner_state
+      "[player + 0x444]": active_index
+      "[player + 0x4d6]": pending
+      FUN_0806673c: object_select_resource_index
+      FUN_08066618: configure_inner_state
+    notes: >-
+      Raw osos.dec words establish the exact 56-byte executable extent
+      0x08111664..0x0811169c: the next real function starts with
+      stmdb sp!,{r4,r5,r6,lr} at 0x0811169c. Full-image A32 decoding finds
+      three inbound unconditional plain BL callers (0x08111528, 0x08111834,
+      and 0x08230144) and no predicated BL callers. The body has two direct
+      unconditional BL instructions: object_select_resource_index @
+      0x0806673c with inner_state and index 0, then FUN_08066618 @
+      0x08066618 with inner_state and selector words 1,3. It then stores
+      -1 to player+0x444 and zero to player+0x4d6. FUN_08066618's concrete
+      semantic identity is not established: its recovered behavior writes
+      selector-dependent words at inner_state+0xe30/+0xe34. The target port
+      therefore preserves its verified three-u32 ABI call while host tests
+      replace it through CONFIGURE_INNER_STATE; no callee identity is
+      inferred from its address. The first callee is the existing direct
+      object_select_resource_index port.

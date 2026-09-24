@@ -1369,6 +1369,10 @@ pub mod hints {
     // 0x9300_0000: dedicated to util/inner_state's selected-resource table
     // and object fixture; mappings never unmap, so no other user may share it.
     pub const OBJECT_SELECT_RESOURCE_INDEX: usize = 0x9300_0000;
+    // 0x9500_0000: dedicated to app/media_player_reset_default_resource's
+    // raw-u32 player and inner-state fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const MEDIA_PLAYER_RESET_DEFAULT_RESOURCE: usize = 0x9500_0000;
     // 0xa700_0000: dedicated to util/inner_state's raw-u32 query-object cache
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const QUERY_OBJECT_ENSURE: usize = 0xa700_0000;

@@ -167,6 +167,7 @@ pub mod volume_controller_post_byte_90_code;
 pub mod volume_limit_state_refresh_if_pending;
 pub mod volume_controller_adjust;
 pub mod media_player_set_volume;
+pub mod media_player_reset_default_resource;
 pub mod global_adjustment_notification_post;
 pub mod volume_channel_set_level;
 pub mod volume_channel_set_balance;
