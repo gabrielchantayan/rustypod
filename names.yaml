@@ -137250,3 +137250,25 @@ functions:
       tail-branches to timing_wheel_insert at 0x08273898. Rust uses existing
       scheduler, refcount, and wheel ports; its host scheduler-table model is
       the only deliberate deviation.
+  - address: 0x080faaa0
+    ghidra: FUN_080faaa0
+    name: object_byte_0x450_initialize
+    size: 36
+    sig: "void object_byte_0x450_initialize(void *object)"
+    module: app/object_byte_0x450_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x450": lazy_initialized_byte
+      FUN_0809b644: unidentified_retail_byte_initializer
+    notes: >-
+      Raw osos.dec establishes the exact nine-instruction, 36-byte A32 body
+      0x080faaa0..0x080faac3; the stmdb prologue at 0x080faac4 begins the
+      next real function. Decoding the raw words finds one unconditional
+      direct BL to the still-unidentified 0x0809b644 helper and no predicated
+      BL instructions. An independent full-image A32 branch decode finds three
+      inbound unconditional BL sites (0x080f87d0, 0x080fdc40, and 0x080fdf10)
+      and no predicated forms. The function returns when object+0x450 is
+      nonzero; otherwise it calls the helper with zero and writes the returned
+      byte there. ARM builds call the retail address; host builds use a seam
+      because the helper has no established semantic identity.
