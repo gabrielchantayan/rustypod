@@ -2284,6 +2284,10 @@ pub mod hints {
     // message and selector-word fixture; mappings never unmap, so no other
     // port may share this hint.
     pub const MESSAGE_SELECTOR_READ: usize = 0x6eb0_0000;
+    // 0x6ec0_0000: dedicated to ui/plst_optional_fields_read's target-width
+    // parser state, source record, and destination buffer fixture; mappings
+    // never unmap, so no other port may share this hint.
+    pub const PLST_OPTIONAL_FIELDS_READ: usize = 0x6ec0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
