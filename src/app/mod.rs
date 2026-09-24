@@ -63,6 +63,7 @@ pub mod class6000_property_60bc_u16;
 pub mod class6000_property_60ac_is_602e;
 pub mod class_8780_dispatch_state;
 pub mod class_9300_remove_inactive_items;
+pub mod class_9000_remove_inactive_entries;
 pub mod selection_mode_validate;
 pub mod mov_chain_timeout_prepare;
 pub mod class_8900;

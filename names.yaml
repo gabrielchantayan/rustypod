@@ -136901,3 +136901,28 @@ functions:
       string_from_range converter. Rust uses the existing RANGE_I32_OPS
       volatile seam so target builds call the retail converter and host tests
       can verify forwarding.
+
+  - address: 0x08109bd0
+    ghidra: FUN_08109bd0
+    name: class_9000_remove_inactive_entries
+    size: 108
+    sig: "void class_9000_remove_inactive_entries(void *this)"
+    module: app/class_9000_remove_inactive_entries
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_082a4cf8: array_element_at
+    notes: >-
+      Raw osos.dec decoding establishes 0x08109bd0..0x08109c3c as the
+      executable extent: the following word begins a separate
+      push {r4,lr} function. The body has one unconditional direct bl to
+      array_element_at and two virtual blx calls: a predicated blxne through
+      the optional retained object's vtable+0x04, and an unconditional blx
+      through this->vtable+0xac. It clears this+0x6c, then scans the
+      StridedArray at this+0x4c using its signed count at +0x50. Each entry
+      contains an item pointer; an item byte of zero at +0x2c dispatches the
+      +0xac callback without advancing the index, so callback-owned array
+      mutation is reexamined. Full-image A32 decoding finds three plain
+      inbound BL callers (0x08108c90, 0x08126db4, 0x0817087c) and no
+      predicated inbound BL calls. Virtual callee identities remain
+      deliberately unresolved; host tests inject both dispatches.
