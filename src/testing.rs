@@ -2260,6 +2260,10 @@ pub mod hints {
     // 0x6ea0_0000: dedicated to util/ring_write's target-width ring and data
     // fixture; mappings never unmap, so no other port may share this hint.
     pub const RING_WRITE: usize = 0x6ea0_0000;
+    // 0x6eb0_0000: dedicated to app/message_selector_read's target-width
+    // message and selector-word fixture; mappings never unmap, so no other
+    // port may share this hint.
+    pub const MESSAGE_SELECTOR_READ: usize = 0x6eb0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
