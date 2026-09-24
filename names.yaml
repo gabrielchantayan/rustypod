@@ -85044,6 +85044,31 @@ functions:
       (push {fp,lr} / pop {fp,pc} vs bx lr), identical to the accepted
       sibling metadata accessors at 0x0805129c/0x080512ac/0x080512c4.
 
+  # --- FAT date/time fields to packed calendar record ---
+  - address: 0x080aa738
+    ghidra: FUN_080aa738
+    name: fat_to_datetime
+    size: 132
+    sig: "void fat_to_datetime(u32 fat_date, u32 fat_time, DateTime *datetime)"
+    module: time/fat_to_datetime
+    status: ported
+    renames:
+      param_1/r0: fat_date
+      param_2/r1: fat_time
+      param_3/r2: datetime
+      DAT_080aa7bc: fat_year_base
+    notes: >-
+      Raw ARM has a 132-byte executable body at 0x080aa738..0x080aa7bb,
+      followed by its 0x000007bc FAT-year-base literal at 0x080aa7bc; the
+      next separately linked function begins at 0x080aa7c0. An independent
+      full-image A32 B/BL decode finds exactly three inbound plain BL callers
+      at 0x081bcc54, 0x081bcc64, and 0x081bcc74, no predicated BL callers,
+      and no outbound calls. It unpacks the low u16 FAT date/time fields into
+      DateTime seconds, minutes, hours, day, month, and year, writes weekday
+      zero, and preserves padding bytes +5 and +9. When both packed fields
+      are zero, it substitutes FAT date 0x0021 (1980-01-01). No validation,
+      NULL guard, or bounds check exists; no deliberate deviations.
+
   # --- Packed calendar record to FAT date/time fields ---
   - address: 0x080aacc0
     ghidra: FUN_080aacc0
