@@ -139307,3 +139307,26 @@ functions:
       host-mapped. match.py exits 1 with an expected structural diff:
       LLVM adds a frame, routes isdigit and the reporter through relocatable
       function pointers, and folds the status return into clz/lsr.
+
+  - address: 0x0809c340
+    ghidra: FUN_0809c340
+    name: byte_bit_set_mask
+    size: 36
+    sig: "u32 byte_bit_set_mask(const ByteBitSet *set, u32 bit_index)"
+    module: util/byte_bit_set_mask
+    status: ported
+    renames:
+      r0: set
+      r1: bit_index
+      r2: bit_count_or_mask
+      r3: bitmap_byte
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte extent
+      0x0809c340..0x0809c364; the next distinct function starts at
+      0x0809c364 with `stmdb sp!, {r4,lr}`. The unsigned bit count at +0x00
+      bounds the lookup; accepted indices select bytes from the target-width
+      pointer at +0x08 and bits most-significant first, returning the raw
+      mask rather than a normalized boolean. Full ARM B/BL decoding finds
+      exactly three direct unconditional BL callers (0x0809c1cc, 0x0809c1e0,
+      0x0809c1f4), no predicated BL callers, and no direct B callers. No
+      deliberate deviations.
