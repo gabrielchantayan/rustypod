@@ -157,6 +157,7 @@ pub mod volume_controller_post_byte_90_code;
 pub mod volume_limit_state_refresh_if_pending;
 pub mod volume_controller_adjust;
 pub mod volume_channel_set_level;
+pub mod volume_channel_set_balance;
 pub mod volume_controller_reschedule_timer;
 pub mod timer_rearm_after_15000;
 pub mod derived_object_construct;
