@@ -18,6 +18,7 @@ pub mod app_boot_metrics_submit;
 pub mod byte_state_set_and_notify;
 pub mod app_screen_cached_position;
 pub mod app_state_cleanup;
+pub mod application_shutdown;
 pub mod app_transition_cleanup;
 pub mod owner_pending_handle_reset;
 pub mod app_screen_position_decrement_if_flagged;
