@@ -525,6 +525,27 @@ pub unsafe extern "C" fn display_get(display_id: u32) -> *mut Display {
         _ => core::ptr::null_mut(),
     }
 }
+/// internal_display_request_clear — original: `FUN_080a76b8` @ 0x080a76b8
+/// (28 bytes exactly, 0x080a76b8..0x080a76d4; the next function opens at
+/// 0x080a76d4 with `stmdb sp!, {r4, r5, lr}`). Raw A32 word decoding finds
+/// three inbound plain `bl` calls and no predicated inbound `bl` calls. Its
+/// body has one plain `bl` to [`display_get`] and tail-branches to
+/// [`display_set_clear_color`].
+///
+/// Gets the internal LCD (display id 0) and requests that its next flush clear
+/// the panel to `color`. The tail dispatch preserves the getter's pointer as
+/// the clear-color routine's first argument. No deliberate deviations.
+///
+/// # Safety
+///
+/// Carries the same singleton initialization and panel-state side effects as
+/// [`display_get`] and [`display_set_clear_color`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn internal_display_request_clear(color: u32) {
+    display_set_clear_color(display_get(INTERNAL_DISPLAY_ID), color);
+}
+
 
 /// display_set_layer_enabled — original: `FUN_081d892c` @ 0x081d892c
 /// (124 bytes, 0x081d892c..0x081d89a8; Ghidra's 164-byte extent swallows the
@@ -1775,6 +1796,23 @@ mod tests {
                 assert_eq!(d.reserved_25_27, [0x99; 3], "the trailing flags are untouched");
             }
         }
+    }
+
+    #[test]
+    fn internal_clear_request_targets_only_the_internal_display() {
+        let guard = install_singleton_mocks();
+        unsafe {
+            for color in [0u32, 0x00ff_ffff, 0x00ff_0000, 0xffff_ffff] {
+                (*internal()).clear_pending = 0;
+                (*internal()).clear_color = 0xdead_beef;
+                internal_display_request_clear(color);
+                assert_eq!((*internal()).clear_pending, 1, "the internal clear is armed for {color:#x}");
+                assert_eq!((*internal()).clear_color, color, "the internal clear color for {color:#x}");
+                assert_eq!((*secondary()).clear_pending, 0xa5, "the secondary display is untouched");
+                assert_eq!((*secondary()).clear_color, 0xa5a5_a5a5, "the secondary color is untouched");
+            }
+        }
+        restore_singleton_mocks(guard);
     }
 
     #[test]
