@@ -137696,3 +137696,30 @@ functions:
       The port writes seed directly through the existing replaceable ANSI_RAND_STATE
       seam; target builds retain the fixed BSS address while host tests use a local
       word.
+
+  - address: 0x080e8430
+    ghidra: FUN_080e8430
+    name: singly_linked_list_unlink
+    size: 52
+    sig: "void singly_linked_list_unlink(u32 *head, u32 node)"
+    module: util/singly_linked_list_unlink
+    status: ported
+    renames:
+      param_1/r0/r2: head_link
+      param_2/r1: node
+      iVar1/r0: current
+      r2: current_link
+      "node+0x4": next
+    notes: >-
+      Raw osos.dec establishes the 52-byte body 0x080e8430..0x080e8463:
+      0x080e8460 is the final bx lr, and 0x080e8464 starts the next independent
+      function with push {r3-r9,sl,fp,lr}. A full A32 direct-call decode finds
+      one plain BL caller at 0x08073f88 and two predicated BLEQ callers at
+      0x08074118 and 0x08074140. This leaf walks a NULL-terminated singly
+      linked chain via each node's +0x4 target-width next word. On an address
+      match it replaces the incoming link (head or predecessor+0x4) with the
+      matched node's next word, deliberately leaving that node unchanged. It
+      has no callees, no NULL validation beyond the chain terminator, and no
+      deliberate deviations. Host tests cover empty, NULL/absent, head,
+      interior, and tail removal; match.py reports the expected LLVM loop
+      shape and no missing behavior.
