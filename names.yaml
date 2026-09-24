@@ -138683,3 +138683,23 @@ functions:
       unrecovered, so its name records only the observed slot dispatch. Rust
       uses a native-pointer host seam for the 32-bit firmware pointer and an
       Rust source leaves tail-call selection to LLVM, which emits the equivalent tail branch.
+
+  - address: 0x080b8228
+    ghidra: FUN_080b8228
+    name: queue_remove_source_tail_index
+    size: 48
+    sig: u32 queue_remove_source_tail_index(u32 selector)
+    module: util/queue_remove_source_tail_index
+    status: ported
+    vars:
+      param_1: selector
+    notes: >-
+      Raw ARM is a 48-byte wrapper, not Ghidra's overextended removal body:
+      it tests the byte pointed to by 0x08a0e180, selects one of two
+      0x48-byte queue records at 0x08b1c858 by selector == 1, derives
+      record[0x40/4] - 1, then tail-branches to 0x080b0fbc. That chain
+      repeats the gate and selection before entering the removal body at
+      0x080b0fdc. Zero internal bl instructions; three inbound plain bl
+      sites at 0x0807baa0, 0x0807babc, and 0x081c0ed4; no predicated forms.
+      The port deliberately inlines the verified tail chain because it has
+      no established Rust seam.

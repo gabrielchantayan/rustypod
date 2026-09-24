@@ -2292,6 +2292,9 @@ pub mod hints {
     // target-width state fixture; mappings never unmap, so no other user may
     // share it.
     pub const ENTRY_TABLE_FINALIZE_AND_APPEND: usize = 0x6fc0_0000;
+    // 0x6fd0_0000: dedicated to util/queue_remove_source_tail_index's
+    // target-width source-record and queue fixture; mappings never unmap.
+    pub const QUEUE_REMOVE_SOURCE_TAIL_INDEX: usize = 0x6fd0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
