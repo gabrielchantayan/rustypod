@@ -140201,6 +140201,46 @@ functions:
       makes the terminal branch a normal call while preserving r0/r1 and its
       return value; null providers retain the callee's null result.
 
+  # --- OpenSSL RSA destructor ---
+  - address: 0x08062374
+    ghidra: FUN_08062374
+    name: rsa_free
+    size: 212
+    sig: "void rsa_free(u32 *rsa)"
+    module: crypto/rsa_free
+    status: ported
+    renames:
+      param_1/r0/r4: rsa
+      "rsa+0x08": method
+      "method+0x20": finish
+      "rsa+0x30": ex_data
+      "rsa+0x38": references
+      "rsa+0x4c": blinding
+      "rsa+0x50": montgomery
+      FUN_08043828: crypto_add_lock
+      FUN_080439e0: crypto_free_ex_data
+      FUN_0803e5e4: tagged_word_buffer_destroy
+      FUN_0803dba8: two_buffer_owner_release
+      FUN_08043a20: unported alternate allocator release
+      FUN_08043994: traced_free
+    notes: >-
+      Raw A32 establishes the exact 212-byte code extent
+      0x08062374..0x08062448: the next independently linked function begins
+      at 0x08062448. Full-image B/BL decoding finds exactly three inbound
+      plain BL callers (0x080e9638, 0x082735cc, 0x082d3fdc) and no predicated
+      direct callers. The body has three unconditional direct BL calls
+      (crypto_add_lock, crypto_free_ex_data, traced_free) and eleven
+      predicated calls: BLXNE through rsa->meth->finish, eight BLNE tagged
+      BIGNUM releases, BLNE two_buffer_owner_release, and BLNE traced_free.
+      NULL returns; otherwise CRYPTO_add_lock decrements references (+0x38)
+      under lock class 9 and only a signed positive count returns. Final
+      teardown calls the optional method finish, frees class-6 ex-data,
+      destroys n/e/d/p/q/dmp1/dmq1/iqmp (+0x10..+0x2c) in ascending order,
+      releases +0x50 then +0x4c, and frees rsa. Deliberate deviation: host
+      builds use RSA_FREE_OPS to represent 32-bit target-word callbacks and
+      destructor pointers; target code directly loads/calls the original
+      method slot and the already-ported direct helpers.
+
   # --- opaque crypto context teardown ---
   - address: 0x0806fe48
     ghidra: FUN_0806fe48

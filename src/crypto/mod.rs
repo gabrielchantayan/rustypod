@@ -91,6 +91,7 @@ pub mod evp_md_ctx_copy_ex;
 pub mod evp_md_ctx_init;
 pub mod evp_sha1;
 pub mod evp_pkey;
+pub mod rsa_free;
 pub mod obj_dat;
 pub mod obj_name_alias_register;
 pub mod xor_f6_in_place;
