@@ -29,6 +29,7 @@ pub mod resource_op;
 pub mod ready_wait;
 pub mod sync_mutex;
 pub mod sync_sem;
+pub mod pending_state_take;
 pub mod task;
 pub mod task_queue_callback_find;
 pub mod signal_object_51;
