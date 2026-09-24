@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08114378
+    ghidra: FUN_08114378
+    name: selection_state_reset_and_dispatch
+    size: 60
+    sig: "void selection_state_reset_and_dispatch(SelectionState *state)"
+    module: app/selection_state_reset_and_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x444": selection_state
+      "state-vtable+0x58": completion_dispatch
+      FUN_08113a18: selection_state_refresh (unported)
+      DAT_081143ac: completion_kind (0x000063d6)
+      DAT_081143b0: completion_action (0x564d6178)
+    notes: >-
+      Raw osos.dec establishes the 60-byte 0x08114378..0x081143b4 extent:
+      52 instruction bytes followed by the two literal-pool words. The push
+      at 0x081143b4 is the next real function boundary. There are three
+      unconditional direct BL callers (0x08113834, 0x08114d94, 0x08115078)
+      and no predicated direct BL callers. This function has one unconditional
+      direct BL to the unported 0x08113a18 helper and no predicated direct BL
+      calls; its final vtable dispatch is `bx r3`, not BL. Rust writes -1 at
+      +0x444, calls that helper, then dispatches vtable+0x58 with
+      `(state, 0x564d6178, 0x000063d6)`. Host seams represent the unported
+      helper and target-width virtual call; the ARM tail dispatch is a final
+      ordinary Rust call because its return value is unobserved.
   - address: 0x08130090
     ghidra: FUN_08130090
     name: collection_count_eligible_entries
