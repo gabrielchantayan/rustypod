@@ -2336,6 +2336,9 @@ pub mod hints {
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;
+    // 0x6ff8_0000: dedicated to util/big_endian_bit_cell_store's target-width
+    // table and cell fixtures; mappings never unmap, so no other port may use it.
+    pub const BIG_ENDIAN_BIT_CELL_STORE: usize = 0x6ff8_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
