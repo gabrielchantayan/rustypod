@@ -137860,3 +137860,30 @@ functions:
       volatile metadata copies and a frame-pointer prologue instead of the
       retail LDM/STM block, while preserving metadata-before-table ordering,
       indexed pair stores, callback arguments, and terminal BX dispatch.
+
+  - address: 0x080e40c8
+    ghidra: FUN_080e40c8
+    name: string_map_assign_tree_records
+    size: 96
+    sig: "void string_map_assign_tree_records(RedBlackTreePayload24 *tree, StringKeyMap *map)"
+    module: cxx/string_map_assign_tree_records
+    status: ported
+    vars: {param_1/r0/r5: tree, param_2/r1/r6: map, local_4: node, r4: record}
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent: 24 ARM words from
+      push {r3,r4,r5,r6,r7,lr} at 0x080e40c8 through
+      pop {r3,r4,r5,r6,r7,pc} at 0x080e4124; the next separately linked
+      function begins at 0x080e4128. Whole-image aligned ARM decoding finds
+      three inbound direct calls, all plain unconditional bl
+      (0x081e0348, 0x081e03e4, 0x081e0480), and no predicated forms. The
+      body has exactly three plain unconditional bl calls and no predicated
+      calls: string_map_lookup_or_insert @ 0x083db32c, then the observed
+      record assignment ABI @ 0x08197c68, then the observed iterator-advance
+      ABI @ 0x083b5b58. It snapshots tree+0x10's header+0x08 leftmost node,
+      loops until that node equals the header sentinel, obtains the mapped
+      value for node+0x14, assigns the record, and advances the iterator with
+      zero as its second argument. The latter two callees have no established
+      names.yaml identities, so Rust retains fixed-address device dispatch and
+      typed replaceable host seams rather than inventing identities. Host tests
+      cover the sentinel-empty case and a two-node traversal with record and
+      map arguments asserted at both dispatch boundaries.
