@@ -5,6 +5,7 @@ pub mod offset_to_64;
 pub mod ahtp_state_destroy;
 pub mod active_selection_previous_index;
 pub mod afm_next_statement_token;
+pub mod binary_data_read;
 pub mod assign_active_entry_labels;
 pub mod always_succeeds;
 pub mod ascii_to_uppercase;

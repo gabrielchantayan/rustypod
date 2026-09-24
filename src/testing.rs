@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6f70_0000: dedicated to drivers/storage_backend_sector_size's
     // target-width validated-backend fixture; mappings never unmap.
     pub const STORAGE_BACKEND_SECTOR_SIZE: usize = 0x6f70_0000;
+    // 0x6f80_0000: dedicated to util/binary_data_read's target-width input
+    // fixture; mappings never unmap.
+    pub const BINARY_DATA_READ: usize = 0x6f80_0000;
     // 0xfee0_0000 / 0xfee1_0000: dedicated to ft/pshinter's target-width
     // stem-record array fixtures; mappings never unmap.
     pub const PSH_DIMENSION_APPEND_STEM_RECORD: usize = 0xfee0_0000;

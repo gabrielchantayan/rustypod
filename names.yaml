@@ -139278,3 +139278,32 @@ functions:
       BL calls, and no tail branch. The mask-ROM calls are modeled by
       volatile hooks; this deliberate seam preserves arguments, call order,
       the direct slot pointer, and result classification.
+
+  - address: 0x0809c634
+    ghidra: FUN_0809c634
+    name: binary_data_read
+    size: 160
+    sig: "u32 binary_data_read(parser: *mut u32, value: *mut u32, payload_start: *mut u32)"
+    module: util/binary_data_read
+    status: ported
+    renames:
+      param_1/r4: parser
+      param_2/r5: value
+      param_3/r7: payload_start
+      FUN_082d731c: isdigit
+    notes: >-
+      Raw osos.dec words establish the exact 160-byte extent
+      0x0809c634..0x0809c6d4; the following bytes are the stock
+      "read_binary_data: invalid size field\n" string and 0x0809c6fc is
+      the next real function. The body has two plain BL and three indirect
+      BLX calls, with no predicated forms. It skips parser input, accepts
+      only a digit prefix, reads and consumes the binary size, records the
+      payload after its delimiter, and advances the cursor by size plus one.
+      Failure reports the stock message, sets parser status +0x0c to three,
+      and returns zero. Target builds retain the parser callback fields at
+      +0x1c/+0x20/+0x24, call ported isdigit, and call the raw-verified
+      0x0804d17c error reporter; host tests use explicit callback seams
+      because target-width function pointers and LC_CTYPE storage are not
+      host-mapped. match.py exits 1 with an expected structural diff:
+      LLVM adds a frame, routes isdigit and the reporter through relocatable
+      function pointers, and folds the status return into clz/lsr.
