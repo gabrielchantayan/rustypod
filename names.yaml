@@ -136270,3 +136270,38 @@ functions:
       timer_restart implementation; Rust uses a normal call rather than the
       stock tail branch, whose return value is unobservable.
 
+  - address: 0x081169a0
+    ghidra: FUN_081169a0
+    name: ui_refresh_notification_state
+    size: 92
+    sig: "u32 ui_refresh_notification_state(void *owner)"
+    module: ui/refresh_notification_state
+    status: ported
+    renames:
+      param_1/r0: owner
+      r4: owner
+      r5: state_changed
+      "owner+0x73c": current_event
+      "owner+0x734": saved_event
+      "owner+0x884": pending_flag
+      "owner+0x88c": notification_target
+      "target-vtable+0x5c": replacement_event
+      FUN_08116dac: target_state_changed
+      FUN_0811190c: owner_event_cleanup
+      FUN_08116574: owner_event_changed
+      FUN_0811707c: ui_dispatch_notification
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte A32 body
+      0x081169a0..0x081169fb; the ldr at 0x081169fc starts the next real
+      function. The body has four unconditional direct BL instructions
+      (0x08116dac, 0x0811190c, 0x08116574, and 0x0811707c), zero predicated
+      BL instructions, and one indirect BLX through target-vtable+0x5c.
+      An independent whole-image branch decode finds three inbound plain BL
+      sites (0x08202eb8, 0x08202fdc, 0x0820e8d8) and zero predicated inbound
+      BL sites. It asks the target if state changed; a nonzero result invokes
+      two observed owner/event operations with owner+0x73c, then dispatches
+      owner+0x734, replaces that field from vtable+0x5c, clears owner+0x884,
+      and returns the change result. The three unported direct callees remain
+      explicit ABI-only seams because their semantic identities are not
+      established; host builds also replace the target's four-byte function
+      pointer with a seam.
