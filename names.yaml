@@ -139462,3 +139462,27 @@ functions:
       pairs at offsets 0 and 4 as a date key, then bytes 8..10 as a time key,
       returning -1, 0, or 1. Rust retains aligned halfword reads, matching the
       original ldrh accesses; bytes 2, 3, 6, and 7 are deliberately not read.
+
+  - address: 0x0808b1c0
+    ghidra: FUN_0808b1c0
+    name: kernel_object3_allocate
+    size: 72
+    sig: "u32 kernel_object3_allocate(u32 *slot)"
+    module: kernel/object3_allocate
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_080f4f74: object_creation_prelude (unported fixed call)
+      thunk_EXT_FUN_22003d70: kernel_create_dispatch
+    notes: >-
+      Raw osos.dec words establish the 72-byte extent
+      0x0808b1c0..0x0808b208: 64 bytes of instructions and the two-word
+      literal pool, followed by stmdb sp!,{r2,r3,r4,lr} at the next real
+      function. The body makes two plain BL calls (0x080f4f74 and veneer
+      0x08037e70 -> ROM 0x22003d70) and no predicated BL calls; there are
+      three inbound plain BL callers (0x080a3d68, 0x081e2278, 0x082e834c).
+      It runs the fixed prelude, requests class 3 into slot, and returns zero
+      only if the dispatcher returned zero and populated a nonzero handle;
+      otherwise it returns 0x27. Target Rust calls the verified unported
+      prelude and ROM entries through explicit seams; the host default models
+      successful creation.

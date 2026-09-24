@@ -27,6 +27,7 @@ pub mod os_heap;
 pub mod mutex_handoff;
 pub mod posix_mutex;
 pub mod object4_slot_delete;
+pub mod object3_allocate;
 pub mod resource_op;
 pub mod ready_wait;
 pub mod sync_mutex;
