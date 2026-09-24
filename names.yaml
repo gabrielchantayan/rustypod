@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08111968
+    ghidra: FUN_08111968
+    name: selection_state_refresh_if_count_changed
+    size: 80
+    sig: "void selection_state_refresh_if_count_changed(SelectionState *state)"
+    module: app/selection_state_refresh_if_count_changed
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      "state+0x30": inner
+      "state+0xd4": cached_count
+      "state+0x444": context_index
+      FUN_080542a0: materialize_and_count_inner_results
+      FUN_082982e4: context_index_matches_context_field_f40
+      "state-vtable+0x58": context_sensitive_notification_dispatch
+      DAT_081119b8: notification_action ("VMax", 0x564d6178)
+      DAT_081119bc: matching_context_kind (0x6381)
+      DAT_081119c0: differing_context_kind (0x639a)
+    notes: >-
+      Raw osos.dec words establish the true 80-byte extent
+      0x08111968..0x081119b7: the last instruction is `bx r3` at
+      0x081119b4, while the three-word literal pool occupies
+      0x081119b8..0x081119c0 and the next real function begins at
+      0x081119c4 with `ldr r0,[r0,#0x430]`. Full-image A32 decoding finds
+      three inbound plain BL calls (0x08109fb4, 0x0811521c, 0x08116d80) and
+      zero predicated forms. The function has two internal plain BL calls
+      (0x080542a0 and 0x082982e4), no predicated direct BL calls, then final
+      indirect `bx r3` vtable dispatch. It materializes the inner result
+      count, suppresses work when state+0xd4 already matches, otherwise
+      caches the count and dispatches vtable+0x58 with "VMax" plus 0x6381
+      when the one-based context index matches or 0x639a when it differs.
+      Rust makes the tail dispatch an ordinary final call and uses the
+      existing host seam for the unported materialize-and-count target;
+      target builds retain the physical vtable dispatch.
   - address: 0x081131a8
     ghidra: FUN_081131a8
     name: counted_utf16_to_utf8
