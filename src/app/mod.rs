@@ -199,6 +199,7 @@ pub mod context_scope;
 pub mod context_scope_complete_selection;
 pub mod context_index_matches_context_field_f40;
 pub mod selection_state_refresh_if_count_changed;
+pub mod counting_path_acquire;
 pub mod directory_iterator;
 pub mod context_scope_selector;
 pub mod current_record_handle;
