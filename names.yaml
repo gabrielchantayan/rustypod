@@ -17802,6 +17802,26 @@ functions:
       re-read-after-materialize, and the +0x3ac/+0x10 addressing all
       match.
 
+  - address: 0x080e4300
+    ghidra: FUN_080e4300
+    name: current_task_priority_set
+    size: 12
+    sig: "u32 current_task_priority_set(u32 priority)"
+    module: kernel/task_priority
+    status: ported
+    vars: {param_1: priority}
+    notes: >-
+      Raw words e1a01000 e3a00000 eafd4ef0 establish the complete
+      0x080e4300..0x080e430b function: move priority from r0 to r1,
+      set the task selector r0 to zero, then tail-branch to the
+      task_priority_set veneer at 0x08037ed0. The sibling queue_wait_status
+      prologue at 0x080e430c proves the 12-byte extent. Decoding every ARM
+      B/BL word in osos.dec finds three inbound unconditional bl calls
+      (0x080935c4, 0x080f5540, 0x081f4974), zero predicated bl calls; the
+      function itself has zero bl and one unconditional tail b. The Rust
+      port calls the existing task_priority_set gateway seam instead of
+      reproducing the literal tail branch; its observable r0 result remains
+      zero, the current-task selector.
   - address: 0x080e430c
     ghidra: FUN_080e430c
     name: queue_wait_status
