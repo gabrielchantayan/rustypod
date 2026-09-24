@@ -25533,6 +25533,25 @@ functions:
       plain BL and five predicated BLX calls. The unported embedded reset is an
       address seam; host virtual dispatch is a seam because target pointer
       fields are four bytes and host pointers are wider.
+  - address: 0x08120700
+    ghidra: FUN_08120700
+    name: layer_pending_object_cleanup
+    size: 68
+    sig: "void layer_pending_object_cleanup(u32 *layer)"
+    module: drivers/display_layer_reset
+    status: ported
+    vars:
+      param_1: layer
+    notes: >-
+      Raw osos.dec establishes the 68-byte extent 0x08120700..0x08120744:
+      0x08120744 is the next separately linked function. Two plain BL callers
+      (0x081d8b4c, 0x081d8b6c) and one predicated BLNE caller (0x081d8f38) were
+      independently decoded. Clears layer byte +0x1bd. A nonzero target-width
+      word at +0x60 receives unported 0x0810667c with flag 1, then virtual
+      slot +0x04, before the word is cleared. A zero word tail-branches to
+      condvar_signal(&layer[+0x80]). The callee has no names.yaml identity, so
+      it remains an address seam; host vtable dispatch is likewise a seam
+      because target pointers are four bytes and host pointers are wider.
   - address: 0x08120880
     ghidra: FUN_08120880
     name: layer_set_global_alpha_blend
