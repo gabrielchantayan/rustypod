@@ -137441,3 +137441,33 @@ functions:
       callers at 0x0810559c, 0x081055d0, and 0x0814e434; no predicated BL
       callers. Ghidra calls the return short, but raw ldrh/movne proves the
       observable r0 value is zero-extended, so Rust exposes u16.
+  - address: 0x080f4fd8
+    ghidra: FUN_080f4fd8
+    name: sha1_update
+    size: 176
+    sig: "void sha1_update(Sha1Context *context, const u8 *input, u32 input_len)"
+    module: crypto/sha1_update
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1/r6: input
+      param_3/r2/r7: input_len
+      r5: input_index
+      "context+0x14..+0x53": block_buffer
+      "context+0x154": buffered_bytes
+      "context+0x158": bit_count_high
+      "context+0x15c": bit_count_low
+      FUN_0807d558: sha1_block_transform
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte function extent
+      0x080f4fd8..0x080f5087: `pop {r4-r7,pc}` at 0x080f5084 is final and
+      `push {r4,lr}` at 0x080f5088 begins the next real function. Its sole
+      internal direct call is the unconditional BL at 0x080f5048 to the
+      SHA-1 block transform 0x0807d558; it has no predicated direct BLs.
+      Full-image decoding finds three inbound plain BL call sites and no
+      predicated inbound forms. Each positive signed-length input byte shifts
+      into the big-endian 64-byte buffer; every 64 bytes it transforms the
+      block and clears buffered_bytes. The low bit counter adds eight and the
+      high counter receives its carry. ARM builds retain the verified stock
+      transform entry; host tests use its seam because that callee is not yet
+      ported.
