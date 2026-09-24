@@ -24,6 +24,41 @@ const MODE_STATE_FLAG_OFFSET: usize = 0x860;
 /// Byte offset of the status code in a selected mode substate.
 const MODE_STATE_SUBSTATE_CODE_OFFSET: usize = 0x14;
 
+/// select_mode_substate — original: `FUN_080e1cc8` @ `0x080e1cc8`
+/// (64 bytes).
+///
+/// Verified call count: three unconditional `bl` sites (`0x080db644`,
+/// `0x080dd2b4`, and `0x080df5b8`); no predicated calls. Raw ARM returns
+/// `object + selector * 0x20` for selectors 0–3, selects the irregular
+/// offsets `0x100`, `0x180`, `0x200`, and `0x230` for selectors 4–7, and
+/// returns null for every other selector.
+///
+/// Deliberate deviations: `wrapping_add` expresses the ARM address addition
+/// without requiring a dereferenceable Rust allocation. The original has no
+/// memory accesses, bounds checks, or null checks.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn select_mode_substate(object: *mut u8, selector: u32) -> *mut u8 {
+    if selector == 4 {
+        return object.wrapping_add(0x100);
+    }
+    if selector == 5 {
+        return object.wrapping_add(0x180);
+    }
+    if selector == 6 {
+        return object.wrapping_add(0x200);
+    }
+    if selector == 7 {
+        return object.wrapping_add(0x230);
+    }
+    if selector > 3 {
+        return core::ptr::null_mut();
+    }
+
+    object.wrapping_add(selector as usize * 0x20)
+}
+
+
 
 /// indexed_mode_flag — original: `FUN_080b649c` @ `0x080b649c` (28 bytes).
 ///
@@ -86,11 +121,9 @@ pub unsafe extern "C" fn indexed_mode_status(index: i16) -> u32 {
 /// embedded substates, then returns the low three bits of that substate's
 /// word at `+0x14`.
 ///
-/// The selector mapping from the unported `FUN_080e1cc8` is deliberately
-/// inlined: selectors 0–3 select `selector * 0x20`, while selectors 4–7
-/// select `0x100`, `0x180`, `0x200`, and `0x230`. An invalid selector makes
-/// the stock helper return null and the following load fault; it remains
-/// outside this function's safety contract.
+/// [`select_mode_substate`] preserves the original selector mapping. An
+/// invalid selector makes the stock helper return null and the following
+/// load fault; it remains outside this function's safety contract.
 ///
 /// # Safety
 ///
@@ -103,14 +136,7 @@ pub unsafe extern "C" fn indexed_mode_status(index: i16) -> u32 {
 pub unsafe extern "C" fn indexed_mode_substate_code(index: i16, selector: u32) -> u32 {
     let object_slot = mode_state_object_table().offset(index as isize * MODE_STATE_RECORD_STRIDE);
     let object = (object_slot as *const *const u8).read();
-    let substate = match selector {
-        0..=3 => object.add(selector as usize * 0x20),
-        4 => object.add(0x100),
-        5 => object.add(0x180),
-        6 => object.add(0x200),
-        7 => object.add(0x230),
-        _ => core::ptr::null(),
-    };
+    let substate = select_mode_substate(object as *mut u8, selector);
 
     (substate.wrapping_add(MODE_STATE_SUBSTATE_CODE_OFFSET) as *const u32).read() & 7
 }
@@ -178,6 +204,28 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn selects_all_mode_substate_offsets_and_rejects_invalid_selectors() {
+        let mut object = [0u8; 0x231];
+        let base = object.as_mut_ptr();
+        let cases = [
+            (0, 0x000),
+            (1, 0x020),
+            (2, 0x040),
+            (3, 0x060),
+            (4, 0x100),
+            (5, 0x180),
+            (6, 0x200),
+            (7, 0x230),
+        ];
+
+        for (selector, offset) in cases {
+            assert_eq!(select_mode_substate(base, selector), unsafe { base.add(offset) });
+        }
+        assert!(select_mode_substate(base, 8).is_null());
+        assert!(select_mode_substate(base, u32::MAX).is_null());
+    }
     #[test]
     fn selects_each_substate_and_masks_its_status_code() {
         let _guard = MODE_STATE_TABLE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
