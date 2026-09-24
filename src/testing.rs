@@ -2231,6 +2231,9 @@ pub mod hints {
     // 0x6e60_0000: dedicated to app/registered_listener_remove_by_pair's
     // target-width listener owner and circular-list fixture; mappings never unmap.
     pub const REGISTERED_LISTENER_REMOVE_BY_PAIR: usize = 0x6e60_0000;
+    // 0x6e70_0000: dedicated to app/selection_state_apply_index_and_dispatch's
+    // target-width state and target fixture; mappings never unmap.
+    pub const SELECTION_STATE_APPLY_INDEX_DISPATCH: usize = 0x6e70_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

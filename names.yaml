@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811190c
+    ghidra: FUN_0811190c
+    name: selection_state_apply_index_and_dispatch
+    size: 92
+    sig: "void selection_state_apply_index_and_dispatch(SelectionState *state, u32 index)"
+    module: app/selection_state_apply_index_and_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1: index
+      "state+0x88c": target
+      "target-vtable+0x84": apply_index
+      "state-vtable+0x58": selection_notification_dispatch
+      DAT_0811195c: first_selection_kind (0x63fb)
+      DAT_08111960: selection_action (0x2a2a2a2a, "****")
+      DAT_08111964: second_selection_kind (0x63fc)
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x0811190c..0x08111967:
+      20 A32 instruction words through tail `bx r3` at 0x08111958 and the
+      three-word literal pool at 0x0811195c..0x08111964; 0x08111968 is the
+      next real function. It has no internal plain or predicated direct BL
+      instructions, two indirect BLX calls (target-vtable+0x84 then
+      state-vtable+0x58), and a final state-vtable+0x58 BX tail dispatch.
+      Full-image decoding finds three inbound plain BL calls at 0x08112f80,
+      0x08113598, and 0x081169bc, with no predicated inbound forms. It forwards
+      the index to the target then emits action 0x2a2a2a2a with kinds 0x63fb and
+      0x63fc. Rust uses host seams for target-width vtable pointers; ARM builds
+      physically dispatch both observed slots.
   - address: 0x08111968
     ghidra: FUN_08111968
     name: selection_state_refresh_if_count_changed
