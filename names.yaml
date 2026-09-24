@@ -139230,6 +139230,30 @@ functions:
       inspect the next byte's class bit 0x08 and advance one or two bytes;
       other classes advance one byte when any bit in 0x0307 is set, otherwise
       returning the current byte pointer. No callee seam is required.
+  - address: 0x0809c758
+    ghidra: FUN_0809c758
+    name: mode_position_validate
+    size: 68
+    sig: "u32 mode_position_validate(u32 mode, const i32 *position)"
+    module: util/mode_position_validate
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r1: position
+      iVar2/r3: position_value
+      local_8[0]/sp+4: lower_bound
+      local_c/sp: upper_bound
+    notes: >-
+      Raw osos.dec A32 words establish the complete 68-byte extent
+      0x0809c758..0x0809c79c; the next real function begins at 0x0809c79c
+      with `stmdb sp!, {r4,lr}`. The sole outgoing call is a plain BL at
+      0x0809c768 to 0x080d7ad8; no predicated BL calls occur. Three inbound
+      plain BL calls occur at 0x080a3de8, 0x082e7cf0, and 0x082e8588, with
+      none predicated. The callee is only used here and has no established
+      semantic identity; verified raw behavior gives mode 2 bounds -62..63,
+      modes 1 and 3 status 0x31, and other modes status 0x1a. The Rust port
+      inlines those fixed callee results rather than adding an unsupported
+      callee seam; this is the deliberate deviation.
   - address: 0x0809c79c
     ghidra: FUN_0809c79c
     name: kernel_object4_slot_delete
