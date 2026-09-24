@@ -138812,3 +138812,34 @@ functions:
       changing count or capacity. match.py confirms the grow branch,
       realloc call, error gate, and two-word initialization structure; LLVM
       uses a smaller frame and different register allocation.
+
+  - address: 0x080ac06c
+    ghidra: FUN_080ac06c
+    name: path_stage_budget_set
+    size: 88
+    sig: "void path_stage_budget_set(u32 stage, StringObject *path_object)"
+    module: app/path_stage_budget_set
+    status: ported
+    renames:
+      param_1/r5: stage
+      param_2/r4: path_object
+      local_10/stack: budget_kib (zero unless the path probe succeeds)
+      FUN_080f4ad8: path_probe_via_facade (ported filesystem facade slot-+0x50 probe)
+      FUN_0808918c: PATH_FACADE_SLOT_68_FROM_PATH_OBJECT seam (unported facade slot-+0x68 byte-size operation)
+      FUN_081fa3b0: stage_progress_tracker_get (ported lazy tracker singleton)
+    notes: >-
+      Raw A32 decoding establishes the exact 88-byte extent
+      0x080ac06c..0x080ac0c0: the following push at 0x080ac0c4 begins the
+      next real function. The body has three plain unconditional BL calls
+      (0x080f4ad8, 0x0808918c, and 0x081fa3b0), no predicated BL forms, and
+      no tail branch. It initializes the stack budget word to zero, probes the
+      supplied path with flags zero, conditionally requests its byte size into
+      that same word, shifts it right ten bits, then writes the result at
+      tracker+0x10+stage*4. The path probe and tracker getter are ported. The
+      size operation remains the established target-retailOS/host-replaceable
+      PATH_FACADE_SLOT_68_FROM_PATH_OBJECT seam; its i32 status is ignored just
+      as the raw body ignores r0 after the call. Deliberate deviation: the
+      tracker getter uses the crate cache rather than the firmware global word,
+      while StageProgressTracker preserves the target's four-byte stage-word
+      spacing. Host coverage exercises absent-path zeroing, present-path
+      floor-to-KiB conversion, and preservation of other stage words.
