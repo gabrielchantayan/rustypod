@@ -14338,6 +14338,32 @@ functions:
       deviations: the tail branch is a return-position call and the
       mutex is volatile-copied before locking so LLVM preserves the pair.
 
+  - address: 0x08087450
+    ghidra: FUN_08087450
+    name: localtime_copy
+    size: 40
+    sig: "struct tm *localtime_copy(const i32 *time, struct tm *dst)"
+    module: time/localtime_copy
+    status: ported
+    renames:
+      param_1: time
+      param_2: dst
+      FUN_080312a0: localtime
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec confirms the true 40-byte extent
+      0x08087450..0x08087478. Ghidra's 44-byte range incorrectly absorbs
+      the separately named 4-byte timer_trace_assert_veneer at 0x0808747c;
+      that veneer is a `b 0x08076954`, and the next real function opens at
+      0x08087480. The body calls localtime(time), returns NULL if it does,
+      and otherwise copies the 36-byte static struct tm result to dst
+      through iram_memcpy_veneer before returning dst. Whole-image ARM B/BL
+      decoding finds 3 inbound unconditional bl calls (0x08039e9c,
+      0x0803a4ec, 0x0803a5b8) and zero predicated bl calls; its two internal
+      calls are both unconditional. Deliberate deviation: Rust calls the
+      already-ported IRAM memcpy veneer rather than duplicating its
+      word-copy implementation, preserving the retail call seam.
+
   - address: 0x0808747c
     ghidra: thunk_FUN_08076954
     name: timer_trace_assert_veneer
