@@ -140235,3 +140235,36 @@ functions:
       for generic_descriptor_lookup, or an action callback; its identity is
       deliberately not invented. Host tests use target-width source fixtures
       and seams for the opaque resolver, parser, and callback.
+
+  # --- Application shutdown coordinator (app/application_shutdown) ---
+  - address: 0x0806e71c
+    ghidra: FUN_0806e71c
+    name: application_shutdown
+    size: 168
+    sig: "void application_shutdown(void *owner)"
+    module: app/application_shutdown
+    status: ported
+    renames:
+      param_1/r4: owner
+      iVar2/r0: state
+      FUN_0806b438: state_pending_release
+      FUN_080beba4: pending_release_cleanup
+      FUN_0806e5b4: pending_notification_cleanup
+      FUN_0806e5a4: preferences_flush
+      FUN_08100b74: instance_of_class_6600
+      FUN_08149648: four_slot_buffer_pool_get
+      FUN_0814933c: four_slot_pool_shutdown
+    notes: >-
+      Raw osos.dec words establish the true 168-byte extent from 0x0806e71c
+      through the tail branch at 0x0806e7c0; the next separately linked
+      function begins with stmdb sp!,{r4,lr} at 0x0806e7c4. There are exactly
+      18 unconditional plain BL instructions and no predicated BL forms:
+      pending-release cleanup, the +0xb91 clear helper, pending-notification
+      cleanup, preferences flush, four fixed subsystem calls, class-0x6600
+      accessor and two field enables, five shutdown services, and the pool
+      getter. The final B dispatches the returned pool to 0x0814933c. The
+      port reproduces both conditional byte clears and order. Independently
+      unported callees use typed fixed-address seams on target and replaceable
+      operations on host; the existing class-0x6600 accessor remains a Rust
+      call on target. Host test proves both flagged branches, byte clears,
+      arguments, and the complete observable call order.
