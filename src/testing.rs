@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6ed0_0000: dedicated to cxx/descriptor_action_dispatch's raw-u32
     // owner and source fixture; mappings never unmap.
     pub const DESCRIPTOR_ACTION_DISPATCH: usize = 0x6ed0_0000;
+    // 0x6f58_0000: dedicated to crypto/rsa_size's target-width RSA fixture;
+    // mappings never unmap, so no other port may share this hint.
+    pub const RSA_SIZE: usize = 0x6f58_0000;
     // 0x6f70_0000: dedicated to drivers/storage_backend_sector_size's
     // target-width validated-backend fixture; mappings never unmap.
     pub const STORAGE_BACKEND_SECTOR_SIZE: usize = 0x6f70_0000;

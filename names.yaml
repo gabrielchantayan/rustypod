@@ -81335,6 +81335,31 @@ functions:
   # @ 0x08063040 is (BN_num_bits + 7) / 8; the X.509 chain walk
   # FUN_082d48ac @ 0x082d48ac requires BN_num_bits(key) == 0x400,
   # the RSA-1024 modulus check.
+  - address: 0x08063040
+    ghidra: FUN_08063040
+    name: rsa_size
+    size: 32
+    sig: "int rsa_size(const u32 *rsa)"
+    module: crypto/bn_num_bytes
+    status: ported
+    renames:
+      param_1/r0: rsa
+      FUN_080404a8: bn_num_bits
+    notes: >-
+      OpenSSL RSA_size: read rsa->n at target byte offset 0x10, then return
+      (BN_num_bits(n) + 7) / 8. Raw osos.dec decodes to eight ARM words from
+      0x08063040 through 0x0806305c; the next real function starts at
+      0x08063060 with push {r1-r11,lr}, confirming Ghidra's 32-byte extent.
+      Decoding every B/BL instruction finds exactly three inbound plain bl
+      sites (0x08062f80, 0x08063084, 0x082d3fa8), zero predicated bl sites,
+      and one unconditional outbound bl to bn_num_bits @ 0x080404a8. The
+      caller contexts are RSA public-key verification and EVP_PKEY_size,
+      confirming the RSA identity. The port uses target-width word indexing
+      for rsa->n, avoiding host pointer-width field offsets; wrapping_add(7)
+      plus signed division by eight preserves the ARM add/sign-adjust/asr
+      result, including addition overflow. Host tests cover a zero-top
+      modulus, byte-rounding boundaries, and a multi-limb modulus. The
+      bn_num_bits callee is already ported; no new seam is introduced.
   - address: 0x080404a8
     ghidra: FUN_080404a8
     name: bn_num_bits
