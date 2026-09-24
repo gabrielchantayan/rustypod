@@ -136173,3 +136173,43 @@ functions:
       jumptable and is not used. The Rust port calls the already ported
       string_object_substring directly instead of reproducing the tail branch;
       this is the only deliberate codegen deviation.
+
+  - address: 0x08116b6c
+    ghidra: FUN_08116b6c
+    name: context_transition_notification
+    size: 76
+    sig: "u32 context_transition_notification(u8 *context, u32 use_first_code, u32 first_code, u32 second_code)"
+    module: app/context_transition_notification
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: use_first_code
+      param_3/r2: first_code
+      param_4/r3: second_code
+      DAT_08116bb8: timer_refresh_delay_ms (0x0001d4c0)
+      FUN_081a5500: singleton_class_8c00
+      FUN_081a6368: class_8c00_rearm_timer_post_0x11
+      FUN_0811666c: context_transition_prepare
+      FUN_081d2408: framework_root_post_message
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 72 bytes of ARM
+      instructions from 0x08116b6c through the tail branch at 0x08116bb4,
+      plus the 0x0001d4c0 literal at 0x08116bb8; the next real function
+      starts at 0x08116bbc with push {r4,r5,r6,lr}. Ghidra's apparent
+      in-function allocation/construct/post sequence belongs to the tail
+      target FUN_081d2408, not this function. Decoding every ARM B/BL word
+      finds exactly three unconditional direct BL callers (0x08114aac,
+      0x08114ae0, 0x08115bc4) and zero predicated direct BL callers. The
+      body makes three unconditional direct BL calls and no predicated BL:
+      it returns immediately with zero when instance_of_class_6000() is
+      NULL; otherwise it refreshes singleton_class_8c00's 120000-ms timer,
+      conditionally prepares context via FUN_0811666c, selects r2 when
+      use_first_code is nonzero and r3 otherwise, then tail-branches to
+      the ported framework-root zero-payload message post. FUN_0811666c
+      remains semantically unidentified; the target build calls its
+      verified retail address directly, while host tests inject and verify
+      that action. Host tests cover the NULL guard, both selector paths,
+      timer refresh, preparation ordering, code forwarding, and post
+      status. match.py reports the same call/guard/select/tail-post shape;
+      expected differences are the Rust frame, direct-retail BLX seam, and
+      synthesized zero-return epilogue.
