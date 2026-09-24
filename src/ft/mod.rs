@@ -23,6 +23,7 @@ pub mod glyph_loader;
 pub mod list;
 pub mod memory;
 pub mod module;
+pub mod module_callback_dispatch;
 pub mod linked_module_find_by_class;
 pub mod metrics;
 pub mod outline;
