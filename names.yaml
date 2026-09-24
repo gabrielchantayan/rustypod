@@ -136387,3 +136387,36 @@ functions:
       global condition is unrelated to this wrapper; it is retained as a
       fixed-address call on target and as a host seam. Deliberate deviations:
       Rust expresses the final tail dispatch as a normal call.
+  - address: 0x08114dc0
+    ghidra: FUN_08114dc0
+    name: controller_clamped_delay
+    size: 72
+    sig: "void controller_clamped_delay(u8 *controller, u32 *elapsed_out, u32 *remaining_out)"
+    module: app/controller_clamped_delay
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: elapsed_out
+      param_3/r2: remaining_out
+      r4: delay_milliseconds
+      r5: elapsed_out
+      r6: remaining_out
+      r7: controller
+      FUN_082a4290: vtable_predicate_state_scaled_value
+      FUN_08111488: controller_timestamp
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte A32 body from
+      0x08114dc0 through 0x08114e07; push {r4,lr} at 0x08114e08 starts the
+      next independently entered function. The body has three unconditional
+      direct BL instructions (0x082a4290, 0x08111488, and 0x08036f14), zero
+      predicated BL instructions, and no BLX. An independent full-image A32
+      decode finds exactly three inbound plain BL sites at 0x0811252c,
+      0x08112550, and 0x081f44a0, with zero predicated inbound BL forms. It
+      gets a vtable-gated delay from controller+0x38, reads the opaque
+      controller timestamp, divides it by 1000, stores elapsed milliseconds,
+      and writes delay-elapsed when elapsed is below delay; otherwise it
+      clamps elapsed to delay and writes zero remaining. The timestamp helper
+      has no established identity, so Rust keeps it as a target-call seam;
+      host tests replace all three calls to prove ordering, the strict clamp
+      boundary, and aliased output-store order.
