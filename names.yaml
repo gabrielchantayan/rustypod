@@ -3276,6 +3276,30 @@ functions:
       the supplied path to the live record's +4 prefix pointer for its +0x10
       byte length, returning one only for equality. Target reads 32-bit record
       fields at 0x089ca3a4; host tests use a native-pointer seam.
+  - address: 0x080921dc
+    ghidra: FUN_080921dc
+    name: input_command_dispatch
+    size: 72
+    sig: "void input_command_dispatch(u32 slot, u32 mode)"
+    module: ui/input_command_dispatch
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: mode
+      r4: slot
+    notes: >-
+      Raw osos.dec establishes the true 72-byte code extent
+      0x080921dc..0x08092220; 0x08092224..0x0809222c is the literal pool,
+      and 0x08092230 is the next distinct push prologue. There is one
+      outbound plain BL to unresolved FUN_080e2ef4, one incoming plain BL at
+      0x080e183c, and one incoming predicated BLNE at 0x080a8e2c. Mode zero
+      dispatches selector 0x00030004 with zero and slot, then stores slot’s
+      low byte at 0x089d05c4; mode one tail-branches to the same dispatcher
+      with selector 0x00030003; all other modes return. Target retains the
+      unresolved dispatcher address and host tests use dispatcher and byte
+      seams. match.py confirms the mode split, dispatch arguments, byte store,
+      and target tail dispatch; LLVM uses indirect BLX/BX for the fixed
+      unresolved address rather than the retail direct BL/B.
   - address: 0x080a8e10
     ghidra: FUN_080a8e10
     name: input_state_transition
