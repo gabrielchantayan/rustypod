@@ -137674,3 +137674,25 @@ functions:
       buffer, IRAM memzero, and storage-transfer ports. Deliberate ABI deviation:
       the original leaves r1 as the last storage-helper residue on successful return;
       the exported Rust signature represents the verified r0 status only.
+
+  # --- ANSI-C LCG seed setter ---
+  - address: 0x080e8a64
+    ghidra: FUN_080e8a64
+    name: ansi_srand
+    size: 12
+    sig: "void ansi_srand(u32 seed)"
+    module: runtime/random
+    status: ported
+    renames:
+      param_1/r0: seed
+      DAT_080e8a70: ansi_rand_state (target RAM @ 0x089ca89c)
+    notes: >-
+      Raw osos.dec establishes three ARM instructions at 0x080e8a64..0x080e8a6c:
+      LDR r1,[pc,#4], STR r0,[r1], and BX lr. The literal-pool word at
+      0x080e8a70 is 0x089ca89c, the ANSI-C LCG state used by ansi_rand; the next
+      separately linked function begins with push at 0x080e8a74. Full-image ARM
+      BL decoding finds exactly three inbound plain, unconditional calls at
+      0x08143cac, 0x081b7910, and 0x081bc02c, with zero predicated BL forms.
+      The port writes seed directly through the existing replaceable ANSI_RAND_STATE
+      seam; target builds retain the fixed BSS address while host tests use a local
+      word.

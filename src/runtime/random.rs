@@ -106,6 +106,27 @@ pub unsafe extern "C" fn ansi_rand() -> u32 {
     state.write(next);
     (next >> 16) & 0x7fff
 }
+/// ansi_srand — original: `FUN_080e8a64` @ 0x080e8a64 (12 instruction bytes;
+/// literal-pool word at 0x080e8a70; next function starts 0x080e8a74).
+///
+/// Verified call count: three plain `bl` sites at 0x08143cac, 0x081b7910, and
+/// 0x081bc02c; no predicated calls. Replaces the ANSI-C LCG seed used by
+/// [`ansi_rand`].
+///
+/// # Deliberate deviations
+///
+/// The target stores through its fixed BSS seed cell at 0x089ca89c. Host
+/// builds use the replaceable [`ANSI_RAND_STATE`] pointer for testability.
+///
+/// # Safety
+///
+/// [`ANSI_RAND_STATE`] must identify a writable aligned `u32`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ansi_srand(seed: u32) {
+    ANSI_RAND_STATE.write(seed);
+}
+
 
 /// rand — alias of `random` (no separate original; same generator).
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -263,5 +284,19 @@ pub(crate) mod tests {
         }
         assert_eq!(observed, expected, "each result is bits 16..30");
         assert_eq!(final_state, second_state, "the wrapped seed is stored after every step");
+    }
+
+    #[test]
+    fn ansi_srand_replaces_seed_without_advancing() {
+        let _g = LOCK.lock();
+        let mut seed = 0;
+        unsafe {
+            let original_state = ANSI_RAND_STATE;
+            ANSI_RAND_STATE = core::ptr::addr_of_mut!(seed);
+            ansi_srand(0xdead_beef);
+            assert_eq!(seed, 0xdead_beef);
+            assert_eq!(ansi_rand(), 0x1c01);
+            ANSI_RAND_STATE = original_state;
+        }
     }
 }
