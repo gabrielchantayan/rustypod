@@ -138254,3 +138254,25 @@ functions:
       FUN_08074410 lacks a names.yaml entry, so the port calls the existing
       equivalent is_leap_year implementation rather than creating an
       unverified seam for that address.
+  - address: 0x080d4b2c
+    ghidra: FUN_080d4b2c
+    name: pending_state_take
+    size: 20
+    sig: "u32 pending_state_take(void)"
+    module: kernel/pending_state_take
+    status: ported
+    renames:
+      DAT_080d4b40: pending_state_word_base (0x3c200000)
+      "pending_state_word_base+0x10": pending_state_word
+    notes: >-
+      Raw osos.dec establishes the 20-byte executable extent
+      0x080d4b2c..0x080d4b3f. The following word at 0x080d4b40 is the
+      literal-pool pointer 0x3c200000, and the push at 0x080d4b44 begins
+      the next real function. Full A32 BL decoding finds three plain direct
+      callers (0x0836d8f4, 0x0836d984, and 0x0836da28) and no predicated
+      direct BL callers; this leaf has no outbound calls. It loads the word
+      at 0x3c200010, stores zero there, and returns the loaded value. The
+      higher-level state identity remains unrecovered, so the semantic name
+      records only the verified take-and-clear behavior. Target builds use
+      the retail address directly; host builds substitute private storage
+      to make this fixed-address operation testable.
