@@ -139688,3 +139688,19 @@ functions:
       seams targeting verified retailOS addresses; LLVM consequently emits
       indirect calls and a different prologue from retailOS. Deliberate
       deviations: none.
+
+  - address: 0x08087480
+    ghidra: FUN_08087480
+    name: word_is_zero
+    size: 16
+    sig: "u32 word_is_zero(const u32 *word)"
+    module: util/word_is_zero
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact four-word extent
+      0x08087480..0x08087490: ldr r0,[r0]; rsbs r0,r0,#1; movcc r0,#0;
+      bx lr. The next real function starts at 0x08087490. Whole-image A32
+      decoding finds three inbound plain bl calls (0x08166dfc, 0x08166ed8,
+      0x081670ac), no predicated bl callers, and no calls in this leaf. The
+      returned value is normalized to one only when the aligned input word is
+      zero. No deliberate deviations.
