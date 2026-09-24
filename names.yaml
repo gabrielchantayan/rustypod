@@ -137538,3 +137538,28 @@ functions:
       their decompilations, not a claimed subsystem identity. Rust calls the
       already-ported task_sleep directly rather than the retail veneer; the
       ignored return value and 10-tick behavior are retained.
+
+  - address: 0x080f47e4
+    ghidra: FUN_080f47e4
+    name: write_nul_padding
+    size: 76
+    sig: "u32 write_nul_padding(WriteBytes writer, void *context, i32 count)"
+    module: printf/write_nul_padding
+    status: ported
+    renames:
+      param_1/r0/r5: writer
+      param_2/r1/r7: context
+      param_3/r2/r6: count
+      r4: written
+      DAT_080f4830: nul_byte (0x08977f9c)
+    notes: >-
+      Raw osos.dec establishes the 76-byte extent 0x080f47e4..0x080f482f;
+      0x080f4830 is the literal pointer 0x08977f9c and 0x080f4834 begins
+      the next function. Three inbound direct calls are all plain
+      unconditional BLs (0x0807530c, 0x08075468, 0x08075560), with no
+      predicated direct BL callers. The function has one unconditional
+      indirect BLX through writer. It repeatedly calls writer(context,
+      nul_byte, 1), advancing only after a nonzero result; count <= 0
+      succeeds without a call, and zero returns failure. The host port uses
+      a local NUL byte instead of dereferencing the verified retail data
+      address, while target_os=none retains the exact pointer.
