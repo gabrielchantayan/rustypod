@@ -55946,6 +55946,25 @@ functions:
       the shared INDENT_PREPARE / STREAM_APPEND slots and returns after the
       append call rather than tail-branching; formatting and arguments are
       preserved.
+  - address: 0x081238e0
+    ghidra: FUN_081238e0
+    name: formatted_message_emit_unsigned
+    size: 80
+    sig: "void formatted_message_emit_unsigned(MessageStream *stream, const char *key, uint32 value, uint32 depth)"
+    module: printf/formatted_message
+    status: ported
+    vars: {param_1: stream, param_2: key, param_3: value, param_4: depth}
+    notes: >-
+      Raw words establish the exact 80-byte body from 0x081238e0 through
+      the tail branch at 0x0812392c; 0x08123930 starts the adjacent
+      "%s<key>%s</key>\n%s<integer>%u</integer>\n" literal. It has 3
+      verified direct BL call sites, all unconditional plain bl and zero
+      predicated forms. The body forwards stream + depth to indent_prepare
+      @ 0x08123a54, then calls snprintf @ 0x0802f768 with (indent, key,
+      indent, value) into stream+0x15 (512 bytes), before tail-branching to
+      stream append @ 0x08123c58. Ghidra's appended strlen/strncat body is
+      past that tail branch. Rust uses the shared INDENT_PREPARE and
+      STREAM_APPEND slots; its append call returns rather than tail-branching.
   - address: 0x0812395c
     ghidra: FUN_0812395c
     name: formatted_message_emit_boolean
