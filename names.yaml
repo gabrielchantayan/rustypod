@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080dc3e8
+    ghidra: FUN_080dc3e8
+    name: schedule_calendar_update
+    size: 176
+    sig: "u32 schedule_calendar_update(i32 minute_adjustment, i32 second_adjustment)"
+    module: time/calendar_schedule
+    status: ported
+    renames:
+      param_1/r4: minute_adjustment
+      param_2/r5: second_adjustment
+      local_2c/sp+44: current_datetime
+      local_28/sp+40: base_utc_offset_minutes
+      local_24/sp+36: daylight_saving_minutes
+      local_34/sp+4: calendar_query_record
+      DAT_080dc498: calendar_change_callback_table
+    notes: >-
+      Raw osos.dec establishes the 176-byte executable extent
+      0x080dc3e8..0x080dc498: the next word is the callback-table literal
+      at 0x080dc498, and 0x080dc49c begins the next independent frame.
+      Branch decoding finds three unconditional direct BL callers
+      (0x0816f7c8, 0x0818763c, 0x082040a4), no predicated direct BL callers;
+      the body has seven direct BL instructions and one predicated indirect
+      BLX callback. It obtains the normalized current timestamp, subtracts
+      signed UTC and DST minute offsets, applies both signed input minute
+      adjustments, commits a 20-byte calendar record with mask 0x180,
+      conditionally notifies the callback table's +0x0c slot, then converts
+      and applies the result with mask 0x3f. FUN_08056800, FUN_080985f4, and
+      the callback have no names.yaml identities; the device port dispatches
+      to their verified retail addresses/table, while host tests inject them.
   - address: 0x0811190c
     ghidra: FUN_0811190c
     name: selection_state_apply_index_and_dispatch
