@@ -139844,3 +139844,28 @@ functions:
       the same NULL guard, conditional flag load/test/free, ordered stores,
       loop, and final traced_free tail structure; LLVM uses a different frame
       and bxeq early return.
+  - address: 0x0807f5a0
+    ghidra: FUN_0807f5a0
+    name: mailbox_controller_reset
+    size: 36
+    sig: "void mailbox_controller_reset()"
+    module: drivers/mailbox_controller_reset
+    status: ported
+    renames:
+      DAT_0807f5c0: controller_base
+      DAT_080b48d8: mailbox_base
+      "controller_base+0x0c": status
+      "controller_base+0x1c": result
+      "controller_base+0x2c": mode
+    notes: >-
+      Raw osos.dec establishes the true 36-byte extent
+      0x0807f5a0..0x0807f5c3: the final A32 word is an unconditional branch
+      to 0x080b48a8, the literal at 0x0807f5c0 is part of this body, and the
+      next separately linked function begins at 0x0807f5c4. Full-image A32
+      decoding finds two inbound plain BL call sites (0x08089924, 0x081b07dc)
+      and one predicated inbound BL call site (0x081b08cc); the body itself
+      has no BL instruction. The tail target writes five mailbox locations
+      rooted at 0x39610000 but has no verified semantic identity in names.yaml,
+      so Rust inlines that proven write sequence rather than creating an
+      invented callee seam. Volatile stores deliberately preserve the
+      fixed-address observable writes although retailOS uses ordinary STR.
