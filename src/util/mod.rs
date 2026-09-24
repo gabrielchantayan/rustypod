@@ -33,6 +33,7 @@ pub mod clear_u16_three_word_record;
 pub mod clear_opaque_record_state;
 pub mod bswap;
 pub mod bswap_four_u32s_inplace;
+pub mod bswap_three_u32_and_u16_inplace;
 pub mod context_field;
 pub mod context_finalize_if_present;
 pub mod copy_four_bytes;

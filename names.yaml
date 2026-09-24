@@ -138457,3 +138457,27 @@ functions:
       entry through state+0x0c using r2, returning the append status. Neither
       helper has a names.yaml identity; ARM builds call their verified retail
       addresses and host tests install ABI seams.
+  - address: 0x080cbfa0
+    ghidra: FUN_080cbfa0
+    name: bswap_three_u32_and_u16_inplace
+    size: 120
+    sig: "u32 *bswap_three_u32_and_u16_inplace(u32 *record)"
+    module: util/bswap_three_u32_and_u16_inplace
+    status: ported
+    renames:
+      param_1/r0: record
+      "record+0x00": first_word
+      "record+0x04": second_word
+      "record+0x08": third_word
+      "record+0x0c": trailing_halfword
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte A32 body
+      0x080cbfa0..0x080cc017: three repeated aligned u32 byte reversals,
+      followed by an aligned u16 byte reversal and bx lr. The push at
+      0x080cc018 starts the next independently linked function. The body has
+      no direct BL instructions. A full-image aligned A32 decode finds zero
+      unconditional inbound BL sites and three predicated BLNE sites
+      (0x0807fa3c, 0x080963f8, and 0x0809ee0c). It reverses the three u32
+      fields at offsets 0, 4, and 8 plus the u16 field at offset 12, retaining
+      record in r0 despite Ghidra's void signature. Deliberate deviations:
+      none.
