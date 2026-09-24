@@ -135675,3 +135675,29 @@ functions:
       return, head removal, later-node unlink, and no-match timer conversion.
       match.py structural review preserves the head guard, bit clear, list
       walk, early delete returns, and timer-conversion tail.
+
+
+  # --- Retained value dispatch ---
+  - address: 0x08124f64
+    ghidra: FUN_08124f64
+    name: value_dispatch_retain
+    size: 24
+    sig: "void value_dispatch_retain(void *context, DispatchValue *value, u32 extra)"
+    module: app/value_dispatch_retain
+    vars:
+      param_1/r0: context
+      param_2/r1: value
+      param_3/r2: extra
+      FUN_08124ff4: value_dispatch
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 24-byte body
+      0x08124f64..0x08124f7c; 0x08124f7c begins the next independently
+      entered function. The body saves r2 as the fifth stack argument,
+      supplies r2=r3=1, and calls the still-unported value dispatcher at
+      0x08124ff4. A complete raw ARM B/BL scan finds three direct inbound
+      calls, all plain bl at 0x08133250, 0x08133634, and 0x081f0458; no
+      predicated BL calls exist. Rust preserves the three-argument void ABI,
+      calls the retail target on device, and deliberately reuses the existing
+      host dispatcher seam for testability. Host tests cover a non-NULL value
+      and NULL forwarding; neither path releases the value.
