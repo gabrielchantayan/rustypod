@@ -135955,3 +135955,38 @@ functions:
       chunk through FUN_081660c8, establishing +0x44 as current transfer
       progress. No NULL guard or validation in the original or port; no
       deliberate deviations.
+
+
+  - address: 0x0811f1a4
+    ghidra: FUN_0811f1a4
+    name: registered_listener_remove_by_pair
+    size: 160
+    sig: "void registered_listener_remove_by_pair(u8 *owner, u32 key_first, u32 key_second)"
+    module: app/registered_listener_remove_by_pair
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: key_first
+      param_3/r2: key_second
+      DAT_0811f240: listener_key_tag (0x0898ce24)
+      FUN_083d6f40: not_equal_deref_alias_6f40
+      FUN_082012c4: listener_payload_pair_matches
+      FUN_083dc3fc: listener_list_erase
+    notes: >-
+      Raw osos.dec establishes the true 160-byte extent: 39 instruction
+      words from push {r4-r6,lr} at 0x0811f1a4 through pop {r4-r6,pc} at
+      0x0811f23c plus the literal 0x0898ce24 at 0x0811f240; the next
+      separately linked function starts at 0x0811f244. The body has two
+      plain bl calls (not_equal_deref_alias_6f40 @ 0x083d6f40 and the
+      listener payload pair predicate @ 0x082012c4) and one predicated
+      blne list-erase call @ 0x083dc3fc. When owner+0x2c is nonzero, it
+      traverses the circular list rooted at owner+0x28 and removes every
+      node whose payload words +0xc/+0x10 match (key_second, key_first);
+      the tag word at +0x08 is the fixed 0x0898ce24 pointer. The predicate
+      and erase callees are identified from their raw bodies but unported,
+      so target builds retain fixed-address volatile seams and host tests
+      install recorders. Deliberate deviations: the seam indirection replaces
+      the original direct bl/blne calls; otherwise target-width pointer words,
+      key order, sentinel comparison, and successor-after-erase iteration
+      are preserved. match.py exits 1 with the expected structural diff:
+      crate frame and volatile seam blx calls replace the direct calls.
