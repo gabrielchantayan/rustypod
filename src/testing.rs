@@ -552,6 +552,9 @@ pub mod hints {
     // silently on every host.
     pub const ELEMENT_REFERENCE_PERSISTENT_ID: usize = 0x5a00_0000;
     pub const TIMED_TRANSITION: usize = 0x5c00_0000;
+    // 0x5c30_0000: dedicated to app/locked_callback_list_any's target-width
+    // list, semaphore slot, and node fixtures; mappings never unmap.
+    pub const LOCKED_CALLBACK_LIST_ANY: usize = 0x5c30_0000;
     // 0x5c10_0000: dedicated to cxx/string_object's raw-u32 path-chain
     // context, nodes, and C-string fixture; mappings never unmap.
     pub const PATH_CHAIN_TO_STRING: usize = 0x5c10_0000;

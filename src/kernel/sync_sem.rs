@@ -208,6 +208,7 @@ pub unsafe extern "C" fn sem_delete(sem: SemHandle) {
 /// NULL slot or NULL `*slot` returns immediately; otherwise blocks in the
 /// ROM wait on the kernel semaphore ID `*slot`.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn sem_wait(sem: SemHandle) {
     if sem.is_null() || *sem == 0 {
         return;
@@ -220,6 +221,7 @@ pub unsafe extern "C" fn sem_wait(sem: SemHandle) {
 /// NULL slot or NULL `*slot` returns immediately; otherwise signals the
 /// kernel semaphore ID `*slot` in the ROM.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn sem_signal(sem: SemHandle) {
     if sem.is_null() || *sem == 0 {
         return;
