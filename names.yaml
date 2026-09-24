@@ -137154,3 +137154,34 @@ functions:
       and input_len unchanged, discards the worker's result, and returns zero.
       Rust uses the existing replaceable legacy_sha1_update seam because the
       worker itself is not yet ported; target builds call 0x08065224 directly.
+
+  - address: 0x080fe954
+    ghidra: FUN_080fe954
+    name: ring_write
+    size: 152
+    sig: "u32 ring_write(u32 *ring, const u8 *source, u32 length, u32 require_empty)"
+    module: util/ring_write
+    status: ported
+    renames:
+      param_1/r0: ring
+      param_2/r1: source
+      param_3/r2: length
+      param_4/r3: require_empty
+      "ring+0x04": data
+      "ring+0x08": capacity
+      "ring+0x0c": read_cursor
+      "ring+0x10": write_cursor
+      "ring+0x14": mask
+      FUN_08297608: ring_buffer_used_bytes
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte A32 extent
+      0x080fe954..0x080fe9e8: push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      0x080fe9ec begins the next independently linked function. Full-image
+      aligned A32 BL decoding finds three inbound plain BL calls at
+      0x080b26a8, 0x08103aac, and 0x08103adc, with zero predicated BL calls.
+      The body has one plain outbound BL, to the ported ring_buffer_used_bytes
+      @ 0x08297608. When require_empty is nonzero it first rejects a nonempty
+      ring; it then rejects lengths above mask-used, copies source bytes to
+      data[write_cursor], and advances write_cursor with & mask after each
+      store. Rust keeps target pointer fields as u32 words and uses volatile
+      byte and word access; no deliberate deviations.
