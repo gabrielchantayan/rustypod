@@ -602,6 +602,9 @@ pub mod hints {
     // 0x7f30_0000: dedicated to util/singly_linked_list_unlink's raw-u32
     // link-field fixture; mappings never unmap, so no other test may share it.
     pub const SINGLY_LINKED_LIST_UNLINK: usize = 0x7f30_0000;
+    // 0x7f40_0000: dedicated to cxx/string_map_assign_tree_records' raw-u32
+    // tree, header, and node fixtures; mappings never unmap.
+    pub const STRING_MAP_ASSIGN_TREE_RECORDS: usize = 0x7f40_0000;
     // 0xc000_0000: dedicated to cxx/bit_set's copy-constructor source
     // fixture; fixture mappings never unmap, so no other user may share it.
     pub const BIT_SET_COPY_SOURCE: usize = 0xc000_0000;
