@@ -85,6 +85,68 @@ const RESOURCE_KIND_DTTM: ResourceKind = ResourceKind(0x4474_546d);
 /// demo mode's canned calendar record.
 const RESOURCE_ID_DEMO_MODE_DATETIME: u32 = 0x80aa;
 
+/// Firmware cache word @ 0x089cb304, used only by
+/// [`demo_mode_datetime_cached`]. The target reads and writes the original
+/// RAM word directly; host fixtures use a private equivalent.
+#[cfg(not(target_os = "none"))]
+static mut CACHED_DEMO_MODE_PROVIDER: *mut ResourceProvider = core::ptr::null_mut();
+
+#[cfg(target_os = "none")]
+unsafe fn cached_demo_mode_provider() -> *mut ResourceProvider {
+    core::ptr::read_volatile(0x089c_b304 as *const *mut ResourceProvider)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn cached_demo_mode_provider() -> *mut ResourceProvider {
+    core::ptr::read_volatile(core::ptr::addr_of!(CACHED_DEMO_MODE_PROVIDER))
+}
+
+#[cfg(target_os = "none")]
+unsafe fn set_cached_demo_mode_provider(provider: *mut ResourceProvider) {
+    core::ptr::write_volatile(0x089c_b304 as *mut *mut ResourceProvider, provider);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe fn set_cached_demo_mode_provider(provider: *mut ResourceProvider) {
+    core::ptr::write_volatile(core::ptr::addr_of_mut!(CACHED_DEMO_MODE_PROVIDER), provider);
+}
+
+/// demo_mode_datetime_cached — original: `FUN_080a6890` @ `0x080a6890`
+/// (**68 bytes, `0x080a6890..0x080a68d4`, including the three literal
+/// words; 3 inbound plain `bl` call sites; two outbound plain `bl`, no
+/// predicated `bl`, and one tail `b`, decoded from `osos.dec`**).
+///
+/// Lazily caches the demo-mode resource-provider head in the original RAM
+/// word at `0x089cb304`, looks up its `"DtTm"` resource `0x80aa`, and copies
+/// the ten-byte calendar record to `out`. The cache is populated only when
+/// zero; resource lookup and the terminal `__rt_memcpy` happen on every call.
+/// The tail branch returns `out`.
+///
+/// # Deliberate deviations
+///
+/// Host builds use a private cache word in place of target RAM
+/// `0x089cb304`. The original tail `b` is a Rust call and return; its result
+/// is `out` in both cases. All callees are already ported, so no seam is
+/// introduced.
+///
+/// # Safety
+///
+/// `out` must point at a writable ten-byte [`DateTime`]. The cached or
+/// resolved provider chain must be valid; as in retailOS, missing data reaches
+/// `__rt_memcpy` as a NULL source and faults.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_datetime_cached(out: *mut DateTime) -> *mut DateTime {
+    let mut head = cached_demo_mode_provider();
+    if head.is_null() {
+        head = demo_mode_instance().cast();
+        set_cached_demo_mode_provider(head);
+    }
+    let record = resource_chain_find(head, RESOURCE_KIND_DTTM, RESOURCE_ID_DEMO_MODE_DATETIME);
+    __rt_memcpy(out.cast(), record.cast_const(), core::mem::size_of::<DateTime>());
+    out
+}
+
 /// demo_mode_datetime — original: `FUN_08284e4c` @ 0x08284e4c
 /// (**44 bytes of code, 0x08284e4c..0x08284e78, plus an 8-byte literal
 /// pool through 0x08284e80; 17 call sites — 16 `bl` + 1 `bleq`,
@@ -290,6 +352,7 @@ mod tests {
                 .unwrap_or_else(|e| e.into_inner());
             unsafe {
                 (*ptr::addr_of_mut!(FIND_CALLS)).clear();
+                set_cached_demo_mode_provider(ptr::null_mut());
                 *ptr::addr_of_mut!(ANSWER_NODE) = answer_node;
                 let vtable = ptr::addr_of!(DEMO_VTABLE);
                 DEMO_NODE.vtable = vtable.cast();
@@ -309,6 +372,7 @@ mod tests {
                 DEMO_NODE.vtable = ptr::null();
                 DEMO_NODE.next = ptr::null_mut();
                 SECOND_NODE.vtable = ptr::null();
+                set_cached_demo_mode_provider(ptr::null_mut());
             }
         }
     }
@@ -368,5 +432,31 @@ mod tests {
         let calls = unsafe { &*ptr::addr_of!(FIND_CALLS) };
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[1].0, unsafe { ptr::addr_of_mut!(SECOND_NODE) });
+    }
+
+    /// The first call resolves the singleton, then later calls retain that
+    /// provider even if the registry is no longer available. Lookup itself
+    /// still runs for every destination buffer.
+    #[test]
+    fn cached_fetch_reuses_provider_and_copies_each_time() {
+        let _fixture = Fixture::new(0);
+        let mut first = DEMO_RECORD;
+        first.second = 0xff;
+        let returned = unsafe { demo_mode_datetime_cached(&mut first) };
+        assert_eq!(returned, &mut first as *mut DateTime);
+        assert_eq!(first, DEMO_RECORD);
+
+        unsafe { CLASS_REGISTRY.vtable = ptr::null() };
+        let mut second = DEMO_RECORD;
+        second.minute = 0xff;
+        let returned = unsafe { demo_mode_datetime_cached(&mut second) };
+        assert_eq!(returned, &mut second as *mut DateTime);
+        assert_eq!(second, DEMO_RECORD);
+
+        let calls = unsafe { &*ptr::addr_of!(FIND_CALLS) };
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|call| call.0 == unsafe {
+            ptr::addr_of_mut!(DEMO_NODE)
+        }));
     }
 }

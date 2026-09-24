@@ -60326,6 +60326,39 @@ functions:
       the three helpers into a 100-instruction body rather than preserving
       the retail six-instruction call/tail-call shape.
 
+  - address: 0x080a6890
+    ghidra: FUN_080a6890
+    name: demo_mode_datetime_cached
+    size: 68
+    sig: "DateTime *demo_mode_datetime_cached(DateTime *out)"
+    module: app/demo_mode_datetime
+    status: ported
+    renames:
+      param_1: out
+      DAT_080a68d4: DEMO_MODE_PROVIDER_CACHE (0x089cb304)
+      DAT_080a68d8: RESOURCE_ID_DEMO_MODE_DATETIME (0x80aa)
+      DAT_080a68dc: RESOURCE_KIND_DTTM ("DtTm")
+      FUN_081883fc: demo_mode_instance
+      FUN_0827216c: resource_chain_find
+      FUN_08037db0: __rt_memcpy
+    notes: >-
+      Raw osos.dec words establish the 68-byte extent
+      0x080a6890..0x080a68d4: sixteen instructions through the tail
+      `b 0x08037db0`, followed by the three literal words at
+      0x080a68d4..0x080a68df; the next function opens at 0x080a68e0.
+      It lazily fills the global provider-cache word from
+      demo_mode_instance, looks up the demo calendar resource (kind
+      "DtTm", id 0x80aa), and tail-copies its ten bytes to out through
+      __rt_memcpy. Decoding B/BL immediates in the body finds two
+      outbound plain BL calls (0x081883fc and 0x0827216c), no predicated
+      BL calls, and one tail B to the memcpy veneer. Three inbound plain
+      BL call sites were independently scanned. The port uses the
+      original cache address on target and a private volatile cache on
+      host; its ordinary Rust call/return replaces the terminal tail B
+      without changing the returned out pointer. Host tests prove the
+      ten-byte copy and that the cached provider continues to serve
+      later fetches after the registry is unavailable.
+
   - address: 0x080e9310
     ghidra: FUN_080e9310
     name: scan_decimal_cursor
