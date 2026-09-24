@@ -622,6 +622,7 @@ pub mod tuning_status;
 pub mod task_registry;
 pub mod token_parser;
 pub mod character_class_scan;
+pub mod parser_scan_to_token_boundary;
 pub mod template_binding;
 pub mod tree_flag_propagation;
 pub mod tracker_record;

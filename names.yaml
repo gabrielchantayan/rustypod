@@ -139178,3 +139178,24 @@ functions:
       0x081a4354), with no predicated BL calls. Stores tag as a little-endian
       halfword at buffer+0, calls strncpy at 0x080310d4 for buffer+2 with
       length 0xff, forces buffer[0x101] to NUL, and returns zero.
+
+  - address: 0x080a1ee8
+    ghidra: FUN_080a1ee8
+    name: parser_scan_to_token_boundary
+    size: 80
+    sig: "const u8 *parser_scan_to_token_boundary(const void *parser, const u8 *characters)"
+    module: app/parser_scan_to_token_boundary
+    status: ported
+    renames:
+      param_1/r0: parser
+      param_2/r1: characters
+    notes: >-
+      Raw osos.dec words establish the 80-byte executable extent
+      0x080a1ee8..0x080a1f37; the next real function begins at 0x080a1f38.
+      Full-image A32 decoding finds exactly three inbound plain BL call sites
+      (0x0807bfc8, 0x0807c070, and 0x0807c0a0), with no predicated BL calls;
+      the body contains no outgoing BL. It reads the parser's u16
+      character-class table from target offset +4. Classes carrying 0x20
+      inspect the next byte's class bit 0x08 and advance one or two bytes;
+      other classes advance one byte when any bit in 0x0307 is set, otherwise
+      returning the current byte pointer. No callee seam is required.
