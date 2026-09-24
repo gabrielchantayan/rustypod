@@ -13534,6 +13534,27 @@ functions:
       destination-second bounded text copy (notably 0x08079f54,
       0x08093d64, and 0x080bd7f8).
 
+  - address: 0x08093d64
+    ghidra: FUN_08093d64
+    name: default_context_operation
+    size: 8
+    sig: "i32 default_context_operation(void *argument)"
+    module: app/default_context_operation
+    vars: {param_1: argument, DAT_08093d6c: default_context_word}
+    status: ported
+    notes: >-
+      Raw ARM extent is exactly 0x08093d64..0x08093d6c: ldr r1 from the
+      literal-pool word at 0x08093d6c (0x083e8bc8), then B 0x080bd7f8.
+      0x08093d70 starts its sibling, so Ghidra's merged 0x080bd7f8 body is
+      not this wrapper. The body has no BL instruction, predicated or plain.
+      Exactly three direct unconditional BL callers were verified at
+      0x0805ca54, 0x080aafe0, and 0x08113808; no predicated BL caller
+      exists. The helper identity is unestablished: the port preserves only
+      its verified ABI, forwarding r0 unchanged and 0x083e8bc8 as r1 to the
+      unported helper. Target code calls address 0x080bd7f8; host tests inject
+      it through a volatile seam. The stock tail branch becomes a normal Rust
+      call, with the returned r0 preserved.
+
   - address: 0x08044c10
     ghidra: FUN_08044c10
     name: dcache_clean_invalidate
