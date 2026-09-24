@@ -138703,3 +138703,27 @@ functions:
       sites at 0x0807baa0, 0x0807babc, and 0x081c0ed4; no predicated forms.
       The port deliberately inlines the verified tail chain because it has
       no established Rust seam.
+
+  - address: 0x080b79dc
+    ghidra: FUN_080b79dc
+    name: pfr_extra_items_skip
+    size: 12
+    sig: "u32 pfr_extra_items_skip(u8 **cursor, const u8 *limit)"
+    module: cxx/pfr_extra_items_skip
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: limit
+      r2: handler (NULL)
+      r3: handler_data (NULL)
+    notes: >-
+      Raw osos.dec words e3a03000, e3a02000, and ea002375 establish the exact
+      12-byte wrapper 0x080b79dc..0x080b79e8; 0x080b79e8 begins the next real
+      function. The wrapper clears r3 and r2, then tail-branches to 0x080c07c0,
+      the shared FreeType pfr_extra_items_parse body. Decoding all direct calls
+      finds three inbound plain BL sites and no predicated BL sites. NULL handler
+      arguments select skip-only parsing: consume the count-prefixed (size, kind,
+      payload) records, store the terminal cursor, and return 8 on a header or
+      payload overrun. The Rust port intentionally omits the retail trace through
+      FUN_0804d17c because that diagnostic has no named Rust seam; cursor state
+      and status behavior are preserved.
