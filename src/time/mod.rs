@@ -22,6 +22,7 @@ pub mod day_and_seconds_is_before;
 pub mod leap_year;
 pub mod legacy_leap_year;
 pub mod localtime;
+pub mod localtime_copy;
 pub mod mac_epoch_to_datetime;
 pub mod local_timestamp;
 pub mod local_to_utc;
