@@ -266,6 +266,7 @@ pub mod tail_call_retail_utf8_validate_three_byte;
 pub mod metadata_fetch_or_null;
 pub mod table_transform_fixed_selector;
 pub mod text_layout_fit_glyph_count;
+pub mod text_width_accumulate;
 pub mod tagged_counter;
 pub mod tagged_header_low_bits;
 pub mod tagged_resource_payload;
