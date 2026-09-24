@@ -138867,3 +138867,31 @@ functions:
       while StageProgressTracker preserves the target's four-byte stage-word
       spacing. Host coverage exercises absent-path zeroing, present-path
       floor-to-KiB conversion, and preservation of other stage words.
+  - address: 0x080aac70
+    ghidra: FUN_080aac70
+    name: guarded_global_index_transform
+    size: 72
+    sig: "u32 guarded_global_index_transform(u32 value)"
+    module: app/guarded_global_index_transform
+    status: ported
+    renames:
+      param_1/r0/r5: value
+      DAT_080aacb8: guarded_global_guard (0x089cb198)
+      DAT_080aacbc: guarded_global_state (0x089cb1a0)
+      FUN_0805b0cc: guarded_global_allocate
+      FUN_080633f0: guarded_global_transform
+    notes: >-
+      Ghidra's 172-byte extent crosses a function boundary. Raw osos.dec
+      words establish the 72-byte executable body 0x080aac70..0x080aacb7:
+      the two words at 0x080aacb8 and 0x080aacbc are its literal pool, and
+      the next real function starts at 0x080aacc0. Full-image A32 decoding
+      finds three plain inbound BL callers (0x08047a10, 0x08047adc, and
+      0x08047b5c) and no predicated forms. The body has three plain BL calls
+      (cxa_guard_acquire @ 0x082ab31c, the unidentified allocator thunk @
+      0x0805b0cc, and cxa_guard_release @ 0x082ab338), no predicated BL
+      calls, then tail-branches to the unidentified transform @ 0x080633f0.
+      It initializes the global state once and transforms the input through
+      that state. Rust uses target calls to the verified addresses and narrow
+      host callback seams; its final ordinary return replaces the tail branch.
+      LLVM folds the cxa_guard_release call because the established port is a
+      deliberate no-op; this preserves its observable behavior.
