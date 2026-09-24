@@ -2312,6 +2312,9 @@ pub mod hints {
     // 0x6fd0_0000: dedicated to util/queue_remove_source_tail_index's
     // target-width source-record and queue fixture; mappings never unmap.
     pub const QUEUE_REMOVE_SOURCE_TAIL_INDEX: usize = 0x6fd0_0000;
+    // 0x6fe0_0000: dedicated to ui/flush_pending_cell's target-width cell
+    // record fixture; mappings never unmap, so no other port may share it.
+    pub const UI_FLUSH_PENDING_CELL: usize = 0x6fe0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
