@@ -54505,6 +54505,38 @@ functions:
       drop the rotation and branch to the timer pointer - the port
       reads the fn-pointer field directly to sidestep it.
 
+  - address: 0x0810e6f8
+    ghidra: FUN_0810e6f8
+    name: pair_header_base_initialize_pooled_owned_payload
+    size: 216
+    sig: "void pair_header_base_initialize_pooled_owned_payload(u32 *base, const u32 *descriptor, u32 decoder_argument, u32 tag, u32 context)"
+    module: cxx/pair_header
+    status: ported
+    renames:
+      param_1/r5: base
+      param_2/r4: descriptor
+      param_3/r7: decoder_argument
+      param_4/r6: tag
+      param_5/r8: context
+      iVar1/r6: row_stride
+    notes: >-
+      Raw ARM establishes Ghidra's 216-byte extent: the function begins
+      with `push {r1-r9,lr}` at 0x0810e6f8, ends `pop {r1-r9,pc}` at
+      0x0810e7cc, and the next distinct function begins at 0x0810e7d0.
+      The body contains five unconditional, unpredicated BL instructions:
+      release_owned_payload (0x0810e908), format-to-bits (0x080a63f8),
+      heap_alloc_tag1 (0x0819d2f0), malloc_wrapper (0x080eb67c), and the
+      unported payload initializer (0x08094214). It releases the existing
+      owned payload, ldm/stm-copies descriptor words 0..3 to +0x98..+0xa4,
+      stores tag at +0xa8 and ownership byte 1 at +0xb4, computes a
+      four-byte-aligned row stride from descriptor height and decoder bits
+      per pixel, then allocates stride times descriptor width with tag 28.
+      A configured +0xb0 pool is tried first; a null result clears +0xb0
+      before the malloc-wrapper fallback. Allocation failure returns without
+      decoding; success passes (base+4, descriptor, payload, stride,
+      decoder_argument, base, context) to 0x08094214. The three unported
+      dependencies remain explicit in PairHeaderBasePooledOwnedPayloadOps:
+      target defaults call their exact retail entries and host defaults panic.
   - address: 0x0810e9c0
     ghidra: FUN_0810e9c0
     name: pair_header_base_construct_with_pooled_owned_payload

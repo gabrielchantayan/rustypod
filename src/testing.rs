@@ -2355,6 +2355,11 @@ pub static CPP_ARRAY_OPS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new
 pub static PAIR_HEADER_BASE_BIND_PAYLOAD_TEST_LOCK: std::sync::Mutex<()> =
     std::sync::Mutex::new(());
 
+/// Serializes host tests that replace
+/// `cxx::pair_header::PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS`.
+pub static PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 /// Serializes every host test that installs a fixture block into
 /// `kernel::diag_ring_record::DIAG_RING_BLOCK_GETTER`. That seam is one
 /// shared mutable global pointing at the per-task diagnostic ring, and
