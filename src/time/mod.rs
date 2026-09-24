@@ -13,6 +13,7 @@ pub mod normalize_day_and_seconds;
 pub mod datetime;
 /// Packed calendar record to FAT date/time fields @ 0x080aacc0.
 pub mod datetime_to_fat;
+pub mod datetime_to_tm;
 pub mod fat_to_datetime;
 pub mod datetime_to_mac_epoch;
 pub mod day_number;

@@ -140007,3 +140007,34 @@ functions:
       implements the otherwise-unidentified leaf encoder privately rather
       than creating an unverified callee seam. Host tests install native
       state and register fixtures; target builds use the verified addresses.
+
+  - address: 0x08075ff0
+    ghidra: FUN_08075ff0
+    name: datetime_to_tm
+    size: 132
+    sig: "i32 datetime_to_tm(datetime: *const DateTime, out: *mut Tm)"
+    module: time/datetime_to_tm
+    status: ported
+    renames:
+      param_1/r0: datetime
+      param_2/r1/r4: out
+      local_18/sp: normalized
+      FUN_0807ea68: datetime_day_number
+      FUN_0807eafc: day_number_to_datetime
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte A32 body
+      0x08075ff0..0x08076073; the next real function begins with push
+      {r4,lr} at 0x08076074. It contains three outbound plain BL instructions
+      (__rt_memcpy through veneer 0x08037db0, datetime_day_number, and
+      day_number_to_datetime) and no predicated BL. It copies the ten-byte
+      packed calendar record to stack storage, obtains its Rata Die day number,
+      then normalizes that day back through FUN_0807eafc. The resulting fields
+      populate the nine-word ADS struct tm: second/minute/hour/day, month-1,
+      year-1900, weekday, zero yday, and -1 isdst; it returns 1. Rust uses the
+      established volatile calendar-converter seam and ported __rt_memcpy
+      rather than target-address calls. Its initialized scratch padding is a
+      deliberate deterministic deviation: neither retailOS callee reads those
+      bytes. Host test covers a leap-day input, exact day-number handoff,
+      normalized date output, retained time, and all fixed tm fields. match.py
+      reports the expected Rust frame and seam-dispatch structural differences.
