@@ -59934,6 +59934,31 @@ functions:
       tuple.
 
 
+  # --- UI object packed-field non-one predicate (ui/object_packed_field_is_not_one) ---
+  - address: 0x08061578
+    ghidra: FUN_08061578
+    name: object_packed_field_is_not_one
+    size: 20
+    sig: "bool object_packed_field_is_not_one(u8 *object, const u8 *selector)"
+    module: ui/object_packed_field_is_not_one
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: selector
+      FUN_080616a0: ensure_object_packed_field_is_one
+    notes: >-
+      Raw osos.dec words establish five ARM instructions at
+      0x08061578..0x08061588, ending in `ldr pc,[sp],#4`; the following
+      `cmp r0,#0` at 0x0806158c begins the next independently linked
+      function. The function has one plain unconditional bl to
+      ensure_object_packed_field_is_one and no predicated bl calls. A raw
+      ARM decode independently finds three plain direct callers at
+      0x0817b040, 0x0817b6e4, and 0x082a648c, with zero predicated callers.
+      It forwards object and selector to the ensure-one helper, then uses
+      `rsbs r0,r0,#1` plus `movcc r0,#0` to return one only when that helper
+      returned zero. Rust boolean negation preserves the normalized
+      zero/nonzero result contract.
+
   # --- UI object packed two-bit field ensure-one (ui/object_packed_field_ensure_one) ---
   - address: 0x080616a0
     ghidra: FUN_080616a0
