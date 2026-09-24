@@ -171,6 +171,9 @@ pub mod hints {
     // locale, and facet-table fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const STREAM_BASIC_IOS_INITIALIZE: usize = 0x1234_0000;
+    // 0x2345_0000: dedicated to app/timing_wheel_node_replace_value's
+    // target-width node and value fixtures; mappings never unmap.
+    pub const TIMING_WHEEL_NODE_REPLACE_VALUE: usize = 0x2345_0000;
     // 0x0100_0000: dedicated to cxx/stream_read's target-width descriptor,
     // complete-owner state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ: usize = 0x0100_0000;
