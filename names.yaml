@@ -137593,3 +137593,33 @@ functions:
       table with 32-bit wrapping arithmetic, and optionally returns the first
       unparsed byte. Rust reproduces this directly; there are no deliberate
       deviations.
+
+  - address: 0x080f086c
+    ghidra: FUN_080f086c
+    name: storage_transfer_chunked
+    size: 192
+    sig: "i32 storage_transfer_chunked(ChunkedStorageTransferGeometry *geometry, u32 unused, u32 block, u32 block_high, u32 block_count)"
+    module: fs/storage_transfer_chunked
+    status: ported
+    renames:
+      param_1/r0: geometry
+      "geometry+0x08": max_blocks
+      param_3/r2: block
+      param_4/r3: block_high
+      param_5/stack+0x30: block_count
+      local_28: aligned_buffer
+    notes: >-
+      Raw osos.dec establishes the exact 192-byte extent 0x080f086c..0x080f092c:
+      48 A32 words, followed immediately by the next push prologue at 0x080f092c.
+      Full-image ARM B/BL decoding finds three inbound plain BL calls
+      (0x0807cc78, 0x0807cc9c, 0x0807ccbc), no predicated BL calls, and no
+      tail B callers. The body itself has three plain BL calls: aligned_buffer_init
+      @ 0x081a81c4, iram_memzero_veneer @ 0x08037dc8 -> 0x220002d4, and
+      storage_transfer_aligned_blocks @ 0x08077444; cleanup uses two plain BL
+      sites to aligned_buffer_reset @ 0x081a8204. It bounds chunks by +0x08,
+      allocates and clears chunk_blocks*512 bytes, transfers sequential chunks while
+      carrying block:block_high, then releases the owner on success, allocation
+      failure (0x19), or first transfer error. Rust reuses the established aligned
+      buffer, IRAM memzero, and storage-transfer ports. Deliberate ABI deviation:
+      the original leaves r1 as the last storage-helper residue on successful return;
+      the exported Rust signature represents the verified r0 status only.
