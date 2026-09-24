@@ -283,6 +283,7 @@ pub mod deferred_record_table;
 pub mod global_identifier_slot;
 pub mod global_slot_4_get;
 pub mod global_slot_4_callback_dispatch;
+pub mod global_slot_8_callback_dispatch;
 pub mod global_slot_28_byte_query;
 pub mod global_slot_5c_dispatch;
 pub mod global_transition_callback_dispatch;
