@@ -2034,6 +2034,9 @@ pub mod hints {
     // 0x7fc0_0000: dedicated to app/playback_action_flags's raw-u32 player
     // and nested-state fixture; mappings never unmap.
     pub const PLAYBACK_ACTION_FLAGS: usize = 0x7fc0_0000;
+    // 0x7fd0_0000: dedicated to app/media_player_set_volume's raw-u32 player
+    // fixture; mappings never unmap, so no other port may share this hint.
+    pub const MEDIA_PLAYER_SET_VOLUME: usize = 0x7fd0_0000;
     // 0x1357_0000: dedicated to util/active_selection_previous_index's raw-u32
     // selection-state fixture; mappings never unmap, so no other user may
     // share this hint.
