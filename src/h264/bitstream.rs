@@ -322,6 +322,35 @@ pub unsafe extern "C" fn bitstream_msb_read_advance(
     bit_position.write(next_position);
     value & mask
 }
+/// bitstream_read_5bit_escape_code — original: `FUN_080a8998` @ 0x080a8998
+/// (76 bytes, all code — no literal pool; **3 plain inbound `bl` call
+/// sites** at 0x080c8cd8, 0x080c8db0, and 0x080c8f58; no predicated inbound
+/// call sites). The body contains two unconditional direct `bl` instructions
+/// to [`bitstream_msb_read_advance`].
+///
+/// Reads a five-bit MSB-first code into `output[0]`. Code 31 is the escape:
+/// it reads a six-bit extension, stores that unmodified at `output[0x24]`,
+/// and stores the extension plus 32 at `output[0]`. It always returns zero.
+/// There are no null or bounds checks, matching retail.
+///
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitstream_read_5bit_escape_code(
+    data: *const u8,
+    bit_position: *mut u32,
+    output: *mut u8,
+) -> u32 {
+    let code = bitstream_msb_read_advance(data, bit_position, 5) as u8;
+    output.write(code);
+    if code == 31 {
+        let extension = bitstream_msb_read_advance(data, bit_position, 6) as u8;
+        output.add(0x24).write(extension);
+        output.write(extension.wrapping_add(32));
+    }
+    0
+}
+
 
 /// bitstream_msb_fetch — original: `FUN_080efa38` @ 0x080efa38
 /// (152 bytes, all code — no literal pool, no calls; a
@@ -753,6 +782,7 @@ mod tests {
                     bitstream_msb_read_advance(
                         FETCH_PAYLOAD.as_ptr().add(1),
                         &mut position,
+
                         count,
                     )
                 };
@@ -768,6 +798,39 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn five_bit_escape_code_keeps_plain_codes_out_of_the_extension_slot() {
+        let bytes = [0b1010_1000u8];
+        let mut position = 0;
+        let mut output = [0xa5u8; 0x25];
+
+        assert_eq!(
+            unsafe {
+                bitstream_read_5bit_escape_code(bytes.as_ptr(), &mut position, output.as_mut_ptr())
+            },
+            0
+        );
+        assert_eq!(output[0], 0b10101);
+        assert_eq!(output[0x24], 0xa5);
+        assert_eq!(position, 5);
+    }
+
+    #[test]
+    fn five_bit_escape_code_preserves_extension_and_biases_primary_code() {
+        let bytes = [0b1111_1000u8, 0b1010_0000];
+        let mut position = 0;
+        let mut output = [0u8; 0x25];
+
+        assert_eq!(
+            unsafe {
+                bitstream_read_5bit_escape_code(bytes.as_ptr(), &mut position, output.as_mut_ptr())
+            },
+            0
+        );
+        assert_eq!(output[0], 37);
+        assert_eq!(output[0x24], 5);
+        assert_eq!(position, 11);
     }
 
     /// Counts larger than 32 retain the complete result word but ARM's

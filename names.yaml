@@ -63135,6 +63135,30 @@ functions:
       +0x04 load/add/store; only the Rust fp frame and register allocation
       differ from the retail eight-instruction body.
 
+  # --- Five-bit code with six-bit escape extension ---
+  - address: 0x080a8998
+    ghidra: FUN_080a8998
+    name: bitstream_read_5bit_escape_code
+    size: 76
+    sig: "u32 bitstream_read_5bit_escape_code(const u8 *data, u32 *bit_position, u8 *output)"
+    module: h264/bitstream
+    status: ported
+    renames:
+      param_1: data
+      param_2: bit_position
+      param_3: output
+    notes: >-
+      Reads a five-bit MSB-first code through bitstream_msb_read_advance and
+      stores it at output[0]. The 31 escape reads a six-bit extension, stores
+      the raw extension at output[0x24], and stores extension + 32 at
+      output[0]. It always returns zero. Raw decoding establishes 0x080a89e4
+      as the next function boundary, so the true extent is 76 bytes. The
+      body has two unconditional direct BLs to 0x080ebc00. Full-firmware ARM
+      BL decoding finds exactly three plain inbound calls
+      (0x080c8cd8, 0x080c8db0, 0x080c8f58) and no predicated inbound calls.
+      No null or bounds guards were added. Rust implementation and host edge
+      tests: src/h264/bitstream.rs::bitstream_read_5bit_escape_code.
+
   # --- Direct MSB-first bitstream read-and-advance ---
   - address: 0x080ebc00
     ghidra: FUN_080ebc00
