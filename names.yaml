@@ -54945,6 +54945,39 @@ functions:
       the operator_delete blne; the diff is the seam blx and the crate
       fp frame.
 
+  - address: 0x08124f7c
+    ghidra: FUN_08124f7c
+    name: global_callback_dispatch_cleanup
+    size: 96
+    sig: "void global_callback_dispatch_cleanup(u32 event)"
+    module: app/global_callback_dispatch_cleanup
+    status: ported
+    vars:
+      param_1/r5: event
+      DAT_08124fe0: global callback pointer at 0x089cc830
+      DAT_08124fe4: global callback counted mutex at 0x08a79c68
+      "callback+0x04": cleanup gate reference count
+      "callback-vtable+0x04": destroy
+      "callback-vtable+0x28": dispatch event local
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM establishes 96 code bytes from push {r0,r4,r5,lr} at
+      0x08124f7c through pop {r3,r4,r5,pc} at 0x08124fdc; the next real
+      entry is the one-word mutex initialization veneer at 0x08124fe8.
+      The words at 0x08124fe0 and 0x08124fe4 are this function's
+      literal pool, not code. Whole-image A32 decoding finds exactly three
+      direct inbound calls, all unconditional plain bl (0x08124f18,
+      0x08125278, and 0x08629bec), with no predicated bl calls. If the
+      global callback exists, the function locks its shared counted mutex,
+      dispatches event through its unnamed vtable +0x28 with the address of
+      a stack-local event word, then invokes vtable +0x04 and clears the
+      global when callback+0x04 is zero. It unlocks last. Vtable identities
+      remain deliberately unnamed; no seam is introduced because both calls
+      are runtime virtual dispatch. Host tests cover absent, live, and
+      zero-reference callbacks, including dispatch-before-destroy and
+      unlock-after-cleanup behavior. No deliberate deviations.
+
   - address: 0x08124a9c
     ghidra: FUN_08124a9c
     name: resource_provider_contains_view
