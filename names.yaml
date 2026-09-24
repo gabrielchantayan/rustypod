@@ -13058,6 +13058,29 @@ functions:
       all unconditional bl at 0x08039a34, 0x080aa04c, 0x080b62e4, and
       0x080cc544; no predicated forms or direct tail branches reach it.
 
+  # --- UI mode-substate selector ---
+  - address: 0x080e1cc8
+    ghidra: FUN_080e1cc8
+    name: select_mode_substate
+    size: 64
+    sig: "ptr select_mode_substate(ptr object, u32 selector)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: selector
+      return/r0: selected_substate
+    notes: >-
+      Raw osos.dec establishes a 64-byte extent: 16 ARM instructions at
+      0x080e1cc8..0x080e1d04, followed by the separately linked next
+      function at 0x080e1d08. Selectors 0..3 return object + selector *
+      0x20; selectors 4..7 return object plus 0x100, 0x180, 0x200, or
+      0x230; all other selectors return null. Decoding every ARM BL form
+      in osos.dec finds three inbound direct calls, all unconditional bl at
+      0x080db644, 0x080dd2b4, and 0x080df5b8; no predicated calls. The
+      Rust port uses wrapping pointer addition because the original only
+      computes addresses and never dereferences them.
+
   # --- indexed UI mode-substate status ---
   - address: 0x080dd2a0
     ghidra: FUN_080dd2a0
