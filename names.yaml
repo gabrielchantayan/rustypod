@@ -137471,3 +137471,37 @@ functions:
       high counter receives its carry. ARM builds retain the verified stock
       transform entry; host tests use its seam because that callee is not yet
       ported.
+
+  - address: 0x080f4bbc
+    ghidra: FUN_080f4bbc
+    name: retail_control_profile_apply
+    size: 100
+    sig: "void retail_control_profile_apply(u32 unused_r0, u32 unused_r1, u32 selector_five, u32 selector_six)"
+    module: app/retail_control_profile_apply
+    status: ported
+    renames:
+      param_1/r0: unused_r0
+      param_2/r1: unused_r1
+      param_3/r2/stack: selector_five
+      param_4/r3/stack: selector_six
+      FUN_0836e274: retail_control_initialize
+      FUN_0836e400: retail_control_apply_mode
+      FUN_0836e41c: retail_control_set_field_three
+      FUN_0836e440: retail_control_set_field_four
+      FUN_0836e450: retail_control_set_field_five
+      FUN_0836e36c: retail_control_read_selector
+      FUN_0836e224: retail_control_submit_code
+      FUN_0836e298: retail_control_commit_selector
+      thunk_FUN_080568e8: task_sleep_thunk
+    notes: >-
+      Raw osos.dec words establish the exact 100-byte A32 body
+      0x080f4bbc..0x080f4c20; 0x080f4c20 begins the next real function.
+      It has 11 plain internal bl instructions and no predicated bl. It
+      initializes the retail control service; sleeps 10 ticks through the
+      0x080e9eb0 task_sleep veneer; applies fixed values 3, 12, and 31;
+      reads selectors 6 and 5 into the preserved r3 and r2 stack slots;
+      submits code 24; rereads selector 6; then commits selector 1.
+      The direct callee names describe verified observable behavior from
+      their decompilations, not a claimed subsystem identity. Rust calls the
+      already-ported task_sleep directly rather than the retail veneer; the
+      ignored return value and 10-tick behavior are retained.
