@@ -140058,3 +140058,39 @@ functions:
       bytes. Host test covers a leap-day input, exact day-number handoff,
       normalized date output, retained time, and all fixed tm fields. match.py
       reports the expected Rust frame and seam-dispatch structural differences.
+
+  # --- parser lhash name-record insertion ---
+  - address: 0x080734d8
+    ghidra: FUN_080734d8
+    name: parser_name_record_insert
+    size: 156
+    sig: "ParserNameRecord *parser_name_record_insert(u8 *parser, const u8 *name)"
+    module: app/parser_name_record_insert
+    status: ported
+    renames:
+      param_1/r0/r6: parser
+      param_2/r1/r8: name
+      iVar1/r5: handle
+      piVar2/r4: record
+      iVar3/r0/r7: name_len_plus_nul
+      FUN_08369778: ata_call_with_zero
+      FUN_08043c18: traced_alloc
+      FUN_08392478: strlen
+      thunk_EXT_FUN_22000020: __rt_memcpy
+      FUN_082d7c48: lh_insert
+      FUN_08369618: namespace_provider_destroy
+      FUN_08043994: traced_free
+    notes: >-
+      Raw osos.dec establishes exactly 156 bytes, from push
+      {r4,r5,r6,r7,r8,lr} at 0x080734d8 through pop {r4,r5,r6,r7,r8,pc}
+      at 0x08073570; the next separate function begins at 0x08073574.
+      The body has eight unconditional bl instructions and one predicated
+      blne. Decoding all ARM immediate B/BL words in osos.dec finds three
+      inbound direct calls: two plain bl and one predicated blne. It makes
+      a zero-argument ATA handle, allocates a 12-byte {name,0,handle} record,
+      duplicates the NUL-terminated name, and inserts the record in the
+      lhash pointer at parser+0x08. Failure destroys the handle and releases
+      a partially allocated record. The Rust port uses a volatile byte copy
+      instead of the stock __rt_memcpy call to prevent an unavailable LLVM
+      runtime builtin; allocator, handle-factory, and lhash seams are the
+      existing ports.
