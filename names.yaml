@@ -17745,6 +17745,33 @@ functions:
       PLST_ELEMENT_TEARDOWN_OPS seam (stock address on target, recorder
       seam on host).
 
+  - address: 0x080df114
+    ghidra: FUN_080df114
+    name: read_plst_optional_fields
+    size: 164
+    sig: "u32 read_plst_optional_fields(u8 *state, u32 *cursor, const u8 *end, u32 include_extra)"
+    module: ui/plst_optional_fields_read
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: cursor
+      param_3/r2: end
+      param_4/r3: include_extra
+      puVar1/r12: destination
+      puVar2/r14: source
+    notes: >-
+      Raw osos.dec decoding confirms the 164-byte extent
+      0x080df114..0x080df1b8, where the distinct next function begins.
+      Decoding every ARM B/BL word in the function finds zero outgoing
+      direct calls. Its three inbound direct calls are all plain bl; no
+      predicated bl forms occur. It validates and consumes a five-byte
+      field, or eight bytes when include_extra is nonzero, copying to the
+      target-width destination at state+0x0c only while state+0x10 is zero.
+      On success it sets state+0x10 to one and stores the advanced cursor;
+      insufficient input returns 6 without changing cursor or latch. The
+      Rust byte loops deliberately retain the retail copy granularity rather
+      than synthesizing a bulk-copy callee.
+
   - address: 0x080df1b8
     ghidra: FUN_080df1b8
     name: materialize_plst_slot
