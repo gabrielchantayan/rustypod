@@ -137042,3 +137042,29 @@ functions:
       and 0x08235a90, with zero predicated BL calls. The function has no
       internal calls and directly returns the opaque target word at object+0xe8.
       Rust represents that unrecovered target word as `*mut u8`.
+  - address: 0x08103f1c
+    ghidra: FUN_08103f1c
+    name: sha1_update_context
+    size: 20
+    sig: "u32 sha1_update_context(u8 *owner, const u8 *input, u32 input_len)"
+    module: crypto/sha1_update_context
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1: input
+      param_3/r2: input_len
+      "owner+0x1c": sha1_context
+      FUN_08065224: legacy_sha1_update
+    notes: >-
+      Raw osos.dec words establish the true 20-byte extent
+      0x08103f1c..0x08103f2f: push {r4,lr}, add r0,r0,#0x1c, BL
+      0x08065224, mov r0,#0, and pop {r4,pc}; 0x08103f30 begins the next
+      real function with push {r4,r5,r6,lr}. Full-image A32 decoding finds
+      three inbound plain BL calls at 0x082358c0, 0x08235a00, and 0x08235a84,
+      and no predicated inbound forms. The body has one plain direct BL and
+      no predicated direct calls. The callee is the SHA-1 update worker:
+      its 64-byte compression target uses SHA-1's rotate-left-five and
+      80-round schedule. This wrapper advances owner by 0x1c, forwards input
+      and input_len unchanged, discards the worker's result, and returns zero.
+      Rust uses the existing replaceable legacy_sha1_update seam because the
+      worker itself is not yet ported; target builds call 0x08065224 directly.

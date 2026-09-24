@@ -41,7 +41,7 @@ pub static mut LEGACY_SHA1_UPDATE: LegacySha1UpdateFn = firmware_legacy_sha1_upd
 pub static mut LEGACY_SHA1_UPDATE: LegacySha1UpdateFn = missing_legacy_sha1_update;
 
 #[inline(always)]
-unsafe fn legacy_sha1_update() -> LegacySha1UpdateFn {
+pub(crate) unsafe fn legacy_sha1_update() -> LegacySha1UpdateFn {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(LEGACY_SHA1_UPDATE)) }
 }
 
@@ -64,14 +64,14 @@ pub unsafe extern "C" fn sha1_update_payload(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use core::ptr;
     use parking_lot::Mutex;
 
-    static SHA1_UPDATE_PAYLOAD_TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static SHA1_UPDATE_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut RECEIVED_CONTEXT: *mut u8 = ptr::null_mut();
     static mut RECEIVED_INPUT: *const u8 = ptr::null();
     static mut RECEIVED_LEN: u32 = 0;
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn forwards_payload_arguments_and_discards_worker_result() {
-        let _lock = SHA1_UPDATE_PAYLOAD_TEST_LOCK.lock();
+        let _lock = SHA1_UPDATE_TEST_LOCK.lock();
         let saved = unsafe { LEGACY_SHA1_UPDATE };
         unsafe { LEGACY_SHA1_UPDATE = record_update };
 
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn forwards_nonzero_length_without_inspecting_input() {
-        let _lock = SHA1_UPDATE_PAYLOAD_TEST_LOCK.lock();
+        let _lock = SHA1_UPDATE_TEST_LOCK.lock();
         let saved = unsafe { LEGACY_SHA1_UPDATE };
         unsafe { LEGACY_SHA1_UPDATE = record_update };
 
