@@ -42,6 +42,10 @@ pub mod hints {
     // 0x6f70_0000: dedicated to drivers/storage_backend_sector_size's
     // target-width validated-backend fixture; mappings never unmap.
     pub const STORAGE_BACKEND_SECTOR_SIZE: usize = 0x6f70_0000;
+    // 0xfee0_0000 / 0xfee1_0000: dedicated to ft/pshinter's target-width
+    // stem-record array fixtures; mappings never unmap.
+    pub const PSH_DIMENSION_APPEND_STEM_RECORD: usize = 0xfee0_0000;
+    pub const PSH_DIMENSION_APPEND_STEM_RECORD_CAPACITY: usize = 0xfee1_0000;
     // 0x6f50_0000: dedicated to util/video_engine's target-width controller,
     // engine, frame-table, and frame-record fixture; mappings never unmap.
     pub const VIDEO_ENGINE_PRESENT_DEFAULT_FRAME: usize = 0x6f50_0000;
