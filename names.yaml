@@ -136420,3 +136420,38 @@ functions:
       has no established identity, so Rust keeps it as a target-call seam;
       host tests replace all three calls to prove ordering, the strict clamp
       boundary, and aliased output-store order.
+
+  # --- UI resource maximum ordinal by value presence ---
+  - address: 0x0811457c
+    ghidra: FUN_0811457c
+    name: object_resource_max_ordinal_for_presence
+    size: 112
+    sig: "u32 object_resource_max_ordinal_for_presence(const void *context, u32 has_value)"
+    module: ui/object_resource_max_ordinal_for_presence
+    status: ported
+    renames:
+      param_1/r0/r6: context
+      param_2/r1/r9: has_value
+      r4: index
+      r5: greatest_ordinal
+      r7: resource_has_value
+      r8: resource_count
+      FUN_0805417c: object_resource_count
+      FUN_08052314: resource_value_at_218
+      FUN_08054afc: resource_ordinal_at_210
+    notes: >-
+      Raw osos.dec A32 decoding establishes a 112-byte body from push
+      {r4-r10,lr} at 0x0811457c through pop {r4-r10,pc} at 0x081145ec; the
+      ldr at 0x081145f0 starts the next independently entered function, so
+      Ghidra's 116-byte extent includes one instruction too many. The body has
+      three unconditional direct BL instructions (0x0805417c, 0x08052314,
+      and 0x08054afc), zero predicated direct BL instructions, and no BLX. It
+      loads context+0x30, scans its backend resource vector, and returns one
+      plus the greatest signed resource+0x210 ordinal whose resource+0x218
+      u64 zero/nonzero state exactly equals has_value; no matching ordinal
+      returns one. object_resource_count is the established Rust seam.
+      resource_value_at_218 and resource_ordinal_at_210 have no recorded
+      callee identity, so Rust deliberately uses their verified target-layout
+      loads directly rather than inventing seams. It also retains the raw
+      selector comparison and the stock signed count loop without null,
+      alignment, or bounds checks.
