@@ -138659,3 +138659,27 @@ functions:
       diagnostics are a volatile seam for edge tests. match.py is structural
       (exit 1 expected): LLVM emits separate retry paths and a fuller frame,
       while preserving the reads, delay, report, masks, and priority.
+  - address: 0x080bb46c
+    ghidra: FUN_080bb46c
+    name: global_slot_8_callback_dispatch
+    size: 40
+    sig: "u32 global_slot_8_callback_dispatch(u32 event_code)"
+    module: app/global_slot_8_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r2: event_code
+      DAT_080bb490: global_slot_8_callback_target (0x089ca95c)
+      "target+0x08": callback
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent 0x080bb46c..0x080bb494:
+      nine A32 instruction words end with bx lr at 0x080bb48c, followed by
+      the 0x089ca95c literal at 0x080bb490; 0x080bb494 begins the next real
+      function. Raw callers at FUN_081f46f4, FUN_081f4954, and FUN_08369a6c
+      account for three unconditional direct BL callers and no predicated
+      direct BL callers. The body has no direct BL instructions; its only call
+      is predicated indirect bxne through target+0x08. It returns 0x11 if the
+      optional global target is NULL, otherwise tail-dispatches event_code and
+      returns the callback result. The target object's identity remains
+      unrecovered, so its name records only the observed slot dispatch. Rust
+      uses a native-pointer host seam for the 32-bit firmware pointer and an
+      Rust source leaves tail-call selection to LLVM, which emits the equivalent tail branch.
