@@ -20366,6 +20366,37 @@ functions:
       differs only in the crate frame-pointer prologue and register
       allocation.
 
+  # --- PMU mode-status availability predicate (app) ---
+  - address: 0x080b4eb4
+    ghidra: FUN_080b4eb4
+    name: pmu_mode_status_available
+    size: 80
+    sig: "u32 pmu_mode_status_available(u32 incoming_r0, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: app/pmu_mode_status_available
+    status: ported
+    renames:
+      local_10/sp: pmu_register_0x4b_bit2
+      DAT_089ca974_plus_0xc: pmu_mode_availability_blocked
+      FUN_080bfbd4: store_pmu_register_0x4b_bit2
+      FUN_082e5b64: pmu_board_version_status_bit
+      FUN_080cc950: cg_mode_limit
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x080b4eb4..0x080b4f03; the following word at 0x080b4f04 is the
+      literal-pool pointer 0x089ca974, not an instruction. Decoding every
+      aligned ARM word finds three direct calls, all plain unconditional bl
+      (cond=e), at 0x080b4ebc, 0x080b4ec4, and 0x080b4ec8; there are zero
+      predicated bl calls. The function stores PMU register 0x4b bit 2,
+      obtains the board-selected PMU status bit, and reads cg_mode_limit().
+      A nonzero word at 0x089ca980 returns zero. Otherwise it returns one
+      when the register-0x4b bit is set, or when the board-selected bit is
+      set and the signed mode limit is above four. Incoming r3 is forwarded
+      through both PMU calls because their failed-I2C paths expose its scratch
+      bits; incoming r0-r2 retain the retail ABI even though r0 becomes zero
+      after the first call. The three direct callees are existing Rust ports.
+      Host tests cover the register-bit fast path, the strict mode-limit
+      boundary, and the blocking word override.
+
   - address: 0x0807ba0c
     ghidra: FUN_0807ba0c
     name: cff_check_points

@@ -214,6 +214,7 @@ pub mod registration_handle_try_select_current_record;
 pub mod configured_path_prefix_matches;
 pub mod encoded_field_prefix_size;
 pub mod firmware_query_low_byte;
+pub mod pmu_mode_status_available;
 pub mod dual_pool_screen;
 pub mod transfer_slot_buffer;
 pub mod transfer_slot_try_process;
