@@ -473,3 +473,4 @@ pub mod vector8_erase;
 pub mod task_base_construct;
 pub mod framework_string_pair_construct;
 pub mod string_map_assign_tree_records;
+pub mod owned_virtual_handle_release;
