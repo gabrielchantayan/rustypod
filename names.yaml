@@ -136759,3 +136759,31 @@ functions:
       replace it through CONFIGURE_INNER_STATE; no callee identity is
       inferred from its address. The first callee is the existing direct
       object_select_resource_index port.
+
+  - address: 0x08111338
+    ghidra: FUN_08111338
+    name: media_player_set_inner_state_selector
+    size: 160
+    sig: "void media_player_set_inner_state_selector(void *player, u32 selector)"
+    module: app/media_player_set_inner_state_selector
+    status: ported
+    renames:
+      param_1/r0: player
+      param_2/r1: selector
+      "[player + 0x30]": inner_state
+      "[inner_state + 0xe38]": selector
+      "[inner_state + 0xe3c]": selector_is_six
+      FUN_08067ca4: store_inner_state_selector
+      FUN_08067c9c: store_inner_state_selector_is_six
+    notes: >-
+      Raw osos.dec words establish the exact 160-byte executable extent
+      0x08111338..0x081113d8: the next independent function begins with
+      stmdb sp!,{r4,r5,r6,r7,r8,r9,r10,lr} at 0x081113d8. Full-image A32
+      decoding finds three inbound unconditional plain BL callers
+      (0x08109fac, 0x081116d4, and 0x08230158) and no predicated BL callers.
+      The selector is unsigned-bounded to 0..6 using a jump table; each valid
+      case stores it to inner_state+0xe38 through FUN_08067ca4, then tail
+      branches to FUN_08067c9c to store byte (selector == 6) at +0xe3c.
+      Selectors above six return before loading player+0x30. Raw decoding of
+      both helpers proves they are individual stores, so Rust inlines them;
+      no unverified helper identity or dispatch seam is introduced.
