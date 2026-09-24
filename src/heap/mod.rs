@@ -64,6 +64,7 @@ pub mod bucket_chain_table;
 pub mod zeroing_buffer;
 pub mod two_buffer_owner;
 pub mod three_buffer_owner;
+pub mod sixteen_resource_slots;
 pub mod three_buffer_owner_create;
 pub mod pool_client;
 pub mod pool_client_reset;
