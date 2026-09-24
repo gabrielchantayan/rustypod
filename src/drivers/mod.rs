@@ -52,6 +52,7 @@ pub mod gpioic;
 pub mod i2c;
 pub mod interrupts;
 pub mod lcd_write_register;
+pub mod mailbox_controller_reset;
 pub mod mmio_bit_write;
 pub mod piezo;
 pub mod pwrcon;
