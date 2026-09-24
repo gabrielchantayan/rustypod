@@ -138943,3 +138943,41 @@ functions:
       helper reads status property 0x4b and tests bit two. Its exact semantic
       identity remains unrecovered, so target builds call its verified retail
       address and host tests use a narrow volatile seam.
+  - address: 0x080aa5c8
+    ghidra: FUN_080aa5c8
+    name: counted_path_acquire
+    size: 152
+    sig: "i32 counted_path_acquire(u8 *counted_path, u32 unused, const u8 *prefix, const u8 *suffix)"
+    module: app/counting_path_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: counted_path
+      param_2/r1: unused
+      param_3/r2/r5: prefix
+      param_4/r3/r6: suffix
+      FUN_08079f54: path_join (unported seam)
+      FUN_0805a8e4: facade_initial_probe (unported seam)
+      FUN_0805a84c: path_facade_probe_dispatch_counted
+      FUN_0805a634: opaque_handle_acquire
+      FUN_0805a594: opaque_handle_release_if_valid
+    notes: >-
+      Raw osos.dec words establish the 152-byte executable extent
+      0x080aa5c8..0x080aa65f. The word at 0x080aa660 is a literal pool value
+      (0x64617461), and the next real function starts at 0x080aa664. The body
+      has five unconditional plain BL instructions (zeroing routine,
+      path_join, facade_initial_probe, path_facade_probe_dispatch_counted,
+      and opaque_handle_acquire) plus one predicated BLEQ to
+      opaque_handle_release_if_valid. Full-image A32 decoding finds two plain
+      inbound BL call sites (0x0806e600 and 0x080bef14) and one predicated
+      inbound BLEQ call site (0x080bef40). It zeroes a 72-byte scratch record,
+      joins prefix and suffix into counted_path+2 with capacity 0xff, clears
+      the u16 prefix, runs the initial facade probe, and dispatches the
+      counted facade on initial success. Results other than zero and -43
+      return unchanged; zero and -43 acquire mode 2 with the literal
+      auxiliary word, then release a successful handle. Target builds use
+      verified-address seams for the two unported callees; host tests record
+      those boundaries and verify prefix clearing, join arguments, scratch
+      zeroing, and both signs of non-fallback probe errors. match.py reports
+      the expected structural diff from the unported seams and LLVM's
+      memclr/helper calls; its exit status is 1 by design when printing that
+      diff.
