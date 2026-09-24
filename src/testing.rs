@@ -622,6 +622,10 @@ pub mod hints {
     // header and backing-array fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const UNIQUE_WORD_ARRAY_INSERT: usize = 0x6d80_0000;
+    // 0x6fb0_0000: dedicated to app/object_activate_until_query_matches's
+    // raw-u32 opaque-object traversal fixture; mappings never unmap, so no
+    // other test may reuse this hint.
+    pub const OBJECT_ACTIVATE_UNTIL_QUERY_MATCHES: usize = 0x6fb0_0000;
     // 0x6c80_0000: dedicated to cxx/hash_table_bucket_slot's raw-u32 table
     // and bucket-array fixture; mappings never unmap, so no other user may
     // share this hint.

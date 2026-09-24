@@ -63749,6 +63749,29 @@ functions:
       than TaskCtx field offsets. Focused tests cover lazy allocation,
       construction/publication, argument forwarding, and the cached path.
 
+  - address: 0x08110ac4
+    ghidra: FUN_08110ac4
+    name: object_activate_until_query_matches
+    size: 120
+    sig: "void object_activate_until_query_matches(void *initial, u32 target)"
+    module: app/object_activate_until_query_matches
+    status: ported
+    vars:
+      param_1/r0: initial
+      param_2/r1: target
+      puVar2: initial_active_byte
+      iVar1: queried_or_next_object
+    notes: >-
+      Raw ARM proves the 120-byte extent 0x08110ac4..0x08110b3c: thirty words
+      from push {r4-r6,lr} through the branch back to 0x08110ac8; the next
+      function starts at 0x08110b3c with push {r4,lr}. A full-image A32 decode
+      finds three unconditional direct inbound BL calls (0x081107ac, 0x081107c0,
+      0x08111218) and no predicated direct BL calls. The body has four
+      register-indirect BLX calls: vtable +0x50 once and vtable +0x1c three
+      times. It marks initial+0x0c, activates each visited object, compares the
+      first query result to target, then only advances after a second nonzero
+      query. A match clears the initial byte; exhaustion deliberately leaves it
+      set. Virtual method identities are unrecovered and are not invented.
   # --- Silver UI framework: link and owner initializer ---
 
   - address: 0x081108b4
