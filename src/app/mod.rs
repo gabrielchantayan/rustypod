@@ -84,6 +84,7 @@ pub mod clamped_mode_position_adjust;
 pub mod clamped_mode_position_from_lower_offset;
 pub mod clamped_mode_position_from_upper_offset;
 pub mod class_8c00;
+pub mod component_gate_rearm_continue;
 pub mod settings_value_scale;
 pub mod range_value_to_u8;
 pub mod buffer_refill_request;

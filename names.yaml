@@ -136305,3 +136305,32 @@ functions:
       explicit ABI-only seams because their semantic identities are not
       established; host builds also replace the target's four-byte function
       pointer with a seam.
+
+  - address: 0x0811666c
+    ghidra: FUN_0811666c
+    name: component_gate_rearm_continue
+    size: 68
+    sig: "void component_gate_rearm_continue(u8 *owner)"
+    module: app/component_gate_rearm_continue
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x4d2": suppress_flag
+      "owner+0x430": component
+      "component-vtable+0x9c": gate
+      FUN_081a5500: singleton_class_8c00
+      FUN_081a6368: class_8c00_rearm_timer_post_0x11
+      FUN_08115f38: continuation
+    notes: >-
+      Raw osos.dec words establish the 68-byte A32 body
+      0x0811666c..0x0811666caf; 0x0811666cb0 is the 0x1d4c0 literal pool
+      word and 0x0811666cb4 begins the next independently entered function.
+      Ghidra's 192-byte extent incorrectly absorbs the tail continuation.
+      The body has two unconditional direct BL calls (singleton_class_8c00
+      and class_8c00_rearm_timer_post_0x11), zero predicated direct BL calls,
+      and one indirect BLX through component-vtable+0x9c. A nonzero suppress
+      flag or zero gate return exits; otherwise the class-0x8c00 timer is
+      rearmed for 120000 ms and the function tail-branches to the unported
+      0x08115f38 continuation. Rust spells the tail branch as a call; host
+      tests use seams while ARM calls the two ported callees directly and the
+      verified continuation address.
