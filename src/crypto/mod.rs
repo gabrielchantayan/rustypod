@@ -93,6 +93,7 @@ pub mod evp_sha1;
 pub mod evp_pkey;
 pub mod rsa_free;
 pub mod obj_dat;
+pub mod pkcs7_set_detached;
 pub mod obj_name_alias_register;
 pub mod xor_f6_in_place;
 pub mod standard_cipher_table_one;

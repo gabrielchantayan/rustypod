@@ -80898,6 +80898,32 @@ functions:
       rather than reproduce undefined stack contents. Device NID_OBJS remains
       the original absolute array; host tests install an inline fixture.
 
+  - address: 0x0805fa50
+    ghidra: FUN_0805fa50
+    name: pkcs7_set_detached
+    size: 212
+    sig: "int PKCS7_set_detached(PKCS7 *message, int mode, int detached)"
+    module: crypto/pkcs7_set_detached
+    vars: {param_1/r0: message, param_2/r1: mode, param_3/r2: detached}
+    renames:
+      FUN_0805f074: obj_obj2nid
+      FUN_0803a240: PKCS7_free
+      FUN_08049a84: diag_ring_record
+    status: ported
+    notes: >-
+      OpenSSL's PKCS7_set_detached. Raw A32 words establish the exact
+      212-byte extent 0x0805fa50..0x0805fb23; the next separately linked
+      function starts at 0x0805fb24. Full-image branch decoding finds exactly
+      three inbound plain unconditional bl call sites (0x0805fcbc,
+      0x08060048, 0x082d43d4) and zero predicated bl calls. For
+      NID_pkcs7_signed (22), mode 1 stores detached, and nonzero detached
+      frees and clears an inner NID_pkcs7_data (21) content; mode 2 stores
+      and returns whether that content slot is NULL. A non-signed type records
+      (0x21, 0x68, 0x68, 0, 0); an unsupported mode records
+      (0x21, 0x68, 0x6e, 0, 0). PKCS7_free @ 0x0803a240 remains unported:
+      target builds dispatch to its verified fixed address, while host tests
+      install a volatile seam. The PKCS7 pointer fields are read as target
+      words so host pointer width cannot change their offsets.
   - address: 0x0805efc4
     ghidra: FUN_0805efc4
     name: obj_nid2sn
