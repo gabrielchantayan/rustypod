@@ -10739,6 +10739,36 @@ functions:
       for 0x089d03bc and intentionally adds no null guard, cache, ownership,
       or bit interpretation.
 
+  - address: 0x080879d0
+    ghidra: FUN_080879d0
+    name: string_pointer_list_join
+    size: 148
+    sig: "u8 *string_pointer_list_join(const StringPointerList *list, u32 separator, u32 *out_len)"
+    module: app/string_pointer_list_join
+    status: ported
+    renames:
+      param_1/r0: "list (three-word string pointer list: strings +0, unused +4, count +8)"
+      param_2/r1: separator (low byte written between entries)
+      param_3/r2: out_len (cleared before list validation)
+      param_4/r3: unused (not read by raw ARM)
+      iVar7/lr: destination (first string-list pointer)
+      iVar3/r3: written (result byte count)
+      uVar6/r12: index (string-list index)
+    notes: >-
+      Raw ARM establishes the 148-byte extent 0x080879d0..0x08087a64:
+      0x080879d0 opens with push {r4,r5,r6,r7,lr}, while 0x08087a64 opens
+      ata_data_transfer_status_ok. The body contains zero outbound plain or
+      predicated BL instructions. Full-image target decoding finds two inbound
+      plain BL call sites, 0x08098ba0 and 0x080a0264, and zero predicated BL
+      forms; Ghidra's reported third call site is not a BL in osos.dec. The
+      function zeroes out_len, returns NULL for a null or empty list, otherwise
+      copies every NUL-terminated list entry into strings[0], inserts the low
+      separator byte between entries, appends NUL, and publishes its length.
+      Rust's typed target layout preserves +0/+4/+8 on ARM; host fields are
+      intentionally wider to retain valid native pointers. Host tests cover
+      in-place first-entry joining, empty entries, separator narrowing, and
+      both early returns. match.py reports a structural diff (exit 1), not an
+      automatic failure.
   - address: 0x08087a64
     ghidra: FUN_08087a64
     name: ata_data_transfer_status_ok
