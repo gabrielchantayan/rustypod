@@ -18174,6 +18174,31 @@ functions:
       core cmp r0,#0 / beq / ldr r0,[r0,#4] / ldr r1,[pc] sequence
       matches verbatim.
 
+  - address: 0x08061650
+    ghidra: FUN_08061650
+    name: plst_task_is_active
+    size: 48
+    sig: "u32 plst_task_is_active(u32 *task)"
+    module: ui/plst_task_is_active
+    status: ported
+    renames:
+      param_1/r0: task
+      param_1[0]: element
+      param_1[4]: active_link
+    notes: >-
+      PLST task activity predicate. Raw ARM runs from 0x08061650 through
+      0x0806167c; the next independent prologue is at 0x08061680, confirming
+      the 48-byte Ghidra extent. It uses movs r2,r0 to NULL-test task, calls
+      ui_element_is_plst_class at 0x080613e0 on task word +0, then reads word
+      +0x10 only after that class check succeeds; it returns strict 1 only
+      when both tests pass and 0 otherwise. Decoding every B/BL word in
+      osos.dec independently finds three inbound unconditional bl calls at
+      0x08048a14, 0x0805cdec, and 0x0805d348, with zero predicated calls.
+      The existing PLST task completion and resource-callback ports now call
+      this exported seam rather than carrying a local duplicate. Deliberate
+      deviations: none; the already-ported class predicate replaces the
+      stock call while retaining target-width pointer fields and access order.
+
   - address: 0x08061378
     ghidra: FUN_08061378
     name: plst_element_notify_teardown

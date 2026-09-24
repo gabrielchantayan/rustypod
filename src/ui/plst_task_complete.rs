@@ -6,7 +6,7 @@
 
 use core::ptr;
 
-use super::plst_class_check::ui_element_is_plst_class;
+use super::plst_task_is_active::plst_task_is_active;
 
 /// Raw FourCC event key held in the literal pool at `0x08048aac`.
 /// Its semantic identity is not recovered.
@@ -20,14 +20,6 @@ const ELEMENT_RESOURCE_WORD: usize = 0x3c / core::mem::size_of::<u32>();
 const ELEMENT_ACTIVITY_FLAGS_OFFSET: usize = 0x1ac;
 const ELEMENT_ACTIVITY_NONZERO_OFFSET: usize = 0x1b0;
 
-/// Recovered `0x08061650` gate shared by PLST task ports.
-pub(crate) unsafe fn plst_task_is_active(task: *mut u32) -> u32 {
-    if task.is_null() {
-        return 0;
-    }
-    let element = task.add(TASK_ELEMENT_WORD).read() as usize as *const u8;
-    (ui_element_is_plst_class(element) != 0 && task.add(TASK_ACTIVE_LINK_WORD).read() != 0) as u32
-}
 
 /// Boundaries for the four unported calls made by this routine.
 pub type PlstTaskNotify = unsafe extern "C" fn(*mut u8, u32, *mut u32, u32, u32);
@@ -121,11 +113,11 @@ fn ops() -> PlstTaskCompleteOps {
 /// inbound calls, all unconditional `bl`: 0x080477f0, 0x08064650,
 /// 0x080646a4, 0x080c5fd8, 0x080d8690, and 0x08283f18.
 ///
-/// Deliberate deviations: the small unported gate `0x08061650` is expressed
-/// directly with the already-ported class predicate and its observed +0x10
-/// test. The remaining unported callees dispatch through
-/// [`PLST_TASK_COMPLETE_OPS`], whose target defaults retain their verified
-/// retail addresses; no callee identity beyond the observed role is claimed.
+/// Deliberate deviations: none for the stock activity-gate call; it now uses
+/// the dedicated [`plst_task_is_active`] port. The remaining unported callees
+/// dispatch through [`PLST_TASK_COMPLETE_OPS`], whose target defaults retain
+/// their verified retail addresses; no callee identity beyond the observed
+/// role is claimed.
 ///
 /// # Safety
 /// `task` may be NULL. A non-NULL task must be aligned and readable through

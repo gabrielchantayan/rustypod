@@ -8,7 +8,7 @@ use core::ptr;
 
 use crate::app::resource::cache::resource_callback_dispatch;
 
-use super::plst_task_complete::plst_task_is_active;
+use super::plst_task_is_active::plst_task_is_active;
 
 const TASK_FLAGS_OFFSET: usize = 0x1d;
 const TASK_RESULT_WORD: usize = 5;
@@ -42,10 +42,10 @@ unsafe fn callback_dispatch() -> PlstTaskResourceCallbackDispatch {
 /// context one, then stores zero at +0x14 only if element +0x40 still points
 /// at that task.
 ///
-/// Deliberate deviation: the already-ported activity predicate replaces the
-/// stock call at `0x08061650`. The callback dispatcher uses a volatile seam so
-/// host tests can observe the call without assigning an identity to literal
-/// `0x080cc284`; target builds retain that exact callback address.
+/// Deliberate deviation: the callback dispatcher uses a volatile seam so host
+/// tests can observe the call without assigning an identity to literal
+/// `0x080cc284`; target builds retain that exact callback address. The activity
+/// gate is the dedicated [`plst_task_is_active`] port.
 ///
 /// # Safety
 /// `task` may be NULL. A non-NULL task must satisfy

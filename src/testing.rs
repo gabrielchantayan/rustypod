@@ -2342,6 +2342,9 @@ pub mod hints {
     // 0x6ff8_0000: dedicated to util/big_endian_bit_cell_store's target-width
     // table and cell fixtures; mappings never unmap, so no other port may use it.
     pub const BIG_ENDIAN_BIT_CELL_STORE: usize = 0x6ff8_0000;
+    // 0x6ef0_0000: dedicated to ui/plst_task_is_active's target-width task
+    // element fixture; mappings never unmap, so no other port may share it.
+    pub const PLST_TASK_IS_ACTIVE: usize = 0x6ef0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
