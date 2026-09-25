@@ -141994,3 +141994,30 @@ functions:
       inbound BL calls; this corrects the assigned three-call report. ARM
       builds write the verified live global at 0x089ca864 through volatile
       byte stores; host tests use a private backing object for that state.
+  - address: 0x0804b3a8
+    ghidra: FUN_0804b3a8
+    name: big_endian_bit_cell_store_and_mark_pending
+    size: 60
+    sig: "u32 big_endian_bit_cell_store_and_mark_pending(u32 channel, i32 pending, i32 payload, u32 group, u32 bit_index, u32 mode)"
+    module: util/big_endian_bit_cell_store_and_mark_pending
+    status: ported
+    renames:
+      param_1/r0/r5: channel
+      param_2/r1/r6: pending
+      param_3/r2/r4: payload
+      param_4/r3: group
+      stack+0x00/r2: bit_index
+      stack+0x04/r3: mode
+      FUN_0806436c: big_endian_bit_cell_store
+      FUN_0836b6fc: retail pending-map update
+      FUN_0836b634: retail pending-map OR
+    notes: >-
+      Raw osos.dec establishes the 60-byte body at 0x0804b3a8..0x0804b3e3:
+      the final word is a tail branch to 0x0836b634, and the next independently
+      entered function begins at 0x0804b3e4. A32 decoding finds two unconditional
+      outbound BL calls at 0x0804b3c4 and 0x0804b3d0, zero predicated BL calls,
+      and the one direct tail B at 0x0804b3e0. It passes reordered arguments to
+      big_endian_bit_cell_store, applies pending through 0x0836b6fc, then tail-calls
+      0x0836b634 with payload. The latter two helpers have no names.yaml entries;
+      target builds call their verified retail addresses and host tests use explicit
+      callback seams. The Rust final ordinary call preserves the tail helper result.
