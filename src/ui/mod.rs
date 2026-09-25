@@ -110,6 +110,7 @@ pub mod plst_slot_item;
 pub mod plst_secondary_slot_item;
 pub mod plst_selector_normalize;
 pub mod plst_slot_materialize;
+pub mod plst_slot_source_clone;
 pub mod plst_optional_fields_read;
 pub mod plst_linked_item_count;
 pub mod plst_slot_position;
