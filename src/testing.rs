@@ -2076,6 +2076,9 @@ pub mod hints {
     // 0x4400_0000: dedicated to ui/pool_entry_create's owner fixture; mappings
     // never unmap, so no other user may share this hint.
     pub const UI_POOL_ENTRY_CREATE: usize = 0x4400_0000;
+    // 0x4450_0000: dedicated to crypto/bio_free_all's target-width BIO
+    // chain fixture; mappings never unmap, so no other port may share it.
+    pub const BIO_FREE_ALL: usize = 0x4450_0000;
     // 0x4500_0000: dedicated to ft/cff_pshinter_callback's target-width face,
     // state, and callback-table fixture; mappings never unmap, so no other user
     // may share this hint.
