@@ -128709,6 +128709,30 @@ functions:
       in frame/register allocation and branch layout but must retain first-or-
       successor selection, +0x08 comparison, and successor loop. Reference C:
       decomp/c/003/08053b14_FUN_08053b14.c.
+  - address: 0x08053b5c
+    ghidra: FUN_08053b5c
+    name: utf8_decode_codepoint_le16
+    size: 32
+    sig: "void utf8_decode_codepoint_le16(const char **cursor, u8 *low_byte, u8 *high_byte)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: low_byte
+      param_3/r2: high_byte
+      FUN_08276214: utf8_next_codepoint
+    notes: >-
+      Raw osos.dec words establish the 32-byte all-code extent
+      0x08053b5c..0x08053b7c; the following `mov r2,r0` at 0x08053b7c starts
+      the next real function. The body makes one unconditional direct BL to
+      utf8_next_codepoint @ 0x08276214, stores its low byte through r1, shifts
+      the codepoint right eight bits, then stores that byte through r2.
+      Independent whole-disassembly decoding finds three inbound plain BL
+      calls (0x083941a8, 0x083941ec, 0x08394230) and zero predicated BL calls.
+      This is a little-endian low-u16 splitter: codepoint bits above 15 are
+      discarded. No deliberate deviations; Rust calls the already-ported
+      decoder directly. Host tests cover two- and three-byte decoding,
+      cursor advancement, and invalid four-byte lead behavior.
   - address: 0x08053bb8
     ghidra: FUN_08053bb8
     name: entry_match_successor

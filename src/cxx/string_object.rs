@@ -3641,6 +3641,31 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
 
     0
 }
+/// Decodes one retail UTF-8-like codepoint and stores its low sixteen bits as
+/// little-endian bytes — original: `FUN_08053b5c` @ 0x08053b5c (32 bytes,
+/// 0x08053b5c..0x08053b7c; all code, followed by the distinct
+/// `FUN_08053b7c` entry).
+///
+/// Raw ARM contains one unconditional internal `bl` to
+/// [`utf8_next_codepoint`] @ 0x08276214. It has three inbound direct plain
+/// `bl` calls (0x083941a8, 0x083941ec, 0x08394230) and no predicated calls.
+///
+/// The decoder advances `*cursor`; this wrapper writes the returned
+/// codepoint's least-significant byte to `low_byte` and bits 8..15 to
+/// `high_byte`. Higher codepoint bits are deliberately discarded. No
+/// deliberate deviations: the already-ported decoder is called directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_decode_codepoint_le16(
+    cursor: *mut *const u8,
+    low_byte: *mut u8,
+    high_byte: *mut u8,
+) {
+    let codepoint = utf8_next_codepoint(cursor);
+    *low_byte = codepoint as u8;
+    *high_byte = (codepoint >> 8) as u8;
+}
+
 
 /// Decode the UTF-8-like codepoint at a signed index — original:
 /// `FUN_08275e94` @ 0x08275e94 (56 bytes, 0x08275e94..0x08275ecc; all code,
@@ -9207,6 +9232,28 @@ pub(crate) mod tests {
             "the decoder masks a malformed second byte instead of rejecting it"
         );
     }
+    #[test]
+    fn utf8_decode_codepoint_le16_advances_and_stores_little_endian_low_word() {
+        let bytes = [0xc2, 0xa2, 0xe2, 0x82, 0xac, 0xf0, 0x9f, 0x92, 0];
+        let mut cursor = bytes.as_ptr();
+        let mut low = 0xff;
+        let mut high = 0xff;
+
+        unsafe {
+            utf8_decode_codepoint_le16(&mut cursor, &mut low, &mut high);
+            assert_eq!((low, high), (0xa2, 0));
+            assert_eq!(cursor.offset_from(bytes.as_ptr()), 2);
+
+            utf8_decode_codepoint_le16(&mut cursor, &mut low, &mut high);
+            assert_eq!((low, high), (0xac, 0x20));
+            assert_eq!(cursor.offset_from(bytes.as_ptr()), 5);
+
+            utf8_decode_codepoint_le16(&mut cursor, &mut low, &mut high);
+            assert_eq!((low, high), (0, 0));
+            assert_eq!(cursor.offset_from(bytes.as_ptr()), 8);
+        }
+    }
+
 
     fn decode_codepoint_at_index(bytes: &[u8], index: i32) -> u32 {
         unsafe { utf8_decode_codepoint_at_index(bytes.as_ptr(), index) }
