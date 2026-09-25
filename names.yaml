@@ -6755,6 +6755,32 @@ functions:
       checks. `match.py` finds LLVM adds a frame prologue and epilogue, while
       retaining the two retail memory operations and their offsets.
 
+  # --- opaque FreeType service-context metadata signed-byte accessor ---
+  - address: 0x080549f4
+    ghidra: FUN_080549f4
+    name: ft_service_metadata_signed_byte_at_b52
+    size: 16
+    sig: "i32 ft_service_metadata_signed_byte_at_b52(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_first_ldr: metadata
+    notes: >-
+      Raw words `e5900f00`, `e2800c0b`, `e1d005d2`, and `e12fff1e` decode
+      to `ldr r0,[r0,#0xf00]; add r0,r0,#0xb00; ldrsb r0,[r0,#0x52]; bx
+      lr`. The next real function begins at 0x08054a04, confirming the
+      16-byte extent. Thus this loads the aligned metadata pointer word at
+      service_context+0xf00, then returns the signed byte at metadata+0xb52
+      sign-extended to i32. Decoding every ARM B/BL word in osos.dec finds
+      exactly three unconditional plain BL callers (0x08173474, 0x08173488,
+      and 0x08173498) and no predicated BL callers. Those callers compare
+      it with a cached state word and, when nonzero, cache its low byte.
+      Ghidra's C agrees exactly. The concrete layouts and ownership are
+      unrecovered, so the port deliberately preserves direct pointer
+      dereferences with no NULL or bounds checks. Deliberate deviations:
+      none.
+
   # --- opaque FreeType service-context metadata byte accessor ---
   - address: 0x080512ac
     ghidra: FUN_080512ac
