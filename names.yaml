@@ -145628,3 +145628,29 @@ functions:
       full base layout are not recovered, so they are deliberately not
       invented. Target builds call the verified base-constructor address;
       host builds use a replaceable seam for that unported boundary.
+
+  # --- opaque owned StringObject release ---
+  - address: 0x083e75ac
+    ghidra: FUN_083e75ac
+    name: opaque_owned_allocation_release
+    size: 36
+    sig: "StringObject **opaque_owned_allocation_release(StringObject **holder)"
+    module: cxx/opaque_owned_allocation_release
+    status: ported
+    renames:
+      param_1/r0: holder
+      FUN_08291fb4: string_object_opaque_base_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent 0x083e75ac..0x083e75cf:
+      the final pop {r4,pc} is at 0x083e75cc and the next independently linked
+      function starts with push {r4,lr} at 0x083e75d0. Its two internal calls
+      are unconditional BL to the already ported string_object_opaque_base_destroy
+      @ 0x08291fb4 and operator_delete @ 0x082aad24. Full-image A32 decoding
+      finds two inbound unconditional plain BL calls and zero predicated BL calls.
+      It loads holder+0, skips both calls when that word is NULL, otherwise
+      destroys the owned StringObject, deletes the destroyer's returned pointer,
+      and returns holder without clearing its word. Rust calls the two ports
+      normally rather than preserving ARM scheduling; the host helper takes the
+      operations explicitly so tests observe the actual destroy-then-delete
+      return-value flow without heap-backed target-address fixtures.
