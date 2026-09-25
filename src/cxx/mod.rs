@@ -335,6 +335,7 @@ pub mod counted_utf16_to_utf8;
 pub mod string_object_remove_trailing_codepoint;
 pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
+pub mod owned_string_object_replace;
 pub mod opaque_record_string_pair_destroy;
 pub mod string_object_less;
 pub mod string_object_word_upper_bound;
