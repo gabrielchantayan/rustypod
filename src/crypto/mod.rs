@@ -53,6 +53,7 @@ pub mod buffered_writer_write;
 pub mod buffered_writer_flush;
 pub mod base64_encode;
 pub mod base64_decode;
+pub mod base64_decode_state_reset;
 pub mod base64_char_value;
 pub mod base64_table_char;
 pub mod bio_printf;
