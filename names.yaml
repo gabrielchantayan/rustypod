@@ -109668,6 +109668,42 @@ functions:
       write, reference-count increment, six-word clear, preserved prefix, and
       returned storage. match.py structural review completed.
 
+  # --- adjusted registry-owning subobject initializer (cxx) ---
+  - address: 0x083e78f8
+    ghidra: FUN_083e78f8
+    name: adjusted_subobject_initializer
+    size: 148
+    sig: "void adjusted_subobject_initializer(void *subobject, u32 initialization_flag)"
+    module: cxx/adjusted_subobject_initializer
+    status: ported
+    renames:
+      param_1/r0/r4: subobject
+      param_2/r1: initialization_flag
+      FUN_082a8b50: shared_handle_retain_copy
+      FUN_082a7280: typed_handler_registry_lookup
+      FUN_082a8ba0: shared_handle_release
+      vtable+0x30: handler_slot_30
+      DAT_083e7980: subobject_descriptor
+      DAT_083e7984: default_handler_entry
+      DAT_083e7988: handler_type_id
+    notes: >-
+      Raw osos.dec establishes the 148-byte extent
+      0x083e78f8..0x083e798b: 136 bytes of A32 instructions ending in
+      `pop {r2,r3,r4,r5,r6,pc}` at 0x083e797c, followed by the three
+      literal-pool words 0x00001002, 0x083ab3c4, and 0x08a0fba0. The next
+      independently linked function begins at 0x083e798c. Whole-image aligned
+      A32 decoding finds exactly two inbound plain BL calls (0x082a7be4 and
+      0x082a91b8), zero predicated BL calls, and three outbound plain BL
+      calls (0x082a8b50, 0x082a7280, and 0x082a8ba0). The instruction between
+      the latter two is an indirect handler-vtable +0x30 call via `mov pc,r2`.
+      The port initializes the fixed state fields, retain-copies the +0x18
+      shared handle, finds the fixed type handler, invokes it with selector
+      0x20, releases the temporary handle, and stores the returned low
+      halfword at +0x3c. Deliberate deviations: the two unported shared-handle
+      operations and the unrecovered virtual slot use fixed target addresses
+      on ARM and replaceable host seams; the target-only type-ID address is a
+      host fixture on native builds.
+
   - address: 0x083d8008
     ghidra: FUN_083d8008
     name: empty_destructor_083d8008
