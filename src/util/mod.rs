@@ -181,6 +181,7 @@ pub mod selection_index_adjust;
 pub mod optional_codec_dispatch;
 pub mod resource_list;
 pub mod pascal_string;
+pub mod pascal_u16_copy;
 pub mod packet_record_initialize;
 pub mod pool_entry_is_live;
 pub mod paletted_image_copy;
