@@ -100056,6 +100056,32 @@ functions:
       deltas are the seam blx indirection, the fp frame, and clz/lsr
       instead of rsbs/movcc for the equality map.
 
+  - address: 0x08059b88
+    ghidra: FUN_08059b88
+    name: resource_query_account
+    size: 56
+    sig: "i32 resource_query_account(u32 *context, const u32 *descriptor, u8 *has_identifier)"
+    module: util/resource_query_account
+    status: ported
+    vars:
+      param_1/r0: context
+      param_2/r1: descriptor
+      param_3/r2: has_identifier
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x08059b88..0x08059bc0: bx lr ends the body at 0x08059bbc and the
+      next separately entered function begins at 0x08059bc0. Every query
+      wraps and increments context+0x5c. A nonzero descriptor+0x04 resource
+      identifier stores one through has_identifier and wraps and increments
+      context+0x60; zero stores zero and leaves that counter unchanged. The
+      function returns zero in both cases. Raw decoding of every ARM B/BL
+      word in osos.dec found exactly three inbound calls, all unconditional
+      bl at 0x08041b20, 0x08041d94, and 0x080507dc, with zero predicated
+      forms and no body calls. Ghidra's C is faithful. Deliberate deviations:
+      none; the port preserves the original unchecked pointer contract and
+      ARM wrapping adds. Host tests cover both identifier branches and
+      u32::MAX counter wraparound.
+
   - address: 0x08050ae0
     ghidra: FUN_08050ae0
     name: ui_plst_find_by_persistent_id
