@@ -142680,3 +142680,30 @@ functions:
       structural diff (51 Rust instructions versus 28 original), not an
       automatic failure; LLVM expands the Rust NULL/loop control flow and
       tail-calls the strlen path.
+  - address: 0x0803a298
+    ghidra: FUN_0803a298
+    name: string_record_clone
+    size: 80
+    sig: "StringRecord *string_record_clone(const StringRecord *source)"
+    module: cxx/string_record_clone
+    status: ported
+    renames:
+      param_1/r0/r4: source
+      r5: destination
+      "source+0x00": byte_count
+      "source+0x04": data
+      "source+0x0c": metadata
+      FUN_0803a488: allocate_string_record
+      FUN_0803a3cc: assign_string_record
+      FUN_0803a2ec: destroy_string_record
+    notes: >-
+      Raw osos.dec words establish the true 80-byte extent
+      0x0803a298..0x0803a2e8; 0x0803a2ec begins the next function. The body
+      contains three plain direct BL calls (allocate, assign, and destroy)
+      and no predicated BL calls. It returns NULL for a null source or
+      allocation failure, then assigns source data using the signed byte
+      count, copies metadata at +0x0c on success, or destroys the fresh
+      record after assignment failure. The three callees are identified from
+      their raw direct targets but unported, so the Rust port uses one
+      injectable boundary that fails closed by default; host tests cover
+      success, null/allocation failure, and assignment cleanup.

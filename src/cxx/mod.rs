@@ -126,6 +126,7 @@ pub mod hash_table_bucket_slot;
 pub mod hash_table_visit_with_context;
 pub mod handle_callback_dispatch;
 pub mod heap_string;
+pub mod string_record_clone;
 pub mod list_splice;
 pub mod list_release_chain_destroy;
 pub mod list_node_prepend_release;

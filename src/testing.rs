@@ -521,6 +521,9 @@ pub mod hints {
     // 0x3900_0000, skipping 0x2e00_0000..0x3500_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
+    // 0x5d10_0000: dedicated to cxx/string_record_clone's target-width
+    // source and C-string fixture; mappings never unmap.
+    pub const STRING_RECORD_CLONE: usize = 0x5d10_0000;
     pub const SET_STRING: usize = 0x3900_0000;
     // 0x4c00_0000, skipping 0x3a00_0000..0x4b00_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
