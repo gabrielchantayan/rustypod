@@ -74,6 +74,7 @@ pub mod storage_backend_sector_size;
 pub mod stream_buffer_context;
 pub mod stream_transfer;
 pub mod transfer_default_mode;
+pub mod iram_queue_transfer_default_mode_veneer;
 pub mod timer;
 pub mod timer_channel_start;
 pub mod timer_channel_stop;
