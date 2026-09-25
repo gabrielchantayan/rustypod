@@ -280,6 +280,7 @@ pub mod state_object_initialize;
 pub mod string;
 pub mod filebuf_is_open;
 pub mod string_pair_word_uninitialized_copy;
+pub mod cxx_string_uninitialized_copy;
 pub mod named_object_cache;
 pub mod keyed_record_find_string_match;
 pub mod string_range_destroy;

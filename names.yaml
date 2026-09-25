@@ -144378,3 +144378,30 @@ functions:
       implements the verified branch target directly instead of retaining the
       entry branch, preserves forward-overlap ordering, and uses wrapping
       cursor increments to model the one-word null-destination path.
+  - address: 0x083e9390
+    ghidra: FUN_083e9390
+    name: cxx_string_uninitialized_copy
+    size: 56
+    sig: "u8 *cxx_string_uninitialized_copy(const u8 *first, const u8 *last, u8 *output, void *owner)"
+    module: cxx/cxx_string_uninitialized_copy
+    status: ported
+    renames:
+      param_1/r0/r5: first
+      param_2/r1/r6: last
+      param_3/r2/r4: output
+      param_4/r3: owner
+      return/r0: output
+      FUN_083d8c30: cxx_string_copy_ctor
+    notes: >-
+      Raw osos.dec words establish the true extent 0x083e9390..0x083e93c8:
+      push {r4-r6,lr} starts the function, pop {r4-r6,pc} returns at
+      0x083e93c4, and the independently linked next function starts with
+      `b 0x083e93e0` at 0x083e93c8. Full-image A32 decoding finds two
+      inbound plain direct BL calls (0x083e5a30 and 0x083e5a6c), zero
+      predicated inbound direct BL calls, and one outbound predicated BLNE
+      to cxx_string_copy_ctor @ 0x083d8c30. It uninitialized-COW-copies
+      target-width string words in [first,last) when output is non-null,
+      advances both cursors by four bytes, and returns output; owner is
+      passed but unread. The port preserves forward-copy and null-output
+      cursor behavior with wrapping byte increments. Host tests use a
+      test-only copy observation seam in place of the real COW constructor.
