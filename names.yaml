@@ -144939,3 +144939,35 @@ functions:
       overlap and the one-word null-destination cursor advance with wrapping
       pointer arithmetic, and uses volatile accesses to prevent libc-copy
       substitution.
+
+  - address: 0x083e8c74
+    ghidra: FUN_083e8c74
+    name: vector_uninitialized_copy_elem24
+    size: 60
+    sig: "u8 *vector_uninitialized_copy_elem24(const u8 *first, const u8 *last, u8 *output, void *owner)"
+    module: cxx/vector_uninitialized_copy_elem24
+    status: ported
+    renames:
+      param_1/r0/r5: first
+      param_2/r1/r6: last
+      param_3/r2/r4: output
+      param_4/r3: owner (unread)
+      return/r0: output
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_08000188: memcpy_forward_words
+    notes: >-
+      Raw osos.dec confirms the exact 60-byte extent from push {r4,r5,r6,lr}
+      at 0x083e8c74 through pop {r4,r5,r6,pc} at 0x083e8cac; the next
+      independently linked function starts with push {r4,r5,r6,r7,r8,lr} at
+      0x083e8cb0. Full-image A32 B/BL decoding finds exactly two inbound
+      unconditional plain BL calls (0x083e1fa8 and 0x083e20a4), zero inbound
+      predicated BL calls, and one outbound predicated BLNE to the IRAM memcpy
+      veneer at 0x08037df8. It advances first and output by 24 bytes per record
+      in [first,last), copying through the veneer only when output is non-null,
+      and returns the advanced output. A null output skips only the current
+      copy; the subsequent increment makes it non-null for later iterations.
+      Rust calls memcpy_forward_words directly instead of entering the IRAM
+      veneer, preserving aligned grouped forward-copy behavior and its returned
+      cursor; a dedicated target text section prevents folding with another
+      independently hookable range-copy port. Host tests cover empty, complete,
+      null-output, and forward-overlap ranges.
