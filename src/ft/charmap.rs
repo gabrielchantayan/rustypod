@@ -112,6 +112,124 @@ pub unsafe extern "C" fn ft_set_charmap(
     FT_ERR_INVALID_ARGUMENT
 }
 
+/// FreeType 2.3 `FT_Select_Charmap` (ftobjs.c) — original:
+/// `FUN_0804ea90` @ 0x0804ea90 (108 bytes through its Unicode literal at
+/// 0x0804eaf8; 0 outgoing BL instructions; 3 plain direct inbound BL calls
+/// at 0x080ad4dc, 0x080bf5c8, and 0x080e6a6c; no predicated inbound BL calls).
+///
+/// Selects an encoding from `face->charmaps`. Non-Unicode encodings take the
+/// first forward match. Unicode scans backward, preferring platform 3,
+/// encoding 10, then platform 0, encoding 4; if neither exists, it retains
+/// the last Unicode map encountered by the reverse scan. Null faces return
+/// `FT_Err_Invalid_Face_Handle` (0x23); absent tables and unmatched Unicode
+/// maps return `FT_Err_Invalid_CharMap_Handle` (0x26).
+///
+/// Deliberate deviation: the retail function branches to shared code at
+/// 0x080b6828 for Unicode; this port inlines that verified branch target so
+/// the hook does not re-enter retailOS.
+///
+/// # Safety
+/// `face`, when non-null, must be a valid `FT_FaceRec`; `face->charmaps`,
+/// when non-null, must point to `face->num_charmaps` readable charmap pointers.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_select_charmap(face: *mut FtFace, encoding: u32) -> i32 {
+    const FT_ENCODING_UNICODE: u32 = 0x756e_6963;
+
+    if face.is_null() {
+        return 0x23;
+    }
+
+    let charmaps = (*face).charmaps;
+    if charmaps.is_null() {
+        return 0x26;
+    }
+
+    let count = (*face).num_charmaps;
+    if encoding != FT_ENCODING_UNICODE {
+        for index in 0..count {
+            let charmap = (*charmaps.offset(index as isize)).cast::<FtCharMap>();
+            if (*charmap).encoding == encoding {
+                (*face).charmap = charmap;
+                return 0;
+            }
+        }
+        return 6;
+    }
+
+    let mut fallback = core::ptr::null_mut();
+    for index in (0..count).rev() {
+        let charmap = (*charmaps.offset(index as isize)).cast::<FtCharMap>();
+        if (*charmap).encoding != FT_ENCODING_UNICODE {
+            continue;
+        }
+
+        fallback = charmap;
+        if ((*charmap).platform_id == 3 && (*charmap).encoding_id == 10)
+            || ((*charmap).platform_id == 0 && (*charmap).encoding_id == 4)
+        {
+            (*face).charmap = charmap;
+            return 0;
+        }
+    }
+
+    if fallback.is_null() {
+        0x26
+    } else {
+        (*face).charmap = fallback;
+        0
+    }
+}
+
+
+#[cfg(test)]
+mod select_charmap_tests {
+    use super::*;
+    use core::mem::MaybeUninit;
+
+    fn face_with(charmaps: &mut [*mut core::ffi::c_void]) -> FtFace {
+        let mut face = unsafe { MaybeUninit::<FtFace>::zeroed().assume_init() };
+        face.num_charmaps = charmaps.len() as i32;
+        face.charmaps = charmaps.as_mut_ptr();
+        face
+    }
+
+    #[test]
+    fn rejects_null_face_and_missing_charmap_table() {
+        assert_eq!(unsafe { ft_select_charmap(core::ptr::null_mut(), 1) }, 0x23);
+        let face = unsafe { MaybeUninit::<FtFace>::zeroed().assume_init() };
+        assert_eq!(unsafe { ft_select_charmap(&raw const face as *mut FtFace, 1) }, 0x26);
+    }
+
+    #[test]
+    fn selects_first_non_unicode_match_and_rejects_absent_encoding() {
+        let mut first = FtCharMap { face: core::ptr::null_mut(), encoding: 7, platform_id: 0, encoding_id: 0 };
+        let mut second = FtCharMap { face: core::ptr::null_mut(), encoding: 7, platform_id: 0, encoding_id: 0 };
+        let mut maps = [(&raw mut first).cast(), (&raw mut second).cast()];
+        let mut face = face_with(&mut maps);
+
+        assert_eq!(unsafe { ft_select_charmap(&raw mut face, 7) }, 0);
+        assert_eq!(face.charmap, &raw mut first);
+        assert_eq!(unsafe { ft_select_charmap(&raw mut face, 8) }, 6);
+    }
+
+    #[test]
+    fn unicode_prefers_windows_then_unicode_platform_and_falls_back_to_last() {
+        let mut fallback = FtCharMap { face: core::ptr::null_mut(), encoding: 0x756e_6963, platform_id: 1, encoding_id: 0 };
+        let mut unicode = FtCharMap { face: core::ptr::null_mut(), encoding: 0x756e_6963, platform_id: 0, encoding_id: 4 };
+        let mut windows = FtCharMap { face: core::ptr::null_mut(), encoding: 0x756e_6963, platform_id: 3, encoding_id: 10 };
+        let mut maps = [(&raw mut fallback).cast(), (&raw mut unicode).cast(), (&raw mut windows).cast()];
+        let mut face = face_with(&mut maps);
+
+        assert_eq!(unsafe { ft_select_charmap(&raw mut face, 0x756e_6963) }, 0);
+        assert_eq!(face.charmap, &raw mut windows);
+
+        maps = [(&raw mut fallback).cast(), (&raw mut fallback).cast(), (&raw mut fallback).cast()];
+        assert_eq!(unsafe { ft_select_charmap(&raw mut face, 0x756e_6963) }, 0);
+        assert_eq!(face.charmap, &raw mut fallback);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
