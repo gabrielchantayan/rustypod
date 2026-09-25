@@ -51002,6 +51002,29 @@ functions:
       Deliberate deviations: target code calls the engine at its verified fixed
       address; host tests use a volatile seam and pointer-sized provider slots
       to preserve disjoint target words.
+  - address: 0x0803bc8c
+    ghidra: FUN_0803bc8c
+    name: utf8_write_codepoint_from_bytes
+    size: 8
+    sig: "void utf8_write_codepoint_from_bytes(unsigned char **cursor, unsigned int low_byte, unsigned int high_byte)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: low_byte
+      param_3/r2: high_byte
+      FUN_08275ecc: utf8_write_codepoint
+    notes: >-
+      Raw osos.dec words establish the exact eight-byte extent
+      0x0803bc8c..0x0803bc94: `orr r1,r1,r2,lsl #8; b 0x08275ecc`.
+      The next distinct function begins at 0x0803bc94 with `push
+      {r4,r5,r6,r7,lr}`. Decoding every ARM immediate B/BL word finds three
+      inbound plain unconditional BL calls (0x082d7a84, 0x082d7ab8, and
+      0x082d7aec), with zero predicated BL calls. The wrapper combines
+      caller-provided low and high bytes into a little-endian UTF-16 code
+      unit and tail-dispatches to the existing ported utf8_write_codepoint.
+      Deliberate deviation: LLVM adds an fp/lr frame around the tail branch;
+      its byte-sized caller inputs preserve the retail value.
   - address: 0x083697ac
     ghidra: FUN_083697ac
     name: namespace_provider_each_then_destroy

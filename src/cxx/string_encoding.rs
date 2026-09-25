@@ -44,6 +44,28 @@ pub unsafe extern "C" fn utf8_write_codepoint(cursor: *mut *mut u8, codepoint: u
     }
     write_cursor_byte(cursor, 0x80 | (codepoint & 0x3f) as u8);
 }
+/// utf8_write_codepoint_from_bytes — original: FUN_0803bc8c @ 0x0803bc8c
+/// (8 bytes, 0x0803bc8c..0x0803bc94). Raw ARM decoding finds 3 direct plain
+/// `bl` callers (0x082d7a84, 0x082d7ab8, and 0x082d7aec) and no predicated
+/// direct `bl` callers. It combines the caller-supplied low and high bytes
+/// into a codepoint, then tail-branches to `utf8_write_codepoint` @
+/// 0x08275ecc. Deliberate deviation: LLVM adds an `fp`/`lr` frame around its
+/// tail branch; the codepoint calculation and target transfer remain the
+/// same. Callers supply byte-sized values, so the result is their
+/// little-endian UTF-16 code unit.
+///
+/// # Safety
+///
+/// `cursor` must be a valid cursor cell and its output must have room for up
+/// to three bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_write_codepoint_from_bytes(
+    cursor: *mut *mut u8, low_byte: u32, high_byte: u32,
+) {
+    utf8_write_codepoint(cursor, low_byte | (high_byte << 8));
+}
+
 
 /// Emit one UTF-16 code unit without a terminator or surrogate pairing.
 #[inline(always)]
@@ -807,6 +829,24 @@ mod tests {
             assert_eq!(cursor, unsafe { bytes.as_mut_ptr().add(1 + expected.len()) });
             assert_eq!(bytes[0], 0xa5);
             assert!(bytes[1 + expected.len()..].iter().all(|&b| b == 0xa5));
+        }
+    }
+
+    #[test]
+    fn byte_pair_encoder_matches_every_little_endian_code_unit() {
+        for unit in 0..=u16::MAX {
+            let mut bytes = [0xa5; 5];
+            let mut cursor = unsafe { bytes.as_mut_ptr().add(1) };
+            unsafe {
+                utf8_write_codepoint_from_bytes(
+                    &mut cursor, u32::from(unit as u8), u32::from((unit >> 8) as u8),
+                );
+            }
+            let expected = encoded(unit);
+            assert_eq!(&bytes[1..1 + expected.len()], expected, "unit={unit:#x}");
+            assert_eq!(cursor, unsafe { bytes.as_mut_ptr().add(1 + expected.len()) });
+            assert_eq!(bytes[0], 0xa5);
+            assert!(bytes[1 + expected.len()..].iter().all(|&byte| byte == 0xa5));
         }
     }
 
