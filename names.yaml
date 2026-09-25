@@ -63393,6 +63393,32 @@ functions:
       `strne` out-count store kept; LLVM uses a frame pointer and an
       indirect blx for the fixed-address helper instead of the original's
       direct bl.
+  - address: 0x08046d78
+    ghidra: FUN_08046d78
+    name: utf16_to_utf8_capped_thunk
+    size: 28
+    sig: "i32 utf16_to_utf8_capped_thunk(const u16 *source, i32 max_code_units, u8 *destination, u32 max_bytes, u32 *out_bytes)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: max_code_units
+      param_3/r2: destination
+      param_4/r3: max_bytes
+      param_5/[sp]: out_bytes
+      FUN_08046d94: utf16_to_utf8_capped
+    notes: >-
+      Raw ARM decoding establishes the exact 28-byte extent
+      0x08046d78..0x08046d93: mov ip,r3; push {r3,lr}; reload the fifth
+      argument from the incoming stack; place it in the outgoing stack slot;
+      restore r3; bl 0x08046d94; pop {ip,pc}. The next separately linked
+      function starts at 0x08046d94. The body contains one unconditional BL
+      and no predicated BL. Whole-image B/BL decoding finds three unconditional
+      inbound BL sites (0x08046d28, 0x08046d68, 0x0805c9c4) and zero predicated
+      inbound calls. It is a strict five-argument ABI forwarding wrapper for
+      the already ported utf16_to_utf8_capped @ 0x08046d94; no seam or behavior
+      deviation is introduced. Rust uses its C ABI to perform the equivalent
+      fifth-argument stack placement.
   - address: 0x08267848
     ghidra: FUN_08267848
     name: two_string_record_destroy

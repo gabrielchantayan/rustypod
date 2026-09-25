@@ -352,6 +352,29 @@ pub unsafe extern "C" fn utf16_to_utf8_capped(
     string_object_destroy(text);
     0
 }
+/// utf16_to_utf8_capped_thunk — original: FUN_08046d78 @ 0x08046d78 (28 bytes,
+/// 0x08046d78..0x08046d93). Raw ARM has one plain internal `bl` and no
+/// predicated `bl`; whole-image decoding finds three plain inbound `bl` sites
+/// (0x08046d28, 0x08046d68, and 0x0805c9c4), with none predicated.
+///
+/// Preserve the five-argument ABI while forwarding the UTF-16 source,
+/// code-unit bound, destination, byte bound, and optional byte count to
+/// `utf16_to_utf8_capped`.
+///
+/// Deliberate deviation: none. Rust's C ABI supplies the stack argument
+/// reshuffling that the retail wrapper performs explicitly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf16_to_utf8_capped_thunk(
+    source: *const u16,
+    max_code_units: i32,
+    destination: *mut u8,
+    max_bytes: u32,
+    out_bytes: *mut u32,
+) -> i32 {
+    utf16_to_utf8_capped(source, max_code_units, destination, max_bytes, out_bytes)
+}
+
 
 /// utf8_to_utf16_counted_buffer — original: FUN_08046c24 @ 0x08046c24
 /// (80 bytes, all code; nine direct `bl` call sites verified by scanning
@@ -1168,6 +1191,25 @@ mod utf16_to_utf8_capped_tests {
 
         assert_eq!(unsafe {
             utf16_to_utf8_capped(source.as_ptr(), 3, destination.as_mut_ptr(), 3, &mut byte_count)
+        }, 0);
+        assert_eq!(&destination[..3], b"A\xc2\xa2");
+        assert_eq!(byte_count, 3);
+    }
+
+    #[test]
+    fn thunk_forwards_all_five_arguments() {
+        let _test = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _assign = STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _object = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _guard = unsafe { SeamGuard::install() };
+        let source = [b'A' as u16, 0xa2, b'B' as u16, 0];
+        let mut destination = [0xff; 8];
+        let mut byte_count = u32::MAX;
+
+        assert_eq!(unsafe {
+            utf16_to_utf8_capped_thunk(
+                source.as_ptr(), 3, destination.as_mut_ptr(), 3, &mut byte_count,
+            )
         }, 0);
         assert_eq!(&destination[..3], b"A\xc2\xa2");
         assert_eq!(byte_count, 3);
