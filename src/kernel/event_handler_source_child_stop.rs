@@ -15,11 +15,12 @@
 //!
 //! ## Deliberate deviations
 //!
-//! The child implementation and its four IRAM veneers are not independently
+//! The child implementation and remaining retail veneers are not independently
 //! identified. Target builds retain direct calls to their verified retailOS
-//! addresses; host builds expose replaceable seams for behavioral tests.
+//! addresses; the ported child-rank veneer reads the decoded rank halfword
+//! directly on host builds.
 
-use crate::kernel::thunks::event_handler_source_child_enabled;
+use crate::kernel::thunks::{event_handler_source_child_enabled, event_handler_source_child_rank};
 
 const SOURCE_ACTIVE_CHILD_COUNT_OFFSET: usize = 0x50;
 const SOURCE_CHILD_COUNT: usize = 8;
@@ -41,8 +42,6 @@ unsafe extern "C" fn retail_source_transition(source: *mut u8, operation: u32, r
 unsafe extern "C" fn retail_child_clear(child: *mut u8) { core::mem::transmute::<usize, unsafe extern "C" fn(*mut u8, u32)>(0x0800_3980)(child, 0) }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_child_configure(child: *mut u8, duration: u32, count: u32, mode: u32) { core::mem::transmute::<usize, ChildConfigure>(0x0800_3988)(child, duration, count, mode) }
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_child_rank(child: *mut u8) -> u32 { core::mem::transmute::<usize, ChildResult>(0x0800_3958)(child) }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_child_finish(child: *mut u8) { core::mem::transmute::<usize, ChildAction>(0x0800_3968)(child) }
 #[cfg(target_os = "none")]
@@ -77,10 +76,6 @@ static mut CHILD_CONFIGURE: ChildConfigure = {
     #[cfg(target_os = "none")] { retail_child_configure }
     #[cfg(not(target_os = "none"))] { host_configure }
 };
-static mut CHILD_RANK: ChildResult = {
-    #[cfg(target_os = "none")] { retail_child_rank }
-    #[cfg(not(target_os = "none"))] { host_result }
-};
 static mut CHILD_FINISH: ChildAction = {
     #[cfg(target_os = "none")] { retail_child_finish }
     #[cfg(not(target_os = "none"))] { host_action }
@@ -105,12 +100,12 @@ pub unsafe extern "C" fn event_handler_source_child_stop(source: *mut u8, child:
     if event_handler_source_child_enabled(child) == 0 { return; }
     let count = source.add(SOURCE_ACTIVE_CHILD_COUNT_OFFSET) as *mut u16;
     core::ptr::write_volatile(count, core::ptr::read_volatile(count).wrapping_sub(1));
-    let rank = core::ptr::read_volatile(core::ptr::addr_of!(CHILD_RANK))(child);
+    let rank = event_handler_source_child_rank(child);
     core::ptr::read_volatile(core::ptr::addr_of!(CHILD_FINISH))(child);
     let children = source.cast::<*mut u8>();
     for index in 0..SOURCE_CHILD_COUNT {
         let other = core::ptr::read_volatile(children.add(index));
-        if rank < core::ptr::read_volatile(core::ptr::addr_of!(CHILD_RANK))(other)
+        if rank < event_handler_source_child_rank(other)
             && event_handler_source_child_enabled(other) != 0 {
             core::ptr::read_volatile(core::ptr::addr_of!(CHILD_RETIRE))(other);
         }
