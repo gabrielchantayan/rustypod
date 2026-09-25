@@ -143432,3 +143432,24 @@ functions:
       no execution path to this address is evidenced. Deliberate deviations:
       no Rust symbol or module is created because routing execution to data
       would be invalid.
+  - address: 0x083ed1b8
+    ghidra: thunk_FUN_08036348
+    name: scan_float_conversion_veneer
+    size: 4
+    sig: "void scan_float_conversion_veneer(void)"
+    module: stdio/scan_float_conversion_veneer
+    status: ported
+    renames:
+      FUN_08036348: retail_scan_float_conversion_worker
+    notes: >-
+      Raw osos.dec word 0xeaf12462 at 0x083ed1b8 is `b 0x08036348`;
+      0x083ed1bc is the next separately linked `mov pc,lr` function, so the
+      true extent is four bytes. Full-image A32 branch decoding finds two
+      inbound plain BL calls (0x080331d0 and 0x08034c18) and zero predicated
+      direct BL calls. The thunk does not inspect arguments or memory: it
+      preserves the full incoming AAPCS state and tail-dispatches to the
+      0x08036348 scan-conversion worker. Its two callers use that worker for
+      scanf `%f`/`%g` conversions; the worker itself remains unported.
+      Deliberate deviation: the payload's relocation-safe eight-byte
+      `ldr pc,[pc,#-4]` veneer replaces the stock four-byte PC-relative
+      branch while preserving registers, flags, stack, and tail-call return.

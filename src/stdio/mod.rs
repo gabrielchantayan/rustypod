@@ -12,6 +12,7 @@ pub mod seek_core;
 pub mod record_preamble;
 pub mod scan_stream_setup;
 pub mod semihost;
+pub mod scan_float_conversion_veneer;
 pub mod stdio_init;
 pub mod stream_file;
 pub mod stream_flags;
