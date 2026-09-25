@@ -10636,6 +10636,41 @@ functions:
       crate fp frame and the blx-through-volatile-slot dispatch standing in
       for the direct bl 0x083d7df4 (the documented deviation).
 
+  - address: 0x083e8cf0
+    ghidra: FUN_083e8cf0
+    name: vector_copy_range_elem24_alias_8cf0
+    size: 60
+    sig: "u8 *vector_copy_range_elem24_alias_8cf0(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: output_cursor
+      r5: source_cursor
+      r6: last
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte extent
+      0x083e8cf0..0x083e8d2c: the closing pop {r4,r5,r6,pc} is at
+      0x083e8d28 and the next independently linked push {r4,r5,r6,lr} starts
+      at 0x083e8d2c. Decoding every ARM B/BL word independently finds exactly
+      two inbound plain BL calls (0x083e2e40 and 0x083e2f3c), no predicated
+      inbound BL calls, no plain body BL, and one predicated BLNE at
+      0x083e8d10 to the known IRAM memcpy veneer 0x08037df8
+      (thunk_EXT_FUN_22000188 -> 0x22000188, the mirror of
+      memcpy_forward_words). This std::vector trivial 24-byte-element
+      uninitialized-copy loop copies only when the current output cursor is
+      non-NULL, advances both cursors by 0x18, stops on cursor equality, and
+      returns the advanced output cursor. Deliberate deviation: the port calls
+      memcpy_forward_words through a volatile function pointer rather than
+      entering the IRAM veneer, retaining the call and its aligned,
+      forward-copy behavior. A dedicated text section prevents LLVM from
+      folding this separately hookable duplicate into another instantiation.
+      Host tests cover two records, the exclusive range endpoint, output
+      offset guards, and the one-record NULL-output no-read path.
+
   - address: 0x083e8afc
     ghidra: FUN_083e8afc
     name: vector_copy_construct_range_elem20
