@@ -145241,3 +145241,30 @@ functions:
       entry branch, uses wrapping pointer arithmetic for the null destination
       cursor, and uses volatile accesses to retain the grouped load-before-store
       operation and prevent libc-copy substitution.
+
+  - address: 0x083e8934
+    ghidra: FUN_083e8934
+    name: vector_copy_range_elem16
+    size: 52
+    sig: "u8 *vector_copy_range_elem16(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/vector_copy_range_elem16
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1/r5: last
+      param_3/r2/lr: output
+      return/r0: output
+    notes: >-
+      Raw osos.dec fixes the exact 52-byte extent at 0x083e8934..0x083e8968:
+      the final pop {r4,r5,pc} is at 0x083e8964 and the next independently
+      linked function begins with push {r4,r5,lr} at 0x083e8968. Full-image
+      A32 B/BL decoding finds exactly two inbound unconditional plain BL calls
+      (0x083e04a4 and 0x083e04e0), zero inbound predicated BL calls, and no
+      outbound BL calls. It copies four aligned u32 words from each 16-byte
+      record in [first,last) only when the current output cursor is non-null,
+      loading all four words before any store, then advances both cursors by
+      16 and returns output. A null initial output skips only its first record.
+      Rust uses wrapping cursor advances to preserve that target behavior
+      without host in-bounds pointer-arithmetic requirements; otherwise there
+      are no deliberate deviations. Host tests cover empty, complete,
+      null-output, and grouped-load-before-store overlap ranges.
