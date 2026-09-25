@@ -330,7 +330,7 @@
 //! - `string_id_record_construct_from_string_id` chains to the
 //!   StringObject copy constructor @ 0x082773e0 through the
 //!   [`STRING_OBJECT_COPY_CONSTRUCT`] dispatch slot (the
-//!   util/inner_state.rs `INNER_MATERIALIZE_COUNT` pattern) so host
+//!   util/inner_state.rs `INNER_MATERIALIZE_RESULTS` pattern) so host
 //!   tests can observe the dispatch; the wired default is the ported
 //!   [`string_object_copy_construct`] itself. Like
 //!   `string_id_record_destroy`, the port derives `this` from the
@@ -3355,7 +3355,7 @@ pub unsafe extern "C" fn string_id_record_default_construct(
 }
 
 /// Indirect dispatch for the StringObject copy constructor @ 0x082773e0
-/// (the util/inner_state.rs `INNER_MATERIALIZE_COUNT` pattern). Chained
+/// (the util/inner_state.rs `INNER_MATERIALIZE_RESULTS` pattern). Chained
 /// to by [`string_id_record_construct_from_string_id`] and by the copy
 /// constructor sibling [`string_id_record_copy_construct`]. The wired
 /// default is the ported [`string_object_copy_construct`] itself (it

@@ -43,15 +43,12 @@
 //! b   0x080542a0        @ tail: materialize-and-count(inner)
 //! ```
 //!
-//! The tail target `FUN_080542a0` @ 0x080542a0 (20 bytes, 3 `bl` call
-//! sites) calls the lazy materializer `FUN_08086694` @ 0x08086694 (480
-//! bytes: when the cached result-array pointer at inner+0xeec is NULL it
-//! builds the array under a mutex, caching the array at +0xeec, an aux
-//! pointer at +0xef0 and the result count at +0xef4 — a no-op otherwise)
-//! and returns the count word at inner+0xef4. The sole caller uses the
-//! result as the loop bound over the per-index record fetch
-//! `FUN_0813b898` after running query 0x32 — the number of records the
-//! query produced.
+//! The tail target `inner_materialize_and_count` @ 0x080542a0 (20 bytes,
+//! one plain direct `bl` to the lazy result materializer @ 0x08086694,
+//! then a read of `inner+0xef4`) invokes the materializer and returns the
+//! cached count word. The sole caller uses the result as the loop bound over
+//! the per-index record fetch `FUN_0813b898` after running query 0x32 — the
+//! number of records the query produced.
 //!
 //! # inner_set_state — original: `FUN_08067ca4` @ 0x08067ca4 (8 bytes)
 //!
@@ -75,14 +72,11 @@
 //! behavior. This is the symbol `inner_set_state_4`'s port inlined;
 //! it gets its own per-address symbol here.
 //!
-//! Deviation: the materializer is unported firmware (it allocates,
-//! walks a record table and locks a mutex through nine further
-//! callees), so the whole tail target sits behind the
-//! [`INNER_MATERIALIZE_COUNT`] dispatch slot (the app/class_registry.rs
-//! pattern). The default stub is the materializer's no-op path: it
-//! reads the cached count word at +0xef4 without materializing — exact
-//! once a query has populated the cache, which is the only state the
-//! sole caller ever observes (it runs query 0x32 before asking).
+//! Deviation: the materializer is unported firmware (it allocates, walks a
+//! record table and locks a mutex through nine further callees), so
+//! `inner_materialize_and_count` calls a replaceable seam. The target default
+//! is its verified firmware address; the host default is the materializer's
+//! no-op path, exact once a query has populated the cache.
 
 /// Byte offset of the inner-object pointer inside the query object.
 const INNER: usize = 0x40;
@@ -943,37 +937,64 @@ pub unsafe extern "C" fn inner_dispatch_selected_resource(object: *mut u8) -> i3
     (ops.dispatch)(callback_root, SELECTED_RESOURCE_CALLBACK, object)
 }
 
-/// Default [`INNER_MATERIALIZE_COUNT`] stub: the no-op path of the
-/// unported materialize-and-count tail target `FUN_080542a0` @
-/// 0x080542a0 — reads the cached result-count word at inner+0xef4
-/// without running the unported 480-byte materializer @ 0x08086694
-/// (exact once the query has populated the cache; see the module
-/// header).
-unsafe extern "C" fn materialize_count_stub(inner: *mut u8) -> u32 {
+/// Firmware load address of the unported lazy result materializer.
+const INNER_MATERIALIZE_RESULTS_ADDRESS: usize = 0x0808_6694;
+
+/// Target direct-call boundary for the unported lazy result materializer.
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe extern "C" fn firmware_materialize_results(inner: *mut u8) {
+    let materialize: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(INNER_MATERIALIZE_RESULTS_ADDRESS);
+    materialize(inner);
+}
+
+/// Host default: the materializer's verified cached-result no-op path.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn materialize_results_no_op(_inner: *mut u8) {}
+
+/// Host-test boundary for the unported lazy result materializer
+/// `FUN_08086694`.
+///
+/// The materializer has no inferred identity beyond its verified role:
+/// `inner_materialize_and_count` ignores its return value and reads the
+/// count cache only after it returns.
+#[cfg(not(target_os = "none"))]
+pub static mut INNER_MATERIALIZE_RESULTS: unsafe extern "C" fn(*mut u8) =
+    materialize_results_no_op;
+
+/// Serializes host tests that replace [`INNER_MATERIALIZE_RESULTS`].
+#[cfg(test)]
+pub static INNER_MATERIALIZE_RESULTS_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+/// inner_materialize_and_count — retailOS `FUN_080542a0` @ `0x080542a0`
+/// (20 bytes, `0x080542a0..0x080542b3`; the next real function begins at
+/// `0x080542b4`; one plain direct `bl`, no predicated `bl`, and three inbound
+/// plain `bl` call sites).
+///
+/// Calls the lazy materializer, then returns its cached result count from
+/// `inner + 0xef4`. Deliberate deviation: host tests replace the unported
+/// materializer with a no-op or recording seam; target builds retain the
+/// direct stock call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inner_materialize_and_count(inner: *mut u8) -> u32 {
+    #[cfg(target_os = "none")]
+    firmware_materialize_results(inner);
+    #[cfg(not(target_os = "none"))]
+    core::ptr::read_volatile(core::ptr::addr_of!(INNER_MATERIALIZE_RESULTS))(inner);
     (inner.add(RESULT_COUNT) as *const u32).read()
 }
 
-/// Indirect dispatch for the unported materialize-and-count tail target
-/// @ 0x080542a0 (the app/class_registry.rs pattern). Host tests install
-/// a recording mock; the real port replaces the default stub when the
-/// materializer @ 0x08086694 is ported.
-pub static mut INNER_MATERIALIZE_COUNT: unsafe extern "C" fn(inner: *mut u8) -> u32 =
-    materialize_count_stub;
-
 /// inner_result_count — original: `FUN_0813b7d0` @ 0x0813b7d0 (8 bytes).
 ///
-/// Loads the inner object from `object + 0x40` and tail-branches to the
-/// materialize-and-count getter, returning the query's result count
-/// (the word at inner+0xef4 after the lazy materializer has run).
+/// Loads the inner object from `object + 0x40` and tail-branches to
+/// [`inner_materialize_and_count`], returning the query's result count.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn inner_result_count(object: *mut u8) -> u32 {
     let inner = (object.add(INNER) as *const *mut u8).read();
-    // Volatile slot read — the class_registry.rs `ops!` rationale: the
-    // slot is meant to be swapped at runtime, and a build in which
-    // nothing swaps it must not constant-fold the default in.
-    let materialize =
-        core::ptr::read_volatile(core::ptr::addr_of!(INNER_MATERIALIZE_COUNT));
-    materialize(inner)
+    inner_materialize_and_count(inner)
 }
 
 #[cfg(test)]
@@ -1027,9 +1048,7 @@ mod tests {
     const OUTER_LEN: usize = INNER + core::mem::size_of::<*mut u8>();
     const SENTINEL: u8 = 0xa5;
 
-    /// Serializes the tests that swap `INNER_MATERIALIZE_COUNT` (the
-    /// wstr_casecmp.rs `FOLD_TEST_LOCK` precedent).
-    static SLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use super::INNER_MATERIALIZE_RESULTS_TEST_LOCK as SLOT_TEST_LOCK;
 
     /// A stand-in outer object whose +0x40 slot points at a stand-in
     /// inner object, both filled with sentinel bytes.
@@ -2060,31 +2079,31 @@ mod tests {
         }
     }
 
-    // ---- inner_result_count -------------------------------------------
+    // ---- inner_materialize_and_count / inner_result_count --------------
 
     static mut MOCK_SEEN: *mut u8 = core::ptr::null_mut();
     static mut MOCK_CALLS: u32 = 0;
     const MOCK_COUNT: u32 = 0x5a5a_0007;
 
-    unsafe extern "C" fn recording_materialize(inner: *mut u8) -> u32 {
+    unsafe extern "C" fn recording_materialize(inner: *mut u8) {
         MOCK_SEEN = inner;
         MOCK_CALLS += 1;
-        MOCK_COUNT
+        inner.add(RESULT_COUNT).cast::<u32>().write(MOCK_COUNT);
     }
 
-    /// Restores the default stub on drop, even when a test panics.
+    /// Restores the host no-op materializer on drop, even when a test panics.
     struct SlotGuard;
     impl Drop for SlotGuard {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(INNER_MATERIALIZE_COUNT)
-                    .write_volatile(materialize_count_stub)
+                core::ptr::addr_of_mut!(INNER_MATERIALIZE_RESULTS)
+                    .write_volatile(materialize_results_no_op)
             };
         }
     }
 
     #[test]
-    fn forwards_the_inner_pointer_and_returns_the_count() {
+    fn materializes_before_reading_the_cached_count() {
         let _lock = SLOT_TEST_LOCK.lock();
         let _restore = SlotGuard;
         let mut fixture = Fixture::new();
@@ -2093,48 +2112,58 @@ mod tests {
         unsafe {
             MOCK_SEEN = core::ptr::null_mut();
             MOCK_CALLS = 0;
-            core::ptr::addr_of_mut!(INNER_MATERIALIZE_COUNT)
+            core::ptr::addr_of_mut!(INNER_MATERIALIZE_RESULTS)
                 .write_volatile(recording_materialize);
 
-            let count = inner_result_count(fixture.outer.as_mut_ptr());
+            let count = inner_materialize_and_count(inner_base);
 
             assert_eq!(count, MOCK_COUNT);
-            assert_eq!(MOCK_CALLS, 1, "exactly one tail call");
+            assert_eq!(MOCK_CALLS, 1, "exactly one materializer call");
+            assert_eq!(MOCK_SEEN, inner_base);
+        }
+    }
+
+    #[test]
+    fn inner_result_count_forwards_the_inner_pointer() {
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        let mut fixture = Fixture::new();
+        fixture.link();
+        let inner_base = fixture.inner.as_mut_ptr();
+        unsafe {
+            MOCK_SEEN = core::ptr::null_mut();
+            MOCK_CALLS = 0;
+            core::ptr::addr_of_mut!(INNER_MATERIALIZE_RESULTS)
+                .write_volatile(recording_materialize);
+
+            assert_eq!(inner_result_count(fixture.outer.as_mut_ptr()), MOCK_COUNT);
+            assert_eq!(MOCK_CALLS, 1);
             assert_eq!(MOCK_SEEN, inner_base, "the +0x40 slot value is forwarded");
         }
     }
 
     #[test]
-    fn default_stub_reads_the_cached_count_word() {
+    fn host_no_op_reads_the_cached_count_word() {
         let _lock = SLOT_TEST_LOCK.lock();
         let mut fixture = Fixture::new();
         fixture.link();
-        // Preload the count the materializer would have cached.
         fixture.inner[RESULT_COUNT..RESULT_COUNT + 4]
             .copy_from_slice(&0x2au32.to_le_bytes());
         let inner_before = fixture.inner;
 
-        let count = unsafe { inner_result_count(fixture.outer.as_mut_ptr()) };
+        let count = unsafe { inner_materialize_and_count(fixture.inner.as_mut_ptr()) };
 
         assert_eq!(count, 0x2a);
-        // The no-op path reads only: every inner byte is untouched.
         assert_eq!(fixture.inner, inner_before);
-        // And the outer object (including the +0x40 slot) is untouched.
-        let mut outer_expect = [SENTINEL; OUTER_LEN];
-        let ptr = fixture.inner.as_mut_ptr();
-        unsafe {
-            (outer_expect.as_mut_ptr().add(INNER) as *mut *mut u8).write(ptr);
-        }
-        assert_eq!(fixture.outer, outer_expect);
     }
 
     #[test]
-    fn default_stub_returns_a_zero_count_for_a_fresh_object() {
+    fn host_no_op_returns_a_zero_count_for_a_fresh_object() {
         let _lock = SLOT_TEST_LOCK.lock();
         let mut fixture = Fixture::new();
         fixture.link();
         fixture.inner = [0; INNER_LEN];
-        let count = unsafe { inner_result_count(fixture.outer.as_mut_ptr()) };
+        let count = unsafe { inner_materialize_and_count(fixture.inner.as_mut_ptr()) };
         assert_eq!(count, 0);
     }
     // ---- object_select_resource_index -----------------------------------

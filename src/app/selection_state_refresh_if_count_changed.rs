@@ -16,8 +16,8 @@
 //! Otherwise it updates the cache, tests the one-based context index at
 //! `+0x444`, and dispatches vtable slot `+0x58` with action `"VMax"` and kind
 //! `0x6381` when the context entry matches, or `0x639a` otherwise. Deliberate
-//! deviations: the ARM tail dispatch is an ordinary final Rust call, and the
-//! unported materialize-and-count target uses its existing host seam.
+//! deviations: the ARM tail dispatch is an ordinary final Rust call, and
+//! `inner_materialize_and_count` uses the lazy-materializer seam.
 
 #[cfg(target_os = "none")]
 use core::mem;
@@ -42,17 +42,9 @@ pub struct SelectionState {
 }
 
 
-#[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn materialize_and_count(inner: *mut u8) -> u32 {
-    let target: unsafe extern "C" fn(*mut u8) -> u32 = unsafe { core::mem::transmute(0x0805_42a0usize) };
-    unsafe { target(inner) }
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn materialize_and_count(inner: *mut u8) -> u32 {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(crate::util::inner_state::INNER_MATERIALIZE_COUNT))(inner) }
+    crate::util::inner_state::inner_materialize_and_count(inner)
 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_notification_dispatch(_: *mut SelectionState, _: u32, _: u32) {
@@ -83,11 +75,9 @@ unsafe fn dispatch_notification(state: *mut SelectionState, kind: u32) {
     }
 }
 
-/// # Safety
-///
-/// `state`, its target-width inner and context pointers, the materialize-count
-/// seam, and its vtable notification slot must satisfy retailOS's unchecked
-/// contracts.
+/// `state`, its target-width inner and context pointers, the lazy
+/// materializer seam, and its vtable notification slot must satisfy
+/// retailOS's unchecked contracts.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn selection_state_refresh_if_count_changed(state: *mut SelectionState) {
@@ -126,10 +116,10 @@ mod tests {
     static mut DISPATCH: (usize, u32, u32) = (0, 0, 0);
     static mut DISPATCH_COUNT: usize = 0;
 
-    unsafe extern "C" fn materialize_count(_: *mut u8) -> u32 { unsafe { MATERIALIZED_COUNT } }
-    unsafe extern "C" fn default_materialize_count(inner: *mut u8) -> u32 {
-        unsafe { inner.add(0xef4).cast::<u32>().read() }
+    unsafe extern "C" fn materialize_results(inner: *mut u8) {
+        unsafe { inner.add(0xef4).cast::<u32>().write(MATERIALIZED_COUNT) }
     }
+    unsafe extern "C" fn default_materialize_results(_: *mut u8) {}
     unsafe extern "C" fn record_dispatch(state: *mut SelectionState, action: u32, kind: u32) {
         unsafe {
             DISPATCH = (state as usize, action, kind);
@@ -157,14 +147,16 @@ mod tests {
     #[test]
     fn changed_count_caches_and_dispatches_matching_context_kind() {
         let _lock = TEST_LOCK.lock();
+        let _materializer_lock =
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS_TEST_LOCK.lock();
         let Some(state) = (unsafe { fixture(true, 4) }) else { return };
         unsafe {
             MATERIALIZED_COUNT = 7;
             DISPATCH_COUNT = 0;
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = record_dispatch;
             selection_state_refresh_if_count_changed(state);
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = default_materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = default_materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = missing_notification_dispatch;
             assert_eq!((*state).cached_count, 7);
             assert_eq!(DISPATCH_COUNT, 1);
@@ -175,14 +167,16 @@ mod tests {
     #[test]
     fn unchanged_count_suppresses_context_test_and_notification() {
         let _lock = TEST_LOCK.lock();
+        let _materializer_lock =
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS_TEST_LOCK.lock();
         let Some(state) = (unsafe { fixture(false, 7) }) else { return };
         unsafe {
             MATERIALIZED_COUNT = 7;
             DISPATCH_COUNT = 0;
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = record_dispatch;
             selection_state_refresh_if_count_changed(state);
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = default_materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = default_materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = missing_notification_dispatch;
             assert_eq!(DISPATCH_COUNT, 0);
         }
@@ -191,14 +185,16 @@ mod tests {
     #[test]
     fn changed_count_dispatches_differing_context_kind() {
         let _lock = TEST_LOCK.lock();
+        let _materializer_lock =
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS_TEST_LOCK.lock();
         let Some(state) = (unsafe { fixture(false, 1) }) else { return };
         unsafe {
             MATERIALIZED_COUNT = 2;
             DISPATCH_COUNT = 0;
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = record_dispatch;
             selection_state_refresh_if_count_changed(state);
-            crate::util::inner_state::INNER_MATERIALIZE_COUNT = default_materialize_count;
+            crate::util::inner_state::INNER_MATERIALIZE_RESULTS = default_materialize_results;
             SELECTION_STATE_COUNT_REFRESH_DISPATCH = missing_notification_dispatch;
             assert_eq!(DISPATCH_COUNT, 1);
             assert_eq!(DISPATCH.2, DIFFERING_CONTEXT_KIND);
