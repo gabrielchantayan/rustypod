@@ -143722,3 +143722,30 @@ functions:
       advanced destination, and calls the verified but unnamed retail callee
       at 0x0827c1ec for every element. Deliberate deviation: target Rust uses
       that address as a call seam while host tests inject the clone operation.
+  - address: 0x083e9d84
+    ghidra: FUN_083e9d84
+    name: string_object_pair_range_assign
+    size: 68
+    sig: "StringObjectPair *string_object_pair_range_assign(const StringObjectPair *first, const StringObjectPair *last, StringObjectPair *output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      FUN_082774a8: string_object_assign
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte body 0x083e9d84..0x083e9dc8:
+      `push {r4,r5,r6,lr}; mov r6,r1; mov r5,r2; mov r4,r0; b
+      0x083e9db8; mov r1,r4; mov r0,r5; bl 0x082774a8; add r1,r4,#8; add
+      r0,r5,#8; bl 0x082774a8; add r4,r4,#0x10; add r5,r5,#0x10; cmp
+      r4,r6; bne 0x083e9d98; mov r0,r5; pop {r4,r5,r6,pc}`. The next
+      separately linked function begins at 0x083e9dc8. Two inbound direct BL
+      sites, both in 0x083e3ad8, are unconditional; raw body decoding finds
+      two unconditional direct BLs to string_object_assign and no predicated
+      BL calls. It copy-assigns the first then second StringObject in each
+      16-byte record over [first,last), returning the advanced output cursor.
+      Deliberate deviation: typed records preserve ARM's target stride while
+      keeping host pointer fields disjoint; the established Rust assignment
+      port replaces direct retail-address calls. Host tests cover empty ranges,
+      member call order, every record, and return identity.
