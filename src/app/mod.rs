@@ -318,6 +318,7 @@ pub mod framework_root_post_message_kind;
 pub mod framework_root;
 pub mod liti_class_check;
 pub mod liti_field_class_check;
+pub mod liti_entry_next;
 pub mod liti_indexed_entry_lookup;
 pub mod nested_liti_class_check;
 pub mod h264_decode_forwarder;
