@@ -202,6 +202,7 @@ pub mod object_flags;
 pub mod pfr_extra_items_skip;
 mod object_state;
 pub mod opaque_type_tag_is_allowed;
+pub mod opaque_tagged_object_word_at_20;
 pub mod opaque_allocation_release_089062ec;
 pub mod opaque_result_destroy;
 pub mod opaque_result_owner_destroy;
