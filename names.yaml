@@ -63292,6 +63292,29 @@ functions:
       stores to destination. It appends NUL at destination[copied] and returns
       copied; overlapping ranges retain the original interleaved load/store
       behavior rather than memcpy or memmove semantics.
+  - address: 0x08046b60
+    ghidra: FUN_08046b60
+    name: pascal_u16_copy
+    size: 52
+    sig: "void pascal_u16_copy(const u16 *source, u16 *destination)"
+    module: util/pascal_u16_copy
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      uVar1/r2: count
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte body
+      0x08046b60..0x08046b93; the next real function begins at 0x08046b94.
+      It has no internal BL calls. Whole-image ARM B/BL-immediate decoding
+      finds three direct plain BL callers (0x08061298, 0x080b4b20, and
+      0x0817b88c) and zero predicated BL callers. Null source or destination
+      returns immediately. Otherwise the initial ldrh copies source[0] to
+      destination[0]; its unsigned value is the payload halfword count.
+      Ordered forward ldrh/strh pairs then copy exactly that many payload
+      words, preserving overlap effects rather than memcpy or memmove
+      semantics. Rust uses volatile accesses to retain this ordering; no
+      deliberate behavior deviation.
   - address: 0x08046ac8
     ghidra: FUN_08046ac8
     name: dispatch_if_optional_link_valid
