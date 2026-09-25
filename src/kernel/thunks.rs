@@ -1721,6 +1721,107 @@ callback_target_getter:
     .size callback_target_getter, . - callback_target_getter
 "#
 );
+/// Osos staging address of the audio stream configuration veneer.
+pub const AUDIO_STREAM_CONFIGURE_VENEER: u32 = 0x0800_3928;
+pub const AUDIO_STREAM_CONFIGURE_INSN: u32 = 0xe51f_f004;
+pub const AUDIO_STREAM_CONFIGURE_TARGET: u32 = 0x0818_c1c8;
+
+/// ABI of the audio stream configuration target reached by
+/// [`audio_stream_configure`].
+///
+/// The target accepts a stream, sample rate, sample bit depth, and channel
+/// count, and returns whether the configuration was accepted.
+pub type AudioStreamConfigureFn = unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32;
+
+/// Host/target dispatch boundary for the unported retailOS audio stream
+/// configuration target.
+#[derive(Clone, Copy)]
+pub struct AudioStreamConfigureOps {
+    pub configure: AudioStreamConfigureFn,
+}
+
+#[cfg(not(target_arch = "arm"))]
+unsafe extern "C" fn missing_audio_stream_configure(
+    _stream: *mut u8,
+    _sample_rate: u32,
+    _sample_bit_depth: u32,
+    _channel_count: u32,
+) -> u32 {
+    0
+}
+
+#[cfg(not(target_arch = "arm"))]
+const DEFAULT_AUDIO_STREAM_CONFIGURE_OPS: AudioStreamConfigureOps = AudioStreamConfigureOps {
+    configure: missing_audio_stream_configure,
+};
+
+/// The host dispatch boundary for the unported retailOS audio stream
+/// configuration target.
+#[cfg(not(target_arch = "arm"))]
+pub static mut AUDIO_STREAM_CONFIGURE_OPS: AudioStreamConfigureOps =
+    DEFAULT_AUDIO_STREAM_CONFIGURE_OPS;
+
+#[cfg(not(target_arch = "arm"))]
+#[inline(always)]
+fn audio_stream_configure_target() -> AudioStreamConfigureFn {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(AUDIO_STREAM_CONFIGURE_OPS.configure)) }
+}
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// audio_stream_configure — original: `FUN_08003928` @ 0x08003928
+    /// (8 bytes; Ghidra's 4-byte extent drops the trailing literal word, and
+    /// the next veneer starts at 0x08003930).
+    ///
+    /// Raw osos.dec is `ldr pc, [pc, #-4]` plus literal 0x0818c1c8, so this
+    /// tail veneer preserves every register including LR and forwards all four
+    /// arguments directly to the target. A full A32 branch scan finds three
+    /// plain unconditional BL call sites (0x08007668, 0x08007774, 0x08007ef4)
+    /// and zero predicated BL call sites. The post-relocation target maps to
+    /// function entry 0x081970a0, which validates stream sample rate, bit
+    /// depth, and channel count before notifying its three stream consumers.
+    ///
+    /// Deliberate deviation: none on ARM; this is the original instruction and
+    /// literal.
+    pub fn audio_stream_configure(
+        stream: *mut u8,
+        sample_rate: u32,
+        sample_bit_depth: u32,
+        channel_count: u32,
+    ) -> u32;
+}
+
+/// Host implementation of the audio stream configuration veneer, with the
+/// unported retailOS target supplied by [`AUDIO_STREAM_CONFIGURE_OPS`].
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn audio_stream_configure(
+    stream: *mut u8,
+    sample_rate: u32,
+    sample_bit_depth: u32,
+    channel_count: u32,
+) -> u32 {
+    audio_stream_configure_target()(stream, sample_rate, sample_bit_depth, channel_count)
+}
+
+// `ldr pc` preserves LR, so the retailOS target returns directly to this
+// veneer's caller. Keep the fixed target in assembly rather than materializing
+// it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl audio_stream_configure
+    .type audio_stream_configure, %function
+audio_stream_configure:
+    ldr     pc, [pc, #-4]
+    .word   0x0818c1c8
+    .size audio_stream_configure, . - audio_stream_configure
+"#
+);
 
 /// Instruction word and literal in the r7-context table-dispatch veneer.
 pub const R7_CONTEXT_TABLE_DISPATCH_VENEER_INSN: u32 = 0xe51f_f004;
@@ -3488,6 +3589,52 @@ mod tests {
             assert_eq!(second, third);
             core::ptr::addr_of_mut!(CALLBACK_TARGET_GETTER_OPS)
                 .write(DEFAULT_CALLBACK_TARGET_GETTER_OPS);
+        }
+        drop(guard);
+    }
+    #[test]
+    fn audio_stream_configure_matches_the_literal_veneer() {
+        assert_eq!(AUDIO_STREAM_CONFIGURE_VENEER, 0x0800_3928);
+        assert_eq!(AUDIO_STREAM_CONFIGURE_INSN, 0xe51f_f004);
+        assert_eq!(AUDIO_STREAM_CONFIGURE_TARGET, 0x0818_c1c8);
+        assert_eq!(AUDIO_STREAM_CONFIGURE_TARGET & 3, 0);
+    }
+
+    static mut AUDIO_STREAM_CONFIGURE_CALLS: u32 = 0;
+    static mut AUDIO_STREAM_CONFIGURE_ARGS: (*mut u8, u32, u32, u32) =
+        (core::ptr::null_mut(), 0, 0, 0);
+
+    unsafe extern "C" fn record_audio_stream_configuration(
+        stream: *mut u8,
+        sample_rate: u32,
+        sample_bit_depth: u32,
+        channel_count: u32,
+    ) -> u32 {
+        AUDIO_STREAM_CONFIGURE_CALLS += 1;
+        AUDIO_STREAM_CONFIGURE_ARGS = (stream, sample_rate, sample_bit_depth, channel_count);
+        1
+    }
+
+    /// The host seam must preserve all four ABI arguments and the target's
+    /// status result; valid and invalid stream configurations are target
+    /// policy, not veneer policy.
+    #[test]
+    fn audio_stream_configure_forwards_unmodified_arguments_and_status() {
+        let guard = OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        unsafe {
+            core::ptr::addr_of_mut!(AUDIO_STREAM_CONFIGURE_CALLS).write(0);
+            core::ptr::addr_of_mut!(AUDIO_STREAM_CONFIGURE_OPS).write(AudioStreamConfigureOps {
+                configure: record_audio_stream_configuration,
+            });
+            let stream = 0x1234_5000usize as *mut u8;
+            assert_eq!(audio_stream_configure(stream, 0, u32::MAX, 0), 1);
+            assert_eq!(core::ptr::addr_of!(AUDIO_STREAM_CONFIGURE_CALLS).read(), 1);
+            assert_eq!(
+                core::ptr::addr_of!(AUDIO_STREAM_CONFIGURE_ARGS).read(),
+                (stream, 0, u32::MAX, 0)
+            );
+            core::ptr::addr_of_mut!(AUDIO_STREAM_CONFIGURE_OPS)
+                .write(DEFAULT_AUDIO_STREAM_CONFIGURE_OPS);
         }
         drop(guard);
     }

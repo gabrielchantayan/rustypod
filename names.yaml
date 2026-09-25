@@ -6447,6 +6447,36 @@ functions:
       wrappers 0x08007788, 0x080077a8 and 0x08007bd4 keep their own inline
       copies of this veneer; they are unchanged by this entry.
 
+  # --- audio stream configuration veneer ---
+  - address: 0x08003928
+    ghidra: FUN_08003928
+    name: audio_stream_configure
+    size: 8
+    sig: "u32 audio_stream_configure(void *stream, u32 sample_rate, u32 sample_bit_depth, u32 channel_count)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: sample_rate
+      param_3/r2: sample_bit_depth
+      param_4/r3: channel_count
+      DAT_0800392c: audio_stream_configure_target
+    notes: >-
+      Raw osos.dec bytes at 0x08003928 are `04 f0 1f e5 c8 c1 18 08`: the
+      `ldr pc, [pc, #-4]` literal veneer followed by target 0x0818c1c8.
+      The next real veneer begins at 0x08003930, establishing the eight-byte
+      extent that Ghidra's four-byte function boundary misses. Independent
+      full-image A32 branch decoding finds three inbound unconditional plain
+      BL sites (0x08007668, 0x08007774, and 0x08007ef4) and zero predicated
+      BL sites. Loading PC preserves r0-r3 and LR, so the veneer tail-calls
+      the target with stream, sample rate, sample bit depth, and channel count
+      and returns its u32 status. The relocator's +0xaed8 file-address
+      correction maps literal 0x0818c1c8 to real function entry
+      0x081970a0, whose recovered body validates those three configuration
+      values before updating and notifying the stream consumers. Deliberate
+      deviations: none on ARM; the host implementation uses an injectable
+      volatile dispatch seam because that target is not ported.
+
   # --- event-handler source child-enabled veneer ---
   - address: 0x08003950
     ghidra: FUN_08003950
