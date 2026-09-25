@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6ed0_0000: dedicated to cxx/descriptor_action_dispatch's raw-u32
     // owner and source fixture; mappings never unmap.
     pub const DESCRIPTOR_ACTION_DISPATCH: usize = 0x6ed0_0000;
+    // 0x6ee0_0000: dedicated to util/key_descriptor_copy_eight's
+    // target-width descriptor, source, and output fixture; mappings never unmap.
+    pub const KEY_DESCRIPTOR_EIGHT_BYTE_COPY: usize = 0x6ee0_0000;
     // 0x7c20_0000: dedicated to crypto/pkcs7_set_detached's target-width
     // PKCS7 and ASN1_OBJECT fixture; mappings never unmap.
     pub const PKCS7_SET_DETACHED: usize = 0x7c20_0000;

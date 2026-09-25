@@ -141264,3 +141264,29 @@ functions:
       local_20/sp: record
     notes: >-
       Raw osos.dec decoding establishes the exact 208-byte extent 0x08056800..0x080568d0; the next word opens an independent push {r4, lr} function. The body has five plain bl instructions (0x080642a4, 0x0806748c, 0x08031568 twice, and 0x0806ce94), zero predicated bl instructions, and no tail call. The raw-image inbound census is three plain bl calls (0x08098644, 0x080dc460, 0x0825b704), zero predicated bl calls, and no tail branches. The port initializes a 12-byte calendar-update record, conditionally replaces the two selected date groups, commits the valid record, and conditionally applies the initialized or signed-divided adjustment fields. FUN_080642a4, FUN_0806748c, and FUN_0806ce94 have no names.yaml identities; target builds call their verified retail addresses while host tests inject volatile dispatch seams. match.py reports the expected structural difference: LLVM uses dispatch-slot blx calls and strength-reduces the constant signed divisions.
+
+  - address: 0x08054cd8
+    ghidra: FUN_08054cd8
+    name: key_descriptor_copy_eight
+    size: 80
+    sig: "int key_descriptor_copy_eight(const u32 *descriptor, u32 *out)"
+    module: util/key_descriptor_copy_eight
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      param_2/r1: out
+      r1: source
+      r2: descriptor then copy byte count
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec words at 0x08054cd8..0x08054d28 establish the 80-byte
+      all-code extent; the next real function starts at 0x08054d28. The
+      body has one plain bl to the ROM __rt_memcpy veneer @ 0x08037db0
+      (target 0x22000020) and no predicated bl. Full-image ARM B/BL decoding
+      finds three inbound plain bl call sites (0x0806b2f8, 0x080df428, and
+      0x080e5ba0) and zero predicated bl call sites. It rejects NULL descriptor
+      or output, descriptor byte +0x08 nonzero, descriptor target word +0x0c
+      zero, or kind word +0x10 other than 0x44 with 0xffffffce, without
+      touching output. Otherwise it copies eight bytes from the target-width
+      pointer at +0x0c to output and returns zero. Deliberate deviation: calls
+      the established Rust __rt_memcpy seam directly instead of the ROM veneer.
