@@ -109138,6 +109138,41 @@ functions:
       source. match.py confirms the cursor loop, conditional stores, and
       eight-byte stride; Rust field stores replace the raw ldrb/ldrh sequence.
 
+  - address: 0x083e8a0c
+    ghidra: FUN_083e8a0c
+    name: vector_copy_construct_range_slot1
+    size: 56
+    sig: "RefcountedBody **vector_copy_construct_range_slot1(RefcountedBody *const *first, RefcountedBody *const *last, RefcountedBody **output)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: output_cursor
+      r5: source_cursor
+      r6: last
+      return/r0: output_cursor
+    notes: >-
+      Raw osos.dec words establish the exact 56-byte extent
+      0x083e8a0c..0x083e8a44: push {r4,r5,r6,lr} opens this function, pop
+      {r4,r5,r6,pc} returns at 0x083e8a40, and the next independent push
+      starts at 0x083e8a44. It copies the half-open [first,last) range of
+      slot-1 refcounted pointer slots into output. Each iteration tests the
+      current output cursor with movs; if nonzero it loads *first and invokes
+      refcounted_ptr_copy_construct_slot1 @ 0x0839f100, then advances both
+      cursors by four and returns the advanced output cursor. Decoding every
+      aligned ARM B/BL immediate finds exactly two inbound direct calls, both
+      unconditional plain bl at 0x083e0bb8 and 0x083e0bf4, with no predicated
+      inbound calls; the body has exactly one predicated blne at 0x083e8a28
+      to 0x0839f100. No data-word references occur. Rust calls the existing
+      slot-1 copy constructor directly and uses wrapping_add to preserve ARM
+      cursor arithmetic for the host-testable one-record NULL-output path.
+      Host tests cover three slots including NULL, an empty range, and that
+      NULL output skips the source read while advancing the cursor. match.py
+      confirms the equality-terminated cursor loop and predicated helper call;
+      LLVM differs only in frame/register allocation.
+
   - address: 0x083e8a44
     ghidra: FUN_083e8a44
     name: vector_copy_construct_range_attach
