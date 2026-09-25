@@ -961,6 +961,62 @@ ui_manager_dispatch_callback_context:
 "#
 );
 
+/// ui_manager_current_context — original: `thunk_EXT_FUN_22005228` @
+/// `0x08038218` (Ghidra reports 4 bytes; raw `osos.dec` proves the full
+/// **8** bytes are `ldr pc,[pc,#-4]` / `0xe51ff004` and target literal
+/// `0x22005228` at `0x0803821c`; the next veneer begins at `0x08038220`).
+///
+/// The boot relocator at `0x080046e0` copies `0xaed8` bytes from
+/// `0x08000000` to `0x22000000`, so the literal reaches the mirrored
+/// `FUN_08005228` @ `0x08005228`, not mask ROM. Its three instructions load
+/// the manager's word at `+0x1c`, load that object's word at `+0x1c`, and
+/// return it. The three observed callers acquire the UI manager immediately
+/// before this veneer and pass the result to UI callback setup.
+///
+/// Decoding every ARM B/BL word in `osos.dec` found exactly three direct,
+/// unconditional `bl` callers at 0x08201f84, 0x08201fdc, and 0x08202020;
+/// there are no predicated calls, direct tail branches, or aligned raw
+/// data-word references. Deviation: target builds retain the exact literal
+/// veneer; the host implementation performs the verified target-width word
+/// loads directly.
+pub const UI_MANAGER_CURRENT_CONTEXT_VENEER: u32 = 0x0803_8218;
+pub const UI_MANAGER_CURRENT_CONTEXT_INSN: u32 = 0xe51f_f004;
+pub const UI_MANAGER_CURRENT_CONTEXT_TARGET: u32 = 0x2200_5228;
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    pub fn ui_manager_current_context(manager: *mut u8) -> *mut u8;
+}
+
+/// Host implementation of the mirrored two-level `+0x1c` context lookup.
+///
+/// Both pointers are target-width words, rather than host pointer fields, so
+/// the observed ARM offsets remain correct on 64-bit hosts.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_manager_current_context(manager: *mut u8) -> *mut u8 {
+    let state = core::ptr::read_volatile(manager.add(0x1c).cast::<u32>()) as usize as *mut u8;
+    core::ptr::read_volatile(state.add(0x1c).cast::<u32>()) as usize as *mut u8
+}
+
+// `ldr pc` preserves LR and forwards the mirrored body's result unchanged.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl ui_manager_current_context
+    .type ui_manager_current_context, %function
+ui_manager_current_context:
+    ldr     pc, [pc, #-4]
+    .word   0x22005228
+    .size ui_manager_current_context, . - ui_manager_current_context
+"#
+);
+
+
 
 /// stream_buffer_flush_enter — original:
 /// `thunk_FUN_08201460` @ `0x08003848` (Ghidra reports 4 bytes; raw
@@ -2171,7 +2227,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038200, rom_target: 0x22005114, name: Some("ui_manager_begin_pending_operation") },
     RomThunk { thunk_addr: 0x08038208, rom_target: 0x220076cc, name: Some("ui_manager_dispatch_callback_context") },
     RomThunk { thunk_addr: 0x08038210, rom_target: 0x22005cb0, name: None },
-    RomThunk { thunk_addr: 0x08038218, rom_target: 0x22005228, name: None },
+    RomThunk { thunk_addr: 0x08038218, rom_target: 0x22005228, name: Some("ui_manager_current_context") },
     RomThunk { thunk_addr: 0x08038220, rom_target: 0x22004ee4, name: None },
     RomThunk { thunk_addr: 0x08038228, rom_target: 0x2200521c, name: None },
     RomThunk { thunk_addr: 0x08038230, rom_target: 0x2200530c, name: None },
@@ -2264,7 +2320,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 30] = [
+        let expected: [(u32, &str); 31] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -2289,6 +2345,7 @@ mod tests {
             (0x2200509c, "ui_manager_finish_pending_operation"),
             (0x22005114, "ui_manager_begin_pending_operation"),
             (0x220076cc, "ui_manager_dispatch_callback_context"),
+            (0x22005228, "ui_manager_current_context"),
             (0x2200200c, "clock_config_dispatch_veneer"),
             (0x220060e0, "lazy_singleton_106dc_acquire"),
             (0x22006e88, "iram_stream_buffer_initializer_veneer"),
@@ -2371,8 +2428,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 30 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 32);
+        // 31 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 33);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 
@@ -3003,6 +3060,24 @@ mod tests {
                 .write(DEFAULT_UI_MANAGER_DISPATCH_CALLBACK_CONTEXT_OPS);
         }
         drop(guard);
+    }
+
+    #[test]
+    fn ui_manager_current_context_reads_two_target_width_context_links() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::UI_MANAGER_CURRENT_CONTEXT,
+            0x100,
+        ) else {
+            return;
+        };
+        unsafe {
+            slab.write_bytes(0, 0x100);
+            let state = slab.add(0x40);
+            let context = slab.add(0x80);
+            slab.add(0x1c).cast::<u32>().write(state as usize as u32);
+            state.add(0x1c).cast::<u32>().write(context as usize as u32);
+            assert_eq!(ui_manager_current_context(slab), context);
+        }
     }
 
     static mut STREAM_BUFFER_FLUSH_ENTER_CALLS: u32 = 0;

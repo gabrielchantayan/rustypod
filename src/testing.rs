@@ -2438,6 +2438,9 @@ pub mod hints {
     // 0x7000_0000: dedicated to fs/hfs_btree_lookup_key's target-width
     // handle and control-block fixture; mappings never unmap.
     pub const HFS_BTREE_LOOKUP_KEY: usize = 0x7000_0000;
+    // 0x6aa0_0000: dedicated to kernel/thunks's target-width UI-manager,
+    // state, and current-context fixture; mappings never unmap.
+    pub const UI_MANAGER_CURRENT_CONTEXT: usize = 0x6aa0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
