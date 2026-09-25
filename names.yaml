@@ -143866,3 +143866,27 @@ functions:
       instead of the IRAM veneer, retaining its grouped forward-copy behavior.
       A target-only unique text section prevents LLVM from folding this distinct
       retail BL target into byte-identical fixed_record_range_copy.
+  - address: 0x083e9c00
+    ghidra: FUN_083e9c00
+    name: vector_record24_copy_assign
+    size: 60
+    sig: "u8 *vector_record24_copy_assign(const u8 *source, const u8 *source_end, u8 *destination)"
+    module: cxx/vector_record24_copy_assign
+    status: ported
+    vars: {param_1: source, param_2: source_end, param_3: destination}
+    renames:
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec confirms the exact 60-byte extent 0x083e9c00..0x083e9c3b:
+      `push {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}`, followed immediately
+      by the distinct `push {r4,r5,r6,lr}` entry at 0x083e9c3c. Full-image
+      A32 B/BL decoding finds exactly two inbound unconditional plain BL calls
+      (0x083e2028 and 0x083e2078) and zero predicated BL calls. The single
+      internal unconditional BL calls iram_memcpy_veneer @ 0x08037df8 for
+      each 24-byte record. It copies the half-open source record range into
+      destination and returns destination advanced by its byte length.
+      Deliberate deviation: Rust calls the already-ported memcpy body directly
+      instead of the IRAM veneer, retaining its grouped forward-copy behavior.
+      A target-only unique text section prevents LLVM from folding this distinct
+      retail BL target into byte-identical fixed_record_range_copy and
+      vector_record24_copy.
