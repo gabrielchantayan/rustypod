@@ -145021,3 +145021,29 @@ functions:
       cursor; a dedicated target text section prevents folding with another
       independently hookable range-copy port. Host tests cover empty, complete,
       null-output, and forward-overlap ranges.
+
+  - address: 0x083e8b74
+    ghidra: FUN_083e8b74
+    name: copy_u32_pair_range_if_destination
+    size: 44
+    sig: "u32 *copy_u32_pair_range_if_destination(const u32 *source, const u32 *end, u32 *destination)"
+    module: util/copy_u32_pair_range_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+      return/r0: destination
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent
+      0x083e8b74..0x083e8ba0: push {lr} begins the function and the next
+      independently linked function begins with push {r4-r6,lr} at
+      0x083e8ba0. The entry branch targets the equality test at 0x083e8b90;
+      the loop compares source and end, conditionally ldm/stm-copies two u32
+      words when destination is non-null, advances both cursors by eight bytes,
+      and returns destination. Full-image A32 decoding finds exactly two inbound
+      unconditional plain BL calls (0x083e1a3c and 0x083e1a7c), zero inbound
+      predicated BL calls, and no outbound BL calls. Rust incorporates the
+      entry branch, uses wrapping pointer arithmetic for the null destination
+      cursor, and uses volatile accesses to retain the grouped load-before-store
+      operation and prevent libc-copy substitution.
