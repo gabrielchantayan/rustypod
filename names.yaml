@@ -11549,6 +11549,37 @@ functions:
       conditional destroy, bzero, and final indirect unlock; the
       REGION_MUTEX_OPS seam adds a frame and indirect lock/unlock calls.
 
+  - address: 0x080487ac
+    ghidra: FUN_080487ac
+    name: plst_resource_dispatch_pldm
+    size: 88
+    sig: "u32 plst_resource_dispatch_pldm(u8 *task)"
+    module: ui/plst_resource_dispatch_pldm
+    renames:
+      param_1/r0: task
+      "task+0x0c": tdat_element
+      "task+0x40": resource_root
+      "task+0x190": ready
+      DAT_080487fc: RESOURCE_CALLBACK (0x080d43e4)
+      DAT_08048800: PLDM_MESSAGE (0x706c646d)
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_0806b604: resource_callback_dispatch
+      FUN_0804424c: unregistered_tdat_message_helper
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the full 88-byte extent
+      0x080487ac..0x08048804: 80 instruction bytes through the tail B at
+      0x080487f8, followed by literals 0x080d43e4 and 0x706c646d; the next
+      independently linked push-prologue begins at 0x08048804. It has two
+      plain BL calls (ui_element_is_plst_class and resource_callback_dispatch),
+      zero predicated BL calls, and one tail B to unregistered helper
+      0x0804424c. A non-plst task or zero task+0x190 returns -50. Success
+      clears resource_root+0x14, dispatches callback 0x080d43e4 with NULL
+      context while ignoring its status, then sends the raw-verified
+      {task,0x706c646d,0,0} record as Tdat message 0x74647070 to task+0x0c.
+      The Rust port deliberately expresses the unregistered helper by that
+      verified record and the ported Tdat dispatcher rather than inventing a
+      callee identity; volatile operation seams permit host observation.
   - address: 0x08048a0c
     ghidra: FUN_08048a0c
     name: plst_task_complete
