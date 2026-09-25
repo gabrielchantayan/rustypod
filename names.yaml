@@ -10525,6 +10525,39 @@ functions:
       host pointers are wider than retailOS pointer fields. match.py shows
       the same paired direct calls and 0x10 cursor advances; LLVM adds its
       frame and rotates the equality-tested loop.
+  - address: 0x083e8edc
+    ghidra: FUN_083e8edc
+    name: vector_copy_construct_range_cxx_string_vector_entry
+    size: 64
+    sig: "u8 *vector_copy_construct_range_cxx_string_vector_entry(const u8 *first, const u8 *last, u8 *output, VectorStorage *vector)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: vector
+      r4: source_cursor
+      r5: output_cursor
+      r6: last
+      r7: vector
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw ARM is exactly 16 words at 0x083e8edc..0x083e8f1c; the next
+      independently linked function begins with push {r4-r8,lr} at
+      0x083e8f1c. It uninitialized-copies 0x10-byte C++ string-vector
+      entries in [first,last): call cxx_string_vector_entry_copy_ctor @
+      0x083d7df4 with (vector, output, source), then advance both cursors
+      by 0x10 and terminate only on cursor equality. Raw A32 decoding finds
+      two inbound unconditional plain BL sites (0x083e2324 and 0x083e2364),
+      no predicated inbound calls, one plain body BL (0xebffbbbb at
+      0x083e8f00) to 0x083d7df4, and no predicated body calls. The already
+      established cxx_string_vector_entry_copy_ctor dispatch seam preserves
+      the unported helper's boundary; a dedicated text section prevents LLVM
+      from folding this byte-identical loop into
+      vector_copy_construct_range_elem16_alt. Host tests verify per-element
+      cursor advancement, vector forwarding, helper dispatch, and an empty
+      range.
   - address: 0x083e8cb0
     ghidra: FUN_083e8cb0
     name: vector_copy_construct_range_elem16_alt
