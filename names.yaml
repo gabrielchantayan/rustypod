@@ -7893,6 +7893,24 @@ functions:
       only the ADS frame spill. match.py is structurally expected to differ
       at the seam dispatch and frame.
 
+  - address: 0x0805381c
+    ghidra: thunk_FUN_08086e4c
+    name: pmu_reg87_bit1_query_veneer
+    size: 4
+    sig: "i32 pmu_reg87_bit1_query_veneer(void)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      FUN_08086e4c: pmu_reg87_bit1_query
+    notes: >-
+      Binary extent is exactly 0x0805381c..0x08053820: raw word
+      0xea00cd8a decodes as b 0x08086e4c, the semantic PMU register-0x87
+      bit-1 query. Raw ARM decoding finds three unconditional direct bl
+      callers (0x08061810, 0x081a5978, 0x082a19f0) and zero predicated
+      callers. Rust preserves the return-value pass-through via the ported
+      target; LLVM may retain a frame around the tail branch.
+
+
   - address: 0x08001ee8
     ghidra: FUN_08001ee8
     name: usec_timer_elapsed
