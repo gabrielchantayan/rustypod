@@ -82208,6 +82208,29 @@ functions:
       use BIO_FREE_OPS; the raw target-width callback word uses that same
       host dispatch boundary. Tests prove NULL, shared-reference, callback
       veto, release ordering, and the method/destroy free gate.
+  - address: 0x0803d454
+    ghidra: FUN_0803d454
+    name: bio_free_all
+    size: 48
+    sig: "void bio_free_all(BIO *bio)"
+    module: crypto/bio_free_all
+    status: ported
+    renames:
+      param_1/r0/r4: bio
+      iVar1/r4: next_bio
+      iVar2/r5: references
+      FUN_0803d3c8: bio_free
+    notes: >-
+      OpenSSL BIO_free_all. Raw ARM extent is exactly 48 bytes,
+      0x0803d454..0x0803d484; the next function starts at 0x0803d484, so
+      Ghidra's extent is exact. Decoding every ARM BL word in osos.dec finds
+      exactly three direct inbound calls: one unconditional bl (0x08272994)
+      and two blne (0x08060228, 0x08060234), with no data word holding this
+      address. The function itself has one unconditional BL to bio_free at
+      0x0803d46c and no predicated BL. Each iteration retains next_bio and
+      references before bio_free; a retained references value above one stops
+      traversal after that release. No deliberate deviations: next_bio stays
+      a target-width word through the existing repr(C) BIO layout.
   - address: 0x0803d558
     ghidra: FUN_0803d558
     name: bio_new
