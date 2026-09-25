@@ -681,6 +681,37 @@ pub unsafe extern "C" fn cxx_string_pair_range_destroy(
         first = first.add(1);
     }
 }
+/// cxx_string_pair_entry_range_copy — retailOS `FUN_083e9e68` @ `0x083e9e68`
+/// (56 bytes; true extent `0x083e9e68..0x083e9ea0`; one direct, unconditional
+/// `bl` caller at `0x081df32c`, one direct predicated `blne` caller at
+/// `0x081df468`).
+///
+/// Raw ARM walks the half-open range `[first, last)` of 12-byte entries,
+/// invokes the two-string COW copy constructor for each entry, and returns the
+/// advanced output cursor. It has one unconditional body `bl` to
+/// `0x08257fc8`. That callee is byte-identical to
+/// [`cxx_string_pair_entry_copy_ctor_base`] at `0x08257f80`, so this port
+/// deliberately uses the established seam rather than adding a duplicate
+/// export. There are no guards beyond pointer equality.
+///
+/// # Safety
+///
+/// `first..last` must be a valid range of 12-byte target-layout entries and
+/// `output` must provide one writable entry for each source entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_entry_range_copy(
+    mut first: *const CxxStringPairRangeEntry,
+    last: *const CxxStringPairRangeEntry,
+    mut output: *mut CxxStringPairRangeEntry,
+) -> *mut CxxStringPairRangeEntry {
+    while first != last {
+        cxx_string_pair_entry_copy_ctor_base(output, first);
+        first = first.add(1);
+        output = output.add(1);
+    }
+    output
+}
 
 /// cxx_string_pair_vector_owner_destroy — retailOS `FUN_081df500` @
 /// 0x081df500 (80 bytes, 0x081df500..0x081df54f).
@@ -2796,6 +2827,63 @@ mod tests {
             assert_eq!(destination.trailing, 0xdeaf_beef);
         }
     }
+    #[test]
+    fn pair_entry_range_copy_preserves_empty_ranges_and_copies_every_entry() {
+        let _guard = arena();
+        unsafe {
+            let mut source_first: *mut u8 = core::ptr::null_mut();
+            let mut source_second: *mut u8 = core::ptr::null_mut();
+            build(&mut source_first, b"first");
+            build(&mut source_second, b"second");
+            let source = [
+                CxxStringPairRangeEntry {
+                    first: source_first,
+                    second: source_second,
+                    trailing: 0x1020_3040,
+                },
+                CxxStringPairRangeEntry {
+                    first: source_second,
+                    second: source_first,
+                    trailing: 0xa0b0_c0d0,
+                },
+            ];
+            let mut destination = [
+                CxxStringPairRangeEntry {
+                    first: core::ptr::null_mut(),
+                    second: core::ptr::null_mut(),
+                    trailing: 0,
+                },
+                CxxStringPairRangeEntry {
+                    first: core::ptr::null_mut(),
+                    second: core::ptr::null_mut(),
+                    trailing: 0,
+                },
+            ];
+
+            let output = destination.as_mut_ptr();
+            assert_eq!(
+                cxx_string_pair_entry_range_copy(source.as_ptr(), source.as_ptr(), output),
+                output,
+            );
+            assert_eq!(
+                cxx_string_pair_entry_range_copy(
+                    source.as_ptr(),
+                    source.as_ptr().add(source.len()),
+                    output,
+                ),
+                output.add(destination.len()),
+            );
+            assert_eq!(destination[0].first, source_first);
+            assert_eq!(destination[0].second, source_second);
+            assert_eq!(destination[0].trailing, 0x1020_3040);
+            assert_eq!(destination[1].first, source_second);
+            assert_eq!(destination[1].second, source_first);
+            assert_eq!(destination[1].trailing, 0xa0b0_c0d0);
+            assert_eq!((*data_rep(source_first)).refcount, 2);
+            assert_eq!((*data_rep(source_second)).refcount, 2);
+        }
+    }
+
 
     #[test]
     fn pair_entry_copy_ctor_null_destination_does_not_read_source() {

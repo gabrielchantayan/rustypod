@@ -40580,6 +40580,27 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083e9e68
+    ghidra: FUN_083e9e68
+    name: cxx_string_pair_entry_range_copy
+    size: 56
+    sig: "CxxStringPairRangeEntry *cxx_string_pair_entry_range_copy(const CxxStringPairRangeEntry *first, const CxxStringPairRangeEntry *last, CxxStringPairRangeEntry *output)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: first, param_2/r1: last, param_3/r2: output, r4: first, r5: output, r6: last}
+    notes: >-
+      Raw ARM words from 0x083e9e68 through 0x083e9e9c establish the
+      56-byte extent; the independent range-copy routine begins at
+      0x083e9ea0. It advances source and output through the half-open
+      [first,last) range in 12-byte steps, invokes FUN_08257fc8 for every
+      entry, and returns the advanced output cursor. Whole-image A32
+      immediate decoding finds one direct plain bl caller at 0x081df32c and
+      one predicated blne caller at 0x081df468. The body has one unconditional
+      bl to 0x08257fc8. That callee is byte-identical to the existing
+      cxx_string_pair_entry_copy_ctor_base seam at 0x08257f80, so the Rust
+      port deliberately uses that seam rather than adding an otherwise
+      duplicate target export.
+
   - address: 0x083d6f20
     ghidra: FUN_083d6f20
     name: filebuf_is_open
