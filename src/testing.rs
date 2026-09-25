@@ -1053,6 +1053,9 @@ pub mod hints {
     // 0xe890_0000: dedicated to cxx/cxx_string_range_assign's raw-u32 source
     // and destination string-word fixture; mappings never unmap.
     pub const CXX_STRING_RANGE_ASSIGN: usize = 0xe890_0000;
+    // 0xe8a0_0000: dedicated to cxx/cxx_string_pair_range_assign's raw-u32
+    // source and destination pair fixture; mappings never unmap.
+    pub const CXX_STRING_PAIR_RANGE_ASSIGN: usize = 0xe8a0_0000;
     // 0xea00_0000: dedicated to app/path_probe's raw-u32 base-destructor
     // owner fixture; mappings never unmap, so no other user may share this hint.
     pub const PATH_PROBE_BASE_DESTROY: usize = 0xea00_0000;
