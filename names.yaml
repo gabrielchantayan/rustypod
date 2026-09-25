@@ -6957,6 +6957,28 @@ functions:
       recovered, so the port deliberately retains the raw dereferences with
       no NULL or bounds checks.
 
+  # --- opaque FreeType service metadata signed-status accessor ---
+  - address: 0x080514ec
+    ghidra: FUN_080514ec
+    name: ft_service_metadata_signed_status_at_b3c
+    size: 16
+    sig: "i32 ft_service_metadata_signed_status_at_b3c(const void *object)"
+    module: ft/service_metadata
+    status: ported
+    vars:
+      param_1: object
+      r0_after_first_ldr: metadata
+      r0: sign_extended_status
+    notes: >-
+      Raw words `e5900f00 e2800c0b e1d003dc e12fff1e` load the aligned
+      metadata pointer at object+0xf00, add 0xb00, then signed-load its byte
+      at +0x3c (metadata+0xb3c). The next real function begins at 0x080514fc,
+      establishing the 16-byte extent. Three direct BL call sites are
+      unconditional (0x081149b0, 0x08173200, 0x08173214); none is predicated.
+      Callers distinguish -1, 1, and other values, but the byte's concrete
+      meaning remains unrecovered. The port deliberately keeps unchecked,
+      aligned direct dereferences and i8-to-i32 sign extension.
+
   # --- opaque FreeType service metadata word accessor ---
   - address: 0x080514fc
     ghidra: FUN_080514fc

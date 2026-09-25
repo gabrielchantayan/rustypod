@@ -9,6 +9,8 @@ pub const OBJECT_METADATA_OFFSET: usize = 0xf00;
 pub const METADATA_FLAGS_B00_OFFSET: usize = 0xb00;
 /// Byte offset of the returned word in the opaque metadata block.
 pub const METADATA_WORD_AF4_OFFSET: usize = 0xaf4;
+/// Byte offset of the signed status byte in the opaque metadata block.
+pub const METADATA_SIGNED_STATUS_B3C_OFFSET: usize = 0xb3c;
 /// Byte offset of the returned status-flag word in the opaque metadata block.
 pub const METADATA_FLAGS_B20_OFFSET: usize = 0xb20;
 
@@ -79,13 +81,32 @@ pub unsafe extern "C" fn ft_service_metadata_word_at_af4(object: *const u8) -> u
     (metadata.add(METADATA_WORD_AF4_OFFSET) as *const u32).read()
 }
 
+/// ft_service_metadata_signed_status_at_b3c — original: `FUN_080514ec` @
+/// `0x080514ec` (16 bytes; 3 verified direct `bl` call sites, all unconditional).
+///
+/// Loads the metadata pointer word at `object + 0xf00`, then sign-extends the
+/// status byte at `metadata + 0xb3c`. Raw words `e5900f00 e2800c0b e1d003dc
+/// e12fff1e` decode to `ldr; add #0xb00; ldrsb #0x3c; bx lr`; the next real
+/// function begins at `0x080514fc`. The callers distinguish -1, 1, and other
+/// values, but the byte's concrete meaning remains unrecovered.
+///
+/// Deliberate deviations: none. It retains retailOS's aligned direct pointer
+/// load and unchecked byte read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_signed_status_at_b3c(object: *const u8) -> i32 {
+    let metadata = (object.add(OBJECT_METADATA_OFFSET) as *const *const u8).read();
+    (metadata.add(METADATA_SIGNED_STATUS_B3C_OFFSET) as *const i8).read() as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ft_service_metadata_flags_at_b00, ft_service_metadata_flags_at_b20,
-        ft_service_metadata_word_at_af4, MetadataFlagsAtB20, ServiceObjectFlagsAtB20,
-        METADATA_FLAGS_B00_OFFSET, METADATA_FLAGS_B20_OFFSET, METADATA_WORD_AF4_OFFSET,
-        OBJECT_METADATA_OFFSET,
+        ft_service_metadata_signed_status_at_b3c, ft_service_metadata_word_at_af4,
+        MetadataFlagsAtB20, ServiceObjectFlagsAtB20, METADATA_FLAGS_B00_OFFSET,
+        METADATA_FLAGS_B20_OFFSET, METADATA_SIGNED_STATUS_B3C_OFFSET,
+        METADATA_WORD_AF4_OFFSET, OBJECT_METADATA_OFFSET,
     };
 
     #[repr(C)]
@@ -106,6 +127,12 @@ mod tests {
         word: u32,
     }
 
+
+    #[repr(C)]
+    struct MetadataSignedStatusAtB3c {
+        before_status: [u8; METADATA_SIGNED_STATUS_B3C_OFFSET],
+        status: i8,
+    }
     #[test]
     fn reads_the_full_word_at_the_recovered_offsets() {
         let metadata = Metadata {
@@ -138,6 +165,30 @@ mod tests {
             unsafe { ft_service_metadata_word_at_af4((&object as *const Object).cast()) },
             0x89ab_cdef,
         );
+    }
+
+    #[test]
+    fn sign_extends_status_byte_at_b3c_through_metadata_pointer() {
+        for (byte, expected) in [(0x00u8, 0), (0x01, 1), (0x7f, 127), (0x80, -128), (0xff, -1)] {
+            let metadata = MetadataSignedStatusAtB3c {
+                before_status: [0xa5; METADATA_SIGNED_STATUS_B3C_OFFSET],
+                status: byte as i8,
+            };
+            let object = Object {
+                before_metadata: [0x5a; OBJECT_METADATA_OFFSET],
+                metadata: (&metadata as *const MetadataSignedStatusAtB3c).cast(),
+            };
+
+            assert_eq!(
+                unsafe {
+                    ft_service_metadata_signed_status_at_b3c((&object as *const Object).cast())
+                },
+                expected,
+                "status byte {byte:#04x}",
+            );
+            assert_eq!(object.before_metadata, [0x5a; OBJECT_METADATA_OFFSET]);
+            assert_eq!(metadata.before_status, [0xa5; METADATA_SIGNED_STATUS_B3C_OFFSET]);
+        }
     }
 
     #[test]
@@ -222,6 +273,10 @@ mod tests {
         assert_eq!(
             core::mem::offset_of!(MetadataFlagsAtB20, flags),
             METADATA_FLAGS_B20_OFFSET
+        );
+        assert_eq!(
+            core::mem::offset_of!(MetadataSignedStatusAtB3c, status),
+            METADATA_SIGNED_STATUS_B3C_OFFSET
         );
     }
 }
