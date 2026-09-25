@@ -11,6 +11,7 @@ pub mod forward_byte_copy_returning_dst;
 pub mod null_guarded_forward_byte_copy;
 pub mod counted_copy;
 pub mod copy_byte_range_returning_end;
+pub mod copy_byte_range_returning_end_083e9e50;
 pub mod bounded_copy;
 pub mod cstr_copy;
 pub mod cstr_compare_normalized;
