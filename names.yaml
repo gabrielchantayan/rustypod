@@ -142707,3 +142707,31 @@ functions:
       their raw direct targets but unported, so the Rust port uses one
       injectable boundary that fails closed by default; host tests cover
       success, null/allocation failure, and assignment cleanup.
+
+  - address: 0x080394c4
+    ghidra: FUN_080394c4
+    name: strided_plane_copy
+    size: 208
+    sig: "void strided_plane_copy(u32 context, const u32 *source_index, const PlaneCopyDescriptor *descriptor, u32 position, const u8 *target)"
+    module: h264/strided_plane_copy
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: source_index
+      param_3/r2: descriptor
+      param_4/r3: position
+      param_5/stack: target
+      local_20: source_span
+    notes: >-
+      Raw osos.dec establishes the exact 208-byte extent
+      0x080394c4..0x08039594; 0x08039594 begins the next real function.
+      Whole-image A32 decoding finds three inbound plain BL calls at
+      0x080395d0, 0x080396ec, and 0x08039748, with no predicated inbound BL.
+      The body has two plain outbound BL calls (0x080b64fc and 0x080a9fc4)
+      and no predicated BL. It obtains a source span selected by descriptor
+      byte +0x14, derives a word source from source_index, and copies 32-bit
+      words either as paired 16-byte-stride writes, low-halfword writes, or
+      contiguous words. The span lookup at 0x080b64fc is not independently
+      identified, so it remains an address-backed target call and host seam;
+      the trivial contiguous word copy at 0x080a9fc4 is rendered directly.
+      Host tests cover all three layouts.

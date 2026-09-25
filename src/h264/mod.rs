@@ -37,4 +37,5 @@ pub mod nal_header;
 pub mod range_segments;
 pub mod stream_buffer_reset;
 pub mod stream_position_round_up;
+pub mod strided_plane_copy;
 pub mod video_frame_data_offset;
