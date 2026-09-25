@@ -14085,6 +14085,30 @@ functions:
       already shared 0x08046c74 retailOS helper. The port deliberately uses
       that existing helper boundary directly rather than restubbing or
       separately porting the veneer.
+  - address: 0x08045fb0
+    ghidra: FUN_08045fb0
+    name: counted_u16_copy
+    size: 60
+    sig: "void counted_u16_copy(const u8 *source, u8 *destination, i32 wide)"
+    module: cxx/counted_u16_copy
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      param_3/r2: wide
+      uVar1/r2: byte_count
+    notes: >-
+      Raw words establish the exact extent 0x08045fb0..0x08045fec: the next
+      function starts at 0x08045fec. A NULL source clears the destination
+      halfword. Otherwise a zero wide flag reads source[0] as u8 and copies
+      count + 1 bytes; a nonzero flag reads it as u16 and copies
+      (count + 1) * 2 bytes. Lengths at most one clear a destination halfword;
+      longer spans tail-branch to bcopy at 0x08042cbc. Decoding raw ARM branch
+      words finds three direct inbound BL callers: plain BL at 0x080433f0 and
+      predicated BLNE at 0x0805d8b0 and 0x0805d908; the body has no direct BL.
+      The port deliberately calls the established Rust bcopy port rather than
+      reproducing the stock tail branch.
+
 
 
   - address: 0x08045ee0

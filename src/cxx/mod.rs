@@ -321,6 +321,7 @@ pub mod string_object_owner_destroy;
 pub mod string_object_normalize_volume_path;
 pub mod path_escape_record;
 pub mod string_encoding;
+pub mod counted_u16_copy;
 pub mod string_export_counted_utf16;
 pub mod templates;
 pub mod container_dispose_elements;
