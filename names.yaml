@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e7d4c
+    ghidra: FUN_083e7d4c
+    name: record_min_heap_pop_adjust
+    size: 48
+    sig: "void record_min_heap_pop_adjust(u32 *heap, u32 *last, u32 *output, u32 value, int (*comparator)(u32, u32))"
+    module: util/record_min_heap_pop_adjust
+    status: ported
+    renames:
+      param_1/r0: heap
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: value
+      param_5/stack: comparator
+      lr: root_value
+      r12: value
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x083e7d4c..0x083e7d7b: push {r3,lr} begins at the assigned address,
+      pop {r12,pc} returns at its end, and the next independently linked
+      function begins with push {r4-r8,lr} at 0x083e7d7c. Raw A32 decoding
+      finds one plain unconditional body BL at 0x083e7d74 to the unported
+      record_min_heap_sift_down at 0x083e7f40, and zero predicated body BL
+      instructions. Full-image caller decoding finds two inbound plain direct
+      BL sites at 0x083e8220 and 0x083e825c, and zero predicated inbound BL
+      sites. It copies heap[0] to output, then calls sift-down with hole zero,
+      record count (last - heap), value, and comparator. Rust uses typed pointer
+      subtraction instead of byte subtraction plus lsr #2; the unported helper
+      is a firmware target call and replaceable host seam.
   - address: 0x083e7d7c
     ghidra: FUN_083e7d7c
     name: record_min_heap_sift_up
