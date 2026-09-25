@@ -40580,6 +40580,24 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083e9cbc
+    ghidra: FUN_083e9cbc
+    name: cxx_string_pair_entry_range_assign
+    size: 76
+    sig: "CxxStringPairRangeEntry *cxx_string_pair_entry_range_assign(const CxxStringPairRangeEntry *first, const CxxStringPairRangeEntry *last, CxxStringPairRangeEntry *output)"
+    module: cxx/cxx_string_pair_entry_range_assign
+    status: ported
+    vars: {param_1/r0: first, param_2/r1: last, param_3/r2: output, r4: first, r5: output, r6: last}
+    renames: {FUN_083d8d1c: cxx_string_assign}
+    notes: >-
+      Raw ARM words establish the exact 76-byte extent from 0x083e9cbc through
+      0x083e9d04; the next independent helper begins at 0x083e9d08. Whole-image
+      A32 immediate decoding finds two direct inbound plain bl sites
+      (0x083e31fc and 0x083e324c) and zero predicated forms. For every 12-byte
+      [first,last) entry it calls cxx_string_assign @ 0x083d8d1c for COW-string
+      words +0x00 then +0x04, copies the trailing +0x08 word, and returns the
+      advanced output cursor. No deliberate deviations.
+
   - address: 0x083e9e68
     ghidra: FUN_083e9e68
     name: cxx_string_pair_entry_range_copy
