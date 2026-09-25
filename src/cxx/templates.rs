@@ -5648,6 +5648,49 @@ pub unsafe extern "C" fn vector_fill_construct_n_elem32(
         output = output.wrapping_add(0x20);
     }
 }
+/// vector_fill_copy_word — original: `thunk_FUN_083e95e0` @ 0x083e95c8
+/// (32 bytes; true extent 0x083e95c8..0x083e95e8, bounded by the next
+/// function's `push {r4-r8,lr}` at 0x083e95ec; reference
+/// `ipod-decomp/decomp/c/038/083e95c8_thunk_FUN_083e95e0.c`).
+///
+/// Fills `count` consecutive words at `output` with the one word at `source`.
+/// The raw entry branches over the loop body to its count test; each nonzero
+/// iteration conditionally loads and stores only when its current `output` is
+/// non-NULL, then advances output by one word and decrements the count. Thus,
+/// an initially NULL output avoids a source access only on its first
+/// iteration; subsequent iterations use addresses 4, 8, and so on.
+///
+/// **Call count**, verified by decoding every B/BL word in osos.dec: two
+/// inbound direct plain `bl` sites (0x083e2ae8 and 0x083e2b9c), no predicated
+/// inbound calls; the body contains no `bl` or predicated calls.
+///
+/// # Deviations
+/// Rust represents the firmware's integer address increment with
+/// [`core::ptr::wrapping_add`], preserving its NULL-output path without
+/// forming an invalid in-bounds pointer. Volatile word accesses prevent LLVM
+/// from hoisting the source load above the firmware's output-NULL guard.
+///
+/// # Safety
+///
+/// `output` must be writable and `source` readable for each iteration whose
+/// current output cursor is non-NULL. In particular, a NULL `output` is safe
+/// with an unreadable `source` only when `count` is at most one.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_fill_copy_word(
+    mut output: *mut u32,
+    mut count: u32,
+    source: *const u32,
+) {
+    while count != 0 {
+        if !output.is_null() {
+            output.write_volatile(source.read_volatile());
+        }
+        output = output.wrapping_add(1);
+        count -= 1;
+    }
+}
+
 /// vector_fill_construct_n_elem16 — original: `FUN_083e95ec` @ 0x083e95ec
 /// (60 bytes; extent 0x083e95ec..0x083e9628, bounded by the next function's
 /// `push {r4-r8,lr}` at 0x083e9628; reference
@@ -11483,6 +11526,38 @@ mod tests {
             "the NULL-output guard lives in the helper, not the loop"
         );
     }
+    #[test]
+    fn fill_copy_word_repeats_source_across_exact_count() {
+        let source = 0xfeed_c0deu32;
+        let mut output = [0xa5a5_a5a5u32; 4];
+
+        unsafe { vector_fill_copy_word(output.as_mut_ptr(), 3, &source) };
+
+        assert_eq!(output, [source, source, source, 0xa5a5_a5a5]);
+    }
+
+    #[test]
+    fn fill_copy_word_zero_count_does_not_access_pointers() {
+        unsafe {
+            vector_fill_copy_word(
+                core::ptr::null_mut(),
+                0,
+                core::ptr::null(),
+            );
+        }
+    }
+
+    #[test]
+    fn fill_copy_word_null_output_does_not_read_source() {
+        unsafe {
+            vector_fill_copy_word(
+                core::ptr::null_mut(),
+                1,
+                0x1usize as *const u32,
+            );
+        }
+    }
+
     #[test]
     fn fill_construct_n_elem16_reuses_source_and_strides_output() {
         let _guard = copy_construct_elem16_guard();

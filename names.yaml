@@ -10396,6 +10396,28 @@ functions:
       [source,end) forward only when destination is non-NULL, and returns the
       advanced destination.
 
+  - address: 0x083e95c8
+    ghidra: thunk_FUN_083e95e0
+    name: vector_fill_copy_word
+    size: 32
+    sig: "void vector_fill_copy_word(u32 *output, u32 count, const u32 *source)"
+    renames:
+      param_1/r0: output
+      param_2/r1: count
+      param_3/r2: source
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Ghidra's four-byte thunk boundary is false: the raw `b 0x083e95e0` entry
+      at 0x083e95c8 reaches the loop test, whose back-edge returns to the
+      predicated load/store at 0x083e95cc. The true extent is
+      0x083e95c8..0x083e95e8, ending before the next function's push at
+      0x083e95ec. Whole-image A32 branch decoding finds exactly two inbound
+      direct plain BL sites (0x083e2ae8 and 0x083e2b9c), no predicated BL
+      sites, and no BL calls in this body. It repeats the source word into
+      each output word when that iteration's output cursor is non-NULL; an
+      initially NULL output therefore skips source only for its first
+      iteration. Rust uses wrapping pointer advancement to model that path.
   - address: 0x083e95ec
     ghidra: FUN_083e95ec
     name: vector_fill_construct_n_elem16
