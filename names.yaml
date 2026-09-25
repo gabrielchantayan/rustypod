@@ -143775,3 +143775,30 @@ functions:
       cxx_string_assign seam preserves ownership and self-assignment behavior;
       host tests use a raw-u32 fixture to prove target offsets, member order,
       every-record traversal, empty-range no-call behavior, and return identity.
+
+  - address: 0x083e9d08
+    ghidra: FUN_083e9d08
+    name: record_40_copy_construct_range
+    size: 52
+    sig: "u8 *record_40_copy_construct_range(const u8 *source, const u8 *end, u8 *destination)"
+    module: cxx/record_40_copy_construct_range
+    status: ported
+    renames:
+      param_1/r0/r4: source
+      param_2/r1/r6: end
+      param_3/r2/r5: destination
+      FUN_0825c824: retail_record_40_copy_constructor
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent 0x083e9d08..0x083e9d3c:
+      `push {r4,r5,r6,lr}; mov r6,r1; mov r5,r2; mov r4,r0; b 0x083e9d1c;
+      mov r1,r4; mov r0,r5; bl 0x0825c824; add r4,r4,#0x28; add r5,r5,#0x28;
+      cmp r4,r6; bne 0x083e9d1c; mov r0,r5; pop {r4,r5,r6,pc}`. The next
+      distinct function starts with `push {r4,r5,r6,lr}` at 0x083e9d3c;
+      Ghidras 56-byte boundary includes that prologue. Independent whole-image
+      A32 decoding finds two inbound plain BL calls (0x083e351c, 0x083e356c),
+      zero inbound predicated BL calls, one outbound plain BL to the verified
+      but unnamed 40-byte record copy constructor at 0x0825c824, and zero
+      outbound predicated BL calls. It construct-copies each 40-byte record in
+      [source,end), returns the advanced destination cursor, and makes no call
+      for an empty range. Deliberate deviation: target Rust reaches the unported
+      constructor through an absolute-literal veneer; host tests inject it.
