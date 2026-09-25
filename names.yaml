@@ -44,6 +44,30 @@ functions:
       fourth decompiler parameter in callers is not read by the raw body.
       Deliberate deviation: host cursors use StringWordRecord stride to retain
       the ARM 12-byte layout across widened pointers.
+  - address: 0x083e8acc
+    ghidra: FUN_083e8acc
+    name: vector_copy_range_elem12_alias_8acc
+    size: 48
+    sig: "u8 *vector_copy_range_elem12_alias_8acc(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      lr: output_cursor
+      r4: third_word
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x083e8acc..0x083e8afc: the next independently linked function begins
+      `push {r4,r5,r6,lr}` at 0x083e8afc. It forward-copies [first,last) in
+      12-byte units only while the current output cursor is non-NULL, loading
+      all three source words before storing any output word, then returns the
+      advanced output cursor. Full-image A32 decoding finds two inbound
+      unconditional plain BL calls (0x083e138c, 0x083e13d8), zero predicated
+      BL calls, and no body calls. This is a byte-identical instantiation of
+      vector_copy_range_elem12; a distinct export and text section keep this
+      independently hookable address from being folded into that symbol.
   - address: 0x083e8bdc
     ghidra: FUN_083e8bdc
     name: vector_copy_range_elem12_alias_8bdc
