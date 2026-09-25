@@ -6732,6 +6732,30 @@ functions:
       checks.
 
   # --- opaque FreeType service-context metadata byte accessor ---
+  - address: 0x08054f68
+    ghidra: FUN_08054f68
+    name: ft_service_metadata_byte_at_b1a
+    size: 12
+    sig: "u32 ft_service_metadata_byte_at_b1a(const void *service_context)"
+    module: ft/service/metadata
+    status: ported
+    vars:
+      param_1: service_context
+      r0_after_first_ldr: metadata
+    notes: >-
+      Raw words `e5900f00`, `e5d00b1a`, and `e12fff1e` are `ldr
+      r0,[r0,#0xf00]; ldrb r0,[r0,#0xb1a]; bx lr`; the next separately
+      linked function starts at 0x08054f74. Thus it loads the aligned
+      metadata pointer word at service_context+0xf00 and returns the
+      unsigned, zero-extended byte at metadata+0xb1a. Whole-image ARM
+      decoding found three unconditional plain BL callers (0x08114990,
+      0x08172f00, and 0x08172f14) and no predicated BL callers. Ghidra's C
+      agrees exactly. The concrete layouts and ownership are unrecovered;
+      the port deliberately retains raw dereferences with no NULL or bounds
+      checks. `match.py` finds LLVM adds a frame prologue and epilogue, while
+      retaining the two retail memory operations and their offsets.
+
+  # --- opaque FreeType service-context metadata byte accessor ---
   - address: 0x080512ac
     ghidra: FUN_080512ac
     name: ft_service_metadata_byte_at_b50
