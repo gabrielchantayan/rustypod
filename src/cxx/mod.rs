@@ -334,6 +334,7 @@ pub mod string_object_truncate_codepoints;
 pub mod string_object_opaque_base_destroy;
 pub mod opaque_record_string_pair_destroy;
 pub mod string_object_less;
+pub mod string_object_word_upper_bound;
 pub mod string_from_vtable_slot_50;
 pub mod string_from_vtable_slot_58;
 pub mod string_word_record;
