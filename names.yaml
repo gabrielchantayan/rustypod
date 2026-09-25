@@ -16443,6 +16443,35 @@ functions:
       of tail-branching to the target-only ROM veneer, preserving the fixed
       id and returned result.
 
+  - address: 0x08047df4
+    ghidra: FUN_08047df4
+    name: gateway_request_empty_tag5
+    size: 92
+    sig: "void gateway_request_empty_tag5(void)"
+    module: kernel/gateway_request_blocking
+    status: ported
+    renames:
+      local_28: request_frame
+      local_18: request_tag
+      local_8: reserved_word
+    notes: >-
+      Raw osos.dec establishes the complete 92-byte extent from `push {lr}`
+      at 0x08047df4 through `pop {pc}` at 0x08047e4c; the next helper begins
+      with `push {lr}` at 0x08047e50. It first calls gateway_wait_ready
+      (0x080c8304), then posts an argument-free tag-5 gateway request as a
+      nine-word frame {0, 0, 0, 0, 5, pad, pad, pad, 0}, bracketed by
+      semaphore 9 and sent through the mode-1 mailbox body at thunk
+      0x08037e18 with (mailbox = 1, message = frame, priority = 5,
+      semaphore = 6). The body contains four unconditional BL instructions:
+      readiness wait, semaphore wait, mailbox send, and semaphore signal.
+      A whole-image ARM B/BL scan finds exactly three callers, all
+      unconditional BL at 0x08068530, 0x08068fb8, and 0x0813af6c; there are
+      no predicated BLs, tail branches, or data-word references. The
+      service-level semantic of tag 5 is not established, so the Rust name
+      records only the verified empty-tag ABI. Deliberate deviation: ARM
+      leaves words 5..7 uninitialized; Rust zeros them because the declared
+      frame and observed dispatcher path do not consume them.
+
   - address: 0x08047fa8
     ghidra: FUN_08047fa8
     name: gateway_request_empty_tag4
