@@ -41166,6 +41166,24 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083e8fc0
+    ghidra: FUN_083e8fc0
+    name: cxx_string_pair_entry_range_copy_construct
+    size: 64
+    sig: "u8 *cxx_string_pair_entry_range_copy_construct(const u8 *first, const u8 *last, u8 *destination, void *owner)"
+    module: cxx/cxx_string_pair_entry_range_copy_construct
+    status: ported
+    vars: {param_1/r0: first, param_2/r1: last, param_3/r2: destination, param_4/r3: owner, r4: first, r5: destination, r6: last, r7: owner}
+    renames: {FUN_083d7e58: cxx_string_pair_entry_copy_ctor}
+    notes: >-
+      Raw ARM is exactly 16 instructions at 0x083e8fc0..0x083e8fff; the
+      independent plist_node_child_range_copy begins at 0x083e9000.
+      Whole-image A32 immediate decoding finds two inbound plain BL sites
+      (0x083e3034 and 0x083e3084) and zero predicated BL sites. It calls
+      cxx_string_pair_entry_copy_ctor @ 0x083d7e58 for each 12-byte
+      [first,last) COW-string-pair entry, advances both cursors by 12, and
+      returns destination. No deliberate deviations.
+
   - address: 0x083e9000
     ghidra: FUN_083e9000
     name: plist_node_child_range_copy

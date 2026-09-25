@@ -1062,6 +1062,9 @@ pub mod hints {
     // 0xe8b0_0000: dedicated to cxx/cxx_string_pair_entry_range_assign's raw-u32
     // source and destination entry fixture; mappings never unmap.
     pub const CXX_STRING_PAIR_ENTRY_RANGE_ASSIGN: usize = 0xe8b0_0000;
+    // 0xe8e0_0000: dedicated to cxx/cxx_string_pair_entry_range_copy_construct's
+    // raw-u32 source and destination entry fixture; mappings never unmap.
+    pub const CXX_STRING_PAIR_ENTRY_RANGE_COPY_CONSTRUCT: usize = 0xe8e0_0000;
     // 0xe8c0_0000: dedicated to cxx/cxx_string_vector_range_assign's raw-u32
     // source and destination 16-byte record fixture; mappings never unmap.
     pub const CXX_STRING_VECTOR_RANGE_ASSIGN: usize = 0xe8c0_0000;
