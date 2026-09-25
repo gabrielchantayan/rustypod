@@ -544,6 +544,9 @@ pub mod hints {
     // 0x5100_0000: dedicated to app/type_handler_lookup's raw-u32 registry
     // fixture; mappings never unmap, so no other test may reuse this hint.
     pub const TYPE_HANDLER_LOOKUP_WRAPPER: usize = 0x5100_0000;
+    // 0x5300_0000: dedicated to app/type_handler_lookup_alt_id's raw-u32
+    // registry fixture; mappings never unmap, so no other test may reuse this hint.
+    pub const TYPE_HANDLER_LOOKUP_ALT_ID: usize = 0x5300_0000;
     // 0x3a00_0000: sibling ports in flight take the sequential slots,
     // and a collision skips tests silently on every host.
     pub const KINDED_CONTROLLER: usize = 0x3a00_0000;

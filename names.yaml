@@ -143480,3 +143480,26 @@ functions:
       capacity-call displacement. The dedicated Rust text section preserves
       this independently hookable target; it deliberately calls the shared
       deque_seg_capacity export rather than creating a redundant local seam.
+
+  - address: 0x083eab30
+    ghidra: FUN_083eab30
+    name: type_handler_lookup_alt_id
+    size: 32
+    sig: "void *type_handler_lookup_alt_id(void **registry)"
+    module: app/type_handler_lookup_alt_id
+    status: ported
+    renames:
+      param_1/r0: registry
+      DAT_083eab50: default_handler_entry (0x083ab45c)
+      DAT_083eab54: handler_type_id (0x08a0fbe4)
+      FUN_082a7280: typed_handler_registry_lookup
+    notes: >-
+      Raw osos.dec words establish the 32-byte executable extent
+      0x083eab30..0x083eab50; the two following words are its literal pool
+      and 0x083eab58 starts the next independent function. Full-image A32
+      decoding finds exactly two inbound unconditional plain BL calls
+      (0x083d98c8 and 0x083d9b54) and zero predicated direct BL calls. This
+      wrapper forwards registry, the four-word type identifier at 0x08a0fbe4,
+      direction 1, flags 0x20, and default entry 0x083ab45c to the already
+      ported typed_handler_registry_lookup helper; it returns that result
+      unchanged. No deliberate deviations.
