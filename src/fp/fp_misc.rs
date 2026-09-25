@@ -2102,6 +2102,19 @@ unsafe fn plist_node_child_vector_push_back_ops() -> PlistNodeChildVectorPushBac
         ))
     }
 }
+/// Calls the established plist-node copy-constructor boundary.
+///
+/// The target operation reaches `FUN_0825c61c`; host tests replace it through
+/// [`PLIST_NODE_CHILD_VECTOR_PUSH_BACK_OPS`].
+#[inline(always)]
+pub unsafe fn plist_node_child_copy_construct(
+    destination: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    let ops = unsafe { plist_node_child_vector_push_back_ops() };
+    unsafe { (ops.copy)(destination, source) }
+}
+
 
 /// plist_node_child_vector_push_back — original: `FUN_0825c1a0` @
 /// 0x0825c1a0 (48 bytes).
@@ -2142,7 +2155,7 @@ pub unsafe extern "C" fn plist_node_child_vector_push_back(
     if destination.is_null() {
         destination
     } else {
-        unsafe { (ops.copy)(destination, source) }
+        unsafe { plist_node_child_copy_construct(destination, source) }
     }
 }
 

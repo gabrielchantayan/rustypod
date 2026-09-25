@@ -41166,6 +41166,27 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083e9000
+    ghidra: FUN_083e9000
+    name: plist_node_child_range_copy
+    size: 56
+    sig: "PlistNode *plist_node_child_range_copy(const PlistNode *source, const PlistNode *end, PlistNode *destination)"
+    module: fp/plist_node_child_range_copy
+    status: ported
+    vars: {param_1/r0: source, param_2/r1: end, param_3/r2: destination, r4: destination, r5: source, r6: end}
+    renames: {FUN_0825c61c: plist_node_child_copy_construct}
+    notes: >-
+      Raw ARM is exactly 14 instructions at 0x083e9000-0x083e9037;
+      0x083e9038 begins an independent function. It construct-copies
+      0x28-byte PlistNode records from [source,end) to destination and
+      returns the advanced destination. Whole-image A32 immediate decoding
+      finds two inbound plain BL sites (0x083e3368 and 0x083e33b4), zero
+      predicated inbound BL sites, and one internal predicated BLNE to
+      plist_node_child_copy_construct @ 0x0825c61c. The port deliberately
+      dispatches that established unported copy-constructor seam through its
+      volatile operation table, retaining the target callee and allowing host
+      tests to supply a constructor.
+
   - address: 0x083e9c3c
     ghidra: FUN_083e9c3c
     name: cxx_string_vector_range_assign
