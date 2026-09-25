@@ -7179,6 +7179,44 @@ functions:
       identity is not invented. The reader status is returned, matching r0
       surviving the counted-reader wrapper.
 
+  # --- retailOS UI 16-byte resource-vector counted-string reader ---
+  - address: 0x08053768
+    ghidra: FUN_08053768
+    name: object_resource_vector16_counted_string
+    size: 144
+    sig: "i32 object_resource_vector16_counted_string(const void *object, i32 index, u16 *counted)"
+    module: ui/object_resource_vector16_counted_string
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: counted
+      r3: resource_vector
+      r5: backend_then_active_item
+      FUN_08051dc4: object_backend_for_kind (ported)
+      FUN_083d7694: vector_size_elem16 (ported)
+      FUN_080561b4: ui_tdat_flagged_plst (ported)
+      FUN_0808e16c: tagged_counter_try_increment (ported)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+      FUN_0809f744: tagged_counter_try_decrement (ported)
+    notes: >-
+      Raw osos.dec words from 0x08053768 through 0x080537f4 decode from
+      `stmdb sp!,{r4-r8,lr}` through `ldmia sp!,{r4-r8,pc}`; the next
+      separately entered function starts at 0x080537f8, proving the
+      144-byte extent. Whole-image ARM B/BL-immediate decoding finds exactly
+      three inbound plain bl calls at 0x08066acc, 0x0813c458, and
+      0x0813d35c, with no predicated BL callers. The body contains six
+      unconditional BL instructions: it clears counted[0], resolves the
+      kind-1/kind-2 backend, rejects null output, negative indices, and
+      indices outside object+0xec8's 16-byte vector with -50, resolves the
+      backend's flagged PLST active item, retains/releases its +0xcc inline
+      string pool, and reads the selected entry's first-word ID as a counted
+      UTF-16 string. Rust calls the existing verified seams; it passes zero
+      for string_pool_read_counted's dead fourth ABI argument because that
+      callee clears its local byte length before the preserved stock value
+      can be observed. Host tests cover negative/out-of-range rejection and
+      a valid zero-ID read with balanced pool locking.
+
   # --- retailOS UI object backend resolver (kind-1 self / kind-2 proxy) ---
   - address: 0x08051dc4
     ghidra: FUN_08051dc4
