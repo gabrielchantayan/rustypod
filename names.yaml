@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8968
+    ghidra: FUN_083e8968
+    name: record16_range_copy_if_destination_8968
+    size: 52
+    sig: "u32 *record16_range_copy_if_destination_8968(const u32 *source, const u32 *source_end, u32 *destination)"
+    module: cxx/record16_range_copy_if_destination_8968
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+      r4: fourth_word
+      r5: source_end
+      lr: destination_cursor
+      return/r0: destination
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x083e8968..0x083e899b: push {r4,r5,lr}; copy each 16-byte record with
+      conditional ldmne/stmne; then pop {r4,r5,pc}. The next independently
+      linked function begins at 0x083e899c. Full-image A32 decoding finds zero
+      inbound plain direct BL calls, zero inbound predicated direct BL calls,
+      and no body calls. The two nearby source call sites at 0x083e073c and
+      0x083e0778 target the separately linked byte-identical function at
+      0x083e899c, not this function. The loop forward-copies
+      [source,source_end) in 16-byte records only while destination is
+      non-NULL, advances both cursors after every record, and returns the
+      advanced destination cursor. Deliberate deviation: volatile Rust word
+      accesses preserve the retail grouped ordered load/store behavior and
+      prevent libc-copy substitution.
   - address: 0x083e899c
     ghidra: FUN_083e899c
     name: record16_range_copy_if_destination
