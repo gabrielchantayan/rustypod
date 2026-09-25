@@ -143914,6 +143914,29 @@ functions:
       order and returns the advanced output cursor. No deliberate behavioral
       deviations: Rust reuses the verified semantic callee, while LLVM may
       choose a different prologue or loop shape.
+  - address: 0x083e9aec
+    ghidra: FUN_083e9aec
+    name: word_insertion_sort_insert
+    size: 60
+    sig: "void word_insertion_sort_insert(u32 *slot, u32 value, WordOrder comparator)"
+    module: cxx/word_insertion_sort_insert
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: value
+      param_3/r2: comparator
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 body
+      0x083e9aec..0x083e9b27: the `pop {r4, r5, r6, r7, r8, pc}` at
+      0x083e9b24 ends it and the next real function starts at 0x083e9b28.
+      Full-image A32 decoding independently finds exactly two inbound
+      unconditional plain BL calls (0x083e83dc and 0x083ea760), zero
+      predicated BL calls, no outbound direct BL calls, and one indirect
+      `blx r6` comparator dispatch. The helper decrements from slot, calls
+      comparator(value, prior_word), and shifts prior words right while that
+      result is nonzero before writing value at the first zero result. Rust
+      preserves this comparator convention and creates no callee seam; there
+      are no deliberate deviations.
   - address: 0x083e9bdc
     ghidra: FUN_083e9bdc
     name: copy_word_triplets_returning_end
