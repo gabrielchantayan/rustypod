@@ -661,6 +661,9 @@ pub mod hints {
     // raw-u32 Showcase, slot queues, and queue-completion state fixture;
     // mappings never unmap, so no other test may reuse this hint.
     pub const SHOWCASE_PENDING_QUEUES_COMPLETE: usize = 0xda00_0000;
+    // 0xdc00_0000: dedicated to h264/strided_plane_copy's target-width source
+    // index and destination plane fixture; mappings never unmap.
+    pub const STRIDED_PLANE_COPY: usize = 0xdc00_0000;
     // 0xda80_0000: dedicated to app/showcase_initialization_complete's raw-u32
     // Showcase state fixture; mappings never unmap, so no other test may
     // share this hint.
