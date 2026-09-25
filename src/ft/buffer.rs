@@ -62,6 +62,29 @@ unsafe extern "C" fn firmware_backing_stream_tell(_io_context: u32, _position: *
 /// `names.yaml`; target builds dispatch to that verified retailOS address.
 pub static mut BACKING_STREAM_TELL: BackingStreamTellFn = firmware_backing_stream_tell;
 
+/// ABI of the unported backing-stream size helper at `0x0805b714`.
+pub type BackingStreamSizeFn = unsafe extern "C" fn(io_context: u32, size: *mut u64) -> i32;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_backing_stream_size(io_context: u32, size: *mut u64) -> i32 {
+    let size_query: BackingStreamSizeFn = core::mem::transmute(0x0805b714usize);
+    size_query(io_context, size)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_backing_stream_size(_io_context: u32, _size: *mut u64) -> i32 {
+    panic!("ft_buffered_stream_get_size requires backing size 0x0805b714")
+}
+
+/// Host-replaceable backing-size call. Target builds dispatch directly to the
+/// verified but unported retailOS wrapper at `0x0805b714`.
+pub static mut BACKING_STREAM_SIZE: BackingStreamSizeFn = firmware_backing_stream_size;
+
+#[inline(always)]
+unsafe fn backing_stream_size() -> BackingStreamSizeFn {
+    core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_SIZE))
+}
+
 #[inline(always)]
 unsafe fn backing_stream_tell() -> BackingStreamTellFn {
     core::ptr::read_volatile(core::ptr::addr_of!(BACKING_STREAM_TELL))
@@ -467,6 +490,47 @@ pub unsafe extern "C" fn ft_buffered_stream_buffered_bytes(
     }
 }
 
+/// ft_buffered_stream_get_size — original: `FUN_08042df4` @ `0x08042df4`
+/// (124 bytes; 3 verified plain `bl` calls and no predicated `bl` calls).
+///
+/// Queries the backing stream's 64-bit size. Output streams also query the
+/// current backing position, add their wrapping buffered output span, and
+/// retain the unsigned maximum as the stream size. Input streams retain the
+/// backing size unchanged.
+///
+/// Deliberate deviation: the unported backing-size wrapper at `0x0805b714`
+/// remains a volatile dispatch seam on host and an indirect dispatch to its
+/// verified retailOS entry on target. The port expresses ARM `adds`/`adc`
+/// arithmetic as wrapping `u64` addition.
+///
+/// # Safety
+///
+/// `stream` and `size` must be valid, aligned pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ft_buffered_stream_get_size")]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_get_size(
+    stream: *const FtBufferedStream,
+    size: *mut u64,
+) -> i32 {
+    let stream = &*stream;
+    let result = backing_stream_size()(stream.io_context, size);
+    if result != 0 || stream.is_input != 0 {
+        return result;
+    }
+
+    let mut position = 0;
+    let result = backing_stream_tell()(stream.io_context, &mut position);
+    if result != 0 {
+        return result;
+    }
+    let buffered_end = position.wrapping_add(ft_buffered_stream_buffered_bytes(stream) as u64);
+    if buffered_end > size.read() {
+        size.write(buffered_end);
+    }
+    0
+}
+
 /// ft_buffered_stream_reset_buffer_cursor — original: `FUN_08076b30` @
 /// `0x08076b30` (44 bytes; 4 verified direct inbound `bl` call sites: 3
 /// unconditional and 1 `bleq`).
@@ -506,10 +570,11 @@ mod tests {
     use parking_lot::MutexGuard;
     use super::{
         buffered_stream_tell, ft_buffered_stream_buffered_bytes, ft_buffered_stream_finalize,
-        ft_buffered_stream_flush, ft_buffered_stream_reset_buffer_cursor, BackingStreamSeekFn,
-        BackingStreamTellFn, BackingStreamWriteFn, BufferedStreamIoContextFinalizeFn,
-        FtBufferedStream, BACKING_STREAM_SEEK, BACKING_STREAM_TELL, BACKING_STREAM_WRITE,
-        BACKING_STREAM_TELL_TEST_LOCK, BUFFERED_STREAM_FINALIZE_TEST_LOCK,
+        ft_buffered_stream_flush, ft_buffered_stream_get_size, ft_buffered_stream_reset_buffer_cursor,
+        BackingStreamSeekFn, BackingStreamSizeFn, BackingStreamTellFn, BackingStreamWriteFn,
+        BufferedStreamIoContextFinalizeFn, FtBufferedStream, BACKING_STREAM_SEEK,
+        BACKING_STREAM_SIZE, BACKING_STREAM_TELL, BACKING_STREAM_TELL_TEST_LOCK,
+        BACKING_STREAM_WRITE, BUFFERED_STREAM_FINALIZE_TEST_LOCK,
         BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
     };
 
@@ -517,6 +582,9 @@ mod tests {
     static mut BACKING_POSITION: u64 = 0;
     static mut BACKING_CONTEXT: u32 = 0;
     static mut BACKING_CALLS: usize = 0;
+    static mut BACKING_SIZE_RESULT: i32 = 0;
+    static mut BACKING_SIZE: u64 = 0;
+    static mut BACKING_SIZE_CALLS: usize = 0;
     static mut WRITE_RESULT: i32 = 0;
     static mut WRITE_TRANSFERRED: u32 = 0;
     static mut WRITE_CONTEXT: u32 = 0;
@@ -531,12 +599,16 @@ mod tests {
 
     struct BackingSeam {
         _lock: MutexGuard<'static, ()>,
-        original: BackingStreamTellFn,
+        tell: BackingStreamTellFn,
+        size: BackingStreamSizeFn,
     }
 
     impl Drop for BackingSeam {
         fn drop(&mut self) {
-            unsafe { BACKING_STREAM_TELL = self.original; }
+            unsafe {
+                BACKING_STREAM_TELL = self.tell;
+                BACKING_STREAM_SIZE = self.size;
+            }
         }
     }
 
@@ -562,6 +634,12 @@ mod tests {
         BACKING_CONTEXT = context;
         position.write(BACKING_POSITION);
         BACKING_RESULT
+    }
+
+    unsafe extern "C" fn record_backing_size(_context: u32, size: *mut u64) -> i32 {
+        BACKING_SIZE_CALLS += 1;
+        size.write(BACKING_SIZE);
+        BACKING_SIZE_RESULT
     }
 
     unsafe extern "C" fn record_backing_write(
@@ -591,12 +669,20 @@ mod tests {
     fn install_backing() -> BackingSeam {
         let lock = BACKING_STREAM_TELL_TEST_LOCK.lock();
         unsafe {
-            let seam = BackingSeam { _lock: lock, original: BACKING_STREAM_TELL };
+            let seam = BackingSeam {
+                _lock: lock,
+                tell: BACKING_STREAM_TELL,
+                size: BACKING_STREAM_SIZE,
+            };
             BACKING_STREAM_TELL = record_backing_tell;
+            BACKING_STREAM_SIZE = record_backing_size;
             BACKING_RESULT = 0;
             BACKING_POSITION = 0;
             BACKING_CONTEXT = 0;
             BACKING_CALLS = 0;
+            BACKING_SIZE_RESULT = 0;
+            BACKING_SIZE = 0;
+            BACKING_SIZE_CALLS = 0;
             seam
         }
     }
@@ -731,6 +817,54 @@ mod tests {
         assert_eq!(unsafe { buffered_stream_tell(&stream, &mut position) }, -17);
         assert_eq!(position, 0x1122_3344_5566_7788);
         unsafe { assert_eq!(BACKING_CALLS, 1); }
+    }
+
+    #[test]
+    fn get_size_preserves_input_size_and_extends_output_size_without_overflow() {
+        let _seam = install_backing();
+        unsafe {
+            BACKING_SIZE = 0x100;
+            BACKING_POSITION = 0xf0;
+        }
+        let mut input = stream(1, 0x140, 0x100, 0x1ff);
+        input.io_context = 0x1234_5678;
+        let mut size = 0;
+        assert_eq!(unsafe { ft_buffered_stream_get_size(&input, &mut size) }, 0);
+        assert_eq!(size, 0x100);
+        unsafe {
+            assert_eq!(BACKING_SIZE_CALLS, 1);
+            assert_eq!(BACKING_CALLS, 0);
+        }
+
+        let output = stream(0, 0x40, 0, 0);
+        assert_eq!(unsafe { ft_buffered_stream_get_size(&output, &mut size) }, 0);
+        assert_eq!(size, 0x130);
+        unsafe { assert_eq!(BACKING_CALLS, 1); }
+
+        unsafe {
+            BACKING_SIZE = u64::MAX - 1;
+            BACKING_POSITION = u64::MAX;
+        }
+        let output = stream(0, 3, 0, 0);
+        assert_eq!(unsafe { ft_buffered_stream_get_size(&output, &mut size) }, 0);
+        assert_eq!(size, u64::MAX - 1);
+    }
+
+    #[test]
+    fn get_size_propagates_backing_errors_without_later_calls() {
+        let _seam = install_backing();
+        unsafe {
+            BACKING_SIZE = 0x7654;
+            BACKING_SIZE_RESULT = -17;
+        }
+        let stream = stream(0, 1, 0, 0);
+        let mut size = 0;
+        assert_eq!(unsafe { ft_buffered_stream_get_size(&stream, &mut size) }, -17);
+        assert_eq!(size, 0x7654);
+        unsafe {
+            assert_eq!(BACKING_SIZE_CALLS, 1);
+            assert_eq!(BACKING_CALLS, 0);
+        }
     }
     #[test]
     fn flush_writes_output_span_and_rejects_short_write() {
