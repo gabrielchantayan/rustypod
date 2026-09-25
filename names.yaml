@@ -144256,3 +144256,27 @@ functions:
       branch target directly instead of preserving the tail branch; this is
       required for a hookable Rust symbol and preserves the observed mutation
       order, including a fill pointer overlapping the destination.
+  - address: 0x083e94e4
+    ghidra: thunk_FUN_083e9510
+    name: pair_range_fill_after_cursor
+    size: 4
+    sig: "u32 (*pair_range_fill_after_cursor(u32 (*destination)[2], u32 count, const u32 (*fill)[2]))[2]"
+    module: cxx/pair_range_fill_after_cursor
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: count
+      param_3/r2: fill
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk at 0x083e94e4:
+      A32 `b 0x083e9510`. Its target enters the loop update; the loop
+      back-edge reaches the transfer at 0x083e94e8, `bx lr` at 0x083e9518
+      ends the target body, and 0x083e951c begins the next distinct function.
+      Raw whole-image A32 decoding verifies two inbound plain BL calls at
+      0x083e0870 and 0x083e0914, both unconditional, and zero predicated
+      direct BL calls. The thunk has no outbound calls. It first advances the
+      destination by one eight-byte pair, then for each nonzero count reloads
+      and stores a four-byte word, byte, and halfword from fill before
+      advancing the destination. Rust deliberately implements the verified
+      branch target directly for a hookable symbol, retaining that granular
+      volatile load/store order for overlapping fill and destination ranges.

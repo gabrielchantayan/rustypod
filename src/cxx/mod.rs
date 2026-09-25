@@ -75,6 +75,7 @@ pub mod deque_iterator_current_or_zero;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
 pub mod word_range_fill_if_destination;
+pub mod pair_range_fill_after_cursor;
 pub mod strided_record_remove_selector;
 pub mod record_40_copy_construct_range;
 pub mod segmented_iter_post_increment;
