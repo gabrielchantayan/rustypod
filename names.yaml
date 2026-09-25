@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e7dd8
+    ghidra: FUN_083e7dd8
+    name: string_object_word_upper_bound
+    size: 112
+    sig: "const StringObjectWord *string_object_word_upper_bound(const StringObjectWord *first, const StringObjectWord *last, const StringObject *key, const void *comparator)"
+    module: cxx/string_object_word_upper_bound
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: key
+      param_4/r3: comparator
+      r4: remaining_records
+      r5: half_remaining
+      r6: first
+      r7: middle
+      r8: key
+      return/r0: upper_bound
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte extent
+      0x083e7dd8..0x083e7e47: pop {r2-r8,pc} returns at the end, and the next
+      independently linked function starts with push {r2-r8,lr} at
+      0x083e7e48. Raw A32 decoding finds two plain unconditional body BL
+      instructions (__rt_sdiv at 0x08031568 and string_object_less at
+      0x083d6550), with zero predicated body BL instructions. Every word is
+      byte-identical to the already ported 112-byte copy at 0x083e7e48, so this
+      address deliberately hooks to its string_object_word_upper_bound symbol.
+      It computes the upper bound of key in sorted 12-byte StringObjectWord
+      records: while the count is positive, it compares key with the middle
+      record and retains the lower half only when key < middle, so equal keys
+      are skipped. The shared Rust port uses typed StringObjectWord cursor
+      arithmetic and native division instead of literal +0xc arithmetic and
+      the ADS division helper; valid contiguous vector ranges preserve the
+      same stride and quotient.
   - address: 0x083e7e48
     ghidra: FUN_083e7e48
     name: string_object_word_upper_bound

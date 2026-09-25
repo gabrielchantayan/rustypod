@@ -4,14 +4,17 @@ use super::string_object::StringObject;
 use super::string_object_less::string_object_less;
 use super::templates::StringObjectWord;
 
-/// `string_object_word_upper_bound` — original: `FUN_083e7e48` @ `0x083e7e48`.
+/// `string_object_word_upper_bound` — originals: `FUN_083e7dd8` @
+/// `0x083e7dd8` and byte-identical `FUN_083e7e48` @ `0x083e7e48`.
 ///
-/// Raw `osos.dec` establishes the exact **112-byte** extent
-/// `0x083e7e48..0x083e7eb7`: it returns with `pop {r2-r8,pc}`, and the next
-/// independently linked function begins with `push {r3-r9,sl,fp,lr}` at
-/// `0x083e7eb8`. The body has two plain unconditional direct `bl` calls
+/// Raw `osos.dec` establishes the exact **112-byte** extent for the assigned
+/// copy, `0x083e7dd8..0x083e7e47`: it returns with `pop {r2-r8,pc}`, and the
+/// next independently linked function begins with `push {r2-r8,lr}` at
+/// `0x083e7e48`. The body has two plain unconditional direct `bl` calls
 /// (`__rt_sdiv` @ `0x08031568` and `string_object_less` @ `0x083d6550`) and
-/// no predicated direct `bl` calls.
+/// no predicated direct `bl` calls. The following 112-byte copy at
+/// `0x083e7e48` has the same words, so both hook addresses deliberately share
+/// this one symbol.
 ///
 /// Searches `[first, last)` for the first record strictly greater than `key`.
 /// Each iteration divides the remaining count by two with signed truncation,
@@ -66,9 +69,10 @@ mod tests {
     }
 
     #[test]
-    fn finds_end_of_empty_and_duplicate_runs() {
+    fn finds_upper_bound_at_empty_between_and_duplicate_runs() {
         let mut apple = *b"apple\0";
         let mut banana = *b"banana\0";
+        let mut blueberry = *b"blueberry\0";
         let mut carrot = *b"carrot\0";
         let mut records = [
             record(apple.as_mut_ptr(), 1),
@@ -79,6 +83,7 @@ mod tests {
         let empty: [StringObjectWord; 0] = [];
         let banana_key = record(banana.as_mut_ptr(), 0);
         let apple_key = record(apple.as_mut_ptr(), 0);
+        let blueberry_key = record(blueberry.as_mut_ptr(), 0);
         let carrot_key = record(carrot.as_mut_ptr(), 0);
 
         unsafe {
@@ -92,6 +97,10 @@ mod tests {
             );
             assert_eq!(
                 string_object_word_upper_bound(records.as_ptr(), records.as_ptr().add(records.len()), &banana_key.string, core::ptr::null()),
+                records.as_ptr().add(3),
+            );
+            assert_eq!(
+                string_object_word_upper_bound(records.as_ptr(), records.as_ptr().add(records.len()), &blueberry_key.string, core::ptr::null()),
                 records.as_ptr().add(3),
             );
             assert_eq!(
