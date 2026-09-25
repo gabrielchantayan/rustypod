@@ -11342,6 +11342,33 @@ functions:
       retail address. The FixA description derives only from the verified
       literal, not an inferred subsystem identity.
 
+  # --- MemH handle reference decrement ---
+  - address: 0x0805a14c
+    ghidra: FUN_0805a14c
+    name: memh_handle_release
+    size: 52
+    sig: "u32 *memh_handle_release(u32 *handle_slot)"
+    module: heap/memh_handle_release
+    status: ported
+    renames:
+      param_1/r0: handle_slot
+      r2: handle
+      r1: refcount
+      FUN_0805d028: memh_handle_destroy
+    notes: >-
+      Raw osos.dec words at 0x0805a14c establish the exact 52-byte extent
+      through the final `bx lr` at 0x0805a17c; 0x0805a180 is the next distinct
+      `push {r3,r4-r9,lr}` function. Decoding every aligned ARM B/BL immediate
+      independently finds exactly three inbound plain bl callers
+      (0x080446cc, 0x080aa418, 0x080aa420) and no predicated bl callers.
+      The function returns a NULL slot unchanged; otherwise it reads the
+      target-width handle pointer from the slot and its signed +0x18 halfword
+      count. Counts <= 0 and > 1000 are unchanged. Counts 1..=1000 decrement,
+      with zero tail-branching to the already ported memh_handle_destroy.
+      Deliberate deviation: Rust makes an ordinary destructor call instead of
+      the retail tail branch; its u32 slot preserves four-byte target pointer
+      width on 64-bit host tests.
+
   # --- fixed-length byte range equality predicate ---
   - address: 0x0805d000
     ghidra: thunk_FUN_0805d018

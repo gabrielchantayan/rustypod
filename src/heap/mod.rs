@@ -37,6 +37,7 @@ pub mod indexed_pair_table_create;
 pub mod heap_poison;
 pub mod managed_handle;
 pub mod memh_handle;
+pub mod memh_handle_release;
 pub mod memh_buffer_create;
 pub mod memh_get_len;
 pub mod memh_set_len;
