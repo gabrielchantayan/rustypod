@@ -2179,6 +2179,9 @@ pub mod hints {
     // 0x80b1_0000: dedicated to app/entry_match_find_eligible's raw-u32
     // container, nested-object, and entry-list fixture; mappings never unmap.
     pub const ENTRY_MATCH_FIND_ELIGIBLE: usize = 0x80b1_0000;
+    // 0x80b2_0000: dedicated to app/entry_nested_liti_class_check's raw-u32
+    // entry, nested-container, and target fixture; mappings never unmap.
+    pub const ENTRY_NESTED_LITI_CLASS_CHECK: usize = 0x80b2_0000;
     // 0x80c0_0000 and 0x80d0_0000: dedicated to
     // ui/object_resource_counted_string's raw-u32 object and entry-table
     // fixtures; mappings never unmap, so no other user may share them.
