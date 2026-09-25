@@ -6053,6 +6053,29 @@ functions:
       the already ported tag-2 operator_delete @ 0x082aad24, then stores
       replacement. The host implementation deliberately uses native-width
       repr(C) pointers and the existing typed-vtable and heap-operation seams.
+  # --- optional vtable slot +4 callback ---
+  - address: 0x083e7424
+    ghidra: FUN_083e7424
+    name: optional_vtable_slot4_invoke
+    size: 36
+    sig: "void **optional_vtable_slot4_invoke(void **slot)"
+    module: cxx/optional_vtable_slot4_invoke
+    status: ported
+    renames:
+      param_1/r0: slot
+      slot_deref: object
+      object_vtable_plus_0x04: vtable_slot4_callback
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x083e7424 through pop {r4,pc} at 0x083e7444; the next
+      independently entered function begins at 0x083e7448. Full-image ARM
+      decoding finds exactly two inbound direct calls, both plain unconditional
+      bl at 0x08140714 and 0x0814071c; there are no predicated bl calls. The
+      body has no direct bl calls and one predicated indirect blxne through the
+      non-NULL object's vtable slot +0x04. It leaves slot unchanged and returns
+      it. The callback has no recovered semantic identity; Rust deliberately
+      invokes only the verified vtable slot and uses native-width host pointers
+      and vtable entries for valid fixtures.
   # --- owned StringObject replacement ---
   - address: 0x083e757c
     ghidra: FUN_083e757c
