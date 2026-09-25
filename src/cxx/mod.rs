@@ -208,6 +208,7 @@ pub mod opaque_result_destroy;
 pub mod opaque_result_owner_destroy;
 pub mod opaque_result_construct;
 pub mod opaque_record_destroy_and_release;
+pub mod doubly_linked_list_append;
 pub mod opaque_record_word_at_0c;
 pub mod opaque_record_word_at_10;
 pub mod opaque_collection_count;
