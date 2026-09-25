@@ -141667,3 +141667,28 @@ functions:
       __rt_udivmod exposes ADS r1 remainder through an out-pointer; the two
       unported call sites are typed address seams without an inferred callee
       identity. Host tests use a dedicated raw-u32 slab for pointer fields.
+
+  - address: 0x0805228c
+    ghidra: FUN_0805228c
+    name: opaque_tagged_object_word_at_20
+    size: 20
+    sig: "u32 opaque_tagged_object_word_at_20(const OpaqueTaggedObjectWordAt20 *object)"
+    module: cxx/opaque_tagged_object_word_at_20
+    status: ported
+    renames:
+      param_1/r0/r2: object
+      "object+0x00": opaque_tag
+      "object+0x20": payload
+      FUN_08057c2c: opaque_tagged_object_validate
+    notes: >-
+      Raw osos.dec establishes five ARM words at 0x0805228c..0x080522a0;
+      the next independently callable sibling accessor begins at 0x080522a4,
+      so Ghidra's 24-byte extent is four bytes too large. The body contains
+      one plain unconditional bl (0x08057c2c) and no predicated bl form.
+      Whole-image ARM decoding establishes three inbound plain bl callsites
+      and no predicated inbound forms. The callee returns one only when object
+      is nonnull and its first word equals literal 0x6974696c; this accessor
+      then returns object+0x20, otherwise zero. Deliberate deviation: the
+      unported validation helper is inlined as its verified null-and-tag
+      predicate, without assigning an unrecovered class identity or adding a
+      seam.
