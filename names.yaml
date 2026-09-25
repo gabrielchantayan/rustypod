@@ -5565,6 +5565,33 @@ functions:
       builds retain the exact literal tail veneer; host builds use a
       replaceable boundary to prove manager and flag forwarding, deliberately
       leaving the target's manager +0x20 context load unmodeled.
+  - address: 0x08038218
+    ghidra: thunk_EXT_FUN_22005228
+    name: ui_manager_current_context
+    size: 8
+    sig: "u8 *ui_manager_current_context(u8 *manager)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_EXT_FUN_22005228: ui_manager_current_context
+      EXT_FUN_22005228: ui_manager_current_context
+      param_1/r0: manager
+      uVar1/r0: context_state
+      uVar2/r0: current_context
+    notes: >-
+      Ghidra's 4-byte extent omits this ADS literal veneer target word: raw
+      osos.dec has ldr pc,[pc,#-4] (0xe51ff004) at 0x08038218 and literal
+      0x22005228 at 0x0803821c; the next veneer begins at 0x08038220, so the
+      true size is 8 bytes. The relocator at 0x080046e0 copies osos
+      0x08000000..0x0800aed8 into IRAM 0x22000000, making the literal target
+      the mirror of FUN_08005228 @ 0x08005228. Its three raw instructions
+      load manager +0x1c, load that object's +0x1c, then bx lr. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly three inbound calls,
+      all unconditional plain bl at 0x08201f84, 0x08201fdc, and 0x08202020,
+      with no predicated forms, direct tail branches, or aligned raw data-word
+      references. ARM builds retain the exact literal tail veneer; host builds
+      read target-width words directly so 64-bit host pointer width cannot
+      alter the two +0x1c offsets.
   - address: 0x0833dda8
     ghidra: FUN_0833dda8
     name: xor_6b_in_place
