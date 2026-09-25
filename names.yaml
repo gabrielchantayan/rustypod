@@ -143076,3 +143076,44 @@ functions:
       its cipher semantics while preserving the verified ABI. Host tests cover
       two-block chaining, all forwarded block-encryptor arguments, and the
       single-block edge. match.py reviewed after the ARM release build.
+
+  # --- I2S transfer channel deactivation ---
+  - address: 0x080080cc
+    ghidra: FUN_080080cc
+    name: i2s_transfer_channel_deactivate
+    size: 76
+    sig: "u32 i2s_transfer_channel_deactivate(i32 slot, i32 controller)"
+    status: identified
+    renames:
+      param_1/r0: slot
+      param_2/r1: controller
+      DAT_08008110: i2s_slot_one_register_base
+      DAT_08008114: i2s_slot_two_register_base
+    notes: >-
+      Raw ARM selects the literal register base for slot 1 or 2, clears bit 0
+      in the controller-indexed word at base + 0x108 + controller*0x20, writes
+      1 << controller to the base, and returns zero. Other slot values return
+      0x13. It is retained as a target callback for 0x080085fc.
+
+  # --- I2S transfer channel teardown ---
+  - address: 0x080085fc
+    ghidra: FUN_080085fc
+    name: i2s_transfer_channel_teardown
+    size: 72
+    sig: "u32 i2s_transfer_channel_teardown(i32 slot, i32 controller)"
+    module: util/i2s_transfer_channel_teardown
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: controller
+      FUN_08004c4c: i2s_transfer_slot_cleanup
+      FUN_080080cc: i2s_transfer_channel_deactivate
+      DAT_08008644: i2s_transfer_channel_active_table
+    notes: >-
+      Raw ARM spans 0x080085fc..0x08008644, then loads literal
+      0x22010000 at 0x08008644. It contains exactly two plain unconditional
+      BL instructions (to 0x08004c4c and 0x080080cc) and no predicated BL.
+      When slot is nonzero and controller is not -1, it calls both helpers in
+      order, clears byte [0x22010000 + slot*8 + controller - 8], and returns
+      zero. The Rust port preserves this behavior; the unported second helper
+      remains an observed-ABI target callback.

@@ -111,6 +111,7 @@ pub mod fixed_scale_parameters;
 pub mod interp_stack_pop_release;
 pub mod i32_abs_wrapping;
 pub mod i2s_transfer_slot;
+pub mod i2s_transfer_channel_teardown;
 pub mod i2s_transfer_slot_wait;
 pub mod is_tagged_c0;
 pub mod indexed_record_lookup;
