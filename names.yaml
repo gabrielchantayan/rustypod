@@ -144016,6 +144016,28 @@ functions:
       nearby callers operate on 12-byte-stride storage. Deliberate deviation:
       volatile word accesses and a unique target text section preserve the
       separately linked leaf rather than allowing LLVM to substitute or fold it.
+  - address: 0x083e96a0
+    ghidra: thunk_FUN_083e96b8
+    name: repeat_source_word_if_destination
+    size: 36
+    sig: "u32 *repeat_source_word_if_destination(u32 *destination, u32 count, const u32 *source)"
+    module: util/repeat_source_word_if_destination
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: count
+      param_3/r2: source
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent
+      0x083e96a0..0x083e96c3: the entry is `b 0x083e96b8`, which reaches the
+      loop test; `bx lr` at 0x083e96c0 ends the loop, and 0x083e96c4 begins
+      the next distinct function. Raw caller decoding verifies two inbound
+      unconditional plain BL calls and zero predicated direct BL calls; the
+      leaf has no outbound calls. For each nonzero count, it conditionally
+      reloads *source and stores it at destination, then advances destination
+      by one word and decrements count. Rust incorporates the entry branch,
+      returns the final r0 cursor despite Ghidra's void signature, and uses
+      volatile accesses to retain the observed per-iteration load/store order.
   - address: 0x083e96e8
     ghidra: thunk_FUN_083e9700
     name: word_range_fill_if_destination
