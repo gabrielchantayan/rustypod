@@ -143992,3 +143992,26 @@ functions:
       nearby callers operate on 12-byte-stride storage. Deliberate deviation:
       volatile word accesses and a unique target text section preserve the
       separately linked leaf rather than allowing LLVM to substitute or fold it.
+  - address: 0x083e96e8
+    ghidra: thunk_FUN_083e9700
+    name: word_range_fill_if_destination
+    size: 4
+    sig: "void word_range_fill_if_destination(u32 *destination, u32 count, const u32 *fill)"
+    module: cxx/word_range_fill_if_destination
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: count
+      param_3/r2: fill
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk at 0x083e96e8: A32
+      `b 0x083e9700`; the independently entered loop body occupies
+      0x083e96ec..0x083e9708 and 0x083e970c begins the next function.
+      Raw caller decoding verifies two inbound plain BL calls at 0x083e66d8
+      and 0x083e678c, and zero predicated direct BL calls. The thunk has no
+      outbound calls. Its branch target writes a freshly loaded fill word to
+      each destination word when the current destination is non-null, then
+      increments the destination. Rust deliberately implements that verified
+      branch target directly instead of preserving the tail branch; this is
+      required for a hookable Rust symbol and preserves the observed mutation
+      order, including a fill pointer overlapping the destination.
