@@ -141124,3 +141124,17 @@ functions:
       seam. Host tests cover a nontrivial block and all input/output alignments
       0..3 with output boundary sentinels. match.py reports the expected
       helper folding and LLVM-unrolled eight-round loop.
+
+  - address: 0x08056800
+    ghidra: FUN_08056800
+    name: calendar_update_fields
+    size: 208
+    sig: "void calendar_update_fields(const u8 *input, u32 selection)"
+    module: time/calendar_update_fields
+    status: ported
+    renames:
+      param_1/r0/r4: input
+      param_2/r1/r5: selection
+      local_20/sp: record
+    notes: >-
+      Raw osos.dec decoding establishes the exact 208-byte extent 0x08056800..0x080568d0; the next word opens an independent push {r4, lr} function. The body has five plain bl instructions (0x080642a4, 0x0806748c, 0x08031568 twice, and 0x0806ce94), zero predicated bl instructions, and no tail call. The raw-image inbound census is three plain bl calls (0x08098644, 0x080dc460, 0x0825b704), zero predicated bl calls, and no tail branches. The port initializes a 12-byte calendar-update record, conditionally replaces the two selected date groups, commits the valid record, and conditionally applies the initialized or signed-divided adjustment fields. FUN_080642a4, FUN_0806748c, and FUN_0806ce94 have no names.yaml identities; target builds call their verified retail addresses while host tests inject volatile dispatch seams. match.py reports the expected structural difference: LLVM uses dispatch-slot blx calls and strength-reduces the constant signed divisions.
