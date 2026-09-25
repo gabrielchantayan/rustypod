@@ -145419,3 +145419,29 @@ functions:
       by the callers and is deliberately represented as a typed callback, not
       a new seam. Host tests cover a left-only child, right-child selection,
       upward repair, and a singleton heap.
+
+  # --- fixed priority-record binary heap adjustment ---
+  - address: 0x083e7eb8
+    ghidra: FUN_083e7eb8
+    name: record_priority_heap_adjust
+    size: 136
+    sig: "void record_priority_heap_adjust(u32 *heap, i32 hole_index, i32 element_count, u32 value, const void *context)"
+    module: cxx/record_priority_heap_adjust
+    status: ported
+    renames:
+      param_1/r5: heap
+      param_2/r9/r6: hole_index
+      param_3/r7: element_count
+      param_4/r10: value
+      param_5/stack: context
+      r4: child_index
+    notes: >-
+      Raw osos.dec establishes the exact 136-byte extent 0x083e7eb8..0x083e7f40:
+      the final pop {r3,r4,r5,r6,r7,r8,r9,sl,fp,pc} is at 0x083e7f3c and
+      the next independently linked function begins with push at 0x083e7f40.
+      Full-image A32 decoding finds exactly two inbound unconditional plain BL
+      calls (0x082622f4 and 0x082624d4) and zero predicated BL calls. The
+      body directly calls 0x082a1d1c to order records by unsigned +0x1c then
+      signed +0x20, and 0x083e7d7c to sift the held value upward. The Rust
+      target retains those fixed-address callees; host builds faithfully model
+      them to test right-child selection and signed tiebreak behavior.

@@ -82,6 +82,7 @@ pub mod context_record_resolve;
 pub mod opaque_context_take_mode_one;
 pub mod decoder_begin_batch;
 pub mod dma_aligned_array_destroy;
+pub mod record_priority_heap_adjust;
 pub mod deque_layout_copy;
 pub mod deque_iterator_current_or_zero;
 pub mod deque_front_dispatch;
