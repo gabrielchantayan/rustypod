@@ -1912,6 +1912,9 @@ pub mod hints {
     // class-target fixture; mappings never unmap, so no other user may share
     // this hint.
     pub const LITI_ENTRY_NEXT: usize = 0xa200_0000;
+    // 0xa210_0000: dedicated to app/image_library_first_entry's raw-u32
+    // database fixture; mappings never unmap, so no other user may share it.
+    pub const IMAGE_LIBRARY_FIRST_ENTRY: usize = 0xa210_0000;
     // 0x2b00_0000: dedicated to crypto/buffered_writer_write's raw-u32
     // handle and page-state fixture; mappings never unmap, so no other user
     // may share this hint.

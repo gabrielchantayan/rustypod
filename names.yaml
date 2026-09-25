@@ -141692,3 +141692,28 @@ functions:
       unported validation helper is inlined as its verified null-and-tag
       predicate, without assigning an unrecovered class identity or adding a
       seam.
+
+  - address: 0x08052274
+    ghidra: FUN_08052274
+    name: image_library_first_entry
+    size: 24
+    sig: "u32 image_library_first_entry(const u8 *database)"
+    module: app/image_library_first_entry
+    status: ported
+    renames:
+      param_1/r0/r2: database
+      "database+0x18": first_entry
+      FUN_08057c2c: image_library_is_liti_class
+    notes: >-
+      Raw osos.dec decodes as mov r2, r0; push {lr}; bl 0x08057c2c; movs
+      r0, r0; ldrne r0, [r2, #0x18]; pop {pc}. The 24-byte Ghidra extent is
+      exact: the separately callable sibling at 0x0805228c starts with mov
+      r2, r0. The body contains one plain outbound bl and no predicated bl
+      form. Whole-image ARM decoding establishes three inbound plain bl
+      callsites at 0x080490d0, 0x08052594, and 0x0813e748, with no predicated
+      inbound forms. The callee returns one only when database is nonnull and
+      its first word equals literal 0x6974696c; this accessor then returns
+      database+0x18, otherwise zero. The Rust port calls the existing
+      image_library_is_liti_class implementation directly rather than
+      branching to retailOS; its aligned target-width load and reachable
+      control flow are unchanged.
