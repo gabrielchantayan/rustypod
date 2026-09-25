@@ -11517,6 +11517,38 @@ functions:
       BLNE walk, entry free, bzero call, and final free/tail structure; LLVM
       adds an ABI frame and uses different conditional branch encodings.
 
+  - address: 0x08049428
+    ghidra: FUN_08049428
+    name: magic_tagged_object_reset
+    size: 60
+    sig: "u32 magic_tagged_object_reset(u32 *object)"
+    module: cxx/magic_tagged_object_reset
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      "object+0x08": target
+      DAT_08049464: global_magic_tagged_object_mutex
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_0804939c: magic_tagged_object_destroy
+      FUN_0805cfb4: bzero
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte body
+      0x08049428..0x08049464; 0x08049464 is its literal-pool mutex address
+      0x08a774c0, and the next push-prologue at 0x08049468 begins the next
+      function. The body has two plain BL instructions (lock veneer
+      0x082621a8 and bzero 0x0805cfb4) plus one predicated BLNE to
+      magic_tagged_object_destroy at 0x0804939c; the final B goes to unlock
+      veneer 0x082621ac. It returns zero for NULL, otherwise locks the global
+      mutex, destroys a non-NULL object+0x08 target, zeroes 28 bytes from
+      object, then unlocks and forwards that return value. Deliberate
+      deviations: REGION_MUTEX_OPS represents the ported mutex boundary, and
+      Rust uses a normal unlock call rather than the retail tail branch. Host
+      tests cover NULL's no-lock early return and the locked zero-target
+      clear/unlock order. match.py reports the expected NULL early return,
+      conditional destroy, bzero, and final indirect unlock; the
+      REGION_MUTEX_OPS seam adds a frame and indirect lock/unlock calls.
+
   - address: 0x08048a0c
     ghidra: FUN_08048a0c
     name: plst_task_complete
