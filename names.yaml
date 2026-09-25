@@ -60,6 +60,28 @@ functions:
       deviations: Rust implements the loop-entry behavior directly rather
       than its branch and uses wrapping pointer arithmetic for a null
       destination.
+  - address: 0x083e9318
+    ghidra: thunk_FUN_083e9330
+    name: copy_word_range_if_destination_loop_entry_9318
+    size: 4
+    sig: "u32 *copy_word_range_if_destination_loop_entry_9318(const u32 *source, const u32 *end, u32 *destination)"
+    module: util/copy_word_range_if_destination_loop_entry_9318
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk extent
+      0x083e9318..0x083e931c: `b 0x083e9330` enters the loop test of the
+      separately entered 36-byte transfer body at 0x083e931c..0x083e9340.
+      The only two direct inbound calls are unconditional plain BLs at
+      0x083e5640 and 0x083e567c; no predicated BL calls target the thunk.
+      The loop entry conditionally copies 32-bit words forward while advancing
+      both pointers and returns the advanced destination. Deliberate
+      deviations: Rust implements the loop-entry behavior directly rather
+      than its branch and uses wrapping pointer arithmetic for a null
+      destination.
   - address: 0x0802769c
     ghidra: FUN_0802769c
     name: empty_destructor_0802769c
