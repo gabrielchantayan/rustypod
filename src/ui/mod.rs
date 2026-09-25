@@ -50,6 +50,7 @@ pub mod object_resource_max_ordinal_for_presence;
 pub mod query_object_display_name;
 pub mod backend_active_item;
 pub mod object_resource_counted_string;
+pub mod object_resource_vector16_counted_string;
 pub mod object_resource_string;
 pub mod object_resource_table_counted_string;
 pub mod object_resource_vector20_counted_string;

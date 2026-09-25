@@ -2215,6 +2215,11 @@ pub mod hints {
     pub const OBJECT_RESOURCE_TABLE_COUNTED_STRING: usize = 0x80f0_0000;
     pub const OBJECT_RESOURCE_VECTOR20_COUNTED_STRING: usize = 0x8100_0000;
     pub const OBJECT_RESOURCE_VECTOR24_COUNTED_STRING: usize = 0x8110_0000;
+    // 0x82a0_0000 and 0x82b0_0000: dedicated to
+    // ui/object_resource_vector16_counted_string's raw-u32 object and
+    // entry-table fixtures; mappings never unmap, so no other user may share them.
+    pub const OBJECT_RESOURCE_VECTOR16_COUNTED_STRING: usize = 0x82a0_0000;
+    pub const OBJECT_RESOURCE_VECTOR16_COUNTED_STRING_VALID: usize = 0x82b0_0000;
     // 0x8120_0000 and 0x8130_0000: dedicated to
     // cxx/red_black_tree_root_replace's target-layout root and node fixtures;
     // mappings never unmap, so no other user may share these hints.
