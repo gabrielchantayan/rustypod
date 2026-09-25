@@ -1567,6 +1567,10 @@ pub mod hints {
     // 0x4d00_0000: dedicated to ui/clear_pending_notify's target-width
     // object fixture; mappings never unmap, so no other user may share it.
     pub const UI_CLEAR_PENDING_NOTIFY: usize = 0x4d00_0000;
+    // 0x5c80_0000: dedicated to ui/tdat_flagged_plst's target-width context
+    // and linked-element fixture; mappings never unmap, so no other test may
+    // share it.
+    pub const TDAT_FLAGGED_PLST: usize = 0x5c80_0000;
     // 0x5100_0000: dedicated to ui/layout_apply_pending_offsets' raw-u32
     // entry-offset fixture; mappings never unmap, so no other user may
     // share this hint.
