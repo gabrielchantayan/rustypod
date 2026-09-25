@@ -9664,6 +9664,27 @@ functions:
       via SOFTFLOAT_OPS (pow10 0x08034228, ext_mul 0x08037534, ext_div
       0x080374d4 — next batch). ERANGE on |exp|>500; canonical inf flatten.
 
+  - address: 0x080373c8
+    ghidra: FUN_080373c8
+    name: extended_fp_normalize_round_tail
+    size: 220
+    sig: "internal extended-fp normalization and rounding tail (r0-r3, r6, r11 live inputs)"
+    module: fp
+    status: identified
+    notes: >-
+      Raw osos.dec A32 establishes the 220-byte executable extent
+      0x080373c8..0x080374a3; 0x080374a4 begins the next function. It has
+      three direct incoming call sites (0x08037390, 0x080374c8, and
+      0x08037528), one plain outgoing BL to the already-ported
+      __ieee_status at 0x083ece54, and zero predicated BL instructions.
+      The code normalizes/underflows a multiword extended-fp significand,
+      then uses the status stub and carry propagation to round it. This
+      Ghidra boundary is not an AAPCS function seam: it consumes live r6
+      (the guard/sticky word) and r11 (rounding state) without receiving
+      them in r0-r3, while its callers deliberately preserve those
+      registers across the BL. A Rust replacement entered through the
+      normal ABI cannot observe those inputs faithfully; no port was made.
+
   - address: 0x08036348
     ghidra: FUN_08036348
     name: scanf_float_engine
