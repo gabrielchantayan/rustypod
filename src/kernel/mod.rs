@@ -34,6 +34,7 @@ pub mod object3_allocate;
 pub mod resource_op;
 pub mod ready_wait;
 pub mod sync_mutex;
+pub mod semaphore_wait;
 pub mod sync_sem;
 pub mod pending_state_take;
 pub mod task;
