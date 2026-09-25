@@ -2352,6 +2352,9 @@ pub mod hints {
     // 0x6ef0_0000: dedicated to ui/plst_task_is_active's target-width task
     // element fixture; mappings never unmap, so no other port may share it.
     pub const PLST_TASK_IS_ACTIVE: usize = 0x6ef0_0000;
+    // 0x7000_0000: dedicated to fs/hfs_btree_lookup_key's target-width
+    // handle and control-block fixture; mappings never unmap.
+    pub const HFS_BTREE_LOOKUP_KEY: usize = 0x7000_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

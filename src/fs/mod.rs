@@ -82,6 +82,8 @@ pub mod hfs_btree_get_record;
 pub mod hfs_btree_prepare_record_request;
 /// HFS B-tree key-length decoder @ 0x080537f8.
 pub mod hfs_btree_key_length;
+/// Validated HFS B-tree key lookup wrapper with resident dispatch seams @ 0x08058ba4.
+pub mod hfs_btree_lookup_key;
 /// File-path layer failure-status accessor @ 0x0829dcf8.
 pub mod error_status;
 /// Mapped allocation-bitmap block completion @ 0x0806448c.
