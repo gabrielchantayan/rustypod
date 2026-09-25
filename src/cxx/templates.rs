@@ -4797,6 +4797,161 @@ pub unsafe extern "C" fn string_object_word_range_copy(
     }
     output
 }
+/// rotate_adjacent_string_object_ranges_if_nonempty — original:
+/// `FUN_083ea968` @ `0x083ea968` (32 bytes; raw extent
+/// `0x083ea968..0x083ea987`, with the next real function at `0x083ea988`).
+/// Raw whole-image A32 decoding finds two inbound plain `bl` sites
+/// (`0x083e86f8` and `0x083e98c8`) and no predicated inbound forms. Its body
+/// makes one predicated `blne` to the unported range-rotation helper at
+/// `0x083ea9a8`.
+///
+/// Invokes the retail string-object range rotation only when both adjacent
+/// half-open ranges `[first, middle)` and `[middle, last)` are nonempty.
+///
+/// ## Deliberate deviations
+///
+/// The range-rotation helper has no established Rust identity or port, so the
+/// target build calls its verified retail address. Host tests replace that
+/// call with a seam and verify the wrapper's exact predicate and arguments.
+type RotateAdjacentStringObjectRanges =
+    unsafe extern "C" fn(*mut u8, *mut u8, *mut u8, *mut u8, *mut u8, *mut u8);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn rotate_adjacent_string_object_ranges(
+    first: *mut u8,
+    middle: *mut u8,
+    last: *mut u8,
+) {
+    let rotate: RotateAdjacentStringObjectRanges = unsafe { core::mem::transmute(0x083e_a9a8usize) };
+    unsafe {
+        rotate(
+            first,
+            middle,
+            last,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        )
+    };
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_rotate_adjacent_string_object_ranges(
+    _first: *mut u8,
+    _middle: *mut u8,
+    _last: *mut u8,
+    _context: *mut u8,
+    _scratch0: *mut u8,
+    _scratch1: *mut u8,
+) {
+    panic!("install rotate-adjacent-string-object-ranges host seam")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut ROTATE_ADJACENT_STRING_OBJECT_RANGES: RotateAdjacentStringObjectRanges =
+    missing_rotate_adjacent_string_object_ranges;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn rotate_adjacent_string_object_ranges(
+    first: *mut u8,
+    middle: *mut u8,
+    last: *mut u8,
+) {
+    let rotate = unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(ROTATE_ADJACENT_STRING_OBJECT_RANGES))
+    };
+    unsafe {
+        rotate(
+            first,
+            middle,
+            last,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        )
+    };
+}
+
+/// # Safety
+///
+/// `first`, `middle`, and `last` must meet the unchecked range-rotation
+/// helper's object-range contract when `first != middle && middle != last`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rotate_adjacent_string_object_ranges_if_nonempty(
+    first: *mut u8,
+    middle: *mut u8,
+    last: *mut u8,
+) {
+    if first != middle && middle != last {
+        unsafe { rotate_adjacent_string_object_ranges(first, middle, last) };
+    }
+}
+
+#[cfg(test)]
+mod rotate_adjacent_string_object_ranges_if_nonempty_tests {
+    extern crate std;
+
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    static FIRST: AtomicUsize = AtomicUsize::new(0);
+    static MIDDLE: AtomicUsize = AtomicUsize::new(0);
+    static LAST: AtomicUsize = AtomicUsize::new(0);
+    static CONTEXT: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static SCRATCH0: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static SCRATCH1: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+    unsafe extern "C" fn record_rotate(
+        first: *mut u8,
+        middle: *mut u8,
+        last: *mut u8,
+        context: *mut u8,
+        scratch0: *mut u8,
+        scratch1: *mut u8,
+    ) {
+        CALLS.fetch_add(1, Ordering::SeqCst);
+        FIRST.store(first as usize, Ordering::SeqCst);
+        MIDDLE.store(middle as usize, Ordering::SeqCst);
+        LAST.store(last as usize, Ordering::SeqCst);
+        CONTEXT.store(context as usize, Ordering::SeqCst);
+        SCRATCH0.store(scratch0 as usize, Ordering::SeqCst);
+        SCRATCH1.store(scratch1 as usize, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn invokes_rotation_only_for_two_nonempty_ranges() {
+        unsafe {
+            ROTATE_ADJACENT_STRING_OBJECT_RANGES = record_rotate;
+            rotate_adjacent_string_object_ranges_if_nonempty(
+                0x1000usize as *mut u8,
+                0x1000usize as *mut u8,
+                0x3000usize as *mut u8,
+            );
+            rotate_adjacent_string_object_ranges_if_nonempty(
+                0x1000usize as *mut u8,
+                0x3000usize as *mut u8,
+                0x3000usize as *mut u8,
+            );
+            rotate_adjacent_string_object_ranges_if_nonempty(
+                0x1000usize as *mut u8,
+                0x2000usize as *mut u8,
+                0x3000usize as *mut u8,
+            );
+        }
+
+        assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(FIRST.load(Ordering::SeqCst), 0x1000);
+        assert_eq!(MIDDLE.load(Ordering::SeqCst), 0x2000);
+        assert_eq!(LAST.load(Ordering::SeqCst), 0x3000);
+        assert_eq!(CONTEXT.load(Ordering::SeqCst), 0);
+        assert_eq!(SCRATCH0.load(Ordering::SeqCst), 0);
+        assert_eq!(SCRATCH1.load(Ordering::SeqCst), 0);
+    }
+}
 /// advance_string_object_word_cursor — original: `FUN_083ea988` @ 0x083ea988
 /// (32 bytes; raw extent 0x083ea988..0x083ea9a8, with the separately linked
 /// next function opening at 0x083ea9a8). Six direct `bl` call sites are all
