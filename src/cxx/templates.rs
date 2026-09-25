@@ -6183,6 +6183,55 @@ pub unsafe extern "C" fn vector_copy_construct_range_elem16_alt(
     }
     output
 }
+/// vector_copy_construct_range_cxx_string_vector_entry — original:
+/// `FUN_083e8edc` @ 0x083e8edc (64 bytes, raw extent
+/// 0x083e8edc..0x083e8f1c; the next function starts with `push {r4-r8,lr}`
+/// at 0x083e8f1c).
+///
+/// Copies a half-open range of 0x10-byte C++ string-vector entries into
+/// uninitialized storage. For each entry, it calls the established
+/// `cxx_string_vector_entry_copy_ctor` seam at 0x083d7df4 with
+/// `(vector, output, source)`, then advances both cursors by 0x10. The loop
+/// stops only when the source cursor equals `last` and returns the advanced
+/// output cursor.
+///
+/// Raw A32 has two inbound unconditional plain `bl` sites (0x083e2324 and
+/// 0x083e2364), no predicated inbound calls, one plain body `bl` to
+/// 0x083d7df4, and no predicated body calls. The only other branches are the
+/// initial transfer to the equality test and its `bne` back-edge.
+///
+/// # Deliberate deviations
+///
+/// The per-entry constructor is already ported but retains its own
+/// four-byte-stride copy boundary, so this function calls the established
+/// volatile dispatch seam rather than duplicating that helper. Its dedicated
+/// text section prevents LLVM from folding this independently hookable,
+/// byte-identical range loop into
+/// [`vector_copy_construct_range_elem16_alt`].
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a whole number of contiguous readable
+/// 0x10-byte entries. `output` must be writable for the same number of
+/// entries whenever the configured constructor writes. `vector` is forwarded
+/// untouched.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_construct_range_cxx_string_vector_entry")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_construct_range_cxx_string_vector_entry(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+    vector: *mut VectorStorage,
+) -> *mut u8 {
+    while first != last {
+        (vector_copy_construct_elem16_alt_ops().copy_construct)(vector, output, first);
+        first = first.wrapping_add(0x10);
+        output = output.wrapping_add(0x10);
+    }
+    output
+}
+
 
 /// Firmware load address of `FUN_083d7ee8`, the 0x1c-byte element
 /// copy-construct helper [`vector_copy_construct_range_elem28`] calls once
@@ -12108,6 +12157,62 @@ mod tests {
             "the NULL-output guard lives in the helper, not the loop"
         );
     }
+    #[test]
+    fn copy_construct_range_cxx_string_vector_entry_preserves_cursor_protocol() {
+        let _guard = copy_construct_elem16_alt_guard();
+        unsafe { install_recording_copy_construct_elem16_alt() };
+        let source = [0x5au8; 2 * 0x10];
+        let mut destination = [0xa5u8; 2 * 0x10];
+        let mut vector = VectorStorage {
+            begin: core::ptr::null_mut(),
+            end: core::ptr::null_mut(),
+            end_of_storage: core::ptr::null_mut(),
+        };
+        let first = source.as_ptr();
+        let output = destination.as_mut_ptr();
+
+        assert_eq!(
+            unsafe {
+                vector_copy_construct_range_cxx_string_vector_entry(
+                    first,
+                    first.add(2 * 0x10),
+                    output,
+                    core::ptr::addr_of_mut!(vector),
+                )
+            },
+            unsafe { output.add(2 * 0x10) }
+        );
+        assert_eq!(
+            elem16_alt_copy_construct_calls(),
+            std::vec![
+                Elem16AltCopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: output as usize,
+                    source: first as usize,
+                },
+                Elem16AltCopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: unsafe { output.add(0x10) } as usize,
+                    source: unsafe { first.add(0x10) } as usize,
+                },
+            ]
+        );
+
+        unsafe { install_recording_copy_construct_elem16_alt() };
+        assert_eq!(
+            unsafe {
+                vector_copy_construct_range_cxx_string_vector_entry(
+                    first,
+                    first,
+                    output,
+                    core::ptr::addr_of_mut!(vector),
+                )
+            },
+            output
+        );
+        assert!(elem16_alt_copy_construct_calls().is_empty());
+    }
+
 
     static COPY_CONSTRUCT_ELEM28_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
