@@ -141014,3 +141014,31 @@ functions:
       field, key-length branch, zero option word, one call, and status return.
       Deliberate deviation: host builds use a volatile replaceable consumer
       seam; target builds call the resident address directly.
+
+  - address: 0x08058ba4
+    ghidra: FUN_08058ba4
+    name: hfs_btree_lookup_key
+    size: 152
+    sig: "i32 hfs_btree_lookup_key(u32 *btree_slot, const u8 *key, const u8 *lookup_arguments, void *operation_context, u32 *result)"
+    module: fs/hfs_btree_lookup_key
+    status: ported
+    renames:
+      param_1/r0: btree_slot
+      param_2/r1: key
+      param_3/r2: lookup_arguments
+      param_4/r3: operation_context
+      param_5/[sp+0x250]: result
+      "*btree_slot": btree_handle
+      "*btree_handle": control_block
+    notes: >-
+      Raw osos.dec words establish the exact 152-byte body from stmdb sp!,{r4-r8,lr}
+      at 0x08058ba4 through ldmia sp!,{r4-r8,pc} at 0x08058c38; the next
+      function begins at 0x08058c3c. Decoding all 38 words finds exactly three
+      plain unconditional BL instructions (0x08058be0 -> FUN_0804491c,
+      0x08058c0c -> FUN_08042cbc/bcopy, and 0x08058c20 -> FUN_0804112c)
+      and zero predicated BL instructions. It validates the HFS B-tree key,
+      copies its one- or two-byte-length-prefixed representation into a
+      524-byte temporary according to control_block+0x30 bit 1, calls the
+      opaque lookup dispatcher, writes its temporary result word, and
+      sign-extends the 16-bit status. Direct unported calls use volatile host
+      seams and verified resident addresses on target; bcopy uses its port.
