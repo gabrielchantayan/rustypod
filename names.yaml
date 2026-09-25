@@ -142045,3 +142045,22 @@ functions:
       0x0836b634 with payload. The latter two helpers have no names.yaml entries;
       target builds call their verified retail addresses and host tests use explicit
       callback seams. The Rust final ordinary call preserves the tail helper result.
+  - address: 0x0804af30
+    ghidra: FUN_0804af30
+    name: stream_operation_type_normalize
+    size: 80
+    sig: "u32 stream_operation_type_normalize(u32 stream_operation_code)"
+    module: app/stream_operation_type_normalize
+    status: ported
+    renames:
+      param_1/r0: stream_operation_code
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte extent
+      0x0804af30..0x0804af7f: `bx lr` at 0x0804af7c ends it, and
+      `push {r4-r8,lr}` at 0x0804af80 begins the next real function.
+      Whole-image A32 decoding finds three inbound plain BL calls at
+      0x0805f7a8, 0x082c5884, and 0x082c5958, with zero predicated forms.
+      The body has no plain or predicated direct BL calls. It maps codes 6
+      and 0x13 to 6, preserves 0x1c, maps 0x42, 0x43, 0x46, 0x71, and
+      0x74 to 0x74, and maps all other codes to zero. Rust uses a `match`
+      instead of the original comparison tree; both are side-effect-free.

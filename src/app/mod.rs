@@ -42,6 +42,7 @@ pub mod directional_resource_record_construct;
 pub mod application_message_post_global;
 pub mod application_global_slot_is_clear;
 pub mod stream_status_normalize;
+pub mod stream_operation_type_normalize;
 pub mod anchor_identifier_find;
 pub mod strided_record_find_by_key;
 pub mod context_dispatch_and_register_if_idle;
