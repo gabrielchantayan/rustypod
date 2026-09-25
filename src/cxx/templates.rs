@@ -4797,6 +4797,51 @@ pub unsafe extern "C" fn string_object_word_range_copy(
     }
     output
 }
+/// string_object_pair_range_assign — original: `FUN_083e9d84` @ 0x083e9d84
+/// (68 bytes; raw extent 0x083e9d84..0x083e9dc8, with the next separately
+/// linked function opening at 0x083e9dc8). Two inbound direct `bl` sites
+/// (both paths in 0x083e3ad8) are unconditional. Raw ARM contains two
+/// unconditional `bl 0x082774a8` instructions and no predicated `bl`.
+///
+/// Copy-assigns each 16-byte [`StringObjectPair`] in the half-open
+/// `[first, last)` range into initialized `output` storage. Each iteration
+/// assigns `first`, then `second`, advances both cursors by 16 target bytes,
+/// and returns the advanced output cursor. The loop tests cursor equality
+/// before its first dereference and has no overlap guard.
+///
+/// Deliberate deviation: typed iteration preserves the 16-byte ARM stride
+/// while keeping 64-bit host pointer fields disjoint. The direct calls use
+/// the existing Rust [`string_object_assign`] port rather than retail
+/// addresses.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit contiguous readable [`StringObjectPair`]
+/// records. `output` must designate equally many valid initialized writable
+/// records. Every embedded StringObject must satisfy
+/// [`string_object_assign`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_pair_range_assign(
+    mut first: *const StringObjectPair,
+    last: *const StringObjectPair,
+    mut output: *mut StringObjectPair,
+) -> *mut StringObjectPair {
+    while first != last {
+        string_object_assign(
+            core::ptr::addr_of_mut!((*output).first),
+            core::ptr::addr_of!((*first).first),
+        );
+        string_object_assign(
+            core::ptr::addr_of_mut!((*output).second),
+            core::ptr::addr_of!((*first).second),
+        );
+        first = first.add(1);
+        output = output.add(1);
+    }
+    output
+}
+
 /// rotate_adjacent_string_object_ranges_if_nonempty — original:
 /// `FUN_083ea968` @ `0x083ea968` (32 bytes; raw extent
 /// `0x083ea968..0x083ea987`, with the next real function at `0x083ea988`).
@@ -10445,6 +10490,50 @@ mod tests {
 
         let returned = unsafe {
             string_object_word_range_copy(core::ptr::null(), core::ptr::null(), output)
+        };
+
+        assert_eq!(returned, output);
+    }
+
+    #[test]
+    fn string_object_pair_range_assigns_first_then_second_and_returns_end() {
+        let source = [
+            string_pair(0, 0),
+            string_pair(0, 0),
+        ];
+        let mut output = [
+            string_pair(0x11, 0x12),
+            string_pair(0x21, 0x22),
+        ];
+        let _guard = record_string_object_assign_clears();
+        let output_start = output.as_mut_ptr();
+
+        let returned = unsafe {
+            string_object_pair_range_assign(source.as_ptr(), source.as_ptr().add(2), output_start)
+        };
+
+        let clears = unsafe {
+            (*core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CLEAR_CALLS)).clone()
+        };
+        assert_eq!(
+            clears,
+            std::vec![
+                core::ptr::addr_of_mut!(output[0].first) as usize,
+                core::ptr::addr_of_mut!(output[0].second) as usize,
+                core::ptr::addr_of_mut!(output[1].first) as usize,
+                core::ptr::addr_of_mut!(output[1].second) as usize,
+            ],
+            "the raw body calls assignment in member order for each record"
+        );
+        assert_eq!(returned, unsafe { output_start.add(2) });
+    }
+
+    #[test]
+    fn string_object_pair_range_assign_empty_does_not_dereference_bounds() {
+        let output = 0x1234usize as *mut StringObjectPair;
+
+        let returned = unsafe {
+            string_object_pair_range_assign(core::ptr::null(), core::ptr::null(), output)
         };
 
         assert_eq!(returned, output);
