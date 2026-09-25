@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e88cc
+    ghidra: FUN_083e88cc
+    name: record20_range_copy_if_destination
+    size: 60
+    sig: "u8 *record20_range_copy_if_destination(const u8 *source, const u8 *source_end, u8 *destination)"
+    module: cxx/record20_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+      r4: destination_cursor
+      r5: source_cursor
+      r6: source_end
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      return/r0: destination
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083e88cc..0x083e8907: push {r4,r5,r6,lr}; loop with
+      movs r0,r4; movne r2,#20; movne r1,r5; blne 0x08037df8; then
+      pop {r4,r5,r6,pc}. The next independently linked function begins at
+      0x083e8908. Raw A32 decoding finds two inbound plain direct BL calls
+      (0x083e01e4 and 0x083e0234), zero inbound predicated direct BL calls,
+      zero outbound plain BL calls, and one outbound predicated BLNE to the
+      IRAM memcpy veneer at 0x08037df8. The loop forward-copies
+      [source,source_end) in aligned 20-byte records only while destination
+      is non-NULL, advances both cursors after every record, and returns the
+      advanced destination cursor. Deliberate deviation: Rust calls the
+      already-ported memcpy_forward_words through a volatile function pointer
+      to retain the call and its word-aligned forward-copy behavior rather
+      than entering the IRAM veneer or permitting copy substitution.
   - address: 0x083e8908
     ghidra: FUN_083e8908
     name: record8_range_copy_if_destination
