@@ -5648,6 +5648,48 @@ pub unsafe extern "C" fn vector_fill_construct_n_elem32(
         output = output.wrapping_add(0x20);
     }
 }
+/// vector_fill_construct_n_elem16 — original: `FUN_083e95ec` @ 0x083e95ec
+/// (60 bytes; extent 0x083e95ec..0x083e9628, bounded by the next function's
+/// `push {r4-r8,lr}` at 0x083e9628; reference
+/// `ipod-decomp/decomp/c/038/083e95ec_FUN_083e95ec.c`).
+///
+/// `std::vector<T>` uninitialized-fill for `count` 0x10-byte elements. Each
+/// iteration copy-constructs `source` into the current output slot, then
+/// decrements the count and advances only that output cursor by 0x10. The
+/// source and vector arguments are invariant across calls.
+///
+/// **Call count**, verified from raw A32 words: two inbound direct plain `bl`
+/// sites (0x083e3970 and 0x083e3a24), no predicated inbound calls; the body
+/// has one plain `bl` (`ebffba2a` at 0x083e960c to 0x083d7ec0) and no
+/// predicated calls.
+///
+/// # Deviations
+///
+/// The unported element helper dispatches through
+/// [`VECTOR_COPY_CONSTRUCT_ELEM16_OPS`], as in
+/// [`vector_copy_construct_range_elem16`]: target builds call its firmware
+/// address and the host default is inert.
+///
+/// # Safety
+///
+/// `output` must be writable for `count` consecutive 0x10-byte elements
+/// whenever the installed helper writes. `source` must identify a readable
+/// element whenever `count` is nonzero.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_fill_construct_n_elem16(
+    mut output: *mut u8,
+    mut count: u32,
+    source: *const u8,
+    vector: *mut VectorStorage,
+) {
+    while count != 0 {
+        (vector_copy_construct_elem16_ops().copy_construct)(vector, output, source);
+        count -= 1;
+        output = output.wrapping_add(0x10);
+    }
+}
+
 
 
 /// Firmware load address of `FUN_083d7ec0`, the 0x10-byte element
@@ -11441,6 +11483,93 @@ mod tests {
             "the NULL-output guard lives in the helper, not the loop"
         );
     }
+    #[test]
+    fn fill_construct_n_elem16_reuses_source_and_strides_output() {
+        let _guard = copy_construct_elem16_guard();
+        unsafe { install_recording_copy_construct_elem16() };
+        let source = [0x5au8; 0x10];
+        let mut destination = [0xa5u8; 3 * 0x10];
+        let mut vector = VectorStorage {
+            begin: core::ptr::null_mut(),
+            end: core::ptr::null_mut(),
+            end_of_storage: core::ptr::null_mut(),
+        };
+        let output = destination.as_mut_ptr();
+
+        unsafe {
+            vector_fill_construct_n_elem16(
+                output,
+                3,
+                source.as_ptr(),
+                core::ptr::addr_of_mut!(vector),
+            );
+        }
+
+        assert_eq!(
+            elem16_copy_construct_calls(),
+            std::vec![
+                Elem16CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: output as usize,
+                    source: source.as_ptr() as usize,
+                },
+                Elem16CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: unsafe { output.add(0x10) } as usize,
+                    source: source.as_ptr() as usize,
+                },
+                Elem16CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: unsafe { output.add(2 * 0x10) } as usize,
+                    source: source.as_ptr() as usize,
+                },
+            ],
+            "the source is reused while only output advances"
+        );
+        assert!(destination.iter().all(|byte| *byte == 0xa5));
+    }
+
+    #[test]
+    fn fill_construct_n_elem16_zero_count_does_not_dispatch() {
+        let _guard = copy_construct_elem16_guard();
+        unsafe { install_recording_copy_construct_elem16() };
+
+        unsafe {
+            vector_fill_construct_n_elem16(
+                core::ptr::null_mut(),
+                0,
+                core::ptr::null(),
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert!(elem16_copy_construct_calls().is_empty());
+    }
+
+    #[test]
+    fn fill_construct_n_elem16_null_output_still_dispatches() {
+        let _guard = copy_construct_elem16_guard();
+        unsafe { install_recording_copy_construct_elem16() };
+
+        unsafe {
+            vector_fill_construct_n_elem16(
+                core::ptr::null_mut(),
+                2,
+                0x1234usize as *const u8,
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert_eq!(
+            elem16_copy_construct_calls(),
+            std::vec![
+                Elem16CopyConstruct { vector: 0, output: 0, source: 0x1234 },
+                Elem16CopyConstruct { vector: 0, output: 0x10, source: 0x1234 },
+            ],
+            "the NULL-output guard remains the helper's responsibility"
+        );
+    }
+
     #[test]
     fn copy_construct_range_string_pair_constructs_both_members_and_advances() {
         // Aligned, zero-payload words make both StringObject copy constructors
