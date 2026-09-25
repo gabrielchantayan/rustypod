@@ -22909,6 +22909,33 @@ functions:
       inclusive end; the permitted sub/add also wraps for the full
       0..=u32::MAX input range.
 
+  - address: 0x08042df4
+    ghidra: FUN_08042df4
+    name: ft_buffered_stream_get_size
+    size: 124
+    sig: "i32 ft_buffered_stream_get_size(const FtBufferedStream *stream, u64 *size)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r0: stream
+      param_2/r1: size
+      "[stream + 0x5]": is_input
+      "[stream + 0x8]": io_context
+      "[stream + 0x18]": cursor
+      "[stream + 0x1c]": buffer_start
+    notes: >-
+      Raw osos.dec decodes exactly 31 ARM words from 0x08042df4 through pop
+      {r2,r3,r4,r5,r6,pc} at 0x08042e6c; the independent push at 0x08042e70
+      starts buffered_stream_tell. The body has three plain direct BL calls
+      (0x0805b714, 0x0805b73c, and 0x08042ccc) and no predicated BL calls.
+      It first writes the backing size through size using the +8 I/O context.
+      Input streams return that result unchanged. Output streams retrieve the
+      backing position, add the wrapping buffered cursor span, and replace
+      size only when the resulting unsigned u64 is greater. The unported
+      validated size wrapper at 0x0805b714 remains a volatile host seam and
+      fixed-address target dispatch; the ported tell helper is used through
+      its existing volatile seam.
+
 
   - address: 0x08076b30
     ghidra: FUN_08076b30
