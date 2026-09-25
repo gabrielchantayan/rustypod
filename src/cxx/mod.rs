@@ -21,6 +21,7 @@ pub mod refcounted_ptr_range_assign;
 pub mod record_work_pump;
 pub mod work_record_teardown;
 pub mod string_object_word_merge;
+pub mod string_object_word_merge_pass;
 pub mod array_element_at;
 pub mod sorted_pointer_array_insert;
 pub mod word_insertion_sort_insert;
