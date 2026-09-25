@@ -143890,6 +143890,30 @@ functions:
       A target-only unique text section prevents LLVM from folding this distinct
       retail BL target into byte-identical fixed_record_range_copy and
       vector_record24_copy.
+  - address: 0x083e9ba4
+    ghidra: FUN_083e9ba4
+    name: refcounted_ptr_range_assign
+    size: 56
+    sig: "RefcountedBody **refcounted_ptr_range_assign(const RefcountedBody **first, const RefcountedBody **last, RefcountedBody **output)"
+    module: cxx/refcounted_ptr_range_assign
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: last
+      param_3/r2/r5: output
+      FUN_0839f28c: refcounted_ptr_copy_assign
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x083e9ba4..0x083e9bdc: `pop {r4,r5,r6,pc}` at 0x083e9bd8 ends the
+      body and the next independently linked function begins at 0x083e9bdc.
+      Full-image A32 decoding finds exactly two inbound unconditional plain BL
+      calls and zero predicated BL calls; the body makes one unconditional BL
+      per four-byte source slot, to the already ported
+      refcounted_ptr_copy_assign @ 0x0839f28c. It assigns each half-open
+      source range handle slot into the corresponding output slot in ascending
+      order and returns the advanced output cursor. No deliberate behavioral
+      deviations: Rust reuses the verified semantic callee, while LLVM may
+      choose a different prologue or loop shape.
   - address: 0x083e9bdc
     ghidra: FUN_083e9bdc
     name: copy_word_triplets_returning_end
