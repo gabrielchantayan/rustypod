@@ -119,10 +119,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::testing::{hints, try_map_u32_slab};
-    use parking_lot::Mutex;
-
-    static LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::{hints, try_map_u32_slab, BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK};
     static mut TABLES: *mut u32 = core::ptr::null_mut();
     static mut CLEARED: [u32; 2] = [u32::MAX; 2];
 
@@ -146,7 +143,7 @@ mod tests {
 
     #[test]
     fn stores_each_value_in_the_big_endian_cell_and_sets_mode_two_flag() {
-        let _lock = LOCK.lock();
+        let _lock = BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK.lock();
         let Some(base) = (unsafe { fixture() }) else { return; };
         unsafe {
             TABLES = base;
@@ -163,7 +160,7 @@ mod tests {
 
     #[test]
     fn clears_only_the_selected_flag_for_non_two_modes() {
-        let _lock = LOCK.lock();
+        let _lock = BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK.lock();
         let Some(base) = (unsafe { fixture() }) else { return; };
         unsafe {
             TABLES = base;

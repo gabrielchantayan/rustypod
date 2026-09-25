@@ -2397,6 +2397,9 @@ pub mod hints {
     // 0x6ff8_0000: dedicated to util/big_endian_bit_cell_store's target-width
     // table and cell fixtures; mappings never unmap, so no other port may use it.
     pub const BIG_ENDIAN_BIT_CELL_STORE: usize = 0x6ff8_0000;
+    // 0x6ec0_0000: dedicated to util/big_endian_bit_cell_store_and_mark_pending's
+    // target-width table and cell fixtures; mappings never unmap.
+    pub const BIG_ENDIAN_BIT_CELL_STORE_AND_MARK_PENDING: usize = 0x6ec0_0000;
     // 0x6ef0_0000: dedicated to ui/plst_task_is_active's target-width task
     // element fixture; mappings never unmap, so no other port may share it.
     pub const PLST_TASK_IS_ACTIVE: usize = 0x6ef0_0000;
@@ -2694,3 +2697,6 @@ pub static OBJECT_SLOT_D8_NOTIFY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mu
 pub static SHOW_TUNING_REGION_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// Serializes host tests that replace `cxx::draw_state_fill::DRAW_STATE_FILL_OPS`.
 pub static DRAW_STATE_FILL_OPS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+/// Serializes host tests that replace big-endian bit-cell store seams.
+pub static BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
