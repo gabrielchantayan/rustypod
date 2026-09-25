@@ -22874,6 +22874,22 @@ functions:
       pos = 0x%lx, size = 0x%lx" @ 0x0804fa1c). 1 call site
       (0x0807d52c), binary-scanned.
 
+  - address: 0x08042220
+    ghidra: FUN_08042220
+    name: buf_strdup
+    size: 108
+    sig: "char *BUF_strdup(const char *source)"
+    module: crypto/buf_strdup
+    status: ported
+    vars: {param_1: source, iVar1: length, iVar2: duplicate}
+    notes: >-
+      OpenSSL BUF_strdup. Raw words establish the exact 108-byte extent
+      0x08042220..0x0804228c, ending before strlcat, and three plain BL calls
+      with no predicated BL: unguarded strlen (0x08392478), traced_alloc
+      (0x08043c18), and __rt_memcpy via its 0x08037db0 veneer. NULL returns
+      NULL; otherwise strlen+1 is allocated with zero tags and copied including
+      the terminator. Allocation failure records ERR_LIB_BUF (7),
+      BUF_F_BUF_STRDUP (0x66), ERR_R_MALLOC_FAILURE (0x41), then returns NULL.
   - address: 0x0804228c
     ghidra: FUN_0804228c
     name: strlcat
