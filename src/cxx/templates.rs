@@ -49,6 +49,8 @@
 //! - [`advance_string_object_word_cursor`] — advances a cursor through the
 //!   12-byte StringObject-and-word records used by the range-copy template.
 //! - [`vector_copy_range_u32`] — copies a half-open range of 4-byte
+//! - [`vector_copy_range_elem24_alias_8f84`] — an independently hookable
+//!   second instantiation of the 24-byte trivial-record range copy.
 //!   trivially-copyable vector elements into initialized output storage.
 //! - [`vector_copy_range_record8`] — copies the named fields of 8-byte
 //!   vector records while leaving their padding byte intact.
@@ -5063,6 +5065,51 @@ pub unsafe extern "C" fn vector_copy_range_elem24(
     }
     output
 }
+/// vector_copy_range_elem24_alias_8f84 — original: `FUN_083e8f84` @
+/// 0x083e8f84 (60 bytes; raw extent 0x083e8f84..0x083e8fc0, bounded by the
+/// independently linked `push {r4-r8,lr}` at 0x083e8fc0).
+///
+/// Copies the half-open `[first, last)` range of aligned 24-byte vector
+/// records into `output`, advancing both cursors by 24 bytes and returning the
+/// advanced output cursor. Raw ARM contains one predicated `blne
+/// 0x08037df8` to the IRAM memcpy veneer and no plain `bl`; its two inbound
+/// call sites are the unconditional calls at 0x083e2c68 and 0x083e2c80.
+///
+/// Deliberate deviation: the IRAM veneer is represented by the already-ported
+/// [`memcpy_forward_words`] through a volatile function pointer, preventing
+/// LLVM from replacing the call with an inline copy. Its word-aligned,
+/// forward-copy behavior is identical for this 24-byte transfer. The
+/// dedicated text section prevents this independently hookable body from
+/// folding into [`vector_copy_range_elem24`].
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a range whose length is a multiple of 24.
+/// When `output` is non-NULL, `first` must be readable and `output` writable
+/// for that many bytes; both must be word-aligned. The original has no
+/// overlap guard and performs forward copies. For exactly one record, a NULL
+/// `output` is supported and leaves `first` unread.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_range_elem24_alias_8f84")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_elem24_alias_8f84(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            let copy = core::ptr::read_volatile(
+                &(memcpy_forward_words as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+            );
+            copy(output, first, 24);
+        }
+        first = first.wrapping_add(24);
+        output = output.wrapping_add(24);
+    }
+    output
+}
+
 /// An 8-byte vector record whose +5 byte is padding left untouched by the
 /// retailOS copy assignment.
 ///
@@ -13351,5 +13398,29 @@ mod tests {
             assert_eq!(fixture.accessor_calls, 3);
             assert_eq!(RELEASED_COUNT, 2);
         }
+    }
+    #[test]
+    fn copy_range_elem24_alias_8f84_copies_records_and_preserves_null_output_behavior() {
+        let source: [u8; 48] = core::array::from_fn(|index| (index as u8).wrapping_mul(13));
+        let mut output = [0xa5u8; 72];
+        unsafe {
+            let returned = vector_copy_range_elem24_alias_8f84(
+                source.as_ptr(),
+                source.as_ptr().add(source.len()),
+                output.as_mut_ptr().add(24),
+            );
+            assert_eq!(returned, output.as_mut_ptr().add(72));
+        }
+        assert_eq!(&output[..24], &[0xa5; 24]);
+        assert_eq!(&output[24..72], &source);
+
+        let returned = unsafe {
+            vector_copy_range_elem24_alias_8f84(
+                core::ptr::null(),
+                24usize as *const u8,
+                core::ptr::null_mut(),
+            )
+        };
+        assert_eq!(returned, 24usize as *mut u8);
     }
 }

@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8f84
+    ghidra: FUN_083e8f84
+    name: vector_copy_range_elem24_alias_8f84
+    size: 60
+    sig: "u8 *vector_copy_range_elem24_alias_8f84(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: output_cursor
+      r5: source_cursor
+      r6: last
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte extent
+      0x083e8f84..0x083e8fc0: the next independently linked function begins
+      `push {r4-r8,lr}` at 0x083e8fc0. The loop copies [first,last) in
+      0x18-byte units only when the current output cursor is non-NULL, then
+      advances both cursors and returns output. Raw A32 decoding establishes
+      two inbound unconditional plain BL calls (0x083e2c68, 0x083e2c80), zero
+      inbound predicated BL calls, zero outbound plain BL calls, and one
+      outbound predicated BLNE at 0x083e8fa4 to iram_memcpy_veneer
+      (0x08037df8). The port calls the already-ported memcpy_forward_words
+      through a volatile function pointer to retain the forward word-copy
+      operation; a unique text section prevents folding with the identical
+      0x083e8ba0 instantiation. Host tests cover two records and the
+      one-record NULL-output path, where source is deliberately unread.
   - address: 0x083e9138
     ghidra: thunk_FUN_083e9150
     name: copy_range_nonnull_destination_loop_entry_9138
