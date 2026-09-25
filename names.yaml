@@ -141923,3 +141923,28 @@ functions:
       byte result to 0. Target builds retain the verified 0x0809b644 call;
       host builds share its existing recording seam. No identity beyond the
       helper's verified byte-return role is asserted.
+  - address: 0x0804caa8
+    ghidra: FUN_0804caa8
+    name: doubly_linked_list_append
+    size: 32
+    sig: "void doubly_linked_list_append(DoublyLinkedList *list, DoublyLinkedListNode *node)"
+    module: cxx/doubly_linked_list_append
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: node
+      "list+0x00": head
+      "list+0x04": tail
+      "node+0x00": previous
+      "node+0x04": next
+    notes: >-
+      Raw osos.dec establishes the exact eight-word, 32-byte extent
+      0x0804caa8..0x0804cac8; the next independent function begins with
+      `push {r4-r11,lr}` at 0x0804cac8. A full A32 decode finds exactly three
+      inbound unconditional BL calls at 0x0804c08c, 0x0804d688, and
+      0x0804d8dc, with no predicated BL calls. The leaf has no calls. It
+      appends node to the target's two-word doubly linked-list header: save
+      the old tail to node.previous, clear node.next, install node as head
+      when empty or old_tail.next otherwise, then set list.tail. Rust uses
+      repr(C) pointer fields, preserving adjacent target words on ARM while
+      using native pointers in host tests; no behavioral deviation.
