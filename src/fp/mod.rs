@@ -16,4 +16,5 @@ pub mod fp_interpolate;
 pub mod fixed16_vec3;
 pub mod fp_fmuldiv;
 pub mod fp_misc;
+pub mod plist_node_child_range_copy;
 pub mod fp_scalb;
