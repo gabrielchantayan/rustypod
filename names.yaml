@@ -15561,6 +15561,30 @@ functions:
       ordinary slot words, and verify the hook's status result returns
       unchanged. match.py shows the expected hook-call-vs-literal-veneer
       structural difference.
+  - address: 0x08037e48
+    ghidra: thunk_EXT_FUN_22003ea0
+    name: task_lock
+    size: 8
+    sig: "usize task_lock(usize id)"
+    module: kernel/task_lock
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003ea0: task_lock
+      DAT_08037e4c: task_lock_rom_target
+    notes: >-
+      Raw osos.dec words prove this is the complete 8-byte ADS literal veneer:
+      e51ff004 (`ldr pc,[pc,#-4]`) at 0x08037e48 and target word 0x22003ea0
+      at 0x08037e4c; Ghidra's four-byte extent omits the literal, and the
+      next veneer begins at 0x08037e50. Independent ARM B/BL decoding finds
+      exactly three plain bl callers (0x080564c0, 0x080564f4, 0x0809c7b4)
+      and zero predicated bl calls, tail branches, or data references. The
+      veneer forwards r0 unchanged and returns r0 from the ROM target. Its
+      IRAM mirror at 0x08003ea0 loads a kernel object pointer from
+      0x08a24108[id]; callers discard that result except mutex deletion,
+      which accepts 0 and 0xffffffff as empty-slot sentinels. Deliberate
+      deviation: mask-ROM cannot be called directly from portable Rust, so
+      the port dispatches through the volatile ROM_KERNEL task_lock hook;
+      host tests verify ordinary and all-ones ids and the returned r0 word.
   - address: 0x08037e50
     ghidra: thunk_EXT_FUN_2200408c
     name: task_unlock
