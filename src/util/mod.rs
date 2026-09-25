@@ -49,6 +49,7 @@ pub mod copy_u32_pair_if_destination;
 pub mod copy_word_range_if_destination_tail_entry;
 pub mod copy_halfword_range_if_destination;
 pub mod copy_word_range_if_destination;
+pub mod copy_word_range_if_destination_sibling;
 pub mod relocation_word_range_copy;
 pub mod copy_word_range_if_destination_loop_entry;
 pub mod copy_word_range_if_destination_loop_entry_9318;

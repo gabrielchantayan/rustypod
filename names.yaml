@@ -10495,6 +10495,32 @@ functions:
       entry branch into a cmp/beq prologue; the loop body is instruction-for-
       instruction identical (modulo ip vs r3 scratch).
 
+  - address: 0x083e92a0
+    ghidra: thunk_FUN_083e92b8
+    name: copy_word_range_if_destination_sibling
+    size: 40
+    sig: "u32 *copy_word_range_if_destination_sibling(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_word_range_if_destination_sibling
+    status: ported
+    notes: >-
+      Ghidra reports a 4-byte thunk at the entry; raw words establish
+      `b 0x083e92b8`, whose loop back-edge reaches the word transfer at
+      0x083e92a4, making the complete callable extent
+      0x083e92a0..0x083e92c8 (40 bytes; next real function starts at
+      0x083e92c8). Raw decoding finds exactly two inbound direct BLs
+      (0x083e524c and 0x083e5288), both unconditional; no predicated BLs.
+      This is the byte-identical sibling of copy_word_range_if_destination
+      @ 0x083e9278: it copies [source,end) forward only when destination is
+      non-NULL, advances destination regardless, and returns it. The
+      implementation folds the entry branch into the loop and uses wrapping
+      pointer arithmetic for the firmware's null-destination address advance;
+      volatile word operations preserve the ordered transfer and prevent a
+      libc-copy substitution.
+
   - address: 0x083e93c8
     ghidra: thunk_FUN_083e93e0
     name: copy_range_if_destination
