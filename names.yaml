@@ -1048,6 +1048,7 @@ functions:
       r1,r1,#0x94; b 0x083b50c8`; 0x0822b060 is the next real function
       boundary. Thus this 12-byte thunk copy-constructs dst from the
       source object's +0x894 shared-cell field. Whole-image A32 decoding
+
       finds three inbound unconditional plain BL calls (0x081b70ec,
       0x081cbe58, and 0x08220434), zero predicated BL calls, and no
       outbound BL calls. The resolved target is the already ported
@@ -1056,6 +1057,30 @@ functions:
       Rust inlines the verified tail target rather than creating a call
       seam, keeping this veneer independently hookable; host fixtures use
       low-address raw-u32 storage because firmware pointers are 32-bit.
+  - address: 0x083e9eb8
+    ghidra: FUN_083e9eb8
+    name: copy_word_range
+    size: 24
+    sig: "u32 *copy_word_range(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_word_range
+    status: ported
+    notes: >-
+      Raw extent is exactly 24 bytes, 0x083e9eb8..0x083e9ed0: `cmp r0,r1;
+      ldrne r3,[r0],#4; strne r3,[r2],#4; bne 0x083e9eb8; mov r0,r2; bx lr`.
+      The next distinct function begins at 0x083e9ed0 with `push
+      {r0-r6,lr}`. This copies aligned words over the half-open range
+      [source,end) in forward load/store order and returns the advanced
+      destination. Raw caller decoding finds exactly two inbound BLs:
+      unconditional `bl` at 0x08181908 and predicated `blne` at 0x0817ea10;
+      no other inbound BLs. Ghidra omits the latter's register arguments, but
+      the decoded caller sets r0=r2+4 and uses live r1/r2 as end/destination.
+      Volatile accesses deliberately preserve the ordered transfer and prevent
+      LLVM libc-copy substitution; otherwise the Rust implementation has no
+      deviations.
   - address: 0x0822b060
     ghidra: thunk_FUN_08214368
     name: object_set_word_0x20
