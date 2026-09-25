@@ -143274,3 +143274,23 @@ functions:
       site is not present in the disassembly. Do not replace this veneer
       until the caller flag invariant and the four predicated instructions'
       intended effect are independently established.
+  - address: 0x08003838
+    ghidra: thunk_FUN_080d43e0
+    name: opaque_tail_dispatch
+    size: 4
+    sig: "void opaque_tail_dispatch(u32 first_argument)"
+    module: app/opaque_tail_dispatch
+    status: ported
+    renames:
+      param_1/r0: first_argument
+      DAT_0800383c: opaque_retail_target (0x080d43e0)
+    notes: >-
+      Raw osos.dec establishes the four-byte veneer at 0x08003838:
+      `ldr pc,[pc,#-4]`; the following word at 0x0800383c is its
+      0x080d43e0 target, and 0x08003840 begins the next independent veneer.
+      Independent full-image A32 BL decoding finds three inbound plain BL
+      calls (0x08005f58, 0x08005f60, and 0x08006a98) and zero predicated BL
+      calls. The target has no names.yaml identity; this port therefore
+      preserves the literal tail dispatch without inventing its signature.
+      Host tests model only the verified r0 forwarding contract; ARM builds
+      retain the exact literal veneer and preserve all remaining ABI state.
