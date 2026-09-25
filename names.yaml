@@ -1057,6 +1057,28 @@ functions:
       Rust inlines the verified tail target rather than creating a call
       seam, keeping this veneer independently hookable; host fixtures use
       low-address raw-u32 storage because firmware pointers are 32-bit.
+  - address: 0x083e9ea0
+    ghidra: FUN_083e9ea0
+    name: word_range_copy
+    size: 24
+    sig: "u32 *word_range_copy(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/word_range_copy
+    status: ported
+    notes: >-
+      Raw extent is exactly 24 bytes, 0x083e9ea0..0x083e9eb8: `cmp r0,r1;
+      ldrne r3,[r0],#4; strne r3,[r2],#4; bne 0x083e9ea0; mov r0,r2; bx lr`.
+      The next real function boundary is the identical 24-byte helper at
+      0x083e9eb8. It copies aligned words over [source,end) in forward
+      load/store order and returns the advanced destination. Raw caller
+      decoding finds exactly two inbound plain `bl` calls (0x083de2b4 and
+      0x083de438), zero predicated `bl` calls, and no outbound calls. LLVM
+      folds the byte-identical Rust body with copy_word_range, while retaining
+      word_range_copy as an exported alias; volatile accesses preserve ordered
+      transfer and prevent libc-copy substitution.
   - address: 0x083e9eb8
     ghidra: FUN_083e9eb8
     name: copy_word_range
