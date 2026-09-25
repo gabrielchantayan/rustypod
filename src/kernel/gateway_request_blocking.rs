@@ -176,6 +176,41 @@ pub unsafe extern "C" fn gateway_request_empty_tag5() {
     task_lock::rom_sem_signal(REQUEST_LOCK);
 }
 
+/// gateway_request_tag1_result — original: FUN_08047d90 @ 0x08047d90 (100
+/// bytes; three verified unconditional incoming `bl` call sites, no
+/// predicated calls). Waits for gateway readiness, then builds the tag-1
+/// nine-word request frame `{0, 0, 0, 0, 1, payload, pad, result, 1}` and
+/// sends it through the mode-1 mailbox gateway while kernel semaphore 9 is
+/// held. The writable dispatcher fills the result word, which becomes r0.
+/// Deliberate deviation: ARM leaves the pad and result words uninitialized;
+/// Rust zeros them before dispatch, giving a defined zero result if the
+/// dispatcher does not write the result word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_request_tag1_result(payload: u32) -> u32 {
+    (ready_wait())();
+    let mut frame: [u32; FRAME_SLOTS] = [
+        0,
+        0,
+        0,
+        0,
+        1,
+        payload,
+        0, // padding (uninitialized in the original)
+        0, // dispatcher result (uninitialized in the original)
+        1,
+    ];
+    task_lock::rom_sem_wait(REQUEST_LOCK);
+    mailbox_send_gateway_mode1(
+        GATEWAY_MAILBOX,
+        frame.as_mut_ptr() as usize as u32,
+        GATEWAY_PRIORITY,
+        GATEWAY_SEMAPHORE,
+    );
+    task_lock::rom_sem_signal(REQUEST_LOCK);
+    frame[7]
+}
+
 
 /// gateway_request_blocking — original: FUN_08048000 @ 0x08048000 (100
 /// bytes). Waits for the ROM gateway to report ready, then posts a tag-0
@@ -375,6 +410,20 @@ mod tests {
             assert_ne!(request[6], 0, "frame pointer");
             assert_eq!(request[7], 1, "mode");
             assert_eq!(request[8], 0, "trailing mode word");
+        }
+    }
+
+    /// A dispatcher that does not supply tag-1's result leaves the Rust
+    /// deliberate-deviation value defined while preserving the full bracket.
+    #[test]
+    fn tag1_result_request_returns_zero_when_dispatcher_leaves_result_unwritten() {
+        let _installed = install();
+        unsafe {
+            assert_eq!(gateway_request_tag1_result(0xffff_fffe), 0);
+            assert_eq!(*addr_of!(CALL_LOG), ["ready", "wait", "dispatch", "signal"]);
+            assert_eq!(*addr_of!(WAIT_ARG), REQUEST_LOCK);
+            assert_eq!(*addr_of!(SIGNAL_ARG), REQUEST_LOCK);
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 1);
         }
     }
 
