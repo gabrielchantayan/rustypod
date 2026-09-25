@@ -15578,6 +15578,31 @@ functions:
       kernel_create_dispatch (e70), tick_elapsed (eb8), irq_fiq_disable
       (ed8), tick_delay (ef0, 23 callers).
 
+  - address: 0x08003fd0
+    ghidra: FUN_08003fd0
+    name: kernel_semaphore_wait
+    size: 180
+    sig: "u32 kernel_semaphore_wait(u32 semaphore_id)"
+    module: kernel/semaphore_wait
+    status: ported
+    vars: {param_1: semaphore_id, DAT_08004084: semaphore_table, DAT_08004088: current_task_slot, local_30: request_service, local_2c: request_status, local_28: request_semaphore_id, local_24: request_wait_mode, local_20: request_zero, FUN_08003660: message_dispatch_veneer}
+    notes: >-
+      Raw ARM establishes the true 180-byte extent: 0x08003fd0 through the
+      two literal words at 0x08004084/0x08004088; the next push-lr prologue
+      starts at 0x0800408c. Decoding every instruction word in that extent
+      finds five unconditional plain bl instructions, three unique callee
+      addresses (0x080034f8, 0x08003500, 0x08003660), and no predicated bl.
+      The 32-byte record at 0x08a1be28 + semaphore_id*32 is entered through
+      the 0x080034f8 foreign veneer. If owner +0 is zero, acquisition count
+      +24 is incremented, owner is set from 0x2200acf4, and u16 recursion
+      count +4 becomes one before the 0x08003500 leave veneer returns zero.
+      Matching ownership increments both counters and returns ten. Otherwise
+      it leaves first, dispatches writable service-14 request {14, 0,
+      semaphore_id, 1, 0} through 0x08003660, then returns request word one.
+      Rust ports the table mutations with exact target-width offsets;
+      undocumented enter/leave veneers and the foreign dispatcher remain
+      volatile installable seams, allowing host tests to verify all three
+      ownership paths and the dispatched record.
   - address: 0x08037e08
     ghidra: thunk_EXT_FUN_22003fd0
     name: rom_sem_wait
