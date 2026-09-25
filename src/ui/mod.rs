@@ -127,6 +127,7 @@ pub mod tdat_first_plst;
 pub mod tdat_flagged_plst;
 pub mod tdat_element_teardown;
 pub mod tdat_node_find;
+pub mod tdat_node_lookup;
 pub mod element_reference;
 pub mod operation_destroy;
 pub mod element_reference_item;
