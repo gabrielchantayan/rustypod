@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e9200
+    ghidra: thunk_FUN_083e9218
+    name: copy_word_range_if_destination_loop_entry_9200
+    size: 4
+    sig: "u32 *copy_word_range_if_destination_loop_entry_9200(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_word_range_if_destination_loop_entry_9200
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk extent
+      0x083e9200..0x083e9204: `b 0x083e9218` enters the loop test of the
+      separately entered 36-byte transfer body at 0x083e9204..0x083e9228.
+      The next real function boundary is 0x083e9228. Whole-image raw A32
+      decoding finds exactly two inbound unconditional plain BL calls
+      (0x083e4c10 and 0x083e4c4c), zero predicated BL calls, and no outbound
+      calls. The loop entry conditionally copies aligned 32-bit words forward
+      while advancing both cursors and returns the advanced destination.
+      Deliberate deviations: Rust implements the branch entry directly; a
+      unique no-code assembly barrier retains an independently hookable
+      symbol, wrapping pointer arithmetic models a null destination cursor,
+      and volatile accesses retain the ordered transfer without libc
+      substitution.
   - address: 0x083e9228
     ghidra: thunk_FUN_083e9240
     name: copy_word_range_if_destination_loop_entry_9228
