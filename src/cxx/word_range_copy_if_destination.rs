@@ -87,10 +87,76 @@ pub unsafe extern "C" fn word_range_copy_if_destination_alias_9440(
     destination
 }
 
+/// `word_range_copy_if_destination_alias_93f0` — retailOS
+/// `thunk_FUN_083e9408` at load address `0x083e93f0` (40 bytes; raw extent
+/// `0x083e93f0..0x083e9418`). Raw ARM establishes a four-byte `b 0x083e9408`
+/// entry, whose target is the range-test loop header; `0x083e9418` starts the
+/// next independently linked function. Full-image A32 decoding finds two
+/// inbound direct plain `bl` calls (`0x083e6438`, `0x083e6474`) and zero
+/// predicated direct `bl` calls. The thunk has no outbound calls.
+///
+/// The target copies the half-open `[source, source_end)` word range forward
+/// when the current destination is non-null, advances both cursors, and
+/// returns the final destination. Deliberate deviation: this hookable export
+/// implements the verified branch target rather than the entry branch.
+/// Volatile accesses preserve the ordered retail load/store loop and prevent
+/// LLVM from replacing it with a libc copy routine.
+///
+/// # Safety
+///
+/// `source` and `source_end` must delimit a forward-reachable word range. A
+/// non-null `destination` must identify writable words for that range. Like
+/// retailOS, overlapping ranges copy forward; a null destination is safe only
+/// for an empty or one-word range.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.word_range_copy_if_destination_alias_93f0")]
+#[inline(never)]
+pub unsafe extern "C" fn word_range_copy_if_destination_alias_93f0(
+    mut source: *const u32,
+    source_end: *const u32,
+    mut destination: *mut u32,
+) -> *mut u32 {
+    while source != source_end {
+        if !destination.is_null() {
+            destination.write_volatile(source.read_volatile());
+        }
+        source = source.wrapping_add(1);
+        destination = destination.wrapping_add(1);
+    }
+    destination
+}
+
+
 
 #[cfg(test)]
 mod tests {
-    use super::{word_range_copy_if_destination, word_range_copy_if_destination_alias_9440};
+    use super::{
+        word_range_copy_if_destination, word_range_copy_if_destination_alias_93f0,
+        word_range_copy_if_destination_alias_9440,
+    };
+    #[test]
+    fn alias_93f0_copies_and_preserves_retail_cursor_rules() {
+        let mut words = [0x1111_1111_u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+
+        let copied_end = unsafe {
+            word_range_copy_if_destination_alias_93f0(
+                words.as_ptr(),
+                words.as_ptr().add(3),
+                words.as_mut_ptr().add(1),
+            )
+        };
+        let null_end = unsafe {
+            word_range_copy_if_destination_alias_93f0(
+                words.as_ptr(),
+                words.as_ptr().add(1),
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(words, [0x1111_1111; 4]);
+        assert_eq!(copied_end, unsafe { words.as_mut_ptr().add(4) });
+        assert_eq!(null_end as usize, 4);
+    }
 
     #[test]
     fn copies_words_and_returns_the_destination_cursor() {
