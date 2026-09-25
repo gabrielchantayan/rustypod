@@ -54,6 +54,7 @@ pub mod copy_word_range_if_destination_sibling;
 pub mod relocation_word_range_copy;
 pub mod copy_word_range_if_destination_loop_entry;
 pub mod copy_word_range_if_destination_loop_entry_9318;
+pub mod copy_word_range_if_destination_loop_entry_9228;
 pub mod repeat_source_word_if_destination;
 pub mod fill_repeated_byte_if_destination;
 pub mod clone_16_byte_element_range;
