@@ -46,7 +46,7 @@
 //! Deviations: the tail target `FUN_0811d7b0` is unported firmware and
 //! stays unported (not this function's entry), so the whole dispatch
 //! sits behind the [`VTABLE_SLOT_4C_DISPATCH`] slot (the
-//! util/inner_state.rs `INNER_MATERIALIZE_COUNT` pattern). The default
+//! util/inner_state.rs `INNER_MATERIALIZE_RESULTS` pattern). The default
 //! stub models the dispatcher body exactly — the double dereference,
 //! the slot +0x4c load and the indirect call — so on firmware the
 //! behavior is identical; host tests install a recording mock. The
@@ -86,7 +86,7 @@ unsafe extern "C" fn vtable_slot_4c_dispatch(
 
 /// Indirect dispatch for the unported vtable slot +0x4c dispatcher
 /// `FUN_0811d7b0` @ 0x0811d7b0 (the util/inner_state.rs
-/// `INNER_MATERIALIZE_COUNT` pattern). The default stub is the
+/// `INNER_MATERIALIZE_RESULTS` pattern). The default stub is the
 /// dispatcher's exact body; host tests install a recording mock via
 /// `core::ptr::addr_of_mut!`.
 pub static mut VTABLE_SLOT_4C_DISPATCH: unsafe extern "C" fn(

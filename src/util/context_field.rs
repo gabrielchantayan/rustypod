@@ -32,7 +32,7 @@
 //! rather than masked.
 //!
 //! Deviation: the callee sits behind the [`CURRENT_TASK_CTX_BLOCK`]
-//! dispatch slot (the util/inner_state.rs `INNER_MATERIALIZE_COUNT`
+//! dispatch slot (the util/inner_state.rs `INNER_MATERIALIZE_RESULTS`
 //! pattern) instead of a direct `bl 0x080cb828`, so host tests can
 //! install a recording mock. The default stub models the callee's
 //! known prefix exactly — `kernel_running()` (ported) as the name-node
@@ -65,7 +65,7 @@ unsafe extern "C" fn current_task_ctx_block_stub() -> *mut u8 {
 
 /// Indirect dispatch for the current-task context-block getter
 /// `FUN_080cb828` @ 0x080cb828 (the util/inner_state.rs
-/// `INNER_MATERIALIZE_COUNT` pattern). Host tests install a recording
+/// `INNER_MATERIALIZE_RESULTS` pattern). Host tests install a recording
 /// mock; the default stub models the real callee's known prefix (see
 /// the module header) and can be swapped for the ported
 /// `current_task_ctx_block` once cross-module wiring is wanted. Tests
