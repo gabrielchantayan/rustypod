@@ -106,7 +106,9 @@
 //! ported in `heap/block_deque`): that one is the same four-word copy
 //! with the **source in r2**, and it exists exactly once.
 
-use crate::cxx::handle::{refcounted_body_attach, RefcountedBody};
+use crate::cxx::handle::{
+    refcounted_body_attach, refcounted_ptr_copy_construct_slot1, RefcountedBody,
+};
 use crate::app::scoped_context::scoped_context_destroy;
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{
@@ -5357,6 +5359,51 @@ pub unsafe extern "C" fn vector_copy_range_record8(
             (*output).word = (*first).word;
             (*output).byte = (*first).byte;
             (*output).halfword = (*first).halfword;
+        }
+        first = first.wrapping_add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
+/// vector_copy_construct_range_slot1 — original: `FUN_083e8a0c` @ load
+/// address `0x083e8a0c` (56 bytes; raw extent `0x083e8a0c..0x083e8a44`,
+/// ending at the next independent `push {r4, r5, r6, lr}` function entry).
+///
+/// Copies the half-open `[first, last)` range of slot-1 refcounted pointers
+/// into uninitialized `output`. For each current non-NULL output cursor it
+/// invokes [`refcounted_ptr_copy_construct_slot1`], which stores the source
+/// body and attaches its reference; both cursors then advance by one target
+/// word and the advanced output cursor is returned.
+///
+/// Raw A32 decoding verifies two inbound direct call sites, both plain `bl`
+/// at `0x083e0bb8` and `0x083e0bf4`, with no predicated inbound calls. The
+/// body contains one predicated `blne` at `0x083e8a28` to `0x0839f100`; its
+/// `movs r0, r4` guard skips both source-slot load and construction when the
+/// current output cursor is NULL.
+///
+/// # Deviations
+///
+/// `wrapping_add` preserves ARM's cursor arithmetic without host
+/// out-of-bounds-pointer UB for the one-record NULL-output path.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit readable contiguous pointer slots. A
+/// non-NULL `output` must designate writable slots for the range, and each
+/// non-NULL source body must satisfy
+/// [`refcounted_ptr_copy_construct_slot1`]'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_construct_range_slot1")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_construct_range_slot1(
+    mut first: *const *mut RefcountedBody,
+    last: *const *mut RefcountedBody,
+    mut output: *mut *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    while first != last {
+        if !output.is_null() {
+            refcounted_ptr_copy_construct_slot1(output, first);
         }
         first = first.wrapping_add(1);
         output = output.wrapping_add(1);
@@ -12956,6 +13003,62 @@ mod tests {
         };
 
         assert_eq!(returned, 8usize as *mut VectorRecord8, "skipped record still advances output");
+    }
+
+    #[test]
+    fn copy_construct_range_slot1_attaches_slots_and_returns_end() {
+        unsafe {
+            let mut bodies = [body(0), body(7), body(-3)];
+            let slots = [
+                &mut bodies[0] as *mut RefcountedBody,
+                core::ptr::null_mut(),
+                &mut bodies[2] as *mut RefcountedBody,
+            ];
+            let mut output = [0xdeadbeefusize as *mut RefcountedBody; 3];
+
+            let end = vector_copy_construct_range_slot1(
+                slots.as_ptr(),
+                slots.as_ptr().add(slots.len()),
+                output.as_mut_ptr(),
+            );
+
+            assert_eq!(end, output.as_mut_ptr().add(3));
+            assert_eq!(output, slots);
+            assert_eq!(bodies[0].refcount, 1);
+            assert_eq!(bodies[1].refcount, 7, "NULL slot is stored without an attach");
+            assert_eq!(bodies[2].refcount, -2);
+        }
+    }
+
+    #[test]
+    fn copy_construct_range_slot1_empty_range_leaves_output_untouched() {
+        unsafe {
+            let mut body = body(5);
+            let source = &mut body as *mut RefcountedBody;
+            let mut output = 0xdeadbeefusize as *mut RefcountedBody;
+
+            let end = vector_copy_construct_range_slot1(&source, &source, &mut output);
+
+            assert_eq!(end, &mut output as *mut *mut RefcountedBody);
+            assert_eq!(output, 0xdeadbeefusize as *mut RefcountedBody);
+            assert_eq!(body.refcount, 5);
+        }
+    }
+
+    #[test]
+    fn copy_construct_range_slot1_null_output_skips_source_read_and_advances() {
+        unsafe {
+            let end = vector_copy_construct_range_slot1(
+                core::ptr::null(),
+                core::ptr::null::<*mut RefcountedBody>().wrapping_add(1),
+                core::ptr::null_mut(),
+            );
+
+            assert_eq!(
+                end,
+                (core::ptr::null_mut::<*mut RefcountedBody>()).wrapping_add(1)
+            );
+        }
     }
     #[test]
     fn container_end_cursor_returns_the_opaque_end_word() {
