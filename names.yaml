@@ -18777,6 +18777,21 @@ functions:
       defaults are the real ports. match.py structural match (identical
       offsets/order; push_back inlined, hooks as blx).
 
+  - address: 0x08037e30
+    ghidra: thunk_EXT_FUN_22003c98
+    name: iram_task_init_veneer
+    size: 8
+    sig: "void iram_task_init_veneer(u32 id, u32 priority, u8 *stack, usize stack_size, usize init_word)"
+    module: kernel/task
+    status: ported
+    notes: >-
+      Raw bytes are e51ff004 22003c98: an ARM `ldr pc, [pc, #-4]`
+      veneer plus its literal target, so Ghidra's four-byte extent omits
+      the literal. Tail-dispatches all five RTXC task-init arguments to
+      IRAM mirror 0x22003c98. Verified direct callers are unconditional
+      bl at 0x08056424, 0x08103e88, and 0x080b16b0; no predicated direct
+      calls. Rust routes through kernel/task's existing task_init hook;
+      the ROM implementation remains deliberately external.
   - address: 0x080563a0
     ghidra: FUN_080563a0
     name: task_create
