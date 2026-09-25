@@ -141414,3 +141414,22 @@ functions:
       contract is established. A Rust callback or helper seam would invent that
       contract, so no faithful port or host tests are possible. Deliberate
       deviations: none.
+  - address: 0x08053b94
+    ghidra: FUN_08053b94
+    name: nullable_u32_deref_or_zero
+    size: 12
+    sig: "u32 nullable_u32_deref_or_zero(const u32 *word)"
+    module: util/nullable_u32_deref_or_zero
+    status: ported
+    renames:
+      param_1/r0: word
+      "*word": value
+    notes: >-
+      Raw osos.dec words e3500000 15900000 e12fff1e establish the exact
+      12-byte body 0x08053b94..0x08053b9f: `cmp r0,#0; ldrne r0,[r0];
+      bx lr`. The next independently entered function begins at 0x08053ba0
+      with `mov r2,r0`. Full-image A32 decoding finds three inbound plain
+      BL calls (0x08049144, 0x08050408, and 0x0813e734) and no predicated
+      BL calls. The function returns zero without loading for a null input;
+      otherwise it returns the aligned u32 at word. Deliberate deviations:
+      none.
