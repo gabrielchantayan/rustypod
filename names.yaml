@@ -143410,3 +143410,25 @@ functions:
       assigning unverified argument semantics. Host tests verify forwarding
       and result propagation; ARM builds retain an absolute veneer, preserving
       r0-r3, lr, and the retail target's return value.
+
+  # --- Ghidra false function in embedded data ---
+  - address: 0x0882e5d0
+    ghidra: FUN_0882e5d0
+    name: embedded_text_metadata_0882e5d0
+    size: 0
+    sig: "not a function"
+    status: identified
+    renames: {}
+    notes: >-
+      Not ported: raw osos.dec at 0x0882e5d0 begins with two zero words,
+      followed by the little-endian text metadata word `0x74657874` ("txet");
+      it remains structured data through the inspected 0x0882e650 range, so
+      there is no ARM function entry, extent, ABI, or callable behavior to
+      port. The two Ghidra BL references are also data: the surrounding words
+      at 0x0856b970 are a byte-pattern table, while 0x0856b994 and
+      0x0856b998 decode incidentally as predicated `bleq 0x0882e5d0`.
+      Independent raw A32 decoding therefore establishes zero plain
+      unconditional BL call sites and two predicated BL-shaped data words;
+      no execution path to this address is evidenced. Deliberate deviations:
+      no Rust symbol or module is created because routing execution to data
+      would be invalid.
