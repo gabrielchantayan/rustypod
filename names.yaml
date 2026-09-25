@@ -6271,6 +6271,33 @@ functions:
       (result, 0) second-continuation contract, flag clearing, call order,
       and result forwarding.
 
+  # --- Literal veneer to ABI-incompatible target ---
+  - address: 0x080036a0
+    ghidra: thunk_FUN_083dff70
+    name: tail_veneer_to_083dff70
+    size: 8
+    sig: "tail transfer to 0x083dff70"
+    module: null
+    status: identified
+    renames:
+      DAT_080036a4: target_083dff70
+    notes: >-
+      Raw osos.dec words are e51ff004 at 0x080036a0 and 083dff70 at
+      0x080036a4: `ldr pc,[pc,#-4]`, a literal-loaded tail veneer with an
+      8-byte true extent, not Ghidra's 4-byte inferred indirect-call
+      function. The next literal veneer begins at 0x080036a8. Independent
+      decoding of aligned ARM B/BL words finds exactly three inbound direct
+      plain bl sites (0x08004638, 0x0800464c, and 0x08004660), zero
+      predicated bl sites, and one non-call tail b at 0x08004678. The
+      literal target's raw entry begins `push {r4,lr}; mov r4,r0; ldr
+      r0,[r0,#0x10]`, requiring r0 to be a valid object pointer, but every
+      recovered plain-BL caller sets r0 to 0x1b, 0x17, or 0x12 immediately
+      before dispatch. Thus neither Ghidra's target signature nor a
+      Rust-callable ABI can be established from the available firmware:
+      reproducing this veneer needs an unverified runtime relocation/overlay
+      explanation, not an invented seam or target identity. Deliberate
+      deviation: no Rust port.
+
   # --- Tail veneer to unported multi-register implementation ---
   - address: 0x080036b0
     ghidra: FUN_080036b0
