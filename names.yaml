@@ -141974,3 +141974,23 @@ functions:
       when empty or old_tail.next otherwise, then set list.tail. Rust uses
       repr(C) pointer fields, preserving adjacent target words on ARM while
       using native pointers in host tests; no behavioral deviation.
+  - address: 0x0804b3e4
+    ghidra: FUN_0804b3e4
+    name: global_status_flags_reset
+    size: 24
+    sig: "void global_status_flags_reset(void)"
+    module: runtime/global_status_flags
+    status: ported
+    renames:
+      DAT_0804b3fc: global_status_flags (target address 0x089ca864)
+      "global_status_flags+0x00": active
+      "global_status_flags+0x01": reset_marked
+    notes: >-
+      Raw osos.dec words establish the 24-byte extent
+      0x0804b3e4..0x0804b3fb: the final bx lr is at 0x0804b3f8, the literal
+      at 0x0804b3fc is 0x089ca864, and the next function starts with stmdb
+      at 0x0804b400. The leaf marks byte +1 then clears byte +0, with no
+      outbound plain or predicated BL. Whole-image A32 decoding finds two
+      inbound BL calls; this corrects the assigned three-call report. ARM
+      builds write the verified live global at 0x089ca864 through volatile
+      byte stores; host tests use a private backing object for that state.
