@@ -6271,6 +6271,28 @@ functions:
       (result, 0) second-continuation contract, flag clearing, call order,
       and result forwarding.
 
+  # --- Tail veneer to unported multi-register implementation ---
+  - address: 0x080036b0
+    ghidra: FUN_080036b0
+    name: tail_veneer_to_0804b8b0
+    size: 8
+    sig: "tail transfer to 0x0804b8b0"
+    module: null
+    status: identified
+    renames:
+      DAT_080036b4: target_0804b8b0
+    notes: >-
+      Raw osos.dec words are e51ff004 at 0x080036b0 and 0804b8b0 at
+      0x080036b4: `ldr pc,[pc,#-4]`, a literal-loaded tail veneer with an
+      8-byte true extent, not Ghidra's 4-byte indirect-call function. ARM
+      decoding finds two unconditional direct `bl` callers (0x080046c8 and
+      0x08006864), zero predicated `bl` callers, and no return instruction.
+      The literal target is the 0x0804b8b0 entry, whose recovered body
+      consumes live callee-saved registers and stack arguments across more
+      than 200 bytes; its ABI and semantics cannot be represented faithfully
+      as this veneer alone. No Rust seam or ported target exists, so this
+      entry is deliberately identified rather than ported.
+
   # --- UI allocation-table slot creation ---
   - address: 0x08004c78
     ghidra: FUN_08004c78
