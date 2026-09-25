@@ -144,6 +144,38 @@ pub unsafe extern "C" fn gateway_wait_ready() {
         task::task_sleep(POLL_SLEEP_TICKS);
     }
 }
+/// gateway_request_empty_tag5 — original: FUN_08047df4 @ 0x08047df4 (92
+/// bytes). Raw ARM calls gateway_wait_ready, then posts an argument-free
+/// tag-5 frame through the mode-1 mailbox gateway under semaphore 9. The
+/// three verified incoming call sites are unconditional `bl`; no predicated
+/// calls reach this entry. Deliberate deviation: ARM leaves frame words 5..7
+/// uninitialized; Rust zeros them because the declared frame and observed
+/// dispatcher path do not consume them.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn gateway_request_empty_tag5() {
+    ready_wait()();
+    let frame: [u32; FRAME_SLOTS] = [
+        0,
+        0,
+        0,
+        0,
+        5,
+        0, // padding (uninitialized in the original)
+        0, // padding (uninitialized in the original)
+        0, // padding (uninitialized in the original)
+        0,
+    ];
+    task_lock::rom_sem_wait(REQUEST_LOCK);
+    mailbox_send_gateway_mode1(
+        GATEWAY_MAILBOX,
+        frame.as_ptr() as usize as u32,
+        GATEWAY_PRIORITY,
+        GATEWAY_SEMAPHORE,
+    );
+    task_lock::rom_sem_signal(REQUEST_LOCK);
+}
+
 
 /// gateway_request_blocking — original: FUN_08048000 @ 0x08048000 (100
 /// bytes). Waits for the ROM gateway to report ready, then posts a tag-0
@@ -307,6 +339,34 @@ mod tests {
             assert_eq!(*addr_of!(WAIT_ARG), 9);
             assert_eq!(*addr_of!(SIGNAL_ARG), 9);
             assert_eq!(*addr_of!(DISPATCH_COUNT), 1, "exactly one dispatch");
+            let request = *addr_of!(DISPATCH_REQUEST);
+            assert_eq!(request[0], 4, "mailbox-send selector");
+            assert_eq!(request[2], 6, "preserved r3 semaphore");
+            assert_eq!(request[3], 1, "mailbox");
+            assert_eq!(request[5], 5, "priority");
+            assert_ne!(request[6], 0, "frame pointer");
+            assert_eq!(request[7], 1, "mode");
+            assert_eq!(request[8], 0, "trailing mode word");
+        }
+    }
+
+    /// The argument-free tag-5 request waits before each independently
+    /// bracketed mailbox dispatch.
+    #[test]
+    fn empty_tag5_request_waits_then_dispatches_under_semaphore_9() {
+        let _installed = install();
+        unsafe {
+            gateway_request_empty_tag5();
+            gateway_request_empty_tag5();
+            assert_eq!(
+                *addr_of!(CALL_LOG),
+                [
+                    "ready", "wait", "dispatch", "signal", "ready", "wait", "dispatch", "signal"
+                ]
+            );
+            assert_eq!(*addr_of!(WAIT_ARG), REQUEST_LOCK);
+            assert_eq!(*addr_of!(SIGNAL_ARG), REQUEST_LOCK);
+            assert_eq!(*addr_of!(DISPATCH_COUNT), 2);
             let request = *addr_of!(DISPATCH_REQUEST);
             assert_eq!(request[0], 4, "mailbox-send selector");
             assert_eq!(request[2], 6, "preserved r3 semaphore");
