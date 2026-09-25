@@ -143527,3 +143527,28 @@ functions:
       flags 0x20, and default entry 0x083ab368 to the already ported
       typed_handler_registry_lookup helper, returning its result unchanged.
       No deliberate deviations.
+
+  - address: 0x083ea968
+    ghidra: FUN_083ea968
+    name: rotate_adjacent_string_object_ranges_if_nonempty
+    size: 32
+    sig: "void rotate_adjacent_string_object_ranges_if_nonempty(void *first, void *middle, void *last)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: middle
+      param_3/r2: last
+      FUN_083ea9a8: rotate_adjacent_string_object_ranges (unported retail helper)
+    notes: >-
+      Raw osos.dec words establish the exact eight-instruction A32 body at
+      0x083ea968..0x083ea987; the next separately linked function begins at
+      0x083ea988. Independent raw decoding identifies exactly two inbound
+      unconditional plain BL calls at 0x083e86f8 and 0x083e98c8, with zero
+      predicated inbound BL forms. The body compares first with middle and,
+      only if unequal, compares middle with last; when both half-open adjacent
+      ranges are nonempty, it clears r3 and both outgoing stack words then
+      performs its one predicated BLNE to 0x083ea9a8. The callee moves the
+      adjacent StringObjectWord ranges but has no established identity or Rust
+      port, so target builds call its verified retail address while host tests
+      install a seam. Deliberate deviation: none.
