@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0802a954
+    ghidra: FUN_0802a954
+    name: standard_cipher_configure
+    size: 108
+    sig: "u32 standard_cipher_configure(u32 key_schedule, u32 key_mode, u32 cipher_context, u32 cipher_name, u32 round_count, u32 configuration, u32 auxiliary)"
+    module: crypto/standard_cipher_configure
+    status: ported
+    renames:
+      param_1/r0/r5: key_schedule
+      param_2/r1/r6: key_mode
+      param_3/r2/r4: cipher_context
+      param_4/r3: cipher_name
+      param_5/r7: round_count
+      param_6/r8: configuration
+      param_7/r9: auxiliary
+      iVar1/r0: validation_status
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte body
+      0x0802a954..0x0802a9c0: `pop {r2-r10,pc}` ends it, and the next
+      distinct function begins at 0x0802a9c4. Its three outbound calls are
+      unconditional plain BL (zero predicated): validation at 0x08027950,
+      key-schedule expansion at 0x0802dec0, and context initialization at
+      0x0802e910. Full raw A32 decoding finds three inbound unconditional
+      plain BL calls (zero predicated), at 0x0802a9ec, 0x0802aa20, and
+      0x0802aa88. It forwards the seven ABI words to validation as
+      (cipher_context, cipher_name, round_count, key_mode, configuration,
+      auxiliary), returns a nonzero status unchanged, and otherwise expands
+      the key schedule then initializes the context with literal mode 8.
+      Deliberate deviation: those unported callees remain absolute retail
+      veneers on ARM and host-test callbacks, preserving the verified ABI
+      without assigning unverified identities beyond their observed roles.
   - address: 0x0808ab4c
     ghidra: FUN_0808ab4c
     name: bit_buffer_ensure_capacity
