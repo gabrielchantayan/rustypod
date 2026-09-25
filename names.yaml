@@ -143749,3 +143749,29 @@ functions:
       keeping host pointer fields disjoint; the established Rust assignment
       port replaces direct retail-address calls. Host tests cover empty ranges,
       member call order, every record, and return identity.
+
+  - address: 0x083e9d40
+    ghidra: FUN_083e9d40
+    name: cxx_string_pair_range_assign
+    size: 68
+    sig: "u8 *cxx_string_pair_range_assign(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/cxx_string_pair_range_assign
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: last
+      param_3/r2/r5: output
+      FUN_083d8d1c: cxx_string_assign
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent
+      0x083e9d40..0x083e9d84: `pop {r4,r5,r6,pc}` ends this function and
+      the next separately linked range helper opens with `push {r4,r5,r6,lr}`
+      at 0x083e9d84. Two inbound direct BL sites, both in FUN_083e3724, are
+      unconditional; there are no predicated inbound forms. The body has two
+      unconditional direct BLs to cxx_string_assign @ 0x083d8d1c and no
+      predicated BLs. It copy-assigns the COW string words at +0x00 then +0x04
+      for every 8-byte target-layout record in [first,last), returning the
+      advanced output cursor. No deliberate deviations: the established
+      cxx_string_assign seam preserves ownership and self-assignment behavior;
+      host tests use a raw-u32 fixture to prove target offsets, member order,
+      every-record traversal, empty-range no-call behavior, and return identity.
