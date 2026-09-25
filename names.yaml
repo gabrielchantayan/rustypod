@@ -143503,3 +143503,27 @@ functions:
       direction 1, flags 0x20, and default entry 0x083ab45c to the already
       ported typed_handler_registry_lookup helper; it returns that result
       unchanged. No deliberate deviations.
+
+  - address: 0x083eaae0
+    ghidra: FUN_083eaae0
+    name: type_handler_lookup_primary_id
+    size: 40
+    sig: "void *type_handler_lookup_primary_id(void **registry)"
+    module: app/type_handler_lookup_primary_id
+    status: ported
+    renames:
+      param_1/r0: registry
+      DAT_083eab00: default_handler_entry (0x083ab368)
+      DAT_083eab04: handler_type_id (0x08a0fb9c)
+      FUN_082a7280: typed_handler_registry_lookup
+    notes: >-
+      Raw osos.dec words establish eight executable A32 instructions at
+      0x083eaae0..0x083eab00 followed by the wrapper's two literal-pool
+      words at 0x083eab00 and 0x083eab04; 0x083eab08 is the next independent
+      function, so the true extent is 40 bytes. Full-image A32 branch decoding
+      finds exactly two inbound unconditional plain BL sites (0x083b6cbc and
+      0x083d82a8) and zero predicated direct BL sites. The wrapper forwards
+      registry, the four-word type identifier at 0x08a0fb9c, direction 1,
+      flags 0x20, and default entry 0x083ab368 to the already ported
+      typed_handler_registry_lookup helper, returning its result unchanged.
+      No deliberate deviations.
