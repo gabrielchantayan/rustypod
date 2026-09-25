@@ -78,6 +78,8 @@ pub mod hfs_btree_get_node;
 /// HFS B-tree node free-space probe @ 0x08053e14.
 pub mod hfs_btree_free_space;
 pub mod hfs_btree_get_record;
+/// HFS B-tree record-request preparation and opaque consumer dispatch @ 0x080595c0.
+pub mod hfs_btree_prepare_record_request;
 /// HFS B-tree key-length decoder @ 0x080537f8.
 pub mod hfs_btree_key_length;
 /// File-path layer failure-status accessor @ 0x0829dcf8.
