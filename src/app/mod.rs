@@ -370,6 +370,7 @@ pub mod context_primary_target_is_present;
 pub mod context_secondary_target_set;
 pub mod input_sequence_item_acquire;
 pub mod managed_entry;
+pub mod managed_entry_request_submit;
 pub mod managed_entry_selector;
 pub mod length_prefix_validate;
 pub mod class_6600_byte_at_100;
