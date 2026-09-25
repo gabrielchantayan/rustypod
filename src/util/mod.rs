@@ -123,6 +123,7 @@ pub mod increment_shared_counter;
 pub mod le_read;
 pub mod linked_list_count;
 pub mod linked_list_find_and_promote;
+pub mod linked_list_entry_update;
 pub mod linked_list_append;
 pub mod linked_list_refresh_sort_ascending;
 pub mod list_find;

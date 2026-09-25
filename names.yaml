@@ -5087,6 +5087,36 @@ functions:
       calls that verified address through a volatile operation seam while host
       tests install a recorder; its identity is deliberately not claimed beyond
       moving the entry to the list front.
+  # --- intrusive linked-list entry update ---
+  - address: 0x08059110
+    ghidra: FUN_08059110
+    name: linked_list_entry_update
+    size: 120
+    sig: "void linked_list_entry_update(u8 *list, u32 key, const u8 *value, u8 *candidate_payload)"
+    module: util/linked_list_entry_update
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: key
+      param_3/r2: value
+      param_4/r3: candidate_payload
+      local_18: payload
+      iVar2/r4: entry
+      FUN_08053850: linked_list_find_and_promote
+      FUN_08042cbc: bcopy
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte extent from stmdb
+      sp!,{r3,r4,r5,r6,r7,lr} at 0x08059110 through ldmia sp!,{r3,r4,r5,r6,r7,pc}
+      at 0x08059184; the independently linked function at 0x08059188 follows.
+      It calls FUN_08053850, derives entry from its returned payload on success
+      or candidate_payload on the -123 miss path, directly stores one word when
+      list +0x04 equals four, otherwise calls FUN_08042cbc with that word as its
+      byte count, then clears entry +0x08 and stores key at +0x0c. Decoding
+      immediate ARM B/BL words in osos.dec finds exactly three inbound plain,
+      unconditional bl calls at 0x08051600, 0x08059d28, and 0x08065dfc; no
+      predicated BL calls or direct tail branches. Deliberate deviations: calls
+      the established Rust ports of FUN_08053850 and FUN_08042cbc rather than
+      retail addresses; raw byte offsets avoid host pointer-width assumptions.
   # --- guarded virtual slot +0x04 dispatch ---
   - address: 0x08157448
     ghidra: FUN_08157448
