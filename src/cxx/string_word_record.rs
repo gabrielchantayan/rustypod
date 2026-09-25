@@ -52,6 +52,44 @@ pub unsafe extern "C" fn string_word_record_copy_construct(
     this
 }
 
+/// string_word_record_uninitialized_copy — original: `FUN_083e8b3c` @
+/// `0x083e8b3c` (56 bytes, fourteen ARM words; the next separately linked
+/// function starts with `push {lr}` at `0x083e8b74`). **2 direct `bl` call
+/// sites** verified by decoding every ARM `B`/`BL` word in
+/// `work/firmware/osos.dec`: two unconditional (`0x083e18e0`, `0x083e192c`)
+/// and zero predicated inbound calls. The body has one predicated `blne` to
+/// [`string_word_record_copy_construct`] @ `0x081f4ffc`.
+///
+/// Copy-constructs the records in `[first, last)` at `output`, advancing both
+/// cursors by one 12-byte target record each iteration, and returns the final
+/// output cursor. The ARM tests the current output cursor each iteration:
+/// a NULL cursor skips that construction before advancing by 12.
+///
+/// Deliberate deviation: Rust advances typed cursors by [`StringWordRecord`].
+/// This maps to 12 bytes on ARM and the widened host record stride in tests.
+///
+/// # Safety
+///
+/// `first..last` must be a valid forward range of [`StringWordRecord`]s.
+/// Every non-NULL output cursor reached by the loop must designate valid
+/// uninitialized storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_word_record_uninitialized_copy(
+    mut first: *const StringWordRecord,
+    last: *const StringWordRecord,
+    mut output: *mut StringWordRecord,
+) -> *mut StringWordRecord {
+    while first != last {
+        if !output.is_null() {
+            string_word_record_copy_construct(output, first);
+        }
+        first = first.add(1);
+        output = output.wrapping_add(1);
+    }
+    output
+}
+
 /// string_word_record_copy_assign — original: `FUN_081f5014` @
 /// `0x081f5014` (32 bytes, eight ARM words; the next separately linked
 /// function starts with `push {r4,lr}` at `0x081f5034`). Whole-image raw A32
@@ -460,6 +498,67 @@ mod tests {
                 std::vec![4, 3, 2],
                 "highest record is moved before the lower ones it would overlap"
             );
+        }
+    }
+
+    #[test]
+    fn uninitialized_copy_constructs_each_record_and_returns_end() {
+        let _bench = copy_assign_bench();
+        let mut first_text = *b"one\0";
+        let mut second_text = *b"two\0";
+        let source = [
+            record(&mut first_text, 0x1111_2222),
+            record(&mut second_text, 0x3333_4444),
+        ];
+        let mut output: [MaybeUninit<StringWordRecord>; 2] =
+            core::array::from_fn(|_| MaybeUninit::uninit());
+
+        unsafe {
+            let returned = string_word_record_uninitialized_copy(
+                source.as_ptr(),
+                source.as_ptr().add(2),
+                output.as_mut_ptr().cast(),
+            );
+            assert_eq!(returned, output.as_mut_ptr().cast::<StringWordRecord>().add(2));
+            assert_eq!(output[0].assume_init_read().value, 0x1111_2222);
+            assert_eq!(output[1].assume_init_read().value, 0x3333_4444);
+            assert_eq!(&COPY_STORAGE[..4], b"two\0");
+        }
+    }
+
+    #[test]
+    fn uninitialized_copy_empty_range_does_not_construct() {
+        let _bench = copy_assign_bench();
+        let mut text = *b"edge\0";
+        let source = [record(&mut text, 7)];
+        let mut output = MaybeUninit::<StringWordRecord>::uninit();
+
+        unsafe {
+            let boundary = source.as_ptr().add(1);
+            assert_eq!(
+                string_word_record_uninitialized_copy(boundary, boundary, output.as_mut_ptr()),
+                output.as_mut_ptr()
+            );
+            assert_eq!(COPY_ALLOCATION, None);
+        }
+    }
+
+    #[test]
+    fn uninitialized_copy_null_output_skips_first_construction_then_advances() {
+        let _bench = copy_assign_bench();
+        let mut text = *b"one\0";
+        let source = [record(&mut text, 1)];
+
+        unsafe {
+            assert_eq!(
+                string_word_record_uninitialized_copy(
+                    source.as_ptr(),
+                    source.as_ptr().add(1),
+                    core::ptr::null_mut(),
+                ) as usize,
+                core::mem::size_of::<StringWordRecord>()
+            );
+            assert_eq!(COPY_ALLOCATION, None);
         }
     }
 }

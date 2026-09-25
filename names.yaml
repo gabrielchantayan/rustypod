@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8b3c
+    ghidra: FUN_083e8b3c
+    name: string_word_record_uninitialized_copy
+    size: 56
+    sig: "StringWordRecord *string_word_record_uninitialized_copy(const StringWordRecord *first, const StringWordRecord *last, StringWordRecord *output)"
+    module: cxx/string_word_record
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: output_cursor
+      r5: source_cursor
+      r6: last
+      FUN_081f4ffc: string_word_record_copy_construct
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x083e8b3c..0x083e8b73: it begins with push {r4,r5,r6,lr}, ends with
+      pop {r4,r5,r6,pc}, and the next separately linked function begins with
+      push {lr} at 0x083e8b74. It advances first and output by 12 through
+      [first,last); `movs r0,r4; movne r1,r5; blne 0x081f4ffc` tests the
+      current output cursor before each construction, then advances it even
+      after a skipped NULL iteration. Full-image A32 decoding finds two inbound
+      unconditional plain BL calls (0x083e18e0, 0x083e192c), zero predicated
+      inbound BL calls, and one predicated body BL (blne 0x081f4ffc). The
+      fourth decompiler parameter in callers is not read by the raw body.
+      Deliberate deviation: host cursors use StringWordRecord stride to retain
+      the ARM 12-byte layout across widened pointers.
   - address: 0x083e8bdc
     ghidra: FUN_083e8bdc
     name: vector_copy_range_elem12_alias_8bdc
