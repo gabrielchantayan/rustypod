@@ -95,6 +95,7 @@ pub mod plst_class_check;
 pub mod plst_task_is_active;
 pub mod plst_resource_activate;
 pub mod plst_resource_dispatch_pldm;
+pub mod plst_task_message;
 pub mod plst_counted_string;
 pub mod plst_file_element_create;
 pub mod plst_apply_counted_string;
