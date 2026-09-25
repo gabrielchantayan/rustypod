@@ -142306,3 +142306,30 @@ functions:
       unrecovered: target builds retain a direct retailOS call, while host
       tests model its observed output layout solely to exercise this outer
       initializer's contract.
+
+  - address: 0x080476b8
+    ghidra: FUN_080476b8
+    name: opaque_56_byte_record_initialize
+    size: 84
+    sig: "i32 opaque_56_byte_record_initialize(u8 *record, u32 first_value, u32 second_value)"
+    module: util/opaque_56_byte_record_initialize
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: first_value
+      param_3/r2: second_value
+      FUN_0805cfb4: bzero
+      FUN_080470bc: embedded_subobject_initialize
+    notes: >-
+      Raw osos.dec establishes the 84-byte A32 body from 0x080476b8 through
+      0x08047704; 0x08047708 is the 0x4d526376 vtable literal and the next
+      separately entered function begins at 0x0804770c. Ghidra's 80-byte
+      extent omits the final pop. Decoding every B/BL-immediate word confirms
+      three plain inbound BL calls (0x08047c68, 0x08058680, 0x0805e494) and
+      no predicated inbound calls; the body contains two plain outgoing BL
+      calls, bzero and 0x080470bc, with no predicated BL. A non-NULL record is
+      zeroed for 0x38 bytes, receives r1/r2 at +0x30/+0x34, then its +0x0c
+      36-byte embedded subobject is initialized as (4,0,0); only success
+      stores the vtable. 0x080470bc remains an intentional resident-target
+      seam because its semantic identity is unrecovered; host tests emulate
+      only its observed layout.
