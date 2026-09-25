@@ -143225,3 +143225,28 @@ functions:
       order, clears byte [0x22010000 + slot*8 + controller - 8], and returns
       zero. The Rust port preserves this behavior; the unported second helper
       remains an observed-ABI target callback.
+
+  - address: 0x08003920
+    ghidra: thunk_FUN_08117500
+    name: condition_flag_sensitive_veneer
+    size: 8
+    sig: "not safely representable by a Rust C-ABI function"
+    module: null
+    status: identified
+    notes: >-
+      Blocked from porting. Raw osos.dec words at 0x08003920 are
+      `e51ff004 08117500`: an `ldr pc,[pc,#-4]` veneer plus its literal,
+      with the next independent veneer beginning at 0x08003928. Its literal
+      target is not a conventional function entry: raw words at 0x08117500
+      are `089a3990 00006380 0000ea60 089ca660`, four EQ-predicated ARM
+      instructions before the ordinary `cmp r0,#0` prologue at 0x08117510.
+      The veneer preserves the caller CPSR, so whether those four
+      instructions execute depends on the incoming Z flag; Rust's C ABI
+      cannot observe or preserve that flag. Ghidra's inferred
+      FUN_08117500 body and one-argument signature therefore do not
+      establish a faithful callable seam. Complete raw-image/assembly
+      evidence finds two inbound plain BL calls (0x08007750 and
+      0x08007f34), zero predicated BL calls; the reported third Ghidra call
+      site is not present in the disassembly. Do not replace this veneer
+      until the caller flag invariant and the four predicated instructions'
+      intended effect are independently established.
