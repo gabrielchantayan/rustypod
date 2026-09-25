@@ -2177,7 +2177,7 @@ pub static ROM_THUNKS: [RomThunk; 158] = [
     RomThunk { thunk_addr: 0x08038070, rom_target: 0x2200796c, name: None },
     RomThunk { thunk_addr: 0x08038078, rom_target: 0x2200722c, name: None },
     RomThunk { thunk_addr: 0x08038080, rom_target: 0x220040fc, name: None },
-    RomThunk { thunk_addr: 0x08038088, rom_target: 0x22003b64, name: None },
+    RomThunk { thunk_addr: 0x08038088, rom_target: 0x22003b64, name: Some("signal_embedded_object") },
     RomThunk { thunk_addr: 0x08038090, rom_target: 0x22004d7c, name: None },
     RomThunk { thunk_addr: 0x08038098, rom_target: 0x22004cf0, name: None },
     RomThunk { thunk_addr: 0x080380a0, rom_target: 0x22004d20, name: None },
@@ -2320,7 +2320,7 @@ mod tests {
     /// Known-target name mapping (see module header for the evidence).
     #[test]
     fn known_target_names() {
-        let expected: [(u32, &str); 31] = [
+        let expected: [(u32, &str); 32] = [
             (0x22000020, "__rt_memcpy"),
             (0x220000d4, "memmove"),
             (0x22000188, "memcpy"),
@@ -2352,6 +2352,7 @@ mod tests {
             (0x22007470, "iram_event_handler_source_veneer"),
             (0x220073b0, "iram_stream_buffer_reinitialize_veneer"),
             (0x220084dc, "i2s_chunked_transfer_veneer"),
+            (0x22003b64, "signal_embedded_object"),
         ];
         for (target, name) in expected {
             let entry = lookup_by_target(target)
@@ -2428,8 +2429,8 @@ mod tests {
     #[test]
     fn named_entry_count() {
         let named = ROM_THUNKS.iter().filter(|e| e.name.is_some()).count();
-        // 31 known targets, two of them aliased by two thunks each.
-        assert_eq!(named, 33);
+        // 32 known targets, two of them aliased by two thunks each.
+        assert_eq!(named, 34);
         let _: std::string::String = ROM_THUNKS[0].name.unwrap().to_string();
     }
 

@@ -130023,6 +130023,32 @@ functions:
       assembles the data bytes big-endian, and negates type 0x102 magnitudes.
       The Rust port uses target-width u32 header words rather than host pointer
       layout; no behavioral deviations are deliberate.
+  - address: 0x08038088
+    ghidra: thunk_EXT_FUN_22003b64
+    name: signal_embedded_object
+    size: 8
+    sig: "u32 signal_embedded_object(const u32 *owner)"
+    module: kernel/gateway_signal
+    status: ported
+    renames:
+      EXT_FUN_22003b64: signal_embedded_object
+      FUN_08003b64: signal_embedded_object
+      DAT_0803808c: signal_embedded_object_target
+      param_1/r0: owner
+      "[owner + 0xc]": object
+      FUN_080041cc: gateway_signal_object
+    notes: >-
+      Raw osos.dec words establish that 0x08038088 is an eight-byte ADS
+      literal veneer, `ldr pc,[pc,#-4]` followed by target 0x22003b64; the
+      next real veneer begins at 0x08038090. The boot relocator mirrors the
+      target body at 0x08003b64..0x08003b6c: `ldr r0,[r0,#12]` then
+      `b 0x080041cc`. It therefore loads owner word three and tail-branches
+      to the existing gateway_signal_object port. Full-image A32 decoding
+      finds two inbound plain BL calls (0x083930d0, 0x08393400) and one
+      predicated BLNE call (0x08165d90). The Rust
+      port uses the existing signal seam and returns its status normally
+      rather than tail-branching; no other behavioral deviations are
+      deliberate.
   - address: 0x08038080
     ghidra: thunk_EXT_FUN_220040fc
     name: gateway_service5_request

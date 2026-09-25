@@ -170,6 +170,24 @@ pub unsafe extern "C" fn gateway_signal_object(object: u32) -> u32 {
     words.add(STATUS_WORD).read()
 }
 
+/// signal_embedded_object — original: `thunk_EXT_FUN_22003b64` @
+/// `0x08038088` (8-byte literal veneer) → mirrored body `0x08003b64` (8
+/// bytes; two plain `bl` call sites and one predicated `blne` call site).
+///
+/// Raw words prove the veneer is `ldr pc, [pc, #-4]` (`e51ff004`) followed by
+/// `0x22003b64`; the next real veneer starts at `0x08038090`. The boot
+/// relocator mirrors its body, `ldr r0, [r0, #12]; b 0x080041cc`, at
+/// `0x08003b64..0x08003b6c`. It loads the embedded kernel-object id at word
+/// three of `owner`, then signals it through [`gateway_signal_object`].
+///
+/// Deliberate deviation: the original tail-branches to the signal gateway;
+/// this Rust port calls the existing seam and returns its status normally.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signal_embedded_object(owner: *const u32) -> u32 {
+    gateway_signal_object(owner.add(3).read())
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -276,6 +294,20 @@ mod tests {
                 ids.as_slice(),
                 &[0, 1, 0x7fff_ffff, 0x8000_0000, 0xffff_fffe, 0xffff_ffff],
                 "no guard, no masking — the two blne sites filter sentinels themselves"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_object_signal_loads_word_three_and_returns_gateway_status() {
+        let _recorder = install(0x27);
+        let owner = [0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0x8000_0001, 0xeeee_eeee];
+        unsafe {
+            assert_eq!(signal_embedded_object(owner.as_ptr()), 0x27);
+            assert_eq!(
+                OBSERVED.as_slice(),
+                &[[GATEWAY_SERVICE_SIGNAL, SIGNAL_OK, 0x8000_0001]],
+                "the IRAM body loads only owner word three before tail-signalling"
             );
         }
     }
