@@ -11588,6 +11588,39 @@ functions:
       PLST_TASK_COMPLETE_OPS seam with retail-address defaults. No callee
       identity beyond the observed role is claimed.
 
+  - address: 0x08048eb8
+    ghidra: FUN_08048eb8
+    name: release_element_resource
+    size: 144
+    sig: "void release_element_resource(FixaOwner *owner, u32 *resource)"
+    module: heap/fixa_resource
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: resource
+      "owner+0x0c": first_fixl
+      "fixl+0x08": next_fixl
+      "fixl+0x0c": capacity
+      "fixl+0x10": returned_count
+      "fixl+0x14": first_resource
+      "fixl+0x18": last_resource
+      "fixl+0x1c": available_head
+      FUN_080d21d0: validate_fixa_magic
+      FUN_080d8750: unlink_and_destroy_fixl
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte instruction extent
+      0x08048eb8..0x08048f48; 0x08048f48 starts fixa_owner_destroy.
+      Full-image aligned A32 decoding finds two inbound plain unconditional
+      bl calls (0x08048aa0 and 0x080c6074), one predicated blne call at
+      0x080c6064, and one outbound plain bl to validate_fixa_magic.
+      After validation, it walks owner+0x0c FixL nodes until resource lies in
+      the inclusive [first_resource, last_resource] range. It increments the
+      node's returned count. A node becoming full is passed to
+      unlink_and_destroy_fixl unless it is the sole owner node; otherwise
+      resource is linked at available_head, with its first word receiving the
+      previous head. Rust directly calls the ported validator and retains the
+      established address-based FixL destructor boundary rather than the
+      retail tail branch. FixL remains a descriptive magic-word name only.
   - address: 0x08048f48
     ghidra: FUN_08048f48
     name: fixa_owner_destroy

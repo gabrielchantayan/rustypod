@@ -35,6 +35,7 @@ pub mod flagged_pointer_group;
 pub mod indexed_release;
 pub mod indexed_pair_table_create;
 pub mod heap_poison;
+pub mod fixa_resource;
 pub mod managed_handle;
 pub mod memh_handle;
 pub mod memh_handle_release;
