@@ -34,6 +34,7 @@ pub mod object_activate_until_query_matches;
 pub mod playback_position_get;
 pub mod showcase_clear_timer_slots;
 pub mod service_status_word;
+pub mod status_code_normalize;
 pub mod application_resource_provider;
 pub mod media_player_set_inner_state_selector;
 pub mod default_selection_traversal_token;

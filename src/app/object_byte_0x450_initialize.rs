@@ -17,9 +17,12 @@
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
+#[cfg(test)]
+extern crate std;
+
 
 const RETAIL_0809B644: usize = 0x0809_b644;
-type RetailByteInitializer = unsafe extern "C" fn(u32) -> u8;
+pub(crate) type RetailByteInitializer = unsafe extern "C" fn(u32) -> u8;
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_retail_byte_initializer(_argument: u32) -> u8 {
@@ -30,8 +33,11 @@ unsafe extern "C" fn missing_retail_byte_initializer(_argument: u32) -> u8 {
 #[cfg(not(target_os = "none"))]
 pub static mut OBJECT_BYTE_0X450_INITIALIZER: RetailByteInitializer = missing_retail_byte_initializer;
 
+#[cfg(test)]
+pub(crate) static RETAIL_BYTE_INITIALIZER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[inline(always)]
-unsafe fn retail_byte_initializer() -> u8 {
+pub(crate) unsafe fn retail_byte_initializer() -> u8 {
     #[cfg(target_os = "none")]
     {
         let helper: RetailByteInitializer = unsafe { core::mem::transmute(RETAIL_0809B644) };
@@ -62,12 +68,8 @@ pub unsafe extern "C" fn object_byte_0x450_initialize(object: *mut u8) {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
     use super::*;
     use core::ptr::addr_of_mut;
-    use std::sync::Mutex;
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: u32 = 0;
     static mut RESULT: u8 = 0;
 
@@ -86,7 +88,7 @@ mod tests {
 
     #[test]
     fn initializes_zero_field_with_retail_result() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = RETAIL_BYTE_INITIALIZER_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         install_initializer();
         unsafe { RESULT = 0xa5 };
         let mut storage = [0u8; 0x452];
@@ -100,7 +102,7 @@ mod tests {
 
     #[test]
     fn preserves_nonzero_field_without_calling_retail_helper() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = RETAIL_BYTE_INITIALIZER_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         install_initializer();
         unsafe { RESULT = 0 };
         let mut storage = [0xa5u8; 0x452];
