@@ -129099,6 +129099,29 @@ functions:
       invented. match.py reports the expected structural diff: the emitted
       literal relocation and local-symbol branch operand differ from the
       retail absolute forms. Deliberate deviations: none.
+  # --- Fixed parameter-descriptor value veneer ---
+  - address: 0x0805108c
+    ghidra: FUN_0805108c
+    name: fixed_parameter_descriptor_value
+    size: 12
+    sig: "u32 fixed_parameter_descriptor_value(void) [r0 replaced; r1/r2 preserved; incoming r3 forwarded]"
+    module: runtime/fixed_parameter_descriptor_value
+    status: ported
+    renames:
+      DAT_08051094/r0: fixed_parameter_descriptor_0x08939b88
+      FUN_0803b468: parameter_descriptor_value
+      FUN_080d3a78: parameter_descriptor_resolve
+    notes: >-
+      EXTENT: raw osos.dec is 12 bytes, not Ghidras reported 8: ldr r0,[pc];
+      b 0x0803b468; literal 0x08939b88. The next separate function begins
+      at 0x08051098 (push {r2,r3,r4,r5,r6,lr}), proving the trailing literal
+      belongs here. CALL COUNT: raw ARM decoding finds exactly three direct
+      call sites, all unconditional plain bl at 0x0807511c, 0x080b251c, and
+      0x08396b5c, with zero predicated bl forms. ALGORITHM: load the fixed
+      descriptor address into r0 and tail-branch to parameter_descriptor_value;
+      r1/r2 remain intact and r3 reaches the resolver as its opaque context.
+      match.py reports the expected structural diff: LLVM retains a frame around
+      the tail branch and relocates the literal. Deliberate deviations: none.
   - address: 0x08050ac8
     ghidra: FUN_08050ac8
     name: ui_selected_element_context
