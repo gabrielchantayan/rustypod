@@ -1905,6 +1905,10 @@ pub mod hints {
     // object, class-target, and table fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const LITI_INDEXED_ENTRY_LOOKUP: usize = 0xa1d0_0000;
+    // 0xa200_0000: dedicated to app/liti_entry_next's raw-u32 entry and
+    // class-target fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const LITI_ENTRY_NEXT: usize = 0xa200_0000;
     // 0x2b00_0000: dedicated to crypto/buffered_writer_write's raw-u32
     // handle and page-state fixture; mappings never unmap, so no other user
     // may share this hint.

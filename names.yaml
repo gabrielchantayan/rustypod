@@ -141433,3 +141433,30 @@ functions:
       BL calls. The function returns zero without loading for a null input;
       otherwise it returns the aligned u32 at word. Deliberate deviations:
       none.
+
+  - address: 0x08053b7c
+    ghidra: FUN_08053b7c
+    name: liti_entry_next
+    size: 24
+    sig: "u32 liti_entry_next(const u8 *entry)"
+    module: app/liti_entry_next
+    status: ported
+    renames:
+      param_1/r0/r2: entry
+      param_1_plus_0x0: successor
+      FUN_08057bb4: liti_field_class_check
+    notes: >-
+      Raw osos.dec words e1a02000 e52de004 eb00100a e1b00000 15920000
+      e49df004 establish the exact 24-byte body
+      0x08053b7c..0x08053b94; the next separately linked function begins
+      with cmp r0,#0 at 0x08053b94. Full-image A32 decoding finds exactly
+      three inbound unconditional plain BL calls (0x080490dc, 0x080525a8,
+      and 0x0813e7d0), zero predicated BL calls, and no other direct BL
+      callers. It validates entry through liti_field_class_check, then
+      conditionally returns its aligned word at +0x00; rejected or NULL
+      entries return zero. Callers use that word as the successor in a
+      'liti' entry list. Rust directly calls the canonical predicate port
+      rather than the stock address; otherwise there are no deliberate
+      deviations. Host tests use a dedicated raw-u32 slab to preserve
+      target-width pointer fields and cover NULL, valid nonzero and zero
+      successor words, and a wrong class tag.
