@@ -144471,3 +144471,32 @@ functions:
       passed but unread. The port preserves forward-copy and null-output
       cursor behavior with wrapping byte increments. Host tests use a
       test-only copy observation seam in place of the real COW constructor.
+
+  - address: 0x083e92f0
+    ghidra: thunk_FUN_083e9308
+    name: word_range_copy_if_destination_alias_92f0
+    size: 4
+    sig: "u32 *word_range_copy_if_destination_alias_92f0(const u32 *source, const u32 *source_end, u32 *destination, void *owner)"
+    module: cxx/word_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+      param_4/r3: owner (unread)
+      return/r0: destination
+      FUN_083e9308: word_range_copy_if_destination_body
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk extent
+      0x083e92f0..0x083e92f3: `b 0x083e9308`. Its verified branch target
+      contains the range-test loop, returns at 0x083e9310, and the next
+      independently linked thunk begins at 0x083e9314. Independent A32
+      decoding finds two inbound plain direct BL calls (0x083e54bc and
+      0x083e54f8), zero predicated direct BL calls, and no outbound calls.
+      The target copies each u32 in [source,source_end) forward when
+      destination is non-null, advances both cursors by four bytes, and
+      returns destination; owner in r3 is never read. Rust implements the
+      verified branch target rather than the entry branch, preserves forward
+      overlap and the one-word null-destination cursor advance with wrapping
+      pointer arithmetic, and uses volatile accesses to prevent libc-copy
+      substitution.
