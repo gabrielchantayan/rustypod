@@ -667,9 +667,22 @@ pub unsafe extern "C" fn kernel_op_dispatch(op: usize, arg: usize) -> usize {
     (hook!(kernel_op_dispatch))(op, arg)
 }
 
-/// task_lock — original: thunk @ 0x08037e48 -> ROM 0x22003ea0, the
-/// kernel-id -> object-pointer table lookup (table @ 0x08a24108; empty
-/// slots read back as 0/-1 — see the module header for the naming caveat).
+/// task_lock — original: `thunk_EXT_FUN_22003ea0` @ `0x08037e48`.
+///
+/// Raw words establish the full **8-byte** ADS literal veneer: `e51ff004`
+/// (`ldr pc, [pc, #-4]`) and literal `22003ea0`; the next real veneer begins
+/// at `0x08037e50`. ARM decoding finds exactly three unconditional `bl` call
+/// sites (`0x080564c0`, `0x080564f4`, `0x0809c7b4`) and no predicated `bl`
+/// calls. The veneer tail-dispatches its r0 kernel id to the ROM target
+/// unchanged and returns its r0 result. The IRAM mirror at `0x08003ea0`
+/// loads `table[0x08a24108][id]`, yielding the object pointer or its empty
+/// sentinel.
+///
+/// Deliberate deviation: this is target-only mask-ROM code, so Rust calls the
+/// volatile `ROM_KERNEL.task_lock` hook rather than issuing the literal
+/// PC-load transfer. That seam preserves the documented input and result.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.task_lock")]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn task_lock(id: usize) -> usize {
     (hook!(task_lock))(id)
