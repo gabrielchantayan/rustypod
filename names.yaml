@@ -143820,3 +143820,26 @@ functions:
       [source,end), returns the advanced destination cursor, and makes no call
       for an empty range. Deliberate deviation: target Rust reaches the unported
       constructor through an absolute-literal veneer; host tests inject it.
+  - address: 0x083e9c80
+    ghidra: FUN_083e9c80
+    name: vector_record24_copy
+    size: 60
+    sig: "u8 *vector_record24_copy(const u8 *source, const u8 *source_end, u8 *destination)"
+    module: cxx/vector_record24_copy
+    status: ported
+    vars: {param_1: source, param_2: source_end, param_3: destination}
+    renames:
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec confirms the exact 60-byte extent 0x083e9c80..0x083e9cbb:
+      `push {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}`, followed immediately
+      by the distinct `push {r4,r5,r6,lr}` entry at 0x083e9cbc. Full-image
+      A32 B/BL decoding finds exactly two inbound unconditional plain BL calls
+      (0x083e2ec0 and 0x083e2f10) and zero predicated BL calls. The single
+      internal unconditional BL calls iram_memcpy_veneer @ 0x08037df8 for
+      each 24-byte record. It copies the half-open source record range into
+      destination and returns destination advanced by its byte length.
+      Deliberate deviation: Rust calls the already-ported memcpy body directly
+      instead of the IRAM veneer, retaining its grouped forward-copy behavior.
+      A target-only unique text section prevents LLVM from folding this distinct
+      retail BL target into byte-identical fixed_record_range_copy.
