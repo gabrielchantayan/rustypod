@@ -33,6 +33,7 @@ pub mod object_word;
 pub mod message_0x17;
 pub mod message_0x23;
 pub mod message_0x10;
+pub mod pending_message_discard;
 pub mod message_0x2e;
 pub mod message_dispatch_veneer;
 pub mod opaque_tail_dispatch_veneer;
