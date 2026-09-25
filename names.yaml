@@ -142759,3 +142759,32 @@ functions:
       match.py reports the expected structural diff: LLVM uses BLX/BX through
       literal-loaded addresses and a larger frame instead of ARM's direct BL/B
       sequence.
+
+  - address: 0x08038258
+    ghidra: thunk_EXT_FUN_22003bb0
+    name: gateway_service29
+    size: 8
+    sig: "void gateway_service29(u32 first, u32 second)"
+    module: kernel/gateway_service29
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      "request+0x00": service_selector
+      "request+0x04": first
+      "request+0x08": second
+    notes: >-
+      Ghidra reports a four-byte function, but raw osos.dec words establish
+      its true eight-byte ADS literal-veneer extent:
+      0x08038258 `ldr pc,[pc,#-4]` (0xe51ff004), then target literal
+      0x22003bb0 at 0x0803825c; the next veneer starts at 0x08038260.
+      The boot relocator makes ROM 0x22003bb0 recoverable through its
+      28-byte osos mirror at 0x08003bb0..0x08003bcb, which saves
+      r1-r3/lr, builds `{ 0x1d, first, second }`, and calls the RTXC gateway
+      veneer at 0x08003660. Decoding all direct A32 BL encodings finds three
+      inbound plain BL call sites and zero predicated BL forms. The selector's
+      higher-level identity is unrecovered, so Rust names the verified
+      service-29 wire protocol rather than inventing a callee identity.
+      Rust uses the established volatile message_dispatch_veneer foreign-call
+      seam and intentionally does not expose the original's caller-saved
+      register state after dispatch.
