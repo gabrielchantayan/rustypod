@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8814
+    ghidra: FUN_083e8814
+    name: string_object_word_merge_pass
+    size: 184
+    sig: "void string_object_word_merge_pass(const StringObjectWord *first, const StringObjectWord *last, StringObjectWord *output, i32 run_records, const void *comparator)"
+    module: cxx/string_object_word_merge_pass
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      param_4/r3: run_records
+      param_5/stack: comparator
+      r4: input_cursor
+      r5: doubled_run_records
+      r6: output_cursor
+      r7: pair_end
+      r8: last
+      r9: comparator
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent
+      0x083e8814..0x083e88cb: it ends in pop {r4-r9,pc}, and the next
+      independently linked function starts with push {r4-r6,lr} at
+      0x083e88cc. Raw A32 decoding finds four plain unconditional body BL
+      instructions (two to string_object_word_merge at 0x083ea788 and two
+      to __rt_sdiv at 0x08031568), with zero predicated body BL instructions.
+      The full-image direct-call scan finds two plain inbound BL sites
+      (0x083e9ab8 and 0x083e9ad4) and zero predicated inbound BL sites.
+      It merges adjacent run_records-long sorted StringObjectWord runs into
+      output, then merges the final partial pair using min(run_records,
+      remaining_records) as the left-run length. The comparator reaches the
+      callee ABI but is stateless and unread by string_object_less; Rust
+      preserves the argument while deliberately ignoring it. Host tests cover
+      complete runs followed by a short final pair.
   - address: 0x083e88cc
     ghidra: FUN_083e88cc
     name: record20_range_copy_if_destination
