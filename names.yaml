@@ -1057,6 +1057,31 @@ functions:
       Rust inlines the verified tail target rather than creating a call
       seam, keeping this veneer independently hookable; host fixtures use
       low-address raw-u32 storage because firmware pointers are 32-bit.
+  - address: 0x083e9490
+    ghidra: thunk_FUN_083e94a8
+    name: copy_halfword_range_if_destination
+    size: 40
+    sig: "u16 *copy_halfword_range_if_destination(const u16 *source, const u16 *end, u16 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_halfword_range_if_destination
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the 40-byte extent
+      0x083e9490..0x083e94b8: `b 0x083e94a8; cmp r2,#0; ldrhne
+      r12,[r0],#2; strhne r12,[r2],#2; cmp r0,r1; bne 0x083e9494; mov
+      r0,r2; bx lr`. The branch entry is required: it checks for an empty
+      range before entering the transfer block. The next real function
+      boundary is the `str lr,[sp,#-4]!` at 0x083e94b8. It conditionally
+      copies aligned halfwords over [source,end) in forward load/store order,
+      advances the destination even when null, and returns it. Whole-image
+      raw A32 decoding finds exactly two inbound plain BL calls
+      (0x083e6c04 and 0x083e6c40), zero predicated BL calls, and no outbound
+      calls. Volatile accesses retain the ordered halfword transfer and avoid
+      libc-copy substitution; wrapping pointer increments deliberately model
+      null-destination address arithmetic without Rust UB.
   - address: 0x083e9ea0
     ghidra: FUN_083e9ea0
     name: word_range_copy
