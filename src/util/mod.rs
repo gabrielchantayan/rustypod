@@ -45,6 +45,7 @@ pub mod copy_four_bytes;
 pub mod copy_fourteen_bytes;
 pub mod copy_two_u32_pairs;
 pub mod copy_range_if_destination;
+pub mod copy_range_nonnull_destination_loop_entry_9138;
 pub mod copy_u32_pair_if_destination;
 pub mod copy_word_range_if_destination_tail_entry;
 pub mod copy_word_range_if_destination_tail_entry_9250;
