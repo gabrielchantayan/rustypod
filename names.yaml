@@ -144354,3 +144354,27 @@ functions:
       branch target directly instead of retaining the entry branch, preserves
       forward-overlap ordering, and uses wrapping cursor increments to model
       the one-word null-destination path.
+  - address: 0x083e93f0
+    ghidra: thunk_FUN_083e9408
+    name: word_range_copy_if_destination_alias_93f0
+    size: 40
+    sig: "u32 *word_range_copy_if_destination_alias_93f0(const u32 *source, const u32 *source_end, u32 *destination)"
+    module: cxx/word_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+    notes: >-
+      Raw osos.dec establishes that the Ghidra four-byte thunk is the entry of
+      one 40-byte scheduled loop: `b 0x083e9408` at 0x083e93f0 branches to
+      the range comparison, whose backward branch enters the transfer at
+      0x083e93f4; `bx lr` ends at 0x083e9414 and 0x083e9418 begins the next
+      independent function. Full-image A32 decoding finds two inbound plain
+      direct BL calls (0x083e6438 and 0x083e6474), zero predicated direct BL
+      calls, and no outbound calls. The range copy conditionally performs a
+      volatile u32 load/store for each source word when destination is
+      non-null, advances both cursors, and returns destination. Rust
+      implements the verified branch target directly instead of retaining the
+      entry branch, preserves forward-overlap ordering, and uses wrapping
+      cursor increments to model the one-word null-destination path.
