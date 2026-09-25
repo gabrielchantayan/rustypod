@@ -2071,6 +2071,73 @@ event_handler_source_child_enabled:
 "#
 );
 
+/// Osos load address of the event-handler source child-rank veneer.
+pub const EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER: u32 = 0x0800_3958;
+
+/// Instruction word and literal in the child-rank veneer.
+pub const EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_INSN: u32 = 0xe51f_f004;
+pub const EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_TARGET: u32 = 0x0811_78c8;
+
+/// Byte offset of the child rank halfword.
+pub const EVENT_HANDLER_SOURCE_CHILD_RANK_OFFSET: usize = 0x6b8;
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// Event-handler source child rank — original: `thunk_FUN_081178c8` @
+    /// `0x08003958` (8 bytes: `ldr pc,[pc,#-4]` and its target literal
+    /// 0x081178c8; Ghidra's reported 4-byte extent excludes the literal word,
+    /// and the next veneer starts at 0x08003960).
+    ///
+    /// The literal is a post-relocation retailOS address. The relocator at
+    /// 0x080046e0 copies the 0xaed8-byte IRAM block (this veneer included, so
+    /// on device it is equally entered as 0x22003958) to 0x22000000 before
+    /// moving retailOS to 0x08000000. The target bytes therefore live at
+    /// osos.dec file address 0x081227a0 (= target - 0x08000000 + 0xaed8).
+    /// They are the 8-byte leaf `ldrh r0,[r0,#0x6b8]; bx lr`, bounded by the
+    /// next function prologue at file address 0x081227a8.
+    ///
+    /// Decoding every ARM B/BL word in osos.dec finds exactly three inbound
+    /// calls, all plain unconditional `bl` at 0x08007908, 0x080079e8, and
+    /// 0x08007a00; there are no predicated forms. The event-handler source
+    /// teardown path compares this rank to select enabled children to retire.
+    ///
+    /// Deliberate deviation: none on ARM; the port is the verbatim instruction
+    /// and literal. The host build implements the decoded leaf directly.
+    pub fn event_handler_source_child_rank(child: *const u8) -> u32;
+}
+
+/// Host port of the child-rank leaf the veneer tail-dispatches to.
+///
+/// The ARM target has no NULL guard and ignores r1; callers must provide a
+/// valid child object at least 0x6ba bytes long. The halfword read is volatile
+/// so host tests observe exactly one load per call.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_handler_source_child_rank(child: *const u8) -> u32 {
+    u32::from(core::ptr::read_volatile(
+        child.add(EVENT_HANDLER_SOURCE_CHILD_RANK_OFFSET) as *const u16
+    ))
+}
+
+// `ldr pc` preserves LR, so the retailOS leaf returns directly to this
+// veneer's caller. Keep the fixed target in assembly rather than
+// materializing it as a Rust function pointer on target.
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl event_handler_source_child_rank
+    .type event_handler_source_child_rank, %function
+event_handler_source_child_rank:
+    ldr     pc, [pc, #-4]
+    .word   0x081178c8
+    .size event_handler_source_child_rank, . - event_handler_source_child_rank
+"#
+);
+
 /// One thunk-table entry: the osos-side stub and its ROM target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RomThunk {
@@ -3553,6 +3620,30 @@ mod tests {
             let _ = event_handler_source_child_enabled(child.as_ptr() as *const u8);
         }
         assert_eq!(child, before);
+    }
+
+    #[test]
+    fn child_rank_veneer_matches_literal_and_reads_the_rank_halfword() {
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER, 0x0800_3958);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_TARGET, 0x0811_78c8);
+        assert_eq!(EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_TARGET & 3, 0);
+        assert_eq!(
+            EVENT_HANDLER_SOURCE_CHILD_RANK_VENEER_TARGET - 0x0800_0000 + 0xaed8,
+            0x0012_27a0
+        );
+
+        let mut child = [0xffff_u16; 0x400];
+        for rank in [0x0000_u16, 0x0001, 0x7fff, 0x8000, 0xffff] {
+            child[EVENT_HANDLER_SOURCE_CHILD_RANK_OFFSET / 2] = rank;
+            unsafe {
+                assert_eq!(
+                    event_handler_source_child_rank(child.as_ptr().cast()),
+                    u32::from(rank),
+                    "rank {rank:#06x}"
+                );
+            }
+        }
     }
 
     #[test]

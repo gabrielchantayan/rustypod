@@ -6487,6 +6487,34 @@ functions:
       normalization over edge halfwords (0, 1, 0x7fff, 0x8000, 0xff00,
       0xffff), neighbor-halfword isolation, and read-only behavior.
 
+
+  # --- event-handler source child-rank veneer ---
+  - address: 0x08003958
+    ghidra: thunk_FUN_081178c8
+    name: event_handler_source_child_rank
+    size: 8
+    sig: "u32 event_handler_source_child_rank(const void *child)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      thunk_FUN_081178c8: event_handler_source_child_rank
+      param_1/r0: child
+    notes: >-
+      Raw bytes are 04 f0 1f e5 c8 78 11 08, i.e. the literal veneer
+      `ldr pc, [pc, #-4]` plus target word 0x081178c8; Ghidra's 4-byte
+      extent drops the literal, and the next veneer starts at 0x08003960,
+      so the true size is 8 bytes. Decoding every ARM B/BL word in osos.dec
+      finds exactly three inbound calls, all plain unconditional bl at
+      0x08007908, 0x080079e8 and 0x08007a00 - no predicated forms. The
+      relocator at 0x080046e0 mirrors this veneer to IRAM, so it is equally
+      entered as 0x22003958. Its post-relocation target bytes are at osos.dec
+      file address 0x081227a0 (= target - 0x08000000 + 0xaed8), where the
+      8-byte leaf is `ldrh r0,[r0,#0x6b8]; bx lr`, bounded by the next
+      prologue at 0x081227a8. It returns the child rank halfword at +0x6b8,
+      used by event-handler source teardown to select higher-ranked enabled
+      children for retirement. ARM builds retain the exact literal veneer;
+      host builds decode the leaf directly and test rank values including
+      zero and both signed-halfword extrema.
   # --- callback-target virtual dispatch ---
   - address: 0x08007788
     ghidra: FUN_08007788
