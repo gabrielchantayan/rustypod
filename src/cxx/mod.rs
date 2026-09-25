@@ -144,6 +144,7 @@ pub mod list_cursor_item_at;
 pub mod list_cursor_base_index;
 pub mod list_cursor_count;
 pub mod magic_tagged_object_release;
+pub mod magic_tagged_object_entry_count;
 pub mod magic_tagged_object_destroy;
 pub mod magic_tagged_object_reset;
 pub mod vtable_owned_payload_destruct;

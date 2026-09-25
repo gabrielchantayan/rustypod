@@ -142333,3 +142333,30 @@ functions:
       stores the vtable. 0x080470bc remains an intentional resident-target
       seam because its semantic identity is unrecovered; host tests emulate
       only its observed layout.
+
+  # --- Magic tagged object entry-count accessor ---
+  - address: 0x080470a0
+    ghidra: FUN_080470a0
+    name: magic_tagged_object_entry_count
+    size: 28
+    sig: "u32 magic_tagged_object_entry_count(const MagicTaggedObject *object)"
+    module: cxx/magic_tagged_object_entry_count
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_080d8f64: magic_tagged_object_validate
+      field_+0x10: entry_count
+    notes: >-
+      Raw osos.dec confirms the exact 28-byte extent
+      0x080470a0..0x080470b8: push {r4,lr}; move object to r4; bl
+      magic_tagged_object_validate; compare its result to zero; ldreq r0
+      from object+0x10; movne r0,#0; pop {r4,pc}. The following
+      push {r4,r5,r6,r7,r8,lr} at 0x080470bc starts the next separately
+      entered function. Whole-image ARM B/BL-immediate decoding finds three
+      direct inbound calls, all plain bl at 0x08054b30, 0x080df3c4, and
+      0x080e5af8, with zero predicated bl calls. The accessor returns the
+      +0x10 child-entry count only for objects accepted by the existing
+      magic-tag validator; invalid and null objects return zero. Callers use
+      it as an upper bound while enumerating 0x14-byte child entries.
+      Deliberate Rust deviation: the validator is called directly rather
+      than branched to stock code.
