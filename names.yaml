@@ -5784,6 +5784,31 @@ functions:
       host seam replaces only the fixed seed-cell address with a test word;
       target behavior retains the fixed BSS cell.
 
+  # --- stack-sensitive frame-restoring literal veneer ---
+  - address: 0x08003638
+    ghidra: thunk_FUN_0829fe9c
+    name: return_frame_veneer
+    size: 8
+    sig: "noreturn return_frame_veneer(u32 value)"
+    module: kernel/thunks
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_0800363c: return_frame_target
+    notes: >-
+      Ghidra's four-byte extent omits the owned literal word. Raw osos.dec is
+      exactly `ldr pc, [pc, #-4]` (0xe51ff004) followed by 0x0829fe9c; the
+      next literal veneer starts at 0x08003640, so the true extent is 8 bytes.
+      A complete raw A32 BL decode finds exactly three inbound direct calls,
+      all unconditional plain bl at 0x08003a88, 0x08003abc, and 0x0800730c;
+      there are zero predicated forms. The literal enters the final
+      `ldmia sp!, {r4,r5,r6,pc}` instruction of the preceding routine, which
+      restores the immediate caller's saved frame while preserving r0-r3.
+      This is a stack-sensitive non-local return, not Ghidra's inferred
+      indirect call. ARM retains the raw literal transfer verbatim; the host
+      declaration terminates because a normal host call cannot consume its
+      caller's frame.
+
   # --- stack-sensitive literal tail dispatch ---
   - address: 0x08003678
     ghidra: FUN_08003678

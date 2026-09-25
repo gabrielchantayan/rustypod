@@ -225,6 +225,59 @@ record_fields_compare_tail_veneer:
     .size record_fields_compare_tail_veneer, . - record_fields_compare_tail_veneer
 "#
 );
+/// Load address and literal contents of the return-frame veneer
+/// `thunk_FUN_0829fe9c` @ `0x08003638` (8 bytes: 4-byte instruction plus its
+/// target word; Ghidra reports only the instruction).
+///
+/// Raw `osos.dec` is `ldr pc, [pc, #-4]` / literal `0x0829fe9c`; the next
+/// literal veneer starts at `0x08003640`, so the true occupied range is 8
+/// bytes. Decoding every immediate ARM BL word in `osos.dec` finds exactly
+/// three direct callers, all unconditional plain `bl` (`0x08003a88`,
+/// `0x08003abc`, and `0x0800730c`); there are no predicated forms.
+///
+/// The literal enters the final `ldmia sp!, {r4, r5, r6, pc}` instruction of
+/// the preceding routine, which restores the immediate caller's frame and
+/// leaves r0-r3 unchanged. It is consequently a non-local return, not
+/// Ghidra's inferred indirect call. The ARM implementation is deliberately
+/// verbatim; the host stand-in terminates because ordinary host calls cannot
+/// consume their caller's frame.
+pub const RETURN_FRAME_VENEER: u32 = 0x0800_3638;
+pub const RETURN_FRAME_VENEER_INSN: u32 = 0xe51f_f004;
+pub const RETURN_FRAME_VENEER_TARGET: u32 = 0x0829_fe9c;
+
+#[cfg(target_arch = "arm")]
+extern "C" {
+    /// return_frame_veneer — original: `thunk_FUN_0829fe9c` @ `0x08003638`
+    /// (8 bytes).
+    ///
+    /// Tail-dispatches to the frame-restoring instruction at `0x0829fe9c`,
+    /// preserving r0-r3 and consuming the immediate caller's saved
+    /// `{r4, r5, r6, pc}` frame.
+    pub fn return_frame_veneer(value: u32) -> !;
+}
+
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn return_frame_veneer(value: u32) -> ! {
+    let _ = value;
+    unreachable!("return_frame_veneer frame-restoring transfer unavailable on host")
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl return_frame_veneer
+    .type return_frame_veneer, %function
+return_frame_veneer:
+    ldr     pc, [pc, #-4]
+    .word   0x0829fe9c
+    .size return_frame_veneer, . - return_frame_veneer
+"#
+);
+
 
 /// Load address and literal contents of the opaque state-terminal continuation
 /// veneer `thunk_FUN_082aad24` @ `0x08003728` (8 bytes: 4-byte instruction
@@ -2633,6 +2686,17 @@ mod tests {
         assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER_TARGET, 0x0829_fe4c);
         assert_eq!(RECORD_FIELDS_COMPARE_TAIL_VENEER_TARGET & 3, 0);
     }
+    /// The raw veneer at 0x08003638 reaches the frame-restoring epilogue at
+    /// 0x0829fe9c. These word-level edge constraints prevent a normal
+    /// call/return wrapper from replacing the stack-sensitive transfer.
+    #[test]
+    fn return_frame_veneer_matches_literal_transfer() {
+        assert_eq!(RETURN_FRAME_VENEER, 0x0800_3638);
+        assert_eq!(RETURN_FRAME_VENEER_INSN, 0xe51f_f004);
+        assert_eq!(RETURN_FRAME_VENEER_TARGET, 0x0829_fe9c);
+        assert_eq!(RETURN_FRAME_VENEER_TARGET & 3, 0);
+    }
+
 
     static OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static mut CALLBACK_COUNT: u32 = 0;
