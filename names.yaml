@@ -141634,3 +141634,36 @@ functions:
       rather than an invented identity; its status result is discarded exactly
       as retailOS does. Host tests cover early guards, materialize/re-read, and
       zero-primary delegation.
+
+  # --- thumbnail location cache entry selection (app) ---
+  - address: 0x08052484
+    ghidra: FUN_08052484
+    name: thumbnail_location_cache_entry
+    size: 116
+    sig: "u8 *thumbnail_location_cache_entry(u8 *request)"
+    module: app/thumbnail_location_cache_entry
+    status: ported
+    renames:
+      param_1/r0/r4: request
+      "request+0x4": cache
+      "request+0x8": key
+      "cache+0x8": entry_base
+      "cache+0xc": bucket_source
+      FUN_080503ec: "unported cache lookup seam"
+      FUN_0805dfec: "unported cache allocation seam"
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec decoding establishes the exact 116-byte extent
+      0x08052484..0x080524f7; the next word at 0x080524f8 begins the
+      independent following function. It contains exactly three unconditional
+      direct bl calls (0x080503ec, 0x0805dfec, and __rt_udiv at 0x08036f14)
+      and no predicated body call. Independently decoding every aligned
+      immediate B/BL word in the raw image finds three inbound plain bl sites
+      (0x08049070, 0x080523e0, 0x0809edd0) and zero predicated forms. NULL
+      returns zero; keys below 1000 use the unsigned remainder of
+      cache+0x0c / 20 to select entry_base + remainder*0x58 + 0xe4. Other
+      keys use the 0x080503ec result or call 0x0805dfec only for a null
+      result, returning a nonnull entry +0x10. Deliberate deviation:
+      __rt_udivmod exposes ADS r1 remainder through an out-pointer; the two
+      unported call sites are typed address seams without an inferred callee
+      identity. Host tests use a dedicated raw-u32 slab for pointer fields.

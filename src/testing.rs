@@ -179,6 +179,9 @@ pub mod hints {
     // 0x7f00_0000: dedicated to app/file_record_registry_destruct's
     // target-width registry fixture; mappings never unmap.
     pub const FILE_RECORD_REGISTRY_DESTRUCT: usize = 0x7f00_0000;
+    // 0x6f90_0000: dedicated to app/thumbnail_location_cache_entry's
+    // request, cache, and entry-base raw-u32 fixture; mappings never unmap.
+    pub const THUMBNAIL_LOCATION_CACHE_ENTRY: usize = 0x6f90_0000;
     // 0x7f80_0000: dedicated to codegen/interference's raw-u32 graph and
     // arena fixture; mappings never unmap, so no other user may share it.
     pub const CG_INTERFERENCE_EDGE_LINK: usize = 0x7f80_0000;
