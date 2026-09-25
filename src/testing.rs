@@ -2471,6 +2471,9 @@ pub mod hints {
     // 0x6aa0_0000: dedicated to kernel/thunks's target-width UI-manager,
     // state, and current-context fixture; mappings never unmap.
     pub const UI_MANAGER_CURRENT_CONTEXT: usize = 0x6aa0_0000;
+    // 0x6a90_0000: dedicated to util/record_min_heap_sift_up's record and
+    // heap fixtures; mappings never unmap, so no other port may share it.
+    pub const RECORD_MIN_HEAP_SIFT_UP: usize = 0x6a90_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

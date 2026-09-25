@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e7d7c
+    ghidra: FUN_083e7d7c
+    name: record_min_heap_sift_up
+    size: 92
+    sig: "void record_min_heap_sift_up(u32 *heap, i32 child_index, i32 start_index, u32 value)"
+    module: util/record_min_heap_sift_up
+    status: ported
+    renames:
+      param_1/r0: heap
+      param_2/r1: child_index
+      param_3/r2: start_index
+      param_4/r3: value
+      r4: parent_index
+      r5: current_index
+      r6: heap
+      r7: start_index
+      r8: value
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent
+      0x083e7d7c..0x083e7dd7: pop {r4-r8,pc} returns at the end, and the next
+      independently linked function begins at 0x083e7dd8. Raw A32 decoding
+      finds one plain unconditional body BL at 0x083e7dc4 to the unported
+      comparator 0x082a1d1c, and zero predicated body BL instructions. The two
+      inbound BL callers are 0x083d9e28 and 0x083e7eb8. The function inserts a
+      target-width record pointer into a binary min-heap, moving strict-greater
+      parents down while the insertion index exceeds its lower bound. Comparator
+      inspection establishes lexicographic unsigned +0x1c then signed +0x20
+      ordering. Rust uses indexed u32 access rather than literal lsl #2
+      arithmetic; its unported comparator is a target call and host test seam.
   - address: 0x083e7dd8
     ghidra: FUN_083e7dd8
     name: string_object_word_upper_bound
