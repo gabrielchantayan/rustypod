@@ -891,6 +891,41 @@ pub unsafe extern "C" fn namespace_provider_at(
             .read_volatile()
     }
 }
+/// namespace_provider_slot_at — original: `FUN_08043af0` @ `0x08043af0`
+/// (56 bytes, `0x08043af0..0x08043b28`; the next separately linked function
+/// begins with `stmdb sp!,{r4,r5,r6,lr}` at `0x08043b28`). Raw-word decoding
+/// verifies one plain direct `bl` to [`namespace_provider_count`], no
+/// predicated calls, and three plain inbound `bl` sites (`0x08090da8`,
+/// `0x08090f00`, and `0x0809b918`).
+///
+/// Reads a namespace-provider pointer from `provider_slot`. A null provider
+/// returns null; otherwise, a signed index strictly below the provider count
+/// tail-dispatches to [`namespace_provider_at`]. Negative indexes deliberately
+/// pass the signed comparison then become unsigned table indexes, exactly as
+/// the ARM `cmp`/`bgt` path does.
+///
+/// Deliberate deviation: the ARM success path restores registers and tail
+/// branches to `namespace_provider_at`; Rust performs an ordinary returning
+/// call. On the target both accessor callees remain direct Rust calls. Host
+/// slots use pointer-width storage so test fixtures remain valid on 64-bit
+/// hosts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_slot_at(
+    provider_slot: *const *const u32,
+    index: i32,
+) -> *const u32 {
+    let providers = provider_slot.read_volatile();
+    if providers.is_null() {
+        return core::ptr::null();
+    }
+    if namespace_provider_count(providers) > index {
+        namespace_provider_at(providers, index as u32)
+    } else {
+        core::ptr::null()
+    }
+}
+
 /// namespace_provider_set — original: `FUN_083697f8` @ `0x083697f8`
 /// (24 bytes, `0x083697f8..0x08369810`; the next independently linked
 /// function begins with `ldr r2,[r0,#16]` at `0x08369810`). Verified inbound
@@ -3406,6 +3441,23 @@ mod tests {
         );
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 2) }, table[2]);
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 3) }, table[3]);
+    }
+    #[test]
+    fn namespace_provider_slot_at_handles_null_and_count_boundaries() {
+        let first = 0x1111_1111u32;
+        let second = 0x2222_2222u32;
+        let table = [core::ptr::addr_of!(first), core::ptr::addr_of!(second)];
+        let providers = NamespaceProviders::new(2, table.as_ptr().cast());
+        let slot = providers.ptr();
+        let null_slot = core::ptr::null();
+        let empty = NamespaceProviders::new(0, table.as_ptr().cast());
+        let empty_slot = empty.ptr();
+
+        assert!(unsafe { namespace_provider_slot_at(&null_slot, 0) }.is_null());
+        assert_eq!(unsafe { namespace_provider_slot_at(&slot, 0) }, table[0]);
+        assert_eq!(unsafe { namespace_provider_slot_at(&slot, 1) }, table[1]);
+        assert!(unsafe { namespace_provider_slot_at(&slot, 2) }.is_null());
+        assert!(unsafe { namespace_provider_slot_at(&empty_slot, 0) }.is_null());
     }
 
     #[test]
