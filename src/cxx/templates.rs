@@ -580,6 +580,52 @@ pub unsafe extern "C" fn deque_iter_distance_elem4(
         words_between(left.cur as usize, right.cur as usize)
     }
 }
+/// deque_iter_distance_elem4_alias_ad78 — original: `FUN_083ead78` @
+/// 0x083ead78.
+///
+/// **104 bytes**, exactly 26 ARM instructions from 0x083ead78 through
+/// `pop {r4,r5,pc}` at 0x083eaddc; the next separately linked function begins
+/// at 0x083eade0. Full-image A32 decoding of `osos.dec` finds two inbound
+/// direct plain `bl` calls at 0x083de5f8 and 0x083eab80, with no predicated
+/// `bl` forms. Its sole outgoing call is an unconditional `bl` to the adjacent
+/// `deque_seg_capacity` copy at 0x083d9fcc.
+///
+/// Returns the signed distance, in four-byte elements, between two deque
+/// iterators. Iterators in distinct segments include complete intervening
+/// segments, the left offset from its segment base, and the right offset to
+/// its segment end; iterators in one segment only subtract cursors.
+///
+/// Deliberate deviations: the capacity call uses the shared
+/// [`deque_seg_capacity`] export instead of an otherwise redundant local seam,
+/// and arithmetic wraps at 32 bits before signed shifts to preserve target
+/// pointer subtraction on 64-bit hosts.
+///
+/// # Safety
+///
+/// `left` and `right` must be valid [`DequeIter`] objects.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_distance_elem4_alias_ad78")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_distance_elem4_alias_ad78(
+    left: *const DequeIter,
+    right: *const DequeIter,
+) -> i32 {
+    let left = &*left;
+    let right = &*right;
+    let words_between = |a: usize, b: usize| (a as u32).wrapping_sub(b as u32) as i32 >> 2;
+    if left.seg_slot != right.seg_slot {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let segment_capacity = capacity_fn() as i32;
+        (words_between(left.seg_slot as usize, right.seg_slot as usize) - 1) * segment_capacity
+            + words_between(left.cur as usize, left.seg_base as usize)
+            + words_between(right.seg_end as usize, right.cur as usize)
+    } else {
+        words_between(left.cur as usize, right.cur as usize)
+    }
+}
+
 
 /// deque_iter_equal — original: `FUN_083eaca0` @ 0x083eaca0.
 ///
@@ -11707,6 +11753,33 @@ mod tests {
             assert_eq!(deque_iter_distance_elem4(&earlier_segment, &later_segment), -35);
         }
     }
+
+    #[test]
+    fn deque_iter_distance_elem4_alias_ad78_matches_same_and_cross_segment_positions() {
+        let same_left = DequeIter {
+            cur: 0x100cusize as *mut u8,
+            seg_base: 0x1000usize as *mut u8,
+            seg_end: 0x1080usize as *mut u8,
+            seg_slot: 0x2000usize as *mut *mut u8,
+        };
+        let same_right = DequeIter {
+            cur: 0x1000usize as *mut u8,
+            ..same_left
+        };
+        let later_segment = DequeIter {
+            cur: 0x300cusize as *mut u8,
+            seg_base: 0x3000usize as *mut u8,
+            seg_end: 0x3080usize as *mut u8,
+            seg_slot: 0x2008usize as *mut *mut u8,
+        };
+
+        unsafe {
+            assert_eq!(deque_iter_distance_elem4_alias_ad78(&same_left, &same_right), 3);
+            assert_eq!(deque_iter_distance_elem4_alias_ad78(&later_segment, &same_left), 64);
+            assert_eq!(deque_iter_distance_elem4_alias_ad78(&same_left, &later_segment), -64);
+        }
+    }
+
 
     #[test]
     fn deque_iter_equal_handles_identical_and_distinct_interior_positions() {
