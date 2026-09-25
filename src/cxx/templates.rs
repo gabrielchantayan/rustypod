@@ -5109,6 +5109,52 @@ pub unsafe extern "C" fn vector_copy_range_elem24_alias_8f84(
     }
     output
 }
+/// vector_copy_range_elem24_alias_8cf0 — original: `FUN_083e8cf0` @
+/// 0x083e8cf0 (60 bytes; raw extent 0x083e8cf0..0x083e8d2c, bounded by the
+/// separately linked `push {r4,r5,r6,lr}` at 0x083e8d2c). Raw A32 decoding
+/// finds two inbound plain `bl` calls at 0x083e2e40 and 0x083e2f3c, no
+/// predicated inbound `bl`, one predicated body `blne 0x08037df8`, and no
+/// plain body `bl`.
+///
+/// Copies the half-open `[first, last)` range of aligned 24-byte vector
+/// records into `output`, advancing both cursors by 24 bytes and returning the
+/// advanced output cursor. The ARM predicates each copy on `output != NULL`;
+/// a NULL initial cursor therefore skips only the first record before the
+/// cursor advances to address 0x18.
+///
+/// Deliberate deviation: the IRAM memcpy veneer is represented by the
+/// already-ported [`memcpy_forward_words`] through a volatile function
+/// pointer, preserving its forward-copy semantics while preventing LLVM from
+/// replacing this call with an inline copy. The dedicated text section keeps
+/// this independently hookable function separate from identical instantiations.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a range whose length is a multiple of 24.
+/// When `output` is non-NULL, `first` must be readable and `output` writable
+/// for that many bytes; both must be word-aligned. The original has no overlap
+/// guard and performs forward copies.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_range_elem24_alias_8cf0")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_elem24_alias_8cf0(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            let copy = core::ptr::read_volatile(
+                &(memcpy_forward_words as unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8),
+            );
+            copy(output, first, 24);
+        }
+        first = first.wrapping_add(24);
+        output = output.wrapping_add(24);
+    }
+    output
+}
+
 
 /// An 8-byte vector record whose +5 byte is padding left untouched by the
 /// retailOS copy assignment.
@@ -13528,4 +13574,31 @@ mod tests {
         };
         assert_eq!(returned, 24usize as *mut u8);
     }
+    #[test]
+    fn copy_range_elem24_alias_8cf0_copies_exclusive_range_and_advances_null_output() {
+        let source: [u8; 48] = core::array::from_fn(|index| (index as u8).wrapping_mul(29));
+        let mut output = [0xa5u8; 72];
+
+        let returned = unsafe {
+            vector_copy_range_elem24_alias_8cf0(
+                source.as_ptr(),
+                source.as_ptr().add(source.len()),
+                output.as_mut_ptr().add(24),
+            )
+        };
+
+        assert_eq!(returned, unsafe { output.as_mut_ptr().add(72) });
+        assert_eq!(&output[..24], &[0xa5; 24]);
+        assert_eq!(&output[24..72], &source);
+
+        let returned = unsafe {
+            vector_copy_range_elem24_alias_8cf0(
+                core::ptr::null(),
+                24usize as *const u8,
+                core::ptr::null_mut(),
+            )
+        };
+        assert_eq!(returned, 24usize as *mut u8);
+    }
+
 }
