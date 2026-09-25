@@ -51509,6 +51509,34 @@ functions:
       forwarding and the post-initializer vtable reload. The target tail bx
       is an ordinary returning Rust call.
 
+  - address: 0x08043af0
+    ghidra: FUN_08043af0
+    name: namespace_provider_slot_at
+    size: 56
+    sig: "const u32 *namespace_provider_slot_at(const u32 *const *provider_slot, i32 index)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r4: provider_slot
+      param_2/r5: index
+      "*provider_slot/r0": providers
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+    notes: >-
+      Raw osos.dec words establish the exact 56-byte executable extent
+      0x08043af0..0x08043b27; `stmdb sp!,{r4,r5,r6,lr}` at 0x08043b28 is the
+      next independently linked function. The body has one unconditional
+      direct BL to namespace_provider_count and no predicated direct BL
+      calls, then restores registers and tail-branches to
+      namespace_provider_at when the signed count is greater than index.
+      Full-image A32 decoding finds three inbound unconditional BL calls
+      (0x08090da8, 0x08090f00, 0x0809b918) and no predicated callers. Null
+      providers and out-of-range signed indexes return null. Negative indexes
+      deliberately pass the signed count check and become unsigned table
+      indexes at the tail accessor. Rust makes that tail branch an ordinary
+      returning call and uses native-width provider slots only in host tests;
+      the ARM ABI and target object words remain four bytes wide.
+
   # --- OpenSSL CRYPTO_new_ex_data dispatch shim ---
   - address: 0x08043e04
     ghidra: FUN_08043e04
