@@ -106,6 +106,7 @@ pub mod plst_find_by_persistent_id;
 pub mod plst_find_by_selector;
 pub mod plst_next;
 pub mod plst_slot_item;
+pub mod plst_secondary_slot_item;
 pub mod plst_selector_normalize;
 pub mod plst_slot_materialize;
 pub mod plst_optional_fields_read;

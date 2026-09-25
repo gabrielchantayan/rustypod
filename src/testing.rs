@@ -2368,6 +2368,10 @@ pub mod hints {
     // parser state, source record, and destination buffer fixture; mappings
     // never unmap, so no other port may share this hint.
     pub const PLST_OPTIONAL_FIELDS_READ: usize = 0x6ec0_0000;
+    // 0x7920_0000: dedicated to ui/plst_secondary_slot_item's target-width
+    // element, header, and lazily materialized secondary-slot fixture; mappings
+    // never unmap, so no other port may share this hint.
+    pub const PLST_SECONDARY_SLOT_ITEM: usize = 0x7920_0000;
     // 0x6fc0_0000: dedicated to util/entry_table_finalize_and_append's
     // target-width state fixture; mappings never unmap, so no other user may
     // share it.
