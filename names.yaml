@@ -10396,6 +10396,37 @@ functions:
       [source,end) forward only when destination is non-NULL, and returns the
       advanced destination.
 
+  - address: 0x083e9628
+    ghidra: FUN_083e9628
+    name: vector_fill_construct_n_elem28
+    size: 60
+    sig: "void vector_fill_construct_n_elem28(u8 *output, u32 count, const u8 *source, VectorStorage *vector)"
+    renames:
+      param_1/r0: output
+      param_2/r1: count
+      param_3/r2: source
+      param_4/r3: vector
+      r4: remaining_count
+      r5: output_cursor
+      r6: source
+      r7: vector
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw words establish the true 60-byte extent 0x083e9628..0x083e9664:
+      push {r4-r7,lr}; preserve vector, source, output, and count; branch to
+      the count test; then invoke 0x083d7ee8 as (vector, output_cursor,
+      source), decrement count, advance output +0x1c, and loop while nonzero.
+      The push {r4-r7,lr} at 0x083e9664 is the next function's entry, not
+      part of this function. Whole-image A32 branch decoding finds exactly two
+      inbound direct plain BL sites, no predicated BL sites; the body contains
+      exactly one plain BL, ebffba25 at 0x083e9648 resolving to 0x083d7ee8,
+      and no predicated calls. This is std::vector uninitialized-fill for
+      count 0x1c-byte elements. Deliberate deviation: the unported 0x083d7ee8
+      element helper uses the existing VECTOR_COPY_CONSTRUCT_ELEM28_OPS
+      volatile dispatch seam; its target default calls the firmware address
+      and its host default is inert. Host tests cover repeated source/striding
+      output, zero count, and NULL output dispatch.
   - address: 0x083e9664
     ghidra: FUN_083e9664
     name: vector_fill_construct_n_elem32

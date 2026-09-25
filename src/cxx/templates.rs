@@ -5566,6 +5566,47 @@ pub unsafe extern "C" fn vector_copy_construct_range_elem32(
     }
     output
 }
+/// vector_fill_construct_n_elem28 — original: `FUN_083e9628` @ 0x083e9628
+/// (60 bytes; extent 0x083e9628..0x083e9664, bounded by the next function's
+/// `push {r4-r7,lr}` at 0x083e9664; reference
+/// `ipod-decomp/decomp/c/038/083e9628_FUN_083e9628.c`).
+///
+/// `std::vector<T>` uninitialized-fill for `count` 0x1c-byte elements. Each
+/// iteration copy-constructs `source` into the current output slot, then
+/// decrements the count and advances only that output cursor by 0x1c. The
+/// source and vector arguments are invariant across calls.
+///
+/// **Call count**, verified from the raw A32 words: two inbound direct plain
+/// `bl` sites and no predicated inbound calls; the body has one plain `bl`
+/// (`ebffba25` at 0x083e9648 to 0x083d7ee8) and no predicated calls.
+///
+/// # Deviations
+///
+/// The unported element helper dispatches through
+/// [`VECTOR_COPY_CONSTRUCT_ELEM28_OPS`], as in
+/// [`vector_copy_construct_range_elem28`]: target builds call its firmware
+/// address and the host default is inert.
+///
+/// # Safety
+///
+/// `output` must be writable for `count` consecutive 0x1c-byte elements
+/// whenever the installed helper writes. `source` must identify a readable
+/// element whenever `count` is nonzero.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_fill_construct_n_elem28(
+    mut output: *mut u8,
+    mut count: u32,
+    source: *const u8,
+    vector: *mut VectorStorage,
+) {
+    while count != 0 {
+        (vector_copy_construct_elem28_ops().copy_construct)(vector, output, source);
+        count -= 1;
+        output = output.wrapping_add(0x1c);
+    }
+}
+
 /// vector_fill_construct_n_elem32 — original: `FUN_083e9664` @ 0x083e9664
 /// (60 bytes; extent 0x083e9664..0x083e96a0, bounded by the next callable
 /// entry's `b 0x083e96b8` at 0x083e96a0; reference
@@ -11074,6 +11115,92 @@ mod tests {
             elem32_copy_construct_calls(),
             std::vec![Elem32CopyConstruct { vector: 0, output: 0, source: 0 }],
             "the NULL-output guard lives in the helper, not the loop"
+        );
+    }
+    #[test]
+    fn fill_construct_n_elem28_reuses_source_and_strides_output() {
+        let _guard = copy_construct_elem28_guard();
+        unsafe { install_recording_copy_construct_elem28() };
+        let source = [0x5au8; 0x1c];
+        let mut destination = [0xa5u8; 3 * 0x1c];
+        let mut vector = VectorStorage {
+            begin: core::ptr::null_mut(),
+            end: core::ptr::null_mut(),
+            end_of_storage: core::ptr::null_mut(),
+        };
+        let output = destination.as_mut_ptr();
+
+        unsafe {
+            vector_fill_construct_n_elem28(
+                output,
+                3,
+                source.as_ptr(),
+                core::ptr::addr_of_mut!(vector),
+            );
+        }
+
+        assert_eq!(
+            elem28_copy_construct_calls(),
+            std::vec![
+                Elem28CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: output as usize,
+                    source: source.as_ptr() as usize,
+                },
+                Elem28CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: unsafe { output.add(0x1c) } as usize,
+                    source: source.as_ptr() as usize,
+                },
+                Elem28CopyConstruct {
+                    vector: core::ptr::addr_of_mut!(vector) as usize,
+                    output: unsafe { output.add(2 * 0x1c) } as usize,
+                    source: source.as_ptr() as usize,
+                },
+            ],
+            "the source is reused while only output advances"
+        );
+        assert!(destination.iter().all(|byte| *byte == 0xa5));
+    }
+
+    #[test]
+    fn fill_construct_n_elem28_zero_count_does_not_dispatch() {
+        let _guard = copy_construct_elem28_guard();
+        unsafe { install_recording_copy_construct_elem28() };
+
+        unsafe {
+            vector_fill_construct_n_elem28(
+                core::ptr::null_mut(),
+                0,
+                core::ptr::null(),
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert!(elem28_copy_construct_calls().is_empty());
+    }
+
+    #[test]
+    fn fill_construct_n_elem28_null_output_still_dispatches() {
+        let _guard = copy_construct_elem28_guard();
+        unsafe { install_recording_copy_construct_elem28() };
+
+        unsafe {
+            vector_fill_construct_n_elem28(
+                core::ptr::null_mut(),
+                2,
+                0x1234usize as *const u8,
+                core::ptr::null_mut(),
+            );
+        }
+
+        assert_eq!(
+            elem28_copy_construct_calls(),
+            std::vec![
+                Elem28CopyConstruct { vector: 0, output: 0, source: 0x1234 },
+                Elem28CopyConstruct { vector: 0, output: 0x1c, source: 0x1234 },
+            ],
+            "the NULL-output guard remains the helper's responsibility"
         );
     }
     #[test]
