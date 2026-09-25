@@ -303,6 +303,7 @@ pub mod expand_byte_pair;
 pub mod u32_indirect_equal;
 pub mod u32_deref_equal;
 pub mod u32_deref;
+pub mod nullable_u32_deref_or_zero;
 pub mod u32_deref_is_max;
 pub mod u32_le_store_last_byte;
 pub mod zero_u32_pair;
