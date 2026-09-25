@@ -46,6 +46,7 @@ pub mod copy_fourteen_bytes;
 pub mod copy_two_u32_pairs;
 pub mod copy_range_if_destination;
 pub mod copy_u32_pair_if_destination;
+pub mod copy_halfword_range_if_destination;
 pub mod copy_word_range_if_destination;
 pub mod repeat_source_word_if_destination;
 pub mod fill_repeated_byte_if_destination;
