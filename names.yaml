@@ -143651,3 +143651,25 @@ functions:
       them directly; host tests inject equivalent helper seams. Deliberate
       deviations: the stock small-range path tail-dispatches after restoring
       registers, while Rust performs a normal call and return.
+  - address: 0x083e9e50
+    ghidra: FUN_083e9e50
+    name: copy_byte_range_returning_end_083e9e50
+    size: 24
+    sig: "u8 *copy_byte_range_returning_end_083e9e50(const u8 *begin, const u8 *end, u8 *dst)"
+    module: libc/copy_byte_range_returning_end_083e9e50
+    status: ported
+    renames:
+      param_1/r0: begin
+      param_2/r1: end
+      param_3/r2: dst
+    notes: >-
+      Raw osos.dec establishes the exact six-word body 0x083e9e50..0x083e9e64:
+      `cmp r0,r1; ldrbne r3,[r0],#1; strbne r3,[r2],#1; bne` then `mov r0,r2;
+      bx lr`; 0x083e9e68 begins the next real function. Full-image A32 decoding
+      finds two inbound plain BL calls (0x083e6320 and 0x083e6358), no predicated
+      direct BL calls, and no outbound direct BL calls. It copies [begin,end) to
+      dst in ascending-address order and returns dst plus the range length; empty
+      ranges dereference neither pointer and overlapping ranges retain forward-copy
+      propagation. Deliberate deviation: volatile accesses prevent LLVM memcpy
+      substitution, and a target-only text section prevents identical-code folding
+      with the distinct adjacent 0x083e9e38 retail entry.
