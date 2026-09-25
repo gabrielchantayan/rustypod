@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8aa4
+    ghidra: thunk_FUN_083e8abc
+    name: byte_range_copy_if_output
+    size: 40
+    sig: "u8 *byte_range_copy_if_output(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/byte_range_copy_if_output
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r12: byte
+    notes: >-
+      Raw osos.dec resolves Ghidra's four-byte thunk as `b 0x083e8abc` into
+      the shared loop at 0x083e8aa8..0x083e8acb; the next independently
+      linked function begins with `push {r4,lr}` at 0x083e8acc, so the true
+      executable extent is 40 bytes at 0x083e8aa4..0x083e8acb. The loop
+      byte-copies [first,last) only while the current output cursor is
+      non-NULL, advances both cursors after every iteration, and returns the
+      advanced output cursor. Raw A32 decoding finds two inbound plain BL
+      sites, zero inbound predicated BL sites, and zero body calls. Deliberate
+      deviation: the branch thunk and its shared-entry loop are one Rust
+      export so a hook at the assigned address preserves the reached behavior.
   - address: 0x083e8b3c
     ghidra: FUN_083e8b3c
     name: string_word_record_uninitialized_copy
