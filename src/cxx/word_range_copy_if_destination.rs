@@ -45,6 +45,47 @@ pub unsafe extern "C" fn word_range_copy_if_destination(
     }
     destination
 }
+
+/// `word_range_copy_if_destination_alias_8a7c` — retailOS
+/// `thunk_FUN_083e8a94` at load address `0x083e8a7c` (4 bytes; raw extent
+/// `0x083e8a7c..0x083e8a7f`). Raw `osos.dec` establishes the one-word A32
+/// `b 0x083e8a94`; `0x083e8a80` begins the loop body, and `0x083e8aa4`
+/// begins the next independently linked thunk. Direct full-image A32 decoding
+/// finds two inbound plain `bl` calls (`0x083e10c0`, `0x083e10fc`) and zero
+/// inbound predicated `bl` calls. The thunk has no outbound calls.
+///
+/// The target copies the half-open `[source, source_end)` word range forward
+/// when the current destination is non-null, advances both cursors, and
+/// returns the final destination. Callers use it for the portions of a growing
+/// word vector around an inserted word; r3 carries the vector but is unread.
+/// Deliberate deviation: this hookable export implements the verified branch
+/// target rather than retaining the four-byte tail branch. Volatile accesses
+/// preserve the ordered retail load/store loop and prevent libc-copy
+/// substitution.
+///
+/// # Safety
+///
+/// `source` and `source_end` must delimit a forward-reachable word range. A
+/// non-null `destination` must identify writable words for that range. Like
+/// retailOS, overlapping ranges are copied forward; a null destination is safe
+/// only for an empty or one-word range.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.word_range_copy_if_destination_alias_8a7c")]
+#[inline(never)]
+pub unsafe extern "C" fn word_range_copy_if_destination_alias_8a7c(
+    mut source: *const u32,
+    source_end: *const u32,
+    mut destination: *mut u32,
+) -> *mut u32 {
+    while source != source_end {
+        if !destination.is_null() {
+            destination.write_volatile(source.read_volatile());
+        }
+        source = source.wrapping_add(1);
+        destination = destination.wrapping_add(1);
+    }
+    destination
+}
  
 /// `word_range_copy_if_destination_alias_9440` — retailOS
 /// `thunk_FUN_083e9458` at load address `0x083e9440` (40 bytes; raw extent
@@ -173,8 +214,9 @@ pub unsafe extern "C" fn word_range_copy_if_destination_alias_92f0(
 #[cfg(test)]
 mod tests {
     use super::{
-        word_range_copy_if_destination, word_range_copy_if_destination_alias_92f0,
-        word_range_copy_if_destination_alias_93f0, word_range_copy_if_destination_alias_9440,
+        word_range_copy_if_destination, word_range_copy_if_destination_alias_8a7c,
+        word_range_copy_if_destination_alias_92f0, word_range_copy_if_destination_alias_93f0,
+        word_range_copy_if_destination_alias_9440,
     };
     #[test]
     fn alias_93f0_copies_and_preserves_retail_cursor_rules() {
@@ -191,6 +233,30 @@ mod tests {
             word_range_copy_if_destination_alias_93f0(
                 words.as_ptr(),
                 words.as_ptr().add(1),
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(words, [0x1111_1111; 4]);
+        assert_eq!(copied_end, unsafe { words.as_mut_ptr().add(4) });
+        assert_eq!(null_end as usize, 4);
+    }
+
+    #[test]
+    fn alias_8a7c_copies_forward_and_skips_a_null_destination_load() {
+        let mut words = [0x1111_1111_u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+
+        let copied_end = unsafe {
+            word_range_copy_if_destination_alias_8a7c(
+                words.as_ptr(),
+                words.as_ptr().add(3),
+                words.as_mut_ptr().add(1),
+            )
+        };
+        let null_end = unsafe {
+            word_range_copy_if_destination_alias_8a7c(
+                1usize as *const u32,
+                5usize as *const u32,
                 core::ptr::null_mut(),
             )
         };

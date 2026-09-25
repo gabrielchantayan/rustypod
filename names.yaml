@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e8a7c
+    ghidra: thunk_FUN_083e8a94
+    name: word_range_copy_if_destination_alias_8a7c
+    size: 4
+    sig: "u32 *word_range_copy_if_destination_alias_8a7c(const u32 *source, const u32 *source_end, u32 *destination, void *owner)"
+    module: cxx/word_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+      param_4/r3: owner (unread)
+      return/r0: destination
+      FUN_083e8a94: word_range_copy_if_destination_body
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk extent
+      0x083e8a7c..0x083e8a7f: `b 0x083e8a94`. Its target is the range-test
+      loop header; the loop body begins at 0x083e8a80, returns at
+      0x083e8aa0, and the next independently linked thunk begins at
+      0x083e8aa4. Independent full-image A32 decoding finds two inbound
+      plain direct BL calls (0x083e10c0 and 0x083e10fc), zero predicated
+      direct BL calls, and no outbound calls. The target copies each u32 in
+      [source,source_end) forward when destination is non-null, advances both
+      cursors by four bytes, and returns destination; owner in r3 is never
+      read. Rust implements the verified branch target rather than the entry
+      branch, preserves forward overlap and the one-word null-destination
+      cursor advance with wrapping pointer arithmetic, and uses volatile
+      accesses to prevent libc-copy substitution.
   - address: 0x083e8aa4
     ghidra: thunk_FUN_083e8abc
     name: byte_range_copy_if_output
