@@ -7867,6 +7867,32 @@ functions:
       adds sl/fp frame bookkeeping around the same push/mov/bl/str/pop
       spine.
 
+  - address: 0x08086e4c
+    ghidra: FUN_08086e4c
+    name: pmu_reg87_bit1_query
+    size: 28
+    sig: "i32 pmu_reg87_bit1_query(void)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      local_8/r0: bit
+      FUN_082e55dc: pmu_reg87_bit1_read
+    notes: >-
+      The assigned entry thunk_FUN_08086e4c at 0x0805381c is a 4-byte
+      `b 0x08086e4c` veneer; the semantic body is
+      0x08086e4c..0x08086e68, ending before the next `bx lr` function.
+      It pushes a four-byte staging slot, calls the mutexed PMU register-0x87
+      bit-1 read FUN_082e55dc, then returns 1 for slot zero and 0 for every
+      nonzero slot (`rsbs r0,r0,#1; movcc r0,#0`). Raw ARM decoding finds
+      five reachable direct bl callers: three unconditional calls to the
+      veneer (0x08061810, 0x081a5978, 0x082a19f0) and two unconditional
+      direct calls to the body (0x08093db8, 0x083934c4); zero are predicated.
+      The PMU read status is ignored because the body reloads the slot after
+      the call. Rust retains that behavior and substitutes the unported read
+      with a fixed-address target seam and host-swappable test seam; it omits
+      only the ADS frame spill. match.py is structurally expected to differ
+      at the seam dispatch and frame.
+
   - address: 0x08001ee8
     ghidra: FUN_08001ee8
     name: usec_timer_elapsed
@@ -58467,8 +58493,8 @@ functions:
     vars:
       iVar1: query_status
       thunk_FUN_08086e4c: pmu_reg87_bit1_query (the veneer @
-        0x0805381c, `b 0x08086e4c`; target FUN_08086e4c @ 0x08086e4c,
-        28 bytes, unported - behind the PMU_REG87_BIT1_QUERY seam)
+        0x0805381c, `b 0x08086e4c`; ported target FUN_08086e4c @
+        0x08086e4c, 28 bytes)
       FUN_082e55dc: pmu_reg87_bit1_read (68 bytes, unported - the
         mutexed single-register PMU read the query runs)
     notes: >-
@@ -58497,19 +58523,14 @@ functions:
       accessory-kind enum through a byte table) and FUN_081a5940
       (flags bit 0x200 + flag clear -> result code 0xf) point at
       a charger/accessory status flag without pinning it down.
-      The query callee is unported firmware behind the
-      host-swappable PMU_REG87_BIT1_QUERY usize seam (this
-      module's FIXED16_RECIPROCAL pattern): the target build
-      transmutes 0x08086e4c (the veneer folds away - a bare b),
-      host tests install recording mocks. Deviations: the pushed
-      r4 is never used (gratuitous ADS frame spill); the
-      cmp/movne pair is the ADS != 0 bool conversion, modeled by
-      Rust's bool return (every nonzero query value -> true,
-      pinned by host tests over 0/1/2/-1/INT_MIN/INT_MAX).
-      match.py structural (exit-1 diff expected): same call ->
-      cmp r0,#0 -> movne r0,#1 shape; the diffs are the crate fp
-      frame and the blx seam dispatch (0x08086e4c visible as a
-      literal word), the documented seam deviations.
+      The ported query calls the still-unported PMU read through its
+      PMU_REG87_BIT1_READ seam; target transmute selects 0x082e55dc
+      while host tests install recording mocks. The clear wrapper's
+      pushed r4 remains an omitted ADS frame spill, and its cmp/movne
+      booleanization is represented by Rust bool. match.py structural
+      (exit-1 diff expected): same call -> cmp r0,#0 -> movne r0,#1
+      shape; the differences are the crate fp frame and query seam
+      dispatch.
 
   - address: 0x082a1a04
     ghidra: FUN_082a1a04
