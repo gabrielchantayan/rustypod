@@ -5850,6 +5850,30 @@ functions:
       global assembly; the host-only shim terminates because that stack
       transfer cannot be represented in a normal host call.
 
+  - address: 0x08003840
+    ghidra: FUN_08003840
+    name: opaque_retail_continuation_veneer
+    size: 8
+    sig: "void opaque_retail_continuation_veneer(void)"
+    module: kernel/thunks
+    status: identified
+    renames:
+      DAT_08003844: opaque_retail_continuation_target
+    notes: >-
+      Ghidra's four-byte extent omits the owned literal word. Raw osos.dec is
+      exactly `ldr pc, [pc, #-4]` (0xe51ff004) followed by 0x080c7e44; the
+      next literal veneer starts at 0x08003848, so the true size is 8 bytes.
+      An independent full aligned ARM B/BL decode finds exactly three direct
+      callers, all unconditional plain bl at 0x08005f74, 0x08005f88, and
+      0x08005fa8; there are zero predicated bl forms. The literal enters the
+      middle of retail code: the preceding word at 0x080c7e40 loads r2 from
+      [sp,#0x68], while the entry immediately stores live r1 to [sp,#0x6c],
+      then repeatedly multiplies live r0 by stack-derived r2 values and
+      updates stack accumulators before popping {r4-r9,sl,fp,pc}. Thus the
+      target requires an unprescribed ARM register set and immediate caller
+      stack frame; its normal C ABI and purpose cannot be inferred without
+      inventing a callee identity. It is deliberately unported.
+
   - address: 0x08003848
     ghidra: thunk_FUN_08201460
     name: stream_buffer_flush_enter
