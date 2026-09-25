@@ -47,6 +47,7 @@ pub mod copy_two_u32_pairs;
 pub mod copy_range_if_destination;
 pub mod copy_u32_pair_if_destination;
 pub mod copy_word_range_if_destination;
+pub mod clone_16_byte_element_range;
 pub mod copy_word_range;
 pub mod word_range_copy;
 pub mod word_pair_has_nonzero_word;
