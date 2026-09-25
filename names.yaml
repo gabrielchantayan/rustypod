@@ -7179,6 +7179,45 @@ functions:
       identity is not invented. The reader status is returned, matching r0
       surviving the counted-reader wrapper.
 
+  # --- media item scoped-context identity predicate ---
+  - address: 0x0805352c
+    ghidra: FUN_0805352c
+    name: media_item_matches_context
+    size: 196
+    sig: "i32 media_item_matches_context(const void *object, i32 index, u8 *matches)"
+    module: app/media_item_matches_context
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: index
+      param_3/r2: matches
+      r6: object
+      r7: media_player
+      FUN_0817ceb4: media_player_get (ported)
+      FUN_08270394: scoped_context_construct (ported)
+      FUN_08270414: scoped_context_destroy (ported)
+      FUN_082a3018: scoped_context_result_id
+    notes: >-
+      Raw words e92d40f0 through eaffffda at 0x0805352c..0x080535ec
+      decode from `stmdb sp!,{r4-r7,lr}` through the branch to the common
+      epilogue; the next separately entered function starts at 0x080535f0,
+      proving the 196-byte extent. There are four internal unconditional
+      plain BL instructions (media_player_get @ 0x0805356c,
+      scoped_context_construct @ 0x08053598, the unported-but-recovered
+      scoped_context_result_id @ 0x080535b8, and scoped_context_destroy @
+      0x080535e4), zero predicated BL instructions, and two indirect BLX
+      calls through media-player vtable slots +0x190 and +0x15c. Raw ARM
+      immediate decoding finds three inbound plain BL callers at 0x08114694,
+      0x08114b7c, and 0x0813df90, with no predicated inbound BL callers. It clears matches, rejects
+      null output, negative index, and index >= object+0xef4 with -50, then
+      constructs a zero-mode ScopedContext only when the +0x190 query
+      permits it. The +0x15c virtual fills that context; its vtable +8
+      validity operation and the context's +4 owner-valid word resolve the
+      identifier at owner-valid+0x18, which is compared to selected
+      object+0xeec[index]+0x10. Rust keeps the two virtual calls and models
+      the recovered 0x082a3018 body locally; host tests substitute this
+      unresolved virtual/context chain with a native callback.
+
   # --- retailOS UI 16-byte resource-vector counted-string reader ---
   - address: 0x08053768
     ghidra: FUN_08053768

@@ -2254,6 +2254,9 @@ pub mod hints {
     // 0x81f0_0000: dedicated to app/linked_list_merge_by_word_4's
     // target-width intrusive-node fixture; mappings never unmap.
     pub const LINKED_LIST_MERGE_BY_WORD_4: usize = 0x81f0_0000;
+    // 0x8240_0000: dedicated to app/media_item_matches_context's target-width
+    // object, item table, and selected-record fixture; mappings never unmap.
+    pub const MEDIA_ITEM_MATCHES_CONTEXT: usize = 0x8240_0000;
     // 0x8200_0000 / 0x8210_0000: dedicated to h264/fragment_list_append's
     // target-width list, storage, source and directory fixtures; mappings
     // never unmap, so no other test may share either hint.

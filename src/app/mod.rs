@@ -158,6 +158,7 @@ pub mod glyph_range_contains_character;
 pub mod context_callback_dispatch;
 pub mod context_select_item_and_dispatch;
 pub mod scoped_context_dispatch_and_store_result;
+pub mod media_item_matches_context;
 pub mod default_selector_dispatch;
 pub mod context;
 pub mod context_submit_u32;
