@@ -145359,3 +145359,33 @@ functions:
       without host in-bounds pointer-arithmetic requirements; otherwise there
       are no deliberate deviations. Host tests cover empty, complete,
       null-output, and grouped-load-before-store overlap ranges.
+
+  - address: 0x083e8154
+    ghidra: FUN_083e8154
+    name: vector_record24_copy_backward
+    size: 60
+    sig: "u8 *vector_record24_copy_backward(const u8 *source, const u8 *source_end, u8 *destination_end)"
+    module: cxx/vector_record24_copy_backward
+    status: ported
+    renames:
+      param_1/r0/r6: source
+      param_2/r1/r4: source_end
+      param_3/r2/r5: destination_end
+      return/r0: destination_start
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083e8154..0x083e8190: the final pop {r4,r5,r6,pc} is at 0x083e818c
+      and the next independently linked function begins with push
+      {r2-r9,sl,lr} at 0x083e8190. Full-image A32 decoding finds exactly two
+      inbound unconditional plain BL calls, zero inbound predicated BL calls,
+      and one unconditional body BL at 0x083e817c to the known IRAM memcpy
+      veneer 0x08037df8 (thunk_EXT_FUN_22000188 -> 0x22000188, the IRAM
+      mirror of memcpy_forward_words). It decrements source_end and
+      destination_end by 24 bytes per record until source_end equals source,
+      copies each record through the veneer, and returns destination_start.
+      Rust calls memcpy_forward_words directly instead of entering the veneer,
+      preserving aligned grouped forward-copy behavior within each
+      reverse-ordered record; a dedicated target text section prevents folding
+      with another independently hookable record-copy port. Host tests cover
+      an empty range, two records, and an overlapping destination range that
+      requires reverse record ordering.
