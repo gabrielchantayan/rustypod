@@ -145567,3 +145567,28 @@ functions:
       signed +0x20, and 0x083e7d7c to sift the held value upward. The Rust
       target retains those fixed-address callees; host builds faithfully model
       them to test right-child selection and signed tiebreak behavior.
+
+  # --- opaque derived constructor ---
+  - address: 0x083e798c
+    ghidra: FUN_083e798c
+    name: opaque_vtable_089a8b14_construct
+    size: 20
+    sig: "void *opaque_vtable_089a8b14_construct(void *this)"
+    module: cxx/opaque_vtable_089a8b14_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_082a9498: opaque_base_construct
+      DAT_083e79a0: OPAQUE_VTABLE_089A8B14
+    notes: >-
+      Raw osos.dec has four instruction words at 0x083e798c..0x083e7998 and
+      literal-pool word 0x089a8b14 at 0x083e79a0, for a true 20-byte extent;
+      the next independently linked function begins at 0x083e79a4. Full-image
+      A32 decoding finds exactly two inbound unconditional plain BL calls
+      (0x082a7be4 and 0x082a9174) and zero predicated BL calls. The body has
+      one unconditional plain BL, to the still-retail base constructor at
+      0x082a9498, and no predicated BL calls. It stores the literal to +0x00
+      of that constructor's returned object. The literal's class identity and
+      full base layout are not recovered, so they are deliberately not
+      invented. Target builds call the verified base-constructor address;
+      host builds use a replaceable seam for that unported boundary.

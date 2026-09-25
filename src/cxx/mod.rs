@@ -215,6 +215,7 @@ pub mod owned_element_array_delete_cells;
 pub mod owned_string_object_array_release;
 pub mod owned_string_owner_array_release;
 pub mod derived_observable_array_construct;
+pub mod opaque_vtable_089a8b14_construct;
 pub mod parse_i32_list;
 pub mod pending_event;
 pub mod payload_list_owner_destroy;
