@@ -143890,3 +143890,27 @@ functions:
       A target-only unique text section prevents LLVM from folding this distinct
       retail BL target into byte-identical fixed_record_range_copy and
       vector_record24_copy.
+  - address: 0x083e9bdc
+    ghidra: FUN_083e9bdc
+    name: copy_word_triplets_returning_end
+    size: 36
+    sig: "u32 *copy_word_triplets_returning_end(const u32 *source, const u32 *source_end, u32 *destination)"
+    module: libc/copy_word_triplets_returning_end
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2/lr: destination
+    notes: >-
+      Raw osos.dec establishes the exact nine-instruction, 36-byte body
+      0x083e9bdc..0x083e9bff: `pop {pc}` at 0x083e9bfc ends it and the next
+      real function begins at 0x083e9c00. Full-image A32 decoding independently
+      finds exactly two inbound unconditional plain BL calls (0x083e1564 and
+      0x083e15b4), zero predicated BL calls, and no outbound plain or predicated
+      BL instructions. It advances source and destination in 12-byte steps,
+      loading all three aligned words before storing them, until source equals
+      source_end, then returns the destination end cursor. The inferred record
+      role is deliberately not elevated beyond this verified word-triplet copy;
+      nearby callers operate on 12-byte-stride storage. Deliberate deviation:
+      volatile word accesses and a unique target text section preserve the
+      separately linked leaf rather than allowing LLVM to substitute or fold it.
