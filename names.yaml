@@ -143697,3 +143697,28 @@ functions:
       propagation. Deliberate deviation: volatile accesses prevent LLVM memcpy
       substitution, and a target-only text section prevents identical-code folding
       with the distinct adjacent 0x083e9e38 retail entry.
+  - address: 0x083e9dc8
+    ghidra: FUN_083e9dc8
+    name: clone_16_byte_element_range
+    size: 56
+    sig: "u8 *clone_16_byte_element_range(const u8 *source, const u8 *end, u8 *destination)"
+    module: util/clone_16_byte_element_range
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+      FUN_0827c1ec: retail_clone_16_byte_element
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x083e9dc8..0x083e9e00: `push {r4,r5,r6,lr}; mov r6,r1; mov r5,r2;
+      mov r4,r0; b 0x083e9df0; mov r1,r4; mov r0,r5; bl 0x0827c1ec; add
+      r4,r4,#0x10; add r5,r5,#0x10; cmp r4,r6; bne 0x083e9ddc; mov r0,r5;
+      pop {r4,r5,r6,pc}`. The next real function starts at 0x083e9e00.
+      Independent whole-image A32 decoding finds two inbound plain BL calls
+      (0x083e43c8 and 0x083e4410), zero inbound predicated BL calls, one
+      outbound plain BL (0x0827c1ec), and zero outbound predicated BL calls.
+      It clones opaque 16-byte elements over [source,end), returns the
+      advanced destination, and calls the verified but unnamed retail callee
+      at 0x0827c1ec for every element. Deliberate deviation: target Rust uses
+      that address as a call seam while host tests inject the clone operation.
