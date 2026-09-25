@@ -1068,6 +1068,7 @@ functions:
     ghidra: FUN_0820429c
     name: message_error_code_from_flags
     size: 28
+
     sig: "u32 message_error_code_from_flags(u32 first_flag, u32 second_flag)"
     module: app/message_error_code_from_flags
     status: ported
@@ -1085,6 +1086,31 @@ functions:
       flag returns 0x2c and two nonzero flags return 0x20. Each caller passes
       the result as the fourth argument to the message constructor at
       0x08204434.
+  - address: 0x083e92c8
+    ghidra: thunk_FUN_083e92e0
+    name: relocation_word_range_copy
+    size: 40
+    sig: "u32 *relocation_word_range_copy(const u32 *source, const u32 *end, u32 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/relocation_word_range_copy
+    status: ported
+    notes: >-
+      Ghidra reports a 4-byte thunk at the entry; the raw words show the entry
+      `b 0x083e92e0` branches to the loop test, whose back-edge reaches the
+      word transfer at 0x083e92cc, so the complete callable extent is
+      0x083e92c8..0x083e92f0 (40 bytes; the next function begins at
+      0x083e92f0). Two direct inbound BLs (0x083e5380 and 0x083e53bc), both
+      unconditional, come from vector insertion/reallocation code; no
+      predicated BLs or outbound calls occur. The helper copies [source,end)
+      forward only when destination is non-NULL (both ldr and str are
+      predicated), advances destination regardless, and returns it. LLVM folds
+      the entry branch into its loop guard and emits an extra frame; volatile
+      access prevents libc-copy substitution. Empty target inline assembly
+      prevents LLVM merging this required external seam with the byte-identical
+      0x083e9278 sibling without emitting a runtime instruction.
   - address: 0x08223630
     ghidra: FUN_08223630
     name: pool_client_reset
