@@ -1114,6 +1114,24 @@ pub unsafe extern "C" fn pmu_reg87_bit1_query() -> i32 {
     pmu_reg87_bit1_read(&mut bit);
     if bit == 0 { 1 } else { 0 }
 }
+/// pmu_reg87_bit1_query_veneer — original: `thunk_FUN_08086e4c` @
+/// 0x0805381c (4 bytes, 0x0805381c..0x08053820; raw-decoded). Three direct
+/// reachable `bl` callers target this veneer; all are unconditional, with
+/// zero predicated `bl` callers.
+///
+/// A single unconditional branch transfers control to
+/// [`pmu_reg87_bit1_query`]. Rust expresses that tail transfer as a call;
+/// the return value passes through unchanged.
+///
+/// Deliberate deviation: LLVM may emit a `bl`/return sequence rather than
+/// the retail tail `b`; `#[inline(never)]` preserves this independently
+/// hookable entry point.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pmu_reg87_bit1_query_veneer() -> i32 {
+    pmu_reg87_bit1_query()
+}
+
 
 /// pmu_reg87_bit1_clear — original: `FUN_082a19ec` @ 0x082a19ec (20
 /// bytes; NO `bl` call sites in osos.asm and no direct pointer to the
@@ -5074,6 +5092,22 @@ mod tests {
             assert_eq!(unsafe { pmu_reg87_bit1_query() }, expected, "bit={bit:#x}, status={status:#x}");
             unsafe {
                 assert_eq!(PMU_FLAG_CALLS, 1, "bit={bit:#x}, status={status:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn pmu_reg87_bit1_query_veneer_forwards_the_query_result() {
+        let _mock = install_pmu_flag(0, 0);
+
+        for (bit, expected) in [(0, 1), (1, 0), (u32::MAX, 0)] {
+            unsafe {
+                PMU_FLAG_BIT = bit;
+                PMU_FLAG_CALLS = 0;
+            }
+            assert_eq!(unsafe { pmu_reg87_bit1_query_veneer() }, expected, "bit={bit:#x}");
+            unsafe {
+                assert_eq!(PMU_FLAG_CALLS, 1, "bit={bit:#x}");
             }
         }
     }
