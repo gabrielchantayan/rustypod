@@ -45,10 +45,52 @@ pub unsafe extern "C" fn word_range_copy_if_destination(
     }
     destination
 }
+ 
+/// `word_range_copy_if_destination_alias_9440` — retailOS
+/// `thunk_FUN_083e9458` at load address `0x083e9440` (40 bytes; raw extent
+/// `0x083e9440..0x083e9468`). Raw ARM establishes a four-byte `b 0x083e9458`
+/// entry, whose target is the range-test loop header; `0x083e9468` starts the
+/// next independently linked function. Full-image A32 decoding finds two
+/// inbound direct plain `bl` calls, at `0x083e6984` and `0x083e69c0`, and zero
+/// predicated direct `bl` calls. The thunk has no outbound calls.
+///
+/// The target copies the half-open `[source, source_end)` word range forward
+/// when the current destination is non-null, advances both cursors, and
+/// returns the final destination. Callers use it to copy the two disjoint
+/// portions of a growing vector around an inserted word; r3 carries the
+/// vector but is never read. Deliberate deviation: this hookable export
+/// implements the verified branch target rather than the entry branch.
+/// Volatile accesses preserve the ordered retail load/store loop and prevent
+/// LLVM from replacing it with a libc copy routine.
+///
+/// # Safety
+///
+/// `source` and `source_end` must delimit a forward-reachable word range. A
+/// non-null `destination` must identify writable words for that range. Like
+/// retailOS, overlapping ranges copy forward; a null destination is safe only
+/// for an empty or one-word range.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.word_range_copy_if_destination_alias_9440")]
+#[inline(never)]
+pub unsafe extern "C" fn word_range_copy_if_destination_alias_9440(
+    mut source: *const u32,
+    source_end: *const u32,
+    mut destination: *mut u32,
+) -> *mut u32 {
+    while source != source_end {
+        if !destination.is_null() {
+            destination.write_volatile(source.read_volatile());
+        }
+        source = source.wrapping_add(1);
+        destination = destination.wrapping_add(1);
+    }
+    destination
+}
+
 
 #[cfg(test)]
 mod tests {
-    use super::word_range_copy_if_destination;
+    use super::{word_range_copy_if_destination, word_range_copy_if_destination_alias_9440};
 
     #[test]
     fn copies_words_and_returns_the_destination_cursor() {
@@ -95,6 +137,63 @@ mod tests {
         let mut words = [0x1111_1111_u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
 
         unsafe { word_range_copy_if_destination(words.as_ptr(), words.as_ptr().add(3), words.as_mut_ptr().add(1)) };
+
+        assert_eq!(words, [0x1111_1111; 4]);
+    }
+
+    #[test]
+    fn alias_9440_copies_the_half_open_range_and_returns_the_cursor() {
+        let source = [0x1357_9bdf, 0x2468_ace0, 0xdead_beef];
+        let mut destination = [0_u32; 5];
+
+        let end = unsafe {
+            word_range_copy_if_destination_alias_9440(
+                source.as_ptr(),
+                source.as_ptr().add(3),
+                destination.as_mut_ptr().add(1),
+            )
+        };
+
+        assert_eq!(destination, [0, source[0], source[1], source[2], 0]);
+        assert_eq!(end, unsafe { destination.as_mut_ptr().add(4) });
+    }
+
+    #[test]
+    fn alias_9440_empty_range_and_null_destination_follow_retail_cursor_rules() {
+        let source = [0x1111_1111_u32];
+        let mut destination = [0x2222_2222_u32];
+
+        let empty = unsafe {
+            word_range_copy_if_destination_alias_9440(
+                source.as_ptr(),
+                source.as_ptr(),
+                destination.as_mut_ptr(),
+            )
+        };
+        let null = unsafe {
+            word_range_copy_if_destination_alias_9440(
+                source.as_ptr(),
+                source.as_ptr().add(1),
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(destination, [0x2222_2222]);
+        assert_eq!(empty, destination.as_mut_ptr());
+        assert_eq!(null as usize, 4);
+    }
+
+    #[test]
+    fn alias_9440_preserves_the_retail_forward_overlap_order() {
+        let mut words = [0x1111_1111_u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+
+        unsafe {
+            word_range_copy_if_destination_alias_9440(
+                words.as_ptr(),
+                words.as_ptr().add(3),
+                words.as_mut_ptr().add(1),
+            )
+        };
 
         assert_eq!(words, [0x1111_1111; 4]);
     }

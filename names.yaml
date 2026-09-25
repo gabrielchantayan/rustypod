@@ -144328,3 +144328,29 @@ functions:
       overlap semantics. Rust implements the verified branch target directly
       rather than retaining the tail branch and uses wrapping cursor increments
       to model the target null-pointer arithmetic.
+  - address: 0x083e9440
+    ghidra: thunk_FUN_083e9458
+    name: word_range_copy_if_destination_alias_9440
+    size: 40
+    sig: "u32 *word_range_copy_if_destination_alias_9440(const u32 *source, const u32 *source_end, u32 *destination)"
+    module: cxx/word_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+    notes: >-
+      Raw osos.dec establishes that Ghidra's four-byte thunk is the entry of
+      one 40-byte scheduled loop: `b 0x083e9458` at 0x083e9440 branches to
+      the range comparison, whose backward branch enters the transfer at
+      0x083e9444; `bx lr` ends at 0x083e9464 and 0x083e9468 begins the next
+      independent function. Full-image A32 decoding finds two inbound plain
+      direct BL calls, at 0x083e6984 and 0x083e69c0, zero predicated direct
+      BL calls, and no outbound calls. Callers use it to copy either side of
+      an inserted u32 while growing a vector; r3 carries that vector but is
+      never read. The range copy conditionally performs a volatile u32
+      load/store for each source word when destination is non-null, advances
+      both cursors, and returns destination. Rust implements the verified
+      branch target directly instead of retaining the entry branch, preserves
+      forward-overlap ordering, and uses wrapping cursor increments to model
+      the one-word null-destination path.
