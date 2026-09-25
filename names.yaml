@@ -6869,6 +6869,36 @@ functions:
       separately linked, register-allocation-different implementation of
       indexed_object_offset at 0x08055ed0.
 
+  # --- 'tdat' node lookup forwarding to context resolver ---
+  - address: 0x0805132c
+    ghidra: FUN_0805132c
+    name: ui_tdat_node_lookup
+    size: 44
+    sig: "void *ui_tdat_node_lookup(const u8 *owner, u32 node_id_low, u32 node_id_high, u32 unused)"
+    module: ui/tdat_node_lookup
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: node_id_low
+      param_3/r2: node_id_high
+      param_4/r3: unused
+      param_1_plus_0xf60: tdat_element
+      param_1_plus_0xf9c: lookup_context
+      FUN_08050d10: ui_tdat_find_node_by_id
+      FUN_080506bc: context_node_resolver
+    notes: >-
+      Raw ARM words establish the exact 44-byte extent
+      0x0805132c..0x08051358: the next function begins with `push {r3,lr}`
+      at 0x08051358. It loads and NULL-checks owner+0xf9c, then calls
+      ui_tdat_find_node_by_id with owner+0xf60 and r1/r2. It tail-branches
+      to the still-unported context resolver at 0x080506bc with the context
+      and found node; r3 is unused. The body has one plain direct `bl` and
+      no predicated BL forms; whole-image decoding finds three plain inbound
+      BL callsites and no predicated inbound forms. The Rust port dispatches
+      the unresolved tail callee through a host seam while target builds call
+      its verified retail address; it returns normally rather than
+      tail-branching.
+
 
   # --- matchable entry index word getter ---
   - address: 0x08051400
