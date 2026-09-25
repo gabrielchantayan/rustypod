@@ -142630,3 +142630,30 @@ functions:
       No deliberate deviations: target pointer fields remain u32 and widen
       only to dereference on hosts. Host tests cover null input, null method
       skipping, category-mask matching, exact-match precedence and no-match.
+
+  - address: 0x0803c4d4
+    ghidra: FUN_0803c4d4
+    name: cstr_append_bounded
+    size: 112
+    sig: "size_t cstr_append_bounded(const char *src, char *dst, size_t capacity)"
+    module: libc/cstr_append_bounded
+    status: ported
+    vars: {param_1/r0: src, param_2/r1: dst, param_3/r2: capacity, r12: limit, iVar2/r1: length}
+    notes: >-
+      Raw osos.dec A32 establishes the exact 112-byte extent
+      0x0803c4d4..0x0803c540; the next separately entered function begins at
+      0x0803c544. Whole-image decoding finds exactly three inbound plain BL
+      call sites (0x08079fac, 0x080bd860, 0x080bef00) and no predicated BL
+      call sites. The body has no outbound plain BL and one predicated BLS to
+      the ported strlen @ 0x08392478 when src is NULL or capacity <= 1.
+      A NULL dst returns zero. Otherwise the strlen path returns the complete
+      existing dst length. With a non-NULL src and capacity > 1, it scans at
+      most capacity - 1 destination bytes; after finding dst's terminator it
+      appends source bytes through the same bound, writes a terminator, and
+      returns the bounded resulting length. If dst has no terminator in that
+      prefix, it returns capacity - 1 without writing. No overlap handling or
+      other deviations. Host tests cover empty/exact-fit/truncated strings,
+      NULL source, capacity one, and NULL destination. match.py reports a
+      structural diff (51 Rust instructions versus 28 original), not an
+      automatic failure; LLVM expands the Rust NULL/loop control flow and
+      tail-calls the strlen path.
