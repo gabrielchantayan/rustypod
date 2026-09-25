@@ -1050,6 +1050,9 @@ pub mod hints {
     // 0xe880_0000: dedicated to cxx/string_pair_word_uninitialized_copy's
     // raw-u32 source and destination record fixture; mappings never unmap.
     pub const CXX_STRING_PAIR_WORD_UNINITIALIZED_COPY: usize = 0xe880_0000;
+    // 0xe8d0_0000: dedicated to cxx/cxx_string_uninitialized_copy's raw-u32
+    // source and destination string-word fixture; mappings never unmap.
+    pub const CXX_STRING_UNINITIALIZED_COPY: usize = 0xe8d0_0000;
     // 0xe890_0000: dedicated to cxx/cxx_string_range_assign's raw-u32 source
     // and destination string-word fixture; mappings never unmap.
     pub const CXX_STRING_RANGE_ASSIGN: usize = 0xe890_0000;
