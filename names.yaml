@@ -142735,3 +142735,27 @@ functions:
       identified, so it remains an address-backed target call and host seam;
       the trivial contiguous word copy at 0x080a9fc4 is rendered directly.
       Host tests cover all three layouts.
+  - address: 0x08038fc0
+    ghidra: FUN_08038fc0
+    name: stream_current_position_milliseconds
+    size: 24
+    sig: "u32 stream_current_position_milliseconds(void *stream)"
+    module: app/stream_current_position_milliseconds
+    status: ported
+    renames:
+      param_1/r0/r4: stream
+      FUN_08038f60: opaque_current_position_query
+      FUN_08038ebc: opaque_position_to_milliseconds
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent
+      0x08038fc0..0x08038fd8: push {r4,lr}; preserve stream in r4; BL the
+      opaque current-position query at 0x08038f60; move its result to r1;
+      restore r0 from r4; then tail B to the opaque milliseconds converter at
+      0x08038ebc. The next real function starts at 0x08038fdc. Whole-image
+      A32 decoding finds exactly three inbound plain BL calls (0x081380dc,
+      0x08138104, and 0x08138208), no predicated BL callers, one outbound
+      plain BL, and one tail B. Neither callee has an established identity:
+      ARM calls their verified retail addresses; host tests inject typed seams.
+      match.py reports the expected structural diff: LLVM uses BLX/BX through
+      literal-loaded addresses and a larger frame instead of ARM's direct BL/B
+      sequence.
