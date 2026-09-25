@@ -144305,3 +144305,26 @@ functions:
       advancing the destination. Rust deliberately implements the verified
       branch target directly for a hookable symbol, retaining that granular
       volatile load/store order for overlapping fill and destination ranges.
+  - address: 0x083e9468
+    ghidra: thunk_FUN_083e9480
+    name: word_range_copy_if_destination
+    size: 4
+    sig: "u32 *word_range_copy_if_destination(const u32 *source, const u32 *source_end, u32 *destination)"
+    module: cxx/word_range_copy_if_destination
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_end
+      param_3/r2: destination
+    notes: >-
+      Raw osos.dec establishes the thunk exact four-byte extent: `b 0x083e9480`
+      at 0x083e9468. The branch target is the range comparison at 0x083e9480;
+      the loop body starts at 0x083e946c and 0x083e9490 begins the next real
+      function. Full-image A32 decoding finds two inbound plain direct BL calls
+      (0x083e6ac0 and 0x083e6afc), zero predicated direct BL calls, and no
+      outbound calls. The target repeatedly copies a u32 source word when the
+      destination is non-null, advances both cursors, and returns the final
+      destination cursor; it deliberately has forward-copy, not memmove,
+      overlap semantics. Rust implements the verified branch target directly
+      rather than retaining the tail branch and uses wrapping cursor increments
+      to model the target null-pointer arithmetic.
