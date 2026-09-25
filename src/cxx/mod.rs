@@ -95,6 +95,7 @@ pub mod record_40_copy_construct_range;
 pub mod segmented_iter_post_increment;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
+pub mod conditional_owned_object_destroy;
 pub mod buffered_read_context_destroy;
 pub mod stream_read_u64;
 pub mod empty_destructor;

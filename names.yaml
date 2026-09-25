@@ -6081,6 +6081,33 @@ functions:
       pointer words; the Rust repr(C) pointer slot deliberately uses native-width
       pointers so valid host fixtures can exercise the existing opaque-base and
       heap-operation seams.
+  # --- conditional owned opaque-object destruction ---
+  - address: 0x083e7520
+    ghidra: FUN_083e7520
+    name: conditional_owned_object_destroy
+    size: 36
+    sig: "void **conditional_owned_object_destroy(void **slot)"
+    module: cxx/conditional_owned_object_destroy
+    status: ported
+    renames:
+      param_1/r0: slot
+      slot_deref: object
+      FUN_081d2914: opaque_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x083e7520 through pop {r4,pc} at 0x083e7540; the next
+      independently entered function begins with push {r4,r5,r6,lr} at
+      0x083e7544. Full-image ARM decoding finds exactly two inbound direct
+      calls, both plain unconditional bl at 0x08291f08 and 0x08291f88; there
+      are no predicated bl calls. The body has exactly two plain unconditional
+      bl calls and no predicated bl calls: the unported opaque-object destructor
+      @ 0x081d2914 and the already ported tag-2 operator_delete @ 0x082aad24.
+      It loads the pointer from slot, destroys and deletes a non-NULL object,
+      leaves the slot unchanged, and returns slot. The target slot is a 32-bit
+      pointer word; Rust deliberately uses a native-width pointer slot for valid
+      host fixtures. The destructor has no recovered semantic identity, so the
+      target calls its verified address and host tests install a narrow seam.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760
