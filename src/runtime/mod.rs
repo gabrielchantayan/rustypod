@@ -21,6 +21,7 @@ pub mod empty_object_destruct;
 pub mod exit;
 pub mod i2c0_idle;
 pub mod global_state;
+pub mod global_status_flags;
 pub mod global_object_address;
 pub mod i2c0_transfer;
 pub mod lib_init;
