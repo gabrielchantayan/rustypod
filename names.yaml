@@ -21181,6 +21181,26 @@ functions:
       instruction-for-instruction. Host tests cover head/mid/tail hits,
       miss, empty list, first-match-wins on duplicate data, and NULL
       data matching a node with NULL data.
+  - address: 0x0804cb4c
+    ghidra: FUN_0804cb4c
+    name: ft_list_remove
+    size: 36
+    sig: "void ft_list_remove(FtList *list, FtListNode *node)"
+    module: ft/list
+    status: ported
+    vars: {param_1: list, param_2: node}
+    notes: >-
+      FreeType FT_List_Remove (src/base/ftlist.c). Raw osos.dec words
+      establish the complete 36-byte body at 0x0804cb4c..0x0804cb70; the
+      following ldm instruction starts a distinct function. It loads
+      node->prev (+0) and node->next (+4), writes next to prev->next (+4)
+      or list->head (+0), then writes prev to next->prev (+0) or list->tail
+      (+4), leaving the removed node's links unchanged. Exactly three
+      inbound call sites decode as unconditional plain bl: 0x0804c398,
+      0x0804c484, and 0x080868f8; no predicated BL form targets it, and the
+      leaf makes no calls. Callers pass module, service, and resource-list
+      heads respectively. Host pointer fields are wider than ARM target
+      fields, so repr(C) preserves field order while tests validate links.
   # --- FreeType 2 ftcalc fixed-point kernels ---
   - address: 0x0804d2cc
     ghidra: FUN_0804d2cc
