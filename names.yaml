@@ -141772,3 +141772,27 @@ functions:
       the IRAM veneer; target builds retain the two unported callee addresses,
       while host tests use recording seams. No identity beyond these verified
       input/output roles is asserted for either unported callee.
+
+  - address: 0x08051de0
+    ghidra: FUN_08051de0
+    name: status_code_normalize
+    size: 44
+    sig: "u32 status_code_normalize()"
+    module: app/status_code_normalize
+    status: ported
+    renames:
+      FUN_0809b644: retail_status_query
+      r0: raw_status
+      r1: normalized_status
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte A32 body
+      0x08051de0..0x08051e08: `ldmia sp!,{r4,pc}` ends the function and
+      0x08051e0c begins the next independent function with
+      `stmdb sp!,{r1,r2,r3,lr}`. The body has one unconditional BL to the
+      still-unidentified helper at 0x0809b644 and no predicated BL forms.
+      Whole-image direct-call decoding finds three incoming plain BL sites
+      (0x08114e10, 0x08116a84, and 0x081e60f8), with no predicated incoming
+      forms. It maps raw status 1 to 1, raw status 2 to 3, and every other
+      byte result to 0. Target builds retain the verified 0x0809b644 call;
+      host builds share its existing recording seam. No identity beyond the
+      helper's verified byte-return role is asserted.
