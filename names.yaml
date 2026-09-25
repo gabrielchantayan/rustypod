@@ -71670,6 +71670,35 @@ functions:
       the magic-tag validation relocation, while preserving branch order,
       entry stride, field accesses, and lookup boundary.
 
+  # --- navigation mode from nested state ---
+  - address: 0x08054acc
+    ghidra: FUN_08054acc
+    name: navigation_mode_from_state
+    size: 48
+    sig: "u32 navigation_mode_from_state(const u32 *owner)"
+    module: ui/navigation_mode_from_state
+    status: ported
+    renames:
+      param_1: owner
+      iVar1: navigation_state
+    notes: >-
+      Raw ARM words from osos.dec establish the exact 48-byte body through
+      `bx lr` at 0x08054af8; the following `ldr r0,[r0,#0xf64]` at
+      0x08054afc starts the next function. The body has no outbound BL
+      instructions. The three static inbound calls are plain BL (two at
+      0x08172c6c and one at 0x0817d694); no predicated BL calls were found.
+      It reads the target-width pointer word at owner+0xf00, then its word at
+      +0x18, mapping state 1 to navigation mode 2, state 2 to navigation mode
+      1, and all other values to 0. The concrete state identity is unrecovered;
+      the semantic name follows 0x0817d694, which passes the result to
+      set_navigation_mode. Rust deliberately represents the target pointer
+      field as a u32 word, so host fixtures preserve the firmware's four-byte
+      layout instead of assuming an eight-byte host pointer.
+      No behavioral deviations were made. match.py reports 12 ADS versus 10
+      LLVM instructions: LLVM combines the two comparisons into `sub`/`clz`/
+      `lsr` plus `moveq`, preserving the full mapping but not the retail
+      conditional-return sequence.
+
   # --- shared-context kind halfword accessor ---
   - address: 0x08054ab8
     ghidra: FUN_08054ab8

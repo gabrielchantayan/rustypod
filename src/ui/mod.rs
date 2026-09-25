@@ -75,6 +75,7 @@ pub mod lazy_resource_state;
 pub mod object_state;
 pub mod state_dependent_handle_metric;
 pub mod shared_context_pair_38;
+pub mod navigation_mode_from_state;
 pub mod sub_record_lookup;
 pub mod range_byte_lookup;
 pub mod record_descriptor_pack;

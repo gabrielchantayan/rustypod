@@ -2370,6 +2370,10 @@ pub mod hints {
     // 0x6ef0_0000: dedicated to ui/plst_task_is_active's target-width task
     // element fixture; mappings never unmap, so no other port may share it.
     pub const PLST_TASK_IS_ACTIVE: usize = 0x6ef0_0000;
+    // 0x6fb0_0000: dedicated to ui/navigation_mode_from_state's target-width
+    // owner and nested-state fixture; mappings never unmap, so no other port
+    // may share it.
+    pub const UI_NAVIGATION_MODE_FROM_STATE: usize = 0x6fb0_0000;
     // 0x7000_0000: dedicated to fs/hfs_btree_lookup_key's target-width
     // handle and control-block fixture; mappings never unmap.
     pub const HFS_BTREE_LOOKUP_KEY: usize = 0x7000_0000;
