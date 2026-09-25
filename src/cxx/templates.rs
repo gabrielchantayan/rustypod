@@ -6536,6 +6536,47 @@ pub unsafe extern "C" fn vector_copy_construct_range_attach_8c0c(
     }
     output
 }
+///
+/// vector_fill_construct_n_refcounted_body — original: `FUN_083e951c` @
+/// 0x083e951c (52 bytes; exact extent 0x083e951c..0x083e9550, ending before
+/// the next `push {r4-r8,lr}` entry at 0x083e9550).
+///
+/// `std::vector<RefcountedBody*>` uninitialized-fill construction. It stores
+/// the body at `*source` into each of `count` output slots through
+/// [`refcounted_body_attach`], retaining the body once per slot.
+///
+/// Raw A32 decoding establishes two plain inbound `bl` sites (0x083e0d38 and
+/// 0x083e0df8), no predicated inbound calls, and one body call: the `blne` at
+/// 0x083e9538 to `refcounted_body_attach` @ 0x0839d370. The `movs r0, r4`
+/// predicates both the source load and attach on the current output cursor;
+/// the cursor always advances by one target word.
+///
+/// # Deviations
+///
+/// `wrapping_add` preserves ARM's NULL-cursor advance without host pointer
+/// arithmetic UB. The already ported attach helper is called directly.
+///
+/// # Safety
+///
+/// `source` must point to a readable body slot. A non-NULL `output` must be
+/// writable for `count` target pointer slots, and its body must meet
+/// [`refcounted_body_attach`]'s preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_fill_construct_n_refcounted_body(
+    mut output: *mut *mut RefcountedBody,
+    mut count: u32,
+    source: *const *mut RefcountedBody,
+) {
+    while count != 0 {
+        if !output.is_null() {
+            refcounted_body_attach(output, source.read());
+        }
+        count -= 1;
+        output = output.wrapping_add(1);
+    }
+}
+
 
 
 
@@ -13120,6 +13161,35 @@ mod tests {
             // The attach's store is unconditional: the NULL body lands
             // in the destination slot and no refcount is touched.
             assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn fill_construct_refcounted_body_reuses_source_for_every_output() {
+        unsafe {
+            let mut repeated = body(-2);
+            let source = &mut repeated as *mut RefcountedBody;
+            let mut output = [core::ptr::null_mut(); 3];
+
+            vector_fill_construct_n_refcounted_body(output.as_mut_ptr(), 3, &source);
+
+            assert_eq!(output, [source; 3]);
+            assert_eq!(repeated.refcount, 1);
+        }
+    }
+
+    #[test]
+    fn fill_construct_refcounted_body_zero_count_and_null_output_skip_attach() {
+        unsafe {
+            let mut repeated = body(i32::MAX);
+            let source = &mut repeated as *mut RefcountedBody;
+            let mut untouched = [0xdeadbeefusize as *mut RefcountedBody];
+
+            vector_fill_construct_n_refcounted_body(untouched.as_mut_ptr(), 0, &source);
+            vector_fill_construct_n_refcounted_body(core::ptr::null_mut(), 1, &source);
+
+            assert_eq!(untouched[0], 0xdeadbeefusize as *mut RefcountedBody);
+            assert_eq!(repeated.refcount, i32::MAX);
         }
     }
     #[test]
