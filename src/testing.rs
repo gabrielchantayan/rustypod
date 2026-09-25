@@ -1240,6 +1240,10 @@ pub mod hints {
     // handler and context fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const TDAT_MESSAGE_DISPATCH: usize = 0xfb00_0000;
+    // 0xe010_0000: dedicated to ui/plst_resource_dispatch_pldm's raw-u32
+    // task, Tdat element, and resource-root fixture; mappings never unmap,
+    // so no other user may share this hint.
+    pub const PLST_RESOURCE_DISPATCH_PLDM: usize = 0xe010_0000;
     // 0xf900_0000: dedicated to util/tagged_payload_read_signed_field_0x54's
     // raw-u32 object/payload fixture; mappings never unmap, so no other user
     // may share this hint.
