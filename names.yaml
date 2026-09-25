@@ -142974,3 +142974,37 @@ functions:
       to that wrapper. Rust makes the tail transfer an ordinary call; because
       the target returns void, this preserves observable argument and return
       behavior while deliberately not reproducing the mirror-address jump.
+
+  # --- proprietary STANDARD cipher CBC encrypt wrapper ---
+  - address: 0x0802e758
+    ghidra: FUN_0802e758
+    name: proprietary_cipher_cbc_encrypt
+    size: 188
+    sig: "void proprietary_cipher_cbc_encrypt(u32 mode_word_0, u32 mode_word_1, const u8 *plaintext, u8 *ciphertext, const u8 *iv, const u8 *round_keys, u32 rounds, u32 byte_len)"
+    module: crypto/proprietary_cipher_cbc_encrypt
+    status: ported
+    renames:
+      param_1/r0: mode_word_0
+      param_2/r1: mode_word_1
+      param_3/r2: plaintext
+      param_4/r3: ciphertext
+      param_5/[sp,#0]: iv
+      param_6/[sp,#4]: round_keys
+      param_7/[sp,#8]: rounds
+      param_8/[sp,#12]: byte_len
+      local_44: chained_input
+      FUN_0802e58c: retail_proprietary_cipher_encrypt_block
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte extent from the frame setup
+      at 0x0802e758 through the return at 0x0802e810; the next independent
+      frame begins at 0x0802e814. Decoding every ARM B/BL-immediate word finds
+      exactly three incoming direct calls, all unconditional plain bl
+      (0x0802a408, 0x0802a4a4, 0x0802ac00), zero predicated forms, and two
+      unconditional body bl instructions to 0x0802e58c. It XORs the first
+      plaintext block with the IV, encrypts it, then XORs each following
+      plaintext block with the preceding ciphertext block before encryption.
+      The unported 388-byte retail block encryptor at 0x0802e58c remains an
+      explicit ARM literal-veneer / host-callback seam; this avoids inventing
+      its cipher semantics while preserving the verified ABI. Host tests cover
+      two-block chaining, all forwarded block-encryptor arguments, and the
+      single-block edge. match.py reviewed after the ARM release build.

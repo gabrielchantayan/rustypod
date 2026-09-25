@@ -80,6 +80,7 @@ pub mod bn_mod_mul;
 pub mod bn_ucmp;
 pub mod bn_cmp_words;
 pub mod cipher_name;
+pub mod proprietary_cipher_cbc_encrypt;
 pub mod standard_cipher_table_offset;
 pub mod i2a_asn1_object;
 pub mod digest_init;
