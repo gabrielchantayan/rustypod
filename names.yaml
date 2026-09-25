@@ -141378,3 +141378,36 @@ functions:
       existing object_resource_counted_string test exercises the direct
       integration path. match.py is a structural review only: LLVM need not
       retain the ADS frame or exact loop layout.
+
+  - address: 0x080543a4
+    ghidra: FUN_080543a4
+    name: resource_read_counted
+    size: 40
+    sig: "void resource_read_counted(Resource *resource, u16 *counted, void *context, u32 initial_byte_len)"
+    module: unported
+    status: identified
+    renames:
+      param_1/r0: resource
+      param_2/r1: counted
+      param_3/r2: context
+      param_4/r3: initial_byte_len
+      FUN_08055a90: opaque_utf16_source_read (unported)
+      FUN_080bd8bc: string_pool_read_counted (ported)
+    notes: >-
+      Raw osos.dec words e1a02001 e5d0101d e3110001 05900020 01a01002
+      0a0005b4 15901028 15900000 128000cc 1a01a53b establish the 40-byte
+      extent from 0x080543a4 through the tail branch at 0x080543c8; the next
+      independently entered function starts with push {r4-r6,lr} at
+      0x080543cc. The body has zero plain BL and zero predicated-BL
+      instructions. A full raw-image ARM branch decode finds exactly three
+      inbound unconditional BL calls (0x0806111c, 0x080dc620, and
+      0x080dc630) and zero predicated-BL calls. Bit 0 of resource+0x1d
+      selects a tail dispatch: clear loads resource+0x20 and calls unported
+      opaque_utf16_source_read with context moved into r1; set loads the pool
+      at resource+0x00, adds 0xcc, loads entry id from resource+0x28, and
+      calls ported string_pool_read_counted. Both preserve r2 and r3. BLOCKED:
+      opaque_utf16_source_read forwards undocumented source state through
+      string_pool_read, and neither its input invariants nor its UTF-16 output
+      contract is established. A Rust callback or helper seam would invent that
+      contract, so no faithful port or host tests are possible. Deliberate
+      deviations: none.
