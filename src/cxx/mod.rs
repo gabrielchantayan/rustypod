@@ -49,6 +49,7 @@ pub mod record16_range_copy_if_destination_8968;
 pub mod byte_range_copy_if_output;
 pub mod vector_record24_copy;
 pub mod vector_record24_copy_backward;
+pub mod heap_adjust;
 pub mod vector_record24_copy_assign;
 pub mod vector_uninitialized_copy_elem24;
 pub mod vector_copy_range_elem16;

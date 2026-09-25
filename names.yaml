@@ -145389,3 +145389,33 @@ functions:
       with another independently hookable record-copy port. Host tests cover
       an empty range, two records, and an overlapping destination range that
       requires reverse record ordering.
+
+  # --- binary heap adjustment ---
+  - address: 0x083e7f40
+    ghidra: FUN_083e7f40
+    name: heap_adjust
+    size: 172
+    sig: "void heap_adjust(u32 *heap, i32 hole_index, i32 element_count, u32 value, HeapCompare compare)"
+    module: cxx/heap_adjust
+    status: ported
+    renames:
+      param_1/r4: heap
+      param_2/r9/r6: hole_index
+      param_3/r8: element_count
+      param_4/r11: value
+      param_5/r7: compare
+      r5: child_index
+    notes: >-
+      Raw osos.dec establishes the exact 172-byte extent
+      0x083e7f40..0x083e7fec: the final pop {r3,r4,r5,r6,r7,r8,r9,sl,fp,pc}
+      is at 0x083e7fe8 and the next independently linked function begins with
+      push {r4,r5,r6,r7,r8,r9,lr} at 0x083e7fec. Raw caller decoding verifies
+      exactly two inbound unconditional plain BL calls (0x083e7d74 and
+      0x083e81d8) and zero predicated BL calls. The body has two unconditional
+      indirect BLX comparator dispatches, at 0x083e7f70 and 0x083e7fd8. It
+      moves the selected child down from hole_index, preferring the left child
+      when compare(right,left) is non-zero, then sifts value upward while
+      compare(parent,value) is non-zero. The comparator identity is supplied
+      by the callers and is deliberately represented as a typed callback, not
+      a new seam. Host tests cover a left-only child, right-child selection,
+      upward repair, and a singleton heap.
