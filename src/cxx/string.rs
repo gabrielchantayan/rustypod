@@ -418,6 +418,42 @@ pub unsafe extern "C" fn cxx_string_pair_uninitialized_copy(
     }
     output_cursor
 }
+/// cxx_string_pair_vector_growth_copy — retailOS `FUN_083e9038` @
+/// **0x083e9038** (64 bytes, `0x083e9038..0x083e9078`; the next independent
+/// function begins with `push {r4-r8,lr}` at `0x083e9078`). Whole-image ARM
+/// decoding finds two inbound plain `bl` calls (0x083e3690 and 0x083e36d0),
+/// zero predicated `bl` calls, and one plain outbound `bl` to
+/// [`cxx_string_pair_copy_ctor`] at 0x083d7e98.
+///
+/// This is the `std::vector` growth range constructor used by
+/// `plist_node_attribute_vector_grow`: it COW-copy-constructs each 8-byte
+/// string pair in `[first, last)` at `output`, forwarding `context` as r0 to
+/// the pair constructor, and returns the advanced output cursor.
+///
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `first..last` must be a valid range of target-layout string pairs, and
+/// `output` must provide one uninitialized pair for each source pair.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_vector_growth_copy(
+    first: *const *mut u8,
+    last: *const *mut u8,
+    output: *mut *mut u8,
+    context: *mut u8,
+) -> *mut *mut u8 {
+    let mut source_cursor = first;
+    let mut output_cursor = output;
+    while source_cursor != last {
+        cxx_string_pair_copy_ctor(context, output_cursor, source_cursor);
+        source_cursor = source_cursor.add(2);
+        output_cursor = output_cursor.add(2);
+    }
+    output_cursor
+}
+
 
 /// cxx_string_pair_entry_uninitialized_copy — retailOS `FUN_083e8d7c` @
 /// `0x083e8d7c` (64 bytes; true extent `0x083e8d7c..0x083e8dbc`; three
@@ -2657,6 +2693,44 @@ mod tests {
     fn pair_uninitialized_copy_empty_null_range_does_not_dereference() {
         unsafe {
             assert!(cxx_string_pair_uninitialized_copy(
+                core::ptr::null(),
+                core::ptr::null(),
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+            .is_null());
+        }
+    }
+
+    #[test]
+    fn pair_vector_growth_copy_constructs_range_and_preserves_empty_null_range() {
+        let _guard = arena();
+        unsafe {
+            let mut first: *mut u8 = core::ptr::null_mut();
+            let mut second: *mut u8 = core::ptr::null_mut();
+            build(&mut first, b"shared");
+            build(&mut second, b"leaked");
+            (*data_rep(second)).refcount = -1;
+            let source = [CxxStringPair { first, second }];
+            let mut output = [CxxStringPair {
+                first: core::ptr::null_mut(),
+                second: core::ptr::null_mut(),
+            }];
+
+            assert_eq!(
+                cxx_string_pair_vector_growth_copy(
+                    source.as_ptr().cast(),
+                    source.as_ptr().add(1).cast(),
+                    output.as_mut_ptr().cast(),
+                    core::ptr::null_mut(),
+                ),
+                output.as_mut_ptr().add(1).cast(),
+            );
+            assert_eq!(output[0].first, first);
+            assert_ne!(output[0].second, second);
+            assert_eq!(core::slice::from_raw_parts(output[0].second, 7), b"leaked\0");
+            assert_eq!((*data_rep(first)).refcount, 1);
+            assert!(cxx_string_pair_vector_growth_copy(
                 core::ptr::null(),
                 core::ptr::null(),
                 core::ptr::null_mut(),
