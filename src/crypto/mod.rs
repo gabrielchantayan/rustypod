@@ -67,6 +67,7 @@ pub mod free_ex_data;
 pub mod new_ex_data;
 pub mod bio_snprintf;
 pub mod bio_ctrl;
+pub mod bio_find_type;
 pub mod bio_push;
 pub mod bio_copy_next_retry;
 pub mod bn_num_bits;

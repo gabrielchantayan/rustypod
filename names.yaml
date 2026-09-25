@@ -142605,3 +142605,28 @@ functions:
       zeros its scratch arrays whereas ARM leaves stack scratch uninitialized;
       all observed callee-visible pointer layout, ordering, and scalar values
       are preserved.
+
+  - address: 0x0803d37c
+    ghidra: FUN_0803d37c
+    name: bio_find_type
+    size: 76
+    sig: "Bio *bio_find_type(Bio *bio, u32 bio_type)"
+    module: crypto/bio_find_type
+    status: ported
+    renames:
+      param_1/r0: bio
+      param_2/r1: bio_type
+      r2: method_type
+      r3: type_low_byte
+    notes: >-
+      Raw osos.dec A32 establishes the exact 76-byte extent
+      0x0803d37c..0x0803d3c4, followed by the separately linked BIO_free at
+      0x0803d3c8. Branch decoding finds exactly three inbound plain bl sites
+      (0x0805fc60, 0x0805fe54, 0x080606c4) and zero predicated bl sites.
+      It walks the target-width BIO next pointer at +0x24. A null method word
+      skips the node; otherwise method+0x00 is its type. A query with a zero
+      low byte is a category mask and matches method_type & bio_type != 0;
+      every other query requires equality. Returns the first match or null.
+      No deliberate deviations: target pointer fields remain u32 and widen
+      only to dereference on hosts. Host tests cover null input, null method
+      skipping, category-mask matching, exact-match precedence and no-match.
