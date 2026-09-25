@@ -78,14 +78,14 @@ unsafe fn fixa_destroy_ops() -> FixaDestroyOps {
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn destroy_fixl(fixl: *mut u8) {
+pub(crate) unsafe fn destroy_fixl(fixl: *mut u8) {
     let destroy: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(RETAIL_DESTROY_FIXL) };
     unsafe { destroy(fixl) }
 }
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn destroy_fixl(fixl: *mut u8) {
+pub(crate) unsafe fn destroy_fixl(fixl: *mut u8) {
     unsafe { (fixa_destroy_ops().destroy_fixl)(fixl) }
 }
 
