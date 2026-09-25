@@ -141600,3 +141600,37 @@ functions:
       deviations. Host tests use a dedicated raw-u32 slab to preserve
       target-width pointer fields and cover NULL, valid nonzero and zero
       successor words, and a wrong class tag.
+
+  - address: 0x080527d4
+    ghidra: FUN_080527d4
+    name: ui_plst_secondary_slot_item_at
+    size: 216
+    sig: "u32 ui_plst_secondary_slot_item_at(u8 *element, u32 selector, u32 reverse_flag, u32 index)"
+    module: ui/plst_secondary_slot_item
+    status: ported
+    renames:
+      param_1/r0/r4: element
+      param_2/r1: selector
+      param_3/r2: reverse_flag
+      param_4/r3/r5: index
+      "header+0x2c": primary_count
+      "header+0x2e": secondary_count
+      "element+0x224": secondary_slot_table
+      FUN_08052728: ui_plst_slot_item_at
+      FUN_080dc49c: secondary_slot_materialize
+    notes: >-
+      Raw osos.dec decoding establishes the exact 216-byte extent
+      0x080527d4..0x080528ac: the next word at 0x080528ac is mov r3,r0,
+      starting the independent following function. The body contains four
+      unconditional direct bl calls (0x080613e0, 0x08052728, 0x080b48dc,
+      and 0x080dc49c); decoding every ARM B/BL word independently finds three
+      inbound plain bl calls (0x0808d444, 0x0809dc80, 0x0809e00c) and zero
+      predicated forms. After the already-ported 'plst' class check, a zero
+      primary count delegates to ui_plst_slot_item_at. Otherwise it guards
+      selector and total-count bounds, normalizes selector/low flag byte,
+      reverse-indexes when requested, lazily populates the +0x224 slot, and
+      returns its +0x10 item word. FUN_080dc49c has no names.yaml entry, so
+      its verified address and cache-population ABI remain a typed target seam
+      rather than an invented identity; its status result is discarded exactly
+      as retailOS does. Host tests cover early guards, materialize/re-read, and
+      zero-primary delegation.
