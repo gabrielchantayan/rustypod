@@ -141717,3 +141717,29 @@ functions:
       image_library_is_liti_class implementation directly rather than
       branching to retailOS; its aligned target-width load and reachable
       control flow are unchanged.
+
+  - address: 0x08052090
+    ghidra: FUN_08052090
+    name: static_string_lookup
+    size: 56
+    sig: "u32 static_string_lookup()"
+    module: app/static_string_lookup
+    status: ported
+    renames:
+      auStack_108: static_key
+      FUN_0805205c: retail_static_key_build
+      FUN_080b42e4: retail_static_key_lookup
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x08052090..0x080520c8: eight A32 words ending in `ldr pc, [sp], #4`;
+      0x080520c8 begins the next real function. The body makes three plain
+      unconditional outbound BL calls (IRAM memzero veneer 0x08037db8,
+      static-key builder 0x0805205c, and static-key lookup 0x080b42e4), with
+      no predicated BL forms. Whole-image direct-call decoding finds three
+      plain inbound BL sites at 0x0805ca74, 0x0806353c, and 0x08063630, also
+      with no predicated forms. It clears 0x104 stack bytes, builds a static
+      key, returns zero on nonzero build status, otherwise returns the lookup
+      result. The Rust port calls existing memzero_aligned directly instead of
+      the IRAM veneer; target builds retain the two unported callee addresses,
+      while host tests use recording seams. No identity beyond these verified
+      input/output roles is asserted for either unported callee.
