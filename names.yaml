@@ -5083,10 +5083,34 @@ functions:
       every immediate ARM B/BL word in osos.dec finds exactly six inbound
       calls, all plain unconditional bl at 0x080516d0, 0x08059130, 0x08059dbc,
       0x08065ec4, 0x0806d908, and 0x081c0034; there are no predicated forms or
-      direct tail branches. FUN_08058b60 has no ledger entry, so the target
-      calls that verified address through a volatile operation seam while host
-      tests install a recorder; its identity is deliberately not claimed beyond
-      moving the entry to the list front.
+      direct tail branches. Its successful path invokes the ported
+      move_entry_to_front operation before returning the payload start.
+  # --- intrusive linked-list entry promotion ---
+  - address: 0x08058b60
+    ghidra: FUN_08058b60
+    name: move_entry_to_front
+    size: 68
+    sig: "void move_entry_to_front(LinkedListHeader *list, LinkedListEntry *entry)"
+    module: util/linked_list_find_and_promote
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: entry
+      param_1_plus_0x0c: list_front
+      param_1_plus_0x10: list_back
+      param_2_plus_0x00: next
+      param_2_plus_0x04: previous
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent: 17 ARM words from
+      ldr r2,[r0,#0xc] at 0x08058b60 through bx lr at 0x08058ba0; the next
+      separately entered function begins at 0x08058ba4. Decoding every
+      immediate ARM B/BL word in osos.dec finds exactly three inbound calls,
+      all unconditional plain bl at 0x08053874, 0x08059174, and 0x0806d928;
+      there are no predicated forms or direct tail branches. The function is a
+      move-to-front operation: it unlinks entry through its next and previous
+      links, updates list back when entry was last, then makes entry the new
+      front. Passing the current front leaves all state unchanged. Deliberate
+      deviations: none.
   # --- intrusive linked-list entry update ---
   - address: 0x08059110
     ghidra: FUN_08059110

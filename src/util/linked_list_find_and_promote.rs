@@ -13,11 +13,8 @@
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_08058b60` has no ledger entry, so this port preserves its direct call
-//! boundary with a volatile operation seam: the device default calls the
-//! verified retail address, while host tests install an observable replacement.
-//! Its recovered identity is deliberately not claimed beyond moving the found
-//! node to the front.
+//! None. Host pointer fields are wider than their ARM counterparts, but the
+//! named `repr(C)` fields preserve the target's link operations.
 
 use core::ptr;
 
@@ -26,6 +23,7 @@ use core::ptr;
 /// On ARM, `payload_start` is at +0x14. Native-width host pointers deliberately
 /// make host fixtures wider; named `repr(C)` fields retain the target layout
 /// without overlapping pointer fields.
+#[derive(Debug)]
 #[repr(C)]
 pub struct LinkedListEntry {
     pub next: *mut LinkedListEntry,
@@ -36,8 +34,8 @@ pub struct LinkedListEntry {
     pub payload_start: [u8; 0],
 }
 
-/// Intrusive list header. The lookup reads only `front`; `back` is maintained
-/// by the unported promotion helper.
+/// Intrusive list header. The lookup reads only `front`; the promotion helper
+/// maintains `back` when moving the current last entry.
 #[repr(C)]
 pub struct LinkedListHeader {
     pub state_0: u32,
@@ -47,39 +45,38 @@ pub struct LinkedListHeader {
     pub back: *mut LinkedListEntry,
 }
 
-/// The unported `FUN_08058b60` direct callee.
-pub type MoveEntryToFront = unsafe extern "C" fn(*mut LinkedListHeader, *mut LinkedListEntry);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_move_entry_to_front(
+/// `move_entry_to_front` — original: `FUN_08058b60` @ 0x08058b60 (68 bytes;
+/// three direct `bl` call sites, all unconditional: 0x08053874, 0x08059174,
+/// and 0x0806d928).
+///
+/// Removes `entry` from its current position, repairs its adjacent links and
+/// the list back pointer when it was last, then makes it the front entry. A
+/// request to promote the current front is a no-op. The caller must provide an
+/// entry already linked into `list`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.move_entry_to_front")]
+#[inline(never)]
+pub unsafe extern "C" fn move_entry_to_front(
     list: *mut LinkedListHeader,
     entry: *mut LinkedListEntry,
 ) {
-    let move_entry: MoveEntryToFront = unsafe { core::mem::transmute(0x0805_8b60usize) };
-    unsafe { move_entry(list, entry) };
-}
+    let old_front = unsafe { (*list).front };
+    if old_front == entry {
+        return;
+    }
+    unsafe { (*list).front = entry };
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_move_entry_to_front(
-    _list: *mut LinkedListHeader,
-    _entry: *mut LinkedListEntry,
-) {
-    panic!("linked_list_find_and_promote requires FUN_08058b60 @ 0x08058b60")
-}
-
-#[cfg(target_os = "none")]
-pub const DEFAULT_LINKED_LIST_FIND_AND_PROMOTE_OPS: MoveEntryToFront = firmware_move_entry_to_front;
-#[cfg(not(target_os = "none"))]
-pub const DEFAULT_LINKED_LIST_FIND_AND_PROMOTE_OPS: MoveEntryToFront = missing_move_entry_to_front;
-
-/// Active operation for the retail promotion call. Host tests replace it to
-/// observe the original call boundary.
-pub static mut LINKED_LIST_FIND_AND_PROMOTE_OPS: MoveEntryToFront =
-    DEFAULT_LINKED_LIST_FIND_AND_PROMOTE_OPS;
-
-#[inline(always)]
-unsafe fn move_entry_to_front() -> MoveEntryToFront {
-    unsafe { ptr::read_volatile(ptr::addr_of!(LINKED_LIST_FIND_AND_PROMOTE_OPS)) }
+    let next = unsafe { (*entry).next };
+    let previous = unsafe { (*entry).previous };
+    unsafe { (*previous).next = next };
+    if next.is_null() {
+        unsafe { (*list).back = previous };
+    } else {
+        unsafe { (*next).previous = previous };
+    }
+    unsafe { (*entry).previous = ptr::null_mut() };
+    unsafe { (*entry).next = old_front };
+    unsafe { (*old_front).previous = entry };
 }
 
 /// `linked_list_find_and_promote` — original: `FUN_08053850` @ 0x08053850
@@ -99,7 +96,7 @@ pub unsafe extern "C" fn linked_list_find_and_promote(
     while !entry.is_null() {
         let entry_key = unsafe { (*entry).key };
         if entry_key != u32::MAX && entry_key == key {
-            unsafe { move_entry_to_front()(list, entry) };
+            unsafe { move_entry_to_front(list, entry) };
             unsafe { *output = (*entry).payload_start.as_mut_ptr() };
             return 0;
         }
@@ -113,43 +110,7 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::ptr::{self, addr_of_mut};
-    use std::sync::{Mutex, MutexGuard};
-
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut PROMOTION_CALLS: usize = 0;
-    static mut SEEN_LIST: *mut LinkedListHeader = ptr::null_mut();
-    static mut SEEN_ENTRY: *mut LinkedListEntry = ptr::null_mut();
-
-    unsafe extern "C" fn recording_move_to_front(
-        list: *mut LinkedListHeader,
-        entry: *mut LinkedListEntry,
-    ) {
-        unsafe {
-            PROMOTION_CALLS += 1;
-            SEEN_LIST = list;
-            SEEN_ENTRY = entry;
-        }
-    }
-
-    fn install_recording_move() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe {
-            PROMOTION_CALLS = 0;
-            SEEN_LIST = ptr::null_mut();
-            SEEN_ENTRY = ptr::null_mut();
-            addr_of_mut!(LINKED_LIST_FIND_AND_PROMOTE_OPS).write(recording_move_to_front);
-        }
-        guard
-    }
-
-    fn restore_default(guard: MutexGuard<'static, ()>) {
-        unsafe {
-            addr_of_mut!(LINKED_LIST_FIND_AND_PROMOTE_OPS)
-                .write(DEFAULT_LINKED_LIST_FIND_AND_PROMOTE_OPS);
-        }
-        drop(guard);
-    }
+    use core::ptr;
 
     fn entry(key: u32) -> LinkedListEntry {
         LinkedListEntry {
@@ -167,49 +128,93 @@ mod tests {
     }
 
     #[test]
-    fn finds_a_later_entry_and_promotes_it_before_returning_its_payload() {
-        let guard = install_recording_move();
+    fn promotes_a_middle_entry_and_repairs_both_neighbors() {
         let mut entries = [entry(3), entry(5), entry(7)];
         entries[0].next = &mut entries[1];
+        entries[1].previous = &mut entries[0];
         entries[1].next = &mut entries[2];
+        entries[2].previous = &mut entries[1];
+        let mut header = list(&mut entries[0], &mut entries[2]);
+        let entry0 = ptr::addr_of_mut!(entries[0]);
+        let entry1 = ptr::addr_of_mut!(entries[1]);
+        let entry2 = ptr::addr_of_mut!(entries[2]);
+
+        unsafe { move_entry_to_front(&mut header, &mut entries[1]) };
+        assert_eq!(header.front, entry1);
+        assert_eq!(header.back, entry2);
+        assert!(entries[1].previous.is_null());
+        assert_eq!(entries[1].next, entry0);
+        assert_eq!(entries[0].previous, entry1);
+        assert_eq!(entries[0].next, entry2);
+        assert_eq!(entries[2].previous, entry0);
+    }
+
+    #[test]
+    fn promotes_last_entry_and_updates_back() {
+        let mut entries = [entry(3), entry(5)];
+        entries[0].next = &mut entries[1];
+        entries[1].previous = &mut entries[0];
+        let mut header = list(&mut entries[0], &mut entries[1]);
+        let entry0 = ptr::addr_of_mut!(entries[0]);
+        let entry1 = ptr::addr_of_mut!(entries[1]);
+
+        unsafe { move_entry_to_front(&mut header, &mut entries[1]) };
+
+        assert_eq!(header.front, entry1);
+        assert_eq!(header.back, entry0);
+        assert!(entries[1].previous.is_null());
+        assert_eq!(entries[1].next, entry0);
+        assert!(entries[0].next.is_null());
+        assert_eq!(entries[0].previous, entry1);
+    }
+
+    #[test]
+    fn leaves_the_current_front_unchanged() {
+        let mut entries = [entry(3), entry(5)];
+        entries[0].next = &mut entries[1];
+        entries[1].previous = &mut entries[0];
+        let mut header = list(&mut entries[0], &mut entries[1]);
+        let entry0 = ptr::addr_of_mut!(entries[0]);
+        let entry1 = ptr::addr_of_mut!(entries[1]);
+
+        unsafe { move_entry_to_front(&mut header, &mut entries[0]) };
+
+        assert_eq!(header.front, entry0);
+        assert_eq!(header.back, entry1);
+        assert!(entries[0].previous.is_null());
+        assert_eq!(entries[0].next, entry1);
+        assert_eq!(entries[1].previous, entry0);
+    }
+
+    #[test]
+    fn lookup_promotes_the_matching_entry_before_returning_its_payload() {
+        let mut entries = [entry(3), entry(5), entry(7)];
+        entries[0].next = &mut entries[1];
+        entries[1].previous = &mut entries[0];
+        entries[1].next = &mut entries[2];
+        entries[2].previous = &mut entries[1];
         let expected_payload = entries[2].payload_start.as_mut_ptr();
         let mut header = list(&mut entries[0], &mut entries[2]);
         let mut output = ptr::null_mut();
 
         assert_eq!(unsafe { linked_list_find_and_promote(7, &mut header, &mut output) }, 0);
         assert_eq!(output, expected_payload);
-        assert_eq!(unsafe { PROMOTION_CALLS }, 1);
-        assert_eq!(unsafe { SEEN_LIST as usize }, &mut header as *mut _ as usize);
-        assert_eq!(unsafe { SEEN_ENTRY as usize }, &mut entries[2] as *mut _ as usize);
-        restore_default(guard);
+        assert_eq!(header.front, ptr::addr_of_mut!(entries[2]));
+        assert_eq!(header.back, ptr::addr_of_mut!(entries[1]));
     }
 
     #[test]
-    fn skips_sentinel_keys_even_when_the_lookup_key_is_the_sentinel() {
-        let guard = install_recording_move();
+    fn lookup_skips_sentinel_keys_and_preserves_output_on_a_miss() {
         let mut entries = [entry(u32::MAX), entry(9)];
         entries[0].next = &mut entries[1];
+        entries[1].previous = &mut entries[0];
         let mut header = list(&mut entries[0], &mut entries[1]);
         let marker = 0x1234usize as *mut u8;
         let mut output = marker;
 
         assert_eq!(unsafe { linked_list_find_and_promote(u32::MAX, &mut header, &mut output) }, -123);
         assert_eq!(output, marker);
-        assert_eq!(unsafe { PROMOTION_CALLS }, 0);
-        restore_default(guard);
-    }
-
-    #[test]
-    fn missing_key_preserves_output_and_does_not_call_promotion() {
-        let guard = install_recording_move();
-        let mut only = entry(4);
-        let mut header = list(&mut only, &mut only);
-        let marker = 0x5678usize as *mut u8;
-        let mut output = marker;
-
-        assert_eq!(unsafe { linked_list_find_and_promote(8, &mut header, &mut output) }, -123);
-        assert_eq!(output, marker);
-        assert_eq!(unsafe { PROMOTION_CALLS }, 0);
-        restore_default(guard);
+        assert_eq!(header.front, ptr::addr_of_mut!(entries[0]));
+        assert_eq!(header.back, ptr::addr_of_mut!(entries[1]));
     }
 }
