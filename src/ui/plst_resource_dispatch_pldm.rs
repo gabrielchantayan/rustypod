@@ -9,7 +9,7 @@ use core::ptr;
 use crate::app::resource::cache::resource_callback_dispatch;
 
 use super::plst_class_check::ui_element_is_plst_class;
-use super::tdat_message_dispatch::tdat_dispatch_message;
+use super::plst_task_message::plst_task_message;
 
 const TASK_RESOURCE_ROOT_OFFSET: usize = 0x40;
 const TASK_READY_OFFSET: usize = 0x190;
@@ -21,10 +21,7 @@ const DISPATCH_REJECTED: u32 = 0xffff_ffce;
 
 /// ABI boundaries reached after the task readiness check.
 ///
-/// `0x0804424c` is deliberately not named: it has no `names.yaml` entry. Raw
-/// instructions establish that it zeroes `{task, PLDM_MESSAGE, 0, 0}` and
-/// dispatches `TDAT_MESSAGE` to task+0x0c, which is represented here by the
-/// already ported message dispatcher.
+/// The tail-call helper at 0x0804424c is ported as [`plst_task_message`].
 #[derive(Clone, Copy)]
 pub struct PlstResourceDispatchPldmOps {
     pub resource_dispatch: unsafe extern "C" fn(*mut u8, usize, *mut u8) -> i32,
@@ -34,7 +31,7 @@ pub struct PlstResourceDispatchPldmOps {
 pub const DEFAULT_PLST_RESOURCE_DISPATCH_PLDM_OPS: PlstResourceDispatchPldmOps =
     PlstResourceDispatchPldmOps {
         resource_dispatch: resource_callback_dispatch,
-        message_dispatch: tdat_dispatch_message,
+        message_dispatch: plst_task_message,
     };
 
 pub static mut PLST_RESOURCE_DISPATCH_PLDM_OPS: PlstResourceDispatchPldmOps =
@@ -55,13 +52,11 @@ fn dispatch_ops() -> PlstResourceDispatchPldmOps {
 /// predicated `bl` calls; the final `b 0x0804424c` is a tail branch. The
 /// function rejects a non-'plst' task or zero task+0x190 with -50. On success
 /// it clears resource-root+0x14, dispatches callback `0x080d43e4` with a NULL
-/// context (ignoring its status), then tail-dispatches `pldm` through the
-/// verified behavior of 0x0804424c.
+/// context while ignoring its status), then tail-dispatches `pldm` through
+/// [`plst_task_message`].
 ///
-/// Deliberate deviation: the unregistered 0x0804424c helper is expressed by
-/// its raw-verified 16-byte argument record and the ported Tdat dispatcher,
-/// rather than inventing a callee identity. The two externally observable
-/// calls remain replaceable volatile boundaries for host tests.
+/// Deliberate deviations: the two externally observable calls remain
+/// replaceable volatile boundaries for host tests.
 ///
 /// # Safety
 ///

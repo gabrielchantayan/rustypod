@@ -14013,6 +14013,37 @@ functions:
       more specific upstream representation, so the operation-based name
       is intentional. All adds wrap modulo 2^32.
 
+  - address: 0x0804424c
+    ghidra: FUN_0804424c
+    name: plst_task_message
+    size: 80
+    sig: "u32 plst_task_message(u8 *task, u32 message, u8 *arguments)"
+    module: ui/plst_task_message
+    vars:
+      param_1/r0: task
+      param_2/r1: message
+      param_3/r2: arguments
+      "task+0x0c": tdat_element
+      "task+0x190": ready
+      DAT_0804429c: TDAT_TASK_MESSAGE (0x74647070)
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_0805cfb4: bzero
+      FUN_080442a0: tdat_dispatch_message
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 80-byte extent
+      0x0804424c..0x0804429c, including the trailing 0x74647070 message
+      literal; the next push-prologue starts at 0x080442a0. The body has
+      three plain BL calls (plst-class predicate, bzero, and Tdat dispatcher)
+      and no predicated BL calls. Independent full-image decoding finds three
+      inbound plain BL calls at 0x08049278, 0x0805455c, and 0x080d35dc, with
+      no predicated inbound calls. It rejects a non-plst task or zero
+      task+0x190 with -50; otherwise bzeroes a four-word local record, fills
+      {task,message,arguments,0}, and dispatches message 0x74647070 to the
+      Tdat element at task+0x0c. Rust represents the stack record as [u32;4]
+      and makes the final dispatcher replaceable for host tests; both preserve
+      the target-width record and ABI.
+
   - address: 0x080442a0
     ghidra: FUN_080442a0
     name: tdat_dispatch_message
