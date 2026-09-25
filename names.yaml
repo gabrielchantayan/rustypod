@@ -130767,6 +130767,30 @@ functions:
       pops {r4,r5,r6,r7,r8,pc}. Its ABI requires registers and a caller frame
       established by earlier code, so a Rust function would invent a register
       and stack contract and cannot faithfully replace this veneer.
+  - address: 0x083e9e00
+    ghidra: FUN_083e9e00
+    name: cxx_string_range_assign
+    size: 56
+    sig: "u8 *cxx_string_range_assign(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/cxx_string_range_assign
+    status: ported
+    renames:
+      param_1/r0/r4: first
+      param_2/r1/r6: last
+      param_3/r2/r5: output
+      FUN_083d8d1c: cxx_string_assign
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent
+      0x083e9e00..0x083e9e38: push {r4-r6,lr}; save first, last, and output;
+      branch to the loop test; call cxx_string_assign(output, first); advance
+      both cursors by four bytes; compare first with last; return the advanced
+      output cursor. The next independently linked function begins at
+      0x083e9e38. The body contains one unconditional plain bl to
+      cxx_string_assign and no predicated bl forms. Independent whole-image
+      A32 decoding finds exactly two inbound direct plain BL calls, at
+      0x083e5cb8 and 0x083e5d00, with no predicated BL calls. It assigns COW
+      strings over [first,last) into output, using target-layout four-byte
+      word strides. There are no deliberate deviations.
   - address: 0x083e9e38
     ghidra: FUN_083e9e38
     name: copy_byte_range_returning_end

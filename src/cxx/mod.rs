@@ -11,6 +11,7 @@ pub mod generic_descriptor_lookup;
 pub mod descriptor_action_dispatch;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod string_record;
+pub mod cxx_string_range_assign;
 pub mod record_work_pump;
 pub mod work_record_teardown;
 pub mod string_object_word_merge;
