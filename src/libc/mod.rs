@@ -14,6 +14,7 @@ pub mod copy_byte_range_returning_end;
 pub mod bounded_copy;
 pub mod cstr_copy;
 pub mod cstr_compare_normalized;
+pub mod cstr_append_bounded;
 pub mod cstr_find_from;
 pub mod bzero;
 pub mod zero_unwritten_suffix;
