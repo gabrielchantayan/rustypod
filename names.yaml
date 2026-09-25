@@ -142064,3 +142064,26 @@ functions:
       and 0x13 to 6, preserves 0x1c, maps 0x42, 0x43, 0x46, 0x71, and
       0x74 to 0x74, and maps all other codes to zero. Rust uses a `match`
       instead of the original comparison tree; both are side-effect-free.
+  - address: 0x0804a0b4
+    ghidra: FUN_0804a0b4
+    name: base64_decode_state_reset
+    size: 28
+    sig: "void base64_decode_state_reset(u32 *state_words)"
+    module: crypto/base64_decode_state_reset
+    status: ported
+    renames:
+      param_1/r0: state_words
+      "state_words+0x00": decoded_block_length
+      "state_words+0x04": decoded_block_capacity
+      "state_words+0x58": pending_character_count
+      "state_words+0x5c": line_continuation
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte body
+      0x0804a0b4..0x0804a0cf: `bx lr` at 0x0804a0cc ends it, and
+      `stmdb sp!,{r0-r11,lr}` at 0x0804a0d0 begins the next independently
+      entered function. Whole-image A32 decoding finds three incoming plain
+      BL calls at 0x080ee7b4, 0x080ee934, and 0x080ee9b0, with zero
+      predicated forms; the leaf body has no calls. It stores 30 at word one,
+      then zeroes words zero, 22, and 23. The field semantics come from the
+      immediately-following Base64 decoder state machine; its unrecovered
+      fields remain word-addressed to preserve the target's four-byte layout.
