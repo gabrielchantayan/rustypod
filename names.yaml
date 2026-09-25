@@ -143552,3 +143552,34 @@ functions:
       adjacent StringObjectWord ranges but has no established identity or Rust
       port, so target builds call its verified retail address while host tests
       install a seam. Deliberate deviation: none.
+  - address: 0x083ea6f4
+    ghidra: FUN_083ea6f4
+    name: introsort_u32_range
+    size: 128
+    sig: "void introsort_u32_range(u32 *first, u32 *last, WordComparator compare)"
+    module: util/introsort_u32_range
+    status: ported
+    renames:
+      param_1/r4: first
+      param_2/r5: last
+      param_3/r7: compare
+      r6: byte_length
+      FUN_083e83f0: retail_partition_sort
+      FUN_083e8378: retail_guarded_insertion_sort
+      FUN_083e9aec: retail_unguarded_insert
+    notes: >-
+      Raw osos.dec establishes the true 128-byte extent
+      0x083ea6f4..0x083ea773: `pop {r4-r8,pc}` ends the body at 0x083ea770,
+      and 0x083ea774 begins the next distinct function. Independent A32
+      decoding finds two inbound unconditional plain BL sites (0x08277f2c
+      and 0x08278048), no inbound predicated direct BL sites, and three
+      internal unconditional direct BL instructions (0x083e83f0, 0x083e8378,
+      and 0x083e9aec), with no predicated direct BL instructions. The wrapper
+      invokes retail partitioning with the word count as depth budget, then
+      tail-dispatches guarded insertion sorting for ranges of at most sixteen
+      words; larger ranges guarded-sort the initial sixteen words and insert
+      each remaining word with the unguarded helper. None of the three
+      verified helper addresses has a names.yaml identity. Target Rust calls
+      them directly; host tests inject equivalent helper seams. Deliberate
+      deviations: the stock small-range path tail-dispatches after restoring
+      registers, while Rust performs a normal call and return.
