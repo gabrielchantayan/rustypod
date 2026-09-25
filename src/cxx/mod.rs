@@ -324,6 +324,7 @@ pub mod string_byte_vector_record;
 pub mod byte_vector_owner_push_back;
 pub mod string_object_initial_sort_key;
 pub mod record_range_stable_sort;
+pub mod record_range_merge_sort;
 pub mod text_buffer;
 pub mod vtable_object_construct_with_text_buffer;
 pub mod string_from_range_provider;

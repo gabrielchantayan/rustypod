@@ -143914,6 +143914,37 @@ functions:
       order and returns the advanced output cursor. No deliberate behavioral
       deviations: Rust reuses the verified semantic callee, while LLVM may
       choose a different prologue or loop shape.
+  - address: 0x083e9a20
+    ghidra: FUN_083e9a20
+    name: record_range_merge_sort
+    size: 204
+    sig: "void record_range_merge_sort(void *first, void *last, void *unused, void *scratch, void *unused2, RecordCompare compare)"
+    module: cxx/record_range_merge_sort
+    status: ported
+    renames:
+      param_1/r0/r11: first
+      param_2/r1/r9: last
+      param_3/r2: unused
+      param_4/r3: scratch
+      param_5/stack: unused2
+      param_6/stack/r6: compare
+      FUN_08031568: __rt_sdiv
+      FUN_083e8274: record_range_leaf_sort
+      FUN_083e8814: record_range_merge_runs
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent
+      0x083e9a20..0x083e9aeb: `pop {r4,r5,r6,r7,r8,r9,r10,r11,pc}` at
+      0x083e9ae8 ends it and the next independently linked function begins at
+      0x083e9aec. Decoding every A32 BL word finds seven unconditional plain
+      outbound BL instructions (three __rt_sdiv, two record_range_leaf_sort,
+      two record_range_merge_runs) and zero predicated BL instructions. The
+      only two inbound direct calls are unconditional BL instructions at
+      0x083e9974 and 0x083e999c in FUN_083e9928. It leaf-sorts seven-record
+      chunks, then alternates merge passes between the range and scratch,
+      doubling the run width after each pass. The third and fifth ABI arguments
+      are unread. Deliberate deviation: the two unrecovered retail callees are
+      fixed-address device calls and volatile host seams; their data flow and
+      argument order are preserved.
   - address: 0x083e9aec
     ghidra: FUN_083e9aec
     name: word_insertion_sort_insert
