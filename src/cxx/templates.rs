@@ -5154,6 +5154,56 @@ pub unsafe extern "C" fn vector_copy_range_elem12(
     }
     output
 }
+/// vector_copy_range_elem12_alias_8bdc — original: `FUN_083e8bdc` @
+/// 0x083e8bdc (48 bytes; raw extent 0x083e8bdc..0x083e8c0c, bounded by the
+/// next independent `push {r4,r5,r6,lr}` entry).
+///
+/// Copies the half-open `[first,last)` range of aligned 12-byte vector records
+/// into `output`, advancing both cursors by 12 bytes and returning the
+/// resulting output cursor. The raw `ldmne` loads all three source words before
+/// the `stmne` stores any destination word. A NULL initial output therefore
+/// skips only the first source record before the cursor advances to address 12.
+///
+/// Whole-image A32 decoding finds exactly two inbound direct plain `bl` sites
+/// (0x083e2170 and 0x083e21bc), no predicated inbound `bl` sites, and no body
+/// calls.
+///
+/// # Deliberate deviations
+///
+/// None. Its dedicated text section preserves this independently hookable
+/// byte-identical vector-copy instantiation.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a range whose length is divisible by 12.
+/// When `output` is non-NULL, `first` must be readable and `output` writable
+/// for that many bytes; both must be word-aligned. The original performs
+/// forward copies without an overlap guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.vector_copy_range_elem12_alias_8bdc")]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_elem12_alias_8bdc(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            let source = first as *const u32;
+            let destination = output as *mut u32;
+            let first_word = source.read();
+            let second_word = source.add(1).read();
+            let third_word = source.add(2).read();
+            destination.write(first_word);
+            destination.add(1).write(second_word);
+            destination.add(2).write(third_word);
+        }
+        first = first.wrapping_add(12);
+        output = output.wrapping_add(12);
+    }
+    output
+}
+
 
 /// vector_copy_range_elem24_alias_8cf0 — original: `FUN_083e8cf0` @
 /// 0x083e8cf0 (60 bytes; raw extent 0x083e8cf0..0x083e8d2c, bounded by the
@@ -11089,6 +11139,36 @@ mod tests {
         assert_eq!(empty, output);
         assert_eq!(destination, [0xaaaa_aaaa; 3]);
         assert_eq!(null_output, 12usize as *mut u8);
+    }
+
+    #[test]
+    fn vector_copy_range_elem12_alias_8bdc_copies_and_skips_null_output_source() {
+        let source = [
+            0x0102_0304, 0x1112_1314, 0x2122_2324,
+            0x3132_3334, 0x4142_4344, 0x5152_5354,
+        ];
+        let mut destination = [0xaaaa_aaaau32; 7];
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        let returned = unsafe {
+            vector_copy_range_elem12_alias_8bdc(
+                source.as_ptr().cast::<u8>(),
+                source.as_ptr().cast::<u8>().wrapping_add(24),
+                output,
+            )
+        };
+        let null_returned = unsafe {
+            vector_copy_range_elem12_alias_8bdc(
+                core::ptr::null(),
+                12usize as *const u8,
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(&destination[..6], &source);
+        assert_eq!(destination[6], 0xaaaa_aaaa);
+        assert_eq!(returned, unsafe { output.add(24) });
+        assert_eq!(null_returned, 12usize as *mut u8);
     }
 
     #[test]
