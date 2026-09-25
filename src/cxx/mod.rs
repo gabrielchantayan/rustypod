@@ -69,6 +69,7 @@ pub mod deque_iterator_current_or_zero;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
 pub mod strided_record_remove_selector;
+pub mod record_40_copy_construct_range;
 pub mod segmented_iter_post_increment;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
