@@ -22874,6 +22874,20 @@ functions:
       pos = 0x%lx, size = 0x%lx" @ 0x0804fa1c). 1 call site
       (0x0807d52c), binary-scanned.
 
+  - address: 0x0804228c
+    ghidra: FUN_0804228c
+    name: strlcat
+    size: 52
+    sig: "size_t strlcat(char *dst, const char *src, size_t capacity)"
+    module: libc/strlcat
+    status: ported
+    vars: {param_1: dst, param_2: src, param_3: capacity, iVar2: dst_len}
+    notes: >-
+      Bounded concatenation: scans dst up to capacity, then calls strlcpy
+      (0x080422c0) on the remaining span and returns the bounded dst length
+      plus full src length. Raw words establish a 52-byte extent ending at
+      0x080422c0, one plain BL (to strlcpy), and no predicated BL. 3 inbound
+      BL call sites, binary-scanned. No NULL guard or overlap handling.
   - address: 0x08042cbc
     ghidra: FUN_08042cbc
     name: bcopy

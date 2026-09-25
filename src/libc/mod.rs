@@ -37,6 +37,7 @@ pub mod strlen;
 pub mod strlen_safe;
 pub mod strlen_safe_plus1;
 pub mod strlcpy;
+pub mod strlcat;
 pub mod strncmp;
 pub mod strncpy;
 pub mod strstr;
