@@ -52,6 +52,7 @@ pub mod copy_halfword_range_if_destination;
 pub mod copy_word_range_if_destination;
 pub mod copy_word_range_if_destination_sibling;
 pub mod relocation_word_range_copy;
+pub mod copy_word_range_if_destination_loop_entry_9188;
 pub mod copy_word_range_if_destination_loop_entry;
 pub mod copy_word_range_if_destination_loop_entry_91b0;
 pub mod copy_word_range_if_destination_loop_entry_91d8;
