@@ -142841,3 +142841,24 @@ functions:
       Rust uses the established volatile message_dispatch_veneer foreign-call
       seam and intentionally does not expose the original's caller-saved
       register state after dispatch.
+  - address: 0x08038018
+    ghidra: thunk_EXT_FUN_22008648
+    name: iram_queue_transfer_with_default_mode_veneer
+    size: 8
+    sig: "void iram_queue_transfer_with_default_mode_veneer(u32 first, u32 second, u32 length, u32 transfer_type, u32 transfer_slot)"
+    module: drivers/iram_queue_transfer_default_mode_veneer
+    status: ported
+    renames:
+      literal_0803801c: iram_queue_transfer_with_default_mode (0x22008648)
+      FUN_08008648: queue_transfer_with_default_mode
+    notes: >-
+      Raw osos.dec establishes the complete eight-byte veneer:
+      `ldr pc,[pc,#-4]` at 0x08038018 loads literal 0x22008648 from
+      0x0803801c; the next real veneer begins at 0x08038020. This literal is
+      the IRAM mirror of the already ported 0x08008648 default-control DMA
+      transfer wrapper. Full-image A32 decoding finds three inbound plain BL
+      calls at 0x080f7dcc, 0x0836b04c, and 0x0836b0b4, with no predicated BL
+      calls. The veneer preserves all five argument words and tail-transfers
+      to that wrapper. Rust makes the tail transfer an ordinary call; because
+      the target returns void, this preserves observable argument and return
+      behavior while deliberately not reproducing the mirror-address jump.
