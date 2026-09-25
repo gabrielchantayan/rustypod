@@ -6995,6 +6995,35 @@ functions:
       unrecovered. No NULL or bounds guard is added: direct dereferences match
       retailOS exactly.
 
+  # --- counted-string fixed-template initializer ---
+  - address: 0x0805205c
+    ghidra: FUN_0805205c
+    name: counted_string_template_initialize
+    size: 52
+    sig: "i32 counted_string_template_initialize(u8 *destination)"
+    module: app/counted_string_template_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: destination (u16 count at +0, C string at +2)
+      DAT_08052088: template_prefix (fixed byte sequence at 0x083e25d0)
+      DAT_0805208c: template_suffix (fixed byte sequence at 0x083e25c4)
+      FUN_08030ff4: strcpy
+      FUN_080311b4: strcat
+    notes: >-
+      Raw osos.dec establishes the true 0x0805205c..0x08052090 extent:
+      ten ARM instructions through `ldmia sp!,{r4-r6,pc}`, followed by two
+      literal-pool words at 0x08052088 and 0x0805208c, then the next real
+      `push {lr}` prologue. Thus Ghidra's 44-byte function extent omits the
+      eight-byte literal pool. The body stores zero to destination+0, invokes
+      strcpy(destination+2, 0x083e25d0), then strcat(destination+2,
+      0x083e25c4), and returns zero. It contains two unconditional outbound
+      plain BL instructions and no predicated BL; raw direct-call scanning
+      finds three unconditional inbound plain BL sites (0x080520a8,
+      0x080b5464, 0x080d8fb4). The literal targets resolve to executable
+      bytes in osos.dec rather than recognized text, so their semantic
+      content remains deliberately unnamed. Host-only source-pointer
+      injection exists solely to test this fixed-address behavior.
+
   # --- retailOS kind-resolved UI backend resource count ---
   - address: 0x0805417c
     ghidra: FUN_0805417c
