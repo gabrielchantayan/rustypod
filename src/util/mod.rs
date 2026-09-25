@@ -166,6 +166,7 @@ pub mod obfuscated_buffer_prepare;
 pub mod mode_position_validate;
 pub mod opaque_record_initialize;
 pub mod opaque_52_byte_record_initialize;
+pub mod opaque_56_byte_record_initialize;
 pub mod xor_index_key;
 pub mod object_word_payload_resolve;
 pub mod object_word_payload_dispatch;
