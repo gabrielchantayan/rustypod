@@ -16,6 +16,21 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0802769c
+    ghidra: FUN_0802769c
+    name: empty_destructor_0802769c
+    size: 4
+    sig: "void empty_destructor_0802769c(void)"
+    module: util/empty_destructor_0802769c
+    status: ported
+    renames: {}
+    notes: >-
+      Raw osos.dec is exactly `bx lr` at 0x0802769c; 0x080276a0 is the next
+      distinct empty function, establishing the four-byte extent. Independent
+      full-image A32 branch decoding finds three inbound unconditional plain
+      BL sites (0x082fc4f4, 0x08343a90, and 0x08348600) and zero predicated
+      direct BL sites. The leaf reads no arguments, writes no memory, and
+      returns immediately while preserving r0. Deliberate deviations: none.
   - address: 0x0802a954
     ghidra: FUN_0802a954
     name: standard_cipher_configure
