@@ -612,9 +612,17 @@ pub unsafe extern "C" fn kernel_ticks() -> usize {
     (hook!(kernel_ticks))()
 }
 
-/// rom_svc_22003b6c — original: thunk @ 0x08037e28 -> ROM gateway stub,
-/// service 23. No input args; returns a result word. Called at the head of
-/// the kernel-object create helpers.
+/// Gateway service 23 request — load address 0x08037e28, true size 8 bytes.
+/// Raw words are `e51ff004` (`ldr pc, [pc, #-4]`) and `22003b6c`; the next
+/// literal veneer starts at 0x08037e30. The stub forwards no documented
+/// arguments to ROM target 0x22003b6c and returns its r0 result word. The
+/// three callers are plain `bl` at 0x080563b8, 0x080b1628, and 0x08103e64;
+/// ARM-word decoding found zero predicated `bl` calls. They use the result as
+/// a newly allocated kernel-object id before gateway initialization.
+///
+/// Deliberate deviation: portable Rust cannot transfer to mask ROM, so this
+/// dispatches through the volatile `ROM_KERNEL` hook. It deliberately retains
+/// the evidence-based service name rather than inventing a ROM callee identity.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn rom_svc_22003b6c() -> usize {
     (hook!(rom_svc_22003b6c))()
