@@ -141066,3 +141066,31 @@ functions:
       opaque lookup dispatcher, writes its temporary result word, and
       sign-extends the 16-bit status. Direct unported calls use volatile host
       seams and verified resident addresses on target; bcopy uses its port.
+
+  - address: 0x08057c04
+    ghidra: FUN_08057c04
+    name: entry_nested_liti_class_check
+    size: 40
+    sig: "u32 entry_nested_liti_class_check(const u8 *entry)"
+    module: app/entry_nested_liti_class_check
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_1_plus_0x04: nested_container
+      FUN_08057bdc: nested_liti_class_check
+    notes: >-
+      Raw osos.dec words e3500000 e52de004 0a000004 e5900004 ebfffff0
+      e3500000 13a00001 149df004 e3a00000 e49df004 prove the 40-byte
+      extent 0x08057c04..0x08057c2c; the next distinct function starts with
+      cmp r0,#0 at 0x08057c2c. Decoding every ARM B/BL word finds three
+      inbound unconditional plain bl calls (0x08049050, 0x080523cc,
+      0x08053bc0), zero predicated bl forms, and one predicated bne tail
+      caller at 0x08053b0c. The body has one plain bl to the already ported
+      nested_liti_class_check and no predicated calls. It returns zero for a
+      NULL entry or rejected nested container; otherwise it returns one after
+      loading the target-width nested-container pointer at entry+4. Rust calls
+      the canonical callee directly. LLVM proves its result is canonical and
+      lowers that call to a tail branch; the exported wrapper remains distinct.
+      Host tests cover NULL entry/container, liti and non-liti nested targets,
+      and isolation of the +0x04 load. match.py reports this intentional
+      tail-branch difference plus its frame prologue.
