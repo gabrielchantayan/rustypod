@@ -6610,6 +6610,31 @@ functions:
       recording setup seam. The relocator at 0x080046e0 mirrors this body to
       0x22007470, and the former literal thunk 0x08038060 now forwards to
       this port.
+  # --- event-handler source child stop ---
+  - address: 0x0800796c
+    ghidra: FUN_0800796c
+    name: event_handler_source_child_stop
+    size: 196
+    sig: "void event_handler_source_child_stop(void *source, void *child)"
+    module: kernel/event_handler_source_child_stop
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: child
+      FUN_08003950: event_handler_source_child_enabled
+      FUN_08007c04: event_handler_source_transition
+    notes: >-
+      Raw ARM runs from 0x0800796c through pop {r4,r5,r6,pc} at 0x08007a2c;
+      the next real prologue at 0x08007a30 proves the 196-byte extent.
+      Decoding osos.dec independently finds ten unconditional bl instructions
+      (0x0800797c, 0x08007988, 0x080079a4, 0x080079b0, 0x080079c4,
+      0x080079cc, 0x080079e8, 0x080079f4, 0x08007a00, 0x08007a10) and one
+      predicated blne at 0x08007a1c; there are no tail branches. It starts and
+      completes a child stop, records a nonzero result in the source transition,
+      configures an 8000-unit mode-1 operation, and for enabled children
+      decrements source +0x50 then retires enabled table children with a greater
+      rank. The opaque child targets remain target/host seams; their identities
+      are not claimed beyond this verified caller behavior.
   # --- event-loop callback dispatch ---
   - address: 0x080074e8
     ghidra: FUN_080074e8
