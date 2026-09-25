@@ -16443,6 +16443,28 @@ functions:
       of tail-branching to the target-only ROM veneer, preserving the fixed
       id and returned result.
 
+  - address: 0x08047d90
+    ghidra: FUN_08047d90
+    name: gateway_request_tag1_result
+    size: 100
+    sig: "u32 gateway_request_tag1_result(u32 payload)"
+    module: kernel/gateway_request_blocking
+    status: ported
+    vars: {param_1: payload, local_10: result}
+    notes: >-
+      Raw osos.dec establishes the 100-byte extent from push {r4,lr} at
+      0x08047d90 through pop {r4,pc} at 0x08047df0; the next function begins
+      at 0x08047df4. It waits for gateway readiness, builds the tag-1 frame
+      {0,0,0,0,1,payload,pad,result,1}, sends it through mode-1 mailbox
+      gateway under kernel semaphore 9, then returns frame word 7. The body
+      has four unconditional BL instructions (ready wait, semaphore wait,
+      mailbox send, semaphore signal); a whole-image ARM B/BL scan finds
+      exactly three inbound unconditional BL callers at 0x0806e7b4,
+      0x0807a3f4, and 0x08149370, with no predicated BLs. The service-level
+      meaning of tag 1 is not established, so the name records only its ABI
+      and returned result word. Deliberate deviation: ARM leaves the pad and
+      result words uninitialized; Rust zeros both, producing zero when the
+      dispatcher does not fill the result.
   - address: 0x08047df4
     ghidra: FUN_08047df4
     name: gateway_request_empty_tag5
