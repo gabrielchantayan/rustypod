@@ -64,6 +64,49 @@ pub unsafe extern "C" fn ft_list_find(
     ptr::null_mut()
 }
 
+/// `ft_list_remove` — original: `FUN_0804cb4c` @ **0x0804cb4c** (36 bytes
+/// exactly, `0x0804cb4c..0x0804cb70`; `0x0804cb70` begins the next distinct
+/// function). Raw `osos.dec` words decode to two conditional link updates
+/// followed by `bx lr`; Ghidra's extent is exact.
+///
+/// Every ARM BL-immediate in the firmware gives **3 direct inbound call
+/// sites**, all unconditional plain `bl` (cond 0xe): 0x0804c398, 0x0804c484,
+/// and 0x080868f8. There are no predicated inbound BL forms. This leaf has
+/// no outgoing calls.
+///
+/// FreeType `FT_List_Remove` from `src/base/ftlist.c`: splice `node` out of
+/// `list` by replacing either `node->prev->next` or `list->head` with
+/// `node->next`, then replacing either `node->next->prev` or `list->tail`
+/// with `node->prev`. The node's own links remain unchanged.
+///
+/// Deliberate deviations: host pointer fields are wider than the target's
+/// four-byte fields; `repr(C)` preserves the field order used by the
+/// algorithm, while tests validate observable list-link behavior.
+///
+/// # Safety
+///
+/// `list` and `node` must be valid, non-NULL pointers. Any non-NULL adjacent
+/// nodes must be writable `FtListNode` values. The original makes no checks.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ft_list_remove")]
+#[inline(never)]
+pub unsafe extern "C" fn ft_list_remove(list: *mut FtList, node: *mut FtListNode) {
+    let prev = ptr::read_volatile(ptr::addr_of!((*node).prev));
+    let next = ptr::read_volatile(ptr::addr_of!((*node).next));
+
+    if prev.is_null() {
+        ptr::write_volatile(ptr::addr_of_mut!((*list).head), next);
+    } else {
+        ptr::write_volatile(ptr::addr_of_mut!((*prev).next), next);
+    }
+
+    if next.is_null() {
+        ptr::write_volatile(ptr::addr_of_mut!((*list).tail), prev);
+    } else {
+        ptr::write_volatile(ptr::addr_of_mut!((*next).prev), prev);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +184,70 @@ mod tests {
             unsafe { ft_list_find(&list, ptr::null_mut()) },
             &mut nodes[1] as *mut FtListNode
         );
+    }
+
+    fn linked_list(nodes: &mut [FtListNode]) -> FtList {
+        chain(nodes);
+        FtList {
+            head: &mut nodes[0],
+            tail: &mut nodes[nodes.len() - 1],
+        }
+    }
+
+    #[test]
+    fn removes_head_and_updates_the_new_head_prev_link() {
+        let mut nodes = [node(ptr::null_mut()), node(ptr::null_mut()), node(ptr::null_mut())];
+        let mut list = linked_list(&mut nodes);
+        let first = nodes.as_mut_ptr();
+        let middle = first.wrapping_add(1);
+        let last = first.wrapping_add(2);
+        let removed_prev = nodes[0].prev;
+        let removed_next = nodes[0].next;
+
+        unsafe { ft_list_remove(&mut list, &mut nodes[0]) };
+
+        assert_eq!(list.head, middle);
+        assert_eq!(list.tail, last);
+        assert!(nodes[1].prev.is_null());
+        assert_eq!(nodes[0].prev, removed_prev);
+        assert_eq!(nodes[0].next, removed_next);
+    }
+
+    #[test]
+    fn removes_middle_and_splices_neighbors() {
+        let mut nodes = [node(ptr::null_mut()), node(ptr::null_mut()), node(ptr::null_mut())];
+        let mut list = linked_list(&mut nodes);
+        let first = nodes.as_mut_ptr();
+        let last = first.wrapping_add(2);
+        let removed_prev = nodes[1].prev;
+        let removed_next = nodes[1].next;
+
+        unsafe { ft_list_remove(&mut list, &mut nodes[1]) };
+
+        assert_eq!(list.head, first);
+        assert_eq!(list.tail, last);
+        assert_eq!(nodes[0].next, last);
+        assert_eq!(nodes[2].prev, first);
+        assert_eq!(nodes[1].prev, removed_prev);
+        assert_eq!(nodes[1].next, removed_next);
+    }
+
+    #[test]
+    fn removes_tail_and_singleton() {
+        let mut nodes = [node(ptr::null_mut()), node(ptr::null_mut())];
+        let mut list = linked_list(&mut nodes);
+        let first = nodes.as_mut_ptr();
+
+        unsafe { ft_list_remove(&mut list, &mut nodes[1]) };
+
+        assert_eq!(list.head, first);
+        assert_eq!(list.tail, first);
+        assert!(nodes[0].next.is_null());
+
+        let mut only = [node(ptr::null_mut())];
+        let mut singleton = linked_list(&mut only);
+        unsafe { ft_list_remove(&mut singleton, &mut only[0]) };
+        assert!(singleton.head.is_null());
+        assert!(singleton.tail.is_null());
     }
 }
