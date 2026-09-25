@@ -62,7 +62,6 @@ functions:
       Ghidra's 124-byte extent is truncated in the middle of the body. Raw
       osos.dec A32 establishes the 732-byte executable extent
       0x080d4364..0x080d4640: 0x080d4640 is the literal-pool word
-      0x62697473 and the following push at 0x080d4644 begins the next
       function. Decoding all ARM branch-immediate words finds two incoming
       plain BL calls (0x0809aa30, 0x080b6978), no predicated incoming BL
       calls, and seven plain plus one predicated outgoing BL calls; the
@@ -20758,6 +20757,33 @@ functions:
       bit 31 set remains a no-op because bzero's signed-length guard returns
       first.
 
+
+  - address: 0x0804bdb0
+    ghidra: FUN_0804bdb0
+    name: sha1_managed_context_create
+    size: 116
+    sig: "void sha1_managed_context_create(u32 **out)"
+    module: crypto/sha1_managed_context_create
+    status: ported
+    renames:
+      param_1/r0: out
+      FUN_082aadd4: operator_new
+      FUN_0839e0e8: managed_buffer_create
+    notes: >-
+      Raw osos.dec words establish the true 112-byte A32 body from
+      0x0804bdb0 through 0x0804be23. The five following SHA-1 IV words are
+      its literal pool, and `stmdb sp!,{r4,r5,r6,lr}` at 0x0804be3c begins
+      the next function; Ghidra's 116-byte extent includes the first literal.
+      Independent A32 decoding finds exactly three inbound plain BL call
+      sites (0x080436dc, 0x08392df8, 0x08396aa8) and zero predicated forms.
+      The body itself has two plain unconditional BL calls and zero predicated
+      BL calls: tag-2 operator_new(16) and the retained managed-buffer
+      constructor 0x0839e0e8(handle, 0x106c, 3). It initializes SHA-1 IV
+      words at backing+0x54, sets backing+0x4c to that state, clears +0x40,
+      +0x44, and +0x68, sets +0x50 to one, then writes the handle to out.
+      The Rust port uses a volatile stock-entry seam for the unported
+      managed-buffer constructor so host tests can verify its ABI; all backing
+      pointer fields are explicitly 32-bit despite host pointer width.
 
   # --- FreeType 2 size API ---
   - address: 0x0804be6c
