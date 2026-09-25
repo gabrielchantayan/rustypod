@@ -10396,6 +10396,31 @@ functions:
       [source,end) forward only when destination is non-NULL, and returns the
       advanced destination.
 
+  - address: 0x083e951c
+    ghidra: FUN_083e951c
+    name: vector_fill_construct_n_refcounted_body
+    size: 52
+    sig: "void vector_fill_construct_n_refcounted_body(RefcountedBody **output, u32 count, RefcountedBody *const *source)"
+    renames:
+      param_1/r0/r4: output/output_cursor
+      param_2/r1/r5: count/remaining_count
+      param_3/r2/r6: source
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      0x083e951c..0x083e9550, ending before the independent
+      vector_fill_construct_n_elem20 entry. Whole-image A32 decoding finds
+      two inbound direct plain BL sites (0x083e0d38 and 0x083e0df8), no
+      predicated BL sites; the body has no plain BL and one predicated BLNE
+      at 0x083e9538 to ported refcounted_body_attach @ 0x0839d370. This is
+      std::vector uninitialized-fill construction for RefcountedBody pointer
+      slots: each iteration tests the current output cursor, conditionally
+      reloads *source and attaches it, decrements count, then advances output
+      by one target word. Rust directly calls the ported attach helper and
+      uses wrapping_add for the NULL-output cursor advance, avoiding host
+      pointer-arithmetic UB while preserving target behavior.
+
   - address: 0x083e9550
     ghidra: FUN_083e9550
     name: vector_fill_construct_n_elem20
