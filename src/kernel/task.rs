@@ -635,6 +635,31 @@ pub unsafe extern "C" fn task_create(
     task_start(entry, priority, stack_size, context, name, id, prio);
     rec
 }
+/// iram_task_init_veneer — original: `thunk_EXT_FUN_22003c98` @
+/// `0x08037e30` (8 bytes: `ldr pc, [pc, #-4]` plus literal `0x22003c98`).
+///
+/// The veneer tail-dispatches the five task-init arguments unchanged to the
+/// IRAM mirror at `0x22003c98`. Raw decoding finds three unconditional direct
+/// `bl` callers (`0x08056424`, `0x08103e88`, `0x080b16b0`) and no predicated
+/// direct calls. The mirror's internal algorithm is outside this port; this
+/// wrapper deliberately dispatches through the existing task-init gateway
+/// seam, which target integration must bind to the real ROM service.
+///
+/// # Safety
+/// `stack` and `init_word` are opaque RTXC values accepted by the ROM task
+/// initializer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn iram_task_init_veneer(
+    id: u32,
+    priority: u32,
+    stack: *mut u8,
+    stack_size: usize,
+    init_word: usize,
+) {
+    (hooks().task_init)(id, priority, stack, stack_size, init_word);
+}
+
 
 /// task_start — original: `FUN_080b4c44` @ 0x080b4c44 (8 bytes).
 ///
@@ -1513,6 +1538,25 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn task_init_veneer_forwards_all_five_gateway_arguments() {
+        let _guard = mock_hooks();
+        let stack = 0x1234_5000usize as *mut u8;
+        unsafe {
+            iram_task_init_veneer(0x7a5c, 0x3c, stack, 0x1800, 0x0809_c5c8);
+        }
+        assert_eq!(
+            drain(),
+            vec![Call::Init {
+                id: 0x7a5c,
+                prio: 0x3c,
+                stack: stack as usize,
+                stack_size: 0x1800,
+                init_word: 0x0809_c5c8,
+            }]
+        );
     }
 
     #[test]
