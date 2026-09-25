@@ -47,6 +47,7 @@ pub mod byte_range_copy_if_output;
 pub mod vector_record24_copy;
 pub mod vector_record24_copy_assign;
 pub mod vector_uninitialized_copy_elem24;
+pub mod vector_copy_range_elem16;
 pub mod color_copy;
 pub mod color_pack;
 pub mod color_unpack;
