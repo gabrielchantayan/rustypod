@@ -1,6 +1,5 @@
 //! Reads a counted string from a kind-resolved UI object's resource table.
-#[cfg(target_os = "none")]
-use core::mem;
+use crate::ui::backend_active_item::ui_backend_active_item;
 
 use crate::cxx::templates::{vector_size_elem16, VectorBounds};
 use crate::util::string_pool::{string_pool_read_counted, StringPool, PARAM_ERR};
@@ -12,22 +11,6 @@ const RESOURCE_TABLE_VECTOR_OFFSET: usize = 0xebc;
 const RESOURCE_ENTRY_SIZE: usize = 16;
 const STRING_POOL_OFFSET: usize = 0xcc;
 
-type BackendActiveItem = unsafe extern "C" fn(*const u8) -> *mut u8;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_backend_active_item(backend: *const u8) -> *mut u8 {
-    mem::transmute::<usize, BackendActiveItem>(0x0805_4724)(backend)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_backend_active_item(_: *const u8) -> *mut u8 {
-    panic!("FUN_08054724 is unported; install OBJECT_RESOURCE_ACTIVE_ITEM")
-}
-
-#[cfg(target_os = "none")]
-static mut OBJECT_RESOURCE_ACTIVE_ITEM: BackendActiveItem = firmware_backend_active_item;
-#[cfg(all(not(target_os = "none"), not(test)))]
-static mut OBJECT_RESOURCE_ACTIVE_ITEM: BackendActiveItem = missing_backend_active_item;
 
 #[inline(always)]
 unsafe fn resource_entry_count(vector: *const VectorBounds) -> i32 {
@@ -42,33 +25,25 @@ unsafe fn resource_entry_count(vector: *const VectorBounds) -> i32 {
         end.wrapping_sub(begin).wrapping_shr(4) as i32
     }
 }
-#[cfg(test)]
-static mut OBJECT_RESOURCE_ACTIVE_ITEM: BackendActiveItem = missing_backend_active_item;
 
 /// object_resource_counted_string — original: `FUN_08053084` @ `0x08053084`
 /// (144 bytes; next real function starts at `0x08053114`; **4 plain `bl`
 /// callers and no predicated-BL callers**).
 ///
 /// Raw ARM establishes six internal plain calls: `object_backend_for_kind`,
-/// `vector_size_elem16`, the unported active-item resolver at `0x08054724`,
-/// `tagged_counter_try_increment`, `string_pool_read_counted`, and
-/// `tagged_counter_try_decrement`. It clears `counted[0]` before validation,
-/// rejects a null output, negative index, or index outside the object's
-/// `+0xebc` 16-byte-entry vector with `-50`, then reads that entry's first
-/// word through the active item's inline pool at `+0xcc`.
-///
-/// Deliberate deviation: `FUN_08054724` has no recovered identity beyond its
-/// observed backend-to-active-item contract, so it remains a target call and
-/// replaceable host seam rather than an invented Rust implementation. The
-/// reader's fourth ABI argument is dead after its callee clears the local
-/// byte length; zero supplies it deterministically.
-///
-/// # Safety
-///
-/// `object`, `counted`, its `+0xebc` vector, and every accepted table entry
-/// must be readable; `counted` is written before its null check, as retailOS
-/// does. The active-item seam must return an item with a valid string pool at
+/// `vector_size_elem16`, `ui_backend_active_item`, `tagged_counter_try_increment`,
+/// `string_pool_read_counted`, and `tagged_counter_try_decrement`. It clears
+/// `counted[0]` before validation, rejects a null output, negative index, or
+/// index outside the object's `+0xebc` 16-byte-entry vector with `-50`, then
+/// reads that entry's first word through the active item's inline pool at
 /// `+0xcc`.
+///
+/// Deliberate deviation: the reader's fourth ABI argument is dead after its
+/// callee clears the local byte length; zero supplies it deterministically.
+///
+/// `object` and `counted` must be readable through their accessed fields;
+/// `counted` is written before its null check, as retailOS does. The resolved
+/// active item must have a valid string pool at `+0xcc`.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn object_resource_counted_string(
@@ -87,7 +62,7 @@ pub unsafe extern "C" fn object_resource_counted_string(
         return PARAM_ERR;
     }
 
-    let item = (core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_RESOURCE_ACTIVE_ITEM)))(backend);
+    let item = ui_backend_active_item(backend);
     let pool = item.add(STRING_POOL_OFFSET).cast::<StringPool>();
     let _ = tagged_counter_try_increment(pool.cast::<TaggedCounter>());
     let entry_table = (entries.cast::<u32>().read() as usize) as *const u8;
@@ -102,13 +77,9 @@ mod tests {
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     extern crate std;
-    use core::mem::MaybeUninit;
     use parking_lot::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut ACTIVE_ITEM: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn active_item(_: *const u8) -> *mut u8 { ACTIVE_ITEM }
 
     #[test]
     fn rejects_negative_and_out_of_range_indices_before_the_active_item_lookup() {
@@ -122,14 +93,12 @@ mod tests {
             let table = object.add(0x1000);
             (object.add(RESOURCE_TABLE_VECTOR_OFFSET) as *mut u32).write(table as usize as u32);
             (object.add(RESOURCE_TABLE_VECTOR_OFFSET + 4) as *mut u32).write(table.add(16) as usize as u32);
-            OBJECT_RESOURCE_ACTIVE_ITEM = active_item;
             let mut counted = 0xffffu16;
             assert_eq!(object_resource_counted_string(object, -1, &mut counted), PARAM_ERR);
             assert_eq!(counted, 0);
             counted = 0xffff;
             assert_eq!(object_resource_counted_string(object, 1, &mut counted), PARAM_ERR);
             assert_eq!(counted, 0);
-            OBJECT_RESOURCE_ACTIVE_ITEM = missing_backend_active_item;
         }
     }
 
@@ -140,21 +109,26 @@ mod tests {
             assert!(note_missing_u32_fixture("ui/object_resource_counted_string"));
             return;
         };
-        let mut pool = unsafe { MaybeUninit::<StringPool>::zeroed().assume_init() };
-        pool.tag = 0x7374_7263;
         unsafe {
             object.write(1);
             let table = object.add(0x1000);
             (object.add(RESOURCE_TABLE_VECTOR_OFFSET) as *mut u32).write(table as usize as u32);
             (object.add(RESOURCE_TABLE_VECTOR_OFFSET + 4) as *mut u32).write(table.add(16) as usize as u32);
             (table as *mut i32).write(0);
-            ACTIVE_ITEM = (core::ptr::addr_of_mut!(pool) as *mut u8).sub(STRING_POOL_OFFSET);
-            OBJECT_RESOURCE_ACTIVE_ITEM = active_item;
+            let tdat = object.add(0x1200);
+            let pool = object.add(0x1800).cast::<StringPool>();
+            let item = (pool as *mut u8).sub(STRING_POOL_OFFSET);
+            (object.add(0xf60) as *mut u32).write(tdat as usize as u32);
+            (tdat.add(4) as *mut u32).write(0x7464_6174);
+            (tdat.add(0x34) as *mut u32).write(item as usize as u32);
+            (item.add(4) as *mut u32).write(0x706c_7374);
+            core::ptr::write_bytes(pool, 0, 1);
+            (*pool).tag = 0x7374_7263;
+            item.add(0x1ac).write(0x10);
             let mut counted = 0xffffu16;
             assert_eq!(object_resource_counted_string(object, 0, &mut counted), 0);
             assert_eq!(counted, 0);
-            assert_eq!(pool.lock_depth, 0);
-            OBJECT_RESOURCE_ACTIVE_ITEM = missing_backend_active_item;
+            assert_eq!((*pool).lock_depth, 0);
         }
     }
 }

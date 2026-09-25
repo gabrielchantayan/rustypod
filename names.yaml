@@ -141345,3 +141345,36 @@ functions:
       touching output. Otherwise it copies eight bytes from the target-width
       pointer at +0x0c to output and returns zero. Deliberate deviation: calls
       the established Rust __rt_memcpy seam directly instead of the ROM veneer.
+
+  - address: 0x08054724
+    ghidra: FUN_08054724
+    name: ui_backend_active_item
+    size: 76
+    sig: "u8 *ui_backend_active_item(const u8 *backend)"
+    module: ui/backend_active_item
+    status: ported
+    renames:
+      param_1/r0: backend
+      param_1_plus_0xf44: cached_item
+      param_1_plus_0xf60: tdat_element
+      iVar1/r0: plst_item
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+    notes: >-
+      Raw ARM words establish the 76-byte body from push {r4,lr} at
+      0x08054724 through pop {r4,pc} at 0x0805476c; the next independently
+      linked function starts with push {r4,r5,r6,lr} at 0x08054770. The
+      function returns backend+0xf44 when nonzero. Otherwise it obtains the
+      first 'plst' through the backend+0xf60 'tdat' element, follows each
+      ui_plst_next result, and returns the first item with bit 0x10 set at
+      +0x1ac; exhaustion returns zero. Full-image ARM B/BL decoding finds
+      three inbound unconditional bl calls at 0x080530dc, 0x0809dc14, and
+      0x081134f8, with zero predicated-bl calls. The body itself has two
+      plain bl instructions (ui_tdat_first_plst and ui_plst_next), zero
+      predicated bl instructions, and no tail call. Rust calls the two
+      existing ports directly rather than their stock addresses; it omits
+      the otherwise unused r4 save. Host raw-u32 slab tests cover the cached
+      fast path, selecting a later flagged item, and exhaustion; the
+      existing object_resource_counted_string test exercises the direct
+      integration path. match.py is a structural review only: LLVM need not
+      retain the ADS frame or exact loop layout.
