@@ -16008,6 +16008,42 @@ functions:
       rather than branching to stock 0x0806aa3c; aligned word load and
       zero-on-rejected-class behavior are unchanged.
 
+  - address: 0x080561b4
+    ghidra: FUN_080561b4
+    name: ui_tdat_flagged_plst
+    size: 76
+    sig: "u32 ui_tdat_flagged_plst(const u8 *context)"
+    module: ui/tdat_flagged_plst
+    status: ported
+    renames:
+      param_1/r0: context
+      param_1_plus_0xf48: cached_plst
+      param_1_plus_0xf60: tdat_element
+      iVar1/r0: plst_element
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+    notes: >-
+      Raw ARM spans 0x080561b4..0x08056200: push {r4,lr}; cached +0xf48
+      word check with predicated return; load the +0xf60 'tdat' element; call
+      ui_tdat_first_plst; then inspect each candidate's +0x1ac byte for bit
+      0x20, stepping via ui_plst_next until a marked candidate or zero. The
+      sibling function starts with ldr r1,[pc,#...] at 0x08056200, confirming
+      Ghidra's 76-byte extent. Decoding inbound ARM BL words finds three
+      unconditional calls (0x080537c0, 0x0809dfa0, 0x0811369c) and no
+      predicated calls. Ghidra correctly shows the loop but its
+      ui_plst_next declaration loses its r0 return; raw callers and the
+      existing port establish the returned successor word. Rust directly
+      invokes the already-ported selector seams instead of stock branches;
+      otherwise it preserves target-width pointer words, aligned +0xf48 and
+      +0xf60 loads, the +0x1ac byte test, cached-word bypass, and zero return
+      on exhaustion. Host tests use hints::TDAT_FLAGGED_PLST to cover cached
+      bypass, a marked successor after an unmarked predecessor, exhaustion,
+      and rejected 'tdat' class. match.py reports an expected structural
+      diff: LLVM moves the cached fast-path before its frame and merges the
+      two zero exits, while retaining both selector calls, loop, byte test,
+      and zero-on-exhaustion behavior. Reference C:
+      decomp/c/003/080561b4_FUN_080561b4.c.
+
   - address: 0x080645a8
     ghidra: FUN_080645a8
     name: kernel_sem5_signal
