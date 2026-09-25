@@ -688,6 +688,10 @@ pub mod hints {
     // and bucket-array fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const HASH_TABLE_BUCKET_SLOT: usize = 0x6c80_0000;
+    // 0x6c90_0000: dedicated to crypto/bio_find_type's target-width BIO
+    // chain and method-type-word fixture; mappings never unmap, so no other
+    // user may share it.
+    pub const BIO_FIND_TYPE: usize = 0x6c90_0000;
     // 0x6d00_0000: dedicated to util/global_state's raw-u32 table, bucket,
     // record, and string fixtures; mappings never unmap, so no other test
     // may share this hint.
