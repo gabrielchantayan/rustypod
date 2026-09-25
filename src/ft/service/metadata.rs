@@ -13,6 +13,9 @@ pub const METADATA_BYTE_B1A_OFFSET: usize = 0xb1a;
 
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
+/// Byte offset of this signed byte in the metadata block.
+pub const METADATA_SIGNED_BYTE_B52_OFFSET: usize = 0xb52;
+
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B89_OFFSET: usize = 0xb89;
 /// Byte offset of this byte in the metadata block.
@@ -86,6 +89,29 @@ pub unsafe extern "C" fn ft_service_metadata_byte_at_b50(
     let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
     (metadata.add(METADATA_BYTE_B50_OFFSET) as *const u8).read() as u32
 }
+
+/// ft_service_metadata_signed_byte_at_b52 — original: `FUN_080549f4` @
+/// `0x080549f4` (16 bytes; three unconditional plain `bl` call sites, zero
+/// predicated `bl` call sites).
+///
+/// Raw words `e5900f00`, `e2800c0b`, `e1d005d2`, and `e12fff1e` establish the
+/// complete function from 0x080549f4 through 0x08054a04; the next separately
+/// linked function begins at 0x08054a04. Loads the metadata pointer word at
+/// `service_context + 0xf00`, adds 0xb00, then sign-extends its byte at +0x52
+/// into `r0`. The concrete layouts and ownership are not recovered, so this
+/// deliberately retains raw dereferences with no NULL or bounds checks.
+///
+/// Deliberate deviations: none. Direct ARM call sites are 0x08173474,
+/// 0x08173488, and 0x08173498.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_signed_byte_at_b52(
+    service_context: *const u8,
+) -> i32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(METADATA_SIGNED_BYTE_B52_OFFSET).read() as i8 as i32
+}
+
 
 /// ft_service_metadata_byte_at_b89 — original: `FUN_080512b8` @ `0x080512b8`
 /// (12 bytes).
@@ -186,6 +212,8 @@ mod tests {
         METADATA_BYTE_B70_OFFSET,
         ft_service_metadata_byte_at_b1a,
         METADATA_BYTE_B1A_OFFSET,
+        ft_service_metadata_signed_byte_at_b52,
+        METADATA_SIGNED_BYTE_B52_OFFSET,
 
 
     };
@@ -200,6 +228,9 @@ mod tests {
     struct MetadataFixture([u8; METADATA_U16_B1C_OFFSET + 2]);
     #[repr(align(4))]
     struct MetadataByteB1AFixture([u8; METADATA_BYTE_B1A_OFFSET + 1]);
+    #[repr(align(4))]
+    struct MetadataSignedByteB52Fixture([u8; METADATA_SIGNED_BYTE_B52_OFFSET + 1]);
+
 
 
     #[repr(align(4))]
@@ -308,6 +339,29 @@ mod tests {
                     )
                 },
                 value as u32,
+            );
+        }
+    }
+
+    #[test]
+    fn sign_extends_every_signed_metadata_byte_at_b52() {
+        for (raw, expected) in [(0x00u8, 0), (0x7f, 127), (0x80, -128), (0xff, -1)] {
+            let mut metadata =
+                MetadataSignedByteB52Fixture([0; METADATA_SIGNED_BYTE_B52_OFFSET + 1]);
+            metadata.0[METADATA_SIGNED_BYTE_B52_OFFSET] = raw;
+            let service_context = ServiceContextFixture {
+                before_metadata: [0x5a; SERVICE_CONTEXT_METADATA_OFFSET],
+                metadata: metadata.0.as_ptr(),
+            };
+
+            assert_eq!(
+                unsafe {
+                    ft_service_metadata_signed_byte_at_b52(
+                        (&service_context as *const ServiceContextFixture).cast(),
+                    )
+                },
+                expected,
+                "ldrsb sign-extends {raw:#04x} into r0",
             );
         }
     }
