@@ -10586,6 +10586,32 @@ functions:
       vector_copy_construct_range_elem16_alt. Host tests verify per-element
       cursor advancement, vector forwarding, helper dispatch, and an empty
       range.
+  - address: 0x083e8c44
+    ghidra: FUN_083e8c44
+    name: vector_copy_range_elem12
+    size: 48
+    sig: "u8 *vector_copy_range_elem12(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0: first
+      param_2/r1: last
+      param_3/r2: output
+      r4: first_cursor
+      lr: output_cursor
+      return/r0: output_cursor
+    module: cxx/templates
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 48-byte extent
+      0x083e8c44..0x083e8c74: pop {r4,pc} ends it and the following
+      independently linked push {r4,lr} begins the next function. Decoding
+      every aligned A32 BL immediate in the image finds exactly two inbound
+      plain BL calls (0x083e14e4 and 0x083e15e0) and no predicated inbound
+      BL calls. The body has no BL instructions. It equality-walks source and
+      output cursors by 12 bytes; when output is non-NULL, raw ldmne/stmne
+      words 0x1890001c and 0x188e001c copy three source words to output,
+      loading all three before storing any. No deliberate deviations. Host
+      tests cover three records, the empty range, and the NULL-output
+      skip-and-advance path.
   - address: 0x083e8cb0
     ghidra: FUN_083e8cb0
     name: vector_copy_construct_range_elem16_alt

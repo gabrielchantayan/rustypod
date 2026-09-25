@@ -5109,6 +5109,52 @@ pub unsafe extern "C" fn vector_copy_range_elem24_alias_8f84(
     }
     output
 }
+/// vector_copy_range_elem12 — original: `FUN_083e8c44` @ 0x083e8c44 (48
+/// bytes; raw extent 0x083e8c44..0x083e8c74, bounded by the next independent
+/// `push {r4,lr}` at 0x083e8c74). Whole-image raw A32 decoding finds two
+/// inbound plain `bl` sites (0x083e14e4, 0x083e15e0), no predicated inbound
+/// `bl` sites, and no body calls.
+///
+/// Copies the half-open `[first,last)` range of aligned 12-byte vector records
+/// into `output`, advancing both cursors by 12 bytes and returning the
+/// resulting output cursor. The ARM predicates the three-word load/store on
+/// `output != NULL`; a NULL initial cursor therefore skips only the first
+/// record before advancing to address 12.
+///
+/// Deliberate deviation: none. Raw words `0x1890001c` and `0x188e001c` decode
+/// as `ldmne r0,{r2,r3,r4}` and `stmne lr,{r2,r3,r4}`, preserving the source
+/// loads before any destination store.
+///
+/// # Safety
+///
+/// `first` and `last` must delimit a range whose length is divisible by 12.
+/// When `output` is non-NULL, `first` must be readable and `output` writable
+/// for that many bytes; both must be word-aligned. The original performs
+/// forward copies without an overlap guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_copy_range_elem12(
+    mut first: *const u8,
+    last: *const u8,
+    mut output: *mut u8,
+) -> *mut u8 {
+    while first != last {
+        if !output.is_null() {
+            let source = first as *const u32;
+            let destination = output as *mut u32;
+            let first_word = source.read();
+            let second_word = source.add(1).read();
+            let third_word = source.add(2).read();
+            destination.write(first_word);
+            destination.add(1).write(second_word);
+            destination.add(2).write(third_word);
+        }
+        first = first.wrapping_add(12);
+        output = output.wrapping_add(12);
+    }
+    output
+}
+
 /// vector_copy_range_elem24_alias_8cf0 — original: `FUN_083e8cf0` @
 /// 0x083e8cf0 (60 bytes; raw extent 0x083e8cf0..0x083e8d2c, bounded by the
 /// separately linked `push {r4,r5,r6,lr}` at 0x083e8d2c). Raw A32 decoding
@@ -10994,6 +11040,55 @@ mod tests {
         before: u32,
         records: [u32; 18],
         after: u32,
+    }
+
+    #[test]
+    fn vector_copy_range_elem12_copies_records_and_returns_end() {
+        let source = [
+            0x0102_0304, 0x1112_1314, 0x2122_2324,
+            0x3132_3334, 0x4142_4344, 0x5152_5354,
+            0x6162_6364, 0x7172_7374, 0x8182_8384,
+        ];
+        let mut destination = [0xaaaa_aaaau32; 10];
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        let returned = unsafe {
+            vector_copy_range_elem12(
+                source.as_ptr().cast::<u8>(),
+                source.as_ptr().cast::<u8>().wrapping_add(36),
+                output,
+            )
+        };
+
+        assert_eq!(&destination[..9], &source);
+        assert_eq!(destination[9], 0xaaaa_aaaa, "range end is exclusive");
+        assert_eq!(returned, unsafe { output.add(36) });
+    }
+
+    #[test]
+    fn vector_copy_range_elem12_empty_and_null_output_paths() {
+        let source = [0x0102_0304u32; 3];
+        let mut destination = [0xaaaa_aaaau32; 3];
+        let output = destination.as_mut_ptr().cast::<u8>();
+
+        let empty = unsafe {
+            vector_copy_range_elem12(
+                source.as_ptr().cast::<u8>(),
+                source.as_ptr().cast::<u8>(),
+                output,
+            )
+        };
+        let null_output = unsafe {
+            vector_copy_range_elem12(
+                core::ptr::null(),
+                12usize as *const u8,
+                core::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(empty, output);
+        assert_eq!(destination, [0xaaaa_aaaa; 3]);
+        assert_eq!(null_output, 12usize as *mut u8);
     }
 
     #[test]
