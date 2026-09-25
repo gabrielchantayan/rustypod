@@ -1169,6 +1169,10 @@ pub mod hints {
     // 0xf800_0000: dedicated to app/indexed_payload_lookup's raw-u32 record
     // and index fixture; mappings never unmap, so no other user may share it.
     pub const RECORD_METADATA_LOOKUP: usize = 0xf800_0000;
+    // 0xc800_0000: dedicated to app/indexed_payload_lookup's raw-u32 record
+    // and index fixture for the index+0x118 word-15 wrapper; mappings never
+    // unmap, so no other user may share this hint.
+    pub const RECORD_INDEXED_PAYLOAD_LOOKUP_118_WORD15: usize = 0xc800_0000;
     // 0xe800_0000: dedicated to app/indexed_payload_lookup's raw-u32 record
     // and index fixture for the index+0x1c8 wrapper; mappings never unmap,
     // so no other user may share this hint.
