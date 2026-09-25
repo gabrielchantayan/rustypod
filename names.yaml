@@ -6053,6 +6053,34 @@ functions:
       the already ported tag-2 operator_delete @ 0x082aad24, then stores
       replacement. The host implementation deliberately uses native-width
       repr(C) pointers and the existing typed-vtable and heap-operation seams.
+  # --- owned StringObject replacement ---
+  - address: 0x083e757c
+    ghidra: FUN_083e757c
+    name: owned_string_object_replace
+    size: 48
+    sig: "void owned_string_object_replace(StringObject **slot, StringObject *replacement)"
+    module: cxx/owned_string_object_replace
+    status: ported
+    renames:
+      param_1/r0: slot
+      param_2/r1: replacement
+      slot_deref: old_string
+      FUN_08291fb4: string_object_opaque_base_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      push {r4,r5,r6,lr} at 0x083e757c through pop {r4,r5,r6,pc} at
+      0x083e75a8; 0x083e75ac begins the next independently entered function.
+      Full-image ARM decoding finds exactly two inbound direct calls, both plain
+      unconditional bl at 0x08186f68 and 0x081baa70; there are zero predicated
+      direct bl calls. The body has exactly two plain unconditional direct bl
+      calls and no predicated bl calls: string_object_opaque_base_destroy @
+      0x08291fb4 and operator_delete @ 0x082aad24. If old_string equals
+      replacement it returns without writes; otherwise it destroys and deletes a
+      non-NULL old_string before storing replacement. The target uses 32-bit
+      pointer words; the Rust repr(C) pointer slot deliberately uses native-width
+      pointers so valid host fixtures can exercise the existing opaque-base and
+      heap-operation seams.
   # --- conditional UTF-16 vtable dispatch ---
   - address: 0x08135760
     ghidra: FUN_08135760
