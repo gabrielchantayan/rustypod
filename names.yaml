@@ -142087,3 +142087,21 @@ functions:
       then zeroes words zero, 22, and 23. The field semantics come from the
       immediately-following Base64 decoder state machine; its unrecovered
       fields remain word-addressed to preserve the target's four-byte layout.
+
+  - address: 0x080498b4
+    ghidra: FUN_080498b4
+    name: pending_message_discard_next
+    size: 36
+    sig: "u32 pending_message_discard_next()"
+    module: runtime/pending_message_discard
+    status: ported
+    renames:
+      r0: queued_result
+      FUN_0809ae9c: take_pending_message
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte body 0x080498b4..0x080498d4;
+      the next function begins at 0x080498d8. Binary scan finds 2 plain BL
+      callers (0x0805f3a0, 0x080a1350) and 1 predicated EQ BL caller
+      (0x080d4b68). The wrapper calls 0x0809ae9c with remove=1, peek=0,
+      and four null output pointers, then returns its r0 result. Ghidra
+      incorrectly declares the wrapper void; raw code preserves r0.
