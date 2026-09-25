@@ -140945,3 +140945,42 @@ functions:
       verified four-argument ABI is reached by a literal ARM veneer. Host
       tests cover failed lookup, zero-length publication, signed occurrence
       extension, decoder argument forwarding, and both decoder outputs.
+
+  # --- HFS B-tree record-request preparation ---
+  - address: 0x080595c0
+    ghidra: FUN_080595c0
+    name: hfs_btree_prepare_record_request
+    size: 132
+    sig: "i32 hfs_btree_prepare_record_request(BTreeControlBlock *btree, u8 *node, const u8 *key, u8 *data, u16 data_length, u8 *operation_context, u16 node_height, u32 record_index, u8 operation_flags, u8 *result)"
+    module: fs/hfs_btree_prepare_record_request
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: node
+      param_3/r2: key
+      param_4/r3: data
+      param_5/stack: data_length
+      param_6/stack: operation_context
+      param_7/stack: node_height
+      param_8/stack: record_index
+      param_9/stack: operation_flags
+      param_10/stack: result
+      FUN_080537f8: hfs_btree_key_length
+      FUN_08058e64: hfs_btree_record_request_consumer
+    notes: >-
+      Raw osos.dec establishes the 132-byte A32 extent from the push at
+      0x080595c0 through the pop at 0x08059640; the next real function starts
+      at 0x08059644. Full aligned ARM B/BL decoding finds three inbound direct
+      calls, all unconditional plain BL at 0x08041354, 0x08041ce0, and
+      0x08048dec, with no predicated form. The body has two unconditional
+      outbound BL calls: hfs_btree_key_length at 0x08059600 and the still
+      unidentified 0x08058e64 consumer at 0x08059638. It builds the exact
+      34-byte request at stack +0: context, node height, record index, result,
+      key, data, computed key length, data length, operation flags, then a
+      cleared final byte; it calls the consumer with options zero and forwards
+      its i32 status. The consumer has no names.yaml entry or established
+      identity, so the Rust boundary retains only its verified address and ABI
+      rather than inventing a callee semantic. Host tests record every request
+      field, key-length branch, zero option word, one call, and status return.
+      Deliberate deviation: host builds use a volatile replaceable consumer
+      seam; target builds call the resident address directly.
