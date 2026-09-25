@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e9138
+    ghidra: thunk_FUN_083e9150
+    name: copy_range_nonnull_destination_loop_entry_9138
+    size: 4
+    sig: "u8 *copy_range_nonnull_destination_loop_entry_9138(const u8 *source, const u8 *end, u8 *destination)"
+    renames:
+      param_1/r0: source
+      param_2/r1: end
+      param_3/r2: destination
+    module: util/copy_range_nonnull_destination_loop_entry_9138
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact four-byte thunk extent
+      0x083e9138..0x083e913c: `b 0x083e9150` enters the loop test of the
+      separately entered 32-byte transfer body at 0x083e913c..0x083e9160.
+      The next real function boundary is 0x083e9160. Raw A32 decoding
+      establishes two inbound unconditional plain BL calls (0x083e4154 and
+      0x083e4188), zero predicated BL calls, and no outbound calls. The
+      branch skips the body's `cmp r2,#0`, so the entry copies [source,end)
+      forward only with a non-NULL destination, advances both cursors, and
+      returns the advanced destination. Rust implements the branch entry
+      directly; its unique no-code assembly barrier retains an independently
+      hookable target, and volatile byte accesses retain ordered transfers
+      without libc substitution.
   - address: 0x083e9160
     ghidra: thunk_FUN_083e9178
     name: copy_word_range_if_destination_loop_entry_9160
