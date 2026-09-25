@@ -14,6 +14,7 @@ pub mod string_record;
 pub mod cxx_string_range_assign;
 pub mod cxx_string_pair_range_assign;
 pub mod cxx_string_pair_entry_range_assign;
+pub mod cxx_string_vector_range_assign;
 pub mod record_work_pump;
 pub mod work_record_teardown;
 pub mod string_object_word_merge;

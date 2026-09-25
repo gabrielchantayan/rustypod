@@ -40580,6 +40580,29 @@ functions:
       word at +4 via cxx_string_release @ 0x083d8b04, then the word at +0,
       advances current by 12, and terminates only when current == last.
 
+  - address: 0x083e9c3c
+    ghidra: FUN_083e9c3c
+    name: cxx_string_vector_range_assign
+    size: 68
+    sig: "u8 *cxx_string_vector_range_assign(const u8 *first, const u8 *last, u8 *output)"
+    module: cxx/cxx_string_vector_range_assign
+    status: ported
+    vars: {param_1/r0: first, param_2/r1: last, param_3/r2: output, r4: first, r5: output, r6: last}
+    renames:
+      FUN_083d8d1c: cxx_string_assign
+      FUN_083e5bb8: cxx_string_vector_assign
+    notes: >-
+      Raw words establish the exact 68-byte extent 0x083e9c3c..0x083e9c80;
+      the next independent helper starts at 0x083e9c80. Whole-image A32
+      immediate decoding finds two direct inbound plain bl sites (0x083e26a4
+      and 0x083e26ec) and zero predicated forms. For each 16-byte
+      [first,last) record it calls cxx_string_assign @ 0x083d8d1c at +0x00,
+      then the unported COW-string-vector assignment helper @ 0x083e5bb8 at
+      +0x04, advances both cursors by 16, and returns output. The port keeps
+      0x083e5bb8 as a direct fixed-firmware seam; this deliberately matches
+      the original call because that helper has no names.yaml entry or Rust
+      port yet.
+
   - address: 0x083e9cbc
     ghidra: FUN_083e9cbc
     name: cxx_string_pair_entry_range_assign
