@@ -10525,6 +10525,34 @@ functions:
       host pointers are wider than retailOS pointer fields. match.py shows
       the same paired direct calls and 0x10 cursor advances; LLVM adds its
       frame and rotates the equality-tested loop.
+  - address: 0x083e8e44
+    ghidra: FUN_083e8e44
+    name: tagged_buffer_range_copy_construct
+    size: 56
+    sig: "u8 *tagged_buffer_range_copy_construct(const u8 *first, const u8 *last, u8 *output)"
+    renames:
+      param_1/r0/r5: first
+      param_2/r1/r6: last
+      param_3/r2/r4: output
+      return/r0: output_cursor
+      FUN_0827c18c: tagged_buffer_copy_construct_unported
+    module: cxx/tagged_buffer_range_copy_construct
+    status: ported
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x083e8e44..0x083e8e7c:
+      pop {r4-r6,pc} ends it and the following push {r4-r6,lr} begins the
+      next function. It advances equality-tested source and output cursors by
+      0x10, invoking 0x0827c18c only when output is non-NULL, then returns
+      output_cursor. Whole-image raw A32 branch decoding finds two incoming
+      plain BL calls (0x083e435c, 0x083e4438) and no predicated incoming BL
+      calls. The body has no plain BL and one predicated BLNE
+      (0x083e8e60 -> 0x0827c18c). Ghidra's C and 56-byte size agree.
+      Deliberate deviation: because 0x0827c18c has no names.yaml entry, Rust
+      inlines its raw observed copy operation rather than creating an
+      unverified callee seam; it writes the empty state, clears target words
+      +8/+c, releases, then copies source byte +0 and words +8/+c. Host tests
+      cover the partial target-word copy, empty range, and NULL-output
+      skip-and-advance behavior.
   - address: 0x083e8edc
     ghidra: FUN_083e8edc
     name: vector_copy_construct_range_cxx_string_vector_entry
