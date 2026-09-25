@@ -19859,6 +19859,36 @@ functions:
       INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
 
   # --- record indexed payload lookup wrapper (app) ---
+  - address: 0x08055810
+    ghidra: FUN_08055810
+    name: record_indexed_payload_lookup_at_0x118_word15
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x118_word15(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_15: entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent 0x08055810..0x08055848:
+      push {r4,lr}; preserve payload_out in ip and encoded_length_out in r4;
+      load record word 15 into r1 and word 0 into r0; forward payload_out as
+      r2 and encoded_length_out as r3; add 0x118 to the index base; call
+      indexed_payload_lookup; and, when the length pointer is non-NULL, replace
+      its word with a logical right shift by one before returning the backend
+      status unchanged. The following mov r2,r1 at 0x08055848 begins a distinct
+      wrapper. Raw decoding finds exactly three direct unconditional plain bl
+      callers (0x08045804, 0x08045814, and 0x080e2a40), zero predicated calls,
+      and no data-word references. Host tests map the target-width record,
+      verify word-15 entry and index+0x118 forwarding, nonzero status, output
+      mutation, length halving, and NULL optional outputs. Target-width u32
+      reads deliberately avoid host pointer-size offsets; indexed_payload_lookup
+      supplies the established unported backend seam.
+  # --- record indexed payload lookup wrapper (app) ---
   - address: 0x080559c0
     ghidra: FUN_080559c0
     name: record_indexed_payload_lookup_at_0x278
