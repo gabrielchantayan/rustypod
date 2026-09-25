@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
 pub mod application_mode_transition;
+pub mod counted_string_template_initialize;
 pub mod input_sequence_find_item;
 pub mod parser_stack_pop;
 pub mod decode_result_with_fallback;
