@@ -142549,3 +142549,36 @@ functions:
       it as an upper bound while enumerating 0x14-byte child entries.
       Deliberate Rust deviation: the validator is called directly rather
       than branched to stock code.
+
+
+  - address: 0x08041038
+    ghidra: FUN_08041038
+    name: managed_entry_request_submit
+    size: 200
+    sig: "i32 managed_entry_request_submit(u8 **owner_slot, u8 *request)"
+    module: app/managed_entry_request_submit
+    status: ported
+    renames:
+      param_1/r0: owner_slot
+      param_2/r1/r6: request
+      "*owner_slot/r4": managed_entry
+      "managed_entry+0x10": pending_count
+      "managed_entry+0x2c": active_flags
+      "managed_entry+0x34": submission_count
+    notes: >-
+      Raw osos.dec A32 establishes the exact 200-byte executable extent
+      0x08041038..0x080410fc; 0x08041100 is its 0x302 literal pool and the
+      next separately entered function starts at 0x08041104. The body has
+      three outgoing plain BL calls (0x08041088, 0x080410ac, 0x080410f4) and
+      no predicated BL. Whole-image decoding finds exactly three inbound plain
+      BL callers at 0x080473c8, 0x080482b4, and 0x080485d0, with no predicated
+      BL calls. It rejects null owner slots or requests with -50; a null
+      managed-entry pointer releases a zeroed scratch entry and returns 0x302.
+      Otherwise it prepares request+0x1c, submits the prepared scratch entry,
+      increments +0x34, decrements +0x10, sets bit zero at +0x2c, and clears
+      request+0x04 only on success. The callee semantics are not recovered:
+      their fixed target addresses are retained as host-installable operation
+      seams rather than asserting unsupported identities. Rust deliberately
+      zeros its scratch arrays whereas ARM leaves stack scratch uninitialized;
+      all observed callee-visible pointer layout, ordering, and scalar values
+      are preserved.
