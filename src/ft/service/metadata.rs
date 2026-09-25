@@ -9,6 +9,9 @@ pub const SERVICE_CONTEXT_METADATA_OFFSET: usize = 0xf00;
 /// Byte offset of this unsigned halfword in the metadata block.
 pub const METADATA_U16_B1C_OFFSET: usize = 0xb1c;
 /// Byte offset of this byte in the metadata block.
+pub const METADATA_BYTE_B1A_OFFSET: usize = 0xb1a;
+
+/// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B50_OFFSET: usize = 0xb50;
 /// Byte offset of this byte in the metadata block.
 pub const METADATA_BYTE_B89_OFFSET: usize = 0xb89;
@@ -38,6 +41,31 @@ pub unsafe extern "C" fn ft_service_metadata_u16_at_b1c(service_context: *const 
     let metadata_b00 = metadata.add(0xb00);
     (metadata_b00.add(0x1c) as *const u16).read()
 }
+
+/// ft_service_metadata_byte_at_b1a — original: `FUN_08054f68` @ `0x08054f68`
+/// (12 bytes; three unconditional plain `bl` call sites, zero predicated
+/// `bl` call sites).
+///
+/// Raw words `e5900f00`, `e5d00b1a`, and `e12fff1e` establish the complete
+/// function from 0x08054f68 through 0x08054f74; the next separately linked
+/// function begins at 0x08054f74. Loads the metadata pointer word at
+/// `service_context + 0xf00`, then returns its unsigned byte at
+/// `metadata + 0xb1a`; `ldrb` zero-extends into `r0`. The concrete layouts
+/// and ownership are not recovered, so this deliberately retains raw
+/// dereferences with no NULL or bounds checks.
+///
+/// Deliberate deviation: LLVM emits a frame prologue/epilogue around the two
+/// loads; `match.py` confirms the two retail memory operations and offsets.
+/// Direct ARM call sites are 0x08114990, 0x08172f00, and 0x08172f14.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_service_metadata_byte_at_b1a(
+    service_context: *const u8,
+) -> u32 {
+    let metadata = (service_context.add(SERVICE_CONTEXT_METADATA_OFFSET) as *const *const u8).read();
+    metadata.add(METADATA_BYTE_B1A_OFFSET).read() as u32
+}
+
 
 /// ft_service_metadata_byte_at_b50 — original: `FUN_080512ac` @ `0x080512ac`
 /// (12 bytes).
@@ -156,6 +184,9 @@ mod tests {
         METADATA_WORD_B74_OFFSET,
         ft_service_metadata_byte_at_b70,
         METADATA_BYTE_B70_OFFSET,
+        ft_service_metadata_byte_at_b1a,
+        METADATA_BYTE_B1A_OFFSET,
+
 
     };
 
@@ -167,6 +198,9 @@ mod tests {
 
     #[repr(align(4))]
     struct MetadataFixture([u8; METADATA_U16_B1C_OFFSET + 2]);
+    #[repr(align(4))]
+    struct MetadataByteB1AFixture([u8; METADATA_BYTE_B1A_OFFSET + 1]);
+
 
     #[repr(align(4))]
     struct MetadataByteFixture([u8; METADATA_BYTE_B50_OFFSET + 1]);
@@ -237,6 +271,43 @@ mod tests {
                     )
                 },
                 value,
+            );
+        }
+    }
+
+    #[test]
+    fn reads_the_unsigned_byte_at_b1a_with_arm_zero_extension() {
+        let mut metadata = MetadataByteB1AFixture([0; METADATA_BYTE_B1A_OFFSET + 1]);
+        metadata.0[METADATA_BYTE_B1A_OFFSET] = 0xff;
+        let service_context = ServiceContextFixture {
+            before_metadata: [0x5a; SERVICE_CONTEXT_METADATA_OFFSET],
+            metadata: metadata.0.as_ptr(),
+        };
+
+        let result = unsafe {
+            ft_service_metadata_byte_at_b1a(
+                (&service_context as *const ServiceContextFixture).cast(),
+            )
+        };
+        assert_eq!(result, 0x0000_00ff, "ldrb zero-extends into r0");
+    }
+
+    #[test]
+    fn all_byte_bit_patterns_survive_the_b1a_load() {
+        for value in [0x00u8, 0x7f, 0x80, 0xff] {
+            let mut metadata = MetadataByteB1AFixture([0; METADATA_BYTE_B1A_OFFSET + 1]);
+            metadata.0[METADATA_BYTE_B1A_OFFSET] = value;
+            let service_context = ServiceContextFixture {
+                before_metadata: [0; SERVICE_CONTEXT_METADATA_OFFSET],
+                metadata: metadata.0.as_ptr(),
+            };
+            assert_eq!(
+                unsafe {
+                    ft_service_metadata_byte_at_b1a(
+                        (&service_context as *const ServiceContextFixture).cast(),
+                    )
+                },
+                value as u32,
             );
         }
     }
