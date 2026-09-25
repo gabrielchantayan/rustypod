@@ -20758,6 +20758,30 @@ functions:
       first.
 
 
+  # --- String-registry lookup in namespace 1 ---
+  - address: 0x0804b1f4
+    ghidra: FUN_0804b1f4
+    name: registry_lookup_default_namespace
+    size: 8
+    sig: "void *registry_lookup_default_namespace(const u8 *name)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1: name
+      FUN_0805e8a8: registry_lookup
+    notes: >-
+      Ghidra's 152-byte extent is wrong: raw osos.dec decodes exactly `mov
+      r1,#1; b 0x0805e8a8` at 0x0804b1f4..0x0804b1fb, and the separately
+      linked successor starts at 0x0804b1fc. This preserves the name pointer
+      in r0, selects namespace index 1 in r1, then tail-branches to the
+      unported registry lookup FUN_0805e8a8. Full-image ARM decoding finds
+      exactly three direct plain bl callers (0x0803b4d0, 0x08060008, and
+      0x080607cc), zero predicated bl callers, and no direct tail-B callers.
+      Host builds use an injectable lookup seam whose default returns null;
+      device builds call FUN_0805e8a8 directly. Focused host coverage verifies
+      preservation of the name pointer, forced namespace 1, and return-value
+      forwarding in src/cxx/object_flags.rs.
+
   - address: 0x0804bdb0
     ghidra: FUN_0804bdb0
     name: sha1_managed_context_create

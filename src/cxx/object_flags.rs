@@ -1576,6 +1576,48 @@ mod registry_insert_record_layout {
     const _: [u8; 0x0c] = [0; core::mem::offset_of!(RegistryInsertRecord, value)];
 }
 
+/// ABI of the unported registry lookup `FUN_0805e8a8`.
+type RegistryLookup = unsafe extern "C" fn(name: *const u8, namespace_index: u32) -> usize;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn registry_lookup(name: *const u8, namespace_index: u32) -> usize {
+    let lookup: RegistryLookup = core::mem::transmute(0x0805_e8a8usize);
+    lookup(name, namespace_index)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_registry_lookup(_name: *const u8, _namespace_index: u32) -> usize {
+    0
+}
+
+/// Host injection for the unported lookup. The default models its null result.
+#[cfg(not(target_os = "none"))]
+static mut REGISTRY_LOOKUP: RegistryLookup = missing_registry_lookup;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn registry_lookup(name: *const u8, namespace_index: u32) -> usize {
+    core::ptr::read_volatile(core::ptr::addr_of!(REGISTRY_LOOKUP))(name, namespace_index)
+}
+
+/// registry_lookup_default_namespace — original: `FUN_0804b1f4` @
+/// `0x0804b1f4` (8 bytes, `0x0804b1f4..0x0804b1fb`; the separately linked
+/// next function starts at `0x0804b1fc`).
+///
+/// Raw ARM is `mov r1,#1; b 0x0805e8a8`: it preserves the name pointer in r0,
+/// selects registry namespace 1, and tail-branches to the registry lookup.
+/// Full-image decoding finds three direct plain `bl` callers — `0x0803b4d0`,
+/// `0x08060008`, and `0x080607cc` — and zero predicated `bl` callers.
+///
+/// Deliberate host deviation: the unported lookup is an injectable seam whose
+/// default returns null; device builds call `FUN_0805e8a8` directly.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn registry_lookup_default_namespace(name: *const u8) -> usize {
+    registry_lookup(name, 1)
+}
+
 /// ABI of the still-unported singleton initializer `FUN_0805e93c`.
 type RegistryInsertInitialize = unsafe extern "C" fn() -> u32;
 
@@ -4192,6 +4234,50 @@ mod tests {
             "the ldr r1,[r4,#0x0] @ 0x080855e8 reloads the index after the hash call"
         );
         uninstall_registry_context();
+    }
+
+    // --- registry_lookup_default_namespace ---
+
+    static mut REGISTRY_LOOKUP_CALL: Option<(usize, u32)> = None;
+    static mut REGISTRY_LOOKUP_RESULT: usize = 0;
+
+    unsafe extern "C" fn recording_registry_lookup(name: *const u8, namespace_index: u32) -> usize {
+        REGISTRY_LOOKUP_CALL = Some((name as usize, namespace_index));
+        REGISTRY_LOOKUP_RESULT
+    }
+
+    struct RegistryLookupReset(RegistryLookup);
+
+    impl Drop for RegistryLookupReset {
+        fn drop(&mut self) {
+            unsafe {
+                REGISTRY_LOOKUP = self.0;
+            }
+        }
+    }
+
+    #[test]
+    fn registry_lookup_default_namespace_forwards_name_and_selects_one() {
+        let _registry_guard = REGISTRY_KEY_HASH_TEST_LOCK.lock().unwrap();
+        let reset = unsafe {
+            let previous = REGISTRY_LOOKUP;
+            REGISTRY_LOOKUP_CALL = None;
+            REGISTRY_LOOKUP_RESULT = 0xfeed_cafe;
+            REGISTRY_LOOKUP = recording_registry_lookup;
+            RegistryLookupReset(previous)
+        };
+        let name = b"registry-name\0";
+
+        assert_eq!(
+            unsafe { registry_lookup_default_namespace(name.as_ptr()) },
+            0xfeed_cafe
+        );
+        assert_eq!(
+            unsafe { REGISTRY_LOOKUP_CALL },
+            Some((name.as_ptr() as usize, 1)),
+            "the wrapper preserves r0 and overwrites r1 with namespace 1"
+        );
+        drop(reset);
     }
 
     // --- registry_insert_and_notify ---
