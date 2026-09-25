@@ -15882,6 +15882,35 @@ functions:
       cover record construction, status propagation, unguarded u32 ids,
       and the thunk-table target.
 
+  - address: 0x08037eb0
+    ghidra: thunk_EXT_FUN_22003c28
+    name: gateway_service39_request
+    size: 8
+    sig: "u32 gateway_service39_request(u32 first_input, u32 second_input)"
+    module: kernel/gateway_service39
+    status: ported
+    renames:
+      thunk_EXT_FUN_22003c28: gateway_service39_request
+      DAT_08037eb4: gateway_service39_iram_entry
+      FUN_08003660: message_dispatch_veneer
+    notes: >-
+      Raw words establish the full veneer as e51ff004 (ldr pc,[pc,#-4]) at
+      0x08037eb0 followed by IRAM target literal 0x22003c28 at 0x08037eb4;
+      Ghidra's four-byte extent omits the literal and its C indirect call is
+      not the execution model. The relocator at 0x080046e0 copies
+      0x08000000..0x0800aed8 to 0x22000000, so this target mirrors the
+      52-byte body at 0x08003c28..0x08003c5c. That body stores r0 at request
+      word 2, clears word 1, stores selector 39 at word 0, stores r1 at word
+      7, calls the 0x08003660 message-dispatch veneer, and returns word 1;
+      request words 3..6 remain uninitialized. Every ARM B/BL immediate in
+      osos.dec was decoded: exactly three direct callers, all plain bl at
+      0x08058510, 0x0805851c, and 0x081f4b98; there are no predicated bl or
+      tail-branch callers. The selector's higher-level identity is unknown,
+      so the name records only the verified gateway wire protocol. The port
+      deliberately uses the established message_dispatch_veneer seam instead
+      of branching into IRAM; host tests verify the frame, output propagation,
+      unguarded edge words, and thunk-table entry.
+
   - address: 0x080041cc
     ghidra: null
     name: gateway_signal_object
