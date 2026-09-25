@@ -141094,3 +141094,33 @@ functions:
       Host tests cover NULL entry/container, liti and non-liti nested targets,
       and isolation of the +0x04 load. match.py reports this intentional
       tail-branch difference plus its frame prologue.
+
+  - address: 0x08056c8c
+    ghidra: FUN_08056c8c
+    name: xtea_decrypt_block
+    size: 152
+    sig: "void xtea_decrypt_block(const u32 *key, const u8 *input, u8 *output)"
+    module: util/xtea_decrypt_block
+    status: ported
+    renames:
+      param_1/r0/r6: key
+      param_2/r1/r4: input
+      param_3/r2/r7: output
+      uVar1/r5: left
+      uVar2/r4: right
+      DAT_08056d24: initial_sum
+      DAT_08056d28: xtea_delta
+    notes: >-
+      Raw osos.dec words e92d47f0 through ea0175cb establish the exact
+      152-byte extent 0x08056c8c..0x08056d24: push r4-r10/lr, two big-endian
+      loads via 0x080bdb50, eight decrypt rounds with initial sum 0xf1bbcdc8
+      and delta 0x9e3779b9, then one normal and one tail big-endian store via
+      0x080b4454. The next independently linked function starts at
+      0x08056d2c. Decoding every body word finds two plain unconditional bl
+      instructions, zero predicated bl instructions, and the final unconditional
+      tail b; three inbound plain bl call sites are 0x08056d54, 0x080e6f14,
+      and 0x080e6fc0. Neither byte helper has a names.yaml identity, so Rust
+      uses its verified byte-access semantics directly instead of inventing a
+      seam. Host tests cover a nontrivial block and all input/output alignments
+      0..3 with output boundary sentinels. match.py reports the expected
+      helper folding and LLVM-unrolled eight-round loop.
