@@ -41,6 +41,7 @@ pub mod clock_source_construct;
 pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;
 pub mod copy_record_20_if_destination;
+pub mod record16_range_copy_if_destination;
 pub mod byte_range_copy_if_output;
 pub mod vector_record24_copy;
 pub mod vector_record24_copy_assign;
