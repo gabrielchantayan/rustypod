@@ -275,6 +275,7 @@ pub mod strided_cursor_advance;
 pub mod table_find;
 pub mod tail_call_retail_080e76b8;
 pub mod tail_call_retail_080cfe50;
+pub mod tail_call_retail_082db944;
 pub mod tail_call_retail_utf8_validate_three_byte;
 pub mod metadata_fetch_or_null;
 pub mod table_transform_fixed_selector;
