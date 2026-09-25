@@ -188,6 +188,49 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x1c8(
 
     status
 }
+/// `record_indexed_payload_lookup_at_0x278` — original: `FUN_080559c0` @
+/// `0x080559c0` (56 bytes).
+///
+/// Raw ARM establishes the exact extent `0x080559c0..0x080559f8`: the next
+/// `mov r2, r1` at `0x080559f8` starts a separately entered wrapper. Three
+/// inbound direct calls are unconditional plain `bl`; none are predicated.
+///
+/// # Algorithm
+///
+/// Load the record's index pointer from word 0 and its metadata entry from
+/// word 16, look up that entry at index offset `0x278`, then halve the
+/// optional encoded-length result in place. The backend status remains in
+/// `r0` and is returned unchanged.
+///
+/// # Deliberate deviations
+///
+/// The record's target ABI fields are read as 32-bit words rather than host
+/// pointers, preserving their four-byte offsets on 64-bit host tests. The
+/// established [`indexed_payload_lookup`] seam supplies its unported backend.
+///
+/// # Safety
+///
+/// `record` must point to at least seventeen readable target words and word
+/// zero must be a valid index base for the backend. Optional output pointers
+/// obey the backend's contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x278(
+    record: *const u32,
+    payload_out: *mut *mut u8,
+    encoded_length_out: *mut u32,
+) -> u32 {
+    let index_base = core::ptr::read(record) as usize as *mut u8;
+    let entry = core::ptr::read(record.add(16));
+    let status = indexed_payload_lookup(index_base.add(0x278), entry, payload_out, encoded_length_out);
+
+    if !encoded_length_out.is_null() {
+        encoded_length_out.write(encoded_length_out.read() >> 1);
+    }
+
+    status
+}
+
 
 
 /// indexed_payload_lookup_mode_one — original: `FUN_080d6e50` @ `0x080d6e50`
@@ -482,6 +525,48 @@ mod tests {
         };
         assert_eq!(status, 0x8000_0001);
         unsafe {
+            assert_eq!(SEEN_PAYLOAD_OUT, 0);
+            assert_eq!(SEEN_LENGTH_OUT, 0);
+        }
+        drop(guard);
+    }
+    #[test]
+    fn record_indexed_payload_lookup_at_0x278_reads_target_words_and_halves_optional_length() {
+        let Some(record) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_278, 0x1000) else {
+            assert!(note_missing_u32_fixture("app/indexed_payload_lookup record 0x278"));
+            return;
+        };
+        let index = unsafe { record.add(0x300) };
+        let expected_payload = unsafe { record.add(0x380) };
+        let (guard, _reset) = arrange(0x8000_0001, expected_payload, 0x8000_0003);
+        let mut payload = ptr::null_mut();
+        let mut encoded_length = 0;
+
+        unsafe {
+            record.cast::<u32>().write(index as usize as u32);
+            record.add(0x40).cast::<u32>().write(u32::MAX);
+        }
+        let status = unsafe {
+            record_indexed_payload_lookup_at_0x278(record.cast(), &mut payload, &mut encoded_length)
+        };
+
+        assert_eq!(status, 0x8000_0001);
+        assert_eq!(payload, expected_payload);
+        assert_eq!(encoded_length, 0x4000_0001);
+        unsafe {
+            assert_eq!(SEEN_INDEX, index.add(0x278) as usize);
+            assert_eq!(SEEN_ENTRY, u32::MAX);
+            assert_eq!(SEEN_MODE, 0);
+            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
+            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
+        }
+
+        let status = unsafe {
+            record_indexed_payload_lookup_at_0x278(record.cast(), ptr::null_mut(), ptr::null_mut())
+        };
+        assert_eq!(status, 0x8000_0001);
+        unsafe {
+            assert_eq!(SEEN_ENTRY, u32::MAX);
             assert_eq!(SEEN_PAYLOAD_OUT, 0);
             assert_eq!(SEEN_LENGTH_OUT, 0);
         }

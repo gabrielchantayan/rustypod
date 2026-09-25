@@ -1173,6 +1173,10 @@ pub mod hints {
     // and index fixture for the index+0x1c8 wrapper; mappings never unmap,
     // so no other user may share this hint.
     pub const RECORD_INDEXED_PAYLOAD_LOOKUP_1C8: usize = 0xe800_0000;
+    // 0xd800_0000: dedicated to app/indexed_payload_lookup's raw-u32 record
+    // and index fixture for the index+0x278 wrapper; mappings never unmap,
+    // so no other user may share this hint.
+    pub const RECORD_INDEXED_PAYLOAD_LOOKUP_278: usize = 0xd800_0000;
     // 0xf600_0000: dedicated to app/string_table's raw-u32 COW value
     // fixture for the signed-decimal getter; mappings never unmap, so no
     // other user may share this hint.

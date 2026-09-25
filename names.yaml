@@ -19858,6 +19858,42 @@ functions:
       backend is invoked directly at 0x080d6d94; host builds substitute
       INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
 
+  # --- record indexed payload lookup wrapper (app) ---
+  - address: 0x080559c0
+    ghidra: FUN_080559c0
+    name: record_indexed_payload_lookup_at_0x278
+    size: 56
+    sig: "u32 record_indexed_payload_lookup_at_0x278(const u32 *record, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: payload_out
+      param_3/r2: encoded_length_out
+      record_word_0: index_base
+      record_word_16: metadata_entry
+      FUN_0809e3d0: indexed_payload_lookup
+    notes: >-
+      Raw ARM establishes the exact 56-byte extent
+      0x080559c0..0x080559f8: push {r4,lr}; load record word 16 into r1
+      and word 0 into r0; preserve encoded_length_out in r4; forward the
+      incoming payload_out as r2 and encoded_length_out as r3; add 0x278
+      to the index base; call indexed_payload_lookup; and, when the length
+      pointer is non-NULL, replace its word with a logical right shift by
+      one before returning the backend status unchanged. The following
+      mov r2,r1 at 0x080559f8 begins a distinct tail-call wrapper. Raw
+      decoding finds exactly three direct unconditional plain bl callers
+      (0x080455e8, 0x080455f8, and 0x080e2978), zero predicated calls, and
+      no data-word references. Host tests map the target-width record,
+      verify the word-16 entry and index+0x278 forwarding, nonzero status,
+      output mutation, length halving, and NULL optional outputs. The
+      target-width u32 reads deliberately avoid host pointer-size offsets;
+      indexed_payload_lookup supplies the established unported backend seam.
+      match.py structural review: fourteen Rust instructions preserve the
+      record loads, index adjustment, backend call, conditional shift/store,
+      and status return; LLVM uses a larger frame and a different register
+      shuffle.
+
   # --- default selection traversal token (app) ---
   - address: 0x080d6d5c
     ghidra: FUN_080d6d5c
