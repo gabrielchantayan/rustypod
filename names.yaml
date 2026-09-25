@@ -143453,3 +143453,30 @@ functions:
       Deliberate deviation: the payload's relocation-safe eight-byte
       `ldr pc,[pc,#-4]` veneer replaces the stock four-byte PC-relative
       branch while preserving registers, flags, stack, and tail-call return.
+
+  - address: 0x083ead78
+    ghidra: FUN_083ead78
+    name: deque_iter_distance_elem4_alias_ad78
+    size: 104
+    sig: "i32 deque_iter_distance_elem4_alias_ad78(const DequeIter *left, const DequeIter *right)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: left, param_2: right}
+    renames:
+      FUN_083d9fcc: deque_seg_capacity
+      param_1: left
+      param_2: right
+    notes: >-
+      Raw ARM fixes the true extent as 0x083ead78 through `pop {r4,r5,pc}` at
+      0x083eaddc; the next separately linked function starts at 0x083eade0.
+      It returns the signed distance in four-byte elements between deque
+      iterators: same-segment cursors subtract directly; otherwise the result
+      combines intervening 0x20-element segments, left cur-base, and right
+      end-cur. Its only outgoing BL is the adjacent capacity member at
+      0x083d9fcc. Full-image A32 decoding finds exactly two inbound
+      unconditional plain BL sites (0x083de5f8 and 0x083eab80), zero
+      predicated BL sites, and no direct tail branches. The arithmetic matches
+      the adjacent 0x083eade0 template instantiation except for its local
+      capacity-call displacement. The dedicated Rust text section preserves
+      this independently hookable target; it deliberately calls the shared
+      deque_seg_capacity export rather than creating a redundant local seam.
