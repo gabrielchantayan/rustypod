@@ -20957,6 +20957,38 @@ functions:
       empty/negative counts, and first-match installation. LLVM codegen
       counts down with `subs` instead of the original's pointer-limit loop
       and sinks the returns behind a shared pop — same structure.
+  - address: 0x0804ea90
+    ghidra: FUN_0804ea90
+    name: ft_select_charmap
+    size: 108
+    sig: "FT_Error ft_select_charmap(FtFace *face, u32 encoding)"
+    module: ft/charmap
+    status: ported
+    vars:
+      param_1/r0: face
+      param_2/r1: encoding
+      piVar6: charmap
+      piVar9: charmap_limit
+      puVar8: unicode_fallback
+    notes: >-
+      FreeType 2.3.0 FT_Select_Charmap (src/base/ftobjs.c). Raw osos.dec
+      confirms the true 108-byte extent 0x0804ea90..0x0804eafb, including
+      the FT_ENCODING_UNICODE literal at 0x0804eaf8 (Ghidra reports only the
+      104-byte executable body); the next function begins with stmdb at 0x0804eafc.
+      There are no outgoing BL instructions.
+      Decoding every ARM BL-immediate word independently finds exactly three
+      direct inbound calls, all plain and unpredicated: 0x080ad4dc,
+      0x080bf5c8, and 0x080e6a6c. Ghidra's three-call-site count is correct.
+      Non-Unicode encodings scan forward and select the first matching map.
+      Unicode scans backward, preferring platform/encoding pairs 3/10 then
+      0/4, otherwise retaining the last Unicode map encountered. Null face
+      returns 0x23; an absent charmap table or absent Unicode candidate returns
+      0x26; a missing non-Unicode encoding returns 6. Host tests cover both
+      null gates, first-match behavior, a missing encoding, Unicode priority,
+      and fallback. Deliberate deviation: the retail Unicode path branches to
+      shared code at 0x080b6828; the Rust export inlines that verified target
+      to avoid re-entering retailOS. match.py consequently reports a structural
+      diff after the shared non-Unicode prefix.
   - address: 0x0804eafc
     ghidra: FUN_0804eafc
     name: ft_select_metrics
