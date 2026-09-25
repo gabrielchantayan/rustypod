@@ -6053,6 +6053,33 @@ functions:
       the already ported tag-2 operator_delete @ 0x082aad24, then stores
       replacement. The host implementation deliberately uses native-width
       repr(C) pointers and the existing typed-vtable and heap-operation seams.
+  # --- owned optional polymorphic object delete ---
+  - address: 0x083e73d0
+    ghidra: FUN_083e73d0
+    name: owned_virtual_object_delete
+    size: 36
+    sig: "void **owned_virtual_object_delete(void **slot)"
+    module: cxx/owned_virtual_object_delete
+    status: ported
+    renames:
+      param_1/r0: slot
+      slot_deref: object
+      FUN_083e7328: optional_vtable_slot4_dispatch
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x083e73d0 through pop {r4,pc} at 0x083e73f0; the next
+      separately linked function begins at 0x083e73f4. Raw ARM decoding finds
+      two unconditional plain bl calls, to FUN_083e7328 at 0x083e73e4 and
+      operator_delete at 0x083e73e8, with no predicated bl calls. Full-image
+      decoding finds exactly two inbound plain bl calls, at 0x08124644 and
+      0x0815fc30, and no predicated bl callers. It loads object from slot;
+      non-NULL objects dispatch through their vtable slot +0x04 then pass to
+      operator_delete, while slot is returned unchanged. FUN_083e7328 has no
+      recovered identity beyond this dispatch, so target Rust invokes its
+      verified address and host tests use the equivalent native-width vtable
+      layout plus a delete seam. Rust's normal delete call deliberately differs
+      from the retail register-preserving sequence.
   # --- optional vtable slot +4 callback ---
   - address: 0x083e7424
     ghidra: FUN_083e7424
