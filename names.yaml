@@ -142278,3 +142278,31 @@ functions:
       (0x080d4b68). The wrapper calls 0x0809ae9c with remove=1, peek=0,
       and four null output pointers, then returns its r0 result. Ghidra
       incorrectly declares the wrapper void; raw code preserves r0.
+
+  - address: 0x0804770c
+    ghidra: FUN_0804770c
+    name: opaque_52_byte_record_initialize
+    size: 64
+    sig: "i32 opaque_52_byte_record_initialize(u8 *record)"
+    module: util/opaque_52_byte_record_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      DAT_0804774c: record_vtable
+      FUN_0805cfb4: bzero
+      FUN_080470bc: trailing_subobject_initialize
+    notes: >-
+      Raw osos.dec establishes the 60-byte instruction body
+      0x0804770c..0x08047748 and the trailing vtable literal at
+      0x0804774c, making the true 64-byte extent 0x0804770c..0x0804774f;
+      the next independently entered function starts at 0x08047750.
+      The body has two plain outbound BL instructions (bzero at 0x0805cfb4
+      and the unrecovered trailing-subobject initializer at 0x080470bc) and
+      no predicated BL instructions. Whole-image disassembly finds exactly
+      three plain inbound BL calls at 0x08047c50, 0x0805895c, and 0x0805e47c,
+      with no predicated inbound calls. NULL returns -50. Otherwise it zeros
+      52 bytes, initializes the 36-byte subobject at +16 with (8, 0, 0), and
+      installs vtable word 0x4d536e64 on success. The 0x080470bc identity is
+      unrecovered: target builds retain a direct retailOS call, while host
+      tests model its observed output layout solely to exercise this outer
+      initializer's contract.
