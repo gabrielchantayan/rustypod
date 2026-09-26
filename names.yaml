@@ -147660,3 +147660,35 @@ functions:
       omitting the dead stack home traffic; the dedicated text section prevents LLVM
       from folding this separately linked BL target into either twin. match.py reports
       the expected frame setup/teardown structural difference (exit 1).
+
+  - address: 0x083dbd0c
+    ghidra: FUN_083dbd0c
+    name: selector_list_construct
+    size: 88
+    sig: "SelectorList *selector_list_construct(SelectorList *list, const unsigned char *selector)"
+    module: cxx/selector_list_construct
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: selector
+      "list+0x00": pool_chunks
+      "list+0x04": pool_free
+      "list+0x08": pool_next
+      "list+0x0c": pool_end
+      "list+0x10": sentinel
+      "list+0x14": count
+      "list+0x18": initialized
+      "list+0x19": selector
+    notes: >-
+      Raw osos.dec establishes the exact twenty-two-word, 88-byte A32 body from
+      0x083dbd0c through 0x083dbd60; 0x083dbd64 begins the next real function.
+      The body has one unconditional plain BL, to the 24-byte-node pool acquire
+      helper at 0x083cd680, and no predicated BL instructions. Raw caller decoding
+      finds two inbound unconditional plain BL sites at 0x081e15bc and 0x081e15d0,
+      both in FUN_081e1594, and no predicated inbound forms. The constructor clears
+      the target-width pool state and list state, copies the selector byte, acquires
+      a 24-byte sentinel, and self-links its previous and owner words while leaving
+      its next word zero. Rust preserves the target-width layout and ordered stores.
+      The unported 0x083cd680 helper is reproduced as a private 24-byte pool helper
+      instead of an exported seam; match.py reports the expected frame, store-order,
+      and local-call-target structural differences (exit 1).
