@@ -55153,6 +55153,25 @@ functions:
       NULL-base + 0x80 result. Its dedicated text section prevents LLVM from
       folding this independently hookable copy into another deque template
       instance.
+  - address: 0x083da184
+    ghidra: FUN_083da184
+    name: deque_iter_assign_alias_a184
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_a184(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw words e5912000 e5802000 e5912004 e5802004 e5912008 e5802008
+      e591100c e580100c e12fff1e establish the 36-byte A32 body from
+      0x083da184 through bx lr at 0x083da1a4; the adjacent mov r0,#0x20 at
+      0x083da1a8 starts the next independently linked function. The body
+      forward-copies four aligned u32 deque-iterator fields from src to dst
+      and returns dst. Whole-image raw ARM branch decoding finds exactly two
+      unconditional plain bl callers, 0x0815b990 and 0x0815b9a8, zero
+      predicated bl callers, and no body calls. Deliberate deviation: the
+      dedicated Rust text section preserves this independently hookable copy
+      against identical-code folding.
   - address: 0x083da1b0
     ghidra: FUN_083da1b0
     name: deque_iter_assign_alias_a1b0
