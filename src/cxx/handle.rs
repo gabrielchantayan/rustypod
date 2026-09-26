@@ -1425,6 +1425,54 @@ pub unsafe extern "C" fn refcounted_ptr_copy_construct(
     dst
 }
 ///
+/// refcounted_ptr_copy_construct_mutex — original: `FUN_0839efec` @
+/// `0x0839efec` (68 bytes, `0x0839efec..0x0839f030`; **2 direct `bl` call
+/// sites**, both unconditional: `0x08162554` and `0x08162740). Raw
+/// `osos.dec` words establish the extent: `pop {r4,r5,r6,pc}` is at
+/// `0x0839f02c`, and the next separately linked function begins at
+/// `0x0839f030`. Its two internal calls are predicated `blne` forms, first
+/// to mutex_lock @ `0x0807f5c4`, then to mutex_unlock @ `0x0807f6a0`.
+///
+/// C++ copy-constructs a refcounted handle: loads `*src`, stores it into
+/// `dst`, and, when non-NULL, wrapping-increments the body's signed
+/// refcount between independent NULL-guarded loads of its optional mutex.
+/// It returns `dst`.
+///
+/// Deliberate deviation: Rust directly calls the ported mutex helpers; LLVM
+/// may inline them rather than retain stock's predicated calls. The store,
+/// mutex/load/guard/increment/load/guard order is preserved, and the
+/// dedicated target section keeps this hookable entry distinct.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. A non-NULL `*src`
+/// must point to a writable [`RefcountedBody`]; its optional mutex must meet
+/// the mutex helpers' preconditions.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_construct_mutex")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_construct_mutex(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    let body = src.read();
+    dst.write(body);
+    if body.is_null() {
+        return dst;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+    dst
+}
+
+///
 /// refcounted_ptr_assign_owned_variant — original: `FUN_0839ef54` @
 /// `0x0839ef54` (48 bytes; 3 direct `bl` call sites, all unconditional:
 /// `0x081332d4`, `0x08133bb8`, and `0x08133fa4`). Raw instructions run
@@ -3954,8 +4002,48 @@ mod tests {
         }
     }
 
+    /// The 0x0839efec copy constructor replaces the destination with NULL
+    /// before its early return and still returns the destination slot.
+    #[test]
+    fn copy_construct_mutex_null_source_stores_null_and_returns_destination() {
+        unsafe {
+            let source: *mut RefcountedBody = core::ptr::null_mut();
+            let mut destination = 0xdead_beefusize as *mut RefcountedBody;
+
+            let result =
+                refcounted_ptr_copy_construct_mutex(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert!(destination.is_null());
+        }
+    }
+
+    /// Its increment is the raw ARM wrapping `add`; the copy leaves the
+    /// implementation word intact when no mutex guards the body.
+    #[test]
+    fn copy_construct_mutex_copies_body_and_wraps_refcount() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x5555_6666,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let source: *mut RefcountedBody = &mut body;
+            let mut destination: *mut RefcountedBody = core::ptr::null_mut();
+
+            let result =
+                refcounted_ptr_copy_construct_mutex(&mut destination, &source);
+
+            assert_eq!(result, &mut destination as *mut *mut RefcountedBody);
+            assert_eq!(destination, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x5555_6666);
+        }
+    }
+
     /// The slot-1 forwarding constructor preserves the unconditional source
     /// load and attach: NULL replaces the destination and still returns it.
+
     #[test]
     fn copy_construct_slot1_null_source_stores_null_and_returns_destination() {
         unsafe {
