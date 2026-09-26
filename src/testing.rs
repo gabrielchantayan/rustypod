@@ -2397,6 +2397,9 @@ pub mod hints {
     // 0x8030_0000: dedicated to util/free_index_table_grow's target-width
     // table header and old-slot fixture; mappings never unmap.
     pub const FREE_INDEX_TABLE_GROW: usize = 0x8030_0000;
+    // 0x8090_0000: dedicated to cxx/indexed_element_array_destruct's raw
+    // target-width array fixture; mappings never unmap.
+    pub const INDEXED_ELEMENT_ARRAY_DESTRUCT: usize = 0x8090_0000;
     // 0x083e_9000: dedicated to util/fixed_record_u16_lookup's runtime
     // record-table fixture; mappings never unmap, so no other user may share it.
     pub const FIXED_RECORD_U16_LOOKUP: usize = 0x083e_9000;
