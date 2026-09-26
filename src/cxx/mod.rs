@@ -97,6 +97,7 @@ pub mod deque_front_advance_release;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
 pub mod word_list_node_pool_acquire;
+pub mod list_node_pool_acquire_083dd1a8;
 pub mod list_node_pool_acquire_083dd2e4;
 pub mod list_node_pool_acquire_083dd4cc;
 pub mod list_node_pool_list_init;

@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd1a8
+    ghidra: FUN_083dd1a8
+    name: list_node_pool_acquire_083dd1a8
+    size: 184
+    sig: "ListNode *list_node_pool_acquire_083dd1a8(ListNodePoolList *list, u32 single)"
+    module: cxx/list_node_pool_acquire_083dd1a8
+    status: ported
+    vars: {param_1: list, param_2: single}
+    renames:
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083dd1a8 through pop {r4-r8,pc} at 0x083dd25c;
+      0x083dd260 starts the next real function. The body performs exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70,
+      and no predicated bl calls. Its two inbound direct call sites are plain
+      bl at 0x0818a6f4 and 0x0818b37c. It pops an uninitialized 12-byte
+      {next, previous, value} node from the free list, otherwise bump-allocates
+      one from a chunk. Exhausted pools allocate a 12-byte {previous, capacity,
+      nodes} header and capacity*12 backing storage: one node for single, then
+      32 initially and max(capacity + 32, capacity + capacity/2 + capacity/8).
+      Deliberate deviations: none; pointer fields remain target-width u32 words.
   - address: 0x083dd39c
     ghidra: FUN_083dd39c
     name: word_list_node_pool_list_recycle_all
