@@ -74,6 +74,9 @@ pub mod hints {
     // target-width state, inner, context, and index-table fixture; mappings
     // never unmap, so no other port may share this hint.
     pub const SELECTION_STATE_COUNT_REFRESH: usize = 0x6f60_0000;
+    // 0x6f68_0000: dedicated to cxx/list_node_pool_list_erase_releasing_payload's
+    // target-width list and intrusive-node fixture; mappings never unmap.
+    pub const LIST_NODE_POOL_LIST_ERASE_RELEASING_PAYLOAD: usize = 0x6f68_0000;
     // 0xe100_0000: dedicated to app/animation_property_pair_init's owner,
     // fixed-value endpoints, and animation fixture; mappings never unmap.
     pub const ANIMATION_PROPERTY_PAIR_INIT: usize = 0xe100_0000;

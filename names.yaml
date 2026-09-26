@@ -147308,3 +147308,30 @@ functions:
       Target pointer fields stay u32 words in Rust so host pointers cannot
       change recovered target offsets. Host tests cover unlink/recycle and
       sentinel no-op behavior.
+
+  - address: 0x083dc3fc
+    ghidra: FUN_083dc3fc
+    name: list_node_pool_list_erase_releasing_payload
+    size: 136
+    sig: "void list_node_pool_list_erase_releasing_payload(u32 *successor, ListNodePoolList *list, u32 *node_slot)"
+    module: cxx/list_node_pool_list_erase_releasing_payload
+    status: ported
+    renames:
+      param_1/r0/r6: successor
+      param_2/r1/r4: list
+      param_3/r2/r5: node_slot
+      "[node + 0x08]": payload_release_handle
+      "payload vtable+0x00": release
+    notes: >-
+      Raw osos.dec establishes the exact 136-byte A32 extent: 34 words from
+      push {r1-r7,lr} at 0x083dc3fc through pop {r1-r7,pc} at 0x083dc480;
+      0x083dc484 starts the next independently linked function. Whole-image
+      ARM immediate-branch decoding finds two inbound unconditional plain bl
+      sites and no predicated direct callers. The body has no direct bl calls
+      and one indirect blx through the payload object's vtable slot +0x00. A
+      sentinel selection only writes that sentinel through successor. Otherwise
+      it unlinks the selected 20-byte node, decrements count with wrapping
+      arithmetic, calls the payload slot-zero release with &node->payload[0],
+      adds the node to the free list, and writes its successor. Target builds
+      dispatch the observed u32 vtable slot directly; host tests use a release
+      seam because native function pointers do not fit target-width slots.
