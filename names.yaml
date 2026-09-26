@@ -56334,6 +56334,23 @@ functions:
       not_equal_deref symbol.
 
 
+  - address: 0x083dee70
+    ghidra: FUN_083dee70
+    name: deque_push_back_elem4_alias_ee70
+    size: 92
+    sig: "void deque_push_back_elem4_alias_ee70(BlockDeque *deque, const u32 *value)"
+    module: heap/deque_push_back_elem4
+    status: ported
+    notes: >-
+      `std::deque<u32>::push_back` instantiation. Raw A32 decoding confirms
+      0x083dee70..0x083deec8 (92 bytes), followed by the next function at
+      0x083deecc. Two inbound and two body calls are all plain `bl`; body
+      callees are container_is_empty alias 0x083d75f0 and unported grow helper
+      FUN_083deca4. The port preserves the non-NULL store guard, four-byte
+      cursor advance, and wrapping count increment. The grow helper remains
+      behind a dedicated volatile ops seam; the target default calls its
+      verified retail address and host tests install a growth model.
+
   - address: 0x083dff14
     ghidra: FUN_083dff14
     name: deque_drain_elem4
