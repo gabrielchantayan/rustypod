@@ -6027,6 +6027,33 @@ functions:
       the dispatcher receives record +0x04. Target builds call these verified
       addresses directly; host tests install an operation seam. The dispatcher
       identity is deliberately not inferred beyond dispatching a record.
+  # --- owned opaque object delete through +0x04 subobject ---
+  - address: 0x083e7284
+    ghidra: FUN_083e7284
+    name: owned_offset_object_delete
+    size: 44
+    sig: "void **owned_offset_object_delete(void **slot)"
+    module: cxx/owned_offset_object_delete
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      slot_deref/r0: object
+      FUN_0839c888: opaque_subobject_destruct
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent: eleven ARM words from
+      push {r4,lr} at 0x083e7284 through pop {r4,pc} at 0x083e72ac; the next
+      real function begins at 0x083e72b0. Raw ARM decoding finds two plain bl
+      calls in the body, to the unported opaque destructor at 0x0839c888 and
+      operator_delete at 0x082aad24, with no predicated bl calls. Full-image
+      raw ARM decoding finds exactly two inbound plain bl calls at 0x08126c3c
+      and 0x081282ec, with no predicated bl callers. It loads the object from slot;
+      calls the opaque destructor on object +0x04, subtracts four from its
+      returned subobject address, deletes that allocation, and returns slot
+      unchanged. The class identity of 0x0839c888 is deliberately not inferred:
+      target Rust calls its verified address and host tests replace a narrow
+      seam. Host slots use native-width pointers rather than target four-byte
+      pointer words.
   # --- polymorphic member replacement ---
   - address: 0x083e72f8
     ghidra: FUN_083e72f8

@@ -869,6 +869,9 @@ pub mod hints {
     // target-width parser and character-class-table fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const PARSER_SCAN_TO_TOKEN_BOUNDARY: usize = 0x7f31_0000;
+    // 0x7f32_0000: dedicated to cxx/owned_offset_object_delete's raw-u32
+    // object fixture; mappings never unmap, so no other test may share it.
+    pub const OWNED_OFFSET_OBJECT_DELETE: usize = 0x7f32_0000;
     // 0x7f35_0000: dedicated to util/utf16_next_whitespace_delimited_range's
     // raw-u32 UTF-16 cursor and range fixture; mappings never unmap, so no
     // other user may share this hint.
