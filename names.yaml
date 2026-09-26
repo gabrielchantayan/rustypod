@@ -148993,3 +148993,19 @@ functions:
       target r0 word, clears dead r1, and tail-branches to
       operator_new_checked. Deliberate deviation: Rust makes the tail branch
       an ordinary call through the existing checked-allocation seam.
+  - address: 0x083d7e1c
+    ghidra: FUN_083d7e1c
+    name: copy_record_12_if_destination
+    size: 40
+    sig: "u8 *copy_record_12_if_destination(void *context, u8 *destination, const u8 *source)"
+    module: cxx/copy_record_12_if_destination
+    status: ported
+    notes: >-
+      Raw A32 words establish the exact 40-byte extent 0x083d7e1c..0x083d7e44:
+      movs r0,r1; bxeq lr; two aligned word loads/stores at +0x00 and +0x04;
+      then ldrb, and #1, and strb at +0x08. The next movs r0,r1 at 0x083d7e44
+      begins a separate function. Whole-image A32 decoding finds exactly two
+      inbound direct plain BL sites (0x083e8f40 and 0x083e95b0), no predicated
+      BL sites, and no body calls. The context is discarded; a NULL destination
+      returns unchanged without reading source; otherwise the two words copy and
+      the byte at +0x08 is canonicalized to 0 or 1. No deliberate deviations.

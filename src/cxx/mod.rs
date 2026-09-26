@@ -434,6 +434,7 @@ pub mod templates;
 pub mod container_dispose_elements;
 pub mod fixed_record_range_copy;
 pub mod copy_record_24_if_destination;
+pub mod copy_record_12_if_destination;
 pub mod signed_key_tree_find;
 pub mod equal_key_tree_clear;
 pub mod u32_map_value_slot;
