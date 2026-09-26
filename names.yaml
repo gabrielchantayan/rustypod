@@ -15503,6 +15503,25 @@ functions:
       deliberately serves this address instead of adding an
       indistinguishable Rust body.
 
+  - address: 0x083da424
+    ghidra: FUN_083da424
+    name: deque_seg_capacity
+    size: 8
+    sig: "usize deque_seg_capacity(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Alias of the existing deque_seg_capacity Rust export. Raw ARM words
+      0xe3a00020 and 0xe12fff1e decode as `mov r0, #0x20; bx lr`,
+      returning 0x20 elements per deque segment. The raw extent is exactly
+      8 bytes at 0x083da424..0x083da42b; the next real function begins at
+      0x083da42c. Decoding every ARM B/BL word in osos.dec verifies exactly
+      two unconditional plain bl call sites (0x083ea584 and 0x083ea5ec),
+      zero predicated bl forms, and zero tail b forms. This is one of the
+      17 byte-identical deque-template copies, so the canonical 0x083d9ec0
+      export deliberately serves this address instead of adding an
+      indistinguishable Rust body.
   - address: 0x083da450
     ghidra: FUN_083da450
     name: deque_seg_capacity
