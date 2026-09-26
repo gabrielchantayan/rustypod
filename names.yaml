@@ -149074,3 +149074,31 @@ functions:
       range. Both unported helpers are verified-address seams: target builds
       call retail addresses directly and the host test fixtures verify their
       target-word ABI.
+
+  - address: 0x083d7360
+    ghidra: FUN_083d7360
+    name: byte_range_offset_copy
+    size: 40
+    sig: "void byte_range_offset_copy(u32 *destination, const u32 *source, u32 byte_count)"
+    module: cxx/byte_range_offset_copy
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: byte_count
+      "source+0x00": start
+      "source+0x04": end
+      FUN_083dc0cc: copy_u32_pair
+    notes: >-
+      Raw words e92d400c e5913000 e58d3000 e5911004 e0832002 e58d1004
+      e1a0100d e58d2000 eb001351 e8bd9008 establish the exact 40-byte A32
+      body from 0x083d7360 through 0x083d7384; the ldr at 0x083d7388 begins
+      the next real function. The body has one outgoing unconditional plain bl
+      at 0x083d7380 to the already ported two-word copy helper at 0x083dc0cc
+      and zero predicated bl instructions. Whole-image raw A32 branch decoding
+      finds two inbound unconditional plain bl sites, 0x083d8fdc and
+      0x083d99c0, and zero predicated inbound sites. It snapshots a two-word
+      byte range, adds byte_count to its start with u32 wrapping, and copies
+      the resulting {start,end} pair to destination. Deliberate deviation:
+      Rust represents the stack-local pair and 0x083dc0cc helper directly,
+      retaining the snapshot-before-store and ordered volatile word writes.
