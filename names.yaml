@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d5784
+    ghidra: FUN_083d5784
+    name: fixed_increment_u32_array_append
+    size: 144
+    sig: "u32 fixed_increment_u32_array_append(FixedIncrementU32Array *array, const u32 *value)"
+    module: cxx/fixed_increment_u32_array_append
+    status: ported
+    renames:
+      param_1/r0: array
+      param_2/r1: value
+      "array+0x04": allocated
+      "array+0x08": increment
+      "array+0x0c": len
+      "array+0x14": values
+      FUN_0802edec: realloc
+    notes: >-
+      Raw A32 words establish the exact 144-byte body from 0x083d5784 through
+      pop {r4-r8,pc} at 0x083d5810; the push at 0x083d5814 starts the next
+      real function. The body has one unconditional plain bl, at 0x083d57c8
+      to the already ported realloc/FUN_0802edec, and no predicated bl. It
+      appends *value to a six-word fixed-increment u32 array; when len reaches
+      allocated, it doubles increment below 0x1000, reallocates
+      (allocated + increment) * 4 bytes, then commits storage and allocated
+      only on success. The increment update precedes realloc and therefore
+      deliberately remains visible on allocation failure. Target pointers are
+      stored as u32 and indexed as words; a volatile realloc function pointer
+      retains the allocator call boundary against LLVM inlining.
   - address: 0x083db704
     ghidra: FUN_083db704
     name: kinded_node_pool_construct

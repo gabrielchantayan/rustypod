@@ -2569,6 +2569,12 @@ pub mod hints {
     pub const WORK_RECORD_ASSIGN_VALUE: usize = 0x6f60_0000;
     pub const WORK_RECORD_ASSIGN_VALUE_UNCHANGED: usize = 0x6f70_0000;
     pub const WORK_RECORD_ASSIGN_VALUE_SAME_OBJECT: usize = 0x6f80_0000;
+    // 0x6c60_0000 / 0x6c70_0000 / 0x6c80_0000: dedicated to
+    // cxx/fixed_increment_u32_array_append's target-width array fixtures;
+    // mappings never unmap, so each test uses a distinct address.
+    pub const FIXED_INCREMENT_U32_ARRAY_APPEND: usize = 0x6c60_0000;
+    pub const FIXED_INCREMENT_U32_ARRAY_APPEND_GROW: usize = 0x6c70_0000;
+    pub const FIXED_INCREMENT_U32_ARRAY_APPEND_FAILURE: usize = 0x6c80_0000;
     // 0x6f90_0000 / 0x6fa0_0000: dedicated to
     // app/media_player_set_inner_state_selector's target-width player and
     // inner-state fixtures; mappings never unmap, so each test uses a
