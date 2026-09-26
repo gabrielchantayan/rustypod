@@ -146201,3 +146201,38 @@ functions:
       rather than host sizeof because StringObject widens on host. match.py
       reports an expected structural difference: LLVM emits an empty-range
       early return and a fuller frame around the existing Rust destructor seam.
+
+  - address: 0x083e2558
+    ghidra: FUN_083e2558
+    name: cxx_string_vector_record_vector_destroy
+    size: 76
+    sig: "StringVectorRecordVector *cxx_string_vector_record_vector_destroy(StringVectorRecordVector *vector)"
+    module: cxx/string_vector_record_vector_destroy
+    status: ported
+    renames:
+      param_1/r0/r5: vector
+      r4: current_record
+      r6: end
+      "record+0x0": cxx_string_slot
+      "record+0x4": cxx_string_vector
+      FUN_083e5b88: cxx_string_vector_destruct
+      FUN_083d8b04: cxx_string_release
+      FUN_08266f2c: cxx_array_dealloc
+      return/r0: vector
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x083e2558..0x083e25a3: the next independently linked function begins
+      at 0x083e25a4 with push {r2,r3,r4,r5,r6,r7,r8,lr}. Raw A32 decoding
+      finds three plain unconditional body BL instructions—to
+      cxx_string_vector_destruct @ 0x083e5b88, cxx_string_release @
+      0x083d8b04, and cxx_array_dealloc @ 0x08266f2c—and zero predicated
+      body BL instructions. This corrects Ghidra's two-call view, which omits
+      the final direct deallocation. Two inbound direct BL call sites are
+      0x081348c4 and 0x083c1658; neither is predicated. The function walks
+      [begin,end) as 16-byte {COW string, CxxStringVector} records,
+      destructing the embedded vector then releasing the leading string slot,
+      frees begin with (capacity - begin) >> 4 and element size zero, and
+      returns vector. Deliberate deviation: Rust retains the raw
+      destructor-return-minus-four data flow; LLVM may fold it to the
+      equivalent record base. match.py exits 1 with the expected fuller LLVM
+      frame, empty-range branch, and archive-local unresolved BL targets.
