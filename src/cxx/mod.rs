@@ -101,6 +101,7 @@ pub mod app_block_manager_node_pool_acquire;
 pub mod two_word_list_node_pool_acquire;
 pub mod two_word_list_node_pool_list_recycle_all;
 pub mod word_list_node_pool_acquire;
+pub mod red_black_tree_construct;
 pub mod refcounted_list_node_pool_acquire;
 pub mod list_node_pool_acquire_083dd1a8;
 pub mod list_node_pool_acquire_083dd2e4;
