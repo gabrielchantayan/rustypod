@@ -719,6 +719,61 @@ pub unsafe extern "C" fn deque_iter_init_elem12(
     (*iter).seg_slot = slot;
     iter
 }
+///
+/// deque_iter_advance_elem4 — original: `FUN_083da088` @ 0x083da088 (168
+/// bytes, `0x083da088..0x083da12f`; the next real function,
+/// `deque_iter_increment_elem4`, begins at 0x083da130).
+///
+/// Verified calls: two incoming unconditional plain `bl` instructions at
+/// 0x083d6fc8 and 0x083d6ff4; no incoming predicated `bl` forms. The body has
+/// seven unconditional plain `bl` instructions: five to the 0x20-element
+/// segment-capacity twin at 0x083d9fcc and two to `__rt_udiv` @ 0x08036f14.
+///
+/// Advances this four-byte-element deque iterator by signed `offset` elements.
+/// It combines the current segment-relative index with `offset`, floor-divides
+/// that total by 0x20 to move the segment-map slot, reloads the segment bounds,
+/// then sets `cur` to the non-negative remainder within the new segment.
+///
+/// Deliberate deviations: repeated calls to the pure capacity twin are
+/// collapsed to one canonical [`deque_seg_capacity`] call, and the port invokes
+/// the existing Rust [`crate::runtime::rt_div::__rt_udiv`] seam rather than the
+/// original's duplicate call sequence. `DequeIter`'s `repr(C)` pointer fields
+/// preserve their target-field identity on 64-bit hosts.
+///
+/// # Safety
+///
+/// `iter` and its current `seg_slot` must describe a valid four-byte-element
+/// deque iterator; advancing it must remain within its segment-map allocation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_advance_elem4(
+    iter: *mut DequeIter,
+    offset: i32,
+) -> *mut DequeIter {
+    let current = &mut *iter;
+    let capacity = deque_seg_capacity() as u32;
+    let within_segment = ((current.cur as usize as u32)
+        .wrapping_sub(current.seg_base as usize as u32) as i32) >> 2;
+    let total = offset.wrapping_add(within_segment);
+    let segment_delta = if total < 0 {
+        0u32.wrapping_sub(crate::runtime::rt_div::__rt_udiv(
+            capacity.wrapping_sub(total as u32).wrapping_sub(1),
+            capacity,
+        )) as i32
+    } else {
+        crate::runtime::rt_div::__rt_udiv(total as u32, capacity) as i32
+    };
+    if segment_delta != 0 {
+        let slot = current.seg_slot.offset(segment_delta as isize);
+        current.seg_slot = slot;
+        current.seg_base = slot.read();
+        current.seg_end = current.seg_base.add(capacity as usize * 4);
+    }
+    let index = total.wrapping_sub(segment_delta.wrapping_mul(capacity as i32));
+    current.cur = current.seg_base.add(index as usize * 4);
+    iter
+}
+
 
 /// deque_construct — original: `FUN_083dfdac` @ 0x083dfdac (64 bytes;
 /// 4 plain `bl` call sites @ 0x081de2c0, 0x081de2cc, 0x082e7ecc,
@@ -1419,6 +1474,33 @@ mod tests {
             assert!(it.seg_base.is_null());
             assert!(it.seg_end.is_null());
             assert!(it.seg_slot.is_null());
+        }
+    }
+
+    #[test]
+    fn iter_advance_elem4_crosses_segments_in_both_directions() {
+        let mut segments = [[0u8; 0x20 * 4]; 3];
+        let mut map = [
+            segments[0].as_mut_ptr(),
+            segments[1].as_mut_ptr(),
+            segments[2].as_mut_ptr(),
+        ];
+        let mut it = DequeIter {
+            cur: unsafe { segments[1].as_mut_ptr().add(3 * 4) },
+            seg_base: segments[1].as_mut_ptr(),
+            seg_end: unsafe { segments[1].as_mut_ptr().add(0x20 * 4) },
+            seg_slot: unsafe { map.as_mut_ptr().add(1) },
+        };
+        unsafe {
+            assert!(deque_iter_advance_elem4(&mut it, 0x20 + 2) == &mut it);
+            assert_eq!(it.cur, segments[2].as_mut_ptr().add(5 * 4));
+            assert_eq!(it.seg_base, segments[2].as_mut_ptr());
+            assert_eq!(it.seg_slot, map.as_mut_ptr().add(2));
+
+            assert!(deque_iter_advance_elem4(&mut it, -0x25) == &mut it);
+            assert_eq!(it.cur, segments[1].as_mut_ptr());
+            assert_eq!(it.seg_base, segments[1].as_mut_ptr());
+            assert_eq!(it.seg_slot, map.as_mut_ptr().add(1));
         }
     }
 
