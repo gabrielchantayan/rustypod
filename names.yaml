@@ -149635,3 +149635,26 @@ functions:
       pointers remain u32 words to preserve four-byte retail layout on 64-bit
       hosts; no other deliberate deviations. Host tests cover an empty child
       chain and recursive sibling/descendant ordering.
+
+  - address: 0x083d4f2c
+    ghidra: FUN_083d4f2c
+    name: slot_array_remove_at_release
+    size: 76
+    sig: "void slot_array_remove_at_release(SlotArray *this, i32 index)"
+    module: cxx/slot_array_remove_at_release
+    status: ported
+    vars: {param_1: this, param_2: index, iVar1: object, piVar2: slot}
+    notes: >-
+      Raw osos.dec is exactly 19 ARM words from 0x083d4f2c through pop
+      {r4,r5,r6,pc} at 0x083d4f74; the push at 0x083d4f78 starts the next
+      function, confirming Ghidra's 76-byte extent. There is one plain
+      direct bl to slot_array_index_in_bounds at 0x083d4f38, zero predicated
+      direct bl calls, and one indirect blx r1 through the selected object's
+      vtable word +4. It does nothing unless 0 <= index < slots and the
+      target slot is nonzero; otherwise it calls that object's unresolved
+      vtable +4 release callback, clears the slot, then decrements used.
+      The port reuses the verified slot_array_index_in_bounds seam. match.py:
+      structural match; both bodies call the bounds check, gate the virtual
+      release on an occupied slot, clear it, and decrement count. LLVM emits
+      explicit branches instead of ADS's predicated load/compare/return and
+      keeps the storage base live in r6 instead of reloading it.

@@ -2691,6 +2691,9 @@ pub mod hints {
     // 0x5350_0000: dedicated to cxx/object_matches_active_context's target-width
     // adjusted-object and active-context fixture; mappings never unmap.
     pub const CXX_OBJECT_MATCHES_ACTIVE_CONTEXT: usize = 0x5350_0000;
+    // 0x76b0_0000: dedicated to cxx/slot_array_remove_at_release's target-width
+    // storage and polymorphic object fixture; mappings never unmap.
+    pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE: usize = 0x76b0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
