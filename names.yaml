@@ -134678,6 +134678,33 @@ functions:
       target BL becomes a seam BLX; arguments and local lifetimes are
       preserved.
 
+  # --- conditional 24-byte element-array record copy ---
+  - address: 0x083d7de0
+    ghidra: FUN_083d7de0
+    name: element_array_record_copy_construct
+    size: 20
+    sig: "void *element_array_record_copy_construct(void *container, void *destination, const void *source)"
+    module: cxx/element_array_record_copy_construct
+    status: ported
+    renames:
+      param_1/r0: container
+      param_2/r1: destination
+      param_3/r2: source
+      DAT_08037dfc: memcpy_veneer
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte extent: movs r0,r1; mov
+      r1,r2; movne r2,#0x18; bne 0x08037df8; bx lr at
+      0x083d7de0..0x083d7df3. The separately linked next function starts with
+      push {r4,lr} at 0x083d7df4. The veneer at 0x08037df8 is ldr pc,[pc,#-4]
+      with target 0x22000188, the IRAM mirror of the ported
+      memcpy_forward_words at 0x08000188. Whole-image A32 decoding finds two
+      inbound plain BL calls (0x083e1b64 and 0x083e1bf4) and no predicated BL
+      calls; the body contains no BL. It returns NULL without reading source
+      when destination is NULL; otherwise it tail-transfers a 24-byte aligned
+      forward memcpy and returns destination + 24. Rust directly calls the
+      verified memcpy body rather than its IRAM veneer, preserving grouped
+      forward-copy overlap behavior and result.
+
   - address: 0x083d7e44
     ghidra: FUN_083d7e44
     name: copy_record_24_if_destination
