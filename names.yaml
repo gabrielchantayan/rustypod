@@ -147692,3 +147692,40 @@ functions:
       The unported 0x083cd680 helper is reproduced as a private 24-byte pool helper
       instead of an exported seam; match.py reports the expected frame, store-order,
       and local-call-target structural differences (exit 1).
+
+  - address: 0x083dbc64
+    ghidra: FUN_083dbc64
+    name: word_key_map_find
+    size: 168
+    sig: "void word_key_map_find(WordKeyMapNode **out, WordKeyMap *map, const u32 *key)"
+    module: cxx/word_key_map
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: map
+      param_3/r2: key
+      "map+0x10": header
+      "header+0x04": root
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": key
+      FUN_083d7598: less_unsigned
+      FUN_083cf980: equal_deref_f980_copy
+      FUN_083b6b44: node_key_accessor
+    notes: >-
+      Raw osos.dec establishes the exact 168-byte A32 body from 0x083dbc64
+      through `pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,pc}` at 0x083dbd08;
+      0x083dbd0c begins the next separately entered function. Whole-image
+      A32 decoding finds exactly two inbound unconditional plain BL sites,
+      0x081e1504 and 0x081e1554, with no predicated BL forms. The body has
+      four unconditional BL instructions and no predicated BL instructions:
+      two calls to less_unsigned @ 0x083d7598, plus byte-identical helper
+      copies equal_deref_f980_copy @ 0x083cf980 and node_key_accessor @
+      0x083b6b44. It is structurally identical to the already ported
+      word_key_map_find @ 0x083dbb5c; only those two leaf-helper addresses
+      differ. It performs lower-bound descent over u32 keys, writing the
+      matching node or header/end node through out. The established Rust
+      export deliberately serves both physical copies, inlining the
+      byte-identical key-accessor and equality leaves while retaining the
+      comparator call boundaries; host tests cover empty, found, absent,
+      deep, and unsigned-boundary keys.
