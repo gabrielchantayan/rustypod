@@ -53874,6 +53874,34 @@ functions:
       use r0 as a vector header and its begin/end words as r1/r2;
       0x083e3aa8 immediately frees the storage as 16-byte elements.
 
+  - address: 0x083e3c50
+    ghidra: FUN_083e3c50
+    name: two_string_record_range_destroy
+    size: 40
+    sig: "void *two_string_record_range_destroy(void *unused, TwoStringRecord *first, TwoStringRecord *last)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: unused, param_2: first, param_3: last}
+    renames:
+      FUN_08267848: two_string_record_destroy
+      iVar1: current
+      param_2: first
+      param_3: last
+    notes: >-
+      Raw osos.dec fixes the extent at 0x083e3c50..0x083e3c77: push
+      {r4,r5,r6,lr}; copy r1/r2 to current/end; branch to the equality test;
+      call 0x08267848(current); add current,#0x1c; repeat on inequality; pop.
+      The next separately linked function begins at 0x083e3c78. Whole-image
+      ARM B/BL decoding finds two inbound unconditional plain BL calls
+      (0x08267a10 and 0x083e3e5c), zero inbound predicated BL calls, one
+      internal plain BL to the established two_string_record_destroy seam,
+      and zero internal predicated BL calls. It is the structural half-open
+      vector range destructor for the already recovered 0x1c-byte
+      TwoStringRecord: that record destroys its +0x14 StringObject before
+      +0x0c. Ghidra declares void, and callers ignore r0, but the raw empty
+      path retains unused r0 while a nonempty path returns the final element
+      destructor's value; the Rust seam preserves this incidental result.
+
   - address: 0x083da458
     ghidra: FUN_083da458
     name: deque_iter_assign

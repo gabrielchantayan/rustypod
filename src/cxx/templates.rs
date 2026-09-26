@@ -41,6 +41,8 @@
 //! - [`cxx_record_range_destroy_16`] — elementwise destruction of a
 //!   half-open vector range whose 16-byte records contain two
 //!   [`StringObject`] values.
+//! - [`two_string_record_range_destroy`] — elementwise destruction of a
+//!   half-open vector range of 28-byte records containing two StringObjects.
 //! - [`pair_assign_guarded`] — the self-assignment-guarded two-word
 //!   copy-assign of a pair-shaped value type, the only copy, 14 call
 //!   sites.
@@ -114,6 +116,7 @@ use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{
     string_object_assign, string_object_copy_construct, string_object_destroy, StringObject,
 };
+use crate::cxx::two_string_record_assign::{two_string_record_destroy, TwoStringRecord};
 use crate::libc::memcmp::memcmp;
 use crate::libc::memcpy::memcpy_forward_words;
 use crate::runtime::rt_div::__rt_sdiv;
@@ -409,6 +412,40 @@ pub unsafe extern "C" fn cxx_record_range_destroy_16(
         string_object_destroy(core::ptr::addr_of_mut!((*first).first));
         first = first.add(1);
     }
+}
+
+/// two_string_record_range_destroy — original: `FUN_083e3c50` @ 0x083e3c50
+/// (40 bytes, `0x083e3c50..0x083e3c77`; the next function begins at
+/// 0x083e3c78). Raw ARM decoding finds 2 inbound plain `bl` calls
+/// (0x08267a10 and 0x083e3e5c), no inbound predicated calls, one internal
+/// plain `bl` to [`two_string_record_destroy`] @ 0x08267848, and no internal
+/// predicated calls.
+///
+/// Destroys the half-open `[first, last)` range of 28-byte [`TwoStringRecord`]
+/// values. The raw loop compares its iterators before any dereference, destroys
+/// each current record, and advances by 0x1c. Although callers ignore r0, the
+/// raw function leaves the unused first ABI argument in r0 for an empty range,
+/// or the final element destructor's return otherwise; this port preserves that
+/// incidental result.
+///
+/// Deliberate deviation: typed records preserve the 0x1c target stride on ARM
+/// while host pointer widening changes the native test stride.
+///
+/// # Safety
+/// `first` and `last` must delimit a valid contiguous range of initialized
+/// [`TwoStringRecord`] values, each valid for [`two_string_record_destroy`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn two_string_record_range_destroy(
+    mut unused: *mut u8,
+    mut first: *mut TwoStringRecord,
+    last: *mut TwoStringRecord,
+) -> *mut u8 {
+    while first != last {
+        unused = two_string_record_destroy(first).cast();
+        first = first.add(1);
+    }
+    unused
 }
 
 
@@ -7521,6 +7558,68 @@ mod tests {
             cxx_record_range_destroy_16(core::ptr::null_mut(), first, first.add(records.len()));
             assert_eq!(string_object_releases(), expected);
         }
+    }
+
+    #[test]
+    fn two_string_record_range_destroy_empty_preserves_unused_argument() {
+        let unused = 0x1234usize as *mut u8;
+        let returned = unsafe {
+            two_string_record_range_destroy(
+                unused,
+                core::ptr::null_mut(),
+                core::ptr::null_mut(),
+            )
+        };
+        assert_eq!(returned, unused);
+    }
+
+    #[test]
+    fn two_string_record_range_destroy_visits_records_in_reverse_member_order() {
+        let _guard = record_string_object_releases();
+        let mut records = [
+            TwoStringRecord {
+                words: [1, 2, 3],
+                first: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x11usize as *mut u8,
+                },
+                second: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x12usize as *mut u8,
+                },
+            },
+            TwoStringRecord {
+                words: [4, 5, 6],
+                first: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x21usize as *mut u8,
+                },
+                second: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: 0x22usize as *mut u8,
+                },
+            },
+        ];
+        let first = records.as_mut_ptr();
+        unsafe {
+            let expected = [
+                core::ptr::addr_of_mut!((*first).second) as usize,
+                core::ptr::addr_of_mut!((*first).first) as usize,
+                core::ptr::addr_of_mut!((*first.add(1)).second) as usize,
+                core::ptr::addr_of_mut!((*first.add(1)).first) as usize,
+            ];
+            assert_eq!(
+                two_string_record_range_destroy(
+                    core::ptr::null_mut(),
+                    first,
+                    first.add(records.len()),
+                ),
+                first.add(1).cast(),
+            );
+            assert_eq!(string_object_releases(), expected);
+        }
+        assert_eq!(records[0].words, [1, 2, 3]);
+        assert_eq!(records[1].words, [4, 5, 6]);
     }
 
 
