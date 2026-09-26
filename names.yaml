@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd6c8
+    ghidra: FUN_083dd6c8
+    name: list_node_pool_list_init
+    size: 72
+    sig: "ListNodePoolList *list_node_pool_list_init(ListNodePoolList *list)"
+    module: cxx/list_node_pool_list_init
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x00": chunks
+      "list+0x04": free
+      "list+0x08": next
+      "list+0x0c": end
+      "list+0x10": sentinel
+      "list+0x14": state
+      FUN_083dd4cc: list_node_pool_acquire
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent:
+      0x083dd6c8..0x083dd710, 18 A32 words ending pop {r4,pc}; 0x083dd710
+      starts the next function with push {r4,r5,r6,lr}. It has one
+      unconditional outgoing bl to the unported list_node_pool_acquire at
+      0x083dd4cc, no predicated bl, and two inbound plain bl calls at
+      0x082acbb0 and 0x082acbc8. The constructor clears six target words,
+      acquires one node with single=1, then uses it as a self-linked empty
+      intrusive-list sentinel. The unported call is a volatile host-test seam;
+      target builds call the verified firmware address.
   - address: 0x083dd78c
     ghidra: FUN_083dd78c
     name: word_list_node_pool_acquire

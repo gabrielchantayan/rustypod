@@ -2017,6 +2017,10 @@ pub mod hints {
     // 0xde00_0000: dedicated to cxx/word_list_node_pool_acquire's target-width
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const WORD_LIST_NODE_POOL_ACQUIRE: usize = 0xde00_0000;
+    // 0xdf00_0000: dedicated to cxx/list_node_pool_list_init's target-width
+    // list-owner and sentinel fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const LIST_NODE_POOL_LIST_INIT: usize = 0xdf00_0000;
     // 0x3200_0000: dedicated to cxx/red_black_tree_payload_24_node_pool_acquire's
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
