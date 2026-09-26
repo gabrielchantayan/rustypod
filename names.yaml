@@ -148266,3 +148266,27 @@ functions:
       a fixture to verify the ABI and wrapping result. match.py reports the
       expected frame, literal-pool BLX target, and result padding differences
       while preserving the copied key pair, retail call, and +0x14 return.
+
+  - address: 0x083daf6c
+    ghidra: FUN_083daf6c
+    name: tree_lookup_pair_node_payload_slot
+    size: 64
+    sig: "u32 tree_lookup_pair_node_payload_slot(void *tree, const u32 *key_pair)"
+    module: cxx/tree_lookup_pair_node_payload_slot
+    status: ported
+    vars: {param_1/r0: tree, param_2/r1: key_pair, local_18: node, local_14: key_first, local_10: key_second}
+    renames:
+      FUN_083b7ba0: retail_tree_operation_083b7ba0
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: 16 ARM words from
+      push {lr} @ 0x083daf6c through pop {pc} @ 0x083dafa8; the next
+      separately linked function starts at 0x083dafac. Decoding the body
+      finds one outbound unconditional plain bl @ 0x083daf94 to
+      FUN_083b7ba0 and no predicated bl. Raw direct-call decoding finds two
+      inbound unconditional plain bl calls, at 0x08182c98 and 0x08182cc8,
+      and no predicated calls. The wrapper copies two target-width key words
+      and a zero word into a local key record, invokes the still-unported
+      tree operation, and returns the selected node's +0x18 payload slot.
+      Deliberate deviation: FUN_083b7ba0 has no established semantic identity,
+      so Rust keeps it as an address-verified target seam; host tests install
+      a fixture for its ABI.
