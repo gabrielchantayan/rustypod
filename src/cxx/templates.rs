@@ -6215,70 +6215,6 @@ pub unsafe extern "C" fn vector_fill_construct_n_elem12(
     }
 }
 
-/// Firmware load address of `FUN_083d7f2c`, the 0x20-byte element
-/// copy-construct helper [`vector_copy_construct_range_elem32`] calls once
-/// per element. Unported (its own StringObject copy-constructor chain
-/// 0x082773e0 and allocating callee 0x08266c70 are not ported either);
-/// dispatched through [`VECTOR_COPY_CONSTRUCT_ELEM32_OPS`].
-pub const VECTOR_COPY_CONSTRUCT_ELEM32_ADDRESS: usize = 0x083d_7f2c;
-
-/// Indirect dispatch for the one unported callee of
-/// [`vector_copy_construct_range_elem32`] (the
-/// [`VECTOR_PUSH_BACK_ELEM12_OPS`] pattern): host tests install a recording
-/// model; a later port of the helper replaces the default without touching
-/// this caller.
-#[derive(Clone, Copy)]
-pub struct VectorCopyConstructElem32Ops {
-    /// Helper 0x083d7f2c `(vector, output, source)`: copy-constructs the
-    /// 0x20-byte element at `source` into `output` (StringObject copy
-    /// constructor on the head, then the trailing fields), skipping all
-    /// construction when `output` is NULL. Its return value is unused by
-    /// the caller; `vector` is forwarded verbatim from the range
-    /// function's r3 although the observed helper never reads its r0
-    /// (its first instruction overwrites r0 with r1).
-    pub copy_construct: unsafe extern "C" fn(
-        vector: *mut VectorStorage,
-        output: *mut u8,
-        source: *const u8,
-    ),
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_copy_construct_elem32(
-    vector: *mut VectorStorage,
-    output: *mut u8,
-    source: *const u8,
-) {
-    let f: unsafe extern "C" fn(*mut VectorStorage, *mut u8, *const u8) =
-        core::mem::transmute(VECTOR_COPY_CONSTRUCT_ELEM32_ADDRESS);
-    f(vector, output, source)
-}
-
-/// Host default: inert — every test installs its own model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_copy_construct_elem32(
-    _vector: *mut VectorStorage,
-    _output: *mut u8,
-    _source: *const u8,
-) {
-}
-
-/// Wired default: the ROM address on target, a documented inert stub on
-/// host.
-pub const DEFAULT_VECTOR_COPY_CONSTRUCT_ELEM32_OPS: VectorCopyConstructElem32Ops =
-    VectorCopyConstructElem32Ops {
-        copy_construct: firmware_copy_construct_elem32,
-    };
-
-/// The active callee, read through `read_volatile` so LLVM cannot fold
-/// the indirect call to the default.
-pub static mut VECTOR_COPY_CONSTRUCT_ELEM32_OPS: VectorCopyConstructElem32Ops =
-    DEFAULT_VECTOR_COPY_CONSTRUCT_ELEM32_OPS;
-
-#[inline(always)]
-fn vector_copy_construct_elem32_ops() -> VectorCopyConstructElem32Ops {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VECTOR_COPY_CONSTRUCT_ELEM32_OPS)) }
-}
 
 /// vector_copy_construct_range_elem32 — original: `FUN_083e90f8` @
 /// 0x083e90f8 (64 bytes; extent 0x083e90f8..0x083e9138, the next function
@@ -6326,10 +6262,8 @@ fn vector_copy_construct_elem32_ops() -> VectorCopyConstructElem32Ops {
 ///
 /// # Deviations
 ///
-/// The element helper `FUN_083d7f2c` is unported and dispatches through
-/// [`VECTOR_COPY_CONSTRUCT_ELEM32_OPS`]: target builds transmute
-/// [`VECTOR_COPY_CONSTRUCT_ELEM32_ADDRESS`], the host default is inert and
-/// every test installs a recording model.
+/// The element helper is now the direct port
+/// [`crate::cxx::vector_copy_construct_elem32::vector_copy_construct_elem32`].
 ///
 /// # Safety
 /// `first` and `last` must delimit a whole number of contiguous readable
@@ -6345,7 +6279,7 @@ pub unsafe extern "C" fn vector_copy_construct_range_elem32(
     vector: *mut VectorStorage,
 ) -> *mut u8 {
     while first != last {
-        (vector_copy_construct_elem32_ops().copy_construct)(vector, output, first);
+        crate::cxx::vector_copy_construct_elem32::vector_copy_construct_elem32(vector.cast(), output, first);
         first = first.wrapping_add(0x20);
         output = output.wrapping_add(0x20);
     }
@@ -6409,10 +6343,8 @@ pub unsafe extern "C" fn vector_fill_construct_n_elem28(
 ///
 /// # Deviations
 ///
-/// The unported element helper dispatches through
-/// [`VECTOR_COPY_CONSTRUCT_ELEM32_OPS`], as in
-/// [`vector_copy_construct_range_elem32`]: target builds call its firmware
-/// address and the host default is inert.
+/// The ported element helper is invoked directly, as in
+/// [`vector_copy_construct_range_elem32`].
 ///
 /// # Safety
 ///
@@ -6428,7 +6360,7 @@ pub unsafe extern "C" fn vector_fill_construct_n_elem32(
     vector: *mut VectorStorage,
 ) {
     while count != 0 {
-        (vector_copy_construct_elem32_ops().copy_construct)(vector, output, source);
+        crate::cxx::vector_copy_construct_elem32::vector_copy_construct_elem32(vector.cast(), output, source);
         count -= 1;
         output = output.wrapping_add(0x20);
     }
@@ -12483,157 +12415,7 @@ mod tests {
         );
     }
 
-    static COPY_CONSTRUCT_ELEM32_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    struct CopyConstructElem32Guard {
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for CopyConstructElem32Guard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(VECTOR_COPY_CONSTRUCT_ELEM32_OPS)
-                    .write_volatile(DEFAULT_VECTOR_COPY_CONSTRUCT_ELEM32_OPS);
-            }
-        }
-    }
-
-    fn copy_construct_elem32_guard() -> CopyConstructElem32Guard {
-        let lock = COPY_CONSTRUCT_ELEM32_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        CopyConstructElem32Guard { _lock: lock }
-    }
-
-    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    struct Elem32CopyConstruct {
-        vector: usize,
-        output: usize,
-        source: usize,
-    }
-
-    static mut ELEM32_COPY_CONSTRUCT_CALLS: Vec<Elem32CopyConstruct> = Vec::new();
-
-    unsafe extern "C" fn recording_copy_construct_elem32(
-        vector: *mut VectorStorage,
-        output: *mut u8,
-        source: *const u8,
-    ) {
-        (*core::ptr::addr_of_mut!(ELEM32_COPY_CONSTRUCT_CALLS)).push(Elem32CopyConstruct {
-            vector: vector as usize,
-            output: output as usize,
-            source: source as usize,
-        });
-    }
-
-    unsafe fn install_recording_copy_construct_elem32() {
-        (*core::ptr::addr_of_mut!(ELEM32_COPY_CONSTRUCT_CALLS)).clear();
-        core::ptr::addr_of_mut!(VECTOR_COPY_CONSTRUCT_ELEM32_OPS)
-            .write_volatile(VectorCopyConstructElem32Ops {
-                copy_construct: recording_copy_construct_elem32,
-            });
-    }
-
-    fn elem32_copy_construct_calls() -> Vec<Elem32CopyConstruct> {
-        unsafe { (*core::ptr::addr_of!(ELEM32_COPY_CONSTRUCT_CALLS)).clone() }
-    }
-
-    #[test]
-    fn copy_construct_range_elem32_visits_each_element_and_returns_advanced_output() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-        let source = [0x5au8; 3 * 0x20];
-        let mut destination = [0xa5u8; 3 * 0x20 + 0x20];
-        let mut vector = VectorStorage {
-            begin: 0x1111usize as *mut u8,
-            end: 0x2222usize as *mut u8,
-            end_of_storage: 0x3333usize as *mut u8,
-        };
-        let first = source.as_ptr();
-        let output = destination.as_mut_ptr();
-
-        let returned = unsafe {
-            vector_copy_construct_range_elem32(
-                first,
-                first.add(3 * 0x20),
-                output,
-                core::ptr::addr_of_mut!(vector),
-            )
-        };
-
-        assert_eq!(
-            elem32_copy_construct_calls(),
-            std::vec![
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: output as usize,
-                    source: first as usize,
-                },
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: unsafe { output.add(0x20) } as usize,
-                    source: unsafe { first.add(0x20) } as usize,
-                },
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: unsafe { output.add(2 * 0x20) } as usize,
-                    source: unsafe { first.add(2 * 0x20) } as usize,
-                },
-            ],
-            "one helper call per 0x20-byte element, cursors striding together"
-        );
-        assert_eq!(returned, unsafe { output.add(3 * 0x20) });
-        assert!(
-            destination.iter().all(|byte| *byte == 0xa5),
-            "the loop itself never writes the destination (construction is the helper's)"
-        );
-    }
-
-    #[test]
-    fn copy_construct_range_elem32_empty_range_returns_output_without_calls() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-        let source = [0x5au8; 0x20];
-        let mut destination = [0xa5u8; 0x20];
-        let output = destination.as_mut_ptr();
-
-        let returned = unsafe {
-            vector_copy_construct_range_elem32(
-                source.as_ptr(),
-                source.as_ptr(),
-                output,
-                core::ptr::null_mut(),
-            )
-        };
-
-        assert_eq!(returned, output);
-        assert!(elem32_copy_construct_calls().is_empty());
-    }
-
-    #[test]
-    fn copy_construct_range_elem32_null_output_still_dispatches_and_advances() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-        // The original guards nothing: a NULL output cursor is handed to
-        // the helper (whose own `movs r0, r1; beq` skips construction),
-        // and the cursor still advances to 0x20. `first`/`last` are dead
-        // cursors here — the recording model never dereferences them.
-        let returned = unsafe {
-            vector_copy_construct_range_elem32(
-                core::ptr::null(),
-                0x20usize as *const u8,
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
-            )
-        };
-
-        assert_eq!(returned, 0x20usize as *mut u8, "skipped element still advances output");
-        assert_eq!(
-            elem32_copy_construct_calls(),
-            std::vec![Elem32CopyConstruct { vector: 0, output: 0, source: 0 }],
-            "the NULL-output guard lives in the helper, not the loop"
-        );
-    }
     #[test]
     fn fill_construct_n_elem28_reuses_source_and_strides_output() {
         let _guard = copy_construct_elem28_guard();
@@ -12716,92 +12498,6 @@ mod tests {
             std::vec![
                 Elem28CopyConstruct { vector: 0, output: 0, source: 0x1234 },
                 Elem28CopyConstruct { vector: 0, output: 0x1c, source: 0x1234 },
-            ],
-            "the NULL-output guard remains the helper's responsibility"
-        );
-    }
-    #[test]
-    fn fill_construct_n_elem32_reuses_source_and_strides_output() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-        let source = [0x5au8; 0x20];
-        let mut destination = [0xa5u8; 3 * 0x20];
-        let mut vector = VectorStorage {
-            begin: core::ptr::null_mut(),
-            end: core::ptr::null_mut(),
-            end_of_storage: core::ptr::null_mut(),
-        };
-        let output = destination.as_mut_ptr();
-
-        unsafe {
-            vector_fill_construct_n_elem32(
-                output,
-                3,
-                source.as_ptr(),
-                core::ptr::addr_of_mut!(vector),
-            );
-        }
-
-        assert_eq!(
-            elem32_copy_construct_calls(),
-            std::vec![
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: output as usize,
-                    source: source.as_ptr() as usize,
-                },
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: unsafe { output.add(0x20) } as usize,
-                    source: source.as_ptr() as usize,
-                },
-                Elem32CopyConstruct {
-                    vector: core::ptr::addr_of_mut!(vector) as usize,
-                    output: unsafe { output.add(2 * 0x20) } as usize,
-                    source: source.as_ptr() as usize,
-                },
-            ],
-            "the source is reused while only output advances"
-        );
-        assert!(destination.iter().all(|byte| *byte == 0xa5));
-    }
-
-    #[test]
-    fn fill_construct_n_elem32_zero_count_does_not_dispatch() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-
-        unsafe {
-            vector_fill_construct_n_elem32(
-                core::ptr::null_mut(),
-                0,
-                core::ptr::null(),
-                core::ptr::null_mut(),
-            );
-        }
-
-        assert!(elem32_copy_construct_calls().is_empty());
-    }
-
-    #[test]
-    fn fill_construct_n_elem32_null_output_still_dispatches() {
-        let _guard = copy_construct_elem32_guard();
-        unsafe { install_recording_copy_construct_elem32() };
-
-        unsafe {
-            vector_fill_construct_n_elem32(
-                core::ptr::null_mut(),
-                2,
-                0x1234usize as *const u8,
-                core::ptr::null_mut(),
-            );
-        }
-
-        assert_eq!(
-            elem32_copy_construct_calls(),
-            std::vec![
-                Elem32CopyConstruct { vector: 0, output: 0, source: 0x1234 },
-                Elem32CopyConstruct { vector: 0, output: 0x20, source: 0x1234 },
             ],
             "the NULL-output guard remains the helper's responsibility"
         );

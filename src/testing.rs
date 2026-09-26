@@ -39,6 +39,9 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x6c00_0000: dedicated to cxx/vector_copy_construct_elem32's
+    // target-width source, destination, and allocation fixture; mappings never unmap.
+    pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;
     // 0x7010_0000: dedicated to crypto/sha1_managed_context_create's
     // target-width SHA-1 backing context fixture; mappings never unmap.
     pub const SHA1_MANAGED_CONTEXT_CREATE: usize = 0x7010_0000;

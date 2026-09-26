@@ -43007,6 +43007,34 @@ functions:
       into destination, then released; zero capacity copies the shared empty
       representation. The temporary ensures destination owns its bytes rather
       than aliases the strstreambuf buffer. No deliberate deviations.
+  - address: 0x083d7f2c
+    ghidra: FUN_083d7f2c
+    name: vector_copy_construct_elem32
+    size: 192
+    sig: "void vector_copy_construct_elem32(VectorStorage *vector, u8 *output, const u8 *source)"
+    module: cxx/vector_copy_construct_elem32
+    status: ported
+    renames:
+      FUN_082773e0: string_object_copy_construct
+      FUN_08266c70: operator_new_checked
+      thunk_FUN_083e8ecc: vector_copy_range_u8
+    notes: >-
+      Raw A32 establishes 0x083d7f2c..0x083d7fec exactly: the final
+      pop {r4-r8,pc} is at 0x083d7fe8 and 0x083d7fec begins the next
+      function. Ghidra's 192-byte extent is correct but its two-BL report
+      misses the veneer: the body has three unconditional plain BLs
+      (0x083d7f44 string_object_copy_construct, 0x083d7f98
+      operator_new_checked, and 0x083d7fac thunk_FUN_083e8ecc) and no
+      predicated BLs. Two direct callers were independently identified:
+      vector_copy_construct_range_elem32 and vector_fill_construct_n_elem32.
+      It copy-constructs the target-width StringObject at +0, copies the
+      word at +8, allocates max(source vector length, 0x20) bytes for the
+      +0x0c byte vector, copies its range, rebuilds its end/capacity fields,
+      then copies bytes +0x18/+0x19 and word +0x1c. Deliberate deviations:
+      the existing StringObject constructor test seam remains; host tests
+      also use a target-width allocation seam, while target builds call the
+      ported operator_new_checked directly. vector_copy_range_u8 replaces
+      the original four-byte veneer with its verified target body.
   - address: 0x083d7ff8
     ghidra: FUN_083d7ff8
     name: cxx_allocator_deallocate
