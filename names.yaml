@@ -54956,6 +54956,28 @@ functions:
       alias so this independently hookable byte-identical instantiation
       cannot be folded into the canonical deque_iter_assign; no other
       deliberate deviations.
+  - address: 0x083da2b4
+    ghidra: FUN_083da2b4
+    name: deque_iter_assign_alias_a2b4
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_a2b4(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1: dst
+      param_2: src
+    notes: >-
+      Raw osos.dec fixes the 36-byte extent at 0x083da2b4..0x083da2d7:
+      four forward aligned u32 loads from src and stores to dst, then bx lr.
+      The following separately linked deque segment-capacity member starts at
+      0x083da2d8 with mov r0,#0x20; bx lr. Whole-image ARM B/BL decoding
+      finds exactly two inbound unconditional plain bl calls (0x08261bb4 and
+      0x08261bcc), no predicated bl calls, and no internal calls. It is
+      byte-identical to deque_iter_assign at 0x083da458; its predecessor
+      capacity member and callers copying iterator temporaries identify the
+      16-byte deque iterator layout as cur, seg_base, seg_end, seg_slot.
+      The Rust export and link section deliberately retain this independently
+      hookable alias rather than allowing identical-code folding.
   - address: 0x083da34c
     ghidra: FUN_083da34c
     name: deque_iter_assign_alias_a34c

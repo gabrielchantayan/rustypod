@@ -1316,6 +1316,38 @@ pub unsafe extern "C" fn deque_iter_assign_alias_a34c(
     }
     dst
 }
+/// deque_iter_assign_alias_a2b4 — original: `FUN_083da2b4` @ 0x083da2b4
+/// (36 bytes, `0x083da2b4..0x083da2d7`; two plain `bl` call sites and zero
+/// predicated `bl` call sites).
+///
+/// Raw ARM is four forward aligned `u32` loads from `src` and stores to `dst`,
+/// followed by `bx lr`; the adjacent `mov r0,#0x20; bx lr` at 0x083da2d8
+/// establishes the true extent. The only callers, 0x08261bb4 and 0x08261bcc,
+/// copy deque-iterator temporaries. This is therefore a byte-identical
+/// `deque_iter_assign` instantiation: it copies `cur`, `seg_base`, `seg_end`,
+/// and `seg_slot`, then returns `dst` unchanged.
+///
+/// Deliberate deviation: this separately exported text section prevents LLVM
+/// from folding this independently hookable target into another identical
+/// deque-iterator assignment.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; retailOS
+/// performs a forward word copy with no NULL or overlap handling.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_a2b4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_a2b4(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
 /// deque_iter_assign_alias_a3b8 — original: `FUN_083da3b8` @ 0x083da3b8
 /// (36 bytes, `0x083da3b8..0x083da3dc`; Ghidra reports 36).
 ///
@@ -7864,6 +7896,22 @@ mod tests {
             assert_eq!(dst[4], 0xaaaa_aaaa, "nothing past the 16 bytes");
         }
     }
+    #[test]
+    fn iter_assign_alias_a2b4_copies_words_returns_destination_and_is_forward() {
+        unsafe {
+            let src = [0u32, 0xffff_ffff, 0x1357_9bdf, 0x2468_ace0];
+            let mut dst = [0xaaaa_aaaa; 5];
+            let returned = deque_iter_assign_alias_a2b4(dst.as_mut_ptr(), src.as_ptr());
+            assert_eq!(returned, dst.as_mut_ptr());
+            assert_eq!(&dst[..4], &src);
+            assert_eq!(dst[4], 0xaaaa_aaaa, "does not write past 16 bytes");
+
+            let mut overlapping = [1u32, 2, 3, 4, 5];
+            deque_iter_assign_alias_a2b4(overlapping.as_mut_ptr().add(1), overlapping.as_ptr());
+            assert_eq!(overlapping, [1, 1, 1, 1, 1]);
+        }
+    }
+
     #[test]
     fn iter_assign_alias_c774_is_a_forward_word_copy() {
         unsafe {
