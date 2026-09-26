@@ -69,6 +69,7 @@ pub mod byte_key_map_lower_bound_value;
 pub mod byte_key_word_map;
 pub mod character_class;
 pub mod clock_source_base_construct;
+pub mod u32_key_tree_count;
 pub mod clock_source_construct;
 pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;
