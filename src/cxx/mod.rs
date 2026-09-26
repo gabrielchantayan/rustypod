@@ -8,6 +8,7 @@ pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
 pub mod container_first_node;
 pub mod container_first_node_083dbeb4;
+pub mod container_first_node_083dbdd4;
 pub mod container_first_node_083dbde8;
 pub mod node_pool_construct;
 pub mod tagged_buffer_range_copy_construct;
