@@ -149158,3 +149158,31 @@ functions:
       range. Both unported helpers are verified-address seams: target builds
       call retail addresses directly and the host fixtures verify their
       target-word ABI.
+
+  # --- U32-key red-black tree equal-range count ---
+  - address: 0x083d7178
+    ghidra: FUN_083d7178
+    name: u32_key_tree_equal_range_count
+    size: 96
+    sig: "u32 u32_key_tree_equal_range_count(void *tree, const u32 *key)"
+    module: cxx/u32_key_tree_equal_range_count
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      local_1c/local_18: equal_range
+      local_14: count
+      FUN_083b7ff0: u32_key_tree_equal_range
+      FUN_083e7a40: red_black_tree_range_count
+    notes: >-
+      Raw words e1a02001 e52de004 e24dd01c e1a01000 e28d0004 ebff8397
+      e59d0004 e3a03000 e58d0010 e59d0008 e28d1018 e58d000c e59d0010
+      e28d200c e58d0014 e59d000c e58d300c e58d0018 e28d0014 e58d3010
+      eb00421c e59d000c e28dd01c e49df004 establish the exact 96-byte A32
+      body at 0x083d7178..0x083d71d4; the next separately linked function
+      starts at 0x083d71d8. It has two outgoing unconditional plain bl calls,
+      to equal-range at 0x083b7ff0 and range-count at 0x083e7a40, with zero
+      predicated bl instructions. It obtains the equal range for a u32 key,
+      then counts the resulting half-open iterator range. Stack temporaries
+      are Rust locals; the unported helpers remain verified-address target
+      dispatches and host-test seams.
