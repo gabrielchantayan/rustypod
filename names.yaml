@@ -43007,6 +43007,32 @@ functions:
       into destination, then released; zero capacity copies the shared empty
       representation. The temporary ensures destination owns its bytes rather
       than aliases the strstreambuf buffer. No deliberate deviations.
+  - address: 0x083d7ee8
+    ghidra: FUN_083d7ee8
+    name: three_word_string_pair_copy_construct
+    size: 68
+    sig: "ThreeWordStringPair *three_word_string_pair_copy_construct(void *context, ThreeWordStringPair *destination, const ThreeWordStringPair *source)"
+    module: cxx/three_word_string_pair_copy_construct
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: destination
+      param_3/r2: source
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw osos.dec words establish the exact 68-byte A32 body
+      0x083d7ee8..0x083d7f2c: the next independently linked function starts
+      with push {r2,r3,r4,r5,r6,r7,r8,lr} at 0x083d7f2c. Whole-image A32
+      decoding finds two inbound unconditional plain bl instructions
+      (0x083e90dc and 0x083e964c) and zero inbound predicated bl forms. The
+      body has one plain bl to string_object_copy_construct @ 0x082773e0,
+      followed by an unconditional tail branch to the same constructor. It
+      ignores context, returns NULL before dereferencing source when destination
+      is NULL, copies the three words at +0x00..+0x08, then copy-constructs
+      StringObject subobjects at +0x0c and +0x14. The tail constructor return
+      is adjusted back eight bytes to return destination. Deliberate deviations:
+      none; repr(C) fields preserve target order without applying 32-bit
+      offsets to widened host pointers.
   - address: 0x083d7f2c
     ghidra: FUN_083d7f2c
     name: vector_copy_construct_elem32
