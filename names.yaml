@@ -15498,6 +15498,31 @@ functions:
       and zero tail b forms. This is one of the 17 byte-identical
       deque-template copies, so the canonical 0x083d9ec0 export deliberately
       serves this address instead of adding an indistinguishable Rust body.
+  - address: 0x083da088
+    ghidra: FUN_083da088
+    name: deque_iter_advance_elem4
+    size: 168
+    sig: "DequeIter *deque_iter_advance_elem4(DequeIter *iter, i32 offset)"
+    module: heap/block_deque
+    status: ported
+    renames:
+      param_1: iter
+      param_2: offset
+      iVar5: total
+      iVar2: segment_delta
+      piVar3: slot
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x083da088..0x083da12f; the
+      next real function, deque_iter_increment_elem4, begins at 0x083da130.
+      An independent aligned ARM B/BL decode finds two incoming unconditional
+      plain bl sites (0x083d6fc8 and 0x083d6ff4), no incoming predicated bl
+      forms, and seven outgoing unconditional plain bl instructions: five to
+      deque_seg_capacity at 0x083d9fcc and two to __rt_udiv at 0x08036f14.
+      The iterator advances signed four-byte-element offsets by floor-dividing
+      the total segment-relative index by 0x20, relocating the map slot when
+      needed, then selecting the non-negative in-segment remainder. Rust
+      collapses the repeated pure capacity call to one canonical
+      deque_seg_capacity call and invokes the ported __rt_udiv seam.
   - address: 0x083d9fcc
     ghidra: FUN_083d9fcc
     name: deque_seg_capacity
