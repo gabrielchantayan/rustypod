@@ -16,6 +16,7 @@ pub mod tagged_node_pool_construct;
 pub mod tagged_buffer_range_copy_construct;
 pub mod tagged_bit_set_insert_utf8;
 pub mod basic_ostream_construct;
+pub mod ostream_write_padding;
 pub mod generic_descriptor_lookup;
 pub mod descriptor_action_dispatch;
 pub mod descriptor_lookup_exact_or_tail;
