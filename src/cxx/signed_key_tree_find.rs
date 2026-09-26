@@ -98,6 +98,69 @@ pub unsafe extern "C" fn signed_key_tree_find_node_copy(
         out_node.write(candidate);
     }
 }
+/// signed_key_tree_find_node_f908_copy — original: `FUN_083dba0c` @
+/// `0x083dba0c` (168 bytes, exactly `0x083dba0c..0x083dbab0`; the next
+/// separately linked function begins at `0x083dbab4`).
+///
+/// Raw A32 decoding finds two inbound unconditional plain `bl` call sites
+/// (0x081bea14 and 0x0839bc78), no predicated inbound calls, and four
+/// unconditional body `bl` instructions: `less_signed` @ 0x083d7580 twice,
+/// `equal_deref_f908_copy` @ 0x083cf908, and `node_key_accessor` @
+/// 0x083b6b1c. It is the signed lower-bound walk: select the least node not
+/// less than `key`, then return it only when `key` is not less than its key;
+/// otherwise write the header sentinel through `out_node`.
+///
+/// Deliberate deviations: the two byte-identical leaf helpers are expressed
+/// as direct candidate/header comparison and the node key's +0x10 word; the
+/// signed comparator remains the established Rust seam. Dead ABI slack
+/// arguments and stack scratch stores are omitted.
+///
+/// # Safety
+///
+/// `tree`, `key`, and `out_node` must meet
+/// [`signed_key_tree_find_node_copy`]'s target-layout pointer requirements.
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.signed_key_tree_find_node_f908_copy"
+)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_find_node_f908_copy(
+    out_node: *mut u32,
+    tree: *const SignedKeyTree,
+    key: *const i32,
+) {
+    let header = addr_of!((*tree).header).read();
+    let mut node = (header as usize as *const u32).add(1).read();
+    let mut candidate = header;
+    let comparator = tree.cast::<u8>().add(0x19);
+    while node != 0 {
+        let node_words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(
+            comparator,
+            node_words.add(4).cast::<i32>(),
+            key,
+        ) != 0
+        {
+            node = node_words.add(3).read();
+        } else {
+            candidate = node;
+            node = node_words.add(2).read();
+        }
+    }
+    if candidate == header
+        || crate::cxx::templates::less_signed(
+            comparator,
+            key,
+            (candidate as usize as *const i32).add(4),
+        ) != 0
+    {
+        out_node.write(header);
+    } else {
+        out_node.write(candidate);
+    }
+}
+
 
 /// signed_key_tree_find_value — original: `FUN_0839bccc` @ `0x0839bccc`
 /// (84 bytes; 8 direct, unconditional `bl` call sites).
@@ -323,7 +386,7 @@ mod tests {
 
 
     #[test]
-    fn find_node_copy_rejects_lower_bound_candidates_with_different_keys() {
+    fn find_node_f908_copy_rejects_lower_bound_candidates_with_different_keys() {
         let Some(slab) = crate::testing::try_map_u32_slab(
             crate::testing::hints::SIGNED_KEY_TREE_LOWER_BOUND,
             0x1000,
@@ -350,7 +413,7 @@ mod tests {
         let tree = SignedKeyTree { opaque_prefix: [0; 4], header };
         let find = |key: i32| {
             let mut selected = 0;
-            unsafe { signed_key_tree_find_node_copy(&mut selected, &tree, &key) };
+            unsafe { signed_key_tree_find_node_f908_copy(&mut selected, &tree, &key) };
             selected
         };
 
