@@ -60529,6 +60529,37 @@ functions:
       the original. Pointers remain 32-bit target words to preserve the
       28-byte layout on host builds.
 
+  - address: 0x083db32c
+    ghidra: FUN_083db32c
+    name: string_vector_map_lookup_or_insert
+    size: 160
+    sig: "u8 *string_vector_map_lookup_or_insert(void *tree, char *const *source)"
+    module: cxx/string_vector_map_lookup_or_insert
+    status: ported
+    vars: {param_1/r0: tree, param_2/r1: source, r4: key, r5: copied_string, r6: source, r7: tree}
+    renames:
+      FUN_083e5aec: opaque_vector_initialize
+      FUN_08197ab8: opaque_key_construct
+      FUN_08197b90: opaque_query_construct
+      FUN_083c1d1c: opaque_tree_lookup_or_insert
+      FUN_08197c28: opaque_query_destroy
+      FUN_083e5b88: opaque_vector_destroy
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 160-byte extent from the push at
+      0x083db32c through the literal word at 0x083db3cc; the next separately
+      linked function starts at 0x083db3d0. Decoding every aligned ARM
+      B/BL-immediate word finds two inbound direct calls, both unconditional
+      plain bl (0x080e40f0, 0x082aaf8c), and no predicated forms. The body
+      has nine unconditional plain bl calls and no predicated bl: it
+      initializes a three-word vector, constructs a 20-byte key with the
+      zero literal at 0x083db3cc, COW-copies source, constructs a query
+      tail, performs the tree lookup-or-insert, then destroys the query,
+      copied string, key, and vector in that order. It returns result.node +
+      0x14. The composite helper types are not established, so their Rust
+      operation slots retain only verified behavior and ABI; the existing COW
+      string copy/release ports are used directly. No algorithmic deviations.
   - address: 0x083db510
     ghidra: FUN_083db510
     name: string_value_map_lookup_or_insert
