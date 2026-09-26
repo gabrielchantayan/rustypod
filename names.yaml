@@ -14946,6 +14946,32 @@ functions:
       0x083ddcc4). The Rust port reads BlockDeque::count directly,
       target and correct under the host's wider pointer layout.
 
+  - address: 0x083dee30
+    ghidra: FUN_083dee30
+    name: deque_construct_elem4_alias_ee30
+    size: 64
+    sig: "DequeHead *deque_construct_elem4_alias_ee30(DequeHead *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    renames:
+      FUN_083da26c: deque_iter_init_elem4_alias_a26c
+      param_1: dq
+    notes: >-
+      Raw ARM establishes the exact 64-byte body from 0x083dee30 through
+      `pop {r0,r1,r2,r3,r4,r5,pc}` at 0x083dee6c; the next separately linked
+      helper begins at 0x083dee70. It creates a four-word stack iterator via
+      deque_iter_init_elem4_alias_a26c @ 0x083da26c with NULL cur and slot,
+      copies it to end (+0x10) then begin (+0x00), and clears count (+0x20)
+      and map (+0x24). The pop restores the saved dq argument into r0, so the
+      function returns dq. Decoding every ARM B/BL word in osos.dec finds two
+      incoming unconditional plain bl forms at 0x081559e4 and 0x081559f0,
+      zero predicated bl forms, zero tail b forms, and one outgoing plain bl
+      at 0x083dee48 to 0x083da26c. The Rust port deliberately replaces the
+      deterministic NULL initializer call and stack temporary with
+      DequeIter::NULL, while preserving the returned dq and untouched trailing
+      map-capacity word.
+
   - address: 0x083df154
     ghidra: FUN_083df154
     name: deque_construct_elem4_alias_f154
