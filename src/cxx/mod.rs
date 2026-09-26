@@ -13,6 +13,7 @@ pub mod generic_descriptor_lookup;
 pub mod descriptor_action_dispatch;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod tree_lookup_result_write;
+pub mod tree_lookup_result_write_cc874;
 pub mod string_record;
 pub mod cxx_string_range_assign;
 pub mod cxx_string_pair_range_assign;
