@@ -77088,6 +77088,33 @@ functions:
       src/cxx/templates.rs::less_unsigned_byte_edges /
       less_unsigned_byte_matches_reference_exhaustively.
 
+  - address: 0x083d7248
+    ghidra: FUN_083d7248
+    name: byte_key_tree_find_predecessor
+    size: 180
+    sig: "u32 *byte_key_tree_find_predecessor(const void *tree, const u8 *key)"
+    module: cxx/byte_key_tree_find_predecessor
+    status: ported
+    renames:
+      param_1: tree
+      param_2: key
+      iVar5: candidate
+      iVar2: node
+    notes: >-
+      Raw osos.dec decodes from 0x083d7248 through the return at 0x083d72f8;
+      0x083d72fc is the next separately linked entry, so the true extent is
+      180 bytes. It walks the byte-key red-black tree rooted at
+      `*(u32 *)(*(u32 *)(tree + 0x10) + 4)`: node.key at +0x10 less than key
+      selects node +0x8 and records that node as the candidate; otherwise it
+      selects +0xc. It returns the greatest key strictly less than key, or the
+      header sentinel if no such node exists. The final key/candidate comparison
+      is required because the sentinel starts as the candidate. The body has four plain BL
+      instructions (two less_unsigned_byte_alias_73ec calls, equal_deref at
+      0x083cf788, and the verified node +0x10 accessor at 0x083b6a54), with
+      no predicated BL. The two inbound plain BL sites are 0x0829e31c and
+      0x0829e330 in FUN_0829e310; none is predicated. Target pointers remain
+      u32 words to preserve offsets on the 64-bit host. The accessor is
+      inlined as its verified add-16 body; no other deliberate deviation.
   - address: 0x083d73d4
     ghidra: FUN_083d73d4
     name: less_unsigned_byte_alias_73d4
