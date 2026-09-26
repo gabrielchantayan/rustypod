@@ -148207,3 +148207,33 @@ functions:
       match.py reports the expected frame, helper-leaf, and local-call-target
       differences (exit 1) while retaining lower-bound traversal and final
       candidate rejection.
+  - address: 0x083db164
+    ghidra: FUN_083db164
+    name: tree_lookup_node_counter
+    size: 56
+    sig: "u32 tree_lookup_node_counter(void *tree, const u32 *key_slot)"
+    module: cxx/tree_lookup_node_counter
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key_slot
+      local_c: node
+      local_14: copied_key_pair
+      FUN_083bc5e0: retail_tree_operation
+    notes: >-
+      Raw osos.dec words e52de004 e5911000 e24dd014 e3a02000 e98d0006
+      e1a01000 e28d000c e28d2004 ebff8515 e59d000c e58d0000 e28dd014
+      e2800014 e49df004 establish the exact 56-byte A32 extent
+      0x083db164..0x083db19c; the push at 0x083db19c starts the next real
+      function. The body has one unconditional plain bl, at 0x083db184 to the
+      verified but semantically unidentified FUN_083bc5e0/0x083bc5e0, and no
+      predicated bl. Full-image raw branch decoding finds two inbound
+      unconditional plain bl sites, 0x08124ba8 and 0x08124bc0, with no
+      predicated inbound calls. It copies the caller key word and a zero word
+      into a local key pair, gives that pair and the tree to the retail
+      operation, then returns the resulting node target address plus 0x14 with
+      u32 wrapping. The unported callee is deliberately an address-verified
+      seam: target builds call its fixed address directly and host tests install
+      a fixture to verify the ABI and wrapping result. match.py reports the
+      expected frame, literal-pool BLX target, and result padding differences
+      while preserving the copied key pair, retail call, and +0x14 return.

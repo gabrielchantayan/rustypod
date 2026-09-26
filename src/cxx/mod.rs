@@ -22,6 +22,7 @@ pub mod descriptor_lookup_exact_or_tail;
 pub mod tree_lookup_result_write;
 pub mod tree_lookup_result_write_cc874;
 pub mod refcounted_key_tree_lookup_value;
+pub mod tree_lookup_node_counter;
 pub mod tree_lookup_node_payload_slot;
 pub mod red_black_tree_payload_8_construct;
 pub mod string_record;
