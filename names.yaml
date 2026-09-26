@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dc0a4
+    ghidra: FUN_083dc0a4
+    name: tree_lookup_result_write
+    size: 40
+    sig: "void tree_lookup_result_write(TreeLookupResult *result, void *tree, const void *key)"
+    module: cxx/tree_lookup_result_write
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: tree
+      param_3/r2: key
+      "result+0x00": node
+      "result+0x04": matched
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent: ten A32 words from
+      push {r1,r2,r3,r4,r5,lr} at 0x083dc0a4 through
+      pop {r1,r2,r3,r4,r5,pc} at 0x083dc0c8; 0x083dc0cc begins the next real
+      function. The body has one outgoing unconditional plain bl, to the
+      unported retail tree lookup at 0x083cf2b8, and zero predicated bl
+      instructions. Whole-image A32 decoding finds two inbound bl sites:
+      unconditional at 0x081853a0 and condition-ne at 0x081853e4. It invokes
+      that lookup into a stack-local {u32 node, u8 matched} result and copies
+      exactly those five bytes to result. Deliberate deviation: host builds
+      use an injectable lookup seam; target builds invoke 0x083cf2b8 directly.
   - address: 0x083dc1d8
     ghidra: FUN_083dc1d8
     name: list_node_pool_clear_owned
