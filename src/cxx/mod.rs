@@ -106,6 +106,7 @@ pub mod list_node_pool_list_erase;
 pub mod list_node_pool_list_clear;
 pub mod word_list_node_pool_list_recycle_all;
 pub mod vector_word_copy_construct;
+pub mod word_pair_list_node_pool_acquire;
 pub mod word_pair_list_insert_before;
 pub mod word_pair_list_sentinel_initialize;
 pub mod word_pair_list_copy_construct;

@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dce90
+    ghidra: FUN_083dce90
+    name: word_pair_list_node_pool_acquire
+    size: 176
+    sig: "WordPairListNode *word_pair_list_node_pool_acquire(WordPairList *list, u32 single)"
+    module: cxx/word_pair_list_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: single
+      "list+0x00": chunks
+      "list+0x04": free
+      "list+0x08": next
+      "list+0x0c": end
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent: 44 A32 words from
+      push {r4-r6,lr} at 0x083dce90 through pop {r4-r6,pc} at 0x083dcf3c;
+      0x083dcf40 begins the next real function. The body holds exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70
+      (sizes 0xc and capacity<<4), and no predicated bl calls. The two direct
+      inbound calls are unconditional plain bl sites at 0x083dd060 and
+      0x083dd0c4; no predicated inbound bl sites are present. It pops an
+      uninitialized 16-byte {next, previous, first, second} node from the free
+      list or bump-allocates one. Exhausted pools allocate a 12-byte
+      {previous, capacity, nodes} chunk header and capacity*16 backing storage:
+      one node when single is nonzero, otherwise 32 initially and
+      max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
+      deviations: none; target pointer fields remain u32 words.
   - address: 0x083dd048
     ghidra: FUN_083dd048
     name: word_pair_list_insert_before
