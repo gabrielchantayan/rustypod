@@ -147009,3 +147009,28 @@ functions:
       max(old+32, old+old/2+old/8). The caller at 0x08292a18 inserts its
       returned node into an intrusive list. Deliberate deviations: none;
       pointers remain 32-bit target words on host and target.
+  - address: 0x083dd0dc
+    ghidra: FUN_083dd0dc
+    name: word_pair_list_copy_construct
+    size: 144
+    sig: "WordPairList *word_pair_list_copy_construct(WordPairList *destination, const WordPairList *source)"
+    module: cxx/word_pair_list_copy_construct
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      "destination+0x10": sentinel
+      "destination+0x14": state
+      FUN_083dd0bc: word_pair_list_init_sentinel
+      FUN_083dd048: word_pair_list_append_pair
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte extent: 36 A32 words from
+      push {r0-r8,lr} at 0x083dd0dc through pop {r4-r8,pc} at 0x083dd168;
+      0x083dd16c starts the next real function. The body contains exactly two
+      unconditional plain bl calls, to 0x083dd0bc and 0x083dd048, and no
+      predicated bl calls. The two direct inbound calls are plain bl at
+      0x0821395c and predicated blne at 0x083cb5e8. It initializes a 16-byte
+      pair-node pool and sentinel, then appends every source-ring {first,
+      second} pair in order. Rust deliberately inlines the two unported
+      helpers, preserving their target-width pool allocation and intrusive-ring
+      behavior rather than introducing firmware-call seams.
