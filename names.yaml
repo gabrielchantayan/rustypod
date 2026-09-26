@@ -14946,6 +14946,34 @@ functions:
       0x083ddcc4). The Rust port reads BlockDeque::count directly,
       target and correct under the host's wider pointer layout.
 
+  - address: 0x083df7a4
+    ghidra: FUN_083df7a4
+    name: deque_construct_elem4_alias_f7a4
+    size: 64
+    sig: "DequeHead *deque_construct_elem4_alias_f7a4(DequeHead *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    renames:
+      FUN_083da3e4: deque_iter_init_elem4_alias_a3e4
+      param_1: dq
+    notes: >-
+      Raw ARM establishes the exact 64-byte body from 0x083df7a4 through
+      `pop {r0,r1,r2,r3,r4,r5,pc}` at 0x083df7e0; the next separately linked
+      deque helper begins at 0x083df7e4. It allocates a four-word stack
+      temporary, initializes it with NULL cur and slot through
+      deque_iter_init_elem4_alias_a3e4 @ 0x083da3e4, copies the result to
+      end (+0x10) and begin (+0x00), then zeroes count (+0x20) and map
+      (+0x24). Since the initializer necessarily produces four NULL words,
+      the Rust port writes DequeIter::NULL directly; it deliberately omits
+      the call and stack temporary. Like stock, it returns NULL (the
+      temporary's zeroed first word), not dq. Decoding every ARM B/BL word
+      in osos.dec finds exactly two incoming unconditional plain bl forms at
+      0x0825c3a0 and 0x0825c3ac, zero predicated bl forms, zero tail b forms,
+      and one outgoing plain bl at 0x083df7bc to 0x083da3e4. A dedicated text
+      section prevents LLVM from folding this independently hookable twin
+      into deque_construct @ 0x083dfdac.
+
   - address: 0x083dfdac
     ghidra: FUN_083dfdac
     name: deque_construct
