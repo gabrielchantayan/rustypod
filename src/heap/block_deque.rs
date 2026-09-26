@@ -773,6 +773,50 @@ pub unsafe extern "C" fn deque_iter_advance_elem4(
     current.cur = current.seg_base.add(index as usize * 4);
     iter
 }
+///
+/// deque_iter_decrement_elem4_alias_a038 — original: `FUN_083da038` @ 0x083da038
+/// (80 bytes, `0x083da038..0x083da087`; the next real function,
+/// `deque_iter_advance_elem4`, begins at 0x083da088).
+///
+/// Verified calls: two incoming unconditional plain `bl` instructions at
+/// 0x083de758 and 0x083de768; no incoming predicated `bl` forms. The body has
+/// one unconditional plain `bl`, to the local 0x20-element capacity member at
+/// 0x083d9fcc.
+///
+/// Decrements this four-byte-element deque iterator. At a segment boundary it
+/// moves to the preceding map slot, reloads that segment's base, makes both
+/// `cur` and `seg_end` its exclusive end, then subtracts one element.
+///
+/// Deliberate deviations: this distinct template copy has a dedicated text
+/// section; its capacity export is loaded volatile to retain the real call
+/// boundary. Typed fields retain target word identity without assuming 32-bit
+/// host pointer offsets.
+///
+/// # Safety
+///
+/// `iter` and its current `seg_slot` must describe a valid four-byte-element
+/// deque iterator; decrementing at a boundary requires a preceding map slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_decrement_elem4_alias_a038")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_decrement_elem4_alias_a038(iter: *mut DequeIter) -> *mut DequeIter {
+    let current = &mut *iter;
+    if current.cur == current.seg_base {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let seg_base = current.seg_slot.wrapping_sub(1).read();
+        current.seg_slot = current.seg_slot.wrapping_sub(1);
+        current.seg_base = seg_base;
+        current.cur = seg_base.wrapping_add(capacity_fn() * 4);
+        current.seg_end = current.cur;
+    }
+    current.cur = current.cur.wrapping_sub(4);
+    iter
+}
+
+
+
 
 
 /// deque_construct — original: `FUN_083dfdac` @ 0x083dfdac (64 bytes;
@@ -2491,5 +2535,31 @@ mod tests {
         assert_eq!(words[1], 0x1111_1111);
         assert_eq!(words[2], 0x1111_1111);
         assert_eq!(words[3] & 0xff, 0x5a);
+    }
+    #[test]
+    fn deque_iter_decrement_elem4_alias_a038_moves_within_and_across_segments() {
+        let mut segments = [[0u8; 0x80]; 2];
+        let mut slots = [segments[0].as_mut_ptr(), segments[1].as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: unsafe { segments[1].as_mut_ptr().add(16) },
+            seg_base: segments[1].as_mut_ptr(),
+            seg_end: unsafe { segments[1].as_mut_ptr().add(0x80) },
+            seg_slot: unsafe { slots.as_mut_ptr().add(1) },
+        };
+
+        let returned = unsafe { deque_iter_decrement_elem4_alias_a038(&mut iter) };
+        assert!(core::ptr::eq(returned, &mut iter));
+        assert_eq!(iter.cur, unsafe { segments[1].as_mut_ptr().add(12) });
+        assert_eq!(iter.seg_base, segments[1].as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { segments[1].as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+
+        iter.cur = segments[1].as_mut_ptr();
+        let returned = unsafe { deque_iter_decrement_elem4_alias_a038(&mut iter) };
+        assert!(core::ptr::eq(returned, &mut iter));
+        assert_eq!(iter.cur, unsafe { segments[0].as_mut_ptr().add(0x7c) });
+        assert_eq!(iter.seg_base, segments[0].as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { segments[0].as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, slots.as_mut_ptr());
     }
 }
