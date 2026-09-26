@@ -148315,3 +148315,30 @@ functions:
       Deliberate deviation: FUN_083b7ba0 has no established semantic identity,
       so Rust keeps it as an address-verified target seam; host tests install
       a fixture for its ABI.
+
+  - address: 0x083da654
+    ghidra: FUN_083da654
+    name: input_cursor_next_byte
+    size: 76
+    sig: "u32 input_cursor_next_byte(InputByteCursor *cursor)"
+    module: cxx/input_cursor_next_byte
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "cursor+0x04": flags
+      "cursor+0x18": current
+      "cursor+0x1c": end
+      "vtable+0x24": next_byte
+    notes: >-
+      Raw osos.dec words e92d4008 e5901004 e2011004 e1b01121 0a000009
+      e5901018 e590201c e0522001 15d11000 158d1000 15901018 12811001
+      15801018 15dd0000 1a000002 e5901000 e5911024 e12fff31 e8bd9000
+      establish the exact 76-byte A32 body at 0x083da654..0x083da69c; the
+      bx lr at 0x083da6a0 and push at 0x083da6a4 start separately entered
+      functions. The body has no direct plain or predicated BL and one
+      indirect blx through vtable slot +0x24. Complete image decoding finds
+      exactly one inbound plain BL at 0x083d82d4 and one predicated BLNE at
+      0x083daf60. With flag bit 2 set and current != end, it returns
+      *current and increments current; otherwise it delegates to slot +0x24.
+      Host fixtures widen pointer and function fields; target code retains
+      the retail 32-bit layout and volatile loads/stores.

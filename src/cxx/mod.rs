@@ -176,6 +176,7 @@ pub mod empty_destructor_165bfc;
 pub mod version_info_construct;
 pub mod empty_destructor_1070b4;
 pub mod empty_destructor_083d8008;
+pub mod input_cursor_next_byte;
 pub mod tracker_diagnostic_no_op;
 pub mod tracker_table_diagnostic_no_op;
 pub mod empty_destructor_2a1ebc;
