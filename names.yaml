@@ -146269,3 +146269,30 @@ functions:
       otherwise dead malformed-range walk. match.py exits 1 with the expected
       LLVM frame, constant-divide sequence, and archive-local unresolved BL
       target.
+  - address: 0x083e12a0
+    ghidra: FUN_083e12a0
+    name: cxx_trivial_range_destroy_and_deallocate
+    size: 60
+    sig: "u32 *cxx_trivial_range_destroy_and_deallocate(u32 *range)"
+    module: heap/trivial_range_destroy_and_deallocate
+    status: ported
+    renames:
+      param_1/r0: range
+      r4: range
+      r0: begin
+      r1: end_or_deallocation_size
+      r2: element_size
+      FUN_08266f2c: cxx_array_dealloc
+      return/r0: range
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083e12a0..0x083e12db: `pop {r4,pc}` returns at its end and the next
+      independently linked function starts with `push {r4-r8,lr}` at
+      0x083e12dc. Raw A32 decoding finds one plain unconditional body BL at
+      0x083e12d0 to cxx_array_dealloc (0x08266f2c), zero predicated body BL
+      instructions, two inbound plain direct BL sites (0x08268318 and
+      0x08268338), and zero inbound predicated direct BL sites. It walks the
+      three target-width range words `{begin,end,capacity}` with an empty
+      element-destruction loop, then calls cxx_array_dealloc(begin,
+      capacity - begin, 0) and returns the range. Rust preserves the loop and
+      wrapping target-width arithmetic; no deliberate deviations.
