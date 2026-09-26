@@ -6027,6 +6027,30 @@ functions:
       the dispatcher receives record +0x04. Target builds call these verified
       addresses directly; host tests install an operation seam. The dispatcher
       identity is deliberately not inferred beyond dispatching a record.
+  # --- polymorphic member replacement ---
+  - address: 0x083e72f8
+    ghidra: FUN_083e72f8
+    name: polymorphic_member_replace
+    size: 48
+    sig: "void polymorphic_member_replace(void **member, void *replacement)"
+    module: cxx/polymorphic_member_replace
+    status: ported
+    renames:
+      param_1/r0/r4: member
+      param_2/r1/r5: replacement
+      member_deref/r0: old_object
+      old_object_vtable_plus_0x04/r1: vtable_slot4_callback
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      push {r4,r5,r6,lr} at 0x083e72f8 through pop {r4,r5,r6,pc} at 0x083e7324;
+      push {r4,lr} at 0x083e7328 starts the next real function. The body has
+      zero plain direct bl calls and one predicated indirect blxne through
+      vtable slot +0x04. Whole-image raw ARM decoding finds exactly two inbound
+      plain direct bl sites at 0x0815f14c and 0x0815f198, with no predicated
+      direct callers. If old_object differs from replacement, the non-NULL old
+      object receives its unresolved slot +0x04 callback before replacement is
+      stored. Rust deliberately uses native-width host vtable entries because
+      retailOS target pointer words are four bytes.
   # --- optional vtable slot +0x04 dispatch ---
   - address: 0x083e7328
     ghidra: FUN_083e7328
