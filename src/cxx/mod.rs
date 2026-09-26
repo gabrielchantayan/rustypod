@@ -54,6 +54,7 @@ pub mod slot_array_owner_get;
 pub mod byte_key_map;
 pub mod resource_value_map_lookup_or_insert;
 pub mod string_value_map_lookup_or_insert;
+pub mod string_vector_map_lookup_or_insert;
 pub mod byte_key_map_lower_bound_value;
 pub mod byte_key_word_map;
 pub mod character_class;
