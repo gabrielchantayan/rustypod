@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dca68
+    ghidra: FUN_083dca68
+    name: two_word_list_node_pool_list_recycle_all
+    size: 180
+    sig: "void two_word_list_node_pool_list_recycle_all(TwoWordListNodePoolList *list)"
+    module: cxx/two_word_list_node_pool_list_recycle_all
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+      "node+0x00": next
+      "node+0x04": previous
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent: 45 A32 words from
+      ldr r1,[r0,#0x10] at 0x083dca68 through bx lr at 0x083dcb18;
+      0x083dcb1c begins the next real function. The body has zero outgoing
+      plain bl instructions and zero predicated bl instructions. Whole-image
+      A32 decoding finds two inbound unconditional plain bl sites and no
+      predicated inbound bl sites. It walks the 16-byte-node intrusive ring,
+      unlinks each live node, decrements state, and prepends it to the
+      target-width free list; the sentinel remains self-linked. Deliberate
+      deviation: Rust omits the retail stack-local stores, which are dead on
+      return.
   - address: 0x083dcb1c
     ghidra: FUN_083dcb1c
     name: two_word_list_node_pool_acquire
