@@ -499,6 +499,39 @@ pub unsafe extern "C" fn deque_iter_assign_alias_9ec8(
     }
     dst
 }
+/// deque_iter_assign_alias_a184 — original: `FUN_083da184` @ 0x083da184
+/// (36 bytes; Ghidra reports 36).
+///
+/// Raw `osos.dec` words establish four forward aligned `ldr`/`str` pairs
+/// followed by `bx lr` at 0x083da1a4. The adjacent `mov r0,#0x20; bx lr`
+/// capacity member at 0x083da1a8 begins the next independently linked
+/// function. Whole-image ARM decoding finds two inbound unconditional plain
+/// `bl` calls (0x0815b990 and 0x0815b9a8), zero inbound predicated `bl`
+/// calls, and no body calls.
+///
+/// This byte-identical deque-iterator assignment copies `cur`, `seg_base`,
+/// `seg_end`, and `seg_slot` from `src` to `dst`, retaining `dst` in r0 as
+/// its return value. Deliberate deviation: this separate export and text
+/// section prevent LLVM from folding this independently hookable target into
+/// another identical iterator-copy instantiation.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; the
+/// original is a plain forward word copy and does not handle overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_a184")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_a184(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
 /// deque_iter_assign_alias_a21c — original: `FUN_083da21c` @ 0x083da21c
 /// (36 bytes, `0x083da21c..0x083da23f`; Ghidra reports 36).
 ///
@@ -14329,6 +14362,24 @@ mod tests {
             assert_eq!(overlapping, [1, 1, 1, 1, 1]);
         }
     }
+    #[test]
+    fn deque_iter_assign_alias_a184_copies_words_forward_and_returns_destination() {
+        unsafe {
+            let src = [0x0000_0000u32, 0xffff_ffff, 0x0123_4567, 0x89ab_cdef];
+            let mut dst = [0xdead_beefu32; 5];
+            assert_eq!(
+                deque_iter_assign_alias_a184(dst.as_mut_ptr(), src.as_ptr()),
+                dst.as_mut_ptr(),
+            );
+            assert_eq!(&dst[..4], &src);
+            assert_eq!(dst[4], 0xdead_beef);
+
+            let mut overlapping = [1u32, 2, 3, 4, 5];
+            deque_iter_assign_alias_a184(overlapping.as_mut_ptr().add(1), overlapping.as_ptr());
+            assert_eq!(overlapping, [1, 1, 1, 1, 1]);
+        }
+    }
+
     unsafe extern "C" fn delete_enabled_element_slot(
         container: *mut u8,
         index: usize,
