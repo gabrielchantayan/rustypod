@@ -46392,6 +46392,34 @@ functions:
       codegen deviation: LLVM may inline mutex_create, while a dedicated target
       text section preserves this distinct callable sibling.
 
+  - address: 0x0839efec
+    ghidra: FUN_0839efec
+    name: refcounted_ptr_copy_construct_mutex
+    size: 68
+    sig: "RefcountedBody **refcounted_ptr_copy_construct_mutex(RefcountedBody **dst, RefcountedBody *const *src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: dst
+      param_2/r1: src
+      iVar1/r4: body
+      iVar1+0x04: refcount
+      iVar1+0x08: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 68-byte A32 extent
+      0x0839efec..0x0839f030: pop {r4,r5,r6,pc} is at 0x0839f02c and the
+      following push starts the next separately linked function. Independent
+      osos.asm call-site enumeration finds exactly two inbound plain
+      unconditional bl sites, 0x08162554 and 0x08162740, and no predicated
+      inbound bl sites. The body stores *src to dst, then for a non-NULL body
+      uses independent optional-mutex loads around a wrapping +1 to refcount.
+      Its two outgoing calls are predicated blne to already ported mutex_lock
+      and mutex_unlock. Deliberate codegen deviation: Rust composes those
+      direct helpers, which LLVM may inline, while preserving the ordered
+      store, guard, increment, reload, and guard operations.
+
   - address: 0x0839f28c
     ghidra: FUN_0839f28c
     name: refcounted_ptr_copy_assign
