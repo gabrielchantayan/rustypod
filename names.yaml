@@ -16168,6 +16168,26 @@ functions:
       remainder return register; this preserves the division result and
       keeps the divider call boundary.
 
+  - address: 0x083d6e9c
+    ghidra: FUN_083d6e9c
+    name: object_matches_active_context
+    size: 36
+    sig: "bool object_matches_active_context(const u32 *object)"
+    module: cxx/object_matches_active_context
+    status: ported
+    vars: {param_1: object}
+    notes: >-
+      Raw osos.dec words establish the complete 36-byte extent
+      0x083d6e9c..0x083d6ec0: the final word is the literal
+      0x08b316e8, and push {r4,lr} at 0x083d6ec4 starts the next real
+      function. It loads a signed adjustment from three words before
+      object[0], adds that adjustment to object, then compares the result
+      with word 1 at 0x08b316e8. Raw ARM decoding finds zero plain and zero
+      predicated body BL calls, plus two inbound plain BL calls at
+      0x083d6ecc and 0x083d849c; there are zero predicated inbound calls.
+      Host builds replace the fixed active-context address with writable
+      fixture storage only; target builds use the verified literal.
+
   - address: 0x08266f2c
     ghidra: FUN_08266f2c
     name: cxx_array_dealloc

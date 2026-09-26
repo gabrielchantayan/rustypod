@@ -2660,6 +2660,9 @@ pub mod hints {
     // 0x5340_0000: dedicated to cxx/byte_key_tree_find_predecessor's empty-tree
     // target-width fixture; mappings never unmap.
     pub const BYTE_KEY_TREE_FIND_PREDECESSOR_EMPTY: usize = 0x5340_0000;
+    // 0x5350_0000: dedicated to cxx/object_matches_active_context's target-width
+    // adjusted-object and active-context fixture; mappings never unmap.
+    pub const CXX_OBJECT_MATCHES_ACTIVE_CONTEXT: usize = 0x5350_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
