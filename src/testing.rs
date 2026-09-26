@@ -591,6 +591,10 @@ pub mod hints {
     // 0x5e00_0000: dedicated to ui/plst_slot_materialize's raw-u32 element,
     // header, slot-record, and source-buffer fixture; mappings never unmap.
     pub const PLST_SLOT_MATERIALIZE: usize = 0x5e00_0000;
+    // 0x5e10_0000 / 0x5e20_0000: dedicated to cxx/opaque_base_destroy's
+    // target-width base and null-allocation fixtures; mappings never unmap.
+    pub const OPAQUE_BASE_DESTROY: usize = 0x5e10_0000;
+    pub const OPAQUE_BASE_DESTROY_NULL_ALLOCATION: usize = 0x5e20_0000;
     // 0x5f10_0000: dedicated to cxx/deque_front_advance_release's
     // target-width segment-map fixture; mappings never unmap.
     pub const DEQUE_FRONT_ADVANCE_RELEASE: usize = 0x5f10_0000;
