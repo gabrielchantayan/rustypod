@@ -110,6 +110,184 @@ fn deque_push_back_elem4_alias_eaa8_ops() -> DequePushBackElem4Ops {
         core::ptr::read_volatile(core::ptr::addr_of!(DEQUE_PUSH_BACK_ELEM4_ALIAS_EAA8_OPS))
     }
 }
+/// Firmware load address of `FUN_083de22c`, the grow-and-insert helper used
+/// only by [`deque_push_back_elem4_alias_e7dc`].
+pub const DEQUE_PUSH_BACK_AUX_ELEM4_ALIAS_E7DC_ADDRESS: usize = 0x083d_e22c;
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_deque_push_back_aux_elem4_alias_e7dc(
+    deque: *mut BlockDeque,
+    value: *const u32,
+) {
+    let f: unsafe extern "C" fn(*mut BlockDeque, *const u32) =
+        core::mem::transmute(DEQUE_PUSH_BACK_AUX_ELEM4_ALIAS_E7DC_ADDRESS);
+    f(deque, value);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_deque_push_back_aux_elem4_alias_e7dc(
+    _deque: *mut BlockDeque,
+    _value: *const u32,
+) {
+}
+
+pub const DEFAULT_DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS: DequePushBackElem4Ops =
+    DequePushBackElem4Ops {
+        push_back_aux: firmware_deque_push_back_aux_elem4_alias_e7dc,
+    };
+
+/// Active helper for the independently linked `0x083de7dc` instantiation.
+pub static mut DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS: DequePushBackElem4Ops =
+    DEFAULT_DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS;
+
+#[inline(always)]
+fn deque_push_back_elem4_alias_e7dc_ops() -> DequePushBackElem4Ops {
+    unsafe {
+        core::ptr::read_volatile(core::ptr::addr_of!(DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS))
+    }
+}
+
+/// deque_push_back_elem4_alias_e7dc — original: `FUN_083de7dc` @ 0x083de7dc
+/// (92 bytes; Ghidra reports 92 bytes).
+///
+/// Appends the four-byte word referenced by `value` to a `std::deque<u32>`.
+/// The raw A32 body first calls `container_is_empty` at 0x083d75d0; an empty
+/// deque or an end iterator at its segment boundary calls the grow-and-insert
+/// helper `FUN_083de22c`. It then writes through a non-NULL resulting cursor,
+/// advances that cursor by four bytes, and increments the count with ARM
+/// wrapping arithmetic.
+///
+/// Raw `osos.dec` establishes the true 92-byte extent from the `push` at
+/// 0x083de7dc through `pop {r4,r5,r6,pc}` at 0x083de834; the next function
+/// starts at 0x083de838. The caller at 0x083de544 contains exactly two inbound
+/// unconditional plain `bl` calls (0x083de60c and 0x083de670), no predicated
+/// calls. The body contains two plain `bl` calls, to 0x083d75d0 and 0x083de22c.
+///
+/// Deliberate deviation: `FUN_083de22c` is unported, so this independently
+/// linked instantiation crosses its own volatile operations seam; target builds
+/// call the verified firmware address and host tests install a growth model.
+///
+/// # Safety
+///
+/// `deque` must point to a writable valid four-byte-element [`BlockDeque`].
+/// `value` must be readable when the helper or resulting cursor is non-NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_push_back_elem4_alias_e7dc")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_push_back_elem4_alias_e7dc(
+    deque: *mut BlockDeque,
+    value: *const u32,
+) {
+    let end = core::ptr::addr_of_mut!((*deque).end);
+    if container_is_empty(deque.cast()) != 0 || (*end).cur == (*end).seg_end {
+        (deque_push_back_elem4_alias_e7dc_ops().push_back_aux)(deque, value);
+    }
+
+    let cursor = (*end).cur;
+    if !cursor.is_null() {
+        cursor.cast::<u32>().write(value.read());
+    }
+    (*end).cur = cursor.wrapping_add(4);
+    (*deque).count = (*deque).count.wrapping_add(1);
+}
+
+#[cfg(test)]
+mod alias_e7dc_tests {
+    use super::*;
+    use crate::heap::block_deque::DequeIter;
+
+    static OPS_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    static mut AUX_CALLS: usize = 0;
+    static mut AUX_STORAGE: *mut u32 = core::ptr::null_mut();
+
+    struct OpsReset;
+    impl Drop for OpsReset {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS)
+                    .write_volatile(DEFAULT_DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS);
+            }
+        }
+    }
+
+    unsafe extern "C" fn grow_one_slot(deque: *mut BlockDeque, _value: *const u32) {
+        AUX_CALLS += 1;
+        (*deque).end.cur = AUX_STORAGE.cast();
+        (*deque).end.seg_end = AUX_STORAGE.add(1).cast();
+    }
+
+    #[test]
+    fn fast_path_writes_without_calling_alias_growth_helper() {
+        let mut storage = [0u32; 1];
+        let mut deque = BlockDeque {
+            begin: DequeIter::NULL,
+            end: DequeIter {
+                cur: storage.as_mut_ptr().cast(),
+                seg_base: storage.as_mut_ptr().cast(),
+                seg_end: storage.as_mut_ptr().wrapping_add(1).cast(),
+                seg_slot: core::ptr::null_mut(),
+            },
+            count: 1,
+            map: core::ptr::null_mut(),
+            map_cap: 0,
+        };
+
+        unsafe { deque_push_back_elem4_alias_e7dc(&mut deque, &0x1122_3344) };
+
+        assert_eq!(storage, [0x1122_3344]);
+        assert_eq!(deque.end.cur, storage.as_mut_ptr().wrapping_add(1).cast());
+        assert_eq!(deque.count, 2);
+    }
+
+    #[test]
+    fn empty_deque_grows_then_appends() {
+        let _lock = OPS_LOCK.lock();
+        let _reset = OpsReset;
+        let mut storage = [0u32; 1];
+        let mut deque = BlockDeque { begin: DequeIter::NULL, end: DequeIter::NULL, count: 0, map: core::ptr::null_mut(), map_cap: 0 };
+        unsafe {
+            AUX_CALLS = 0;
+            AUX_STORAGE = storage.as_mut_ptr();
+            core::ptr::addr_of_mut!(DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS).write_volatile(
+                DequePushBackElem4Ops { push_back_aux: grow_one_slot },
+            );
+            deque_push_back_elem4_alias_e7dc(&mut deque, &0xaabb_ccdd);
+        }
+
+        assert_eq!(unsafe { AUX_CALLS }, 1);
+        assert_eq!(storage, [0xaabb_ccdd]);
+        assert_eq!(deque.end.cur, storage.as_mut_ptr().wrapping_add(1).cast());
+        assert_eq!(deque.count, 1);
+    }
+
+    #[test]
+    fn segment_boundary_grows_and_wraps_count() {
+        let _lock = OPS_LOCK.lock();
+        let _reset = OpsReset;
+        let mut old_storage = [0u32; 1];
+        let mut new_storage = [0u32; 1];
+        let mut deque = BlockDeque {
+            begin: DequeIter::NULL,
+            end: DequeIter { cur: old_storage.as_mut_ptr().wrapping_add(1).cast(), seg_base: old_storage.as_mut_ptr().cast(), seg_end: old_storage.as_mut_ptr().wrapping_add(1).cast(), seg_slot: core::ptr::null_mut() },
+            count: u32::MAX,
+            map: core::ptr::null_mut(),
+            map_cap: 0,
+        };
+        unsafe {
+            AUX_CALLS = 0;
+            AUX_STORAGE = new_storage.as_mut_ptr();
+            core::ptr::addr_of_mut!(DEQUE_PUSH_BACK_ELEM4_ALIAS_E7DC_OPS).write_volatile(
+                DequePushBackElem4Ops { push_back_aux: grow_one_slot },
+            );
+            deque_push_back_elem4_alias_e7dc(&mut deque, &7);
+        }
+
+        assert_eq!(unsafe { AUX_CALLS }, 1);
+        assert_eq!(new_storage, [7]);
+        assert_eq!(deque.count, 0);
+    }
+}
+
 
 /// deque_push_back_elem4_alias_eaa8 — original: `FUN_083deaa8` @ 0x083deaa8
 /// (92 bytes; Ghidra reports 92 bytes).

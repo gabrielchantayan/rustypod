@@ -56324,6 +56324,25 @@ functions:
       ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 6 bl
       sites. No separate port; hook to the container_is_empty symbol.
 
+  - address: 0x083de7dc
+    ghidra: FUN_083de7dc
+    name: deque_push_back_elem4_alias_e7dc
+    size: 92
+    sig: "void deque_push_back_elem4_alias_e7dc(BlockDeque *deque, const u32 *value)"
+    module: heap/deque_push_back_elem4
+    status: ported
+    notes: >-
+      Raw `osos.dec` establishes the 92-byte std::deque<u32> push-back
+      instantiation at 0x083de7dc..0x083de834, followed by the next function
+      at 0x083de838. It calls container_is_empty @ 0x083d75d0, or when
+      end.cur equals end.seg_end invokes its unique unported grow helper @
+      0x083de22c; then conditionally stores *value through end.cur, advances
+      that cursor by four bytes, and increments count with u32 wrapping. The
+      two inbound direct calls are unconditional plain bl (0x083de60c and
+      0x083de670); no predicated calls. The two body calls are plain bl. The
+      target seam calls the verified retail helper address; host tests install
+      a growth model.
+
   - address: 0x083deaa8
     ghidra: FUN_083deaa8
     name: deque_push_back_elem4_alias_eaa8
