@@ -31,9 +31,9 @@
 //!   at 0x083dd990 and 0x083dd9ac. Raw ARM B/BL decoding finds two incoming
 //!   plain `bl` sites (0x083d2570 / 0x083d26ac) and no predicated forms.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
-//!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
-//!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da214` @ 0x083da214,
-//!   `FUN_083da240` @ 0x083da240, `FUN_083da344` @ 0x083da344, `FUN_083da424` @ 0x083da424, and
+//!   `FUN_083da17c` @ 0x083da17c, `FUN_083da1a8` @ 0x083da1a8,
+//!   `FUN_083da214` @ 0x083da214, `FUN_083da240` @ 0x083da240,
+//!   `FUN_083da344` @ 0x083da344, `FUN_083da424` @ 0x083da424, and
 //!   `FUN_083da450` @ 0x083da450 (8 bytes each: `mov r0, #0x20; bx lr`;
 //!   respectively 7, 12, 18, 12, 2, 12, 13, 2, and 11 direct plain `bl`
 //!   call sites; no predicated calls, binary-verified). Elements per deque
@@ -574,10 +574,11 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 
 /// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 /// `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
-/// `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
-/// `FUN_083da2d8` @ 0x083da2d8, `FUN_083da344` @ 0x083da344,
-/// `FUN_083da3b0` @ 0x083da3b0, `FUN_083da3dc` @ 0x083da3dc,
-/// `FUN_083da424` @ 0x083da424, and `FUN_083da450` @ 0x083da450
+/// `FUN_083da17c` @ 0x083da17c, `FUN_083da1a8` @ 0x083da1a8,
+/// `FUN_083da240` @ 0x083da240, `FUN_083da2d8` @ 0x083da2d8,
+/// `FUN_083da344` @ 0x083da344, `FUN_083da3b0` @ 0x083da3b0,
+/// `FUN_083da3dc` @ 0x083da3dc, `FUN_083da424` @ 0x083da424, and
+/// `FUN_083da450` @ 0x083da450
 /// (8 bytes each).
 ///
 /// The raw ARM body is `mov r0, #0x20; bx lr`: return the 0x20 elements
@@ -608,6 +609,25 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {
     0x20
 }
+///
+/// deque_seg_capacity_alias_a17c — original: `FUN_083da17c` @ 0x083da17c
+/// (8 bytes, `0x083da17c..0x083da183`).
+///
+/// Raw words `0xe3a00020` and `0xe12fff1e` decode as `mov r0, #0x20; bx
+/// lr`, returning 0x20 elements per deque segment. The next independently
+/// linked function, `deque_iter_assign_alias_a184`, starts at 0x083da184.
+/// Whole-image ARM B/BL decoding verifies two unconditional plain `bl` call
+/// sites (0x083ea168 and 0x083ea1d0), zero predicated forms, and zero body
+/// calls. Deliberate deviation: this byte-identical template copy has a
+/// dedicated text section to retain its address-specific hook seam rather
+/// than allowing LLVM to fold it into `deque_seg_capacity`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.deque_seg_capacity_alias_a17c"))]
+#[inline(never)]
+pub unsafe extern "C" fn deque_seg_capacity_alias_a17c() -> usize {
+    0x20
+}
+
 ///
 /// deque_seg_capacity_alias_a2ac — original: `FUN_083da2ac` @ 0x083da2ac
 /// (8 bytes, `0x083da2ac..0x083da2b3`).
@@ -1339,6 +1359,13 @@ mod tests {
     fn seg_capacity_alias_a214_returns_its_raw_constant() {
         unsafe {
             assert_eq!(deque_seg_capacity_alias_a214(), 0x20);
+        }
+    }
+
+    #[test]
+    fn seg_capacity_alias_a17c_returns_its_raw_constant() {
+        unsafe {
+            assert_eq!(deque_seg_capacity_alias_a17c(), 0x20);
         }
     }
 
