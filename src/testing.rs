@@ -2037,6 +2037,9 @@ pub mod hints {
     // target-width owner and three-node intrusive-ring fixture; mappings never
     // unmap, so no other user may share this hint.
     pub const LIST_NODE_POOL_LIST_APPEND_VALUE: usize = 0xe000_0000;
+    // 0xe080_0000: dedicated to cxx/word_pair_list_copy_construct's source,
+    // destination, and target-width node-ring fixture; mappings never unmap.
+    pub const WORD_PAIR_LIST_COPY_CONSTRUCT: usize = 0xe080_0000;
     // 0x3a00_0000: dedicated to cxx/list_node_pool_list_erase's target-width
     // owner and four-node intrusive-ring fixture; mappings never unmap, so no
     // other user may share this hint.
