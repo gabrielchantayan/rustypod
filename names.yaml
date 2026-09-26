@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dc7e4
+    ghidra: FUN_083dc7e4
+    name: record_40_list_node_pool_acquire
+    size: 184
+    sig: "Record40ListNode *record_40_list_node_pool_acquire(Record40ListNodePool *pool, u32 single)"
+    module: cxx/record_40_list_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: single
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r6,lr} at 0x083dc7e4 through pop {r4-r6,pc} at 0x083dc898;
+      0x083dc89c begins the next real function. The body performs exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70
+      (sizes 0xc and capacity*0x30), and no predicated bl calls. Whole-image
+      A32 decoding finds two inbound unconditional plain bl sites, at
+      0x081a8638 and 0x083dc998, and no predicated inbound bl sites. It pops
+      an uninitialized 48-byte {next, previous, payload[10]} list node from
+      the free list or bump-allocates one. Exhausted pools allocate a 12-byte
+      {previous, capacity, nodes} chunk header and capacity*48 backing
+      storage: one node when single is nonzero, otherwise 32 initially and
+      max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
+      deviations: none; target pointer fields remain u32 words.
   - address: 0x083dca68
     ghidra: FUN_083dca68
     name: two_word_list_node_pool_list_recycle_all
