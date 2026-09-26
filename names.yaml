@@ -147633,3 +147633,30 @@ functions:
       body is byte-identical to the separately linked functions at 0x083dbeb4
       and 0x083dbec8; Rust preserves the two ordered target-width loads and
       return value while deliberately omitting their dead stack home traffic.
+
+  - address: 0x083dbdd4
+    ghidra: FUN_083dbdd4
+    name: cxx_container_first_node_083dbdd4
+    size: 20
+    sig: "void *cxx_container_first_node_083dbdd4(const void *header)"
+    module: cxx/container_first_node_083dbdd4
+    status: ported
+    renames:
+      param_1/r0: header
+      "header+0x10": nested_container
+      "nested_container+0x08": first_node
+    notes: >-
+      Raw osos.dec words e92d4008 e5900010 e5900008 e58d0000 e8bd9000 establish the
+      exact five-instruction, 20-byte A32 body from 0x083dbdd4 through 0x083dbde7;
+      the identical push {r3,lr} at 0x083dbde8 starts the next separately linked
+      function. The body has zero unconditional plain BL instructions and zero
+      predicated BL instructions. Whole-image A32 branch decoding finds exactly two
+      inbound unconditional plain BL sites, 0x081099c0 and 0x081099cc, and no
+      predicated inbound BL forms. The direct caller passes a header at +0x74, uses
+      the returned target-width word as the first node of an intrusive traversal, and
+      terminates it at the owner word at +0x10. This body is byte-identical to the
+      separately linked functions at 0x083dbde8, 0x083dbeb4, and 0x083dbec8. Rust
+      preserves the two ordered target-width loads and returned r0 while deliberately
+      omitting the dead stack home traffic; the dedicated text section prevents LLVM
+      from folding this separately linked BL target into either twin. match.py reports
+      the expected frame setup/teardown structural difference (exit 1).
