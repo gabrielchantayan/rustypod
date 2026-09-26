@@ -60182,6 +60182,28 @@ functions:
       the end store ahead of it. match.py shows the same block shape,
       capacity math, chunk-link stmia, and both bl boundaries.
 
+  - address: 0x083dc5f8
+    ghidra: FUN_083dc5f8
+    name: list_node_pool_list_construct
+    size: 72
+    sig: "ListNodePoolList *list_node_pool_list_construct(ListNodePoolList *list)"
+    module: cxx/list_node_pool_list_construct
+    status: ported
+    vars: {param_1: list}
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent: 18 ARM words from
+      push {r4,lr} @ 0x083dc5f8 through pop {r4,pc} @ 0x083dc63c; the next
+      separately linked function begins at 0x083dc640. Decoding every aligned
+      ARM B/BL-immediate word finds two inbound direct calls, both
+      unconditional plain bl (0x0811f408, 0x0811f520), and no predicated
+      forms. The body makes one unconditional plain bl to
+      list_node_pool_acquire @ 0x083dc344 (ported,
+      cxx/list_node_pool_acquire) and no predicated bl calls. It clears the
+      24-byte ADS std::list header {chunks, free, next, end, sentinel, count},
+      acquires a one-node sentinel, stores it at +0x10, and self-links its
+      next and previous words. Pointers remain u32 target words so the
+      target layout is preserved on host builds; no algorithmic deviations.
+
   - address: 0x083db2d4
     ghidra: FUN_083db2d4
     name: red_black_tree_payload_24_construct
