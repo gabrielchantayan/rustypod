@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083db7e8
+    ghidra: FUN_083db7e8
+    name: refcounted_key_tree_lookup_value
+    size: 100
+    sig: "u32 refcounted_key_tree_lookup_value(void *tree, RefcountedBody *const *key_slot)"
+    module: cxx/refcounted_key_tree_lookup_value
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key_slot
+      local_14: node
+      local_1c: key
+    notes: >-
+      Raw osos.dec establishes the exact 100-byte A32 extent
+      0x083db7e8..0x083db84c; the next separately linked function starts at
+      0x083db84c. The two Ghidra-reported inbound sites independently decode
+      from raw osos.dec as plain unconditional bl at 0x081b5880 and
+      0x081b5cf4; neither is predicated. The body initializes an empty
+      refcounted-body temporary, passes the caller's body pointer slot to the
+      retail tree lookup/insert at 0x083c6acc, destroys both empty
+      temporaries, and returns the selected node address plus 0x14 with
+      target-word wrapping. The unported lookup/insert is a verified address
+      seam: host tests install a fixture and target builds call the retail
+      address directly.
   - address: 0x083db964
     ghidra: FUN_083db964
     name: signed_key_tree_find_node_f8f0_copy
