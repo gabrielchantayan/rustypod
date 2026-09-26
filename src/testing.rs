@@ -2023,6 +2023,9 @@ pub mod hints {
     // 0xde80_0000: dedicated to cxx/list_node_pool_acquire_083dd4cc's
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const LIST_NODE_POOL_ACQUIRE_083DD4CC: usize = 0xde80_0000;
+    // 0xdec0_0000: dedicated to cxx/list_node_pool_acquire_083dd2e4's
+    // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
+    pub const LIST_NODE_POOL_ACQUIRE_083DD2E4: usize = 0xdec0_0000;
     // 0xdf00_0000: dedicated to cxx/list_node_pool_list_init's target-width
     // list-owner and sentinel fixture; mappings never unmap, so no other user
     // may share this hint.

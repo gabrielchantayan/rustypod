@@ -146956,3 +146956,34 @@ functions:
       {next,previous,value} node or bump-allocates one, allocating a 12-byte
       chunk header and one/32/grown backing nodes. Rust preserves target
       pointers as u32 words; no deliberate deviations.
+
+  - address: 0x083dd2e4
+    ghidra: FUN_083dd2e4
+    name: list_node_pool_acquire_083dd2e4
+    size: 184
+    sig: "ListNode *list_node_pool_acquire_083dd2e4(ListNodePool *pool, u32 single)"
+    module: cxx/list_node_pool_acquire_083dd2e4
+    status: ported
+    vars:
+      param_1/r0: pool
+      param_2/r1: single
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words
+      from push {r4-r8,lr} at 0x083dd2e4 through pop {r4-r8,pc} at
+      0x083dd398; 0x083dd39c begins the next separately linked function.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds
+      exactly two inbound direct calls, both unconditional plain bl
+      (0x08292a18 and 0x082acc44), and no predicated forms. The body has
+      exactly two unconditional plain bl calls, both to
+      operator_new_checked @ 0x08266c70; it has no predicated bl calls.
+      The pool is the first 16 bytes of its 24-byte list owner:
+      {chunks, free, next, end}. It returns a free-list node after replacing
+      free with node->next, without otherwise initializing it. When the bump
+      range is exhausted, it allocates a 12-byte {previous, capacity, nodes}
+      chunk header and capacity*12-byte node arena, links the header, and
+      returns the first node. single != 0 chooses capacity 1; otherwise the
+      first arena has 32 nodes and later capacities are
+      max(old+32, old+old/2+old/8). The caller at 0x08292a18 inserts its
+      returned node into an intrusive list. Deliberate deviations: none;
+      pointers remain 32-bit target words on host and target.
