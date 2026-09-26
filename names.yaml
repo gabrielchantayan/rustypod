@@ -60529,6 +60529,34 @@ functions:
       the original. Pointers remain 32-bit target words to preserve the
       28-byte layout on host builds.
 
+  - address: 0x083db510
+    ghidra: FUN_083db510
+    name: string_value_map_lookup_or_insert
+    size: 76
+    sig: "u8 *string_value_map_lookup_or_insert(void *map, char *const *key)"
+    module: cxx/string_value_map_lookup_or_insert
+    status: ported
+    vars: {param_1/r0: map, param_2/r1: key, local_14: result, "auStack_1c": pair}
+    renames:
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083c3cb8: string_value_map_tree_operation
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 19 ARM words from
+      push {r4,r5,lr} at 0x083db510 through pop {r4,r5,pc} at 0x083db558;
+      the next separately linked function begins at 0x083db55c. Decoding every
+      aligned ARM B/BL-immediate word finds two inbound direct call sites, both
+      unconditional plain bl (0x0815b170, 0x0815b3d4), and no predicated
+      forms. The body has three unconditional plain bl instructions and no
+      predicated bl: cxx_string_copy_ctor @ 0x083d8c30, the still-unported tree
+      operation @ 0x083c3cb8, and cxx_string_release @ 0x083d8b04. It
+      COW-copies key into a temporary {string, u32 value} pair, zeroes value,
+      runs the tree operation, releases the temporary, and returns result.node
+      + 0x14, the mapped value word. The tree operation's identity is not
+      established, so target code calls its verified fixed address and host
+      tests use a replaceable seam. Deliberate deviations: typed Rust locals
+      replace stack offsets and the unknown tree operation becomes an indirect
+      seam, preserving all three semantic call boundaries.
   - address: 0x083db4c4
     ghidra: FUN_083db4c4
     name: string_map_lookup_or_insert
