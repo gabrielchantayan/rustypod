@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd844
+    ghidra: FUN_083dd844
+    name: list_node_pool_recycle_all
+    size: 180
+    sig: "void list_node_pool_recycle_all(ListNodePoolList *list)"
+    module: cxx/list_node_pool_recycle_all
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x10": sentinel
+      "list+0x14": count
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent
+      0x083dd844..0x083dd8f8: 45 A32 words ending bx lr; 0x083dd8f8 starts
+      the next separately entered function with push {r4,r5,r6,lr}. Decoding
+      every aligned ARM B/BL-immediate word finds exactly two inbound plain bl
+      calls, at 0x08292868 and 0x083dd910, and zero predicated bl calls. The
+      body has no outgoing bl instructions. It walks the intrusive ring from
+      sentinel->next, splices each live node out, decrements count with
+      wrapping subtraction, and pushes it onto the pool free list through its
+      next word; the sentinel ring is empty at return. Ghidra invents a
+      redundant sentinel reload but captures the same node recycling behavior.
+      Rust preserves the target's 24-byte header and 20-byte node layouts with
+      u32 pointer words, avoiding host pointer-width offset changes.
   - address: 0x083de12c
     ghidra: FUN_083de12c
     name: path_object_vector_push_back
