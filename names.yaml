@@ -149259,3 +149259,33 @@ functions:
       of inventing an unverified seam; comparison_context preserves the ABI but
       is not dereferenced. Nodes and links remain u32 addresses to retain the
       retail four-byte layout on 64-bit host tests.
+
+  - address: 0x083d6d80
+    ghidra: FUN_083d6d80
+    name: pair_chain_find_header16
+    size: 72
+    sig: "u32 pair_chain_find_header16(u32 comparison_context, const u32 *head_link, const u32 *key)"
+    module: util/pair_chain_find_header16
+    status: ported
+    renames:
+      param_1/r0: comparison_context
+      param_2/r1: head_link
+      param_3/r2: key
+      iVar1/r4: node
+      FUN_083d7b88: pair_words_equal
+    notes: >-
+      Raw osos.dec words e92d4070 e5914000 e1a06002 e1a05000 ea000000
+      e5944000 e3540000 0a000007 e5950004 e2442010 e0800005 e2800001
+      e1a01006 eb000373 e3500000 0afffff4 e1a00004 e8bd8070 establish the
+      exact 72-byte A32 extent 0x083d6d80..0x083d6dc7; the next independently
+      entered function begins with push {r4,r5,r6,lr} at 0x083d6dc8.
+      Whole-image A32 decoding finds exactly two inbound unconditional plain
+      bl sites (0x083d22a4 and 0x083d2b98) and zero predicated inbound bl
+      sites. The body has one outgoing plain bl to FUN_083d7b88 and no
+      predicated calls. It reads *head_link, then walks target-width +0x00
+      links until the helper reports equality between key and the two words at
+      node-16. The helper's raw body only compares those two word pairs, so
+      Rust deliberately inlines it instead of inventing an unverified seam;
+      comparison_context preserves the ABI but is not dereferenced. Nodes and
+      links remain u32 addresses to retain the retail four-byte layout on
+      64-bit host tests.

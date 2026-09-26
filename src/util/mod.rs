@@ -153,6 +153,7 @@ pub mod list_find;
 pub mod half_open_word_range_contains;
 pub mod predicate_list_find;
 pub mod pair_chain_find;
+pub mod pair_chain_find_header16;
 pub mod predicate_for_kind;
 pub mod lazy_slot_table_entry;
 pub mod least_common_multiple;

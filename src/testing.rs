@@ -96,6 +96,10 @@ pub mod hints {
     // singly linked node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const PAIR_CHAIN_FIND: usize = 0x83d0_0000;
+    // 0x83d1_0000: dedicated to util/pair_chain_find_header16's target-width
+    // key and singly linked node fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const PAIR_CHAIN_FIND_HEADER16: usize = 0x83d1_0000;
     // 0xe100_0000: dedicated to app/animation_property_pair_init's owner,
     // fixed-value endpoints, and animation fixture; mappings never unmap.
     pub const ANIMATION_PROPERTY_PAIR_INIT: usize = 0xe100_0000;
