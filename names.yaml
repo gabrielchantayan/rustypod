@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083de190
+    ghidra: FUN_083de190
+    name: deque_construct_elem12
+    size: 32
+    sig: "BlockDeque *deque_construct_elem12(BlockDeque *deque)"
+    module: heap/deque_construct_elem12
+    status: ported
+    renames:
+      param_1/r0: deque
+      r4: deque
+      FUN_083ddffc: deque_iter_init_elem12
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent from push {r4,lr}
+      at 0x083de190 through pop {r4,pc} at 0x083de1ac; the next independently
+      entered function begins with push {r4,lr} at 0x083de1b0. The body has
+      one outgoing unconditional BL, deque_iter_init_elem12's default-head
+      constructor at 0x083ddffc, and no predicated outgoing BL. Full-image
+      A32 decoding finds two inbound direct plain BL sites, 0x081ef8bc and
+      0x081ef968, and zero predicated BL forms. It clears map_cap (+0x28),
+      default-constructs the preceding 0x28-byte deque head with NULL
+      iterators, then returns deque. The Rust port uses the established
+      deque_construct for the equivalent null head instead of duplicating
+      the redundant element-12 iterator initialization; host tests seed every
+      target field dirty and verify all are cleared and the input pointer
+      returns. match.py structural review is recorded against this worktree's
+      ARM archive.
   - address: 0x083e0c54
     ghidra: FUN_083e0c54
     name: refcounted_body_range_release
