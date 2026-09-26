@@ -146376,3 +146376,35 @@ functions:
       a non-NULL end cursor, advances that cursor by four bytes, and wraps the
       deque count. The growth helper uses a dedicated volatile seam: target
       builds call 0x083df988, while host tests install a faithful model.
+
+  - address: 0x083df7e4
+    ghidra: FUN_083df7e4
+    name: deque_front_advance_release
+    size: 212
+    sig: "void deque_front_advance_release(u32 *deque)"
+    module: cxx/deque_front_advance_release
+    status: ported
+    vars:
+      param_1/r4: deque
+      local_20: iterator
+    renames:
+      FUN_083d8b04: cxx_string_release
+      FUN_083d7620: container_is_empty
+      FUN_083da3dc: deque_seg_capacity
+      FUN_08266f2c: cxx_array_dealloc
+      FUN_083da3e4: deque_iter_init_elem4_alias_a3e4
+    notes: >-
+      Raw osos.dec establishes the exact 212-byte extent
+      0x083df7e4..0x083df8b8: push {r0-r6,lr} through pop {r0-r6,pc};
+      0x083df8b8 is the next independently linked function. Decoding all
+      aligned A32 B/BL words finds seven unconditional plain body BL
+      instructions—cxx_string_release, container_is_empty twice,
+      deque_seg_capacity, cxx_array_dealloc, and the deque iterator
+      initializer twice—and no predicated BL. Whole-image decoding finds two
+      inbound unconditional plain BL sites, 0x0825c3b4 and 0x083df8c8, and no
+      predicated inbound BL. The port advances the target-width front iterator,
+      decrements the count, releases the retired slot, then either reanchors
+      from the next map slot or NULL-initializes both iterators and frees the
+      map. Deliberate deviations: shared capacity and iterator-init ports
+      replace redundant adjacent copies; target-width fields use u32 word
+      indices so host pointer widening cannot change their offsets.
