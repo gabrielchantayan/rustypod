@@ -53874,6 +53874,32 @@ functions:
       use r0 as a vector header and its begin/end words as r1/r2;
       0x083e3aa8 immediately frees the storage as 16-byte elements.
 
+  - address: 0x083e3aa8
+    ghidra: FUN_083e3aa8
+    name: string_object_pair_vector_destroy
+    size: 48
+    sig: "StringObjectPairVector *string_object_pair_vector_destroy(StringObjectPairVector *vector)"
+    module: cxx/string_object_pair_vector_destroy
+    status: ported
+    vars:
+      param_1/r0: vector
+      FUN_083e38a0: cxx_record_range_destroy_16
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw ARM words establish the exact 48-byte extent
+      0x083e3aa8..0x083e3ad7: `pop {r4,pc}` is at 0x083e3ad4 and the next
+      independently linked function starts with `push {r2-r8,lr}` at
+      0x083e3ad8. The body loads the vector's begin/end words into r1/r2,
+      preserves the vector header in r4, calls cxx_record_range_destroy_16,
+      then passes `(begin, (capacity - begin) >> 4, 0)` to
+      cxx_array_dealloc and returns the original header. Decoding the raw
+      words finds two plain unconditional body bl instructions
+      (0x083e38a0 and 0x08266f2c), no predicated bl instructions, and two
+      inbound plain bl call sites (0x08100b5c and 0x0812bc98), with none
+      predicated. The Rust header keeps target pointer fields and the
+      sixteen-byte element arithmetic explicit; host tests replace the range
+      call because host StringObjectPair values widen pointer fields.
+
   - address: 0x083e3c50
     ghidra: FUN_083e3c50
     name: two_string_record_range_destroy
