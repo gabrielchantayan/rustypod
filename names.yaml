@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd048
+    ghidra: FUN_083dd048
+    name: word_pair_list_insert_before
+    size: 116
+    sig: "void word_pair_list_insert_before(WordPairListNode **output, WordPairList *list, WordPairListNode *position, const u32 *value)"
+    module: cxx/word_pair_list_insert_before
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: list
+      param_3/r2: position
+      param_4/r3: value
+      FUN_083dce90: word_pair_list_node_pool_acquire
+      "list+0x14": state
+      "position+0x00": next
+      "position+0x04": previous
+      "node+0x08": first
+      "node+0x0c": second
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent: 29 A32 words from
+      push {r3-r7,lr} at 0x083dd048 through pop {r3-r7,pc} at 0x083dd0b8;
+      0x083dd0bc starts word_pair_list_sentinel_initialize. The body has one
+      unconditional plain bl, to word_pair_list_node_pool_acquire @
+      0x083dce90, and no predicated bl calls. Whole-image A32 decoding finds
+      two inbound plain bl sites, in FUN_08213908 and
+      word_pair_list_copy_construct, and no predicated inbound bl sites. It
+      acquires a 16-byte pair node, copies value.first and value.second,
+      inserts it immediately before position in the intrusive ring, increments
+      list.state, and writes the node through output. Deliberate deviation:
+      target builds call the verified retail pool-acquire seam; host tests use
+      the existing equivalent implementation shared by word_pair_list_copy_construct.
   - address: 0x083dd0bc
     ghidra: FUN_083dd0bc
     name: word_pair_list_sentinel_initialize
