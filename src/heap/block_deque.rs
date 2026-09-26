@@ -634,6 +634,38 @@ pub unsafe extern "C" fn deque_construct_elem4_alias_ee30(
     (*dq).map = core::ptr::null_mut();
     dq
 }
+/// deque_construct_elem40_alias_db9c — original: `FUN_083ddb9c` @
+/// 0x083ddb9c (64 bytes, `0x083ddb9c..0x083ddbdc`; the next separately
+/// linked function begins at 0x083ddbdc). Raw ARM B/BL-immediate decoding
+/// finds two incoming unconditional plain `bl` calls (0x081a83d4 and
+/// 0x081a8460), no predicated forms, and one outgoing plain `bl` at
+/// 0x083ddbb4 to [`deque_iter_init`].
+///
+/// Default-constructs a 0x28-byte 40-byte-element deque head. Stock builds
+/// an all-NULL iterator in a four-word stack temporary through
+/// `deque_iter_init(_, 0, 0)`, copies it to `end` then `begin`, and clears
+/// `count` and `map`; its saved-register restore returns the original `dq`.
+///
+/// Deliberate deviation: NULL inputs make the iterator unconditionally
+/// [`DequeIter::NULL`], so the port writes it directly and omits the
+/// redundant stack temporary and callee.
+///
+/// # Safety
+///
+/// `dq` must be valid for writes through the 0x28-byte [`DequeHead`] prefix.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_construct_elem40_alias_db9c")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_construct_elem40_alias_db9c(
+    dq: *mut DequeHead,
+) -> *mut DequeHead {
+    (*dq).end = DequeIter::NULL;
+    (*dq).begin = (*dq).end;
+    (*dq).count = 0;
+    (*dq).map = core::ptr::null_mut();
+    dq
+}
+
 /// deque_construct_elem4_alias_ea68 — original: `FUN_083dea68` @
 /// 0x083dea68 (64 bytes, `0x083dea68..0x083deaa7`; the next separately
 /// linked helper begins at 0x083deaa8). Raw ARM decoding finds two incoming
@@ -1371,6 +1403,42 @@ mod tests {
         };
         unsafe {
             assert!(deque_construct_elem12(&mut obj.head) == &mut obj.head);
+        }
+        for it in [&obj.head.begin, &obj.head.end] {
+            assert!(it.cur.is_null());
+            assert!(it.seg_base.is_null());
+            assert!(it.seg_end.is_null());
+            assert!(it.seg_slot.is_null());
+        }
+        assert_eq!(obj.head.count, 0);
+        assert!(obj.head.map.is_null());
+        assert_eq!(obj.tail, 0xcafe_babe);
+    }
+
+    #[test]
+    fn construct_elem40_alias_db9c_zeroes_a_garbage_head_preserves_tail_and_returns_it() {
+        #[repr(C)]
+        struct HeadWithTail {
+            head: DequeHead,
+            tail: u32,
+        }
+        let garbage = DequeIter {
+            cur: 0x11 as *mut u8,
+            seg_base: 0x22 as *mut u8,
+            seg_end: 0x33 as *mut u8,
+            seg_slot: 0x44 as *mut *mut u8,
+        };
+        let mut obj = HeadWithTail {
+            head: DequeHead {
+                begin: garbage,
+                end: garbage,
+                count: u32::MAX,
+                map: 0x55 as *mut *mut u8,
+            },
+            tail: 0xcafe_babe,
+        };
+        unsafe {
+            assert!(deque_construct_elem40_alias_db9c(&mut obj.head) == &mut obj.head);
         }
         for it in [&obj.head.begin, &obj.head.end] {
             assert!(it.cur.is_null());

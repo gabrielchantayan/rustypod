@@ -14958,6 +14958,30 @@ functions:
       because the local target is an already-ledgered byte-identical
       capacity twin returning 0x20.
 
+  - address: 0x083ddb9c
+    ghidra: FUN_083ddb9c
+    name: deque_construct_elem40_alias_db9c
+    size: 64
+    sig: "DequeHead *deque_construct_elem40_alias_db9c(DequeHead *dq)"
+    module: heap/block_deque
+    vars: {param_1: dq}
+    status: ported
+    renames:
+      FUN_083d9eec: deque_iter_init
+      param_1: dq
+    notes: >-
+      Raw osos.dec fixes the 64-byte extent at 0x083ddb9c..0x083ddbdc:
+      push {r0-r5,lr}, make an all-NULL four-word stack iterator through
+      deque_iter_init @ 0x083d9eec, copy it to end (+0x10) then begin
+      (+0x00), clear count/map (+0x20/+0x24), and pop the saved dq into r0.
+      The next separately linked function begins at 0x083ddbdc. Independent
+      aligned ARM B/BL-immediate decoding finds exactly two inbound
+      unconditional plain bl calls (0x081a83d4 and 0x081a8460), zero
+      predicated bl forms, and one outgoing plain bl at 0x083ddbb4 to
+      deque_iter_init. Rust deliberately writes DequeIter::NULL directly,
+      removing the deterministic stack temporary and callee while preserving
+      dq as the return and leaving the trailing map-capacity word untouched.
+
   - address: 0x083ddbdc
     ghidra: FUN_083ddbdc
     name: deque_pop_front
