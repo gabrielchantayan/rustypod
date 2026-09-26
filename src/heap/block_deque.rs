@@ -32,10 +32,10 @@
 //!   plain `bl` sites (0x083d2570 / 0x083d26ac) and no predicated forms.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 //!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
-//!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
-//!   `FUN_083da344` @ 0x083da344, `FUN_083da424` @ 0x083da424, and
+//!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da214` @ 0x083da214,
+//!   `FUN_083da240` @ 0x083da240, `FUN_083da344` @ 0x083da344, `FUN_083da424` @ 0x083da424, and
 //!   `FUN_083da450` @ 0x083da450 (8 bytes each: `mov r0, #0x20; bx lr`;
-//!   respectively 7, 12, 18, 12, 12, 13, 2, and 11 direct plain `bl`
+//!   respectively 7, 12, 18, 12, 2, 12, 13, 2, and 11 direct plain `bl`
 //!   call sites; no predicated calls, binary-verified). Elements per deque
 //!   segment: 0x20 elements of 0x28 bytes = the 0x500-byte segment stride
 //!   of the seed walk.
@@ -625,6 +625,26 @@ pub unsafe extern "C" fn deque_seg_capacity() -> usize {
 pub unsafe extern "C" fn deque_seg_capacity_alias_a2ac() -> usize {
     0x20
 }
+
+/// deque_seg_capacity_alias_a214 — original: `FUN_083da214` @ 0x083da214
+/// (8 bytes, `0x083da214..0x083da21b`).
+///
+/// Raw words `0xe3a00020` and `0xe12fff1e` decode as `mov r0, #0x20; bx
+/// lr`, returning 0x20 elements per deque segment. The next independently
+/// linked function, `deque_iter_assign_alias_a21c`, starts at 0x083da21c.
+/// Raw ARM decoding and its sole caller identify exactly two unconditional
+/// plain `bl` call sites at 0x083ea25c and 0x083ea2c4, with no predicated
+/// `bl` forms and no body calls. Deliberate deviation: this byte-identical
+/// template copy has a dedicated text section to retain its address-specific
+/// hook seam rather than allowing LLVM to fold it into `deque_seg_capacity`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.deque_seg_capacity_alias_a214"))]
+#[inline(never)]
+pub unsafe extern "C" fn deque_seg_capacity_alias_a214() -> usize {
+    0x20
+}
+
+
 
 
 /// deque_iter_init — original: `FUN_083d9eec` @ 0x083d9eec (68 bytes).
@@ -1312,6 +1332,13 @@ mod tests {
     fn seg_capacity_alias_a2ac_returns_its_raw_constant() {
         unsafe {
             assert_eq!(deque_seg_capacity_alias_a2ac(), 0x20);
+        }
+    }
+
+    #[test]
+    fn seg_capacity_alias_a214_returns_its_raw_constant() {
+        unsafe {
+            assert_eq!(deque_seg_capacity_alias_a214(), 0x20);
         }
     }
 
