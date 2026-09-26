@@ -107,6 +107,7 @@ pub mod list_node_pool_list_init;
 pub mod list_node_pool_list_append_value;
 pub mod list_node_pool_list_erase;
 pub mod list_node_pool_list_construct;
+pub mod list_node_pool_list_insert_payload_range;
 pub mod list_node_pool_list_clear;
 pub mod word_list_node_pool_list_recycle_all;
 pub mod vector_word_copy_construct;
