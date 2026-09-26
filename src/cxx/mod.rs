@@ -5,6 +5,7 @@
 pub mod bit_set;
 pub mod vector_copy_construct_elem32;
 pub mod path_object_vector_push_back;
+pub mod three_word_string_pair_copy_construct;
 pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
 pub mod container_first_node;
