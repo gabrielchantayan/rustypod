@@ -56,7 +56,7 @@ unsafe fn node_from_word(word: u32) -> *mut WordPairListNode {
     word as usize as *mut WordPairListNode
 }
 
-unsafe fn acquire_node(list: *mut WordPairList, single: u32) -> *mut WordPairListNode {
+pub(crate) unsafe fn acquire_node(list: *mut WordPairList, single: u32) -> *mut WordPairListNode {
     if (*list).free != 0 {
         let node = node_from_word((*list).free);
         (*list).free = (*node).next;

@@ -2040,6 +2040,9 @@ pub mod hints {
     // 0xe080_0000: dedicated to cxx/word_pair_list_copy_construct's source,
     // destination, and target-width node-ring fixture; mappings never unmap.
     pub const WORD_PAIR_LIST_COPY_CONSTRUCT: usize = 0xe080_0000;
+    // 0xe100_0000: dedicated to cxx/word_pair_list_sentinel_initialize's
+    // target-width list-owner and node-pool fixture; mappings never unmap.
+    pub const WORD_PAIR_LIST_SENTINEL_INITIALIZE: usize = 0xe100_0000;
     // 0x3a00_0000: dedicated to cxx/list_node_pool_list_erase's target-width
     // owner and four-node intrusive-ring fixture; mappings never unmap, so no
     // other user may share this hint.
