@@ -146680,3 +146680,27 @@ functions:
       map. Deliberate deviations: shared capacity and iterator-init ports
       replace redundant adjacent copies; target-width fields use u32 word
       indices so host pointer widening cannot change their offsets.
+  - address: 0x083dd9c8
+    ghidra: FUN_083dd9c8
+    name: copy_two_words_with_flag
+    size: 28
+    sig: "u32 *copy_two_words_with_flag(u32 *destination, const u32 *source_words, const u8 *flag)"
+    module: cxx/copy_two_words_with_flag
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source_words
+      param_3/r2: flag
+      r3: first_word
+      r1: second_word_then_flag
+      return/r0: destination
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent 0x083dd9c8..0x083dd9e3:
+      two ordered aligned word load/store pairs, an ordered byte load/store pair,
+      then bx lr; 0x083dd9e4 begins the next independently linked function.
+      Raw A32 decoding finds zero plain or predicated outgoing BL instructions.
+      Full-image A32 decoding finds two inbound plain direct BL sites at
+      0x083d2ee8 and 0x083d301c, and zero predicated inbound BL sites. It copies
+      two target-width words and one trailing byte, returns destination unchanged,
+      and has no target-call seams. Rust preserves the source/load then
+      destination/store order so overlapping ranges retain stock behavior.
