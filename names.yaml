@@ -60145,6 +60145,32 @@ functions:
       early-out, double unlink, count--, bl release, free push,
       successor store) with a different frame and no spill traffic.
 
+
+  - address: 0x083dc2d0
+    ghidra: FUN_083dc2d0
+    name: list_node_pool_insert_refcounted
+    size: 116
+    sig: "void list_node_pool_insert_refcounted(u32 *out, RefcountedListHeader *list, u32 *node_slot, RefcountedBody **payload)"
+    module: cxx/list_node_pool_insert_refcounted
+    status: ported
+    vars: {param_1: out, param_2: list, param_3: node_slot, param_4: payload}
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent: 29 ARM words from
+      push {r3-r7,lr} @ 0x083dc2d0 through pop {r3-r7,pc} @ 0x083dc340;
+      the next real function begins at 0x083dc344. Decoding every aligned
+      ARM B/BL-immediate word finds exactly two inbound calls, both plain
+      unconditional bl (0x08132ee8 and 0x083dc118), correcting Ghidra's
+      spurious third caller. The body has two verified BL calls: plain bl to
+      the unported 12-byte pool acquire @ 0x083dc120 and blne to ported
+      refcounted_ptr_copy_construct @ 0x0839ef3c. It acquires a 12-byte node,
+      copy-constructs payload[0], splices the node immediately before the
+      sentinel in *node_slot, increments list + 0x14 with wrapping arithmetic,
+      and writes it to *out. The pool acquire is structurally identical to
+      ported word_list_node_pool_acquire @ 0x083dd78c; the port deliberately
+      reuses that semantic equivalent rather than inventing a new callee
+      identity. Target node pointers remain u32 words; host tests inject the
+      two callees to prove payload construction, singleton-sentinel linking,
+      output, and count wrapping without host pointer-width distortion.
   - address: 0x083dc344
     ghidra: FUN_083dc344
     name: list_node_pool_acquire
