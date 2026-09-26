@@ -15498,6 +15498,30 @@ functions:
       and zero tail b forms. This is one of the 17 byte-identical
       deque-template copies, so the canonical 0x083d9ec0 export deliberately
       serves this address instead of adding an indistinguishable Rust body.
+  - address: 0x083da038
+    ghidra: FUN_083da038
+    name: deque_iter_decrement_elem4_alias_a038
+    size: 80
+    sig: "DequeIter *deque_iter_decrement_elem4_alias_a038(DequeIter *iter)"
+    module: heap/block_deque
+    status: ported
+    renames:
+      param_1: iter
+      iVar1: segment_capacity
+      iVar2: previous_segment_base
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x083da038..0x083da087; the
+      next real function, deque_iter_advance_elem4, begins at 0x083da088.
+      Decoding every aligned ARM B/BL word finds exactly two incoming
+      unconditional plain bl call sites (0x083de758 and 0x083de768), zero
+      predicated bl forms, and one outgoing unconditional plain bl at
+      0x083da050 to the verified deque_seg_capacity member at 0x083d9fcc.
+      The iterator decrements its four-byte current element; at its segment
+      base it selects the preceding map slot, reloads its segment base, sets
+      cur and seg_end to that segment's exclusive end, then decrements cur by
+      four. Rust calls the existing pure deque_seg_capacity export for the
+      byte-identical local member and uses typed fields so target word identity
+      remains explicit on wider host pointers.
   - address: 0x083da088
     ghidra: FUN_083da088
     name: deque_iter_advance_elem4
