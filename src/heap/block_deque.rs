@@ -37,6 +37,11 @@
 //!   0x28-byte deque head: both iterators all-NULL, element count and
 //!   segment-map pointer zeroed (the trailing `map_cap` word of a full
 //!   `BlockDeque` is left untouched, exactly like the original).
+//! - `deque_construct_elem12` — original: `FUN_083ddffc` @ 0x083ddffc
+//!   (64 bytes; 2 incoming plain `bl` call sites, no predicated forms,
+//!   binary-verified). Default-constructs the 12-byte-element template's
+//!   0x28-byte deque head, returning `dq`.
+
 //! - `deque_pop_front` — original: `FUN_083ddbdc` @ 0x083ddbdc
 //!   (204 bytes; 4 bl call sites @ 0x0814c724, 0x081fc0c8, 0x08214250,
 //!   0x083ddcbc, binary-verified). Pops the front element: advances
@@ -693,6 +698,35 @@ pub unsafe extern "C" fn deque_construct_elem4_alias_f154(
     dq
 }
 
+/// deque_construct_elem12 — original: `FUN_083ddffc` @ 0x083ddffc (64 bytes,
+/// `0x083ddffc..0x083de03b`; the next separately linked helper begins at
+/// calls (0x083de198 and 0x083dffdc), no predicated BL forms, and one outgoing
+/// plain `bl` at 0x083de014 to [`deque_iter_init_elem12`] @ 0x083d9f88.
+///
+/// Default-constructs this 12-byte-element template's 0x28-byte deque head:
+/// stock initializes a four-word stack iterator with NULL `cur` and slot,
+/// copies it to `end` then `begin`, and clears `count` and `map`. Its register
+/// restore returns the original `dq`.
+///
+/// Deliberate deviation: NULL inputs make the iterator unconditionally
+/// [`DequeIter::NULL`], so this port writes it directly and omits the redundant
+/// stack temporary and call.
+///
+/// # Safety
+///
+/// `dq` must be valid for writes through the 0x28-byte [`DequeHead`] prefix.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_construct_elem12")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_construct_elem12(dq: *mut DequeHead) -> *mut DequeHead {
+    (*dq).end = DequeIter::NULL;
+    (*dq).begin = (*dq).end;
+    (*dq).count = 0;
+    (*dq).map = core::ptr::null_mut();
+    dq
+}
+
+
 
 /// The base object's client handle (`handle_deref_or_null(this + 0x4)`,
 /// the shape every original call site uses).
@@ -1301,6 +1335,42 @@ mod tests {
         };
         unsafe {
             assert!(deque_construct_elem4_alias_ea68(&mut obj.head) == &mut obj.head);
+        }
+        for it in [&obj.head.begin, &obj.head.end] {
+            assert!(it.cur.is_null());
+            assert!(it.seg_base.is_null());
+            assert!(it.seg_end.is_null());
+            assert!(it.seg_slot.is_null());
+        }
+        assert_eq!(obj.head.count, 0);
+        assert!(obj.head.map.is_null());
+        assert_eq!(obj.tail, 0xcafe_babe);
+    }
+
+    #[test]
+    fn construct_elem12_zeroes_a_garbage_head_preserves_tail_and_returns_it() {
+        #[repr(C)]
+        struct HeadWithTail {
+            head: DequeHead,
+            tail: u32,
+        }
+        let garbage = DequeIter {
+            cur: 0x11 as *mut u8,
+            seg_base: 0x22 as *mut u8,
+            seg_end: 0x33 as *mut u8,
+            seg_slot: 0x44 as *mut *mut u8,
+        };
+        let mut obj = HeadWithTail {
+            head: DequeHead {
+                begin: garbage,
+                end: garbage,
+                count: u32::MAX,
+                map: 0x55 as *mut *mut u8,
+            },
+            tail: 0xcafe_babe,
+        };
+        unsafe {
+            assert!(deque_construct_elem12(&mut obj.head) == &mut obj.head);
         }
         for it in [&obj.head.begin, &obj.head.end] {
             assert!(it.cur.is_null());
