@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e4a90
+    ghidra: FUN_083e4a90
+    name: vector_word_copy_construct
+    size: 156
+    sig: "u32 *vector_word_copy_construct(u32 *output, const u32 *source)"
+    module: cxx/vector_word_copy_construct
+    status: ported
+    renames:
+      param_1/r4: output
+      param_2/r6: source
+      local_14: source_len
+      local_18: capacity
+      FUN_083d78e4: vector_size_elem4_alias_78e4
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the 156-byte extent from the push at
+      0x083e4a90 through the pop at 0x083e4b28; 0x083e4b2c begins the next
+      function. The body has three unconditional BL instructions (two calls
+      to vector_size_elem4_alias_78e4 at 0x083d78e4 and one call to
+      operator_new_checked at 0x08266c70) and no predicated BL instructions.
+      It zero-initializes a three-word vector, allocates max(source length,
+      32) words, conditionally copies source words after a failed allocation,
+      then stores the end and capacity pointers derived from the source length.
   - address: 0x083e7d4c
     ghidra: FUN_083e7d4c
     name: record_min_heap_pop_adjust
