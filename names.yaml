@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083db964
+    ghidra: FUN_083db964
+    name: signed_key_tree_find_node_f8f0_copy
+    size: 168
+    sig: "void signed_key_tree_find_node_f8f0_copy(u32 *out_node, const SignedKeyTree *tree, const i32 *key)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1/r0: out_node
+      param_2/r1: tree
+      param_3/r2: key
+      "tree+0x10": header
+      "header+0x04": root
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": key
+    notes: >-
+      Raw osos.dec establishes the 168-byte A32 extent from 0x083db964 through
+      pop {r0-r10,pc} at 0x083dba08; the next separately linked sibling starts
+      at 0x083dba0c. Whole-image ARM branch decoding finds exactly two inbound
+      unconditional plain bl sites (0x081bd328, 0x0839bc40) and no predicated
+      bl sites. The body descends the signed-key red-black tree from header+4,
+      retaining the least node not less than *key, then returns that candidate
+      only when *key is not less than its +0x10 key; otherwise it stores the
+      header sentinel. Its four unconditional body calls are less_signed twice,
+      equal_deref_f8f0_copy, and the node-key accessor. Rust inlines the two
+      leaf helpers as direct word operations and omits dead comparator slack
+      arguments and stack scratch stores; target-width pointers remain u32.
   - address: 0x083dbe5c
     ghidra: FUN_083dbe5c
     name: cxx_node_pool_construct

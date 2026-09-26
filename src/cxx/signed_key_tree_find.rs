@@ -1,5 +1,6 @@
 //! Signed-key tree search helpers.
 //!
+//!
 //! `signed_key_tree_find_node_copy` — original: `FUN_083dbab4` @
 //! `0x083dbab4` (**168 bytes**, exactly `0x083dbab4..0x083dbb58`; the
 //! separately linked sibling starts at `0x083dbb5c`).
@@ -30,6 +31,75 @@
 //! no predicated calls, direct `b` transfers, or aligned data-word references.
 
 use core::ptr::{addr_of, addr_of_mut};
+/// `signed_key_tree_find_node_f8f0_copy` — original: `FUN_083db964` @
+/// `0x083db964` (**168 bytes**, exactly `0x083db964..0x083dba08`; the next
+/// separately linked sibling starts at `0x083dba0c`).
+///
+/// Raw A32 decoding finds **2 direct inbound plain `bl` call sites**
+/// (0x081bd328 and 0x0839bc40), **0 predicated `bl` call sites**, and no
+/// direct `b` transfers. Its body has four unconditional `bl` instructions:
+/// `less_signed` @ 0x083d7580 twice, `equal_deref_f8f0_copy` @ 0x083cf8f0,
+/// and the node-key accessor @ 0x083b6b14.
+///
+/// It descends `std::_Rb_tree::lower_bound` from `header->root` (+0x4):
+/// a node key at +0x10 less than the query follows the right child (+0xc);
+/// otherwise it becomes the candidate and follows the left child (+0x8).
+/// A candidate equal to the header or strictly greater than the query writes
+/// the header sentinel through `out_node`; otherwise it writes the candidate.
+/// Deliberate deviations: the two leaf helpers are equivalent direct
+/// candidate/header comparison and `candidate + 0x10`, and ignored comparator
+/// slack arguments plus stack scratch stores are omitted.
+///
+/// Exact signed-key tree lookup after lower-bound descent.
+///
+/// # Safety
+///
+/// `tree`, `key`, and `out_node` must be valid, aligned pointers. `tree`'s
+/// header must point to a readable target-layout header with its root at +0x4;
+/// every reachable node must expose readable child words at +0x8/+0xc and a
+/// signed key at +0x10. As in retailOS, NULL and malformed links fault or
+/// loop rather than being checked.
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.signed_key_tree_find_node_f8f0_copy"
+)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_find_node_f8f0_copy(
+    out_node: *mut u32,
+    tree: *const SignedKeyTree,
+    key: *const i32,
+) {
+    let header = addr_of!((*tree).header).read();
+    let mut node = (header as usize as *const u32).add(1).read();
+    let mut candidate = header;
+    let comparator = tree.cast::<u8>().add(0x19);
+    while node != 0 {
+        let node_words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(
+            comparator,
+            node_words.add(4).cast::<i32>(),
+            key,
+        ) != 0
+        {
+            node = node_words.add(3).read();
+        } else {
+            candidate = node;
+            node = node_words.add(2).read();
+        }
+    }
+    if candidate == header
+        || crate::cxx::templates::less_signed(
+            comparator,
+            key,
+            (candidate as usize as *const i32).add(4),
+        ) != 0
+    {
+        out_node.write(header);
+    } else {
+        out_node.write(candidate);
+    }
+}
 
 /// The tree prefix consumed here: its header/sentinel pointer is at +0x10.
 ///
@@ -386,7 +456,7 @@ mod tests {
 
 
     #[test]
-    fn find_node_f908_copy_rejects_lower_bound_candidates_with_different_keys() {
+    fn find_node_f8f0_copy_rejects_lower_bound_candidates_with_different_keys() {
         let Some(slab) = crate::testing::try_map_u32_slab(
             crate::testing::hints::SIGNED_KEY_TREE_LOWER_BOUND,
             0x1000,
@@ -413,7 +483,7 @@ mod tests {
         let tree = SignedKeyTree { opaque_prefix: [0; 4], header };
         let find = |key: i32| {
             let mut selected = 0;
-            unsafe { signed_key_tree_find_node_f908_copy(&mut selected, &tree, &key) };
+            unsafe { signed_key_tree_find_node_f8f0_copy(&mut selected, &tree, &key) };
             selected
         };
 
