@@ -78,6 +78,7 @@ pub mod queue_wait_status;
 pub mod stats;
 pub mod state;
 pub mod tracked;
+pub mod trivial_range_destroy_and_deallocate;
 pub mod types;
 pub mod veneers;
 pub mod word_buffer;
