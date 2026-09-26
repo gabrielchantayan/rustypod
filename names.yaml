@@ -57664,6 +57664,26 @@ functions:
       accepted vector_bool_reference_init deviation), plus LLVM's fp
       frame.
 
+  - address: 0x083e5f5c
+    ghidra: FUN_083e5f5c
+    name: vector_bool_iter_decrement
+    size: 40
+    sig: "VectorBoolIter *vector_bool_iter_decrement(VectorBoolIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, iVar1: previous_bit}
+    notes: >-
+      `std::vector<bool>` bit-iterator `_Vb_iterator::operator--`: decrements
+      `iter.bit` with 32-bit wrapping. Only the underflow value -1 resets bit
+      to 31 and moves `iter.word` back one 4-byte storage element; all other
+      noncanonical offsets retain raw ARM behavior. Raw decoding proves the
+      40-byte body at 0x083e5f5c..0x083e5f80, followed by the next sibling at
+      0x083e5f84. The two direct inbound calls are unconditional `bl` at
+      0x083e5d84 and 0x083e5d98; no predicated `bl` or outgoing call exists.
+      The function leaves r0 equal to `iter`, and both callers pass that result
+      to vector_bool_reference_init. Deliberate host-only deviation:
+      read_unaligned/write_unaligned field accesses accept 4-byte-aligned
+      target iterator heads on 64-bit hosts; the target retains aligned words.
   - address: 0x083e5f84
     ghidra: FUN_083e5f84
     name: vector_bool_iter_advance
