@@ -23,6 +23,7 @@ pub mod tree_lookup_result_write;
 pub mod tree_lookup_result_write_cc874;
 pub mod refcounted_key_tree_lookup_value;
 pub mod tree_lookup_node_payload_slot;
+pub mod red_black_tree_payload_8_construct;
 pub mod string_record;
 pub mod cxx_string_range_assign;
 pub mod cxx_string_pair_range_assign;

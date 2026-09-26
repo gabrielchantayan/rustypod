@@ -60506,6 +60506,30 @@ functions:
       next and previous words. Pointers remain u32 target words so the
       target layout is preserved on host builds; no algorithmic deviations.
 
+  - address: 0x083db244
+    ghidra: FUN_083db244
+    name: red_black_tree_payload_8_construct
+    size: 88
+    sig: "RedBlackTreePayload8 *red_black_tree_payload_8_construct(RedBlackTreePayload8 *tree, const u8 *comparator, void *allocator)"
+    module: cxx/red_black_tree_payload_8_construct
+    status: ported
+    vars: {param_1/r0: tree, param_2/r1: comparator, param_3/r2: allocator, r4: tree, r5: zero}
+    renames:
+      FUN_083bc980: red_black_tree_payload_8_node_pool_acquire
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from
+      push {r4-r6,lr} at 0x083db244 through pop {r4-r6,pc} at 0x083db298;
+      the next separately linked function starts at 0x083db29c. Decoding
+      every aligned ARM B/BL-immediate word finds two inbound direct calls,
+      both unconditional plain bl (0x0809dbc0, 0x0809df4c), no predicated
+      forms, and one unconditional outbound bl to the still-retail
+      red_black_tree_payload_8_node_pool_acquire @ 0x083bc980. The
+      constructor clears the 16-byte embedded pool, header pointer, count,
+      and initialized byte at +0x18; copies *comparator to +0x19; obtains
+      the sentinel; then sets sentinel parent to zero and left/right links to
+      itself. The third ABI argument is deliberately retained but ignored.
+      Pointers remain 32-bit target words to preserve the 28-byte layout on
+      host builds.
   - address: 0x083db2d4
     ghidra: FUN_083db2d4
     name: red_black_tree_payload_24_construct

@@ -42,6 +42,9 @@ pub mod hints {
     // 0x7010_0000: dedicated to crypto/sha1_managed_context_create's
     // target-width SHA-1 backing context fixture; mappings never unmap.
     pub const SHA1_MANAGED_CONTEXT_CREATE: usize = 0x7010_0000;
+    // 0x6ca0_0000: dedicated to cxx/red_black_tree_payload_8_construct's
+    // target-width tree and sentinel fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_PAYLOAD_8_CONSTRUCT: usize = 0x6ca0_0000;
     // 0x6ef0_0000: dedicated to heap/fixa_resource's target-width FixA
     // owner, FixL range, and resource fixtures; mappings never unmap.
     pub const FIXA_RESOURCE_RELEASE: usize = 0x6ef0_0000;
