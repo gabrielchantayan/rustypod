@@ -279,6 +279,7 @@ pub mod stream_read_core;
 pub mod stream_read_be32_or_zero;
 pub mod stream_read_u32;
 pub mod stream_read_u32_pair_if_ready;
+pub mod stream_prepare_and_test_ready;
 pub mod store_static_descriptor;
 pub mod store_four_components;
 pub mod store_four_u32s;

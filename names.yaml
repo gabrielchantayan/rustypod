@@ -148823,3 +148823,29 @@ functions:
       offset, calls pubsync for a non-NULL streambuf at +0x34, and calls the
       verified-address basic_ios_setstate seam with badbit (1) only for result
       -1. Host hooks deliberately replace target-width function pointers.
+  - address: 0x083d81ac
+    ghidra: FUN_083d81ac
+    name: stream_prepare_and_test_ready
+    size: 96
+    sig: "u8 *stream_prepare_and_test_ready(u8 *result, void *stream, u32 force_prepare)"
+    module: util/stream_prepare_and_test_ready
+    status: ported
+    renames:
+      FUN_083d820c: unported_direct_helper_083d820c
+      param_2/r1: stream
+      param_3/r2: force_prepare
+      FUN_083d820c: stream_prepare_helper
+      "stream-state+0x04": activity_flags
+      "prepared-stream-state+0x10": result_state
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent: 24 A32 words from
+      push {r4,lr} at 0x083d81ac through pop {r4,pc} at 0x083d8208;
+      0x083d820c starts the next real function. The body has one outgoing
+      unconditional plain BL at 0x083d81e4 to unported FUN_083d820c and no
+      predicated BL. Whole-image A32 branch decoding finds two inbound
+      unconditional plain BL sites at 0x083b5458 and 0x083d8150, with no
+      predicated inbound calls. It selects helper flags 0x10 or 0x14 from
+      stream-state+4 bit 0x1000 and force_prepare, then stores whether the
+      returned stream state's +0x10 word is zero. Target builds call the
+      verified helper address; host tests use an injectable seam and native
+      pointer-width host vtable metadata.
