@@ -2049,6 +2049,10 @@ pub mod hints {
     // 0xe200_0000: dedicated to cxx/word_pair_list_node_pool_acquire's target-width
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const WORD_PAIR_LIST_NODE_POOL_ACQUIRE: usize = 0xe200_0000;
+    // 0xe280_0000: dedicated to cxx/app_block_manager_node_pool_acquire's
+    // target-width pool/chunk/node fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const APP_BLOCK_MANAGER_NODE_POOL_ACQUIRE: usize = 0xe280_0000;
     // 0x3a00_0000: dedicated to cxx/list_node_pool_list_erase's target-width
     // owner and four-node intrusive-ring fixture; mappings never unmap, so no
     // other user may share this hint.
