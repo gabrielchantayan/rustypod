@@ -100,20 +100,17 @@
 //! 0x0839f870..0x083b4xxx treat NULL as fatal — `movs r6, r0` followed
 //! by `bleq 0x08030f44` (`heap_panic`).
 //!
-//! # Deviations
+//! # Deliberate deviations
 //!
-//! - `FUN_083db92c` is **not ported** (its `insert_unique` pulls in the
-//!   whole red-black tree), so it goes through the
-//!   [`SILVER_LIST_TABLE_OPS`] `read_volatile` dispatch table (house
-//!   pattern — see `cxx/string_object.rs`'s
-//!   `STRING_OBJECT_ASSIGN_CSTR_OPS`). The wired default models an
-//!   **empty** table: it hands back a shared always-NULL slot, so every
-//!   lookup misses. This port is therefore **NOT HOOK-READY** until
-//!   0x083db92c is ported — branching stock code here today would make
-//!   every controller's item lookup panic.
-//! - The port takes `item_id` by value and spills it into a local, which
-//!   is exactly what the original's `push {r0, r1, ...}` +
-//!   `add r1, sp, #4` does; the caller's register is never aliased.
+//! - On the host, the unported `insert_unique` callee is an explicit test
+//!   seam. On device it remains a direct call to 0x083c8aa8. This is
+//!   necessary because this port is the caller, not the red-black tree
+//!   implementation.
+//! - Host pointers are wider than retailOS words. Host callers of
+//!   [`silver_list_table_item`] read the returned slot as one `u32`, while
+//!   device code reads the native four-byte pointer.
+//! - The key remains a local private copy, mirroring the original's stack
+//!   pair rather than exposing the caller's storage.
 
 /// Byte offset of the map inside the table (`add r0, r0, #12`), kept as
 /// a named constant only for documentation — the port addresses the map
@@ -202,46 +199,84 @@ const _: [u8; SILVER_LIST_TABLE_STATE_OFFSET] =
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x30] = [0; core::mem::size_of::<SilverListTable>()];
 
-/// Injection point for `FUN_083db92c`, the map's `operator[]`: the
-/// address of the value word for `key`, inserting a zero-valued entry
-/// when the key is absent.
-pub type SilverItemMapValueSlot = unsafe extern "C" fn(
+/// A red-black map node returned by `FUN_083c8aa8`. Its value word is at
+/// target offset +20.
+pub type SilverItemMapNode = u32;
+
+/// The temporary `value_type` which `FUN_083db92c` constructs on its stack.
+#[repr(C)]
+pub struct SilverItemMapPair {
+    pub key: u32,
+    pub value: u32,
+}
+
+/// `FUN_083c8aa8`: inserts the pair if absent and returns `{node, inserted}`.
+/// This caller observes only the first word, the node pointer.
+pub type SilverItemMapInsertUnique = unsafe extern "C" fn(
+    result: *mut *mut SilverItemMapNode,
+    map: *mut SilverItemMap,
+    pair: *const SilverItemMapPair,
+);
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn map_insert_unique(
+    result: *mut *mut SilverItemMapNode,
+    map: *mut SilverItemMap,
+    pair: *const SilverItemMapPair,
+) {
+    let insert_unique: SilverItemMapInsertUnique = core::mem::transmute(0x083c_8aa8usize);
+    insert_unique(result, map, pair);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_map_insert_unique(
+    _result: *mut *mut SilverItemMapNode,
+    _map: *mut SilverItemMap,
+    _pair: *const SilverItemMapPair,
+) {
+    panic!("silver_item_map_value_slot requires map insert_unique 0x083c8aa8")
+}
+
+/// Host-test seam for the unported `FUN_083c8aa8` direct callee.
+#[cfg(not(target_os = "none"))]
+pub static mut SILVER_ITEM_MAP_INSERT_UNIQUE: SilverItemMapInsertUnique = missing_map_insert_unique;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn map_insert_unique(
+    result: *mut *mut SilverItemMapNode,
+    map: *mut SilverItemMap,
+    pair: *const SilverItemMapPair,
+) {
+    core::ptr::read_volatile(core::ptr::addr_of!(SILVER_ITEM_MAP_INSERT_UNIQUE))(result, map, pair);
+}
+
+/// `silver_item_map_value_slot` — original: `FUN_083db92c` @ 0x083db92c
+/// (**56 bytes**, all code; **1 plain `bl`, 0 predicated `bl`** in its body;
+/// exactly **2 incoming `bl` sites**, binary-decoded).
+///
+/// Copies `*key` into the stack `value_type { key, 0 }`, asks the ordered
+/// map's `insert_unique` for its `{node, inserted}` result, and returns the
+/// address of the node's value word at +20. Thus an absent key is inserted
+/// with a zero value; this is C++ `operator[]`, not a lookup.
+///
+/// # Deliberate deviations
+///
+/// The direct retailOS callee `FUN_083c8aa8` remains unported. Device builds
+/// call it at its verified load address; host builds expose it as the narrow
+/// [`SILVER_ITEM_MAP_INSERT_UNIQUE`] test seam. The host seam returns a
+/// target-width node address so the +20 target offset remains literal.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn silver_item_map_value_slot(
     map: *mut SilverItemMap,
     key: *const u32,
-) -> *mut *mut u8;
-
-/// The one unported retailOS dependency of [`silver_list_table_item`].
-#[derive(Clone, Copy)]
-pub struct SilverListTableOps {
-    /// `FUN_083db92c` — `map[key]`, default-inserting.
-    pub map_value_slot: SilverItemMapValueSlot,
-}
-
-/// The value slot [`unported_map_value_slot`] hands out. It stays NULL:
-/// nothing in this crate writes through it.
-static mut EMPTY_TABLE_VALUE_SLOT: *mut u8 = core::ptr::null_mut();
-
-/// Wired default for [`SilverListTableOps::map_value_slot`]: models an
-/// empty table, where every key misses and `operator[]` would return a
-/// freshly zeroed value slot.
-unsafe extern "C" fn unported_map_value_slot(
-    _map: *mut SilverItemMap,
-    _key: *const u32,
 ) -> *mut *mut u8 {
-    core::ptr::addr_of_mut!(EMPTY_TABLE_VALUE_SLOT)
-}
-
-/// Wired defaults for [`SILVER_LIST_TABLE_OPS`].
-pub const DEFAULT_SILVER_LIST_TABLE_OPS: SilverListTableOps =
-    SilverListTableOps { map_value_slot: unported_map_value_slot };
-
-/// Active model of the unported map indexer. Target integration replaces
-/// the slot when 0x083db92c is ported; host tests install a real map.
-pub static mut SILVER_LIST_TABLE_OPS: SilverListTableOps = DEFAULT_SILVER_LIST_TABLE_OPS;
-
-#[inline(always)]
-unsafe fn map_value_slot_op() -> SilverItemMapValueSlot {
-    core::ptr::read_volatile(core::ptr::addr_of!(SILVER_LIST_TABLE_OPS.map_value_slot))
+    let pair = SilverItemMapPair { key: key.read(), value: 0 };
+    let mut node: *mut SilverItemMapNode = core::ptr::null_mut();
+    map_insert_unique(core::ptr::addr_of_mut!(node), map, core::ptr::addr_of!(pair));
+    node.add(5).cast()
 }
 
 /// silver_list_table_item — original: `FUN_081473c0` @ 0x081473c0
@@ -262,11 +297,14 @@ pub unsafe extern "C" fn silver_list_table_item(
     item_id: u32,
 ) -> *mut u8 {
     let key = item_id;
-    let slot = (map_value_slot_op())(
+    let slot = silver_item_map_value_slot(
         core::ptr::addr_of_mut!((*table).items),
         core::ptr::addr_of!(key),
     );
-    core::ptr::read_volatile(slot)
+    #[cfg(target_os = "none")]
+    { core::ptr::read_volatile(slot) }
+    #[cfg(not(target_os = "none"))]
+    { core::ptr::read_volatile(slot.cast::<u32>()) as usize as *mut u8 }
 }
 
 /// The retailOS dependencies of [`silver_list_table_ctor`].
@@ -525,13 +563,10 @@ mod tests {
     use std::vec::Vec;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
-
-    /// A host stand-in for the ordered map: `(key, value)` pairs plus the
-    /// map address each lookup was handed.
-    static mut ENTRIES: Vec<(u32, *mut u8)> = Vec::new();
+    static mut ENTRIES: Vec<(u32, *mut u32)> = Vec::new();
     static mut LOOKUPS: Vec<(*mut SilverItemMap, u32)> = Vec::new();
 
-    fn entries() -> &'static mut Vec<(u32, *mut u8)> {
+    fn entries() -> &'static mut Vec<(u32, *mut u32)> {
         unsafe { &mut *ptr::addr_of_mut!(ENTRIES) }
     }
 
@@ -539,33 +574,54 @@ mod tests {
         unsafe { &mut *ptr::addr_of_mut!(LOOKUPS) }
     }
 
-    unsafe extern "C" fn mock_map_value_slot(
-        map: *mut SilverItemMap,
-        key: *const u32,
-    ) -> *mut *mut u8 {
-        let key = key.read();
-        lookups().push((map, key));
-        if let Some(index) = entries().iter().position(|(k, _)| *k == key) {
-            return ptr::addr_of_mut!(entries()[index].1);
-        }
-        // operator[] default-inserts on a miss and returns the new slot.
-        entries().push((key, ptr::null_mut()));
-        let last = entries().len() - 1;
-        ptr::addr_of_mut!(entries()[last].1)
+    static mut NODE_COUNT: usize = 0;
+    static MAP_NODES: std::sync::LazyLock<Option<usize>> = std::sync::LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(crate::testing::hints::SILVER_ITEM_MAP_VALUE_SLOT, 0x100)
+            .map(|pointer| pointer as usize)
+    });
+
+    unsafe fn node_at(index: usize) -> *mut SilverItemMapNode {
+        let base = MAP_NODES.expect("target-width map node fixture");
+        (base as *mut SilverItemMapNode).add(index * 6)
     }
 
-    unsafe fn install_map() -> MutexGuard<'static, ()> {
+    unsafe extern "C" fn mock_map_insert_unique(
+        result: *mut *mut SilverItemMapNode,
+        map: *mut SilverItemMap,
+        pair: *const SilverItemMapPair,
+    ) {
+        let pair = pair.read();
+        lookups().push((map, pair.key));
+        if let Some(index) = entries().iter().position(|(key, _)| *key == pair.key) {
+            result.write(entries()[index].1.cast());
+            return;
+        }
+        let node = node_at(NODE_COUNT);
+        NODE_COUNT += 1;
+        node.write_bytes(0, 6);
+        node.add(4).write(pair.key);
+        node.add(5).write(pair.value);
+        entries().push((pair.key, node.cast()));
+        result.write(node);
+    }
+
+    unsafe fn install_map() -> Option<MutexGuard<'static, ()>> {
         let guard = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        if MAP_NODES.is_none() {
+            return None;
+        }
         entries().clear();
         lookups().clear();
-        SILVER_LIST_TABLE_OPS = SilverListTableOps { map_value_slot: mock_map_value_slot };
-        guard
+        NODE_COUNT = 0;
+        SILVER_ITEM_MAP_INSERT_UNIQUE = mock_map_insert_unique;
+        Some(guard)
     }
 
     unsafe fn restore() {
-        SILVER_LIST_TABLE_OPS = DEFAULT_SILVER_LIST_TABLE_OPS;
+        SILVER_ITEM_MAP_INSERT_UNIQUE = missing_map_insert_unique;
         entries().clear();
         lookups().clear();
+        NODE_COUNT = 0;
     }
 
     fn table() -> SilverListTable {
@@ -587,118 +643,91 @@ mod tests {
     }
 
     #[test]
-    fn a_registered_id_yields_its_item_and_indexes_the_embedded_map() {
+    fn map_value_slot_returns_the_value_word_of_an_existing_node() {
         let mut table = table();
-        let item = 0x1000_0000usize as *mut u8;
-
         unsafe {
-            let guard = install_map();
-            entries().push((0x0dad_05be, 0x2000_0000usize as *mut u8));
-            entries().push((0x0dad_05bf, item));
+            let Some(guard) = install_map() else { return };
+            let node = node_at(0);
+            NODE_COUNT = 1;
+            node.write_bytes(0, 6);
+            node.add(4).write(0x0dad_05bf);
+            node.add(5).write(0x1000_0000);
+            entries().push((0x0dad_05bf, node.cast()));
+            let key = 0x0dad_05bf;
+            let slot = silver_item_map_value_slot(ptr::addr_of_mut!(table.items), ptr::addr_of!(key));
+            assert_eq!(slot.cast::<u32>(), node.add(5));
+            assert_eq!(slot.cast::<u32>().read(), 0x1000_0000);
+            assert_eq!(lookups(), &[(ptr::addr_of_mut!(table.items), key)]);
+            restore();
+            drop(guard);
+        }
+    }
 
+    #[test]
+    fn map_value_slot_default_inserts_zero_for_a_missing_or_zero_key() {
+        let mut table = table();
+        unsafe {
+            let Some(guard) = install_map() else { return };
+            for key in [0x0dad_0000, 0] {
+                let slot = silver_item_map_value_slot(ptr::addr_of_mut!(table.items), ptr::addr_of!(key));
+                assert_eq!(slot.cast::<u32>().read(), 0);
+            }
+            assert_eq!(entries().len(), 2);
+            assert_eq!(entries()[0].0, 0x0dad_0000);
+            assert_eq!(entries()[1].0, 0);
+            restore();
+            drop(guard);
+        }
+    }
+
+    #[test]
+    fn table_item_reads_the_default_inserted_value_slot() {
+        let mut table = table();
+        unsafe {
+            let Some(guard) = install_map() else { return };
             let found = silver_list_table_item(ptr::addr_of_mut!(table), 0x0dad_05bf);
-
-            assert_eq!(found, item);
-            assert_eq!(lookups().len(), 1, "exactly one map index per call");
-            assert_eq!(
-                lookups()[0],
-                (ptr::addr_of_mut!(table.items), 0x0dad_05bf),
-                "the map subobject is indexed, not the table"
-            );
-            assert_eq!(entries().len(), 2, "a hit inserts nothing");
+            assert!(found.is_null());
+            assert_eq!(entries().len(), 1);
             restore();
             drop(guard);
         }
     }
 
     #[test]
-    fn a_missing_id_answers_null_and_leaves_the_default_inserted_entry() {
-        let mut table = table();
-
-        unsafe {
-            let guard = install_map();
-            entries().push((0x0dad_05bf, 0x1000_0000usize as *mut u8));
-
-            let found = silver_list_table_item(ptr::addr_of_mut!(table), 0x0dad_0000);
-
-            assert!(found.is_null(), "operator[] hands back a zeroed value slot");
-            assert_eq!(
-                entries().len(),
-                2,
-                "the miss grew the map — the original does not avoid that"
-            );
-            assert_eq!(entries()[1], (0x0dad_0000, ptr::null_mut()));
-            restore();
-            drop(guard);
-        }
-    }
-
-    #[test]
-    fn a_zero_id_is_an_ordinary_key() {
-        // Nothing in the original special-cases 0; the id goes straight
-        // into the map as a key like any other.
-        let mut table = table();
-
-        unsafe {
-            let guard = install_map();
-            entries().push((0, 0x3000_0000usize as *mut u8));
-
-            let found = silver_list_table_item(ptr::addr_of_mut!(table), 0);
-
-            assert_eq!(found, 0x3000_0000usize as *mut u8);
-            assert_eq!(lookups()[0].1, 0);
-            restore();
-            drop(guard);
-        }
-    }
-
-    #[test]
-    fn the_key_crosses_the_seam_by_pointer_to_a_private_copy() {
-        // `push {r0, r1, ...}` + `add r1, sp, #4`: the callee reads the
-        // key through a pointer, and that pointer is never the caller's.
-        static mut SEEN: *const u32 = ptr::null();
-        static mut SEEN_VALUE: u32 = 0;
+    fn map_value_slot_passes_a_private_zero_initialized_pair() {
+        static mut SEEN_PAIR: *const SilverItemMapPair = ptr::null();
 
         unsafe extern "C" fn capture(
+            result: *mut *mut SilverItemMapNode,
             _map: *mut SilverItemMap,
-            key: *const u32,
-        ) -> *mut *mut u8 {
-            SEEN = key;
-            SEEN_VALUE = key.read();
-            ptr::addr_of_mut!(EMPTY_TABLE_VALUE_SLOT)
+            pair: *const SilverItemMapPair,
+        ) {
+            SEEN_PAIR = pair;
+            result.write(node_at(0));
         }
 
         let mut table = table();
-        let caller_owned: u32 = 0x0dad_05bf;
-
+        let caller_owned = 0x0dad_05bf;
         unsafe {
             let guard = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            SILVER_LIST_TABLE_OPS = SilverListTableOps { map_value_slot: capture };
-
-            let found = silver_list_table_item(ptr::addr_of_mut!(table), caller_owned);
-
-            assert!(found.is_null());
-            assert_eq!(SEEN_VALUE, caller_owned, "the key arrives by value, intact");
-            assert_ne!(
-                SEEN,
+            if MAP_NODES.is_none() {
+                return;
+            }
+            node_at(0).write_bytes(0, 6);
+            SILVER_ITEM_MAP_INSERT_UNIQUE = capture;
+            let slot = silver_item_map_value_slot(
+                ptr::addr_of_mut!(table.items),
                 ptr::addr_of!(caller_owned),
-                "the callee sees a private spill, not the caller's storage"
             );
+            assert_eq!((*SEEN_PAIR).key, caller_owned);
+            assert_eq!((*SEEN_PAIR).value, 0);
+            assert_ne!(
+                SEEN_PAIR.cast::<u32>(),
+                ptr::addr_of!(caller_owned),
+                "the retail pair is private stack storage"
+            );
+            assert_eq!(slot.cast::<u32>(), node_at(0).add(5));
             restore();
-            drop(guard);
-        }
-    }
-
-    #[test]
-    fn the_wired_default_models_an_empty_table() {
-        let mut table = table();
-
-        unsafe {
-            let guard = OPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            SILVER_LIST_TABLE_OPS = DEFAULT_SILVER_LIST_TABLE_OPS;
-
-            assert!(silver_list_table_item(ptr::addr_of_mut!(table), 0x0dad_05bf).is_null());
-            assert!(silver_list_table_item(ptr::addr_of_mut!(table), 0).is_null());
             drop(guard);
         }
     }

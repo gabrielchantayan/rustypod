@@ -69137,6 +69137,30 @@ functions:
 
   # --- Silver UI framework: the "SLst" resource-backed item table ---
 
+  - address: 0x083db92c
+    ghidra: FUN_083db92c
+    name: silver_item_map_value_slot
+    size: 56
+    sig: "void **silver_item_map_value_slot(SilverItemMap *map, const u32 *key)"
+    module: app/silver_list_table
+    status: ported
+    vars:
+      param_1: map
+      param_2: key
+      local_14: pair {key, value=0}
+      local_c: insert_unique result node
+      FUN_083c8aa8: red_black_map_insert_unique
+    notes: >-
+      Raw ARM from 0x083db92c through the next function's push at
+      0x083db964 is 56 bytes: one unconditional bl to 0x083c8aa8 and no
+      predicated bl. It loads *key, builds stack pair {key, 0}, calls the
+      red-black insert_unique callee with result at sp+12, then returns
+      result.node+20, the node value word. There are exactly two incoming
+      bl sites, at 0x081473cc and 0x08147328. A missing key is therefore
+      inserted with a zero value. Device builds call the verified unported
+      callee directly; host tests provide only that direct-call seam and
+      use target-width nodes to verify +20, hit, miss, and zero-key cases.
+
   - address: 0x081473c0
     ghidra: FUN_081473c0
     name: silver_list_table_item
@@ -69147,7 +69171,7 @@ functions:
     vars:
       param_1: table
       param_2: item_id
-      FUN_083db92c: map_value_slot (SILVER_LIST_TABLE_OPS slot)
+      FUN_083db92c: silver_item_map_value_slot
     notes: >-
       128 bl + 0 b call sites, binary-scanned. 24 bytes, all code - no
       literal-pool word. The by-id accessor of the Silver framework's
@@ -69183,17 +69207,11 @@ functions:
       so a lookup grows the map and answers NULL; the 125 Silver
       controller call sites in 0x0839f870-0x083b4xxx treat NULL as fatal
       (`movs r6,r0; bleq 0x08030f44`), the three stack-constructed
-      callers (0x0816d418, 0x0816d440, 0x08184010) do not. Deviation -
-      0x083db92c is unported (its insert_unique pulls in the whole
-      red-black tree) so it goes through the SILVER_LIST_TABLE_OPS
-      read_volatile dispatch table; the wired default models an EMPTY
-      table by handing back a shared always-NULL slot, so the port is NOT
-      HOOK-READY until 0x083db92c is ported. Host tests cover a hit, a
-      miss (asserting the default insertion), a zero key, the
-      private-spill pointer contract and the wired default. match.py
-      structural: identical `add r0,r0,#12` / `add r1,sp,#4` / call /
-      `ldr r0,[r0]` core; the diff is the explicit spill store ADS folded
-      into its push, the ops-table indirection and the crate's fp frame.
+      callers (0x0816d418, 0x0816d440, 0x08184010) do not. The port now
+      calls its direct insert_unique callee at 0x083c8aa8 on device; its
+      host seam models only that call boundary with target-width nodes.
+      match.py structural: the caller retains the same private key spill,
+      map+0x0c address, call, and value-word load shape.
 
   - address: 0x081473d8
     ghidra: FUN_081473d8
