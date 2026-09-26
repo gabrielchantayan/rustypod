@@ -6081,6 +6081,29 @@ functions:
       layout plus a delete seam. Rust's normal delete call deliberately differs
       from the retail register-preserving sequence.
   # --- optional vtable slot +4 callback ---
+  - address: 0x083e737c
+    ghidra: FUN_083e737c
+    name: optional_vtable_slot4_invoke_737c
+    size: 36
+    sig: "void **optional_vtable_slot4_invoke_737c(void **slot)"
+    module: cxx/optional_vtable_slot4_invoke_737c
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      slot_deref: object
+      object_vtable_plus_0x04: vtable_slot4_callback
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x083e737c through pop {r4,pc} at 0x083e739c; the next
+      independently entered function begins with push {r4,lr} at 0x083e73a0.
+      Full-image A32 decoding finds two inbound plain direct BL calls at
+      0x081dd1fc and 0x081e8748, zero inbound predicated direct BL calls, zero
+      outbound direct BL calls, and one predicated indirect BLXNE through
+      vtable slot +0x04. The function loads slot's object, conditionally calls
+      its unresolved virtual slot +0x04, then returns slot unchanged. Rust
+      deliberately uses native-width host vtable entries and duplicates the
+      independently hookable 0x083e7424 body under a distinct symbol.
+  # --- optional vtable slot +4 callback ---
   - address: 0x083e7424
     ghidra: FUN_083e7424
     name: optional_vtable_slot4_invoke
