@@ -3739,6 +3739,32 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cff80
+    ghidra: FUN_083cff80
+    name: indexed_element_array_destruct
+    size: 56
+    sig: "IndexedElementArray *indexed_element_array_destruct(IndexedElementArray *array)"
+    module: cxx/indexed_element_array_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      "[array + 0x0]": vtable
+      "[array + 0x14]": owned_payload
+      "[owned_payload + 0x0]": vtable
+      "[vtable + 0x1c]": release
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent 0x083cff80..0x083cffb7:
+      fourteen A32 words from push {r4,lr} through the tail B
+      observable_array_destruct @ 0x08271d2c; 0x083cffb8 is its vtable literal,
+      and the next independently entered function begins at 0x083cffbc. Raw ARM
+      decode finds two inbound plain BL sites and no predicated BL sites. The body
+      plants vtable 0x089a3c18, conditionally dispatches owned_payload through
+      vtable+0x1c, runs FUN_083cfef0's indexed cleanup, and tail-chains to
+      observable_array_destruct. FUN_083cfef0's accessor @ 0x083d6870 is
+      byte-identical to the existing indexed_element_array_destroy accessor
+      @ 0x083d689c, so the Rust port reuses that implementation. Host tests use
+      target-width mapped storage and replace callback seams; ARM behavior does
+      not deviate.
   - address: 0x083cffbc
     ghidra: FUN_083cffbc
     name: indexed_element_array_destroy
