@@ -55157,6 +55157,27 @@ functions:
       wrapping_add preserves the raw NULL-base + 0x80 result. Its dedicated
       text section prevents LLVM from folding this independently hookable
       copy into another deque template instance.
+  - address: 0x083da2e0
+    ghidra: FUN_083da2e0
+    name: copy_four_words_forward_alias_a2e0
+    size: 36
+    sig: "u32 *copy_four_words_forward_alias_a2e0(u32 *destination, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    vars: {param_1: destination, param_2: source}
+    renames:
+      param_1: destination
+      param_2: source
+    notes: >-
+      Raw ARM confirms the nine-instruction, 36-byte extent
+      0x083da2e0..0x083da300: four ordered aligned ldr/str pairs followed by
+      bx lr; the next separately linked deque iterator constructor begins at
+      0x083da304. Decoding every ARM B/BL word in osos.dec finds exactly two
+      unconditional plain bl callers (0x083df1a8 and 0x083dff4c), zero
+      predicated bl forms, and no outgoing calls. r0 remains destination and
+      is returned; source-to-destination overlap observes the preceding stores
+      in each later load. The dedicated Rust text section retains this
+      separately hookable copy despite byte-identical siblings.
   - address: 0x083da304
     ghidra: FUN_083da304
     name: deque_iter_init_elem4_alias_a304
