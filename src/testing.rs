@@ -2654,6 +2654,12 @@ pub mod hints {
     // 0x7670_0000: dedicated to cxx/node_pool_construct's target-width owner
     // and acquired-node fixture; mappings never unmap.
     pub const CXX_NODE_POOL_CONSTRUCT: usize = 0x7670_0000;
+    // 0x5330_0000: dedicated to cxx/byte_key_tree_find_predecessor's
+    // target-width tree header and node fixture; mappings never unmap.
+    pub const BYTE_KEY_TREE_FIND_PREDECESSOR: usize = 0x5330_0000;
+    // 0x5340_0000: dedicated to cxx/byte_key_tree_find_predecessor's empty-tree
+    // target-width fixture; mappings never unmap.
+    pub const BYTE_KEY_TREE_FIND_PREDECESSOR_EMPTY: usize = 0x5340_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
