@@ -2176,6 +2176,10 @@ pub mod hints {
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const RED_BLACK_TREE_WORD_NODE_POOL_ACQUIRE: usize = 0x3600_0000;
+    // 0x3700_0000: dedicated to cxx/red_black_tree_word_subtree_clone's
+    // target-width source and cloned-tree fixture; mappings never unmap, so
+    // no other user may share this hint.
+    pub const RED_BLACK_TREE_WORD_SUBTREE_CLONE: usize = 0x3700_0000;
     // 0x3300_0000: dedicated to cxx/red_black_tree_payload_24_construct's
     // recycled sentinel-node fixture; mappings never unmap, so no other user
     // may share this hint.
