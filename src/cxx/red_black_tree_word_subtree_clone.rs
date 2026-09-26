@@ -13,13 +13,12 @@
 //! each source right subtree, and sets every clone's parent link to its
 //! destination parent.
 //!
-//! Deliberate deviations: the target's helper at `0x083bf4dc` wraps the
-//! ported pool-acquire routine while copying the word payload. This port
-//! performs that payload copy explicitly, avoiding a duplicate helper seam.
+//! Deliberate deviations: none.
 
 use super::red_black_tree_word_node_pool_acquire::{
-    red_black_tree_word_node_pool_acquire, RedBlackTreeWordNode, RedBlackTreeWordNodePool,
+    RedBlackTreeWordNode, RedBlackTreeWordNodePool,
 };
+use super::red_black_tree_word_node_pool_acquire_with_payload::red_black_tree_word_node_pool_acquire_with_payload;
 
 #[inline(always)]
 fn pointer_word(pointer: *mut u8) -> u32 { pointer as usize as u32 }
@@ -44,8 +43,7 @@ pub unsafe extern "C" fn red_black_tree_word_subtree_clone(
     let first = source;
     let mut result = source;
     while !source.is_null() {
-        let clone = red_black_tree_word_node_pool_acquire(pool);
-        (*clone).payload = (*source).payload;
+        let clone = red_black_tree_word_node_pool_acquire_with_payload(pool, &(*source).payload);
         (*parent).left = pointer_word(clone.cast());
         (*clone).parent = pointer_word(parent.cast());
         if source == first {
