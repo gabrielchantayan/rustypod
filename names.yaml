@@ -3768,6 +3768,35 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cfef0
+    ghidra: FUN_083cfef0
+    name: indexed_element_array_release_elements
+    size: 60
+    sig: "void indexed_element_array_release_elements(IndexedElementArray *array)"
+    module: cxx/indexed_element_array_release_elements
+    status: ported
+    renames:
+      param_1/r0/r6: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar1/r4: index
+      iVar2/r5: count
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_at
+      FUN_083d6870: container_element_at_alias_6870
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083cfef0..0x083cff2b: fifteen A32 words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the next independently entered function
+      starts at 0x083cff30. Full-image aligned A32 branch decoding finds two
+      inbound plain BL sites, 0x083cff70 and 0x083cffa8, and no predicated BL
+      callers. The body makes two plain BL calls and no predicated BL calls:
+      container_element_at_alias_6870 @ 0x083d6870 and operator_delete @
+      0x082aad24. When enabled is nonzero, it visits indices [0,count) and
+      passes each vtable-slot-0x40 element directly to the NULL-guarded
+      operator delete. The host layout deliberately widens only the vtable
+      pointer; target accesses retain the original 32-bit offsets.
   - address: 0x083cff80
     ghidra: FUN_083cff80
     name: indexed_element_array_destruct

@@ -12,15 +12,13 @@
 //! # Algorithm
 //!
 //! Install the derived vtable, release the optional owned payload at `+0x14`
-//! through vtable slot `+0x1c`, dispose indexed elements, then tail-chain to
-//! the observable-array destructor. `FUN_083cfef0` uses the vtable-slot-0x40
-//! accessor at 0x083d6870, byte-identical to the accessor used by the already
-//! ported [`indexed_element_array_destroy`], so this port deliberately reuses
-//! that semantic implementation. On the host, test seams replace both nested
-//! destructor calls because target-width vtable words cannot hold host
-//! callbacks; the production ARM path has no such deviation.
+//! through vtable slot `+0x1c`, release indexed elements, then tail-chain to
+//! the observable-array destructor. The direct cleanup call is now the ported
+//! [`indexed_element_array_release_elements`] body. On the host, test seams
+//! replace both nested destructor calls because target-width vtable words cannot
+//! hold host callbacks; the production ARM path has no such deviation.
 
-use crate::cxx::indexed_element_array_destroy::indexed_element_array_destroy;
+use crate::cxx::indexed_element_array_release_elements::indexed_element_array_release_elements;
 use crate::cxx::observable_array::{observable_array_destruct, ObservableArray};
 
 /// Vtable planted before derived cleanup (literal at 0x083cffb8).
@@ -44,7 +42,7 @@ unsafe extern "C" fn indexed_element_array_payload_release(_: u32) {
 
 static mut INDEXED_ELEMENT_ARRAY_PAYLOAD_RELEASE: IndexedElementArrayPayloadRelease =
     indexed_element_array_payload_release;
-static mut INDEXED_ELEMENT_ARRAY_CLEANUP: IndexedElementArrayCleanup = indexed_element_array_destroy;
+static mut INDEXED_ELEMENT_ARRAY_CLEANUP: IndexedElementArrayCleanup = indexed_element_array_release_elements;
 static mut INDEXED_ELEMENT_ARRAY_BASE_DESTRUCT: ObservableArrayDestruct = observable_array_destruct;
 
 /// indexed_element_array_destruct — original: `FUN_083cff80` @ 0x083cff80.
