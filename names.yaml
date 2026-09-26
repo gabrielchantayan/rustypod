@@ -56324,6 +56324,23 @@ functions:
       ALIAS - byte-identical to container_is_empty @ 0x083d75e0; 6 bl
       sites. No separate port; hook to the container_is_empty symbol.
 
+  - address: 0x083de1dc
+    ghidra: FUN_083de1dc
+    name: deque_push_front_elem4
+    size: 80
+    sig: "void deque_push_front_elem4(BlockDeque *deque, const u32 *value)"
+    module: heap/deque_push_front_elem4
+    status: ported
+    notes: >-
+      Raw `osos.dec` establishes the exact 80-byte extent
+      0x083de1dc..0x083de22b, followed by the next function at 0x083de22c.
+      It prepends a u32: empty deque or begin.cur == begin.seg_base invokes
+      the unique unported grow helper @ 0x083de3b8; it then decrements
+      begin.cur, conditionally stores *value, and increments count with u32
+      wrapping. Full-image ARM decoding finds two inbound plain bl sites
+      (0x083de580, 0x083de620), no predicated bl calls, and two plain body
+      calls (0x083d75d0 and 0x083de3b8). The helper is an independent
+      volatile operations seam: target calls retailOS; tests install growth.
   - address: 0x083de7dc
     ghidra: FUN_083de7dc
     name: deque_push_back_elem4_alias_e7dc
