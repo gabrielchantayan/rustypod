@@ -60129,6 +60129,33 @@ functions:
       differing only in the frame prologue/epilogue (push/pop vs
       `mov pc, lr`). 14 bl call sites; the only copy.
 
+  - address: 0x083dc120
+    ghidra: FUN_083dc120
+    name: refcounted_list_node_pool_acquire
+    size: 184
+    sig: "WordListNode *refcounted_list_node_pool_acquire(WordListNodePool *pool, u32 single)"
+    module: cxx/refcounted_list_node_pool_acquire
+    status: ported
+    vars: {param_1: pool, param_2: single}
+    renames:
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 ARM words from
+      push {r4-r8,lr} at 0x083dc120 through pop {r4-r8,pc} at 0x083dc1d4;
+      0x083dc1d8 begins the next real function. The body has exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70,
+      and no predicated bl calls. Pool state is four target-width words
+      {chunks, free, next, end}. It pops a free 12-byte
+      {next, previous, refcounted-body} node without initialization; otherwise
+      it bump-allocates a node. Exhaustion allocates a 12-byte
+      {previous, capacity, nodes} chunk header and capacity*12 backing store.
+      single != 0 selects capacity 1; the first ordinary chunk has 32 nodes,
+      then capacity grows by max(capacity + 32, capacity + capacity/2 +
+      capacity/8). The direct callers are list construction at 0x08133e14
+      and list_node_pool_insert_refcounted @ 0x083dc2d0. Deliberate deviation:
+      the original's dead r1=0 allocator argument is omitted; target pointers
+      remain u32 words so host pointer width cannot alter the layout.
+
   - address: 0x083dc24c
     ghidra: FUN_083dc24c
     name: list_node_pool_erase_owned
