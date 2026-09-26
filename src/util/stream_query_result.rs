@@ -1,14 +1,15 @@
-//! Stream query result — `FUN_083d8e88` @ load address `0x083d8e88`.
+//! Stream query result — `FUN_083d8e88` @ `0x083d8e88` and
+//! `FUN_083d986c` @ `0x083d986c`.
 //!
-//! Raw `osos.dec` words establish the 44-byte extent
-//! `0x083d8e88..0x083d8eb0`; `0x083d8eb4` begins the next function with
-//! `push {r4,r5,r6,r7,r8,r9,sl,lr}`. The body has one plain unconditional
-//! `bl`, to the unrecovered stream query at `0x08266bc0`, and no predicated
-//! `bl` instructions. Whole-image A32 decoding finds three inbound plain
-//! `bl` calls (`0x083d9014`, `0x083d92b4`, and `0x083d93e8`) and no
-//! predicated calls. It forwards the three query arguments after adding 48 to
-//! the stream object's address, stores the returned word, and clears the
-//! result's second word.
+//! Raw `osos.dec` words establish each 44-byte extent: `0x083d8e88..0x083d8eb0`
+//! and `0x083d986c..0x083d9894`. `0x083d8eb4` and `0x083d9898` begin the next
+//! separately linked functions with `push {r4,r5,r6,r7,r8,r9,sl,lr}`. Each
+//! body has one plain unconditional `bl`, to the unrecovered stream query at
+//! `0x08266bc0`, and no predicated `bl` instructions. Whole-image A32
+//! decoding finds two inbound plain calls to `0x083d986c`, at `0x083d99b4`
+//! and `0x083d9c18`, and no predicated calls. Each forwards three query
+//! arguments after adding 48 to the stream object's address, stores the
+//! returned word, and clears the result's second word.
 //!
 //! Deliberate deviation: ARM builds retain the eleven original instructions.
 //! Host builds use a seam for `0x08266bc0`, whose semantic identity has not
@@ -44,6 +45,21 @@ pub unsafe extern "C" fn stream_query_result(
     result.add(1).write_volatile(0);
 }
 
+/// Queries the stream subobject at offset 48 for a position result.
+#[cfg(not(target_arch = "arm"))]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_query_result_at_position(
+    result: *mut u32,
+    stream: *mut u8,
+    position: u32,
+    query_mode: u32,
+) {
+    let query = core::ptr::read_volatile(core::ptr::addr_of!(STREAM_QUERY));
+    result.write_volatile(query(stream.add(0x30), position, query_mode));
+    result.add(1).write_volatile(0);
+}
+
 #[cfg(target_arch = "arm")]
 core::arch::global_asm!(
     r#"
@@ -68,9 +84,33 @@ stream_query_result:
 "#
 );
 
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .section .text.stream_query_result_at_position, "ax", %progbits
+    .p2align 2
+    .globl stream_query_result_at_position
+    .type stream_query_result_at_position, %function
+stream_query_result_at_position:
+    push    {{r4, lr}}
+    mov     r4, r0
+    mov     r0, r1
+    mov     r1, r2
+    mov     r2, r3
+    add     r0, r0, #0x30
+    bl      0x08266bc0
+    str     r0, [r4]
+    mov     r0, #0
+    str     r0, [r4, #4]
+    pop     {{r4, pc}}
+    .size stream_query_result_at_position, . - stream_query_result_at_position
+"#
+);
+
 #[cfg(test)]
 mod tests {
-    use super::{stream_query_result, StreamQuery, STREAM_QUERY, STREAM_QUERY_TEST_LOCK};
+    use super::{stream_query_result, stream_query_result_at_position, StreamQuery, STREAM_QUERY, STREAM_QUERY_TEST_LOCK};
     use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
     static OBSERVED_STREAM_STATE: AtomicUsize = AtomicUsize::new(0);
@@ -97,6 +137,31 @@ mod tests {
         assert_eq!(OBSERVED_STREAM_STATE.load(Ordering::Relaxed), unsafe { stream.as_mut_ptr().add(0x30) } as usize);
         assert_eq!(OBSERVED_ARG2.load(Ordering::Relaxed), 0x1234_5678);
         assert_eq!(OBSERVED_ARG3.load(Ordering::Relaxed), 0x9abc_def0);
+        assert_eq!(result, [0x81e2_4a09, 0]);
+
+        unsafe { STREAM_QUERY = saved_query };
+    }
+
+    #[test]
+    fn position_query_forwards_position_and_mode() {
+        let _lock = STREAM_QUERY_TEST_LOCK.lock();
+        let saved_query: StreamQuery = unsafe { STREAM_QUERY };
+        unsafe { STREAM_QUERY = recording_stream_query };
+
+        let mut stream = [0u8; 0x34];
+        let mut result = [0xffff_ffff; 2];
+        unsafe {
+            stream_query_result_at_position(
+                result.as_mut_ptr(),
+                stream.as_mut_ptr(),
+                0x1357_9bdf,
+                2,
+            )
+        };
+
+        assert_eq!(OBSERVED_STREAM_STATE.load(Ordering::Relaxed), unsafe { stream.as_mut_ptr().add(0x30) } as usize);
+        assert_eq!(OBSERVED_ARG2.load(Ordering::Relaxed), 0x1357_9bdf);
+        assert_eq!(OBSERVED_ARG3.load(Ordering::Relaxed), 2);
         assert_eq!(result, [0x81e2_4a09, 0]);
 
         unsafe { STREAM_QUERY = saved_query };

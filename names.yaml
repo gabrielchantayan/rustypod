@@ -4194,6 +4194,34 @@ functions:
       deviation: target builds preserve all eleven raw ARM instructions while
       host builds use a query seam, since no semantic identity for 0x08266bc0
       has been established.
+  - address: 0x083d986c
+    ghidra: FUN_083d986c
+    name: stream_query_result_at_position
+    size: 44
+    sig: "void stream_query_result_at_position(u32 *result, u8 *stream, u32 position, u32 query_mode)"
+    module: util/stream_query_result
+    status: ported
+    renames:
+      param_1/r0: result
+      param_2/r1: stream
+      param_3/r2: position
+      param_4/r3: query_mode
+      FUN_08266bc0: stream_query_unported
+      "[stream + 0x30]": stream_query_state
+      "[result + 0x0]": query_value
+      "[result + 0x4]": reserved_zero
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte body
+      0x083d986c..0x083d9894; 0x083d9898 begins the next separate function
+      with push {r4,r5,r6,r7,r8,r9,sl,lr}. The body has one plain
+      unconditional BL, to 0x08266bc0, and zero predicated BL instructions.
+      Raw caller words at 0x083d99f8 and 0x083d9bf0 are the two direct plain
+      BL calls; no predicated BL calls target this address. It invokes the
+      unrecovered query with stream + 0x30 and unchanged position and
+      query_mode, stores its return word, then clears result + 4. Deliberate
+      deviation: target builds preserve all eleven raw ARM instructions while
+      host builds use a query seam, since no semantic identity for 0x08266bc0
+      has been established.
   - address: 0x0813a318
     ghidra: FUN_0813a318
     name: filesystem_kind_is_hfsplus
