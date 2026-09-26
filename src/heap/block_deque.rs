@@ -14,6 +14,11 @@
 //!   r1 is scratch the callee never reads (both stock call sites happen
 //!   to leave the deque pointer there), so the export keeps the
 //!   three-argument shape.
+//! - `copy_two_words_and_byte` — original: `FUN_083dd9ac` @ 0x083dd9ac
+//!   (28 bytes, `0x083dd9ac..0x083dd9c7`; next real function begins at
+//!   0x083dd9c8). Copies two source words and one separately addressed byte
+//!   into a packed 9-byte result. 2 incoming plain `bl` call sites
+//!   (0x083d2bc0 / 0x083d2cfc); no predicated `bl` forms, binary-verified.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 //!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
 //!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
@@ -466,6 +471,33 @@ pub unsafe extern "C" fn deque_node_accessor(this: *mut PoolBase) -> *mut BlockD
 #[inline(never)]
 pub unsafe extern "C" fn deque_iter_copy(dst: *mut DequeIter, _r1: usize, src: *const DequeIter) {
     dst.write(src.read());
+}
+
+/// copy_two_words_and_byte — original: `FUN_083dd9ac` @ 0x083dd9ac
+/// (28 bytes, `0x083dd9ac..0x083dd9c7`; the next real function begins at
+/// 0x083dd9c8).
+///
+/// Verified incoming calls: two unconditional plain `bl` instructions at
+/// 0x083d2bc0 and 0x083d2cfc; no predicated `bl` forms. Copies the two
+/// 32-bit words at `src` to `dst`, then writes the separately addressed byte
+/// at `byte_src` to byte offset 8. Deliberate deviation: typed pointers
+/// replace the original's untyped word and byte accesses.
+///
+/// # Safety
+///
+/// `dst` must be valid for two aligned `u32` writes plus one byte at offset 8;
+/// `src` must be valid for two aligned `u32` reads; `byte_src` must be valid
+/// for one byte read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn copy_two_words_and_byte(
+    dst: *mut u32,
+    src: *const u32,
+    byte_src: *const u8,
+) {
+    dst.write(src.read());
+    dst.add(1).write(src.add(1).read());
+    (dst.add(2) as *mut u8).write(byte_src.read());
 }
 
 /// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
@@ -2149,7 +2181,36 @@ mod tests {
             block_deque_fill(this, 0x800, 2000);
             assert_eq!((*this).fill_block_count, 1);
             uninstall_manager();
+
         }
         restore();
+    }
+    #[test]
+    fn copy_two_words_and_byte_preserves_word_values_and_byte_offset() {
+        let source = [0x1122_3344u32, 0x5566_7788];
+        let byte = 0xa5u8;
+        let mut destination = [0xffff_ffffu32; 3];
+
+        unsafe {
+            copy_two_words_and_byte(destination.as_mut_ptr(), source.as_ptr(), &byte);
+        }
+
+        assert_eq!(destination[0], source[0]);
+        assert_eq!(destination[1], source[1]);
+        assert_eq!(destination[2], 0xffff_ffa5);
+    }
+
+    #[test]
+    fn copy_two_words_and_byte_keeps_stock_overlap_order() {
+        let mut words = [0x1111_1111u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+        let byte = 0x5au8;
+
+        unsafe {
+            copy_two_words_and_byte(words.as_mut_ptr().add(1), words.as_ptr(), &byte);
+        }
+
+        assert_eq!(words[1], 0x1111_1111);
+        assert_eq!(words[2], 0x1111_1111);
+        assert_eq!(words[3] & 0xff, 0x5a);
     }
 }
