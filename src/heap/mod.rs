@@ -63,6 +63,7 @@ pub mod timer_free_gateway;
 pub mod new_handler;
 pub mod report_runtime_error;
 pub mod pool;
+pub mod region_list_erase_recycle;
 pub mod releasable_buffer;
 pub mod owned_buffer;
 pub mod owned_pair_destroy_and_deallocate;
