@@ -149046,3 +149046,31 @@ functions:
       and capacity cursors. Deliberate deviation: computes the known
       vector_size_elem12 result from raw target u32 cursor words so host
       fixtures preserve the ARM layout; host allocation uses a volatile seam.
+  - address: 0x083d7c74
+    ghidra: FUN_083d7c74
+    name: u32_key_tree_count
+    size: 96
+    sig: "u32 u32_key_tree_count(const void *tree, const u32 *key)"
+    module: cxx/u32_key_tree_count
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      local_1c/local_18: bounds
+      local_14: count
+      FUN_083bd47c: u32_tree_equal_range
+      FUN_083e79a4: tree_iterator_distance
+    notes: >-
+      Raw words e1a02001 e52de004 e24dd01c e1a01000 e28d0004 ebff95fb
+      e59d0004 e3a03000 e58d0010 e59d0008 e28d1018 e58d000c e59d0010
+      e28d200c e58d0014 e59d000c e58d300c e58d0018 e28d0014 e58d3010
+      eb003f36 e59d000c e28dd01c e49df004 establish the exact 96-byte A32
+      body from 0x083d7c74 through 0x083d7cd3; the next separately linked
+      function begins at 0x083d7cd4. The body has two plain unconditional bl
+      calls, to 0x083bd47c and 0x083e79a4, with no predicated bl. The two
+      inbound sites independently decode as plain unconditional bl at
+      0x08134860 and 0x08134900, with no predicated inbound calls. It obtains
+      the unsigned-word tree's equal range for key, then counts that iterator
+      range. Both unported helpers are verified-address seams: target builds
+      call retail addresses directly and the host test fixtures verify their
+      target-word ABI.
