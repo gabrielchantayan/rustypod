@@ -2494,6 +2494,11 @@ pub mod hints {
     // mappings never unmap, so no other port may share them.
     pub const TRIVIAL_RANGE_DESTROY_AND_DEALLOCATE: usize = 0x6ad0_0000;
     pub const TRIVIAL_RANGE_DESTROY_AND_DEALLOCATE_NULL: usize = 0x6ae0_0000;
+    // 0x6af0_0000 / 0x6b00_0000: dedicated to
+    // cxx/path_object_vector_push_back's target-width vector and record fixtures;
+    // mappings never unmap.
+    pub const PATH_OBJECT_VECTOR_PUSH_BACK: usize = 0x6af0_0000;
+    pub const PATH_OBJECT_VECTOR_PUSH_BACK_EMPTY: usize = 0x6b00_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

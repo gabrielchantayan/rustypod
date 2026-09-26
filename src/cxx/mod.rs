@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod bit_set;
+pub mod path_object_vector_push_back;
 pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
 pub mod tagged_buffer_range_copy_construct;

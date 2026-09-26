@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083de12c
+    ghidra: FUN_083de12c
+    name: path_object_vector_push_back
+    size: 100
+    sig: "void path_object_vector_push_back(void *vector, const void *record)"
+    module: cxx/path_object_vector_push_back
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: record
+      r4: vector
+      r5: record
+      FUN_083d75c0: container_is_empty_alias_75c0
+      FUN_083ddd80: path_object_vector_grow
+      FUN_082792b4: path_object_copy_construct
+    notes: >-
+      Raw osos.dec establishes the 100-byte extent from push {r4,r5,r6,lr} at
+      0x083de12c through pop {r4,r5,r6,pc} at 0x083de18c; the next separately
+      entered function begins at 0x083de190. The body has two outgoing plain BL
+      sites (0x083d75c0 and 0x083ddd80) and one predicated BLNE site
+      (0x082792b4). It grows when the predicate reports empty or cursor +0x10
+      equals capacity +0x18, copies a 12-byte path record into a non-null
+      cursor, then advances cursor and count +0x20 with wrapping arithmetic.
+      The unported growth routine and already named copy constructor remain
+      target-call seams; host tests provide those seams and target-width slabs.
   - address: 0x083de190
     ghidra: FUN_083de190
     name: deque_construct_elem12
