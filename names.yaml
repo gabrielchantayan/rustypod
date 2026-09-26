@@ -148868,3 +148868,48 @@ functions:
       returned stream state's +0x10 word is zero. Target builds call the
       verified helper address; host tests use an injectable seam and native
       pointer-width host vtable metadata.
+
+  - address: 0x083d7fec
+    ghidra: FUN_083d7fec
+    name: cxx_allocator_allocate
+    size: 12
+    sig: "void *cxx_allocator_allocate(void *allocator, u32 count)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: allocator
+      param_2/r1: count
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec words e1a00101 e3a01000 eafa3b1d establish the exact
+      12-byte A32 body from 0x083d7fec through 0x083d7ff7: . The following  at
+      0x083d7ff8 starts cxx_allocator_deallocate. The body has no direct
+      BL instructions. Whole-image A32 decoding finds exactly two inbound
+      unconditional plain BL sites, 0x083de368 and 0x083de4e8, and no
+      predicated BL sites. It ignores allocator, wraps count*4 in the
+      target r0 word, clears dead r1, and tail-branches to
+      operator_new_checked. Deliberate deviation: Rust makes the tail branch
+      an ordinary call through the existing checked-allocation seam.
+
+  - address: 0x083d7fec
+    ghidra: FUN_083d7fec
+    name: cxx_allocator_allocate
+    size: 12
+    sig: "void *cxx_allocator_allocate(void *allocator, u32 count)"
+    module: heap/veneers
+    status: ported
+    renames:
+      param_1/r0: allocator
+      param_2/r1: count
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec words e1a00101 e3a01000 eafa3b1d establish the exact
+      12-byte A32 body from 0x083d7fec through 0x083d7ff7: `mov r0,r1,lsl
+      #2; mov r1,#0; b 0x08266c70`. The following `mov r0,r1` at
+      0x083d7ff8 starts cxx_allocator_deallocate. The body has no direct
+      BL instructions. Whole-image A32 decoding finds exactly two inbound
+      unconditional plain BL sites, 0x083de368 and 0x083de4e8, and no
+      predicated BL sites. It ignores allocator, wraps count*4 in the
+      target r0 word, clears dead r1, and tail-branches to
+      operator_new_checked. Deliberate deviation: Rust makes the tail branch
+      an ordinary call through the existing checked-allocation seam.

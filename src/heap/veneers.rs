@@ -1118,6 +1118,28 @@ pub unsafe extern "C" fn cxx_array_dealloc(ptr: *mut u8, _count: usize, _elem: u
     operator_delete(ptr);
 }
 
+/// cxx_allocator_allocate — original: `FUN_083d7fec` @ 0x083d7fec
+/// (12 bytes; two unconditional plain inbound `bl` calls, none predicated).
+///
+/// Raw ARM words `e1a00101 e3a01000 eafa3b1d` establish the exact extent
+/// 0x083d7fec..0x083d7ff7: `mov r0,r1,lsl #2; mov r1,#0; b 0x08266c70`.
+/// The following `mov r0,r1` starts [`cxx_allocator_deallocate`] at
+/// 0x083d7ff8. It ignores the allocator object, wraps `count * 4` to the
+/// target's 32-bit r0, clears the dead r1 argument, then tail-branches to
+/// [`operator_new_checked`]. Whole-image A32 branch decoding finds the two
+/// plain callers at 0x083de368 and 0x083de4e8, and no predicated forms.
+///
+/// Deliberate deviation: Rust makes the tail branch an ordinary call through
+/// the existing checked-allocation seam; its `usize` argument is explicitly
+/// narrowed after the target-width multiply.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.cxx_allocator_allocate")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn cxx_allocator_allocate(_allocator: *mut u8, count: u32) -> *mut u8 {
+    operator_new_checked(count.wrapping_shl(2) as usize)
+}
+
+
 /// cxx_allocator_deallocate — original: `FUN_083d7ff8` @ 0x083d7ff8
 /// (16 bytes; 3 unconditional `bl` call sites, none predicated).
 ///
@@ -1648,6 +1670,24 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_TAG, 2);
         }
     }
+    #[test]
+    fn cxx_allocator_allocate_scales_count_as_a_target_word() {
+        let _lock = mock_heap();
+        unsafe {
+            for (calls, (count, bytes)) in [(0u32, 0usize), (1, 4), (0x4000_0000, 0), (u32::MAX, 0xffff_fffc)].into_iter().enumerate() {
+                assert_eq!(
+                    cxx_allocator_allocate(0x1234 as *mut u8, count),
+                    BLOCK_A as *mut u8
+                );
+                assert_eq!(
+                    (ALLOC_CALLS, LAST_ALLOC_SIZE, LAST_ALLOC_TAG),
+                    (calls + 1, bytes, 2),
+                    "count {count:#x} must become its wrapping four-byte allocation"
+                );
+            }
+        }
+    }
+
 
     #[test]
     fn cxx_allocator_deallocate_discards_allocator_and_element_size() {
