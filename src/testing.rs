@@ -1481,6 +1481,10 @@ pub mod hints {
     // node fixture for FUN_0839bbd0; mappings never unmap, so no other user
     // may share this hint.
     pub const SIGNED_KEY_TREE_FIND_VALUE_COPY: usize = 0x0200_0000;
+    // 0x8400_0000: dedicated to cxx/signed_key_tree_find's raw-u32 tree
+    // fixture for FUN_083dbab4; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SIGNED_KEY_TREE_LOWER_BOUND: usize = 0x8400_0000;
     // 0x8200_0000: dedicated to cxx/signed_key_tree_find's raw-u32 header,
     // node, and tree fixture for FUN_083dbf00; mappings never unmap, so no
     // other user may share this hint.

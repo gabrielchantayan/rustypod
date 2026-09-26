@@ -1,4 +1,26 @@
-//! Signed-key tree value lookup — original: `FUN_0839bccc` @ `0x0839bccc`
+//! Signed-key tree search helpers.
+//!
+//! `signed_key_tree_find_node_copy` — original: `FUN_083dbab4` @
+//! `0x083dbab4` (**168 bytes**, exactly `0x083dbab4..0x083dbb58`; the
+//! separately linked sibling starts at `0x083dbb5c`).
+//!
+//! Raw `osos.dec` decoding finds **2 direct inbound plain `bl` call sites**
+//! (0x081bdd24 and 0x0839bce8), **0 predicated `bl` call sites**, and no
+//! direct `b` transfers. Its body has four unconditional `bl` instructions:
+//! two calls to `less_signed` @ 0x083d7580, one to the ported
+//! `equal_deref_f950_copy` @ 0x083cf950, and one to the exact node-key
+//! accessor @ 0x083b6b34.
+//!
+//! It first performs `std::_Rb_tree::lower_bound` descent from
+//! `header->root` (+0x4): a node key at +0x10 less than the query follows
+//! the right child (+0xc); otherwise it becomes the candidate and follows
+//! the left child (+0x8). The final equality check returns that candidate
+//! only when its key equals the query; it otherwise writes the header
+//! sentinel through `out_node`. Deliberate deviations: equality is the
+//! equivalent candidate/header and signed-key comparisons, the node-key
+//! accessor is +0x10, and ignored comparator slack arguments are omitted.
+//!
+//! `signed_key_tree_find_value` — original: `FUN_0839bccc` @ `0x0839bccc`
 //! (**84 bytes**, exactly `0x0839bccc..0x0839bd20`; the next separately
 //! linked function starts with `push {r4-r8,lr}` at `0x0839bd20`).
 //!
@@ -6,20 +28,6 @@
 //! unconditional `bl` call sites** — 0x081bca78, 0x081bd1fc, 0x081bd67c,
 //! 0x081bdcf4, 0x081bdf74, 0x081be008, 0x081be0cc, and 0x081be144. There are
 //! no predicated calls, direct `b` transfers, or aligned data-word references.
-//!
-//! The body materializes the signed `key` on its stack, calls the still-retail
-//! `std::_Rb_tree::lower_bound` specialization at 0x083dbab4, then compares
-//! the returned node with `tree->header` through the ported `equal_deref`
-//! copy at 0x083cf950. A non-header node is a match: the function writes its
-//! value word at node+0x14 to `out_value` and returns 1. A header node is a
-//! miss: it leaves `out_value` untouched and returns 0. The lower-bound helper
-//! compares signed keys through `less_signed` at 0x083d7580, establishing the
-//! signed-key identity without inventing the mapped value type.
-//!
-//! Deliberate deviation: 0x083dbab4 is not ported, so target builds invoke its
-//! retailOS load address and host tests replace only that boundary through a
-//! volatile dispatch seam. The equality leaf is inlined as `candidate !=
-//! header`, which is its exact normalized result at this call site.
 
 use core::ptr::{addr_of, addr_of_mut};
 
@@ -37,10 +45,6 @@ pub struct SignedKeyTree {
 const _: [u8; 0x10] = [0; core::mem::offset_of!(SignedKeyTree, header)];
 const _: [u8; 0x14] = [0; core::mem::size_of::<SignedKeyTree>()];
 
-/// Firmware load address of the still-unported signed-key lower-bound helper
-/// `FUN_083dbab4`.
-pub const SIGNED_KEY_TREE_LOWER_BOUND_ADDRESS: usize = 0x083d_bab4;
-
 /// ABI of the lower-bound helper. It stores the selected node in `out_node`.
 pub type SignedKeyTreeLowerBound = unsafe extern "C" fn(
     out_node: *mut u32,
@@ -48,37 +52,52 @@ pub type SignedKeyTreeLowerBound = unsafe extern "C" fn(
     key: *const i32,
 );
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_signed_key_tree_lower_bound(
+/// Exact signed-key tree lookup after lower-bound descent.
+///
+/// # Safety
+///
+/// `tree`, `key`, and `out_node` must be valid, aligned pointers. `tree`'s
+/// header must point to a readable target-layout header with its root at +0x4;
+/// every reachable node must expose readable child words at +0x8/+0xc and a
+/// signed key at +0x10. As in retailOS, NULL and malformed links fault or
+/// loop rather than being checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_find_node_copy(
     out_node: *mut u32,
     tree: *const SignedKeyTree,
     key: *const i32,
 ) {
-    let lower_bound: SignedKeyTreeLowerBound =
-        core::mem::transmute(SIGNED_KEY_TREE_LOWER_BOUND_ADDRESS);
-    lower_bound(out_node, tree, key);
+    let header = addr_of!((*tree).header).read();
+    let mut node = (header as usize as *const u32).add(1).read();
+    let mut candidate = header;
+    let comparator = tree.cast::<u8>().add(0x19);
+    while node != 0 {
+        let node_words = node as usize as *const u32;
+        if crate::cxx::templates::less_signed(
+            comparator,
+            node_words.add(4).cast::<i32>(),
+            key,
+        ) != 0
+        {
+            node = node_words.add(3).read();
+        } else {
+            candidate = node;
+            node = node_words.add(2).read();
+        }
+    }
+    if candidate == header
+        || crate::cxx::templates::less_signed(
+            comparator,
+            key,
+            (candidate as usize as *const i32).add(4),
+        ) != 0
+    {
+        out_node.write(header);
+    } else {
+        out_node.write(candidate);
+    }
 }
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_signed_key_tree_lower_bound(
-    _out_node: *mut u32,
-    _tree: *const SignedKeyTree,
-    _key: *const i32,
-) {
-    panic!("signed_key_tree_find_value requires lower-bound helper 0x083dbab4")
-}
-
-/// Boundary for the still-retail lower-bound helper at 0x083dbab4.
-///
-/// Device builds default to the fixed load address; host tests replace this
-/// mutable slot to observe the stack-materialized signed key and selected node.
-#[cfg(target_os = "none")]
-pub static mut SIGNED_KEY_TREE_LOWER_BOUND: SignedKeyTreeLowerBound =
-    firmware_signed_key_tree_lower_bound;
-
-#[cfg(not(target_os = "none"))]
-pub static mut SIGNED_KEY_TREE_LOWER_BOUND: SignedKeyTreeLowerBound =
-    missing_signed_key_tree_lower_bound;
 
 /// signed_key_tree_find_value — original: `FUN_0839bccc` @ `0x0839bccc`
 /// (84 bytes; 8 direct, unconditional `bl` call sites).
@@ -90,9 +109,10 @@ pub static mut SIGNED_KEY_TREE_LOWER_BOUND: SignedKeyTreeLowerBound =
 /// # Safety
 ///
 /// `tree` must designate a readable [`SignedKeyTree`], `out_value` must be
-/// writable on a match, and the installed lower-bound helper must obey
-/// [`SignedKeyTreeLowerBound`]. A matching node must have a readable aligned
-/// word at +0x14. As in the original, none of these pointers is NULL-checked.
+/// writable on a non-header result, and every reachable node must satisfy
+/// [`signed_key_tree_find_node_copy`]'s pointer requirements. A selected
+/// node must have a readable aligned word at +0x14. As in the original,
+/// none of these pointers is NULL-checked.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn signed_key_tree_find_value(
@@ -101,8 +121,7 @@ pub unsafe extern "C" fn signed_key_tree_find_value(
     out_value: *mut u32,
 ) -> u32 {
     let mut candidate = 0u32;
-    let lower_bound = core::ptr::read_volatile(addr_of!(SIGNED_KEY_TREE_LOWER_BOUND));
-    lower_bound(addr_of_mut!(candidate), tree, addr_of!(key));
+    signed_key_tree_find_node_copy(addr_of_mut!(candidate), tree, addr_of!(key));
 
     let header = addr_of!((*tree).header).read();
     if candidate == header {
@@ -266,8 +285,6 @@ mod tests {
     use std::{ptr, vec, vec::Vec};
 
     static SEAM_LOCK: Mutex<()> = Mutex::new(());
-    static mut CALLS: Vec<(usize, i32)> = Vec::new();
-    static mut NEXT_NODE: u32 = 0;
     static mut COPY_CALLS: Vec<(usize, i32)> = Vec::new();
     static mut NEXT_COPY_NODE: u32 = 0;
 
@@ -278,36 +295,6 @@ mod tests {
     ) {
         (*ptr::addr_of_mut!(COPY_CALLS)).push((tree as usize, key.read()));
         out_node.write(ptr::addr_of!(NEXT_COPY_NODE).read_volatile());
-    }
-
-
-    unsafe extern "C" fn recording_lower_bound(
-        out_node: *mut u32,
-        tree: *const SignedKeyTree,
-        key: *const i32,
-    ) {
-        (*ptr::addr_of_mut!(CALLS)).push((tree as usize, key.read()));
-        out_node.write(ptr::addr_of!(NEXT_NODE).read_volatile());
-    }
-
-    struct SeamGuard;
-
-    impl SeamGuard {
-        unsafe fn install(node: u32) -> Self {
-            ptr::addr_of_mut!(NEXT_NODE).write_volatile(node);
-            (*ptr::addr_of_mut!(CALLS)).clear();
-            ptr::addr_of_mut!(SIGNED_KEY_TREE_LOWER_BOUND).write_volatile(recording_lower_bound);
-            Self
-        }
-    }
-
-    impl Drop for SeamGuard {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::addr_of_mut!(SIGNED_KEY_TREE_LOWER_BOUND)
-                    .write_volatile(missing_signed_key_tree_lower_bound);
-            }
-        }
     }
     struct CopySeamGuard;
 
@@ -335,48 +322,55 @@ mod tests {
     }
 
 
-    fn calls() -> Vec<(usize, i32)> {
-        unsafe { (*ptr::addr_of!(CALLS)).clone() }
-    }
-
     #[test]
-    fn header_result_is_a_miss_and_preserves_output() {
-        let _seam_lock = SEAM_LOCK.lock();
-        let tree = SignedKeyTree { opaque_prefix: [0; 4], header: 0x3344_5566 };
-        let _seam = unsafe { SeamGuard::install(tree.header) };
-        let mut output = 0xa5a5_5a5a;
-
-        let found = unsafe {
-            signed_key_tree_find_value(&tree, i32::MAX, ptr::addr_of_mut!(output))
-        };
-
-        assert_eq!(found, 0);
-        assert_eq!(output, 0xa5a5_5a5a);
-        assert_eq!(calls(), vec![(ptr::addr_of!(tree) as usize, i32::MAX)]);
-    }
-
-    #[test]
-    fn non_header_result_reads_node_value_and_forwards_negative_key() {
-        let Some(node) = crate::testing::try_map_u32_slab(
-            crate::testing::hints::SIGNED_KEY_TREE_FIND_VALUE,
+    fn find_node_copy_rejects_lower_bound_candidates_with_different_keys() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SIGNED_KEY_TREE_LOWER_BOUND,
             0x1000,
         ) else {
             return;
         };
-        let _seam_lock = SEAM_LOCK.lock();
-        unsafe { node.cast::<u32>().add(5).write(0xdead_beef) };
-        let node_word = node as usize as u32;
-        let tree = SignedKeyTree { opaque_prefix: [0; 4], header: 0 };
-        let _seam = unsafe { SeamGuard::install(node_word) };
-        let mut output = 0;
-
-        let found = unsafe {
-            signed_key_tree_find_value(&tree, i32::MIN, ptr::addr_of_mut!(output))
+        let base = slab as usize;
+        let word = |offset: usize| (base + offset) as u32;
+        let (header, root, left, right) = (word(0), word(0x40), word(0x60), word(0x80));
+        let write = |offset: usize, value: u32| unsafe {
+            ((base + offset) as *mut u32).write(value)
+        };
+        write(0x04, root);
+        write(0x48, left);
+        write(0x4c, right);
+        write(0x50, 10);
+        write(0x54, 0xdead_beef);
+        write(0x68, 0);
+        write(0x6c, 0);
+        write(0x70, 5);
+        write(0x88, 0);
+        write(0x8c, 0);
+        write(0x90, 20);
+        let tree = SignedKeyTree { opaque_prefix: [0; 4], header };
+        let find = |key: i32| {
+            let mut selected = 0;
+            unsafe { signed_key_tree_find_node_copy(&mut selected, &tree, &key) };
+            selected
         };
 
-        assert_eq!(found, 1);
+        assert_eq!(find(i32::MIN), header);
+        assert_eq!(find(5), left);
+        assert_eq!(find(7), header);
+        assert_eq!(find(10), root);
+        assert_eq!(find(20), right);
+        assert_eq!(find(i32::MAX), header);
+
+        let mut output = 0;
+        assert_eq!(unsafe { signed_key_tree_find_value(&tree, 10, &mut output) }, 1);
         assert_eq!(output, 0xdead_beef);
-        assert_eq!(calls(), vec![(ptr::addr_of!(tree) as usize, i32::MIN)]);
+        output = 0xa5a5_5a5a;
+        assert_eq!(unsafe { signed_key_tree_find_value(&tree, 7, &mut output) }, 0);
+        assert_eq!(output, 0xa5a5_5a5a);
+        write(0x04, 0);
+        output = 0xa5a5_5a5a;
+        assert_eq!(unsafe { signed_key_tree_find_value(&tree, 0, &mut output) }, 0);
+        assert_eq!(output, 0xa5a5_5a5a);
     }
 
     #[test]
