@@ -16084,6 +16084,36 @@ functions:
       block_deque's `base_client` calls it. Hook this address to that
       symbol.
 
+  - address: 0x083d6cf0
+    ghidra: FUN_083d6cf0
+    name: hash_table_bucket_find_word_pair_6cf0
+    size: 72
+    sig: "void *hash_table_bucket_find_word_pair_6cf0(const HashTable *table, u32 *bucket, const u32 *key)"
+    module: cxx/hash_table_bucket_find_word_pair_6cf0
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: bucket
+      param_3/r2: key
+    notes: >-
+      Raw osos.dec words e92d4070 e5914000 e1a06002 e1a05000 ea000000
+      e5944000 e3540000 0a000007 e5950004 e2442010 e0800005 e2800001
+      e1a01006 eb000397 e3500000 0afffff4 e1a00004 e8bd8070 establish the
+      exact 72-byte A32 extent 0x083d6cf0..0x083d6d34; the next separately
+      entered function begins at 0x083d6d38. Whole-image ARM decoding finds
+      two incoming unconditional plain bl sites (0x0826a050 and 0x083d2548),
+      zero predicated inbound bl sites, one unconditional plain body bl to
+      FUN_083d7b88 (0x083d7b88), and zero predicated body calls. Starting
+      after the bucket sentinel, it follows forward links whose nodes place
+      their two-word key 16 bytes before the link and returns the first
+      matching link or NULL. FUN_083d7b88 ignores its context argument and
+      compares those two words directly, so Rust deliberately inlines that
+      verified leaf rather than adding an unported firmware-call seam.
+      LLVM folds this byte-identical port with
+      hash_table_bucket_find_word_pair (FUN_083d6d38); both exported symbols
+      are present in the ARM archive and share its .text section. match.py
+      must therefore inspect hash_table_bucket_find_word_pair: it reports the
+      expected structural diff from LLVM's smaller loop, not a semantic diff.
   - address: 0x083d6d38
     ghidra: FUN_083d6d38
     name: hash_table_bucket_find_word_pair
