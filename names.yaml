@@ -55285,6 +55285,33 @@ functions:
       deliberately preserves the raw NULL-base + 0x80 result without
       Rust's in-bounds pointer-arithmetic requirement.
 
+  - address: 0x083da4bc
+    ghidra: FUN_083da4bc
+    name: deque_iter_decrement_elem4
+    size: 80
+    sig: "DequeIter *deque_iter_decrement_elem4(DequeIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, iVar1: segment_capacity, iVar2: previous_base}
+    renames:
+      FUN_083da450: deque_seg_capacity
+      param_1: iter
+      iVar1: segment_capacity
+      iVar2: previous_base
+    notes: >-
+      Raw ARM establishes the exact 80-byte body from 0x083da4bc through
+      `pop {r4,pc}` at 0x083da508; the next separately linked iterator member
+      begins at 0x083da50c. It compares cur with seg_base; on equality it calls
+      the adjacent `mov r0,#0x20; bx lr` capacity member at 0x083da450, moves
+      seg_slot back one target word, loads the previous segment base, writes
+      seg_base and both cur/seg_end to base + 0x20 * 4, then subtracts four
+      from cur. A NULL previous segment yields seg_base NULL, seg_end 0x80,
+      and cur 0x7c. Decoding every ARM B/BL word in osos.dec finds two plain
+      incoming bl calls and zero predicated bl forms; the body itself makes one
+      unconditional bl to the verified deque_seg_capacity member. The port
+      uses the existing shared capacity export via read_volatile to retain that
+      call boundary; wrapping pointer arithmetic deliberately preserves the
+      raw NULL-segment results.
   - address: 0x083da50c
     ghidra: FUN_083da50c
     name: deque_iter_increment_elem4

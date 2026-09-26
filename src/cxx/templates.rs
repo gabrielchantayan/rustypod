@@ -580,6 +580,46 @@ pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mu
     iter
 }
 
+/// deque_iter_decrement_elem4 — original: `FUN_083da4bc` @ `0x083da4bc`
+/// (80 bytes; 2 plain `bl` call sites, no predicated forms, verified by
+/// decoding every ARM B/BL word in `osos.dec`).
+///
+/// Moves a 4-byte deque iterator back one element. When `cur` equals
+/// `seg_base`, it first calls the adjacent segment-capacity member, moves
+/// `seg_slot` to the preceding map entry, loads that segment base, and resets
+/// `seg_base`, `seg_end`, and `cur` to the preceding segment's end. It then
+/// subtracts four from `cur`. The raw body has no null or bounds guard.
+///
+/// Deliberate deviation: loads the existing [`deque_seg_capacity`] export
+/// through `read_volatile` so LLVM retains the stock capacity-call boundary
+/// rather than folding its constant result into this independently hookable
+/// body. `wrapping_add` and `wrapping_sub` preserve the raw NULL-segment
+/// result: `seg_end` becomes `0x80`, then `cur` becomes `0x7c`.
+///
+/// # Safety
+/// `iter` must be a valid [`DequeIter`]. When `cur` equals `seg_base`,
+/// `seg_slot - 1` must be a valid, aligned segment-map entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_decrement_elem4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_decrement_elem4(iter: *mut DequeIter) -> *mut DequeIter {
+    if (*iter).cur == (*iter).seg_base {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let segment_capacity = capacity_fn();
+        let previous_slot = (*iter).seg_slot.wrapping_sub(1);
+        (*iter).seg_slot = previous_slot;
+        let previous_base = previous_slot.read();
+        (*iter).seg_base = previous_base;
+        let previous_end = previous_base.wrapping_add(segment_capacity * 4);
+        (*iter).seg_end = previous_end;
+        (*iter).cur = previous_end;
+    }
+    (*iter).cur = (*iter).cur.wrapping_sub(4);
+    iter
+}
+
 /// deque_iter_distance_elem4 — original: `FUN_083eade0` @ 0x083eade0.
 ///
 /// **104 bytes**, exactly 26 ARM instructions from 0x083eade0 through
@@ -7883,6 +7923,56 @@ mod tests {
         assert!(iter.seg_base.is_null());
         assert_eq!(iter.seg_end, 0x80 as *mut u8);
         assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+    }
+
+    #[test]
+    fn iter_decrement_elem4_stays_in_segment_and_crosses_previous_boundary() {
+        let mut first = [0u8; 0x80];
+        let mut second = [0u8; 0x80];
+        let mut slots = [first.as_mut_ptr(), second.as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: unsafe { second.as_mut_ptr().add(0x18) },
+            seg_base: second.as_mut_ptr(),
+            seg_end: unsafe { second.as_mut_ptr().add(0x80) },
+            seg_slot: unsafe { slots.as_mut_ptr().add(1) },
+        };
+
+        unsafe {
+            let ret = deque_iter_decrement_elem4(&mut iter);
+            assert_eq!(ret, &mut iter as *mut DequeIter);
+        }
+        assert_eq!(iter.cur, unsafe { second.as_mut_ptr().add(0x14) });
+        assert_eq!(iter.seg_base, second.as_mut_ptr());
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+
+        iter.cur = second.as_mut_ptr();
+        unsafe {
+            deque_iter_decrement_elem4(&mut iter);
+        }
+        assert_eq!(iter.cur, unsafe { first.as_mut_ptr().add(0x7c) });
+        assert_eq!(iter.seg_base, first.as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { first.as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, slots.as_mut_ptr());
+    }
+
+    #[test]
+    fn iter_decrement_elem4_keeps_the_raw_null_previous_segment_behavior() {
+        let mut second = [0u8; 0x80];
+        let mut slots = [core::ptr::null_mut(), second.as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: second.as_mut_ptr(),
+            seg_base: second.as_mut_ptr(),
+            seg_end: unsafe { second.as_mut_ptr().add(0x80) },
+            seg_slot: unsafe { slots.as_mut_ptr().add(1) },
+        };
+
+        unsafe {
+            deque_iter_decrement_elem4(&mut iter);
+        }
+        assert_eq!(iter.cur, 0x7c as *mut u8);
+        assert!(iter.seg_base.is_null());
+        assert_eq!(iter.seg_end, 0x80 as *mut u8);
+        assert_eq!(iter.seg_slot, slots.as_mut_ptr());
     }
 
     #[test]
