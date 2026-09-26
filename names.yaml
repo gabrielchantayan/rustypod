@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083e4884
+    ghidra: FUN_083e4884
+    name: vector_word_clear
+    size: 84
+    sig: "void vector_word_clear(VectorBounds *vector)"
+    module: cxx/vector_word_clear
+    status: ported
+    renames:
+      param_1/r0: vector
+      r12: begin
+      lr: original_end
+      r1: cursor
+      r2: output_cursor
+    notes: >-
+      Raw osos.dec establishes the 84-byte extent from push {r4,lr} at
+      0x083e4884 through pop {r4,pc} at 0x083e48d4; ldr r2,[r0,#8] at
+      0x083e48d8 begins the next independently entered function. The body
+      contains no BL instructions. A full-image raw A32 decode also finds zero
+      inbound direct plain BL and zero predicated BL sites, despite Ghidra's
+      three apparent caller edges. It is the 4-byte-element vector clear
+      specialization: the stock loops have equal initial bounds and execute
+      zero iterations, leaving only end = begin. Rust implements that
+      observable assignment directly; VectorBounds retains adjacent ARM words
+      while using native pointers in host fixtures.
   - address: 0x083e4a90
     ghidra: FUN_083e4a90
     name: vector_word_copy_construct
