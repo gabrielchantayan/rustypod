@@ -15422,6 +15422,26 @@ functions:
       0x083da2ac, 0x083da3b0, 0x083da424 (116 calls in total).
       0x081a81bc is the only copy outside the C++ block.
 
+  - address: 0x083da2ac
+    ghidra: FUN_083da2ac
+    name: deque_seg_capacity_alias_a2ac
+    size: 8
+    sig: "usize deque_seg_capacity_alias_a2ac(void)"
+    module: heap/block_deque
+    status: ported
+    renames: {}
+    notes: >-
+      Raw osos.dec words 0xe3a00020 and 0xe12fff1e decode as `mov r0, #0x20;
+      bx lr`, returning 0x20 elements per deque segment. The true extent is
+      8 bytes at 0x083da2ac..0x083da2b3; the next real function,
+      deque_iter_assign_alias_a2b4, begins at 0x083da2b4. Complete raw-image
+      ARM B/BL decoding verifies exactly two unconditional plain bl call sites
+      (0x083ea350 and 0x083ea3b8), zero predicated bl forms, and zero tail b
+      forms. The callers compute four-byte deque-iterator distances and use
+      the result as the segment capacity. This is a byte-identical deque
+      template copy, so deque_seg_capacity_alias_a2ac uses a dedicated text
+      section to retain this address-specific hook seam rather than allowing
+      LLVM to fold it into the canonical deque_seg_capacity export.
   - address: 0x083da3b0
     ghidra: FUN_083da3b0
     name: deque_seg_capacity
