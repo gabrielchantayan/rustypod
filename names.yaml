@@ -16084,6 +16084,36 @@ functions:
       block_deque's `base_client` calls it. Hook this address to that
       symbol.
 
+  - address: 0x083d6cac
+    ghidra: FUN_083d6cac
+    name: hash_table_contains_word_pair
+    size: 68
+    sig: "bool hash_table_contains_word_pair(const HashTable *table, const u32 *key)"
+    module: cxx/hash_table_contains_word_pair
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: key
+      FUN_083d63cc: hash_word_pair
+      FUN_08036f14: __rt_udiv
+      FUN_083d6dc8: bucket_find_word_pair
+    notes: >-
+      Raw osos.dec words e92d4070 e1a04000 e5900004 e1a05001 e0800004
+      e1c120d0 ebfffdc0 e5941018 ebf18090 e5940014 e1a02005 e0801101
+      e1a00004 eb000038 e3500000 13a00001 e8bd8070 establish the exact
+      68-byte A32 body 0x083d6cac..0x083d6cf0; the next real function begins
+      at 0x083d6cf0. The body has three unconditional plain bl calls
+      (FUN_083d63cc, __rt_udiv at 0x08036f14, and FUN_083d6dc8), no
+      predicated calls. Whole-image aligned ARM decoding finds two inbound
+      plain bl sites (0x08269a5c and 0x0826a340), no predicated sites.
+      The function hashes the two-word key with the 64-bit Jenkins mix,
+      takes its unsigned division remainder by table+0x18, selects the u32
+      bucket at table + *(table+0x14) + remainder*4, and returns whether
+      the intrusive chain has a matching key at link-8/link-4.
+      Deliberate deviations: the verified raw hash and equality operations
+      are inlined; the ported __rt_udivmod supplies the original r1
+      remainder without adding seams for the adjacent unported helpers.
+
   - address: 0x083d6cf0
     ghidra: FUN_083d6cf0
     name: hash_table_bucket_find_word_pair_6cf0
