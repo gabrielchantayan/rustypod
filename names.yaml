@@ -16084,6 +16084,29 @@ functions:
       block_deque's `base_client` calls it. Hook this address to that
       symbol.
 
+  - address: 0x083d6d38
+    ghidra: FUN_083d6d38
+    name: hash_table_bucket_find_word_pair
+    size: 72
+    sig: "void *hash_table_bucket_find_word_pair(const HashTable *table, u32 *bucket, const u32 *key)"
+    module: cxx/hash_table_bucket_find_word_pair
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: bucket
+      param_3/r2: key
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte A32 body
+      0x083d6d38..0x083d6d7c through pop {r4,r5,r6,pc}; the next separately
+      linked function begins at 0x083d6d80. An aligned whole-image ARM B/BL
+      decode finds two incoming unconditional plain bl sites (0x083d2204 and
+      0x083d2870), no predicated inbound forms, one unconditional plain body
+      bl to FUN_083d7b88 (0x083d7b88), and no predicated body calls. Starting
+      after the bucket sentinel, it follows forward links whose nodes place
+      their two-word key 16 bytes before the link and returns the first
+      matching link or NULL. FUN_083d7b88 ignores its context argument and
+      compares those two words directly, so Rust deliberately inlines that
+      verified leaf rather than adding an unported firmware-call seam.
   - address: 0x083d6e10
     ghidra: FUN_083d6e10
     name: hash_table_bucket_slot_6e10

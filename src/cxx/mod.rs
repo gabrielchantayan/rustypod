@@ -375,6 +375,7 @@ pub mod string_pair_word_uninitialized_copy;
 pub mod cxx_string_uninitialized_copy;
 pub mod named_object_cache;
 pub mod keyed_record_find_string_match;
+pub mod hash_table_bucket_find_word_pair;
 pub mod string_range_destroy;
 pub mod record_string_byte_vector_destroy;
 pub mod string_byte_vector_record_range_destroy;
