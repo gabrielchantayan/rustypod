@@ -61149,6 +61149,35 @@ functions:
       canonical zero test; LLVM uses clz/lsr where ADS uses rsbs/movcc,
       with a frame prologue/epilogue around the leaf.
 
+  - address: 0x083dafac
+    ghidra: FUN_083dafac
+    name: byte_key_tree_erase_key
+    size: 140
+    sig: "u32 byte_key_tree_erase_key(void *tree, const u8 *key)"
+    module: cxx/byte_key_tree_erase_key
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      local_24: range_first
+      local_20: range_last
+      iVar2/r4: erased_count
+    notes: >-
+      Raw osos.dec fixes the 35-word body at 0x083dafac..0x083db034; the
+      next independently linked function starts at 0x083db038. It has four
+      outbound plain bl instructions (equal_range @ 0x083b7ff0,
+      red_black_tree_advance_cursor @ 0x083b5960, equal_deref @ 0x083cf740,
+      and erase_range @ 0x083b859c), with no predicated bl. Whole-image A32
+      branch decoding finds two inbound plain bl sites, 0x082581b0 and
+      0x082581fc, and no predicated callers. The function obtains the
+      equal-range iterators, advances and counts their half-open range, then
+      erases that saved range. The port reuses the established cursor advance
+      implementation and inlines iterator-word equality; equal_range and
+      erase_range remain narrow retail dispatches on target and host-test
+      seams. Stack temporaries are Rust locals. Host tests cover an empty
+      range and a three-node successor chain, including the mandatory erase
+      call with original bounds.
+
   - address: 0x083db038
     ghidra: FUN_083db038
     name: byte_key_map_find

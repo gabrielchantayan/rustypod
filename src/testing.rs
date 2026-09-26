@@ -2579,6 +2579,9 @@ pub mod hints {
     // 0x6ff0_0000: dedicated to ui/tdat_element_teardown's target-width
     // element and linked 'plst' node fixture; mappings never unmap.
     pub const TDAT_ELEMENT_TEARDOWN: usize = 0x6ff0_0000;
+    // 0x6ff4_0000: dedicated to cxx/byte_key_tree_erase_key's target-width
+    // cursor-chain fixture; mappings never unmap, so no other port may use it.
+    pub const BYTE_KEY_TREE_ERASE_KEY: usize = 0x6ff4_0000;
     // 0x6ff8_0000: dedicated to util/big_endian_bit_cell_store's target-width
     // table and cell fixtures; mappings never unmap, so no other port may use it.
     pub const BIG_ENDIAN_BIT_CELL_STORE: usize = 0x6ff8_0000;
