@@ -10,20 +10,19 @@
 //! The function acquires a node, copy-constructs its refcounted payload, then
 //! inserts it immediately before the sentinel supplied through `node_slot`.
 //! The list count at +0x14 increments with ARM wrapping arithmetic and the
-//! acquired target pointer is written to `out`. Deliberate deviation: the
-//! byte-identical, still-unported pool-acquire callee at `0x083dc120` is
-//! represented by the existing ported `word_list_node_pool_acquire`; both use
-//! the recovered 16-byte pool and 12-byte `{next, previous, value}` layout.
+//! acquired target pointer is written to `out`. The pool-acquire callee is now
+//! the direct port [`refcounted_list_node_pool_acquire`], which preserves the
+//! recovered 16-byte pool and 12-byte `{next, previous, value}` layout.
 
 use crate::cxx::handle::{refcounted_ptr_copy_construct, RefcountedBody};
-use crate::cxx::word_list_node_pool_acquire::{word_list_node_pool_acquire, WordListNode, WordListNodePool};
+use crate::cxx::refcounted_list_node_pool_acquire::refcounted_list_node_pool_acquire;
+use crate::cxx::word_list_node_pool_acquire::{WordListNode, WordListNodePool};
 
 type AcquireNode = unsafe fn(*mut WordListNodePool) -> *mut WordListNode;
 type CopyConstruct = unsafe fn(*mut u32, *const u32);
 
-#[inline(always)]
 unsafe fn acquire_node(pool: *mut WordListNodePool) -> *mut WordListNode {
-    word_list_node_pool_acquire(pool, 0)
+    refcounted_list_node_pool_acquire(pool, 0)
 }
 
 #[inline(always)]

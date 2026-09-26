@@ -2033,6 +2033,10 @@ pub mod hints {
     // 0xde00_0000: dedicated to cxx/word_list_node_pool_acquire's target-width
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const WORD_LIST_NODE_POOL_ACQUIRE: usize = 0xde00_0000;
+    // 0xde40_0000: dedicated to cxx/refcounted_list_node_pool_acquire's
+    // target-width pool/chunk/node fixture; mappings never unmap, so no other
+    // user may share this hint.
+    pub const REFCOUNTED_LIST_NODE_POOL_ACQUIRE: usize = 0xde40_0000;
     // 0xde80_0000: dedicated to cxx/list_node_pool_acquire_083dd4cc's
     // pool/chunk/node fixture; mappings never unmap, so no other user may share it.
     pub const LIST_NODE_POOL_ACQUIRE_083DD4CC: usize = 0xde80_0000;
