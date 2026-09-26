@@ -581,13 +581,10 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 /// (8 bytes each).
 ///
 /// The raw ARM body is `mov r0, #0x20; bx lr`: return the 0x20 elements
-/// per deque segment. `FUN_083da424` occupies
-/// `0x083da424..0x083da42b`; the next real function begins at
-/// `0x083da42c`. Decoding every ARM B/BL word in `osos.dec` finds its two
-/// unconditional plain `bl` call sites at 0x083ea584 and 0x083ea5ec, with
-/// no predicated calls or tail branches. `FUN_083da2d8` has five plain
-/// `bl` call sites (0x083da328, 0x083defd0, 0x083df0f4, 0x083df118, and
-/// 0x083df1f4), with no predicated calls or tail branches.
+/// per deque segment. `FUN_083da424` occupies `0x083da424..0x083da42b`;
+/// the next real function begins at `0x083da42c`. Decoding every ARM B/BL
+/// word in `osos.dec` finds its two unconditional plain `bl` call sites at
+/// 0x083ea584 and 0x083ea5ec, with no predicated calls or tail branches.
 /// `FUN_083da3b0` occupies `0x083da3b0..0x083da3b7`; its successor,
 /// `deque_iter_assign_alias_a3b8`, begins at `0x083da3b8`. It has two
 /// unconditional plain `bl` call sites (0x083ea490 and 0x083ea4f8), no
@@ -605,12 +602,30 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 /// 0x083d9f88 builds `seg_end = seg_base + 0x20 * 0xc`, and the pop path
 /// frees a spent segment via `cxx_array_dealloc(seg, 0x20, 0)`).
 /// Deliberate deviation: this one export serves these byte-identical
-/// template copies rather than duplicating an indistinguishable Rust body.
+/// template copies except the independently hookable 0x083da2ac copy below.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn deque_seg_capacity() -> usize {
     0x20
 }
+///
+/// deque_seg_capacity_alias_a2ac — original: `FUN_083da2ac` @ 0x083da2ac
+/// (8 bytes, `0x083da2ac..0x083da2b3`).
+///
+/// Raw words `0xe3a00020` and `0xe12fff1e` are `mov r0, #0x20; bx lr`,
+/// returning 0x20 elements per deque segment. The next real function,
+/// `deque_iter_assign_alias_a2b4`, starts at 0x083da2b4. Complete
+/// raw-image ARM B/BL decoding finds two unconditional plain `bl` callers
+/// (0x083ea350 and 0x083ea3b8), no predicated forms, and no tail branches.
+/// Deliberate deviation: this byte-identical template copy has a dedicated
+/// text section so LLVM retains its address-specific hook seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.deque_seg_capacity_alias_a2ac"))]
+#[inline(never)]
+pub unsafe extern "C" fn deque_seg_capacity_alias_a2ac() -> usize {
+    0x20
+}
+
 
 /// deque_iter_init — original: `FUN_083d9eec` @ 0x083d9eec (68 bytes).
 ///
@@ -1290,6 +1305,13 @@ mod tests {
         unsafe {
             assert_eq!(deque_seg_capacity(), 0x20);
             assert_eq!(deque_seg_capacity() * DEQUE_ELEM_SIZE, DEQUE_SEG_BYTES);
+        }
+    }
+
+    #[test]
+    fn seg_capacity_alias_a2ac_returns_its_raw_constant() {
+        unsafe {
+            assert_eq!(deque_seg_capacity_alias_a2ac(), 0x20);
         }
     }
 
