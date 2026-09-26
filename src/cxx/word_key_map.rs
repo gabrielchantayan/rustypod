@@ -2,9 +2,11 @@
 //! `_Rb_tree<unsigned, pair<const unsigned, V>>::_M_find` for the map
 //! instantiation whose nodes carry a u32 key plus a u32 mapped word.
 //!
-//! - [`word_key_map_find`] — original: `FUN_083dbb5c` @ 0x083dbb5c
+//! - [`word_key_map_find`] — originals: `FUN_083dbb5c` @ 0x083dbb5c
 //!   (168 bytes; 4 verified direct `bl` call sites, all unconditional:
-//!   0x081f09a0, 0x081f0ad0, 0x081f0bdc, 0x081f0f84).
+//!   0x081f09a0, 0x081f0ad0, 0x081f0bdc, 0x081f0f84) and
+//!   `FUN_083dbc64` @ 0x083dbc64 (168 bytes; 2 verified direct `bl` call
+//!   sites, both unconditional: 0x081e1504 and 0x081e1554).
 //!
 //! Container and node shape (same family as `cxx/word_key_set.rs` and
 //! `cxx/byte_key_map.rs`): the header node pointer lives at map+0x10
@@ -98,13 +100,21 @@ mod layout_checks {
     const _COMPARATOR_OFFSET: [u8; 0x19] = [0; core::mem::offset_of!(WordKeyMap, comparator)];
 }
 
-/// word_key_map_find — original: `FUN_083dbb5c` @ 0x083dbb5c
-/// (168 bytes; 4 `bl` call sites, binary-verified, all unconditional).
+/// word_key_map_find — originals: `FUN_083dbb5c` @ 0x083dbb5c and
+/// `FUN_083dbc64` @ 0x083dbc64 (168 bytes each; 4 and 2 inbound plain `bl`
+/// call sites respectively; no predicated `bl` forms). Raw A32 establishes
+/// the latter's extent through `pop {r0-r10,pc}` at 0x083dbd08; the new
+/// separately entered function begins at 0x083dbd0c.
 ///
 /// Writes the node for `*key` — or the header node (`end()`) when the
 /// key is absent — through `out`. Lower-bound descent from the root
 /// comparing u32 keys with `less_unsigned`; the candidate is rejected
-/// when it is the header or when `*key < candidate_key`.
+/// when it is the header or when `*key < candidate_key`. The two retail
+/// copies differ only in their byte-identical key-accessor and iterator-
+/// equality helper addresses, so this established implementation ports both.
+/// Deliberate deviations: the retail stack homes and dead zero scratch store
+/// are held in registers; helper leaves are inlined except for the two real
+/// comparator call boundaries.
 ///
 /// # Safety
 /// `out` must point at a writable word, `map` at a live container
@@ -258,6 +268,19 @@ mod tests {
         let want = &mut *t.nodes[1] as *mut _;
         assert_eq!(find(&mut t, u32::MAX), want);
         let header = &mut *t.header as *mut _;
+        assert_eq!(find(&mut t, u32::MAX - 1), header);
+    }
+
+    #[test]
+    fn second_retail_copy_contract_finds_and_rejects_boundary_keys() {
+        // FUN_083dbc64 is the second physical instantiation of this exact
+        // target-width map layout; exercise its caller-visible contract at
+        // both unsigned ordering boundaries.
+        let mut t = tree(&[(1, usize::MAX, 1), (u32::MAX, usize::MAX, usize::MAX)]);
+        let max = &mut *t.nodes[1] as *mut _;
+        assert_eq!(find(&mut t, u32::MAX), max);
+        let header = &mut *t.header as *mut _;
+        assert_eq!(find(&mut t, 0), header);
         assert_eq!(find(&mut t, u32::MAX - 1), header);
     }
 }
