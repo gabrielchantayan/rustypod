@@ -57255,6 +57255,31 @@ functions:
       equality with the primary accessor. Deliberate deviations: none.
 
 
+  - address: 0x083d47c8
+    ghidra: FUN_083d47c8
+    name: slot_array_remove_at_release_inline
+    size: 80
+    sig: "void slot_array_remove_at_release_inline(SlotArray *this, i32 index)"
+    module: cxx/slot_array_remove_at_release_inline
+    status: ported
+    vars: {param_1: this, param_2: index}
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x083d47c8..0x083d4818; the next independently linked function begins
+      at 0x083d4818 with push {r2,r3,r4,r5,r6,lr}. Whole-image A32
+      B/BL-immediate decoding finds exactly two inbound direct calls, both
+      unconditional plain bl at 0x08076b94 and 0x082c9a80, and no predicated
+      bl calls. The body inlines the signed capacity check, then for an
+      occupied storage slot invokes the object's dynamically resolved vtable
+      slot +4 callback, clears that slot, and decrements the occupied count.
+      The callback target is runtime data; no static callee identity is
+      inferred. Host fixtures use native-width vtable pointers while target
+      builds retain retailOS u32 pointer words; this is the only deliberate
+      deviation. match.py reports LLVM's equivalent branch-based bounds
+      handling and extra saved registers rather than ADS's predicated
+      prologue, but retains the check, slot load, indirect vtable call, clear,
+      and count decrement sequence.
+
   - address: 0x083d48dc
     ghidra: FUN_083d48dc
     name: array_at_checked
