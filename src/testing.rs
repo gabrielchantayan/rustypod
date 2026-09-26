@@ -344,6 +344,9 @@ pub mod hints {
     pub const EVENT_SOURCE_FIND_PAYLOAD: usize = 0x1f00_0000;
     pub const EVENT_SOURCE_FIND_PAYLOAD_NO_MATCH: usize = 0x1f10_0000;
     pub const SILVER_CONTROLLER: usize = 0x1700_0000;
+    // 0x1710_0000: dedicated to app/silver_list_table's target-width
+    // red-black map node fixture; mappings never unmap.
+    pub const SILVER_ITEM_MAP_VALUE_SLOT: usize = 0x1710_0000;
     // 0x7f20_0000: dedicated to app/locked_owned_context_destroy's controller
     // and owned-context raw-u32-pointer fixture.
     pub const LOCKED_OWNED_CONTEXT_DESTROY: usize = 0x7f20_0000;
