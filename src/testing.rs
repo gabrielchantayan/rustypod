@@ -2594,6 +2594,9 @@ pub mod hints {
     // mappings never unmap.
     pub const PATH_OBJECT_VECTOR_PUSH_BACK: usize = 0x6af0_0000;
     pub const PATH_OBJECT_VECTOR_PUSH_BACK_EMPTY: usize = 0x6b00_0000;
+    // 0x7650_0000: dedicated to cxx/container_first_node's target-width
+    // nested-container and node fixture; mappings never unmap.
+    pub const CXX_CONTAINER_FIRST_NODE: usize = 0x7650_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

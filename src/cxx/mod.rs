@@ -6,6 +6,7 @@ pub mod bit_set;
 pub mod path_object_vector_push_back;
 pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
+pub mod container_first_node;
 pub mod tagged_buffer_range_copy_construct;
 pub mod tagged_bit_set_insert_utf8;
 pub mod basic_ostream_construct;
