@@ -145883,3 +145883,30 @@ functions:
       normally rather than preserving ARM scheduling; the host helper takes the
       operations explicitly so tests observe the actual destroy-then-delete
       return-value flow without heap-backed target-address fixtures.
+
+  # --- opaque derived constructor ---
+  - address: 0x083e71bc
+    ghidra: FUN_083e71bc
+    name: opaque_vtable_089a8a6c_construct
+    size: 28
+    sig: "void *opaque_vtable_089a8a6c_construct(void *this, u32 value)"
+    module: cxx/opaque_vtable_089a8a6c_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: value
+      FUN_082a89b4: opaque_base_construct
+      DAT_083e71d4: OPAQUE_VTABLE_089A8A6C
+    notes: >-
+      Raw osos.dec words establish six instruction words at
+      0x083e71bc..0x083e71d0 plus literal-pool word 0x089a8a6c at
+      0x083e71d4, for a true 28-byte extent; push {r4,r5,r6,lr} at
+      0x083e71d8 begins the next independently entered function. Caller
+      decoding finds exactly two inbound unconditional plain
+      BL calls (0x083b63b8 and 0x083b63d0), zero inbound predicated BL calls,
+      and the body has one unconditional plain BL to still-retail base
+      constructor 0x082a89b4 with no predicated calls. It forwards this and
+      value, supplies fixed kind 0x80, then overwrites word +0x00 of the base
+      constructor's returned object with 0x089a8a6c. The class identity and
+      full layout remain opaque. Target assembly preserves the direct retail
+      call; host builds use a replaceable seam for that unported boundary.
