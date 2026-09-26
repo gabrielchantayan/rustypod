@@ -147731,6 +147731,44 @@ functions:
       deep, and unsigned-boundary keys.
 
 
+  - address: 0x083dba0c
+    ghidra: FUN_083dba0c
+    name: signed_key_tree_find_node_f908_copy
+    size: 168
+    sig: "void signed_key_tree_find_node_f908_copy(u32 *out_node, const SignedKeyTree *tree, const i32 *key)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1/r0: out_node
+      param_2/r1/r5: tree
+      param_3/r2/r9: key
+      r4: node
+      r6: candidate_or_header
+      "tree+0x10": header
+      "header+0x04": root
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": key
+      FUN_083d7580: less_signed
+      FUN_083cf908: equal_deref_f908_copy
+      FUN_083b6b1c: node_key_accessor
+    notes: >-
+      Raw osos.dec establishes the exact 168-byte A32 body from 0x083dba0c
+      through pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,pc} at 0x083dbab0;
+      0x083dbab4 begins the next separately linked function. Whole-image A32
+      decoding finds exactly two inbound unconditional plain BL sites,
+      0x081bea14 and 0x0839bc78, with no predicated BL forms. The body has
+      four unconditional BL instructions and no predicated BL instructions:
+      two calls to less_signed @ 0x083d7580, plus equal_deref_f908_copy @
+      0x083cf908 and node_key_accessor @ 0x083b6b1c. It performs lower-bound
+      descent over signed i32 keys, then rejects a non-equal candidate by
+      returning the header sentinel. Rust preserves target-width node words,
+      calls the established signed comparator directly. A dedicated target text
+      section prevents LLVM from folding this separately linked BL target into
+      the otherwise equivalent 0x083dbab4 copy. Host tests cover empty, exact,
+      absent-between, and signed-boundary keys. match.py reports the expected
+      frame and local-call-target differences (exit 1) while retaining the
+      traversal and final candidate-rejection structure.
   - address: 0x083dbab4
     ghidra: FUN_083dbab4
     name: signed_key_tree_find_node_copy
