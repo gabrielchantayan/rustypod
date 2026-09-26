@@ -226,6 +226,7 @@ pub mod record_stream_begin;
 pub mod record_entry_payload_length;
 pub mod record_fields_configure;
 pub mod record_min_heap_pop_adjust;
+pub mod record_min_heap_push;
 pub mod record_min_heap_sift_up;
 pub mod resource_record_find_nth;
 pub mod resource_record_find_and_decode;

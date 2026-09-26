@@ -2608,6 +2608,9 @@ pub mod hints {
     // 0x6a90_0000: dedicated to util/record_min_heap_sift_up's record and
     // heap fixtures; mappings never unmap, so no other port may share it.
     pub const RECORD_MIN_HEAP_SIFT_UP: usize = 0x6a90_0000;
+    // 0x6a80_0000: dedicated to util/record_min_heap_push's target-width
+    // vector and record fixtures; mappings never unmap.
+    pub const RECORD_MIN_HEAP_PUSH: usize = 0x6a80_0000;
     // 0x6ac0_0000: dedicated to cxx/trivial_vector24_destroy's target-width
     // vector backing-storage fixture; mappings never unmap.
     pub const TRIVIAL_VECTOR24_DESTROY: usize = 0x6ac0_0000;

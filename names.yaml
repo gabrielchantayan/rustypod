@@ -148718,3 +148718,30 @@ functions:
       *current and increments current; otherwise it delegates to slot +0x24.
       Host fixtures widen pointer and function fields; target code retains
       the retail 32-bit layout and volatile loads/stores.
+
+  - address: 0x083d9e28
+    ghidra: FUN_083d9e28
+    name: record_min_heap_push
+    size: 108
+    sig: "void record_min_heap_push(u32 *vector, const u32 *value)"
+    module: util/record_min_heap_push
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: value
+      FUN_083e5410: record_vector_grow_and_insert
+      FUN_083e7d7c: record_min_heap_sift_up
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte extent from push
+      {r3,r4,r5,lr} at 0x083d9e28 through pop {r3,r4,r5,pc} at 0x083d9e90;
+      the next independently linked function begins at 0x083d9e94. Raw A32
+      decoding finds two outgoing body BL instructions, both plain and
+      unconditional: 0x083d9e64 to the unported vector-growth helper
+      0x083e5410, and 0x083d9e8c to record_min_heap_sift_up at 0x083e7d7c.
+      No body BL is predicated. Complete direct-call decoding finds two inbound
+      plain BL callers, at 0x0826220c and 0x082624d4. It appends one u32 record
+      pointer if capacity remains or delegates insertion to the growth helper,
+      then sifts the final element upward using the comparator word at +0x0c.
+      The growth helper has one caller and its three-argument ABI is verified
+      from this call site and its raw code; it remains a target-call seam.
+      Deliberate deviations: word indexing replaces the target's byte offsets.
