@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd39c
+    ghidra: FUN_083dd39c
+    name: word_list_node_pool_list_recycle_all
+    size: 180
+    sig: "void word_list_node_pool_list_recycle_all(ListNodePoolList *list)"
+    module: cxx/word_list_node_pool_list_recycle_all
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+    notes: >-
+      Raw osos.dec establishes the exact 180-byte extent: 45 A32 words from
+      0x083dd39c through bx lr at 0x083dd44c; 0x083dd450 begins the next
+      separately entered function with push {r4,r5,r6,lr}. The body has no
+      outgoing plain or predicated BL instructions. Whole-image decoding finds
+      two inbound plain BL sites, at 0x082928c8 and 0x083dd468. It walks the
+      intrusive ring from sentinel.next, unlinks every non-sentinel node,
+      decrements state with wrapping arithmetic, and prepends each node to
+      free. Rust uses target-width u32 pointer fields and omits only the
+      retail stack-local stores that are dead on return. match.py reports the
+      expected LLVM frame reduction while preserving the empty guard and
+      unlink/decrement/free-list loop.
   - address: 0x083dd6c8
     ghidra: FUN_083dd6c8
     name: list_node_pool_list_init
