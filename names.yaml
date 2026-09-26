@@ -43007,6 +43007,32 @@ functions:
       into destination, then released; zero capacity copies the shared empty
       representation. The temporary ensures destination owns its bytes rather
       than aliases the strstreambuf buffer. No deliberate deviations.
+  - address: 0x083d7ec0
+    ghidra: FUN_083d7ec0
+    name: vector_copy_construct_elem16
+    size: 40
+    sig: "StringObject *vector_copy_construct_elem16(VectorStorage *vector, StringObjectPair *output, const StringObjectPair *source)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: output
+      param_3/r2: source
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 body
+      0x083d7ec0..0x083d7ee8; the next independently linked function starts
+      with push {r4,lr} at 0x083d7ee8. Whole-image A32 branch decoding finds
+      two inbound unconditional plain bl instructions (0x083e909c and
+      0x083e960c) and zero inbound predicated bl forms. The body has one plain
+      bl, ebfa7d41 at 0x083d7ed4 resolving to string_object_copy_construct @
+      0x082773e0, zero predicated bls, then an unconditional tail branch,
+      eafa7d3d at 0x083d7ee4, to the same constructor. It ignores vector,
+      returns NULL without reading source when output is NULL, copy-constructs
+      adjacent StringObjects at output/source +0x00 and +0x08, and returns
+      the second constructor's result (output +0x08). No deliberate
+      deviations: typed member stepping preserves the target layout on ARM
+      and correct widened-pointer member adjacency on host tests.
   - address: 0x083d7ee8
     ghidra: FUN_083d7ee8
     name: three_word_string_pair_copy_construct
