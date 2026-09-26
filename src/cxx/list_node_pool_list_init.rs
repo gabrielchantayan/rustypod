@@ -70,8 +70,7 @@ const DEFAULT_LIST_NODE_POOL_ACQUIRE: ListNodePoolAcquire = missing_list_node_po
 /// constructor's exact argument and sentinel stores.
 pub static mut LIST_NODE_POOL_ACQUIRE: ListNodePoolAcquire = DEFAULT_LIST_NODE_POOL_ACQUIRE;
 
-#[inline(always)]
-unsafe fn list_node_pool_acquire() -> ListNodePoolAcquire {
+pub(crate) unsafe fn list_node_pool_acquire() -> ListNodePoolAcquire {
     unsafe { read_volatile(addr_of!(LIST_NODE_POOL_ACQUIRE)) }
 }
 
