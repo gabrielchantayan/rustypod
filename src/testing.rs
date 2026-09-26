@@ -46,6 +46,8 @@ pub mod hints {
     // target-width basic_ostream fixtures; mappings never unmap.
     pub const OSTREAM_WRITE_PADDING_COMPLETE: usize = 0x6d50_0000;
     pub const OSTREAM_WRITE_PADDING_FAILURE: usize = 0x6d51_0000;
+    // 0x6d52_0000: dedicated to cxx/ostream_flush's target-width fixture; mappings never unmap.
+    pub const OSTREAM_FLUSH: usize = 0x6d52_0000;
     // 0x6ca0_0000: dedicated to cxx/red_black_tree_payload_8_construct's
     // target-width tree and sentinel fixture; mappings never unmap.
     pub const RED_BLACK_TREE_PAYLOAD_8_CONSTRUCT: usize = 0x6ca0_0000;
