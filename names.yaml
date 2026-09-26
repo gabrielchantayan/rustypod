@@ -3739,6 +3739,37 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cffbc
+    ghidra: FUN_083cffbc
+    name: indexed_element_array_destroy
+    size: 76
+    sig: "void indexed_element_array_destroy(IndexedElementArray *array)"
+    module: cxx/indexed_element_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r6: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      iVar1/r0: element
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_at
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x083cffbc..0x083d0007: nineteen A32 words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the next independently entered function
+      begins at 0x083d0008. Raw ARM decoding finds two inbound plain BL calls,
+      at 0x083d0054 and 0x083d007c, with no predicated BL callers. The body
+      makes three plain BL calls and no predicated BL calls: the unresolved
+      vtable-slot-0x40 accessor FUN_083d689c, string_object_destroy @
+      0x08277484, and operator_delete @ 0x082aad24. If enabled is nonzero, it
+      visits indices [0,count), destroys each non-NULL returned StringObject,
+      then deletes it. FUN_083d689c has the same verified vtable-slot-0x40
+      load-and-dereference behavior as the established
+      container_element_at_083d6818 port, which this implementation reuses.
+      Host fixtures deliberately widen the vtable pointer while retaining the
+      target count and enabled field meanings.
   - address: 0x083d00a0
     ghidra: FUN_083d00a0
     name: indexed_element_array_release
