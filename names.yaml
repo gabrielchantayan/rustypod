@@ -54934,6 +54934,23 @@ functions:
       0x083da3b8. 0x0824c734/0x0824c774 are the only copies outside the
       C++ block.
 
+  - address: 0x083da21c
+    ghidra: FUN_083da21c
+    name: deque_iter_assign_alias_a21c
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_a21c(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec fixes the 36-byte extent from 0x083da21c through bx lr at
+      0x083da23c; the next independently linked function starts at 0x083da240
+      with mov r0,#0x20; bx lr. It forward-copies the four aligned deque
+      iterator words (cur, seg_base, seg_end, seg_slot), preserving dst in r0
+      despite Ghidra declaring void. Whole-image ARM decoding finds two plain
+      inbound bl calls (0x081559fc and 0x08155a14), no predicated bl calls,
+      and no body calls. A dedicated exported text section prevents identical
+      function folding; no other deliberate deviations.
   - address: 0x083d9ec8
     ghidra: FUN_083d9ec8
     name: deque_iter_assign_alias_9ec8
