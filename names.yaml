@@ -3713,6 +3713,35 @@ functions:
       pointer fields deliberately remain u32 words so their firmware offsets
       are invariant on the 64-bit host; the original's dead r1=0 second
       allocator argument is omitted from the Rust callee signature.
+  - address: 0x083bfdbc
+    ghidra: FUN_083bfdbc
+    name: red_black_tree_word_subtree_clone
+    size: 116
+    sig: "RedBlackTreeWordNode *red_black_tree_word_subtree_clone(RedBlackTreeWordNodePool *pool, RedBlackTreeWordNode *source, RedBlackTreeWordNode *parent)"
+    module: cxx/red_black_tree_word_subtree_clone
+    status: ported
+    renames:
+      param_1/r0/r8: pool
+      param_2/r1/r4: source
+      param_3/r2/r6: parent
+      puVar3/r7: first
+      puVar1/r5: clone
+      "[node + 0x0]": color
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+      "[node + 0x10]": payload
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent
+      0x083bfdbc..0x083bfe2c; the next independently entered function starts
+      at 0x083bfe30. Its 29 decoded A32 words contain two unconditional BL
+      instructions, to the word-node pool helper at 0x083bf4dc and recursively
+      to itself, and no predicated BL instructions. It clones a red-black
+      subtree by iterating its left spine, recursively cloning each right
+      subtree, copying color and word payload, and rebuilding target-width
+      parent and child links. The 0x083bf4dc helper's payload copy is performed
+      directly after the existing ported pool acquisition seam; deliberate
+      deviations: no extra helper seam is introduced.
   - address: 0x083c64b4
     ghidra: FUN_083c64b4
     name: red_black_tree_node_pool_release_refcounted
