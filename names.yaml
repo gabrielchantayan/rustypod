@@ -149232,3 +149232,30 @@ functions:
       three-pointer table at 0x08b316e8. The unported helper remains a
       verified-address target dispatch and host-test seam; the table uses a
       native-width host seam to avoid dereferencing firmware RAM.
+
+  - address: 0x083d6dc8
+    ghidra: FUN_083d6dc8
+    name: pair_chain_find
+    size: 72
+    sig: "u32 pair_chain_find(u32 comparison_context, const u32 *head_link, const u32 *key)"
+    module: util/pair_chain_find
+    status: ported
+    renames:
+      param_1/r0: comparison_context
+      param_2/r1: head_link
+      param_3/r2: key
+      iVar1/r4: node
+      FUN_083d7b88: pair_words_equal
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte A32 extent
+      0x083d6dc8..0x083d6e0f; the next independently entered function begins
+      with push {r4,lr} at 0x083d6e10. Whole-image ARM decoding finds exactly
+      two inbound unconditional plain bl sites (0x083d2ec0 and 0x083d6ce0)
+      and zero predicated inbound bl sites. The body has one outgoing plain bl
+      to FUN_083d7b88 and no predicated calls. It reads *head_link, then walks
+      target-width +0x00 links until the verified helper reports equality
+      between key and the two words at node-8. The helper's raw body only
+      compares those two word pairs, so Rust deliberately inlines it instead
+      of inventing an unverified seam; comparison_context preserves the ABI but
+      is not dereferenced. Nodes and links remain u32 addresses to retain the
+      retail four-byte layout on 64-bit host tests.
