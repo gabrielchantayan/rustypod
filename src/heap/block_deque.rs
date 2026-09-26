@@ -571,6 +571,35 @@ pub unsafe extern "C" fn deque_construct(dq: *mut DequeHead) -> *mut DequeHead {
     (*dq).map = core::ptr::null_mut();
     core::ptr::null_mut()
 }
+/// deque_construct_elem4_alias_f7a4 — original: `FUN_083df7a4` @
+/// 0x083df7a4 (64 bytes; 2 plain `bl` call sites at 0x0825c3a0 and
+/// 0x0825c3ac; no predicated forms, binary-verified).
+///
+/// Default-constructs a 0x28-byte 4-byte-element deque head. The raw body
+/// builds an all-NULL iterator in a four-word stack temporary through
+/// `deque_iter_init_elem4_alias_a3e4(_, 0, 0)`, copies it to `end` then
+/// `begin`, and clears `count` and `map`. The null inputs make that call's
+/// result unconditionally `DequeIter::NULL`, so this port writes the typed
+/// value directly. Deliberate deviation: it omits the redundant stack
+/// temporary and call, and returns NULL because the original returns the
+/// zeroed temporary's first word rather than `dq`.
+///
+/// # Safety
+///
+/// `dq` must be valid for writes through the 0x28-byte [`DequeHead`] prefix.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_construct_elem4_alias_f7a4")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_construct_elem4_alias_f7a4(
+    dq: *mut DequeHead,
+) -> *mut DequeHead {
+    (*dq).end = DequeIter::NULL;
+    (*dq).begin = (*dq).end;
+    (*dq).count = 0;
+    (*dq).map = core::ptr::null_mut();
+    core::ptr::null_mut()
+}
+
 
 /// The base object's client handle (`handle_deref_or_null(this + 0x4)`,
 /// the shape every original call site uses).
@@ -1074,6 +1103,33 @@ mod tests {
             assert!(dq.map.is_null());
         }
     }
+    #[test]
+    fn construct_elem4_alias_f7a4_zeroes_a_garbage_head() {
+        let garbage = DequeIter {
+            cur: 0x11 as *mut u8,
+            seg_base: 0x22 as *mut u8,
+            seg_end: 0x33 as *mut u8,
+            seg_slot: 0x44 as *mut *mut u8,
+        };
+        let mut dq = DequeHead {
+            begin: garbage,
+            end: garbage,
+            count: u32::MAX,
+            map: 0x55 as *mut *mut u8,
+        };
+        unsafe {
+            assert!(deque_construct_elem4_alias_f7a4(&mut dq).is_null());
+        }
+        for it in [&dq.begin, &dq.end] {
+            assert!(it.cur.is_null());
+            assert!(it.seg_base.is_null());
+            assert!(it.seg_end.is_null());
+            assert!(it.seg_slot.is_null());
+        }
+        assert_eq!(dq.count, 0);
+        assert!(dq.map.is_null());
+    }
+
 
     #[test]
     fn construct_leaves_the_trailing_word_untouched() {
@@ -1097,6 +1153,28 @@ mod tests {
             assert_eq!(obj.tail, 0xcafe_babe);
         }
     }
+    #[test]
+    fn construct_elem4_alias_f7a4_preserves_following_map_capacity() {
+        #[repr(C)]
+        struct HeadWithTail {
+            head: DequeHead,
+            tail: u32,
+        }
+        let mut obj = HeadWithTail {
+            head: DequeHead {
+                begin: DequeIter::NULL,
+                end: DequeIter::NULL,
+                count: 7,
+                map: 0x99 as *mut *mut u8,
+            },
+            tail: 0xcafe_babe,
+        };
+        unsafe {
+            deque_construct_elem4_alias_f7a4(&mut obj.head);
+        }
+        assert_eq!(obj.tail, 0xcafe_babe);
+    }
+
 
     #[test]
     fn iter_copy_copies_all_four_fields_and_ignores_r1() {
