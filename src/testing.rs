@@ -610,6 +610,9 @@ pub mod hints {
     // 0x5f10_0000: dedicated to cxx/record_priority_heap_adjust's raw-u32
     // priority-record and heap-array fixture; mappings never unmap.
     pub const RECORD_PRIORITY_HEAP_ADJUST: usize = 0x5f10_0000;
+    // 0xcafe_1000: dedicated to cxx/kinded_node_pool_construct's raw-u32
+    // owner and acquired-node fixture; mappings never unmap.
+    pub const KINDED_NODE_POOL_CONSTRUCT: usize = 0xcafe_1000;
     // 0x4a00_0000, skipping the sequential 0x4700_0000..0x4900_0000:
     // sibling ports in flight take the sequential slots, and a
     // collision skips tests silently on every host.

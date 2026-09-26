@@ -11,6 +11,7 @@ pub mod container_first_node_083dbeb4;
 pub mod container_first_node_083dbdd4;
 pub mod container_first_node_083dbde8;
 pub mod node_pool_construct;
+pub mod kinded_node_pool_construct;
 pub mod tagged_buffer_range_copy_construct;
 pub mod tagged_bit_set_insert_utf8;
 pub mod basic_ostream_construct;
