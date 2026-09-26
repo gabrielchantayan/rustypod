@@ -6027,6 +6027,30 @@ functions:
       the dispatcher receives record +0x04. Target builds call these verified
       addresses directly; host tests install an operation seam. The dispatcher
       identity is deliberately not inferred beyond dispatching a record.
+  # --- polymorphic slot replacement ---
+  - address: 0x083e734c
+    ghidra: FUN_083e734c
+    name: polymorphic_slot_replace
+    size: 48
+    sig: "void polymorphic_slot_replace(void **slot, void *replacement)"
+    module: cxx/polymorphic_slot_replace
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      param_2/r1/r5: replacement
+      slot_deref/r0: old_object
+      old_object_vtable_plus_0x04/r1: vtable_slot4_callback
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent: twelve ARM words from
+      push {r4,r5,r6,lr} at 0x083e734c through pop {r4,r5,r6,pc} at 0x083e7378;
+      push {r4,lr} at 0x083e737c is the next real function. The body has zero
+      plain direct bl calls and one predicated indirect blxne through vtable
+      slot +0x04. Raw caller instructions at 0x081dd1d0 and 0x081e871c are the
+      two inbound plain direct bl sites; there are no predicated direct callers.
+      If old_object differs from replacement, the non-NULL old object receives
+      its unresolved slot +0x04 callback before replacement is stored. Rust
+      deliberately uses native-width host vtable entries because retailOS
+      target pointer words are four bytes.
   # --- owned guarded slot +0x04 replacement ---
   - address: 0x083e73a0
     ghidra: FUN_083e73a0
