@@ -146090,3 +146090,34 @@ functions:
       Rust port retains the capacity calculation and call ABI. Host tests cover
       empty and nonempty vectors, returned descriptor identity, and
       capacity-based count calculation.
+
+  - address: 0x083e429c
+    ghidra: FUN_083e429c
+    name: tagged_value_vector_destroy
+    size: 48
+    sig: "TaggedValueVector *tagged_value_vector_destroy(TaggedValueVector *vector)"
+    module: cxx/tagged_value_vector_destroy
+    status: ported
+    renames:
+      param_1/r0: vector
+      r4: vector
+      r0: begin
+      r1: capacity_bytes
+      FUN_083e41d4: tagged_value_range_destroy
+      FUN_08266f2c: cxx_array_dealloc
+      return/r0: vector
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x083e429c..0x083e42cb: pop {r4,pc} returns at 0x083e42c8, and the
+      next independently linked function begins with push {r2-r8,lr} at
+      0x083e42cc. Raw A32 decoding finds two plain unconditional body BL
+      instructions, to tagged_value_range_destroy @ 0x083e41d4 and the
+      ported cxx_array_dealloc @ 0x08266f2c, with zero predicated body BL
+      instructions. A full-image direct-call scan finds two inbound plain BL
+      sites (0x0827c844 and 0x0827c894) and zero predicated BL sites. It
+      destroys [begin,end) as 16-byte tagged values, releases begin with
+      (capacity - begin) >> 4 and a zero element-size argument, then returns
+      vector. The unported range destructor remains a firmware-address call
+      on target and a replaceable host seam. match.py reports the expected
+      structural divergence: LLVM materializes that target address and emits
+      BLX, while the retail function has a direct BL.
