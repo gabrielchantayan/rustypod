@@ -147463,3 +147463,27 @@ functions:
       recovered semantic identity, so target builds call its verified address
       and host tests use a narrow volatile seam; target pointers remain u32
       words to preserve retail offsets on 64-bit hosts.
+
+  - address: 0x083dc014
+    ghidra: FUN_083dc014
+    name: red_black_tree_construct
+    size: 88
+    sig: "RedBlackTree *red_black_tree_construct(RedBlackTree *tree, const u8 *comparator_state)"
+    module: cxx/red_black_tree_construct
+    status: ported
+    vars: {param_1: tree, param_2: comparator_state}
+    renames:
+      FUN_083cc1d0: red_black_tree_node_pool_acquire
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: 22 ARM words from
+      push {r4-r6,lr} @ 0x083dc014 through pop {r4-r6,pc} @ 0x083dc068;
+      0x083dc06c begins the next real function. Whole-image decoding finds
+      exactly two inbound direct calls, both unconditional plain bl
+      (0x0819f9b4 and 0x0819f9c8), with no predicated forms. The body has
+      exactly one unconditional plain bl, to ported
+      red_black_tree_node_pool_acquire @ 0x083cc1d0, and no predicated bl
+      calls. It clears the 16-byte pool, root, count, and state byte; copies
+      the one-byte comparator state; acquires a 20-byte sentinel; clears its
+      parent; and self-links its left and right children. Deliberate
+      deviations: none; all target pointers remain u32 words so host pointer
+      width cannot alter the 26-byte initialized layout.

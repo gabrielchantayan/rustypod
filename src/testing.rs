@@ -579,6 +579,9 @@ pub mod hints {
     // and slot-source fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const PLST_SLOT_SOURCE_CLONE: usize = 0x4180_0000;
+    // 0x4200_0000: dedicated to cxx/red_black_tree_construct's target-width
+    // tree header and sentinel fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_CONSTRUCT: usize = 0x4200_0000;
     // 0x5e00_0000: dedicated to ui/plst_slot_materialize's raw-u32 element,
     // header, slot-record, and source-buffer fixture; mappings never unmap.
     pub const PLST_SLOT_MATERIALIZE: usize = 0x5e00_0000;
