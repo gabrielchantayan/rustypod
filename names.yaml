@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd0bc
+    ghidra: FUN_083dd0bc
+    name: word_pair_list_sentinel_initialize
+    size: 32
+    sig: "WordPairListNode *word_pair_list_sentinel_initialize(WordPairList *list, u32 single)"
+    module: cxx/word_pair_list_sentinel_initialize
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: single
+      FUN_083dce90: word_pair_list_node_pool_acquire
+      "list+0x10": sentinel
+      "sentinel+0x00": next
+      "sentinel+0x04": previous
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: eight A32 words from
+      push {r4,lr} at 0x083dd0bc through pop {r4,pc} at 0x083dd0d8;
+      0x083dd0dc starts word_pair_list_copy_construct. The body has one
+      unconditional plain bl, to word_pair_list_node_pool_acquire @
+      0x083dce90, and no predicated bl calls. Whole-image A32 decoding finds
+      two inbound plain bl sites, in FUN_08213908 and
+      word_pair_list_copy_construct, and no predicated inbound bl sites.
+      It acquires a 16-byte pair node with the caller's single flag, stores it
+      as the list sentinel, and self-links its next and previous words. The
+      original returns the acquired sentinel in r0 although known callers
+      discard it. Deliberate deviations: target builds call the verified retail
+      pool-acquire seam; host tests use the existing equivalent implementation
+      shared by word_pair_list_copy_construct.
   - address: 0x083dd1a8
     ghidra: FUN_083dd1a8
     name: list_node_pool_acquire_083dd1a8
