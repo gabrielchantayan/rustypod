@@ -146013,3 +146013,33 @@ functions:
       only the live begin pointer through the ported free seam. Host tests
       cover empty and nonempty vectors, returned descriptor identity,
       descriptor non-mutation, and exactly one release.
+
+  - address: 0x083e5554
+    ghidra: FUN_083e5554
+    name: u32_vector_destroy
+    size: 64
+    sig: "u32 **u32_vector_destroy(u32 **vector)"
+    module: cxx/u32_vector_destroy
+    status: ported
+    vars:
+      param_1/r0/r4: vector
+      iVar1/r0/r2: begin
+      param_1[1]/r1: end
+      param_1[2]/r1: end_of_storage
+    renames:
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec words establish the true 64-byte extent
+      0x083e5554..0x083e5593; the next separately linked function begins at
+      0x083e5594 with push {r4,r5,r6,r7,lr}. The body has exactly one direct
+      unconditional BL, cxx_array_dealloc @ 0x08266f2c, and no predicated BL.
+      Whole-image aligned A32 decoding finds exactly two inbound plain BL call
+      sites, 0x082623c0 and 0x082628d4, with no predicated inbound BL. This is
+      a vector<u32> destructor: it walks [begin,end) in four-byte increments
+      with an empty retained trivial-destructor loop, passes begin,
+      (end_of_storage-begin) >> 2, and zero to the deallocation veneer, then
+      returns the descriptor unchanged. The veneer tail-branches to
+      operator_delete, so its count and element-size arguments are dead; the
+      Rust port retains the capacity calculation and call ABI. Host tests cover
+      empty and nonempty vectors, returned descriptor identity, and
+      capacity-based count calculation.
