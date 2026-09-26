@@ -2600,6 +2600,9 @@ pub mod hints {
     // 0x7660_0000: dedicated to cxx/container_first_node_083dbeb4's target-width
     // nested-container and node fixture; mappings never unmap.
     pub const CXX_CONTAINER_FIRST_NODE_083DBEB4: usize = 0x7660_0000;
+    // 0x7680_0000: dedicated to cxx/container_first_node_083dbde8's target-width
+    // nested-container and node fixture; mappings never unmap.
+    pub const CXX_CONTAINER_FIRST_NODE_083DBDE8: usize = 0x7680_0000;
     // 0x7670_0000: dedicated to cxx/node_pool_construct's target-width owner
     // and acquired-node fixture; mappings never unmap.
     pub const CXX_NODE_POOL_CONSTRUCT: usize = 0x7670_0000;
