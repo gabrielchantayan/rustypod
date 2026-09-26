@@ -121159,6 +121159,40 @@ functions:
       absolute address; tests prove the guard avoids an invalid vtable and
       that a nonzero guard dispatches only slot +0x40 with zero as argument.
 
+  # --- guarded virtual +0x40 dispatch (separate duplicate BL target) ---
+  - address: 0x083d615c
+    ghidra: FUN_083d615c
+    name: guarded_vtable_slot_40_dispatch_615c
+    size: 32
+    sig: "u8 *guarded_vtable_slot_40_dispatch_615c(GuardedVtableSlot40Receiver *receiver)"
+    module: cxx/guarded_vtable_slot_40_dispatch_615c
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_1_plus_0x00/r1: vtable
+      param_1_plus_0x04/r1: guard_word
+      vtable_plus_0x40/r2: virtual_method
+      DAT_083d617c/r0: fallback_pointer
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte extent: seven ARM
+      instructions from ldr r1,[r0,#4] at 0x083d615c through bx lr at
+      0x083d6178, followed by the fallback-pointer literal at 0x083d617c;
+      the next separately linked function begins at 0x083d6180. Decoding
+      every aligned ARM B/BL-immediate word in osos.dec finds exactly two
+      inbound direct calls, both unconditional plain bl at 0x0807f814 and
+      0x0807f820; there are no predicated calls or direct tail branches. A
+      zero receiver+4 guard returns the literal 0x08a0fc64; otherwise the
+      function dispatches vtable word 16 (+0x40) as method(receiver, 0). The
+      guarded word and concrete virtual method identity remain unrecovered and
+      deliberately unnamed. This is a separately linked duplicate of
+      0x083d6138. Both source exports are inline(never), but ARM archive symbol
+      inspection verifies LLVM folds their identical bodies to
+      guarded_vtable_slot_40_dispatch; either export reaches that equivalent
+      implementation. Host builds return a stable private fallback pointer
+      instead of the firmware absolute address; tests prove the guard avoids an
+      invalid vtable and that a nonzero guard dispatches only slot +0x40 with
+      zero as argument.
+
   # --- guarded virtual +0x04 dispatch through an object handle ---
   - address: 0x083e72b0
     ghidra: FUN_083e72b0
