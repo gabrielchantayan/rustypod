@@ -42797,6 +42797,31 @@ functions:
       cxx_array_dealloc discards both count and the forced-zero element size
       before its tag-2 operator-delete tail branch. Rust uses a normal call
       through that ported seam instead of the raw tail branch.
+  - address: 0x083dadd4
+    ghidra: FUN_083dadd4
+    name: opaque_base_destroy
+    size: 52
+    sig: "u32 *opaque_base_destroy(u32 *base)"
+    module: cxx/opaque_base_destroy
+    status: ported
+    vars:
+      param_1/r0: base
+      DAT_083dae08: destruction_vtable
+      FUN_083d7ff8: cxx_allocator_deallocate
+      FUN_083da798: opaque_shared_array_handle_release
+    notes: >-
+      Raw A32 establishes the 52-byte instruction extent 0x083dadd4 through
+      0x083dae04; 0x089a87dc at 0x083dae08 is the function's literal and the
+      next independently linked function begins at 0x083dae0c. Its two inbound
+      direct call sites are unconditional plain bl at 0x082a7e40 and
+      0x082a7e98. Outbound it has zero plain bl and one predicated blne to
+      cxx_allocator_deallocate at 0x083d7ff8, then tail-branches to
+      0x083da798. It installs the destruction vtable, conditionally frees the
+      pointer/count pair at words two and three when word four bit zero is set,
+      and releases the embedded shared-array handle at word eleven. Rust makes
+      the tail branch an ordinary call and retains the identified-but-unported
+      shared-array release as an exact-address target seam and replaceable host
+      seam.
   - address: 0x0825c8fc
     ghidra: FUN_0825c8fc
     name: cxx_string_pair_destroy
