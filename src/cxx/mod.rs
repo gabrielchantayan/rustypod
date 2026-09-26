@@ -21,6 +21,7 @@ pub mod u16_vector_destroy;
 pub mod u32_vector_destroy;
 pub mod tagged_value_vector_destroy;
 pub mod string_object_pair_vector_destroy;
+pub mod trivial_vector24_destroy;
 pub mod trivial_byte_vector_destruct;
 pub mod refcounted_ptr_range_assign;
 pub mod record_work_pump;

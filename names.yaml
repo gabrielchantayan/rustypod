@@ -146236,3 +146236,36 @@ functions:
       destructor-return-minus-four data flow; LLVM may fold it to the
       equivalent record base. match.py exits 1 with the expected fuller LLVM
       frame, empty-range branch, and archive-local unresolved BL targets.
+
+  - address: 0x083e1ecc
+    ghidra: FUN_083e1ecc
+    name: trivial_vector24_destroy
+    size: 72
+    sig: "TrivialVector24 *trivial_vector24_destroy(TrivialVector24 *vector)"
+    module: cxx/trivial_vector24_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: vector
+      "vector+0x0": begin
+      "vector+0x4": end
+      "vector+0x8": capacity
+      r5: begin
+      FUN_08031568: __rt_sdiv
+      FUN_08266f2c: cxx_array_dealloc
+      return/r0: vector
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte extent
+      0x083e1ecc..0x083e1f13: the next independent function starts at
+      0x083e1f14 with push {r2,r3,r4,r5,r6,r7,r8,lr}. Raw A32 decoding finds
+      two plain unconditional outbound BL instructions (__rt_sdiv @ 0x08031568
+      and cxx_array_dealloc @ 0x08266f2c) and zero predicated outbound BL
+      instructions. Whole-image direct-call decoding finds two plain inbound
+      BL sites (0x08054000 and 0x08054128) and zero predicated inbound sites.
+      It walks [begin,end) in 24-byte steps for the trivial element destructor,
+      then frees begin through cxx_array_dealloc(begin, signed_truncating
+      (capacity - begin) / 24, 0) and returns vector. Rust keeps target
+      pointers as u32 fields so their ABI offsets remain four bytes apart on
+      64-bit hosts; an empty inline-assembly barrier deliberately retains the
+      otherwise dead malformed-range walk. match.py exits 1 with the expected
+      LLVM frame, constant-divide sequence, and archive-local unresolved BL
+      target.
