@@ -29806,6 +29806,29 @@ functions:
       export is naked A32 assembly and exactly preserves the single `bx lr`
       body, including its unchanged r0 return.
 
+  - address: 0x083d55b8
+    ghidra: FUN_083d55b8
+    name: tracker_array_expand
+    size: 120
+    sig: "void tracker_array_expand(u32 *array)"
+    module: app/tracker_array_expand
+    status: ported
+    vars: {param_1: array, iVar3: expanded_length, iVar1: resized_storage, FUN_0802edec: realloc, thunk_EXT_FUN_2200027c: memzero_aligned_iram_veneer, FUN_083d551c: tracker_event_log_noop}
+    notes: >-
+      Raw osos.dec establishes the exact 120-byte ARM body from 0x083d55b8
+      through pop {r1-r5,pc} at 0x083d562c; 0x083d5630 is the first
+      string literal. It has three unconditional direct BL calls, at
+      0x083d55d4 to realloc/FUN_0802edec, 0x083d55f4 to the 0x08037db8
+      veneer for IRAM memzero_aligned @ 0x2200027c, and 0x083d5628 to the
+      ported tracker_event_log_noop/FUN_083d551c; no calls are predicated.
+      Two inbound direct BL instructions are predicated (bleq at 0x083d5568
+      and blhi at 0x088a9f84); there are no plain inbound BL calls. The
+      function multiplies the +0x10 growth factor and +0x04 allocated-word
+      count with ARM wrapping arithmetic, reallocates +0x00 to that many
+      words, clears [old_count,new_count), and stores the new count only if
+      realloc succeeds. The logging call is preserved despite its verified
+      no-op body. No deliberate behavioral deviations.
+
   - address: 0x083d58ac
     ghidra: FUN_083d58ac
     name: vtable_owned_payload_destruct
