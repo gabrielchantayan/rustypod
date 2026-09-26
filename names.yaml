@@ -60620,6 +60620,28 @@ functions:
       checking query < candidate.key. It stores the matching node or header
       sentinel through out. The Rust port retains cxx_string_less calls and
       directly expresses the decoded equality and node+0x10 key accessor.
+  - address: 0x083db644
+    ghidra: FUN_083db644
+    name: tagged_node_pool_construct
+    size: 88
+    sig: "void *tagged_node_pool_construct(void *owner, const u8 *tag)"
+    module: cxx/tagged_node_pool_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: tag
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent from push
+      {r4-r6,lr} at 0x083db644 through pop {r4-r6,pc} at 0x083db698;
+      0x083db69c starts the next separately linked function. The body has one
+      unconditional plain bl to the unported helper at 0x083c4064 and no
+      predicated bl forms. Whole-image raw A32 decoding finds two inbound
+      unconditional plain bl sites (0x08038e58 and 0x081021e8), with no
+      predicated inbound calls. It clears the 0x1a-byte owner control area,
+      writes the tag at +0x19, acquires a node, records it at +0x10, clears
+      its +4 payload word, and self-links +8/+0xc. The 0x083c4064 callee has
+      no names.yaml entry, so no callee identity is invented: target builds
+      call its verified address and host tests use a volatile ABI-matched seam.
   - address: 0x083db69c
     ghidra: FUN_083db69c
     name: string_table_fallback_value_slot
