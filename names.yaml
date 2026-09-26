@@ -147435,3 +147435,31 @@ functions:
       adds the node to the free list, and writes its successor. Target builds
       dispatch the observed u32 vtable slot directly; host tests use a release
       seam because native function pointers do not fit target-width slots.
+
+  - address: 0x083dc06c
+    ghidra: FUN_083dc06c
+    name: embedded_list_operation_dispatch
+    size: 56
+    sig: "void embedded_list_operation_dispatch(u32 *owner)"
+    module: cxx/embedded_list_operation_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      "[owner + 0x10]": embedded_list
+      "[embedded_list + 0x08]": link
+      local_8/sp+8: output
+      local_c/sp+4: link_argument
+      local_10/sp: embedded_list_argument
+      FUN_083cf1d8: embedded_list_operation
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte A32 extent
+      0x083dc06c..0x083dc0a3; push {r1-r5,lr} at 0x083dc0a4 starts the next
+      independently linked function. The body contains one unconditional plain
+      bl to 0x083cf1d8 and no predicated bl. Whole-image ARM immediate-branch
+      decoding finds two inbound plain direct bl sites (0x080d1f50 and
+      0x080d200c) and no predicated inbound direct calls. It reads owner+0x10,
+      reads that target-width list's +0x08 link, reloads owner+0x10, and passes
+      stack-local output/link/list words to 0x083cf1d8. The callee has no
+      recovered semantic identity, so target builds call its verified address
+      and host tests use a narrow volatile seam; target pointers remain u32
+      words to preserve retail offsets on 64-bit hosts.
