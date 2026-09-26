@@ -96,6 +96,7 @@ pub mod deque_iterator_current_or_zero;
 pub mod deque_front_advance_release;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
+pub mod word_list_node_pool_acquire;
 pub mod vector_word_copy_construct;
 pub mod vector_word_clear;
 pub mod word_range_fill_if_destination;

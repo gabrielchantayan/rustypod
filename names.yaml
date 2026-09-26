@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dd78c
+    ghidra: FUN_083dd78c
+    name: word_list_node_pool_acquire
+    size: 180
+    sig: "WordListNode *word_list_node_pool_acquire(WordListNodePool *pool, bool single)"
+    module: cxx/word_list_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: single
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the true 180-byte extent: 45 A32 words from
+      0x083dd78c through the pop {r4-r8,pc} at 0x083dd840; 0x083dd844 is the
+      separately entered list_node_pool_recycle_all. The body contains exactly
+      two unconditional plain bl calls, both to operator_new_checked @
+      0x08266c70, and no predicated bl calls. It pops a free node through its
+      first word or bump-allocates an uninitialised 12-byte
+      {next,previous,value} node. Exhausted pools allocate a 12-byte chunk
+      header and capacity*12 backing storage: one node when single is nonzero,
+      otherwise 32 initially then max(capacity+32, capacity+capacity/2+
+      capacity/8). Rust preserves every target pointer field as a u32 word;
+      failed checked allocations are immediately dereferenced, matching retailOS.
   - address: 0x083dd844
     ghidra: FUN_083dd844
     name: list_node_pool_recycle_all
