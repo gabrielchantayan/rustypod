@@ -147917,3 +147917,30 @@ functions:
       match.py reports the expected frame and local-call-target differences
       (exit 1) while retaining the traversal and final candidate-rejection
       structure.
+
+  - address: 0x083db7a8
+    ghidra: FUN_083db7a8
+    name: list_member_destroy
+    size: 64
+    sig: "u64 list_member_destroy(u8 *object)"
+    module: cxx/list_member_destroy
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x10": list_header
+      "list_header+0x08": first_node
+      FUN_083c69ec: list_member_destroy_helper
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 body
+      0x083db7a8..0x083db7e4; push {r4,r5,lr} at 0x083db7e8 begins the next
+      independently entered function. Whole-image A32 decoding finds exactly
+      two inbound unconditional plain BL sites, 0x081b6130 and 0x081b6780,
+      with no predicated forms. The body has one unconditional BL to unported
+      FUN_083c69ec @ 0x083c69ec and no predicated BL. It copies the list-header
+      word at object+0x10 and that header's first-node word at +0x08 to stack
+      homes, passes their addresses to the helper, and returns the original
+      words in r0/r1. The helper's identity is deliberately not inferred:
+      device builds call its verified fixed address and host tests inject its
+      observed ABI. match.py reports the expected frame and literal-pool BLX
+      difference (exit 1) while retaining both target-width loads, the helper
+      call, and r0/r1 result.

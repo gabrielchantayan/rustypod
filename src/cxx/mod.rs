@@ -27,6 +27,7 @@ pub mod cxx_string_pair_entry_range_assign;
 pub mod cxx_string_pair_entry_range_copy_construct;
 pub mod cxx_string_vector_range_assign;
 pub mod u16_vector_destroy;
+pub mod list_member_destroy;
 pub mod u32_vector_destroy;
 pub mod tagged_value_vector_destroy;
 pub mod string_object_pair_vector_destroy;
