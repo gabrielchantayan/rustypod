@@ -1,4 +1,6 @@
-//! Wrapper around the unrecovered list-node insertion member.
+//! Wrapper around the ported list-node insertion member.
+
+use crate::cxx::list_node_pool_insert_refcounted::list_node_pool_insert_refcounted;
 
 /// list_insert_header_value — original: `FUN_083dc0f8` @ 0x083dc0f8
 /// (40 bytes; raw extent `0x083dc0f8..0x083dc120`, bounded by the next
@@ -6,23 +8,16 @@
 /// direct calls are unconditional plain `bl`; there are no predicated calls.
 ///
 /// The wrapper loads the target node word through `list + 0x10`, materializes
-/// it in a stack local, and calls the unrecovered `FUN_083dc2d0` with that
+/// it in a stack local, and calls the ported list-node insertion with that
 /// local, `list`, and `value`. Its fourth ABI argument only initializes the
 /// stack output slot that the callee overwrites; the wrapper discards it.
-///
-/// # Deliberate deviation
-///
-/// `FUN_083dc2d0` is not ported, so target builds retain its verified firmware
-/// boundary. The host test injects the same ABI-shaped call to prove the
-/// target-word load, stack-local indirection, argument order, and discarded
-/// output seed without assigning an identity to the callee.
 ///
 /// # Safety
 ///
 /// `list` must point to at least five readable target words, and its word at
 /// +0x10 must be a valid aligned pointer to a readable node word. The
 /// firmware callee's additional allocation and list invariants apply.
-type ListNodeInsertFn = unsafe extern "C" fn(*mut u32, *mut u32, *mut u32, u32);
+type ListNodeInsertFn = unsafe extern "C" fn(*mut u32, *mut u32, *const u32, *const u32);
 
 #[inline(always)]
 unsafe fn list_insert_header_value_with(
@@ -31,34 +26,10 @@ unsafe fn list_insert_header_value_with(
     value: u32,
     discarded_output_seed: u32,
 ) {
-    let mut node = *((*list.add(4)) as *const u32);
+    let node = *((*list.add(4)) as *const u32);
     let mut discarded_output = discarded_output_seed;
-    insert(&mut discarded_output, list, &mut node, value);
+    insert(&mut discarded_output, list, &node, &value);
 }
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_list_node_insert(
-    output: *mut u32,
-    list: *mut u32,
-    node: *mut u32,
-    value: u32,
-) {
-    let insert: ListNodeInsertFn = core::mem::transmute(0x083d_c2d0usize);
-    insert(output, list, node, value);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_list_node_insert(
-    _output: *mut u32,
-    _list: *mut u32,
-    _node: *mut u32,
-    _value: u32,
-) {
-    panic!("list_insert_header_value requires FUN_083dc2d0")
-}
-
-#[cfg_attr(target_os = "none", no_mangle)]
-#[cfg_attr(target_os = "none", link_section = ".text.list_insert_header_value")]
 #[inline(never)]
 pub unsafe extern "C" fn list_insert_header_value(
     list: *mut u32,
@@ -66,7 +37,7 @@ pub unsafe extern "C" fn list_insert_header_value(
     _unused: u32,
     discarded_output_seed: u32,
 ) {
-    list_insert_header_value_with(firmware_list_node_insert, list, value, discarded_output_seed);
+    list_insert_header_value_with(list_node_pool_insert_refcounted, list, value, discarded_output_seed);
 }
 
 #[cfg(test)]
@@ -79,8 +50,8 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut CALL: (usize, usize, u32, u32) = (0, 0, 0, 0);
 
-    unsafe extern "C" fn record_insert(output: *mut u32, list: *mut u32, node: *mut u32, value: u32) {
-        CALL = (list as usize, node as usize, *node, value);
+    unsafe extern "C" fn record_insert(output: *mut u32, list: *mut u32, node: *const u32, payload: *const u32) {
+        CALL = (list as usize, node as usize, *node, *payload);
         *output = 0xfeed_beef;
     }
 
