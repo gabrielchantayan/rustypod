@@ -2211,6 +2211,10 @@ pub mod hints {
     // 0xabcd_0000: dedicated to app/buffered_stream_flush_pending's raw-u32
     // backing-object fixture; mappings never unmap, so no other user may share it.
     pub const BUFFERED_STREAM_FLUSH_PENDING: usize = 0xabcd_0000;
+    // 0xbeef_0000: dedicated to heap/region_list_erase_recycle's raw-u32
+    // list and node fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const REGION_LIST_ERASE_RECYCLE: usize = 0xbeef_0000;
     // 0x082c_0000/0x082d_0000: dedicated to util/buffer_result_take's
     // target-width owner and buffer fixtures; mappings never unmap.
     pub const BUFFER_RESULT_TAKE: usize = 0x082c_0000;

@@ -147122,3 +147122,32 @@ functions:
       second} pair in order. Rust deliberately inlines the two unported
       helpers, preserving their target-width pool allocation and intrusive-ring
       behavior rather than introducing firmware-call seams.
+
+  # --- cached region-list node erase ---
+  - address: 0x083dcd38
+    ghidra: FUN_083dcd38
+    name: region_list_erase_recycle
+    size: 128
+    sig: "void region_list_erase_recycle(u32 *output, u32 *list, u32 *cursor)"
+    module: heap/region_list_erase_recycle
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: list
+      param_3/r2: cursor
+      "[list + 0x04]": cached_nodes
+      "[list + 0x10]": end_sentinel
+      "[list + 0x14]": count
+    notes: >-
+      Raw osos.dec establishes 128 bytes from the push at 0x083dcd38 through
+      the pop at 0x083dcdb4; 0x083dcdb8 begins the next real function.
+      Full-image B/BL decoding finds two inbound plain bl sites (0x081a7b04
+      and 0x083dce04), no predicated calls. The single outgoing plain bl at
+      0x083dcd98 targets 0x082804f8, a raw B veneer to the already ported
+      operator_delete at 0x082aad24; Ghidra's FUN_082804fc association is
+      four bytes late and is not used. The routine returns the input cursor
+      through output; non-sentinel nodes are unlinked, decrement count with
+      wrapping arithmetic, delete node+0x10, then join the cached-node chain.
+      Target pointer fields stay u32 words in Rust so host pointers cannot
+      change recovered target offsets. Host tests cover unlink/recycle and
+      sentinel no-op behavior.
