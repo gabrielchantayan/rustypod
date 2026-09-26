@@ -8,19 +8,18 @@
 //! Acquires a node, conditionally stores the supplied value in its final word,
 //! and splices it before the sentinel of the target-width intrusive ring. It
 //! then increments the list state word with wrapping arithmetic. Deliberate
-//! deviation: none; the shared acquisition seam targets the verified retailOS
-//! helper until that helper is ported.
+//! deviation: none.
 
 use core::ptr::addr_of_mut;
 
-use super::list_node_pool_list_init::{list_node_pool_acquire, ListNode, ListNodePoolList};
+use super::list_node_pool_acquire_083dd4cc::list_node_pool_acquire_083dd4cc;
+use super::list_node_pool_list_init::{ListNode, ListNodePoolList};
 
 /// Appends `*value` immediately before `list`'s sentinel.
 ///
 /// # Safety
 ///
 /// `list`, its sentinel ring, and `value` must be live target-layout objects;
-/// the active pool-acquisition helper must return a writable node.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn list_node_pool_list_append_value(
@@ -28,7 +27,7 @@ pub unsafe extern "C" fn list_node_pool_list_append_value(
     value: *const u32,
 ) {
     let sentinel = (*list).sentinel as usize as *mut ListNode;
-    let node = list_node_pool_acquire()(list, 0);
+    let node = list_node_pool_acquire_083dd4cc(list, 0);
 
     if (node as usize as u32).wrapping_add(8) != 0 {
         addr_of_mut!((*node).value).write(*value);
@@ -46,30 +45,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::list_node_pool_list_init::{ListNodePoolAcquire, LIST_NODE_POOL_ACQUIRE};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use core::ptr::{addr_of, addr_of_mut};
-    use core::sync::atomic::{AtomicUsize, Ordering};
     use parking_lot::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static NODE: AtomicUsize = AtomicUsize::new(0);
-    static CALLS: AtomicUsize = AtomicUsize::new(0);
-    static SINGLE: AtomicUsize = AtomicUsize::new(usize::MAX);
-
-    unsafe extern "C" fn acquire(_list: *mut ListNodePoolList, single: u32) -> *mut ListNode {
-        CALLS.fetch_add(1, Ordering::Relaxed);
-        SINGLE.store(single as usize, Ordering::Relaxed);
-        NODE.load(Ordering::Relaxed) as *mut ListNode
-    }
-
-    struct RestoreAcquire(ListNodePoolAcquire);
-
-    impl Drop for RestoreAcquire {
-        fn drop(&mut self) {
-            unsafe { addr_of_mut!(LIST_NODE_POOL_ACQUIRE).write_volatile(self.0) };
-        }
-    }
 
     #[test]
     fn appends_after_existing_tail_and_preserves_unrelated_pool_words() {
@@ -91,18 +70,11 @@ mod tests {
             (*sentinel).previous = tail as usize as u32;
             (*tail).next = sentinel as usize as u32;
             (*tail).previous = sentinel as usize as u32;
-            NODE.store(node as usize, Ordering::Relaxed);
-            CALLS.store(0, Ordering::Relaxed);
-            SINGLE.store(usize::MAX, Ordering::Relaxed);
-            let old = addr_of!(LIST_NODE_POOL_ACQUIRE).read_volatile();
-            let _restore = RestoreAcquire(old);
-            addr_of_mut!(LIST_NODE_POOL_ACQUIRE).write_volatile(acquire);
+            (*node).next = 0;
+            (*list).free = node as usize as u32;
 
             let value = 0xcafe_babe;
             list_node_pool_list_append_value(list, &value);
-
-            assert_eq!(CALLS.load(Ordering::Relaxed), 1);
-            assert_eq!(SINGLE.load(Ordering::Relaxed), 0);
             assert_eq!((*node).next, sentinel as usize as u32);
             assert_eq!((*node).previous, tail as usize as u32);
             assert_eq!((*node).value, value);
@@ -111,7 +83,7 @@ mod tests {
             assert_eq!((*sentinel).next, tail as usize as u32);
             assert_eq!((*list).state, 0);
             assert_eq!((*list).chunks, 0xa5a5_a5a5);
-            assert_eq!((*list).free, 0xa5a5_a5a5);
+            assert_eq!((*list).free, 0);
             assert_eq!((*list).next, 0xa5a5_a5a5);
             assert_eq!((*list).end, 0xa5a5_a5a5);
         }

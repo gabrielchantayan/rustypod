@@ -36,12 +36,6 @@ functions:
       Raw osos.dec establishes the exact 72-byte extent:
       0x083dd6c8..0x083dd710, 18 A32 words ending pop {r4,pc}; 0x083dd710
       starts the next function with push {r4,r5,r6,lr}. It has one
-      unconditional outgoing bl to the unported list_node_pool_acquire at
-      0x083dd4cc, no predicated bl, and two inbound plain bl calls at
-      0x082acbb0 and 0x082acbc8. The constructor clears six target words,
-      acquires one node with single=1, then uses it as a self-linked empty
-      intrusive-list sentinel. The unported call is a volatile host-test seam;
-      target builds call the verified firmware address.
   - address: 0x083dd5f4
     ghidra: FUN_083dd5f4
     name: list_node_pool_list_erase
@@ -146912,3 +146906,29 @@ functions:
       two target-width words and one trailing byte, returns destination unchanged,
       and has no target-call seams. Rust preserves the source/load then
       destination/store order so overlapping ranges retain stock behavior.
+  - address: 0x083dd4cc
+    ghidra: FUN_083dd4cc
+    name: list_node_pool_acquire_083dd4cc
+    size: 184
+    sig: "ListNode *list_node_pool_acquire_083dd4cc(ListNodePoolList *list, bool single)"
+    module: cxx/list_node_pool_acquire_083dd4cc
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: single
+      "list+0x00": chunks
+      "list+0x04": free
+      "list+0x08": next
+      "list+0x0c": end
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      0x083dd4cc through pop {r4-r8,pc} at 0x083dd580; 0x083dd584 begins
+      list_node_pool_list_clear. The body has two unconditional plain bl calls,
+      both to operator_new_checked @ 0x08266c70, and no predicated bl calls.
+      Its two inbound direct calls are unconditional bl from
+      list_node_pool_list_append_value @ 0x083dd660 and
+      list_node_pool_list_init @ 0x083dd6c8. It pops a free 12-byte
+      {next,previous,value} node or bump-allocates one, allocating a 12-byte
+      chunk header and one/32/grown backing nodes. Rust preserves target
+      pointers as u32 words; no deliberate deviations.
