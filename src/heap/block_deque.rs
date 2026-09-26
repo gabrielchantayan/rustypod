@@ -25,6 +25,11 @@
 //!   at 0x083dd9ac, but raw ARM B/BL decoding finds no incoming plain or
 //!   predicated `bl` call sites for this address. Kept as a distinct export
 //!   so an address-specific hook preserves the original seam.
+//! - `copy_two_words_and_byte_alias_d974` — original: `FUN_083dd974` @
+//!   0x083dd974 (28 bytes, `0x083dd974..0x083dd98f`; next real function
+//!   begins at 0x083dd990). Byte-identical to the separately linked helpers
+//!   at 0x083dd990 and 0x083dd9ac. Raw ARM B/BL decoding finds two incoming
+//!   plain `bl` sites (0x083d2570 / 0x083d26ac) and no predicated forms.
 //! - `deque_seg_capacity` — originals: `FUN_083d9ec0` @ 0x083d9ec0,
 //!   `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
 //!   `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
@@ -533,6 +538,37 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d990(
     dst.add(1).write(src.add(1).read());
     (dst.add(2) as *mut u8).write(byte_src.read());
 }
+
+/// copy_two_words_and_byte_alias_d974 — original: `FUN_083dd974` @ 0x083dd974
+/// (28 bytes, `0x083dd974..0x083dd98f`; the next real function begins at
+/// 0x083dd990).
+///
+/// Verified incoming calls: two unconditional plain `bl` instructions at
+/// 0x083d2570 and 0x083d26ac; no predicated `bl` forms. Copies the two 32-bit
+/// words at `src` to `dst`, then writes the separately addressed byte at
+/// `byte_src` to byte offset 8. Deliberate deviations: typed pointers replace
+/// the original's untyped word and byte accesses, and the dedicated target text
+/// section prevents LLVM from folding this distinct hook seam into the
+/// byte-identical helpers at 0x083dd990 and 0x083dd9ac.
+///
+/// # Safety
+///
+/// `dst` must be valid for two aligned `u32` writes plus one byte at offset 8;
+/// `src` must be valid for two aligned `u32` reads; `byte_src` must be valid
+/// for one byte read.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.copy_two_words_and_byte_alias_d974")]
+#[inline(never)]
+pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
+    dst: *mut u32,
+    src: *const u32,
+    byte_src: *const u8,
+) {
+    dst.write(src.read());
+    dst.add(1).write(src.add(1).read());
+    (dst.add(2) as *mut u8).write(byte_src.read());
+}
+
 
 
 /// deque_seg_capacity — originals: `FUN_083d9ec0` @ 0x083d9ec0,
@@ -2256,6 +2292,33 @@ mod tests {
 
         unsafe {
             copy_two_words_and_byte_alias_d990(words.as_mut_ptr().add(1), words.as_ptr(), &byte);
+        }
+
+        assert_eq!(words[1], 0x1111_1111);
+        assert_eq!(words[2], 0x1111_1111);
+        assert_eq!(words[3] & 0xff, 0x5a);
+    }
+
+    #[test]
+    fn copy_two_words_and_byte_alias_d974_preserves_word_values_and_byte_offset() {
+        let source = [0x1020_3040u32, 0x5060_7080];
+        let byte = 0xc3u8;
+        let mut destination = [0xffff_ffffu32; 3];
+
+        unsafe {
+            copy_two_words_and_byte_alias_d974(destination.as_mut_ptr(), source.as_ptr(), &byte);
+        }
+
+        assert_eq!(destination, [source[0], source[1], 0xffff_ffc3]);
+    }
+
+    #[test]
+    fn copy_two_words_and_byte_alias_d974_keeps_stock_overlap_order() {
+        let mut words = [0x1111_1111u32, 0x2222_2222, 0x3333_3333, 0x4444_4444];
+        let byte = 0x5au8;
+
+        unsafe {
+            copy_two_words_and_byte_alias_d974(words.as_mut_ptr().add(1), words.as_ptr(), &byte);
         }
 
         assert_eq!(words[1], 0x1111_1111);

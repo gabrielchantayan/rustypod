@@ -14747,6 +14747,27 @@ functions:
       folding this address-specific seam into the byte-identical 0x083dd9ac
       helper.
 
+  - address: 0x083dd974
+    ghidra: FUN_083dd974
+    name: copy_two_words_and_byte_alias_d974
+    size: 28
+    sig: "void copy_two_words_and_byte_alias_d974(u32 *dst, const u32 *src, const u8 *byte_src)"
+    module: heap/block_deque
+    vars: {param_1: dst, param_2: src, param_3: byte_src}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent 0x083dd974..0x083dd98f:
+      two ordered aligned word load/store pairs, an ordered byte load/store pair,
+      then bx lr; 0x083dd990 begins the next independently linked function.
+      Raw A32 decoding finds zero plain or predicated outgoing BL instructions.
+      Full-image A32 decoding finds two inbound plain direct BL sites at
+      0x083d2570 and 0x083d26ac, and no predicated inbound BL sites. It copies
+      two target-width words and one trailing byte, with no target-call seams.
+      Deliberate deviations: typed u32/u8 pointers replace untyped memory
+      accesses, and a dedicated target text section prevents LLVM from folding
+      this address-specific seam into byte-identical helpers at 0x083dd990 and
+      0x083dd9ac.
+
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
 
