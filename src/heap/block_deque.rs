@@ -610,6 +610,25 @@ pub unsafe extern "C" fn deque_seg_capacity() -> usize {
     0x20
 }
 ///
+/// `deque_seg_capacity_alias_9e94` — original: `FUN_083d9e94` @
+/// 0x083d9e94 (8 bytes, `0x083d9e94..0x083d9e9b`).
+///
+/// Raw words `0xe3a00020` and `0xe12fff1e` decode as `mov r0, #0x20; bx
+/// lr`, returning 0x20 elements per deque segment. The next independently
+/// linked function, `deque_iter_assign_alias_9e9c`, begins at 0x083d9e9c.
+/// Whole-image ARM B/BL decoding verifies two unconditional plain `bl` call
+/// sites (0x083e9f48 and 0x083e9fd0), zero predicated forms, and zero body
+/// calls. Deliberate deviation: this byte-identical template copy has a
+/// dedicated text section to retain its address-specific hook seam rather
+/// than allowing LLVM to fold it into `deque_seg_capacity`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", unsafe(link_section = ".text.deque_seg_capacity_alias_9e94"))]
+#[inline(never)]
+pub unsafe extern "C" fn deque_seg_capacity_alias_9e94() -> usize {
+    0x20
+}
+
+///
 /// `deque_seg_capacity_alias_9f30` — original: `FUN_083d9f30` @
 /// 0x083d9f30 (8 bytes, `0x083d9f30..0x083d9f37`).
 ///
@@ -1470,6 +1489,13 @@ mod tests {
     fn seg_capacity_alias_a2ac_returns_its_raw_constant() {
         unsafe {
             assert_eq!(deque_seg_capacity_alias_a2ac(), 0x20);
+        }
+    }
+
+    #[test]
+    fn seg_capacity_alias_9e94_returns_its_raw_constant() {
+        unsafe {
+            assert_eq!(deque_seg_capacity_alias_9e94(), 0x20);
         }
     }
 

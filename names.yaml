@@ -15401,6 +15401,24 @@ functions:
       src-in-r1 twin has 17 byte-identical copies and is ported
       separately as deque_iter_assign (canonical 0x083da458).
 
+  - address: 0x083d9e94
+    ghidra: FUN_083d9e94
+    name: deque_seg_capacity_alias_9e94
+    size: 8
+    sig: "usize deque_seg_capacity_alias_9e94(void)"
+    module: heap/block_deque
+    status: ported
+    notes: >-
+      Raw osos.dec words 0xe3a00020 and 0xe12fff1e decode as `mov r0, #0x20;
+      bx lr`, returning 0x20 elements per deque segment. The true extent is
+      8 bytes at 0x083d9e94..0x083d9e9b; deque_iter_assign_alias_9e9c begins
+      at 0x083d9e9c. Whole-image ARM B/BL decoding verifies exactly two
+      unconditional plain bl call sites (0x083e9f48 and 0x083e9fd0), zero
+      predicated bl forms, and zero body calls. This byte-identical deque
+      template copy uses a dedicated text section to retain its
+      address-specific hook seam rather than allowing LLVM to fold it into
+      the canonical deque_seg_capacity export.
+
   - address: 0x083d9e9c
     ghidra: FUN_083d9e9c
     name: deque_iter_assign_alias_9e9c
