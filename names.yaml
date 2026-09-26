@@ -3713,6 +3713,27 @@ functions:
       pointer fields deliberately remain u32 words so their firmware offsets
       are invariant on the 64-bit host; the original's dead r1=0 second
       allocator argument is omitted from the Rust callee signature.
+  - address: 0x083bf4dc
+    ghidra: FUN_083bf4dc
+    name: red_black_tree_word_node_pool_acquire_with_payload
+    size: 28
+    sig: "RedBlackTreeWordNode *red_black_tree_word_node_pool_acquire_with_payload(RedBlackTreeWordNodePool *pool, const uint32_t *payload)"
+    module: cxx/red_black_tree_word_node_pool_acquire_with_payload
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1/r4: payload
+      iVar1/r0: node
+    notes: >-
+      Raw osos.dec establishes the true 28-byte extent
+      0x083bf4dc..0x083bf4f4; the next independently entered function starts
+      at 0x083bf4f8. The body has one unconditional BL to the ported
+      red_black_tree_word_node_pool_acquire at 0x083bf424 and no predicated
+      BL instructions. Its two inbound direct calls are unconditional BL at
+      0x083bfdbc and 0x083bfe6c. It acquires a node then, when the returned
+      pointer is non-null, copies the source word to node+0x10. Target
+      pointer fields remain u32 words in the reused node and pool layouts;
+      deliberate deviations: none.
   - address: 0x083bfdbc
     ghidra: FUN_083bfdbc
     name: red_black_tree_word_subtree_clone

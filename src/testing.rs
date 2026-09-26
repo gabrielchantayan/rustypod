@@ -645,6 +645,9 @@ pub mod hints {
     // 0x5d30_0000: dedicated to cxx/embedded_list_clear's target-width
     // owner and embedded-list fixture; mappings never unmap.
     pub const EMBEDDED_LIST_CLEAR: usize = 0x5d30_0000;
+    // 0x5d40_0000: dedicated to cxx/red_black_tree_word_node_pool_acquire_with_payload's
+    // target-width pool and node fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_WORD_NODE_POOL_ACQUIRE_WITH_PAYLOAD: usize = 0x5d40_0000;
     // 0x5f00_0000: dedicated to cxx/stream_read_cxx_string's raw-u32
     // descriptor, owner-state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ_CXX_STRING: usize = 0x5f00_0000;
