@@ -146121,3 +146121,29 @@ functions:
       on target and a replaceable host seam. match.py reports the expected
       structural divergence: LLVM materializes that target address and emits
       BLX, while the retail function has a direct BL.
+
+  - address: 0x083e3ea8
+    ghidra: FUN_083e3ea8
+    name: string_byte_vector_record_range_destroy
+    size: 40
+    sig: "void string_byte_vector_record_range_destroy(void *ignored, StringByteVectorRecord *begin, StringByteVectorRecord *end)"
+    module: cxx/string_byte_vector_record_range_destroy
+    status: ported
+    renames:
+      param_1/r0: ignored
+      param_2/r1/r4: begin
+      param_3/r2/r5: end
+      FUN_082678d4: record_string_byte_vector_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent 0x083e3ea8..0x083e3ecf:
+      push {r4,r5,r6,lr} begins this function and the next independently linked
+      function begins at 0x083e3ed0. The ten decoded words branch first to the
+      loop comparison, then for every 0x20-byte record in [begin,end) pass its
+      base in r0 to record_string_byte_vector_destroy @ 0x082678d4 and advance
+      begin by 0x20; r0 at entry is unused. The body contains one unconditional
+      direct BL and no predicated BL. The two direct inbound calls at 0x082679f8
+      and 0x083e3f40 are unconditional plain BL instructions; no predicated
+      inbound BL was found. The Rust port preserves the target-byte stride
+      rather than host sizeof because StringObject widens on host. match.py
+      reports an expected structural difference: LLVM emits an empty-range
+      early return and a fuller frame around the existing Rust destructor seam.
