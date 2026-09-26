@@ -96,6 +96,7 @@ pub mod deque_iterator_current_or_zero;
 pub mod deque_front_advance_release;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
+pub mod app_block_manager_node_pool_acquire;
 pub mod word_list_node_pool_acquire;
 pub mod list_node_pool_acquire_083dd1a8;
 pub mod list_node_pool_acquire_083dd2e4;

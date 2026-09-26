@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dcc80
+    ghidra: FUN_083dcc80
+    name: app_block_manager_node_pool_acquire
+    size: 184
+    sig: "AppBlockManagerNode *app_block_manager_node_pool_acquire(AppBlockManagerNodePool *pool, u32 single)"
+    module: cxx/app_block_manager_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: single
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r6,lr} at 0x083dcc80 through pop {r4-r6,pc} at 0x083dcd34;
+      0x083dcd38 begins the next real function. The body performs exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70
+      (sizes 0xc and capacity*0x38), and no predicated bl calls. Whole-image
+      A32 decoding finds exactly two inbound unconditional plain bl sites, at
+      0x081a7dec and 0x081a7f40, and no predicated inbound bl sites. It pops an
+      uninitialized 56-byte application-block-manager node from the free list
+      or bump-allocates one. Exhausted pools allocate a 12-byte {previous,
+      capacity, nodes} chunk header and capacity*56 backing storage: one node
+      when single is nonzero, otherwise 32 initially and
+      max(capacity + 32, capacity + capacity/2 + capacity/8). Deliberate
+      deviations: none; target pointer fields remain u32 words.
   - address: 0x083dce90
     ghidra: FUN_083dce90
     name: word_pair_list_node_pool_acquire
