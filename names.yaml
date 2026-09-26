@@ -60534,6 +60534,34 @@ functions:
       release call and the +0x14 add all correspond; LLVM additionally
       pre-zeroes the pair/result stack slots and uses a wider frame.
 
+
+  - address: 0x083db75c
+    ghidra: FUN_083db75c
+    name: resource_value_map_lookup_or_insert
+    size: 76
+    sig: "u8 *resource_value_map_lookup_or_insert(void *map, char *const *key)"
+    module: cxx/resource_value_map_lookup_or_insert
+    status: ported
+    vars: {param_1/r0: map, param_2/r1: key, local_14: result, "auStack_1c": pair}
+    renames:
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083c6050: resource_value_map_insert
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent: 19 ARM words from
+      push {r4,r5,lr} at 0x083db75c through pop {r4,r5,pc} at 0x083db7a4;
+      the next independently entered function begins at 0x083db7a8.
+      Decoding every aligned ARM B/BL-immediate word finds three unconditional
+      plain bl instructions and no predicated bl: veneer calls at 0x083db770
+      and 0x083db794 resolve to cxx_string_copy_ctor @ 0x083d8c30 and
+      cxx_string_release @ 0x083d8b04, while 0x083db784 resolves to the
+      still-unported tree operation @ 0x083c6050. It COW-copies key into a
+      temporary {string, u32 value} pair, zeroes value, runs the tree
+      operation, releases the temporary, and returns result.node + 0x14, the
+      mapped value word. The tree operation's class identity is not yet
+      established, so the port preserves it as a fixed-address firmware call
+      and replaceable host seam; Rust typed locals replace the original stack
+      offsets and the seam is indirect rather than the raw veneer branch.
   - address: 0x083db55c
     ghidra: FUN_083db55c
     name: string_key_tree_find
