@@ -11,6 +11,7 @@ pub mod three_word_string_pair_copy_construct;
 pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
 pub mod container_element_at_083d6818;
+pub mod indexed_element_array_destroy;
 pub mod container_first_node;
 pub mod container_first_node_083dbeb4;
 pub mod container_first_node_083dbdd4;
