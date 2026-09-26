@@ -3798,6 +3798,58 @@ pub unsafe extern "C" fn vector_bool_reference_init(
     mask_ref
 }
 
+/// vector_bool_iter_decrement — original: `FUN_083e5f5c` @ 0x083e5f5c
+/// (40 bytes, `0x083e5f5c..0x083e5f84`; the next real function is
+/// `vector_bool_iter_advance`). Raw whole-image A32 decoding finds two
+/// incoming unconditional `bl` calls, at 0x083e5d84 and 0x083e5d98, no
+/// predicated `bl` calls, and no outgoing calls.
+///
+/// `std::vector<bool>` bit-iterator `operator--`: decrements `iter.bit`
+/// with 32-bit register wrapping. When that produces `u32::MAX`, it replaces
+/// the bit offset with 31 and moves `iter.word` back one 4-byte storage word.
+/// It reads and writes only the iterator head, never the storage word.
+///
+/// Deliberate host-only deviation: unaligned field access accepts firmware
+/// heads that are 4-byte aligned but not aligned for 64-bit host pointers;
+/// target named-field accesses remain aligned word loads and stores.
+///
+/// # Safety
+///
+/// `iter` must point at a writable [`VectorBoolIter`]. Its `word` member
+/// may be NULL because it is adjusted as an address and never dereferenced.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_iter_decrement(iter: *mut VectorBoolIter) -> *mut VectorBoolIter {
+    #[cfg(target_os = "none")]
+    let bit = (*iter).bit;
+    #[cfg(not(target_os = "none"))]
+    let bit = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit));
+    let previous_bit = bit.wrapping_sub(1);
+    #[cfg(target_os = "none")]
+    {
+        (*iter).bit = previous_bit;
+    }
+    #[cfg(not(target_os = "none"))]
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), previous_bit);
+    if previous_bit == u32::MAX {
+        #[cfg(target_os = "none")]
+        {
+            (*iter).bit = 31;
+            (*iter).word = (*iter).word.wrapping_sub(1);
+        }
+        #[cfg(not(target_os = "none"))]
+        {
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), 31);
+            let word = core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word));
+            core::ptr::write_unaligned(
+                core::ptr::addr_of_mut!((*iter).word),
+                word.wrapping_sub(1),
+            );
+        }
+    }
+    iter
+}
+
 /// vector_bool_iter_advance — original: `FUN_083e5f84` @ 0x083e5f84
 /// (60 bytes; the only copy —
 /// `ipod-decomp/decomp/c/038/083e5f84_FUN_083e5f84.c`).
@@ -9767,6 +9819,42 @@ mod tests {
                 core::ptr::read_unaligned(core::ptr::addr_of!((*result).mask)),
                 1 << 31
             );
+        }
+    }
+
+    // ---- vector_bool_iter_decrement -------------------------------
+
+    /// The direct decrement changes only the bit offset except at the
+    /// zero-to-31 boundary, where it retreats one four-byte storage word.
+    /// The return is the unchanged iterator pointer in r0; the test uses a
+    /// 4-byte-aligned head to cover the host layout deviation.
+    #[test]
+    fn vector_bool_iter_decrement_retreats_only_at_word_boundary() {
+        unsafe {
+            let storage = [0u32; 3];
+            let base = storage.as_ptr() as *mut u32;
+            let mut buf = [0u8; 24];
+            let iter = buf.as_mut_ptr().add(4) as *mut VectorBoolIter;
+
+            for (word, bit, want_word, want_bit) in [
+                (base.add(1), 1, base.add(1), 0),
+                (base.add(1), 0, base, 31),
+                (base.add(2), u32::MAX, base.add(2), u32::MAX - 1),
+            ] {
+                core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).word), word);
+                core::ptr::write_unaligned(core::ptr::addr_of_mut!((*iter).bit), bit);
+                assert_eq!(vector_bool_iter_decrement(iter), iter);
+                assert_eq!(
+                    core::ptr::read_unaligned(core::ptr::addr_of!((*iter).word)),
+                    want_word,
+                    "word after decrementing bit {bit}"
+                );
+                assert_eq!(
+                    core::ptr::read_unaligned(core::ptr::addr_of!((*iter).bit)),
+                    want_bit,
+                    "bit after decrementing bit {bit}"
+                );
+            }
         }
     }
 
