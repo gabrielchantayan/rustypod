@@ -42,6 +42,29 @@ functions:
       acquires one node with single=1, then uses it as a self-linked empty
       intrusive-list sentinel. The unported call is a volatile host-test seam;
       target builds call the verified firmware address.
+  - address: 0x083dd5f4
+    ghidra: FUN_083dd5f4
+    name: list_node_pool_list_erase
+    size: 108
+    sig: "void list_node_pool_list_erase(u32 *successor, ListNodePoolList *list, u32 *node_slot)"
+    module: cxx/list_node_pool_list_erase
+    status: ported
+    renames:
+      param_1/r0: successor
+      param_2/r1: list
+      param_3/r2: node_slot
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+    notes: >-
+      Raw osos.dec establishes the exact 108-byte extent: 27 A32 words from
+      0x083dd5f4 through pop {r2,r3,ip,pc} at 0x083dd65c; 0x083dd660 begins
+      list_node_pool_list_append_value. It has no outgoing plain or predicated
+      BL and two inbound plain BL sites at 0x08292944 and 0x083dd5c4. It
+      returns the selected node's successor through successor; for a
+      non-sentinel node it unlinks the target-width intrusive-ring node,
+      decrements state with wrapping arithmetic, and prepends it to free.
+      Selecting the sentinel only returns it and leaves the list unchanged.
   - address: 0x083dd660
     ghidra: FUN_083dd660
     name: list_node_pool_list_append_value

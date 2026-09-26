@@ -99,6 +99,7 @@ pub mod vector4_resize_fill;
 pub mod word_list_node_pool_acquire;
 pub mod list_node_pool_list_init;
 pub mod list_node_pool_list_append_value;
+pub mod list_node_pool_list_erase;
 pub mod vector_word_copy_construct;
 pub mod vector_word_clear;
 pub mod word_range_fill_if_destination;
