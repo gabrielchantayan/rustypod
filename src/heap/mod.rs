@@ -5,6 +5,7 @@ pub mod alloc_core;
 pub mod block_deque;
 pub mod deque_construct_range_elem12;
 pub mod deque_push_back_elem4;
+pub mod deque_push_front_elem4;
 pub mod block_mgr;
 pub mod block_manager_mutex_lock;
 pub mod block_manager_mutex_unlock;
