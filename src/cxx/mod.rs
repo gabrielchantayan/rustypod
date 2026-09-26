@@ -71,6 +71,7 @@ pub mod clock_source_construct_zero;
 pub mod clock_source_destroy;
 pub mod copy_record_20_if_destination;
 pub mod copy_two_words_with_flag;
+pub mod copy_two_word_record_if_destination;
 pub mod record20_range_copy_if_destination;
 pub mod record16_range_copy_if_destination;
 pub mod record8_range_copy_if_destination;

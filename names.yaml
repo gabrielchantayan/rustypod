@@ -43026,6 +43026,25 @@ functions:
       cxx_array_dealloc discards both count and the forced-zero element size
       before its tag-2 operator-delete tail branch. Rust uses a normal call
       through that ported seam instead of the raw tail branch.
+  - address: 0x083d800c
+    ghidra: FUN_083d800c
+    name: copy_two_word_record_if_destination
+    size: 16
+    sig: "u32 *copy_two_word_record_if_destination(void *context, u32 *destination, const u32 *source)"
+    module: cxx/copy_two_word_record_if_destination
+    status: ported
+    vars: {param_1/r0: context, param_2/r1: destination, param_3/r2: source}
+    notes: >-
+      Raw ARM words e1b00001 18920006 18800006 e12fff1e establish the exact
+      extent 0x083d800c..0x083d801b: destination is copied to r0 and tested;
+      if non-NULL, ldmiane reads both source words before stmiane writes both
+      destination words. The next independently linked function starts at
+      0x083d801c. Whole-image branch decoding finds two inbound unconditional
+      plain bl calls (0x083e6efc, 0x083e6f7c), zero inbound predicated bl
+      calls, and zero body bl calls; 0x083e7164 uses bne as a tail branch.
+      The original returns destination (or NULL) and never accesses source for
+      NULL destination. Rust uses volatile word accesses to retain source-load
+      ordering and prevent libc-style substitution; no deliberate deviations.
   - address: 0x083dadd4
     ghidra: FUN_083dadd4
     name: opaque_base_destroy
