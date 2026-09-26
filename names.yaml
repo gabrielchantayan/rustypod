@@ -149129,3 +149129,32 @@ functions:
       the resulting {start,end} pair to destination. Deliberate deviation:
       Rust represents the stack-local pair and 0x083dc0cc helper directly,
       retaining the snapshot-before-store and ordered volatile word writes.
+
+  - address: 0x083d71e8
+    ghidra: FUN_083d71e8
+    name: ordered_tree_key_count
+    size: 96
+    sig: "u32 ordered_tree_key_count(const void *tree, const void *key)"
+    module: cxx/ordered_tree_key_count
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: key
+      local_1c/local_18: bounds
+      local_14: count
+      FUN_083b8adc: tree_equal_range
+      FUN_083e7adc: tree_iterator_distance
+    notes: >-
+      Raw words e1a02001 e52de004 e24dd01c e1a01000 e28d0004 ebff8636
+      e59d0004 e3a03000 e58d0010 e59d0008 e28d1018 e58d000c e59d0010
+      e28d200c e58d0014 e59d000c e58d300c e58d0018 e28d0014 e58d3010
+      eb004227 e59d000c e28dd01c e49df004 establish the exact 96-byte A32
+      body from 0x083d71e8 through 0x083d7247; the push at 0x083d7248 begins
+      the next real function. The body has two outgoing unconditional plain bl
+      calls, to 0x083b8adc and 0x083e7adc, and zero predicated bl instructions.
+      Whole-image raw A32 decoding finds two inbound unconditional plain bl
+      sites, 0x08259aec and 0x08259d48, and zero predicated inbound sites. It
+      obtains the ordered tree's equal range for key, then counts that iterator
+      range. Both unported helpers are verified-address seams: target builds
+      call retail addresses directly and the host fixtures verify their
+      target-word ABI.
