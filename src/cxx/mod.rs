@@ -314,6 +314,7 @@ pub mod named_object_cache;
 pub mod keyed_record_find_string_match;
 pub mod string_range_destroy;
 pub mod record_string_byte_vector_destroy;
+pub mod string_byte_vector_record_range_destroy;
 pub mod string_vector_destruct;
 pub mod lazy_string_tables_initialize;
 pub mod event_list_tree_record_link;
