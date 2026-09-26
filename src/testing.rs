@@ -2597,6 +2597,9 @@ pub mod hints {
     // 0x7650_0000: dedicated to cxx/container_first_node's target-width
     // nested-container and node fixture; mappings never unmap.
     pub const CXX_CONTAINER_FIRST_NODE: usize = 0x7650_0000;
+    // 0x7660_0000: dedicated to cxx/container_first_node_083dbeb4's target-width
+    // nested-container and node fixture; mappings never unmap.
+    pub const CXX_CONTAINER_FIRST_NODE_083DBEB4: usize = 0x7660_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

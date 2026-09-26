@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dbeb4
+    ghidra: FUN_083dbeb4
+    name: cxx_container_first_node_083dbeb4
+    size: 20
+    sig: "void *cxx_container_first_node_083dbeb4(const void *header)"
+    module: cxx/container_first_node_083dbeb4
+    status: ported
+    renames:
+      param_1/r0: header
+      "header+0x10": nested_container
+      "nested_container+0x08": first_node
+    notes: >-
+      Raw words e92d4008 e5900010 e5900008 e58d0000 e8bd9000 establish the
+      exact 20-byte A32 body from 0x083dbeb4 through 0x083dbec7; the following
+      push {r3,lr} at 0x083dbec8 starts the next real function. The body has
+      no plain or predicated bl. Full-image A32 branch decoding finds exactly
+      two inbound unconditional plain bl sites, 0x0819ed38 and 0x0819f054,
+      and no predicated inbound bl sites. Both callers use the returned word
+      as the root or current node of an intrusive tree traversal. This body is
+      byte-identical to FUN_083dbec8; its stack save/home/restore is dead
+      register traffic, so the Rust port retains the two ordered target-width
+      loads and returned r0.
   - address: 0x083dbec8
     ghidra: FUN_083dbec8
     name: cxx_container_first_node
