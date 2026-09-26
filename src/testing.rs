@@ -452,6 +452,9 @@ pub mod hints {
     // 0x1d70_0000: dedicated to cxx/hash_table_bucket_find_word_pair's
     // raw-u32 bucket, sentinel, node, and key fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_FIND_WORD_PAIR: usize = 0x1d70_0000;
+    // 0x1d80_0000: dedicated to cxx/hash_table_bucket_find_word_pair_6cf0's
+    // raw-u32 bucket, sentinel, node, and key fixture; mappings never unmap.
+    pub const HASH_TABLE_BUCKET_FIND_WORD_PAIR_6CF0: usize = 0x1d80_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0x1f10_0000: dedicated to cxx/tokenizer_next_string's raw-u32 UTF-16
