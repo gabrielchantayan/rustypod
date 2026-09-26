@@ -46006,6 +46006,33 @@ functions:
       equivalents refcounted_body_release_owned_variant and
       refcounted_body_attach; no other deliberate deviations.
 
+  - address: 0x0839f030
+    ghidra: FUN_0839f030
+    name: refcounted_ptr_construct_slot7
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_slot7(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      Raw osos.dec words establish the exact 104-byte body
+      0x0839f030..0x0839f098: `pop {r4,r5,r6,r7,r8,pc}` at 0x0839f094
+      ends it and the next separately linked function starts at 0x0839f098.
+      The body has three unconditional plain BL instructions (operator_new
+      0x082aadd4 twice, mutex_create 0x080744a4 once), zero predicated BL
+      instructions, and no tail branch. Two direct BL callers enter this
+      separately linked C++ template instance. It clears slot first; a
+      non-NULL implementation receives a tag-2 12-byte RefcountedBody
+      {implementation, 1, NULL}, with want_mutex optionally adding a zeroed
+      tag-2 8-byte Mutex initialized by mutex_create before publication.
+      Returns slot. The Rust port uses the already ported direct callees and
+      a dedicated target section; LLVM may inline mutex_create rather than
+      retaining the stock direct BL.
   - address: 0x0839f100
     ghidra: FUN_0839f100
     name: refcounted_ptr_copy_construct_slot1

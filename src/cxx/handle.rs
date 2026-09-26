@@ -851,6 +851,53 @@ pub unsafe extern "C" fn refcounted_handle_construct_variant(
     slot
 }
 
+/// refcounted_ptr_construct_slot7 — original: `FUN_0839f030` @ 0x0839f030
+/// (104 bytes). Raw words establish the complete body through `pop
+/// {r4-r8,pc}` at 0x0839f094; the next separately linked function begins at
+/// 0x0839f098. It contains three unconditional plain `bl` instructions
+/// (tag-2 `operator_new` twice and `mutex_create` once), with no predicated
+/// calls. The function has two direct `bl` callers.
+///
+/// Clears `slot`, then, when `implementation` is non-NULL, creates a tag-2
+/// 12-byte [`RefcountedBody`] as `{ implementation, 1, NULL }`. A nonzero
+/// `want_mutex` creates a tag-2 8-byte zeroed [`Mutex`], installs it at +8,
+/// and initializes it before publishing the body. Returns `slot`.
+///
+/// Deliberate deviations: host pointer fields are wider than target words;
+/// the allocation immediates remain the target's 12 and 8 bytes. LLVM may
+/// inline [`mutex_create`] rather than retaining the stock direct `bl`. The
+/// dedicated target section preserves this separately hookable template copy.
+///
+/// # Safety
+///
+/// `slot` must be a valid, aligned pointer slot. `implementation` is opaque;
+/// allocation failures are unchecked, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_construct_slot7")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct_slot7(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
+}
+
 /// refcounted_ptr_construct_slot1 — original: `FUN_0839f098` @ 0x0839f098
 /// (104 bytes; 8 direct `bl` call sites, all unconditional: 0x08137614,
 /// 0x081377ac, 0x081623d0, 0x081c0398, 0x081c03e8, 0x081c0460,
@@ -6733,6 +6780,55 @@ mod tests {
                     Event::SemaDefine(1, cell_arena),
                 ],
                 "both allocations precede the mutex cell create, in ARM order"
+            );
+        }
+
+        /// The two-call-site slot-7 template copy takes the same NULL and
+        /// guarded construction paths while retaining its distinct hook entry.
+        #[test]
+        fn slot7_construct_preserves_null_and_mutex_paths() {
+            let _bench = bench();
+            let mut null_slot = 0xdead_beefusize as *mut RefcountedBody;
+            let null_slot_ptr = &mut null_slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe {
+                refcounted_ptr_construct_slot7(null_slot_ptr, 0, u32::MAX)
+            };
+            assert_eq!(returned, null_slot_ptr);
+            assert!(null_slot.is_null());
+            assert!(events().is_empty(), "NULL implementation must not allocate");
+
+            let (body_arena, mutex_arena, cell_arena) = unsafe {
+                let arenas = &mut *core::ptr::addr_of_mut!(ARENAS);
+                (
+                    arenas[0].as_mut_ptr() as usize,
+                    arenas[1].as_mut_ptr() as usize,
+                    arenas[2].as_mut_ptr() as usize,
+                )
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+            let returned = unsafe {
+                refcounted_ptr_construct_slot7(slot_ptr, 0xaabb_ccdd, 1)
+            };
+            assert_eq!(returned, slot_ptr);
+            assert_eq!(slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0xaabb_ccdd);
+            assert_eq!(body.refcount, 1);
+            assert_eq!(body.mutex as usize, mutex_arena);
+            let mutex = unsafe { &*(mutex_arena as *const Mutex) };
+            assert_eq!(mutex.sem_cell as usize, cell_arena);
+            assert_eq!(mutex.unused, 0);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Alloc(12, 2),
+                    Event::Alloc(8, 2),
+                    Event::KernelAlloc(4),
+                    Event::SemaDefine(1, cell_arena),
+                ],
+                "the body publishes after mutex initialization"
             );
         }
 
