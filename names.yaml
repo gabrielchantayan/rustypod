@@ -12118,21 +12118,11 @@ functions:
       decoding every B/BL word in osos.dec: exactly four inbound direct bl
       sites (0x083e168c, 0x083e16f4, 0x083e1778, 0x083e17cc - the vector
       reallocation/insert paths of FUN_083e1614), all unconditional, no
-      predicated inbound calls; the body itself holds one plain bl (to
-      0x083d7d20, binary-verified: eb ff bc 7e at 0x083e8b20 resolves to
-      0x083e8b20+8+sext(0xffbc7e)<<2) and no predicated calls. Deviations:
-      helper 0x083d7d20 is unported, so the call goes through the new
-      VECTOR_COPY_CONSTRUCT_ELEM20_OPS dispatch slot (the
-      VECTOR_COPY_CONSTRUCT_ELEM28_OPS pattern) whose target default
-      transmutes VECTOR_COPY_CONSTRUCT_ELEM20_ADDRESS and whose host
-      default is inert; the vector argument is forwarded verbatim. Host
-      tests: one helper call per element with the cursors striding
-      together and the vector pointer forwarded, the exclusive range end
-      (destination untouched by the loop itself), the empty range, and the
-      NULL-output dispatch-and-advance path. match.py structural: same
-      push/mov/loop/call/add-0x14/cmp/bne/return-output shape; the diff is
-      the crate fp frame and the blx-through-volatile-slot dispatch
-      standing in for the direct bl 0x083d7d20 (the documented deviation).
+      predicated inbound calls; the body itself holds one plain bl to the now
+      ported vector_copy_construct_elem20 at 0x083d7d20 (binary-verified:
+      eb ff bc 7e at 0x083e8b20 resolves to 0x083d7d20). Host coverage moved
+      to the helper's target-width fixture; range behavior remains covered by
+      the element helper's NULL-output and construction tests.
 
   - address: 0x083e90b8
     ghidra: FUN_083e90b8
@@ -12349,11 +12339,10 @@ functions:
       (0x083e16e0 and 0x083e17a0), no predicated BL sites; the body has exactly
       one plain BL, ebffb9e9 at 0x083e9574 resolving to 0x083d7d20, and no
       predicated calls. This is std::vector uninitialized-fill for count
-      0x14-byte elements. Deliberate deviation: unported helper 0x083d7d20
-      uses the existing VECTOR_COPY_CONSTRUCT_ELEM20_OPS volatile dispatch seam;
-      its target default calls the firmware address and its host default is
-      inert. Host tests cover repeated source/striding output, zero count, and
-      NULL output dispatch.
+      0x14-byte elements. The port now directly calls
+      vector_copy_construct_elem20; its target-width fixture covers
+      construction and NULL output, while this loop retains the firmware's
+      repeated-source and output-stride behavior.
 
   - address: 0x083e958c
     ghidra: FUN_083e958c
@@ -149036,3 +149025,24 @@ functions:
       BL sites, and no body calls. The context is discarded; a NULL destination
       returns unchanged without reading source; otherwise the two words copy and
       the byte at +0x08 is canonicalized to 0 or 1. No deliberate deviations.
+
+  - address: 0x083d7d20
+    ghidra: FUN_083d7d20
+    name: vector_copy_construct_elem20
+    size: 172
+    sig: "void vector_copy_construct_elem20(void *vector, u8 *output, const u8 *source)"
+    module: cxx/vector_copy_construct_elem20
+    status: ported
+    notes: >-
+      Raw A32 establishes the true 172-byte extent 0x083d7d20..0x083d7dcc:
+      the literal pool is at 0x083d7dcc and the next independent entry begins
+      at 0x083d7dd0. Whole-image decoding finds two inbound plain BL sites
+      (0x083e8b20, 0x083e9574), no predicated inbound BL sites; the body holds
+      four plain BLs (vector_size_elem12 twice, operator_new_checked, and
+      cxx_string_pair_word_uninitialized_copy), no predicated BLs. It skips
+      all work on NULL output, writes vtable 0x0898eb5c, copies source+4,
+      initializes the embedded vector, allocates max(length,32)*12 bytes,
+      copies 12-byte COW-string-pair-and-word elements, and rebuilds its end
+      and capacity cursors. Deliberate deviation: computes the known
+      vector_size_elem12 result from raw target u32 cursor words so host
+      fixtures preserve the ARM layout; host allocation uses a volatile seam.
