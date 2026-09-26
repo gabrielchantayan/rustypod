@@ -25,6 +25,7 @@ pub mod generic_descriptor_lookup;
 pub mod descriptor_action_dispatch;
 pub mod descriptor_lookup_exact_or_tail;
 pub mod tree_lookup_result_write;
+pub mod byte_range_offset_copy;
 pub mod tree_lookup_result_write_cc874;
 pub mod refcounted_key_tree_lookup_value;
 pub mod tree_lookup_node_counter;
