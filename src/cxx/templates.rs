@@ -3710,6 +3710,64 @@ pub unsafe extern "C" fn vector_size_bool(bits: *const VectorBoolBounds) -> i32 
     // arithmetic exactly as the ARM body.
     (end_bit as i32).wrapping_add(words << 5).wrapping_sub(begin_bit as i32)
 }
+/// vector_bool_copy_incremented_range — original: `FUN_083e5edc` @
+/// 0x083e5edc (128 bytes, `0x083e5edc..0x083e5f58`; the next real function
+/// is `vector_bool_iter_decrement` @ 0x083e5f5c). Raw A32 decoding verifies
+/// 2 incoming plain `bl` calls (0x083e5dcc and 0x083e5e90), no predicated
+/// incoming `bl`, and 7 outgoing plain `bl` instructions, again with none
+/// predicated.
+///
+/// This `std::vector<bool>` storage-grow helper advances the source and
+/// destination iterators before each transfer, then copies the selected
+/// source bit into the selected destination bit until the pre-increment
+/// source reaches `source_end`. It stores the final destination iterator to
+/// `result`. The second ABI argument is the vector head passed by both
+/// callers; the raw body never reads it.
+///
+/// Deliberate deviation: the port expresses the seven direct calls through
+/// their existing typed Rust ports rather than retaining the original stack
+/// temporaries. Its behavior, including copying `source_end` after the last
+/// loop comparison, is unchanged.
+///
+/// # Safety
+///
+/// `result` must point at writable [`VectorBoolIter`] storage. The source and
+/// destination iterator words must address readable and writable aligned
+/// storage words respectively for every incremented iterator position.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bool_copy_incremented_range(
+    result: *mut VectorBoolIter,
+    _bits: *const VectorBoolBounds,
+    mut source: VectorBoolIter,
+    source_end: VectorBoolIter,
+    mut destination: VectorBoolIter,
+) {
+    while vector_bool_iter_not_equal(core::ptr::addr_of!(source), core::ptr::addr_of!(source_end)) != 0 {
+        vector_bool_iter_increment(core::ptr::addr_of_mut!(destination));
+        let mut destination_ref = VectorBoolReference {
+            word: core::ptr::null_mut(),
+            mask: 0,
+        };
+        vector_bool_reference_init(
+            core::ptr::addr_of_mut!(destination_ref),
+            core::ptr::addr_of!(destination),
+        );
+        vector_bool_iter_increment(core::ptr::addr_of_mut!(source));
+        let mut source_ref = VectorBoolReference {
+            word: core::ptr::null_mut(),
+            mask: 0,
+        };
+        vector_bool_reference_init(core::ptr::addr_of_mut!(source_ref), core::ptr::addr_of!(source));
+        vector_bool_reference_assign(
+            core::ptr::addr_of_mut!(destination_ref),
+            vector_bool_reference_test(core::ptr::addr_of!(source_ref)),
+        );
+    }
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*result).word), destination.word);
+    core::ptr::write_unaligned(core::ptr::addr_of_mut!((*result).bit), destination.bit);
+}
+
 
 /// vector_bool_iter_not_equal — original: `FUN_083d79b4` @ 0x083d79b4
 /// (40 bytes; 2 `bl` call sites, both in the `vector<bool>`
@@ -9857,6 +9915,87 @@ mod tests {
             }
         }
     }
+
+    // ---- vector_bool_copy_incremented_range -------------------------
+
+    /// The raw loop compares before advancing, then transfers the incremented
+    /// positions. It must therefore include `source_end`, cross a storage-word
+    /// boundary, and return the incremented destination iterator.
+    #[test]
+    fn vector_bool_copy_incremented_range_copies_through_the_end_iterator() {
+        unsafe {
+            let mut source_storage = [0x8000_0000u32, 0x0000_0003];
+            let mut destination_storage = [0u32; 2];
+            let source = VectorBoolIter {
+                word: source_storage.as_mut_ptr(),
+                bit: 30,
+            };
+            let source_end = VectorBoolIter {
+                word: source_storage.as_mut_ptr().add(1),
+                bit: 1,
+            };
+            let destination = VectorBoolIter {
+                word: destination_storage.as_mut_ptr(),
+                bit: 29,
+            };
+            let mut result = VectorBoolIter {
+                word: core::ptr::null_mut(),
+                bit: u32::MAX,
+            };
+
+            vector_bool_copy_incremented_range(
+                core::ptr::addr_of_mut!(result),
+                core::ptr::null(),
+                source,
+                source_end,
+                destination,
+            );
+
+            assert_eq!(destination_storage, [0xc000_0000, 1]);
+            assert_eq!(result.word, destination_storage.as_mut_ptr().add(1));
+            assert_eq!(result.bit, 0);
+        }
+    }
+
+    /// An equal source/end pair executes no calls in the raw loop but still
+    /// writes the input destination iterator to the hidden output object.
+    #[test]
+    fn vector_bool_copy_incremented_range_handles_an_empty_range() {
+        unsafe {
+            let mut source_storage = [0u32; 1];
+            let mut destination_storage = [0u32; 1];
+            let source = VectorBoolIter {
+                word: source_storage.as_mut_ptr(),
+                bit: 7,
+            };
+            let source_end = VectorBoolIter {
+                word: source_storage.as_mut_ptr(),
+                bit: 7,
+            };
+
+            let destination = VectorBoolIter {
+                word: destination_storage.as_mut_ptr(),
+                bit: 19,
+            };
+            let mut result = VectorBoolIter {
+                word: core::ptr::null_mut(),
+                bit: 0,
+            };
+
+            vector_bool_copy_incremented_range(
+                core::ptr::addr_of_mut!(result),
+                core::ptr::null(),
+                source,
+                source_end,
+                destination,
+            );
+
+            assert_eq!(destination_storage, [0]);
+            assert_eq!(result.word, destination_storage.as_mut_ptr());
+            assert_eq!(result.bit, 19);
+        }
+    }
+
 
     // ---- vector_bool_iter_increment -------------------------------
 

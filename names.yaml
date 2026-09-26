@@ -57664,6 +57664,32 @@ functions:
       accepted vector_bool_reference_init deviation), plus LLVM's fp
       frame.
 
+  - address: 0x083e5edc
+    ghidra: FUN_083e5edc
+    name: vector_bool_copy_incremented_range
+    size: 128
+    sig: "void vector_bool_copy_incremented_range(VectorBoolIter *result, const VectorBoolBounds *bits, VectorBoolIter source, VectorBoolIter source_end, VectorBoolIter destination)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: result, param_2: bits, param_3: source, param_5: source_end, param_7: destination}
+    notes: >-
+      Raw osos.dec A32 decoding proves the 128-byte body from 0x083e5edc
+      through 0x083e5f58; 0x083e5f5c is the independently entered
+      vector_bool_iter_decrement. Whole-image decoding finds two inbound
+      unconditional BL calls, at 0x083e5dcc and 0x083e5e90, and no
+      predicated BL callers. The body has seven unconditional direct BL
+      instructions and no predicated BL: iterator increment at 0x083e5ef4
+      and 0x083e5f10, reference initialization at 0x083e5f04 and
+      0x083e5f20, reference test at 0x083e5f28, reference assignment at
+      0x083e5f34, and iterator comparison at 0x083e5f40. It compares
+      source with source_end before incrementing both source and destination,
+      then copies the bit from the incremented source iterator into the
+      incremented destination iterator; thus the terminal iterator is copied.
+      The second ABI argument is passed by both callers but never read by the
+      raw body. The port calls the already ported typed iterator/reference
+      helpers instead of reproducing its stack-temporary layout, while
+      preserving the loop and final result write.
+
   - address: 0x083e5f5c
     ghidra: FUN_083e5f5c
     name: vector_bool_iter_decrement
