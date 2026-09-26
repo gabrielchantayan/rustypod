@@ -98,6 +98,7 @@ pub mod decoder_cleanup;
 pub mod conditional_owned_object_destroy;
 pub mod polymorphic_slot_replace;
 pub mod optional_vtable_slot4_invoke;
+pub mod optional_vtable_slot4_dispatch;
 pub mod optional_vtable_slot4_invoke_737c;
 pub mod buffered_read_context_destroy;
 pub mod stream_read_u64;

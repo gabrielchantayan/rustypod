@@ -6027,6 +6027,32 @@ functions:
       the dispatcher receives record +0x04. Target builds call these verified
       addresses directly; host tests install an operation seam. The dispatcher
       identity is deliberately not inferred beyond dispatching a record.
+  # --- optional vtable slot +0x04 dispatch ---
+  - address: 0x083e7328
+    ghidra: FUN_083e7328
+    name: optional_vtable_slot4_dispatch
+    size: 36
+    sig: "void **optional_vtable_slot4_dispatch(void **slot)"
+    module: cxx/optional_vtable_slot4_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: slot
+      slot_deref/r0: object
+      object_deref/r1: vtable
+      vtable_plus_0x04/r1: vtable_slot_04_callback
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      push {r4,lr} at 0x083e7328 through pop {r4,pc} at 0x083e7348; the next
+      separately linked function begins at 0x083e734c. Full-image raw ARM
+      decoding finds exactly two inbound direct calls, both plain unconditional
+      bl at 0x0815f204 and 0x083e73e4; there are no predicated direct calls.
+      The body has zero plain direct bl calls and one predicated indirect blxne
+      through vtable slot +0x04. It loads slot +0x00; non-NULL objects receive
+      that unresolved callback with the object as r0, then slot is returned
+      unchanged. The virtual method identity remains unrecovered and is
+      deliberately not inferred. Rust uses native-width typed host vtable
+      entries rather than the target's four-byte pointer words, and retains a
+      dedicated text section to prevent folding with identical hookable ports.
   # --- polymorphic slot replacement ---
   - address: 0x083e734c
     ghidra: FUN_083e734c
