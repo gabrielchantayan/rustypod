@@ -145910,3 +145910,29 @@ functions:
       constructor's returned object with 0x089a8a6c. The class identity and
       full layout remain opaque. Target assembly preserves the direct retail
       call; host builds use a replaceable seam for that unported boundary.
+
+  # --- trivial u16 vector destructor ---
+  - address: 0x083e6e74
+    ghidra: FUN_083e6e74
+    name: u16_vector_destroy
+    size: 64
+    sig: "U16Vector *u16_vector_destroy(U16Vector *vector)"
+    module: cxx/u16_vector_destroy
+    renames:
+      param_1/r0: vector
+      FUN_08266f2c: cxx_array_dealloc
+    status: ported
+    notes: >-
+      Raw osos.dec words establish the exact 64-byte extent
+      0x083e6e74..0x083e6eb3; push {r4,r5,r6,r7,lr} at 0x083e6eb4 begins
+      the next independently entered function. Decoding every ARM B/BL word
+      in osos.dec finds exactly two inbound unconditional plain BL sites
+      (0x0816f380 and 0x0816f624), zero inbound predicated BL sites, and one
+      unconditional body BL to cxx_array_dealloc @ 0x08266f2c. The three-word
+      vector has trivial two-byte elements: retailOS retains the empty
+      begin-to-end, +2-byte destruction walk, then deallocates begin with
+      count (capacity - begin) >> 1 and zero element-size argument before
+      returning vector. The Rust port uses empty inline assembly to preserve
+      that otherwise dead walk; direct fields preserve target member order
+      without relying on host pointer byte offsets. Host tests cover empty and
+      populated vectors, return identity, and capacity-based count calculation.
