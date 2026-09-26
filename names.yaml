@@ -147815,6 +147815,46 @@ functions:
       absent-between, and signed-boundary keys. match.py reports the expected
       frame and local-call-target differences (exit 1) while retaining the
       traversal and final candidate-rejection structure.
+  - address: 0x083db84c
+    ghidra: FUN_083db84c
+    name: signed_key_tree_find_node_f8a8_copy
+    size: 168
+    sig: "void signed_key_tree_find_node_f8a8_copy(u32 *out_node, const SignedKeyTree *tree, const i32 *key)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1/r0: out_node
+      param_2/r1/r5: tree
+      param_3/r2/r9: key
+      r4: node
+      r6: candidate_or_header
+      "tree+0x10": header
+      "header+0x04": root
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": key
+      FUN_083d7580: less_signed
+      FUN_083cf8a8: equal_deref_f8a8_copy
+      FUN_083b6b04: node_key_accessor
+    notes: >-
+      Raw osos.dec establishes the exact 168-byte A32 body from 0x083db84c
+      through pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,pc} at 0x083db8f0;
+      0x083db8f4 begins the next separately entered function. Whole-image A32
+      decoding finds exactly two inbound unconditional plain BL sites,
+      0x081bf824 and 0x0839bbec, with no predicated BL forms. The body has
+      four unconditional BL instructions and no predicated BL instructions:
+      less_signed @ 0x083d7580 twice, plus equal_deref_f8a8_copy @
+      0x083cf8a8 and node_key_accessor @ 0x083b6b04. It performs signed
+      lower-bound descent, then rejects a non-equal candidate by returning the
+      header sentinel through out. Rust preserves target-width node words and
+      calls the established signed comparator directly; it inlines the
+      byte-identical equality and node-key accessor leaves and omits ignored
+      comparator slack. Host tests cover an empty tree, exact hits,
+      absent-between keys, signed boundaries, and value-copy hit/miss behavior.
+      match.py reports the expected frame and local-call-target differences
+      (exit 1) while retaining traversal and final candidate-rejection
+      structure.
+
   - address: 0x083dbab4
     ghidra: FUN_083dbab4
     name: signed_key_tree_find_node_copy
