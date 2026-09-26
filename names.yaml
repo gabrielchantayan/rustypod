@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083db704
+    ghidra: FUN_083db704
+    name: kinded_node_pool_construct
+    size: 88
+    sig: "void *kinded_node_pool_construct(void *owner, const unsigned char *kind)"
+    module: cxx/kinded_node_pool_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: kind
+      FUN_083c597c: node_pool_acquire
+      "owner+0x10": first_node
+      "owner+0x19": kind
+      "node+0x04": payload
+      "node+0x08": previous
+      "node+0x0c": next
+    notes: >-
+      Raw words e92d4070 e3a05000 e5805000 e5805010 e5805014 e1a04000
+      e5c05018 e5d10000 e5c40019 e584500c e5845008 e1a00004 e5845004
+      ebffa88f e5840010 e5805004 e5940010 e5800008 e5940010 e580000c
+      e1a00004 e8bd8070 establish the exact 88-byte A32 body from 0x083db704
+      through 0x083db758; the push at 0x083db75c starts the next real
+      function. The body has one unconditional plain bl, at 0x083db738 to
+      FUN_083c597c/0x083c597c, and no predicated bl. Whole-image raw branch
+      decoding finds exactly two inbound unconditional plain bl sites at
+      0x082ac9d8 and 0x082ac9f8, with no predicated inbound calls. It clears
+      owner control words, preserves the caller's kind byte at +0x19, then
+      zeroes the acquired node payload and self-links its +0x08/+0x0c list
+      links. The still-unported acquire helper is a verified-address seam:
+      target builds call it directly and host tests use a volatile seam to
+      prove its ABI and target-width observable writes.
   - address: 0x083db7e8
     ghidra: FUN_083db7e8
     name: refcounted_key_tree_lookup_value
