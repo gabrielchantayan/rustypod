@@ -43,7 +43,7 @@
 //!   per descent step is dead scratch (the comparator ignores its
 //!   `this`), dropped.
 
-use crate::cxx::templates::less_unsigned;
+use crate::cxx::templates::{less_unsigned, less_unsigned_alias_744c};
 
 /// A red-black tree node of this map instantiation: the 0x10-byte
 /// `_Rb_tree_node_base` header, the u32 key at +0x10 and the mapped
@@ -145,6 +145,59 @@ pub unsafe extern "C" fn word_key_map_find(
     out.write(candidate);
 }
 
+/// word_key_map_find_db19c_copy — original: `FUN_083db19c` @
+/// `0x083db19c` (168 bytes, exactly `0x083db19c..0x083db240`; the next
+/// separately linked function starts at `0x083db244`).
+///
+/// Raw A32 decoding finds **2 direct inbound plain `bl` call sites**
+/// (0x0809dd90 and 0x0809e110), **0 predicated `bl` call sites**, and no
+/// direct `b` transfers. Its body has four unconditional `bl` instructions:
+/// `less_unsigned_alias_744c` @ 0x083d744c twice,
+/// `equal_deref_f7b8_copy` @ 0x083cf7b8, and the exact node-key accessor
+/// @ 0x083b6a64.
+///
+/// Performs the same unsigned lower-bound descent as [`word_key_map_find`],
+/// writing the matching node or the header sentinel through `out`.
+/// Deliberate deviations: the equality and `node + 0x10` accessor leaves are
+/// inlined; stack homes, the comparator's ignored slack arguments, and the
+/// dead per-iteration zero store are omitted.
+///
+/// # Safety
+///
+/// `out` must point at a writable word, `map` at a live container matching
+/// [`WordKeyMap`], and `key` at a readable aligned u32. Tree links must be
+/// well-formed and null-terminated.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(
+    target_os = "none",
+    link_section = ".text.word_key_map_find_db19c_copy"
+)]
+#[inline(never)]
+pub unsafe extern "C" fn word_key_map_find_db19c_copy(
+    out: *mut *mut WordKeyMapNode,
+    map: *mut WordKeyMap,
+    key: *const u32,
+) {
+    let header = (*map).header;
+    let comparator = &(*map).comparator as *const u8;
+    let mut candidate = header;
+    let mut node = (*header).parent;
+    while !node.is_null() {
+        if less_unsigned_alias_744c(comparator, &(*node).key, key) != 0 {
+            node = (*node).right;
+        } else {
+            candidate = node;
+            node = (*node).left;
+        }
+    }
+    if candidate == header
+        || less_unsigned_alias_744c(comparator, key, &(*candidate).key) != 0
+    {
+        candidate = header;
+    }
+    out.write(candidate);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -207,6 +260,12 @@ mod tests {
     fn find(t: &mut Tree, key: u32) -> *mut WordKeyMapNode {
         let mut out: *mut WordKeyMapNode = ptr::null_mut();
         unsafe { word_key_map_find(&mut out, &mut *t.map, &key) };
+        out
+    }
+
+    fn find_db19c_copy(t: &mut Tree, key: u32) -> *mut WordKeyMapNode {
+        let mut out: *mut WordKeyMapNode = ptr::null_mut();
+        unsafe { word_key_map_find_db19c_copy(&mut out, &mut *t.map, &key) };
         out
     }
 
@@ -282,5 +341,24 @@ mod tests {
         let header = &mut *t.header as *mut _;
         assert_eq!(find(&mut t, 0), header);
         assert_eq!(find(&mut t, u32::MAX - 1), header);
+    }
+
+    #[test]
+    fn db19c_copy_finds_exact_keys_and_rejects_unsigned_boundaries() {
+        // This physical copy calls the 0x083d744c comparator and is reached
+        // from both event-list population paths.
+        let mut t = tree(&[(1, usize::MAX, 1), (u32::MAX, usize::MAX, usize::MAX)]);
+        let one = &mut *t.nodes[0] as *mut _;
+        let max = &mut *t.nodes[1] as *mut _;
+        let header = &mut *t.header as *mut _;
+        assert_eq!(find_db19c_copy(&mut t, 1), one);
+        assert_eq!(find_db19c_copy(&mut t, u32::MAX), max);
+        for key in [0, 2, u32::MAX - 1] {
+            assert_eq!(find_db19c_copy(&mut t, key), header, "key {key}");
+        }
+
+        let mut empty = tree(&[]);
+        let empty_header = &mut *empty.header as *mut _;
+        assert_eq!(find_db19c_copy(&mut empty, 0), empty_header);
     }
 }

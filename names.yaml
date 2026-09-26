@@ -148166,3 +148166,44 @@ functions:
       resulting node target address plus 0x14 with u32 wrapping. The unported
       callee is deliberately an address-verified seam: target builds call its
       fixed address directly and host tests install a fixture to verify the ABI.
+
+  - address: 0x083db19c
+    ghidra: FUN_083db19c
+    name: word_key_map_find_db19c_copy
+    size: 168
+    sig: "void word_key_map_find_db19c_copy(WordKeyMapNode **out, WordKeyMap *map, const u32 *key)"
+    module: cxx/word_key_map
+    status: ported
+    renames:
+      param_1/r0/r7: out
+      param_2/r1/r5: map
+      param_3/r2/r9: key
+      r4: node
+      r6: candidate_or_header
+      "map+0x10": header
+      "header+0x04": root
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": node_key
+      FUN_083d744c: less_unsigned_alias_744c
+      FUN_083cf7b8: equal_deref_f7b8_copy
+      FUN_083b6a64: node_key_accessor
+    notes: >-
+      Raw osos.dec establishes the exact 168-byte A32 body from 0x083db19c
+      through pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,sl,pc} at 0x083db240;
+      0x083db244 begins the next separately linked function. Whole-image A32
+      decoding finds exactly two inbound unconditional plain BL sites,
+      0x0809dd90 and 0x0809e110, with no predicated BL forms. The body has
+      four unconditional BL instructions and no predicated BL instructions:
+      less_unsigned_alias_744c @ 0x083d744c twice, plus
+      equal_deref_f7b8_copy @ 0x083cf7b8 and node_key_accessor @ 0x083b6a64.
+      It descends a u32-keyed red-black tree to its lower bound and returns
+      that candidate only when it equals key; otherwise it writes the header
+      sentinel through out. Rust calls the established 0x083d744c comparator
+      directly, retains target-width node layout, and deliberately inlines the
+      byte-identical equality and node-key accessor leaves while omitting dead
+      stack homes, ignored comparator slack, and the dead zero scratch store.
+      Host tests cover empty, exact, missing, and unsigned-boundary keys.
+      match.py reports the expected frame, helper-leaf, and local-call-target
+      differences (exit 1) while retaining lower-bound traversal and final
+      candidate rejection.
