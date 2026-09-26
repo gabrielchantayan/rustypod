@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dbe5c
+    ghidra: FUN_083dbe5c
+    name: cxx_node_pool_construct
+    size: 88
+    sig: "void *cxx_node_pool_construct(void *owner, const unsigned char *kind)"
+    module: cxx/node_pool_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: kind
+      FUN_083be9e8: node_pool_acquire
+      "owner+0x10": first_node
+      "owner+0x19": kind
+      "node+0x04": payload
+      "node+0x08": previous
+      "node+0x0c": next
+    notes: >-
+      Raw words e92d4070 e3a05000 e5805000 e5805010 e5805014 e1a04000
+      e5c05018 e5d10000 e5c40019 e584500c e5845008 e1a00004 e5845004
+      ebff8ad4 e5840010 e5805004 e5940010 e5800008 e5940010 e580000c
+      e1a00004 e8bd8070 establish the exact 88-byte A32 body from 0x083dbe5c
+      through 0x083dbeaf; the push at 0x083dbeb0 starts the next real
+      function. The body has one unconditional plain bl, at 0x083dbe90 to
+      FUN_083be9e8/0x083be9e8, and no predicated bl. Ghidra's two inbound bl
+      call sites are consistent with the constructor's unguarded pool-acquire
+      contract. It clears owner control words, preserves the caller's kind
+      byte at +0x19, then zeroes the acquired node payload and self-links its
+      +0x08/+0x0c list links. Target builds invoke the verified still-retail
+      helper address; host tests use a volatile seam to prove its ABI and all
+      ordered observable writes.
   - address: 0x083dbeb4
     ghidra: FUN_083dbeb4
     name: cxx_container_first_node_083dbeb4
