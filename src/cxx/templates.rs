@@ -643,6 +643,46 @@ pub unsafe extern "C" fn deque_iter_increment_elem4(iter: *mut DequeIter) -> *mu
     }
     iter
 }
+/// deque_iter_increment_elem4_alias_a130 — original: `FUN_083da130` @
+/// `0x083da130` (76 bytes; 2 plain `bl` call sites, no predicated forms,
+/// verified by decoding every ARM B/BL word in `osos.dec`).
+///
+/// Advances a 4-byte deque iterator in place. It first advances `cur` by
+/// four. Only when that equals `seg_end` does it call the adjacent segment
+/// capacity member, advance `seg_slot` by one map entry, load the next
+/// segment base, and reset `cur` and `seg_base` there with
+/// `seg_end = base + 0x20 * 4`. The raw body has no null or bounds guard.
+///
+/// Deliberate deviation: invokes the established [`deque_seg_capacity`] export
+/// through `read_volatile` instead of this copy's adjacent capacity member at
+/// 0x083da17c, preserving the call boundary while avoiding a redundant seam.
+///
+/// # Safety
+/// `iter` must be a valid [`DequeIter`]. When its advanced `cur` equals
+/// `seg_end`, `seg_slot + 1` must be a valid, aligned segment-map entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_increment_elem4_alias_a130")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_increment_elem4_alias_a130(
+    iter: *mut DequeIter,
+) -> *mut DequeIter {
+    let advanced_cur = (*iter).cur.wrapping_add(4);
+    (*iter).cur = advanced_cur;
+    if advanced_cur == (*iter).seg_end {
+        let capacity_fn = core::ptr::read_volatile(
+            &(deque_seg_capacity as unsafe extern "C" fn() -> usize),
+        );
+        let segment_capacity = capacity_fn();
+        let next_slot = (*iter).seg_slot.add(1);
+        (*iter).seg_slot = next_slot;
+        let next_base = next_slot.read();
+        (*iter).seg_base = next_base;
+        (*iter).cur = next_base;
+        (*iter).seg_end = next_base.wrapping_add(segment_capacity * 4);
+    }
+    iter
+}
+
 
 /// deque_iter_decrement_elem4 — original: `FUN_083da4bc` @ `0x083da4bc`
 /// (80 bytes; 2 plain `bl` call sites, no predicated forms, verified by
@@ -8109,6 +8149,45 @@ mod tests {
         assert_eq!(iter.seg_end, 0x80 as *mut u8);
         assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
     }
+    #[test]
+    fn iter_increment_elem4_alias_a130_preserves_boundary_and_null_segment_behavior() {
+        let mut first = [0u8; 0x80];
+        let mut second = [0u8; 0x80];
+        let mut slots = [first.as_mut_ptr(), second.as_mut_ptr()];
+        let mut iter = DequeIter {
+            cur: unsafe { first.as_mut_ptr().add(0x7c) },
+            seg_base: first.as_mut_ptr(),
+            seg_end: unsafe { first.as_mut_ptr().add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+
+        unsafe {
+            assert_eq!(
+                deque_iter_increment_elem4_alias_a130(&mut iter),
+                &mut iter as *mut DequeIter,
+            );
+        }
+        assert_eq!(iter.cur, second.as_mut_ptr());
+        assert_eq!(iter.seg_base, second.as_mut_ptr());
+        assert_eq!(iter.seg_end, unsafe { second.as_mut_ptr().add(0x80) });
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+
+        slots[1] = core::ptr::null_mut();
+        iter = DequeIter {
+            cur: unsafe { first.as_mut_ptr().add(0x7c) },
+            seg_base: first.as_mut_ptr(),
+            seg_end: unsafe { first.as_mut_ptr().add(0x80) },
+            seg_slot: slots.as_mut_ptr(),
+        };
+        unsafe {
+            deque_iter_increment_elem4_alias_a130(&mut iter);
+        }
+        assert!(iter.cur.is_null());
+        assert!(iter.seg_base.is_null());
+        assert_eq!(iter.seg_end, 0x80 as *mut u8);
+        assert_eq!(iter.seg_slot, unsafe { slots.as_mut_ptr().add(1) });
+    }
+
 
     #[test]
     fn iter_decrement_elem4_stays_in_segment_and_crosses_previous_boundary() {

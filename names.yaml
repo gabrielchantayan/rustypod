@@ -55507,6 +55507,34 @@ functions:
       uses the existing shared capacity export via read_volatile to retain that
       call boundary; wrapping pointer arithmetic deliberately preserves the
       raw NULL-segment results.
+  - address: 0x083da130
+    ghidra: FUN_083da130
+    name: deque_iter_increment_elem4_alias_a130
+    size: 76
+    sig: "DequeIter *deque_iter_increment_elem4_alias_a130(DequeIter *iter)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: iter, iVar1: segment_capacity, iVar2: next_base}
+    renames:
+      FUN_083d9fcc: deque_seg_capacity
+      param_1: iter
+      iVar1: segment_capacity
+      iVar2: next_base
+    notes: >-
+      Raw ARM establishes the exact 76-byte body 0x083da130..0x083da17b:
+      `push {r4,lr}` through `pop {r4,pc}`. The next separately linked
+      function, deque_seg_capacity_alias_a17c, begins at 0x083da17c. It
+      advances iter->cur by four and compares it against iter->seg_end; on
+      equality it calls the adjacent capacity member at 0x083d9fcc, advances
+      iter->seg_slot by one 32-bit map entry, loads the next segment base, and
+      writes it to seg_base and cur before writing seg_end = base + 0x20 * 4.
+      Decoding every ARM B/BL word in osos.dec finds exactly two unconditional
+      plain bl call sites (0x083de6a4 and 0x083de6ac), zero predicated bl
+      forms, and zero tail b forms. The port uses deque_seg_capacity through
+      read_volatile to retain the capacity-call boundary, deliberately
+      substituting the existing shared export for the byte-identical local
+      capacity member; wrapping_add preserves the raw null-next-segment result
+      (cur/base NULL, end 0x80).
   - address: 0x083da50c
     ghidra: FUN_083da50c
     name: deque_iter_increment_elem4
