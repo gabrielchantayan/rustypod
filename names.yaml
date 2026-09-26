@@ -55058,6 +55058,26 @@ functions:
       direct tail branches. Kept as a separate exported, link-sectioned alias
       so the independently hookable target cannot fold into the canonical
       port; no other deliberate deviations.
+  - address: 0x083d9f38
+    ghidra: FUN_083d9f38
+    name: deque_iter_assign_alias_9f38
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_9f38(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec fixes the 36-byte body at 0x083d9f38..0x083d9f5b: four
+      forward aligned u32 loads from src and stores to dst, then bx lr. The
+      following independent deque segment-capacity member at 0x083d9f5c
+      (mov r0,#0x20; bx lr) fixes the true boundary. Whole-image A32 B/BL
+      decoding finds exactly two inbound unconditional plain bl calls at
+      0x083dffec and 0x083e0004, zero predicated bl calls, and no body calls.
+      The sole caller uses the copied words as a deque iterator (cur,
+      seg_base, seg_end, seg_slot); r0 preserves dst despite Ghidra declaring
+      void. A dedicated exported text section prevents LLVM from folding this
+      independently hookable byte-identical instantiation into the canonical
+      deque_iter_assign; no other deliberate deviations.
   - address: 0x083d9f64
     ghidra: FUN_083d9f64
     name: deque_iter_assign_alias_9f64
