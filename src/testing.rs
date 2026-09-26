@@ -576,6 +576,12 @@ pub mod hints {
     // 0x5e00_0000: dedicated to ui/plst_slot_materialize's raw-u32 element,
     // header, slot-record, and source-buffer fixture; mappings never unmap.
     pub const PLST_SLOT_MATERIALIZE: usize = 0x5e00_0000;
+    // 0x5f10_0000: dedicated to cxx/deque_front_advance_release's
+    // target-width segment-map fixture; mappings never unmap.
+    pub const DEQUE_FRONT_ADVANCE_RELEASE: usize = 0x5f10_0000;
+    // 0x5f20_0000: dedicated to cxx/deque_front_advance_release's empty
+    // deque target-width segment-map fixture; mappings never unmap.
+    pub const DEQUE_FRONT_ADVANCE_RELEASE_EMPTY: usize = 0x5f20_0000;
     // 0x4600_0000, skipping 0x4200_0000..0x4500_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
