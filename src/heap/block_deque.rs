@@ -629,6 +629,38 @@ pub unsafe extern "C" fn deque_construct_elem4_alias_ee30(
     (*dq).map = core::ptr::null_mut();
     dq
 }
+/// deque_construct_elem4_alias_ea68 — original: `FUN_083dea68` @
+/// 0x083dea68 (64 bytes, `0x083dea68..0x083deaa7`; the next separately
+/// linked helper begins at 0x083deaa8). Raw ARM decoding finds two incoming
+/// unconditional plain `bl` calls (0x0815b978 and 0x0815b984), no predicated
+/// forms, and one outgoing plain `bl` at 0x083dea80 to
+/// [`crate::cxx::templates::deque_iter_init_elem4_alias_a1d4`] @ 0x083da1d4.
+///
+/// Default-constructs a 0x28-byte 4-byte-element deque head. Stock initializes
+/// a stack iterator with NULL `cur` and slot, copies it to `end` then `begin`,
+/// and clears `count` and `map`; its register restore returns the original
+/// `dq`.
+///
+/// Deliberate deviation: NULL inputs make the iterator unconditionally
+/// [`DequeIter::NULL`], so the port writes it directly and omits the redundant
+/// stack temporary and callee.
+///
+/// # Safety
+///
+/// `dq` must be valid for writes through the 0x28-byte [`DequeHead`] prefix.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_construct_elem4_alias_ea68")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_construct_elem4_alias_ea68(
+    dq: *mut DequeHead,
+) -> *mut DequeHead {
+    (*dq).end = DequeIter::NULL;
+    (*dq).begin = (*dq).end;
+    (*dq).count = 0;
+    (*dq).map = core::ptr::null_mut();
+    dq
+}
+
 
 /// deque_construct_elem4_alias_f154 — original: `FUN_083df154` @
 /// 0x083df154 (64 bytes, `0x083df154..0x083df193`; the next separately
@@ -1243,6 +1275,42 @@ mod tests {
         }
         assert_eq!(dq.count, 0);
         assert!(dq.map.is_null());
+    }
+
+    #[test]
+    fn construct_elem4_alias_ea68_zeroes_a_garbage_head_and_preserves_tail() {
+        #[repr(C)]
+        struct HeadWithTail {
+            head: DequeHead,
+            tail: u32,
+        }
+        let garbage = DequeIter {
+            cur: 0x11 as *mut u8,
+            seg_base: 0x22 as *mut u8,
+            seg_end: 0x33 as *mut u8,
+            seg_slot: 0x44 as *mut *mut u8,
+        };
+        let mut obj = HeadWithTail {
+            head: DequeHead {
+                begin: garbage,
+                end: garbage,
+                count: u32::MAX,
+                map: 0x55 as *mut *mut u8,
+            },
+            tail: 0xcafe_babe,
+        };
+        unsafe {
+            assert!(deque_construct_elem4_alias_ea68(&mut obj.head) == &mut obj.head);
+        }
+        for it in [&obj.head.begin, &obj.head.end] {
+            assert!(it.cur.is_null());
+            assert!(it.seg_base.is_null());
+            assert!(it.seg_end.is_null());
+            assert!(it.seg_slot.is_null());
+        }
+        assert_eq!(obj.head.count, 0);
+        assert!(obj.head.map.is_null());
+        assert_eq!(obj.tail, 0xcafe_babe);
     }
 
     #[test]
