@@ -2076,6 +2076,10 @@ pub mod hints {
     // list-owner and one-node sentinel fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const LIST_NODE_POOL_LIST_CONSTRUCT: usize = 0xe240_0000;
+    // 0xe480_0000: dedicated to cxx/selector_list_construct's target-width
+    // list-owner and 24-byte sentinel fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const SELECTOR_LIST_CONSTRUCT: usize = 0xe480_0000;
     // 0xe2c0_0000: dedicated to cxx/list_node_pool_list_insert_payload_range's
     // target-width list and source-range fixture; mappings never unmap, so no
     // other user may share this hint.

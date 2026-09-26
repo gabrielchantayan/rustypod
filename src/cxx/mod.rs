@@ -118,6 +118,7 @@ pub mod list_node_pool_list_erase;
 pub mod list_node_pool_list_erase_releasing_payload;
 pub mod list_node_pool_clear_owned;
 pub mod list_node_pool_list_construct;
+pub mod selector_list_construct;
 pub mod list_node_pool_list_insert_payload_range;
 pub mod list_node_pool_list_clear;
 pub mod word_list_node_pool_list_recycle_all;
