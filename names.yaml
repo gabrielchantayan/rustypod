@@ -145936,3 +145936,34 @@ functions:
       that otherwise dead walk; direct fields preserve target member order
       without relying on host pointer byte offsets. Host tests cover empty and
       populated vectors, return identity, and capacity-based count calculation.
+
+  - address: 0x083e61f8
+    ghidra: FUN_083e61f8
+    name: trivial_byte_vector_destruct
+    size: 60
+    sig: "u8 **trivial_byte_vector_destruct(u8 **vector)"
+    module: cxx/trivial_byte_vector_destruct
+    status: ported
+    vars:
+      param_1/r0/r4: vector
+      iVar1/r0/r2: begin
+      param_1[1]/r1: end
+      param_1[2]/r1: end_of_storage
+    renames:
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec words establish the true 60-byte extent
+      0x083e61f8..0x083e6234; the next separately linked function begins at
+      0x083e6234 with push {r2,r3,r4,r5,r6,r7,r8,lr}. The body has exactly
+      one direct unconditional BL, cxx_array_dealloc @ 0x08266f2c, and no
+      predicated BL. Whole-image A32 decoding finds exactly two inbound plain
+      BL call sites, 0x08104504 and 0x08104510, and no predicated inbound BL
+      or tail branches. This is a vector<u8> destructor: it walks [begin,end)
+      in one-byte increments with an empty retained trivial-destructor loop,
+      passes begin, end_of_storage-begin, and zero to the deallocation veneer,
+      then returns the descriptor unchanged. The veneer is a bare branch to
+      operator_delete, so its capacity and element-size arguments are dead;
+      the Rust port retains the capacity calculation but deliberately routes
+      only the live begin pointer through the ported free seam. Host tests
+      cover empty and nonempty vectors, returned descriptor identity,
+      descriptor non-mutation, and exactly one release.
