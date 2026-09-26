@@ -248,6 +248,7 @@ pub mod word_array_remove_prefix;
 pub mod singly_linked_list_remove;
 pub mod singly_linked_list_unlink;
 pub mod singly_linked_list_append;
+pub mod tree_children_flatten_into_parent;
 pub mod service_manager_get;
 pub mod selector_record_address;
 pub mod selector_slot_address;

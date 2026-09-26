@@ -149584,3 +149584,27 @@ functions:
       comparison_context preserves the ABI but is not dereferenced. Nodes and
       links remain u32 addresses to retain the retail four-byte layout on
       64-bit host tests.
+
+  - address: 0x083bfe30
+    ghidra: FUN_083bfe30
+    name: tree_children_flatten_into_parent
+    size: 60
+    sig: "void tree_children_flatten_into_parent(u32 *parent, u32 first_child)"
+    module: util/tree_children_flatten_into_parent
+    status: ported
+    renames:
+      param_1/r0: parent
+      param_2/r1: first_child
+      iVar1/r4: node
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte A32 extent
+      0x083bfe30..0x083bfe6b; the next independently entered function starts
+      at 0x083bfe6c with stmdb sp!,{r2,r3,r4,r5,r6,r7,r8,r9,sl,lr}. Whole-image
+      A32 decoding finds exactly two inbound unconditional plain bl sites
+      (0x083bfab0 and recursive 0x083bfe48) and zero predicated inbound bl
+      sites. The body has one plain recursive bl and no predicated calls. It
+      recursively flattens each node's +0x0c child chain, prepends that node
+      to parent+0x04, and follows the original +0x08 sibling chain. Target
+      pointers remain u32 words to preserve four-byte retail layout on 64-bit
+      hosts; no other deliberate deviations. Host tests cover an empty child
+      chain and recursive sibling/descendant ordering.
