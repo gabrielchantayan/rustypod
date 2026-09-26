@@ -65,6 +65,30 @@ functions:
       non-sentinel node it unlinks the target-width intrusive-ring node,
       decrements state with wrapping arithmetic, and prepends it to free.
       Selecting the sentinel only returns it and leaves the list unchanged.
+  - address: 0x083dd584
+    ghidra: FUN_083dd584
+    name: list_node_pool_list_clear
+    size: 112
+    sig: "void list_node_pool_list_clear(ListNodePoolList *list)"
+    module: cxx/list_node_pool_list_clear
+    status: ported
+    renames:
+      param_1/r0: list
+      "list+0x04": free
+      "list+0x10": sentinel
+      "list+0x14": state
+      FUN_083dd5f4: list_node_pool_list_erase
+      FUN_083d6f94: not_equal_deref_alias_6f94
+    notes: >-
+      Raw osos.dec establishes the exact 112-byte extent: 28 A32 words from
+      0x083dd584 through pop {r4,r5,r6,pc} at 0x083dd5f0; 0x083dd5f4 begins
+      list_node_pool_list_erase. It has two outgoing unconditional BL calls,
+      at 0x083dd5c4 to list_node_pool_list_erase and at 0x083dd5d8 to the
+      byte-identical not_equal_deref alias 0x083d6f94, with no predicated BL;
+      Ghidra reports two inbound BL call sites. It erases every non-sentinel
+      intrusive-ring node in successor order, leaving the sentinel self-linked
+      and the removed chain on free. Rust deliberately omits the retail
+      epilogue's final write to dead stack storage.
   - address: 0x083dd660
     ghidra: FUN_083dd660
     name: list_node_pool_list_append_value
