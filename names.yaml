@@ -17528,6 +17528,38 @@ functions:
       (read|write)_unaligned idiom, LLVM peels the first advance
       iteration and adds its fp frame — the accepted house deviations.
 
+  - address: 0x083d5c90
+    ghidra: FUN_083d5c90
+    name: list_iterator_remove_if_owner_matches
+    size: 124
+    sig: "void list_iterator_remove_if_owner_matches(u8 **output, u8 *const *expected_owner, u8 **candidate_iterator)"
+    module: cxx/list_iterator_remove_if_owner_matches
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: expected_owner
+      param_3/r2: candidate_iterator
+      iVar3/r7: expected_owner_value
+      piVar2/r0: node
+      FUN_083d5e5c: iter_owner
+      FUN_082aad24: operator_delete
+      "node+0x00": owner
+      "node+0x04": next
+      "node+0x08": previous
+      "node+0x0c": element
+    notes: >-
+      Raw osos.dec establishes the exact 124-byte A32 extent
+      0x083d5c90..0x083d5d0b; the next independently entered function begins
+      at 0x083d5d0c. Whole-image call analysis finds two inbound unconditional
+      plain BL sites and no predicated inbound BL sites. The body has two
+      outgoing direct plain BL calls, iter_owner @ 0x083d5e5c and
+      operator_delete @ 0x082aad24, plus one predicated BLXNE through the
+      optional element's vtable slot +0x04. If the candidate iterator's owner
+      differs from *expected_owner it stores the node unchanged. Otherwise it
+      unlinks the node from its doubly linked ring, optionally destroys its
+      element, and deletes the node. Deliberate deviation: retail's delete
+      tail path cannot return to this body; Rust's normal veneer call writes
+      output afterwards when a host heap mock returns.
   - address: 0x083d5d20
     ghidra: FUN_083d5d20
     name: list_splice
