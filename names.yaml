@@ -148800,3 +148800,26 @@ functions:
       The growth helper has one caller and its three-argument ABI is verified
       from this call site and its raw code; it remains a target-call seam.
       Deliberate deviations: word indexing replaces the target's byte offsets.
+  - address: 0x083d8344
+    ghidra: FUN_083d8344
+    name: ostream_flush
+    size: 76
+    sig: "BasicOstream *ostream_flush(BasicOstream *ostream)"
+    module: cxx/ostream_flush
+    status: ported
+    renames:
+      param_1/r0: ostream
+      piVar1/r0: streambuf
+      iVar2/r0: sync_result
+      FUN_083e7898: basic_ios_setstate
+    notes: >-
+      Raw ARM proves the exact 76-byte extent 0x083d8344..0x083d838f:
+      push {r4,lr} at entry through pop {r4,pc} at 0x083d838c, followed by
+      the separately linked ostream_write_padding at 0x083d8390. Whole-image
+      A32 decoding finds two inbound predicated BL callers (0x083d8248 and
+      0x083d8484), no inbound plain BL callers; the body has one indirect BLX
+      through streambuf vtable slot +0x34 and one predicated BLEQ to
+      0x083e7898. It derives the basic_ios base from the vtable's -0x0c
+      offset, calls pubsync for a non-NULL streambuf at +0x34, and calls the
+      verified-address basic_ios_setstate seam with badbit (1) only for result
+      -1. Host hooks deliberately replace target-width function pointers.
