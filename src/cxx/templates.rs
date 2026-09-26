@@ -1316,6 +1316,38 @@ pub unsafe extern "C" fn deque_iter_assign_alias_a34c(
     }
     dst
 }
+/// deque_iter_assign_alias_a3b8 — original: `FUN_083da3b8` @ 0x083da3b8
+/// (36 bytes, `0x083da3b8..0x083da3dc`; Ghidra reports 36).
+///
+/// Raw ARM establishes four forward aligned u32 loads from `src` and stores to
+/// `dst`, followed by `bx lr`; the adjacent `mov r0,#0x20; bx lr` member at
+/// 0x083da3dc fixes the true extent. Whole-image ARM B/BL decoding finds two
+/// unconditional plain `bl` callers at 0x0825c3b8 and 0x0825c3d0, with no
+/// predicated `bl` forms or direct tail branches.
+///
+/// This byte-identical deque-iterator assignment copies `cur`, `seg_base`,
+/// `seg_end`, and `seg_slot`, preserving `dst` in r0 as its return value.
+/// Deliberate deviation: a distinct export and text section keep this
+/// independently hookable target from folding into the [`deque_iter_assign`]
+/// family.
+///
+/// # Safety
+///
+/// Both pointers must be valid, 4-byte aligned and 16 bytes wide; retailOS
+/// performs a forward word copy with no NULL or overlap handling.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.deque_iter_assign_alias_a3b8")]
+#[inline(never)]
+pub unsafe extern "C" fn deque_iter_assign_alias_a3b8(
+    dst: *mut u32,
+    src: *const u32,
+) -> *mut u32 {
+    for word in 0..4 {
+        dst.add(word).write(src.add(word).read());
+    }
+    dst
+}
+
 
 /// deque_iter_assign_alias_c774 — original: `FUN_0824c774` @ `0x0824c774`
 /// (36 bytes; five unconditional plain-`bl` call sites, zero predicated
@@ -7301,6 +7333,29 @@ mod tests {
         left_guard: usize,
         vector: VectorStorage,
         right_guard: usize,
+    }
+
+    #[test]
+    fn deque_iter_assign_alias_a3b8_copies_words_and_preserves_forward_overlap() {
+        let mut distinct = [
+            0xfeed_face,
+            0x0123_4567,
+            0x89ab_cdef,
+            0,
+            0,
+            0,
+            0,
+            0xdec0_ded1,
+        ];
+        let returned = unsafe {
+            deque_iter_assign_alias_a3b8(distinct.as_mut_ptr().add(3), distinct.as_ptr().add(1))
+        };
+        assert_eq!(returned, unsafe { distinct.as_mut_ptr().add(3) });
+        assert_eq!(distinct, [0xfeed_face, 0x0123_4567, 0x89ab_cdef, 0x0123_4567, 0x89ab_cdef, 0x0123_4567, 0x89ab_cdef, 0xdec0_ded1]);
+
+        let mut overlap = [0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444, 0x5555_5555];
+        unsafe { deque_iter_assign_alias_a3b8(overlap.as_mut_ptr().add(1), overlap.as_ptr()) };
+        assert_eq!(overlap, [0x1111_1111; 5]);
     }
 
     #[test]
