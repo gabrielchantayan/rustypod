@@ -179,6 +179,9 @@ pub mod hints {
     // 0x6c10_0000: dedicated to cxx/vector4_resize_fill's target-width
     // vector and allocation fixtures; mappings never unmap.
     pub const VECTOR4_RESIZE_FILL: usize = 0x6c10_0000;
+    // 0x6d10_0000: dedicated to cxx/vector_word_copy_construct's target-width
+    // vector source, destination, and allocation fixtures; mappings never unmap.
+    pub const VECTOR_WORD_COPY_CONSTRUCT: usize = 0x6d10_0000;
     // 0x6e10_0000: dedicated to ui/tracked_object_register's raw-u32 object
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const TRACKED_OBJECT_REGISTER: usize = 0x6e10_0000;

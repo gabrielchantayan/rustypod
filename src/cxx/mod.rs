@@ -90,6 +90,7 @@ pub mod deque_layout_copy;
 pub mod deque_iterator_current_or_zero;
 pub mod deque_front_dispatch;
 pub mod vector4_resize_fill;
+pub mod vector_word_copy_construct;
 pub mod word_range_fill_if_destination;
 pub mod word_range_copy_if_destination;
 pub mod pair_range_fill_after_cursor;
