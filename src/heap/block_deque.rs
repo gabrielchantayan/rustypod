@@ -576,8 +576,9 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 /// `FUN_083d9f5c` @ 0x083d9f5c, `FUN_083d9fcc` @ 0x083d9fcc,
 /// `FUN_083da1a8` @ 0x083da1a8, `FUN_083da240` @ 0x083da240,
 /// `FUN_083da2d8` @ 0x083da2d8, `FUN_083da344` @ 0x083da344,
-/// `FUN_083da3dc` @ 0x083da3dc, `FUN_083da424` @ 0x083da424, and
-/// `FUN_083da450` @ 0x083da450 (8 bytes each).
+/// `FUN_083da3b0` @ 0x083da3b0, `FUN_083da3dc` @ 0x083da3dc,
+/// `FUN_083da424` @ 0x083da424, and `FUN_083da450` @ 0x083da450
+/// (8 bytes each).
 ///
 /// The raw ARM body is `mov r0, #0x20; bx lr`: return the 0x20 elements
 /// per deque segment. `FUN_083da424` occupies
@@ -587,9 +588,13 @@ pub unsafe extern "C" fn copy_two_words_and_byte_alias_d974(
 /// no predicated calls or tail branches. `FUN_083da2d8` has five plain
 /// `bl` call sites (0x083da328, 0x083defd0, 0x083df0f4, 0x083df118, and
 /// 0x083df1f4), with no predicated calls or tail branches.
-/// `FUN_083da3dc` has seven unconditional plain `bl` call sites
-/// (0x083da408, 0x083df58c, 0x083df5ec, 0x083df620, 0x083df744,
-/// 0x083df768, and 0x083df838), with no predicated calls or tail branches.
+/// `FUN_083da3b0` occupies `0x083da3b0..0x083da3b7`; its successor,
+/// `deque_iter_assign_alias_a3b8`, begins at `0x083da3b8`. It has two
+/// unconditional plain `bl` call sites (0x083ea490 and 0x083ea4f8), no
+/// predicated calls, and no tail branches. `FUN_083da3dc` has seven
+/// unconditional plain `bl` call sites (0x083da408, 0x083df58c, 0x083df5ec,
+/// 0x083df620, 0x083df744, 0x083df768, and 0x083df838), with no predicated
+/// calls or tail branches.
 /// `FUN_083da450` has 11 unconditional plain `bl` call sites and no
 /// predicated calls or tail branches. `FUN_083da240` has 12 unconditional
 /// `bl` call sites and no predicated calls, binary-verified;
