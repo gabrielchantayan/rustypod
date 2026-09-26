@@ -146351,3 +146351,28 @@ functions:
       tests install a seam. Host pointer fields are wider than the target's
       four-byte words, so the port uses typed DequeIter copies rather than
       target byte offsets.
+
+  - address: 0x083dfeb8
+    ghidra: FUN_083dfeb8
+    name: deque_push_back_elem4_alias_feb8
+    size: 92
+    sig: "void deque_push_back_elem4_alias_feb8(BlockDeque *deque, const u32 *value)"
+    module: heap/deque_push_back_elem4
+    status: ported
+    renames:
+      param_1/r0/r4: deque
+      param_2/r1/r5: value
+      FUN_083d7630: container_is_empty_alias_7630
+      FUN_083df988: deque_push_back_aux_elem4_alias_feb8
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x083dfeb8..0x083dff14:
+      push {r4,r5,r6,lr} through pop {r4,r5,r6,pc}, bounded by the next
+      independently linked push at 0x083dff14. Whole-image A32 decoding finds
+      exactly two inbound unconditional plain BL sites, 0x081de288 and
+      0x083ea568, and no predicated inbound BL sites. Its body contains two
+      plain BL instructions, to the ported count-zero predicate 0x083d7630 and
+      the unported deque grow helper 0x083df988, with no predicated BL.
+      It grows when empty or end.cur equals end.seg_end, stores *value through
+      a non-NULL end cursor, advances that cursor by four bytes, and wraps the
+      deque count. The growth helper uses a dedicated volatile seam: target
+      builds call 0x083df988, while host tests install a faithful model.
