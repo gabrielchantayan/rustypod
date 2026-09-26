@@ -2794,6 +2794,41 @@ pub unsafe extern "C" fn refcounted_body_release_dtor_variant(
 
     slot.write(core::ptr::null_mut());
 }
+/// refcounted_body_range_release — original: `FUN_083e0c54` @ 0x083e0c54
+/// (40 bytes; raw ARM runs through `pop {r4,r5,pc}` at 0x083e0c78, followed
+/// by the independent `push {r2-r9,lr}` at 0x083e0c7c). The body has one
+/// unconditional `bl` to [`refcounted_body_release_dtor_variant`] and no
+/// predicated `bl` instructions. Raw full-image A32 decoding finds two inbound
+/// plain direct `bl` sites and zero predicated inbound sites.
+///
+/// Releases each four-byte refcounted-body slot in `[begin, end)`. The first
+/// ARM argument is deliberately ignored; it is the containing vector pointer
+/// at both observed call sites. Rust uses typed pointer advancement instead of
+/// the stock `add r4,#4`, with the same valid half-open range precondition.
+///
+/// Deliberate codegen deviation: match.py shows LLVM emits a zero-length
+/// early return and frame-pointer prologue rather than the ARM's unconditional
+/// push and branch-to-loop-test. The call, four-byte cursor stride, comparison,
+/// and backedge are preserved.
+///
+/// # Safety
+/// `begin..end` must be a valid contiguous range of aligned
+/// [`RefcountedBody`] pointer slots. Each non-NULL slot must meet
+/// [`refcounted_body_release_dtor_variant`]'s safety requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_range_release")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_range_release(
+    _vector: *mut u8,
+    mut begin: *mut *mut RefcountedBody,
+    end: *mut *mut RefcountedBody,
+) {
+    while begin != end {
+        refcounted_body_release_dtor_variant(begin);
+        begin = begin.add(1);
+    }
+}
+
 
 /// refcounted_body_release_retain_count — original: `FUN_0839d498` @
 /// 0x0839d498 (152 bytes — Ghidra reports 144 but omits the final
@@ -5764,6 +5799,48 @@ mod tests {
             unsafe { refcounted_body_release_dtor_variant(&mut slot) };
 
             assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        #[test]
+        fn range_release_preserves_empty_range_and_releases_each_slot() {
+            let _bench = bench();
+            let mut first = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut second = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slots = [
+                &mut first as *mut RefcountedBody,
+                &mut second as *mut RefcountedBody,
+            ];
+
+            unsafe {
+                refcounted_body_range_release(
+                    core::ptr::null_mut(),
+                    slots.as_mut_ptr(),
+                    slots.as_mut_ptr(),
+                );
+            }
+            assert_eq!(first.refcount, 2);
+            assert_eq!(second.refcount, 2);
+
+            unsafe {
+                refcounted_body_range_release(
+                    core::ptr::null_mut(),
+                    slots.as_mut_ptr(),
+                    slots.as_mut_ptr().add(slots.len()),
+                );
+            }
+            assert_eq!(first.refcount, 1);
+            assert_eq!(second.refcount, 1);
+            assert!(slots[0].is_null());
+            assert!(slots[1].is_null());
             assert!(events().is_empty());
         }
 
