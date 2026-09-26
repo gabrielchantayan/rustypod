@@ -54959,6 +54959,27 @@ functions:
       0x0821580c, and 0x083df4a4; no predicated calls or tail branches target
       it. The routine has no NULL or overlap guard: it performs its four
       reads and writes in increasing word order and leaves dst in r0.
+  - address: 0x083da3b8
+    ghidra: FUN_083da3b8
+    name: deque_iter_assign_alias_a3b8
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_a3b8(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec fixes the 36-byte extent at 0x083da3b8..0x083da3db:
+      four forward aligned u32 loads from src and stores to dst, then bx lr.
+      The adjacent 8-byte deque segment-capacity member begins at 0x083da3dc.
+      Whole-image ARM B/BL decoding finds exactly two unconditional plain bl
+      callers at 0x0825c3b8 and 0x0825c3d0, zero predicated bl callers, and
+      zero direct tail branches. Byte identity with deque_iter_assign at
+      0x083da458 and its placement after that template's capacity member
+      identify it as the 16-byte deque iterator assignment (cur, seg_base,
+      seg_end, seg_slot); dst passes through r0 despite Ghidra declaring void.
+      It is separately exported and link-sectioned so LLVM cannot fold this
+      independently hookable seam into another byte-identical copy; no other
+      deliberate deviations.
 
 
   - address: 0x0824c774
