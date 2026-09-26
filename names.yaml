@@ -149186,3 +149186,29 @@ functions:
       then counts the resulting half-open iterator range. Stack temporaries
       are Rust locals; the unported helpers remain verified-address target
       dispatches and host-test seams.
+
+  # --- Secondary standard-stream subobject predicate ---
+  - address: 0x083d6ec4
+    ghidra: FUN_083d6ec4
+    name: secondary_standard_stream_subobject
+    size: 68
+    sig: "u32 secondary_standard_stream_subobject(const i32 **subobject)"
+    module: cxx/secondary_standard_stream_subobject
+    status: ported
+    renames:
+      param_1/r0: subobject
+      FUN_083d6e9c: primary_standard_stream_subobject
+      DAT_083d6f08: standard_stream_subobjects
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte A32 body from
+      0x083d6ec4 through 0x083d6f07; the literal table pointer at
+      0x083d6f08 is data and 0x083d6f0c starts the next function. The body
+      has one outgoing plain BL at 0x083d6ecc to 0x083d6e9c and no
+      predicated BLs. Whole-image raw A32 decoding finds one inbound
+      predicated BLNE at 0x083d8458 and one inbound plain BL at 0x083d84b0.
+      The helper accepts the primary standard-stream subobject; otherwise
+      this routine applies the signed vtable offset-to-top and compares the
+      complete-object address against slots +8 and +12 of the verified
+      three-pointer table at 0x08b316e8. The unported helper remains a
+      verified-address target dispatch and host-test seam; the table uses a
+      native-width host seam to avoid dereferencing firmware RAM.
