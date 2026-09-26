@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dbfb4
+    ghidra: FUN_083dbfb4
+    name: embedded_list_clear
+    size: 56
+    sig: "void embedded_list_clear(void *owner)"
+    module: cxx/embedded_list_clear
+    status: ported
+    renames:
+      param_1/r0: owner
+      FUN_083cc794: embedded_list_clear_operation
+    notes: >-
+      Raw words e92d400e e5901010 e1a0300d e5911008 e58d1008 e5902010
+      e58d1004 e1a01000 e58d2008 e58d2000 e28d2004 e28d0008 ebffc1ea
+      e8bd900c establish the exact 56-byte A32 body from 0x083dbfb4 through
+      0x083dbfeb; the following push at 0x083dbfec starts the next real
+      function. The sole outbound direct call is unconditional bl
+      FUN_083cc794 at 0x083dbfe4; no predicated bl occurs. Full-image raw
+      branch decoding finds two inbound unconditional bl sites, 0x0819edc4
+      and 0x0819edcc, with no predicated sites. The wrapper reloads owner+0x10
+      after loading its +0x08 link and gives the still-unported list operation
+      stack-local output, link, and list values. Target builds call its verified
+      address; host tests replace it with a volatile seam without claiming a
+      semantic identity for the callee.
   - address: 0x083dc0a4
     ghidra: FUN_083dc0a4
     name: tree_lookup_result_write

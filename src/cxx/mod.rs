@@ -122,6 +122,7 @@ pub mod word_pair_list_insert_before;
 pub mod word_pair_list_sentinel_initialize;
 pub mod word_pair_list_copy_construct;
 pub mod embedded_list_operation_dispatch;
+pub mod embedded_list_clear;
 pub mod vector_word_clear;
 pub mod word_range_fill_if_destination;
 pub mod word_range_copy_if_destination;
