@@ -146322,3 +146322,32 @@ functions:
       element-destruction loop, then calls cxx_array_dealloc(begin,
       capacity - begin, 0) and returns the range. Rust preserves the loop and
       wrapping target-width arithmetic; no deliberate deviations.
+  - address: 0x083dffc4
+    ghidra: FUN_083dffc4
+    name: deque_construct_range_elem12
+    size: 128
+    sig: "BlockDeque *deque_construct_range_elem12(BlockDeque *deque, const DequeIter *range)"
+    module: heap/deque_construct_range_elem12
+    status: ported
+    vars: {param_1/r4: deque, param_2/r6: range, local_28: first, uStack_38: last}
+    renames:
+      FUN_083ddffc: deque_construct
+      FUN_083d9f38: deque_iter_assign_alias_9f38
+      FUN_083ea02c: deque_range_populate_elem12
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte extent from push
+      {r4-r8,lr} at 0x083dffc4 through pop {r4-r8,pc} at 0x083e0040; the
+      next separately linked function begins with push {r4-r6,lr} at
+      0x083e0044. The body has four unconditional plain BL instructions
+      (0x083ddffc, 0x083d9f38 twice, and 0x083ea02c) and no predicated BL
+      instructions. Raw caller disassembly identifies exactly two inbound
+      unconditional plain BL sites, 0x081ef8c8 and 0x081ef974, and no
+      predicated form. It zeros BlockDeque.map_cap, default-constructs its
+      0x28-byte deque head, copies the adjacent first/last 16-byte iterators,
+      then passes both to the 12-byte-element range-population helper. The
+      default constructor is byte-identical in structure to deque_construct;
+      Rust calls that port directly. The range helper remains unported, so
+      target builds call its verified retailOS address 0x083ea02c and host
+      tests install a seam. Host pointer fields are wider than the target's
+      four-byte words, so the port uses typed DequeIter copies rather than
+      target byte offsets.
