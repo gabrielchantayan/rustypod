@@ -583,6 +583,7 @@ pub mod vtable_089825d4_destruct;
 pub mod owned_guarded_slot_04_replace;
 pub mod guarded_vtable_slot_1c_dispatch;
 pub mod guarded_vtable_slot_40_dispatch;
+pub mod guarded_vtable_slot_40_dispatch_615c;
 pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
 pub mod vtable_two_pair_metadata_construct;
