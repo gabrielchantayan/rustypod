@@ -2701,6 +2701,11 @@ pub mod hints {
     // 0x76b0_0000: dedicated to cxx/slot_array_remove_at_release's target-width
     // storage and polymorphic object fixture; mappings never unmap.
     pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE: usize = 0x76b0_0000;
+    // 0x76c0_0000 / 0x76d0_0000: dedicated to
+    // cxx/slot_array_remove_at_release_inline's target-width storage and
+    // polymorphic object fixtures; mappings never unmap.
+    pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE_INLINE: usize = 0x76c0_0000;
+    pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE_INLINE_EMPTY: usize = 0x76d0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
