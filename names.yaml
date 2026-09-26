@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083dc1d8
+    ghidra: FUN_083dc1d8
+    name: list_node_pool_clear_owned
+    size: 116
+    sig: "void list_node_pool_clear_owned(OwnedListHeader *header)"
+    module: cxx/list_node_pool_clear_owned
+    status: ported
+    renames:
+      param_1/r0: header
+      "header+0x10": sentinel
+      FUN_083dc24c: list_node_pool_erase_owned
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte extent: 29 A32 words from
+      push {r4,r5,r6,lr} at 0x083dc1d8 through pop {r4,r5,r6,pc} at
+      0x083dc248; 0x083dc24c begins list_node_pool_erase_owned. The body has
+      one outgoing unconditional plain BL at 0x083dc214 to
+      list_node_pool_erase_owned and zero predicated BL instructions.
+      Whole-image A32 decoding finds two inbound unconditional plain BL sites
+      at 0x08132e50 and 0x08134080, with no predicated inbound calls. It walks
+      the intrusive ring from sentinel->next, erasing each non-sentinel node
+      and using the returned successor after each node is recycled. Deliberate
+      deviation: Rust replaces retail's stack-local current-node and successor
+      slots with locals, preserving all observable list and payload effects.
   - address: 0x083dc7e4
     ghidra: FUN_083dc7e4
     name: record_40_list_node_pool_acquire

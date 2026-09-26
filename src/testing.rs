@@ -1030,6 +1030,10 @@ pub mod hints {
     // client-object and thread-context fixtures; mappings never unmap, so
     // no other user may share this hint.
     pub const IAP_INCOMING_CLIENT_BASE: usize = 0xca00_0000;
+    // 0xca10_0000: dedicated to cxx/list_node_pool_clear_owned's target-width
+    // list and intrusive-node fixture; mappings never unmap, so no other port
+    // may share this hint.
+    pub const LIST_NODE_POOL_CLEAR_OWNED: usize = 0xca10_0000;
     // 0x4300_0000: dedicated to ui/current_window's raw-u32 session and
     // window fixture; mappings never unmap, so no other user may share
     // this hint.
