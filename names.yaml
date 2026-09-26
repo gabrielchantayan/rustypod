@@ -147609,3 +147609,27 @@ functions:
       result and copies exactly those five bytes to result. Deliberate
       deviation: host builds use an injectable lookup seam; target builds
       invoke 0x083cc874 directly.
+  - address: 0x083dbde8
+    ghidra: FUN_083dbde8
+    name: cxx_container_first_node_083dbde8
+    size: 20
+    sig: "void *cxx_container_first_node_083dbde8(const void *header)"
+    module: cxx/container_first_node_083dbde8
+    status: ported
+    renames:
+      param_1/r0: header
+      "[header + 0x10]": nested_container
+      "[nested_container + 0x08]": first_node
+    notes: >-
+      Raw osos.dec words establish the exact five-instruction, 20-byte A32
+      body 0x083dbde8..0x083dbdfb: push {r3,lr}; ldr r0,[r0,#0x10]; ldr
+      r0,[r0,#0x08]; str r0,[sp]; pop {r3,pc}. The push {r1,r2,r3,lr} at
+      0x083dbdfc is the next independently entered function boundary. The
+      body has zero unconditional plain BL instructions and zero predicated BL
+      instructions. Whole-image A32 decoding finds exactly two inbound
+      unconditional plain BL sites, 0x081e1f14 and 0x081e2044, and no
+      predicated inbound forms. Both callers use the returned target-width
+      word as the first node in a traversal terminated by header+0x10. This
+      body is byte-identical to the separately linked functions at 0x083dbeb4
+      and 0x083dbec8; Rust preserves the two ordered target-width loads and
+      return value while deliberately omitting their dead stack home traffic.
