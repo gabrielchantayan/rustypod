@@ -15401,6 +15401,26 @@ functions:
       src-in-r1 twin has 17 byte-identical copies and is ported
       separately as deque_iter_assign (canonical 0x083da458).
 
+  - address: 0x083d9e9c
+    ghidra: FUN_083d9e9c
+    name: deque_iter_assign_alias_9e9c
+    size: 36
+    sig: "u32 *deque_iter_assign_alias_9e9c(u32 *dst, const u32 *src)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec words at 0x083d9e9c..0x083d9ebc are four forward aligned
+      ldr/str word pairs followed by bx lr; deque_seg_capacity at 0x083d9ec0
+      is the next independently linked function, fixing the 36-byte extent.
+      The two callers (0x081a846c and 0x081a8484) copy 16-byte deque iterator
+      temporaries. This is byte-identical to the canonical deque_iter_assign
+      at 0x083da458, but remains a dedicated export and text section so LLVM
+      cannot fold this independently hookable seam. Whole-image ARM B/BL
+      decoding verifies exactly two unconditional plain bl calls, zero
+      predicated bl forms, and zero body calls; Ghidra incorrectly declares
+      void, while r0 returns dst unchanged.
+
   - address: 0x083d9ec0
     ghidra: FUN_083d9ec0
     name: deque_seg_capacity
