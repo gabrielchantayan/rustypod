@@ -14726,6 +14726,27 @@ functions:
       deviation: typed u32/u8 pointers replace the original untyped memory
       accesses; write/read order remains identical for overlap behavior.
 
+  - address: 0x083dd990
+    ghidra: FUN_083dd990
+
+    name: copy_two_words_and_byte_alias_d990
+    size: 28
+    sig: "void copy_two_words_and_byte_alias_d990(u32 *dst, const u32 *src, const u8 *byte_src)"
+    module: heap/block_deque
+    vars: {param_1: dst, param_2: src, param_3: byte_src}
+    status: ported
+    notes: >-
+      Raw body spans 0x083dd990..0x083dd9ab; the next real function starts
+      at 0x083dd9ac. Copies src[0] and src[1] to dst[0] and dst[1], then
+      writes *byte_src at byte offset 8. Decoding every ARM B/BL-immediate
+      word in osos.dec finds zero incoming unconditional plain bl call sites
+      and zero predicated bl forms; Ghidra incorrectly attributes the two
+      calls at 0x083d2bc0 and 0x083d2cfc to this address, but raw targets
+      are 0x083dd9ac. Deliberate deviations: typed u32/u8 pointers replace
+      untyped accesses, and a dedicated target text section prevents LLVM
+      folding this address-specific seam into the byte-identical 0x083dd9ac
+      helper.
+
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
 
