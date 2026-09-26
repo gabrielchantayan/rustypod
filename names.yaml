@@ -14708,6 +14708,24 @@ functions:
       r0,#1 / mov r0,#0 return pair; deltas are the crate fp prologue and
       LLVM tail-merging the commit seam call with the root processor call.
 
+  - address: 0x083dd9ac
+    ghidra: FUN_083dd9ac
+
+    name: copy_two_words_and_byte
+    size: 28
+    sig: "void copy_two_words_and_byte(u32 *dst, const u32 *src, const u8 *byte_src)"
+    module: heap/block_deque
+    vars: {param_1: dst, param_2: src, param_3: byte_src}
+    status: ported
+    notes: >-
+      Raw body spans 0x083dd9ac..0x083dd9c7; the next real function starts
+      at 0x083dd9c8. Copies src[0] and src[1] to dst[0] and dst[1], then
+      writes *byte_src at byte offset 8. Decoding every ARM B/BL-immediate
+      word in osos.dec finds two incoming unconditional plain bl call sites
+      (0x083d2bc0 and 0x083d2cfc), with no predicated forms. Deliberate
+      deviation: typed u32/u8 pointers replace the original untyped memory
+      accesses; write/read order remains identical for overlap behavior.
+
   - address: 0x083dd9e4
     ghidra: FUN_083dd9e4
 
