@@ -55689,6 +55689,33 @@ functions:
       substituting the existing shared export for the byte-identical local
       capacity member; wrapping_add preserves the raw null-next-segment result
       (cur/base NULL, end 0x80).
+  - address: 0x083d8390
+    ghidra: FUN_083d8390
+    name: ostream_write_padding
+    size: 80
+    sig: "i32 ostream_write_padding(BasicOstream *ostream, i32 count)"
+    module: cxx/ostream_write_padding
+    status: ported
+    vars: {param_1/r0: ostream, param_2/r1: count, r4: written, r5: ostream, r6: count}
+    renames:
+      FUN_083d8390: ostream_write_padding
+      param_1/r0: ostream
+      param_2/r1: count
+      r4: written
+      r5: ostream
+      r6: count
+    notes: >-
+      Raw ARM establishes the exact 80-byte body 0x083d8390..0x083d83dc:
+      `push {r4,r5,r6,lr}` opens at the entry, `pop {r4,r5,r6,pc}` ends at
+      0x083d83dc, and the separately linked next helper begins at 0x083d83e0.
+      Whole-image ARM B/BL-immediate decoding finds exactly two direct inbound
+      calls, both plain unconditional bl at 0x083b53a0 and 0x083b53f8, with
+      zero predicated forms. The body has one unconditional bl, to the
+      independently named streambuf_sputc at 0x083da5c8. It reads the
+      vtable-relative streambuf at +0x34 and fill byte at +0x3c, writing until
+      count is reached or streambuf_sputc returns exactly -1; negative counts
+      return unchanged. No deviations; host tests replace the target-width
+      callee with a hook.
   - address: 0x083da50c
     ghidra: FUN_083da50c
     name: deque_iter_increment_elem4

@@ -42,6 +42,10 @@ pub mod hints {
     // 0x7010_0000: dedicated to crypto/sha1_managed_context_create's
     // target-width SHA-1 backing context fixture; mappings never unmap.
     pub const SHA1_MANAGED_CONTEXT_CREATE: usize = 0x7010_0000;
+    // 0x6d50_0000 / 0x6d51_0000: dedicated to cxx/ostream_write_padding's
+    // target-width basic_ostream fixtures; mappings never unmap.
+    pub const OSTREAM_WRITE_PADDING_COMPLETE: usize = 0x6d50_0000;
+    pub const OSTREAM_WRITE_PADDING_FAILURE: usize = 0x6d51_0000;
     // 0x6ca0_0000: dedicated to cxx/red_black_tree_payload_8_construct's
     // target-width tree and sentinel fixture; mappings never unmap.
     pub const RED_BLACK_TREE_PAYLOAD_8_CONSTRUCT: usize = 0x6ca0_0000;
