@@ -592,6 +592,9 @@ pub mod hints {
     // flight take the sequential slots, and a collision skips tests
     // silently on every host.
     pub const PENDING_EVENT_INSERT: usize = 0x4600_0000;
+    // 0x5d20_0000: dedicated to cxx/embedded_list_operation_dispatch's
+    // target-width owner and embedded-list fixture; mappings never unmap.
+    pub const EMBEDDED_LIST_OPERATION_DISPATCH: usize = 0x5d20_0000;
     // 0x5f00_0000: dedicated to cxx/stream_read_cxx_string's raw-u32
     // descriptor, owner-state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ_CXX_STRING: usize = 0x5f00_0000;
