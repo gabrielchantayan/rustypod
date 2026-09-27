@@ -532,6 +532,7 @@ pub mod word_table_index_pair_at;
 pub mod red_black_tree_increment;
 pub mod u32_key_tree_equal_range_count;
 pub mod red_black_tree_root_replace;
+pub mod red_black_tree_insert_rebalance;
 pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;
 pub mod list_node_pool_recycle_all;
