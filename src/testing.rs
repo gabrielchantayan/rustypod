@@ -2288,6 +2288,10 @@ pub mod hints {
     // target-width owner/node fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const CXX_STRING_VECTOR_RECORD_SUBTREE_RELEASE: usize = 0x3601_0000;
+    // 0x3602_0000: dedicated to cxx/red_black_tree_vector_subtree_release's
+    // target-width pool/node fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const RED_BLACK_TREE_VECTOR_SUBTREE_RELEASE: usize = 0x3602_0000;
     // 0xdd00_0000: dedicated to cxx/list_node_pool_acquire's target-width
     // ListNodePool fixture slab, skipping 0xdc00_0000 (reserved).
     pub const LIST_NODE_POOL_ACQUIRE: usize = 0xdd00_0000;

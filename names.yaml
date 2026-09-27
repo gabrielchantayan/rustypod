@@ -153881,3 +153881,30 @@ functions:
       tests cover arena advance, free-list reuse, link clearing, and payload
       preservation. match.py reports exit 1 from code scheduling/frame choices;
       both builds retain the free/bump/grow and two-allocation control flow.
+  - address: 0x083ba7a0
+    ghidra: FUN_083ba7a0
+    name: red_black_tree_vector_subtree_release
+    size: 64
+    sig: "void red_black_tree_vector_subtree_release(RedBlackTreeNodePool *pool, RedBlackTreeVectorNode *node)"
+    module: cxx/red_black_tree_vector_subtree_release
+    status: ported
+    renames:
+      param_1/r0/r6: pool
+      param_2/r1/r4: node
+      r5: next
+      "node+0x08": next
+      "node+0x0c": right-subtree/free-link
+      FUN_083b9ffc: red_black_tree_node_pool_release_vector
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 extent: sixteen words
+      from push {r4,r5,r6,lr} at 0x083ba7a0 through pop {r4,r5,r6,pc} at
+      0x083ba7dc; 0x083ba7e0 begins the next real function. The body has two
+      unconditional direct bl instructions, at 0x083ba7b8 (self) and
+      0x083ba7cc (red_black_tree_node_pool_release_vector @ 0x083b9ffc), and
+      no predicated direct bl calls. Independent whole-image A32 decoding
+      finds two inbound plain unconditional bl sites, 0x083ba7b8 and
+      0x083ba5a0, with no predicated inbound sites. It postorder-traverses
+      node+0x0c, snapshots node+0x08 before recycle overwrites node+0x0c, and
+      recycles every node through the vector-destroying pool release. Rust
+      recursion deliberately represents the direct self-call; target links
+      remain 32-bit words so host fixtures preserve retailOS offsets.
