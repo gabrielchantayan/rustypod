@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array pre-destruction ---
+  - address: 0x083d0834
+    ghidra: FUN_083d0834
+    name: opaque_observable_array_pre_destruct
+    size: 88
+    sig: "void opaque_observable_array_pre_destruct(OpaqueObservableArrayPreDestruct *this)"
+    module: cxx/opaque_observable_array_pre_destruct
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      r4: index
+      vtable_plus_0x40/r2: cell_at
+      returned_cell_plus_0x00/r0: allocation_body
+      FUN_0819b5fc: unidentified_string_pair_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent: twenty-two words
+      from push {r4,r5,r6,lr} at 0x083d0834 through pop {r4,r5,r6,pc} at
+      0x083d0888; the push at 0x083d088c begins the next real function. The
+      body has two unconditional plain direct BL calls, at 0x083d0860 to
+      unidentified_string_pair_destroy/FUN_0819b5fc and at 0x083d0864 to
+      operator_delete/FUN_082aad24; it has zero predicated direct BL calls and
+      one unconditional virtual BLX through vtable+0x40 at 0x083d0850. Raw
+      whole-image branch decoding finds two inbound plain BL call sites and no
+      predicated inbound BL sites. When enabled, it walks signed indices
+      [0,count), obtains each cell through that virtual accessor, and for each
+      nonzero allocation body destroys it then tag-2-deletes the destructor's
+      returned pointer. Host fixtures widen the vtable pointer and use seams
+      for the unresolved destructor and operator delete; target Rust retains
+      target-width words and direct calls to both verified addresses.
   # --- opaque observable-array attached release destruction ---
   - address: 0x083d08e8
     ghidra: FUN_083d08e8
