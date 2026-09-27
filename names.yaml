@@ -152113,3 +152113,37 @@ functions:
       host tests inject seams for both target-width calls. Rust deliberately
       models the predicated BLX and tail branch as ordinary control flow while
       preserving their effects and ordering.
+  - address: 0x083d046c
+    ghidra: FUN_083d046c
+    name: collection_release_first_occupied_object_083d046c
+    size: 88
+    sig: "void collection_release_first_occupied_object_083d046c(OpaqueCollection *array)"
+    module: cxx/collection_release_first_occupied_object_083d046c
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      r4: index
+      vtable_plus_0x40/r2: cell_at
+      returned_cell_plus_0x00/r0: handle
+      FUN_08157448: guarded_vtable_slot_04_dispatch_08157448
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec words e92d4070 e1a05000 e5d00010 e3500000 08bd8070
+      e5956004 e3a04000 ea00000a e5950000 e1a01004 e5902040 e1a00005
+      e12fff32 e5900000 e3500000 0a000001 ebf61be5 ebfb6a1b e2844001
+      e1540006 bafffff2 e8bd8070 establish the exact 88-byte A32 body from
+      0x083d046c through 0x083d04c3; push {r4,r5,r6,lr} at 0x083d04c4 starts
+      the next real function. The body has two unconditional plain direct BL
+      calls, at 0x083d04ac to guarded_vtable_slot_04_dispatch_08157448/
+      FUN_08157448 and at 0x083d04b0 to operator_delete/FUN_082aad24; it has
+      zero predicated direct BL calls and one unconditional virtual BLX through
+      vtable+0x40 at 0x083d049c. When enabled is nonzero, it walks signed
+      indices [0,count), obtains each cell through that virtual accessor, and
+      for the first nonzero handle dispatches its object's vtable slot +0x04
+      before tag-2-deleting that handle. Host fixtures widen vtable and handle
+      words; target Rust retains the observed u32 accesses. match.py reports a
+      structural diff: LLVM uses a larger prologue and branches through local
+      Rust symbols, while retaining the enabled guard, signed scan, virtual
+      dispatch, guarded destruction, and delete ordering.
