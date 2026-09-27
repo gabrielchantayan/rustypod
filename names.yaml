@@ -4644,6 +4644,36 @@ functions:
       container_element_at_083d6818 port, which this implementation reuses.
       Host fixtures deliberately widen the vtable pointer while retaining the
       target count and enabled field meanings.
+  - address: 0x083d0064
+    ghidra: FUN_083d0064
+    name: indexed_element_array_attached_destroy_destruct
+    size: 56
+    sig: "ObservableArray *indexed_element_array_attached_destroy_destruct(ObservableArray *this)"
+    module: cxx/indexed_element_array_attached_destroy_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_083d009c: INDEXED_ELEMENT_ARRAY_ATTACHED_DESTROY_VTABLE
+      "[this + 0x14]": attached_object
+      "[attached_object + 0x0]": attached_object_vtable
+      "[attached_object_vtable + 0x1c]": attached_object_release
+      FUN_083cffbc: indexed_element_array_destroy
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes thirteen A32 code words from 0x083d0064 through
+      the tail B at 0x083d0098: 52 code bytes. The literal derived vtable
+      0x089a3cf0 at 0x083d009c gives Ghidra's 56-byte extent; push
+      {r4,r5,r6,lr} at 0x083d00a0 is the next real function. Full-image
+      aligned A32 decoding finds two inbound plain BL calls (0x081244e8 and
+      0x0826b460) and no predicated inbound BL calls. The body makes one plain
+      BL to indexed_element_array_destroy @ 0x083cffbc and one predicated
+      indirect BLXNE through a non-NULL attached object's vtable slot +0x1c,
+      then tail-branches to observable_array_destruct @ 0x08271d2c. Ghidra
+      incorrectly extends past that tail branch and attributes the base
+      destructor's calls to this function. Host tests replace only the
+      target-width virtual call; Rust expresses the predicated BLX and tail
+      branch as ordinary control flow while target builds dispatch the fixed
+      vtable slot directly.
   - address: 0x083d00a0
     ghidra: FUN_083d00a0
     name: indexed_element_array_release
