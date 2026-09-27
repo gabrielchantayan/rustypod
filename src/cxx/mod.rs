@@ -189,6 +189,7 @@ pub mod list_node_pool_recycle_chain_083cab00;
 pub mod word_list_node_pool_acquire;
 pub mod red_black_tree_construct;
 pub mod red_black_tree_cow_pair_subtree_clone;
+pub mod red_black_tree_node_cow_pair_clone;
 pub mod red_black_tree_payload_56_node_pool_acquire;
 pub mod refcounted_list_node_pool_acquire;
 pub mod list_node_pool_acquire_083dd1a8;
