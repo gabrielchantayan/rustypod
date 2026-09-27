@@ -1019,6 +1019,38 @@ functions:
       target-word wrapping. The unported lookup/insert is a verified address
       seam: host tests install a fixture and target builds call the retail
       address directly.
+  - address: 0x083bdea0
+    ghidra: FUN_083bdea0
+    name: red_black_tree_node_pool_acquire_083bdea0
+    size: 184
+    sig: "RedBlackTreeNode083bdea0 *red_black_tree_node_pool_acquire_083bdea0(RedBlackTreeNodePool083bdea0 *pool)"
+    module: cxx/red_black_tree_node_pool_acquire_083bdea0
+    status: ported
+    renames:
+      param_1/r0: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083bdea0 through pop {r4-r8,pc} at 0x083bdf54;
+      0x083bdf58 begins the next real function. The body has two unconditional
+      plain bl calls, at 0x083bdf04 and 0x083bdf18, both to
+      operator_new_checked @ 0x08266c70, and no predicated bl calls. Raw
+      whole-image branch decoding finds two inbound unconditional plain bl sites,
+      at 0x081e20b4 and 0x083be834, with no predicated inbound calls. It pops a
+      recycled 20-byte red-black-tree node through node+0x0c or grows a 12-byte
+      chunk header and capacity*20 arena from 32 entries by
+      max(capacity + 32, capacity + capacity/2 + capacity/8), then clears the
+      color and three tree links while preserving the payload. Deliberate
+      deviations: none; target pointer fields remain u32 words.
   - address: 0x083be9e8
     ghidra: FUN_083be9e8
     name: cxx_node_pool_acquire
