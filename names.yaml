@@ -7728,6 +7728,34 @@ functions:
       0x083ba024 to red_black_tree_rotate_left. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the transferred
       middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree node COW-pair clone ---
+  - address: 0x083c411c
+    ghidra: FUN_083c411c
+    name: red_black_tree_node_cow_pair_clone
+    size: 52
+    sig: "void *red_black_tree_node_cow_pair_clone(void *pool, const void *payload)"
+    module: cxx/red_black_tree_node_cow_pair_clone
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: payload
+      FUN_083c4064: node_pool_acquire
+      FUN_083d8c30: cxx_string_copy_ctor
+      iVar1/r4: node
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent: 13 A32 words from
+      push {r4,r5,r6,lr} at 0x083c411c through pop {r4,r5,r6,pc} at
+      0x083c414c; 0x083c4150 begins the next real function. The body has three
+      unconditional plain bl instructions: node-pool acquire at 0x083c4064,
+      then cxx_string_copy_ctor at 0x083d8c30 for payload words +0x00 and
+      +0x04 into node payload +0x10 and +0x14; it has no predicated bl
+      instructions. Raw A32 decoding finds two unconditional inbound direct bl
+      sites (0x083c4a30 and 0x083c4a9c) and no predicated inbound calls. The
+      acquire helper has no established identity, so the target calls its
+      verified address and host tests use an ABI-matched seam. Target pointer
+      fields remain u32; host calls use native locals around each COW
+      constructor to prevent 64-bit pointer-field overlap. Deliberate
+      deviations: host-layout adaptation only.
   # --- C++ red-black-tree root replacement ---
   - address: 0x083c4150
     ghidra: FUN_083c4150
@@ -7774,19 +7802,18 @@ functions:
       param_2_plus_0x00: color
       param_2_plus_0x08: left
       param_2_plus_0x0c: right
-      FUN_083c411c: node_cow_pair_clone
+      FUN_083c411c: red_black_tree_node_cow_pair_clone
     notes: >-
       Raw osos.dec establishes the true 116-byte extent: 29 A32 words from
       push {r4,r5,r6,r7,r8,lr} at 0x083c4a10 through pop {r4,r5,r6,r7,r8,pc}
       at 0x083c4a80; 0x083c4a84 begins the next real function. It has exactly
       two unconditional plain bl instructions, to FUN_083c411c at 0x083c4a30
       and recursively at 0x083c4a5c, with no predicated bl instructions. It
-      walks each source left spine, obtains a node whose COW-pair payload is
-      copied from source+0x10 by FUN_083c411c, copies color, links the clone as
-      the current parent's left child, and recursively clones each right
-      subtree. Target pointers remain u32 words. The unported FUN_083c411c is
-      retained as an address-qualified target seam; host tests install a
-      fixture for its observed allocation-and-payload-copy contract.
+      walks each source left spine, constructs each node through
+      red_black_tree_node_cow_pair_clone, copies color, links the clone as the
+      current parent's left child, and recursively clones each right subtree.
+      Target pointers remain u32 words; the shared host test installs the
+      node-pool acquire fixture required by the newly ported callee.
   # --- C++ red-black-tree left rotation ---
   - address: 0x083baa70
     ghidra: FUN_083baa70
