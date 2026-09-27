@@ -451,6 +451,37 @@ functions:
       node+0x0c child chain, walks node+0x08 siblings, and prepends each node to
       parent+0x04. Deliberate deviation: target pointers remain u32 target words
       to preserve retailOS's four-byte field layout on 64-bit hosts.
+  - address: 0x083c8404
+    ghidra: FUN_083c8404
+    name: red_black_tree_payload_pair_node_pool_acquire_083c8404
+    size: 184
+    sig: "RedBlackTreePayloadPairNode083c8404 *red_black_tree_payload_pair_node_pool_acquire_083c8404(RedBlackTreePayloadPairNodePool083c8404 *pool)"
+    module: cxx/red_black_tree_payload_pair_node_pool_acquire_083c8404
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083c8404 through pop {r4-r8,pc} at 0x083c84b8;
+      0x083c84bc begins the next real function. The body contains exactly two
+      unconditional plain BL calls, at 0x083c8468 and 0x083c847c, both to
+      operator_new_checked (0x08266c70), and no predicated BL calls. The pool
+      consumes its free list through node+0x0c or grows 24-byte chunks from 32
+      entries by max(capacity + 32, capacity + capacity/2 + capacity/8), then
+      clears color and the three red-black-tree link words while preserving the
+      two-word payload. Deliberate deviations: target pointers are u32 target
+      words to preserve firmware layout on 64-bit hosts, and the retail dead r1
+      = 0 argument to checked new is omitted from the Rust signature.
   - address: 0x083c8c34
     ghidra: FUN_083c8c34
     name: tree_children_flatten_into_parent_083c8c34
