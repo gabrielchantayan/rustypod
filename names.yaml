@@ -4226,6 +4226,37 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d15dc
+    ghidra: FUN_083d15dc
+    name: container_release_indexed_elements
+    size: 76
+    sig: "void container_release_indexed_elements(IndexedElementContainer *container)"
+    module: cxx/container_release_indexed_elements
+    status: ported
+    renames:
+      param_1/r0/r6: container
+      "[container + 0x4]": count
+      "[container + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      iVar1/r0: element
+      "[element + 0x0]": element_vtable
+      "[element_vtable + 0x4]": element_release
+      FUN_083d6b14: container_element_at_alias_6b14
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent 0x083d15dc..0x083d1627:
+      nineteen A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the next independently entered function begins at 0x083d1628. The body
+      has one unconditional plain direct BL to the ported
+      container_element_at_alias_6b14 @ 0x083d6b14 and one predicated BLXNE
+      through each non-NULL element's vtable slot +0x04. Whole-image ARM branch
+      decoding finds two inbound plain BL sites (0x083d1674 and 0x083d16ac) and
+      no predicated inbound BL sites. When enabled byte +0x10 is nonzero, it
+      walks signed indices [0,count), obtains each element through the
+      established accessor, and invokes that unresolved slot for every non-NULL
+      element. Target Rust calls the established accessor and target-width
+      virtual entry directly; host tests use typed seams because host function
+      pointers cannot occupy retailOS u32 vtable words.
   - address: 0x083d178c
     ghidra: FUN_083d178c
     name: string_object_owned_member_container_destroy
