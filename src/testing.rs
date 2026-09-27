@@ -635,6 +635,9 @@ pub mod hints {
     // 0x7a50_0000: dedicated to cxx/red_black_tree_release_subtree's raw-u32
     // cleanup-chain and intrusive-subtree fixture; mappings never unmap.
     pub const RED_BLACK_TREE_RELEASE_SUBTREE: usize = 0x7a50_0000;
+    // target-width refcounted red-black-tree subtree fixture; mappings never
+    // unmap, so no other user may share this hint.
+    pub const RED_BLACK_TREE_REFCOUNTED_SUBTREE_RELEASE: usize = 0x7b50_0000;
     pub const SET_STRING: usize = 0x3900_0000;
     // 0x4c00_0000, skipping 0x3a00_0000..0x4b00_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
