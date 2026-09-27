@@ -2617,6 +2617,11 @@ pub mod hints {
     // mappings never unmap, so no other user may share these hints.
     pub const RED_BLACK_TREE_ROOT_REPLACE: usize = 0x8120_0000;
     pub const RED_BLACK_TREE_ROOT_REPLACE_STRINGS: usize = 0x8130_0000;
+    // 0xb010_0000 / 0xb020_0000: dedicated to
+    // cxx/red_black_tree_release_child_subtrees' target-width cleanup-chain
+    // and intrusive-child-tree fixtures; mappings never unmap.
+    pub const RED_BLACK_TREE_RELEASE_CHILD_SUBTREES: usize = 0xb010_0000;
+    pub const RED_BLACK_TREE_RELEASE_CHILD_SUBTREES_EMPTY: usize = 0xb020_0000;
     // 0x8140_0000: dedicated to cxx/condition_queue_dequeue's target-width
     // queue, node, and item fixture; mappings never unmap.
     pub const CONDITION_QUEUE_DEQUEUE: usize = 0x8140_0000;
