@@ -149981,3 +149981,40 @@ functions:
       always forwards the unchanged record to that helper and returns its
       result. The helper has no recovered semantic identity, so target builds
       call its verified address and host tests inject a cleanup seam.
+
+  - address: 0x083d3888
+    ghidra: FUN_083d3888
+    name: video_output_configuration_assign
+    size: 164
+    sig: "void video_output_configuration_assign(u32 *state, const u32 *configuration, u32 reserved, u32 mode)"
+    module: util/video_engine
+    status: ported
+    vars:
+      param_1/r4: state
+      param_2/r6: configuration
+      param_3/r8: reserved
+      param_4/r7: mode
+      DAT_083d392c: video_output_initialized_flag
+      DAT_083d3934: video_output_reset_pending
+      FUN_082aad14: operator_delete_tag3
+      FUN_082d12b0: video_engine_enable_control
+      FUN_082d110c: video_output_release
+      FUN_082d0cb8: video_engine_set_selector_value
+      FUN_082d243c: video_output_configuration_update
+    notes: >-
+      Raw osos.dec proves the exact 164-byte body
+      0x083d3888..0x083d392c (the following 16 bytes are its literal pool);
+      the next independently linked function begins with `push {r4,lr}` at
+      0x083d3940. Raw aligned A32 decoding finds two plain outbound BL
+      instructions (operator_delete_tag3 @ 0x082aad14 and
+      video_engine_set_selector_value @ 0x082d0cb8) plus two predicated
+      outbound BL instructions (bleq video_engine_enable_control @
+      0x082d12b0 and blne video_output_release @ 0x082d110c). It releases
+      state word 1 when ownership word 4 is nonzero, initializes output
+      control 0x8074 once, optionally releases the selected output and
+      clears selector 0x8892, stores configuration/reserved/mode in words
+      1..3, then tail-branches to the resident four-argument
+      video_output_configuration_update wrapper @ 0x082d243c with
+      (mode, 0x140c, 0, configuration). Host tests cover ownership reset,
+      one-time initialization, pending-output release, selector clearing,
+      target-width state words, and all forwarded wrapper arguments.

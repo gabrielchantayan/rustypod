@@ -1387,6 +1387,186 @@ pub unsafe extern "C" fn video_engine_apply_configuration(configuration: *const 
     update_video_configuration(configuration.add(1));
 }
 
+/// Firmware flag initialized by `FUN_083d3888` before enabling control 0x8074.
+#[cfg(target_os = "none")]
+const VIDEO_OUTPUT_INITIALIZED_FLAG: *mut u8 = 0x08a0_fc14 as *mut u8;
+
+/// Firmware flag which requests release of the currently selected video output.
+#[cfg(target_os = "none")]
+const VIDEO_OUTPUT_RESET_PENDING: *mut u32 = 0x089d_00c4 as *mut u32;
+
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_OUTPUT_INITIALIZED_FLAG: u8 = 0;
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_OUTPUT_RESET_PENDING: u32 = 0;
+
+#[inline(always)]
+unsafe fn take_video_output_reset_pending() -> bool {
+    #[cfg(target_os = "none")]
+    {
+        let pending = VIDEO_OUTPUT_RESET_PENDING.read_volatile();
+        if pending != 0 {
+            VIDEO_OUTPUT_RESET_PENDING.write_volatile(0);
+            true
+        } else {
+            false
+        }
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        if MOCK_VIDEO_OUTPUT_RESET_PENDING != 0 {
+            MOCK_VIDEO_OUTPUT_RESET_PENDING = 0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn initialize_video_output_once() {
+    #[cfg(target_os = "none")]
+    {
+        if VIDEO_OUTPUT_INITIALIZED_FLAG.read_volatile() == 0 {
+            VIDEO_OUTPUT_INITIALIZED_FLAG.write_volatile(1);
+            video_engine_enable_control(0x8074);
+        }
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        if MOCK_VIDEO_OUTPUT_INITIALIZED_FLAG == 0 {
+            MOCK_VIDEO_OUTPUT_INITIALIZED_FLAG = 1;
+            video_engine_enable_control(0x8074);
+        }
+    }
+}
+
+/// Firmware entry of the output-configuration wrapper `FUN_082d243c`.
+#[cfg(target_os = "none")]
+const VIDEO_OUTPUT_CONFIGURATION_UPDATE_ADDR: usize = 0x082d_243c;
+
+/// ABI of `FUN_082d243c`: mode, format, reserved word, configuration.
+type VideoOutputConfigurationUpdate = unsafe extern "C" fn(u32, u32, u32, *const u32);
+
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE: Option<VideoOutputConfigurationUpdate> = None;
+
+/// Host only: installs the `FUN_082d243c` seam used by
+/// [`video_output_configuration_assign`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_video_output_configuration_update(
+    update: Option<VideoOutputConfigurationUpdate>,
+) {
+    *addr_of_mut!(MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE) = update;
+}
+
+#[inline(always)]
+unsafe fn update_video_output_configuration(
+    mode: u32,
+    format: u32,
+    reserved: u32,
+    configuration: *const u32,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let update: VideoOutputConfigurationUpdate =
+            core::mem::transmute(VIDEO_OUTPUT_CONFIGURATION_UPDATE_ADDR);
+        update(mode, format, reserved, configuration);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match *addr_of!(MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE) {
+            Some(update) => update(mode, format, reserved, configuration),
+            None => panic!("video_output_configuration_assign requires wrapper 0x082d243c"),
+        }
+    }
+}
+
+/// Firmware entry of the output-release helper `FUN_082d110c`.
+#[cfg(target_os = "none")]
+const VIDEO_OUTPUT_RELEASE_ADDR: usize = 0x082d_110c;
+
+type VideoOutputRelease = unsafe extern "C" fn(u32, *mut u32);
+
+#[cfg(not(target_os = "none"))]
+static mut MOCK_VIDEO_OUTPUT_RELEASE: Option<VideoOutputRelease> = None;
+
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_video_output_release(release: Option<VideoOutputRelease>) {
+    *addr_of_mut!(MOCK_VIDEO_OUTPUT_RELEASE) = release;
+}
+
+#[inline(always)]
+unsafe fn release_video_output(state: *mut u32) {
+    #[cfg(target_os = "none")]
+    {
+        let release: VideoOutputRelease = core::mem::transmute(VIDEO_OUTPUT_RELEASE_ADDR);
+        release(1, state);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match *addr_of!(MOCK_VIDEO_OUTPUT_RELEASE) {
+            Some(release) => release(1, state),
+            None => panic!("video_output_configuration_assign requires helper 0x082d110c"),
+        }
+    }
+}
+
+
+/// video_output_configuration_assign — retailOS `FUN_083d3888` @
+/// **0x083d3888** (164 bytes, `0x083d3888..0x083d3928`; literal pool through
+/// `0x083d393c`). The next independently linked function begins at
+/// `0x083d3940`. Raw ARM has two plain `bl` calls (`operator_delete_tag3` @
+/// 0x082aad14 and `video_engine_set_selector_value` @ 0x082d0cb8) and two
+/// predicated calls (`bleq video_engine_enable_control` @ 0x082d12b0 and
+/// `blne` to the unported release helper @ 0x082d110c).
+///
+/// Releases a prior owned configuration when word 4 is nonzero, initializes
+/// video output once, optionally releases the current engine handle and clears
+/// selector 0x8892, then stores `{configuration, reserved, mode}` in words
+/// 1 through 3. It tail-transfers `(mode, 0x140c, 0, configuration)` to the
+/// resident output-configuration wrapper @ 0x082d243c.
+///
+/// # Deliberate deviations
+///
+/// Rust calls the stock tail target normally. The release helper @ 0x082d110c
+/// and output-configuration wrapper @ 0x082d243c are still unported: target
+/// builds transfer to their exact resident addresses; host tests install only
+/// the latter seam. Target-width object fields are addressed as `u32` words.
+///
+/// # Safety
+///
+/// `state` must address at least five readable/writable target words. The
+/// configuration pointer is passed unchanged to the resident wrapper.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_output_configuration_assign(
+    state: *mut u32,
+    configuration: *const u32,
+    reserved: u32,
+    mode: u32,
+) {
+    if state.add(4).read() != 0 {
+        crate::heap::veneers::operator_delete_tag3(state.add(1).read() as usize as *mut u8);
+        state.add(1).write(0);
+        state.add(4).write(0);
+    }
+
+    initialize_video_output_once();
+
+    if take_video_output_reset_pending() {
+        if state.read() != 0 {
+            release_video_output(state);
+        }
+        video_engine_set_selector_value(0x8892, 0);
+    }
+
+    state.add(1).write(configuration as usize as u32);
+    state.add(2).write(reserved);
+    state.add(3).write(mode);
+    update_video_output_configuration(mode, 0x140c, 0, configuration);
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -2500,6 +2680,87 @@ mod tests {
             assert_eq!(CONFIGURATION_SELECTOR, Some(0));
             assert_eq!(CONFIGURATION_POINTER, Some(configuration.as_ptr().add(1)));
             set_mock_video_configuration_calls(None, None);
+        }
+    }
+
+    static mut OUTPUT_CONFIGURATION_UPDATE: Option<(u32, u32, u32, *const u32)> = None;
+    static mut OUTPUT_RELEASE: Option<(u32, *mut u32)> = None;
+
+    unsafe extern "C" fn record_output_configuration_update(
+        mode: u32,
+        format: u32,
+        reserved: u32,
+        configuration: *const u32,
+    ) {
+        *addr_of_mut!(OUTPUT_CONFIGURATION_UPDATE) =
+            Some((mode, format, reserved, configuration));
+    }
+
+    unsafe extern "C" fn record_output_release(count: u32, state: *mut u32) {
+        *addr_of_mut!(OUTPUT_RELEASE) = Some((count, state));
+    }
+
+    #[test]
+    fn output_configuration_replaces_owned_state_initializes_and_forwards_all_words() {
+        let _guard = LOCK.lock();
+        let mut state = [0u32, 0, 0, 0, 1];
+        let configuration = [0u32; 4];
+        let mut engine = [0u8; 16];
+        unsafe {
+            MOCK_VIDEO_OUTPUT_INITIALIZED_FLAG = 0;
+            MOCK_VIDEO_OUTPUT_RESET_PENDING = 0;
+            OUTPUT_CONFIGURATION_UPDATE = None;
+            ENABLE_CONTROL_RECORDED = None;
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_enable_control(Some(record_enable_control));
+            set_mock_video_output_configuration_update(Some(record_output_configuration_update));
+
+            video_output_configuration_assign(state.as_mut_ptr(), configuration.as_ptr(), 7, 9);
+
+            assert_eq!(state[1], configuration.as_ptr() as usize as u32);
+            assert_eq!(state[2], 7);
+            assert_eq!(state[3], 9);
+            assert_eq!(state[4], 0);
+            assert_eq!(ENABLE_CONTROL_RECORDED, Some((engine.as_mut_ptr(), 0x8074, 1)));
+            assert_eq!(
+                OUTPUT_CONFIGURATION_UPDATE,
+                Some((9, 0x140c, 0, configuration.as_ptr()))
+            );
+            set_mock_video_output_configuration_update(None);
+            set_mock_enable_control(None);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn output_configuration_reset_releases_current_output_and_clears_selector() {
+        let _guard = LOCK.lock();
+        let mut state = [1u32, 0, 1, 1, 1];
+        let configuration = [0u32; 4];
+        let mut engine = [0u8; 16];
+        unsafe {
+            MOCK_VIDEO_OUTPUT_INITIALIZED_FLAG = 1;
+            MOCK_VIDEO_OUTPUT_RESET_PENDING = 1;
+            OUTPUT_CONFIGURATION_UPDATE = None;
+            OUTPUT_RELEASE = None;
+            SELECTOR_VALUE_RECORDED = None;
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_video_output_release(Some(record_output_release));
+            set_mock_set_selector_value(Some(record_selector_value));
+            set_mock_video_output_configuration_update(Some(record_output_configuration_update));
+
+            video_output_configuration_assign(state.as_mut_ptr(), configuration.as_ptr(), 0, 0);
+
+            assert_eq!(OUTPUT_RELEASE, Some((1, state.as_mut_ptr())));
+            assert_eq!(
+                SELECTOR_VALUE_RECORDED,
+                Some((engine.as_mut_ptr(), 0x8892, 0))
+            );
+            assert_eq!(MOCK_VIDEO_OUTPUT_RESET_PENDING, 0);
+            set_mock_video_output_configuration_update(None);
+            set_mock_set_selector_value(None);
+            set_mock_video_output_release(None);
+            set_mock_instance(ptr::null_mut());
         }
     }
 }
