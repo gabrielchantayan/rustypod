@@ -152429,3 +152429,31 @@ functions:
       link words while preserving its 28-byte payload. Deliberate deviations:
       target pointers remain u32 words on 64-bit hosts, and Rust omits the
       retail dead r1 = 0 argument to checked new.
+
+  # --- list-node-pool chain recycle, separately linked copy ---
+  - address: 0x083cab00
+    ghidra: FUN_083cab00
+    name: list_node_pool_recycle_chain_083cab00
+    size: 60
+    sig: "void list_node_pool_recycle_chain_083cab00(u32 *pool, u32 *chain)"
+    module: cxx/list_node_pool_recycle_chain_083cab00
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: chain
+      param_1_plus_0x04/r1: pool_free
+      param_2_plus_0x08/r0: chain_next
+      param_2_plus_0x0c/r1: node_free_next
+    notes: >-
+      Raw osos.dec establishes the 60-byte extent from push {r4,r5,lr} at
+      0x083cab00 through pop {r4,r5,pc} at 0x083cab38; the independently
+      entered function at 0x083cab3c follows. The body contains one
+      unconditional plain BL, its recursive call at 0x083cab18, and no
+      predicated BL instructions. The only inbound direct plain BL sites are
+      0x083ca900 and 0x083cab18; there are no predicated callers. It follows
+      chain+0x08 recursively, then links each tail-returned node through
+      node+0x0c before pool+0x04, preserving the input order ahead of the
+      existing free list. This separately linked copy uses named u32 word
+      indices instead of retailOS's callee-saved-register shuffling; it
+      preserves recursion order and target-width field layout. Host tests
+      cover a three-node chain ahead of an existing free node and a NULL chain.
