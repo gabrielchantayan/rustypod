@@ -4226,6 +4226,38 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d14a0
+    ghidra: FUN_083d14a0
+    name: indexed_string_element_array_destroy_083d14a0
+    size: 88
+    sig: "void indexed_string_element_array_destroy_083d14a0(IndexedStringElementArray *array)"
+    module: cxx/indexed_string_element_array_destroy_083d14a0
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r6: count
+      piVar1/r0: element_cell
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_slot
+      "[element_cell + 0x0]": string_object
+      FUN_08277484: string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 88-byte extent 0x083d14a0..0x083d14f7:
+      twenty-two A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the push at 0x083d14f8 starts the next independently entered function.
+      Raw decoding finds two unconditional plain direct BL calls, to
+      string_object_destroy @ 0x08277484 and operator_delete @ 0x082aad24, and
+      zero predicated direct BL calls. Its vtable slot +0x40 dispatch is an
+      indirect BLX with no recovered static target. If enabled is nonzero, it
+      visits signed indices [0,count), destroys each non-NULL StringObject
+      returned through that slot, then deletes it. Host fixtures widen the
+      vtable pointer; target accesses retain the observed 32-bit offsets. An
+      empty target-only assembly barrier keeps this separately hooked retailOS
+      BL target from folding into its identical sibling at 0x083cfe00.
   - address: 0x083d15a0
     ghidra: FUN_083d15a0
     name: observable_array_assert_empty_attached_destruct

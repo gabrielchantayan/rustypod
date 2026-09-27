@@ -17,6 +17,7 @@ pub mod owned_observable_array_erase_at;
 pub mod opaque_indexed_element_array_dispose;
 pub mod refcounted_element_array_dispose;
 pub mod indexed_string_element_array_destroy;
+pub mod indexed_string_element_array_destroy_083d14a0;
 pub mod indexed_element_array_release_elements;
 pub mod container_release_indexed_elements;
 pub mod indexed_element_array_destruct;
