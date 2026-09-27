@@ -151104,3 +151104,31 @@ functions:
       32-bit vtable and cell words; host fixtures deliberately widen pointers
       and replace the direct destructor/delete calls because fixture objects
       are not retail heap allocations.
+
+  - address: 0x083d1ad0
+    ghidra: FUN_083d1ad0
+    name: observable_array_release_cells_destruct
+    size: 60
+    sig: "u8 *observable_array_release_cells_destruct(u8 *array)"
+    module: cxx/observable_array_release_cells_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      "[array + 0x00]": vtable
+      "[array + 0x14]": attached_object
+      "[attached_object + 0x00]": vtable
+      "[vtable + 0x1c]": release
+      FUN_083d1a40: release_cells
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: fourteen A32
+      instructions from push {r4,lr} at 0x083d1ad0 through the tail branch at
+      0x083d1b04, followed by vtable literal 0x089a53b8 at 0x083d1b08; the
+      next independently entered function begins at 0x083d1b0c. Whole-image
+      ARM B/BL decoding finds two inbound unconditional plain BL sites
+      (0x0822bb64 and 0x0826b6e8), with no predicated inbound BL sites. The
+      body plants its vtable, conditionally invokes the attached object's
+      vtable slot +0x1c, calls unported FUN_083d1a40 to release derived cells,
+      then tail-branches to observable_array_destruct @ 0x08271d2c. ARM calls
+      the recovered direct and target-width virtual targets; host tests replace
+      them with seams, and Rust represents the tail branch as a direct call.
