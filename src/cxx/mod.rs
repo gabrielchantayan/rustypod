@@ -537,6 +537,7 @@ pub mod red_black_tree_node_pool_release_vector;
 pub mod red_black_tree_payload_16_node_pool_acquire;
 pub mod red_black_tree_payload_pair_node_pool_acquire;
 pub mod red_black_tree_payload_pair_node_pool_acquire_083cb78c;
+pub mod red_black_tree_payload_pair_node_pool_acquire_083ca2d0;
 pub mod red_black_tree_payload_word_node_pool_acquire;
 pub mod red_black_tree_word_node_pool_acquire;
 pub mod red_black_tree_word_node_pool_acquire_with_payload;
