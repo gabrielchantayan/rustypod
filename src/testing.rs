@@ -2208,6 +2208,9 @@ pub mod hints {
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const RED_BLACK_TREE_NODE_POOL_ACQUIRE: usize = 0x3100_0000;
+    // 0x6b70_0000: dedicated to cxx/cxx_node_pool_acquire's target-width
+    // pool and node fixture; mappings never unmap, so no other user may share it.
+    pub const CXX_NODE_POOL_ACQUIRE: usize = 0x6b70_0000;
     // 0x5ab0_0000: dedicated to cxx/red_black_tree_payload_word_node_pool_acquire_083c0ba8's
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
