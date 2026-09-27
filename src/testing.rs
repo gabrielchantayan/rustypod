@@ -603,6 +603,9 @@ pub mod hints {
     // 0x5432_0000: dedicated to util/tree_children_flatten_into_parent's
     // target-width parent and hierarchy fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_INTO_PARENT: usize = 0x5432_0000;
+    // 0x5442_0000: dedicated to util/tree_children_flatten_into_parent_083cbfbc's
+    // target-width parent and hierarchy fixture; mappings never unmap.
+    pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083CBFBC: usize = 0x5442_0000;
     // 0x7a50_0000: dedicated to cxx/red_black_tree_release_subtree's raw-u32
     // cleanup-chain and intrusive-subtree fixture; mappings never unmap.
     pub const RED_BLACK_TREE_RELEASE_SUBTREE: usize = 0x7a50_0000;
