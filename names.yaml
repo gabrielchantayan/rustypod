@@ -31239,6 +31239,26 @@ functions:
       same vtable store, +0x14 null guard and virtual dispatch, direct item
       destruction, and base-destructor sequence; LLVM adds a frame and emits
       an ordinary conditional branch.
+  - address: 0x083d0f80
+    ghidra: FUN_083d0f80
+    name: owned_string_owner_array_attached_release_destruct
+    size: 56
+    sig: "void *owned_string_owner_array_attached_release_destruct(void *this)"
+    module: cxx/owned_string_owner_array_attached_release_destruct
+    vars: {param_1/r0/r4: this, DAT_083d0fb8: VTABLE_089A4998, "[this + 0x14]": attached_object, "[attached_object.vtable + 0x1c]": release, FUN_083d0ec0: owned_string_owner_array_release, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes fourteen A32 words (56 bytes) from 0x083d0f80
+      through the tail B at 0x083d0fb4. The following word at 0x083d0fb8 is
+      vtable literal 0x089a4998; push {r4,r5,r6,lr} at 0x083d0fbc opens the
+      next real function. Whole-image raw-word decoding finds two inbound plain
+      BL sites and no predicated inbound BL sites. The body stores its derived
+      vtable, conditionally dispatches the object at +0x14 through its vtable
+      slot +0x1c, directly calls ported owned_string_owner_array_release @
+      0x083d0ec0, then tail-branches to observable_array_destruct @ 0x08271d2c.
+      Host tests retain seams for the target-width virtual call and cell release;
+      ARM invokes the recovered Rust calls directly. Rust models the predicated
+      BLX and tail branch as ordinary control flow.
   - address: 0x083d1684
     ghidra: FUN_083d1684
     name: observable_array_item_release_destruct
