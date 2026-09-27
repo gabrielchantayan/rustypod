@@ -32,6 +32,7 @@ pub mod observable_array_release_cells_083d0db4;
 pub mod observable_array_release_cells_pre_destruct;
 pub mod observable_array_release_cells_083d1a40;
 pub mod observable_array_release_cells_destruct;
+pub mod observable_array_attached_release_cells_destruct_083d0250;
 pub mod observable_array_destroy_elements_083d13bc;
 pub mod observable_array_destroy_cells_083d0b2c;
 pub mod observable_array_pre_destruct_check;

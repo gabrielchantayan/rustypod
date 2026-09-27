@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  # --- observable-array attached release and enabled-cell disposal ---
+  - address: 0x083d0250
+    ghidra: FUN_083d0250
+    name: observable_array_attached_release_cells_destruct_083d0250
+    size: 56
+    sig: "ObservableArray *observable_array_attached_release_cells_destruct_083d0250(ObservableArray *this)"
+    module: cxx/observable_array_attached_release_cells_destruct_083d0250
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d0288: VTABLE_089A3EA0
+      virtual_0x1c/r1: attached_object_release
+      FUN_083d019c: release_enabled_cells
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the true 56-byte extent: thirteen A32 instruction
+      words from push {r4,lr} at 0x083d0250 through the tail B at 0x083d0284,
+      followed by vtable literal 0x089a3ea0 at 0x083d0288; push {r4,r5,r6,lr}
+      at 0x083d028c begins the next independently entered function. The body has
+      one plain direct BL, at 0x083d0278 to unported FUN_083d019c, zero
+      predicated direct BL instructions, and one predicated BLXNE through the
+      attached object's vtable slot +0x1c at 0x083d0270. Whole-image aligned A32
+      branch decoding finds two inbound plain BL sites and no predicated inbound
+      BL sites. It installs vtable 0x089a3ea0, conditionally releases the
+      attached object, runs the enabled-cell release, then tail-branches to
+      observable_array_destruct @ 0x08271d2c. Target Rust calls the unresolved
+      direct helper at its verified address; host tests inject explicit seams.
+      Rust deliberately models the predicated BLX and tail branch as ordinary
+      control flow while preserving effects and ordering.
   # --- opaque observable-array first-string disposal ---
   - address: 0x083d028c
     ghidra: FUN_083d028c
