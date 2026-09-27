@@ -267,6 +267,7 @@ pub mod tree_children_flatten_release_strings_083c3e44;
 pub mod tree_children_flatten_release_strings_083c2a34;
 pub mod tree_children_flatten_into_parent_083ca0bc;
 pub mod tree_children_flatten_into_parent_083c9678;
+pub mod tree_children_flatten_into_parent_083bdc94;
 pub mod tree_children_flatten_into_parent_083cbfbc;
 pub mod tree_children_release_083cb574;
 pub mod word_key_set_recycle_tree;
