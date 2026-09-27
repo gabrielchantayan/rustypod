@@ -26,6 +26,7 @@ pub mod observable_array_payload_cleanup_destruct_083cfdc4;
 pub mod observable_array_release_cells;
 pub mod observable_array_release_cells_083d0654;
 pub mod observable_array_release_cells_083d0c90;
+pub mod collection_release_first_occupied_object_083d046c;
 pub mod observable_array_release_cells_083d0db4;
 pub mod observable_array_release_cells_pre_destruct;
 pub mod observable_array_release_cells_083d1a40;
