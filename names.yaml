@@ -4298,6 +4298,35 @@ functions:
       address rather than inventing a callee identity. Host tests use a
       recording replacement solely to verify argument forwarding and the
       observable nine-byte copy, including preservation of trailing padding.
+  - address: 0x083d24cc
+    ghidra: FUN_083d24cc
+    name: scaled_f32_count_ceiling_to_u32_083d24cc
+    size: 60
+    sig: "void scaled_f32_count_ceiling_to_u32_083d24cc(u32 *state)"
+    module: fp/fp_scaled_count_ceiling_083d24cc
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_1+8: scale_f32_bits
+      param_1+12: scaled_count_ceiling
+      param_1+24: count
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x083d24cc..0x083d2507: the next independently entered function starts
+      at 0x083d2508 with push {r0,r1,r2,r4-r11,lr}. The body has five
+      unconditional BL instructions (__u2d, __f2d, __dmul, ceil,
+      double_to_u32_saturating) and no predicated direct calls. Whole-image
+      ARM B/BL decoding finds two inbound plain BL sites (0x083d2198,
+      0x083d24b8) and no predicated sites. It computes
+      u32_saturating(ceil(f64(scale_f32) * f64(count))) and stores the result
+      at state +12. Rust uses u32 word indices so target four-byte offsets
+      hold on 64-bit hosts, and volatile-loaded helper pointers preserve the
+      five retail call boundaries. This is a separate retail body with the
+      same instruction sequence as scaled_f32_count_ceiling_to_u32 at
+      0x083d2b1c. Its distinct target text section prevents LLVM from folding
+      this required hook symbol into that same-body port. Host tests cover
+      fractional positive rounding, u32::MAX saturation, negative products,
+      and positive infinity.
   - address: 0x083d27f4
     ghidra: FUN_083d27f4
     name: scaled_f32_count_ceiling_to_u32
