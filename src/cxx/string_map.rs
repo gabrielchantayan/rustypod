@@ -25,6 +25,10 @@
 //! - [`string_key_tree_find`] — original: `FUN_083db55c` @ 0x083db55c
 //!   (168 bytes; 4 direct unconditional `bl` instructions to 3 callee
 //!   targets, the only copy).
+//! - [`string_key_tree_find_4ebc_copy`] — original: `FUN_083c4ebc` @
+//!   0x083c4ebc (168 bytes; 3 direct unconditional `bl` instructions to
+//!   2 callee targets, no predicated calls).
+
 //! - [`string_key_tree_find_b41c`] — original: `FUN_083db41c` @
 //!   0x083db41c (168 bytes; 4 direct unconditional `bl` instructions to
 //!   3 callee targets; 2 inbound plain `bl` call sites, no predicated
@@ -253,6 +257,65 @@ pub unsafe extern "C" fn string_key_tree_find(
         out.write(header);
     }
 }
+/// string_key_tree_find_4ebc_copy — original: `FUN_083c4ebc` @ 0x083c4ebc
+/// (168 bytes; 3 direct unconditional `bl` instructions to 2 callee
+/// targets, no predicated calls; the next independently linked function
+/// starts at 0x083c4f64).
+///
+/// A separately linked libstdc++ `_Rb_tree::find` copy for the
+/// string-keyed map family. It walks from `header.parent`, retaining the
+/// least node whose key is not less than `key`, then writes that node only
+/// when the reverse comparison confirms equality; otherwise it writes the
+/// header sentinel through `out`.
+///
+/// Deliberate deviations: the original calls `equal_deref_f860_copy` @
+/// 0x083cf860 to compare the candidate and header words; Rust expresses that
+/// one-word comparison directly. Both raw calls to `cxx_string_less` @
+/// 0x083d74f4 retain the `pair_string_less` seam.
+///
+/// # Safety
+/// `out` must be writable, `map` must be a live [`StringKeyTree`], and
+/// `key` must point at a live COW string word. Every reachable node must have
+/// a valid key and child links matching the red-black-tree layout.
+#[cfg_attr(target_os = "none", link_section = ".text.string_key_tree_find_4ebc_copy")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_key_tree_find_4ebc_copy(
+    out: *mut *mut StringKeyTreeNode,
+    map: *mut StringKeyTree,
+    key: *const *mut u8,
+) {
+    let header = (*map).header;
+    let comparator = core::ptr::addr_of!((*map).comparator);
+    let mut node = (*header).parent;
+    let mut lower_bound = header;
+
+    while !node.is_null() {
+        if pair_string_less(
+            comparator,
+            core::ptr::addr_of!((*node).key.key),
+            key,
+        ) == 0 {
+            lower_bound = node;
+            node = (*node).left;
+        } else {
+            node = (*node).right;
+        }
+    }
+
+    if lower_bound != header
+        && pair_string_less(
+            comparator,
+            key,
+            core::ptr::addr_of!((*lower_bound).key.key),
+        ) == 0
+    {
+        out.write(lower_bound);
+    } else {
+        out.write(header);
+    }
+}
+
 
 /// string_key_tree_find_b41c — original: `FUN_083db41c` @ 0x083db41c
 /// (168 bytes; 4 direct unconditional `bl` instructions to 3 callee
@@ -1368,6 +1431,9 @@ mod tests {
                 let mut b41c_found = core::ptr::null_mut();
                 string_key_tree_find_b41c(&mut b41c_found, &mut tree, &query);
                 assert_eq!(b41c_found, expected);
+                let mut copy_found = core::ptr::null_mut();
+                string_key_tree_find_4ebc_copy(&mut copy_found, &mut tree, &query);
+                assert_eq!(copy_found, expected);
             }
         }
     }
