@@ -151677,3 +151677,28 @@ functions:
       array erase implementation. Host tests verify enabled deletion precedes erase,
       disabled ownership skips lookup, and invalid erase indices still follow the
       retail delete-before-validation order.
+
+  - address: 0x083d0e5c
+    ghidra: FUN_083d0e5c
+    name: observable_array_tracked_construct
+    size: 36
+    sig: "ObservableArrayTracked *observable_array_tracked_construct(ObservableArrayTracked *this, u8 enabled)"
+    module: cxx/observable_array_tracked_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1/r4: enabled
+      DAT_083d0e80: OBSERVABLE_ARRAY_TRACKED_VTABLE
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent: eight A32 instructions
+      from push {r4,lr} at 0x083d0e5c through pop {r4,pc} at 0x083d0e7c,
+      followed by the vtable literal 0x089a48c0 at 0x083d0e80; 0x083d0e84
+      begins the next independently entered function. The body has one plain
+      unconditional direct BL, observable_array_construct @ 0x08271cec, and
+      zero predicated direct BL instructions. Whole-image A32 branch decoding
+      finds two inbound plain BL sites (0x0812b250 and 0x0812b43c), no
+      predicated direct callers. It constructs the base, installs the vtable,
+      stores enabled at +0x10, and clears the tracked-items word at +0x14.
+      Deliberate deviations: none. Host tests cover flags 0, 1, and 255, base
+      initialization, padding preservation, and the adjacent-word boundary.
