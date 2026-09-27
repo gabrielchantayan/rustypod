@@ -42,6 +42,7 @@ pub mod refcounted_key_tree_lookup_value;
 pub mod tree_lookup_node_counter;
 pub mod tree_lookup_node_payload_slot;
 pub mod tree_lookup_pair_node_payload_slot;
+pub mod tree_nodes_prepend_to_free_list;
 pub mod red_black_tree_payload_8_construct;
 pub mod string_record;
 pub mod cxx_string_range_assign;
