@@ -595,6 +595,9 @@ pub mod hints {
     // 0x5432_0000: dedicated to util/tree_children_flatten_into_parent's
     // target-width parent and hierarchy fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_INTO_PARENT: usize = 0x5432_0000;
+    // 0x7a50_0000: dedicated to cxx/red_black_tree_release_subtree's raw-u32
+    // cleanup-chain and intrusive-subtree fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_RELEASE_SUBTREE: usize = 0x7a50_0000;
     pub const SET_STRING: usize = 0x3900_0000;
     // 0x4c00_0000, skipping 0x3a00_0000..0x4b00_0000: sibling ports in
     // flight take the sequential slots, and a collision skips tests
