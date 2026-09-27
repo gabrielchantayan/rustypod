@@ -149,6 +149,7 @@ pub mod indexed_record_bounded_value;
 pub mod indexed_record_value_lookup;
 pub mod indexed_slot_pointer;
 pub mod indexed_record_pointer_and_value;
+pub mod conditional_indexed_record_pointer_and_value;
 pub mod indexed_state_set_and_poll;
 pub mod indexed_state_status;
 pub mod id3_synchsafe_u28_decode;

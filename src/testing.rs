@@ -191,6 +191,11 @@ pub mod hints {
     // util/indexed_record_pointer_and_value's target-width record fixtures.
     pub const INDEXED_RECORD_POINTER_AND_VALUE_FIRST: usize = 0x7c00_0000;
     pub const INDEXED_RECORD_POINTER_AND_VALUE_SECOND: usize = 0x7c10_0000;
+    // 0x7c20_0000 / 0x7c30_0000: dedicated to
+    // util/conditional_indexed_record_pointer_and_value's target-width record
+    // fixtures; mappings never unmap, so no other module may share either hint.
+    pub const CONDITIONAL_INDEXED_RECORD_POINTER_AND_VALUE_INDEXED: usize = 0x7c20_0000;
+    pub const CONDITIONAL_INDEXED_RECORD_POINTER_AND_VALUE_DIRECT: usize = 0x7c30_0000;
     pub const ELEMENT_ARRAY_ONE_BASED_AT: usize = 0x083d_0000;
     // 0x2350_0000: dedicated to app/resource_slot_acquire's target-width
     // pool and slot fixtures; mappings never unmap, so no other user may share it.
