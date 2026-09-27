@@ -115,6 +115,7 @@ use crate::app::scoped_context::scoped_context_destroy;
 use crate::cxx::string::cxx_string_release;
 use crate::cxx::string_object::{
     string_object_assign, string_object_copy_construct, string_object_destroy, StringObject,
+    string_object_with_owned_member_destroy,
 };
 use crate::cxx::two_string_record_assign::{two_string_record_destroy, TwoStringRecord};
 use crate::cxx::copy_record_12_if_destination::copy_record_12_if_destination;
@@ -7244,6 +7245,55 @@ pub unsafe extern "C" fn scoped_context_container_delete_enabled_elements(
     }
 }
 
+/// string_object_owned_member_container_destroy — original: `FUN_083d178c` @
+/// 0x083d178c (76 bytes; Ghidra agrees).
+///
+/// Raw `osos.dec` establishes the complete 19-word body from `push
+/// {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}` at 0x083d17d4; the next
+/// independently linked function begins at 0x083d17d8. The body has three
+/// unconditional plain direct `bl` calls per non-NULL element—to
+/// [`container_element_at_alias_6b6c`],
+/// [`string_object_with_owned_member_destroy`], and `operator_delete`—and no
+/// predicated direct `bl` calls. It has two inbound plain `bl` call sites
+/// (0x083d1820 and 0x083d184c), with no predicated inbound calls.
+///
+/// When `delete_enabled` is nonzero, walks signed indices from zero while
+/// less than `count`. Each non-NULL indexed element is a
+/// StringObject-with-owned-member: it runs that destructor, then tag-2-deletes
+/// the same allocation. A disabled flag or nonpositive count performs no
+/// access.
+///
+/// Deliberate deviation: the three verified, already ported callees are
+/// ordinary Rust calls rather than ARM `bl` instructions.
+///
+/// # Safety
+///
+/// `container` must point to a readable target-layout head. When enabled with
+/// a positive count, its vtable and selected elements must satisfy
+/// [`container_element_at_alias_6b6c`]'s contract; every non-NULL element must
+/// be a valid `StringObjectWithOwnedMember` allocation accepted by
+/// `operator_delete`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.string_object_owned_member_container_destroy")]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_owned_member_container_destroy(
+    container: *mut ContainerDeleteEnabledElements,
+) {
+    if (*container).delete_enabled == 0 {
+        return;
+    }
+    let count = (*container).count;
+    let mut index = 0;
+    while index < count {
+        let element = container_element_at_alias_6b6c(container.cast(), index as usize);
+        if !element.is_null() {
+            string_object_with_owned_member_destroy(element.cast());
+            crate::heap::veneers::operator_delete(element);
+        }
+        index += 1;
+    }
+}
+
 /// A target-layout callback container whose release gate is at `+0x28`.
 ///
 /// The leading vtable and count are consumed by
@@ -13503,6 +13553,36 @@ mod tests {
             fixture.container.count = -1;
             scoped_context_container_delete_enabled_elements(&mut fixture.container);
             assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
+        }
+    }
+
+    #[test]
+    fn owned_member_container_destroy_skips_nulls_and_honors_gate() {
+        unsafe {
+            let vtable = [delete_enabled_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut fixture = DeleteEnabledFixture {
+                container: ContainerDeleteEnabledElements {
+                    vtable: vtable.as_ptr(),
+                    count: 3,
+                    _unknown_08: 0,
+                    _unknown_0c: 0,
+                    delete_enabled: 1,
+                },
+                elements: [core::ptr::null_mut(); 3],
+                calls: 0,
+            };
+
+            string_object_owned_member_container_destroy(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "every index below count is retrieved");
+
+            fixture.container.delete_enabled = 0;
+            string_object_owned_member_container_destroy(&mut fixture.container);
+            fixture.container.delete_enabled = 1;
+            fixture.container.count = 0;
+            string_object_owned_member_container_destroy(&mut fixture.container);
+            fixture.container.count = -1;
+            string_object_owned_member_container_destroy(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "the gate and nonpositive counts skip lookup");
         }
     }
     #[repr(C)]
