@@ -124,6 +124,7 @@ pub mod global_state;
 pub mod global_slot_release;
 pub mod growable_buffer_append;
 pub mod hash_table_chain_destroy;
+pub mod hash_table_bucket_chain_insert;
 pub mod hash_table_chain_destroy_083d32fc;
 pub mod hash_table_chain_destroy_083d3484;
 pub mod hash_table_bucket_construct;
