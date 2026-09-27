@@ -2798,6 +2798,9 @@ pub mod hints {
     // 0x76f0_0000: dedicated to cxx/observable_array_release_virtual_cells'
     // target-width virtual cell fixtures; mappings never unmap.
     pub const CXX_OBSERVABLE_ARRAY_RELEASE_VIRTUAL_CELLS: usize = 0x76f0_0000;
+    // 0x7700_0000: dedicated to cxx/refcounted_element_array_dispose's
+    // target-width element fixtures; mappings never unmap.
+    pub const CXX_REFCOUNTED_ELEMENT_ARRAY_DISPOSE: usize = 0x7700_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

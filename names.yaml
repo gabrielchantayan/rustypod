@@ -4282,6 +4282,38 @@ functions:
       stage at its verified fixed address; host tests substitute it and the
       target-width virtual dispatch with recorders because x86-64 function
       pointers cannot inhabit the firmware's u32 fields.
+  - address: 0x083d1e30
+    ghidra: FUN_083d1e30
+    name: refcounted_element_array_dispose
+    size: 96
+    sig: "void refcounted_element_array_dispose(RefcountedElementArrayDispose *this)"
+    module: cxx/refcounted_element_array_dispose
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_1+4: count
+      param_1+16: enabled
+      iVar2/r4: index
+      iVar3/r5: element
+      piVar1/r0: element_cell
+      FUN_0839d498: refcounted_body_release_retain_count
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent
+      0x083d1e30..0x083d1e8f: twenty-four A32 words from push
+      {r4,r5,r6,r7,r8,lr} through pop {r4,r5,r6,r7,r8,pc}; the next
+      independently entered function starts at 0x083d1e90. Raw branch decoding
+      finds two incoming unconditional plain bl sites, 0x083d1eec and
+      0x083d1f04, and no predicated direct bl callers. The body has two
+      unconditional plain direct bl calls — the ported
+      refcounted_body_release_retain_count @ 0x0839d498 and ported
+      operator_delete @ 0x082aad24 — no predicated direct bl calls, plus one
+      indirect blx through vtable slot +0x40. If enabled is nonzero, it visits
+      signed indices [0,count); for each non-NULL element returned through that
+      slot, it releases the embedded refcounted-body handle at element+4 before
+      deleting the element allocation. Target code uses retail u32 pointer
+      fields; host fixtures deliberately use typed seams and a widened embedded
+      body pointer because native pointers cannot round-trip through u32.
   - address: 0x083d20b4
     ghidra: FUN_083d20b4
     name: vtable_089a58c8_destruct
