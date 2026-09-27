@@ -4282,6 +4282,32 @@ functions:
       stage at its verified fixed address; host tests substitute it and the
       target-width virtual dispatch with recorders because x86-64 function
       pointers cannot inhabit the firmware's u32 fields.
+  - address: 0x083d20b4
+    ghidra: FUN_083d20b4
+    name: vtable_089a58c8_destruct
+    size: 60
+    sig: "Vtable089a58c8Object *vtable_089a58c8_destruct(Vtable089a58c8Object *this)"
+    module: cxx/vtable_089a58c8_destruct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_083d20ec: VTABLE_089A58C8
+      param_1+0x14: payload
+      FUN_083d200c: indexed_release
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec words establish the 60-byte extent: fourteen instruction
+      words from 0x083d20b4 through the tail branch at 0x083d20e8, followed
+      by the 0x089a58c8 literal at 0x083d20ec; the next independently entered
+      function starts at 0x083d20f0. Raw ARM B/BL decoding finds two inbound
+      plain BL sites and zero predicated BL sites. The body writes this
+      destruction vtable, conditionally dispatches a non-NULL payload through
+      its vtable slot +0x1c, directly calls ported indexed_release, then
+      tail-branches to ported observable_array_destruct. The class and payload
+      slot remain behavior-only names: no callee identity was invented. On ARM
+      the implementation follows the target u32 vtable words and direct call;
+      host tests use typed seams because 64-bit native pointers cannot occupy
+      those target layout fields.
   - address: 0x083d200c
     ghidra: FUN_083d200c
     name: indexed_release
