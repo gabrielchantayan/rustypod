@@ -4241,6 +4241,33 @@ functions:
       It then releases the bucket allocation with count+1 and returns table.
       The Rust port retains all fields as target-width u32 words rather than
       host pointers, deliberately preserving the 32-bit target layout.
+  - address: 0x083d3484
+    ghidra: FUN_083d3484
+    name: hash_table_chain_destroy_083d3484
+    size: 152
+    sig: "u8 *hash_table_chain_destroy_083d3484(u8 *table)"
+    module: util/hash_table_chain_destroy_083d3484
+    status: ported
+    renames:
+      param_1/r0/r6: table
+      puVar3/r5: bucket
+      puVar4/r7: bucket_end
+      puVar1/r4: node
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte extent
+      0x083d3484..0x083d351b; the next independently entered function begins
+      at 0x083d351c. The body has two plain unconditional BL instructions,
+      both to cxx_array_dealloc (0x08266f2c), and no predicated BL
+      instructions. Whole-image ARM branch decoding finds two inbound plain BL
+      call sites (0x08269750 and 0x083d2b10) and no predicated direct calls.
+
+      It treats table words +4/+8/+12 as a bucket allocation, bucket count,
+      and current-bucket cursor. It clears each bucket below buckets + count*4,
+      walks its word-0 intrusive chain, and deallocates each node from node-16.
+      It then releases the bucket allocation with count+1 and returns table.
+      The Rust port retains all fields as target-width u32 words rather than
+      host pointers, deliberately preserving the 32-bit target layout.
   - address: 0x083d351c
     ghidra: FUN_083d351c
     name: hash_table_bucket_construct
