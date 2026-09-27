@@ -153382,3 +153382,36 @@ functions:
       the stock 124-byte Ghidra extent rather than this raw verified extent,
       so its structural diff is expected; its output confirms LLVM emits the
       same allocator, comparator, and rotation control-flow categories.
+  - address: 0x083c0ba8
+    ghidra: FUN_083c0ba8
+    name: red_black_tree_payload_word_node_pool_acquire_083c0ba8
+    size: 184
+    sig: "RedBlackTreePayloadWordNode083c0ba8 *red_black_tree_payload_word_node_pool_acquire_083c0ba8(RedBlackTreePayloadWordNodePool083c0ba8 *pool)"
+    module: cxx/red_black_tree_payload_word_node_pool_acquire_083c0ba8
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083c0ba8 through pop {r4-r8,pc} at 0x083c0c5c;
+      0x083c0c60 begins the next real function. The body contains exactly two
+      unconditional plain BL calls, at 0x083c0c0c and 0x083c0c20, both to
+      operator_new_checked (0x08266c70), and no predicated BL calls. Whole-image
+      raw branch decoding finds two inbound unconditional plain BL sites, at
+      0x0825bd64 and 0x083c1314, with no predicated inbound BL sites. The pool
+      removes a free node through node+0x0c, or grows 20-byte chunks from 32
+      entries by max(capacity + 32, capacity + capacity/2 + capacity/8), then
+      clears color and three red-black-tree link words while preserving the
+      word payload. Deliberate deviations: target pointers remain u32 words to
+      preserve firmware layout on 64-bit hosts, and the retail dead r1 = 0
+      argument to checked new is omitted from the Rust signature.
