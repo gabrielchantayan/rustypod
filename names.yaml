@@ -153841,3 +153841,43 @@ functions:
       match.py structural exit 1 is expected: LLVM uses an fp frame and
       schedules the same free/bump/grow and two-allocation control flow
       differently from ARM ADS.
+  - address: 0x083ba9b8
+    ghidra: FUN_083ba9b8
+    name: red_black_tree_node_pool_acquire_083ba9b8
+    size: 184
+    sig: "RedBlackTreeNode083ba9b8 *red_black_tree_node_pool_acquire_083ba9b8(RedBlackTreeNodePool083ba9b8 *pool)"
+    module: cxx/red_black_tree_node_pool_acquire_083ba9b8
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      r0: node
+      r5: chunk
+      r6: capacity
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right/free-link
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083ba9b8 through pop {r4-r8,pc} at 0x083baa6c;
+      0x083baa70 begins the next real function. The body has exactly two
+      unconditional plain bl instructions, at 0x083baa1c and 0x083baa30, both
+      to operator_new_checked @ 0x08266c70, and no predicated bl calls.
+      Ghidra and independent raw-word inspection identify two inbound plain
+      unconditional bl sites, 0x0810abb4 and 0x083bb34c, with no predicated
+      inbound calls. The pool pops a recycled 20-byte node through node+0x0c;
+      otherwise it bump-allocates from pool+0x08..+0x0c. At exhaustion it links
+      a 12-byte {previous, capacity, arena} chunk at pool+0x00 and allocates
+      capacity*20 bytes, starting at 32 nodes then growing by
+      max(capacity + 32, capacity + capacity/2 + capacity/8). It clears color
+      and parent/left/right while preserving payload. Target pointers are u32
+      words; the dead r1=0 allocator argument is deliberately omitted. Host
+      tests cover arena advance, free-list reuse, link clearing, and payload
+      preservation. match.py reports exit 1 from code scheduling/frame choices;
+      both builds retain the free/bump/grow and two-allocation control flow.
