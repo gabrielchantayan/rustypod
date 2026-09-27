@@ -4227,6 +4227,38 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d178c
+    ghidra: FUN_083d178c
+    name: string_object_owned_member_container_destroy
+    size: 76
+    sig: "void string_object_owned_member_container_destroy(ContainerDeleteEnabledElements *container)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0/r6: container
+      "[container + 0x4]": count
+      "[container + 0x10]": delete_enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      iVar1/r0: element
+      FUN_083d6b6c: container_element_at_alias_6b6c
+      FUN_0828a148: string_object_with_owned_member_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent 0x083d178c..0x083d17d7:
+      nineteen A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the next independently entered function begins at 0x083d17d8. The body has
+      three unconditional plain direct BL calls and no predicated direct BL calls:
+      container_element_at_alias_6b6c @ 0x083d6b6c,
+      string_object_with_owned_member_destroy @ 0x0828a148, and operator_delete
+      @ 0x082aad24. Raw whole-image A32 branch decoding finds two inbound plain
+      BL sites, 0x083d1820 and 0x083d184c, and no predicated inbound BL sites.
+      When delete_enabled is nonzero, it walks signed indices [0,count), destroys
+      each non-NULL indexed StringObject-with-owned-member, then tag-2-deletes
+      that same allocation. The Rust port directly calls the three established
+      ports; this deliberately replaces the original ARM BL instructions without
+      changing their contracts. Host tests cover enabled all-NULL iteration plus
+      disabled, zero-count, and negative-count no-access paths.
   - address: 0x083d1954
     ghidra: FUN_083d1954
     name: observable_array_assert_items_null
