@@ -31246,6 +31246,26 @@ functions:
       +0x14, and return this; LLVM emits the vtable store and null branch
       before saving callee state, and the release wrapper adds five words.
 
+  - address: 0x083d0d78
+    ghidra: FUN_083d0d78
+    name: observable_array_attached_release_cleanup_destruct
+    size: 56
+    sig: "void *observable_array_attached_release_cleanup_destruct(void *this)"
+    module: cxx/observable_array_attached_release_cleanup_destruct
+    vars: {param_1/r0/r4: this, DAT_083d0db0: VTABLE_089A47E8, "[this + 0x14]": attached_object, "[attached_object.vtable + 0x1c]": release, FUN_083d0c90: cleanup_unported, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec decodes fourteen A32 instruction words (56 code bytes) from
+      push {r4,lr} at 0x083d0d78 through the tail B at 0x083d0dac. The
+      derived-vtable literal 0x089a47e8 is at 0x083d0db0, and
+      0x083d0db4 begins the next real function. The body has one plain direct
+      BL to unported FUN_083d0c90 and one predicated indirect BLXNE through
+      the non-NULL attached object's vtable slot +0x1c. It installs the
+      derived vtable, invokes that release, runs the cleanup stage, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. Target Rust
+      invokes the two unresolved boundaries at their verified addresses; host
+      tests install explicit seams. Rust models the predicated BLX and tail
+      branch as ordinary control flow while preserving their order.
   - address: 0x083d0e84
     ghidra: FUN_083d0e84
     name: observable_array_tracked_destruct
