@@ -4206,6 +4206,26 @@ functions:
       It then releases the bucket allocation with count+1 and returns table.
       The Rust port retains all fields as target-width u32 words rather than
       host pointers, deliberately preserving the 32-bit target layout.
+  - address: 0x083d35e4
+    ghidra: FUN_083d35e4
+    name: bucket_chain_insert
+    size: 40
+    sig: "void bucket_chain_insert(u8 *owner, u32 *node, u32 *chain_head)"
+    module: util/bucket_chain_insert
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: node
+      param_3/r2: chain_head
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent
+      0x083d35e4..0x083d360b; the next independently linked function begins
+      at 0x083d360c. Whole-image A32 decoding finds two inbound plain bl
+      calls (0x083d2dc4 and 0x083d3000) and no predicated bl calls. The leaf
+      inserts node at the word-0 intrusive-chain head, increments owner +0x10
+      with u32 wraparound, and lowers the owner +0x0c cursor if chain_head is
+      lower. Rust retains target-width u32 pointer words, preserving target
+      offsets on host and firmware.
   - address: 0x083d360c
     ghidra: FUN_083d360c
     name: bucket_chain_destroy_node8

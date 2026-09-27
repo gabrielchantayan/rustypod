@@ -788,6 +788,10 @@ pub mod hints {
     // and bucket-array fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const HASH_TABLE_BUCKET_SLOT: usize = 0x6c80_0000;
+    // 0x6cb0_0000: dedicated to util/bucket_chain_insert's target-width
+    // owner and intrusive-chain fixture; mappings never unmap, so no other
+    // user may share it.
+    pub const BUCKET_CHAIN_INSERT: usize = 0x6cb0_0000;
     // 0x6c90_0000: dedicated to crypto/bio_find_type's target-width BIO
     // chain and method-type-word fixture; mappings never unmap, so no other
     // user may share it.
