@@ -392,6 +392,7 @@ pub mod free_index_table_grow;
 pub mod word_list;
 pub mod word_list_assign_value;
 pub mod word_list_modular_add;
+pub mod tree_children_flatten_into_parent_083be7dc;
 pub mod word_list_modular_multiply;
 pub mod word_list_modular_square;
 pub mod word_list_modular_scale;
