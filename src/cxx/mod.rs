@@ -542,6 +542,7 @@ pub mod cxx_string_vector_record_subtree_release;
 pub mod red_black_tree_payload_16_node_pool_acquire;
 pub mod red_black_tree_payload_16_subtree_clone;
 pub mod red_black_tree_payload_pair_node_pool_acquire;
+pub mod red_black_tree_payload_pair_node_pool_acquire_083c35e4;
 pub mod red_black_tree_payload_pair_node_pool_acquire_083c597c;
 pub mod red_black_tree_payload_pair_node_pool_acquire_083c63fc;
 pub mod red_black_tree_payload_pair_node_pool_acquire_083cb78c;
