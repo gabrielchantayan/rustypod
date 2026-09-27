@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083cfd00
+    ghidra: FUN_083cfd00
+    name: observable_array_release_cells
+    size: 72
+    sig: "void observable_array_release_cells(ObservableArrayReleaseCells *array)"
+    module: cxx/observable_array_release_cells
+    status: ported
+    renames:
+      param_1/r0: array
+      "array+0x00": vtable
+      "array+0x04": count
+      "array+0x10": enabled
+      "vtable+0x40": cell_at
+      "cell+0x00": allocation_body
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 words e92d4070 e1a05000 e5d00010 e3500000 08bd8070 e5956004
+      e3a04000 ea000007 e5950000 e1a01004 e5902040 e1a00005 e12fff32
+      e5900000 ebfb6bf9 e2844001 e1540006 bafffff5 e8bd8070
+      establish the exact 72-byte body from 0x083cfd00 through 0x083cfd47;
+      the following push {r4,r5,r6,lr} at 0x083cfd48 starts the next real
+      function. The body has one unconditional plain direct bl at 0x083cfd34
+      to the ported operator_delete/FUN_082aad24, no predicated direct bl,
+      and one unconditional indirect blx through vtable+0x40 at 0x083cfd30.
+      Whole-image A32 branch decoding finds two inbound unconditional plain bl
+      sites at 0x083cfd8c and 0x083cfdd8, with no predicated inbound bl sites.
+      When enabled is nonzero, it calls cell_at(array, index) for each signed
+      index in [0,count), loads that cell's first word, and passes it to
+      null-safe operator_delete. Host tests use native vtable and delete seams;
+      target builds retain u32 target pointers and direct operator_delete.
   - address: 0x083d441c
     ghidra: FUN_083d441c
     name: element_array8_insert_unique

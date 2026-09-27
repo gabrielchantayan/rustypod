@@ -7,21 +7,23 @@
 //! `0x089a3a68`, and the next real function begins at `0x083cfe00`. Full-image
 //! aligned A32 branch decoding finds two inbound plain `bl` sites and no
 //! predicated inbound `bl` sites. The body makes one plain direct `bl` to
-//! unported `FUN_083cfd00`, one predicated indirect `blxne` through the
-//! optional payload's vtable slot `+0x1c`, and tail-branches to
-//! `observable_array_destruct` @ `0x08271d2c`.
+//! `observable_array_release_cells` @ `0x083cfd00`, one predicated indirect
+//! `blxne` through the optional payload's vtable slot `+0x1c`, and tail-branches
+//! to `observable_array_destruct` @ `0x08271d2c`.
 //!
 //! # Algorithm
 //!
 //! Plant the derived vtable, conditionally release the optional payload at
-//! `+0x14` through vtable slot `+0x1c`, run the unported payload cleanup, then
+//! `+0x14` through vtable slot `+0x1c`, release its indexed cells, then
 //! tail-chain into the observable-array destructor.
 //!
-//! Deliberate deviations: host tests replace the unknown direct cleanup and
-//! target-width virtual call with seams. ARM invokes their recovered addresses;
-//! Rust models the tail branch as a direct base-destructor call.
+//! Deliberate deviations: host tests replace the target-width virtual call and
+//! cell cleanup with seams. ARM calls the port directly; Rust models the tail
+//! branch as a direct base-destructor call.
 
 use crate::cxx::observable_array::{observable_array_destruct, ObservableArray};
+#[cfg(target_os = "none")]
+use crate::cxx::observable_array_release_cells::{observable_array_release_cells, ObservableArrayReleaseCells};
 
 const VTABLE_WORD: u32 = 0x089a_3a68;
 const PAYLOAD_WORD: usize = 0x14 / 4;
@@ -39,8 +41,7 @@ unsafe fn payload_release(payload: u32) {
 
 #[cfg(target_os = "none")]
 unsafe fn payload_cleanup(array: *mut u8) {
-    let cleanup: PayloadCleanup = unsafe { core::mem::transmute(0x083c_fd00usize) };
-    unsafe { cleanup(array) };
+    unsafe { observable_array_release_cells(array.cast::<ObservableArrayReleaseCells>()) };
 }
 
 #[cfg(not(target_os = "none"))]
@@ -53,8 +54,7 @@ unsafe extern "C" fn missing_payload_cleanup(_: *mut u8) {
     panic!("host tests must replace OBSERVABLE_ARRAY_PAYLOAD_CLEANUP_DESTRUCT_083CFDC4_OPS");
 }
 
-/// Host replacements for the payload vtable dispatch and unported
-/// `FUN_083cfd00` cleanup.
+/// Host replacements for payload release and indexed-cell cleanup.
 #[cfg(not(target_os = "none"))]
 pub static mut OBSERVABLE_ARRAY_PAYLOAD_CLEANUP_DESTRUCT_083CFDC4_OPS: (PayloadRelease, PayloadCleanup) =
     (missing_payload_release, missing_payload_cleanup);
