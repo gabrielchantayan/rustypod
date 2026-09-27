@@ -153345,3 +153345,40 @@ functions:
       the dead r1=0 allocator argument is omitted; target pointers remain u32
       words on the host; match.py finds the same 46 instructions but expected
       LLVM frame/register scheduling and direct-call relocation differences.
+
+  # --- u32 red-black-tree node insertion and rebalancing ---
+  - address: 0x083c12f8
+    ghidra: FUN_083c12f8
+    name: red_black_tree_insert_rebalance
+    size: 464
+    sig: "void red_black_tree_insert_rebalance(u32 *inserted, void *tree, u32 insert_left, RedBlackTreeNode *parent, const u32 *key)"
+    module: cxx/red_black_tree_insert_rebalance
+    status: ported
+    renames:
+      param_1/r9: inserted
+      param_2/r4: tree
+      param_3/r10: insert_left
+      param_4/r6: parent
+      param_5/stack: key
+      FUN_083c0ba8: red_black_tree_node_pool_acquire
+      FUN_083d74dc: less_unsigned_alias_74dc
+      FUN_083c0c60: red_black_tree_rotate_left
+      FUN_083c0cb4: red_black_tree_rotate_right
+    notes: >-
+      Raw osos.dec establishes the true 464-byte A32 extent: 116 words from
+      push {r2-r9,sl,lr} at 0x083c12f8 through pop {r2-r9,sl,pc} at
+      0x083c14c4; push {r4-r8,lr} at 0x083c14c8 begins the next real
+      function. The body contains four unconditional BL instructions:
+      node-pool acquisition at 0x083c1314, unsigned key comparison at
+      0x083c1360, right rotation at 0x083c1418, and left rotation at
+      0x083c148c; it also contains predicated BLEQ rotations at 0x083c13f4
+      and 0x083c1468. It allocates a 20-byte node, stores *key at +0x10,
+      links it as the requested child or by unsigned comparison, increments
+      tree+0x14, and uses standard red-black recoloring and rotations before
+      returning the node through inserted. The node-pool acquire callee is
+      not yet ported, so ARM retains its verified 0x083c0ba8 address and host
+      tests use a replaceable allocator seam. Target pointer fields remain
+      u32 words, preserving 32-bit layout on 64-bit hosts. match.py reports
+      the stock 124-byte Ghidra extent rather than this raw verified extent,
+      so its structural diff is expected; its output confirms LLVM emits the
+      same allocator, comparator, and rotation control-flow categories.
