@@ -4214,6 +4214,36 @@ functions:
       address rather than inventing a callee identity. Host tests use a
       recording replacement solely to verify argument forwarding and the
       observable nine-byte copy, including preservation of trailing padding.
+  - address: 0x083d3084
+    ghidra: FUN_083d3084
+    name: hash_table_bucket_construct_083d3084
+    size: 200
+    sig: "void hash_table_bucket_construct_083d3084(HashTableBuckets *table)"
+    module: util/hash_table_bucket_construct_083d3084
+    status: ported
+    renames:
+      param_1/r0/r4: table
+      iVar4/r5: bucket_count
+      puVar2/r0: bucket_base
+      puVar3/r0: bucket
+      iVar1/r0/r1: word_count
+      FUN_08266c70: operator_new_checked
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte extent
+      0x083d3084..0x083d314b; the next independently linked function begins
+      at 0x083d314c. The body has two plain unconditional BL instructions:
+      operator_new_checked (0x08266c70) and the unreachable C++ exception
+      cleanup cxx_array_dealloc (0x08266f2c). It has no predicated BL
+      instructions.
+
+      It allocates bucket_count + 1 target words, clears them, makes the final
+      word a self-linked sentinel, and writes the allocation to word +4 and
+      sentinel cursor to word +12. Rust omits only the unreachable C++
+      exception-cleanup landing pad; target-width u32 fields preserve the
+      retail object's 32-bit layout. The separately named port intentionally
+      retains this distinct hook target despite matching the algorithm at
+      0x083d351c.
   - address: 0x083d314c
     ghidra: FUN_083d314c
     name: hash_table_chain_prepend

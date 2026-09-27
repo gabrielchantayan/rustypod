@@ -214,6 +214,9 @@ pub mod hints {
     // 0x7ff0_0000: dedicated to util/hash_table_bucket_construct_083d320c's
     // target-width table and bucket-array fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT_083D320C: usize = 0x7ff0_0000;
+    // 0x7fe0_0000: dedicated to util/hash_table_bucket_construct_083d3084's
+    // target-width table and bucket-array fixture; mappings never unmap.
+    pub const HASH_TABLE_BUCKET_CONSTRUCT_083D3084: usize = 0x7fe0_0000;
     // 0x7e70_0000: dedicated to cxx/list_range_clear's target-width list
     // fixture; mappings never unmap, so no other user may share it.
     pub const LIST_RANGE_CLEAR: usize = 0x7e70_0000;
