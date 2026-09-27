@@ -152736,3 +152736,30 @@ functions:
       two-word payload. Deliberate deviations: target pointers are u32 target
       words to preserve firmware layout on 64-bit hosts, and the retail dead r1
       = 0 argument to checked new is omitted from the Rust signature.
+
+  - address: 0x083c6e70
+    ghidra: FUN_083c6e70
+    name: red_black_tree_payload_pair_node_pool_acquire_083c6e70
+    size: 184
+    sig: "RedBlackTreePayloadPairNode083c6e70 *red_black_tree_payload_pair_node_pool_acquire_083c6e70(RedBlackTreePayloadPairNodePool083c6e70 *pool)"
+    module: cxx/red_black_tree_payload_pair_node_pool_acquire_083c6e70
+    status: ported
+    vars: {param_1: pool, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: previous_capacity, uVar5: grown_capacity, uVar6: capacity}
+    renames:
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083c6e70 through pop {r4-r8,pc} at 0x083c6f24;
+      0x083c6f28 begins the next real function. The body contains exactly two
+      unconditional plain bl calls, at 0x083c6ed4 and 0x083c6ee8, both to
+      operator_new_checked @ 0x08266c70, and no predicated bl calls. Ghidra
+      declares void, but both inbound callers consume r0: 0x081bfc40 stores
+      it as a tree sentinel and 0x083c76f4 writes the payload, so this port
+      returns the node. The pool pops the +0xc-threaded free list, otherwise
+      bumps through pool+8..+0xc, then grows with capacity max(previous+0x20,
+      previous+previous/2+previous/8), initially 0x20. Growth allocates a
+      0xc previous/capacity/arena chunk and capacity*0x18 arena through
+      operator_new_checked. The returned red node has parent/left/right
+      nulled while its two payload words remain untouched. Deliberate
+      deviations: target pointers stay u32 words for target layout on hosts,
+      and the dead r1=0 allocator argument is omitted.
