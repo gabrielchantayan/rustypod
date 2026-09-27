@@ -150211,3 +150211,33 @@ functions:
       the stock store/load/cmp/virtual-call/base-cleanup/tail-destructor flow;
       LLVM expands predication to a branch and the fixed-address call to a
       volatile function-pointer load and blx.
+  - address: 0x083cf9fc
+    ghidra: FUN_083cf9fc
+    name: observable_array_release_virtual_cells
+    size: 88
+    sig: "void observable_array_release_virtual_cells(ObservableArrayReleaseVirtualCells *array)"
+    module: cxx/observable_array_release_virtual_cells
+    status: ported
+    renames:
+      param_1/r0: array
+      "array+0x00": vtable
+      "array+0x04": count
+      "array+0x10": enabled
+      "vtable+0x40": cell_at
+      "cell+0x00": object
+      "object+0x00": vtable
+      "object_vtable+0x04": release
+    notes: >-
+      Raw A32 words e92d4070 e1a05000 e5d00010 e3500000 08bd8070 e5956004
+      e3a04000 ea00000a e5950000 e1a01004 e5902040 e1a00005 e12fff32
+      e5900000 e3500000 15901000 15911004 112fff31 e2844001 e1540006
+      bafffff2 e8bd8070 establish the exact 88-byte body from 0x083cf9fc
+      through 0x083cfa50; the following push at 0x083cfa54 begins the next
+      real function. The body has no plain direct bl instructions and no
+      predicated direct bl instructions; it has one unconditional indirect
+      blx through array_vtable+0x40 and one predicated indirect blxne through
+      object_vtable+0x04. Raw caller decoding independently finds the two
+      inbound unconditional plain bl sites at 0x083cfaac and 0x083cfae4, with
+      no predicated inbound bl. When enabled is nonzero, the function walks
+      signed indices in [0,count), obtains each cell through cell_at, and
+      invokes release(object) only when the cell's first word is nonzero.
