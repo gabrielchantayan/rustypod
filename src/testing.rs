@@ -42,6 +42,9 @@ pub mod hints {
     // 0x6c00_0000: dedicated to cxx/vector_copy_construct_elem32's
     // target-width source, destination, and allocation fixture; mappings never unmap.
     pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;
+    // 0x6c50_0000: dedicated to util/bucket_chain_destroy_node8's raw-u32
+    // owner, bucket allocation, and intrusive-chain fixture; mappings never unmap.
+    pub const BUCKET_CHAIN_DESTROY_NODE8: usize = 0x6c50_0000;
     // 0x6c30_0000: dedicated to app/tracker_array_expand's target-width storage fixture; mappings never unmap.
     pub const TRACKER_ARRAY_EXPAND: usize = 0x6c30_0000;
     // 0x6c40_0000: dedicated to app/element_array2_expand's target-width storage fixture; mappings never unmap.
