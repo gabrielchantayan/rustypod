@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array first-string disposal ---
+  - address: 0x083d028c
+    ghidra: FUN_083d028c
+    name: opaque_observable_array_dispose_first_string
+    size: 76
+    sig: "void opaque_observable_array_dispose_first_string(OpaqueObservableArray *this)"
+    module: cxx/opaque_observable_array_dispose_first_string
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_1_plus_0x04/r5: count
+      param_1_plus_0x10/r0: enabled
+      r4: index
+      FUN_083d6908: container_element_at_alias_6908
+      FUN_08277484: string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte A32 extent: nineteen words
+      from push {r4,r5,r6,lr} at 0x083d028c through pop {r4,r5,r6,pc} at
+      0x083d02d4; the push at 0x083d02d8 begins the next independently entered
+      function. The body has three unconditional plain direct BL calls, at
+      0x083d02b4 to ported container_element_at_alias_6908/FUN_083d6908, at
+      0x083d02c0 to ported string_object_destroy/FUN_08277484, and at
+      0x083d02c4 to ported operator_delete/FUN_082aad24; it has zero predicated
+      direct BL calls. Whole-image A32 branch decoding finds two inbound plain
+      BL calls at 0x083d0324 and 0x083d035c, and no predicated inbound BL
+      calls. If enabled, it scans signed indices [0,count), retrieves each
+      element, then destroys and tag-2-deletes the first non-NULL StringObject.
+      The owning class remains unrecovered, so Rust models only the accessed
+      prefix and injects the two lifecycle calls as host-test seams.
   # --- opaque collection allocation release ---
   - address: 0x083d0738
     ghidra: FUN_083d0738
