@@ -152181,3 +152181,33 @@ functions:
       versus 14 stock) from LLVM's frame, explicit NULL branch, and seam
       function-pointer dispatch, while preserving the vtable store, release,
       assertion, and base-destruction order.
+  - address: 0x083d0370
+    ghidra: FUN_083d0370
+    name: collection_release_first_occupied_string_083d0370
+    size: 88
+    sig: "void collection_release_first_occupied_string_083d0370(CollectionReleaseFirstOccupiedString083d0370 *array)"
+    module: cxx/collection_release_first_occupied_string_083d0370
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      vtable_plus_0x40/r2: cell_at
+      piVar1/r0: string_object
+      FUN_08277484: string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent: twenty-two words
+      from push {r4,r5,r6,lr} at 0x083d0370 through pop {r4,r5,r6,pc} at
+      0x083d03c4; the push at 0x083d03c8 begins the next real function. The
+      body has two unconditional plain direct BL calls, string_object_destroy/
+      FUN_08277484 at 0x083d03b0 and operator_delete/FUN_082aad24 at
+      0x083d03b4, zero predicated direct BL calls, and one unconditional
+      virtual BLX through vtable+0x40 at 0x083d03a0. Raw caller words establish
+      two inbound unconditional plain BL sites, 0x083d0420 and 0x083d0458, and
+      no predicated inbound direct BL sites. When enabled is nonzero, it scans
+      signed indices [0,count), obtains each cell through that virtual accessor,
+      then destroys and tag-2 deletes the first nonzero StringObject. Host
+      fixtures widen vtable and cell words to native width; target accesses
+      retain verified u32 layout. match.py structural output is reviewed rather
+      than requiring an exact compiler match.
