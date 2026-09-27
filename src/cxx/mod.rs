@@ -300,6 +300,7 @@ pub mod recursive_mutex;
 pub mod observable_array;
 pub mod observable_array_tracked_destruct;
 pub mod observable_array_checked_destruct;
+pub mod observable_array_assert_empty_destruct;
 pub mod observable_element_array_clear;
 pub mod observable_array_owned_destroy;
 pub mod observable_array_pair;
