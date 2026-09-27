@@ -153499,3 +153499,30 @@ functions:
       tree's +0x04 free-node list before continuing with that saved left link.
       Target pointers remain u32 words so host fixtures preserve retail
       four-byte link offsets.
+  - address: 0x083be7dc
+    ghidra: FUN_083be7dc
+    name: tree_children_flatten_into_parent_083be7dc
+    size: 60
+    sig: "void tree_children_flatten_into_parent_083be7dc(u32 *parent, u32 first_child)"
+    module: util/tree_children_flatten_into_parent_083be7dc
+    status: ported
+    renames:
+      param_1/r0/r5: parent
+      param_2/r1/r4: first_child
+      iVar1/r4: node
+      "parent+0x04": child_head
+      "node+0x08": next_sibling
+      "node+0x0c": first_child
+    notes: >-
+      Raw osos.dec words establish the true 60-byte A32 extent from push
+      {r4,r5,lr} at 0x083be7dc through pop {r4,r5,pc} at 0x083be814; the
+      next independently entered function begins at 0x083be818 with stmdb
+      sp!,{r2,r3,r4,r5,r6,r7,r8,r9,sl,lr}. Complete aligned raw A32 branch
+      decoding finds two inbound unconditional plain BL sites, at 0x083be4d0
+      and the recursive 0x083be7f4, with no predicated BL forms. The body has
+      one unconditional plain BL, the recursion at 0x083be7f4, and no
+      predicated calls. It recursively flattens each node's +0x0c child chain,
+      saves the +0x08 sibling link, and prepends the node to the parent's
+      +0x04 child-head list before continuing with that saved sibling. Target
+      pointers remain u32 words so host fixtures preserve retail four-byte
+      link offsets. Deliberate deviations: none.
