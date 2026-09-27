@@ -512,6 +512,29 @@ functions:
       node+0x0c child chain, walks node+0x08 siblings, and prepends each node to
       parent+0x04. Deliberate deviation: target pointers remain u32 target words
       to preserve retailOS's four-byte field layout on 64-bit hosts.
+  - address: 0x083bbd30
+    ghidra: FUN_083bbd30
+    name: tree_children_flatten_into_parent_083bbd30
+    size: 60
+    sig: "void tree_children_flatten_into_parent_083bbd30(TreeParent *parent, u32 first_child)"
+    module: util/tree_children_flatten_into_parent_083bbd30
+    status: ported
+    renames:
+      param_1/r0/r5: parent
+      param_2/r1/r4: first_child
+      "parent+0x04": child_head
+      "node+0x08": next_sibling
+      "node+0x0c": first_child
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 extent from push
+      {r4,r5,lr} at 0x083bbd30 through pop {r4,r5,pc} at 0x083bbd68;
+      0x083bbd6c begins the next real function. Whole-image raw branch decoding
+      finds exactly two inbound unconditional plain BL sites, 0x083bbb30 and
+      recursive 0x083bbd48, with no predicated inbound BL sites. The body has
+      one plain recursive BL and no predicated BL. It depth-first flattens the
+      node+0x0c child chain, walks node+0x08 siblings, and prepends each node to
+      parent+0x04. Deliberate deviation: target pointers remain u32 target words
+      to preserve retailOS's four-byte field layout on 64-bit hosts.
   - address: 0x083bdc94
     ghidra: FUN_083bdc94
     name: tree_children_flatten_into_parent_083bdc94
