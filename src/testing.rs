@@ -1297,6 +1297,9 @@ pub mod hints {
     // destructor fixture; fixture mappings never unmap, so no other user
     // may share this hint.
     pub const EVENT_LIST_TREE_DESTRUCT: usize = 0xd200_0000;
+    // 0xd210_0000: dedicated to cxx/event_list_tree_release_subtree's raw-u32
+    // event-tree fixture; mappings never unmap, so no other user may share this hint.
+    pub const EVENT_LIST_TREE_RELEASE_SUBTREE: usize = 0xd210_0000;
     // 0x2f00_0000: dedicated to ui/plst_next's raw-u32 element and
     // chain-node fixture; mappings never unmap, so no other user may
     // share this hint.

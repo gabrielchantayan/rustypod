@@ -8465,6 +8465,33 @@ functions:
       successor release order, next-link snapshotting, teardown flag, and
       null-root no-op. Raw disassembly: osos.dec 0x083c56b8; match.py
       structural review recorded.
+  # --- Event-list tree subtree release ---
+  - address: 0x083c1f10
+    ghidra: FUN_083c1f10
+    name: event_list_tree_release_subtree
+    size: 64
+    sig: "void event_list_tree_release_subtree(u8 *tree, u32 root)"
+    module: cxx/event_list_tree_release_subtree
+    status: ported
+    renames:
+      param_1/r0/r6: tree
+      param_2/r1/r4: root
+      iVar1/r5: next_sibling
+      FUN_083c1648: event_list_tree_record_link
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen A32 words
+      from push {r4,r5,r6,lr} at 0x083c1f10 through pop {r4,r5,r6,pc} at
+      0x083c1f4c; the next independently linked function starts at 0x083c1f50.
+      Decoding every aligned ARM B/BL-immediate word finds exactly two plain,
+      unconditional bl calls: recursive FUN_083c1f10 at 0x083c1f28 and
+      event_list_tree_record_link at 0x083c1f3c; there are no predicated bl
+      calls. The routine postorder-traverses node word three (+0x0c), snapshots
+      the sibling in word two (+0x08) before teardown, releases the current
+      record with flag one, then advances to that snapshot. Deliberate
+      deviation: Rust represents the recursive BL directly and preserves target
+      links as u32 words. Host tests prove subtree-before-sibling release order,
+      next-link snapshotting, teardown flag, and null-root no-op. Raw
+      disassembly: osos.dec 0x083c1f10; match.py structural review recorded.
   # --- Event-list tree record slot link ---
   - address: 0x083c1648
     ghidra: FUN_083c1648

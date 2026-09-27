@@ -461,6 +461,7 @@ pub mod string_byte_vector_record_range_destroy;
 pub mod string_vector_destruct;
 pub mod lazy_string_tables_initialize;
 pub mod event_list_tree_record_link;
+pub mod event_list_tree_release_subtree;
 pub mod string_vector_record_link;
 pub mod string_vector_record_range_destroy;
 pub mod string_vector_record_destroy;
