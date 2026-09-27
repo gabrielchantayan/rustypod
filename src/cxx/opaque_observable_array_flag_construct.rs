@@ -18,6 +18,62 @@
 //! literal, copy the incoming byte to +0x10, and clear the word at +0x14. The
 //! literal has no verified class identity, so this module deliberately uses an
 //! opaque role name rather than inventing one. Deliberate deviations: none.
+//!
+//! - `opaque_observable_array_flag_destruct` — original: `FUN_083d0af0` @
+//!   0x083d0af0 (**60 bytes**: 56 bytes of instructions plus the literal
+//!   0x089a4638 @ 0x083d0b28). The next independently entered function starts
+//!   with `push {r4,r5,r6,lr}` at 0x083d0b2c. Whole-image A32 decoding finds
+//!   two inbound plain `bl` sites (0x0826b568 and 0x08291fbc), no predicated
+//!   direct `bl` callers. The body has one plain direct `bl` to
+//!   `FUN_083d0a20`, one predicated virtual `blxne` through the word at
+//!   `allocation->vtable + 0x1c`, and tail-branches to
+//!   [`observable_array_destruct`] @ 0x08271d2c.
+//!
+//!   It reinstalls this class's vtable, conditionally dispatches virtual slot
+//!   +0x1c on the opaque word at +0x14, then destroys the observable-array
+//!   base. The virtual target has no verified identity, so it remains named
+//!   for its observed slot and argument. Deliberate deviation: Rust models
+//!   the tail branch as a direct call and uses a host seam for the target-only
+//!   32-bit virtual dispatch; field writes and call order are preserved.
+
+use core::ptr;
+
+use super::observable_array::observable_array_destruct;
+
+/// Target default for the opaque virtual release at `allocation->vtable + 0x1c`.
+#[cfg(target_os = "none")]
+unsafe fn opaque_observable_array_flag_release_word_at_14(allocation: *mut u8) {
+    let vtable = allocation.cast::<u32>().read_volatile() as *const u32;
+    let release: unsafe extern "C" fn(*mut u8) = core::mem::transmute(vtable.add(0x1c / 4).read_volatile());
+    release(allocation);
+}
+
+/// Host default for the unported virtual target.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_opaque_observable_array_flag_release_word_at_14(_allocation: *mut u8) {}
+
+/// Host seam for the unported virtual target at target vtable slot `+0x1c`.
+#[cfg(not(target_os = "none"))]
+pub static mut OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14: unsafe extern "C" fn(*mut u8) =
+    missing_opaque_observable_array_flag_release_word_at_14;
+
+/// Target default for `FUN_083d0a20`, whose observed destruction role is not
+/// sufficient to assign it a stronger identity.
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_opaque_auxiliary_destroy(this: *mut OpaqueObservableArrayFlag) {
+    let destroy: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag) =
+        core::mem::transmute(0x083d_0a20usize);
+    destroy(this);
+}
+
+/// Host default for the direct but unported destructor call.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_opaque_auxiliary_destroy(_this: *mut OpaqueObservableArrayFlag) {}
+
+/// Host seam for the direct `bl 0x083d0a20`.
+#[cfg(not(target_os = "none"))]
+pub static mut OPAQUE_AUXILIARY_DESTROY: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag) =
+    missing_opaque_auxiliary_destroy;
 
 use super::observable_array::{observable_array_construct, ObservableArray, OBSERVABLE_ARRAY_SIZE};
 
@@ -63,9 +119,88 @@ pub unsafe extern "C" fn opaque_observable_array_flag_construct(
     object
 }
 
+/// Destroys the opaque observable-array object after releasing its auxiliary word.
+///
+/// # Safety
+///
+/// `this` must point to a live [`OpaqueObservableArrayFlag`]. When `word_at_14`
+/// is nonzero, it must be an allocation whose first word is a vtable with a
+/// callable target-word slot at `+0x1c`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.opaque_observable_array_flag_destruct")]
+pub unsafe extern "C" fn opaque_observable_array_flag_destruct(
+    this: *mut OpaqueObservableArrayFlag,
+) -> *mut OpaqueObservableArrayFlag {
+    unsafe {
+        ptr::addr_of_mut!((*this).array.base.vtable)
+            .write_volatile(OPAQUE_OBSERVABLE_ARRAY_FLAG_VTABLE);
+        let allocation = ptr::addr_of!((*this).word_at_14).read_volatile() as usize as *mut u8;
+        if !allocation.is_null() {
+            #[cfg(target_os = "none")]
+            opaque_observable_array_flag_release_word_at_14(allocation);
+            #[cfg(not(target_os = "none"))]
+            ptr::read_volatile(ptr::addr_of!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14))(allocation);
+        }
+        #[cfg(target_os = "none")]
+        firmware_opaque_auxiliary_destroy(this);
+        #[cfg(not(target_os = "none"))]
+        ptr::read_volatile(ptr::addr_of!(OPAQUE_AUXILIARY_DESTROY))(this);
+        observable_array_destruct(ptr::addr_of_mut!((*this).array));
+    }
+    this
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+    use parking_lot::Mutex;
+
+    static RELEASE_LOCK: Mutex<()> = Mutex::new(());
+    static RELEASE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static RELEASED_ALLOCATION: AtomicUsize = AtomicUsize::new(0);
+
+    static AUXILIARY_DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn record_auxiliary_destroy(_this: *mut OpaqueObservableArrayFlag) {
+        AUXILIARY_DESTROY_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn record_release(allocation: *mut u8) {
+        RELEASE_CALLS.fetch_add(1, Ordering::SeqCst);
+        RELEASED_ALLOCATION.store(allocation as usize, Ordering::SeqCst);
+    }
+
+    struct ReleaseReset {
+        release: unsafe extern "C" fn(*mut u8),
+        auxiliary_destroy: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag),
+    }
+
+    impl Drop for ReleaseReset {
+        fn drop(&mut self) {
+            unsafe {
+                ptr::addr_of_mut!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14)
+                    .write_volatile(self.release);
+                ptr::addr_of_mut!(OPAQUE_AUXILIARY_DESTROY).write_volatile(self.auxiliary_destroy);
+            }
+        }
+    }
+
+    fn install_release() -> ReleaseReset {
+        unsafe {
+            let reset = ReleaseReset {
+                release: ptr::addr_of!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14).read_volatile(),
+                auxiliary_destroy: ptr::addr_of!(OPAQUE_AUXILIARY_DESTROY).read_volatile(),
+            };
+            ptr::addr_of_mut!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14).write_volatile(record_release);
+            ptr::addr_of_mut!(OPAQUE_AUXILIARY_DESTROY).write_volatile(record_auxiliary_destroy);
+            RELEASE_CALLS.store(0, Ordering::SeqCst);
+            RELEASED_ALLOCATION.store(0, Ordering::SeqCst);
+            AUXILIARY_DESTROY_CALLS.store(0, Ordering::SeqCst);
+            reset
+        }
+    }
     use crate::cxx::observable_array::FrameworkObject;
 
     #[repr(C)]
@@ -105,5 +240,65 @@ mod tests {
             assert_eq!(fixture.object.word_at_14, 0);
             assert_eq!(fixture.trailing, 0xcafe_babe);
         }
+    }
+
+    #[test]
+    fn destruct_releases_nonzero_auxiliary_word_before_destroying_base() {
+        let _lock = RELEASE_LOCK.lock();
+        let _reset = install_release();
+        let mut fixture = Fixture {
+            object: OpaqueObservableArrayFlag {
+                array: ObservableArray {
+                    base: FrameworkObject { vtable: 0xdead_beef },
+                    len: 7,
+                    storage: 0,
+                    observers: 0,
+                },
+                flag_at_10: 0x7a,
+                padding_11_13: [0xa5; 3],
+                word_at_14: 0x1234_5000,
+            },
+            trailing: 0xcafe_babe,
+        };
+
+        let returned = unsafe { opaque_observable_array_flag_destruct(ptr::addr_of_mut!(fixture.object)) };
+
+        assert_eq!(returned, ptr::addr_of_mut!(fixture.object));
+        assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(AUXILIARY_DESTROY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(RELEASED_ALLOCATION.load(Ordering::SeqCst), 0x1234_5000);
+        assert_eq!(fixture.object.array.base.vtable, crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE);
+        assert_eq!(fixture.object.array.len, 0);
+        assert_eq!(fixture.object.word_at_14, 0x1234_5000, "the retail destructor does not clear this field");
+        assert_eq!(fixture.object.flag_at_10, 0x7a);
+        assert_eq!(fixture.object.padding_11_13, [0xa5; 3]);
+        assert_eq!(fixture.trailing, 0xcafe_babe);
+    }
+
+    #[test]
+    fn destruct_skips_null_auxiliary_word() {
+        let _lock = RELEASE_LOCK.lock();
+        let _reset = install_release();
+        let mut fixture = Fixture {
+            object: OpaqueObservableArrayFlag {
+                array: ObservableArray {
+                    base: FrameworkObject { vtable: 0 },
+                    len: 0,
+                    storage: 0,
+                    observers: 0,
+                },
+                flag_at_10: 0,
+                padding_11_13: [0xa5; 3],
+                word_at_14: 0,
+            },
+            trailing: 0xcafe_babe,
+        };
+
+        unsafe { opaque_observable_array_flag_destruct(ptr::addr_of_mut!(fixture.object)); }
+
+        assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(AUXILIARY_DESTROY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.object.array.base.vtable, crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE);
+        assert_eq!(fixture.trailing, 0xcafe_babe);
     }
 }
