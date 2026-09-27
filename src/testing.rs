@@ -490,6 +490,9 @@ pub mod hints {
     // 0x1d90_0000: dedicated to cxx/hash_table_contains_word_pair's raw-u32
     // table, bucket, link, and key fixture; mappings never unmap.
     pub const HASH_TABLE_CONTAINS_WORD_PAIR: usize = 0x1d90_0000;
+    // 0x1da0_0000: dedicated to cxx/hash_table_find_or_end_word_pair's
+    // raw-u32 table, bucket, node, key, and output fixture; mappings never unmap.
+    pub const HASH_TABLE_FIND_OR_END_WORD_PAIR: usize = 0x1da0_0000;
     pub const IAP_PACKET_OWNER_MODE: usize = 0x1e00_0000;
     pub const TOKENIZER: usize = 0x1f00_0000;
     // 0x1f10_0000: dedicated to cxx/tokenizer_next_string's raw-u32 UTF-16
