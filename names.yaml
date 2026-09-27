@@ -466,6 +466,7 @@ functions:
       the established FUN_083cadd0/list_node_prepend_release seam with release
       flag one. Target pointers remain u32 target words to preserve firmware
       layout on 64-bit hosts.
+  - address: 0x083cbfbc
     ghidra: FUN_083cbfbc
     name: tree_children_flatten_into_parent_083cbfbc
     size: 60
