@@ -153908,3 +153908,33 @@ functions:
       recycles every node through the vector-destroying pool release. Rust
       recursion deliberately represents the direct self-call; target links
       remain 32-bit words so host fixtures preserve retailOS offsets.
+  - address: 0x083b9f4c
+    ghidra: FUN_083b9f4c
+    name: red_black_tree_payload_16_node_pool_acquire_083b9f4c
+    size: 176
+    sig: "RedBlackTreePayload16Node *red_black_tree_payload_16_node_pool_acquire_083b9f4c(RedBlackTreePayload16NodePool *pool)"
+    module: cxx/red_black_tree_payload_16_node_pool_acquire_083b9f4c
+    status: ported
+    renames:
+      param_1/r4: pool
+      param_1_plus_0x00: chunks
+      param_1_plus_0x04: free
+      param_1_plus_0x08: next
+      param_1_plus_0x0c: end
+      puVar1/r0: node
+      piVar3/r5: chunk
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent: 44 A32 words from
+      push {r4-r8,lr} at 0x083b9f4c through pop {r4-r8,pc} at 0x083b9ff8;
+      0x083b9ffc begins the next real function. The body has exactly two
+      unconditional plain bl calls, at 0x083b9fac and 0x083b9fb8, both to
+      operator_new_checked @ 0x08266c70; there are no predicated bl calls.
+      It acquires a 32-byte red-black-tree node by popping node+0x0c from the
+      free list or by advancing the bump arena. An empty arena allocates a
+      12-byte chunk and capacity*32-byte backing arena; capacity starts at 32
+      and grows by max(old+32, old+old/2+old/8). Acquisition clears color and
+      parent/left/right, preserving its 16-byte payload. Target pointer fields
+      remain u32 words, and the dead retail r1=0 allocator argument is
+      deliberately omitted. Host tests cover fresh allocation, free-list
+      reuse, cleared links, payload preservation, and growth.
