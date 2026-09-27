@@ -4257,6 +4257,39 @@ functions:
       host fixtures deliberately replace both direct calls and widen the vtable
       pointer because native callback pointers and fixture allocations cannot
       occupy retailOS u32 words.
+  - address: 0x083d1d3c
+    ghidra: FUN_083d1d3c
+    name: opaque_observable_array_dispose_items
+    size: 80
+    sig: "void opaque_observable_array_dispose_items(OpaqueObservableArrayDisposeItems *this)"
+    module: cxx/opaque_observable_array_dispose_items
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_1+4/r5: count
+      param_1+16: enabled
+      iVar2/r4: index
+      iVar1/r0: element_cell
+      "[element_cell + 0x0]": object
+      FUN_083d6c2c: opaque_observable_array_cell_at
+      FUN_083d1f04: opaque_observable_array_element_dispose
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent
+      0x083d1d3c..0x083d1d8b: twenty ARM words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the next independently entered function begins
+      at 0x083d1d90. The body has three unconditional plain direct BL calls
+      (0x083d6c2c, 0x083d1f04, and ported operator_delete @ 0x082aad24), zero
+      predicated direct BL calls, and exactly two inbound plain BL sites
+      (0x083d1de4 and 0x083d1e1c). If enabled byte +0x10 is nonzero, it walks
+      signed indices [0,count), obtains each cell through the unresolved direct
+      accessor, skips NULL object words, passes each object +8 to the unresolved
+      direct disposal stage, then tag-2 deletes that returned pointer minus 8.
+      The two unidentified direct callees remain address-backed seams: host
+      tests substitute them and the delete operation; target builds call their
+      fixed retailOS addresses and the ported delete veneer. match.py reports a
+      structural diff because those address-backed direct calls compile as BLX
+      through literals rather than stock direct BL instructions.
   - address: 0x083d1df4
     ghidra: FUN_083d1df4
     name: opaque_observable_array_destroy
