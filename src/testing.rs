@@ -958,6 +958,10 @@ pub mod hints {
     // util/tree_children_flatten_release_strings_083c61dc's target-width
     // parent and intrusive-node fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_RELEASE_STRINGS_083C61DC: usize = 0x7d50_0000;
+    // 0x7d60_0000: dedicated to
+    // util/tree_children_flatten_release_strings_083c3e44's target-width
+    // parent and intrusive-node fixture; mappings never unmap.
+    pub const TREE_CHILDREN_FLATTEN_RELEASE_STRINGS_083C3E44: usize = 0x7d60_0000;
     // 0x1230_0000: dedicated to util/indexed_state_set_and_poll's raw-u32
     // state-table and selected-record fixture; mappings never unmap, so no
     // other user may share this hint.
