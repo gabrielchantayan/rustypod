@@ -3815,6 +3815,36 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cfe00
+    ghidra: FUN_083cfe00
+    name: indexed_string_element_array_destroy
+    size: 88
+    sig: "void indexed_string_element_array_destroy(IndexedStringElementArray *array)"
+    module: cxx/indexed_string_element_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r6: count
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_slot
+      FUN_08277484: string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent 0x083cfe00..0x083cfe57:
+      twenty-two A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the push at 0x083cfe58 starts the next independently entered function.
+      Raw decoding finds two inbound unconditional plain BL sites, 0x083cfea4
+      and 0x083cfedc, with no predicated BL callers. The body makes two
+      unconditional plain BL calls and no predicated BL calls:
+      string_object_destroy @ 0x08277484 and operator_delete @ 0x082aad24. Its
+      vtable slot +0x40 dispatch is an indirect BLX with no recovered static
+      target. If enabled is nonzero, it visits indices [0,count), destroys each
+      non-NULL string object returned through that slot, and deletes it. Host
+      fixtures widen the vtable pointer; target accesses retain the original
+      32-bit offsets.
   - address: 0x083cfeb4
     ghidra: FUN_083cfeb4
     name: observable_array_payload_cleanup_destruct
