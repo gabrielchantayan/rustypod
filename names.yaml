@@ -4330,6 +4330,29 @@ functions:
       record address plus its first word to output. Rust uses u32 word fields
       and volatile accesses deliberately, preserving the target layout and
       retail load/store order on hosts with wider pointers.
+  - address: 0x083d2114
+    ghidra: FUN_083d2114
+    name: conditional_indexed_record_pointer_and_value
+    size: 52
+    sig: "void conditional_indexed_record_pointer_and_value(u32 *output, const u32 *input)"
+    module: util/conditional_indexed_record_pointer_and_value
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input
+      piVar1/r1: record
+      iVar2/r2: record_value
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte extent
+      0x083d2114..0x083d2147: the next independently entered function starts
+      at 0x083d2148 with push {r4-r8,lr}. Whole-image ARM B/BL decoding finds
+      two inbound plain BL sites (0x08268f48 and 0x0826a6c4) and no predicated
+      BL sites. This leaf has no outbound calls. It tests target-width input
+      word +32: zero selects input word +16 plus input word +40 scaled by four;
+      nonzero selects input word +28. It stores the selected record address and
+      its first word to output. Rust keeps word-indexed target offsets and
+      volatile accesses so host pointer width and LLVM transformations cannot
+      alter the load/store behavior.
   - address: 0x083d2148
     ghidra: FUN_083d2148
     name: scaled_byte_pair_hash_table_record_construct
