@@ -638,6 +638,9 @@ pub mod hints {
     // 0x5472_0000: dedicated to util/word_key_set_recycle_tree's target-width
     // word-key set and hierarchy fixture; mappings never unmap.
     pub const WORD_KEY_SET_RECYCLE_TREE: usize = 0x5472_0000;
+    // 0x5482_0000: dedicated to cxx/equal_key_tree_recycle_subtree's
+    // target-width tree and intrusive-node fixture; mappings never unmap.
+    pub const EQUAL_KEY_TREE_RECYCLE_SUBTREE: usize = 0x5482_0000;
     // 0x7a50_0000: dedicated to cxx/red_black_tree_release_subtree's raw-u32
     // cleanup-chain and intrusive-subtree fixture; mappings never unmap.
     pub const RED_BLACK_TREE_RELEASE_SUBTREE: usize = 0x7a50_0000;

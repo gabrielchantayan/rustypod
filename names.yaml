@@ -153442,3 +153442,28 @@ functions:
       word payload. Deliberate deviations: target pointers remain u32 words to
       preserve firmware layout on 64-bit hosts, and the retail dead r1 = 0
       argument to checked new is omitted from the Rust signature.
+  - address: 0x083bf218
+    ghidra: FUN_083bf218
+    name: equal_key_tree_recycle_subtree
+    size: 60
+    sig: "void equal_key_tree_recycle_subtree(EqualKeyTree *tree, RedBlackTreeNode *node)"
+    module: cxx/equal_key_tree_recycle_subtree
+    status: ported
+    renames:
+      param_1/r0/r5: tree
+      param_2/r1/r4: node
+      "tree+0x04": free_node_head
+      "node+0x08": left_child
+      "node+0x0c": right_child
+    notes: >-
+      Raw osos.dec establishes the true 60-byte A32 extent from push
+      {r4,r5,lr} at 0x083bf218 through pop {r4,r5,pc} at 0x083bf250; the
+      next independently entered function begins at 0x083bf254. Complete
+      aligned A32 branch decoding finds two inbound unconditional plain BL
+      sites, at 0x083bf018 and the recursive 0x083bf230, with no predicated
+      BL forms. The body has one unconditional plain BL, the recursion at
+      0x083bf230, and no predicated calls. It recursively recycles each right
+      subtree, saves the left link, and prepends the current node to the
+      tree's +0x04 free-node list before continuing with that saved left link.
+      Target pointers remain u32 words so host fixtures preserve retail
+      four-byte link offsets.
