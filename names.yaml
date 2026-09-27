@@ -30933,6 +30933,28 @@ functions:
       same vtable store, +0x14 null guard and virtual dispatch, direct item
       destruction, and base-destructor sequence; LLVM adds a frame and emits
       an ordinary conditional branch.
+  - address: 0x083d1918
+    ghidra: FUN_083d1918
+    name: observable_array_pre_destruct_check
+    size: 60
+    sig: "void *observable_array_pre_destruct_check(void *this)"
+    module: cxx/observable_array_pre_destruct_check
+    vars: {param_1: this, DAT_083d1950: VTABLE_089A5208, FUN_083d1870: observable_array_pre_destruct_check, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes fourteen A32 instruction words (56 code bytes)
+      from 0x083d1918 through the tail B at 0x083d194c. The following word at
+      0x083d1950 is the vtable literal 0x089a5208, and the next independent
+      function begins with push {r4-r6,lr} at 0x083d1954, so the true extent is
+      60 bytes. Whole-image raw-word decoding finds two inbound plain BL sites
+      (0x0810e414 and 0x081f6714) and no predicated inbound BL sites. The body
+      stores its derived vtable, conditionally calls the object at +0x14 through
+      its vtable slot +0x1c, directly calls unresolved 0x083d1870, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. The unresolved
+      callee checks state and may terminate through a virtual callback; its
+      behavior-only seam name records only this caller role. Host tests replace
+      both unresolved boundaries; ARM invokes their recovered addresses. Rust
+      models the predicated BLX and tail branch as ordinary control flow.
   - address: 0x083d1a04
     ghidra: FUN_083d1a04
     name: observable_array_assert_empty_destruct

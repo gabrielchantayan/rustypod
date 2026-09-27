@@ -23,6 +23,7 @@ pub mod observable_array_payload_cleanup_destruct_083cfdc4;
 pub mod observable_array_release_cells;
 pub mod observable_array_release_cells_083d1a40;
 pub mod observable_array_release_cells_destruct;
+pub mod observable_array_pre_destruct_check;
 pub mod observable_array_release_virtual_cells;
 pub mod observable_array_release_string_objects;
 pub mod container_first_node;
