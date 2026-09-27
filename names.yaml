@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array attached release destruction ---
+  - address: 0x083d08e8
+    ghidra: FUN_083d08e8
+    name: opaque_observable_array_attached_release_destruct
+    size: 60
+    sig: "ObservableArray *opaque_observable_array_attached_release_destruct(ObservableArray *this)"
+    module: cxx/opaque_observable_array_attached_release_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d0920: OPAQUE_OBSERVABLE_ARRAY_ATTACHED_RELEASE_VTABLE
+      virtual_0x1c/r1: attached_object_release
+      FUN_083d0834: opaque_observable_array_pre_destruct
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the true 60-byte extent: thirteen A32
+      instruction words from push {r4,lr} at 0x083d08e8 through the tail B at
+      0x083d091c, followed by vtable literal 0x089a4488 at 0x083d0920; the
+      push at 0x083d0924 begins the next independently entered function.
+      The body has one plain direct BL, to unported 0x083d0834, no predicated
+      direct BL instructions, and one predicated BLXNE through attached_object's
+      vtable slot +0x1c. Whole-image A32 branch decoding finds two inbound plain
+      BL call sites and no predicated direct BL callers. It installs the derived
+      vtable, releases a non-NULL attached object, runs the direct predecessor,
+      then tail-branches to observable_array_destruct @ 0x08271d2c. Target Rust
+      invokes both unresolved boundaries at their verified addresses; host tests
+      inject explicit seams. Rust models the predicated BLX and tail branch as
+      ordinary control flow while preserving their effects and ordering.
   # --- opaque observable-array release before erase ---
   - address: 0x083d097c
     ghidra: FUN_083d097c
