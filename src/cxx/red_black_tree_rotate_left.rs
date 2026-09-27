@@ -124,6 +124,17 @@
 //! right child, transfers that child's left subtree, and relinks the parent or
 //! header root slot. This alias intentionally shares the existing dispatch seam
 //! and host test; deliberate deviations: none.
+//!
+//! `FUN_083c2d0c` at load address `0x083c2d0c` is byte-identical to this
+//! 84-byte (21-word) left rotation, ending at `0x083c2d5c`; the separately
+//! linked right-rotation sibling begins at `0x083c2d60`. Raw decoding verifies
+//! two inbound direct calls: predicated `bleq` at `0x083c3048` and
+//! unconditional `bl` at `0x083c30e0`, with no direct tail-`B` callers. It
+//! promotes the non-null right child, transfers that child's left subtree, and
+//! relinks the old parent or header root slot. This ledger alias deliberately
+//! reuses the existing dispatch seam and host tests; deliberate deviations:
+//! none.
+
 
 
 use super::red_black_tree_increment::RedBlackTreeNode;
