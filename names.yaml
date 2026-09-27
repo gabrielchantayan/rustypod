@@ -62299,6 +62299,38 @@ functions:
       stm and node zeroing; the diff is LLVM's fp frame, register
       scheduling and branch layout (the expected ADS-vs-LLVM noise).
 
+  - address: 0x083cd680
+    ghidra: FUN_083cd680
+    name: u32_pair_tree_allocate_node
+    size: 184
+    sig: "U32PairTreeNode *u32_pair_tree_allocate_node(U32PairTree *tree)"
+    module: cxx/u32_pair_tree
+    status: ported
+    vars: {param_1: tree, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: previous_capacity, uVar5: grown_capacity, uVar6: capacity}
+    renames:
+      FUN_08266c70: operator_new_checked (ported; reached through inline(never)
+        pool_operator_new)
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083cd680 through pop {r4-r8,pc} at 0x083cd734;
+      0x083cd738 begins the next real function. The body has two unconditional
+      plain bl instructions, both to operator_new_checked @ 0x08266c70, and no
+      predicated bl instructions. Whole-image A32 decoding finds two inbound
+      unconditional plain bl sites at 0x083ce014 and 0x083dbd40, with no
+      predicated inbound bl sites. This is a libstdc++ red-black-tree pool for
+      0x18-byte nodes containing the color/link base plus an uninitialised
+      two-word payload: it pops the +0xc-threaded free list, otherwise bump
+      allocates from tree+8..+0xc, growing with capacity max(prev+0x20,
+      prev+prev/2+prev/8), initially 0x20. Growth links a 0xc
+      prev/capacity/arena chunk at tree+0 and allocates capacity*0x18. The
+      returned node is red and its parent/left/right links are nulled. Ghidra
+      types the function void, but both callers consume r0, so the port returns
+      the node. Deliberate deviations: the dead r1=0 allocator argument is
+      omitted; size_of keeps host pointer fields disjoint while preserving
+      32-bit target sizes; and pool_operator_new is inline(never) to retain
+      the two allocation boundaries. Host tests cover first growth, 0x20 to
+      0x40 exhaustion growth, free-list reuse, node reinitialisation, and
+      untouched payload words.
   - address: 0x083c00dc
     ghidra: FUN_083c00dc
     name: word_key_set_allocate_node
