@@ -151047,3 +151047,29 @@ functions:
       node+0x08 before releasing the current node through the ported helper,
       then continues with that saved successor. Rust represents the direct
       recursive bl as a Rust call; all tree links remain target-width u32.
+  - address: 0x083d1bb4
+    ghidra: FUN_083d1bb4
+    name: observable_array_checked_destruct
+    size: 56
+    sig: "u8 *observable_array_checked_destruct(u8 *array)"
+    module: cxx/observable_array_checked_destruct
+    renames:
+      param_1/r0/r4: array
+      "[array + 0x0]": vtable
+      "[array + 0x14]": attached_object
+      "[attached_object + 0x0]": vtable
+      "[vtable + 0x1c]": release
+      FUN_083d1b0c: check_array
+      FUN_08271d2c: observable_array_destruct
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent: thirteen A32
+      instructions at 0x083d1bb4..0x083d1be8, literal 0x089a5490 at
+      0x083d1bec, and the next independently entered function at 0x083d1bf0.
+      Whole-image ARM B/BL decoding finds two inbound plain BL sites and no
+      predicated BL callers. The body plants its vtable, conditionally invokes
+      the attached object's vtable slot +0x1c, calls unported FUN_083d1b0c,
+      then tail-branches to observable_array_destruct @ 0x08271d2c. The Rust
+      port preserves target direct and virtual calls; host tests substitute
+      seams because the unresolved direct target and target-width vtable slots
+      cannot execute natively.
