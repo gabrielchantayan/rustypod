@@ -963,6 +963,9 @@ pub mod hints {
     // 0x7d40_0000: dedicated to util/tree_children_flatten_into_parent_083c76a0's
     // target-width parent and intrusive-node fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083C76A0: usize = 0x7d40_0000;
+    // 0x7da0_0000: dedicated to util/tree_children_flatten_into_parent_083bc76c's
+    // target-width parent and intrusive-node fixture; mappings never unmap.
+    pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083BC76C: usize = 0x7da0_0000;
     // 0x7d50_0000: dedicated to
     // util/tree_children_flatten_release_strings_083c61dc's target-width
     // parent and intrusive-node fixture; mappings never unmap.
