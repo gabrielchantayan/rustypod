@@ -34,6 +34,7 @@ pub mod observable_array_attached_release_destruct_083d1464;
 pub mod observable_array_item_release_destruct;
 pub mod observable_array_release_virtual_cells;
 pub mod observable_array_release_elements;
+pub mod observable_array_release_elements_083d119c;
 pub mod observable_array_release_string_objects;
 pub mod container_first_node;
 pub mod container_first_node_083dbeb4;

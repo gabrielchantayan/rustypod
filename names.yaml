@@ -4226,6 +4226,42 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d119c
+    ghidra: FUN_083d119c
+    name: observable_array_release_elements_083d119c
+    size: 88
+    sig: "void observable_array_release_elements_083d119c(ObservableArrayReleaseElements083d119c *this)"
+    module: cxx/observable_array_release_elements_083d119c
+    status: ported
+    renames:
+      param_1/r0: this
+      param_1+4: count
+      param_1+16: enabled
+      iVar2/r4: index
+      iVar3/r6: count
+      piVar1/r0: element_cell
+      "[this + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_at
+      "[element_cell + 0x0]": element
+      "[element + 0x0]": element_vtable
+      "[element_vtable + 0x4]": element_release
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte body
+      0x083d119c..0x083d11f0; the next independently entered function begins
+      at 0x083d11f4. The body contains no direct BL instructions: one plain
+      indirect BLX through this vtable slot +0x40 and one predicated BLXNE
+      through a non-NULL element's vtable slot +0x04. Raw whole-image aligned
+      A32 branch decoding verifies two inbound direct plain BL instructions at
+      0x083d124c and 0x083d12c4, with no predicated direct BL callers. When
+      enabled, it iterates signed indices [0,count), obtains an element cell
+      through the unresolved accessor, and invokes each non-NULL element's
+      unresolved +0x04 virtual method. Deliberate deviation: both unidentified
+      virtual targets dispatch through their fixed slots on target; host tests
+      use typed native-vtable fixtures because target u32 vtable words cannot
+      hold host callbacks.
+      Target builds use an empty inline-assembly barrier to retain this
+      distinct retailOS BL target rather than allowing LLVM to fold it into
+      the byte-identical indexed_element_array_release at 0x083d00a0.
   - address: 0x083d12d8
     ghidra: FUN_083d12d8
     name: observable_array_release_elements
