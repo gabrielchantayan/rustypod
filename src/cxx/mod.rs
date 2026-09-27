@@ -27,6 +27,7 @@ pub mod observable_array_release_cells;
 pub mod observable_array_release_cells_pre_destruct;
 pub mod observable_array_release_cells_083d1a40;
 pub mod observable_array_release_cells_destruct;
+pub mod observable_array_destroy_elements_083d13bc;
 pub mod observable_array_pre_destruct_check;
 pub mod observable_array_attached_release_destruct;
 pub mod observable_array_attached_release_destruct_083d1464;

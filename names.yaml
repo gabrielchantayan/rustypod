@@ -4226,6 +4226,41 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d13bc
+    ghidra: FUN_083d13bc
+    name: observable_array_destroy_elements_083d13bc
+    size: 76
+    sig: "void observable_array_destroy_elements_083d13bc(ObservableArray *array)"
+    module: cxx/observable_array_destroy_elements_083d13bc
+    status: ported
+    renames:
+      param_1/r0/r6: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      iVar1/r0: element
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": element_slot
+      FUN_083d6ad4: element_at
+      FUN_0827dea4: string_object_destroy_veneer
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent 0x083d13bc..0x083d1407:
+      nineteen A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the following push at 0x083d1408 begins the next independently entered
+      function. Raw decoding finds exactly two inbound unconditional plain BL
+      sites, 0x083d144c and 0x083d1464, with no predicated inbound BL sites.
+      The body makes three unconditional plain direct BL calls and no predicated
+      direct BL calls: element_at/FUN_083d6ad4, string_object_destroy_veneer
+      @ 0x0827dea4, and operator_delete @ 0x082aad24. When enabled is nonzero,
+      it walks signed indices [0,count), calls the vtable-slot-0x40 accessor,
+      dereferences its result, then destroys and tag-2 deletes every non-NULL
+      StringObject. Rust expresses the target's direct accessor call as its
+      verified vtable-slot operation; host fixtures widen the vtable pointer
+      while preserving target field meanings. A target-only mov r12, r12 no-op retains this separately hooked BL
+      target instead of allowing LLVM to fold it
+      into an identical port.
   - address: 0x083d1464
     ghidra: FUN_083d1464
     name: observable_array_attached_release_destruct_083d1464
