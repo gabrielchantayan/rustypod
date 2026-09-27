@@ -152083,3 +152083,33 @@ functions:
       dispatch / host seam named only for the observed slot. Host tests cover
       non-NULL release order, NULL skipping, base destruction, preserved
       auxiliary word, and adjacent-field guards.
+
+  - address: 0x083d052c
+    ghidra: FUN_083d052c
+    name: observable_array_pre_destruct_check_destruct
+    size: 60
+    sig: "void *observable_array_pre_destruct_check_destruct(void *this)"
+    module: cxx/observable_array_pre_destruct_check_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_083d0564: VTABLE_089A4128
+      "[this + 0x14]": attached_object
+      "[attached_object->vtable + 0x1c]": release_attached_object
+      FUN_083d046c: pre_destruct_check_unported
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: fourteen A32
+      instructions from push {r4,lr} at 0x083d052c through the tail branch at
+      0x083d0560, plus literal 0x089a4128 at 0x083d0564; the next independently
+      entered function begins with push {r4,r5,r6,lr} at 0x083d0568. Whole-image
+      A32 branch decoding finds two inbound plain BL sites (0x0826b4d8 and
+      0x08284a90), zero predicated direct BL sites. The body contains one plain
+      direct BL to unported FUN_083d046c and one predicated BLXNE through
+      attached_object's vtable slot +0x1c. It plants the derived vtable,
+      conditionally invokes that virtual release, runs the pre-destruction
+      check, then tail-branches to observable_array_destruct @ 0x08271d2c.
+      Target Rust calls 0x083d046c and dynamically dispatches the virtual slot;
+      host tests inject seams for both target-width calls. Rust deliberately
+      models the predicated BLX and tail branch as ordinary control flow while
+      preserving their effects and ordering.
