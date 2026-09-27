@@ -153156,3 +153156,29 @@ functions:
       pointers are u32 target words to preserve firmware layout on 64-bit hosts,
       and the retail dead r1 = 0 argument to checked new is omitted from the Rust
       signature.
+
+  # --- C++ red-black-tree right rotation ---
+  - address: 0x083c2d60
+    ghidra: FUN_083c2d60
+    name: red_black_tree_rotate_right_twenty_first
+    size: 80
+    sig: "void red_black_tree_rotate_right_twenty_first(RedBlackTree *tree, RedBlackTreeNode *node)"
+    module: cxx/red_black_tree_rotate_right_twenty_first
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: node
+      "tree+0x10": header
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte A32 extent: 20 words from
+      ldr r2,[r1,#8] at 0x083c2d60 through bx lr at 0x083c2db0; 0x083c2db4
+      begins the next real function. Whole-image raw branch decoding finds two
+      inbound direct calls: one unconditional plain BL at 0x083c306c and one
+      predicated BLEQ at 0x083c30bc; there are no other direct BL sites. The
+      non-null left child replaces node under its parent or the header root,
+      transfers its right subtree to node's left link, and gains node as its
+      right child. Deliberate deviation: target pointers remain u32 words so
+      the firmware's 32-bit field layout is retained on 64-bit host fixtures.
