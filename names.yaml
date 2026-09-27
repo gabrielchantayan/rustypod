@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083cbfbc
+    ghidra: FUN_083cbfbc
+    name: tree_children_flatten_into_parent_083cbfbc
+    size: 60
+    sig: "void tree_children_flatten_into_parent_083cbfbc(u32 *parent, u32 first_child)"
+    module: util/tree_children_flatten_into_parent_083cbfbc
+    status: ported
+    renames:
+      param_1/r0: parent
+      param_2/r1: first_child
+      "parent+0x04": child_head
+      "node+0x08": next_sibling
+      "node+0x0c": first_child
+    notes: >-
+      Raw words e92d4030 e1a05000 e1a04001 ea000007 e594100c e1a00005
+      ebfffff8 e5951004 e5940008 e584100c e5854004 e1a04000 e3540000
+      1afffff5 e8bd8030 establish the exact 60-byte A32 extent from
+      0x083cbfbc through pop {r4,r5,pc} at 0x083cbff4; push
+      {r2,r3,r4,r5,r6,r7,r8,r9,sl,lr} at 0x083cbff8 starts the next real
+      function. The body has one unconditional plain bl, its recursive call at
+      0x083cbfd4, and no predicated bl. Whole-image branch decoding finds two
+      inbound unconditional plain bl sites, 0x083cbdbc and 0x083cbfd4, with no
+      predicated inbound calls. It recursively drains node+0x08 after first
+      flattening each node+0x0c chain, then prepends every node through
+      parent+0x04 and node+0x0c. The body is byte-identical to
+      FUN_083bfe30/tree_children_flatten_into_parent; this separately linked
+      Rust port retains its own addressable target symbol.
   - address: 0x083cca00
     ghidra: FUN_083cca00
     name: list_node_pool_recycle_chain_083cca00
