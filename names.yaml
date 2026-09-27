@@ -7757,6 +7757,36 @@ functions:
       pointer fields and passes string words through native locals only to make
       64-bit host fixtures safe; target behavior is unchanged. Deliberate
       deviations: host-layout adaptation only.
+  # --- C++ red-black-tree COW-pair subtree clone ---
+  - address: 0x083c4a10
+    ghidra: FUN_083c4a10
+    name: red_black_tree_cow_pair_subtree_clone
+    size: 116
+    sig: "void *red_black_tree_cow_pair_subtree_clone(void *pool, void *source, void *parent)"
+    module: cxx/red_black_tree_cow_pair_subtree_clone
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: source
+      param_3/r2: parent
+      puVar3/r7: first_clone
+      puVar1/r5: clone
+      param_2_plus_0x00: color
+      param_2_plus_0x08: left
+      param_2_plus_0x0c: right
+      FUN_083c411c: node_cow_pair_clone
+    notes: >-
+      Raw osos.dec establishes the true 116-byte extent: 29 A32 words from
+      push {r4,r5,r6,r7,r8,lr} at 0x083c4a10 through pop {r4,r5,r6,r7,r8,pc}
+      at 0x083c4a80; 0x083c4a84 begins the next real function. It has exactly
+      two unconditional plain bl instructions, to FUN_083c411c at 0x083c4a30
+      and recursively at 0x083c4a5c, with no predicated bl instructions. It
+      walks each source left spine, obtains a node whose COW-pair payload is
+      copied from source+0x10 by FUN_083c411c, copies color, links the clone as
+      the current parent's left child, and recursively clones each right
+      subtree. Target pointers remain u32 words. The unported FUN_083c411c is
+      retained as an address-qualified target seam; host tests install a
+      fixture for its observed allocation-and-payload-copy contract.
   # --- C++ red-black-tree left rotation ---
   - address: 0x083baa70
     ghidra: FUN_083baa70
