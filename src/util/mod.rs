@@ -126,6 +126,7 @@ pub mod growable_buffer_append;
 pub mod hash_table_chain_destroy;
 pub mod hash_table_chain_destroy_083d3484;
 pub mod hash_table_bucket_construct;
+pub mod hash_table_bucket_initialize;
 pub mod bucket_chain_destroy_node8;
 pub mod bucket_chain_insert;
 pub mod hash_table_slot_find;
