@@ -4241,6 +4241,37 @@ functions:
       It then releases the bucket allocation with count+1 and returns table.
       The Rust port retains all fields as target-width u32 words rather than
       host pointers, deliberately preserving the 32-bit target layout.
+  - address: 0x083d351c
+    ghidra: FUN_083d351c
+    name: hash_table_bucket_construct
+    size: 200
+    sig: "void hash_table_bucket_construct(HashTableBuckets *table)"
+    module: util/hash_table_bucket_construct
+    status: ported
+    renames:
+      param_1/r0/r4: table
+      iVar4/r5: bucket_count
+      puVar2/r0: bucket_base
+      puVar3/r0: bucket
+      FUN_08266c70: operator_new_checked
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte extent
+      0x083d351c..0x083d35e3: the next independently linked function starts
+      at 0x083d35e4. The body has two unconditional plain BL instructions, to
+      operator_new_checked (0x08266c70) and cxx_array_dealloc (0x08266f2c),
+      with no predicated BL instructions. The second call is in the unreachable
+      C++ exception-cleanup landing pad at 0x083d35ac; normal control branches
+      directly to the epilogue at 0x083d35dc. Whole-image ARM decoding finds
+      two inbound unconditional plain BL calls at 0x083d2368 and 0x083d2d80,
+      and no predicated BL callers.
+
+      It allocates bucket_count + 1 target-width words, clears each word, then
+      stores a self-linked sentinel in the final word. Table words +4, +8, and
+      +12 hold the bucket allocation, count, and current-bucket cursor. Rust
+      retains those target-width fields; its direct allocator seam replaces the
+      retail BL. Rust has no C++ exception landing pad, so it deliberately
+      omits the unreachable cleanup/deallocation path.
   - address: 0x083d35e4
     ghidra: FUN_083d35e4
     name: bucket_chain_insert
