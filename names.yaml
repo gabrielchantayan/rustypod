@@ -152148,6 +152148,40 @@ functions:
       Rust symbols, while retaining the enabled guard, signed scan, virtual
       dispatch, guarded destruction, and delete ordering.
 
+  - address: 0x083d0334
+    ghidra: FUN_083d0334
+    name: observable_array_attached_release_pre_destruct_083d0334
+    size: 56
+    sig: "u8 *observable_array_attached_release_pre_destruct_083d0334(u8 *array)"
+    module: cxx/observable_array_attached_release_pre_destruct_083d0334
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d036c: VTABLE_089A3F78
+      FUN_083d028c: observable_array_pre_destruct (unported)
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04000 e59f0028 e5840000 e5940014
+      e3500000 15901000 1591101c 112fff31 e1a00004 ebffffca e1a00004
+      e8bd4010 eafa866f followed by literal 089a3f78 establish the exact
+      56-byte extent: 52 bytes of A32 code from 0x083d0334 through the tail
+      branch at 0x083d0368 plus its vtable literal at 0x083d036c. The next
+      real function begins push {r4,r5,r6,lr} at 0x083d0370. Whole-image
+      aligned A32 branch decoding finds two inbound plain BL call sites
+      (0x081244f8 and 0x0826b4a8) and zero predicated inbound BL call sites.
+      The body conditionally BLXes the attached object's vtable slot +0x1c,
+      plainly BLs the unported observable_array_pre_destruct at 0x083d028c,
+      then tail-branches to the ported observable_array_destruct at
+      0x08271d2c. It plants its derived vtable, conditionally releases the
+      object word at +0x14, runs the pre-destructor check, and destroys the
+      observable-array base. Host builds deliberately use recording seams for
+      the target-width virtual dispatch and unported pre-destructor check;
+      target builds use their observed addresses. match.py reports a structural
+      diff (19 Rust instructions versus 14 stock) from LLVM's frame, explicit
+      NULL branch, and fixed-address indirect call, while preserving the vtable
+      store, release, pre-destructor check, and base-destruction order.
+
   - address: 0x083d0430
     ghidra: FUN_083d0430
     name: observable_array_assert_empty_attached_destruct_083d0430
