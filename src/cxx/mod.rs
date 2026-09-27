@@ -83,6 +83,7 @@ pub mod red_black_tree_release_subtree;
 pub mod red_black_tree_release_child_subtrees;
 pub mod equal_key_tree_recycle_subtree;
 pub mod red_black_tree_payload_8_construct;
+pub mod red_black_tree_payload_8_node_pool_acquire;
 pub mod string_record;
 pub mod cxx_string_range_assign;
 pub mod cxx_string_pair_range_assign;

@@ -5,15 +5,16 @@
 //! {r4-r6,lr}` at 0x083db244 through `pop {r4-r6,pc}` at 0x083db298;
 //! 0x083db29c starts the next function. Whole-image decoding finds two inbound
 //! unconditional plain `bl` sites (0x0809dbc0 and 0x0809df4c), no predicated
-//! forms, and one outbound unconditional plain `bl` to the still-retail node
-//! pool acquire at 0x083bc980. The constructor clears the embedded pool,
-//! header, count, and initialization byte; copies the comparator byte; acquires
-//! a header sentinel; then clears its parent and self-links its left/right
-//! words.
+//! forms, and one outbound unconditional plain `bl` to the node-pool acquire
+//! at 0x083bc980. The constructor clears the embedded pool, header, count, and
+//! initialization byte; copies the comparator byte; acquires a header sentinel;
+//! then clears its parent and self-links its left/right words.
 //!
 //! Deliberate deviations: the ignored third ABI argument remains present.
 //! Pointers remain `u32` target words so the 28-byte object layout survives
 //! hosts with wider native pointers.
+use crate::cxx::red_black_tree_payload_8_node_pool_acquire::red_black_tree_payload_8_node_pool_acquire;
+
 
 /// A 24-byte tree node with an 8-byte caller-owned payload.
 #[repr(C)]
@@ -63,15 +64,14 @@ const _: [u8; 0x18] = [0; core::mem::offset_of!(RedBlackTreePayload8, initialize
 const _: [u8; 0x19] = [0; core::mem::offset_of!(RedBlackTreePayload8, comparator)];
 const _: [u8; 0x1c] = [0; core::mem::size_of::<RedBlackTreePayload8>()];
 
-type RetailNodePoolAcquire = unsafe extern "C" fn(*mut RedBlackTreePayload8NodePool) -> *mut RedBlackTreePayload8Node;
-const RETAIL_NODE_POOL_ACQUIRE_ADDRESS: usize = 0x083b_c980;
+type NodePoolAcquire = unsafe extern "C" fn(*mut RedBlackTreePayload8NodePool) -> *mut RedBlackTreePayload8Node;
 
 /// Constructs an empty 8-byte-payload red-black tree.
 ///
 /// # Safety
 ///
 /// `tree` must be writable, `comparator` must point to one readable byte, and
-/// retail node-pool acquisition must return a writable node.
+/// node-pool acquisition must return a writable node.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.red_black_tree_payload_8_construct")]
 #[inline(never)]
@@ -80,15 +80,14 @@ pub unsafe extern "C" fn red_black_tree_payload_8_construct(
     comparator: *const u8,
     _allocator: *mut u8,
 ) -> *mut RedBlackTreePayload8 {
-    let acquire: RetailNodePoolAcquire = unsafe { core::mem::transmute(RETAIL_NODE_POOL_ACQUIRE_ADDRESS) };
-    unsafe { construct_with_acquire(tree, comparator, acquire) }
+    unsafe { construct_with_acquire(tree, comparator, red_black_tree_payload_8_node_pool_acquire) }
 }
 
 #[inline(always)]
 unsafe fn construct_with_acquire(
     tree: *mut RedBlackTreePayload8,
     comparator: *const u8,
-    acquire: RetailNodePoolAcquire,
+    acquire: NodePoolAcquire,
 ) -> *mut RedBlackTreePayload8 {
     unsafe {
         (*tree).pool = RedBlackTreePayload8NodePool::default();
