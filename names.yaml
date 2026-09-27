@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d0c54
+    ghidra: FUN_083d0c54
+    name: observable_array_assert_empty_attached_destruct_083d0c54
+    size: 56
+    sig: "ObservableArray *observable_array_assert_empty_attached_destruct_083d0c54(ObservableArray *this)"
+    module: cxx/observable_array_assert_empty_attached_destruct_083d0c54
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_083d0c8c: VTABLE_089A4710
+      "[this + 0x14]": attached_object
+      "[attached_object.vtable + 0x1c]": release
+      FUN_083d0b2c: observable_array_assert_empty_unported
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the true 56-byte extent: thirteen A32 words
+      from 0x083d0c54 through the tail B at 0x083d0c88, followed by the
+      vtable literal 0x089a4710 at 0x083d0c8c; push {r4,r5,r6,lr} at
+      0x083d0c90 starts the next real function. Full-image aligned A32 branch
+      decoding finds two inbound plain BL sites and no predicated BL sites.
+      The body plants vtable 0x089a4710, conditionally calls the attached
+      object's vtable slot +0x1c through BLXNE, directly calls unported
+      FUN_083d0b2c through one plain BL, then tail-branches to
+      observable_array_destruct @ 0x08271d2c. Host tests use seams for the
+      target-width virtual call and unported assertion; target Rust calls the
+      recovered direct helper address. Rust deliberately models the predicated
+      BLX and tail branch as ordinary control flow while preserving effects and
+      order.
   - address: 0x083d0c90
     ghidra: FUN_083d0c90
     name: observable_array_release_cells_083d0c90
