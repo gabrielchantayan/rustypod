@@ -11,24 +11,21 @@
 //! # Algorithm
 //!
 //! Re-plants its derived vtable, conditionally invokes the attached object's
-//! virtual release at `this+0x14`, runs the unresolved pre-destruction check
-//! at `0x083d1870`, then tail-chains into `observable_array_destruct`.
+//! virtual release at `this+0x14`, releases its cells through
+//! `observable_array_release_cells_pre_destruct`, then tail-chains into
+//! `observable_array_destruct`.
 //!
-//! Deliberate deviations: host builds use explicit seams for the unresolved
-//! direct and dynamic calls. Target builds invoke their recovered absolute
-//! addresses; Rust does not preserve the predicated `blx` or tail branch.
+//! Deliberate deviations: host builds retain seams for target-width dynamic
+//! calls. Target builds call the recovered Rust cell-release port directly;
+//! Rust does not preserve the predicated `blx` or tail branch.
 
 const VTABLE_WORD: u32 = 0x089a_5208;
 const ATTACHED_OBJECT_WORD: usize = 0x14 / 4;
 
+#[cfg(not(target_os = "none"))]
 type PreDestructCheck = unsafe extern "C" fn(*mut u32);
-type ReleaseAttachedObject = unsafe extern "C" fn(*mut u8);
 
-#[cfg(target_os = "none")]
-unsafe fn pre_destruct_check(this: *mut u32) {
-    let check: PreDestructCheck = unsafe { core::mem::transmute(0x083d_1870usize) };
-    unsafe { check(this) };
-}
+type ReleaseAttachedObject = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 unsafe fn release_attached_object(object: *mut u8) {
@@ -47,8 +44,8 @@ unsafe extern "C" fn missing_release_attached_object(_object: *mut u8) {
     panic!("install observable-array pre-destruct-check host seams before calling this port")
 }
 
-/// Host replacements for `0x083d1870` and the attached object's vtable slot
-/// `+0x1c`; neither callee has a Rust port.
+/// Host replacements for the target-width direct and virtual calls. The target
+/// build calls the ported cell release directly.
 #[cfg(not(target_os = "none"))]
 pub static mut OBSERVABLE_ARRAY_PRE_DESTRUCT_CHECK_OPS: (PreDestructCheck, ReleaseAttachedObject) =
     (missing_pre_destruct_check, missing_release_attached_object);
@@ -72,7 +69,7 @@ pub unsafe extern "C" fn observable_array_pre_destruct_check(this: *mut u32) -> 
             check(this);
         }
         #[cfg(target_os = "none")]
-        pre_destruct_check(this);
+        crate::cxx::observable_array_release_cells_pre_destruct::observable_array_release_cells_pre_destruct(this);
         crate::cxx::observable_array::observable_array_destruct(this.cast()).cast()
     }
 }

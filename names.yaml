@@ -30933,13 +30933,34 @@ functions:
       same vtable store, +0x14 null guard and virtual dispatch, direct item
       destruction, and base-destructor sequence; LLVM adds a frame and emits
       an ordinary conditional branch.
+  - address: 0x083d1870
+    ghidra: FUN_083d1870
+    name: observable_array_release_cells_pre_destruct
+    size: 72
+    sig: "void observable_array_release_cells_pre_destruct(void *array)"
+    module: cxx/observable_array_release_cells_pre_destruct
+    vars: {param_1/r0: array, param_1+4: count, param_1+16: enabled, "[array.vtable + 0x40]": cell_at, FUN_082aad24: operator_delete}
+    status: ported
+    notes: >-
+      Raw osos.dec decodes eighteen A32 words from 0x083d1870 through
+      0x083d18b4; push {r4,r5,r6,lr} at 0x083d18bc starts the next real
+      function, establishing the 72-byte extent. The body has one plain direct
+      BL at 0x083d18a8 to ported tag-2 operator_delete/FUN_082aad24, no
+      predicated direct BL, and one unconditional virtual BLX through vtable
+      slot +0x40. Whole-image decoding finds two inbound plain BL sites at
+      0x083d1908 and 0x083d1940, and no predicated inbound BL sites. If the
+      +0x10 enable byte is nonzero, it walks signed indices [0,count), invokes
+      the slot for each index, loads the returned cell's first word, and passes
+      it to operator_delete, including NULL. Host fixtures use native callback
+      seams for target-width vtable words and allocation state; target Rust
+      performs the recovered volatile reads and direct operator_delete call.
   - address: 0x083d1918
     ghidra: FUN_083d1918
     name: observable_array_pre_destruct_check
     size: 60
     sig: "void *observable_array_pre_destruct_check(void *this)"
     module: cxx/observable_array_pre_destruct_check
-    vars: {param_1: this, DAT_083d1950: VTABLE_089A5208, FUN_083d1870: observable_array_pre_destruct_check, FUN_08271d2c: observable_array_destruct}
+    vars: {param_1: this, DAT_083d1950: VTABLE_089A5208, FUN_083d1870: observable_array_release_cells_pre_destruct, FUN_08271d2c: observable_array_destruct}
     status: ported
     notes: >-
       Raw osos.dec establishes fourteen A32 instruction words (56 code bytes)
@@ -30949,12 +30970,12 @@ functions:
       60 bytes. Whole-image raw-word decoding finds two inbound plain BL sites
       (0x0810e414 and 0x081f6714) and no predicated inbound BL sites. The body
       stores its derived vtable, conditionally calls the object at +0x14 through
-      its vtable slot +0x1c, directly calls unresolved 0x083d1870, then
-      tail-branches to observable_array_destruct @ 0x08271d2c. The unresolved
-      callee checks state and may terminate through a virtual callback; its
-      behavior-only seam name records only this caller role. Host tests replace
-      both unresolved boundaries; ARM invokes their recovered addresses. Rust
-      models the predicated BLX and tail branch as ordinary control flow.
+      its vtable slot +0x1c, directly calls ported
+      observable_array_release_cells_pre_destruct @ 0x083d1870, then tail-branches
+      to observable_array_destruct @ 0x08271d2c. Host tests retain seams for the
+      target-width direct and virtual boundaries; ARM calls the recovered Rust
+      port directly. Rust models the predicated BLX and tail branch as ordinary
+      control flow.
   - address: 0x083d1a04
     ghidra: FUN_083d1a04
     name: observable_array_assert_empty_destruct
