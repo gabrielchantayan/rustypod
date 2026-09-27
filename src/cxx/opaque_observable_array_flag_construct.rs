@@ -39,6 +39,7 @@
 use core::ptr;
 
 use super::observable_array::observable_array_destruct;
+use super::opaque_observable_array_auxiliary_destroy::opaque_observable_array_auxiliary_destroy;
 
 /// Target default for the opaque virtual release at `allocation->vtable + 0x1c`.
 #[cfg(target_os = "none")]
@@ -57,23 +58,6 @@ unsafe extern "C" fn missing_opaque_observable_array_flag_release_word_at_14(_al
 pub static mut OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14: unsafe extern "C" fn(*mut u8) =
     missing_opaque_observable_array_flag_release_word_at_14;
 
-/// Target default for `FUN_083d0a20`, whose observed destruction role is not
-/// sufficient to assign it a stronger identity.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_opaque_auxiliary_destroy(this: *mut OpaqueObservableArrayFlag) {
-    let destroy: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag) =
-        core::mem::transmute(0x083d_0a20usize);
-    destroy(this);
-}
-
-/// Host default for the direct but unported destructor call.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_opaque_auxiliary_destroy(_this: *mut OpaqueObservableArrayFlag) {}
-
-/// Host seam for the direct `bl 0x083d0a20`.
-#[cfg(not(target_os = "none"))]
-pub static mut OPAQUE_AUXILIARY_DESTROY: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag) =
-    missing_opaque_auxiliary_destroy;
 
 use super::observable_array::{observable_array_construct, ObservableArray, OBSERVABLE_ARRAY_SIZE};
 
@@ -142,10 +126,7 @@ pub unsafe extern "C" fn opaque_observable_array_flag_destruct(
             #[cfg(not(target_os = "none"))]
             ptr::read_volatile(ptr::addr_of!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14))(allocation);
         }
-        #[cfg(target_os = "none")]
-        firmware_opaque_auxiliary_destroy(this);
-        #[cfg(not(target_os = "none"))]
-        ptr::read_volatile(ptr::addr_of!(OPAQUE_AUXILIARY_DESTROY))(this);
+        opaque_observable_array_auxiliary_destroy(this.cast());
         observable_array_destruct(ptr::addr_of_mut!((*this).array));
     }
     this
@@ -156,25 +137,26 @@ mod tests {
     use super::*;
     use core::sync::atomic::{AtomicUsize, Ordering};
     use parking_lot::Mutex;
+    use crate::app::indexed_virtual_value::{IndexedVirtualValueOps, INDEXED_VIRTUAL_VALUE_OPS};
 
     static RELEASE_LOCK: Mutex<()> = Mutex::new(());
     static RELEASE_CALLS: AtomicUsize = AtomicUsize::new(0);
     static RELEASED_ALLOCATION: AtomicUsize = AtomicUsize::new(0);
+    static ZERO_INDEXED_VALUE: u32 = 0;
 
-    static AUXILIARY_DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn record_auxiliary_destroy(_this: *mut OpaqueObservableArrayFlag) {
-        AUXILIARY_DESTROY_CALLS.fetch_add(1, Ordering::SeqCst);
-    }
 
     unsafe extern "C" fn record_release(allocation: *mut u8) {
         RELEASE_CALLS.fetch_add(1, Ordering::SeqCst);
         RELEASED_ALLOCATION.store(allocation as usize, Ordering::SeqCst);
     }
 
+    unsafe extern "C" fn zero_indexed_value(_: *mut u8, _: i32) -> *const u32 {
+        &ZERO_INDEXED_VALUE
+    }
+
     struct ReleaseReset {
         release: unsafe extern "C" fn(*mut u8),
-        auxiliary_destroy: unsafe extern "C" fn(*mut OpaqueObservableArrayFlag),
+        indexed_value: IndexedVirtualValueOps,
     }
 
     impl Drop for ReleaseReset {
@@ -182,7 +164,8 @@ mod tests {
             unsafe {
                 ptr::addr_of_mut!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14)
                     .write_volatile(self.release);
-                ptr::addr_of_mut!(OPAQUE_AUXILIARY_DESTROY).write_volatile(self.auxiliary_destroy);
+                ptr::addr_of_mut!(INDEXED_VIRTUAL_VALUE_OPS)
+                    .write_volatile(ptr::read_volatile(ptr::addr_of!(self.indexed_value)));
             }
         }
     }
@@ -191,13 +174,14 @@ mod tests {
         unsafe {
             let reset = ReleaseReset {
                 release: ptr::addr_of!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14).read_volatile(),
-                auxiliary_destroy: ptr::addr_of!(OPAQUE_AUXILIARY_DESTROY).read_volatile(),
+                indexed_value: ptr::addr_of!(INDEXED_VIRTUAL_VALUE_OPS).read_volatile(),
             };
             ptr::addr_of_mut!(OPAQUE_OBSERVABLE_ARRAY_FLAG_RELEASE_WORD_AT_14).write_volatile(record_release);
-            ptr::addr_of_mut!(OPAQUE_AUXILIARY_DESTROY).write_volatile(record_auxiliary_destroy);
+            ptr::addr_of_mut!(INDEXED_VIRTUAL_VALUE_OPS).write_volatile(IndexedVirtualValueOps {
+                value_at: zero_indexed_value,
+            });
             RELEASE_CALLS.store(0, Ordering::SeqCst);
             RELEASED_ALLOCATION.store(0, Ordering::SeqCst);
-            AUXILIARY_DESTROY_CALLS.store(0, Ordering::SeqCst);
             reset
         }
     }
@@ -265,7 +249,6 @@ mod tests {
 
         assert_eq!(returned, ptr::addr_of_mut!(fixture.object));
         assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 1);
-        assert_eq!(AUXILIARY_DESTROY_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(RELEASED_ALLOCATION.load(Ordering::SeqCst), 0x1234_5000);
         assert_eq!(fixture.object.array.base.vtable, crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE);
         assert_eq!(fixture.object.array.len, 0);
@@ -297,7 +280,6 @@ mod tests {
         unsafe { opaque_observable_array_flag_destruct(ptr::addr_of_mut!(fixture.object)); }
 
         assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 0);
-        assert_eq!(AUXILIARY_DESTROY_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(fixture.object.array.base.vtable, crate::cxx::observable_array::OBSERVABLE_ARRAY_VTABLE);
         assert_eq!(fixture.trailing, 0xcafe_babe);
     }
