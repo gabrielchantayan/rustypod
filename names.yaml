@@ -149932,3 +149932,26 @@ functions:
       tests cover successful expansion retaining old slots and clearing the
       tail, plus reallocation failure nulling storage without changing the
       old capacity.
+
+  - address: 0x083d3940
+    ghidra: FUN_083d3940
+    name: opaque_owned_record_destroy
+    size: 40
+    sig: "u32 *opaque_owned_record_destroy(u32 *record)"
+    module: cxx/opaque_owned_record_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      FUN_082aad14: operator_delete_tag3
+      FUN_081bb7a8: opaque_owned_record_cleanup
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte A32 extent
+      0x083d3940..0x083d3967: the next independently linked function begins
+      at 0x083d3968. Two inbound direct BL sites at 0x0827bd48 and
+      0x0827bd50 are plain; there are no predicated inbound BL sites. The
+      body has one predicated BLNE to operator_delete_tag3 @ 0x082aad14,
+      then tail-branches to the unported cleanup helper @ 0x081bb7a8.
+      If target word 4 is nonzero, it releases nonzero target word 1; it
+      always forwards the unchanged record to that helper and returns its
+      result. The helper has no recovered semantic identity, so target builds
+      call its verified address and host tests inject a cleanup seam.
