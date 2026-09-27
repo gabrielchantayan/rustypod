@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083ccc0c
+    ghidra: FUN_083ccc0c
+    name: red_black_tree_payload_56_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePayload56Node *red_black_tree_payload_56_node_pool_acquire(RedBlackTreePayload56NodePool *pool)"
+    module: cxx/red_black_tree_payload_56_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083ccc0c through pop {r4-r8,pc} at 0x083cccc0;
+      0x083cccc4 begins the next real function. The body has exactly two
+      unconditional plain bl calls, at 0x083ccc70 and 0x083ccc84, both to
+      operator_new_checked (0x08266c70), and no predicated bl. Whole-image
+      decoding and Ghidra agree on two inbound plain bl callers. The pool
+      consumes its free list through node+0x0c or grows 72-byte chunks from 32
+      entries by max(capacity + 32, capacity + capacity/2 + capacity/8), then
+      clears color and the three red-black-tree link words while preserving the
+      56-byte payload. Deliberate deviations: none; pointer fields are u32
+      target words to preserve firmware layout on 64-bit hosts.
   - address: 0x083cfd00
     ghidra: FUN_083cfd00
     name: observable_array_release_cells
