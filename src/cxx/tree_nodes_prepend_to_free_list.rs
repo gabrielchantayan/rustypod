@@ -1,12 +1,15 @@
 //! `tree_nodes_prepend_to_free_list` — originals: `FUN_083cf444` @
-//! `0x083cf444` and byte-identical `FUN_083cea00` @ `0x083cea00`.
+//! `0x083cf444`, `FUN_083cea00` @ `0x083cea00`, and `FUN_083c81f0` @
+//! `0x083c81f0`.
 //!
-//! Each is 60 bytes: `0x083cf444..0x083cf480` and
-//! `0x083cea00..0x083cea3c`, respectively; `push` begins the next separately
-//! linked function at each endpoint. Raw A32 decoding verifies one plain
-//! direct recursive `bl` in each body and no predicated `bl` instructions.
-//! `FUN_083cea00` is a deliberate shared-symbol alias rather than a duplicate
-//! implementation; its Ghidra reference set reports two `bl` call sites.
+//! Each is 60 bytes: `0x083cf444..0x083cf480`, `0x083cea00..0x083cea3c`,
+//! and `0x083c81f0..0x083c822c`; a `push` begins the next separately linked
+//! function at each endpoint. Raw A32 decoding verifies one plain direct
+//! recursive `bl` in each body and no predicated `bl` instructions.
+//! `FUN_083cea00` and `FUN_083c81f0` are deliberate shared-symbol aliases
+//! rather than duplicate implementations; whole-image aligned A32 decoding
+//! finds two inbound unconditional plain BL sites for `FUN_083c81f0`
+//! (`0x083c7ee4`, `0x083c8208`) and no predicated direct callers.
 //!
 //! Walks a binary tree whose link words are at node+8 and node+12. It visits
 //! each node+12 subtree first, pushes the node onto owner+4, then continues
@@ -94,6 +97,38 @@ mod tests {
             assert_eq!(root.add(NODE_RECURSIVE_SUBTREE_WORD).read(), right as usize as u32);
             assert_eq!(right.add(NODE_RECURSIVE_SUBTREE_WORD).read(), right_child as usize as u32);
             assert_eq!(right_child.add(NODE_RECURSIVE_SUBTREE_WORD).read(), existing as usize as u32);
+        }
+    }
+
+    #[test]
+    fn processes_each_next_subtree_after_its_recursive_subtree() {
+        let Some(slab) = try_map_u32_slab(hints::TREE_NODES_PREPEND_TO_FREE_LIST, 0x2000) else {
+            note_missing_u32_fixture("cxx/tree_nodes_prepend_to_free_list");
+            return;
+        };
+        unsafe {
+            let owner = slab.cast::<u32>();
+            let root = node(slab, 0x100);
+            let root_next = node(slab, 0x120);
+            let recursive = node(slab, 0x140);
+            let recursive_next = node(slab, 0x160);
+            let recursive_child = node(slab, 0x180);
+            let existing = node(slab, 0x1a0);
+            ptr::write_bytes(slab, 0, 0x2000);
+            owner.add(OWNER_FREE_LIST_WORD).write(existing as usize as u32);
+            root.add(NODE_NEXT_SUBTREE_WORD).write(root_next as usize as u32);
+            root.add(NODE_RECURSIVE_SUBTREE_WORD).write(recursive as usize as u32);
+            recursive.add(NODE_NEXT_SUBTREE_WORD).write(recursive_next as usize as u32);
+            recursive.add(NODE_RECURSIVE_SUBTREE_WORD).write(recursive_child as usize as u32);
+
+            tree_nodes_prepend_to_free_list(owner, root);
+
+            assert_eq!(owner.add(OWNER_FREE_LIST_WORD).read(), root_next as usize as u32);
+            assert_eq!(root_next.add(NODE_RECURSIVE_SUBTREE_WORD).read(), root as usize as u32);
+            assert_eq!(root.add(NODE_RECURSIVE_SUBTREE_WORD).read(), recursive as usize as u32);
+            assert_eq!(recursive.add(NODE_RECURSIVE_SUBTREE_WORD).read(), recursive_next as usize as u32);
+            assert_eq!(recursive_next.add(NODE_RECURSIVE_SUBTREE_WORD).read(), recursive_child as usize as u32);
+            assert_eq!(recursive_child.add(NODE_RECURSIVE_SUBTREE_WORD).read(), existing as usize as u32);
         }
     }
 }

@@ -152651,3 +152651,32 @@ functions:
       Rust retains target pointers as u32 words on 64-bit hosts and omits the
       retail dead r1 = 0 argument to checked new. Host tests cover initial
       allocation, free-list reuse, payload preservation, and growth.
+  # --- tree node reclamation ---
+  - address: 0x083c81f0
+    ghidra: FUN_083c81f0
+    name: tree_nodes_prepend_to_free_list
+    size: 60
+    sig: "void tree_nodes_prepend_to_free_list(TreeNodePool *owner, TreeNode *node)"
+    module: cxx/tree_nodes_prepend_to_free_list
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: node
+      param_1_plus_0x04: free_list
+      param_2_plus_0x08: next_subtree
+      param_2_plus_0x0c: recursive_subtree
+      FUN_083c81f0: tree_nodes_prepend_to_free_list
+    notes: >-
+      Raw osos.dec establishes the true 60-byte extent: fifteen A32 words from
+      push {r4,r5,lr} at 0x083c81f0 through pop {r4,r5,pc} at 0x083c8228; the
+      push at 0x083c822c begins the next independently entered function. The
+      body has one unconditional plain direct BL, the recursive call at
+      0x083c8208 to itself, and zero predicated direct BL instructions.
+      Whole-image aligned A32 decoding finds two inbound unconditional plain BL
+      sites (0x083c7ee4 and 0x083c8208) and zero predicated BL sites. It
+      processes each node's +0x0c subtree recursively, saves the +0x08 subtree,
+      then prepends the node to owner+0x04 by rewriting node+0x0c as the
+      free-list link before continuing with the saved subtree. This 60-byte
+      body is byte-identical to the existing port's FUN_083cf444 and
+      FUN_083cea00 originals, so this address deliberately shares that semantic
+      Rust symbol rather than introducing a duplicate implementation.
