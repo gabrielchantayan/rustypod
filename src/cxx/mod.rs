@@ -37,6 +37,7 @@ pub mod observable_array_pre_destruct_check;
 pub mod observable_array_pre_destruct_check_destruct;
 pub mod owned_string_owner_array_attached_release_destruct;
 pub mod observable_array_attached_release_destruct;
+pub mod observable_array_assert_empty_attached_destruct_083d0430;
 pub mod observable_array_assert_empty_attached_destruct_083d0c54;
 pub mod observable_array_attached_release_cleanup_destruct;
 pub mod observable_array_attached_release_destruct_083d1464;

@@ -152147,3 +152147,37 @@ functions:
       structural diff: LLVM uses a larger prologue and branches through local
       Rust symbols, while retaining the enabled guard, signed scan, virtual
       dispatch, guarded destruction, and delete ordering.
+
+  - address: 0x083d0430
+    ghidra: FUN_083d0430
+    name: observable_array_assert_empty_attached_destruct_083d0430
+    size: 56
+    sig: "u8 *observable_array_assert_empty_attached_destruct_083d0430(u8 *array)"
+    module: cxx/observable_array_assert_empty_attached_destruct_083d0430
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d0468: VTABLE_089A4050
+      FUN_083d0370: observable_array_assert_empty (unported)
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04000 e59f0028 e5840000 e5940014
+      e3500000 15901000 1591101c 112fff31 e1a00004 ebffffc4 e1a00004
+      e8bd4010 eafa8630 followed by literal 089a4050 establish the exact
+      56-byte extent: 52 bytes of A32 code from 0x083d0430 through the tail
+      branch at 0x083d0464 plus its vtable literal at 0x083d0468. The next
+      real function begins push {r4,r5,r6,lr} at 0x083d046c. Whole-image
+      aligned A32 branch decoding finds two inbound plain BL call sites and
+      zero predicated inbound BL call sites. The body conditionally BLXes the
+      attached object's vtable slot +0x1c, plainly BLs the unported
+      observable-array assertion at 0x083d0370, then tail-branches to the
+      ported observable_array_destruct at 0x08271d2c. It plants its derived
+      vtable, conditionally releases the object word at +0x14, asserts that
+      the indexed cells are empty, and destroys the observable-array base.
+      Host builds deliberately use recording seams for the target-width virtual
+      dispatch and unported assertion; target builds use their observed
+      addresses. match.py reports a structural diff (19 Rust instructions
+      versus 14 stock) from LLVM's frame, explicit NULL branch, and seam
+      function-pointer dispatch, while preserving the vtable store, release,
+      assertion, and base-destruction order.
