@@ -8232,6 +8232,38 @@ functions:
       destruct before string release), the return-minus-four release
       argument, and the final slot store. Raw disassembly: osos.dec
       0x083c4de0; match.py structural review recorded.
+  # --- C++ red-black-tree 16-byte-payload subtree clone ---
+  - address: 0x083c5628
+    ghidra: FUN_083c5628
+    name: red_black_tree_payload_16_subtree_clone
+    size: 144
+    sig: "RedBlackTreePayload16Node *red_black_tree_payload_16_subtree_clone(RedBlackTreePayload16NodePool *pool, RedBlackTreePayload16Node *source, RedBlackTreePayload16Node *parent)"
+    module: cxx/red_black_tree_payload_16_subtree_clone
+    status: ported
+    renames:
+      param_1/r0/r9: pool
+      param_2/r1/r4: source
+      param_3/r2/r5: parent
+      puVar1/r0/r6: clone
+      puVar4/r7: first_clone
+      FUN_083c4d30: red_black_tree_payload_16_node_pool_acquire
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083e5b00: cxx_string_vector_copy_ctor
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte extent: 36 ARM words from
+      push {r4-r9,sl,lr} at 0x083c5628 through pop {r4-r9,sl,pc} at
+      0x083c56b4; the next independently entered function begins at
+      0x083c56b8. Its four unconditional plain bl instructions call
+      red_black_tree_payload_16_node_pool_acquire @ 0x083c4d30,
+      cxx_string_copy_ctor @ 0x083d8c30, cxx_string_vector_copy_ctor @
+      0x083e5b00, and itself recursively; it has no predicated bl calls.
+      Decoding every aligned ARM B/BL-immediate word in osos.dec finds two
+      inbound direct calls, both unconditional plain bl at 0x083c5690
+      (recursive) and 0x083c591c, with no predicated inbound direct calls.
+      It walks source left links iteratively, recursively clones source right
+      subtrees, preserves color plus the {COW string, string vector} payload,
+      and writes each clone's parent link and its parent's left link. Rust
+      preserves target pointers as u32 words; deliberate deviations: none.
   # --- C++ string/vector record subtree release ---
   - address: 0x083c56b8
     ghidra: FUN_083c56b8
