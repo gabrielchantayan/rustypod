@@ -8353,6 +8353,36 @@ functions:
       dedicated host test covers root, parent-left, and parent-right rotations,
       including the transferred middle subtree. Deliberate deviations: none;
       target-width u32 link words preserve the 32-bit target layout on hosts.
+  # --- C++ string-keyed red-black-tree find ---
+  - address: 0x083c4ebc
+    ghidra: FUN_083c4ebc
+    name: string_key_tree_find_4ebc_copy
+    size: 168
+    sig: "void string_key_tree_find_4ebc_copy(StringKeyTreeNode **out, StringKeyTree *map, const char **key)"
+    module: cxx/string_map
+    status: ported
+    renames:
+      param_1/r0/r8: out
+      param_2/r1/r5: map
+      param_3/r2/r9: key
+      param_2_plus_0x10/r6: header
+      header_plus_0x04/r4: node
+      r6: lower_bound
+      FUN_083d74f4: cxx_string_less
+      FUN_083cf860: equal_deref_f860_copy
+    notes: >-
+      Raw osos.dec establishes the true 168-byte extent: forty-two A32 words
+      from push {r0-r11,lr} at 0x083c4ebc through pop {r0-r11,pc} at
+      0x083c4f60; push {r4-r9,lr} at 0x083c4f64 begins the next independently
+      entered function. Raw-word decoding finds three unconditional plain direct
+      BL instructions and zero predicated BL instructions: cxx_string_less @
+      0x083d74f4 at 0x083c4eec and 0x083c4f3c, and equal_deref_f860_copy @
+      0x083cf860 at 0x083c4f1c. The lower-bound descent starts at
+      header.parent, retaining the least node whose key is not less than the
+      query; a final reverse comparison selects that node only for equality,
+      otherwise the header sentinel. Rust directly expresses the one-word
+      candidate/header equality helper while retaining both string comparator
+      call seams; host tests cover matching nodes and below-minimum misses.
   # --- C++ red-black-tree right rotation ---
   - address: 0x083c5ab0
     ghidra: FUN_083c5ab0
