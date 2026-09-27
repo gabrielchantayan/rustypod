@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d0b2c
+    ghidra: FUN_083d0b2c
+    name: observable_array_destroy_cells_083d0b2c
+    size: 88
+    sig: "void observable_array_destroy_cells_083d0b2c(ObservableArrayDestroyCells083d0b2c *this)"
+    module: cxx/observable_array_destroy_cells_083d0b2c
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      vtable_plus_0x40/r2: cell_at
+      returned_cell_plus_0x00/r0: allocation_body
+      FUN_0820760c: unported_cell_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 body: twenty-two words
+      from push {r4,r5,r6,lr} at 0x083d0b2c through pop {r4,r5,r6,pc} at
+      0x083d0b80; the push at 0x083d0b84 begins the next real function. The
+      body has two unconditional plain direct bl calls, FUN_0820760c at
+      0x083d0b6c and operator_delete/FUN_082aad24 at 0x083d0b70, no predicated
+      direct bl, and one unconditional virtual blx through vtable+0x40 at
+      0x083d0b5c. Raw caller words establish two inbound unconditional plain
+      bl sites, 0x083d0bdc and 0x083d0c7c, with no predicated inbound direct
+      bl sites. When enabled is nonzero, it visits signed indices [0,count),
+      obtains each cell through that virtual accessor, and only for a nonzero
+      first word calls the still-unported FUN_0820760c before the ported
+      tag-2 operator delete. Target Rust calls the verified fixed address;
+      host tests use recording seams for that opaque boundary, operator delete,
+      and the native-width vtable pointer. match.py reports a structural diff:
+      LLVM retains the fixed-address destroy call as a literal-loaded blx and
+      uses a larger prologue, while preserving the enabled guard, signed loop,
+      virtual access, null guard, and destroy-before-delete order.
   - address: 0x083d0c54
     ghidra: FUN_083d0c54
     name: observable_array_assert_empty_attached_destruct_083d0c54
