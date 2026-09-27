@@ -18,4 +18,5 @@ pub mod fp_fmuldiv;
 pub mod fp_misc;
 pub mod plist_node_child_range_copy;
 pub mod fp_scalb;
+pub mod fp_scaled_count_ceiling;
 pub mod fp_scaled_ceiling;
