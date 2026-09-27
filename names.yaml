@@ -4626,6 +4626,32 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083c6c58
+    ghidra: FUN_083c6c58
+    name: red_black_tree_refcounted_subtree_release
+    size: 64
+    sig: "void red_black_tree_refcounted_subtree_release(RedBlackTreeNodePool *pool, RedBlackTreeRefcountedNode *node)"
+    module: cxx/red_black_tree_refcounted_subtree_release
+    status: ported
+    renames:
+      param_1/r0/r6: pool
+      param_2/r1/r4: node
+      iVar1/r5: next
+      "[pool + 0x4]": free
+      "[node + 0x8]": left_or_next
+      "[node + 0xc]": right_subtree_or_free_link
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent
+      0x083c6c58..0x083c6c98; the next independently entered function starts
+      at 0x083c6c98. Its sixteen decoded A32 words contain two unconditional
+      plain BL instructions: recursive BL at 0x083c6c70 and BL at 0x083c6c84
+      to the already ported red_black_tree_node_pool_release_refcounted @
+      0x083c64b4; there are no predicated BL instructions. The function
+      postorder-traverses node+0xc right subtrees, snapshots node+0x8 before
+      release overwrites node+0xc with the pool free-list link, then releases
+      the node with its refcounted payload. Deliberate deviation: Rust
+      recursion represents the recursive ARM call while target links remain
+      u32 words to preserve retail object offsets on host fixtures.
   - address: 0x083cfbf4
     ghidra: FUN_083cfbf4
     name: opaque_indexed_element_array_dispose
