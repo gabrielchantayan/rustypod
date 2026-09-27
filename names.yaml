@@ -190,6 +190,36 @@ functions:
       index in [0,count), loads that cell's first word, and passes it to
       null-safe operator_delete. Host tests use native vtable and delete seams;
       target builds retain u32 target pointers and direct operator_delete.
+  - address: 0x083d0fbc
+    ghidra: FUN_083d0fbc
+    name: opaque_observable_array_parse_diagnostics_cleanup
+    size: 88
+    sig: "void opaque_observable_array_parse_diagnostics_cleanup(OpaqueObservableArray *array)"
+    module: cxx/opaque_observable_array_parse_diagnostics_cleanup
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      vtable_plus_0x40/r2: cell_at
+      piVar1/r0: cell
+      cell_plus_0x00: diagnostic
+      FUN_0826fd10: parse_diagnostic_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 body: twenty-two words
+      from push {r4,r5,r6,lr} at 0x083d0fbc through pop {r4,r5,r6,pc} at
+      0x083d1010; the following push at 0x083d1014 begins the next real
+      function. The body has two unconditional plain direct BL instructions,
+      parse_diagnostic_destroy/FUN_0826fd10 at 0x083d0ffc and
+      operator_delete/FUN_082aad24 at 0x083d1000; it has no predicated direct
+      BL and one unconditional virtual BLX through vtable+0x40 at 0x083d0fec.
+      Whole-image A32 branch decoding finds two inbound plain BL callers at
+      0x083d106c and 0x083d108c, no predicated BL callers. If enabled byte
+      +0x10 is nonzero, it walks signed indices [0,count), fetches each cell
+      through vtable+0x40, and destroys then deletes every non-NULL first word.
+      Target Rust loads the original u32 vtable words; host fixtures use native
+      callback pointers and recording direct-callee operations.
   - address: 0x083d441c
     ghidra: FUN_083d441c
     name: element_array8_insert_unique
