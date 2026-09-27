@@ -150048,3 +150048,29 @@ functions:
       (mode, 0x140c, 0, configuration). Host tests cover ownership reset,
       one-time initialization, pending-output release, selector clearing,
       target-width state words, and all forwarded wrapper arguments.
+
+  - address: 0x083cfcc4
+    ghidra: FUN_083cfcc4
+    name: vtable_089a3990_destruct
+    size: 56
+    sig: "Vtable089a3990Object *vtable_089a3990_destruct(Vtable089a3990Object *this)"
+    module: cxx/vtable_089a3990_destruct
+    vars:
+      param_1/r4: this
+      DAT_083cfcfc: VTABLE_089A3990
+      FUN_083cfbf4: vtable_089a3990_base_cleanup
+      FUN_08271d2c: observable_array_destruct
+    status: ported
+    notes: >-
+      Raw osos.dec is fourteen A32 words from 0x083cfcc4 through the vtable
+      literal 0x089a3990 at 0x083cfcfc; 52 bytes are code and the next
+      independent function starts at 0x083cfd00. Raw-word branch decoding
+      finds two inbound unconditional BL calls and no predicated BL calls.
+      The body stores its vtable at +0x00, conditionally calls the target
+      payload word at +0x14 through its vtable slot +0x1c (predicated BLX),
+      calls unported FUN_083cfbf4 directly, and tail-branches to the ported
+      observable_array_destruct. The class and both unported call identities
+      are not established, so the Rust port names only their observed roles.
+      Firmware dispatches the payload through target-width words and calls
+      0x083cfbf4 directly; host tests use seams because neither target
+      function pointers nor the firmware address are executable on x86-64.
