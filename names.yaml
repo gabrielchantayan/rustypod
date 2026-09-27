@@ -153211,3 +153211,30 @@ functions:
       transfers its right subtree to node's left link, and gains node as its
       right child. Deliberate deviation: target pointers remain u32 words so
       the firmware's 32-bit field layout is retained on 64-bit host fixtures.
+
+  - address: 0x083c2c54
+    ghidra: FUN_083c2c54
+    name: red_black_tree_payload_12_node_pool_acquire_083c2c54
+    size: 184
+    sig: "RedBlackTreePayload12Node083c2c54 *red_black_tree_payload_12_node_pool_acquire_083c2c54(RedBlackTreePayload12NodePool083c2c54 *pool)"
+    module: cxx/red_black_tree_payload_12_node_pool_acquire_083c2c54
+    status: ported
+    vars: {param_1: pool, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: previous_capacity, uVar5: grown_capacity, uVar6: capacity}
+    renames:
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083c2c54 through pop {r4-r8,pc} at 0x083c2d08;
+      0x083c2d0c begins the next real function. The body has exactly two
+      unconditional plain bl calls, at 0x083c2cb8 and 0x083c2ccc, both to
+      operator_new_checked @ 0x08266c70, and no predicated bl calls. Ghidra
+      reports void, but both callers consume r0, so the port returns the node.
+      This libstdc++ red-black-tree pool holds 0x1c-byte nodes with an
+      uninitialised three-word payload: it pops the +0xc-threaded free list,
+      otherwise bump-allocates from pool+8..+0xc, growing a 0xc
+      previous/capacity/arena chunk with max(capacity+0x20,
+      capacity+capacity/2+capacity/8), initially 0x20. The returned node is
+      red and its parent/left/right links are nulled. Deliberate deviations:
+      the dead r1=0 allocator argument is omitted; target pointers remain u32
+      words on the host; match.py finds the same 46 instructions but expected
+      LLVM frame/register scheduling and direct-call relocation differences.
