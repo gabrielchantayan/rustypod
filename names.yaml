@@ -64418,6 +64418,33 @@ functions:
       frame, its inverted movhi/movls max and the usual register
       scheduling and branch layout.
 
+  - address: 0x083c099c
+    ghidra: FUN_083c099c
+    name: word_key_set_recycle_tree
+    size: 60
+    sig: "void word_key_set_recycle_tree(WordKeySet *word_key_set, u32 first_child)"
+    module: util/word_key_set_recycle_tree
+    status: ported
+    renames:
+      param_1/r0: word_key_set
+      param_2/r1: first_child
+      "word_key_set+0x04": free_list_head
+      "node+0x08": next_sibling
+      "node+0x0c": first_child
+    notes: >-
+      Raw words e92d4030 e1a05000 e1a04001 ea000007 e594100c e1a00005
+      ebfffff8 e5951004 e5940008 e584100c e5854004 e1a04000 e3540000
+      1afffff5 e8bd8030 establish the exact 60-byte A32 extent from
+      0x083c099c through pop {r4,r5,pc} at 0x083c09d4; push
+      {r2,r3,r4,r5,r6,r7,r8,r9,sl,lr} at 0x083c09d8 starts the next real
+      function. Whole-image raw branch decoding finds exactly two inbound
+      unconditional plain bl sites, 0x083c07a8 and recursive 0x083c09b4,
+      with no predicated bl forms. The body has one unconditional plain
+      recursive bl and no predicated calls. It recursively processes child
+      chains through node+0x0c, advances siblings through node+0x08, and
+      prepends each node to the word-key set free list through +0x04.
+      Deliberate deviation: target pointers remain u32 target words to
+      preserve the retail four-byte field layout on 64-bit host builds.
   - address: 0x083c31d4
     ghidra: FUN_083c31d4
     name: string_key_tree_rotate_left
