@@ -19,6 +19,7 @@ pub mod byte_state_construct;
 pub mod app_boot_metrics_submit;
 pub mod byte_state_set_and_notify;
 pub mod app_screen_cached_position;
+pub mod event_list_tree_copy_subtree;
 pub mod app_state_cleanup;
 pub mod application_shutdown;
 pub mod app_transition_cleanup;

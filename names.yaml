@@ -73495,6 +73495,31 @@ functions:
       second pre-erase header read is compacted to one read, with no
       intervening mutation.
 
+  - address: 0x083c1e9c
+    ghidra: FUN_083c1e9c
+    name: event_list_tree_copy_subtree
+    size: 116
+    sig: "void *event_list_tree_copy_subtree(void *tree, const void *source_root, void *destination_header)"
+    module: app/event_list_tree_copy_subtree
+    status: ported
+    renames:
+      param_1/r0/r8: tree
+      param_2/r1/r7: source_root
+      param_3/r2/r6: destination_header
+      puVar1/r5: cloned_node
+      puVar3/r7: first_clone
+    notes: >-
+      Raw ARM confirms 29 words from 0x083c1e9c through 0x083c1f0c; the next
+      function begins at 0x083c1f10. Its two direct internal calls are both
+      unconditional bl: 0x083c1ebc to 0x083c1580 and 0x083c1ee8 recursively
+      to itself; no predicated bl occurs. Independently decoding every ARM BL
+      word in osos.dec finds two unconditional direct callers at 0x083c1ee8
+      and 0x083c217c. The routine clones a subtree in left-recursive,
+      right-iterative order, preserving node color and parent/right links and
+      terminating the final right link. The unported type-specialized allocator
+      and payload copier at 0x083c1580 remains an ARM address seam; host tests
+      inject it and validate empty, left-recursive, and right-chain cases.
+
   - address: 0x083c2130
     ghidra: FUN_083c2130
     name: event_list_tree_assign
@@ -73518,9 +73543,10 @@ functions:
       event_list_tree_erase_range, clones source_header->root beneath the
       destination header, resets root/leftmost/rightmost as appropriate, and
       copies source's +0x14 node count. The recursive clone at 0x083c1e9c
-      is still unported: ARM builds call its retailOS entry directly, while
-      host tests use EVENT_LIST_OPS.copy_subtree as a volatile seam receiving
-      destination, source root, and destination header. The original calls
+      is ported as event_list_tree_copy_subtree; it retains an ARM address
+      seam only for its unported type-specialized node allocator/value copier
+      at 0x083c1580. Host assignment tests use EVENT_LIST_OPS.copy_subtree to
+      isolate the assignment protocol. The original calls
       0x083b6a80 and 0x083b6a6c to find leftmost and rightmost; their unchecked
       loops are inlined in the
       port. Host tests cover self-assignment, nonempty replacement and
