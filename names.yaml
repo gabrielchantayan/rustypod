@@ -77,7 +77,6 @@ functions:
       the established FUN_083cadd0/list_node_prepend_release seam with release
       flag one. Target pointers remain u32 target words to preserve firmware
       layout on 64-bit hosts.
-  - address: 0x083cbfbc
     ghidra: FUN_083cbfbc
     name: tree_children_flatten_into_parent_083cbfbc
     size: 60
@@ -30965,6 +30964,27 @@ functions:
       same vtable store, +0x14 null guard and virtual dispatch, direct item
       destruction, and base-destructor sequence; LLVM adds a frame and emits
       an ordinary conditional branch.
+  - address: 0x083d1684
+    ghidra: FUN_083d1684
+    name: observable_array_item_release_destruct
+    size: 64
+    sig: "void *observable_array_item_release_destruct(void *this)"
+    module: cxx/observable_array_item_release_destruct
+    vars: {param_1/r0: this, DAT_083d16b8: VTABLE_089A4F80, FUN_083d15dc: release_items, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes fourteen A32 instruction words (56 code bytes)
+      from 0x083d1684 through the tail B at 0x083d16b8. The following word at
+      0x083d16bc is the vtable literal 0x089a4f80, and push {r4,r5,r6,lr} at
+      0x083d16c0 begins the next real function, making the true extent 64
+      bytes. Whole-image raw-word decoding finds two inbound plain BL sites
+      (0x08236214 and 0x0826b670) and no predicated inbound BL sites. The body
+      stores its derived vtable, conditionally dispatches the object at +0x14
+      through vtable slot +0x1c, directly calls unported 0x083d15dc, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. Target Rust
+      reaches the two unresolved boundaries at verified addresses; host tests
+      install explicit seams. Rust models the predicated BLX and tail branch as
+      ordinary control flow.
   - address: 0x083d1750
     ghidra: FUN_083d1750
     name: observable_array_attached_release_destruct
