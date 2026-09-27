@@ -530,6 +530,7 @@ pub mod list_node_pool_acquire;
 pub mod list_node_pool_erase_owned;
 pub mod list_node_pool_recycle_all;
 pub mod red_black_tree_node_pool_acquire;
+pub mod red_black_tree_payload_28_node_pool_acquire;
 pub mod red_black_tree_node_pool_release_refcounted;
 pub mod red_black_tree_node_pool_release_vector;
 pub mod red_black_tree_payload_16_node_pool_acquire;

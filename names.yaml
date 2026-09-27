@@ -152395,3 +152395,37 @@ functions:
       fixtures widen vtable and cell words to native width; target accesses
       retain verified u32 layout. match.py structural output is reviewed rather
       than requiring an exact compiler match.
+  - address: 0x083cad14
+    ghidra: FUN_083cad14
+    name: red_black_tree_payload_28_node_pool_acquire
+    size: 188
+    sig: "RedBlackTreePayload28Node *red_black_tree_payload_28_node_pool_acquire(RedBlackTreePayload28NodePool *pool)"
+    module: cxx/red_black_tree_payload_28_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte extent: 47 A32 words from
+      push {r4-r8,lr} at 0x083cad14 through pop {r4-r8,pc} at 0x083cadcc;
+      0x083cadd0 begins the next real function. The body has exactly two
+      unconditional plain BL calls, at 0x083cad78 and 0x083cad8c, both to
+      operator_new_checked (0x08266c70), and no predicated BL calls. Raw
+      whole-image ARM branch decoding finds two inbound unconditional plain BL
+      sites at 0x08213a18 and 0x083cb5d0, with no predicated inbound BL sites.
+      It pops a 44-byte red-black-tree node through node+0x0c or allocates a
+      12-byte chunk header and capacity*44 backing storage. The initial
+      capacity is 32; later capacities are max(capacity + 32, capacity +
+      capacity/2 + capacity/8). Every returned node clears color and its three
+      link words while preserving its 28-byte payload. Deliberate deviations:
+      target pointers remain u32 words on 64-bit hosts, and Rust omits the
+      retail dead r1 = 0 argument to checked new.
