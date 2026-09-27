@@ -5,21 +5,26 @@
 //! the tail branch at `0x083d1b04`; `0x083d1b08` is vtable literal
 //! `0x089a53b8`, and the next real function begins at `0x083d1b0c`. Full-image
 //! ARM branch decoding finds two inbound plain `bl` sites and no predicated
-//! inbound `bl` sites. The body has one plain direct `bl` to unported
-//! `FUN_083d1a40` and one predicated indirect `blxne` through the attached
-//! object's vtable slot `+0x1c`.
+//! inbound `bl` sites. The body has one plain direct `bl` to
+//! `observable_array_release_cells_083d1a40` and one predicated indirect
+//! `blxne` through the attached object's vtable slot `+0x1c`.
 //!
 //! # Algorithm
 //!
 //! Plant the derived vtable, conditionally release the attached object at
 //! `+0x14` through vtable slot `+0x1c`, release this derived array's cells
-//! through `FUN_083d1a40`, then tail-chain into `observable_array_destruct`.
+//! through `observable_array_release_cells_083d1a40`, then tail-chain into `observable_array_destruct`.
 //!
-//! Deliberate deviations: host builds replace the unported cell release and
-//! target-width virtual call with seams. ARM invokes their recovered addresses;
-//! Rust models the tail branch as a direct base-destructor call.
+//! Deliberate deviations: host builds replace the target-width cell-release
+//! and virtual-call dispatches with seams. ARM invokes the ported direct
+//! target; Rust models the tail branch as a direct base-destructor call.
 
 use crate::cxx::observable_array::{observable_array_destruct, ObservableArray};
+#[cfg(target_os = "none")]
+use crate::cxx::observable_array_release_cells_083d1a40::{
+    observable_array_release_cells_083d1a40, ObservableArrayReleaseCells083d1a40,
+};
+
 
 const VTABLE_WORD: u32 = 0x089a_53b8;
 const ATTACHED_OBJECT_WORD: usize = 0x14 / 4;
@@ -29,8 +34,7 @@ type ReleaseAttachedObject = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 unsafe fn release_cells(array: *mut u8) {
-    let release: ReleaseCells = unsafe { core::mem::transmute(0x083d_1a40usize) };
-    unsafe { release(array) };
+    unsafe { observable_array_release_cells_083d1a40(array.cast::<ObservableArrayReleaseCells083d1a40>()) };
 }
 
 #[cfg(target_os = "none")]
@@ -52,8 +56,9 @@ unsafe extern "C" fn missing_release_attached_object(_object: *mut u8) {
     panic!("install observable-array release-cells destructor host seams before calling this port")
 }
 
-/// Host replacements for unported `FUN_083d1a40` and the attached object's
-/// vtable slot `+0x1c`.
+/// Host replacement for the target-width vtable dispatch through ported
+/// `observable_array_release_cells_083d1a40` and the attached object's vtable
+/// slot `+0x1c`.
 #[cfg(not(target_os = "none"))]
 pub static mut OBSERVABLE_ARRAY_RELEASE_CELLS_DESTRUCT_OPS: (ReleaseCells, ReleaseAttachedObject) =
     (missing_release_cells, missing_release_attached_object);
