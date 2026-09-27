@@ -151105,6 +151105,33 @@ functions:
       and replace the direct destructor/delete calls because fixture objects
       are not retail heap allocations.
 
+  - address: 0x083d1a40
+    ghidra: FUN_083d1a40
+    name: observable_array_release_cells_083d1a40
+    size: 64
+    sig: "void observable_array_release_cells_083d1a40(void *this)"
+    module: cxx/observable_array_release_cells_083d1a40
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      "[this + 0x00]": vtable
+      "[this + 0x04]": count
+      "[this + 0x10]": enabled
+      FUN_083d6bc0: container_element_at_alias_6bc0
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen A32
+      instructions from push {r4,r5,r6,lr} at 0x083d1a40 through pop
+      {r4,r5,r6,pc} at 0x083d1a7c; the next independently entered function
+      starts at 0x083d1a80. Whole-image ARM B/BL decoding finds two inbound
+      unconditional plain BL sites (0x083d1ac0 and 0x083d1af8), with no
+      predicated inbound BL sites. The body has two unconditional direct BL
+      calls: container_element_at_alias_6bc0 at 0x083d6bc0 and operator_delete
+      at 0x082aad24. If enabled is nonzero, it walks signed indices [0,count),
+      obtains each element through the +0x40 accessor, and tag-2-deletes it;
+      NULL elements are deliberately passed to operator_delete. Host fixtures
+      widen vtable pointers and replace deletion with a recording seam.
+
   - address: 0x083d1ad0
     ghidra: FUN_083d1ad0
     name: observable_array_release_cells_destruct
