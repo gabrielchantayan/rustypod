@@ -405,6 +405,35 @@ functions:
       accessor, dereferences its returned cell, and tag-2 deletes each
       allocation body. Host tests use native vtable and delete seams; target
       builds retain u32 target pointers and direct operator_delete.
+  - address: 0x083c2a34
+    ghidra: FUN_083c2a34
+    name: tree_children_flatten_release_strings_083c2a34
+    size: 68
+    sig: "void tree_children_flatten_release_strings_083c2a34(TreeParent *parent, u32 first_child)"
+    module: util/tree_children_flatten_release_strings_083c2a34
+    status: ported
+    renames:
+      param_1/r0/r5: parent
+      param_2/r1/r4: first_child
+      "parent+0x04": child_head
+      "node+0x08/r6": next_sibling
+      "node+0x0c": first_child
+      "node+0x10/r0": string
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte A32 extent from push
+      {r4,r5,r6,lr} at 0x083c2a34 through pop {r4,r5,r6,pc} at 0x083c2a74;
+      0x083c2a78 begins the next real function. The body has exactly two
+      unconditional plain BL instructions: recursive at 0x083c2a4c and
+      cxx_string_release/FUN_083d8b04 at 0x083c2a60; it has no predicated BL.
+      Raw branch decoding finds two inbound plain BL sites at 0x083c2834 and
+      0x083c2a4c, with no predicated inbound calls. It depth-first flattens
+      node+0x0c child chains, follows node+0x08 siblings, releases every
+      node+0x10 COW string after its descendants, and prepends every node to
+      parent+0x04. Deliberate deviation: target pointers remain u32 target
+      words to preserve retailOS's four-byte layout on 64-bit hosts; the
+      host-test seam records release order without dereferencing synthetic COW
+      strings.
   - address: 0x083c61dc
     ghidra: FUN_083c61dc
     name: tree_children_flatten_release_strings_083c61dc
