@@ -153713,3 +153713,40 @@ functions:
       flattens the node+0x0c child chain, walks node+0x08 siblings, and prepends
       each node to parent+0x04. Deliberate deviation: target pointers remain u32
       target words to preserve retailOS's four-byte field layout on 64-bit hosts.
+
+  - address: 0x083bbf3c
+    ghidra: FUN_083bbf3c
+    name: red_black_tree_payload_pair_node_pool_acquire_083bbf3c
+    size: 184
+    sig: "RedBlackTreePayloadPairNode *red_black_tree_payload_pair_node_pool_acquire_083bbf3c(RedBlackTreePayloadPairNodePool *pool)"
+    module: cxx/red_black_tree_payload_pair_node_pool_acquire_083bbf3c
+    status: ported
+    vars:
+      param_1/r4: pool
+      r0: node
+      r5: chunk
+      r6: capacity
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right/free-link
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083bbf3c through pop {r4-r8,pc} at 0x083bbff0;
+      0x083bbff4 begins the next real function. The body has exactly two
+      unconditional plain bl instructions, at 0x083bbfa0 and 0x083bbfb4,
+      both to operator_new_checked @ 0x08266c70, and no predicated bl calls.
+      This red-black-tree pool pops a recycled 24-byte node through node+0x0c,
+      or grows a 12-byte chunk header and capacity*0x18 arena from 32 entries
+      by max(capacity + 32, capacity + capacity/2 + capacity/8). It clears
+      color and parent/left/right while preserving the caller-owned pair at
+      node+0x10. Target pointers are u32 words for host layout; the retail
+      dead r1=0 second allocator argument is intentionally omitted. Host tests
+      cover initial allocation, free-list reuse, payload preservation, and
+      growth. match.py structural exit 1 is expected when LLVM differs from ADS.
