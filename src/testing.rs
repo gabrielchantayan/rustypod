@@ -2008,6 +2008,9 @@ pub mod hints {
     // 0x9d50_0000: dedicated to cxx/word_list_node_pool_list_recycle_all's
     // target-width intrusive-ring and free-list fixture; mappings never unmap.
     pub const WORD_LIST_NODE_POOL_LIST_RECYCLE_ALL: usize = 0x9d50_0000;
+    // 0x9d70_0000: dedicated to cxx/node_pool_insert_after_cursor's
+    // target-width pool and link-node fixture; mappings never unmap.
+    pub const NODE_POOL_INSERT_AFTER_CURSOR: usize = 0x9d70_0000;
     // 0x9d60_0000: dedicated to cxx/two_word_list_node_pool_list_recycle_all's
     // target-width intrusive-ring and free-list fixture; mappings never unmap.
     pub const TWO_WORD_LIST_NODE_POOL_LIST_RECYCLE_ALL: usize = 0x9d60_0000;

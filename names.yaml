@@ -4241,6 +4241,29 @@ functions:
       It then releases the bucket allocation with count+1 and returns table.
       The Rust port retains all fields as target-width u32 words rather than
       host pointers, deliberately preserving the 32-bit target layout.
+  - address: 0x083d345c
+    ghidra: FUN_083d345c
+    name: node_pool_insert_after_cursor
+    size: 40
+    sig: "void node_pool_insert_after_cursor(u32 *pool, u32 *node, u32 *cursor)"
+    module: cxx/node_pool_insert_after_cursor
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: node
+      param_3/r2: cursor
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent
+      0x083d345c..0x083d3483; the next independently linked function begins
+      at 0x083d3484. The body has no BL instructions. Whole-image ARM branch
+      decoding finds two inbound plain unconditional BL call sites
+      (0x083d2a9c and 0x083d2ce0) and no predicated direct calls.
+
+      It inserts node immediately after cursor in the target-width singly
+      linked chain, increments pool word +0x10, and replaces pool word +0x0c
+      when cursor is lower as an unsigned address. The Rust port preserves the
+      target's 32-bit pointer layout with u32 words on 64-bit hosts.
+      Volatile accesses retain the retail load/store order.
   - address: 0x083d3484
     ghidra: FUN_083d3484
     name: hash_table_chain_destroy_083d3484
