@@ -150454,3 +150454,27 @@ functions:
       preserve target layout on hosts; the dead r1=0 allocator argument is
       omitted from the ported checked-new signature. Host tests cover fresh,
       free-list, and grown-chunk acquisition.
+  - address: 0x083cdfbc
+    ghidra: FUN_083cdfbc
+    name: list_node_pool_recycle_chain
+    size: 60
+    sig: "void list_node_pool_recycle_chain(u32 *pool, u32 *chain)"
+    module: cxx/list_node_pool_recycle_chain
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: chain
+      "pool+0x04": free
+      "node+0x08": chain_next
+      "node+0x0c": free_next
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 extent from push
+      {r4,r5,lr} at 0x083cdfbc through pop {r4,r5,pc} at 0x083cdff4;
+      0x083cdff8 begins the next real function. The body has one outgoing
+      unconditional plain bl, the recursive call at 0x083cdfd4, and no
+      predicated bl instructions. Whole-image A32 decoding finds two inbound
+      unconditional plain bl sites at 0x083cdcb0 and 0x083cdfd4, with no
+      predicated inbound sites. It recursively follows node+0x08 to the tail,
+      then prepends each node through node+0x0c to pool+0x04, preserving input
+      order. Rust names target-width word indices instead of retail register
+      shuffling; all target-width loads, stores, and recursive ordering remain.

@@ -45,6 +45,11 @@ pub mod hints {
     // 0x6c50_0000: dedicated to util/bucket_chain_destroy_node8's raw-u32
     // owner, bucket allocation, and intrusive-chain fixture; mappings never unmap.
     pub const BUCKET_CHAIN_DESTROY_NODE8: usize = 0x6c50_0000;
+    // 0x6cd0_0000 / 0x6ce0_0000: dedicated to
+    // cxx/list_node_pool_recycle_chain's target-width pool and node fixtures;
+    // mappings never unmap, so each test uses a distinct address.
+    pub const LIST_NODE_POOL_RECYCLE_CHAIN: usize = 0x6cd0_0000;
+    pub const LIST_NODE_POOL_RECYCLE_CHAIN_NULL: usize = 0x6ce0_0000;
     // 0x6c60_0000: dedicated to util/hash_table_bucket_construct's
     // target-width table and bucket-allocation fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;

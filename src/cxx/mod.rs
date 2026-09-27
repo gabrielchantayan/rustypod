@@ -144,6 +144,7 @@ pub mod vector4_resize_fill;
 pub mod app_block_manager_node_pool_acquire;
 pub mod two_word_list_node_pool_acquire;
 pub mod two_word_list_node_pool_list_recycle_all;
+pub mod list_node_pool_recycle_chain;
 pub mod word_list_node_pool_acquire;
 pub mod red_black_tree_construct;
 pub mod refcounted_list_node_pool_acquire;
