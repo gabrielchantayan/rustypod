@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083cca00
+    ghidra: FUN_083cca00
+    name: list_node_pool_recycle_chain_083cca00
+    size: 60
+    sig: "void list_node_pool_recycle_chain_083cca00(ListNodePool *pool, ListNode *chain)"
+    module: cxx/list_node_pool_recycle_chain_083cca00
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: chain
+      "pool+0x04": free
+      "node+0x08": chain_next
+      "node+0x0c": free_next
+    notes: >-
+      Raw words e92d4030 e1a05000 e1a04001 ea000007 e594100c e1a00005
+      ebfffff8 e5951004 e5940008 e584100c e5854004 e1a04000 e3540000
+      1afffff5 e8bd8030 establish the exact 60-byte A32 extent from
+      0x083cca00 through pop {r4,r5,pc} at 0x083cca38; push {r2-r9,sl,lr} at
+      0x083cca3c starts the next real function. The body has one unconditional
+      plain bl, its recursive call at 0x083cca1c, and no predicated bl.
+      Whole-image branch decoding finds two inbound unconditional plain bl
+      sites, 0x083cc7f8 and 0x083cca1c, with no predicated inbound calls.
+      It recursively drains node+0x08 before prepending every node onto
+      pool+0x04 through node+0x0c, preserving chain order. The body is
+      byte-identical to FUN_083cdfbc/list_node_pool_recycle_chain; this
+      separately linked Rust port retains its own addressable target symbol.
   - address: 0x083ccc0c
     ghidra: FUN_083ccc0c
     name: red_black_tree_payload_56_node_pool_acquire

@@ -50,6 +50,11 @@ pub mod hints {
     // mappings never unmap, so each test uses a distinct address.
     pub const LIST_NODE_POOL_RECYCLE_CHAIN: usize = 0x6cd0_0000;
     pub const LIST_NODE_POOL_RECYCLE_CHAIN_NULL: usize = 0x6ce0_0000;
+    // 0x6cf0_0000 / 0x6d00_0000: dedicated to
+    // cxx/list_node_pool_recycle_chain_083cca00's target-width pool and node
+    // fixtures; mappings never unmap, so each test uses a distinct address.
+    pub const LIST_NODE_POOL_RECYCLE_CHAIN_083CCA00: usize = 0x6cf0_0000;
+    pub const LIST_NODE_POOL_RECYCLE_CHAIN_083CCA00_NULL: usize = 0x6d00_0000;
     // 0x6c60_0000: dedicated to util/hash_table_bucket_construct's
     // target-width table and bucket-allocation fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;
