@@ -2873,6 +2873,11 @@ pub mod hints {
     // 0x7700_0000: dedicated to cxx/refcounted_element_array_dispose's
     // target-width element fixtures; mappings never unmap.
     pub const CXX_REFCOUNTED_ELEMENT_ARRAY_DISPOSE: usize = 0x7700_0000;
+    // 0x7710_0000 / 0x7720_0000: dedicated to
+    // cxx/red_black_tree_cow_pair_subtree_clone's target-width tree fixtures;
+    // mappings never unmap, so no other port may share these hints.
+    pub const RED_BLACK_TREE_COW_PAIR_SUBTREE_CLONE: usize = 0x7710_0000;
+    pub const RED_BLACK_TREE_COW_PAIR_SUBTREE_CLONE_NULL: usize = 0x7720_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
