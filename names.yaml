@@ -150561,3 +150561,30 @@ functions:
       then prepends each node through node+0x0c to pool+0x04, preserving input
       order. Rust names target-width word indices instead of retail register
       shuffling; all target-width loads, stores, and recursive ordering remain.
+  - address: 0x083cd468
+    ghidra: FUN_083cd468
+    name: red_black_tree_release_subtree
+    size: 64
+    sig: "void red_black_tree_release_subtree(u32 *chain, u32 *node)"
+    module: cxx/red_black_tree_release_subtree
+    status: ported
+    renames:
+      param_1/r0: chain
+      param_2/r1: node
+      "chain+0x04": cleanup_head
+      "node+0x08": next
+      "node+0x0c": right_subtree
+      FUN_083cccc4: red_black_tree_node_prepend_and_destroy_payload
+    notes: >-
+      Raw words e92d4070 e1a06000 e1a04001 ea000008 e594100c e1a00006
+      ebfffff8 e5945008 e3a02001 e1a01004 e1a00006 ebfffe0a e1a04005
+      e3540000 1afffff4 e8bd8070 establish the exact 64-byte A32 body from
+      0x083cd468 through 0x083cd4a7; the following push at 0x083cd4a8 starts
+      the next real function. The body has two unconditional plain direct bl
+      calls (self at 0x083cd480 and FUN_083cccc4 at 0x083cd494), and no
+      predicated direct bl. Whole-image branch decoding finds two inbound
+      unconditional plain bl sites at 0x083cd268 and 0x083cd480, and no
+      predicated inbound bl. It recursively releases the right subtree, saves
+      node+0x08 before releasing the current node through the ported helper,
+      then continues with that saved successor. Rust represents the direct
+      recursive bl as a Rust call; all tree links remain target-width u32.
