@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d019c
+    ghidra: FUN_083d019c
+    name: observable_array_release_enabled_cells
+    size: 88
+    sig: "void observable_array_release_enabled_cells(ObservableArrayReleaseEnabledCells *this)"
+    module: cxx/observable_array_release_enabled_cells
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10/r0: enabled
+      param_1_vtable_plus_0x40/r2: cell_at
+      returned_cell_first_word/r0: cell_object
+      cell_object_vtable_plus_0x04/r1: cell_destroy
+    notes: >-
+      Raw osos.dec establishes the true 88-byte extent: twenty-two A32 words
+      from push {r4,r5,r6,lr} at 0x083d019c through pop {r4,r5,r6,pc} at
+      0x083d01f0; push {r4,r5,r6,lr} at 0x083d01f4 starts the next independently
+      entered function. The body has zero plain direct BL and zero predicated
+      direct BL instructions, plus one unconditional BLX through this's vtable
+      slot +0x40 at 0x083d01cc and one predicated BLXNE through each non-null
+      cell object's vtable slot +0x04 at 0x083d01e0. Whole-image aligned A32
+      decoding finds two inbound unconditional plain BL sites (0x083d0240 and
+      0x083d0278) and no predicated direct calls. It returns immediately when
+      byte +0x10 is clear; otherwise it walks signed indices [0,count), obtains
+      each cell at slot +0x40, and invokes its first-word object's slot +0x04
+      only when that object is non-null. The two calls are unresolved virtual
+      dispatches, so no callee identity or seam is invented. Rust models the
+      predicated BLXNE as a null guard and uses native-width host fixtures while
+      retaining target word offsets.
   # --- observable-array attached release and enabled-cell disposal ---
   - address: 0x083d0250
     ghidra: FUN_083d0250
@@ -36,16 +66,17 @@ functions:
       words from push {r4,lr} at 0x083d0250 through the tail B at 0x083d0284,
       followed by vtable literal 0x089a3ea0 at 0x083d0288; push {r4,r5,r6,lr}
       at 0x083d028c begins the next independently entered function. The body has
-      one plain direct BL, at 0x083d0278 to unported FUN_083d019c, zero
-      predicated direct BL instructions, and one predicated BLXNE through the
-      attached object's vtable slot +0x1c at 0x083d0270. Whole-image aligned A32
-      branch decoding finds two inbound plain BL sites and no predicated inbound
-      BL sites. It installs vtable 0x089a3ea0, conditionally releases the
-      attached object, runs the enabled-cell release, then tail-branches to
-      observable_array_destruct @ 0x08271d2c. Target Rust calls the unresolved
-      direct helper at its verified address; host tests inject explicit seams.
-      Rust deliberately models the predicated BLX and tail branch as ordinary
-      control flow while preserving effects and ordering.
+      one plain direct BL, at 0x083d0278 to ported
+      observable_array_release_enabled_cells, zero predicated direct BL
+      instructions, and one predicated BLXNE through the attached object's
+      vtable slot +0x1c at 0x083d0270. Whole-image aligned A32 decoding finds
+      two inbound plain BL sites and no predicated inbound BL sites. It installs
+      vtable 0x089a3ea0, conditionally releases the attached object, runs the
+      enabled-cell release, then tail-branches to observable_array_destruct @
+      0x08271d2c. Target Rust calls the ported direct callee; host tests inject
+      an explicit direct-call seam. Rust deliberately models the predicated BLX
+      and tail branch as ordinary control flow while preserving effects and
+      ordering.
   # --- opaque observable-array first-string disposal ---
   - address: 0x083d028c
     ghidra: FUN_083d028c
