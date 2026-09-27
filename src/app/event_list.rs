@@ -366,9 +366,13 @@ unsafe fn copy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32, u32) -> u32 {
 #[cfg(target_arch = "arm")]
 #[inline(always)]
 unsafe fn copy_subtree(tree: *mut u8, source_root: u32, destination_header: u32) -> u32 {
-    let retail_copy_subtree: unsafe extern "C" fn(*mut u8, u32, u32) -> u32 =
-        unsafe { core::mem::transmute(0x083c1e9cusize) };
-    unsafe { retail_copy_subtree(tree, source_root, destination_header) }
+    unsafe {
+        crate::app::event_list_tree_copy_subtree::event_list_tree_copy_subtree(
+            tree,
+            source_root,
+            destination_header,
+        )
+    }
 }
 
 #[cfg(not(target_arch = "arm"))]
