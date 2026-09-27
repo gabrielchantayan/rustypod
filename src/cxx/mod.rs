@@ -266,6 +266,7 @@ pub mod magic_tagged_object_reset;
 pub mod vtable_owned_payload_destruct;
 pub mod vtable_089a57f0_destruct;
 pub mod vtable_089a3990_destruct;
+pub mod vtable_089a38b8_destruct;
 pub mod vtable_089a5718_destruct;
 pub mod magic_tagged_object_retain;
 pub mod list_cursor_clear;

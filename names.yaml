@@ -150154,3 +150154,29 @@ functions:
       Firmware dispatches the payload through target-width words and calls
       0x083cfbf4 directly; host tests use seams because neither target
       function pointers nor the firmware address are executable on x86-64.
+
+  - address: 0x083cfbb8
+    ghidra: FUN_083cfbb8
+    name: vtable_089a38b8_destruct
+    size: 60
+    sig: "Vtable089a38b8Object *vtable_089a38b8_destruct(Vtable089a38b8Object *this)"
+    module: cxx/vtable_089a38b8_destruct
+    status: ported
+    vars: {param_1: this, DAT_083cfbf0: VTABLE_089A38B8, FUN_083cfaf8: VTABLE_089A38B8_BASE_CLEANUP, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec is 14 ARM instructions (56 bytes) from 0x083cfbb8 through
+      0x083cfbec, followed by the 0x089a38b8 vtable literal at 0x083cfbf0;
+      the next real function begins with push {r4,r5,r6,r7,lr} at
+      0x083cfbf4, so the true 60-byte extent includes the literal. Decoding
+      every ARM B/BL-immediate in the image finds two inbound plain BL sites
+      and no predicated BL sites. The body plants that vtable at +0x00,
+      conditionally calls payload->vtable[+0x1c] for the target-width payload
+      word at +0x14, calls the unported 0x083cfaf8 cleanup directly, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. The class,
+      payload, virtual slot, and 0x083cfaf8 callee remain unidentified, so
+      their Rust names state only their observed roles. Target code dispatches
+      the direct callee at its fixed address; host tests install typed seams
+      for that address and the target-width virtual callback. match.py shows
+      the stock store/load/cmp/virtual-call/base-cleanup/tail-destructor flow;
+      LLVM expands predication to a branch and the fixed-address call to a
+      volatile function-pointer load and blx.
