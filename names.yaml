@@ -4226,6 +4226,40 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d12d8
+    ghidra: FUN_083d12d8
+    name: observable_array_release_elements
+    size: 72
+    sig: "void observable_array_release_elements(ObservableArray *array)"
+    module: cxx/observable_array_release_elements
+    status: ported
+    renames:
+      param_1/r0/r6: array
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      iVar3/r5: count
+      piVar1/r0: element
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": indexed_element_at
+      "[element + 0x0]": element_vtable
+      "[element_vtable + 0x4]": element_release
+      FUN_083d6aa8: indexed_element_at_wrapper
+    notes: >-
+      Raw osos.dec establishes the true 72-byte extent 0x083d12d8..0x083d1320:
+      eighteen A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the next independently entered function starts at 0x083d1324. The body
+      contains one plain direct BL to the +0x40 indexed-element wrapper @
+      0x083d6aa8 and one predicated BLXNE through each non-NULL element's
+      vtable slot +0x04. The wrapper preserves the caller's live r1 index
+      into its BLX; its existing Rust port omits that ABI argument, so this
+      port reproduces the verified +0x40 dispatch inline instead of reusing an
+      ABI-inexact seam. Full-image aligned A32 branch decoding finds two
+      inbound plain BL sites, 0x083d1370 and 0x083d13a8, with no predicated
+      direct callers. When enabled, it visits signed indices [0,count), gets
+      each element, and invokes the unresolved +0x04 virtual release method
+      for non-NULL elements. Host fixtures deliberately widen vtable pointers;
+      target accesses retain the original 32-bit offsets.
   - address: 0x083d13bc
     ghidra: FUN_083d13bc
     name: observable_array_destroy_elements_083d13bc
