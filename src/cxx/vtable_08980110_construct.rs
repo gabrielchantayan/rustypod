@@ -16,6 +16,8 @@
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
+#[cfg(target_os = "none")]
+use super::observable_array_payload_cleanup_destruct_083cfdc4::observable_array_payload_cleanup_destruct_083cfdc4;
 
 const VTABLE_ADDRESS: u32 = 0x0898_0110;
 const RETAIL_BASE_CONSTRUCT: usize = 0x083c_fdc4;
@@ -34,8 +36,7 @@ pub static mut VTABLE_08980110_CONSTRUCT_OPS: BaseConstruct = missing_base_const
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn base_construct(base: *mut u8) -> *mut u8 {
-    let construct: BaseConstruct = unsafe { core::mem::transmute(RETAIL_BASE_CONSTRUCT) };
-    unsafe { construct(base) }
+    unsafe { observable_array_payload_cleanup_destruct_083cfdc4(base) }
 }
 
 #[cfg(not(target_os = "none"))]
