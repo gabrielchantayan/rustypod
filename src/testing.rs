@@ -44,6 +44,8 @@ pub mod hints {
     pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;
     // 0x6c30_0000: dedicated to app/tracker_array_expand's target-width storage fixture; mappings never unmap.
     pub const TRACKER_ARRAY_EXPAND: usize = 0x6c30_0000;
+    // 0x6c40_0000: dedicated to app/element_array2_expand's target-width storage fixture; mappings never unmap.
+    pub const ELEMENT_ARRAY2_EXPAND: usize = 0x6c40_0000;
     // 0x6c10_0000: dedicated to cxx/vector_copy_construct_elem20's
     // target-width source, destination, and allocation fixture; mappings never unmap.
     pub const VECTOR_COPY_CONSTRUCT_ELEM20: usize = 0x6c10_0000;

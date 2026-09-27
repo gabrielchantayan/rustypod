@@ -149869,3 +149869,36 @@ functions:
       release on an occupied slot, clear it, and decrement count. LLVM emits
       explicit branches instead of ADS's predicated load/compare/return and
       keeps the storage base live in r6 instead of reloading it.
+
+  - address: 0x083d3fec
+    ghidra: FUN_083d3fec
+    name: element_array2_expand
+    size: 120
+    sig: "void element_array2_expand(u32 *array)"
+    module: app/element_array2_expand
+    status: ported
+    renames:
+      param_1/r0: array
+      iVar3/r5: expanded_slots
+      iVar1/r0: resized_storage
+      FUN_0802edec: realloc
+      thunk_EXT_FUN_2200027c: iram_memzero_aligned_veneer
+      FUN_083d3f50: element_array2_tracker_diagnostic_noop
+    notes: >-
+      Raw osos.dec words establish the exact 120-byte A32 body from
+      0x083d3fec through bx lr at 0x083d4060; its three diagnostic strings
+      occupy 0x083d4064..0x083d409f, and the next independently entered
+      function begins at 0x083d40a0 with push {r4,r5,r6,lr}. The body has
+      three unconditional plain direct bl calls, at 0x083d4008 to
+      realloc/FUN_0802edec, 0x083d4028 to the 0x08037db8 IRAM veneer for
+      memzero_aligned @ 0x2200027c, and 0x083d405c to the ported
+      element_array2_tracker_diagnostic_noop/FUN_083d3f50; no calls are
+      predicated. It multiplies allocated slots (+0x04) by factor (+0x10),
+      reallocates the +0x00 u32 storage, clears only the newly allocated
+      tail after a successful allocation, then commits the new allocated
+      count. It unconditionally reaches the verified no-op diagnostic with
+      the retail format arguments. Target pointers remain u32 words so
+      host layout matches ARM; no deliberate behavioral deviations. Host
+      tests cover successful expansion retaining old slots and clearing the
+      tail, plus reallocation failure nulling storage without changing the
+      old capacity.
