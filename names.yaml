@@ -4226,6 +4226,34 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d15a0
+    ghidra: FUN_083d15a0
+    name: observable_array_assert_empty_attached_destruct
+    size: 56
+    sig: "ObservableArray *observable_array_assert_empty_attached_destruct(ObservableArray *this)"
+    module: cxx/observable_array_assert_empty_attached_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_083d15d8: VTABLE_089A4EA8
+      "[this + 0x14]": attached_object
+      "[attached_object + 0x0]": attached_vtable
+      "[attached_vtable + 0x1c]": attached_release
+      FUN_083d14a0: observable_array_assert_empty_unported
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the true 56-byte extent: thirteen A32 words
+      from 0x083d15a0 through the tail branch at 0x083d15d4, followed by the
+      vtable literal 0x089a4ea8 at 0x083d15d8; 0x083d15dc begins the next real
+      function. Whole-image ARM branch decoding finds two inbound plain BL
+      sites (0x08101bd4 and 0x0826b658) and no predicated inbound BL sites.
+      The body re-plants its derived vtable, conditionally invokes the attached
+      object's +0x1c virtual release through predicated BLXNE, calls the
+      unported pre-destruction check FUN_083d14a0 through one plain BL, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. Target Rust
+      calls the verified direct helper address; host tests inject both unresolved
+      calls. Deliberate deviations: Rust does not preserve the predicated BLX
+      or tail branch, while preserving their ordering and effects.
   - address: 0x083d15dc
     ghidra: FUN_083d15dc
     name: container_release_indexed_elements
