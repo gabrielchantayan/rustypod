@@ -49,6 +49,34 @@ functions:
       two-word payload. Deliberate deviations: target pointers are u32 target
       words to preserve firmware layout on 64-bit hosts, and the retail dead r1
       = 0 argument to checked new is omitted from the Rust signature.
+  - address: 0x083cb574
+    ghidra: FUN_083cb574
+    name: tree_children_release_083cb574
+    size: 60
+    sig: "void tree_children_release_083cb574(List *list, u32 first_child)"
+    module: util/tree_children_release_083cb574
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: first_child
+      "list+0x04": head
+      "node+0x08": next_sibling
+      "node+0x0c": first_child
+      FUN_083cadd0: list_node_prepend_release
+    notes: >-
+      Raw words e92d4070 e1a06000 e1a04001 ea000008 e594100c e1a00006
+      ebfffff8 e5945008 e3a02001 e1a01004 e1a00006 ebfffe0a e1a04005
+      e3540000 1afffff4 e8bd8070 establish the exact 60-byte A32 extent from
+      0x083cb574 through pop {r4,r5,r6,pc} at 0x083cb5b0; push
+      {r2,r3,r4,r5,r6,r7,r8,r9,sl,lr} at 0x083cb5b4 starts the next real
+      function. The body has two unconditional plain bl calls, recursion at
+      0x083cb58c and list_node_prepend_release at 0x083cb5a0, with no
+      predicated bl. Whole-image branch decoding finds two inbound unconditional
+      plain bl sites, 0x083cb374 and 0x083cb58c, with no predicated calls. It
+      recursively processes node+0x0c, advances through node+0x08, then invokes
+      the established FUN_083cadd0/list_node_prepend_release seam with release
+      flag one. Target pointers remain u32 target words to preserve firmware
+      layout on 64-bit hosts.
   - address: 0x083cbfbc
     ghidra: FUN_083cbfbc
     name: tree_children_flatten_into_parent_083cbfbc
