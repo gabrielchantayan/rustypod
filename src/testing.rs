@@ -45,6 +45,9 @@ pub mod hints {
     // 0x6c50_0000: dedicated to util/bucket_chain_destroy_node8's raw-u32
     // owner, bucket allocation, and intrusive-chain fixture; mappings never unmap.
     pub const BUCKET_CHAIN_DESTROY_NODE8: usize = 0x6c50_0000;
+    // 0x6c60_0000: dedicated to util/hash_table_bucket_construct's
+    // target-width table and bucket-allocation fixture; mappings never unmap.
+    pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;
     // 0x6c30_0000: dedicated to app/tracker_array_expand's target-width storage fixture; mappings never unmap.
     pub const TRACKER_ARRAY_EXPAND: usize = 0x6c30_0000;
     // 0x6c40_0000: dedicated to app/element_array2_expand's target-width storage fixture; mappings never unmap.
