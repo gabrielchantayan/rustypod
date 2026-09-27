@@ -812,6 +812,10 @@ pub mod hints {
     // 0x6ce0_0000: dedicated to util/hash_table_bucket_chain_insert's
     // target-width table and intrusive-chain fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CHAIN_INSERT: usize = 0x6ce0_0000;
+    // 0x6cc0_0000: dedicated to util/hash_table_chain_prepend's target-width
+    // table and intrusive-chain fixture; mappings never unmap, so no other
+    // user may share it.
+    pub const HASH_TABLE_CHAIN_PREPEND: usize = 0x6cc0_0000;
     // 0x6c90_0000: dedicated to crypto/bio_find_type's target-width BIO
     // chain and method-type-word fixture; mappings never unmap, so no other
     // user may share it.

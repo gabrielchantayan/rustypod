@@ -4214,6 +4214,27 @@ functions:
       address rather than inventing a callee identity. Host tests use a
       recording replacement solely to verify argument forwarding and the
       observable nine-byte copy, including preservation of trailing padding.
+  - address: 0x083d314c
+    ghidra: FUN_083d314c
+    name: hash_table_chain_prepend
+    size: 40
+    sig: "void hash_table_chain_prepend(u8 *table, u32 *node, u32 *chain_head)"
+    module: util/hash_table_chain_prepend
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: node
+      param_3/r2: chain_head
+    notes: >-
+      Raw osos.dec words establish the exact 40-byte extent
+      0x083d314c..0x083d3173; the next independently entered function starts
+      at 0x083d3174 with push {r4,r5,r6,r7,r8,lr}. The body has no outbound
+      bl instructions. Whole-image ARM decoding finds two inbound plain bl
+      calls and no predicated bl calls. It prepends node to the target-width
+      intrusive chain at chain_head, increments table word +0x10 with u32
+      wraparound, and updates table word +0x0c only when chain_head is lower.
+      Rust retains target-width u32 pointer words and target offsets despite
+      wider host pointers; there are no deliberate deviations.
   - address: 0x083d3174
     ghidra: FUN_083d3174
     name: hash_table_chain_destroy
