@@ -4226,6 +4226,27 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d1464
+    ghidra: FUN_083d1464
+    name: observable_array_attached_release_destruct_083d1464
+    size: 56
+    sig: "void *observable_array_attached_release_destruct_083d1464(void *this)"
+    module: cxx/observable_array_attached_release_destruct_083d1464
+    vars: {param_1/r0/r4: this, DAT_083d149c: VTABLE_089A4DD0, "[this + 0x14]": attached_object, "[attached_object.vtable + 0x1c]": release, FUN_083d13bc: unported_pre_destruct, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes thirteen A32 instruction words (52 code bytes)
+      from 0x083d1464 through the tail B at 0x083d1498. The following word at
+      0x083d149c is vtable literal 0x089a4dd0, and push {r4,r5,r6,lr} at
+      0x083d14a0 begins the next real function, making the true extent 56
+      bytes. Whole-image raw-word decoding finds two inbound plain BL sites
+      (0x08124500 and 0x0826b640) and no predicated inbound BL sites. The body
+      stores its derived vtable, conditionally dispatches the object at +0x14
+      through vtable slot +0x1c, directly calls unported 0x083d13bc, then
+      tail-branches to observable_array_destruct @ 0x08271d2c. Target Rust
+      reaches the two unresolved boundaries at verified addresses; host tests
+      install explicit seams. Rust models the predicated BLX and tail branch as
+      ordinary control flow.
   - address: 0x083d14a0
     ghidra: FUN_083d14a0
     name: indexed_string_element_array_destroy_083d14a0
