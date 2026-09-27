@@ -3845,6 +3845,41 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cfbf4
+    ghidra: FUN_083cfbf4
+    name: opaque_indexed_element_array_dispose
+    size: 96
+    sig: "void opaque_indexed_element_array_dispose(OpaqueIndexedElementArray *array)"
+    module: cxx/opaque_indexed_element_array_dispose
+    status: ported
+    renames:
+      param_1/r0/r6: array
+      iVar4/r4: index
+      iVar2/r7: count
+      piVar1/r0: element_slot
+      iVar3/r5: element
+      "[array + 0x0]": vtable
+      "[array + 0x4]": count
+      "[array + 0x10]": enabled
+      "[vtable + 0x40]": indexed_element_slot
+      FUN_0810b3e4: opaque_element_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent
+      0x083cfbf4..0x083cfc53: push {r4,r5,r6,r7,r8,lr} begins the body and
+      pop {r4,r5,r6,r7,r8,pc} ends it; the following push at 0x083cfc54
+      begins the next independently entered function. Its 24 decoded A32 words
+      contain two unconditional plain direct BL instructions, to the unported
+      opaque element destructor at 0x0810b3e4 and ported operator_delete at
+      0x082aad24, zero predicated direct BL instructions, and one unconditional
+      virtual BLX through vtable slot +0x40. A full-image raw A32 branch decode
+      finds exactly two inbound plain BL sites, 0x083cfcb4 and 0x083cfcec, and
+      no predicated direct BL callers. When enabled byte +0x10 is nonzero, it
+      walks signed indices [0,count), dereferences each vtable-slot result, and
+      destroys then deletes every non-NULL element. FUN_0810b3e4 has no
+      established class identity, so target Rust calls its recovered address
+      while host tests use a seam; host fixtures deliberately widen the vtable
+      pointer while retaining the target field meanings.
   - address: 0x083cfdc4
     ghidra: FUN_083cfdc4
     name: observable_array_payload_cleanup_destruct_083cfdc4
