@@ -658,3 +658,4 @@ pub mod string_map_assign_tree_records;
 pub mod owned_virtual_handle_release;
 pub mod owned_virtual_object_delete;
 pub mod opaque_vtable_089a8a6c_construct;
+pub mod observable_array_tracked_construct;
