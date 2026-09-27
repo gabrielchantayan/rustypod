@@ -58812,6 +58812,24 @@ functions:
       `push {fp,lr}` / `pop {fp,pc}` frame prologue replacing the bare
       `bx lr`.
 
+  - address: 0x083bd47c
+    ghidra: FUN_083bd47c
+    name: u32_key_tree_equal_range
+    size: 160
+    sig: "void u32_key_tree_equal_range(u32 *out, const void *tree, const u32 *key)"
+    module: cxx/u32_key_tree_equal_range
+    status: ported
+    vars: {param_1: out, param_2: tree, param_3: key}
+    notes: >-
+      Raw osos.dec confirms the 160-byte extent 0x083bd47c..0x083bd51c:
+      push {r1-r9,lr} at entry through pop {r1-r9,pc}; the next separately
+      linked function begins at 0x083bd51c. Exactly two plain unconditional
+      BL calls occur, at 0x083bd4ac and 0x083bd4e8, both to
+      less_unsigned_alias_7464; no BL is predicated. It walks the unsigned
+      u32-key tree twice from header +4: first lower-bound, then upper-bound,
+      and stores the resulting node or header-sentinel target pointer words
+      in out[0..2]. Ported with raw u32 target pointer words so the retail
+      4-byte field offsets remain correct on 64-bit host fixtures.
   - address: 0x083d7d10
     ghidra: FUN_083d7d10
     name: vector_pair_copy_into

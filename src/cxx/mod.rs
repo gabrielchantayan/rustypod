@@ -124,6 +124,7 @@ pub mod byte_key_map_lower_bound_value;
 pub mod byte_key_word_map;
 pub mod character_class;
 pub mod clock_source_base_construct;
+pub mod u32_key_tree_equal_range;
 pub mod u32_key_tree_count;
 pub mod u32_pair_tree;
 pub mod ordered_tree_key_count;
