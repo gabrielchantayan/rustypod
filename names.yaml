@@ -73500,6 +73500,31 @@ functions:
       leftmost/rightmost reconstruction, and an empty source. match.py
       structural review is expected to differ at the retail clone call and
       the Rust frame.
+  - address: 0x083c21d4
+    ghidra: FUN_083c21d4
+    name: event_list_tree_node_pool_acquire
+    size: 184
+    sig: "EventListTreeNode *event_list_tree_node_pool_acquire(EventListTreeNodePool *pool)"
+    module: cxx/event_list_tree_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r4: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      uVar6/r6: capacity
+    notes: >-
+      Raw ARM decodes a 46-word, 184-byte body from 0x083c21d4 through
+      0x083c2288; 0x083c228c begins the next real function. It makes two
+      unconditional plain bl calls to operator_new_checked @ 0x08266c70 and
+      no predicated bl calls. Whole-image branch decoding finds two
+      unconditional inbound bl call sites at 0x082aca38 and 0x083c2a94. This
+      event-list red-black-tree node pool pops a recycled 24-byte node through
+      node+0x0c or bump-allocates one from its arena. A full arena allocates a
+      12-byte chunk record and capacity*24 bytes, with capacity 32 initially
+      and then max(old+32, old+old/2+old/8). It clears color and the three
+      tree links but deliberately leaves the two-word payload intact. The Rust
+      port retains target pointers as u32 words and omits checked new's dead
+      r1=0 argument.
   - address: 0x082769d4
     ghidra: FUN_082769d4
     name: string_object_format
