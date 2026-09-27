@@ -3789,6 +3789,33 @@ functions:
       RefcountedBody handle, then prepends the node at pool+4. Host pointer
       width is deliberately adapted by bouncing the target u32 payload word
       through a native RefcountedBody pointer before storing the NULLed result.
+  - address: 0x083cfeb4
+    ghidra: FUN_083cfeb4
+    name: observable_array_payload_cleanup_destruct
+    size: 60
+    sig: "ObservableArray *observable_array_payload_cleanup_destruct(ObservableArray *array)"
+    module: cxx/observable_array_payload_cleanup_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      "[array + 0x0]": vtable
+      "[array + 0x14]": optional_payload
+      "[optional_payload.vtable + 0x1c]": release
+      FUN_083cfe00: payload_cleanup
+      DAT_083cfeec: OBSERVABLE_ARRAY_PAYLOAD_CLEANUP_VTABLE
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the true 60-byte extent: fourteen A32 code
+      words from 0x083cfeb4 through the tail B at 0x083cfee8, followed by the
+      vtable literal 0x089a3b40 at 0x083cfeec; the next independently entered
+      function starts at 0x083cfef0. Ghidra's 56-byte size omits that literal.
+      Full-image aligned A32 branch decoding finds two inbound plain BL sites
+      (0x081244f0 and 0x0826b430) and no predicated inbound BL sites. The
+      body plants its derived vtable, conditionally calls optional_payload's
+      vtable slot +0x1c, calls unported FUN_083cfe00, then tail-branches to
+      observable_array_destruct @ 0x08271d2c. Rust preserves that ordering;
+      host tests use seams for the unknown direct cleanup and target-width
+      virtual dispatch, while ARM invokes the recovered absolute addresses.
   - address: 0x083cfef0
     ghidra: FUN_083cfef0
     name: indexed_element_array_release_elements
