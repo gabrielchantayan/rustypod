@@ -30905,6 +30905,27 @@ functions:
       same vtable store, +0x14 null guard and virtual dispatch, direct item
       destruction, and base-destructor sequence; LLVM adds a frame and emits
       an ordinary conditional branch.
+  - address: 0x083d1a04
+    ghidra: FUN_083d1a04
+    name: observable_array_assert_empty_destruct
+    size: 60
+    sig: "void *observable_array_assert_empty_destruct(void *this)"
+    module: cxx/observable_array_assert_empty_destruct
+    vars: {param_1: this, DAT_083d1a3c: VTABLE_089A52E0, FUN_083d1954: assert_items_null, FUN_08271d2c: observable_array_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes thirteen ARM instructions (56 bytes) from
+      0x083d1a04 through the tail B at 0x083d1a38, followed by vtable literal
+      0x089a52e0 at 0x083d1a3c; the next real function starts at 0x083d1a40,
+      making the true extent 60 bytes. Whole-image raw-word decoding finds two
+      inbound plain BL sites (0x081ba804, 0x0826b6d0) and no predicated BL
+      sites. The body installs the vtable, conditionally dispatches the +0x14
+      attached object's vtable slot +0x1c, calls unported FUN_083d1954 to
+      assert all items are null, then tail-branches to observable_array_destruct
+      @ 0x08271d2c. Target Rust invokes both unported boundaries at recovered
+      addresses; host tests install explicit seams. match.py reports the same
+      vtable store, null guard, virtual dispatch, direct assertion, and base
+      destructor sequence; LLVM adds a frame and ordinary conditional branch.
   - address: 0x083d56b8
     ghidra: FUN_083d56b8
     name: element_array4_construct
