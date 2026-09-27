@@ -254,6 +254,36 @@ functions:
       recovered direct helper address. Rust deliberately models the predicated
       BLX and tail branch as ordinary control flow while preserving effects and
       order.
+  - address: 0x083d0654
+    ghidra: FUN_083d0654
+    name: observable_array_release_cells_083d0654
+    size: 76
+    sig: "void observable_array_release_cells_083d0654(ObservableArrayReleaseCells083d0654 *array)"
+    module: cxx/observable_array_release_cells_083d0654
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      vtable_plus_0x40/r2: cell_at
+      piVar1/r0: cell
+      cell_plus_0x00: allocation_body
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec words e92d4070 e1a05000 e5d00010 e3500000 08bd8070
+      e5956004 e3a04000 ea000007 e5950000 e1a01004 e5902040 e1a00005
+      e12fff32 e5900000 ebfb69a4 e2844001 e1540006 bafffff5 e8bd8070
+      establish the exact 76-byte A32 body from 0x083d0654 through
+      0x083d069f; push {r4,r5,r6,lr} at 0x083d06a0 starts the next real
+      function. The body has one unconditional plain direct BL at 0x083d068c
+      to ported operator_delete/FUN_082aad24, no predicated direct BL, and one
+      unconditional indirect BLX through vtable+0x40 at 0x083d0684. Raw caller
+      words establish two inbound unconditional plain BL sites, 0x083d06ec and
+      0x083d0724, with no predicated inbound direct BL sites. When enabled is
+      nonzero, it walks signed indices [0,count), calls the vtable-slot-0x40
+      accessor, dereferences its returned cell, and tag-2 deletes each
+      allocation body. Host tests use native vtable and delete seams; target
+      builds retain u32 target pointers and direct operator_delete.
   - address: 0x083d0c90
     ghidra: FUN_083d0c90
     name: observable_array_release_cells_083d0c90
