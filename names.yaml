@@ -4227,6 +4227,34 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d1954
+    ghidra: FUN_083d1954
+    name: observable_array_assert_items_null
+    size: 80
+    sig: "void observable_array_assert_items_null(ObservableArrayAssertItemsNull *array)"
+    module: cxx/observable_array_assert_items_null
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      "[array + 0x4]/r6": count
+      "[array + 0x10]": enabled
+      iVar2/r4: index
+      piVar1/r0: element_cell
+      "[array + 0x0]": vtable
+      "[vtable + 0x40]": element_at
+      "[element_cell + 0x0]": element
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte extent 0x083d1954..0x083d19a3:
+      twenty A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc}; the
+      next independently entered function begins at 0x083d19a4. Raw ARM decoding
+      finds two inbound plain BL sites (0x083d19f4, 0x083d1a2c) and no predicated
+      BL callers. The body has zero plain direct BL instructions, one predicated
+      direct BLNE to operator_delete @ 0x082aad24, and one unconditional indirect
+      BLX through vtable slot +0x40. When enabled byte +0x10 is nonzero, it walks
+      signed indices [0,count), obtains each element cell through that slot, and
+      tag-2-deletes only non-NULL first words. The unknown accessor is a typed
+      host seam; ARM dispatches its recovered target-width vtable entry directly.
   - address: 0x083d1bf0
     ghidra: FUN_083d1bf0
     name: owned_element_array_release
