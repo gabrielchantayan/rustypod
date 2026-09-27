@@ -22,6 +22,7 @@ pub mod indexed_element_array_release_elements;
 pub mod container_release_indexed_elements;
 pub mod indexed_element_array_destruct;
 pub mod indexed_element_array_attached_destruct;
+pub mod indexed_element_array_attached_destroy_destruct;
 pub mod observable_array_payload_cleanup_destruct;
 pub mod observable_array_payload_cleanup_destruct_083cfdc4;
 pub mod observable_array_release_cells;
