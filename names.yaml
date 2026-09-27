@@ -151845,3 +151845,34 @@ functions:
       stores enabled at +0x10, and clears the tracked-items word at +0x14.
       Deliberate deviations: none. Host tests cover flags 0, 1, and 255, base
       initialization, padding preservation, and the adjacent-word boundary.
+
+  - address: 0x083d0af0
+    ghidra: FUN_083d0af0
+    name: opaque_observable_array_flag_destruct
+    size: 60
+    sig: "OpaqueObservableArrayFlag *opaque_observable_array_flag_destruct(OpaqueObservableArrayFlag *this)"
+    module: cxx/opaque_observable_array_flag_construct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_083d0b28: OPAQUE_OBSERVABLE_ARRAY_FLAG_VTABLE
+      "[this + 0x14]": auxiliary_allocation
+      "[auxiliary_allocation->vtable + 0x1c]": release_word_at_14
+      FUN_083d0a20: opaque_auxiliary_destroy
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent: fourteen A32
+      instructions from push {r4,lr} at 0x083d0af0 through the tail branch at
+      0x083d0b24, plus literal 0x089a4638 at 0x083d0b28; the next independently
+      entered function begins with push {r4,r5,r6,lr} at 0x083d0b2c. Whole-image
+      A32 branch decoding finds two inbound plain BL sites (0x0826b568 and
+      0x08291fbc), zero predicated direct BL sites. The body contains one plain
+      direct BL, opaque_auxiliary_destroy @ 0x083d0a20, and one predicated BLXNE
+      through auxiliary_allocation's vtable slot +0x1c. It plants the derived
+      vtable, conditionally invokes that virtual slot with auxiliary_allocation
+      in r0, then tail-branches to observable_array_destruct @ 0x08271d2c.
+      The virtual target and 0x083d0a20 have no verified semantic identities;
+      Rust preserves the direct base-destructor call and uses a target virtual
+      dispatch / host seam named only for the observed slot. Host tests cover
+      non-NULL release order, NULL skipping, base destruction, preserved
+      auxiliary word, and adjacent-field guards.
