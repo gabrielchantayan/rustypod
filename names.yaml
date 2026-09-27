@@ -150350,3 +150350,29 @@ functions:
       target-width mapped slab so u32 links retain retail offsets. match.py
       confirms the recursive call plus node+0x0c/node+0x08 traversal and
       free-list prepend structure.
+  - address: 0x083cea00
+    ghidra: FUN_083cea00
+    name: tree_nodes_prepend_to_free_list
+    size: 60
+    sig: "void tree_nodes_prepend_to_free_list(u32 *owner, u32 *node)"
+    module: cxx/tree_nodes_prepend_to_free_list
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: node
+      "owner+0x04": free_list
+      "node+0x08": next_subtree
+      "node+0x0c": recursive_subtree_or_free_list_link
+    notes: >-
+      Raw osos.dec words e92d4030 e1a05000 e1a04001 ea000007 e594100c
+      e1a00005 ebfffff8 e5951004 e5940008 e584100c e5854004 e1a04000
+      e3540000 1afffff5 e8bd8030 establish the exact 60-byte body from
+      0x083cea00 through 0x083cea38; the push at 0x083cea3c begins the next
+      real function. The body has one unconditional direct plain BL at
+      0x083cea18, recursively to itself, and no predicated direct BL. The
+      words are byte-identical to FUN_083cf444/tree_nodes_prepend_to_free_list,
+      so this ledger-only alias deliberately adds no duplicate dispatch seam;
+      hook 0x083cea00 to tree_nodes_prepend_to_free_list. Its established host
+      tests cover an empty tree, recursive-subtree-first traversal, preserving
+      the old free-list head, and target-width u32 links. Deliberate
+      deviations: none.

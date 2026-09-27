@@ -1,16 +1,15 @@
-//! `tree_nodes_prepend_to_free_list` — original: `FUN_083cf444` at load
-//! address `0x083cf444`.
+//! `tree_nodes_prepend_to_free_list` — originals: `FUN_083cf444` @
+//! `0x083cf444` and byte-identical `FUN_083cea00` @ `0x083cea00`.
 //!
-//! Raw `osos.dec` establishes the exact 60-byte extent: 15 A32 words from
-//! `push {r4,r5,lr}` at `0x083cf444` through `pop {r4,r5,pc}` at
-//! `0x083cf47c`; the next real function starts at `0x083cf480`. The body has
-//! one unconditional direct plain `bl`, recursively to itself at `0x083cf45c`,
-//! and no predicated direct `bl` instructions. Whole-image decoding finds two
-//! inbound plain `bl` sites, at `0x083cf244` and `0x083cf45c`, and no
-//! predicated inbound sites.
+//! Each is 60 bytes: `0x083cf444..0x083cf480` and
+//! `0x083cea00..0x083cea3c`, respectively; `push` begins the next separately
+//! linked function at each endpoint. Raw A32 decoding verifies one plain
+//! direct recursive `bl` in each body and no predicated `bl` instructions.
+//! `FUN_083cea00` is a deliberate shared-symbol alias rather than a duplicate
+//! implementation; its Ghidra reference set reports two `bl` call sites.
 //!
 //! Walks a binary tree whose link words are at node+8 and node+12. It visits
-//! each node+12 subtree first, pushes the node onto `owner+4`, then continues
+//! each node+12 subtree first, pushes the node onto owner+4, then continues
 //! along node+8. The node+12 word becomes the free-list link.
 //!
 //! Deliberate deviations: none.
