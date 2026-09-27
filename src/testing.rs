@@ -948,6 +948,9 @@ pub mod hints {
     // 0x7d30_0000: dedicated to util/tree_children_flatten_into_parent_083c9678's
     // target-width parent and intrusive-node fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083C9678: usize = 0x7d30_0000;
+    // 0x7d40_0000: dedicated to util/tree_children_flatten_into_parent_083c76a0's
+    // target-width parent and intrusive-node fixture; mappings never unmap.
+    pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083C76A0: usize = 0x7d40_0000;
     // 0x1230_0000: dedicated to util/indexed_state_set_and_poll's raw-u32
     // state-table and selected-record fixture; mappings never unmap, so no
     // other user may share this hint.

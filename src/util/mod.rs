@@ -261,6 +261,7 @@ pub mod singly_linked_list_unlink;
 pub mod singly_linked_list_append;
 pub mod tree_children_flatten_into_parent_083c8c34;
 pub mod tree_children_flatten_into_parent;
+pub mod tree_children_flatten_into_parent_083c76a0;
 pub mod tree_children_flatten_into_parent_083ca0bc;
 pub mod tree_children_flatten_into_parent_083c9678;
 pub mod tree_children_flatten_into_parent_083cbfbc;
