@@ -2711,6 +2711,9 @@ pub mod hints {
     // polymorphic object fixtures; mappings never unmap.
     pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE_INLINE: usize = 0x76c0_0000;
     pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE_INLINE_EMPTY: usize = 0x76d0_0000;
+    // 0x76e0_0000: dedicated to cxx/opaque_owned_record_destroy's target-width
+    // record and owned-allocation fixture; mappings never unmap.
+    pub const CXX_OPAQUE_OWNED_RECORD_DESTROY: usize = 0x76e0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

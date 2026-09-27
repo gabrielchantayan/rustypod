@@ -175,6 +175,7 @@ pub mod conditional_owned_object_destroy;
 pub mod polymorphic_slot_replace;
 pub mod polymorphic_member_replace;
 pub mod owned_offset_object_delete;
+pub mod opaque_owned_record_destroy;
 pub mod optional_vtable_slot4_invoke;
 pub mod optional_vtable_slot4_dispatch;
 pub mod optional_vtable_slot4_invoke_737c;
