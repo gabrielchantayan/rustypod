@@ -939,6 +939,9 @@ pub mod hints {
     // 0x7d10_0000: dedicated to app/context_index_matches_context_field_f40's
     // target-width context and index-table fixture; mappings never unmap.
     pub const CONTEXT_INDEX_MATCHES_CONTEXT_FIELD_F40: usize = 0x7d10_0000;
+    // 0x7d20_0000: dedicated to util/tree_children_flatten_into_parent_083ca0bc's
+    // target-width parent and intrusive-node fixture; mappings never unmap.
+    pub const TREE_CHILDREN_FLATTEN_INTO_PARENT_083CA0BC: usize = 0x7d20_0000;
     // 0x1230_0000: dedicated to util/indexed_state_set_and_poll's raw-u32
     // state-table and selected-record fixture; mappings never unmap, so no
     // other user may share this hint.
