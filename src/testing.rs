@@ -203,6 +203,9 @@ pub mod hints {
     // 0x7ea0_0000: dedicated to util/hash_table_chain_destroy_083d3484's
     // target-width table, bucket, and intrusive-node fixture; mappings never unmap.
     pub const HASH_TABLE_CHAIN_DESTROY_083D3484: usize = 0x7ea0_0000;
+    // 0x7ff1_0000: dedicated to util/hash_table_chain_destroy_083d32fc's
+    // target-width table, bucket, and intrusive-node fixture; mappings never unmap.
+    pub const HASH_TABLE_CHAIN_DESTROY_083D32FC: usize = 0x7ff1_0000;
     // 0x7e70_0000: dedicated to cxx/list_range_clear's target-width list
     // fixture; mappings never unmap, so no other user may share it.
     pub const LIST_RANGE_CLEAR: usize = 0x7e70_0000;
