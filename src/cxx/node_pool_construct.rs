@@ -1,12 +1,12 @@
-//! Initialize a C++ node-pool owner and acquire its first list node.
+//! Initialize a C++ node-pool owner and acquire its first red-black-tree node.
 //!
 //! `cxx_node_pool_construct` — retailOS `FUN_083dbe5c` @ **0x083dbe5c**,
 //! **88 bytes** (`0x083dbe5c..0x083dbeaf`; the `push {r3,lr}` at
 //! `0x083dbeb0` begins the next real function). Raw A32 decoding finds one
-//! unconditional plain body `bl`, to the still-retail node-pool acquisition
-//! helper at `0x083be9e8`, and zero predicated `bl` instructions. Full-image
-//! raw A32 branch decoding finds two inbound unconditional plain `bl` sites
-//! and no predicated inbound `bl` sites.
+//! unconditional plain body `bl`, to `cxx_node_pool_acquire` at `0x083be9e8`,
+//! and zero predicated `bl` instructions. Full-image raw A32 branch decoding
+//! finds two inbound unconditional plain `bl` sites and no predicated inbound
+//! `bl` sites.
 //!
 //! # Algorithm
 //!
@@ -17,41 +17,17 @@
 //!
 //! # Deliberate deviation
 //!
-//! The port calls the unported acquisition helper through its verified load
-//! address on target and a volatile host seam in tests. The retail register
-//! saves and `mov r0, r4` return are otherwise dead traffic; the returned
-//! owner pointer and ordered target-width stores are preserved.
+//! The retail acquisition helper is now called directly. The retail register
+//! saves and `mov r0, r4` return are otherwise dead traffic; the returned owner
+//! pointer and ordered target-width stores are preserved.
 
-const NODE_POOL_ACQUIRE_ADDRESS: usize = 0x083b_e9e8;
+use super::cxx_node_pool_acquire::{cxx_node_pool_acquire, CxxNodePool};
+
 const FIRST_NODE_OFFSET: usize = 0x10;
 const KIND_OFFSET: usize = 0x19;
 const NODE_PAYLOAD_OFFSET: usize = 0x04;
 const NODE_PREVIOUS_OFFSET: usize = 0x08;
 const NODE_NEXT_OFFSET: usize = 0x0c;
-
-type NodePoolAcquire = unsafe extern "C" fn(*mut u8) -> *mut u8;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn node_pool_acquire(owner: *mut u8) -> *mut u8 {
-    let acquire: NodePoolAcquire = core::mem::transmute(NODE_POOL_ACQUIRE_ADDRESS);
-    acquire(owner)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_node_pool_acquire(_: *mut u8) -> *mut u8 {
-    panic!("install cxx node-pool acquisition host seam")
-}
-
-/// Host replacement for the still-retail node-pool acquisition helper.
-#[cfg(not(target_os = "none"))]
-pub static mut CXX_NODE_POOL_ACQUIRE: NodePoolAcquire = missing_node_pool_acquire;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn node_pool_acquire(owner: *mut u8) -> *mut u8 {
-    core::ptr::read_volatile(core::ptr::addr_of!(CXX_NODE_POOL_ACQUIRE))(owner)
-}
 
 /// Initializes `owner` and returns it after acquiring and linking its first node.
 ///
@@ -72,7 +48,7 @@ pub unsafe extern "C" fn cxx_node_pool_construct(owner: *mut u8, kind: *const u8
     owner.add(0x08).cast::<u32>().write(0);
     owner.add(0x04).cast::<u32>().write(0);
 
-    let node = node_pool_acquire(owner);
+    let node = cxx_node_pool_acquire(owner.cast::<CxxNodePool>()).cast::<u8>();
     owner.add(FIRST_NODE_OFFSET).cast::<u32>().write(node as usize as u32);
     node.add(NODE_PAYLOAD_OFFSET).cast::<u32>().write(0);
     node.add(NODE_PREVIOUS_OFFSET).cast::<u32>().write(node as usize as u32);
@@ -83,17 +59,24 @@ pub unsafe extern "C" fn cxx_node_pool_construct(owner: *mut u8, kind: *const u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
+    use crate::heap::types::HeapDescriptorDescriptor;
+    use crate::heap::veneers::HEAP_OPS;
     use crate::testing::{hints, try_map_u32_slab};
     use core::ptr;
+    use parking_lot::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut ACQUIRE_OWNER: *mut u8 = ptr::null_mut();
-    static mut ACQUIRE_RESULT: *mut u8 = ptr::null_mut();
+    static mut ALLOCATIONS: [*mut u8; 2] = [ptr::null_mut(); 2];
+    static mut ALLOCATION_CURSOR: usize = 0;
 
-    unsafe extern "C" fn acquire(owner: *mut u8) -> *mut u8 {
-        ACQUIRE_OWNER = owner;
-        ACQUIRE_RESULT
+    unsafe extern "C" fn pool_alloc(
+        _heap: *mut HeapDescriptorDescriptor,
+        _size: usize,
+        _tag: usize,
+    ) -> *mut u8 {
+        let index = ALLOCATION_CURSOR;
+        ALLOCATION_CURSOR += 1;
+        ptr::addr_of!(ALLOCATIONS).cast::<*mut u8>().add(index).read()
     }
     #[test]
     fn clears_owner_and_self_links_the_acquired_node() {
@@ -106,20 +89,19 @@ mod tests {
             let node = slab.add(0x200);
             owner.write_bytes(0xa5, 0x20);
             node.write_bytes(0x5a, 0x14);
-            let mut seam = ptr::read_volatile(ptr::addr_of_mut!(CXX_NODE_POOL_ACQUIRE));
-            let original = seam;
-            seam = acquire;
-            ptr::addr_of_mut!(CXX_NODE_POOL_ACQUIRE).write(seam);
-            ACQUIRE_OWNER = ptr::null_mut();
-            ACQUIRE_RESULT = node;
+            ptr::addr_of_mut!(ALLOCATIONS).write([slab.add(0x300), node]);
+            ALLOCATION_CURSOR = 0;
+            let mut ops = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            ops.alloc = pool_alloc;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), ops);
 
             let kind = 0x7bu8;
             assert_eq!(cxx_node_pool_construct(owner, &kind), owner);
-            assert_eq!(ACQUIRE_OWNER, owner);
-            assert_eq!(owner.cast::<u32>().read(), 0);
+            assert_eq!(ALLOCATION_CURSOR, 2);
+            assert_eq!(owner.cast::<u32>().read(), slab.add(0x300) as usize as u32);
             assert_eq!(owner.add(4).cast::<u32>().read(), 0);
-            assert_eq!(owner.add(8).cast::<u32>().read(), 0);
-            assert_eq!(owner.add(12).cast::<u32>().read(), 0);
+            assert_eq!(owner.add(8).cast::<u32>().read(), node.add(0x14) as usize as u32);
+            assert_eq!(owner.add(12).cast::<u32>().read(), node.add(32 * 0x14) as usize as u32);
             assert_eq!(owner.add(FIRST_NODE_OFFSET).cast::<u32>().read(), node as usize as u32);
             assert_eq!(owner.add(0x14).cast::<u32>().read(), 0);
             assert_eq!(owner.add(0x18).read(), 0);
@@ -127,7 +109,6 @@ mod tests {
             assert_eq!(node.add(NODE_PAYLOAD_OFFSET).cast::<u32>().read(), 0);
             assert_eq!(node.add(NODE_PREVIOUS_OFFSET).cast::<u32>().read(), node as usize as u32);
             assert_eq!(node.add(NODE_NEXT_OFFSET).cast::<u32>().read(), node as usize as u32);
-            ptr::addr_of_mut!(CXX_NODE_POOL_ACQUIRE).write(original);
         }
     }
 }
