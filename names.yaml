@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083cb78c
+    ghidra: FUN_083cb78c
+    name: red_black_tree_payload_pair_node_pool_acquire_083cb78c
+    size: 184
+    sig: "RedBlackTreePayloadPairNode083cb78c *red_black_tree_payload_pair_node_pool_acquire_083cb78c(RedBlackTreePayloadPairNodePool083cb78c *pool)"
+    module: cxx/red_black_tree_payload_pair_node_pool_acquire_083cb78c
+    status: ported
+    renames:
+      param_1/r0: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083cb78c through pop {r4-r8,pc} at 0x083cb840;
+      0x083cb844 begins the next real function. The body has exactly two
+      unconditional plain bl calls, at 0x083cb7f0 and 0x083cb804, both to
+      operator_new_checked (0x08266c70), and no predicated bl. Whole-image raw
+      branch decoding finds exactly two inbound unconditional plain bl sites at
+      0x081be25c and 0x083cc014, with no predicated inbound bl sites. The pool
+      consumes its free list through node+0x0c or grows 24-byte chunks from 32
+      entries by max(capacity + 32, capacity + capacity/2 + capacity/8), then
+      clears color and the three red-black-tree link words while preserving the
+      two-word payload. Deliberate deviations: target pointers are u32 target
+      words to preserve firmware layout on 64-bit hosts, and the retail dead r1
+      = 0 argument to checked new is omitted from the Rust signature.
   - address: 0x083cbfbc
     ghidra: FUN_083cbfbc
     name: tree_children_flatten_into_parent_083cbfbc
