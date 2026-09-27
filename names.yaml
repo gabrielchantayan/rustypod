@@ -151304,3 +151304,32 @@ functions:
       then tail-branches to observable_array_destruct @ 0x08271d2c. ARM calls
       the recovered direct and target-width virtual targets; host tests replace
       them with seams, and Rust represents the tail branch as a direct call.
+
+
+  - address: 0x083d1700
+    ghidra: FUN_083d1700
+    name: owned_observable_array_erase_at
+    size: 56
+    sig: "i32 owned_observable_array_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/owned_observable_array_erase_at
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: index
+      "[this + 0x10]": owns_elements
+      FUN_083d6b40: container_element_at_alias_6b40
+      FUN_082aad24: operator_delete
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte extent 0x083d1700..0x083d1737:
+      fourteen A32 instructions from push {r4,r5,r6,lr} through the tail branch
+      to observable_array_erase_at; the next independently entered function starts
+      at 0x083d1738. The body has two unconditional plain direct BL calls,
+      container_element_at_alias_6b40 @ 0x083d6b40 and operator_delete @
+      0x082aad24, and no predicated direct BL calls. The two inbound direct BL
+      callers are 0x081a31ac and 0x081a4ca8, both plain and unconditional. When
+      owns_elements is nonzero, it retrieves the indexed allocation through slot
+      +0x40 and tag-2-deletes it before tail-dispatching the established observable
+      array erase implementation. Host tests verify enabled deletion precedes erase,
+      disabled ownership skips lookup, and invalid erase indices still follow the
+      retail delete-before-validation order.

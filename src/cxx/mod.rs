@@ -13,6 +13,7 @@ pub mod callback_table_construct;
 pub mod container_item_count_or_zero;
 pub mod container_element_at_083d6818;
 pub mod indexed_element_array_destroy;
+pub mod owned_observable_array_erase_at;
 pub mod opaque_indexed_element_array_dispose;
 pub mod refcounted_element_array_dispose;
 pub mod indexed_string_element_array_destroy;
