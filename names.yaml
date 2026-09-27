@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  # --- opaque collection allocation release ---
+  - address: 0x083d0738
+    ghidra: FUN_083d0738
+    name: opaque_collection_release_allocation
+    size: 88
+    sig: "void opaque_collection_release_allocation(OpaqueCollection *this)"
+    module: cxx/opaque_collection_release_allocation
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      r4: index
+      vtable_plus_0x40/r2: cell_at
+      returned_cell_plus_0x00/r0: allocation_size
+      FUN_081991bc: opaque_header_allocate
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent: twenty-two A32 words
+      from push {r4,r5,r6,lr} at 0x083d0738 through pop {r4,r5,r6,pc} at
+      0x083d078c; the push at 0x083d0790 begins the next independently entered
+      function. The body has two unconditional plain direct BL calls, at
+      0x083d0774 to still-unidentified FUN_081991bc and at 0x083d0778 to
+      operator_delete/FUN_082aad24; it has zero predicated direct BL calls and
+      one unconditional virtual BLX through vtable+0x40 at 0x083d0764. Raw
+      whole-image branch decoding finds two inbound plain BL call sites,
+      0x083d07e8 and 0x083d0820, and no predicated BL callers. If enabled is
+      nonzero, it walks signed indices [0,count), reads each cell through that
+      virtual accessor, and for the first cell with a nonzero first word calls
+      FUN_081991bc with that word, then tag-2-deletes the returned allocation.
+      The allocation helper's concrete identity is unrecovered, so the target
+      port calls its verified address and host tests inject an ABI-identical
+      seam; the seam name records only the raw header-allocation behavior.
   # --- opaque observable-array pre-destruction ---
   - address: 0x083d0834
     ghidra: FUN_083d0834
