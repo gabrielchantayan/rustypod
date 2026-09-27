@@ -153657,3 +153657,36 @@ functions:
       max(capacity + 32, capacity + capacity/2 + capacity/8), then clears the
       color and three tree links while preserving the payload. Deliberate
       deviations: none; target pointer fields remain u32 words.
+  - address: 0x083bc980
+    ghidra: FUN_083bc980
+    name: red_black_tree_payload_8_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePayload8Node *red_black_tree_payload_8_node_pool_acquire(RedBlackTreePayload8NodePool *pool)"
+    module: cxx/red_black_tree_payload_8_node_pool_acquire
+    status: ported
+    renames:
+      param_1/r0: pool
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083bc980 through pop {r4-r8,pc} at 0x083bca34;
+      0x083bca38 begins the next real function. The body performs exactly two
+      unconditional plain bl calls, at 0x083bc9e4 and 0x083bc9f8, both to
+      operator_new_checked @ 0x08266c70 (sizes 0xc and capacity*0x18), and no
+      predicated bl calls. It pops a 24-byte red-black-tree node through its
+      right-link free list or bump-allocates one from a chunk. Exhausted pools
+      allocate a 12-byte {previous, capacity, nodes} chunk header and
+      capacity*24 backing storage, starting at 32 nodes then growing by
+      max(capacity + 32, capacity + capacity/2 + capacity/8). It clears color
+      and the parent, left, and right links while preserving the eight-byte
+      payload. Deliberate deviations: target pointer fields remain u32 words
+      on 64-bit hosts; the retail dead r1=0 allocator argument is omitted.
