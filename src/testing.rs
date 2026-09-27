@@ -2727,6 +2727,9 @@ pub mod hints {
     // 0x76e0_0000: dedicated to cxx/opaque_owned_record_destroy's target-width
     // record and owned-allocation fixture; mappings never unmap.
     pub const CXX_OPAQUE_OWNED_RECORD_DESTROY: usize = 0x76e0_0000;
+    // 0x76f0_0000: dedicated to cxx/observable_array_release_virtual_cells'
+    // target-width virtual cell fixtures; mappings never unmap.
+    pub const CXX_OBSERVABLE_ARRAY_RELEASE_VIRTUAL_CELLS: usize = 0x76f0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
