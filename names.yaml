@@ -4345,6 +4345,7 @@ functions:
       FUN_083d63cc: hash_word_pair
       FUN_08036f14: __rt_udiv
       FUN_083d6d80: hash_table_bucket_find_word_pair_6d80
+    notes: >-
       Raw osos.dec establishes the exact 124-byte A32 extent
       0x083d2268..0x083d22e3 through pop {r0-r8,pc}; the next independently
       entered function starts at 0x083d22e4. The body has three unconditional
