@@ -14,22 +14,15 @@
 //! Plant the derived vtable, conditionally release the attached object at
 //! `+0x14` through vtable slot `+0x1c`, run the predecessor's enabled-cell
 //! release, then tail-chain into `observable_array_destruct`. Deliberate
-//! deviations: host builds use seams for target-width virtual and unported
-//! direct calls; Rust expresses the predicated `blxne` and tail branch as
-//! ordinary control flow while preserving their effects and ordering.
+//! deviations: host builds use seams for target-width virtual and direct calls;
+//! target Rust calls the ported enabled-cell release directly. Rust expresses
+//! the predicated `blxne` and tail branch as ordinary control flow while
+//! preserving their effects and ordering.
 
 const VTABLE_WORD: u32 = 0x089a_3ea0;
 const ATTACHED_OBJECT_WORD: usize = 0x14 / 4;
-#[cfg(target_os = "none")]
-const RELEASE_ENABLED_CELLS_ADDRESS: usize = 0x083d_019c;
-
 type ReleaseEnabledCells = unsafe extern "C" fn(*mut u32);
 type ReleaseAttachedObject = unsafe extern "C" fn(*mut u8);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_enabled_cells(this: *mut u32) {
-    unsafe { core::mem::transmute::<usize, ReleaseEnabledCells>(RELEASE_ENABLED_CELLS_ADDRESS)(this) };
-}
 
 #[cfg(target_os = "none")]
 unsafe fn release_attached_object(object: *mut u8) {
@@ -48,8 +41,7 @@ unsafe extern "C" fn missing_release_attached_object(_object: *mut u8) {
     panic!("install observable-array attached-release cells destructor host seams before calling this port")
 }
 
-/// Host replacements for the target-width virtual call and unported direct
-/// call. Target builds dispatch to their verified retailOS addresses.
+/// Host replacements for the target-width virtual call and direct ported call.
 #[cfg(not(target_os = "none"))]
 pub static mut OBSERVABLE_ARRAY_ATTACHED_RELEASE_CELLS_DESTRUCT_083D0250_OPS: (ReleaseEnabledCells, ReleaseAttachedObject) =
     (missing_release_enabled_cells, missing_release_attached_object);
@@ -73,7 +65,7 @@ pub unsafe extern "C" fn observable_array_attached_release_cells_destruct_083d02
             if !attached.is_null() {
                 release_attached_object(attached);
             }
-            firmware_release_enabled_cells(this);
+            crate::cxx::observable_array_release_enabled_cells::observable_array_release_enabled_cells(this.cast());
         }
         #[cfg(not(target_os = "none"))]
         {
