@@ -2221,6 +2221,9 @@ pub mod hints {
     // 0x6b80_0000: dedicated to cxx/red_black_tree_node_pool_acquire_083bdea0's
     // target-width pool and node fixture; mappings never unmap, so no other user may share it.
     pub const RED_BLACK_TREE_NODE_POOL_ACQUIRE_083BDEA0: usize = 0x6b80_0000;
+    // 0x6b90_0000: dedicated to cxx/red_black_tree_node_pool_acquire_083bd3c4's
+    // target-width pool and node fixture; mappings never unmap, so no other user may share it.
+    pub const RED_BLACK_TREE_NODE_POOL_ACQUIRE_083BD3C4: usize = 0x6b90_0000;
     // 0x5ab0_0000: dedicated to cxx/red_black_tree_payload_word_node_pool_acquire_083c0ba8's
     // target-width pool/chunk/node fixture; mappings never unmap, so no other
     // user may share this hint.
