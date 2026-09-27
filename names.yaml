@@ -150376,3 +150376,31 @@ functions:
       tests cover an empty tree, recursive-subtree-first traversal, preserving
       the old free-list head, and target-width u32 links. Deliberate
       deviations: none.
+
+  - address: 0x083ce1d0
+    ghidra: FUN_083ce1d0
+    name: red_black_tree_payload_pair_node_pool_acquire
+    size: 184
+    sig: "RedBlackTreePayloadPairNode *red_black_tree_payload_pair_node_pool_acquire(RedBlackTreePayloadPairNodePool *pool)"
+    module: cxx/red_black_tree_payload_pair_node_pool_acquire
+    status: ported
+    vars:
+      param_1: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      uVar6/r6: capacity
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the true 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083ce1d0 through pop {r4-r8,pc} at 0x083ce284;
+      0x083ce288 begins the next real function. The body has exactly two
+      unconditional plain bl calls, both to operator_new_checked @ 0x08266c70
+      (sizes 0xc and capacity*0x18), and no predicated bl calls. It pops a
+      free node through the +0xc right-link or bump-allocates a 0x18-byte
+      red-black-tree node. Exhaustion allocates a 12-byte chunk header and
+      arena; capacity starts at 32 and grows by max(previous+32,
+      previous+previous/2+previous/8). The color and three links are cleared,
+      preserving the pair payload at +0x10. Target pointers are u32 words to
+      preserve target layout on hosts; the dead r1=0 allocator argument is
+      omitted from the ported checked-new signature. Host tests cover fresh,
+      free-list, and grown-chunk acquisition.
