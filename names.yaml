@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array release before erase ---
+  - address: 0x083d097c
+    ghidra: FUN_083d097c
+    name: opaque_observable_array_release_erase_at
+    size: 80
+    sig: "i32 opaque_observable_array_release_erase_at(ObservableArray *this, i32 index)"
+    module: cxx/opaque_observable_array_release_erase_at
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1/r5: index
+      param_1_plus_0x10/r0: enabled
+      virtual_0x40/r2: element_at
+      virtual_0x04/r1: element_release
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw osos.dec establishes twenty A32 words from push {r4,r5,r6,lr} at
+      0x083d097c through the tail branch at 0x083d09c8: the true extent is
+      80 bytes. The subsequent 0x083d09cc..0x083d09e0 entries are veneers;
+      0x083d09e4 begins the next independently entered function. The body has
+      no direct bl instructions, one virtual blx through array-vtable slot
+      +0x40, and one predicated blxne through element-vtable slot +0x04,
+      before tail-branching to observable_array_erase_at @ 0x08271bec.
+      Whole-image A32 decoding finds one inbound plain bl at 0x0815dcf0 and
+      one inbound predicated blgt at 0x081d0dec. The port preserves the
+      enabled check, release-before-erase ordering, and signed index passed to
+      both calls. Host builds use native vtable pointers and callback fields
+      in place of target-width u32 words.
   # --- opaque observable-array element disposal destruction ---
   - address: 0x083d09e4
     ghidra: FUN_083d09e4
