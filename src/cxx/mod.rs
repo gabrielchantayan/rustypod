@@ -33,6 +33,7 @@ pub mod observable_array_destroy_elements_083d13bc;
 pub mod observable_array_pre_destruct_check;
 pub mod owned_string_owner_array_attached_release_destruct;
 pub mod observable_array_attached_release_destruct;
+pub mod observable_array_assert_empty_attached_destruct_083d0c54;
 pub mod observable_array_attached_release_cleanup_destruct;
 pub mod observable_array_attached_release_destruct_083d1464;
 pub mod observable_array_item_release_destruct;
