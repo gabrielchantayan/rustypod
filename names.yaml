@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array element disposal destruction ---
+  - address: 0x083d09e4
+    ghidra: FUN_083d09e4
+    name: opaque_observable_array_dispose_elements_destruct
+    size: 56
+    sig: "ObservableArray *opaque_observable_array_dispose_elements_destruct(ObservableArray *this)"
+    module: cxx/opaque_observable_array_dispose_elements_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_1_plus_0x14/r0: attached_object
+      DAT_083d0a1c: OPAQUE_OBSERVABLE_ARRAY_DISPOSE_ELEMENTS_VTABLE
+      FUN_083d0924: opaque_observable_array_dispose_elements
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes fourteen A32 words from push {r4,lr} at
+      0x083d09e4 through the literal at 0x083d0a1c; the push at 0x083d0a20
+      begins the next independently entered function. This is 56 bytes exactly.
+      The body has one plain direct bl, to opaque_observable_array_dispose_elements
+      @ 0x083d0924, no predicated direct bl instructions, and one predicated
+      blxne through attached_object's vtable slot +0x1c. Raw whole-image ARM
+      branch decoding finds two inbound plain bl call sites and no predicated
+      direct bl callers. It installs vtable 0x089a4560, releases a non-NULL
+      attached object, disposes the elements, then tail-branches to
+      observable_array_destruct @ 0x08271d2c. Host builds use a seam for the
+      target-width virtual release; the final tail branch is a direct Rust call.
   # --- opaque observable-array auxiliary destruction ---
   - address: 0x083d0a20
     ghidra: FUN_083d0a20
