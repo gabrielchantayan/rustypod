@@ -1,11 +1,14 @@
-//! `tree_nodes_prepend_to_free_list` — originals: `FUN_083cf444` @
-//! `0x083cf444`, `FUN_083cea00` @ `0x083cea00`, and `FUN_083c81f0` @
-//! `0x083c81f0`.
+//! `tree_nodes_prepend_to_free_list` — originals: `FUN_083bd1b0` @
+//! `0x083bd1b0`, `FUN_083cf444` @ `0x083cf444`, `FUN_083cea00` @
+//! `0x083cea00`, and `FUN_083c81f0` @ `0x083c81f0`.
 //!
-//! Each is 60 bytes: `0x083cf444..0x083cf480`, `0x083cea00..0x083cea3c`,
-//! and `0x083c81f0..0x083c822c`; a `push` begins the next separately linked
-//! function at each endpoint. Raw A32 decoding verifies one plain direct
-//! recursive `bl` in each body and no predicated `bl` instructions.
+//! Each is 60 bytes: `0x083bd1b0..0x083bd1ec`, `0x083cf444..0x083cf480`,
+//! `0x083cea00..0x083cea3c`, and `0x083c81f0..0x083c822c`; a `push` begins
+//! the next separately linked function at each endpoint. Raw A32 decoding
+//! verifies one plain direct recursive `bl` in each body and no predicated
+//! `bl` instructions. Whole-image decoding finds two inbound plain `bl`
+//! calls for `FUN_083bd1b0` (`0x083bcfb0` and its recursive call at
+//! `0x083bd1c8`), with no predicated inbound calls.
 //! `FUN_083cea00` and `FUN_083c81f0` are deliberate shared-symbol aliases
 //! rather than duplicate implementations; whole-image aligned A32 decoding
 //! finds two inbound unconditional plain BL sites for `FUN_083c81f0`
