@@ -8232,6 +8232,36 @@ functions:
       destruct before string release), the return-minus-four release
       argument, and the final slot store. Raw disassembly: osos.dec
       0x083c4de0; match.py structural review recorded.
+  # --- C++ string/vector record subtree release ---
+  - address: 0x083c56b8
+    ghidra: FUN_083c56b8
+    name: cxx_string_vector_record_subtree_release
+    size: 64
+    sig: "void cxx_string_vector_record_subtree_release(u8 *owner, u8 *node)"
+    module: cxx/cxx_string_vector_record_subtree_release
+    status: ported
+    renames:
+      param_1/r0/r6: owner
+      param_2/r1/r4: node
+      iVar1/r5: next
+      FUN_083c4de0: cxx_string_vector_record_link
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent: sixteen ARM words
+      from stmdb sp!, {r4,r5,r6,lr} at 0x083c56b8 through ldmia
+      sp!, {r4,r5,r6,pc} at 0x083c56f4; the next independently entered
+      function begins at 0x083c56f8. Decoding every aligned ARM
+      B/BL-immediate word finds exactly two plain, unconditional bl calls:
+      recursive FUN_083c56b8 at 0x083c56d0 and
+      cxx_string_vector_record_link at 0x083c56e4; there are no predicated
+      bl calls. The routine postorder-traverses node word three (+0xc),
+      snapshots the successor in word two (+0x08) before teardown, releases
+      the current record with flag one, then advances to that snapshot.
+      Deliberate deviation: none in target behavior; Rust represents the
+      recursive BL directly and preserves target links as u32 words. Host
+      tests map the owner/node fixture below 4 GiB, proving subtree-before-
+      successor release order, next-link snapshotting, teardown flag, and
+      null-root no-op. Raw disassembly: osos.dec 0x083c56b8; match.py
+      structural review recorded.
   # --- Event-list tree record slot link ---
   - address: 0x083c1648
     ghidra: FUN_083c1648
