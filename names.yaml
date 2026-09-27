@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  # --- opaque observable-array auxiliary destruction ---
+  - address: 0x083d0a20
+    ghidra: FUN_083d0a20
+    name: opaque_observable_array_auxiliary_destroy
+    size: 76
+    sig: "void opaque_observable_array_auxiliary_destroy(OpaqueObservableArrayAuxiliary *this)"
+    module: cxx/opaque_observable_array_auxiliary_destroy
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_1_plus_0x04/r5: count
+      param_1_plus_0x10/r0: enabled
+      r4: index
+      FUN_083d69d8: indexed_virtual_value
+      FUN_081d2914: owned_object_observable_array_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes nineteen A32 words from push {r4,r5,r6,lr} at
+      0x083d0a20 through pop {r4,r5,r6,pc} at 0x083d0a68; the push at
+      0x083d0a6c begins the next independently entered function. Full-image
+      decoding finds two inbound plain unconditional bl sites and no predicated
+      inbound direct bl sites. The body has three plain unconditional direct bl
+      calls and no predicated direct bl calls: indexed_virtual_value/FUN_083d69d8
+      at 0x083d0a48, owned_object_observable_array_destroy/FUN_081d2914 at
+      0x083d0a54, and operator_delete/FUN_082aad24 at 0x083d0a58. If enabled is
+      nonzero, it scans signed indices [0,count) and, on the first nonzero
+      indexed virtual value, destroys then tag-2-deletes this. The containing
+      class has no verified identity; Rust models only its accessed prefix and
+      uses host seams for the final target-layout destructor and delete.
   - address: 0x083d0b2c
     ghidra: FUN_083d0b2c
     name: observable_array_destroy_cells_083d0b2c

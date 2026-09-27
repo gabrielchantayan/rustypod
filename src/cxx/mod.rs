@@ -205,6 +205,7 @@ pub mod segmented_iter_post_increment;
 pub mod decoder_end_batch;
 pub mod decoder_cleanup;
 pub mod conditional_owned_object_destroy;
+pub mod opaque_observable_array_auxiliary_destroy;
 pub mod polymorphic_slot_replace;
 pub mod polymorphic_member_replace;
 pub mod owned_offset_object_delete;
