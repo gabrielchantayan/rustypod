@@ -190,6 +190,38 @@ functions:
       index in [0,count), loads that cell's first word, and passes it to
       null-safe operator_delete. Host tests use native vtable and delete seams;
       target builds retain u32 target pointers and direct operator_delete.
+  - address: 0x083d0db4
+    ghidra: FUN_083d0db4
+    name: observable_array_release_cells_083d0db4
+    size: 72
+    sig: "void observable_array_release_cells_083d0db4(ObservableArrayReleaseCells083d0db4 *array)"
+    module: cxx/observable_array_release_cells_083d0db4
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x10: enabled
+      vtable_plus_0x40/r2: cell_at
+      piVar1/r0: cell
+      cell_plus_0x00: allocation_body
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 words e92d4070 e1a05000 e5d00010 e3500000 08bd8070 e5956004
+      e3a04000 ea000007 e5950000 e1a01004 e5902040 e1a00005 e12fff32
+      e5900000 ebfb67cc e2844001 e1540006 bafffff5 e8bd8070 establish the
+      exact 72-byte body from 0x083d0db4 through 0x083d0dff; the following
+      push {r4,r5,r6,lr} at 0x083d0e00 begins the next real function. The body
+      has one unconditional plain direct bl at 0x083d0dec to the ported
+      operator_delete/FUN_082aad24, no predicated direct bl, and one
+      unconditional indirect blx through vtable+0x40 at 0x083d0de4. Whole-image
+      raw A32 branch decoding finds two inbound unconditional plain bl sites at
+      0x083d0e4c and 0x083d0eac, with no predicated inbound bl sites. When
+      enabled is nonzero, it calls cell_at(array, index) for each signed index
+      in [0,count), loads that cell's first word, and passes it to null-safe
+      operator_delete. Host tests use native vtable and delete seams; target
+      builds retain u32 target pointers and direct operator_delete. LLVM folds
+      this byte-identical port with observable_array_release_cells/0x083cfd00;
+      both exported symbols resolve to the same ARM body by design.
   - address: 0x083d0fbc
     ghidra: FUN_083d0fbc
     name: opaque_observable_array_parse_diagnostics_cleanup
