@@ -7196,6 +7196,50 @@ pub unsafe extern "C" fn container_delete_enabled_elements(
         index += 1;
     }
 }
+/// container_delete_enabled_elements_alias_16c0 — original: `FUN_083d16c0`
+/// @ 0x083d16c0 (64 bytes; Ghidra reports 60).
+///
+/// Raw `osos.dec` establishes the complete 16-word body from `push
+/// {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}` at 0x083d16fc; the next
+/// independently linked function begins at 0x083d1700. Two inbound calls are
+/// unconditional plain `bl` instructions (0x083d1740 and 0x083d1778), with no
+/// predicated `bl` forms. The body has two plain direct `bl` calls per
+/// iteration, to `container_element_at_alias_6b40` and `operator_delete`, and
+/// no predicated calls.
+///
+/// When `delete_enabled` is nonzero, walks signed indices from zero while less
+/// than `count`; it obtains each element from the container's vtable +0x40
+/// accessor and passes the returned pointer to tag-2 `operator_delete`. A
+/// disabled flag or nonpositive count performs no access. Deliberate
+/// deviation: the two verified, already ported callees are ordinary Rust calls
+/// rather than ARM `bl` instructions.
+///
+/// # Safety
+///
+/// `container` must point to a readable target-layout head. When enabled with
+/// a positive count, its vtable and each selected element slot must satisfy
+/// [`container_element_at_alias_6b40`]'s contract; every returned element must
+/// satisfy [`crate::heap::veneers::operator_delete`]'s ownership contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.container_delete_enabled_elements_alias_16c0")]
+#[inline(never)]
+pub unsafe extern "C" fn container_delete_enabled_elements_alias_16c0(
+    container: *mut ContainerDeleteEnabledElements,
+) {
+    if (*container).delete_enabled == 0 {
+        return;
+    }
+    let count = (*container).count;
+    let mut index = 0;
+    while index < count {
+        crate::heap::veneers::operator_delete(container_element_at_alias_6b40(
+            container.cast(),
+            index as usize,
+        ));
+        index += 1;
+    }
+}
+
 
 /// scoped_context_container_delete_enabled_elements — original:
 /// `FUN_083d10b8` @ `0x083d10b8` (76 bytes; Ghidra reports 76).
@@ -13524,6 +13568,35 @@ mod tests {
             fixture.container.delete_enabled = 1;
             fixture.container.count = -1;
             container_delete_enabled_elements(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
+        }
+    }
+    #[test]
+    fn delete_enabled_elements_alias_16c0_obeys_flag_and_signed_count() {
+        unsafe {
+            let vtable = [delete_enabled_element_slot as ElementSlotFn; ELEMENT_SLOT_VTABLE_INDEX + 1];
+            let mut fixture = DeleteEnabledFixture {
+                container: ContainerDeleteEnabledElements {
+                    vtable: vtable.as_ptr(),
+                    count: 3,
+                    _unknown_08: 0,
+                    _unknown_0c: 0,
+                    delete_enabled: 1,
+                },
+                elements: [core::ptr::null_mut(); 3],
+                calls: 0,
+            };
+
+            container_delete_enabled_elements_alias_16c0(&mut fixture.container);
+            assert_eq!(fixture.calls, 3, "every index below count is retrieved");
+
+            fixture.container.delete_enabled = 0;
+            container_delete_enabled_elements_alias_16c0(&mut fixture.container);
+            fixture.container.delete_enabled = 1;
+            fixture.container.count = 0;
+            container_delete_enabled_elements_alias_16c0(&mut fixture.container);
+            fixture.container.count = -1;
+            container_delete_enabled_elements_alias_16c0(&mut fixture.container);
             assert_eq!(fixture.calls, 3, "disabled and nonpositive counts do not access elements");
         }
     }

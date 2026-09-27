@@ -151305,6 +151305,35 @@ functions:
       the recovered direct and target-width virtual targets; host tests replace
       them with seams, and Rust represents the tail branch as a direct call.
 
+  - address: 0x083d16c0
+    ghidra: FUN_083d16c0
+    name: container_delete_enabled_elements_alias_16c0
+    size: 64
+    sig: "void container_delete_enabled_elements_alias_16c0(ContainerDeleteEnabledElements *container)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0/r6: container
+      "[container + 0x04]": count
+      "[container + 0x10]": delete_enabled
+      r4: index
+      FUN_083d6b40: container_element_at_alias_6b40
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte extent 0x083d16c0..0x083d16ff:
+      sixteen A32 instructions from push {r4,r5,r6,lr} through pop
+      {r4,r5,r6,pc}; the next independently entered function begins at
+      0x083d1700. The body has two unconditional plain direct BL calls per
+      iteration, container_element_at_alias_6b40 @ 0x083d6b40 and
+      operator_delete @ 0x082aad24, and no predicated direct BL calls. Whole-image
+      ARM B/BL decoding finds two inbound unconditional plain BL sites, 0x083d1740
+      and 0x083d1778, with no predicated inbound BL sites. When delete_enabled is
+      nonzero, it walks signed indexes from zero while less than count, retrieves
+      each pointer through container vtable slot +0x40, and tag-2-deletes it.
+      Disabled ownership or a nonpositive count performs no access. The Rust port
+      reuses the verified target-layout head and direct callee ports; host tests
+      cover enabled iteration plus disabled, zero, and negative counts.
+
 
   - address: 0x083d1700
     ghidra: FUN_083d1700
