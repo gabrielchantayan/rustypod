@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083d441c
+    ghidra: FUN_083d441c
+    name: element_array8_insert_unique
+    size: 152
+    sig: "i32 element_array8_insert_unique(ElementArray *array, void *element)"
+    module: app/element_table
+    status: ported
+    renames:
+      param_1/r0: array
+      param_2/r1: element
+      "array+0x00": data
+      "array+0x04": slots
+      "array+0x08": used
+      FUN_083d44b4: element_array8_expand_for_insert
+    notes: >-
+      Raw A32 words establish the exact 152-byte body from push {r4,r5,r6,lr}
+      at 0x083d441c through pop {r4,r5,r6,pc} at 0x083d44b0; the push at
+      0x083d44b4 starts the next real function. There are two plain direct bl
+      callers and no predicated inbound bl; the body has one predicated
+      outgoing bleq at 0x083d4464 to the unrecovered expansion sibling
+      0x083d44b4. The function rejects duplicate pointers before testing
+      fullness, expands exactly when used == slots, then inserts into the
+      first NULL slot and increments used. A full slot buffer with stale used
+      returns -1 without expansion. Target builds retain the verified fixed
+      call; host tests use a volatile seam because the callee has no recovered
+      identity.
   - address: 0x083d5784
     ghidra: FUN_083d5784
     name: fixed_increment_u32_array_append
