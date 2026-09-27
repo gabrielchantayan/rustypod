@@ -4330,6 +4330,35 @@ functions:
       record address plus its first word to output. Rust uses u32 word fields
       and volatile accesses deliberately, preserving the target layout and
       retail load/store order on hosts with wider pointers.
+  - address: 0x083d2148
+    ghidra: FUN_083d2148
+    name: scaled_byte_pair_hash_table_record_construct
+    size: 92
+    sig: "u8 *scaled_byte_pair_hash_table_record_construct(u8 *this, u32 key, const u8 *a, const u8 *b)"
+    module: cxx/scaled_byte_pair_hash_table_record_construct
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_2/r1/r8: key
+      param_3/r2: a
+      param_4/r3: b
+      FUN_083d2384: byte_pair_prefix_init
+      FUN_0826f3bc: sorted_table_lookup
+      FUN_083d3084: hash_table_bucket_construct_083d3084
+      FUN_083d24cc: scaled_f32_count_ceiling_to_u32_083d24cc
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte extent
+      0x083d2148..0x083d21a3: the next independently entered function starts
+      at 0x083d21a4. The body has four plain unconditional BL instructions
+      (0x083d2384, 0x0826f3bc, 0x083d3084, and 0x083d24cc) and no predicated
+      BL instructions. Whole-image ARM B/BL decoding finds two inbound plain
+      BL sites (0x08268ebc and 0x0826a5e4) and no predicated sites. It writes
+      the duplicate-byte prefix, fixed 1.0f scale, lookup-derived bucket
+      count, and zero cursor words; constructs the embedded bucket table at
+      +0x10; then derives the ceiling count at +0x0c. The unported lookup
+      stays an exact firmware-address seam; the three named callees are
+      existing ports. Rust keeps target field offsets with byte-addressed,
+      volatile word stores.
   - address: 0x083d21c8
     ghidra: FUN_083d21c8
     name: hash_table_find_word_pair

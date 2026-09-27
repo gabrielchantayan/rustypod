@@ -222,6 +222,10 @@ pub mod hints {
     // 0x7fe0_0000: dedicated to util/hash_table_bucket_construct_083d3084's
     // target-width table and bucket-array fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT_083D3084: usize = 0x7fe0_0000;
+    // 0x7fc0_0000: dedicated to
+    // cxx/scaled_byte_pair_hash_table_record_construct's target-width record
+    // and bucket-array fixture; mappings never unmap.
+    pub const SCALED_BYTE_PAIR_HASH_TABLE_RECORD_CONSTRUCT: usize = 0x7fc0_0000;
     // 0x7e70_0000: dedicated to cxx/list_range_clear's target-width list
     // fixture; mappings never unmap, so no other user may share it.
     pub const LIST_RANGE_CLEAR: usize = 0x7e70_0000;
