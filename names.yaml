@@ -4677,6 +4677,34 @@ functions:
       targets dispatch through their fixed slots on target; host tests use
       typed native-vtable fixtures because target u32 vtable words cannot
       hold host callbacks.
+  - address: 0x083d0160
+    ghidra: FUN_083d0160
+    name: indexed_element_array_attached_destruct
+    size: 56
+    sig: "ObservableArray *indexed_element_array_attached_destruct(ObservableArray *this)"
+    module: cxx/indexed_element_array_attached_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "[this + 0x0]": derived_vtable
+      "[this + 0x14]": attached_object
+      "[attached_object + 0x0]": attached_object_vtable
+      "[attached_object_vtable + 0x1c]": attached_object_release
+      FUN_083d00a0: indexed_element_array_release
+      FUN_08271d2c: observable_array_destruct
+    notes: >-
+      Raw osos.dec establishes the exact 56-byte body
+      0x083d0160..0x083d0197: fourteen A32 words from push {r4,lr} through
+      the tail B 0x08271d2c. The following word at 0x083d0198 is the literal
+      derived vtable 0x089a3dc8, and push {r4-r6,lr} at 0x083d019c is the
+      next real function. The body makes one direct plain BL, to the ported
+      indexed_element_array_release @ 0x083d00a0, and one predicated indirect
+      BLXNE through a non-NULL attached object's vtable slot +0x1c; it then
+      tail-branches to the ported observable_array_destruct @ 0x08271d2c.
+      Ghidra incorrectly extends the function past the tail branch and
+      attributes the base destructor's calls to this body. Host tests replace
+      only the target-width virtual call; target builds dispatch that slot
+      directly.
   - address: 0x083d1160
     ghidra: FUN_083d1160
     name: observable_array_attached_release_destruct_083d1160
