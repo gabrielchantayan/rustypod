@@ -152980,3 +152980,29 @@ functions:
       pointers are u32 target words to preserve firmware layout on 64-bit hosts,
       and the retail dead r1 = 0 argument to checked new is omitted from the Rust
       signature.
+  - address: 0x083c4a84
+    ghidra: FUN_083c4a84
+    name: red_black_tree_release_child_subtrees
+    size: 64
+    sig: "void red_black_tree_release_child_subtrees(RedBlackTree *chain, u32 first_node)"
+    module: cxx/red_black_tree_release_child_subtrees
+    status: ported
+    renames:
+      param_1/r0/r6: chain
+      param_2/r1/r4: first_node
+      "chain+0x04": root
+      "node+0x08/r5": next
+      "node+0x0c": first_child
+      FUN_083c4150: red_black_tree_root_replace
+    notes: >-
+      Raw osos.dec establishes the exact 64-byte A32 extent from push
+      {r4,r5,r6,lr} at 0x083c4a84 through pop {r4,r5,r6,pc} at 0x083c4ac0;
+      0x083c4ac4 begins the next real function. The body has exactly two
+      unconditional plain direct BL instructions: recursive at 0x083c4a9c and
+      red_black_tree_root_replace/FUN_083c4150 at 0x083c4ab0; it has no
+      predicated BL instructions. It postorder-traverses each node+0x0c child
+      chain, snapshots node+0x08 before release, and prepends each node through
+      chain+0x04 while requesting destruction of its two COW strings.
+      Deliberate deviation: target pointers remain u32 target words to preserve
+      retailOS field layout on 64-bit hosts, and the recursive ARM BL is Rust
+      recursion.
