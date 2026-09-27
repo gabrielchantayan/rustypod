@@ -2135,6 +2135,9 @@ pub mod hints {
     // 0x9d70_0000: dedicated to cxx/tree_nodes_prepend_to_free_list's
     // target-width tree and free-list fixture; mappings never unmap.
     pub const TREE_NODES_PREPEND_TO_FREE_LIST: usize = 0x9d70_0000;
+    // 0x9d80_0000: dedicated to cxx/tree_nodes_prepend_to_free_list_9d38's
+    // target-width recursive tree fixture; mappings never unmap.
+    pub const TREE_NODES_PREPEND_TO_FREE_LIST_9D38: usize = 0x9d80_0000;
     // 0x4400_0000: dedicated to sqlite/expr_worklist's parent-release
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_RELEASE_PARENTS: usize = 0x4400_0000;

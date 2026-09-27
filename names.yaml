@@ -7916,6 +7916,30 @@ functions:
       0x083b95c0 to red_black_tree_rotate_left. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the
       transferred middle subtree. Deliberate deviations: none.
+  # --- C++ tree nodes prepend to free list ---
+  - address: 0x083b9d38
+    ghidra: FUN_083b9d38
+    name: tree_nodes_prepend_to_free_list_9d38
+    size: 60
+    sig: "void tree_nodes_prepend_to_free_list_9d38(u32 *owner, u32 *node)"
+    module: cxx/tree_nodes_prepend_to_free_list
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: node
+      iVar1/r0: next_subtree
+      FUN_083b9d38: tree_nodes_prepend_to_free_list_9d38
+    notes: >-
+      Raw osos.dec establishes the 60-byte extent from push {r4,r5,lr} at
+      0x083b9d38 through pop {r4,r5,pc} at 0x083b9d70; push at 0x083b9d74
+      starts the next real function. It recursively visits node +0x0c, writes
+      owner +0x04 into node +0x0c, prepends node to owner +0x04, then continues
+      at node +0x08. Whole-image aligned A32 decoding finds two inbound plain
+      BL sites (0x083b9b38 and recursive 0x083b9d50) and no predicated BL
+      sites. This body is byte-identical to tree_nodes_prepend_to_free_list;
+      a separate exported implementation preserves the 0x083b9d38 recursive
+      BL seam. Host test covers recursive-before-next traversal and existing
+      free-list preservation. Deliberate deviations: none.
   # --- C++ red-black-tree left rotation ---
   - address: 0x083ba024
     ghidra: FUN_083ba024

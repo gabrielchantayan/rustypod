@@ -49,6 +49,30 @@ pub unsafe extern "C" fn tree_nodes_prepend_to_free_list(owner: *mut u32, mut no
         }
     }
 }
+/// `FUN_083b9d38` — retailOS load address `0x083b9d38`; true size: 60 bytes
+/// (`0x3c`), from `push {r4,r5,lr}` through `pop {r4,r5,pc}` at
+/// `0x083b9d70`; `push` at `0x083b9d74` begins the next real function.
+/// Its body contains one plain direct recursive `bl` and no predicated `bl`;
+/// whole-image decoding finds two inbound plain `bl` calls (at `0x083b9b38`
+/// and the recursive `0x083b9d50`) and no predicated direct calls. It walks
+/// node+12 before node+8, prepending each node to owner+4 via node+12.
+/// Deliberate deviations: none.
+#[cfg_attr(target_os = "none", link_section = ".text.tree_nodes_prepend_to_free_list_9d38")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tree_nodes_prepend_to_free_list_9d38(owner: *mut u32, mut node: *mut u32) {
+    unsafe {
+        while !node.is_null() {
+            tree_nodes_prepend_to_free_list_9d38(owner, node_from_word(node.add(NODE_RECURSIVE_SUBTREE_WORD).read()));
+            let free_list = owner.add(OWNER_FREE_LIST_WORD).read();
+            let next = node_from_word(node.add(NODE_NEXT_SUBTREE_WORD).read());
+            node.add(NODE_RECURSIVE_SUBTREE_WORD).write(free_list);
+            owner.add(OWNER_FREE_LIST_WORD).write(node as usize as u32);
+            node = next;
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -134,4 +158,30 @@ mod tests {
             assert_eq!(recursive_child.add(NODE_RECURSIVE_SUBTREE_WORD).read(), existing as usize as u32);
         }
     }
+    #[test]
+    fn alias_9d38_visits_recursive_subtrees_before_next_subtrees() {
+        let Some(slab) = try_map_u32_slab(hints::TREE_NODES_PREPEND_TO_FREE_LIST_9D38, 0x1000) else {
+            note_missing_u32_fixture("cxx/tree_nodes_prepend_to_free_list_9d38");
+            return;
+        };
+        unsafe {
+            let owner = slab.cast::<u32>();
+            let root = node(slab, 0x100);
+            let recursive = node(slab, 0x120);
+            let next = node(slab, 0x140);
+            let existing = node(slab, 0x160);
+            ptr::write_bytes(slab, 0, 0x1000);
+            owner.add(OWNER_FREE_LIST_WORD).write(existing as usize as u32);
+            root.add(NODE_NEXT_SUBTREE_WORD).write(next as usize as u32);
+            root.add(NODE_RECURSIVE_SUBTREE_WORD).write(recursive as usize as u32);
+
+            tree_nodes_prepend_to_free_list_9d38(owner, root);
+
+            assert_eq!(owner.add(OWNER_FREE_LIST_WORD).read(), next as usize as u32);
+            assert_eq!(next.add(NODE_RECURSIVE_SUBTREE_WORD).read(), root as usize as u32);
+            assert_eq!(root.add(NODE_RECURSIVE_SUBTREE_WORD).read(), recursive as usize as u32);
+            assert_eq!(recursive.add(NODE_RECURSIVE_SUBTREE_WORD).read(), existing as usize as u32);
+        }
+    }
 }
+
