@@ -4206,6 +4206,31 @@ functions:
       It then releases the bucket allocation with count+1 and returns table.
       The Rust port retains all fields as target-width u32 words rather than
       host pointers, deliberately preserving the 32-bit target layout.
+  - address: 0x083d360c
+    ghidra: FUN_083d360c
+    name: bucket_chain_destroy_node8
+    size: 152
+    sig: "u8 *bucket_chain_destroy_node8(u8 *owner)"
+    module: util/bucket_chain_destroy_node8
+    status: ported
+    renames:
+      param_1/r0/r6: owner
+      puVar3/r5: bucket
+      puVar4/r7: bucket_end
+      puVar1/r4: node
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x083d360c..0x083d36a3; the
+      next independently linked function begins at 0x083d36a4. The body has
+      two plain unconditional bl instructions, both to cxx_array_dealloc
+      (0x08266f2c), and no predicated bl instructions. Whole-image ARM
+      decoding finds two inbound plain bl calls (0x0826f3b0, 0x083d2e38) and
+      no predicated bl calls. It treats owner words +4/+8/+12 as a bucket
+      allocation, bucket count, and current-bucket cursor; clears each bucket,
+      walks its word-0 intrusive chain, releases each node from node-8, then
+      releases the bucket allocation with count+1 and returns owner. Rust
+      retains target-width u32 pointer words; the retail pointer-only loop
+      before final deallocation has no memory side effect and is omitted.
   - address: 0x083d3a8c
     ghidra: FUN_083d3a8c
     name: tracker_trace
