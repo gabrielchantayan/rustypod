@@ -153773,3 +153773,48 @@ functions:
       dead r1=0 second allocator argument is intentionally omitted. Host tests
       cover initial allocation, free-list reuse, payload preservation, and
       growth. match.py structural exit 1 is expected when LLVM differs from ADS.
+
+  - address: 0x083bb500
+    ghidra: FUN_083bb500
+    name: opaque_tree_node_pool_acquire
+    size: 184
+    sig: "OpaqueTreeNode *opaque_tree_node_pool_acquire(OpaqueTreeNodePool *pool)"
+    module: cxx/opaque_tree_node_pool
+    status: ported
+    vars:
+      param_1/r4: pool
+      r0: node
+      r5: chunk
+      r6: capacity
+      "pool+0x00": chunks
+      "pool+0x04": free
+      "pool+0x08": next
+      "pool+0x0c": end
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right/free-link
+      "node+0x10": payload
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083bb500 through pop {r4-r8,pc} at 0x083bb5b4;
+      0x083bb5b8 begins the next real function. The body has exactly two
+      unconditional plain bl instructions, at 0x083bb564 and 0x083bb578, both
+      to operator_new_checked @ 0x08266c70, and no predicated bl calls.
+      Independent whole-image A32 decoding finds exactly two inbound plain
+      unconditional bl sites (0x081f4f14 and 0x083bbd88), with no predicated
+      inbound calls. The pool first pops a recycled 20-byte node through its
+      node+0x0c link, otherwise bump-allocates from pool+0x08..+0x0c. At
+      exhaustion it links a 12-byte {previous, capacity, arena} chunk at
+      pool+0x00 and allocates capacity*20 bytes, starting at 32 nodes then
+      growing by max(capacity + 32, capacity + capacity/2 + capacity/8).
+      It clears color and parent/left/right while preserving payload. Ghidra
+      calls the function void, but both callers consume r0, so the Rust port
+      returns the node. Target layout is asserted; host pointers widen under
+      repr(C) to keep fields disjoint. The dead r1=0 allocator argument is
+      deliberately omitted. Host tests cover recycled-node reinitialization
+      and payload preservation, initial growth, and 32-to-64-node growth.
+      match.py structural exit 1 is expected: LLVM uses an fp frame and
+      schedules the same free/bump/grow and two-allocation control flow
+      differently from ARM ADS.
