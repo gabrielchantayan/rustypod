@@ -2917,6 +2917,9 @@ pub mod hints {
     // 0x5350_0000: dedicated to cxx/object_matches_active_context's target-width
     // adjusted-object and active-context fixture; mappings never unmap.
     pub const CXX_OBJECT_MATCHES_ACTIVE_CONTEXT: usize = 0x5350_0000;
+    // 0x5360_0000: dedicated to cxx/u32_key_tree_equal_range's target-width
+    // tree header and node fixture; mappings never unmap.
+    pub const U32_KEY_TREE_EQUAL_RANGE: usize = 0x5360_0000;
     // 0x76b0_0000: dedicated to cxx/slot_array_remove_at_release's target-width
     // storage and polymorphic object fixture; mappings never unmap.
     pub const CXX_SLOT_ARRAY_REMOVE_AT_RELEASE: usize = 0x76b0_0000;
