@@ -4302,6 +4302,33 @@ functions:
       record address plus its first word to output. Rust uses u32 word fields
       and volatile accesses deliberately, preserving the target layout and
       retail load/store order on hosts with wider pointers.
+  - address: 0x083d2268
+    ghidra: FUN_083d2268
+    name: hash_table_find_or_end_word_pair
+    size: 124
+    sig: "void hash_table_find_or_end_word_pair(u32 *output, const HashTable *table, const u32 *key)"
+    module: cxx/hash_table_find_or_end_word_pair
+    status: ported
+    renames:
+      param_1/r0/r7: output
+      param_2/r1/r4: table
+      param_3/r2/r5: key
+      r6: bucket_slot
+      FUN_083d63cc: hash_word_pair
+      FUN_08036f14: __rt_udiv
+      FUN_083d6d80: hash_table_bucket_find_word_pair_6d80
+      Raw osos.dec establishes the exact 124-byte A32 extent
+      0x083d2268..0x083d22e3 through pop {r0-r8,pc}; the next independently
+      entered function starts at 0x083d22e4. The body has three unconditional
+      plain bl calls (hash_word_pair at 0x083d63cc, __rt_udiv at 0x08036f14,
+      and the bucket-chain search at 0x083d6d80) and no predicated calls.
+      Whole-image direct-call decoding finds two inbound plain bl sites
+      (0x08269358 and 0x08269604), no predicated sites. It hashes the
+      two-word key, uses the unsigned divide remainder to select a bucket at
+      table + *(table+0x14) + remainder*4, then writes the bucket-slot address
+      and either its matching link or its head link when absent. Rust inlines
+      the verified hash and chain comparison and calls __rt_udivmod to expose
+      the ADS r1 remainder; target pointers remain u32 words on hosts.
   - address: 0x083d22e4
     ghidra: FUN_083d22e4
     name: callback_result_build
