@@ -13,6 +13,7 @@
 //! [`red_black_tree_node_cow_pair_clone`].
 
 use super::red_black_tree_node_cow_pair_clone::red_black_tree_node_cow_pair_clone;
+use super::red_black_tree_node_cow_pair_pool_acquire::RedBlackTreeNodeCowPairPool;
 
 #[inline(always)]
 unsafe fn node_from_word(word: u32) -> *mut u8 { word as usize as *mut u8 }
@@ -35,7 +36,7 @@ unsafe fn write_node_word(node: *mut u8, offset: usize, value: *mut u8) {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn red_black_tree_cow_pair_subtree_clone(
-    pool: *mut u8,
+    pool: *mut RedBlackTreeNodeCowPairPool,
     mut source: *mut u8,
     mut parent: *mut u8,
 ) -> *mut u8 {
@@ -69,13 +70,6 @@ mod tests {
 
     const NODE_SIZE: usize = 0x18;
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut NEXT_NODE: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn acquire_fixture(_pool: *mut u8) -> *mut u8 {
-        let node = unsafe { NEXT_NODE };
-        unsafe { NEXT_NODE = NEXT_NODE.add(NODE_SIZE); }
-        node
-    }
 
     unsafe fn word(node: *mut u8, offset: usize) -> u32 { unsafe { node.add(offset).cast::<u32>().read() } }
     unsafe fn put_word(node: *mut u8, offset: usize, value: *mut u8) { unsafe { node.add(offset).cast::<u32>().write(value as usize as u32) } }
@@ -103,11 +97,12 @@ mod tests {
                 put_word(node, 0x14, string_data);
             }
             put_word(root, 0x08, left); put_word(root, 0x0c, right);
-            NEXT_NODE = clones;
-            let previous = super::super::red_black_tree_node_cow_pair_clone::NODE_POOL_ACQUIRE;
-            super::super::red_black_tree_node_cow_pair_clone::NODE_POOL_ACQUIRE = acquire_fixture;
-            let result = red_black_tree_cow_pair_subtree_clone(slab.add(0x20), root, parent);
-            super::super::red_black_tree_node_cow_pair_clone::NODE_POOL_ACQUIRE = previous;
+            let mut pool = RedBlackTreeNodeCowPairPool {
+                next: clones as usize as u32,
+                end: clones.add(NODE_SIZE * 3) as usize as u32,
+                ..RedBlackTreeNodeCowPairPool::default()
+            };
+            let result = red_black_tree_cow_pair_subtree_clone(&mut pool, root, parent);
             let root_clone = clones;
             let right_clone = clones.add(NODE_SIZE);
             let left_clone = clones.add(NODE_SIZE * 2);
@@ -132,7 +127,7 @@ mod tests {
         let Some(slab) = try_map_u32_slab(hints::RED_BLACK_TREE_COW_PAIR_SUBTREE_CLONE_NULL, 0x1000) else { return; };
         unsafe {
             put_word(slab, 0x08, slab.add(0x40));
-            assert!(red_black_tree_cow_pair_subtree_clone(slab.add(0x20), core::ptr::null_mut(), slab).is_null());
+            assert!(red_black_tree_cow_pair_subtree_clone(core::ptr::null_mut(), core::ptr::null_mut(), slab).is_null());
             assert_eq!(word(slab, 0x08), 0);
         }
     }

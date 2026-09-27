@@ -7728,6 +7728,34 @@ functions:
       0x083ba024 to red_black_tree_rotate_left. The shared host test covers root,
       parent-left-slot, and parent-right-slot rotations, including the transferred
       middle subtree. Deliberate deviations: none.
+  # --- C++ red-black-tree COW-string-pair node-pool acquire ---
+  - address: 0x083c4064
+    ghidra: FUN_083c4064
+    name: red_black_tree_node_cow_pair_pool_acquire
+    size: 184
+    sig: "RedBlackTreeNodeCowPair *red_black_tree_node_cow_pair_pool_acquire(RedBlackTreeNodeCowPairPool *pool)"
+    module: cxx/red_black_tree_node_cow_pair_pool_acquire
+    status: ported
+    renames:
+      param_1/r0/r4: pool
+      puVar1/r0: node
+      piVar3/r5: chunk
+      uVar6/r6: capacity
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent: 46 A32 words from
+      push {r4-r8,lr} at 0x083c4064 through pop {r4-r8,pc} at 0x083c4118;
+      0x083c411c begins the next real function. The body has exactly two
+      unconditional plain bl calls, at 0x083c40c8 and 0x083c40dc, both to
+      operator_new_checked (0x08266c70), and no predicated bl calls. Raw
+      whole-image A32 decoding finds two inbound unconditional plain bl sites,
+      at 0x083c4124 and 0x083db678, and no predicated inbound calls. It pops a
+      24-byte COW-string-pair tree node from a free list through node+0x0c, or
+      allocates a 12-byte chunk header and capacity*24 arena, with capacity
+      max(old+32, old+old/2+old/8), then clears color and all three tree links
+      while preserving the payload words at +0x10 and +0x14. Target pointers
+      are u32 words to preserve ARM offsets on 64-bit hosts; the dead r1=0
+      allocator argument is deliberately omitted.
   # --- C++ red-black-tree node COW-pair clone ---
   - address: 0x083c411c
     ghidra: FUN_083c411c
