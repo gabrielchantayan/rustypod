@@ -151073,3 +151073,34 @@ functions:
       port preserves target direct and virtual calls; host tests substitute
       seams because the unresolved direct target and target-width vtable slots
       cannot execute natively.
+
+  - address: 0x083d1b0c
+    ghidra: FUN_083d1b0c
+    name: observable_array_release_string_objects
+    size: 76
+    sig: "void observable_array_release_string_objects(ObservableArrayReleaseStringObjects *this)"
+    module: cxx/observable_array_release_string_objects
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_1+4/r5: count
+      param_1+16: enabled
+      iVar2/r4: index
+      iVar1/r0: element_cell
+      FUN_083d6bec: element_at
+      FUN_08201610: string_object_destroy_08201610
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 76-byte body from 0x083d1b0c through
+      0x083d1b57: nineteen A32 words from push {r4,r5,r6,lr} through pop
+      {r4,r5,r6,pc}; the next independently entered function starts at
+      0x083d1b58. It has three unconditional plain BL instructions—not
+      Ghidra's reported two—to the vtable +0x40 accessor FUN_083d6bec at
+      0x083d1b34, ported string_object_destroy_08201610 at 0x083d1b40, and
+      ported operator_delete at 0x083d1b44; there are no predicated BL calls.
+      When enabled byte +0x10 is nonzero, it walks signed indices [0,count),
+      obtains each cell through the +0x40 accessor, skips NULL first words,
+      and destroys then tag-2-deletes each StringObject. Target code uses
+      32-bit vtable and cell words; host fixtures deliberately widen pointers
+      and replace the direct destructor/delete calls because fixture objects
+      are not retail heap allocations.
