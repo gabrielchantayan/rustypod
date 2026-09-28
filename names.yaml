@@ -55139,6 +55139,37 @@ functions:
       updates. match.py diff is expected because raw layout reads remain
       unaligned little-endian accesses.
 
+  - address: 0x08371d34
+    ghidra: FUN_08371d34
+    name: btree_last
+    size: 112
+    sig: "i32 btree_last(cursor: *mut BtCursor, res: *mut u32)"
+    module: sqlite/btree_last
+    status: ported
+    vars:
+      param_1/r0/r4: cursor
+      param_2/r1/r6: res
+      r5: rc
+      FUN_082d9b00: btree_move_to_root (direct ported callee)
+      FUN_082d9a94: btree_move_to_rightmost (BTREE_MOVE_TO_RIGHTMOST_OPS seam)
+      FUN_083727c8: btree_parse_cell (direct ported callee)
+    notes: >-
+      Raw osos.dec proves the 112-byte body 0x08371d34..0x08371da0:
+      push {r4,r5,r6,r7,r8,lr} begins it, pop {r4,r5,r6,r7,r8,pc} ends it,
+      and btree_leave begins separately at 0x08371da4. The body has three
+      unconditional plain BL instructions (btree_move_to_root @ 0x08371d40,
+      btree_move_to_rightmost @ 0x08371d6c, btree_parse_cell @ 0x08371d88)
+      and no predicated BL. Its two inbound call sites are unconditional plain
+      bl at 0x08386ecc and 0x08386ef8; no predicated inbound BL is identified.
+      This is SQLite 3.5.x sqlite3BtreeLast: move to root; write res=1 for an
+      INVALID/empty root; otherwise write res=0, move rightmost, parse cached
+      CellInfo on nSize +0x3e == 0 and set validNKey +0x42, then set atLast
+      +0x41 to rc == SQLITE_OK. Target pPage and idx at +0x18/+0x1c remain
+      u32-width fields. The direct moveToRightmost target 0x082d9a94 is
+      identified from its raw call ABI and SQLite algorithm but unported, so
+      this port deliberately uses the volatile BTREE_MOVE_TO_RIGHTMOST_OPS
+      seam; btree_move_to_root and btree_parse_cell are direct ported calls.
+
   # ---- B-tree cell size query (src/sqlite/cell_size.rs) ----
   - address: 0x082c0a50
     ghidra: FUN_082c0a50

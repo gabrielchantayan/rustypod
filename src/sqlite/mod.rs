@@ -113,6 +113,7 @@ pub mod btree_factory;
 pub mod move_to_child;
 pub mod get_and_init_page;
 pub mod move_to_root;
+pub mod btree_last;
 pub mod check_read_locks;
 pub mod cell_size;
 pub mod emit_cursor_setup;
