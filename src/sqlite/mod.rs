@@ -198,6 +198,7 @@ pub mod integrity_check_ref;
 pub mod is_nan;
 pub mod is_rowid;
 pub mod hash_find;
+pub mod hash_find_cstr;
 pub mod hash_function;
 pub mod hash_init;
 pub mod hex_to_int;
