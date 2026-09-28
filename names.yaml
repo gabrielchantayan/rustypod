@@ -64819,6 +64819,34 @@ functions:
       Deliberate deviation: host fixtures use native-width pointers and typed
       callbacks; target builds retain volatile u32 vtable reads and slots.
 
+  - address: 0x0839bfdc
+    ghidra: FUN_0839bfdc
+    name: container_destroy_first_non_null_element
+    size: 76
+    sig: "void container_destroy_first_non_null_element(void *this)"
+    module: cxx/container_destroy_first_non_null_element
+    status: ported
+    renames:
+      param_1/r0: this
+      r5: count
+      r4: index
+      r0_after_083d5f14: element
+    notes: >-
+      Raw osos.dec fixes the 76-byte body from push {r4,r5,r6,lr} at
+      0x0839bfdc through pop {r4,r5,r6,pc} at 0x0839c024; the next
+      independently entered function starts at 0x0839c028. It checks enabled
+      byte this+0x28, then scans signed indices [0, this+4) through the
+      already ported container_element_at_alias_5f14 (0x083d5f14). The first
+      non-NULL element is passed to direct opaque destructor 0x0812bc8c; its
+      return feeds the already ported tag-2 operator_delete (0x082aad24). Raw
+      decoding finds three unconditional plain direct BL instructions at
+      0x0839c004, 0x0839c010, and 0x0839c014, and no predicated direct BL;
+      Ghidra incorrectly reports only two because it treats operator_delete as
+      non-returning. The only inbound direct calls are plain BL at 0x0839c074
+      and 0x0839c0d8. Host builds use native-width operation seams only for
+      the opaque direct callee and indexed accessor; target builds call the
+      verified retailOS addresses.
+
   # --- Task-message pool release ---
   - address: 0x0812c1b4
     ghidra: FUN_0812c1b4
