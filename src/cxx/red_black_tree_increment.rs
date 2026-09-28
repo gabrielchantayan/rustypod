@@ -249,6 +249,17 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
 /// 0x083ccdd0, and 0x083cd2a4; there are no predicated calls or direct
 /// tail branches. Deliberate deviations: none.
 ///
+/// `FUN_083b5da8` at load address `0x083b5da8` is a byte-identical 84-byte
+/// (21-word) copy ending in `bx lr` at `0x083b5df8`; the next independently
+/// entered function begins at `0x083b5dfc`. Raw aligned A32 B/BL-immediate
+/// decoding verifies two inbound unconditional plain `bl` calls at
+/// 0x083c65c0 and 0x083c6a94, zero predicated `bl` calls, and no outbound
+/// calls. It advances the target-width cursor to its in-order successor by
+/// descending the right subtree's left spine, or climbing parent links while
+/// leaving right-child edges, retaining the header sentinel. The exact duplicate
+/// deliberately reuses this dispatch seam and shared host tests; deliberate
+/// deviations: none.
+///
 /// `FUN_083b61ec` at load address `0x083b61ec` is a byte-identical,
 /// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
 /// `bx lr` at `0x083b623c`; the next separately linked function begins at
