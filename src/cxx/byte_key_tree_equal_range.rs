@@ -76,6 +76,65 @@ pub unsafe extern "C" fn byte_key_tree_equal_range(
     result.write(ByteKeyTreeEqualRange { lower, upper });
 }
 
+/// byte_key_tree_equal_range_alias_7ff0 — original: `FUN_083b7ff0` @
+/// `0x083b7ff0` (160 bytes; two direct plain `bl` calls, both to
+/// `less_unsigned_byte` @ `0x083d73bc`; none predicated).
+///
+/// Raw words establish the extent `0x083b7ff0..0x083b8090`: `pop
+/// {r4-r8,pc}` at `0x083b808c` returns, and the next real function starts at
+/// `0x083b8090`. This equal-range instantiation makes two root-to-leaf walks:
+/// lower bound follows right when `node < key`, otherwise retains the node and
+/// follows left; upper bound follows left when `key < node`, otherwise retains
+/// the node and follows right. The retained nodes form the half-open range.
+///
+/// Deliberate deviations: typed `#[repr(C)]` fields replace target offsets,
+/// keeping ARM layout exact while host pointers widen safely; calls use the
+/// already-ported comparator instead of its fixed retail address. Kept as a
+/// distinct link section so identical-code folding cannot remove its hookable
+/// label.
+///
+/// # Safety
+/// `result` must be writable, `tree` must be a live byte-key tree with a live
+/// header, and `key` must be readable. All reachable links must be valid tree
+/// nodes or null.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.byte_key_tree_equal_range_alias_7ff0")]
+#[inline(never)]
+pub unsafe extern "C" fn byte_key_tree_equal_range_alias_7ff0(
+    result: *mut ByteKeyTreeEqualRange,
+    tree: *mut ByteKeyTree,
+    key: *const u8,
+) {
+    let header = (*tree).header;
+    let comparator = core::ptr::addr_of!((*tree).comparator);
+    let mut node = (*header).parent;
+    let mut lower = header;
+
+    while !node.is_null() {
+        let node_key = core::ptr::addr_of!((*node).key.key);
+        if crate::cxx::templates::less_unsigned_byte(comparator, node_key, key) == 0 {
+            lower = node;
+            node = (*node).left;
+        } else {
+            node = (*node).right;
+        }
+    }
+
+    node = (*header).parent;
+    let mut upper = header;
+    while !node.is_null() {
+        let node_key = core::ptr::addr_of!((*node).key.key);
+        if crate::cxx::templates::less_unsigned_byte(comparator, key, node_key) == 0 {
+            node = (*node).right;
+        } else {
+            upper = node;
+            node = (*node).left;
+        }
+    }
+
+    result.write(ByteKeyTreeEqualRange { lower, upper });
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -149,6 +208,13 @@ mod tests {
                 byte_key_tree_equal_range(&mut result, &mut tree, &key);
                 assert_eq!(result.lower, expected_lower, "key {key}");
                 assert_eq!(result.upper, expected_upper, "key {key}");
+                let mut alias_result = ByteKeyTreeEqualRange {
+                    lower: core::ptr::null_mut(),
+                    upper: core::ptr::null_mut(),
+                };
+                byte_key_tree_equal_range_alias_7ff0(&mut alias_result, &mut tree, &key);
+                assert_eq!(alias_result.lower, expected_lower, "alias key {key}");
+                assert_eq!(alias_result.upper, expected_upper, "alias key {key}");
             }
         }
     }
