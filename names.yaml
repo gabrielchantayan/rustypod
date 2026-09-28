@@ -55858,6 +55858,26 @@ functions:
       (precedent: db_malloc_raw landing with db_malloc_zero). match.py:
       same structure (callee bl, cmp/early-out, strbeq at +0x1e).
 
+  - address: 0x08374a70
+    ghidra: FUN_08374a70
+    name: default_row_est
+    size: 80
+    sig: "void default_row_est(Index *index)"
+    module: sqlite/default_row_est
+    status: ported
+    vars: {param_1/r0: index, iVar1/r1: column_count, puVar2/r2: row_estimates, DAT_08374ac4: default_table_rows}
+    notes: >-
+      SQLite's sqlite3DefaultRowEst. Raw osos.dec establishes the 80-byte
+      extent 0x08374a70..0x08374ac0: bx lr is followed by the 1000000 literal
+      at 0x08374ac4 and the separately entered next function at 0x08374ac8.
+      Complete A32 branch decoding finds exactly two inbound direct BL sites,
+      both plain unconditional (0x0836f280 and 0x08373dd8), and no predicated
+      BL sites; the body has no BL. It sets aiRowEst[0] to 1000000, writes 5
+      from nColumn down through 5, then 10..7 to columns 1..4; a nonzero
+      onError overwrites aiRowEst[nColumn] with 1. The Rust port uses raw
+      target offsets for Index's 32-bit aiRowEst pointer, avoiding host
+      pointer-width layout changes.
+
   - address: 0x083753d0
     ghidra: FUN_083753d0
     name: dequote
