@@ -49033,6 +49033,29 @@ functions:
       resolves in librustypod.a (no folding).
 
 
+  - address: 0x0839d5e4
+    ghidra: FUN_0839d5e4
+    name: refcounted_body_mutex_unlock_tag3
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_tag3(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0839d5e4..0x0839d5f3: ldr r0,[r0,#8]; cmp r0,#0; bne 0x0807f6a0;
+      bx lr. The next independently linked function begins at 0x0839d5f4.
+      Decoding the containing caller establishes two plain direct BL call
+      sites at 0x0839d590 and 0x0839d5c8, with no predicated BL call sites.
+      The helper loads the optional target +8 mutex and tail-branches to
+      mutex_unlock only when it is non-NULL; body itself is intentionally
+      unguarded. No deliberate deviations: Rust calls the existing mutex
+      seam, and a target-only section prevents folding with byte-identical
+      refcounted-body unlock helpers.
+
   - address: 0x0839d550
     ghidra: FUN_0839d550
     name: refcounted_body_release_tag3
