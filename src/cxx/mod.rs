@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod bit_set;
 pub mod vtable_089a58c8_destruct;
+pub mod vtable_08981fec_destruct;
 pub mod fixed_increment_u32_array_append;
 pub mod vector_copy_construct_elem20;
 pub mod vector_copy_construct_elem32;
