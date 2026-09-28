@@ -157532,3 +157532,21 @@ functions:
       length. Host tests cover the target-word offsets, an embedded NUL
       suffix, and the empty-string one-byte key. match.py exits 1 with the
       expected modern frame/register-allocation structural diff.
+
+  - address: 0x08391d3c
+    ghidra: FUN_08391d3c
+    name: tagged_record_pairs_initialize
+    size: 36
+    sig: "void tagged_record_pairs_initialize(u32 *records, u32 byte_len)"
+    module: app/tagged_record_pairs_initialize
+    status: ported
+    vars: {param_1: records, param_2: byte_len, uVar1: tag, uVar2: record_index}
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte A32 extent
+      0x08391d3c..0x08391d60: it loads the literal 0x5da35da3, computes
+      byte_len >> 3, and writes that tag followed by zero for every complete
+      eight-byte record. The literal at 0x08391d60 is data; the next real
+      function begins at 0x08391d64. Whole-image aligned A32 decoding finds
+      two inbound plain unconditional BL sites (0x08393c08 and 0x08393ccc),
+      zero predicated inbound BL sites, and no outbound calls. The port
+      preserves the byte-length truncation and aligned paired u32 stores.
