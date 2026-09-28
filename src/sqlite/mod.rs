@@ -132,6 +132,7 @@ pub mod context_malloc;
 pub mod corrupt_schema;
 pub mod data_size;
 pub mod data_fetch;
+pub mod data;
 pub mod key_fetch;
 pub mod key;
 pub mod restore_cursor_position;

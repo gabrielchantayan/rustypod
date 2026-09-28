@@ -110,7 +110,7 @@ pub static mut BTREE_ACCESS_PAYLOAD_OPS: BtreeAccessPayloadOps =
     DEFAULT_BTREE_ACCESS_PAYLOAD_OPS;
 
 #[inline(always)]
-unsafe fn access_payload_op() -> unsafe extern "C" fn(
+pub(crate) unsafe fn access_payload_op() -> unsafe extern "C" fn(
     *mut u8,
     u32,
     u32,

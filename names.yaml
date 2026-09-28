@@ -54305,6 +54305,37 @@ functions:
       error ordering. match.py reports the expected LLVM frame/register and
       absolute-call relocation differences while retaining enter/open/leave.
 
+  # ---- B-tree table payload reader (src/sqlite/data.rs) ----
+  - address: 0x08370dfc
+    ghidra: FUN_08370dfc
+    name: btree_data
+    size: 88
+    sig: "int btree_data(BtCursor *cursor, u32 offset, u32 amt, void *buf)"
+    module: sqlite/data
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: offset
+      param_3/r2: amt
+      param_4/r3: buf
+    callees:
+      FUN_08372ae0: btree_restore_cursor_position
+      FUN_082b2994: access_payload (unported, BTREE_ACCESS_PAYLOAD_OPS seam)
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeData. Raw osos.dec words establish the exact
+      88-byte extent 0x08370dfc..0x08370e54: push {r2-r8,lr} at entry,
+      pop {r2-r8,pc} at 0x08370e50, then the distinct next function begins
+      with ldrb r2,[r0,#0x43] at 0x08370e54. Decoding every ARM B/BL word in
+      the body finds exactly two direct calls, both unconditional plain bl:
+      btree_restore_cursor_position @ 0x08372ae0 (0x08370e24) and
+      accessPayload @ 0x082b2994 (0x08370e4c); no predicated calls occur.
+      Cursors below REQUIRESEEK (+0x43 < 2) skip restoration with rc zero;
+      otherwise restoration failure returns unchanged. On success it calls
+      accessPayload(cursor, offset, amt, buf, 1, 0), where one selects table
+      data. The direct restore callee is ported. Deliberate deviation:
+      unported accessPayload uses key's volatile dispatch seam, so match.py
+      shows the seam slot read and blx instead of the retail direct bl.
+
   # ---- B-tree lock counter (src/sqlite/btree_lock.rs) ----
   - address: 0x0837118c
     ghidra: FUN_0837118c
