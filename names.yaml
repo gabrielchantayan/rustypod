@@ -48895,6 +48895,41 @@ functions:
       sibling. Host tests cover the unconditional NULL store and i32::MAX
       wrapping to i32::MIN with a NULL mutex.
 
+  - address: 0x0839d0e8
+    ghidra: FUN_0839d0e8
+    name: refcounted_body_release_dtor_slot1_copy
+    size: 144
+    sig: "void refcounted_body_release_dtor_slot1_copy(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: slot
+      body_plus_0x00: implementation
+      body_plus_0x04: refcount
+      body_plus_0x08: mutex
+      vtable_plus_0x04: virtual_destructor
+      FUN_0839d178: refcounted_body_mutex_lock_dtor_copy
+      FUN_0839d188: refcounted_body_mutex_unlock_dtor_copy
+      FUN_0807f650: mutex_delete
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 144-byte A32 extent
+      0x0839d0e8..0x0839d178: the final str r6,[r4] and pop
+      {r4,r5,r6,pc} at 0x0839d170..0x0839d174 follow Ghidra's
+      reported 136-byte boundary; 0x0839d178 starts the independent
+      mutex-lock helper. Whole-image A32 B/BL decoding finds exactly two
+      inbound unconditional plain BL calls and zero predicated BL calls.
+      The body has five plain direct BL instructions (local lock/unlock,
+      mutex_delete, and two operator_delete calls) and one predicated
+      virtual BLX through implementation vtable word 1. A NULL body leaves
+      slot untouched; otherwise optional-mutex locking brackets a wrapping
+      signed refcount decrement. Non-final drops unlock and clear slot. Final
+      drops dispatch virtual slot 1, unlock, delete and tag-2-free the mutex,
+      clear body+8, tag-2-free the body, and clear slot. Deliberate deviation:
+      Rust uses existing mutex and heap seams for local retail helpers; LLVM
+      may inline them while preserving the release order and target-word
+      semantics.
+
   - address: 0x0839d188
     ghidra: FUN_0839d188
     name: refcounted_body_mutex_unlock_dtor_copy

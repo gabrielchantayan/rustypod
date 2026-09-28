@@ -2949,6 +2949,85 @@ pub unsafe extern "C" fn refcounted_body_release_dtor(slot: *mut *mut Refcounted
 
     slot.write(core::ptr::null_mut());
 }
+/// `refcounted_body_release_dtor_slot1_copy` — retailOS `FUN_0839d0e8` @
+/// `0x0839d0e8` (144 bytes, `0x0839d0e8..0x0839d178`; Ghidra's 136-byte
+/// extent omits the final `str r6,[r4]` / `pop {r4,r5,r6,pc}`). Raw A32
+/// decoding finds two inbound unconditional plain `bl` call sites and no
+/// predicated `bl` calls. Its body has five plain direct `bl` instructions
+/// (the local lock/unlock helpers, `mutex_delete`, and two `operator_delete`
+/// calls) plus one predicated virtual `blxne` through vtable word 1.
+///
+/// A separately linked slot-1 refcounted-body release. A NULL body leaves
+/// `slot` untouched. Otherwise it locks the optional mutex, wrapping-
+/// decrements the signed refcount, and clears `slot`. A non-final release only
+/// unlocks. A final release NULL-guardedly dispatches vtable word 1 (+4) of
+/// the implementation, unlocks, deletes and tag-2-frees the mutex, clears
+/// body+8, and tag-2-frees the body.
+///
+/// Deliberate deviation: local retail helpers at 0x0839d178/0x0839d188 are
+/// represented by the existing mutex ports. LLVM may inline them rather than
+/// retain the stock direct calls; the release order and target-word layout are
+/// preserved. A dedicated target section prevents folding with equivalent
+/// release-template copies.
+///
+/// # Safety
+/// `slot` must be valid and aligned. A non-NULL body, its mutex,
+/// implementation, and implementation vtable word 1 must be live as reached.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_release_dtor_slot1_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_release_dtor_slot1_copy(
+    slot: *mut *mut RefcountedBody,
+) {
+    let body = slot.read();
+    if body.is_null() {
+        return;
+    }
+
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+
+    let remaining = (*body).refcount.wrapping_sub(1);
+    (*body).refcount = remaining;
+    let body = slot.read();
+    if remaining == 0 {
+        let implementation = (*body).opaque0 as *mut u8;
+        if !implementation.is_null() {
+            let vtable = (implementation as *const usize).read() as *const usize;
+            let destructor: unsafe extern "C" fn(*mut u8) =
+                core::mem::transmute(vtable.add(1).read());
+            destructor(implementation);
+        }
+
+        let body = slot.read();
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+
+        let body = slot.read();
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_delete(mutex);
+                let mutex = (*body).mutex;
+                operator_delete(mutex.cast());
+                (*body).mutex = core::ptr::null_mut();
+            }
+            operator_delete(body.cast());
+        }
+    } else {
+        let mutex = (*body).mutex;
+        if !mutex.is_null() {
+            mutex_unlock(mutex);
+        }
+    }
+
+    slot.write(core::ptr::null_mut());
+}
+
 /// refcounted_body_release_dtor_copy — original: `FUN_0839ccac` @
 /// 0x0839ccac (144 bytes — Ghidra's reported 136-byte extent omits the
 /// trailing `str r6,[r4]` / `pop {r4,r5,r6,pc}`; the separately linked
@@ -5920,6 +5999,19 @@ mod tests {
             assert!(slot.is_null());
             assert!(events().is_empty());
         }
+        /// The 0x0839d0e8 copy preserves the NULL-body early-out: no mutex
+        /// operation, virtual dispatch, or slot write occurs.
+        #[test]
+        fn dtor_slot1_copy_null_body_leaves_slot_untouched() {
+            let _bench = bench();
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            unsafe { refcounted_body_release_dtor_slot1_copy(&mut slot) };
+
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
 
         /// A non-final slot-1 drop decrements under the mutex, unlocks,
         /// and NULLs the slot; the virtual destructor never runs.
