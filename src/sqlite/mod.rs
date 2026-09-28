@@ -76,6 +76,7 @@ pub mod auth_context_pop;
 pub mod begin_write_operation;
 pub mod blob_to_hex;
 pub mod binary_compare_coll_seq;
+pub mod hex_to_blob;
 pub mod bind_int64;
 pub mod bind_text;
 pub mod bitvec;
