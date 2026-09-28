@@ -1880,6 +1880,10 @@ pub mod hints {
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const BTREE_MOVE_TO_CHILD: usize = 0x5d00_0000;
+    // 0x5e00_0000: dedicated to sqlite/btree_cursor_pop_parent's target-width
+    // cursor, page, object, and context fixture; mappings never unmap, so no
+    // other module may share this hint.
+    pub const BTREE_CURSOR_POP_PARENT: usize = 0x5e00_0000;
     // 0x5300_0000 and 0x5400_0000: dedicated to the cxx shared-handle
     // initializer and its vtable-owner constructor fixtures; mappings never
     // unmap, so each mapping site has its own hint.

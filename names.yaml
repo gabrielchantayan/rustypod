@@ -59363,6 +59363,33 @@ functions:
       no-op, differing-page removal, equal-page skip predicate, marker write,
       and activity balance.
 
+  # ---- SQLite B-tree cursor parent pop (src/sqlite/btree_cursor_pop_parent.rs) ----
+  - address: 0x08371e18
+    ghidra: FUN_08371e18
+    name: btree_cursor_pop_parent
+    size: 60
+    sig: "void btree_cursor_pop_parent(BtCursor *cursor)"
+    module: sqlite/btree_cursor_pop_parent
+    status: ported
+    renames:
+      param_1/r4: cursor
+      iVar2/r5: old_page
+      iVar3/r6: parent_page
+      uVar1/r7: saved_parent_index
+      FUN_0837e8dc: retain_object
+      FUN_0836761c: release_via_field_0x48
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent 0x08371e18..0x08371e53;
+      0x08371e54 begins the next separately linked function. The body has two
+      plain BL calls, retain_object at 0x0837e8dc and release_via_field_0x48 at
+      0x0836761c, with no predicated calls. Whole-image decoding finds two
+      inbound plain BL calls, at 0x08372360 and 0x083729e8, and no predicated
+      callers. It reads the old page saved parent index before retaining the
+      parent page object, releases the old page, installs the parent, clears
+      both cell-cache fields, and restores the saved index. Target pointer
+      fields remain little-endian u32 words; the host fixture is mapped below
+      4 GiB. No deliberate behavioral deviations.
+
   # ---- Embedded B-tree cursor state accessor (src/sqlite/cursor_embedded_state.rs) ----
   - address: 0x0837e18c
     ghidra: FUN_0837e18c
