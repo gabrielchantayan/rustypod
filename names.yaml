@@ -158125,3 +158125,43 @@ functions:
       call it directly and host tests use a private seam. match.py reports
       LLVM's expected structural differences around target-width fields and
       the fixed-address call.
+
+
+  - address: 0x0837d3b0
+    ghidra: FUN_0837d3b0
+    name: materialize_view
+    size: 204
+    sig: "void materialize_view(Parse *parse, Select *view_select, Expr *where_clause, int cursor)"
+    module: sqlite/materialize_view
+    status: ported
+    renames:
+      param_1/r0/r5: parse
+      param_2/r1: view_select
+      param_3/r2/r6: where_clause
+      param_4/r3/r8: cursor
+      r7: db
+      r4: select
+    callees:
+      FUN_08383cc4: select_dup
+      FUN_08377e58: expr_dup
+      FUN_083842fc: src_list_append_from_term
+      FUN_08383dec: sqlite3SelectNew (retail seam)
+      FUN_08383ca8: select_dest_init
+      FUN_08382e28: sqlite3Select (retail seam)
+      FUN_08383c88: select_delete
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent
+      0x0837d3b0..0x0837d47b; the next function starts with push at
+      0x0837d47c. A whole-image ARM B/BL decode finds exactly two inbound
+      direct calls, both predicated blne (0x08374d54 and 0x08385968), and
+      no plain bl calls. The body has seven unconditional direct BL calls
+      and no predicated BL. This is SQLite 3.5.x materializeView: duplicate
+      the view SELECT; when where_clause is non-NULL, duplicate it and build
+      an outer SELECT with the duplicate as its only FROM subquery; execute
+      into SRT_EphemTab (destination kind 9) at cursor; then delete the
+      resulting SELECT. select_dup is its existing seam. sqlite3SelectNew
+      @ 0x08383dec and sqlite3Select @ 0x08382e28 have no prior names entry
+      or Rust port; target builds call their verified retail addresses and
+      host tests replace both volatile seams. match.py reports the same
+      duplicate/wrap/execute/delete control flow; LLVM adds seam dispatches
+      and a larger frame.
