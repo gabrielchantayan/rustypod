@@ -46436,6 +46436,25 @@ functions:
       expr_delete for control bit 0, then tail-branches to tracked_free only
       when entries is not the inline slot at worklist+0x18.
 
+  - address: 0x083987d8
+    ghidra: FUN_083987d8
+    name: expr_worklist_init
+    size: 32
+    sig: "void expr_worklist_init(ExprWorklist *worklist, u32 owner, u32 reserved)"
+    module: sqlite/expr_worklist
+    status: ported
+    renames:
+      param_1/r0: worklist
+      param_2/r1: owner
+      param_3/r2: reserved
+    notes: >-
+      Raw osos.dec establishes the exact 32-byte body
+      0x083987d8..0x083987f8; expr_worklist_push begins at 0x083987f8.
+      Raw ARM has exactly two plain inbound BL sites (0x082cd33c and
+      0x0838d918) and no predicated inbound BL. It stores owner and the
+      caller-maintained reserved word, clears count, sets capacity to ten,
+      and makes entries point at the inline first item at worklist+0x18.
+
   - address: 0x08398904
     ghidra: FUN_08398904
     name: expr_worklist_push_matching_subtree

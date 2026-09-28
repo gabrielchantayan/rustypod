@@ -2172,6 +2172,9 @@ pub mod hints {
     // 0x0480_0000: dedicated to sqlite/expr_worklist's matching-subtree
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_WORKLIST_MATCHING_SUBTREE: usize = 0x0480_0000;
+    // 0x0580_0000: dedicated to sqlite/expr_worklist's initializer fixture;
+    // mappings never unmap, so no other user may share this hint.
+    pub const SQLITE_EXPR_WORKLIST_INIT: usize = 0x0580_0000;
     // 0x0600_0000: dedicated to sqlite/expr_code_expr_list's raw-u32
     // ExprList and item fixtures; mappings never unmap, so no other user may
     // share this hint.
