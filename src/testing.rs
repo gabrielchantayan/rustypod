@@ -654,6 +654,10 @@ pub mod hints {
     // 0x5d10_0000: dedicated to cxx/string_record_clone's target-width
     // source and C-string fixture; mappings never unmap.
     pub const STRING_RECORD_CLONE: usize = 0x5d10_0000;
+    // 0x5d20_0000: dedicated to cxx/slot_table_index_is_free's raw-u32 slot
+    // table and backing-array fixture; mappings never unmap, so no other user
+    // may share it.
+    pub const SLOT_TABLE_INDEX_IS_FREE: usize = 0x5d20_0000;
     // 0x5432_0000: dedicated to util/tree_children_flatten_into_parent's
     // target-width parent and hierarchy fixture; mappings never unmap.
     pub const TREE_CHILDREN_FLATTEN_INTO_PARENT: usize = 0x5432_0000;
