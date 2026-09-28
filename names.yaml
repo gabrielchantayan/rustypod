@@ -48340,6 +48340,23 @@ functions:
       alias, not a separate function). Port deviation - LLVM inlines
       the strlen (the cxx/string.rs precedent).
 
+  - address: 0x083942b0
+    ghidra: FUN_083942b0
+    name: current_unix_timestamp
+    size: 100
+    sig: "i32 current_unix_timestamp(i32 *out)"
+    module: time/current_unix_timestamp
+    status: ported
+    vars: {param_1: out}
+    notes: >-
+      Obtains the normalized current DateTime through
+      current_datetime_to_normalized_record @ 0x0808e9e0, converts it with
+      datetime_to_tm @ 0x08075ff0, and returns mktime @ 0x08031310's
+      timestamp. The 100-byte raw extent ends at the next push at 0x08394314.
+      Raw-word decoding finds three unconditional bl instructions and no
+      predicated bl instructions; the reported two call sites omits mktime.
+      A non-NULL out receives -1 when either conversion reports zero.
+
   - address: 0x08384f14
     ghidra: FUN_08384f14
     name: str_icmp
