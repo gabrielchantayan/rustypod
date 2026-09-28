@@ -155722,3 +155722,27 @@ functions:
       that node. Deliberate deviations: the unidentified ABI remains a
       verified fixed-address target on device and injected host seam; Rust
       uses a normal delete call rather than retaining r5 across the call.
+
+  - address: 0x0839e764
+    ghidra: FUN_0839e764
+    name: singly_linked_list_is_empty
+    size: 24
+    sig: "u32 singly_linked_list_is_empty(SinglyLinkedList *list)"
+    module: util/singly_linked_list_is_empty
+    status: ported
+    renames:
+      param_1/r0/r4: list
+      param_1_plus_0x04: head_link
+      FUN_0807a13c: singly_linked_list_count
+      uVar1/r0: node_count
+    notes: >-
+      Raw ARM establishes the exact 24-byte extent 0x0839e764..0x0839e77c:
+      six words from push {r4,lr} through pop {r4,pc}; the next separately
+      linked function begins at 0x0839e77c with push {r4-r8,lr}. Independent
+      whole-image A32 B/BL decoding finds exactly two inbound direct plain BL
+      sites, 0x08211ea0 and 0x08211f2c, and no predicated BL sites; the body
+      has one outbound plain BL, to ported singly_linked_list_count @
+      0x0807a13c. It calls that count helper on list+0x04 and returns one only
+      for a zero count, otherwise zero. The list address has no NULL guard.
+      Deliberate deviations: none; host tests cover empty, single-node, and
+      multi-node chains.
