@@ -357,6 +357,48 @@ pub unsafe extern "C" fn signed_key_tree_find_value_copy(
     out_value.write((candidate as usize as *const u32).add(5).read());
     1
 }
+/// `signed_key_tree_find_value_f8f0_copy` — original: `FUN_0839bc24` @
+/// `0x0839bc24` (**84 bytes**, exactly `0x0839bc24..0x0839bc74`; the next
+/// separately linked sibling begins at `0x0839bc78`).
+///
+/// Raw `osos.dec` decoding finds **2 direct inbound plain `bl` call sites**
+/// (0x081bd2dc and 0x081bd434), **0 predicated `bl` call sites**, and two
+/// unconditional body `bl` instructions: `signed_key_tree_find_node_f8f0_copy`
+/// @ 0x083db964 and `equal_deref_f8f0_copy` @ 0x083cf8f0.
+///
+/// Looks up signed `key` in `tree`. On a match, it stores the target-width
+/// value word at the selected node's +0x14 slot into `out_value` and returns
+/// 1. On a miss it leaves `out_value` untouched and returns 0. Deliberate
+/// deviation: the byte-identical equality leaf is represented by a direct
+/// candidate/header comparison, while the separately linked lower-bound
+/// target remains an explicit Rust call.
+///
+/// # Safety
+///
+/// `tree` must designate a readable [`SignedKeyTree`], `out_value` must be
+/// writable on a match, and every reachable node must meet
+/// [`signed_key_tree_find_node_f8f0_copy`]'s target-layout pointer
+/// requirements. A matching node must have a readable aligned word at +0x14.
+/// As in retailOS, none of these pointers is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn signed_key_tree_find_value_f8f0_copy(
+    tree: *const SignedKeyTree,
+    key: i32,
+    out_value: *mut u32,
+) -> u32 {
+    let mut candidate = 0u32;
+    signed_key_tree_find_node_f8f0_copy(addr_of_mut!(candidate), tree, addr_of!(key));
+
+    let header = addr_of!((*tree).header).read();
+    if candidate == header {
+        return 0;
+    }
+
+    out_value.write((candidate as usize as *const u32).add(5).read());
+    1
+}
+
 /// `signed_key_tree_find_value_f908_copy` — original: `FUN_0839bc78` @
 /// `0x0839bc78` (**84 bytes**, exactly `0x0839bc78..0x0839bccc`; the next
 /// separately linked function starts at `0x0839bccc`).
@@ -526,6 +568,48 @@ mod tests {
         output = 0xa5a5_5a5a;
         assert_eq!(unsafe { signed_key_tree_find_value_copy(&tree, 0, &mut output) }, 0);
         assert_eq!(output, 0xa5a5_5a5a);
+    }
+
+    #[test]
+    fn find_value_f8f0_copy_handles_signed_hits_and_preserves_misses() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SIGNED_KEY_TREE_FIND_VALUE_F8F0_COPY,
+            0x1000,
+        ) else {
+            return;
+        };
+        let base = slab as usize;
+        let word = |offset: usize| (base + offset) as u32;
+        let write = |offset: usize, value: u32| unsafe {
+            ((base + offset) as *mut u32).write(value)
+        };
+        let (header, root, left, right) = (word(0), word(0x40), word(0x60), word(0x80));
+        write(0x04, root);
+        write(0x48, left);
+        write(0x4c, right);
+        write(0x50, 0);
+        write(0x54, 0x1234_5678);
+        write(0x68, 0);
+        write(0x6c, 0);
+        write(0x70, i32::MIN as u32);
+        write(0x74, 0xdead_beef);
+        write(0x88, 0);
+        write(0x8c, 0);
+        write(0x90, i32::MAX as u32);
+        write(0x94, 0xa5a5_5a5a);
+        let tree = SignedKeyTree { opaque_prefix: [0; 4], header };
+
+        let mut output = 0;
+        assert_eq!(unsafe { signed_key_tree_find_value_f8f0_copy(&tree, i32::MIN, &mut output) }, 1);
+        assert_eq!(output, 0xdead_beef);
+        assert_eq!(unsafe { signed_key_tree_find_value_f8f0_copy(&tree, i32::MAX, &mut output) }, 1);
+        assert_eq!(output, 0xa5a5_5a5a);
+        output = 0xfeed_face;
+        assert_eq!(unsafe { signed_key_tree_find_value_f8f0_copy(&tree, -1, &mut output) }, 0);
+        assert_eq!(output, 0xfeed_face);
+        write(0x04, 0);
+        assert_eq!(unsafe { signed_key_tree_find_value_f8f0_copy(&tree, 0, &mut output) }, 0);
+        assert_eq!(output, 0xfeed_face);
     }
 
     #[test]
