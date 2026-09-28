@@ -306,6 +306,7 @@ pub mod result_error_toobig;
 pub mod step;
 pub mod vdbe;
 pub mod allocate_cursor;
+pub mod vdbe_reset;
 pub mod vdbe_unbind;
 pub mod vdbe_mem_apply_affinity;
 pub mod vdbe_mem_set_double;
