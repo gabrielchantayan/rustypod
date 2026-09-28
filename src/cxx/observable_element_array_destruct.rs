@@ -15,15 +15,13 @@
 //! final target and the call order, but do not establish a more specific class
 //! identity for the `0x0898219c` vtable.
 //!
-//! Deliberate deviation: the stock direct `bl` to the unresolved element
-//! disposal stage uses the existing direct-call seam so host tests can model
-//! it; target builds still call its verified retailOS address. The final stock
-//! tail branch is a regular Rust call into the existing port.
+//! Deliberate deviation: the stock direct `bl` is a regular Rust call to the
+//! ported element-disposal stage. The final stock tail branch is a regular Rust
+//! call into the existing port.
 
 use crate::app::class_registry::registry_container_destruct;
 use crate::app::registry::{Registry, RegistryVtable};
-use crate::cxx::observable_element_array_clear::OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS;
-use crate::cxx::observable_array::ObservableArray;
+use crate::cxx::observable_element_array_dispose_items::observable_element_array_dispose_items;
 
 /// Vtable literal loaded from `0x0839c294` and installed at object offset
 /// `+0x00` before the element-disposal stage.
@@ -37,9 +35,10 @@ pub const OBSERVABLE_ELEMENT_ARRAY_VTABLE_ADDRESS: usize = 0x0898_219c;
 ///
 /// # Safety
 ///
-/// `this` must be a writable instance accepted by both the unresolved element
-/// disposal stage and [`registry_container_destruct`]. Neither stock stage
-/// guards `this`, its observer, or the observer vtable.
+/// `this` must be a writable instance accepted by both
+/// [`observable_element_array_dispose_items`] and
+/// [`registry_container_destruct`]. Neither stock stage guards `this`, its
+/// observer, or the observer vtable.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.observable_element_array_destruct")]
@@ -48,10 +47,7 @@ pub unsafe extern "C" fn observable_element_array_destruct(this: *mut Registry) 
         core::ptr::addr_of_mut!((*this).vtable),
         OBSERVABLE_ELEMENT_ARRAY_VTABLE_ADDRESS as *const RegistryVtable,
     );
-    let dispose_items = core::ptr::read_volatile(core::ptr::addr_of!(
-        OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS
-    ));
-    dispose_items(this.cast::<ObservableArray>());
+    observable_element_array_dispose_items(this.cast());
     registry_container_destruct(this)
 }
 
@@ -66,9 +62,6 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static EVENTS: Mutex<std::vec::Vec<usize>> = Mutex::new(std::vec::Vec::new());
 
-    unsafe extern "C" fn record_dispose_items(this: *mut ObservableArray) {
-        EVENTS.lock().push(unsafe { (*(this.cast::<Registry>())).vtable as usize });
-    }
 
     unsafe extern "C" fn record_detach(_this: *mut RegistryObserver) -> *mut u8 {
         EVENTS.lock().push(0);
@@ -93,16 +86,11 @@ mod tests {
             reserved: [0; 2],
             observer: (&mut observer as *mut RegistryObserver).cast(),
         };
-
-        unsafe { OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS = record_dispose_items };
         let returned = unsafe { observable_element_array_destruct(&mut registry) };
-        unsafe {
-            OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS =
-                crate::cxx::observable_element_array_clear::DEFAULT_OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS;
-        }
+
 
         assert_eq!(returned, &mut registry as *mut Registry);
-        assert_eq!(*EVENTS.lock(), std::vec![OBSERVABLE_ELEMENT_ARRAY_VTABLE_ADDRESS, 0]);
+        assert_eq!(*EVENTS.lock(), std::vec![0]);
         assert_eq!(registry.vtable as usize, REGISTRY_CONTAINER_VTABLE_ADDRESS);
         assert!(registry.observer.is_null());
     }

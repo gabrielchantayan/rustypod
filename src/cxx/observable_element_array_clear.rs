@@ -13,21 +13,18 @@
 //!
 //! # Algorithm
 //!
-//! First invoke the unresolved direct callee at `0x0839c1c8`, which conditionally
+//! First invoke [`observable_element_array_dispose_items`], which conditionally
 //! walks the receiver's indexed elements and dispatches each non-NULL element's
 //! vtable slot `+0x04`. Then clear the observable-array base through its
-//! `+0xbc` signed tail-removal slot. The first callee has no established class
-//! identity, so this port preserves it as an explicit direct-call boundary
-//! rather than inventing one.
+//! `+0xbc` signed tail-removal slot.
 //!
-//! Deliberate deviation: the stock `bl` to the unported first stage is an
-//! indirect seam so host tests can model it; target builds call its verified
-//! retailOS load address. The final stock tail branch is a regular Rust call
-//! into the existing port, whose ARM implementation retains the tail dispatch
-//! into the concrete array vtable.
+//! Deliberate deviation: the stock direct `bl` is a regular Rust call. The
+//! final stock tail branch is likewise a Rust call into the existing port,
+//! whose ARM implementation retains the tail dispatch into the concrete array
+//! vtable.
 
+use super::observable_element_array_dispose_items::observable_element_array_dispose_items;
 use super::observable_array::ObservableArray;
-
 #[cfg(not(target_arch = "arm"))]
 use super::observable_array::observable_array_clear;
 
@@ -36,42 +33,6 @@ unsafe extern "C" {
     fn observable_array_clear(this: *mut ObservableArray);
 }
 
-/// Firmware load address of the unresolved element-disposal stage,
-/// `FUN_0839c1c8`.
-pub const OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS_ADDRESS: usize = 0x0839_c1c8;
-
-/// Direct-call boundary for the first stage of
-/// [`observable_element_array_clear`].
-///
-/// Raw ARM proves that this call accepts the same receiver and returns before
-/// the observable-array clear. Its internal conditional indexed walk and
-/// element `+0x04` virtual dispatch are known, but its owning class is not.
-pub type ObservableElementArrayDisposeItems = unsafe extern "C" fn(*mut ObservableArray);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_observable_element_array_dispose_items(this: *mut ObservableArray) {
-    let dispose_items: ObservableElementArrayDisposeItems =
-        unsafe { core::mem::transmute(OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS_ADDRESS) };
-    unsafe { dispose_items(this) };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_observable_element_array_dispose_items(_this: *mut ObservableArray) {
-    panic!("observable_element_array_clear requires unresolved FUN_0839c1c8")
-}
-
-#[cfg(target_os = "none")]
-pub const DEFAULT_OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS: ObservableElementArrayDisposeItems =
-    firmware_observable_element_array_dispose_items;
-
-#[cfg(not(target_os = "none"))]
-pub const DEFAULT_OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS: ObservableElementArrayDisposeItems =
-    missing_observable_element_array_dispose_items;
-
-/// Active direct-call boundary for the unresolved first stage. Host tests
-/// install recorders; target builds reach the still-mapped retailOS code.
-pub static mut OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS: ObservableElementArrayDisposeItems =
-    DEFAULT_OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS;
 
 /// Disposes indexed elements, then clears the observable-array base.
 ///
@@ -80,17 +41,14 @@ pub static mut OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS: ObservableElementArrayDis
 ///
 /// # Safety
 ///
-/// `this` must satisfy the unresolved first stage's receiver contract and the
-/// concrete observable-array contract of [`observable_array_clear`]. Neither
-/// stock stage guards `this`, its vtable, or the final `+0xbc` slot.
+/// `this` must satisfy both the indexed-element disposal and concrete
+/// observable-array contracts. Neither stock stage guards `this`, its vtable,
+/// or the final `+0xbc` slot.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.observable_element_array_clear")]
 pub unsafe extern "C" fn observable_element_array_clear(this: *mut ObservableArray) {
-    let dispose_items = unsafe {
-        core::ptr::read_volatile(core::ptr::addr_of!(OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS))
-    };
-    unsafe { dispose_items(this) };
+    unsafe { observable_element_array_dispose_items(this.cast()) };
     unsafe { observable_array_clear(this) };
 }
 
@@ -99,17 +57,22 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::observable_array::{
-        ObservableArrayClearHost, ObservableArrayClearVtable,
-    };
+    use crate::cxx::observable_element_array_dispose_items::HostObservableElementArray;
     use parking_lot::Mutex;
-
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static TEST_EVENTS: Mutex<std::vec::Vec<i64>> = Mutex::new(std::vec::Vec::new());
 
-    unsafe extern "C" fn record_dispose_items(_this: *mut ObservableArray) {
-        TEST_EVENTS.lock().push(i64::MIN);
+    #[repr(C)]
+    struct ClearVtable {
+        unresolved_00_3c: [usize; 16],
+        element_slot: unsafe extern "C" fn(*mut u8, usize) -> *mut *mut u8,
+        unresolved_44_b8: [usize; 30],
+        remove_tail: unsafe extern "C" fn(*mut ObservableArray, i32),
+    }
+
+    unsafe extern "C" fn element_slot(_: *mut u8, _: usize) -> *mut *mut u8 {
+        core::ptr::null_mut()
     }
 
     unsafe extern "C" fn record_remove_tail(_this: *mut ObservableArray, count: i32) {
@@ -117,27 +80,27 @@ mod tests {
     }
 
     #[test]
-    fn disposes_before_clearing_with_wrapping_lengths() {
+    fn clears_after_disabled_disposal_with_wrapping_lengths() {
         let _guard = TEST_LOCK.lock();
-        let vtable = ObservableArrayClearVtable {
-            unresolved_00_b8: [0; 47],
+        let vtable = ClearVtable {
+            unresolved_00_3c: [0; 16],
+            element_slot,
+            unresolved_44_b8: [0; 30],
             remove_tail: record_remove_tail,
         };
 
-        unsafe { OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS = record_dispose_items };
-        for (len, expected_count) in [(0, 0), (u32::MAX, 1)] {
+        for (len, expected_count) in [(0, 0), (-1, 1)] {
             TEST_EVENTS.lock().clear();
-            let mut array = ObservableArrayClearHost {
-                vtable: &vtable,
-                len,
+            let mut array = HostObservableElementArray {
+                vtable: (&vtable as *const ClearVtable).cast(),
+                count: len,
+                unresolved_08_to_27: [0; 0x20],
+                enabled: 0,
             };
 
-            unsafe { observable_element_array_clear((&mut array as *mut ObservableArrayClearHost).cast()) };
+            unsafe { observable_element_array_clear((&mut array as *mut HostObservableElementArray).cast()) };
 
-            assert_eq!(*TEST_EVENTS.lock(), std::vec![i64::MIN, expected_count]);
-        }
-        unsafe {
-            OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS = DEFAULT_OBSERVABLE_ELEMENT_ARRAY_DISPOSE_ITEMS;
+            assert_eq!(*TEST_EVENTS.lock(), std::vec![i64::from(expected_count)]);
         }
     }
 }
