@@ -156,6 +156,7 @@ pub mod id3_synchsafe_u28_decode;
 pub mod increment_shared_counter;
 pub mod le_read;
 pub mod linked_list_count;
+pub mod singly_linked_list_is_empty;
 pub mod linked_list_find_and_promote;
 pub mod linked_list_entry_update;
 pub mod linked_list_append;
