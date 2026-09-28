@@ -154705,3 +154705,38 @@ functions:
       keeps target pointers as u32, preserving the four-byte target layout on
       64-bit hosts. Host tests cover the terminal-node case and a multi-node
       chain with non-null left links. No behavioral deviations were made.
+  - address: 0x083b6798
+    ghidra: FUN_083b6798
+    name: stream_parse_radix_segment
+    size: 164
+    sig: "u8 *stream_parse_radix_segment(RadixSegmentContext *context, u8 *output)"
+    module: cxx/stream_parse_radix_segment
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: output
+      iVar1/r0: parsed_end
+      puVar2/r0: output_cursor
+      uVar3/r1: segment_len_or_flags
+      iVar4/r0: streams_match
+      FUN_083b683c: parse_radix_digits
+      FUN_083d6504: streambuf_slot_peek_equal
+      FUN_083d7158: streambuf_slot_peek_byte
+      FUN_083daf50: streambuf_slot_consume
+    notes: >-
+      Raw osos.dec decoding establishes the 164-byte A32 extent at
+      0x083b6798..0x083b6838: `pop {r4,r5,r6,pc}` is followed by the separately
+      linked radix-digit parser at 0x083b683c. The body has five direct,
+      unconditional plain BL instructions and zero predicated BL instructions:
+      it calls the radix parser, stream-buffer equality helper, byte peek
+      helper, consume helper, and itself. It parses one segment into output,
+      sets flag 0x4 on the 40-byte scratch boundary, sets flag 0x8 for a
+      segment length of at least 255, and otherwise prefixes a non-empty
+      segment with its byte length. If the streams agree and the input's next
+      byte equals context+0x78, it consumes that byte and recursively parses
+      the next segment. The parser at 0x083b683c remains unported; ARM builds
+      branch to its raw address and host tests install a recorder for that
+      helper. Rust keeps every target pointer field as a u32 to preserve the
+      four-byte layout on 64-bit hosts. Host tests cover the scratch boundary,
+      255-byte rejection, and successful delimiter-driven recursion. No
+      behavioral deviations were made.
