@@ -42,6 +42,10 @@ pub mod hints {
     // 0x6c00_0000: dedicated to cxx/vector_copy_construct_elem32's
     // target-width source, destination, and allocation fixture; mappings never unmap.
     pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;
+    // 0x6ff6_0000 / 0x6ff7_0000: dedicated to sqlite/delete_column_names's
+    // target-width Table and Column fixtures; mappings never unmap.
+    pub const SQLITE_DELETE_COLUMN_NAMES: usize = 0x6ff6_0000;
+    pub const SQLITE_DELETE_COLUMN_NAMES_EMPTY: usize = 0x6ff7_0000;
     // 0x6c50_0000: dedicated to util/bucket_chain_destroy_node8's raw-u32
     // owner, bucket allocation, and intrusive-chain fixture; mappings never unmap.
     pub const BUCKET_CHAIN_DESTROY_NODE8: usize = 0x6c50_0000;
