@@ -31,7 +31,8 @@
 //! Sizes from decomp/functions.csv; call-site counts from decoding every
 //! `b`/`bl` word in osos.dec (osos.asm drops lines and undercounts):
 //!
-//! - `read_u16_le` — `FUN_080ed738` @ 0x080ed738 (16 bytes; 34 call sites).
+//! - `read_u16_le` — `FUN_080ed738` @ 0x080ed738 (16 bytes; 34 call sites)
+//!   and `FUN_083943b8` @ 0x083943b8 (24 bytes; 2 call sites).
 //! - `read_u32_le` — `FUN_080ed748` @ 0x080ed748 (32 bytes; 66 call sites).
 //! - `read_u64_le` — `FUN_080ed768` @ 0x080ed768 (88 bytes; 2 call sites).
 //! - `read_u32_le_at` — `FUN_0839e7e8` @ 0x0839e7e8 (36 bytes; 4 call sites).
@@ -48,11 +49,15 @@
 //! left by less than 32 can never reach bit 32. Each of those terms is
 //! always zero, so the port drops them; the returned value is unchanged.
 
-/// read_u16_le — original: `FUN_080ed738` @ 0x080ed738 (16 bytes).
+/// read_u16_le — originals: `FUN_080ed738` @ 0x080ed738 (16 bytes) and
+/// `FUN_083943b8` @ 0x083943b8 (24 bytes; next real function 0x083943d0).
 ///
-/// Unaligned little-endian u16 load: `p[0] | p[1] << 8`, zero-extended to
-/// the full return register (the original leaves r0's top half clear
-/// because both operands are `ldrb`s).
+/// The latter has two inbound unconditional plain `bl` sites, zero predicated
+/// `bl` sites, and no body calls. Both assemble `p[0] | p[1] << 8` with
+/// byte loads, zero-extended to the full return register. Its extra
+/// `mov r2,#0xff00` / `and` is redundant for an `ldrb` high byte. Deliberate
+/// deviation: this shared seam omits that redundant mask and uses nonvolatile
+/// reads; the observable value and two-byte access extent are identical.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn read_u16_le(p: *const u8) -> u32 {
     (*p as u32) | ((*p.add(1) as u32) << 8)
