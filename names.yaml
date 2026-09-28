@@ -55562,6 +55562,26 @@ functions:
       routes the copy through __aeabi_memmove; the p==0 path stays a
       tail call (bx) through the malloc slot.
 
+  - address: 0x08391d34
+    ghidra: FUN_08391d34
+    name: realloc_tag57
+    size: 8
+    sig: "void *realloc_tag57(void *ptr, size_t size)"
+    module: heap/veneers
+    status: ported
+    vars: {param_1: ptr, param_2: size, r2: tag_57, r3: copy_on_move}
+    notes: >-
+      Raw osos.dec verifies the true 8-byte extent: mov r2,#0x39 followed
+      by b 0x08081688. The next function begins at 0x08391d3c, despite
+      Ghidra's 16-byte extent and invented calls. The secondary veneer at
+      0x08081688 sets r3=1 and tail-branches to realloc_wrapper @
+      0x080edbf0; this entry therefore forwards (ptr, size, tag 57,
+      copy-on-move 1). Raw caller scan found two plain inbound bl
+      instructions (0x08390f74 and 0x08390f90), zero predicated inbound
+      bl instructions, both from sqlite3_realloc. Deliberate deviation:
+      Rust makes the two tail branches one call to the existing ported
+      realloc_wrapper; arguments and returned pointer are unchanged.
+
   - address: 0x0837d38c
     ghidra: FUN_0837d38c
     name: sqlite3_malloc_zero

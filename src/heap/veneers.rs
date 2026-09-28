@@ -400,6 +400,22 @@ pub unsafe extern "C" fn realloc_wrapper(
     lazy_init_default_heap();
     (heap_ops().realloc)(default_heap(), ptr, size, a3, a4)
 }
+/// realloc_tag57 — original: `FUN_08391d34` @ 0x08391d34 (8 bytes; two
+/// plain inbound `bl`, zero predicated inbound `bl`; binary-verified).
+///
+/// The whole body is `mov r2, #0x39; b 0x08081688`; the adjacent secondary
+/// veneer sets `r3 = 1` then tail-branches to `realloc_wrapper` @ 0x080edbf0.
+/// Thus this two-argument ADS realloc entry uses heap tag 57 and requests a
+/// copy when the allocation moves.
+///
+/// Deliberate deviation: the two firmware tail branches are one Rust call;
+/// the observable arguments and result are preserved.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn realloc_tag57(ptr: *mut u8, size: usize) -> *mut u8 {
+    realloc_wrapper(ptr, size, 0x39, 1)
+}
+
 
 /// operator new (tag 2) — original @ 0x082aadd4 (8 bytes, 1797 call
 /// sites — the dominant allocator in osos): `mov r1, #2; b 0x080eb67c`.
@@ -1646,6 +1662,21 @@ pub(crate) mod tests {
             assert_eq!(LAST_REALLOC_PTR, BLOCK_A as *mut u8);
             assert_eq!(LAST_REALLOC_SIZE, 0x200);
             assert_eq!(LAST_REALLOC_A3, 1);
+            assert_eq!(LAST_REALLOC_A4, 1);
+        }
+    }
+
+    #[test]
+    fn realloc_tag57_forwards_fixed_tag_and_copy_flag() {
+        let _lock = mock_heap();
+        unsafe {
+            let p = realloc_tag57(core::ptr::null_mut(), usize::MAX);
+            assert_eq!(p, BLOCK_A as *mut u8);
+            assert_eq!(CREATE_CALLS, 1);
+            assert_eq!(REALLOC_CALLS, 1);
+            assert!(LAST_REALLOC_PTR.is_null());
+            assert_eq!(LAST_REALLOC_SIZE, usize::MAX);
+            assert_eq!(LAST_REALLOC_A3, 0x39);
             assert_eq!(LAST_REALLOC_A4, 1);
         }
     }
