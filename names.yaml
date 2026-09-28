@@ -53908,6 +53908,32 @@ functions:
       bic #768/orr #512, semantically identical to the original's
       bic #0x100/orr #0x200.
 
+  # ---- B-tree page-size-fixed flag (src/sqlite/btree_set_page_size_fixed.rs) ----
+  - address: 0x08372c70
+    ghidra: FUN_08372c70
+    name: btree_set_page_size_fixed
+    size: 72
+    sig: "u32 btree_set_page_size_fixed(Btree *btree, int fixed)"
+    module: sqlite/btree_set_page_size_fixed
+    status: ported
+    vars: {param_1/r0: btree, param_2/r1: fixed, iVar2/r4: shared_cache}
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x08372c70..0x08372cb8: push {r4,r5,r6,r7,r8,lr} begins the body,
+      pop {r4,r5,r6,r7,r8,pc} ends it, and the next distinct function starts
+      at 0x08372cb8. Ghidra finds two direct BL callers (0x0837f948 and
+      0x083828f0); raw-word decoding independently confirms both are
+      unconditional plain BL, with no predicated callers. The body has two
+      unconditional plain BL instructions — btree_enter @ 0x0837118c and
+      btree_leave @ 0x08371da4 — and no predicated BL. It normalizes fixed to
+      zero or one, enters the Btree, and compares it with
+      BtShared.pageSizeFixed (+0x16). A read-only BtShared (+0x15) accepts an
+      unchanged value but returns SQLITE_READONLY (8) for a change; a writable
+      cache stores the normalized value. It leaves on every path. The Btree
+      pBt pointer stays a target-width u32 so host pointer width cannot alter
+      the retail +0x04 field layout; host tests map the fixture below 4 GiB at
+      dedicated hint 0x6a60_0000. Deliberate deviations: none.
+
   # ---- B-tree shared-cache sizing (src/sqlite/btree_set_cache_size.rs) ----
   - address: 0x08372cb8
     ghidra: FUN_08372cb8
