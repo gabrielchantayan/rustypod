@@ -324,6 +324,37 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock(body: *mut RefcountedBody)
         mutex_unlock(mutex);
     }
 }
+/// refcounted_body_mutex_unlock_release_dtor_copy — original:
+/// `FUN_0839cd4c` @ 0x0839cd4c (16 bytes; 2 plain direct `bl` call sites at
+/// 0x0839ccf8 and 0x0839cd30; no predicated `bl` call sites). Raw ARM words
+/// are `e5900008 e3500000 1af38a51 e12fff1e`: load `body.mutex` at target
+/// +8, compare it with NULL, tail-branch to [`mutex_unlock`] @ 0x0807f6a0
+/// when present, otherwise return. The next separately linked function begins
+/// at 0x0839cd5c.
+///
+/// This unlock half follows `refcounted_body_release_dtor_copy` @ 0x0839ccac.
+/// `body` itself is deliberately not NULL-checked, matching retailOS.
+///
+/// No deliberate behavioral deviations. A distinct target-only section retains
+/// this separately linked, byte-identical helper instead of allowing LLVM to
+/// fold it into another refcounted-body mutex-unlock entry.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_unlock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_unlock_release_dtor_copy")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_unlock_release_dtor_copy(
+    body: *mut RefcountedBody,
+) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 
 /// refcounted_body_mutex_unlock_tag3 — original: `FUN_0839d5e4` @
 /// 0x0839d5e4 (16 bytes; 2 plain direct `bl` call sites at 0x0839d590 and
@@ -5495,6 +5526,28 @@ mod tests {
             body.mutex = core::ptr::null_mut();
             unsafe { refcounted_body_mutex_unlock(&mut body) };
             assert_eq!(events(), std::vec![Event::Signal(0x39)]);
+        }
+
+        #[test]
+        fn release_dtor_copy_body_mutex_unlock_signals_only_a_present_mutex() {
+            let _bench = bench();
+            let mut semaphore = 0x5f;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+
+            unsafe { refcounted_body_mutex_unlock_release_dtor_copy(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x5f)]);
+
+            body.mutex = core::ptr::null_mut();
+            unsafe { refcounted_body_mutex_unlock_release_dtor_copy(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x5f)]);
         }
 
         #[test]

@@ -48654,6 +48654,31 @@ functions:
       retaining the guard/decrement/slot-1-dispatch/teardown order. Host tests
       cover NULL, non-final mutex, final dispatch/teardown, and wrapping-zero
       paths.
+  - address: 0x0839cd4c
+    ghidra: FUN_0839cd4c
+    name: refcounted_body_mutex_unlock_release_dtor_copy
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_release_dtor_copy(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0839cd4c..0x0839cd5c: `ldr r0,[r0,#8]`; `cmp r0,#0`; `bne
+      0x0807f6a0`; `bx lr`. The next separately linked function begins at
+      0x0839cd5c. Decoding every A32 B/BL word in the image finds exactly two
+      inbound plain direct BL call sites, at 0x0839ccf8 and 0x0839cd30, and
+      zero predicated BL call sites. The bit-24-clear conditional branch is a
+      tail branch to ported mutex_unlock, not a BL call. This is the mutex
+      unlock half following refcounted_body_release_dtor_copy @ 0x0839ccac:
+      it loads target body+8, returns if NULL, otherwise tail-branches to
+      mutex_unlock. Body itself is not NULL-checked. Deliberate deviation: a
+      unique target-only text section preserves this separately linked,
+      byte-identical helper rather than allowing LLVM to fold it with another
+      mutex-unlock helper; behavior is unchanged.
   - address: 0x0839cb84
     ghidra: FUN_0839cb84
     name: refcounted_body_acquire_dtor
