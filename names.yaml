@@ -157220,3 +157220,31 @@ functions:
       value+0x0c; its class identity remains unrecovered. Rust calls its
       verified fixed target address on ARM and supplies a typed host operation
       for tests rather than inventing that identity.
+
+  - address: 0x08398d4c
+    ghidra: FUN_08398d4c
+    name: index_columns_equal
+    size: 132
+    sig: "u32 index_columns_equal(const Index *left_index, const Index *right_index, u32 unused, u32 unused_flags)"
+    module: sqlite/index_columns_equal
+    status: ported
+    renames:
+      param_1/r0: left_index
+      param_2/r1: right_index
+      "left_index+0x04": left_n_column
+      "right_index+0x04": right_n_column
+      "left_index+0x08": left_ai_column
+      "right_index+0x08": right_ai_column
+      "left_index+0x18": left_on_error
+      "right_index+0x18": right_on_error
+      "left_index+0x28": left_collation_names
+      "right_index+0x28": right_collation_names
+      "left_index+0x2c": left_collation_sequences
+      "right_index+0x2c": right_collation_sequences
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte extent
+      0x08398d4c..0x08398dd0. It has two inbound direct BL sites, both plain
+      unconditional (0x08398f9c and 0x08399260), no predicated inbound BL
+      sites, and no outbound BL instructions. It compares Index nColumn,
+      onError, aiColumn entries, collation-name bytes, and collation-sequence
+      words. The final two ABI arguments are unused.
