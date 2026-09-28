@@ -272,6 +272,7 @@ pub mod tree_children_flatten_into_parent_083ca0bc;
 pub mod tree_children_flatten_into_parent_083c9678;
 pub mod tree_children_flatten_into_parent_083bdc94;
 pub mod tree_children_flatten_into_parent_083cbfbc;
+pub mod tree_children_flatten_into_parent_083b7d2c;
 pub mod tree_children_release_083cb574;
 pub mod word_key_set_recycle_tree;
 pub mod service_manager_get;
