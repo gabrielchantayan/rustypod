@@ -394,6 +394,7 @@ pub mod observable_array_pair;
 pub mod owned_object_observable_array_destroy;
 pub mod opaque_observable_array_destroy;
 pub mod vtable_08982784_destruct;
+pub mod vtable_0898285c_destruct;
 pub mod vtable_089917a4_observable_array_destroy;
 pub mod vtable_089917a4_observable_array_take;
 pub mod vtable_089917a4_observable_array_construct;
