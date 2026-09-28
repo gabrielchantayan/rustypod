@@ -10,6 +10,7 @@ pub mod current_mac_epoch_seconds;
 pub mod current_mac_epoch_seconds_raw;
 pub mod current_datetime_query;
 pub mod current_datetime;
+pub mod current_unix_timestamp;
 pub mod normalize_day_and_seconds;
 pub mod datetime;
 /// Packed calendar record to FAT date/time fields @ 0x080aacc0.
