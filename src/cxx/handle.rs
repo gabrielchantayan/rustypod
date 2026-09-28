@@ -1839,6 +1839,52 @@ pub unsafe extern "C" fn refcounted_body_acquire(
     }
 }
 ///
+/// `refcounted_body_acquire_slot1_copy` — original: `FUN_0839cffc` @
+/// `0x0839cffc` (60 bytes, `0x0839cffc..0x0839d038`; the separately linked
+/// [`refcounted_body_release_slot1_copy`] starts at `0x0839d038`). Whole-image
+/// A32 decoding finds two inbound plain `bl` calls, at `0x081f0224` and
+/// `0x081f0240`, and no predicated inbound `bl` forms. The body has one
+/// predicated `blne` to [`mutex_lock`] @ `0x0807f5c4` and a predicated tail
+/// `bne` to [`mutex_unlock`] @ `0x0807f6a0`.
+///
+/// Stores `body` in `dst` before its NULL early return. For a non-NULL body,
+/// it loads and NULL-checks the optional mutex at target +8, wrapping-increments
+/// the signed refcount at +4, then reloads and independently NULL-checks the
+/// mutex before unlocking.
+///
+/// Deliberate deviation: Rust calls the ported mutex helpers directly; LLVM may
+/// inline them rather than preserve the retail predicated branch pair. The
+/// store/guard/increment/reload/guard ordering is preserved, and a dedicated
+/// target section prevents folding this separately hookable copy.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned pointer slot. A non-NULL `body` must point
+/// to a readable/writable [`RefcountedBody`]; neither pointer is NULL-checked
+/// by the stock function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_acquire_slot1_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_acquire_slot1_copy(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
+///
 /// refcounted_body_acquire_dtor — original: `FUN_0839cb84` @ 0x0839cb84
 /// (60 bytes; **3 direct `bl` callers**: unconditional at 0x0839ec94 and
 /// 0x083db810, and predicated `blne` at 0x083c6ccc). Raw ARM spans exactly
@@ -4476,6 +4522,38 @@ mod tests {
             let mut slot: *mut RefcountedBody = 0xdead_beefusize as *mut RefcountedBody;
             refcounted_body_acquire(&mut slot, core::ptr::null_mut());
             assert!(slot.is_null());
+        }
+    }
+
+    /// The 0x0839cffc slot-1 copy overwrites a preexisting slot before its
+    /// NULL-body early return.
+    #[test]
+    fn acquire_slot1_copy_null_body_stores_null() {
+        unsafe {
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_acquire_slot1_copy(&mut slot, core::ptr::null_mut());
+
+            assert!(slot.is_null());
+        }
+    }
+
+    /// The slot-1 copy retains ARM's wrapping increment for an unguarded body.
+    #[test]
+    fn acquire_slot1_copy_wraps_refcount_without_mutex() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = core::ptr::null_mut();
+
+            refcounted_body_acquire_slot1_copy(&mut slot, &mut body);
+
+            assert_eq!(slot as usize, &mut body as *mut RefcountedBody as usize);
+            assert_eq!(body.refcount, i32::MIN);
+            assert_eq!(body.opaque0, 0x1111_2222);
         }
     }
 
