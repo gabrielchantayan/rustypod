@@ -650,6 +650,57 @@ pub unsafe extern "C" fn refcounted_ptr_construct(
     }
     slot
 }
+///
+/// `refcounted_ptr_construct_showcase` — retailOS `FUN_0839ee14` @
+/// `0x0839ee14` (104 bytes). Raw ARM decoding proves the twenty-six-word
+/// extent through `pop {r4-r8,pc}` at `0x0839ee78`; the next independently
+/// linked function starts at `0x0839ee7c`. It has two inbound direct plain
+/// `bl` callers (`0x081b75e8`, `0x081b7890`) and no predicated `bl` callers.
+/// The body has three plain direct `bl` instructions (two `operator_new`,
+/// one `mutex_create`) and no predicated calls.
+///
+/// This C++ template instantiation clears `slot`, then when `implementation`
+/// is non-NULL creates a tag-2 12-byte [`RefcountedBody`] containing
+/// `{ implementation, 1, NULL }`. A nonzero `want_mutex` adds a tag-2
+/// 8-byte zeroed [`Mutex`], stores it at body+8, and calls [`mutex_create`]
+/// before publishing the body and returning `slot`. A NULL implementation
+/// performs no allocation.
+///
+/// Deliberate codegen deviation: LLVM may inline the ported
+/// [`mutex_create`] ROM-kernel dispatch rather than preserve the stock
+/// direct `bl`; the allocation, initialization, and publication order is
+/// retained. The dedicated target section prevents this separately hookable
+/// template instance from folding into a sibling.
+///
+/// # Safety
+///
+/// `slot` must be a valid, aligned pointer slot. `implementation` is opaque;
+/// allocation failures are unchecked, matching the original.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_construct_showcase")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_construct_showcase(
+    slot: *mut *mut RefcountedBody,
+    implementation: usize,
+    want_mutex: u32,
+) -> *mut *mut RefcountedBody {
+    slot.write(core::ptr::null_mut());
+    if implementation != 0 {
+        let body = operator_new(12).cast::<RefcountedBody>();
+        (*body).opaque0 = implementation;
+        (*body).refcount = 1;
+        (*body).mutex = core::ptr::null_mut();
+        if want_mutex != 0 {
+            let mutex = operator_new(8).cast::<Mutex>();
+            (*mutex).sem_cell = core::ptr::null_mut();
+            (*mutex).unused = 0;
+            (*body).mutex = mutex;
+            mutex_create(mutex);
+        }
+        slot.write(body);
+    }
+    slot
+}
 /// refcounted_ptr_construct_vtable_variant — original: `FUN_0839eed4` @
 /// 0x0839eed4 (104 bytes; 7 direct `bl` call sites, all unconditional:
 /// 0x08132ecc, 0x08133264, 0x0813349c, 0x081334f8, 0x08133e7c,
@@ -6970,6 +7021,59 @@ mod tests {
                     Event::SemaDefine(1, cell_arena),
                 ],
                 "both allocations precede the mutex cell create, in ARM order"
+            );
+        }
+
+        #[test]
+        fn showcase_construct_null_implementation_clears_slot_without_allocating() {
+            let _bench = bench();
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe {
+                refcounted_ptr_construct_showcase(slot_ptr, 0, u32::MAX)
+            };
+
+            assert_eq!(returned, slot_ptr);
+            assert!(slot.is_null());
+            assert!(events().is_empty());
+        }
+
+        #[test]
+        fn showcase_construct_mutex_path_initializes_before_publication() {
+            let _bench = bench();
+            let (body_arena, mutex_arena, cell_arena) = unsafe {
+                let arenas = &mut *core::ptr::addr_of_mut!(ARENAS);
+                (
+                    arenas[0].as_mut_ptr() as usize,
+                    arenas[1].as_mut_ptr() as usize,
+                    arenas[2].as_mut_ptr() as usize,
+                )
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+            let slot_ptr = &mut slot as *mut *mut RefcountedBody;
+
+            let returned = unsafe {
+                refcounted_ptr_construct_showcase(slot_ptr, 0xaabb_ccdd, 1)
+            };
+
+            assert_eq!(returned, slot_ptr);
+            assert_eq!(slot as usize, body_arena);
+            let body = unsafe { &*(body_arena as *const RefcountedBody) };
+            assert_eq!(body.opaque0, 0xaabb_ccdd);
+            assert_eq!(body.refcount, 1);
+            assert_eq!(body.mutex as usize, mutex_arena);
+            let mutex = unsafe { &*(mutex_arena as *const Mutex) };
+            assert_eq!(mutex.sem_cell as usize, cell_arena);
+            assert_eq!(mutex.unused, 0);
+            assert_eq!(
+                events(),
+                std::vec![
+                    Event::Alloc(12, 2),
+                    Event::Alloc(8, 2),
+                    Event::KernelAlloc(4),
+                    Event::SemaDefine(1, cell_arena),
+                ]
             );
         }
 
