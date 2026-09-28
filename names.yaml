@@ -155569,3 +155569,33 @@ functions:
       Rust port preserves the signed maximum result and required aligned reads.
       LLVM emits an ABI frame and equivalent comparison predicates; these are
       code-generation differences only. No behavioral deviations.
+
+  # --- slot table index is free ---
+  - address: 0x083b4a9c
+    ghidra: FUN_083b4a9c
+    name: slot_table_index_is_free
+    size: 44
+    sig: "u32 slot_table_index_is_free(const SlotTable *table, u32 index)"
+    module: cxx/slot_table_index_is_free
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: index
+      "*(table + 0x00)": slots
+      "*(table + 0x08)": capacity
+      "*(slots + index * 4)": slot_word
+      return/r0: is_free
+    notes: >-
+      Raw osos.dec words `e5902008 e1520001 9a000005 e5900000 e7900101
+      e3a01001 e1d10000 13a00001 112fff1e e3a00000 e12fff1e` establish the
+      exact 44-byte A32 extent at 0x083b4a9c..0x083b4ac8; bx lr ends this
+      function and the next separately linked function begins at 0x083b4ac8.
+      The body has zero outbound plain BL and zero outbound predicated BL
+      instructions. Independent whole-image decoding finds two inbound plain
+      BL sites, at 0x0824ce78 and 0x0824fba0, and zero predicated inbound BL
+      sites. It returns zero for an index outside the capacity at +0x08;
+      otherwise it returns whether the selected target-width slot word has a
+      clear low bit. Rust retains the four-byte target pointer field as a u32
+      and uses the verified raw A32 body on target. Host tests cover clear and
+      set low bits, capacity boundary rejection, and u32::MAX. No behavioral
+      deviations were made.

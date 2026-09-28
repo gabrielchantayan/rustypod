@@ -212,6 +212,7 @@ pub mod red_black_tree_payload_12_node_pool_acquire_083c2c54;
 pub mod red_black_tree_payload_12_node_pool_acquire_083b73f0;
 pub mod red_black_tree_payload_12_node_pool_recycle_chain_083b73ac;
 pub mod vector_growth_capacity;
+pub mod slot_table_index_is_free;
 pub mod red_black_tree_node_payload_address_083b69e4;
 pub mod red_black_tree_node_payload_address_083b6a34;
 pub mod red_black_tree_node_payload_address_083b6a5c;
