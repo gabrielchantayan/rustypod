@@ -57328,6 +57328,40 @@ functions:
       dispatches. On 64-bit host tests a typed widened Expr is copied;
       the target executes the original 0x44-byte memcpy.
 
+  - address: 0x08375378
+    ghidra: FUN_08375378
+    name: trigger_step_delete
+    size: 88
+    sig: "void trigger_step_delete(TriggerStep *step_list)"
+    module: sqlite/trigger_step_delete
+    status: ported
+    renames:
+      param_1/r0/r5: step_list
+      r4: step
+      "step+0x0c": p_select
+      "step+0x10": target_z
+      "step+0x14": target_n_dyn
+      "step+0x18": p_where
+      "step+0x1c": p_expr_list
+      "step+0x20": p_id_list
+      "step+0x24": next
+      FUN_083906f4: tracked_free
+      FUN_08377e00: expr_delete
+      FUN_08378670: expr_list_delete
+      FUN_08383c88: select_delete
+      FUN_0837b11c: id_list_delete
+    notes: >-
+      SQLite 3.5.x sqlite3DeleteTriggerStep. Raw osos.dec fixes the complete
+      88-byte extent at 0x08375378..0x083753cf: pop {r4-r6,pc} is followed by
+      the independent token-dequote helper beginning cmp r0,#0 at 0x083753d0.
+      Decoding raw ARM B/BL words finds two inbound plain BL callers and no
+      predicated BL callers. The body has five plain BL instructions and one
+      predicated blne: it saves next (+0x24), frees target.z (+0x10) only when
+      target_n_dyn (+0x14) has bit 0 set, then frees p_where, p_expr_list,
+      p_select, p_id_list, and the step itself in that order. Typed repr(C)
+      fields deliberately widen host pointers without changing the asserted
+      32-bit target offsets.
+
   - address: 0x08375328
     ghidra: FUN_08375328
     name: trigger_delete
@@ -57361,11 +57395,10 @@ functions:
       nameToken dyn bit at +0x18 is set, then tail-frees the Trigger itself.
       The five ordinary outbound BLs are the step destructor, zName/table
       frees, expression destructor, and identifier-list destructor; the
-      nameToken free is the sole predicated blne. All but trigger_step_delete
-      are already ported and called directly. trigger_step_delete @ 0x08375378
-      remains an unported volatile seam with a no-op default; host tests swap
-      it for a recorder. The typed repr(C) Trigger preserves every field's
-      target offset on ARM and keeps widened host pointer fields disjoint.
+      nameToken free is the sole predicated blne. All callees are now ported
+      and called directly, including trigger_step_delete @ 0x08375378. The
+      typed repr(C) Trigger preserves every field's target offset on ARM and
+      keeps widened host pointer fields disjoint.
 
   - address: 0x08391954
     ghidra: FUN_08391954

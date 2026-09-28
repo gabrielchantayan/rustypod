@@ -295,6 +295,7 @@ pub mod strdup;
 pub mod stmt_lru_remove;
 pub mod token_copy;
 pub mod trigger_delete;
+pub mod trigger_step_delete;
 pub mod trigger_step_dup;
 pub mod triggers_exist;
 pub mod select_op_name;
