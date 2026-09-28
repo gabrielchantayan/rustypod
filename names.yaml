@@ -157662,3 +157662,26 @@ functions:
       disjoint. Host tests cover a valid non-first binding (both release
       calls and integer stamp) plus NULL and range validation failures that
       neither store nor release a value.
+
+  # ---- Record header serial-type helper (src/sqlite/vdbe_last_serial_type_len.rs) ----
+  - address: 0x0838b570
+    ghidra: FUN_0838b570
+    name: vdbe_last_serial_type_len
+    size: 84
+    sig: "u32 vdbe_last_serial_type_len(const u8 *record)"
+    module: sqlite/vdbe_last_serial_type_len
+    status: ported
+    vars: {param_1: record, local_c: header_size, local_10: serial_type}
+    notes: >-
+      Raw osos.dec words at 0x0838b570..0x0838b5c0 establish the true
+      84-byte extent; 0x0838b5c4 is the next push prologue. Three plain,
+      unconditional bl instructions and no predicated bl: 0x0838b590 and
+      0x0838b5b4 call sqlite3GetVarint @ 0x0837ac30, and 0x0838b5bc calls
+      sqlite3VdbeSerialTypeLen @ 0x0838cfe8. The first byte is decoded
+      inline when below 0x80; otherwise the varint reader fills the stack
+      word. That header-size value selects record + header_size - 1, whose
+      byte is likewise decoded inline or through sqlite3GetVarint before
+      serial-type payload length is returned. The Rust get_varint seam has a
+      u64 out-param rather than the original u32 store; each decoded value is
+      deliberately truncated to u32 before the matching address arithmetic
+      or serial-type call.
