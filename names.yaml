@@ -156563,3 +156563,36 @@ functions:
       callees directly. Host tests use a narrow final-tail seam because
       Registry has host-width pointer fields while stock passes target layout
       unchanged.
+  # --- retailOS string-object opaque-base validator ---
+  - address: 0x0839c8b0
+    ghidra: FUN_0839c8b0
+    name: string_object_opaque_base_validate
+    size: 88
+    sig: "void string_object_opaque_base_validate(void *this)"
+    module: cxx/string_object_opaque_base_validate
+    status: ported
+    renames:
+      param_1: this
+      param_1_plus_0x04: count
+      param_1_plus_0x28: enabled
+      vtable_plus_0x40: indexed_element_at
+      FUN_08291fb4: string_object_opaque_base_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent: twenty-two words
+      from push {r4,r5,r6,lr} at 0x0839c8b0 through pop {r4,r5,r6,pc} at
+      0x0839c904; the next independently linked function starts at 0x0839c908.
+      The body has two unconditional plain direct BL calls, to ported
+      string_object_opaque_base_destroy/FUN_08291fb4 and ported
+      operator_delete/FUN_082aad24, no predicated direct BL calls, and one
+      unconditional virtual BLX through vtable+0x40. Whole-image A32 branch
+      decoding finds two inbound unconditional plain BL sites at 0x0839c954
+      and 0x0839c978, with no predicated inbound BL sites. If enabled is
+      nonzero, it scans signed indices [0,count), calls that virtual slot, and
+      on the first nonzero returned first word destroys it then tag-2 deletes
+      the returned allocation. The class and virtual-method identities remain
+      unrecovered, so the Rust name records only observed behavior. Host seams
+      represent target-width virtual slots and direct calls; target builds call
+      the two existing Rust ports directly. Host tests cover disabled, negative
+      count, and first-live-owner traversal; match.py exit 1 is the expected
+      structural review (LLVM frame and equivalent count guard).
