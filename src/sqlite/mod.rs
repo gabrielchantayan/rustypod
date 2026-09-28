@@ -240,6 +240,7 @@ pub mod os_device_characteristics;
 pub mod os_file_size;
 pub mod os_lock;
 pub mod os_open;
+pub mod os_open_forced_flags;
 pub mod os_read;
 pub mod os_sync;
 pub mod os_truncate;
