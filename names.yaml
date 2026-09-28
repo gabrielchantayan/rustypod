@@ -155521,3 +155521,27 @@ functions:
       leaving right-child edges, retaining the header sentinel. Target links
       remain u32 words to preserve the retail four-byte layout on hosts;
       deliberate deviations: none.
+
+  # --- signed word minimum ---
+  - address: 0x083b4bdc
+    ghidra: FUN_083b4bdc
+    name: signed_word_min
+    size: 20
+    sig: "i32 signed_word_min(const i32 *left, const i32 *right)"
+    module: util/signed_word_min
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r0: minimum
+    notes: >-
+      Raw osos.dec words establish the exact five-word A32 extent at
+      0x083b4bdc..0x083b4bec: bx lr ends this function and the next separately
+      linked function begins at 0x083b4bf0. It loads both aligned signed
+      32-bit words and returns the lesser; on equality the raw movge selects
+      the second word, which is value-identical. Complete raw-firmware branch
+      decoding finds exactly two inbound unconditional plain BL instructions at
+      0x08252ea8 and 0x08252ed8, with zero predicated BL instructions. The
+      Rust port preserves the signed minimum result and required aligned reads.
+      LLVM emits an ABI frame and equivalent reversed comparison predicates;
+      these are code-generation differences only. No behavioral deviations.
