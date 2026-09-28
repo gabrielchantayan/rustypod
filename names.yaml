@@ -49384,6 +49384,39 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e2c8
+    ghidra: FUN_0839e2c8
+    name: dma_aligned_u16_array_construct
+    size: 128
+    sig: "DmaAlignedArray *dma_aligned_u16_array_construct(DmaAlignedArray *array, u32 element_count, u32 allocation_tag)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1: element_count
+      param_3/r2: allocation_tag
+      iVar1/r0: allocation
+      uVar2/r0: aligned_data
+    notes: >-
+      Raw osos.dec words establish the exact 128-byte A32 body
+      0x0839e2c8..0x0839e348; the following push {r4,lr} at 0x0839e348
+      starts the next separately linked function. Decoding every ARM B/BL
+      immediate finds exactly two direct BL callers, both unconditional
+      (0x081f4bdc and 0x081f4bf8), with zero predicated BL forms. The body
+      clears raw allocation +0x00 and aligned view +0x04, stores element_count
+      at +0x08, and clears construction byte +0x0c. It allocates
+      element_count*2 + 0x40 through already ported malloc_wrapper, aligns the
+      resulting block up to 32 bytes, and if bit 27 is set, clean-invalidates
+      the element_count*2-byte view through already ported
+      dcache_clean_invalidate before setting bit 31 in the stored view. Its
+      count-sized empty trivial-element construction walk completes before
+      construction byte = 1. The u16 element width is established by the
+      allocation and cache-range left shifts. Rust uses black_box to retain the
+      empty walk; it has no memory effect. No dispatch seam was added because
+      both callees are already ported. match.py reports the expected structural
+      diff: heap and cache ports dispatch through their established ops tables,
+      and Rust retains a larger frame around those calls.
+
   - address: 0x0839e7c4
     ghidra: FUN_0839e7c4
     name: store_u32_le_at
