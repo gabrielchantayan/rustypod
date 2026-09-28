@@ -101,6 +101,7 @@ pub mod btree_release_locks;
 pub mod btree_commit_phase_two;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
+pub mod btree_get_auto_vacuum;
 pub mod btree_schema;
 pub mod btree_update_meta;
 pub mod btree_set_page_size;

@@ -197,6 +197,9 @@ pub mod hints {
     // 0x6a60_0000: dedicated to sqlite/btree_set_page_size_fixed's
     // target-width Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_SET_PAGE_SIZE_FIXED: usize = 0x6a60_0000;
+    // 0x6a70_0000: dedicated to sqlite/btree_get_auto_vacuum's target-width
+    // Btree and BtShared fixture; mappings never unmap.
+    pub const SQLITE_BTREE_GET_AUTO_VACUUM: usize = 0x6a70_0000;
     // 0x6a20_0000: dedicated to sqlite/btree_factory's target-width
     // Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_FACTORY: usize = 0x6a20_0000;
