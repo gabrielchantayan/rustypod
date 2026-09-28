@@ -54366,6 +54366,29 @@ functions:
       predicated moveq - same null branch, same byte load, same
       compare-against-2 structure.
 
+  # ---- B-tree cursor EOF probe (src/sqlite/btree_cursor_is_eof.rs) ----
+  - address: 0x08371bfc
+    ghidra: FUN_08371bfc
+    name: btree_cursor_is_eof
+    size: 68
+    sig: "u32 btree_cursor_is_eof(const BtCursor *cursor)"
+    module: sqlite/btree_cursor_is_eof
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r0: current_page
+    notes: >-
+      Raw A32 establishes the 68-byte extent 0x08371bfc..0x08371c3f; the
+      next separately linked function begins at 0x08371c40. The body has no
+      BL calls, plain or predicated. Whole-image ARM decoding finds exactly
+      two inbound plain BL calls (0x08372348 and 0x083729d4), with no
+      predicated callers. SQLite sqlite3BtreeEof returns one for a null
+      current-page record; otherwise pages with more than one cell return
+      zero, while zero- and one-cell pages inspect the current cell marker
+      bytes at +3 and +4. The cursor and page pointer fields are target-width
+      little-endian u32 words; host tests use dedicated low-address storage.
+      No deliberate behavioral deviations.
+
   - address: 0x08371da4
     ghidra: FUN_08371da4
     name: btree_leave
