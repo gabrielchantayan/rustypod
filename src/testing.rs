@@ -75,6 +75,11 @@ pub mod hints {
     // fixtures; mappings never unmap, so each test uses a distinct address.
     pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT_083B6A6C: usize = 0x83d0_0000;
     pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT_083B6A6C_CHAIN: usize = 0x83e0_0000;
+    // 0x8410_0000 / 0x8420_0000: dedicated to
+    // cxx/red_black_tree_rightmost_descendant_083b69fc's target-width node
+    // fixtures; mappings never unmap, so each test uses a distinct address.
+    pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT_083B69FC: usize = 0x8410_0000;
+    pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT_083B69FC_CHAIN: usize = 0x8420_0000;
     // 0x83c1_0000: dedicated to cxx/red_black_tree_leftmost_descendant's
     // target-width chain fixture; mappings never unmap.
     pub const RED_BLACK_TREE_LEFTMOST_DESCENDANT_CHAIN: usize = 0x83c1_0000;

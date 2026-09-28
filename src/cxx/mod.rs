@@ -211,6 +211,7 @@ pub mod red_black_tree_node_payload_address_083b6a34;
 pub mod red_black_tree_node_payload_address_083b6a5c;
 pub mod red_black_tree_node_payload_address_083b6acc;
 pub mod red_black_tree_node_payload_address_083b6a64;
+pub mod red_black_tree_rightmost_descendant_083b69fc;
 pub mod red_black_tree_rightmost_descendant_083b6a6c;
 pub mod red_black_tree_leftmost_descendant_083b6a10;
 pub mod red_black_tree_rightmost_descendant;

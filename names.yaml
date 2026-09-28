@@ -154637,3 +154637,29 @@ functions:
       preserving the four-byte target layout on 64-bit hosts. Host tests cover
       the terminal-node case and a multi-node chain with non-null right links.
       No behavioral deviations were made.
+
+  # --- red-black-tree rightmost descendant ---
+  - address: 0x083b69fc
+    ghidra: FUN_083b69fc
+    name: red_black_tree_rightmost_descendant_083b69fc
+    size: 20
+    sig: "u32 red_black_tree_rightmost_descendant_083b69fc(u32 node)"
+    module: cxx/red_black_tree_rightmost_descendant_083b69fc
+    status: ported
+    renames:
+      param_1/r0: node
+      "*(node + 0x0c)": right_child
+      return/r0: rightmost_node
+    notes: >-
+      Raw osos.dec words `e590100c e3510000 11a00001 1afffffb e12fff1e`
+      establish the exact 20-byte A32 extent at 0x083b69fc..0x083b6a10; the
+      next separately linked function begins at 0x083b6a10. The function
+      repeatedly follows the target-width right-child word at node+0x0c until
+      it is null, returning that terminal node. Raw A32 decoding confirms zero
+      outbound plain BL and zero outbound predicated BL instructions.
+      Independent whole-image decoding confirms two inbound plain BL sites, at
+      0x083bf80c and 0x083c00c4, and zero predicated inbound BL sites. No
+      callee seam is needed. Rust reads word index 3 using volatile access and
+      keeps target pointers as u32, preserving the four-byte target layout on
+      64-bit hosts. Host tests cover the terminal-node case and a multi-node
+      chain with non-null left links. No behavioral deviations were made.
