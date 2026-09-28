@@ -131,6 +131,7 @@ pub mod cursor_moveto;
 pub mod date_time_parse_clear_flags;
 pub mod dequote;
 pub mod dequote_expr_token;
+pub mod default_row_est;
 pub mod ephemeral_fn;
 pub mod error;
 pub mod error_message;

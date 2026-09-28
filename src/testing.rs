@@ -477,6 +477,9 @@ pub mod hints {
     // descriptor and pending-frame fixtures; mappings never unmap, so no other
     // port may share this hint.
     pub const VDBE_FRAME_LIST_CLEAR: usize = 0x1a30_0000;
+    // 0x1a40_0000: dedicated to sqlite/default_row_est's target-width Index
+    // and aiRowEst fixture; mappings never unmap, so no other port may share it.
+    pub const SQLITE_DEFAULT_ROW_EST: usize = 0x1a40_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
     pub const PENDING_EVENT_DISCARD_ALL_FOR_KEY: usize = 0x1b10_0000;
     // 0x1b20_0000: dedicated to app/pending_event_timer_rearm's raw-u32
