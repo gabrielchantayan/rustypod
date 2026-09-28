@@ -266,6 +266,32 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock(body: *mut RefcountedBody)
     }
 }
 
+/// refcounted_body_mutex_unlock_tag3 — original: `FUN_0839d5e4` @
+/// 0x0839d5e4 (16 bytes; 2 plain direct `bl` call sites at 0x0839d590 and
+/// 0x0839d5c8, no predicated `bl` calls). Raw ARM instructions load the
+/// optional mutex from target +8, compare it to zero, conditionally branch to
+/// `mutex_unlock` @ 0x0807f6a0, and end with `bx lr` at 0x0839d5f0; the
+/// independently linked next function begins at 0x0839d5f4.
+///
+/// Unlocks the optional mutex guarding a tag-3 refcounted body. `body` itself
+/// is not NULL-checked, matching retailOS. No deliberate deviations: the
+/// target-only section preserves this separately linked copy instead of
+/// allowing LLVM to fold it into its byte-identical siblings.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_unlock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_unlock_tag3")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_unlock_tag3(body: *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 /// refcounted_body_mutex_unlock_copy — original: `FUN_0839cc60` @ load
 /// address 0x0839cc60 (16 bytes; 4 direct `bl` call sites, all
 /// unconditional: 0x0816ccfc, 0x0816cd34, 0x0839cc0c, and 0x0839cc44).
@@ -5078,6 +5104,28 @@ mod tests {
             body.mutex = core::ptr::null_mut();
             unsafe { refcounted_body_mutex_unlock(&mut body) };
             assert_eq!(events(), std::vec![Event::Signal(0x39)]);
+        }
+
+        #[test]
+        fn tag3_body_mutex_unlock_signals_only_a_present_mutex() {
+            let _bench = bench();
+            let mut semaphore = 0x5e;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut body = RefcountedBody {
+                opaque0: 0,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+
+            unsafe { refcounted_body_mutex_unlock_tag3(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x5e)]);
+
+            body.mutex = core::ptr::null_mut();
+            unsafe { refcounted_body_mutex_unlock_tag3(&mut body) };
+            assert_eq!(events(), std::vec![Event::Signal(0x5e)]);
         }
 
         #[test]
