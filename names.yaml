@@ -48501,6 +48501,37 @@ functions:
       the ported mutex and heap helpers, retaining the same
       guard/decrement/dispose/unlock/teardown order.
 
+  - address: 0x0839cffc
+    ghidra: FUN_0839cffc
+    name: refcounted_body_acquire_slot1_copy
+    size: 60
+    sig: "void refcounted_body_acquire_slot1_copy(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1/r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent 0x0839cffc..0x0839d038:
+      `push {r4,lr}; movs r4,r1; str r1,[r0]; popeq {r4,pc}; ldr
+      r0,[r4,#8]; cmp r0,#0; blne mutex_lock; ldr r0,[r4,#4]; add
+      r0,r0,#1; str r0,[r4,#4]; ldr r0,[r4,#8]; cmp r0,#0; popne
+      {r4,lr}; bne mutex_unlock; pop {r4,pc}`. The next separately linked
+      function, refcounted_body_release_slot1_copy, begins at 0x0839d038.
+      Full osos.dec A32 branch decoding finds exactly two inbound plain bl
+      calls, at 0x081f0224 and 0x081f0240, and zero predicated inbound bl
+      calls. The body contains one predicated blne to ported mutex_lock
+      0x0807f5c4 and a predicated tail bne to ported mutex_unlock 0x0807f6a0.
+      It stores body into dst before its NULL early-out, then independently
+      loads and NULL-checks the optional body+8 mutex before lock and unlock
+      around the wrapping signed refcount increment at body+4. Rust directly
+      calls the ported mutex helpers; LLVM may inline them rather than preserve
+      the retail predicated branch pair, while retaining store/guard/increment/
+      reload/guard ordering. Host tests cover NULL overwrite and wrapping
+      increment with a NULL mutex.
+
   - address: 0x0839d038
     ghidra: FUN_0839d038
     name: refcounted_body_release_slot1_copy
