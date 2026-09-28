@@ -156927,3 +156927,27 @@ functions:
       seam-induced BLX and frame differences from the stock direct BL/tail B
       structure; the host test verifies vtable installation, call order,
       argument forwarding, and base-return forwarding.
+
+  - address: 0x0839c0c4
+    ghidra: FUN_0839c0c4
+    name: vtable_08981fec_destruct
+    size: 36
+    sig: "u32 *vtable_08981fec_destruct(u32 *this)"
+    module: cxx/vtable_08981fec_destruct
+    status: ported
+    vars: {param_1/r0/r4: this, DAT_0839c0e8: VTABLE_08981FEC, FUN_0839bfdc: assert_elements_released, FUN_08135380: registry_container_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent 0x0839c0c4..0x0839c0e8:
+      eight A32 instructions from push {r4,lr} through the tail b at
+      0x0839c0e4 plus the trailing vtable literal 0x08981fec at 0x0839c0e8;
+      0x0839c0ec begins the next real function. Whole-image A32 decoding finds
+      two inbound unconditional plain BL sites (0x08101bdc and 0x0811d910)
+      and zero predicated inbound BL sites. The body installs its vtable,
+      directly calls the unported assertion stage FUN_0839bfdc, then
+      tail-branches to ported registry_container_destruct @ 0x08135380 and
+      returns its result. FUN_0839bfdc verifies that an enabled collection has
+      no remaining elements, but its virtual accessor and fatal path remain
+      unported; ARM reaches its verified fixed address through a typed
+      function-pointer seam and host tests inject both callees. match.py is
+      expected to show the seam-induced BLX and frame differences from stock's
+      direct BL/tail-B structure.
