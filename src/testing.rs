@@ -3125,6 +3125,9 @@ pub mod hints {
     // 0x7760_0000: dedicated to sqlite/index_columns_equal's target-width
     // Index objects and key-array fixtures; mappings never unmap.
     pub const SQLITE_INDEX_COLUMNS_EQUAL: usize = 0x7760_0000;
+    // 0x7770_0000: dedicated to sqlite/emit_cursor_setup's target-width
+    // Parse, source, and Vdbe fixtures; mappings never unmap.
+    pub const SQLITE_EMIT_CURSOR_SETUP: usize = 0x7770_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
