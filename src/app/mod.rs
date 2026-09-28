@@ -704,3 +704,4 @@ pub mod guarded_global_index_transform;
 pub mod string_pointer_list_join;
 pub mod path_facade_resolve_relative;
 pub mod thumbnail_location_cache_entry;
+pub mod tagged_record_pairs_initialize;
