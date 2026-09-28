@@ -46585,6 +46585,37 @@ functions:
       private word and lookup seams to prove signed-bound inclusion, wrapping
       direct arithmetic, lookup forwarding, success, and fallback behavior.
 
+  - address: 0x0839b6e0
+    ghidra: FUN_0839b6e0
+    name: parser_stack_push
+    size: 120
+    sig: "void parser_stack_push(u32 *stack, u32 token, u32 parser_state, const u32 *value)"
+    module: sqlite/parser_stack_push
+    status: ported
+    renames:
+      param_1/r0: stack
+      param_2/r1: token
+      param_3/r2: parser_state
+      param_4/r3: value
+      iVar1: top
+      iVar2: parse
+      FUN_083998a4: interp_stack_pop_release
+      FUN_083767a0: sqlite_error_msg
+    notes: >-
+      Raw osos.dec has exactly 30 ARM instructions (120 bytes) from
+      0x0839b6e0 through 0x0839b754. The following 24 bytes are the
+      NUL-terminated "parser stack overflow" literal; the next independent
+      function begins with push {r0-r3,r4-r11,lr} at 0x0839b770. Decoding
+      each body word finds two unconditional plain bl instructions
+      (0x0839b710 to interp_stack_pop_release @ 0x083998a4 and 0x0839b728
+      to sqlite_error_msg @ 0x083767a0), with zero predicated bl forms.
+      The SQLite parser increments stack word 0, storing token, parser state,
+      and the three-word value record at word 3 + 5 * top while top < 100.
+      Overflow restores top to 99, drains live slots, reports the fixed
+      message, sets Parse.parseError at target +0x14, and retains the context
+      pointer in word 2. Deliberate deviations: unused variadic arguments are
+      an explicit null VaList, and host fixtures use a low mapped target-width
+      Parse pointer; LLVM expands the paired/multiple ARM loads and stores.
   - address: 0x083998a4
     ghidra: FUN_083998a4
     name: interp_stack_pop_release

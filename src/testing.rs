@@ -291,6 +291,9 @@ pub mod hints {
     // 0x7f00_0000: dedicated to app/file_record_registry_destruct's
     // target-width registry fixture; mappings never unmap.
     pub const FILE_RECORD_REGISTRY_DESTRUCT: usize = 0x7f00_0000;
+    // 0x1330_0000: dedicated to sqlite/parser_stack_push's target-width Parse
+    // fixture; mappings never unmap, so no other port may share it.
+    pub const SQLITE_PARSER_STACK_PUSH: usize = 0x1330_0000;
     // 0x6f90_0000: dedicated to app/thumbnail_location_cache_entry's
     // request, cache, and entry-base raw-u32 fixture; mappings never unmap.
     pub const THUMBNAIL_LOCATION_CACHE_ENTRY: usize = 0x6f90_0000;

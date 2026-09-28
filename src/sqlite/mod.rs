@@ -134,6 +134,7 @@ pub mod close;
 pub mod exec_first_column_sql;
 pub mod execute_sql;
 pub mod error_msg;
+pub mod parser_stack_push;
 pub mod expire_prepared_statements;
 pub mod expr_affinity;
 pub mod expr_and;
