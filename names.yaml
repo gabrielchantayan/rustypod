@@ -155248,3 +155248,29 @@ functions:
       on 64-bit hosts. Existing shared host tests cover right-subtree descent,
       a direct parent successor, repeated parent climbs, and both header
       sentinel outcomes. No behavioral deviations were made.
+  - address: 0x083b57b8
+    ghidra: FUN_083b57b8
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: next
+      iVar2/r2: current
+    notes: >-
+      Raw osos.dec A32 words establish the exact 84-byte extent
+      0x083b57b8..0x083b5808, ending in bx lr; the next independently linked
+      function begins at 0x083b580c. The body contains no BL instructions.
+      Independent raw branch decoding confirms two inbound plain,
+      unconditional BL call sites at 0x083c0314 and 0x083c07e4 and zero
+      predicated BL call sites. It is byte-identical to the established
+      red_black_tree_advance_cursor port at 0x083b609c, so this address
+      deliberately reuses that symbol rather than adding a redundant seam.
+      The function advances an in-order red-black-tree cursor: it descends a
+      non-null right subtree's left spine, otherwise climbs parent links out
+      of right-child edges and preserves the header sentinel. Target links
+      remain u32 words, retaining the firmware's four-byte layout on 64-bit
+      hosts. The dedicated host test covers multi-level right-subtree descent.
+      No behavioral deviations were made.
