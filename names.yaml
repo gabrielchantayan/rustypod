@@ -64792,6 +64792,47 @@ functions:
       directly; equal_deref remains inlined as the equivalent candidate !=
       header test.
 
+  - address: 0x0839bd20
+    ghidra: FUN_0839bd20
+    name: element_callback_scope_register
+    size: 148
+    sig: "i32 element_callback_scope_register(u32 *out, i32 element_index, u32 callback_argument, u32 callback_target, u32 callback_selector)"
+    module: app/element_callback_scope_register
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: element_index
+      param_3/r2: callback_argument
+      param_4/r3: callback_target
+      param_5/[sp]: callback_selector
+      local_28: callback_scope
+      FUN_080f1038: element_array0_at
+      FUN_082aadd4: operator_new
+      FUN_082840e8: context_scope_init
+      FUN_08284188: context_scope_drop
+      FUN_08105ffc: element_table
+    notes: >-
+      Raw osos.dec words establish the exact 148-byte A32 body from
+      0x0839bd20 through the tail branch at 0x0839bdb0; the distinct
+      push at 0x0839bdb4 begins container_dispose_elements. Complete A32
+      decoding finds exactly two inbound plain unconditional bl calls
+      (0x082c7a7c and 0x082c7bac), zero predicated inbound bl calls, six
+      direct unconditional body bl calls, zero predicated body bl calls,
+      and one unconditional indirect blx. It gets array-0[element_index],
+      returns -1 on NULL, allocates 20 bytes, then calls callback_target
+      with a 20-byte stack callback scope, element, and callback_argument.
+      An odd callback_selector selects the callback word at
+      (callback_target & ~3) + (callback_selector >> 1); an even selector
+      uses callback_target directly. It constructs the allocation as a
+      context scope with callback_scope+4 as subject, drops the stack scope,
+      and invokes the unported direct target 0x083d5040 on
+      element_table()+0x78 and that allocation. Ghidra's out parameter is
+      never read or written by the raw body. Deliberate deviation: the
+      unported 0x083d5040 remains a fixed target call without assigning it
+      an invented identity; host tests use explicit lookup, allocation,
+      construction, drop, and registration seams because target-width code
+      words cannot represent host callback pointers.
+
   - address: 0x0839bdb4
     ghidra: FUN_0839bdb4
     name: container_dispose_elements
