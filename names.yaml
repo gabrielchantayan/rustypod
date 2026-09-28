@@ -158020,3 +158020,26 @@ functions:
       callee statuses. match.py confirms the same save/enter/call/release
       shape; expected differences are LLVM's wider frame and the absolute
       target-call literal with blx.
+
+  - address: 0x0837dd9c
+    ghidra: FUN_0837dd9c
+    name: pager_close
+    size: 188
+    sig: "i32 pager_close(Pager *pager)"
+    module: sqlite/pager_close
+    status: ported
+    renames:
+      param_1/r0: pager
+      "[pager + 0xd4]": previous
+      "[pager + 0xd8]": next
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte A32 extent
+      0x0837dd9c..0x0837de58: the literal at 0x0837de58 is followed by the
+      next push instruction at 0x0837de5c. Decoding finds seven plain BL and
+      two predicated BLNE instructions. This is SQLite's pager close path:
+      unlink non-memory pagers, bracket cache/context teardown in a benign
+      fault scope, close owned files, and release owned allocations. The
+      context cleanup at 0x082dd800 remains retailOS-owned; target builds
+      call it directly and host tests use a private seam. match.py reports
+      LLVM's expected structural differences around target-width fields and
+      the fixed-address call.
