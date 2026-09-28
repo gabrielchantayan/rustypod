@@ -64910,6 +64910,29 @@ functions:
       an fp frame, a volatile seam load and blx rather than the retail
       direct bl; the key pair, result load, and node+0x11 return remain.
 
+  - address: 0x083b8adc
+    ghidra: FUN_083b8adc
+    name: byte_key_tree_equal_range
+    size: 160
+    sig: "void byte_key_tree_equal_range(ByteKeyTreeEqualRange *result, ByteKeyTree *tree, const u8 *key)"
+    module: cxx/byte_key_tree_equal_range
+    status: ported
+    vars: {param_1: result, param_2: tree, param_3: key, iVar3: node, iVar4: lower, iVar1: upper}
+    notes: >-
+      Raw osos.dec establishes the true 160-byte extent
+      0x083b8adc..0x083b8b7c (the next real function begins at
+      0x083b8b7c). Decoding aligned ARM words finds exactly two plain,
+      unconditional BL instructions, both targeting less_unsigned_byte @
+      0x083d73bc; no predicated BL exists. The first root-to-leaf walk is
+      lower_bound: node.key < key follows right (+0xc), otherwise remembers
+      the node and follows left (+0x8). The second is upper_bound: key <
+      node.key remembers and follows left; otherwise follows right. The
+      result stores those candidates at +0/+4, producing the half-open
+      equal range. The comparator is already ported and called directly;
+      typed #[repr(C)] fields replace target offsets, retaining exact
+      layout on ARM while host pointers widen safely. Host tests cover below
+      minimum, exact minimum/middle/maximum, a gap, and above maximum.
+
   - address: 0x083b867c
     ghidra: FUN_083b867c
     name: byte_key_tree_insert_unique
