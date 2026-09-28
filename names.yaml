@@ -157355,3 +157355,30 @@ functions:
       interior splicing, and null/absent no-ops. match.py shows the same
       null guard, head fast path, next-link walk, and splice stores; LLVM adds
       a frame and rearranges the loop branches.
+
+  - address: 0x08396a04
+    ghidra: FUN_08396a04
+    name: utf8_to_pascal_mac_roman
+    size: 84
+    sig: "void utf8_to_pascal_mac_roman(void *context, const u8 *source, u8 *destination)"
+    module: cxx/utf8_to_pascal_mac_roman
+    status: ported
+    renames:
+      param_1/r0/ip: context
+      param_2/r1/r0: source
+      param_3/r2/r4: destination
+      auStack_a0/sp+0x10: utf16
+      local_a4/sp+0x0c: utf16_len_bytes
+      FUN_083966e0: utf8_decode_to_utf16
+      FUN_08395d70: utf16_to_pascal_mac_roman
+    notes: >-
+      Raw osos.dec proves the 84-byte A32 extent is 0x08396a04..0x08396a57;
+      the next real function begins at 0x08396a58 with push {r4,r5,r6,lr}.
+      The body has one plain unconditional bl to 0x083966e0 and one predicated
+      bleq to 0x08395d70. It saves context and destination, calls the UTF-8
+      decoder with source, context, a 150-byte UTF-16 temporary, flags 0x3a,
+      and a zero final argument, then only on a zero status passes the decoded
+      byte count divided by two to the UTF-16-to-counted-MacRoman converter.
+      Both callees remain retail seams: device builds call their verified load
+      addresses, while host tests install recording implementations. No
+      additional validation or destination write is performed on decode error.
