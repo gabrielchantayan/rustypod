@@ -189,6 +189,7 @@ pub mod word_08_set_then_slot_18_dispatch;
 pub mod component_vtable_slot_208_tail_dispatch;
 pub mod vtable_slot_4c_then_2c_dispatch;
 pub mod context_activity;
+pub mod context_activity_leased_operation;
 pub mod context_line_terminator;
 pub mod context_child_handle;
 pub mod context_record_resolve;

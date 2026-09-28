@@ -157928,3 +157928,32 @@ functions:
       builds call its verified retail address and host tests use a replaceable
       seam. match.py records the LLVM structural comparison. Host tests cover
       INIT's delete-and-OK path and unknown-magic's misuse/no-delete path.
+
+  - address: 0x0837ec88
+    ghidra: FUN_0837ec88
+    name: context_activity_leased_operation
+    size: 32
+    sig: "u32 context_activity_leased_operation(u8 *context)"
+    module: cxx/context_activity_leased_operation
+    status: ported
+    renames:
+      param_1/r0: context
+      r4: saved_context
+      "*(u32*)(context+0xe0)": context->activity
+    notes: >-
+      Raw osos.dec words establish the 32-byte body at
+      0x0837ec88..0x0837eca8: push {r4,lr}, move context into r4, plain bl
+      context_activity_enter @ 0x082dd3d8, restore r0 from r4, plain bl
+      FUN_082dd71c, then ldr/sub/str the u32 activity lease at +0xe0 and pop
+      {r4,pc}. The next separately linked function begins at 0x0837eca8 with
+      push {r4,r5,r6,lr}; Ghidra's stated 36-byte extent includes that
+      prologue. The body contains two unconditional plain bl instructions and
+      no predicated bl instruction. Although Ghidra declares void, r0 is not
+      overwritten after FUN_082dd71c, so its status returns unchanged. The
+      callee has no names.yaml identity and remains a target-only seam:
+      target builds transmute-call its verified load address while host tests
+      record the boundary. The activity counter uses volatile wrapping
+      arithmetic; the lease is released unconditionally, including nonzero
+      callee statuses. match.py confirms the same save/enter/call/release
+      shape; expected differences are LLVM's wider frame and the absolute
+      target-call literal with blx.
