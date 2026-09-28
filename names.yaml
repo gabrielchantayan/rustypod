@@ -48501,6 +48501,36 @@ functions:
       the ported mutex and heap helpers, retaining the same
       guard/decrement/dispose/unlock/teardown order.
 
+  - address: 0x0839cfdc
+    ghidra: FUN_0839cfdc
+    name: refcounted_body_mutex_lock_owned_variant
+    size: 16
+    sig: "void refcounted_body_mutex_lock_owned_variant(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      Raw osos.dec words (0xe5900008 0xe3500000 0x1af38976 0xe12fff1e)
+      establish the exact 16-byte A32 extent 0x0839cfdc..0x0839cfec:
+      ldr r0,[r0,#8]; cmp r0,#0; bne mutex_lock @ 0x0807f5c4; bx lr.
+      The next independently linked function,
+      refcounted_body_mutex_unlock_owned_variant, begins at 0x0839cfec.
+      Whole-image A32 B/BL decoding finds zero inbound plain BL calls and
+      zero predicated BL calls; the two Ghidra references are not raw direct
+      calls. The helper loads RefcountedBody.mutex at target +8 and
+      tail-branches to mutex_lock only when non-NULL; body itself has no NULL
+      guard. It is the lock half immediately following
+      refcounted_body_release_owned_variant and paired with the immediately
+      following unlock helper. The Rust port is a direct equivalent in
+      cxx/handle; a unique target-only link section keeps LLVM from folding
+      this separately linked helper into byte-identical siblings. Host test
+      proves a live mutex produces one Wait event and the NULL-mutex early-out
+      produces none. match.py is expected to show LLVM frame and relocation
+      differences while retaining the load/guard/tail-call structure.
+
   - address: 0x0839cffc
     ghidra: FUN_0839cffc
     name: refcounted_body_acquire_slot1_copy
