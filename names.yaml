@@ -49267,6 +49267,34 @@ functions:
       mutex_unlock, preserving the load/guard/unlock behavior. Host test
       covers a live mutex signal and the NULL-mutex early-out.
 
+  - address: 0x0839dfd0
+    ghidra: FUN_0839dfd0
+    name: dma_aligned_12byte_array_destroy
+    size: 72
+    sig: "DmaAlignedArray *dma_aligned_12byte_array_destroy(DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      uVar1/r0: element_index
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte A32 extent
+      0x0839dfd0..0x0839e018; the following separately linked constructor
+      begins with push {r4,lr}. Decoding inbound branch words finds exactly two
+      direct BL callers, both plain and unconditional at 0x08104f0c and
+      0x08104f14, with zero predicated BL forms. The body has one predicated
+      BLNE to already ported free_wrapper @ 0x080e7970 with tag 3 and no other
+      call. This is the destructor paired with the 12-byte-element DMA-aligned
+      array constructor @ 0x0839df4c: a nonzero construction byte +0x0c runs
+      an element-count (+0x08) sized empty trivial-element destruction walk,
+      then the function clears that byte, frees a non-NULL raw allocation at
+      +0x00, and returns array; +0x04 aligned_data and +0x08 element_count
+      remain unchanged. The shared port uses black_box solely to retain the
+      otherwise empty count-dependent walk, and a target-only link section
+      prevents LLVM from folding this separately hookable symbol into an
+      identical destructor.
+
   - address: 0x0839e018
     ghidra: FUN_0839e018
     name: dma_aligned_byte_array_construct_variant
