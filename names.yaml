@@ -53908,6 +53908,32 @@ functions:
       bic #768/orr #512, semantically identical to the original's
       bic #0x100/orr #0x200.
 
+  # ---- B-tree auto-vacuum mode (src/sqlite/btree_get_auto_vacuum.rs) ----
+  - address: 0x08371330
+    ghidra: FUN_08371330
+    name: btree_get_auto_vacuum
+    size: 64
+    sig: "u32 btree_get_auto_vacuum(Btree *btree)"
+    module: sqlite/btree_get_auto_vacuum
+    status: ported
+    renames:
+      param_1/r0: btree
+      uVar1/r0: auto_vacuum_mode
+      FUN_0837118c: btree_enter
+      FUN_08371da4: btree_leave
+    notes: >-
+      SQLite 3.5.x's sqlite3BtreeGetAutoVacuum. Raw osos.dec establishes the
+      exact 64-byte extent 0x08371330..0x0837136f: mov r3,r0 and push {lr}
+      begin the body, pop {pc} ends it, and the next distinct function begins
+      at 0x08371370. Decoding every ARM B/BL word in the body finds exactly two
+      unconditional plain BL instructions (btree_enter @ 0x0837118c and
+      btree_leave @ 0x08371da4), with no predicated BL. Raw-word decoding finds
+      one direct inbound plain BL at 0x0837f838 and one predicated bllt at
+      0x083829a0. It enters the B-tree, returns zero when
+      BtShared.autoVacuum (+0x16) is clear, one when it is set and
+      BtShared.incrVacuum (+0x17) is clear, otherwise two, then leaves. The
+      target-width Btree.pBt remains a u32 word on host builds so host pointer
+      width cannot alter the retail +0x04 layout. No deliberate deviations.
   # ---- B-tree page-size-fixed flag (src/sqlite/btree_set_page_size_fixed.rs) ----
   - address: 0x08372c70
     ghidra: FUN_08372c70
