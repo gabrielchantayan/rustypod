@@ -624,6 +624,7 @@ pub mod hints {
     pub const STRING_VIEW: usize = 0x2700_0000;
     pub const CONDVAR_WAIT_FOREVER_SIGNALED: usize = 0x2800_0000;
     pub const CONDVAR_WAIT_FOREVER_EMPTY: usize = 0x2900_0000;
+    pub const CONDITION_QUEUE_DEQUEUE_ALLOCATION: usize = 0x2b00_0000;
     // 0x2a00_0000: dedicated to app/stream_ensure_available's raw-u32 stream
     // and callback-record fixture; mappings never unmap, so no other user may
     // share this hint.

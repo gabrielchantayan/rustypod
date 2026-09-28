@@ -155897,3 +155897,35 @@ functions:
       It counts the NULL-terminated intrusive chain at list+4 and returns
       one only for a zero count; the list address has no NULL guard.
       Deliberate deviations: none.
+
+  - address: 0x0839e4a0
+    ghidra: FUN_0839e4a0
+    name: condition_queue_dequeue_allocation
+    size: 88
+    sig: "void *condition_queue_dequeue_allocation(void *queue)"
+    module: cxx/condition_queue_dequeue_allocation
+    status: ported
+    renames:
+      param_1/r0/r4: queue
+      r5: queue_mutex
+      r4_return: allocation
+      FUN_0807f5c4: mutex_lock
+      FUN_0839e488: condition_queue_is_empty
+      FUN_080ed9dc: condvar_wait_forever
+      FUN_080f10b8: list_pop_front
+      FUN_082aad24: operator_delete
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent
+      0x0839e4a0..0x0839e4f8: twenty-two words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the separately linked successor starts at
+      0x0839e4f8. Whole-image A32 B/BL decoding finds exactly two inbound
+      plain BL sites, 0x0819bf3c and 0x0819c06c, and zero predicated inbound
+      BL sites. The body has five plain direct BL calls: mutex_lock at
+      0x0839e4b0, condition_queue_is_empty at 0x0839e4c4,
+      condvar_wait_forever at 0x0839e4bc, list_pop_front at 0x0839e4d4,
+      and mutex_unlock at 0x0839e4ec; its sole predicated direct call is
+      BLNE operator_delete at 0x0839e4e4. It locks queue+12, waits while the
+      queue list is empty, pops queue+4, conditionally deletes the popped
+      node's +4 allocation, unlocks, and returns that allocation or NULL.
+      Rust expresses BLNE as a normal branch and calls the existing ports.
