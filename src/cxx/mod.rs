@@ -96,6 +96,7 @@ pub mod cxx_string_pair_entry_range_copy_construct;
 pub mod cxx_string_vector_range_assign;
 pub mod u16_vector_destroy;
 pub mod list_member_destroy;
+pub mod condition_queue_dequeue_allocation;
 pub mod mutexed_list_pop_delete;
 pub mod list_iterator_remove_if_owner_matches;
 pub mod u32_vector_destroy;
