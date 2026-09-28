@@ -298,6 +298,7 @@ pub mod opaque_record_payload_length;
 pub mod opaque_storage_destroy;
 pub mod flagged_pair_copy;
 pub mod flagged_pair_clear;
+pub mod condition_queue_drain;
 pub mod flagged_pair_payload;
 pub mod four_word_clear;
 pub mod error_payload_from_result;
