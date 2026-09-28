@@ -3081,6 +3081,11 @@ pub mod hints {
     // 0x4b80_0000: dedicated to cxx/red_black_tree_leftmost_descendant's
     // target-width tree-node fixture; mappings never unmap.
     pub const RED_BLACK_TREE_LEFTMOST_DESCENDANT: usize = 0x4b80_0000;
+    // 0x7740_0000 / 0x7750_0000: dedicated to
+    // cxx/condition_queue_list_is_empty's target-width queue and
+    // intrusive-chain fixtures; mappings never unmap.
+    pub const CONDITION_QUEUE_LIST_IS_EMPTY: usize = 0x7740_0000;
+    pub const CONDITION_QUEUE_LIST_IS_EMPTY_CALLER: usize = 0x7750_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
