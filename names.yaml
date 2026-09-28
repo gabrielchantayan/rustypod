@@ -64819,6 +64819,30 @@ functions:
       Deliberate deviation: host fixtures use native-width pointers and typed
       callbacks; target builds retain volatile u32 vtable reads and slots.
 
+  - address: 0x0839be5c
+    ghidra: FUN_0839be5c
+    name: vtable_08981e3c_destruct
+    size: 36
+    sig: "void *vtable_08981e3c_destruct(void *this)"
+    module: cxx/vtable_08981e3c_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_0839be80: VTABLE_08981E3C
+      FUN_0839bdb4: container_dispose_elements
+      FUN_08135380: registry_container_destruct
+    notes: >-
+      Raw osos.dec decodes eight instructions from the push at 0x0839be5c
+      through the tail b at 0x0839be7c, followed by the 0x08981e3c vtable
+      literal; 0x0839be84 begins the next independently entered function, so
+      the exact extent is 36 bytes. The body has one unconditional bl to
+      container_dispose_elements @ 0x0839bdb4, zero predicated bl calls, and
+      tail-branches to registry_container_destruct @ 0x08135380 after storing
+      its vtable at +0x00. The assignment establishes two inbound plain bl
+      call sites. The Rust ARM path calls both already ported callees directly;
+      host builds use replaceable seams because the target object's four-byte
+      pointer fields differ from host pointer widths.
+
   - address: 0x0839bfdc
     ghidra: FUN_0839bfdc
     name: container_destroy_first_non_null_element
