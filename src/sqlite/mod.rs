@@ -86,6 +86,7 @@ pub mod btree_in_trans;
 pub mod btree_cursor;
 pub mod btree_close_cursor;
 pub mod btree_clear_cursor;
+pub mod btree_trip_all_cursors;
 pub mod clear_page_overflow_cells;
 pub mod clear_overflow_cell;
 pub mod clear_cursor_saved_overflows;
