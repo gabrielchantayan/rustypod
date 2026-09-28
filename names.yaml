@@ -156509,3 +156509,28 @@ functions:
       queue list is empty, pops queue+4, conditionally deletes the popped
       node's +4 allocation, unlocks, and returns that allocation or NULL.
       Rust expresses BLNE as a normal branch and calls the existing ports.
+
+  - address: 0x0839ca74
+    ghidra: FUN_0839ca74
+    name: class_6280_owned_element_array_destruct
+    size: 36
+    sig: "u8 *class_6280_owned_element_array_destruct(u8 *this)"
+    module: cxx/class_6280_owned_element_array_destruct
+    status: ported
+    vars: {param_1/r4: this, DAT_0839ca98: CLASS_6280_OWNED_ELEMENT_ARRAY_VTABLE, FUN_0839c98c: owned_element_array_dispose, FUN_08135380: registry_container_destruct}
+    notes: >-
+      Raw osos.dec establishes the true 36-byte extent: eight ARM words from
+      0x0839ca74 through the tail branch at 0x0839ca94, followed by vtable
+      literal 0x08982934 at 0x0839ca98; the next independent function begins
+      at 0x0839ca9c (`push {r4,r5,r6,lr}`). Ghidra's 36-byte extent is right,
+      but its recovered body is not: it absorbs the following
+      owned_element_array_dispose at 0x0839c98c. The assigned body saves this
+      in r4, installs the embedded class-0x6280 vtable, calls the ported
+      owned-element disposal body once, restores this to r0, and tail-branches
+      to the ported registry_container_destruct @ 0x08135380. Whole-image ARM
+      branch decoding finds two inbound direct plain bl calls and no predicated
+      bl calls; the function itself has one plain direct bl, no predicated bl,
+      and one tail b. Host tests replace only the final direct tail branch
+      because registry pointers are native-width on the host; device builds
+      call the port directly. match.py structural review records the
+      vtable-store / dispose-call / tail-destructor sequence.
