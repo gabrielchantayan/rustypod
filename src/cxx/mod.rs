@@ -567,6 +567,7 @@ pub mod element_registry_slot_for_key;
 pub mod word_table_index_pair;
 pub mod word_table_index_pair_at;
 pub mod red_black_tree_increment;
+pub mod red_black_tree_decrement_cursor_083b5760;
 pub mod red_black_tree_advance_cursor_083b6048;
 pub mod red_black_tree_advance_cursor_083b5d00;
 pub mod red_black_tree_advance_cursor_083b5d54;

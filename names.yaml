@@ -5678,6 +5678,34 @@ functions:
       right-child edges until a left-child edge (including the header
       sentinel) is found. Target links remain u32 words to preserve their
       32-bit offsets on hosts; deliberate deviations: none.
+  - address: 0x083b5760
+    ghidra: FUN_083b5760
+    name: red_black_tree_decrement_cursor_083b5760
+    size: 88
+    sig: "u32 red_black_tree_decrement_cursor_083b5760(u32 *cursor)"
+    module: cxx/red_black_tree_decrement_cursor_083b5760
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar3/ip: original
+      iVar1/r1: previous
+      iVar2/r2: current
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte body
+      0x083b5760..0x083b57b4; the next independently entered function begins
+      at 0x083b57b8. Whole-image aligned A32 B/BL-immediate decoding finds two
+      inbound plain unconditional BL calls at 0x08257e50 and 0x08257ed0, zero
+      predicated BL calls, and no outbound calls. It moves an in-order
+      red-black-tree cursor to its predecessor by descending the left subtree's
+      right spine, or climbing parent links out of left-child edges until a
+      right-child edge (including the header sentinel) is found. Unlike the
+      84-byte `red_black_tree_decrement_cursor` body at 0x083b59b4, this
+      variant returns the original target-width node word, not the cursor
+      address. Target links remain u32 words to preserve their four-byte
+      target layout on hosts; deliberate deviations: none.
   - address: 0x083bf424
     ghidra: FUN_083bf424
     name: red_black_tree_word_node_pool_acquire
