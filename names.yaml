@@ -154199,3 +154199,27 @@ functions:
       remain u32 words, and the dead retail r1=0 allocator argument is
       deliberately omitted. Host tests cover fresh allocation, free-list
       reuse, cleared links, payload preservation, and growth.
+  - address: 0x083b6b4c
+    ghidra: FUN_083b6b4c
+    name: red_black_tree_node_payload
+    size: 8
+    sig: "void *red_black_tree_node_payload(void *node)"
+    module: cxx/red_black_tree_node_payload
+    status: ported
+    renames:
+      param_1/r0: node
+      return/r0: payload
+      "node+0x00": color
+      "node+0x04": parent
+      "node+0x08": left
+      "node+0x0c": right
+      "node+0x10": payload
+    notes: >-
+      Raw osos.dec words e2800010 e12fff1e establish the exact 8-byte A32
+      extent: add r0,r0,#0x10; bx lr at 0x083b6b4c..0x083b6b50. The next
+      real function begins with push {r4-r8,lr} at 0x083b6b54. The function
+      has no outbound calls. Independent raw A32 decoding confirms exactly two
+      inbound unconditional plain bl sites, at 0x083cc9c8 and 0x083dbf74, and
+      no predicated bl sites. Both callers pass red-black-tree nodes to
+      comparators as node+0x10. The port returns that payload address using
+      wrapping pointer addition; this is the ARM modulo-2^32 add on target.

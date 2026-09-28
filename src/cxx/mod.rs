@@ -77,6 +77,7 @@ pub mod tree_lookup_result_write_cc874;
 pub mod refcounted_key_tree_lookup_value;
 pub mod tree_lookup_node_counter;
 pub mod tree_lookup_node_payload_slot;
+pub mod red_black_tree_node_payload;
 pub mod tree_lookup_pair_node_payload_slot;
 pub mod tree_nodes_prepend_to_free_list;
 pub mod red_black_tree_release_subtree;
