@@ -56701,6 +56701,33 @@ functions:
       pMethods still set during the call and NULLed after (original
       ordering), and a second close on the same file is a no-op.
 
+  # ---- SQLite close-and-free wrapper, sqlite3OsCloseFree (src/sqlite/os_close_free.rs) ----
+  - address: 0x0837db18
+    ghidra: FUN_0837db18
+    name: sqlite_os_close_free
+    size: 32
+    sig: "i32 sqlite_os_close_free(sqlite3_file *file)"
+    module: sqlite/os_close_free
+    status: ported
+    renames:
+      param_1/r0/r5: file
+      r4: close_status
+      FUN_0837dae8: sqlite_os_close
+      FUN_083906f4: tracked_free
+    notes: >-
+      SQLite's sqlite3OsCloseFree from os.c: calls sqlite3OsClose(file),
+      releases the file object through sqlite3_free, and returns the close
+      status even if it is an error. Raw osos.dec establishes the exact
+      eight-word, 32-byte extent 0x0837db18..0x0837db38; the successor at
+      0x0837db38 is a separately linked literal-load veneer. Decoding the
+      raw words independently finds exactly two outbound plain BL calls,
+      sqlite_os_close @ 0x0837dae8 and tracked_free @ 0x083906f4, and no
+      predicated BL calls. The close status is saved in r4 across the free
+      call and moved back to r0 before return. The Rust port directly calls
+      the established seams; its host-only helper injects the free operation
+      to prove close-before-free ordering and status preservation without
+      fabricating a tracked allocator block.
+
   # ---- SQLite OS device-characteristics forwarding wrapper, sqlite3OsDeviceCharacteristics (src/sqlite/os_device_characteristics.rs) ----
   - address: 0x0837db4c
     ghidra: FUN_0837db4c

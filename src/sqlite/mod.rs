@@ -237,6 +237,7 @@ pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod open_table_and_indices;
 pub mod os_close;
+pub mod os_close_free;
 pub mod os_access;
 pub mod os_device_characteristics;
 pub mod os_file_size;
