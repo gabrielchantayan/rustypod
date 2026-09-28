@@ -156877,3 +156877,26 @@ functions:
       unresolved stage so host tests can observe it; target builds call its
       verified load address. match.py reports the expected seam-induced BLX
       and frame differences from the stock direct BL/tail B structure.
+
+  - address: 0x0839c1a0
+    ghidra: FUN_0839c1a0
+    name: vtable_089820c4_destruct
+    size: 36
+    sig: "u32 *vtable_089820c4_destruct(u32 *this)"
+    module: cxx/vtable_089820c4_destruct
+    status: ported
+    vars: {param_1/r0/r4: this, DAT_0839c1c4: VTABLE_089820C4, FUN_0839c0ec: release_enabled_items, FUN_08135380: registry_container_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent 0x0839c1a0..0x0839c1c4:
+      eight A32 instructions from push {r4,lr} through the tail b at
+      0x0839c1c0 plus the trailing vtable literal 0x089820c4 at 0x0839c1c4;
+      0x0839c1c8 begins the next real function. The body has one unconditional
+      plain direct BL to the unported release stage FUN_0839c0ec, zero
+      predicated BL instructions, and a tail B to ported
+      registry_container_destruct @ 0x08135380. It installs the vtable, runs
+      the release stage, then returns the base destructor result. The release
+      stage is a verified fixed-address target seam on ARM and an injectable
+      host seam because it remains unported. match.py reports the expected
+      seam-induced BLX and frame differences from the stock direct BL/tail B
+      structure; the host test verifies vtable installation, call order,
+      argument forwarding, and base-return forwarding.
