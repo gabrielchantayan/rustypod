@@ -401,6 +401,7 @@ pub mod vtable_089917a4_observable_array_destroy;
 pub mod vtable_089917a4_observable_array_take;
 pub mod vtable_089917a4_observable_array_construct;
 pub mod vtable_08982274_destruct;
+pub mod vtable_08982424_destruct;
 pub mod vtable_089824fc_destruct;
 pub mod opaque_observable_array_flag_construct;
 pub mod opaque_observable_array_payload_destroy;

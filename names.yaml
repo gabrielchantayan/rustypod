@@ -49435,6 +49435,31 @@ functions:
       replace the retail tail branch with a normal call, preserving the
       load/guard/lock behavior. Host test covers a live mutex wait and the
       NULL-mutex early-out.
+  - address: 0x0839c518
+    ghidra: FUN_0839c518
+    name: vtable_08982424_destruct
+    size: 36
+    sig: "Registry *vtable_08982424_destruct(Registry *this)"
+    module: cxx/vtable_08982424_destruct
+    vars: {param_1/r0/r4: this, DAT_0839c53c: VTABLE_08982424, FUN_0839c470: vtable_slot_40_release_each, FUN_08135380: registry_container_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes the exact nine-word extent
+      0x0839c518..0x0839c53c: eight ARM instructions ending in the tail
+      branch at 0x0839c538 and literal 0x08982424 at 0x0839c53c; the next
+      push at 0x0839c540 begins a distinct function. Ghidra's 36-byte extent
+      is correct but its decompilation is not: it invents a much larger
+      destructor body and incorrect calls. The raw instructions install
+      VTABLE_08982424 at +0x00, call vtable_slot_40_release_each @
+      0x0839c470, then tail-branch to registry_container_destruct @
+      0x08135380, forwarding that return. Full-image ARM branch decoding
+      finds two inbound plain bl sites (0x0811d988 and 0x08179068), zero
+      predicated inbound bl sites, one body plain bl, and zero body
+      predicated bl calls. Host builds use replaceable direct-callee seams
+      because target pointer fields are four bytes while host pointers are
+      wider; target builds call the already ported callees directly. Test
+      proves vtable-store, release-before-base order, identical receiver
+      forwarding, and base-return forwarding.
   - address: 0x0839c470
     ghidra: FUN_0839c470
     name: vtable_slot_40_release_each
