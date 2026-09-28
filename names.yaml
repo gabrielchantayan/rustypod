@@ -58122,6 +58122,29 @@ functions:
       forwarding and upgrade, factory failure reporting with an explicit
       non-NUL-terminated length, and the negative-length strlen path.
 
+  - address: 0x08378b04
+    ghidra: FUN_08378b04
+    name: find_db_name
+    size: 128
+    sig: "int find_db_name(sqlite3 *db, Token *name)"
+    module: sqlite/find_db_name
+    status: ported
+    vars: {param_1/r5: db, param_2/r1: name, iVar1/r7: temporary_name, iVar2/r6: name_len, iVar4/r4: index, puVar5/r5: entry}
+    notes: >-
+      SQLite 3.5.9 sqlite3FindDb. Exact raw extent is 0x08378b04..0x08378b84:
+      32 ARM words from push {r4-r8,lr} through pop {r4-r8,pc}; the next
+      function begins with stmdb at 0x08378b84. Raw ARM-word decoding of the
+      two known caller bodies finds direct unconditional bl instructions at
+      0x0836f3b8 and 0x083852ac, with no predicated form. The body has five
+      unconditional bl instructions: name_from_token @ 0x0837d7ac, strlen @
+      0x08392478 twice, str_icmp @ 0x08384f14, and tracked_free @ 0x083906f4.
+      It duplicates/dequotes Token, scans sqlite3.aDb backwards from nDb-1
+      through 24-byte Db records, compares zName lengths before SQLite ASCII
+      case-insensitive equality, releases the temporary name, and returns the
+      matching index or -1. The Rust port uses target-width u32 reads for the
+      aDb and zName pointer fields; its test-only operation injection is not
+      present in target code and makes allocator-independent host fixtures
+      possible.
   - address: 0x0837b254
     ghidra: FUN_0837b254
     name: vdbe_attach_index_affinity

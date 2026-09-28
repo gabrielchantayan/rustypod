@@ -1102,6 +1102,9 @@ pub mod hints {
     // 0x8500_0000: dedicated to sqlite/find_index's raw-u32 sqlite3/Db
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_FIND_INDEX: usize = 0x8500_0000;
+    // 0x6d96_0000: dedicated to sqlite/find_db_name's raw-u32 sqlite3/Db
+    // fixture; mappings never unmap, so no other user may share this hint.
+    pub const SQLITE_FIND_DB_NAME: usize = 0x6d96_0000;
     // 0x7700_0000: dedicated to sqlite/find_collation_encoding's raw-u32
     // sqlite3/default-collation fixture; mappings never unmap, so no other
     // user may share this hint.
