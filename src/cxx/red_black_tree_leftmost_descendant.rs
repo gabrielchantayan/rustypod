@@ -1,28 +1,27 @@
-//! Leftmost descendant lookup for a red-black-tree node.
+//! `red_black_tree_leftmost_descendant` — original: `FUN_083b6a80` @
+//! `0x083b6a80` (20 bytes; true extent `0x083b6a80..0x083b6a94`).
 //!
-//! `red_black_tree_leftmost_descendant` — original: `FUN_083b6ae8` @
-//! `0x083b6ae8` (**20 bytes**, `0x083b6ae8..0x083b6afc`; the next distinct
-//! function begins at `0x083b6afc`). Raw ARM words contain zero outgoing plain
-//! or predicated `bl` instructions; two inbound plain `bl` call sites are at
-//! `0x083c50f8` and `0x083c58f4`. It follows each node's target-width left
-//! child word at `+0x08` until that word is zero and returns the last node.
+//! Raw `osos.dec` words are `ldr r1,[r0,#8]; cmp r1,#0; movne r0,r1;
+//! bne 0x083b6a80; bx lr`; `0x083b6a94` begins the separately linked
+//! rightmost-descendant sibling. Branch-immediate decoding verifies two inbound
+//! unconditional plain `bl` sites and no predicated inbound `bl` sites.
+//! Algorithm: follow each node's target-width left-child word at offset `0x08`
+//! until it is NULL, returning the final node in `r0`.
 //!
-//! Deliberate deviations: none. The target's 32-bit child word is read by word
-//! index rather than a host pointer-field offset, so host fixtures remain
-//! layout-faithful on 64-bit hosts.
+//! Deliberate deviation: target pointers remain `u32` addresses rather than host
+//! pointers, preserving the retailOS four-byte node layout on 64-bit hosts.
 
-/// Returns the leftmost descendant of `node`.
+/// Returns the leftmost node in a non-NULL red-black-tree subtree.
 ///
-/// # Safety
-///
-/// `node` and every non-null left child word must identify a valid target
-/// red-black-tree node. Each node must provide at least its first three words.
+/// `node` and every non-NULL left child must be readable target addresses. No
+/// NULL input or cycle guard exists, matching retailOS.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.red_black_tree_leftmost_descendant")]
 #[inline(never)]
-pub unsafe extern "C" fn red_black_tree_leftmost_descendant(mut node: *mut u32) -> *mut u32 {
+pub unsafe extern "C" fn red_black_tree_leftmost_descendant(mut node: u32) -> u32 {
     loop {
-        let left = unsafe { node.add(2).read() as usize as *mut u32 };
-        if left.is_null() {
+        let left = unsafe { (node as *const u32).add(2).read() };
+        if left == 0 {
             return node;
         }
         node = left;
@@ -31,27 +30,48 @@ pub unsafe extern "C" fn red_black_tree_leftmost_descendant(mut node: *mut u32) 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::testing::{hints, try_map_u32_slab};
+    use super::red_black_tree_leftmost_descendant;
+    use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
 
-    const NODE_WORDS: usize = 4;
+    const NODE_SIZE: usize = 16;
+
+    unsafe fn node_at(base: *mut u8, index: usize) -> *mut u32 {
+        unsafe { base.add(index * NODE_SIZE).cast() }
+    }
 
     #[test]
-    fn returns_the_terminal_node_across_left_chains() {
-        let Some(words) = try_map_u32_slab(hints::RED_BLACK_TREE_LEFTMOST_DESCENDANT, 0x1000) else {
+    fn returns_root_when_its_left_child_is_null() {
+        let Some(base) = try_map_u32_slab(hints::RED_BLACK_TREE_LEFTMOST_DESCENDANT, NODE_SIZE) else {
+            assert!(note_missing_u32_fixture(module_path!()));
             return;
         };
-        let words = words.cast::<u32>();
-        unsafe {
-            words.write_bytes(0, 0x1000 / core::mem::size_of::<u32>());
-            let root = words.add(0 * NODE_WORDS);
-            let child = words.add(1 * NODE_WORDS);
-            let leaf = words.add(2 * NODE_WORDS);
-            root.add(2).write(child as usize as u32);
-            child.add(2).write(leaf as usize as u32);
+        let root = base as usize as u32;
 
-            assert_eq!(red_black_tree_leftmost_descendant(root), leaf);
-            assert_eq!(red_black_tree_leftmost_descendant(leaf), leaf);
+        assert_eq!(unsafe { red_black_tree_leftmost_descendant(root) }, root);
+    }
+
+    #[test]
+    fn follows_each_left_link_and_ignores_right_links() {
+        let Some(base) = try_map_u32_slab(hints::RED_BLACK_TREE_LEFTMOST_DESCENDANT_CHAIN, NODE_SIZE * 4) else {
+            assert!(note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        let root = unsafe { node_at(base, 0) };
+        let middle = unsafe { node_at(base, 1) };
+        let leftmost = unsafe { node_at(base, 2) };
+        let ignored_right = unsafe { node_at(base, 3) };
+        unsafe {
+            root.add(2).write(middle as usize as u32);
+            root.add(3).write(ignored_right as usize as u32);
+            middle.add(2).write(leftmost as usize as u32);
+            middle.add(3).write(ignored_right as usize as u32);
+            leftmost.add(2).write(0);
+            leftmost.add(3).write(ignored_right as usize as u32);
         }
+
+        assert_eq!(
+            unsafe { red_black_tree_leftmost_descendant(root as usize as u32) },
+            leftmost as usize as u32
+        );
     }
 }

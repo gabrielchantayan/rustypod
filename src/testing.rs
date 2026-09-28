@@ -70,6 +70,9 @@ pub mod hints {
     // mappings never unmap, so each test uses a distinct address.
     pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT: usize = 0x83a0_0000;
     pub const RED_BLACK_TREE_RIGHTMOST_DESCENDANT_CHAIN: usize = 0x83b0_0000;
+    // 0x83c1_0000: dedicated to cxx/red_black_tree_leftmost_descendant's
+    // target-width chain fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_LEFTMOST_DESCENDANT_CHAIN: usize = 0x83c1_0000;
     // 0x6c60_0000: dedicated to util/hash_table_bucket_construct's
     // target-width table and bucket-allocation fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;
