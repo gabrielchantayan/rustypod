@@ -155694,3 +155694,31 @@ functions:
       helper, preserving the stock call shape. Host tests cover
       self-assignment and shared old-body release followed by a
       mutex-guarded source acquire.
+  - address: 0x0839eae4
+    ghidra: FUN_0839eae4
+    name: mutexed_list_pop_delete
+    size: 52
+    sig: "void *mutexed_list_pop_delete(void *list_owner)"
+    module: cxx/mutexed_list_pop_delete
+    status: ported
+    renames:
+      param_1/r0: list_owner
+      param_1_plus_8/r4: list_mutex
+      r5: popped_node
+      FUN_0807f5c4: mutex_lock
+      FUN_080f10b8: unported opaque list pop ABI
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 52-byte A32 extent
+      0x0839eae4..0x0839eb18: thirteen words from push {r4,r5,r6,lr}
+      through pop {r4,r5,r6,pc}; the next push at 0x0839eb18 begins the
+      separately linked successor. The body has three plain direct BL calls
+      (mutex_lock at 0x0839eaf4, unidentified list ABI 0x080f10b8 at
+      0x0839eafc, and operator_delete at 0x0839eb04), with zero predicated
+      BL calls. Whole-image A32 branch decoding finds exactly two inbound
+      plain BL calls (0x0816679c and 0x08166864) and zero predicated inbound
+      BL calls. It locks list_owner+8, calls the unported 0x080f10b8 ABI with
+      list_owner, deletes the returned node's +4 allocation, then returns
+      that node. Deliberate deviations: the unidentified ABI remains a
+      verified fixed-address target on device and injected host seam; Rust
+      uses a normal delete call rather than retaining r5 across the call.
