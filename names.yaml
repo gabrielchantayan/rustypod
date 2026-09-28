@@ -64762,6 +64762,35 @@ functions:
       directly; equal_deref remains inlined as the equivalent candidate !=
       header test.
 
+  - address: 0x0839bc24
+    ghidra: FUN_0839bc24
+    name: signed_key_tree_find_value_f8f0_copy
+    size: 84
+    sig: "u32 signed_key_tree_find_value_f8f0_copy(const SignedKeyTree *tree, i32 key, u32 *out_value)"
+    module: cxx/signed_key_tree_find
+    status: ported
+    renames:
+      param_1/r4: tree
+      param_2: key
+      param_3/r5: out_value
+      local_20: candidate
+      local_1c: header
+      FUN_083db964: signed_key_tree_find_node_f8f0_copy
+      FUN_083cf8f0: equal_deref_f8f0_copy
+    notes: >-
+      Raw osos.dec from 0x0839bc24 through pop {r4,r5,pc} at 0x0839bc74 is
+      exactly 84 bytes; the separately linked sibling starts at 0x0839bc78.
+      It stack-materializes the signed key, calls the ported lower_bound copy
+      signed_key_tree_find_node_f8f0_copy @ 0x083db964, compares its node
+      result with tree+0x10 through equal_deref_f8f0_copy @ 0x083cf8f0, and
+      only for a non-header node stores node+0x14 through out_value before
+      returning 1. A header result leaves out_value untouched and returns 0.
+      Whole-image ARM branch decoding finds exactly two direct unconditional bl
+      callers (0x081bd2dc and 0x081bd434), no predicated bl callers, no direct
+      b transfers, and no aligned data-word references. The equality leaf is
+      deliberately inlined as candidate != header; its two raw body bl calls
+      remain explicit Rust calls.
+
   - address: 0x0839bc78
     ghidra: FUN_0839bc78
     name: signed_key_tree_find_value_f908_copy
