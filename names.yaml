@@ -112558,6 +112558,30 @@ functions:
       mutex_unlock instead of reproducing the final ARM tail branch, and
       discards its scratch return.
 
+  # --- Pointer FIFO pending-list empty predicate ---
+  - address: 0x0839e5e0
+    ghidra: FUN_0839e5e0
+    name: pointer_queue_list_is_empty
+    size: 24
+    sig: "u32 pointer_queue_list_is_empty(PointerQueue *queue)"
+    module: app/pointer_queue
+    status: ported
+    renames:
+      param_1/r0/r4: queue
+      "queue+0x04": pending_list_head
+      FUN_0807a13c: singly_linked_list_count
+      uVar1/r0: node_count
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte extent
+      0x0839e5e0..0x0839e5f8: six A32 words from `push {r4,lr}` through
+      `pop {r4,pc}`; the next separately linked function begins at 0x0839e5f8
+      with `push {r4,r5,r6,lr}`. Independent whole-image A32 B/BL decoding
+      finds exactly two inbound plain, unconditional BL calls at 0x081dee2c
+      and 0x0839e658, with zero predicated BL calls. The body has one outbound
+      plain BL to ported singly_linked_list_count @ 0x0807a13c. It counts the
+      intrusive chain from queue+0x04 and returns one only when the count is
+      zero; the queue pointer has no NULL guard. No deliberate deviations.
+
   # --- Synchronized opaque-pointer FIFO empty predicate ---
   - address: 0x0839e640
     ghidra: FUN_0839e640
