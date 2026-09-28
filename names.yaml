@@ -55333,6 +55333,25 @@ functions:
       are decoded as u32 words so host fixtures retain the target offsets;
       no behavioral deviation.
 
+  # ---- SQLite u64 varint encoder (src/sqlite/put_varint.rs) ----
+  - address: 0x083816ec
+    ghidra: FUN_083816ec
+    name: put_varint
+    size: 212
+    sig: "u32 sqlite3PutVarint(u8 *out, u64 value)"
+    module: sqlite/put_varint
+    status: ported
+    vars: {param_1: out, param_2: '[unused ABI alignment word]', param_3: value_low, param_4: value_high, local_28: encoded_groups}
+    notes: >-
+      Raw osos.dec words at 0x083816ec..0x083817c0 establish the exact
+      212-byte extent: 0x083817bc is `ldmia sp!,{r1-r9,pc}` and
+      0x083817c0 begins sqlite3PutVarint32. Whole-image ARM branch decoding
+      finds exactly two direct plain bl callers, 0x082cdfbc and 0x082cdfcc,
+      and no predicated bl caller. The body is SQLite's big-endian varint
+      encoder: values below 2^56 use one through eight 7-bit groups, while a
+      nonzero high byte selects the nine-byte form of eight continuation
+      groups followed by the low byte. No deliberate deviation.
+
   # ---- SQLite multibyte u32 varint encoder (src/sqlite/put_varint32.rs) ----
   - address: 0x083817c0
     ghidra: FUN_083817c0
@@ -55351,11 +55370,9 @@ functions:
       SQLite 3.5.x big-endian base-128 encoding under the stock
       multibyte-only contract: callers inline values below 0x80; values below
       0x4000 write 0x80|(value>>7), value&0x7f; larger u32 values take three
-      through five bytes. The branch target at 0x083816ec is a preceding
-      64-bit encoder body, absent from names.yaml and not made into a seam.
-      Deliberate deviation: its >=0x4000 behavior is inlined so the port is
-      self-contained rather than tail-branching to an unported address; values
-      below 0x80 intentionally retain the stock noncanonical two-byte result.
+      through five bytes. The target at 0x083816ec is now the `put_varint`
+      Rust seam. The Rust call replaces that tail branch; values below 0x80
+      intentionally retain the stock noncanonical two-byte result.
 
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30

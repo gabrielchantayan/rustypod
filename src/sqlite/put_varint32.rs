@@ -2,8 +2,8 @@
 //!
 //! `put_varint32` — original: `FUN_083817c0` @ 0x083817c0 (44 bytes;
 //! 2 plain `bl` call sites, 0 predicated `bl` call sites). The 11-instruction
-//! function keeps the two-byte case inline and tail-branches to the preceding
-//! 64-bit SQLite varint encoder at 0x083816ec for values >= 0x4000.
+//! function keeps the two-byte case inline and tail-branches to
+//! [`put_varint`] at 0x083816ec for values >= 0x4000.
 //!
 //! Algorithm: write the big-endian base-128 representation. Values below
 //! 0x4000 always use two bytes (`0x80 | value >> 7`, `value & 0x7f`); larger
@@ -11,10 +11,10 @@
 //! every byte except the last. This matches the stock function's caller
 //! contract: callers inline the one-byte case before calling it.
 //!
-//! Deliberate deviation: the `>= 0x4000` branch target at 0x083816ec has no
-//! established Rust seam, so its equivalent encoder is inlined rather than
-//! tail-branching to that unported address. Values below 0x80 deliberately
-//! produce the stock function's noncanonical two-byte representation.
+//! Deliberate deviation: the Rust call replaces the stock tail branch; both
+//! paths produce the same byte sequence and byte-count return value.
+
+use super::put_varint::put_varint;
 
 /// put_varint32 — original: `FUN_083817c0` @ 0x083817c0 (44 bytes;
 /// 2 plain `bl` call sites, 0 predicated `bl` call sites).
@@ -27,21 +27,7 @@ pub unsafe extern "C" fn put_varint32(out: *mut u8, value: u32) -> u32 {
         return 2;
     }
 
-    let mut groups = [0u8; 5];
-    let mut count = 0;
-    let mut remaining = value;
-    loop {
-        groups[count] = (remaining & 0x7f) as u8;
-        remaining >>= 7;
-        count += 1;
-        if remaining == 0 {
-            break;
-        }
-    }
-    for index in 0..count {
-        *out.add(index) = groups[count - index - 1] | if index + 1 < count { 0x80 } else { 0 };
-    }
-    count as u32
+    put_varint(out, value as u64)
 }
 
 #[cfg(test)]
