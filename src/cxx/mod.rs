@@ -344,6 +344,7 @@ pub mod linked_list_has_items;
 pub mod condition_queue_is_empty_alternate;
 pub mod condition_queue_is_empty;
 pub mod condition_queue_list_is_empty;
+pub mod condition_queue_list_is_empty_0839e3bc;
 pub mod condition_queue_is_empty_0839e670;
 pub mod condition_queue_dequeue;
 pub mod identified_vtable_object_construct;
