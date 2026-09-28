@@ -49120,6 +49120,28 @@ functions:
       calls it directly and host tests use a recording seam. LLVM may inline
       ported mutex and heap helpers while preserving the
       guard/decrement/dispose/unlock/teardown order.
+  - address: 0x0839d540
+    ghidra: FUN_0839d540
+    name: refcounted_body_mutex_unlock_retain_count
+    size: 16
+    sig: "void refcounted_body_mutex_unlock_retain_count(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0839d540..0x0839d54f: ldr r0,[r0,#8]; cmp r0,#0; bne
+      0x0807f6a0; bx lr. The separately linked
+      refcounted_body_release_tag3 begins at 0x0839d550. Decoding every A32
+      B/BL word in osos.dec finds two inbound plain direct BL call sites at
+      0x0839d4ec and 0x0839d524, with no predicated BL call sites. The helper
+      loads the optional target +8 mutex and tail-branches to mutex_unlock
+      only when it is non-NULL; body itself is intentionally unguarded. No
+      deliberate deviations: Rust calls the existing mutex seam, and a
+      target-only section prevents folding with byte-identical helpers.
   - address: 0x0839d3ac
     ghidra: FUN_0839d3ac
     name: refcounted_body_release_dtor_variant
