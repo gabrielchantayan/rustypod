@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b69cc
+    ghidra: FUN_083b69cc
+    name: vector_growth_capacity
+    size: 24
+    sig: "u32 vector_growth_capacity(u32 capacity)"
+    module: cxx/vector_growth_capacity
+    status: ported
+    renames:
+      param_1/r0: capacity
+      r1: scaled_capacity
+      "capacity+0x20/r0": minimum_capacity
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent: add
+      r1,r0,r0,lsr #1; add r1,r1,r0,lsr #3; add r0,r0,#0x20; cmp r0,r1;
+      movls r0,r1; bx lr. The next separately linked function starts at
+      0x083b69e4. The body has zero outbound plain and predicated BL calls.
+      Independent raw branch-immediate decoding finds exactly two inbound
+      unconditional plain BL sites at 0x083e08b8 and 0x083e0a14, and zero
+      predicated inbound BL sites. The callers use the result as the requested
+      capacity of an eight-byte vector. It returns the unsigned maximum of
+      capacity+32 and capacity+capacity/2+capacity/8, preserving 32-bit
+      wrapping additions. Deliberate deviation: none.
   - address: 0x083b69e4
     ghidra: FUN_083b69e4
     name: red_black_tree_node_payload_address_083b69e4
