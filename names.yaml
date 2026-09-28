@@ -54239,6 +54239,36 @@ functions:
       models these boundaries and B-tree entry/leave because target 32-bit
       pointer slots widen on the host. Tests cover write success, pager-error
       early return, and read-transaction cleanup.
+  # ---- B-tree transaction start (src/sqlite/btree_begin_trans.rs) ----
+  - address: 0x08370d7c
+    ghidra: FUN_08370d7c
+    name: btree_begin_trans
+    size: 52
+    sig: "int btree_begin_trans(Btree *btree, int write_flag)"
+    module: sqlite/btree_begin_trans
+    status: ported
+    renames:
+      param_1/r4: btree
+      param_2/r3: write_flag
+      FUN_0837118c: btree_enter
+      FUN_082bd954: begin_transaction_worker
+      FUN_08371da4: btree_leave
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeBeginTrans. Raw osos.dec words establish the
+      exact 52-byte extent 0x08370d7c..0x08370db0: push {r4,lr} starts the
+      body, pop {r4,pc} ends it, and the next separately linked function
+      starts with push {r3-r7,lr} at 0x08370db4. Decoding every ARM B/BL word
+      independently finds three unconditional plain bl instructions, not
+      Ghidra's two: btree_enter @ 0x0837118c, the unported transaction worker
+      @ 0x082bd954, and btree_leave @ 0x08371da4; no predicated bl occurs.
+      It enters, copies Btree.db into BtShared.db (+0x04), invokes the worker
+      with the original write flag, always leaves, and returns its status.
+      The worker remains an absolute target call because its identity has not
+      been established beyond its transaction role. Deliberate host-only
+      deviation: private dispatch models that worker and the lock boundaries,
+      because target-width Btree pointer slots widen on host fixtures. Tests
+      cover database refresh, read/write flag forwarding, nonzero propagation,
+      and required leave after worker failure.
   # ---- B-tree cursor close (src/sqlite/btree_close_cursor.rs) ----
   - address: 0x08370b40
     ghidra: FUN_08370b40
