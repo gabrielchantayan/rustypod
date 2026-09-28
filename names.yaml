@@ -4168,7 +4168,7 @@ functions:
   - address: 0x081bb6c8
     ghidra: FUN_081bb6c8
     name: video_engine_set_selector_0x2889_if_changed
-    size: 36
+    size: 40
     sig: "void video_engine_set_selector_0x2889_if_changed(const u32 *value)"
     module: util/video_engine
     status: ported
@@ -4856,7 +4856,7 @@ functions:
   - address: 0x08240a14
     ghidra: FUN_08240a14
     name: queue_refresh_and_match_kind_two
-    size: 36
+    size: 40
     sig: "u32 queue_refresh_and_match_kind_two(u32 *context)"
     module: util/queue_refresh_and_match_kind_two
     status: ported
@@ -4865,7 +4865,7 @@ functions:
       FUN_082419b0: refresh_queue_match_state
       FUN_08243778: queue_match_and_promote
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent
+      Raw osos.dec establishes the exact 40-byte extent
       0x08240a14..0x08240a38: the following push at 0x08240a38 begins the
       next real function. Full-image A32 decoding finds three inbound plain BL
       callers (0x08253b4c, 0x08253b60, and 0x08253b94), zero predicated inbound
@@ -5550,7 +5550,7 @@ functions:
   - address: 0x082e36c8
     ghidra: FUN_082e36c8
     name: fat_cursor_advance_block
-    size: 36
+    size: 40
     sig: "u32 fat_cursor_advance_block(u32 *cursor)"
     module: fs/fat_cursor_advance_block
     status: ported
@@ -5978,7 +5978,7 @@ functions:
   - address: 0x083c64b4
     ghidra: FUN_083c64b4
     name: red_black_tree_node_pool_release_refcounted
-    size: 36
+    size: 40
     sig: "void red_black_tree_node_pool_release_refcounted(RedBlackTreeNodePool *pool, RedBlackTreeRefcountedNode *node, u32 release_payload)"
     module: cxx/red_black_tree_node_pool_release_refcounted
     status: ported
@@ -6832,7 +6832,7 @@ functions:
   - address: 0x083d20f0
     ghidra: FUN_083d20f0
     name: indexed_record_pointer_and_value
-    size: 36
+    size: 40
     sig: "void indexed_record_pointer_and_value(u32 *output, const u32 *input)"
     module: util/indexed_record_pointer_and_value
     status: ported
@@ -6842,7 +6842,7 @@ functions:
       piVar1/r1: record
       iVar2/r2: record_value
     notes: >-
-      Raw osos.dec words establish the exact 36-byte extent
+      Raw osos.dec words establish the exact 40-byte extent
       0x083d20f0..0x083d2113: the next independently entered function starts
       at 0x083d2114 with push {r0,r1,r2,r3,lr}. The body has no outbound bl
       instructions. Whole-image call analysis finds three inbound plain bl
@@ -10426,7 +10426,7 @@ functions:
   - address: 0x080537f8
     ghidra: FUN_080537f8
     name: hfs_btree_key_length
-    size: 36
+    size: 40
     sig: "u16 hfs_btree_key_length(const BTreeControlBlock *btree, const u8 *key, u32 is_index)"
     module: fs/hfs_btree_key_length
     status: ported
@@ -10438,7 +10438,7 @@ functions:
       btree_plus_0x30: attributes
       return/r0: key_length
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       movs r3,r2 at 0x080537f8 through bx lr at 0x08053818. The separately
       linked next function is the four-byte tail veneer at 0x0805381c
       (b 0x08086e4c). With is_index zero and attributes bit 0x4 clear, this
@@ -10538,7 +10538,7 @@ functions:
   - address: 0x08157448
     ghidra: FUN_08157448
     name: guarded_vtable_slot_04_dispatch_08157448
-    size: 36
+    size: 40
     sig: "GuardedSlot04Handle08157448 *guarded_vtable_slot_04_dispatch_08157448(GuardedSlot04Handle08157448 *handle)"
     module: cxx/guarded_vtable_slot_04_dispatch_08157448
     status: ported
@@ -10548,7 +10548,7 @@ functions:
       object_deref: vtable
       vtable_plus_0x04: vtable_slot_04
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x08157448 through pop {r4,pc} at 0x08157468; the next
       separately linked function begins at 0x0815746c. Full-image ARM decoding
       finds exactly four inbound direct calls, all plain unconditional bl at
@@ -10647,7 +10647,7 @@ functions:
   - address: 0x083e7328
     ghidra: FUN_083e7328
     name: optional_vtable_slot4_dispatch
-    size: 36
+    size: 40
     sig: "void **optional_vtable_slot4_dispatch(void **slot)"
     module: cxx/optional_vtable_slot4_dispatch
     status: ported
@@ -10657,7 +10657,7 @@ functions:
       object_deref/r1: vtable
       vtable_plus_0x04/r1: vtable_slot_04_callback
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x083e7328 through pop {r4,pc} at 0x083e7348; the next
       separately linked function begins at 0x083e734c. Full-image raw ARM
       decoding finds exactly two inbound direct calls, both plain unconditional
@@ -10723,7 +10723,7 @@ functions:
   - address: 0x083e73d0
     ghidra: FUN_083e73d0
     name: owned_virtual_object_delete
-    size: 36
+    size: 40
     sig: "void **owned_virtual_object_delete(void **slot)"
     module: cxx/owned_virtual_object_delete
     status: ported
@@ -10733,7 +10733,7 @@ functions:
       FUN_083e7328: optional_vtable_slot4_dispatch
       FUN_082aad24: operator_delete
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x083e73d0 through pop {r4,pc} at 0x083e73f0; the next
       separately linked function begins at 0x083e73f4. Raw ARM decoding finds
       two unconditional plain bl calls, to FUN_083e7328 at 0x083e73e4 and
@@ -10750,7 +10750,7 @@ functions:
   - address: 0x083e737c
     ghidra: FUN_083e737c
     name: optional_vtable_slot4_invoke_737c
-    size: 36
+    size: 40
     sig: "void **optional_vtable_slot4_invoke_737c(void **slot)"
     module: cxx/optional_vtable_slot4_invoke_737c
     status: ported
@@ -10759,7 +10759,7 @@ functions:
       slot_deref: object
       object_vtable_plus_0x04: vtable_slot4_callback
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x083e737c through pop {r4,pc} at 0x083e739c; the next
       independently entered function begins with push {r4,lr} at 0x083e73a0.
       Full-image A32 decoding finds two inbound plain direct BL calls at
@@ -10773,7 +10773,7 @@ functions:
   - address: 0x083e7424
     ghidra: FUN_083e7424
     name: optional_vtable_slot4_invoke
-    size: 36
+    size: 40
     sig: "void **optional_vtable_slot4_invoke(void **slot)"
     module: cxx/optional_vtable_slot4_invoke
     status: ported
@@ -10782,7 +10782,7 @@ functions:
       slot_deref: object
       object_vtable_plus_0x04: vtable_slot4_callback
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x083e7424 through pop {r4,pc} at 0x083e7444; the next
       independently entered function begins at 0x083e7448. Full-image ARM
       decoding finds exactly two inbound direct calls, both plain unconditional
@@ -10824,7 +10824,7 @@ functions:
   - address: 0x083e7520
     ghidra: FUN_083e7520
     name: conditional_owned_object_destroy
-    size: 36
+    size: 40
     sig: "void **conditional_owned_object_destroy(void **slot)"
     module: cxx/conditional_owned_object_destroy
     status: ported
@@ -10834,7 +10834,7 @@ functions:
       FUN_081d2914: opaque_object_destroy
       FUN_082aad24: operator_delete
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,lr} at 0x083e7520 through pop {r4,pc} at 0x083e7540; the next
       independently entered function begins with push {r4,r5,r6,lr} at
       0x083e7544. Full-image ARM decoding finds exactly two inbound direct
@@ -11571,7 +11571,7 @@ functions:
   - address: 0x08008648
     ghidra: FUN_08008648
     name: queue_transfer_with_default_mode
-    size: 36
+    size: 40
     sig: "void queue_transfer_with_default_mode(u32 first, u32 second, u32 length, u32 transfer_type, u32 transfer_slot)"
     module: drivers/transfer_default_mode
     status: ported
@@ -11783,7 +11783,7 @@ functions:
   - address: 0x08007260
     ghidra: FUN_08007260
     name: stream_buffer_dispatch_mode_zero
-    size: 36
+    size: 40
     sig: "void stream_buffer_dispatch_mode_zero(StreamBuffer *stream_buffer)"
     module: kernel/stream_buffer_dispatch_mode_zero
     status: ported
@@ -13391,7 +13391,7 @@ functions:
   - address: 0x08005cf4
     ghidra: FUN_08005cf4
     name: heap_object_destroy_and_dispatch
-    size: 36
+    size: 40
     sig: "void *heap_object_destroy_and_dispatch(void *object)"
     module: heap/object_destroy_dispatch
     status: ported
@@ -13979,7 +13979,7 @@ functions:
   - address: 0x08003b8c
     ghidra: FUN_08003b8c
     name: ks_alloc_timer
-    size: 36
+    size: 40
     sig: "u32 ks_alloc_timer(void)"
     module: runtime/message_0x10
     status: ported
@@ -14372,7 +14372,7 @@ functions:
   - address: 0x080311dc
     ghidra: FUN_080311dc
     name: strchr
-    size: 36
+    size: 40
     sig: "const char *strchr(const char *s, int c)"
     module: strchr
     status: ported
@@ -14389,7 +14389,7 @@ functions:
   - address: 0x08031240
     ghidra: FUN_08031240
     name: strrchr
-    size: 36
+    size: 40
     sig: "const char *strrchr(const char *s, int c)"
     module: strchr
     status: ported
@@ -14408,7 +14408,7 @@ functions:
   - address: 0x082770bc
     ghidra: FUN_082770bc
     name: strlen_safe
-    size: 36
+    size: 40
     sig: "size_t strlen_safe(const char *s)"
     module: strlen_safe
     status: ported
@@ -14420,7 +14420,7 @@ functions:
   - address: 0x08275e20
     ghidra: FUN_08275e20
     name: strlen_safe_plus1
-    size: 36
+    size: 40
     sig: "size_t strlen_safe_plus1(const char *s)"
     module: strlen_safe_plus1
     status: ported
@@ -14590,7 +14590,7 @@ functions:
   - address: 0x0802f1bc
     ghidra: FUN_0802f1bc
     name: tolower
-    size: 36
+    size: 40
     sig: "i32 tolower(i32 c)"
     module: ctype
     status: ported
@@ -14630,7 +14630,7 @@ functions:
   - address: 0x082d731c
     ghidra: FUN_082d731c
     name: isdigit
-    size: 36
+    size: 40
     sig: "i32 isdigit(i32 c)"
     module: ctype
     status: ported
@@ -14929,7 +14929,7 @@ functions:
   - address: 0x08032084
     ghidra: FUN_08032084
     name: __rt_sys_exit
-    size: 36
+    size: 40
     module: exit
     status: ported
     notes: stdio flush (semihost, dead) then retailOS terminate @ 0x82b20a0.
@@ -15042,13 +15042,13 @@ functions:
 
   - address: 0x0802f2a4
     name: printf_widen_signed
-    size: 36
+    size: 40
     module: printf_helpers
     status: ported
 
   - address: 0x0802f2c8
     name: printf_widen_unsigned
-    size: 36
+    size: 40
     module: printf_helpers
     status: ported
     notes: h/hh length-flag argument widening.
@@ -15513,7 +15513,7 @@ functions:
   - address: 0x08036a10
     ghidra: FUN_08036a10
     name: stream_read_chars
-    size: 360
+    size: 400
     module: stdio/fread
     status: ported
     notes: fread helper; zero callers in image (dead-linked).
@@ -16290,7 +16290,7 @@ functions:
   - address: 0x083e96c4
     ghidra: thunk_FUN_083e96dc
     name: fill_repeated_byte_if_destination
-    size: 36
+    size: 40
     sig: "u8 *fill_repeated_byte_if_destination(u8 *destination, u32 count, const u8 *value)"
     renames:
       param_1/r0: destination
@@ -16660,7 +16660,7 @@ functions:
   - address: 0x08033dc8
     ghidra: FUN_08033dc8
     name: __kernel_sin
-    size: 364
+    size: 404
     module: libm/kernel_trig
     status: ported
     notes: CORRECTION — uses S2..S6 + S1 with iy tail (netlib __kernel_sin).
@@ -16949,14 +16949,14 @@ functions:
   - address: 0x0819d67c
     ghidra: FUN_0819d67c
     name: heap_alloc
-    size: 36
+    size: 40
     module: heap/wrappers
     status: ported
 
   - address: 0x0819d2f0
     ghidra: FUN_0819d2f0
     name: heap_alloc_tag1
-    size: 36
+    size: 40
     module: heap/wrappers
     status: ported
     notes: The '1' goes to the OOM-report-suppress stack arg, NOT the tag.
@@ -16964,7 +16964,7 @@ functions:
   - address: 0x0819ce00
     ghidra: FUN_0819ce00
     name: heap_alloc_zero
-    size: 36
+    size: 40
     module: heap/wrappers
     status: ported
     notes: calloc-style zerofill.
@@ -17929,7 +17929,7 @@ functions:
   - address: 0x080d21d0
     ghidra: FUN_080d21d0
     name: validate_fixa_magic
-    size: 36
+    size: 40
     sig: "u32 validate_fixa_magic(const u32 *owner)"
     module: heap/fixa_validate
     status: ported
@@ -18263,7 +18263,7 @@ functions:
   - address: 0x0805d0cc
     ghidra: FUN_0805d0cc
     name: memh_get_len
-    size: 36
+    size: 40
     sig: "u32 memh_get_len(const MemhBufferHeader *header)"
     module: heap/memh_get_len
     vars: {param_1/r0: header}
@@ -19204,7 +19204,7 @@ functions:
     ghidra: FUN_083dd9e4
 
     name: deque_iter_copy
-    size: 36
+    size: 40
     sig: "void deque_iter_copy(DequeIter *dst, usize r1_unused, const DequeIter *src)"
     module: heap/block_deque
     vars: {param_1: dst, param_3: src}
@@ -19240,7 +19240,7 @@ functions:
   - address: 0x083d9e9c
     ghidra: FUN_083d9e9c
     name: deque_iter_assign_alias_9e9c
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_9e9c(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -20055,7 +20055,7 @@ functions:
   - address: 0x083d6e9c
     ghidra: FUN_083d6e9c
     name: object_matches_active_context
-    size: 36
+    size: 40
     sig: "bool object_matches_active_context(const u32 *object)"
     module: cxx/object_matches_active_context
     status: ported
@@ -20459,7 +20459,7 @@ functions:
   - address: 0x080b49a4
     ghidra: FUN_080b49a4
     name: tagged_link_source_is_valid
-    size: 36
+    size: 40
     sig: "u32 tagged_link_source_is_valid(const TaggedLinkSource *source)"
     module: ui/tagged_link_source_is_valid
     status: ported
@@ -20583,7 +20583,7 @@ functions:
   - address: 0x080dd2a0
     ghidra: FUN_080dd2a0
     name: indexed_mode_substate_code
-    size: 36
+    size: 40
     sig: "u32 indexed_mode_substate_code(i16 index, u32 selector)"
     module: ui/mode_state
     status: ported
@@ -20751,7 +20751,7 @@ functions:
   - address: 0x08044200
     ghidra: FUN_08044200
     name: ft_round_add_clear_bit16
-    size: 36
+    size: 40
     sig: "u32 ft_round_add_clear_bit16(u32 left, u32 right)"
     module: ft/arith
     vars: {param_1: left, param_2: right}
@@ -21113,7 +21113,7 @@ functions:
   - address: 0x081a8198
     ghidra: FUN_081a8198
     name: aligned_buffer_align_up_with_pad
-    size: 36
+    size: 40
     sig: "u8 *aligned_buffer_align_up_with_pad(u8 *block, u32 *pad_out)"
     module: heap/aligned_buffer
     status: ported
@@ -21669,7 +21669,7 @@ functions:
   - address: 0x0807697c
     ghidra: FUN_0807697c
     name: mqueue_receive_wait_wrapper
-    size: 36
+    size: 40
     sig: "u32 mqueue_receive_wait_wrapper(QueuePool *pool)"
     status: identified
     notes: >-
@@ -23531,7 +23531,7 @@ functions:
   - address: 0x080c8304
     ghidra: FUN_080c8304
     name: gateway_wait_ready
-    size: 36
+    size: 40
     sig: "void gateway_wait_ready(void)"
     module: kernel/gateway_request_blocking
     status: ported
@@ -24154,7 +24154,7 @@ functions:
   - address: 0x082dd3d8
     ghidra: FUN_082dd3d8
     name: context_activity_enter
-    size: 36
+    size: 40
     sig: "void context_activity_enter(Context *context)"
     module: cxx/context_activity
     status: ported
@@ -25500,7 +25500,7 @@ functions:
   - address: 0x080564ec
     ghidra: FUN_080564ec
     name: waiter_delete
-    size: 36
+    size: 40
     sig: "void waiter_delete(u32 id)"
     module: kernel/kobj
     status: ported
@@ -26047,7 +26047,7 @@ functions:
   - address: 0x080865bc
     ghidra: FUN_080865bc
     name: status_byte_to_result
-    size: 36
+    size: 40
     sig: "u32 status_byte_to_result(u32 status)"
     module: runtime/status_byte_to_result
     status: ported
@@ -27776,7 +27776,7 @@ functions:
   - address: 0x0805dd68
     ghidra: FUN_0805dd68
     name: bswap16_inplace
-    size: 36
+    size: 40
     sig: "void bswap16_inplace(u8 *ptr)"
     module: util/bswap
     status: ported
@@ -27941,7 +27941,7 @@ functions:
   - address: 0x0804be6c
     ghidra: FUN_0804be6c
     name: ft_activate_size
-    size: 36
+    size: 40
     sig: "i32 ft_activate_size(FtSize *size)"
     module: ft/size
     status: ported
@@ -28362,7 +28362,7 @@ functions:
   - address: 0x0804cb4c
     ghidra: FUN_0804cb4c
     name: ft_list_remove
-    size: 36
+    size: 40
     sig: "void ft_list_remove(FtList *list, FtListNode *node)"
     module: ft/list
     status: ported
@@ -28590,7 +28590,7 @@ functions:
   - address: 0x080cc950
     ghidra: FUN_080cc950
     name: cg_mode_limit
-    size: 36
+    size: 40
     sig: "i32 cg_mode_limit(void)"
     module: codegen/mode_limit
     status: ported
@@ -28878,7 +28878,7 @@ functions:
   - address: 0x0804c1a0
     ghidra: FUN_0804c1a0
     name: ft_angle_diff
-    size: 36
+    size: 40
     sig: "i32 ft_angle_diff(i32 angle1, i32 angle2)"
     module: ft/trig
     status: ported
@@ -30000,7 +30000,7 @@ functions:
   - address: 0x0813b764
     ghidra: FUN_0813b764
     name: berec_read_u24
-    size: 36
+    size: 40
     sig: "u32 berec_read_u24(const u8 **rec, isize offset)"
     module: util/berec
     status: ported
@@ -30047,7 +30047,7 @@ functions:
   - address: 0x081f3b30
     ghidra: FUN_081f3b30
     name: load_be32
-    size: 36
+    size: 40
     sig: "u32 load_be32(const u8 *p)"
     module: util/beload
     status: ported
@@ -31068,7 +31068,7 @@ functions:
   - address: 0x081f3d44
     ghidra: FUN_081f3d44
     name: mov_atom_header_read_width
-    size: 36
+    size: 40
     sig: "u32 mov_atom_header_read_width(const u8 *parser)"
     module: mov/atom_header_read_width
     status: ported
@@ -31299,7 +31299,7 @@ functions:
   - address: 0x0810b610
     ghidra: FUN_0810b610
     name: strlen_safe
-    size: 36
+    size: 40
     sig: "usize strlen_safe(const u8 *s)"
     module: libc/strlen_safe
     status: ported
@@ -35850,7 +35850,7 @@ functions:
   - address: 0x08172c44
     ghidra: FUN_08172c44
     name: class6000_property_60bc_u16
-    size: 36
+    size: 40
     sig: "u16 class6000_property_60bc_u16(void *store)"
     module: app/class6000_property_60bc_u16
     status: ported
@@ -36791,7 +36791,7 @@ functions:
   - address: 0x0811a890
     ghidra: FUN_0811a890
     name: stop_frequency_change_and_start_tuning_timer
-    size: 36
+    size: 40
     sig: "void stop_frequency_change_and_start_tuning_timer(u8 *controller)"
     module: app/tuning_timer
     status: ported
@@ -37675,7 +37675,7 @@ functions:
   - address: 0x081d2184
     ghidra: FUN_081d2184
     name: registry_lookup_by_id
-    size: 36
+    size: 40
     sig: "void *registry_lookup_by_id(u32 class_id)"
     module: app/registry
     status: ported
@@ -39798,7 +39798,7 @@ functions:
   - address: 0x082a22d8
     ghidra: FUN_082a22d8
     name: rect_is_empty
-    size: 36
+    size: 40
     sig: "u32 rect_is_empty(const Rect *rect)"
     module: ui/rect
     status: ported
@@ -39812,7 +39812,7 @@ functions:
   - address: 0x082a22fc
     ghidra: FUN_082a22fc
     name: rect_is_valid
-    size: 36
+    size: 40
     sig: "u32 rect_is_valid(const Rect *rect)"
     module: ui/rect
     status: ported
@@ -39844,7 +39844,7 @@ functions:
   - address: 0x082a25d8
     ghidra: FUN_082a25d8
     name: ui_element_render_bounds
-    size: 36
+    size: 40
     sig: "void ui_element_render_bounds(UiElement *element, Rect *out)"
     module: ui/content_bounds
     status: ported
@@ -39888,7 +39888,7 @@ functions:
   - address: 0x0828c534
     ghidra: FUN_0828c534
     name: coordinate_owner_set_opacity
-    size: 36
+    size: 40
     sig: "void coordinate_owner_set_opacity(CoordinateOwner *owner, u8 opacity)"
     module: ui/coordinate_origin
     status: ported
@@ -40165,7 +40165,7 @@ functions:
   - address: 0x0828d4e0
     ghidra: FUN_0828d4e0
     name: render_context_release_resource
-    size: 36
+    size: 40
     sig: "void render_context_release_resource(void *context, u32 *resource_slot)"
     module: ui/render_context_release_resource
     status: ported
@@ -41327,7 +41327,7 @@ functions:
   - address: 0x0826c550
     ghidra: FUN_0826c550
     name: rect_inset_vertical
-    size: 36
+    size: 40
     sig: "void rect_inset_vertical(Rect *rect, i32 dy)"
     module: ui/rect
     status: ported
@@ -41681,7 +41681,7 @@ functions:
   - address: 0x082d6c6c
     ghidra: FUN_082d6c6c
     name: word_list_assign_value
-    size: 36
+    size: 40
     sig: "int word_list_assign_value(uint32_t value, WordList *list)"
     module: util/word_list_assign_value
     status: ported
@@ -41703,7 +41703,7 @@ functions:
   - address: 0x082d6c90
     ghidra: FUN_082d6c90
     name: clear_cursor_saved_overflows
-    size: 36
+    size: 40
     sig: "void clear_cursor_saved_overflows(cursors: *mut BtCursorList)"
     module: sqlite/clear_cursor_saved_overflows
     status: ported
@@ -42288,7 +42288,7 @@ functions:
   - address: 0x08258c58
     ghidra: FUN_08258c58
     name: string_id_record_default_construct
-    size: 36
+    size: 40
     sig: "StringIdRecord *string_id_record_default_construct(StringIdRecord *this)"
     module: cxx/string_object
     status: ported
@@ -43554,7 +43554,7 @@ functions:
   - address: 0x082a37a4
     ghidra: FUN_082a37a4
     name: string_construct_from_vtable_slot_50
-    size: 36
+    size: 40
     sig: "void string_construct_from_vtable_slot_50(StringObject *out, StringSlot50Source *source)"
     module: cxx/string_from_vtable_slot_50
     status: ported
@@ -47306,7 +47306,7 @@ functions:
   - address: 0x0825c91c
     ghidra: FUN_0825c91c
     name: cxx_string_pair_assign
-    size: 36
+    size: 40
     sig: "CxxStringPair *cxx_string_pair_assign(CxxStringPair *destination, const CxxStringPair *source)"
     module: cxx/string
     status: ported
@@ -48024,7 +48024,7 @@ functions:
   - address: 0x08390c30
     ghidra: null
     name: tracked_stats_reset_peak
-    size: 36
+    size: 40
     sig: "i64 tracked_stats_reset_peak(i32 reset)"
     module: heap/tracked
     status: ported
@@ -48143,7 +48143,7 @@ functions:
   - address: 0x0837a158
     ghidra: FUN_0837a158
     name: load_be32
-    size: 36
+    size: 40
     sig: "u32 load_be32(const u8 *p)"
     module: util/beload
     status: ported
@@ -49468,7 +49468,7 @@ functions:
   - address: 0x0839c518
     ghidra: FUN_0839c518
     name: vtable_08982424_destruct
-    size: 36
+    size: 40
     sig: "Registry *vtable_08982424_destruct(Registry *this)"
     module: cxx/vtable_08982424_destruct
     vars: {param_1/r0/r4: this, DAT_0839c53c: VTABLE_08982424, FUN_0839c470: vtable_slot_40_release_each, FUN_08135380: registry_container_destruct}
@@ -49923,13 +49923,13 @@ functions:
   - address: 0x0839e7c4
     ghidra: FUN_0839e7c4
     name: store_u32_le_at
-    size: 36
+    size: 40
     sig: "u8 *store_u32_le_at(u8 *base, u32 offset, u32 value)"
     module: util/le_read
     status: ported
     vars: {param_1: base, param_2: offset, param_3: value}
     notes: >-
-      Raw ARM establishes the exact 36-byte extent 0x0839e7c4..0x0839e7e8:
+      Raw ARM establishes the exact 40-byte extent 0x0839e7c4..0x0839e7e8:
       strb r2,[r0,r1] / add r0,r0,r1 / lsr r3,r2,#8 / lsr r1,r2,#16 /
       strb r3,[r0,#1] / strb r1,[r0,#2] / lsr r1,r2,#24 / strb r1,[r0,#3] /
       bx lr. It writes an unaligned u32 as four little-endian bytes. Three
@@ -49941,7 +49941,7 @@ functions:
   - address: 0x0839e7e8
     ghidra: FUN_0839e7e8
     name: read_u32_le_at
-    size: 36
+    size: 40
     sig: "u32 read_u32_le_at(const u8 *base, u32 offset)"
     module: util/le_read
     status: ported
@@ -54054,7 +54054,7 @@ functions:
   - address: 0x08371da4
     ghidra: FUN_08371da4
     name: btree_leave
-    size: 36
+    size: 40
     sig: "void btree_leave(Btree *p)"
     module: sqlite/btree_lock
     status: ported
@@ -54817,7 +54817,7 @@ functions:
   - address: 0x083727c8
     ghidra: FUN_083727c8
     name: btree_parse_cell
-    size: 36
+    size: 40
     sig: "void btree_parse_cell(const MemPage *page, u32 index, CellInfo *info)"
     module: sqlite/parse_cell
     status: ported
@@ -55308,7 +55308,7 @@ functions:
   - address: 0x08374998
     ghidra: FUN_08374998
     name: db_malloc_zero
-    size: 36
+    size: 40
     sig: "void *db_malloc_zero(sqlite3 *db, int n)"
     module: sqlite/mem
     status: ported
@@ -55443,7 +55443,7 @@ functions:
   - address: 0x0837d38c
     ghidra: FUN_0837d38c
     name: sqlite3_malloc_zero
-    size: 36
+    size: 40
     sig: "void *sqlite3_malloc_zero(int n)"
     module: sqlite/mem
     status: ported
@@ -59137,7 +59137,7 @@ functions:
   - address: 0x08369618
     ghidra: FUN_08369618
     name: namespace_provider_destroy
-    size: 36
+    size: 40
     sig: "void namespace_provider_destroy(usize *providers)"
     module: cxx/object_flags
     status: ported
@@ -60052,7 +60052,7 @@ functions:
   - address: 0x083da458
     ghidra: FUN_083da458
     name: deque_iter_assign
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60075,7 +60075,7 @@ functions:
   - address: 0x083da21c
     ghidra: FUN_083da21c
     name: deque_iter_assign_alias_a21c
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a21c(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60092,7 +60092,7 @@ functions:
   - address: 0x083d9ec8
     ghidra: FUN_083d9ec8
     name: deque_iter_assign_alias_9ec8
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_9ec8(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60113,7 +60113,7 @@ functions:
   - address: 0x083d9f38
     ghidra: FUN_083d9f38
     name: deque_iter_assign_alias_9f38
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_9f38(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60133,7 +60133,7 @@ functions:
   - address: 0x083d9f64
     ghidra: FUN_083d9f64
     name: deque_iter_assign_alias_9f64
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_9f64(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60154,7 +60154,7 @@ functions:
   - address: 0x083da2b4
     ghidra: FUN_083da2b4
     name: deque_iter_assign_alias_a2b4
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a2b4(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60176,7 +60176,7 @@ functions:
   - address: 0x083da34c
     ghidra: FUN_083da34c
     name: deque_iter_assign_alias_a34c
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a34c(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60198,7 +60198,7 @@ functions:
   - address: 0x083da3b8
     ghidra: FUN_083da3b8
     name: deque_iter_assign_alias_a3b8
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a3b8(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60221,7 +60221,7 @@ functions:
   - address: 0x0824c774
     ghidra: FUN_0824c774
     name: deque_iter_assign_alias_c774
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_c774(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60296,7 +60296,7 @@ functions:
   - address: 0x083da184
     ghidra: FUN_083da184
     name: deque_iter_assign_alias_a184
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a184(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60315,7 +60315,7 @@ functions:
   - address: 0x083da1b0
     ghidra: FUN_083da1b0
     name: deque_iter_assign_alias_a1b0
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_a1b0(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -60396,7 +60396,7 @@ functions:
   - address: 0x083da2e0
     ghidra: FUN_083da2e0
     name: copy_four_words_forward_alias_a2e0
-    size: 36
+    size: 40
     sig: "u32 *copy_four_words_forward_alias_a2e0(u32 *destination, const u32 *source)"
     module: util/copy_four_words
     status: ported
@@ -60818,7 +60818,7 @@ functions:
   - address: 0x083d9fd4
     ghidra: FUN_083d9fd4
     name: deque_iter_assign_alias_9fd4
-    size: 36
+    size: 40
     sig: "u32 *deque_iter_assign_alias_9fd4(u32 *dst, const u32 *src)"
     module: cxx/templates
     status: ported
@@ -62452,7 +62452,7 @@ functions:
   - address: 0x083d7020
     ghidra: FUN_083d7020
     name: strstreambuf_input_available
-    size: 36
+    size: 40
     sig: "i32 strstreambuf_input_available(const u8 *this)"
     module: cxx/string
     status: ported
@@ -62468,7 +62468,7 @@ functions:
   - address: 0x083d7134
     ghidra: FUN_083d7134
     name: strstreambuf_active_buffer_capacity
-    size: 36
+    size: 40
     sig: "i32 strstreambuf_active_buffer_capacity(const u8 *this)"
     module: cxx/string
     status: ported
@@ -64340,7 +64340,7 @@ functions:
   - address: 0x083e5fc0
     ghidra: FUN_083e5fc0
     name: vector_bool_iter_increment
-    size: 36
+    size: 40
     sig: "void vector_bool_iter_increment(VectorBoolIter *iter)"
     module: cxx/templates
     status: ported
@@ -64579,7 +64579,7 @@ functions:
   - address: 0x083d5eb4
     ghidra: FUN_083d5eb4
     name: three_pointer_select
-    size: 36
+    size: 40
     sig: "u32 three_pointer_select(const ThreePointers *triple)"
     module: util
     status: ported
@@ -64601,7 +64601,7 @@ functions:
   - address: 0x083d5ed8
     ghidra: FUN_083d5ed8
     name: three_pointer_select
-    size: 36
+    size: 40
     sig: "u32 three_pointer_select(const ThreePointers *triple)"
     module: util
     status: ported
@@ -65464,7 +65464,7 @@ functions:
   - address: 0x082ab264
     ghidra: FUN_082ab264
     name: cpp_array_allocate
-    size: 36
+    size: 40
     sig: "u32 *cpp_array_allocate(u32 element_size, u32 element_count, u32 element_initializer, u32 initializer_context)"
     module: runtime/cpp_array_allocate
     status: ported
@@ -65476,7 +65476,7 @@ functions:
       FUN_082ab400: cpp_array_allocate_helper_adapter
       FUN_082b498c: unported_array_helper (existing PairHeaderElementArrayOps seam)
     notes: >-
-      Raw ARM establishes the exact 36-byte extent 0x082ab264..0x082ab288;
+      Raw ARM establishes the exact 40-byte extent 0x082ab264..0x082ab288;
       the next separately linked adapter starts at 0x082ab288. Decoding every
       aligned B/BL word in osos.dec finds exactly five direct callers, all
       unconditional bl and none predicated. The body rotates the ADS
@@ -65674,7 +65674,7 @@ functions:
   - address: 0x08124a38
     ghidra: FUN_08124a38
     name: pair_header_construct
-    size: 36
+    size: 40
     sig: "u32 *pair_header_construct(u32 *this, u32 header_first, u32 header_second)"
     module: cxx/pair_header
     status: ported
@@ -68706,7 +68706,7 @@ functions:
   - address: 0x082a0100
     ghidra: FUN_082a0100
     name: rgba8_to_rgba8888
-    size: 36
+    size: 40
     sig: "u32 rgba8_to_rgba8888(const u8 *components)"
     module: ui/rgba8888_pack
     status: ported
@@ -69362,7 +69362,7 @@ functions:
   - address: 0x08138460
     ghidra: FUN_08138460
     name: refcounted_base_init
-    size: 36
+    size: 40
     sig: "void refcounted_base_init(FixedValue *this)"
     module: app/fixed_value
     status: ported
@@ -71164,7 +71164,7 @@ functions:
   - address: 0x0811af38
     ghidra: FUN_0811af38
     name: class_6280_clear_pending_and_post_resource
-    size: 36
+    size: 40
     sig: "void class_6280_clear_pending_and_post_resource(Class6280 *view)"
     module: app/class_6280_clear_pending_and_post_resource
     status: ported
@@ -74692,7 +74692,7 @@ functions:
   - address: 0x08110c54
     ghidra: FUN_08110c54
     name: framework_base_reset_current_task_targets
-    size: 36
+    size: 40
     sig: "void framework_base_reset_current_task_targets(void)"
     module: app/class_6800
     status: ported
@@ -76711,7 +76711,7 @@ functions:
   - address: 0x08165558
     ghidra: FUN_08165558
     name: service_manager_initialization_state_get
-    size: 36
+    size: 40
     sig: "void service_manager_initialization_state_get(void *unused_instance, u8 *constructed, u8 *ready)"
     module: app/service_manager
     renames:
@@ -76859,7 +76859,7 @@ functions:
   - address: 0x08138b84
     ghidra: FUN_08138b84
     name: service_handler_lifecycle_state
-    size: 36
+    size: 40
     sig: "i32 service_handler_lifecycle_state(void *manager, i32 selector)"
     module: app/service_handler_availability
     renames:
@@ -77856,7 +77856,7 @@ functions:
   - address: 0x082a3e74
     ghidra: FUN_082a3e74
     name: string_construct_from_vtable_slot_58
-    size: 36
+    size: 40
     sig: "void string_construct_from_vtable_slot_58(StringObject *out, StringSlot58Source *source)"
     module: cxx/string_from_vtable_slot_58
     status: ported
@@ -78270,7 +78270,7 @@ functions:
   - address: 0x08258d7c
     ghidra: FUN_08258d7c
     name: tagged_value_payload_pair_equal
-    size: 36
+    size: 40
     sig: "bool tagged_value_payload_pair_equal(const TaggedValue *left, const TaggedValue *right)"
     module: cxx/tagged_value
     status: ported
@@ -78480,7 +78480,7 @@ functions:
   - address: 0x0828418c
     ghidra: FUN_0828418c
     name: context_scope_assign
-    size: 36
+    size: 40
     sig: "void *context_scope_assign(void *scope, const void *source)"
     module: app/context_scope
     status: ported
@@ -79511,7 +79511,7 @@ functions:
   - address: 0x0827213c
     ghidra: FUN_0827213c
     name: zero_three_words_four_halfwords
-    size: 36
+    size: 40
     sig: "void *zero_three_words_four_halfwords(void *dst)"
     module: util/zero_three_words_four_halfwords
     status: ported
@@ -79608,7 +79608,7 @@ functions:
   - address: 0x08271cec
     ghidra: FUN_08271cec
     name: observable_array_construct
-    size: 36
+    size: 40
     sig: "ObservableArray *observable_array_construct(ObservableArray *this)"
     module: cxx/observable_array
     status: ported
@@ -80981,7 +80981,7 @@ functions:
   - address: 0x08369c10
     ghidra: FUN_08369c10
     name: shared_context_pair_38_or_zero
-    size: 36
+    size: 40
     sig: "u64 shared_context_pair_38_or_zero(void)"
     module: ui/shared_context_pair_38
     status: ported
@@ -81335,7 +81335,7 @@ functions:
   - address: 0x08055fd0
     ghidra: FUN_08055fd0
     name: snapshot_timestamp_baseline
-    size: 36
+    size: 40
     sig: "i64 snapshot_timestamp_baseline(void)"
     module: ui/object_state
     status: ported
@@ -81952,7 +81952,7 @@ functions:
   - address: 0x080db8ac
     ghidra: FUN_080db8ac
     name: fallback_rule_chain
-    size: 360
+    size: 400
     sig: "u32 fallback_rule_chain(void *library, FT_Stream stream, i32 face_index, void *face_out, const u32 *open_args)"
     module: cxx/object_flags
     status: ported
@@ -82773,7 +82773,7 @@ functions:
   - address: 0x082c0c54
     ghidra: FUN_082c0c54
     name: cg_register_bitset_create
-    size: 36
+    size: 40
     sig: "uint32_t *cg_register_bitset_create(cg_heap_t *heap, uint32_t register_count)"
     module: codegen/register_bitset
     status: ported
@@ -85239,14 +85239,14 @@ functions:
   - address: 0x082c5da8
     ghidra: FUN_082c5da8
     name: h264_nal_header_parse
-    size: 36
+    size: 40
     sig: "i32 h264_nal_header_parse(u32 nal_header, u8 *nal_ref_idc, u8 *nal_unit_type)"
     module: h264/nal_header
     vars: {param_1/r0: nal_header, param_2/r1: nal_ref_idc, param_3/r2: nal_unit_type}
     status: ported
     notes: >-
       The one-byte H.264 NAL-unit header parser. Raw osos.dec words establish
-      the exact 36-byte extent 0x082c5da8..0x082c5dcc: tst r0,#0x80;
+      the exact 40-byte extent 0x082c5da8..0x082c5dcc: tst r0,#0x80;
       andeq/lsreq for bits 6..5; andeq for bits 4..0; two predicated byte
       stores; mvnne/moveq; bx lr. It is a leaf: zero outgoing plain or
       predicated bl calls. There are three inbound unconditional plain bl
@@ -85323,7 +85323,7 @@ functions:
   - address: 0x082c5dcc
     ghidra: FUN_082c5dcc
     name: cg_exp_golomb_se_read
-    size: 36
+    size: 40
     sig: "i32 cg_exp_golomb_se_read(RbspBitReader *reader, i32 *bits_out, u8 *emulation_byte_pending)"
     module: codegen/exp_golomb
     vars: {param_1: reader, param_2: bits_out, param_3: emulation_byte_pending}
@@ -85574,7 +85574,7 @@ functions:
   - address: 0x082cf798
     ghidra: FUN_082cf798
     name: word_list_modular_scale_assign
-    size: 36
+    size: 40
     sig: "void word_list_modular_scale_assign(u32 scalar, WordList *value, const ModularReductionContext *modulus)"
     module: util/word_list_modular_scale
     status: ported
@@ -85662,7 +85662,7 @@ functions:
   - address: 0x082cdac8
     ghidra: FUN_082cdac8
     name: word_list_modular_add_assign
-    size: 36
+    size: 40
     sig: "void word_list_modular_add_assign(const WordList *addend, WordList *accumulator, const ModularReductionContext *modulus)"
     module: util/word_list_modular_add
     status: ported
@@ -86325,7 +86325,7 @@ functions:
   - address: 0x0821c4c8
     ghidra: FUN_0821c4c8
     name: vtable_file_record_inner_iterator_begin
-    size: 36
+    size: 40
     sig: "void vtable_file_record_inner_iterator_begin(iter: *mut u32, registry: *mut u8, key: u32)"
     module: app/vtable_set
     status: ported
@@ -87557,7 +87557,7 @@ functions:
   - address: 0x08279314
     ghidra: FUN_08279314
     name: path_object_assign_from_string_object
-    size: 36
+    size: 40
     sig: "StringObject *path_object_assign_from_string_object(StringObject *this, const StringObject *source)"
     module: app/path_object_construct
     status: ported
@@ -88721,7 +88721,7 @@ functions:
   - address: 0x08028460
     ghidra: FUN_08028460
     name: initialize_eight_byte_identity_slots
-    size: 36
+    size: 40
     sig: "void initialize_eight_byte_identity_slots(u8 *base)"
     module: drivers/eight_slot_identity_init
     status: ported
@@ -88741,7 +88741,7 @@ functions:
   - address: 0x08028490
     ghidra: FUN_08028490
     name: initialize_eight_byte_identity_slots_alias
-    size: 36
+    size: 40
     sig: "void initialize_eight_byte_identity_slots_alias(u8 *base)"
     module: drivers/eight_slot_identity_init_alias
     status: ported
@@ -88876,7 +88876,7 @@ functions:
   - address: 0x0802dda8
     ghidra: FUN_0802dda8
     name: initialize_sixteen_byte_identity_slots
-    size: 36
+    size: 40
     sig: "void initialize_sixteen_byte_identity_slots(u8 *base)"
     module: drivers/sixteen_slot_identity_init
     status: ported
@@ -89021,7 +89021,7 @@ functions:
   - address: 0x0802b974
     ghidra: FUN_0802b974
     name: ft_advance_scaled_word_cursor
-    size: 36
+    size: 40
     sig: "void ft_advance_scaled_word_cursor(u32 *next_cursor, u32 *cursor_mirror, u32 *range_start, u32 stride, u32 count)"
     module: cxx/scaled_cursor
     status: ported
@@ -90438,7 +90438,7 @@ functions:
   - address: 0x082720ac
     ghidra: FUN_082720ac
     name: color_copy_unaligned
-    size: 36
+    size: 40
     sig: "void color_copy_unaligned(u8 *dst, const u8 *src)"
     module: cxx/color_copy
     status: ported
@@ -90470,7 +90470,7 @@ functions:
   - address: 0x082720e8
     ghidra: FUN_082720e8
     name: color_copy
-    size: 36
+    size: 40
     sig: "void color_copy(u8 *dst, const u8 *src)"
     module: cxx/color_copy
     status: ported
@@ -91240,7 +91240,7 @@ functions:
   - address: 0x0803d270
     ghidra: FUN_0803d270
     name: bio_copy_next_retry
-    size: 36
+    size: 40
     sig: "void bio_copy_next_retry(BIO *bio)"
     module: crypto/bio_copy_next_retry
     status: ported
@@ -92488,7 +92488,7 @@ functions:
   - address: 0x080f74ac
     ghidra: FUN_080f74ac
     name: iap_packet_destruct
-    size: 36
+    size: 40
     sig: "u8 *iap_packet_destruct(u8 *packet)"
     module: app/iap_packet
     status: ported
@@ -92686,7 +92686,7 @@ functions:
   - address: 0x08277164
     ghidra: FUN_08277164
     name: utf16_code_unit_count_safe
-    size: 36
+    size: 40
     sig: "int utf16_code_unit_count_safe(const unsigned short *source)"
     module: cxx/string_object
     status: ported
@@ -92826,7 +92826,7 @@ functions:
   - address: 0x082774f0
     ghidra: FUN_082774f0
     name: string_object_append_code_unit_returning_this
-    size: 36
+    size: 40
     sig: "StringObject *string_object_append_code_unit_returning_this(StringObject *this, unsigned int value)"
     module: cxx/string_object
     status: ported
@@ -93043,7 +93043,7 @@ functions:
   - address: 0x082767d8
     ghidra: FUN_082767d8
     name: utf8_to_utf16
-    size: 36
+    size: 40
     sig: "void utf8_to_utf16(unsigned short *out, const unsigned char *source)"
     module: cxx/string_encoding
     status: ported
@@ -96144,7 +96144,7 @@ functions:
   - address: 0x0829f7a4
     ghidra: FUN_0829f7a4
     name: fixed3_is_zero
-    size: 36
+    size: 40
     sig: "u32 fixed3_is_zero(const u32 *value)"
     module: app/fixed3_is_zero
     status: ported
@@ -96313,7 +96313,7 @@ functions:
   - address: 0x0807595c
     ghidra: FUN_0807595c
     name: buffer_state_is_full
-    size: 36
+    size: 40
     sig: "u32 buffer_state_is_full(u32 selector)"
     module: runtime/buffer_state
     status: ported
@@ -99236,7 +99236,7 @@ functions:
   - address: 0x081e8768
     ghidra: FUN_081e8768
     name: tokenizer_next_string
-    size: 36
+    size: 40
     sig: "void tokenizer_next_string(StringObject *out, TokenizerStringReader *reader)"
     module: cxx/tokenizer_next_string
     status: ported
@@ -99246,7 +99246,7 @@ functions:
       FUN_081613d8: tokenizer_next (ported)
       FUN_080f020c: string_from_range (unported RANGE_I32_OPS seam)
     notes: >-
-      Raw words establish the exact 36-byte extent 0x081e8768..0x081e878c:
+      Raw words establish the exact 40-byte extent 0x081e8768..0x081e878c:
       push {r2,r3,r4,lr}, two unconditional bl instructions (to tokenizer_next
       @ 0x081613d8 and string_from_range @ 0x080f020c), then pop
       {r2,r3,r4,pc}; the separately linked constructor opens at 0x081e878c.
@@ -100185,7 +100185,7 @@ functions:
   - address: 0x0838fae4
     ghidra: FUN_0838fae4
     name: sqlite3_column_text
-    size: 36
+    size: 40
     sig: "const void *sqlite3_column_text(sqlite3_stmt *statement, i32 column)"
     module: sqlite/column_text
     status: ported
@@ -100198,7 +100198,7 @@ functions:
     notes: >-
       SQLite 3.5.9's sqlite3_column_text wrapper. Raw words
       e92d4070 e1a05000 ebfcd23f eb000729 e1a04000 e1a00005
-      ebfcd233 e1a00004 e8bd8070 establish the exact 36-byte extent
+      ebfcd233 e1a00004 e8bd8070 establish the exact 40-byte extent
       0x0838fae4..0x0838fb08: select column_mem(statement,column), convert
       it with sqlite3_value_text, preserve that text pointer, then invoke
       sqlite_api_exit(statement->db, statement->rc) and return the saved
@@ -100346,7 +100346,7 @@ functions:
   - address: 0x082728a8
     ghidra: FUN_082728a8
     name: bitfield_extract
-    size: 36
+    size: 40
     sig: "u32 bitfield_extract(const u32 *const *word_handle, u32 hi, u32 lo)"
     module: util/bitfield
     status: ported
@@ -102204,7 +102204,7 @@ functions:
   - address: 0x0803dec8
     ghidra: FUN_0803dec8
     name: tagged_word_buffer_pool_push
-    size: 36
+    size: 40
     sig: "void tagged_word_buffer_pool_push(TaggedWordBufferPool *pool)"
     module: heap/tagged_word_buffer_pool
     status: ported
@@ -106558,7 +106558,7 @@ functions:
   - address: 0x08218aec
     ghidra: FUN_08218aec
     name: selector_record_address
-    size: 36
+    size: 40
     sig: "u32 selector_record_address(u32 base, u32 selector)"
     module: util/selector_record_address
     status: ported
@@ -107037,7 +107037,7 @@ functions:
   - address: 0x081fa04c
     ghidra: FUN_081fa04c
     name: media_player_slot_b8_then_volume_controller_update
-    size: 36
+    size: 40
     module: app/media_player_slot_b8_then_volume_controller_update
     status: ported
     renames:
@@ -107093,7 +107093,7 @@ functions:
   - address: 0x0819fdb0
     ghidra: FUN_0819fdb0
     name: application_string_registry
-    size: 36
+    size: 40
     sig: "void *application_string_registry(void)"
     module: app/application_string_registry
     status: ported
@@ -107399,7 +107399,7 @@ functions:
   - address: 0x080575cc
     ghidra: FUN_080575cc
     name: stream_read_be32_or_zero
-    size: 36
+    size: 40
     sig: "i32 stream_read_be32_or_zero(u32 ctx, u32 *out)"
     module: util/stream_read_be32_or_zero
     status: ported
@@ -107430,7 +107430,7 @@ functions:
   - address: 0x083e75d0
     ghidra: FUN_083e75d0
     name: query_object_release_slot
-    size: 36
+    size: 40
     sig: "void **query_object_release_slot(void **slot)"
     module: util/query_object_release
     status: ported
@@ -108504,7 +108504,7 @@ functions:
   - address: 0x08167028
     ghidra: FUN_08167028
     name: own_target_notification_post
-    size: 36
+    size: 40
     sig: "void own_target_notification_post(OwnTargetNotifier *this, u32 message_code, const u8 *bytes, u32 byte_count, usize reply_queue)"
     module: app/own_target_notification_post
     status: ported
@@ -108597,7 +108597,7 @@ functions:
   - address: 0x080f1158
     ghidra: FUN_080f1158
     name: list_push_back
-    size: 36
+    size: 40
     sig: "void list_push_back(ListHead *list, ListNode *node)"
     module: kernel/condvar
     status: ported
@@ -108834,7 +108834,7 @@ functions:
   - address: 0x0803a2ec
     ghidra: FUN_0803a2ec
     name: owned_buffer_destroy
-    size: 36
+    size: 40
     sig: "void owned_buffer_destroy(OwnedBuffer *owner)"
     module: heap/owned_buffer
     status: ported
@@ -109253,7 +109253,7 @@ functions:
   - address: 0x08248698
     ghidra: FUN_08248698
     name: copy_four_words
-    size: 36
+    size: 40
     sig: "u32 copy_four_words(const u32 *source, u32 *destination)"
     module: util/copy_four_words
     status: ported
@@ -109299,7 +109299,7 @@ functions:
   - address: 0x08248704
     ghidra: FUN_08248704
     name: copy_four_words_staggered
-    size: 36
+    size: 40
     sig: "u32 *copy_four_words_staggered(u32 *destination, const u32 *source)"
     module: util/copy_four_words
     status: ported
@@ -109408,7 +109408,7 @@ functions:
   - address: 0x082572c0
     ghidra: FUN_082572c0
     name: fixed_matrix_copy
-    size: 36
+    size: 40
     sig: "void fixed_matrix_copy(FixedMatrix4x4 *dst, const FixedMatrix4x4 *src)"
     module: util/fixed_matrix_copy
     status: ported
@@ -111530,7 +111530,7 @@ functions:
   - address: 0x082231c0
     ghidra: FUN_082231c0
     name: copy_fourteen_bytes
-    size: 36
+    size: 40
     sig: "u8 *copy_fourteen_bytes(u8 *dst, const u8 *src)"
     module: util/copy_fourteen_bytes
     status: ported
@@ -111561,7 +111561,7 @@ functions:
   - address: 0x0824bf8c
     ghidra: FUN_0824bf8c
     name: copy_four_bytes
-    size: 36
+    size: 40
     sig: "void copy_four_bytes(u8 *dst, const u8 *src)"
     module: util/copy_four_bytes
     status: ported
@@ -112912,7 +112912,7 @@ functions:
   - address: 0x080d8f64
     ghidra: FUN_080d8f64
     name: magic_tagged_object_validate
-    size: 36
+    size: 40
     sig: "i32 magic_tagged_object_validate(const MagicTaggedObject *object)"
     module: cxx/magic_tagged_object
     status: ported
@@ -112934,7 +112934,7 @@ functions:
   - address: 0x080a7714
     ghidra: FUN_080a7714
     name: crts_has_tag
-    size: 36
+    size: 40
     sig: "u32 crts_has_tag(const u32 *object)"
     module: util/crts_tag
     status: ported
@@ -114899,7 +114899,7 @@ functions:
   - address: 0x0815d888
     ghidra: FUN_0815d888
     name: ui_collection_current_item_word
-    size: 36
+    size: 40
     sig: "u32 ui_collection_current_item_word(void *owner)"
     module: ui/collection_current_item_word
     status: ported
@@ -114907,7 +114907,7 @@ functions:
       param_1: owner
       FUN_081d0e00: collection_item_word_dispatch
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent:
+      Raw osos.dec establishes the exact 40-byte extent:
       0x0815d888..0x0815d8ac. The separately linked next function begins at
       0x0815d8ac with push {r4,r5,r6,lr}. Whole-image decoding of every ARM
       B/BL immediate finds exactly ten direct inbound calls, all unconditional
@@ -115515,7 +115515,7 @@ functions:
   - address: 0x08340ee0
     ghidra: FUN_08340ee0
     name: bigint_shift_signed
-    size: 36
+    size: 40
     sig: "void bigint_shift_signed(u32 *value, i32 shift)"
     module: fp/fp_bigint_shift
     status: ported
@@ -115764,7 +115764,7 @@ functions:
   - address: 0x082bcb40
     ghidra: FUN_082bcb40
     name: storage_device_operations_get
-    size: 36
+    size: 40
     sig: "u32 *storage_device_operations_get(void)"
     module: drivers/storage_device_operations
     status: ported
@@ -116066,7 +116066,7 @@ functions:
   - address: 0x0823627c
     ghidra: FUN_0823627c
     name: fixed16_det2
-    size: 36
+    size: 40
     sig: "i32 fixed16_det2(i32 a, i32 b, i32 c, i32 d)"
     module: util/fixed
     status: ported
@@ -117545,7 +117545,7 @@ functions:
   - address: 0x0829e1b4
     ghidra: FUN_0829e1b4
     name: current_record_handle
-    size: 36
+    size: 40
     sig: "u32 current_record_handle(const CurrentRecordCursor *cursor)"
     module: app/current_record_handle
     status: ported
@@ -117555,7 +117555,7 @@ functions:
       param_1+0x08: current_index
       field_+0x04: handle
     notes: >-
-      Raw osos.dec gives the exact 36-byte extent 0x0829e1b4..0x0829e1d8:
+      Raw osos.dec gives the exact 40-byte extent 0x0829e1b4..0x0829e1d8:
       the next separately linked function starts at 0x0829e1d8. The routine
       returns zero only when cursor->current_index is -1; otherwise it returns
       the word at cursor->records + current_index * 0x14 + 4, with modulo-32-bit
@@ -121201,7 +121201,7 @@ functions:
   - address: 0x0813c938
     ghidra: FUN_0813c938
     name: query_object_create_with_id
-    size: 36
+    size: 40
     sig: "u8 *query_object_create_with_id(u32 id, u32 mode)"
     module: fp/fp_misc
     status: ported
@@ -121653,7 +121653,7 @@ functions:
   - address: 0x080a3d30
     ghidra: FUN_080a3d30
     name: semaphore_cell_signal
-    size: 36
+    size: 40
     sig: "u32 semaphore_cell_signal(u32 *cell)"
     module: kernel/posix_mutex
     status: ported
@@ -122288,7 +122288,7 @@ functions:
   - address: 0x083e7448
     ghidra: FUN_083e7448
     name: object_release_slot1
-    size: 36
+    size: 40
     sig: "void **object_release_slot1(void **slot)"
     module: util/object_release_slot1
     status: ported
@@ -122517,7 +122517,7 @@ functions:
   - address: 0x08391144
     ghidra: FUN_08391144
     name: sqlite3_result_error
-    size: 36
+    size: 40
     sig: "void sqlite3_result_error(sqlite3_context *context, const char *text, int length)"
     module: sqlite/result_error
     status: ported
@@ -122527,7 +122527,7 @@ functions:
       param_3/r2: length
       FUN_0838c158: vdbe_mem_set_str
     notes: >-
-      Raw osos.dec confirms the exact 36-byte extent 0x08391144..0x08391168:
+      Raw osos.dec confirms the exact 40-byte extent 0x08391144..0x08391168:
       push {r3,lr}; mov r3,#1; str r3,[r0,#0x34]; mvn r3,#0; str r3,[sp];
       mov r3,#1; add r0,r0,#8; bl 0x0838c158; pop {r12,pc}. The separately
       linked sibling begins at 0x08391168. Decoding every ARM B/BL-immediate
@@ -123031,7 +123031,7 @@ functions:
   - address: 0x0829c438
     ghidra: FUN_0829c438
     name: view_scroll_position
-    size: 36
+    size: 40
     sig: "i32 view_scroll_position(void *view)"
     module: ui/view_scroll_position
     status: ported
@@ -123781,7 +123781,7 @@ functions:
   - address: 0x081ccb78
     ghidra: FUN_081ccb78
     name: timer_stop_then_clear_bit_set
-    size: 36
+    size: 40
     sig: "void timer_stop_then_clear_bit_set(void *this)"
     module: cxx/timer_stop_then_clear_bit_set
     status: ported
@@ -123842,7 +123842,7 @@ functions:
   - address: 0x083e749c
     ghidra: FUN_083e749c
     name: observable_array_owned_destroy
-    size: 36
+    size: 40
     sig: "ObservableArray **observable_array_owned_destroy(ObservableArray **slot)"
     module: cxx/observable_array_owned_destroy
     status: ported
@@ -123877,7 +123877,7 @@ functions:
   - address: 0x081d5f14
     ghidra: FUN_081d5f14
     name: observable_array_pair_construct
-    size: 36
+    size: 40
     sig: "ObservableArrayPair *observable_array_pair_construct(ObservableArrayPair *pair)"
     module: cxx/observable_array_pair
     status: ported
@@ -124727,7 +124727,7 @@ functions:
   - address: 0x080bdb74
     ghidra: FUN_080bdb74
     name: load_be32
-    size: 36
+    size: 40
     sig: "u32 load_be32(const u8 *p)"
     module: util/beload
     status: ported
@@ -124941,7 +124941,7 @@ functions:
   - address: 0x08087974
     ghidra: FUN_08087974
     name: stream_handle_validate
-    size: 36
+    size: 40
     sig: "i32 stream_handle_validate(const u32 *handle)"
     module: util/stream_handle_validate
     status: ported
@@ -125465,7 +125465,7 @@ functions:
   - address: 0x080571ec
     ghidra: FUN_080571ec
     name: forward_byte_copy_returning_dst
-    size: 36
+    size: 40
     sig: "void *forward_byte_copy_returning_dst(void *dst, const void *src, u32 len) -> dst"
     module: libc/forward_byte_copy_returning_dst
     status: ported
@@ -125477,7 +125477,7 @@ functions:
       r12: index
       return/r0: dst
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       0x080571ec through pop {pc} at 0x0805720c; the separately linked next
       function starts at 0x08057210. The function preserves dst in r0,
       advances r3 as a byte destination cursor, and copies while the unsigned
@@ -125881,7 +125881,7 @@ functions:
   - address: 0x083e75f4
     ghidra: FUN_083e75f4
     name: replace_owned_pointer
-    size: 36
+    size: 40
     sig: "void replace_owned_pointer(void **slot, void *replacement)"
     module: util/replace_owned_pointer
     status: ported
@@ -125893,7 +125893,7 @@ functions:
       param_1_deref: old_pointer
       FUN_082aad24: operator_delete
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,r5,r6,lr} at 0x083e75f4 through pop {r4,r5,r6,pc} at
       0x083e7614; the separately linked next function starts at 0x083e7618.
       Ghidra's 28-byte extent incorrectly marks operator_delete as
@@ -126298,7 +126298,7 @@ functions:
   - address: 0x083e72b0
     ghidra: FUN_083e72b0
     name: guarded_vtable_slot_04_dispatch
-    size: 36
+    size: 40
     sig: "GuardedSlot04Handle *guarded_vtable_slot_04_dispatch(GuardedSlot04Handle *handle)"
     module: cxx/guarded_vtable_slot_04_dispatch
     status: ported
@@ -126308,7 +126308,7 @@ functions:
       object_deref/r1: vtable
       vtable_plus_0x04/r1: virtual_method
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM
       instructions from push {r4,lr} at 0x083e72b0 through pop {r4,pc} at
       0x083e72d0; the next function's push {r4,lr} begins at 0x083e72d4,
       which is the ported sibling guarded_vtable_slot_1c_dispatch (same
@@ -126341,7 +126341,7 @@ functions:
   - address: 0x083e72d4
     ghidra: FUN_083e72d4
     name: guarded_vtable_slot_1c_dispatch
-    size: 36
+    size: 40
     sig: "GuardedSlot1cHandle *guarded_vtable_slot_1c_dispatch(GuardedSlot1cHandle *handle)"
     module: cxx/guarded_vtable_slot_1c_dispatch
     status: ported
@@ -126351,7 +126351,7 @@ functions:
       object_deref/r1: vtable
       vtable_plus_0x1c/r1: virtual_method
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM
       instructions from push {r4,lr} at 0x083e72d4 through pop {r4,pc} at
       0x083e72f4; the next function's push {r4-r6,lr} begins at 0x083e72f8.
       Decoding every aligned ARM B/BL-immediate word in osos.dec finds
@@ -127798,7 +127798,7 @@ functions:
   - address: 0x08390dcc
     ghidra: FUN_08390dcc
     name: sqlite3_prepare
-    size: 36
+    size: 40
     sig: "i32 sqlite3_prepare(sqlite3 *db, const char *sql, i32 n_byte, sqlite3_stmt **statement_out, const char **tail_out)"
     module: sqlite/prepare
     status: ported
@@ -128529,7 +128529,7 @@ functions:
   - address: 0x0827281c
     ghidra: FUN_0827281c
     name: mmio_bit_write
-    size: 36
+    size: 40
     sig: "void mmio_bit_write(u32 **register, u32 bit, u32 value)"
     module: drivers/mmio_bit_write
     status: ported
@@ -128541,7 +128541,7 @@ functions:
       r3: one
       r1: bit_mask_then_updated_bits
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       ldr r0,[r0] at 0x0827281c through bx lr at 0x0827283c; the separately
       linked next function begins with ldr r3,[r0] at 0x08272840. Decoding
       every aligned ARM B/BL-immediate word finds exactly five inbound direct
@@ -129086,7 +129086,7 @@ functions:
   - address: 0x081f0700
     ghidra: FUN_081f0700
     name: list_cursor_item_at
-    size: 36
+    size: 40
     sig: "u32 list_cursor_item_at(const void *list, u32 index)"
     module: cxx/list_cursor_item_at
     status: ported
@@ -129096,7 +129096,7 @@ functions:
       "list+0x30": cursor (u32 target pointer)
       FUN_081fcab0: cursor_indexed_lookup
     notes: >-
-      Raw ARM establishes the exact 36-byte extent
+      Raw ARM establishes the exact 40-byte extent
       0x081f0700..0x081f0724: push {r4,lr}; ldr r0,[r0,#0x30]; mov r2,#0;
       cmp r0,#0; beq 0x081f071c; bl 0x081fcab0; mov r2,r0; mov r0,r2; pop
       {r4,pc}. The next separately linked function opens at 0x081f0724 with
@@ -129429,7 +129429,7 @@ functions:
   - address: 0x081b0cd4
     ghidra: FUN_081b0cd4
     name: event_handler_callback_dispatch
-    size: 36
+    size: 40
     sig: "void event_handler_callback_dispatch(u32 value, u32 kind)"
     module: app/event_handler_callback_dispatch
     status: ported
@@ -129439,7 +129439,7 @@ functions:
       thunk_EXT_FUN_22007470: iram event-handler source veneer
       thunk_FUN_080077a8: callback target slot-14 dispatch veneer
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r4,r5,r6,lr} at 0x081b0cd4 through b 0x08038158 at 0x081b0cf0;
       the separately linked next function begins at 0x081b0cf4. The body has
       one plain unconditional BL (0x08038060), zero predicated BL forms, and
@@ -130743,7 +130743,7 @@ functions:
   - address: 0x0809ca70
     ghidra: FUN_0809ca70
     name: global_event_dispatch
-    size: 36
+    size: 40
     sig: "u32 global_event_dispatch(u32 event_code)"
     module: app/global_event_dispatch
     status: ported
@@ -130752,7 +130752,7 @@ functions:
       DAT_0809ca94: global_event_dispatch_object
       r1: dispatch_object_then_entry
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       ldr r1,[0x0809ca94] at 0x0809ca70 through bx lr at 0x0809ca90; the
       literal global-object-pointer address 0x089ca95c is at 0x0809ca94 and
       the next separately linked function starts at 0x0809ca98. Decoding every
@@ -130767,7 +130767,7 @@ functions:
   - address: 0x080c9944
     ghidra: FUN_080c9944
     name: global_event_dispatch_slot_1c
-    size: 36
+    size: 40
     sig: "u32 global_event_dispatch_slot_1c(u32 event_code)"
     module: app/global_event_dispatch
     status: ported
@@ -130776,7 +130776,7 @@ functions:
       DAT_080c9968: global_event_dispatch_object
       global_object_plus_0x1c: dispatch_slot_1c
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       ldr r1,[0x080c9968] at 0x080c9944 through bx lr at 0x080c9964; the
       literal global-object-pointer address 0x089ca95c is at 0x080c9968 and
       the next separately linked function begins at 0x080c996c. Decoding every
@@ -130949,7 +130949,7 @@ functions:
   - address: 0x080648e0
     ghidra: FUN_080648e0
     name: slot_request_submit_and_release
-    size: 36
+    size: 40
     sig: "void slot_request_submit_and_release(void *ctx, u32 arg1, u32 arg2, u32 arg3)"
     module: app/slot_request_release
     vars:
@@ -131462,7 +131462,7 @@ functions:
   - address: 0x083da42c
     ghidra: FUN_083da42c
     name: copy_four_words_forward
-    size: 36
+    size: 40
     sig: "u32 *copy_four_words_forward(u32 *destination, const u32 *source)"
     module: util/copy_four_words
     status: ported
@@ -131483,7 +131483,7 @@ functions:
   - address: 0x083da248
     ghidra: FUN_083da248
     name: copy_four_words_forward_alt
-    size: 36
+    size: 40
     sig: "u32 *copy_four_words_forward_alt(u32 *destination, const u32 *source)"
     module: util/copy_four_words
     status: ported
@@ -131573,7 +131573,7 @@ functions:
   - address: 0x083d7b88
     ghidra: FUN_083d7b88
     name: opaque_pair_equal
-    size: 36
+    size: 40
     sig: "bool opaque_pair_equal(const void *context, const OpaquePair *left, const OpaquePair *right)"
     module: cxx/opaque_pair_equal
     status: ported
@@ -132129,7 +132129,7 @@ functions:
   - address: 0x08369c78
     ghidra: FUN_08369c78
     name: ata_command_wait_idle
-    size: 36
+    size: 40
     sig: "void ata_command_wait_idle(void)"
     module: drivers/ata_command_wait_idle
     status: ported
@@ -133791,7 +133791,7 @@ functions:
   - address: 0x08268090
     ghidra: FUN_08268090
     name: reverse_byte_cursor_pop
-    size: 36
+    size: 40
     sig: "u8 reverse_byte_cursor_pop(void *cursor)"
     module: cxx/reverse_byte_cursor_pop
     status: ported
@@ -134019,7 +134019,7 @@ functions:
   - address: 0x08256d74
     ghidra: FUN_08256d74
     name: copy_four_words_forward_property
-    size: 36
+    size: 40
     sig: "u32 copy_four_words_forward_property(const u32 *source, u32 *destination)"
     module: util/copy_four_words
     status: ported
@@ -134028,7 +134028,7 @@ functions:
       param_2/r1: destination
       r0: final_word_return
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent 0x08256d74..0x08256d98:
+      Raw osos.dec establishes the exact 40-byte extent 0x08256d74..0x08256d98:
       four aligned ldr/str pairs at offsets 0, 4, 8, and 12, followed by bx
       lr; 0x08256d98 starts the next independent push prologue. Whole-image
       A32 branch decoding finds four direct inbound unconditional plain BL
@@ -134126,7 +134126,7 @@ functions:
   - address: 0x0824c67c
     ghidra: FUN_0824c67c
     name: fixed3_normalize
-    size: 36
+    size: 40
     sig: "void fixed3_normalize(i32 *vector)"
     module: app/fixed3_normalize
     status: identified
@@ -134817,7 +134817,7 @@ functions:
   - address: 0x08208578
     ghidra: FUN_08208578
     name: mutex_handoff_guarded_reset
-    size: 36
+    size: 40
     sig: "u32 mutex_handoff_guarded_reset(MutexHandoff *handoff)"
     module: ui/mutex_handoff_guarded_reset
     status: ported
@@ -134845,7 +134845,7 @@ functions:
   - address: 0x081fd554
     ghidra: FUN_081fd554
     name: polymorphic_owner_destroy
-    size: 36
+    size: 40
     sig: "PolymorphicOwner *polymorphic_owner_destroy(PolymorphicOwner *owner)"
     module: cxx/polymorphic_owner_destroy
     status: ported
@@ -135160,7 +135160,7 @@ functions:
   - address: 0x081ef308
     ghidra: FUN_081ef308
     name: slot_array_owner_get
-    size: 36
+    size: 40
     sig: "u32 slot_array_owner_get(const SlotArrayOwner *owner, i32 index)"
     module: cxx/slot_array_owner_get
     status: ported
@@ -136809,7 +136809,7 @@ functions:
   - address: 0x0811f270
     ghidra: FUN_0811f270
     name: indexed_slot_pointer
-    size: 36
+    size: 40
     sig: "u32 *indexed_slot_pointer(const u32 *object, u32 index)"
     module: util/indexed_slot_pointer
     status: ported
@@ -136818,7 +136818,7 @@ functions:
       param_2/r1: index
       FUN_081d5fe0: table_slot_lookup (inlined; target reads table+0x24+index*0x24)
     notes: >-
-      Raw osos.dec A32 words establish the exact 36-byte extent
+      Raw osos.dec A32 words establish the exact 40-byte extent
       0x0811f270..0x0811f294: it loads object+0x14, calls the 16-byte
       table-slot helper at 0x081d5fe0, maps its -1 sentinel to null, otherwise
       returns object+0x04 plus the result scaled by four. The next real
@@ -136898,7 +136898,7 @@ functions:
   - address: 0x08109968
     ghidra: FUN_08109968
     name: query_object_ensure
-    size: 36
+    size: 40
     sig: "void *query_object_ensure(void *owner)"
     module: util/inner_state
     status: ported
@@ -136907,7 +136907,7 @@ functions:
       param_1_plus_0xa8: query_object_cache
       FUN_082597a0: query_object_create
     notes: >-
-      Raw ARM establishes the exact 36-byte extent
+      Raw ARM establishes the exact 40-byte extent
       0x08109968..0x0810998c; the next `push {r2,r3,r4,r5,r6,lr}` at
       0x0810998c begins a separate function. The body preserves the owner,
       loads its four-byte query-object cache at +0xa8, and returns immediately
@@ -138089,7 +138089,7 @@ functions:
   - address: 0x080860c0
     ghidra: FUN_080860c0
     name: gateway_signal_object_checked
-    size: 36
+    size: 40
     sig: "u32 gateway_signal_object_checked(const u32 *object_slot)"
     module: kernel/gateway_signal_checked
     status: ported
@@ -138379,7 +138379,7 @@ functions:
   - address: 0x0806212c
     ghidra: FUN_0806212c
     name: callback_table_get
-    size: 36
+    size: 40
     sig: "u8 *callback_table_get(void)"
     module: app/callback_table
     status: ported
@@ -140242,13 +140242,13 @@ functions:
   - address: 0x083d2244
     ghidra: FUN_083d2244
     name: word_table_index_pair
-    size: 36
+    size: 40
     sig: "void word_table_index_pair(WordTableIndexPair *out_pair, const WordTableIndex *table_index)"
     module: cxx/word_table_index_pair
     status: ported
     vars: {param_1/r0: out_pair, param_2/r1: table_index, param_2_plus_0x14: table, param_2_plus_0x18: index, piVar1/r1: slot, iVar2/r2: value}
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r0-r3,lr} at 0x083d2244 through pop {r1-r3,ip,pc} at 0x083d2264;
       0x083d2268 begins the next real function with push {r0-r8,lr}. The body
       loads the target-width table pointer at +0x14 and index at +0x18, computes
@@ -140262,13 +140262,13 @@ functions:
   - address: 0x083d21a4
     ghidra: FUN_083d21a4
     name: word_table_index_pair_at
-    size: 36
+    size: 40
     sig: "void word_table_index_pair_at(WordTableIndexAtPair *out_pair, const WordTableIndexAt *table_index)"
     module: cxx/word_table_index_pair_at
     status: ported
     vars: {param_1/r0: out_pair, param_2/r1: table_index, param_2_plus_0x14: table, param_2_plus_0x18: index, piVar1/r1: slot, iVar2/r2: value}
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: nine ARM words from
+      Raw osos.dec establishes the exact 40-byte extent: nine ARM words from
       push {r0-r3,lr} at 0x083d21a4 through pop {r1-r3,ip,pc} at 0x083d21c4;
       0x083d21c8 begins the next real function with push {r0-r8,lr}. The body
       makes no direct calls, loads the target-width table pointer at +0x14 and
@@ -140822,7 +140822,7 @@ functions:
   - address: 0x0839c888
     ghidra: FUN_0839c888
     name: vtable_08982784_destruct
-    size: 36
+    size: 40
     sig: "u32 *vtable_08982784_destruct(u32 *this)"
     module: cxx/vtable_08982784_destruct
     status: ported
@@ -140848,7 +140848,7 @@ functions:
   - address: 0x0839c6c4
     ghidra: FUN_0839c6c4
     name: temporary_registry_destruct
-    size: 36
+    size: 40
     sig: "TemporaryRegistry *temporary_registry_destruct(TemporaryRegistry *registry)"
     module: cxx/vtable_089825d4_destruct
     status: ported
@@ -140908,7 +140908,7 @@ functions:
   - address: 0x0839c358
     ghidra: FUN_0839c358
     name: vtable_08982274_destruct
-    size: 36
+    size: 40
     sig: "u32 *vtable_08982274_destruct(u32 *this)"
     module: cxx/vtable_08982274_destruct
     status: ported
@@ -141428,7 +141428,7 @@ functions:
   - address: 0x0836e348
     ghidra: FUN_0836e348
     name: i2c_0x39_register4_high_bits
-    size: 36
+    size: 40
     sig: "void i2c_0x39_register4_high_bits(u8 *out)"
     module: drivers/i2c
     status: ported
@@ -141437,7 +141437,7 @@ functions:
       local_10: register_value
       FUN_0836e36c: i2c_0x39_read_register
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent from push at
+      Raw osos.dec establishes the exact 40-byte extent from push at
       0x0836e348 through pop at 0x0836e368; the next independently linked
       function begins with push at 0x0836e36c. The body has one unconditional
       BL, to i2c_0x39_read_register(4, &register_value), and no predicated
@@ -143426,7 +143426,7 @@ functions:
   - address: 0x0827f6a8
     ghidra: FUN_0827f6a8
     name: volume_limit_state_refresh_if_pending
-    size: 36
+    size: 40
     sig: "u32 volume_limit_state_refresh_if_pending(u8 *object)"
     module: app/volume_limit_state_refresh_if_pending
     status: ported
@@ -143453,7 +143453,7 @@ functions:
   - address: 0x0827f2ac
     ghidra: FUN_0827f2ac
     name: passkey_mask_indicator_countdown_tick
-    size: 36
+    size: 40
     sig: "u32 passkey_mask_indicator_countdown_tick(u32 *object)"
     module: ui/passkey_mask_indicator_countdown
     status: ported
@@ -144370,7 +144370,7 @@ functions:
   - address: 0x0822afec
     ghidra: FUN_0822afec
     name: mode_selected_handle_construct
-    size: 36
+    size: 40
     sig: "void mode_selected_handle_construct(RefcountedBody **slot, u8 *state, u8 *arg2, u8 *arg3)"
     module: app/mode_selected_handle_construct
     status: ported
@@ -145013,7 +145013,7 @@ functions:
   - address: 0x081fca8c
     ghidra: FUN_081fca8c
     name: vtable_slot_10_optional_word
-    size: 36
+    size: 40
     sig: "u32 vtable_slot_10_optional_word(void *object, u32 index)"
     module: cxx/vtable_slot_10_optional_word
     status: ported
@@ -145024,7 +145024,7 @@ functions:
       "[vtable + 0x10]": optional_word_method
       puVar1/r0: result
     notes: >-
-      Raw osos.dec words establish the exact 36-byte extent
+      Raw osos.dec words establish the exact 40-byte extent
       0x081fca8c..0x081fcab0; 0x081fcab0 begins the next real function.
       The body has no direct BL instructions and one indirect BLX through
       object->vtable slot +0x10. Whole-image A32 B/BL decoding finds exactly
@@ -147082,7 +147082,7 @@ functions:
   - address: 0x0817df88
     ghidra: FUN_0817df88
     name: singleton_mode_dispatch_if_state_three_or_four
-    size: 36
+    size: 40
     sig: "void singleton_mode_dispatch_if_state_three_or_four(const u8 *state, u32 mode)"
     module: app/singleton_mode_dispatch_if_state_three_or_four
     status: ported
@@ -149237,7 +149237,7 @@ functions:
   - address: 0x080faaa0
     ghidra: FUN_080faaa0
     name: object_byte_0x450_initialize
-    size: 36
+    size: 40
     sig: "void object_byte_0x450_initialize(void *object)"
     module: app/object_byte_0x450_initialize
     status: ported
@@ -149907,7 +149907,7 @@ functions:
   - address: 0x080cd984
     ghidra: FUN_080cd984
     name: entry_table_finalize_and_append
-    size: 36
+    size: 40
     sig: "u32 entry_table_finalize_and_append(u32 *state, u32 completed_entry_value, u32 context)"
     module: util/entry_table_finalize_and_append
     status: ported
@@ -150249,7 +150249,7 @@ functions:
   - address: 0x080aa474
     ghidra: FUN_080aa474
     name: u16_cstr_buffer_assign
-    size: 36
+    size: 40
     sig: "i32 u16_cstr_buffer_assign(u16 tag, const char *source, u8 *buffer)"
     module: util/u16_cstr_buffer_assign
     status: ported
@@ -150367,7 +150367,7 @@ functions:
   - address: 0x0809c340
     ghidra: FUN_0809c340
     name: byte_bit_set_mask
-    size: 36
+    size: 40
     sig: "u32 byte_bit_set_mask(const ByteBitSet *set, u32 bit_index)"
     module: util/byte_bit_set_mask
     status: ported
@@ -150377,7 +150377,7 @@ functions:
       r2: bit_count_or_mask
       r3: bitmap_byte
     notes: >-
-      Raw osos.dec words establish the exact 36-byte extent
+      Raw osos.dec words establish the exact 40-byte extent
       0x0809c340..0x0809c364; the next distinct function starts at
       0x0809c364 with `stmdb sp!, {r4,lr}`. The unsigned bit count at +0x00
       bounds the lookup; accepted indices select bytes from the target-width
@@ -150666,7 +150666,7 @@ functions:
   - address: 0x0807f5a0
     ghidra: FUN_0807f5a0
     name: mailbox_controller_reset
-    size: 36
+    size: 40
     sig: "void mailbox_controller_reset()"
     module: drivers/mailbox_controller_reset
     status: ported
@@ -151169,7 +151169,7 @@ functions:
   - address: 0x0805e51c
     ghidra: FUN_0805e51c
     name: indexed_pair_table_create
-    size: 36
+    size: 40
     sig: "u32 *indexed_pair_table_create(u32 count)"
     module: heap/indexed_pair_table_create
     status: ported
@@ -151899,7 +151899,7 @@ functions:
   - address: 0x080498b4
     ghidra: FUN_080498b4
     name: pending_message_discard_next
-    size: 36
+    size: 40
     sig: "u32 pending_message_discard_next()"
     module: runtime/pending_message_discard
     status: ported
@@ -152781,7 +152781,7 @@ functions:
   - address: 0x083e9bdc
     ghidra: FUN_083e9bdc
     name: copy_word_triplets_returning_end
-    size: 36
+    size: 40
     sig: "u32 *copy_word_triplets_returning_end(const u32 *source, const u32 *source_end, u32 *destination)"
     module: libc/copy_word_triplets_returning_end
     status: ported
@@ -152805,7 +152805,7 @@ functions:
   - address: 0x083e96a0
     ghidra: thunk_FUN_083e96b8
     name: repeat_source_word_if_destination
-    size: 36
+    size: 40
     sig: "u32 *repeat_source_word_if_destination(u32 *destination, u32 count, const u32 *source)"
     module: util/repeat_source_word_if_destination
     status: ported
@@ -152814,7 +152814,7 @@ functions:
       param_2/r1: count
       param_3/r2: source
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent
+      Raw osos.dec establishes the exact 40-byte extent
       0x083e96a0..0x083e96c3: the entry is `b 0x083e96b8`, which reaches the
       loop test; `bx lr` at 0x083e96c0 ends the loop, and 0x083e96c4 begins
       the next distinct function. Raw caller decoding verifies two inbound
@@ -153201,7 +153201,7 @@ functions:
   - address: 0x083e75ac
     ghidra: FUN_083e75ac
     name: opaque_owned_allocation_release
-    size: 36
+    size: 40
     sig: "StringObject **opaque_owned_allocation_release(StringObject **holder)"
     module: cxx/opaque_owned_allocation_release
     status: ported
@@ -153210,7 +153210,7 @@ functions:
       FUN_08291fb4: string_object_opaque_base_destroy
       FUN_082aad24: operator_delete
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent 0x083e75ac..0x083e75cf:
+      Raw osos.dec establishes the exact 40-byte extent 0x083e75ac..0x083e75cf:
       the final pop {r4,pc} is at 0x083e75cc and the next independently linked
       function starts with push {r4,lr} at 0x083e75d0. Its two internal calls
       are unconditional BL to the already ported string_object_opaque_base_destroy
@@ -155139,7 +155139,7 @@ functions:
   - address: 0x083d0e5c
     ghidra: FUN_083d0e5c
     name: observable_array_tracked_construct
-    size: 36
+    size: 40
     sig: "ObservableArrayTracked *observable_array_tracked_construct(ObservableArrayTracked *this, u8 enabled)"
     module: cxx/observable_array_tracked_construct
     status: ported
@@ -155149,7 +155149,7 @@ functions:
       DAT_083d0e80: OBSERVABLE_ARRAY_TRACKED_VTABLE
       FUN_08271cec: observable_array_construct
     notes: >-
-      Raw osos.dec establishes the exact 36-byte extent: eight A32 instructions
+      Raw osos.dec establishes the exact 40-byte extent: eight A32 instructions
       from push {r4,lr} at 0x083d0e5c through pop {r4,pc} at 0x083d0e7c,
       followed by the vtable literal 0x089a48c0 at 0x083d0e80; 0x083d0e84
       begins the next independently entered function. The body has one plain
@@ -156632,7 +156632,7 @@ functions:
   - address: 0x0839ca74
     ghidra: FUN_0839ca74
     name: class_6280_owned_element_array_destruct
-    size: 36
+    size: 40
     sig: "u8 *class_6280_owned_element_array_destruct(u8 *this)"
     module: cxx/class_6280_owned_element_array_destruct
     status: ported
@@ -156657,7 +156657,7 @@ functions:
   - address: 0x0839c964
     ghidra: FUN_0839c964
     name: vtable_0898285c_destruct
-    size: 36
+    size: 40
     sig: "StringObject *vtable_0898285c_destruct(StringObject *this)"
     module: cxx/vtable_0898285c_destruct
     status: ported
@@ -156719,7 +156719,7 @@ functions:
   - address: 0x0839c7ac
     ghidra: FUN_0839c7ac
     name: vtable_089826ac_destruct
-    size: 36
+    size: 40
     sig: "ValidatedRegistry *vtable_089826ac_destruct(ValidatedRegistry *registry)"
     module: cxx/vtable_089826ac_destruct
     vars: {param_1/r0/r4: registry, DAT_0839c7d0: VTABLE_089826AC, FUN_0839c6ec: validated_registry_validate, FUN_08135380: registry_container_destruct}
@@ -156825,3 +156825,27 @@ functions:
       them. Rust expands the two unidentified helper bodies into their
       verified vtable dispatches rather than inventing callee identities;
       host tests use native-width seams for those dispatches.
+
+  - address: 0x0839c270
+    ghidra: FUN_0839c270
+    name: observable_element_array_destruct
+    size: 40
+    sig: "Registry *observable_element_array_destruct(Registry *this)"
+    module: cxx/observable_element_array_destruct
+    status: ported
+    vars: {param_1/r0: this, DAT_0839c294: OBSERVABLE_ELEMENT_ARRAY_VTABLE, FUN_0839c1c8: observable_element_array_dispose_items, FUN_08135380: registry_container_destruct}
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent 0x0839c270..0x0839c294:
+      eight A32 instructions from push {r4,lr} through the tail b at
+      0x0839c290 plus the trailing vtable literal 0x0898219c at 0x0839c294;
+      the next independently linked function starts with push {r4,r5,r6,lr}
+      at 0x0839c298. Whole-image A32 decoding finds two inbound unconditional
+      plain BL sites (0x0811d940 and 0x081282e4) and zero predicated inbound
+      BL sites. The body installs the literal at +0x00, directly calls the
+      unresolved FUN_0839c1c8 element-disposal stage, then tail-branches to
+      ported registry_container_destruct @ 0x08135380. The raw words establish
+      the call order and target but not a more specific class identity for the
+      0x0898219c vtable. Rust uses the existing typed direct-call seam for the
+      unresolved stage so host tests can observe it; target builds call its
+      verified load address. match.py reports the expected seam-induced BLX
+      and frame differences from the stock direct BL/tail B structure.

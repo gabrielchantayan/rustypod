@@ -391,6 +391,7 @@ pub mod observable_array_assert_empty_attached_destruct;
 pub mod observable_array_attached_release_destruct_083d1160;
 pub mod observable_array_assert_items_null;
 pub mod observable_element_array_clear;
+pub mod observable_element_array_destruct;
 pub mod observable_array_owned_destroy;
 pub mod observable_array_pair;
 pub mod owned_object_observable_array_destroy;
