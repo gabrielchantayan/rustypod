@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b5d00
+    ghidra: FUN_083b5d00
+    name: red_black_tree_advance_cursor_083b5d00
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor_083b5d00(u32 *cursor)"
+    module: cxx/red_black_tree_advance_cursor_083b5d00
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: next
+      iVar2/r2: current
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte A32 extent
+      0x083b5d00..0x083b5d50; the next independently entered function begins
+      at 0x083b5d54. Complete aligned A32 B/BL-immediate decoding finds two
+      inbound unconditional plain BL sites at 0x083c4fa0 and 0x083c5470, zero
+      predicated BL sites, and no outbound calls. It advances the target-width
+      cursor to the red-black-tree in-order successor: descend the right
+      subtree's left spine, or climb parent links while leaving right-child
+      edges, retaining the header sentinel. Target links remain u32 words to
+      preserve the retail four-byte layout on hosts; deliberate deviations:
+      none.
   - address: 0x083b5d54
     ghidra: FUN_083b5d54
     name: red_black_tree_advance_cursor_083b5d54
