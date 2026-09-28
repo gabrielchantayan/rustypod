@@ -49327,6 +49327,30 @@ functions:
       black_box to retain the empty loop (no memory effect) and a target-only
       link section so LLVM cannot fold the body into the identical primary
       destructor; match.py confirms the same guard/walk/clear/free structure.
+  - address: 0x0839e0dc
+    ghidra: FUN_0839e0dc
+    name: dma_aligned_array_data_range_copy
+    size: 12
+    sig: "u32 *dma_aligned_array_data_range_copy(u32 *output, const DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: array
+      r1: aligned_data
+      r2: element_count
+    notes: >-
+      Raw osos.dec words e9910006 e8800006 e12fff1e establish the exact
+      12-byte A32 extent 0x0839e0dc..0x0839e0e8: `ldmib r1,{r1,r2}; stmia
+      r0,{r1,r2}; bx lr`. The following `push {r4,lr}` begins the next real
+      function at 0x0839e0e8. The two direct BL callers at 0x080f9d34 and
+      0x080fdf48 are plain unconditional forms; no predicated BL targets this
+      entry, and the three-instruction body has no calls. This is the
+      DMA-aligned array range accessor: it loads aligned_data (+0x04) and
+      element_count (+0x08) before storing both words to output, returning
+      output unchanged. Rust uses volatile accesses solely to retain the ARM
+      load-load-store-store order for overlapping output and array ranges.
+
 
   - address: 0x0839e0e8
     ghidra: FUN_0839e0e8

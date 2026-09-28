@@ -401,6 +401,37 @@ pub unsafe extern "C" fn dma_aligned_byte_array_destroy_variant(
 ) -> *mut DmaAlignedArray {
     unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
 }
+/// dma_aligned_array_data_range_copy — original: `FUN_0839e0dc` @
+/// 0x0839e0dc (12 bytes exactly, 0x0839e0dc..0x0839e0e8; the next separately
+/// linked function starts with `push {r4,lr}`).
+///
+/// Raw words `e9910006 e8800006 e12fff1e` establish `ldmib r1,{r1,r2};
+/// stmia r0,{r1,r2}; bx lr`. There are two direct plain `bl` callers
+/// (0x080f9d34 and 0x080fdf48) and zero predicated `bl` forms; the body has
+/// no calls. It reads the DMA-aligned array's aligned data view (+0x04) and
+/// element count (+0x08) before storing them as a two-word output range, then
+/// returns `output`.
+///
+/// Deliberate deviation: volatile accesses preserve the ARM's both-loads-
+/// before-any-store ordering when `output` aliases `array`.
+///
+/// # Safety
+///
+/// `array` must be valid for aligned reads of its +0x04 and +0x08 words, and
+/// `output` must be valid for two aligned `u32` writes. The ranges may overlap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dma_aligned_array_data_range_copy(
+    output: *mut u32,
+    array: *const DmaAlignedArray,
+) -> *mut u32 {
+    let aligned_data = core::ptr::addr_of!((*array).aligned_data).read_volatile();
+    let element_count = core::ptr::addr_of!((*array).element_count).read_volatile();
+    output.write_volatile(aligned_data);
+    output.add(1).write_volatile(element_count);
+    output
+}
+
 /// dma_aligned_u32_array_destroy — original: `FUN_0839e280` @ 0x0839e280
 /// (72 bytes exactly, 0x0839e280..0x0839e2c8; the u16 constructor begins
 /// immediately after). Two direct inbound `bl` calls, at 0x080fab9c and
@@ -801,5 +832,33 @@ mod tests {
         assert_eq!(array.constructed, 0);
         assert_eq!(RELEASE_CALLS.load(Ordering::SeqCst), 0);
         assert_eq!(RELEASED_ALLOCATION.load(Ordering::SeqCst), 0);
+    }
+    #[test]
+    fn data_range_copy_writes_view_and_count_and_returns_output() {
+        let array = DmaAlignedArray {
+            allocation: 0x0800_1000,
+            aligned_data: 0x8800_1020,
+            element_count: 0x10000,
+            constructed: 1,
+        };
+        let mut output = [0, 0];
+
+        let returned = unsafe {
+            dma_aligned_array_data_range_copy(output.as_mut_ptr(), core::ptr::addr_of!(array))
+        };
+
+        assert_eq!(returned, output.as_mut_ptr());
+        assert_eq!(output, [array.aligned_data, array.element_count]);
+    }
+
+    #[test]
+    fn data_range_copy_loads_both_words_before_overlapping_output_stores() {
+        let mut words = [0x0800_1000, 0x8800_1020, 0x10000, 0xdead_beef];
+        let array = words.as_ptr() as *const DmaAlignedArray;
+
+        let returned = unsafe { dma_aligned_array_data_range_copy(words.as_mut_ptr().add(2), array) };
+
+        assert_eq!(returned, unsafe { words.as_mut_ptr().add(2) });
+        assert_eq!(words, [0x0800_1000, 0x8800_1020, 0x8800_1020, 0x10000]);
     }
 }
