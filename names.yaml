@@ -16,6 +16,26 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6b1c
+    ghidra: FUN_083b6b1c
+    name: red_black_tree_node_payload_address_083b6b1c
+    size: 8
+    sig: "u32 red_black_tree_node_payload_address_083b6b1c(u32 node)"
+    module: cxx/red_black_tree_node_payload_address_083b6b1c
+    status: ported
+    renames:
+      param_1/r0: node
+      "node+0x10/r0": payload
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte A32 extent: add r0,r0,#0x10
+      at 0x083b6b1c followed by bx lr at 0x083b6b20; 0x083b6b24 begins the
+      next separately linked, byte-identical function. The body has no outbound
+      BL calls. Raw branch-immediate decoding finds exactly two inbound
+      unconditional plain BL sites, 0x083ca084 and 0x083dba7c, and no predicated
+      inbound BL sites. Both callers pass a red-black-tree node whose payload
+      begins at +0x10. Deliberate deviation: Rust represents target addresses
+      as wrapping u32 values rather than host pointers, preserving target-width
+      arithmetic and layout.
   - address: 0x083b6b24
     ghidra: FUN_083b6b24
     name: red_black_tree_node_payload_address_083b6b24
