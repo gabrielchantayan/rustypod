@@ -140700,6 +140700,38 @@ functions:
       an address-backed seam: target builds call retailOS at its verified
       address, while host fixtures substitute it and widen the vtable pointer.
 
+  - address: 0x0839c7d4
+    ghidra: FUN_0839c7d4
+    name: destroy_derived_state
+    size: 88
+    sig: "void destroy_derived_state(DestroyDerivedState *this)"
+    module: cxx/derived_state_release
+    status: ported
+    renames:
+      param_1/r0/r5: this
+      param_1_plus_0x04/r6: count
+      param_1_plus_0x28: enabled
+      iVar2/r4: index
+      param_1_vtable_plus_0x40/r2: element_at
+      element_cell_word: derived_state
+      FUN_08284a88: derived_state_destruct_unidentified
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the complete 22-word, 88-byte body
+      0x0839c7d4..0x0839c828; 0x0839c82c starts the separately linked next
+      function. It has two plain direct BL instructions, to the unidentified
+      derived-state destructor 0x08284a88 and tag-2 operator_delete
+      0x082aad24; no predicated direct BL instructions; and one virtual BLX
+      through vtable slot +0x40. Whole-image A32 decoding finds two inbound
+      plain BL calls (0x0839c878 and 0x0839c89c) and no predicated direct
+      callers. When byte +0x28 is nonzero, it walks signed indices [0,count),
+      reads each cell through that slot, and skips NULL first words. Each
+      non-NULL word goes through the address-backed 0x08284a88 seam, whose
+      returned allocation pointer feeds the ported operator_delete directly.
+      Target builds call the verified retail address; host fixtures replace the
+      destructor and widen the vtable pointer. No deliberate deviations beyond
+      that necessary host representation.
+
   - address: 0x0839c888
     ghidra: FUN_0839c888
     name: vtable_08982784_destruct
