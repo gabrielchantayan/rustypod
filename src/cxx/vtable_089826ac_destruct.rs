@@ -17,8 +17,8 @@
 //! live entries, then tail-chain into the registry-container destructor. The
 //! class identity is not established, so the name describes the verified
 //! vtable destructor role. Deliberate deviation: host tests replace the
-//! unported validation helper and final direct tail call; target builds call
-//! their verified retailOS addresses.
+//! validation call because their registry cannot contain the fixed target
+//! vtable address; target builds call the port directly.
 
 /// Target-width layout required by the validation helper at `0x0839c6ec`.
 /// Its byte flag is at +0x28, so the object occupies at least eleven words.
@@ -29,7 +29,7 @@ pub struct ValidatedRegistry {
 
 const VTABLE_WORD: u32 = 0x0898_26ac;
 
-/// Host-test boundary for the unported validation helper at `0x0839c6ec`.
+/// Host-test boundary for the ported validation helper at `0x0839c6ec`.
 #[cfg(not(target_os = "none"))]
 pub static mut VALIDATED_REGISTRY_VALIDATE: unsafe extern "C" fn(*mut ValidatedRegistry) =
     validated_registry_validate_unported;
@@ -67,11 +67,12 @@ pub unsafe extern "C" fn vtable_089826ac_destruct(
 ) -> *mut ValidatedRegistry {
     core::ptr::addr_of_mut!((*registry).words[0]).write_volatile(VTABLE_WORD);
     #[cfg(target_os = "none")]
-    let validate: unsafe extern "C" fn(*mut ValidatedRegistry) =
-        core::mem::transmute(0x0839_c6ecusize);
+    crate::util::vtable_slot_40_release_first::vtable_slot_40_release_first(registry.cast());
     #[cfg(not(target_os = "none"))]
-    let validate = core::ptr::read_volatile(core::ptr::addr_of!(VALIDATED_REGISTRY_VALIDATE));
-    validate(registry);
+    {
+        let validate = core::ptr::read_volatile(core::ptr::addr_of!(VALIDATED_REGISTRY_VALIDATE));
+        validate(registry);
+    }
 
     #[cfg(test)]
     {
