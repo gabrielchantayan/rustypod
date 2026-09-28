@@ -56770,6 +56770,36 @@ functions:
       a callee. Host test verifies exact file and output-pointer forwarding,
       callee mutation to i64::MIN, and unchanged negative status propagation.
 
+  # ---- SQLite OS sector-size forwarding wrapper, sqlite3OsSectorSize (src/sqlite/os_sector_size.rs) ----
+  - address: 0x0837dbc0
+    ghidra: FUN_0837dbc0
+    name: sqlite_os_sector_size
+    size: 24
+    sig: "u32 sqlite_os_sector_size(sqlite3_file *file)"
+    module: sqlite/os_sector_size
+    status: ported
+    renames:
+      param_1/r0: file
+      r1: "file->pMethods, then xSectorSize"
+      "*(code**)(*param_1 + 0x2c)": sqlite3_io_methods::xSectorSize
+    notes: >-
+      SQLite's sqlite3OsSectorSize from os.c. Raw osos.dec words are exactly
+      six instructions at 0x0837dbc0..0x0837dbd4; the next separately linked
+      function begins at 0x0837dbd8, so Ghidra's 24-byte extent is exact with
+      no literal pool. It loads file->pMethods, loads xSectorSize at +0x2c,
+      returns 512 when that slot is null, and otherwise tail-dispatches
+      xSectorSize(file). Decoding every ARM B/BL immediate in osos.dec finds
+      exactly two inbound calls, both unconditional plain bl at 0x08369058
+      and 0x0837e584; there are no predicated BL forms or direct tail
+      branches. The adjacent 0x0837db44..0x0837dc18 forwarding family matches
+      SQLite's sqlite3_io_methods, establishing the slot identity; its
+      concrete implementation is runtime method-table data, so the port
+      dispatches the supplied slot rather than inventing a callee. Deliberate
+      deviation: the shared recovered method-table prefix ends at +0x18, so
+      the +0x2c entry is read by native-width word index for host parity.
+      Host tests verify the null path returns 512 without a call and the
+      non-null path forwards the exact file pointer and preserves the result.
+
   # ---- SQLite OS lock forwarding wrapper, sqlite3OsLock (src/sqlite/os_lock.rs) ----
   - address: 0x0837db74
     ghidra: FUN_0837db74

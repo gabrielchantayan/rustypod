@@ -244,6 +244,7 @@ pub mod os_lock;
 pub mod os_open;
 pub mod os_open_forced_flags;
 pub mod os_read;
+pub mod os_sector_size;
 pub mod os_sync;
 pub mod os_truncate;
 pub mod os_write;
