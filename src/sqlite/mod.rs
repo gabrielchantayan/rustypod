@@ -100,6 +100,7 @@ pub mod btree_rollback;
 pub mod btree_commit_phase_one;
 pub mod btree_release_locks;
 pub mod btree_commit_phase_two;
+pub mod btree_begin_trans;
 pub mod cursor_embedded_state;
 pub mod btree_get_meta;
 pub mod btree_get_auto_vacuum;
