@@ -156654,3 +156654,33 @@ functions:
       helper address and direct port call. Class identity remains unproven, so
       ValidatedRegistry describes the observed invariant rather than inventing
       a specific class name.
+
+  - address: 0x0839c6ec
+    ghidra: FUN_0839c6ec
+    name: vtable_slot_40_release_first
+    size: 88
+    sig: "void vtable_slot_40_release_first(void *object)"
+    module: util/vtable_slot_40_release_first
+    status: ported
+    renames:
+      param_1/r0/r5: object
+      param_1_plus_0x04/r6: iteration_count
+      param_1_plus_0x28: enabled
+      r4: index
+      vtable_plus_0x40: release_first
+      FUN_082800f8: nested_string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte A32 extent: twenty-two words
+      from push {r4,r5,r6,lr} at 0x0839c6ec through pop {r4,r5,r6,pc} at
+      0x0839c740; the next independently linked function starts at 0x0839c744.
+      The body has two unconditional plain direct BL calls, FUN_082800f8 at
+      0x0839c72c and operator_delete/FUN_082aad24 at 0x0839c730, no predicated
+      direct BL calls, and one unconditional virtual BLX through vtable+0x40
+      at 0x0839c71c. Whole-image A32 branch decoding finds two inbound
+      unconditional plain BL sites, 0x0839c79c and 0x0839c7c0, and no
+      predicated inbound BL sites. If enabled is nonzero, it scans signed
+      indices [0,count), dispatches the slot, and destroys then tag-2 deletes
+      the first nonzero result word. FUN_082800f8 is structurally verified as
+      a nested string-object destructor but its class identity is unrecovered,
+      so target builds call its fixed address and host tests use a typed seam.
