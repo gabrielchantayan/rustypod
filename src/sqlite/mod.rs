@@ -253,6 +253,7 @@ pub mod schema_to_index;
 pub mod schema_get;
 pub mod two_part_name;
 pub mod select_height;
+pub mod select_expr_walk;
 pub mod select_dest_init;
 pub mod select_delete;
 pub mod src_list_delete;
