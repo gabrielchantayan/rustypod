@@ -114,6 +114,17 @@
 //! from right-child edges through the header sentinel. The byte-identical body
 //! deliberately reuses this implementation and its shared host tests;
 //! deliberate deviations: none.
+//!
+//! `FUN_083b5fa0` at load address `0x083b5fa0` is a byte-identical 84-byte
+//! (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
+//! `0x083b5ff0`; the next separately entered function begins at `0x083b5ff4`.
+//! Raw A32 decoding verifies its two inbound calls are unconditional plain
+//! `bl` instructions at `0x083ca46c` and `0x083ca93c`, with zero predicated
+//! `bl` instructions and no outbound calls. It returns the cursor address
+//! while advancing the target-width cursor to its in-order successor: descend
+//! the right subtree's left spine, or climb parent links from right-child edges
+//! through the header sentinel. The byte-identical body deliberately reuses
+//! this implementation and its shared host tests; deliberate deviations: none.
 
 
 
