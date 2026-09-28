@@ -84,6 +84,7 @@ pub mod btree_lock;
 pub mod btree_query_table_lock;
 pub mod btree_in_trans;
 pub mod btree_cursor;
+pub mod btree_cursor_is_eof;
 pub mod btree_close_cursor;
 pub mod btree_clear_cursor;
 pub mod btree_cursor_pop_parent;

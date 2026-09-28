@@ -343,6 +343,9 @@ pub mod hints {
     // 0x5500_0000: dedicated to ft/sfnt's raw-u32 TT_Face table-directory
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const TT_FACE_LOOKUP: usize = 0x5500_0000;
+    // 0x5650_0000: dedicated to sqlite/btree_cursor_is_eof's target-width
+    // cursor, page, and cell-data fixture; mappings never unmap.
+    pub const BTREE_CURSOR_IS_EOF: usize = 0x5650_0000;
     pub const ATA_CMD: usize = 0x0a00_0000;
     // 0xf200_0000: dedicated to sqlite/pager_page_unlink's target-width page
     // and owner fixture; mappings never unmap, so no other port may share it.
