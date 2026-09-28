@@ -57338,6 +57338,28 @@ functions:
       padding +0x02..+0x03 remains untouched. No dispatch seam: this
       function is a leaf with no direct callees. Rust preserves that
       store-only behavior and the unguarded destination dereference.
+  - address: 0x08383dd0
+    ghidra: FUN_08383dd0
+    name: select_expr_height
+    size: 28
+    sig: "int select_expr_height(Select *select)"
+    module: sqlite/select_expr_height
+    status: ported
+    renames:
+      param_1/r0: select
+      r1: height
+    notes: >-
+      SQLite 3.5.x's sqlite3SelectExprHeight. Raw osos.dec ARM establishes
+      the exact 28-byte extent through the next real function boundary at
+      0x08383dec: mov r1,#0; push {r3,lr}; str r1,[sp]; mov r1,sp; bl
+      heightOfSelect @ 0x082d2a8c; ldr r0,[sp]; pop {r3,pc}. The function
+      contains exactly one direct BL, unconditional, and no predicated BL
+      instructions. It seeds a stack-local signed height at zero, delegates
+      the NULL-safe compound-select fold to select_height, and returns the
+      resulting maximum. Rust uses a local i32 rather than an explicit stack
+      slot; the zero seed, direct callee, and returned signed value are
+      unchanged. The target's one 0x082d2a8c BL is preserved as the direct
+      Rust call; LLVM frame setup may differ.
   - address: 0x08384380
     ghidra: FUN_08384380
     name: src_list_assign_cursors
