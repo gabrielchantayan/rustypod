@@ -128369,6 +128369,43 @@ functions:
       volatile host seams and retailOS calls on firmware, following the
       sqlite/prepare convention.
 
+  # --- SQLite UTF-16 preparation dispatcher ---
+  - address: 0x0838160c
+    ghidra: FUN_0838160c
+    name: sqlite3_prepare16_internal
+    size: 192
+    sig: "i32 sqlite3_prepare16_internal(sqlite3 *db, const void *utf16_sql, i32 n_byte, i32 save_sql, sqlite3_stmt **statement_out, const void **tail_out)"
+    module: sqlite/prepare16
+    status: ported
+    renames:
+      param_1/r0/r8: db
+      param_2/r1/r7: utf16_sql
+      param_3/r2/r4: n_byte
+      param_4/r3/r9: save_sql
+      param_5/stack/r10: statement_out
+      param_6/stack/r5: tail_out
+      FUN_08382be4: opaque_type_tag_is_allowed
+      FUN_083862e4: sqlite3_utf16_to_utf8
+      FUN_0837d2fc: sqlite3_lock_and_prepare
+      FUN_08386384: sqlite_utf8_char_len
+      FUN_083861e0: utf16_prefix_byte_len
+      FUN_083906f4: tracked_free
+      FUN_0836f468: sqlite_api_exit
+    notes: >-
+      Raw osos.dec establishes the true 192-byte extent
+      0x0838160c..0x083816cc: 48 ARM words from push {r1-r11,lr} through
+      pop {r1-r11,pc}; the next separately linked function begins at
+      0x083816cc. Independent raw decoding finds eight unconditional plain BL
+      calls in the body and no predicated BL calls. Exactly two inbound plain
+      BL callers exist at 0x08390e0c and 0x08390e30, with no predicated BL
+      callers. This is SQLite 3.5.9's sqlite3Prepare16: it rejects an invalid
+      db tag with SQLITE_MISUSE, converts UTF-16 SQL to UTF-8, invokes
+      sqlite3_lock_and_prepare with -1 byte count and the requested save_sql
+      flag, translates a UTF-8 tail back into a UTF-16 byte offset, frees the
+      conversion, and filters the result through sqlite_api_exit. The unported
+      UTF-16 prefix-byte-length helper at 0x083861e0 uses a volatile host seam
+      and its verified retailOS address on firmware; conversion and free have
+      replaceable host seams solely for tests.
   # --- SQLite legacy prepare wrapper ---
   - address: 0x08390dcc
     ghidra: FUN_08390dcc
