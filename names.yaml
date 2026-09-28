@@ -56833,6 +56833,31 @@ functions:
       local as MaybeUninit: as in ARM, it is only consumed after xRead
       returns success, whose SQLite contract initializes all four bytes.
 
+  # ---- SQLite forced open-flag wrapper (src/sqlite/os_open_forced_flags.rs) ----
+  - address: 0x0837e784
+    ghidra: FUN_0837e784
+    name: sqlite_os_open_forced_flags
+    size: 40
+    sig: "i32 sqlite_os_open_forced_flags(sqlite3_vfs *vfs, sqlite3_file *file, const char *path, u32 flags)"
+    module: sqlite/os_open_forced_flags
+    status: ported
+    renames:
+      param_1/r0: vfs
+      param_2/r1: file
+      param_3/r2: path
+      param_4/r3: flags
+      "flags|0x1e": forced_open_flags
+    notes: >-
+      Raw ARM confirms Ghidra's 40-byte extent: the ten instructions run from
+      0x0837e784 through 0x0837e7a8, and the next separately linked function
+      begins with push {r2,r3,r4,r5,r6,lr} at 0x0837e7ac. It rearranges
+      (vfs, file, path, flags) into sqlite3OsOpen's (vfs, path, file, flags,
+      out_flags) order, ORs flags with 0x1e, supplies a null out_flags stack
+      argument, and returns xOpen's status unchanged. Decoding every ARM B/BL
+      word in osos.dec finds exactly 2 inbound calls, both unconditional plain
+      bl (0x082dd7c4 and 0x082ded54), with no predicated BL forms. The
+      concrete xOpen implementation is runtime VFS data; the port uses the
+      already-ported sqlite_os_open dispatch rather than inventing a callee.
   # ---- SQLite OS open forwarding wrapper, sqlite3OsOpen (src/sqlite/os_open.rs) ----
   - address: 0x0837db80
     ghidra: FUN_0837db80
