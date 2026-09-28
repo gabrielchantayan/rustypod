@@ -49520,6 +49520,31 @@ functions:
       calls the unported predicate by fixed address; host tests use an
       injectable seam, while host lock calls are also injected because target
       pointer fields are four bytes apart.
+  - address: 0x0839e688
+    ghidra: FUN_0839e688
+    name: condition_queue_drain
+    size: 60
+    sig: "void condition_queue_drain(ConditionQueue *queue)"
+    module: cxx/condition_queue_drain
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_1_plus_0x0c: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0839e670: condition_queue_is_empty
+      FUN_0839e6c4: condition_queue_dequeue
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent
+      0x0839e688..0x0839e6c4: fifteen ARM words from push {r4,r5,lr}
+      through pop {r4,r5,lr} and a tail branch to mutex_unlock; 0x0839e6c4
+      starts condition_queue_dequeue. The body has three unconditional direct
+      BL calls (mutex_lock, condition_queue_dequeue, and
+      condition_queue_is_empty) and zero predicated BL calls. It locks
+      queue+0x0c, invokes dequeue until condition_queue_is_empty reports the
+      queue empty, then tail-unlocks the same mutex. The two local helpers
+      remain fixed-address calls on target; host tests inject them and both
+      mutex operations because target pointer fields are four bytes apart.
   - address: 0x0839eb18
     ghidra: FUN_0839eb18
     name: linked_list_has_items
