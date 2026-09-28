@@ -157598,3 +157598,35 @@ functions:
       two inbound plain unconditional BL sites (0x08393c08 and 0x08393ccc),
       zero predicated inbound BL sites, and no outbound calls. The port
       preserves the byte-length truncation and aligned paired u32 stores.
+
+  - address: 0x0838ef84
+    ghidra: FUN_0838ef84
+    name: sqlite_bind_int64
+    size: 68
+    sig: "i32 sqlite_bind_int64(Vdbe *statement, i32 parameter_index, i64 value)"
+    module: sqlite/bind_int64
+    status: ported
+    vars:
+      param_1: statement
+      param_2: parameter_index
+      param_3: value
+      param_4: value_hi
+      FUN_083974e4: vdbe_unbind
+      FUN_0838c110: vdbe_mem_set_int64
+    notes: >-
+      SQLite 3.5.x sqlite3_bind_int64 wrapper. Raw osos.dec establishes the
+      exact 68-byte A32 extent 0x0838ef84..0x0838efc8: the closing
+      ldmia sp!,{r4-r8,pc} is at 0x0838efc4 and 0x0838efc8 starts the
+      separate sqlite3_bind_null tail veneer. The body saves all four
+      arguments, calls vdbe_unbind @ 0x083974e4, and only on SQLITE_OK (0)
+      derives aVar + (parameter_index - 1) * 0x28 before calling
+      vdbe_mem_set_int64 @ 0x0838c110. Decoding the function words finds
+      exactly two outbound plain BL instructions (at 0x0838ef98 and
+      0x0838efbc), with no predicated BL instructions. Two inbound direct
+      plain BL sites are 0x08215c00 and 0x0838f134; no predicated inbound
+      BL site was observed. The port uses typed Vdbe::a_var indexing instead
+      of raw 32-bit byte arithmetic; target offsets and the 40-byte Mem
+      stride are asserted in sqlite/vdbe.rs, so widened host pointers stay
+      disjoint. Host tests cover a valid non-first binding (both release
+      calls and integer stamp) plus NULL and range validation failures that
+      neither store nor release a value.
