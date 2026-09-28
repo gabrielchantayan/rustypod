@@ -219,6 +219,7 @@ pub mod parse;
 pub mod prepare;
 pub mod prepare16;
 pub mod pager_lookup;
+pub mod pager_dont_write;
 pub mod pager_reset;
 pub mod pager_page_unlink;
 pub mod pager_end_transaction;

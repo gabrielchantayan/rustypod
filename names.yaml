@@ -58965,6 +58965,44 @@ functions:
       forwarder. The child pointer field is addressed by word index 18 in
       host fixtures so widened pointers do not overlap adjacent fields.
 
+  # ---- SQLite pager dont-write transition (src/sqlite/pager_dont_write.rs) ----
+  - address: 0x0837e118
+    ghidra: FUN_0837e118
+    name: pager_dont_write
+    size: 116
+    sig: "void pager_dont_write(PgHdr *page)"
+    module: sqlite/pager_dont_write
+    status: ported
+    vars: {param_1/r5: page, iVar1/r4: pager}
+    renames:
+      "*(u32*)page": page->pPager
+      "*(u32*)(page+0x04)": page->pgno
+      "*(u8*)(page+0x1d)": page->inJournal
+      "*(u8*)(page+0x1f)": page->alwaysRollback
+      "*(u8*)(pager+0x09)": pager->journalGate
+      "*(u8*)(pager+0x14)": pager->memDb
+      "*(u32*)(pager+0x24)": pager->dbSize
+      "*(u32*)(pager+0x28)": pager->origDbSize
+      "*(u32*)(pager+0xe0)": pager->activity
+      FUN_082dd3d8: context_activity_enter
+      FUN_082d906c: pager_remove_from_journal
+    notes: >-
+      Raw A32 establishes the exact 116-byte extent
+      0x0837e118..0x0837e18b: the separately linked sibling starts at
+      0x0837e18c with ldr r1,[r0]. The body has exactly two plain BL calls,
+      context_activity_enter (0x082dd3d8) and the still-unported
+      pager_remove_from_journal (0x082d906c). Whole-image ARM decoding finds
+      one unconditional direct BL inbound (0x082cf5b4) and one predicated
+      BLHI inbound (0x082bd5ec), with no other forms. Ghidra loses that
+      caller predicate. Memory pagers return untouched. Other pages take the
+      activity lease, set alwaysRollback, and when inJournal is set while the
+      journal gate is clear, call the remover unless pgno equals dbSize and
+      signed origDbSize is smaller than dbSize; activity is then decremented.
+      Deliberate deviation: the unported remover is a fixed target call on
+      ARM and a private recording seam on the host. Tests cover the memory
+      no-op, differing-page removal, equal-page skip predicate, marker write,
+      and activity balance.
+
   # ---- Embedded B-tree cursor state accessor (src/sqlite/cursor_embedded_state.rs) ----
   - address: 0x0837e18c
     ghidra: FUN_0837e18c
