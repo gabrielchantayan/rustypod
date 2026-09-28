@@ -55105,6 +55105,30 @@ functions:
       restore, the verbatim six-argument ABI (zeroed eOp/skipNext), and
       payload-reader rc propagation.
 
+  - address: 0x08371cac
+    ghidra: FUN_08371cac
+    name: btree_data_fetch
+    size: 24
+    sig: "ptr btree_data_fetch(cursor: *mut BtCursor, out: *mut u32)"
+    module: sqlite/data_fetch
+    status: ported
+    vars:
+      param_1/r0: cursor
+      param_2/r1: out
+      r2: skip_key (zero)
+      FUN_082cdedc: btree_fetch_payload (unported dispatch seam)
+    notes: >-
+      SQLite 3.5.x sqlite3BtreeDataFetch. Raw osos.dec words prove the
+      24-byte extent 0x08371cac..0x08371cc4: ldrb r2,[r0,#0x43];
+      cmp r2,#1; movne r0,#0; moveq r2,#0; beq 0x082cdedc; bx lr.
+      The next real function starts with push {r4,r5,r6,lr} at
+      0x08371cc4. The body contains zero plain and zero predicated BL
+      instructions; binary caller scanning finds two direct BL sites.
+      Non-VALID cursor states return null and do not write through out.
+      VALID tail-dispatches fetchPayload(cursor,out,0) at 0x082cdedc;
+      Ghidra's standalone C at that target confirms the third argument
+      selects the table-data branch. fetchPayload is unported, so the
+      direct branch is a volatile seam whose default returns null.
   - address: 0x08371cc4
     ghidra: FUN_08371cc4
     name: btree_key_size
