@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b4d58
+    ghidra: FUN_083b4d58
+    name: rgba4444_rect_to_rgba8
+    size: 204
+    sig: "void rgba4444_rect_to_rgba8(const u16 *source, u32 source_width, u32 source_format, u32 source_x, u32 source_y, u32 width, u32 height, u8 *destination, u32 destination_width, u32 destination_format, u32 destination_x, u32 destination_y, u32 unused_13, u32 unused_14, u32 source_row_alignment, u32 destination_row_alignment)"
+    module: cxx/rgba4444_rect_to_rgba8
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_width
+      param_3/r2: source_format
+      param_4/r3: source_x
+      param_5: source_y
+      param_6/r4: width
+      param_7/r5: height
+      param_8: destination
+      param_9/r7: destination_width
+      param_10: destination_format
+      param_11/r2: destination_x
+      param_12/r11: destination_y
+      param_15/r2: source_row_alignment
+      param_16/r6: destination_row_alignment
+      r8: source_stride
+      r0: destination_stride
+      "[sp + 0x8]": source_cursor
+      "[sp + 0x4]": destination_cursor
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent: 51 ARM words from
+      push {r0-r11,lr} at 0x083b4d58 through pop {r4-r11,pc} at
+      0x083b4e20; 0x083b4e24 begins the next real function, with no literal
+      pool. The function converts a nonempty RGBA4444 rectangle to RGBA8,
+      using source and destination strides of align_up(width * 2, alignment)
+      and align_up(width * 4, alignment), applying x/y offsets, and advancing
+      each row after width pixels. Complete raw-image decoding finds exactly
+      two inbound unconditional plain BL sites and zero predicated BL sites.
+      Its body has four unconditional BL instructions at 0x083b4d88,
+      0x083b4d98, 0x083b4de0, and 0x083b4df0: align_up twice, then the
+      RGBA4444 cursor reader and RGBA8 cursor writer. Host tests cover an
+      offset single pixel and independent padded source/destination strides.
+      Deliberate deviation: stack-local cursors and the RGBA8 record are Rust
+      locals passed through existing Rust seams.
   - address: 0x083b4e24
     ghidra: FUN_083b4e24
     name: rgba4444_rect_to_rgb555a1
