@@ -155626,3 +155626,37 @@ functions:
       and uses the verified raw A32 body on target. Host tests cover clear and
       set low bits, capacity boundary rejection, and u32::MAX. No behavioral
       deviations were made.
+
+  - address: 0x0839ee7c
+    ghidra: FUN_0839ee7c
+    name: refcounted_ptr_copy_assign_array
+    size: 88
+    sig: "RefcountedBody **refcounted_ptr_copy_assign_array(RefcountedBody **dst, RefcountedBody *const *src)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r4: source_body
+      r5: dst
+      FUN_0839ce48: refcounted_body_release_array
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte extent
+      0x0839ee7c..0x0839eed4: push {r4,r5,r6,lr} through pop
+      {r4,r5,r6,pc}; the next separately linked function begins at
+      0x0839eed4. Decoding the body finds one plain direct BL to the
+      ported refcounted_body_release_array @ 0x0839ce48 and two
+      predicated BLNE calls to the ported mutex_lock @ 0x0807f5c4 and
+      mutex_unlock @ 0x0807f6a0. The two direct callers, 0x081b75e8
+      and 0x081b7890, are plain BL instructions; no predicated inbound
+      BL forms occur. Distinct destination and source slots release the
+      old array-owning body, then load and install the source body. A
+      non-NULL source body locks its optional mutex at +8, increments
+      its signed refcount at +4 with u32 wrapping, reloads the mutex,
+      and unlocks it when non-NULL. Rust reproduces those direct mutex
+      operations rather than routing through the equivalent acquire
+      helper, preserving the stock call shape. Host tests cover
+      self-assignment and shared old-body release followed by a
+      mutex-guarded source acquire.

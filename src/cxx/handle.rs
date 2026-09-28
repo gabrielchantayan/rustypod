@@ -1388,6 +1388,56 @@ pub unsafe extern "C" fn refcounted_ptr_copy_assign_dtor_copy(
     }
     dst
 }
+///
+/// refcounted_ptr_copy_assign_array — original: `FUN_0839ee7c` @
+/// `0x0839ee7c` (88 bytes, `0x0839ee7c..0x0839eed4`). Raw ARM words establish
+/// the next separately linked function at `0x0839eed4`; it has two incoming
+/// plain direct `bl` callers (0x081b75e8 and 0x081b7890), no predicated
+/// incoming calls, one plain outbound `bl`, and two predicated `blne` calls.
+///
+/// C++ copy-assignment for an array-owning refcounted handle. Distinct slots
+/// release the old body through [`refcounted_body_release_array`] @
+/// `0x0839ce48`, then load `*src`, store it in `dst`, and, when non-NULL,
+/// lock its optional mutex, wrapping-increment its refcount, and unlock it.
+/// It returns `dst`; the source load deliberately follows the release.
+///
+/// No deliberate behavioral deviations: the release and mutex callees are
+/// already ported. The target-only section preserves this independently
+/// hookable template instance; LLVM may lower the conditional mutex calls
+/// differently while retaining their ordering.
+///
+/// # Safety
+///
+/// `dst` and `src` must be valid, aligned pointer slots. Their non-NULL
+/// bodies must satisfy [`refcounted_body_release_array`]'s requirements, and
+/// each non-NULL source body must contain a valid optional mutex pointer.
+/// The firmware does not NULL-check either slot pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_ptr_copy_assign_array")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_ptr_copy_assign_array(
+    dst: *mut *mut RefcountedBody,
+    src: *const *mut RefcountedBody,
+) -> *mut *mut RefcountedBody {
+    if dst != src.cast_mut() {
+        refcounted_body_release_array(dst);
+        let body = src.read();
+        dst.write(body);
+        if !body.is_null() {
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_lock(mutex);
+            }
+            (*body).refcount = (*body).refcount.wrapping_add(1);
+            let mutex = (*body).mutex;
+            if !mutex.is_null() {
+                mutex_unlock(mutex);
+            }
+        }
+    }
+    dst
+}
+
 
 ///
 /// refcounted_ptr_copy_construct — original: `FUN_0839ef3c` @ `0x0839ef3c`
@@ -6408,6 +6458,58 @@ mod tests {
                 ],
                 "the old body is destructed and freed before the source is acquired"
             );
+        }
+
+        // --- refcounted_ptr_copy_assign_array @ 0x0839ee7c ---------------
+
+        /// Self-assignment bypasses the array-owning release and acquire.
+        #[test]
+        fn array_copy_assign_self_assignment_is_a_no_op() {
+            let _bench = bench();
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: 1,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot = &mut body as *mut RefcountedBody;
+
+            let ret = unsafe { refcounted_ptr_copy_assign_array(&mut slot, &slot) };
+
+            assert_eq!(ret, &mut slot as *mut *mut RefcountedBody);
+            assert_eq!(body.refcount, 1);
+            assert!(events().is_empty());
+        }
+
+        /// A shared old array body loses one reference before the source is
+        /// installed; the new body's mutex wraps only its acquire increment.
+        #[test]
+        fn array_copy_assign_releases_then_acquires_source() {
+            let _bench = bench();
+            let mut semaphore = 0x79;
+            let mut mutex = Mutex {
+                sem_cell: &mut semaphore,
+                unused: 0,
+            };
+            let mut old = RefcountedBody {
+                opaque0: 0,
+                refcount: 2,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut new = RefcountedBody {
+                opaque0: 0x7777_8888,
+                refcount: 1,
+                mutex: &mut mutex,
+            };
+            let mut dst = &mut old as *mut RefcountedBody;
+            let src: *mut RefcountedBody = core::ptr::addr_of!(new).cast_mut();
+
+            let ret = unsafe { refcounted_ptr_copy_assign_array(&mut dst, &src) };
+
+            assert_eq!(ret, &mut dst as *mut *mut RefcountedBody);
+            assert_eq!(dst, &mut new as *mut RefcountedBody);
+            assert_eq!(old.refcount, 1);
+            assert_eq!(new.refcount, 2);
+            assert_eq!(events(), std::vec![Event::Wait(0x79), Event::Signal(0x79)]);
         }
 
         // --- refcounted_ptr_copy_assign @ 0x0839f28c ----------------------
