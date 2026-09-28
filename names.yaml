@@ -155545,3 +155545,27 @@ functions:
       Rust port preserves the signed minimum result and required aligned reads.
       LLVM emits an ABI frame and equivalent reversed comparison predicates;
       these are code-generation differences only. No behavioral deviations.
+
+  # --- signed word maximum ---
+  - address: 0x083b4bc8
+    ghidra: FUN_083b4bc8
+    name: signed_word_max
+    size: 20
+    sig: "i32 signed_word_max(const i32 *left, const i32 *right)"
+    module: util/signed_word_max
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r0: maximum
+    notes: >-
+      Raw osos.dec words establish the exact five-word A32 extent at
+      0x083b4bc8..0x083b4bd8: bx lr ends this function and the next separately
+      linked function begins at 0x083b4bdc. It loads both aligned signed
+      32-bit words and returns the greater; on equality the raw movle selects
+      the second word, which is value-identical. Complete raw-firmware branch
+      decoding finds exactly two inbound unconditional plain BL instructions at
+      0x08252e68 and 0x08252e78, with zero predicated BL instructions. The
+      Rust port preserves the signed maximum result and required aligned reads.
+      LLVM emits an ABI frame and equivalent comparison predicates; these are
+      code-generation differences only. No behavioral deviations.

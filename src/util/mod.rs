@@ -290,6 +290,7 @@ pub mod scaled_word_list_from_i32;
 pub mod scoped_global_guard_destroy;
 pub mod status_flag_priority;
 pub mod signed_clamp_i32;
+pub mod signed_word_max;
 pub mod signed_word_min;
 pub mod seven_unit_window_bounds;
 pub mod modulo_seven;
