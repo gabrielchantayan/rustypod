@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b7d2c
+    ghidra: FUN_083b7d2c
+    name: tree_children_flatten_into_parent_083b7d2c
+    size: 60
+    sig: "void tree_children_flatten_into_parent_083b7d2c(TreeParent *parent, u32 first_child)"
+    module: util/tree_children_flatten_into_parent_083b7d2c
+    status: ported
+    renames:
+      param_1/r0/r5: parent
+      param_2/r1/r4: first_child
+      "parent+0x04": child_head
+      "node+0x08/r0": next_sibling
+      "node+0x0c/r1": first_child
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 extent from push
+      {r4,r5,lr} at 0x083b7d2c through pop {r4,r5,pc} at 0x083b7d64;
+      0x083b7d68 begins the next independently entered function. Raw branch
+      decoding verifies two inbound unconditional plain BL sites, 0x083b7a20
+      and recursive 0x083b7d44, with no predicated inbound BL sites. The body
+      has one plain recursive BL and no predicated BL. It depth-first flattens
+      node+0x0c child chains, follows node+0x08 siblings, and prepends each
+      node to parent+0x04. This body is byte-identical to the separately linked
+      port at 0x083cbfbc but keeps a dedicated Rust symbol for its BL target.
+      Deliberate deviation: target pointers remain u32 target words to preserve
+      retailOS four-byte field layout on 64-bit hosts.
   - address: 0x083b92f4
     ghidra: FUN_083b92f4
     name: tree_nodes_prepend_to_free_list_92f4
