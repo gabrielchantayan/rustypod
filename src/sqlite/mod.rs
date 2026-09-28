@@ -183,6 +183,7 @@ pub mod index_columns_equal;
 pub mod is_read_only;
 pub mod find_table;
 pub mod find_index;
+pub mod string_table_find_index;
 pub mod locate_coll_seq;
 pub mod locate_table;
 pub mod lock_and_prepare;
