@@ -49428,6 +49428,36 @@ functions:
       (register-indexed first load, fixed offsets 1..3, shifts 8/16/24);
       the crate-wide frame-pointer push/pop is the only diff.
 
+  - address: 0x0839e360
+    ghidra: FUN_0839e360
+    name: condition_queue_is_empty_0839e360
+    size: 48
+    sig: "u32 condition_queue_is_empty_0839e360(ConditionQueue *queue)"
+    module: cxx/condition_queue_is_empty_0839e360
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_1_plus_0x04: item_chain_head
+      param_1_plus_0x0c: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0839e348: condition_queue_list_is_empty_0839e348
+      FUN_0807f6a0: mutex_unlock
+      r5: is_empty
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte A32 extent
+      0x0839e360..0x0839e390: twelve words from push {r4,r5,r6,lr} through
+      pop {r4,r5,r6,pc}; the independent constructor starts at 0x0839e390.
+      The body has exactly three direct unconditional plain bl calls
+      (mutex_lock @ 0x0807f5c4, the unported list-empty predicate @
+      0x0839e348, and mutex_unlock @ 0x0807f6a0) and zero predicated bl
+      calls. Whole-image A32 branch-immediate decoding finds two inbound
+      unconditional plain bl callers and zero predicated bl callers. It locks
+      queue+0x0c, evaluates whether the intrusive list at queue+4 is empty,
+      unlocks the same mutex, and returns the predicate result. The target
+      retains the unported predicate as a fixed-address call; host tests use
+      an injectable seam for it and for the mutex pair because target-width
+      pointer fields are four bytes apart.
+
   - address: 0x0839e3bc
     ghidra: FUN_0839e3bc
     name: condition_queue_list_is_empty_0839e3bc
