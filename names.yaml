@@ -64939,6 +64939,32 @@ functions:
       allocation boundaries. Host tests cover initial growth/bump allocation and
       recycled-node reinitialization with payload preservation.
 
+  - address: 0x083b7ff0
+    ghidra: FUN_083b7ff0
+    name: byte_key_tree_equal_range_alias_7ff0
+    size: 160
+    sig: "void byte_key_tree_equal_range_alias_7ff0(ByteKeyTreeEqualRange *result, ByteKeyTree *tree, const u8 *key)"
+    module: cxx/byte_key_tree_equal_range
+    status: ported
+    vars: {param_1: result, param_2: tree, param_3: key, iVar3: node, iVar4: lower, iVar1: upper}
+    notes: >-
+      Raw osos.dec establishes the true 160-byte extent
+      0x083b7ff0..0x083b8090: pop {r4-r8,pc} at 0x083b808c returns and the
+      next real function begins at 0x083b8090. Decoding aligned ARM words
+      finds exactly two plain, unconditional BL instructions at 0x083b8020
+      and 0x083b805c, both targeting less_unsigned_byte @ 0x083d73bc; no
+      predicated BL exists. It matches the ported 0x083b8adc equal-range
+      instantiation: lower_bound follows right when node.key < key and
+      otherwise retains the node then follows left; upper_bound follows left
+      when key < node.key and otherwise retains the node then follows right.
+      It writes the half-open range candidates at result +0/+4. The
+      already-ported comparator is called directly; typed
+      #[repr(C)] fields replace target offsets while retaining ARM layout and
+      safely widening host pointers. A distinct link section prevents
+      identical-code folding from removing this hookable label. Host tests
+      cover below minimum, exact minimum/middle/maximum, a gap, and above
+      maximum through this alias.
+
   - address: 0x083b8adc
     ghidra: FUN_083b8adc
     name: byte_key_tree_equal_range
