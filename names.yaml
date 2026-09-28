@@ -49384,6 +49384,31 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e1b8
+    ghidra: FUN_0839e1b8
+    name: dma_aligned_array_destroy_variant_0839e1b8
+    size: 72
+    sig: "DmaAlignedArray *dma_aligned_array_destroy_variant_0839e1b8(DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      uVar1/r0: element_index
+    notes: >-
+      Raw osos.dec words establish the 72-byte A32 extent
+      0x0839e1b8..0x0839e200; the u32-specialized DMA-array constructor begins
+      with push {r4,lr} at 0x0839e200. Decoding every ARM branch immediate in
+      the image finds exactly two direct inbound BL calls, both plain and
+      unconditional (0x081c16fc and 0x081c1858), with zero predicated BL forms
+      and no tail-B entries. The body has one predicated BLNE, to the already
+      ported free_wrapper at 0x080e7970 with tag 3. This is a separately linked
+      DMA-aligned-array destructor instance: if construction byte +0x0c is
+      nonzero it walks the +0x08 trivial-element count, then clears that byte,
+      frees a non-NULL raw allocation at +0x00, and returns array; its +0x04
+      aligned-data view and count remain unchanged. The shared port uses
+      black_box solely to retain the otherwise empty count-sized busy-wait and
+      a target-only link section to retain this distinct hookable symbol.
+
   - address: 0x0839e200
     ghidra: FUN_0839e200
     name: dma_aligned_u32_array_construct
