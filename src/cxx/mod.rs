@@ -492,6 +492,7 @@ pub mod string_vector_record_range_destroy;
 pub mod string_vector_record_destroy;
 pub mod string_vector_record_vector_destroy;
 pub mod string_map;
+pub mod string_key_tree_node_key;
 pub mod basic_ios_initialize;
 pub mod streambuf_slot_peek_equal;
 pub mod streambuf_slot_peek_byte;
