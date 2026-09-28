@@ -64,6 +64,18 @@
 //! none.
 //!
 //!
+//! `FUN_083b5c58` at load address `0x083b5c58` is an 84-byte (21-word)
+//! byte-identical copy of `red_black_tree_advance_cursor`, through `bx lr` at
+//! `0x083b5ca8`; the next separately linked sibling begins at `0x083b5cac`.
+//! Complete aligned raw A32 B/BL-immediate decoding finds two inbound plain,
+//! unconditional `bl` instructions at 0x083c37a8 and 0x083c3c80, zero
+//! predicated `bl` instructions, and no outbound calls. It leaves r0
+//! unchanged while advancing the target-width cursor to the red-black-tree
+//! in-order successor: descend through the right subtree's left spine, or
+//! climb parent links while leaving right-child edges, retaining the header
+//! sentinel. This exact duplicate deliberately reuses the established dispatch
+//! seam and shared host tests; deliberate deviations: none.
+//!
 //! `FUN_083b5cac` at load address `0x083b5cac` is a third byte-identical,
 //! 84-byte (21-word) copy of the same `red_black_tree_advance_cursor` body,
 //! ending with `bx lr` at `0x083b5cfc`; the separately linked sibling begins
