@@ -90,6 +90,34 @@ pub struct ExprWorklistReleaseContext {
 
 const _: [u8; 0x10] = [0; core::mem::size_of::<ExprWorklistReleaseContext>()];
 const _: [u8; 0x0c] = [0; core::mem::offset_of!(ExprWorklistReleaseContext, deferred_release_guard)];
+/// `expr_worklist_init` — original `FUN_083987d8` @ `0x083987d8` (32 bytes,
+/// `0x083987d8..0x083987f8`; `expr_worklist_push` begins at `0x083987f8`).
+/// Raw ARM has exactly two plain inbound `bl` sites (`0x082cd33c` and
+/// `0x0838d918`) and no predicated inbound `bl`.
+///
+/// Initializes the fixed worklist header with its owner and caller-maintained
+/// second word, clears the item count, gives the inline array a capacity of
+/// ten, and points entries at that inline array. Deliberate deviation: LLVM
+/// coalesces the five stores into one `stm` and adds a frame prologue/epilogue.
+///
+/// # Safety
+///
+/// `worklist` must name writable target-width storage for the full 24-byte
+/// header and its inline first item.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn expr_worklist_init(
+    worklist: *mut ExprWorklist,
+    owner: u32,
+    reserved: u32,
+) {
+    (*worklist).owner = owner;
+    (*worklist)._reserved = reserved;
+    (*worklist).count = 0;
+    (*worklist).capacity = 10;
+    (*worklist).entries = worklist.cast::<u8>().add(0x18) as usize as u32;
+}
+
 
 /// `expr_worklist_release_completed_parents` — original `FUN_082c635c` @
 /// `0x082c635c` (104 bytes, `0x082c635c..0x082c63c4`; the distinct following
@@ -266,6 +294,7 @@ pub unsafe extern "C" fn expr_worklist_push_matching_subtree(
     expr_worklist_push_matching_subtree(worklist, left, opcode);
     let right = (expression.add(12).cast::<u32>()).read() as usize as *mut u8;
     expr_worklist_push_matching_subtree(worklist, right, opcode)
+
 }
 
 #[cfg(test)]
@@ -292,6 +321,11 @@ mod tests {
 
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::SQLITE_EXPR_WORKLIST, SLAB_LEN).map(|pointer| pointer as usize)
+    });
+    const INIT_SLAB_LEN: usize = 0x100;
+    static INIT_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        try_map_u32_slab(hints::SQLITE_EXPR_WORKLIST_INIT, INIT_SLAB_LEN)
+            .map(|pointer| pointer as usize)
     });
     const MATCHING_SUBTREE_SLAB_LEN: usize = 0x3000;
     static MATCHING_SUBTREE_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
@@ -465,12 +499,33 @@ mod tests {
             let _heap = HeapFixture::new(base, false);
             let entries_raw = base.add(EXPR_RAW_OFFSET);
             let worklist = reset_worklist(base, 0, 1, entries_raw);
+
             let entries = tracked_payload(entries_raw, EXPR_WORK_ITEM_SIZE as i32);
             (*worklist).entries = target_pointer(entries);
 
             expr_worklist_delete(worklist);
 
             assert_eq!(FREED_RAW, entries_raw);
+        }
+    }
+    #[test]
+    fn init_resets_header_and_uses_its_inline_entries() {
+        let Some(base) = *INIT_SLAB else {
+            assert!(note_missing_u32_fixture("sqlite/expr_worklist init"));
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            ptr::write_bytes(base, 0xff, INIT_SLAB_LEN);
+            let worklist = base.cast::<ExprWorklist>();
+
+            expr_worklist_init(worklist, 0x1020_3040, 0x5060_7080);
+
+            assert_eq!((*worklist).owner, 0x1020_3040);
+            assert_eq!((*worklist)._reserved, 0x5060_7080);
+            assert_eq!((*worklist).count, 0);
+            assert_eq!((*worklist).capacity, 10);
+            assert_eq!((*worklist).entries, target_pointer(base.add(0x18)));
         }
     }
 
