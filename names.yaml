@@ -112558,6 +112558,34 @@ functions:
       mutex_unlock instead of reproducing the final ARM tail branch, and
       discards its scratch return.
 
+  # --- Synchronized opaque-pointer FIFO empty predicate ---
+  - address: 0x0839e640
+    ghidra: FUN_0839e640
+    name: pointer_queue_is_empty
+    size: 48
+    sig: "u32 pointer_queue_is_empty(PointerQueue *queue)"
+    module: app/pointer_queue
+    status: ported
+    renames:
+      param_1/r5: queue
+      "queue+0x04": pending_list
+      "queue+0x0c": mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0839e5e0: pointer_queue_list_is_empty
+      FUN_0807f6a0: mutex_unlock
+      r5: is_empty
+    notes: >-
+      Raw osos.dec establishes the exact 48-byte extent
+      0x0839e640..0x0839e670: twelve A32 words from `push {r4,r5,r6,lr}`
+      through `pop {r4,r5,r6,pc}`; 0x0839e670 begins the separate next
+      function. Whole-image A32 B/BL decoding finds two inbound plain,
+      unconditional bl calls at 0x081ded5c and 0x081def7c, and zero
+      predicated bl calls. The function locks the mutex at queue+0x0c, calls
+      the unported list-empty predicate at 0x0839e5e0, unlocks that mutex,
+      and returns the predicate result. The target call remains fixed-address;
+      host tests inject it and both mutex operations because target pointer
+      fields are four bytes apart. No semantic deviations.
+
   # --- Status-flag priority selector ---
   - address: 0x082b1fd4
     ghidra: FUN_082b1fd4
