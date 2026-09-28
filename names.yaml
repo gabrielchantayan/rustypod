@@ -48968,6 +48968,34 @@ functions:
       only differences are LLVM's push {fp,lr} frame and the tail branch
       rendered through a relocation.
 
+  - address: 0x0839d0c8
+    ghidra: FUN_0839d0c8
+    name: refcounted_body_mutex_lock_guarded
+    size: 16
+    sig: "void refcounted_body_mutex_lock_guarded(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      Raw osos.dec words (0xe5900008 0xe3500000 0x1af3893b 0xe12fff1e)
+      establish the exact 16-byte A32 extent 0x0839d0c8..0x0839d0d8:
+      ldr r0,[r0,#8]; cmp r0,#0; bne mutex_lock @ 0x0807f5c4; bx lr.
+      The next separately linked function, refcounted_body_mutex_unlock_slot1_copy,
+      begins at 0x0839d0d8. Whole-image A32 B/BL decoding finds exactly two
+      inbound plain BL calls at 0x0816cd6c and 0x0839d04c, zero predicated
+      BL calls, and no direct tail B or aligned data-word references. The
+      helper loads RefcountedBody.mutex at +8 and tail-branches to mutex_lock
+      only when it is non-NULL; body itself has no NULL guard. It is the lock
+      half paired with refcounted_body_mutex_unlock_slot1_copy in the
+      slot-1 release templates at 0x0816cd58 and 0x0839d038. The Rust port is
+      a direct equivalent in cxx/handle; a unique target-only link section
+      prevents LLVM from folding this separately linked helper into its
+      byte-identical siblings. Host test proves a live mutex produces one Wait
+      event and the NULL-mutex early-out produces none.
+
   - address: 0x0839d0d8
     ghidra: FUN_0839d0d8
     name: refcounted_body_mutex_unlock_slot1_copy
