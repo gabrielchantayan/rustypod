@@ -53364,6 +53364,38 @@ functions:
       through the ported get_varint); a 93-byte text field (two-byte
       serial-type varint).
 
+  - address: 0x0838cb28
+    ghidra: FUN_0838cb28
+    name: sqlite_vdbe_reset
+    size: 212
+    sig: "int sqlite_vdbe_reset(Vdbe *statement, void *clear_arg)"
+    module: sqlite/vdbe_reset
+    status: ported
+    renames:
+      param_1: statement
+      param_2: clear_arg
+      iVar3: db
+      iVar2: result_code
+      DAT_0838cbfc: sqlite_free
+      DAT_0838cc00: VDBE_MAGIC_INIT
+    notes: >-
+      Upstream SQLite 3.5.9 sqlite3VdbeReset. Raw osos.dec proves the exact
+      212-byte extent 0x0838cb28..0x0838cbfc; 0x0838cbfc and 0x0838cc00 are
+      literal-pool words, and the next separately linked function starts at
+      0x0838cc04. Binary scanning finds two inbound direct calls, both plain
+      bl at 0x08371f2c and 0x0838b430; no predicated inbound bl. The body has
+      five unconditional outbound bl calls: sqlite3VdbeHalt, sqlite3Error,
+      sqlite3ValueSetStr (two sites), and sqlite3VdbeClearObject. It halts;
+      reports or transfers zErrMsg according to pc, rc, and expired; clears
+      the object; restores VDBE_MAGIC_INIT; clears expired; and masks rc with
+      db->errMask. VdbeHalt (0x0838b084) and VdbeClearObject (0x08044c78) are
+      verified retail-address seams until separately ported; sqlite3Error and
+      sqlite3ValueSetStr are direct ports. On a 64-bit host rc and zErrMsg use
+      target-offset word access so Vdbe's existing pointer layout remains
+      intact. match.py: 53 original versus 65 LLVM instructions; both retain
+      the signed pc split, zErrMsg paths, final clear, magic/expired stores,
+      and rc/errMask return. Host tests cover completed and negative-pc
+      non-expired paths with halt/clear ordering and state assertions.
   - address: 0x0838cc1c
     ghidra: FUN_0838cc1c
     name: vdbe_serial_get
