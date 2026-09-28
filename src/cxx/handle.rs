@@ -2032,6 +2032,51 @@ pub unsafe extern "C" fn refcounted_body_attach(
     }
 }
 ///
+/// `refcounted_body_attach_slot1_copy` — original: `FUN_0839d284` @
+/// `0x0839d284` (60 bytes, `0x0839d284..0x0839d2c0`). The next separately
+/// Whole-image A32 decoding finds two inbound plain `bl` sites
+/// (`0x08223a98`, `0x0839f1d4`) and no predicated inbound `bl` forms; the
+/// body has two predicated `blne` calls, to `mutex_lock` @ `0x0807f5c4` and
+/// `mutex_unlock` @ `0x0807f6a0`.
+///
+/// Stores `body` through `dst` before its NULL early return. A non-NULL body
+/// loads and NULL-checks the optional mutex at +8, locks it,
+/// wrapping-increments signed refcount at +4, reloads and independently
+/// NULL-checks the mutex, then unlocks it.
+///
+/// Deliberate deviation: this separately linked, byte-identical template copy
+/// calls the ported mutex helpers directly; LLVM may inline them rather than
+/// retaining the retail predicated calls. Its unique target-only section keeps
+/// this hookable entry distinct from `refcounted_body_attach_slot1`.
+///
+/// # Safety
+///
+/// `dst` must be a valid, aligned pointer slot. A non-NULL `body` must point
+/// to a readable/writable [`RefcountedBody`]; neither pointer is NULL-checked
+/// by the stock function.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_attach_slot1_copy")]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_attach_slot1_copy(
+    dst: *mut *mut RefcountedBody,
+    body: *mut RefcountedBody,
+) {
+    dst.write(body);
+    if body.is_null() {
+        return;
+    }
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_lock(mutex);
+    }
+    (*body).refcount = (*body).refcount.wrapping_add(1);
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
+///
 /// refcounted_body_attach_owned_variant — original: `FUN_0839cf10` @
 /// `0x0839cf10` (60 bytes; 3 direct `bl` callers, all unconditional:
 /// `0x0815f51c`, `0x0839ef48`, and `0x0839ef78`; one additional direct tail
@@ -4373,6 +4418,38 @@ mod tests {
             refcounted_body_attach(&mut slot, &mut body);
             assert_eq!(slot, &mut body as *mut RefcountedBody);
             assert_eq!(body.refcount, 4);
+            assert_eq!(body.opaque0, 0x1111_2222);
+        }
+    }
+
+    /// The separately linked 0x0839d284 copy overwrites a preexisting slot
+    /// before its NULL-body early return.
+    #[test]
+    fn attach_slot1_copy_null_body_stores_null() {
+        unsafe {
+            let mut slot = 0xdead_beefusize as *mut RefcountedBody;
+
+            refcounted_body_attach_slot1_copy(&mut slot, core::ptr::null_mut());
+
+            assert!(slot.is_null());
+        }
+    }
+
+    /// The copy retains the retail wrapping increment for an unguarded body.
+    #[test]
+    fn attach_slot1_copy_wraps_refcount_with_null_mutex() {
+        unsafe {
+            let mut body = RefcountedBody {
+                opaque0: 0x1111_2222,
+                refcount: i32::MAX,
+                mutex: core::ptr::null_mut(),
+            };
+            let mut slot: *mut RefcountedBody = core::ptr::null_mut();
+
+            refcounted_body_attach_slot1_copy(&mut slot, &mut body);
+
+            assert_eq!(slot, &mut body as *mut RefcountedBody);
+            assert_eq!(body.refcount, i32::MIN);
             assert_eq!(body.opaque0, 0x1111_2222);
         }
     }

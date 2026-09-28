@@ -48861,6 +48861,40 @@ functions:
       only differences are LLVM's push {fp,lr} frame and the tail branch
       rendered through a relocation.
 
+  - address: 0x0839d284
+    ghidra: FUN_0839d284
+    name: refcounted_body_attach_slot1_copy
+    size: 60
+    sig: "void refcounted_body_attach_slot1_copy(RefcountedBody **dst, RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1-r4: body
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec words establish the exact 60-byte A32 extent
+      0x0839d284..0x0839d2c0: push {r4,lr}; movs r4,r1; str r1,[r0];
+      popeq {r4,pc}; then the optional-mutex lock, wrapping refcount
+      increment, optional-mutex unlock, and pop {r4,pc}. The next separately
+      linked function begins with push {r4,r5,r6,lr} at 0x0839d2c0. Whole-image
+      A32 B/BL decoding finds exactly two inbound plain bl callers
+      (0x08223a98 and 0x0839f1d4), zero predicated inbound bl callers, and no
+      direct tail b or word-aligned data references. The body itself has two
+      predicated blne calls, mutex_lock @ 0x0807f5c4 and mutex_unlock @
+      0x0807f6a0. It stores body through dst unconditionally, then for a
+      non-NULL body independently NULL-checks mutex +8 before lock and unlock
+      around the wrapping increment of signed refcount +4. This is a separately
+      linked copy of refcounted_body_attach_slot1 @ 0x0839d198 modulo its two
+      BL displacements. Deliberate deviation: the Rust port calls the ported
+      mutex helpers directly, so LLVM may inline them; the dedicated target
+      section prevents this hookable entry folding with its byte-identical
+      sibling. Host tests cover the unconditional NULL store and i32::MAX
+      wrapping to i32::MIN with a NULL mutex.
+
   - address: 0x0839d188
     ghidra: FUN_0839d188
     name: refcounted_body_mutex_unlock_dtor_copy
