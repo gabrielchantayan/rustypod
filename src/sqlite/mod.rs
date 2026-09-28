@@ -265,6 +265,7 @@ pub mod select_dest_init;
 pub mod select_delete;
 pub mod src_list_delete;
 pub mod src_list_assign_cursors;
+pub mod src_list_append_from_term;
 pub mod src_list_from_table;
 pub mod src_list_lookup;
 pub mod fix_src_list;
