@@ -160,6 +160,7 @@ pub mod singly_linked_list_is_empty;
 pub mod linked_list_find_and_promote;
 pub mod linked_list_entry_update;
 pub mod linked_list_append;
+pub mod synchronized_list_append;
 pub mod linked_list_refresh_sort_ascending;
 pub mod list_find;
 pub mod half_open_word_range_contains;

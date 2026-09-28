@@ -155746,3 +155746,30 @@ functions:
       for a zero count, otherwise zero. The list address has no NULL guard.
       Deliberate deviations: none; host tests cover empty, single-node, and
       multi-node chains.
+
+  - address: 0x0839e71c
+    ghidra: FUN_0839e71c
+    name: synchronized_list_append
+    size: 72
+    sig: "void synchronized_list_append(u32 *owner, u32 value)"
+    module: util/synchronized_list_append
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      param_2/r1/r7: value
+      param_1_plus_0x4: list
+      param_1_plus_0xc: mutex
+      param_1_plus_0x14: cleanup_owner
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x0839e71c..0x0839e763: the next independently entered function starts
+      at 0x0839e764. The body has four unconditional direct bl calls
+      (mutex_lock 0x0807f5c4, operator_new(8) 0x082aadd4, the unported
+      head/tail append helper 0x080f1158, and the unported cleanup helper
+      0x080744d8), zero predicated bl calls, and a tail b to mutex_unlock
+      0x0807f6a0. Whole-image A32 branch decoding finds two inbound plain bl
+      calls at 0x08211bd0 and 0x08211d20, with zero predicated forms.
+      It locks owner+12, allocates an eight-byte node, stores value at node+4,
+      appends it to the head/tail anchor at owner+4, invokes cleanup on
+      owner+20, then unlocks owner+12. The port uses target-width word indices
+      and target-address/host-ABI seams for the two unnamed callees.
