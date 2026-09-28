@@ -57371,6 +57371,48 @@ functions:
       than widened host pointer fields; this is a deliberate representation
       deviation only, preserving ARM offsets on host fixtures. Host tests
       cover NULL, depth-first cursor allocation, and the early-stop invariant.
+  - address: 0x083842fc
+    ghidra: FUN_083842fc
+    name: src_list_append_from_term
+    size: 132
+    sig: "SrcList *src_list_append_from_term(Parse *parse, SrcList *source_list, const Token *table, const Token *database, const Token *alias, Select *select, Expr *on, IdList *using)"
+    module: sqlite/src_list_append_from_term
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: source_list
+      param_3/r2: table
+      param_4/r3: database
+      "sp+0x20/r6": alias
+      "sp+0x24/r7": select
+      "sp+0x28/r8": on
+      "sp+0x2c/r9": using
+      r4: list
+      r5: item
+      "parse+0x00": db
+      "list+0x00": n_src
+      "item+0x08": z_alias
+      "item+0x10": p_select
+      "item+0x1c": p_on
+      "item+0x20": p_using
+    notes: >-
+      SQLite 3.5.x's sqlite3SrcListAppendFromTerm. Raw osos.dec establishes
+      the exact 132-byte body 0x083842fc..0x0838437f; the next separately
+      linked function begins at 0x08384380. Independent ARM B/BL decoding
+      finds exactly two inbound plain BL call sites (0x0837d408 and
+      0x0839a5b4) and no predicated BL forms. The body calls the unported
+      sqlite3SrcListAppend @ 0x083841ec with parse->db and the first four
+      source-list arguments. A NULL result or a result with nSrc == 0
+      releases pOn through expr_delete @ 0x08377e00, pUsing through
+      id_list_delete @ 0x0837b11c, and pSelect through select_delete @
+      0x08383c88, then returns the result. Otherwise its final item inherits
+      a duplicated alias only when alias is non-NULL and its packed token word
+      has a nonzero length; it then stores pSelect, pOn, and pUsing at
+      +0x10, +0x1c, and +0x20. The five outbound direct BL instructions are
+      unconditional; no outbound BL is predicated. Deliberate deviation: the
+      unported append helper remains the existing volatile
+      SQLITE_SRC_LIST_APPEND seam. The seam's first argument is corrected to
+      the raw-code-proven parse->db, including src_list_from_table's caller.
   - address: 0x083843e8
     ghidra: FUN_083843e8
     name: src_list_delete

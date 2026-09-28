@@ -63,9 +63,9 @@ pub unsafe extern "C" fn src_list_from_table(parse: *mut u8, table: *mut u8, tab
         let db_array = (db.add(DB_ARRAY_INDEX * 4) as *const u32).read() as usize as *const u8;
         let database_name = (db_array.add(index as usize * DB_ENTRY_SIZE) as *const *const u8).read();
         let mut token = [database_name as usize, ((crate::libc::strlen::strlen(database_name) as u32) << 1 | (token_dynamic & 1)) as usize];
-        return src_list_append_op()(parse, core::ptr::null_mut(), token.as_mut_ptr().cast(), table.add(TABLE_NAME_TOKEN_OFFSET * WORD));
+        return src_list_append_op()(db, core::ptr::null_mut(), token.as_mut_ptr().cast(), table.add(TABLE_NAME_TOKEN_OFFSET * WORD));
     };
-    src_list_append_op()(parse, core::ptr::null_mut(), database_token, table.add(TABLE_NAME_TOKEN_OFFSET * WORD))
+    src_list_append_op()(db, core::ptr::null_mut(), database_token, table.add(TABLE_NAME_TOKEN_OFFSET * WORD))
 }
 
 #[cfg(test)]
@@ -75,9 +75,9 @@ mod tests {
     use parking_lot::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut SEEN: (*const u8, *const u8) = (core::ptr::null(), core::ptr::null());
-    unsafe extern "C" fn record(_: *mut u8, _: *mut u8, database: *const u8, table: *const u8) -> *mut u8 {
-        SEEN = (database, table);
+    static mut SEEN: (*mut u8, *const u8, *const u8) = (core::ptr::null_mut(), core::ptr::null(), core::ptr::null());
+    unsafe extern "C" fn record(db: *mut u8, _: *mut u8, database: *const u8, table: *const u8) -> *mut u8 {
+        SEEN = (db, database, table);
         0x1234usize as *mut u8
     }
 
@@ -88,13 +88,15 @@ mod tests {
             let saved = SQLITE_SRC_LIST_APPEND;
             SQLITE_SRC_LIST_APPEND = record;
             let mut parse = [0usize; 1];
+            parse[0] = 0xabcd;
             let mut owner = [0usize; 8];
             let mut table = [0usize; 6];
             table[2] = owner.as_mut_ptr() as usize;
             let token = [0x11usize, 0x22usize];
             assert_eq!(src_list_from_table(parse.as_mut_ptr().cast(), table.as_mut_ptr().cast(), token.as_ptr().cast(), 1), 0x1234usize as *mut u8);
-            assert_eq!(SEEN.0, token.as_ptr().cast());
-            assert_eq!(SEEN.1, table.as_ptr().add(4).cast());
+            assert_eq!(SEEN.0, 0xabcdusize as *mut u8);
+            assert_eq!(SEEN.1, token.as_ptr().cast());
+            assert_eq!(SEEN.2, table.as_ptr().add(4).cast());
             SQLITE_SRC_LIST_APPEND = saved;
         }
     }
