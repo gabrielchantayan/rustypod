@@ -49462,6 +49462,38 @@ functions:
       and model target +0x04/+0x28 as semantic fields, while target builds
       use the original 32-bit word and byte offsets. Tests cover ordered
       multi-result release plus disabled, zero, and negative-count early-outs.
+  - address: 0x0839c610
+    ghidra: FUN_0839c610
+    name: vtable_slot_40_destroy_first
+    size: 88
+    sig: "void vtable_slot_40_destroy_first(VtableDestroyFirstObject *object)"
+    module: util/vtable_slot_40_destroy_first
+    status: ported
+    renames:
+      param_1/r0/r5: object
+      param_1+0x04/r6: iteration_count
+      param_1+0x28/r0: enabled
+      r4: index
+      "vtable+0x40/r2": destroy_first
+      FUN_0826fd10: destroy_result
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the true 88-byte A32 extent:
+      0x0839c610..0x0839c668, ending in pop {r4,r5,r6,pc}; the following
+      push at 0x0839c668 begins a distinct function. Ghidra's 44-byte extent
+      stops at the virtual blx and drops the loop tail. The body has two
+      unconditional direct bl calls, at 0x0839c650 to unported
+      FUN_0826fd10 and at 0x0839c654 to ported operator_delete/FUN_082aad24,
+      no predicated direct bl calls, and one unconditional virtual blx through
+      vtable+0x40 at 0x0839c640. Raw caller words establish two inbound
+      unconditional plain bl calls at 0x0839c6b4 and 0x0839c6d8, with no
+      predicated inbound direct bl calls. When enabled is nonzero, it scans
+      signed indices [0, iteration_count), invokes slot +0x40, and on the
+      first non-null result destroys it through the unported direct callee;
+      that callee's returned pointer is tag-2 deleted. Host fixtures widen
+      vtable pointers and provide a seam for the unported callee; target
+      builds call its verified load address directly. Tests cover first-match
+      selection plus disabled, non-positive, and all-null ranges.
   - address: 0x0839d44c
     ghidra: FUN_0839d44c
     name: refcounted_body_mutex_unlock

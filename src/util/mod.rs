@@ -395,6 +395,7 @@ pub mod vtable_slot_0x1c_result_word;
 pub mod vtable_slot_0x40_result_word;
 pub mod subobject_vtable_slot_0x40_result_word;
 pub mod vtable_slot_40_release_each;
+pub mod vtable_slot_40_destroy_first;
 pub mod vtable_slot_40_release_first;
 pub mod vtable_slot_0x5c_result_is_three;
 pub mod wang_hash;
