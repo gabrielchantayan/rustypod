@@ -49428,6 +49428,29 @@ functions:
       (register-indexed first load, fixed offsets 1..3, shifts 8/16/24);
       the crate-wide frame-pointer push/pop is the only diff.
 
+  - address: 0x0839e348
+    ghidra: FUN_0839e348
+    name: condition_queue_list_is_empty_0839e348
+    size: 24
+    sig: "u32 condition_queue_list_is_empty_0839e348(ConditionQueue *queue)"
+    module: cxx/condition_queue_list_is_empty_0839e348
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_1_plus_0x04: item_chain_head
+      FUN_0807a13c: singly_linked_list_count
+      r0: is_empty
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent
+      0x0839e348..0x0839e360: push {r4,lr}; add r0,r0,#4; bl
+      singly_linked_list_count; rsbs r0,r0,#1; movcc r0,#0; pop {r4,pc}.
+      The separately linked condition_queue_is_empty_0839e360 starts at
+      0x0839e360. Whole-image A32 branch-immediate decoding finds exactly two
+      inbound unconditional plain BL sites (0x08100be4 and 0x0839e378) and
+      zero predicated BL sites. The body has one unconditional direct BL to
+      the ported singly_linked_list_count @ 0x0807a13c and zero predicated BL
+      calls. It counts the NULL-terminated intrusive chain at queue+4 and
+      returns one exactly for a zero count; the queue has no NULL guard.
   - address: 0x0839e360
     ghidra: FUN_0839e360
     name: condition_queue_is_empty_0839e360
