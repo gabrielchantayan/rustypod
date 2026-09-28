@@ -32,6 +32,8 @@
 //!   `sqlite3VdbeChangeP1`: patch the first operand of an emitted op.
 //! - `vdbe_change_p2` — `FUN_08386a44` @ 0x08386a44 (48 bytes; 66 `bl` +
 //!   2 tail `b`). `sqlite3VdbeChangeP2`: back-patch a jump target.
+//! - `vdbe_change_p3` — `FUN_08386a74` @ 0x08386a74 (48 bytes; 2 `bl`).
+//!   `sqlite3VdbeChangeP3`: patch the third operand of an emitted op.
 //! - `vdbe_jump_here` — `FUN_0838b674` @ 0x0838b674 (8 bytes; 8 `bl` +
 //!   1 conditional tail `bne`). `sqlite3VdbeJumpHere`: patch an op's P2
 //!   operand to the address of the next op.
@@ -651,6 +653,28 @@ pub unsafe extern "C" fn vdbe_change_p2(p: *mut Vdbe, addr: i32, value: i32) {
     (*a_op.offset(addr as isize)).p2 = value;
 }
 
+/// vdbe_change_p3 — original: `FUN_08386a74` @ 0x08386a74 (48 bytes;
+/// 2 unconditional `bl` call sites, no predicated `bl`, verified by
+/// decoding every ARM B/BL word in osos.dec).
+///
+/// `sqlite3VdbeChangeP3`: patch the P3 operand of the op at `addr`.
+/// Silently does nothing for a NULL statement, a negative address, an
+/// address at or past `nOp`, or an unallocated op array. The raw routine's
+/// four guards have that order; its `addr * 20 + 12` store selects P3.
+/// No deliberate deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vdbe_change_p3(p: *mut Vdbe, addr: i32, value: i32) {
+    if p.is_null() || addr < 0 || (*p).n_op <= addr {
+        return;
+    }
+    let a_op = (*p).a_op;
+    if a_op.is_null() {
+        return;
+    }
+    (*a_op.offset(addr as isize)).p3 = value;
+}
+
 /// vdbe_jump_here — original: `FUN_0838b674` @ 0x0838b674 (8 bytes; 8
 /// unconditional `bl` call sites and 1 conditional tail `bne`, verified by
 /// decoding every ARM B/BL word in osos.dec).
@@ -1014,6 +1038,36 @@ mod tests {
         stmt.vdbe.n_op = 4;
         // No aOp: must return without dereferencing it.
         unsafe { vdbe_change_p2(stmt.ptr(), 0, 7) };
+    }
+
+    #[test]
+    fn change_p3_patches_only_within_the_emitted_range() {
+        let _guard = quiet();
+        let mut slab = op_slab(4);
+        let mut stmt = preallocated(&mut slab, Connection::healthy());
+        for i in 0..3 {
+            unsafe { vdbe_add_op3(stmt.ptr(), 1, i, 0, 0) };
+        }
+
+        unsafe { vdbe_change_p3(stmt.ptr(), 1, 0x1234) };
+        assert_eq!(slab[1].p3, 0x1234);
+        assert_eq!(slab[1].p2, 0, "the neighbouring P2 operand is untouched");
+
+        unsafe { vdbe_change_p3(stmt.ptr(), -1, 0x999) };
+        unsafe { vdbe_change_p3(stmt.ptr(), 3, 0x999) };
+        unsafe { vdbe_change_p3(stmt.ptr(), i32::MAX, 0x999) };
+        unsafe { vdbe_change_p3(core::ptr::null_mut(), 0, 0x999) };
+        assert_eq!(slab[0].p3, 0);
+        assert_eq!(slab[2].p3, 0);
+        assert_eq!(slab[3].p3, -1, "slot beyond nOp is never written");
+    }
+
+    #[test]
+    fn change_p3_ignores_a_statement_with_no_op_array() {
+        let _guard = quiet();
+        let mut stmt = Statement::new(Connection::healthy());
+        stmt.vdbe.n_op = 4;
+        unsafe { vdbe_change_p3(stmt.ptr(), 0, 7) };
     }
 
     #[test]
