@@ -2202,6 +2202,9 @@ pub mod hints {
     // cache and three-page LRU fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const SQLITE_PCACHE_REMOVE_FROM_LRU_LIST: usize = 0x9500_0000;
+    // 0x9800_0000: dedicated to sqlite/pcache_unlink_and_remove_from_hash's
+    // raw-u32 page and cache fixture; mappings never unmap.
+    pub const SQLITE_PCACHE_UNLINK_AND_REMOVE_FROM_HASH: usize = 0x9800_0000;
     // 0x9700_0000: dedicated to sqlite/pcache_add_to_lru_list's raw-u32
     // cache and LRU-page fixture; mappings never unmap, so no other user may
     // share this hint.

@@ -157406,3 +157406,29 @@ functions:
       record whose +0x00 Btree equals btree, then clear shared +0x5c when it
       equals btree. Deliberate host-only deviation: target pointer slots scale
       to host pointer width so fixture fields cannot overlap.
+
+  # ---- SQLite page unlink and hash removal (src/sqlite/pcache_unlink_and_remove_from_hash.rs) ----
+  - address: 0x08396050
+    ghidra: FUN_08396050
+    name: pcache_unlink_and_remove_from_hash
+    size: 32
+    sig: "void pcache_unlink_and_remove_from_hash(PgHdr *page)"
+    module: sqlite/pcache_unlink_and_remove_from_hash
+    status: ported
+    renames:
+      param_1/r0/r4: page
+      "*page/r5": cache
+      FUN_082d8e30: pager_page_unlink
+      FUN_08395fd0: retail_hash_removal_tail
+    notes: >-
+      Raw osos.dec words establish the exact 32-byte body
+      0x08396050..0x0839606f; the next separately linked function starts at
+      0x08396070. Whole-image aligned A32 decoding finds exactly two inbound
+      unconditional plain BL calls at 0x082de3f4 and 0x082de7dc, and zero
+      inbound predicated BL calls. The body has one outbound unconditional
+      plain BL to pager_page_unlink @ 0x082d8e30, no predicated BL calls, then
+      tail-branches to the unported routine at 0x08395fd0 with the saved page
+      owner in r0 and page in r1. It preserves the owner across unlink before
+      this tail transfer. Deliberate deviation: host tests dispatch the
+      unported tail target through a callback; the ARM payload emits the
+      verified absolute tail transfer.
