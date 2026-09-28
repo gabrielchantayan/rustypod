@@ -382,6 +382,40 @@ pub unsafe extern "C" fn registry_container_construct_default(
     initialize(registry, 4, 4);
     registry
 }
+/// registry_container_construct_with_byte_state — original: `FUN_0839bf94` @
+/// 0x0839bf94 (32 bytes: 28 bytes of code plus the 4-byte vtable literal at
+/// 0x0839bfb0; `push {r4,lr}` at 0x0839bfb4 starts the next function). Two
+/// inbound plain `bl` call sites, zero predicated; its body has one direct
+/// `bl` to [`registry_container_construct_default`].
+///
+/// Constructs the capacity-four registry base over `storage`, replaces its
+/// vtable with `0x08981f14`, then writes `enabled` at the derived object's
+/// target byte offset +0x28. It returns the base constructor's result.
+///
+/// Deliberate deviation: the byte store uses the target offset rather than a
+/// host struct field because `Registry` contains host-width pointers.
+///
+/// # Safety
+///
+/// `storage` must be writable as a registry base and include the derived byte
+/// at target offset +0x28. As in retailOS, invalid storage faults.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_container_construct_with_byte_state(
+    storage: *mut Registry,
+    enabled: u8,
+) -> *mut Registry {
+    const BYTE_STATE_REGISTRY_VTABLE_ADDRESS: usize = 0x0898_1f14;
+
+    let registry = registry_container_construct_default(storage);
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*registry).vtable),
+        BYTE_STATE_REGISTRY_VTABLE_ADDRESS as *const _,
+    );
+    registry.cast::<u8>().add(0x28).write_volatile(enabled);
+    registry
+}
+
 
 /// Host-only substitute for the direct tail branch to
 /// [`observable_array_destruct`]. `Registry` has host-width pointers whereas
@@ -1155,6 +1189,38 @@ mod tests {
         }
         restore(guard);
     }
+    #[test]
+    fn byte_state_registry_constructor_replaces_vtable_and_writes_only_state_byte() {
+        let guard = mock();
+        unsafe {
+            let mut registry = Registry {
+                vtable: 0xdead_beefusize as *const RegistryVtable,
+                container: [usize::MAX; 7],
+                changed: 0xa5,
+                notify_enabled: 0x5a,
+                reserved: [0xa5; 2],
+                observer: usize::MAX as *mut u8,
+            };
+            let this = ptr::addr_of_mut!(registry);
+            let bytes = this.cast::<u8>();
+            bytes.add(0x27).write(0xa5);
+            bytes.add(0x28).write(0x5a);
+            bytes.add(0x29).write(0xa5);
+
+            assert_eq!(registry_container_construct_with_byte_state(this, 1), this);
+            assert_eq!(
+                ptr::read_volatile(this.cast::<u32>()),
+                0x0898_1f14,
+                "the derived constructor replaces the base registry vtable"
+            );
+            assert_eq!(bytes.add(0x28).read(), 1);
+            assert_eq!(bytes.add(0x27).read(), 0xa5);
+            assert_eq!(bytes.add(0x29).read(), 0xa5);
+            assert_eq!(*ptr::addr_of!(CONTAINER_INITIALIZE_ARGS), std::vec![(this, 4, 4)]);
+        }
+        restore(guard);
+    }
+
 
     #[test]
     fn container_initializer_writes_every_state_field_and_builds_capacity_four_observer() {
