@@ -541,6 +541,7 @@ pub mod string_encoding;
 pub mod counted_u16_copy;
 pub mod string_export_counted_utf16;
 pub mod byte_key_tree_find_predecessor;
+pub mod red_black_tree_leftmost_descendant;
 pub mod templates;
 pub mod container_dispose_elements;
 pub mod fixed_record_range_copy;
