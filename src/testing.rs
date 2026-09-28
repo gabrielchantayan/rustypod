@@ -580,6 +580,9 @@ pub mod hints {
     // fixture for field_dc_as_class_4b00; mappings never unmap, so no other
     // user may share this hint.
     pub const FIELD_DC_AS_CLASS_4B00: usize = 0x6d00_0000;
+    // 0x6d60_0000: dedicated to util/synchronized_list_append's target-width
+    // owner and allocation fixture; mappings never unmap.
+    pub const SYNCHRONIZED_LIST_APPEND: usize = 0x6d60_0000;
     // 0x6d10_0000: dedicated to app/context_select_item_and_dispatch's
     // target-width owner and pair-table fixture; mappings never unmap, so no
     // other port may share this hint.
