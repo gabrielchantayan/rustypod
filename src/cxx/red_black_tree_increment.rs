@@ -275,6 +275,17 @@ pub unsafe extern "C" fn red_black_tree_increment(cursor: *mut u32) -> u32 {
 /// links remain `u32` words to preserve retail four-byte layout on hosts.
 /// Deliberate deviations: none.
 ///
+/// `FUN_083b5a08` at load address `0x083b5a08` is a byte-identical,
+/// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
+/// `bx lr` at `0x083b5a58`; the next independently entered function begins
+/// at `0x083b5a5c`. Complete aligned A32 B/BL-immediate decoding finds exactly
+/// two inbound unconditional plain `bl` instructions, zero predicated `bl`
+/// instructions, and no outbound calls. It moves an in-order red-black-tree
+/// cursor to its successor by descending the right subtree's left spine or
+/// climbing parent links from right-child edges, preserving the header sentinel.
+/// Its raw body is byte-identical to this dispatch seam and its dedicated host
+/// tests; deliberate deviations: none.
+///
 /// `FUN_083b5ab0` at load address `0x083b5ab0` is a byte-identical,
 /// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
 /// `bx lr` at `0x083b5b00`; the next independently entered function begins
@@ -433,6 +444,7 @@ pub unsafe extern "C" fn red_black_tree_advance_cursor(cursor: *mut u32) -> *mut
 /// ARM B/BL decoding finds three inbound calls, all plain `bl` at 0x08259b98,
 /// 0x083b8c60, and 0x083b9130; there are no predicated BL calls. The body has
 /// no outbound calls.
+///
 ///
 /// `FUN_083b570c` at load address `0x083b570c` is a byte-identical,
 /// 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
