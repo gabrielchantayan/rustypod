@@ -156716,3 +156716,25 @@ functions:
       the first nonzero result word. FUN_082800f8 is structurally verified as
       a nested string-object destructor but its class identity is unrecovered,
       so target builds call its fixed address and host tests use a typed seam.
+
+  - address: 0x0839c5e8
+    ghidra: FUN_0839c5e8
+    name: vtable_089824fc_destruct
+    size: 40
+    sig: "u32 *vtable_089824fc_destruct(u32 *this)"
+    module: cxx/vtable_089824fc_destruct
+    status: ported
+    vars: {param_1: this, DAT_0839c60c: VTABLE_089824FC, FUN_0839c540: container_release_enabled_elements, FUN_08135380: registry_container_destruct}
+    notes: >-
+      Raw ARM establishes the 40-byte extent 0x0839c5e8..0x0839c610:
+      nine instructions through the tail b at 0x0839c608 and trailing vtable
+      literal 0x089824fc; 0x0839c610 begins the next function. Ghidra's
+      36-byte extent excludes the literal. The body has one plain bl to
+      container_release_enabled_elements (0x0839c540), no predicated bl, and
+      a tail b to the already ported registry_container_destruct
+      (0x08135380). Full-image ARM decoding finds two inbound plain bl sites
+      (0x0811d9a0 and 0x08179070) and no predicated inbound bl forms. It
+      installs the derived vtable, releases enabled container elements, then
+      chains to the base destructor and returns its result. ARM builds call
+      both existing ports directly; host tests use narrow seams because host
+      pointer widths do not preserve the target container layout.
