@@ -1929,6 +1929,10 @@ pub mod hints {
     // raw-u32 cursor-advance fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const RED_BLACK_TREE_ADVANCE_CURSOR_083B5D54: usize = 0x1030_0000;
+    // 0x1040_0000: dedicated to cxx/red_black_tree_advance_cursor_083b5d00's
+    // raw-u32 cursor-advance fixture; mappings never unmap, so no other user
+    // may share this hint.
+    pub const RED_BLACK_TREE_ADVANCE_CURSOR_083B5D00: usize = 0x1040_0000;
     // 0x8140_0000: dedicated to cxx/red_black_tree_increment's raw-u32
     // cursor-decrement fixture; mappings never unmap, so no other user may
     // share this hint.
