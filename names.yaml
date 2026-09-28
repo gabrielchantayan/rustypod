@@ -157382,3 +157382,27 @@ functions:
       Both callees remain retail seams: device builds call their verified load
       addresses, while host tests install recording implementations. No
       additional validation or destination write is performed on decode error.
+
+  - address: 0x08396098
+    ghidra: FUN_08396098
+    name: btree_release_locks
+    size: 80
+    sig: "void sqlite3BtreeReleaseLocks(Btree *btree)"
+    module: sqlite/btree_release_locks
+    status: ported
+    renames:
+      param_1/r5: btree
+      iVar3/r6: shared
+      piVar2/r4: link
+      piVar1/r0: lock
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the true 80-byte extent 0x08396098..0x083960e8:
+      pop {r4,r5,r6,pc} is immediately followed by a distinct push {r4,lr}.
+      Whole-image branch decoding finds exactly two inbound unconditional plain BL
+      calls, at 0x08370ce4 and 0x08372b8c; the body has one outbound plain BL
+      to tracked_free @ 0x083906f4 and no predicated BL. SQLite 3.5.9 lock
+      release: traverse shared +0x58 through lock +0x0c, unlink and free every
+      record whose +0x00 Btree equals btree, then clear shared +0x5c when it
+      equals btree. Deliberate host-only deviation: target pointer slots scale
+      to host pointer width so fixture fields cannot overlap.
