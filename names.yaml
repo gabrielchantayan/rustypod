@@ -58735,6 +58735,31 @@ functions:
       semantically vdbe_add_op3(v, op, 0, 0, 0), so the ported
       vdbe_add_op3 is called directly.
 
+  - address: 0x0837d884
+    ghidra: FUN_0837d884
+    name: open_master_table
+    size: 112
+    sig: "void open_master_table(Parse *parse, int database_index)"
+    module: sqlite/open_master_table
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: database_index
+      r4: vdbe
+      pcVar2/r3: table_name
+    notes: >-
+      SQLite's sqlite3OpenMasterTable. Raw ARM words establish exactly the
+      112-byte executable extent 0x0837d884..0x0837d8f3; the sqlite_master
+      string begins at 0x0837d8f4. The body contains three plain BL
+      instructions and no predicated BL. Exactly two inbound direct BL sites
+      reach it (0x08375db4 and 0x0838498c), both unconditional. It fetches
+      the Vdbe, records a write lock for root page 1 using sqlite_temp_master
+      only when iDb == 1, then emits OP_SetNumColumns (0x62, 0, 5, 0) and
+      OP_OpenWrite (9, 0, 1, iDb). vdbe_add_table_lock and vdbe_add_op3 are
+      direct calls to their ports. get_vdbe has no export despite its ported
+      ledger state, so the port reuses BEGIN_WRITE_OPS.get_vdbe; its default
+      returns Parse.pVdbe and preserves the original's documented OOM result.
+
   - address: 0x0837d918
     ghidra: FUN_0837d918
     name: open_table

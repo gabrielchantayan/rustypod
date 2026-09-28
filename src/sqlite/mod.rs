@@ -296,6 +296,7 @@ pub mod store_u32_le;
 pub mod index_affinity;
 pub mod table_affinity;
 pub mod table_lock;
+pub mod open_master_table;
 pub mod used_as_column_cache;
 pub mod utf8_read;
 pub mod utf16_to_utf8;
