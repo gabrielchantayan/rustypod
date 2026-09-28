@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b92f4
+    ghidra: FUN_083b92f4
+    name: tree_nodes_prepend_to_free_list_92f4
+    size: 60
+    sig: "void tree_nodes_prepend_to_free_list_92f4(TreeOwner *owner, TreeNode *node)"
+    module: cxx/tree_nodes_prepend_to_free_list
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r4: node
+      param_1_plus_0x04/r1: free_list
+      param_2_plus_0x08/r0: next_subtree
+      param_2_plus_0x0c/r1: recursive_subtree_or_free_list_link
+    notes: >-
+      Raw osos.dec establishes the true 60-byte A32 extent: fifteen words from
+      push {r4,r5,lr} at 0x083b92f4 through pop {r4,r5,pc} at 0x083b932c;
+      push {r4,r5,lr} at 0x083b9330 begins the next real function. The body
+      has one plain direct recursive BL at 0x083b930c and zero predicated
+      direct BL instructions. Whole-image aligned A32 branch decoding finds
+      two inbound plain BL sites, 0x083b9088 and 0x083b930c, and no predicated
+      direct callers. It recursively visits node+12, then prepends every node
+      to owner+4 and follows node+8; node+12 becomes the free-list link.
+      This is structurally identical to the separately linked 60-byte ports
+      at 0x083bd1b0, 0x083cf444, and 0x083cea00, so it has a dedicated Rust
+      symbol rather than a runtime seam. Deliberate deviations: none.
   - address: 0x083d019c
     ghidra: FUN_083d019c
     name: observable_array_release_enabled_cells
