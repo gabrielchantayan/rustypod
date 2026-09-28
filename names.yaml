@@ -16,6 +16,25 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6a6c
+    ghidra: FUN_083b6a6c
+    name: red_black_tree_rightmost_descendant_083b6a6c
+    size: 20
+    sig: "u32 red_black_tree_rightmost_descendant_083b6a6c(u32 node)"
+    module: cxx/red_black_tree_rightmost_descendant_083b6a6c
+    status: ported
+    renames:
+      param_1/r0: node
+      "node+0x0c/r1": right
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte A32 extent: ldr r1,[r0,#0xc]
+      at 0x083b6a6c through bx lr at 0x083b6a7c; 0x083b6a80 begins the
+      separately linked leftmost-descendant sibling. The body has no outbound
+      BL calls. Raw branch-immediate decoding finds exactly two inbound
+      unconditional plain BL sites and no predicated inbound BL sites. The loop
+      replaces r0 with every non-NULL right child before returning the rightmost
+      node. Deliberate deviation: target pointers remain u32 addresses,
+      preserving the firmware's four-byte node layout on 64-bit hosts.
   - address: 0x083b6a80
     ghidra: FUN_083b6a80
     name: red_black_tree_leftmost_descendant
@@ -28,8 +47,8 @@ functions:
       "node+0x08/r1": left
     notes: >-
       Raw osos.dec establishes the exact 20-byte A32 extent: ldr r1,[r0,#8]
-      at 0x083b6a80 through bx lr at 0x083b6a90; 0x083b6a94 begins the
-      separately linked rightmost-descendant sibling. The body has no outbound
+      at 0x083b6a80 through bx lr at 0x083b6a90; 0x083b6a94 begins a separate
+      8-byte leaf function. The body has no outbound
       BL calls. Raw branch-immediate decoding finds exactly two inbound
       unconditional plain BL sites and no predicated inbound BL sites. The loop
       replaces r0 with every non-NULL left child before returning the leftmost
