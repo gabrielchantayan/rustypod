@@ -291,6 +291,31 @@ pub unsafe extern "C" fn refcounted_body_mutex_unlock_tag3(body: *mut Refcounted
         mutex_unlock(mutex);
     }
 }
+/// `refcounted_body_mutex_unlock_retain_count` — retailOS `FUN_0839d540` @
+/// `0x0839d540` (16 bytes, `0x0839d540..0x0839d54c`; two plain direct `bl`
+/// call sites at `0x0839d4ec` and `0x0839d524`, no predicated `bl` calls).
+/// Raw ARM is `ldr r0,[r0,#8]; cmp r0,#0; bne 0x0807f6a0; bx lr`; the
+/// separately linked `refcounted_body_release_tag3` begins at `0x0839d550`.
+///
+/// Unlocks the optional mutex after a retain-count body release. `body` is
+/// deliberately not NULL-checked, matching retailOS. No deliberate
+/// deviations: the target-only section preserves this independently linked
+/// copy rather than allowing LLVM to fold it into byte-identical siblings.
+///
+/// # Safety
+///
+/// `body` must be readable. When its mutex is non-NULL, it must satisfy
+/// [`mutex_unlock`]'s requirements.
+#[cfg_attr(target_os = "none", link_section = ".text.refcounted_body_mutex_unlock_retain_count")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn refcounted_body_mutex_unlock_retain_count(body: *mut RefcountedBody) {
+    let mutex = (*body).mutex;
+    if !mutex.is_null() {
+        mutex_unlock(mutex);
+    }
+}
+
 
 /// refcounted_body_mutex_unlock_copy — original: `FUN_0839cc60` @ load
 /// address 0x0839cc60 (16 bytes; 4 direct `bl` call sites, all
@@ -3705,6 +3730,7 @@ pub unsafe extern "C" fn refcounted_body_release_array(slot: *mut *mut Refcounte
         let body = slot.read();
         if !body.is_null() {
             let mutex = (*body).mutex;
+
             if !mutex.is_null() {
                 mutex_unlock(mutex);
                 mutex_delete(mutex);
@@ -3730,6 +3756,34 @@ pub unsafe extern "C" fn refcounted_body_release_array(slot: *mut *mut Refcounte
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retain_count_mutex_unlock_skips_null_mutex() {
+        let mut body = RefcountedBody {
+            opaque0: 0,
+            refcount: 1,
+            mutex: core::ptr::null_mut(),
+        };
+
+        unsafe { refcounted_body_mutex_unlock_retain_count(&mut body) };
+        assert!(body.mutex.is_null());
+    }
+
+    #[test]
+    fn retain_count_mutex_unlock_uses_present_mutex() {
+        let mut mutex = Mutex {
+            sem_cell: core::ptr::null_mut(),
+            unused: 0,
+        };
+        let mut body = RefcountedBody {
+            opaque0: 0,
+            refcount: 1,
+            mutex: &mut mutex,
+        };
+
+        unsafe { refcounted_body_mutex_unlock_retain_count(&mut body) };
+        assert!(core::ptr::eq(body.mutex, &mut mutex));
+    }
+
 
     #[test]
     fn dtor_mutex_release_preserves_an_empty_slot_and_returns_it() {
