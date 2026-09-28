@@ -50094,7 +50094,7 @@ functions:
       (heap/veneers operator_new, kernel/sync_mutex mutex_create).
       Byte-identical siblings (modulo bl displacements to the same two
       callees) sit at 0x0839eca0 and 0x0839ee14 - per-type template
-      instantiations, unported. Codegen deviation: LLVM inlines the
+      instantiations; 0x0839ee14 is ported below. Codegen deviation: LLVM inlines the
       ported mutex_create (ROM_KERNEL dispatch included), so the ARM
       body is larger but keeps the same alloc/init/store sequence -
       match.py structural confirms. Host tests back the 12/8-byte
@@ -50128,6 +50128,40 @@ functions:
       self-assignment. No behavioral deviations: both direct callees are
       ported at the precise original entry addresses. The dedicated target
       section preserves this separately hookable template instance.
+
+  - address: 0x0839ee14
+    ghidra: FUN_0839ee14
+    name: refcounted_ptr_construct_showcase
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_showcase(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2/r0: mutex
+      FUN_082aadd4: operator_new
+      FUN_080744a4: mutex_create
+    notes: >-
+      Raw ARM decoding establishes the exact 104-byte extent
+      0x0839ee14..0x0839ee7b: twenty-six instruction words ending in
+      `pop {r4-r8,pc}`; the next separately linked function begins at
+      0x0839ee7c. Decoding every ARM B/BL word in osos.dec finds exactly
+      two inbound direct plain BL callers (0x081b75e8 and 0x081b7890), no
+      predicated BL callers, three outbound plain BL instructions (two
+      operator_new @ 0x082aadd4 and mutex_create @ 0x080744a4), and no
+      predicated outbound calls. This C++ template instantiation clears slot
+      first. With a non-NULL implementation, tag-2 operator_new(12) creates
+      RefcountedBody { implementation, 1, NULL }; a nonzero want_mutex adds
+      a tag-2 operator_new(8) Mutex, zeroes both target words, calls
+      mutex_create, then publishes body and returns slot. Both callees are
+      already ported. LLVM may inline mutex_create including ROM_KERNEL
+      dispatch rather than preserve its direct BL, so the ARM codegen is
+      larger while retaining allocation, initialization, and publication
+      order. The target-only section preserves this hookable template copy.
+
   - address: 0x0839eed4
     ghidra: FUN_0839eed4
     name: refcounted_ptr_construct_vtable_variant
