@@ -102,6 +102,7 @@ pub mod btree_get_meta;
 pub mod btree_schema;
 pub mod btree_update_meta;
 pub mod btree_set_page_size;
+pub mod btree_set_page_size_fixed;
 pub mod btree_set_cache_size;
 pub mod btree_set_auto_vacuum;
 pub mod btree_set_incr_vacuum;
