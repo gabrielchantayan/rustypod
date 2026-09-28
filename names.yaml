@@ -49384,6 +49384,36 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e200
+    ghidra: FUN_0839e200
+    name: dma_aligned_u32_array_construct
+    size: 128
+    sig: "DmaAlignedArray *dma_aligned_u32_array_construct(DmaAlignedArray *array, u32 element_count, u32 allocation_tag)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1: element_count
+      param_3/r2: allocation_tag
+      iVar1/r0: allocation
+      uVar2/r0: aligned_data
+    notes: >-
+      Raw osos.dec words establish the exact 128-byte A32 extent
+      0x0839e200..0x0839e280: the u32-specialized destructor opens with
+      `push {r4,lr}` immediately after. Decoding every branch immediate in the
+      image finds exactly two inbound direct BL calls, both unconditional
+      (0x080fabc4 and 0x080fc404), with zero predicated BL forms and zero
+      tail-B sites. The constructor clears raw allocation +0x00 and aligned
+      view +0x04, stores element_count at +0x08, and clears construction byte
+      +0x0c. It allocates element_count*4 + 0x40 through already ported
+      malloc_wrapper with the supplied tag, 32-byte-aligns a successful block,
+      and clean-invalidates element_count*4 bytes through already ported
+      dcache_clean_invalidate when aligned_data bit 27 is set before recording
+      the bit-31 uncached alias. A count-sized empty trivial-element walk then
+      sets construction byte = 1. Rust uses black_box solely to retain that
+      otherwise empty loop; no dispatch seam was added because both callees
+      are already ported.
+
   - address: 0x0839e280
     ghidra: FUN_0839e280
     name: dma_aligned_u32_array_destroy

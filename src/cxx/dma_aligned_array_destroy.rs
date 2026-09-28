@@ -113,6 +113,77 @@ pub unsafe extern "C" fn dma_aligned_byte_array_construct(
         array
     }
 }
+/// dma_aligned_u32_array_construct — original: `FUN_0839e200` @
+/// 0x0839e200 (128 bytes exactly, 0x0839e200..0x0839e280; the u32
+/// destructor begins immediately after).
+///
+/// Raw A32 decoding finds exactly two direct inbound `bl` callers, both
+/// unconditional (0x080fabc4 and 0x080fc404), with zero predicated `bl`
+/// forms. Its two direct calls are to already ported `malloc_wrapper` and
+/// `dcache_clean_invalidate`.
+///
+/// Constructs the u32-specialized [`DmaAlignedArray`]: clears allocation and
+/// aligned view, records `element_count`, allocates `element_count * 4 + 0x40`
+/// bytes with `allocation_tag`, then aligns a successful allocation to 32
+/// bytes. Bit 27 clean-invalidates the element byte range before bit 31 marks
+/// the stored view as its uncached alias. A count-sized empty trivial-element
+/// construction walk precedes `constructed = 1`.
+///
+/// Deliberate deviation: [`core::hint::black_box`] retains the otherwise
+/// empty count-dependent walk. It has no memory effect; the original's direct
+/// calls are ordinary Rust calls to their existing ports.
+///
+/// # Safety
+///
+/// `array` must be non-NULL, word-aligned, and point to writable
+/// [`DmaAlignedArray`] storage. Its successful allocation is owned by `array`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dma_aligned_u32_array_construct(
+    array: *mut DmaAlignedArray,
+    element_count: u32,
+    allocation_tag: u32,
+) -> *mut DmaAlignedArray {
+    unsafe {
+        (*array).allocation = 0;
+        (*array).aligned_data = 0;
+        (*array).element_count = element_count;
+        (*array).constructed = 0;
+
+        let allocation = crate::heap::veneers::malloc_wrapper(
+            element_count
+                .wrapping_mul(4)
+                .wrapping_add(DMA_ALIGNED_ARRAY_ALLOCATION_HEADROOM) as usize,
+            allocation_tag as usize,
+        ) as usize as u32;
+        (*array).allocation = allocation;
+
+        if allocation != 0 {
+            let aligned_data = allocation
+                .wrapping_add(DMA_ALIGNED_ARRAY_ALIGNMENT - 1)
+                & !(DMA_ALIGNED_ARRAY_ALIGNMENT - 1);
+            (*array).aligned_data = aligned_data;
+
+            if aligned_data & DMA_ALIGNED_ARRAY_CACHE_FLUSH_REGION_BIT != 0 {
+                crate::heap::dcache::dcache_clean_invalidate(
+                    aligned_data as usize as *mut u8,
+                    element_count.wrapping_mul(4) as usize,
+                );
+                (*array).aligned_data = aligned_data | DMA_ALIGNED_ARRAY_CACHE_ALIAS_BIT;
+            }
+
+            let mut index = 0u32;
+            while index < element_count {
+                core::hint::black_box(index);
+                index = index.wrapping_add(1);
+            }
+            (*array).constructed = 1;
+        }
+
+        array
+    }
+}
+
 /// dma_aligned_u16_array_construct — original: `FUN_0839e2c8` @
 /// 0x0839e2c8 (128 bytes exactly, 0x0839e2c8..0x0839e348; the next
 /// separately linked function begins immediately after).
@@ -474,6 +545,52 @@ mod tests {
         assert_eq!(array.element_count, 3, "element count at +0x08");
         assert_eq!(array.constructed, 1, "set after the trivial-element walk");
     }
+    #[test]
+    fn u32_constructor_allocates_four_bytes_per_element_and_marks_uncached_alias() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        crate::heap::veneers::tests::set_alloc_ret(0x0800_1001usize as *mut u8);
+        let mut array = DmaAlignedArray {
+            allocation: 0xDEAD_BEEF,
+            aligned_data: 0xDEAD_BEEF,
+            element_count: 0xDEAD_BEEF,
+            constructed: 0xff,
+        };
+
+        let result = unsafe {
+            dma_aligned_u32_array_construct(core::ptr::addr_of_mut!(array), 3, 7)
+        };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array), "returns this");
+        assert_eq!(crate::heap::veneers::tests::alloc_log(), (1, 0x4c, 7));
+        assert_eq!(array.allocation, 0x0800_1001, "raw allocation at +0x00");
+        assert_eq!(array.aligned_data, 0x8800_1020, "aligned uncached view at +0x04");
+        assert_eq!(array.element_count, 3, "element count at +0x08");
+        assert_eq!(array.constructed, 1, "set after the trivial-element walk");
+    }
+
+    #[test]
+    fn u32_constructor_keeps_initial_state_when_allocation_fails() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        crate::heap::veneers::tests::set_alloc_ret(core::ptr::null_mut());
+        let mut array = DmaAlignedArray {
+            allocation: 0xDEAD_BEEF,
+            aligned_data: 0xDEAD_BEEF,
+            element_count: 0xDEAD_BEEF,
+            constructed: 0xff,
+        };
+
+        let result = unsafe {
+            dma_aligned_u32_array_construct(core::ptr::addr_of_mut!(array), 0, 3)
+        };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array));
+        assert_eq!(crate::heap::veneers::tests::alloc_log(), (1, 0x40, 3));
+        assert_eq!(array.allocation, 0, "the raw allocation store is unconditional");
+        assert_eq!(array.aligned_data, 0, "no aligned view follows a NULL allocation");
+        assert_eq!(array.element_count, 0);
+        assert_eq!(array.constructed, 0, "the success byte remains clear");
+    }
+
 
     #[test]
     fn u16_constructor_keeps_initial_state_when_allocation_fails() {
