@@ -56241,6 +56241,30 @@ functions:
       match.py diff is exactly those deviations: the Rust body has no
       home area to spill, so LLVM tail-calls through the loaded slot.
 
+  - address: 0x08398954
+    ghidra: FUN_08398954
+    name: sqlite_build_index_name_filter
+    size: 140
+    sig: "char *sqlite_build_index_name_filter(Parse *parse, const Table *table)"
+    module: sqlite/index_name_filter
+    status: ported
+    vars: {param_1/r8: parse, param_2: table, iVar3/r5: result, iVar4/r7: schema_root, puVar2/r4: index}
+    notes: >-
+      Raw osos.dec establishes the 140-byte extent
+      0x08398954..0x083989e0: code ends in pop {r4-r8,pc} and the two
+      format strings begin immediately afterward. It has three outbound
+      plain BL instructions (two sqlite3MPrintf calls through
+      sqlite_set_string_formatted @ 0x0837d358, then sqlite3_free @
+      0x083906f4) and no predicated BL; the function itself has two inbound
+      plain-BL call sites. It returns NULL if table +0x4c matches the
+      schema root at parse->db->pSchema +0x2c. Otherwise it walks the
+      target-width index chain at table +0x20, formats the first matching
+      index (+0x1c root) as "name=%Q", appends later matches as
+      "%s OR name=%Q", and frees each replaced intermediate string. The
+      two variadic formatter calls use the established explicit-VaList
+      Rust seam; index/table pointers remain u32 words so host pointer
+      width cannot alter ARM field offsets.
+
   - address: 0x08384158
     ghidra: FUN_08384158
     name: sqlite3_set_string

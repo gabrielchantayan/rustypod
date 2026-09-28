@@ -149,6 +149,7 @@ pub mod emit_compound_select_rows;
 pub mod expr_code_move;
 pub mod expr_cache_affinity_change;
 pub mod expr_worklist;
+pub mod index_name_filter;
 pub mod left_join_null_row;
 pub mod expr_code_temp;
 pub mod expr_code_pair;

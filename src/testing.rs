@@ -323,6 +323,9 @@ pub mod hints {
     // 0x0800_0000: dedicated to util/predicate_list_find's raw-u32 list and
     // node fixture; mappings never unmap, so no other user may share it.
     pub const PREDICATE_LIST_FIND: usize = 0x0800_0000;
+    // 0x5e00_0000: dedicated to sqlite/index_name_filter's target-width
+    // table, schema, and index-chain fixtures; mappings never unmap.
+    pub const INDEX_NAME_FILTER: usize = 0x5e00_0000;
     // 0x0400_0000: dedicated to cxx/shared_handle_owner_destroy's raw-u32
     // owner fixture; mappings never unmap, so no other user may share it.
     pub const SHARED_HANDLE_OWNER_DESTROY: usize = 0x0400_0000;
