@@ -49491,6 +49491,29 @@ functions:
       injectable seam, while host lock calls are also injected because target
       pointer fields are four bytes apart.
 
+  - address: 0x0839e488
+    ghidra: FUN_0839e488
+    name: condition_queue_list_is_empty
+    size: 24
+    sig: "u32 condition_queue_list_is_empty(ConditionQueue *queue)"
+    module: cxx/condition_queue_list_is_empty
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_1_plus_0x04: item_chain_head
+      FUN_0807a13c: singly_linked_list_count
+      r0: is_empty
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent
+      0x0839e488..0x0839e4a0: push {r4,lr}; add r0,r0,#4; bl
+      singly_linked_list_count; rsbs r0,r0,#1; movcc r0,#0; pop {r4,pc}.
+      The separately linked condition_queue_dequeue starts at 0x0839e4a0.
+      Whole-image A32 branch-immediate decoding finds exactly two inbound
+      unconditional plain BL sites (0x0839e4ac and 0x0839e548) and zero
+      predicated BL sites. The body has one unconditional direct BL to the
+      ported singly_linked_list_count @ 0x0807a13c and zero predicated BL
+      calls. It counts the NULL-terminated intrusive chain at queue+4 and
+      returns one exactly for a zero count; the queue has no NULL guard.
   - address: 0x0839e540
     ghidra: FUN_0839e540
     name: condition_queue_is_empty
