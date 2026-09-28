@@ -64668,6 +64668,29 @@ functions:
       util/three_pointer_select port - hook both addresses to the one
       symbol. 8 bl call sites.
 
+  - address: 0x0839bacc
+    ghidra: FUN_0839bacc
+    name: pointer_in_span_or_null
+    size: 20
+    sig: "u32 pointer_in_span_or_null(u32 pointer, u32 start, u32 byte_len)"
+    module: util/pointer_in_span_or_null
+    status: ported
+    renames:
+      param_1: pointer
+      param_2: start
+      param_3: byte_len
+    notes: >-
+      Raw osos.dec words are `cmp r0,r1; addcs r1,r1,r2; cmpcs r1,r0;
+      movls r0,#0; bx lr`; the next real function begins at 0x0839bae0,
+      establishing the 20-byte extent. The routine returns pointer only
+      when `pointer >= start` and wrapping `start + byte_len > pointer`;
+      it therefore rejects a span whose endpoint wraps, including low
+      addresses nominally after that endpoint. Decoding every ARM B/BL
+      word in osos.dec found two unconditional incoming bl sites
+      (0x080f40bc and 0x080f40d4), no predicated bl sites, no b sites,
+      and no data-word references. The two sites validate the first and
+      last endpoint pointers of a variable-length record against the
+      caller's base and byte length. No deliberate deviations.
   - address: 0x0839bae0
     ghidra: FUN_0839bae0
     name: plane_cursor_init

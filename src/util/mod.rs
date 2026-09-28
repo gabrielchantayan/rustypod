@@ -359,6 +359,7 @@ pub mod three_pointer_select;
 pub mod three_record_secondary_value;
 pub mod u16_le_store_last_byte;
 pub mod offset_table_entry_span;
+pub mod pointer_in_span_or_null;
 pub mod span_validation;
 pub mod u16_pair_copy;
 pub mod zeroing_bump_alloc;
