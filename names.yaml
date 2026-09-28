@@ -157009,3 +157009,37 @@ functions:
       replacement, exact byte write, and adjacent-byte preservation. match.py
       confirms the direct-call/store structure; its expected diff is LLVM's
       larger frame and unresolved archive-local BL relocation.
+
+  - address: 0x0839be84
+    ghidra: FUN_0839be84
+    name: collection_release_first_indexed_value
+    size: 96
+    sig: "void collection_release_first_indexed_value(void *collection)"
+    module: app/collection_release_first_indexed_value
+    status: ported
+    renames:
+      param_1/r0/r6: collection
+      iVar2/r4: index
+      iVar3/r5: value
+      iVar4/r7: count
+      "[collection + 0x04]": count
+      "[collection + 0x28]": enabled
+      FUN_081292cc: release_indexed_value
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte A32 extent: twenty-four words
+      from push {r4,r5,r6,r7,r8,lr} at 0x0839be84 through pop
+      {r4,r5,r6,r7,r8,pc} at 0x0839bee0; 0x0839bee4 starts the next real
+      function. The body has two unconditional plain direct bl instructions:
+      0x0839bec8 to unresolved release_indexed_value/FUN_081292cc and
+      0x0839bed0 to ported operator_delete/FUN_082aad24; it has zero
+      predicated direct bl instructions and one unconditional virtual blx
+      through vtable+0x40 at 0x0839beb4. Ghidra reports two inbound bl call
+      sites. When enabled byte +0x28 is nonzero, it scans signed indices
+      [0,count), retrieves each value through the collection vtable +0x40
+      operation, and on the first non-null value calls FUN_081292cc then
+      tag-2-deletes it. Raw decoding of FUN_081292cc verifies that it drains
+      a linked chain rooted at value+0x04 and stores a replacement word at
+      value+0x0c; its class identity remains unrecovered. Rust calls its
+      verified fixed target address on ARM and supplies a typed host operation
+      for tests rather than inventing that identity.
