@@ -1647,6 +1647,10 @@ pub mod hints {
     // stream-buffer-slot fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const STREAMBUF_SLOT_CONSUME: usize = 0xe500_0000;
+    // 0xc700_0000: dedicated to cxx/stream_parse_radix_segment's raw-u32
+    // parser-state fixture; mappings never unmap, so no other user may share
+    // this hint.
+    pub const STREAM_PARSE_RADIX_SEGMENT: usize = 0xc700_0000;
     // 0xee00_0000: dedicated to kernel/debug_task_selector's raw-u32
     // scheduler-label fixture; fixture mappings never unmap, so no other user
     // may share this hint.
