@@ -50416,6 +50416,37 @@ functions:
       release port preserves the old body's final disposal/deletion, so the
       Rust sequence has the source load after release like the ARM.
 
+  - address: 0x0839d630
+    ghidra: FUN_0839d630
+    name: refcounted_ptr_construct_stream_variant
+    size: 104
+    sig: "RefcountedBody **refcounted_ptr_construct_stream_variant(RefcountedBody **slot, usize implementation, u32 want_mutex)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0/r5: slot
+      param_2/r1/r6: implementation
+      param_3/r2/r8: want_mutex
+      piVar1/r4: body
+      puVar2: mutex
+    notes: >-
+      Raw osos.dec establishes the exact 104-byte A32 extent
+      0x0839d630..0x0839d698: pop {r4-r8,pc} at 0x0839d694 ends it and
+      0x0839d698 begins the next independently linked function. Whole-image
+      decoding finds exactly two inbound unconditional plain BL sites
+      (0x083d3710 and 0x083d3744), zero predicated BL sites, and no data
+      references. The body has three unconditional BL instructions: tag-2
+      operator_new(12), tag-2 operator_new(8), and mutex_create; the two
+      distinct ported callees are heap/veneers operator_new @ 0x082aadd4
+      and kernel/sync_mutex mutex_create @ 0x080744a4. It clears slot, then
+      conditionally creates RefcountedBody { implementation, 1, NULL }; a
+      nonzero want_mutex installs a zeroed Mutex after its semaphore is
+      created, then publishes body and returns slot. This is byte-identical
+      to refcounted_ptr_construct @ 0x0839ed38 after BL displacement
+      normalization. LLVM may inline mutex_create, but preserves allocation,
+      initialization, and publication order; host tests use oversized arenas
+      because host pointers exceed retailOS target-word width.
+
   - address: 0x0839ed38
     ghidra: FUN_0839ed38
     name: refcounted_ptr_construct
