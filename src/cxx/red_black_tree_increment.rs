@@ -28,6 +28,19 @@
 //! returned. This alias reuses the established dispatch seam and shared host
 //! tests; deliberate deviations: none.
 //!
+//! `FUN_083b5ef8` at load address `0x083b5ef8` is a byte-identical, 84-byte
+//! (21-word) copy of `red_black_tree_advance_cursor`, ending with `bx lr` at
+//! `0x083b5f48`; the next separately linked sibling begins at `0x083b5f4c`.
+//! Complete aligned A32 B/BL-immediate decoding finds two inbound
+//! unconditional plain `bl` calls at 0x083c8fe4 and 0x083c94b4, zero
+//! predicated BL calls, and no outbound calls. It advances the target-width
+//! cursor to the red-black-tree in-order successor: descend through the right
+//! subtree's left spine, or climb parent links while leaving right-child
+//! edges, retaining the header sentinel. This exact duplicate deliberately
+//! reuses the established dispatch seam and shared host tests; deliberate
+//! deviations: none.
+//!
+//!
 //! `FUN_083b5e50` at load address `0x083b5e50` is an 84-byte (21-word) copy
 //! of `red_black_tree_advance_cursor`, through `bx lr` at `0x083b5ea0`; the
 //! next separately linked sibling begins at `0x083b5ea4`. Aligned ARM B/BL
