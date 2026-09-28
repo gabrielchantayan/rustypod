@@ -157432,3 +157432,34 @@ functions:
       this tail transfer. Deliberate deviation: host tests dispatch the
       unported tail target through a callback; the ARM payload emits the
       verified absolute tail transfer.
+
+  # ---- SQLite hash-chain removal (src/sqlite/pcache_remove_from_hash.rs) ----
+  - address: 0x08395fd0
+    ghidra: FUN_08395fd0
+    name: pcache_remove_from_hash
+    size: 128
+    sig: "void pcache_remove_from_hash(PCache *cache, PgHdr *page)"
+    module: sqlite/pcache_remove_from_hash
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1/r4: page
+      param_2+0x04: hash_key
+      param_2+0x08: next_hash_page
+      param_2+0x0c: previous_hash_page
+      param_1+0xcc: hash_bucket_count
+      param_1+0xd0: hash_buckets
+      FUN_082c369c: release_tracked_pair
+    notes: >-
+      Raw osos.dec A32 decoding establishes the exact 128-byte extent
+      0x08395fd0..0x0839604f; the following push {r4,r5,r6,lr} begins the
+      separately linked function at 0x08396050. The body has no unconditional
+      plain BL and one predicated BLNE to release_tracked_pair @ 0x082c369c.
+      The two direct callers are unconditional plain BL instructions at
+      0x0837e1fc and 0x0837e228; no predicated inbound BL targets it.
+      A nonzero page hash key causes unlinking from the doubly linked hash
+      chain, updating either the predecessor or the selected bucket head.
+      When cache byte +0x14 is nonzero, the tracked pair at page +0x38 is
+      released. The hash key and both links are then cleared. Deliberate
+      deviation: target pointers are retained as u32 words to preserve the
+      target layout on 64-bit host fixtures.
