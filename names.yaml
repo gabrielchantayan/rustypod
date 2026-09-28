@@ -154546,3 +154546,27 @@ functions:
       Host tests use the unique hints::RED_BLACK_TREE_LEFTMOST_DESCENDANT
       low-address slab to cover a multi-node chain and the terminal-node case.
       No behavioral deviations were made.
+
+  # --- red-black-tree node key accessor ---
+  - address: 0x083b6a54
+    ghidra: FUN_083b6a54
+    name: red_black_tree_node_key
+    size: 8
+    sig: "u32 red_black_tree_node_key(u32 node)"
+    module: cxx/red_black_tree_node_key
+    status: ported
+    renames:
+      param_1/r0: node
+      return/r0: key
+    notes: >-
+      Raw osos.dec words `e2800010 e12fff1e` establish the exact 8-byte A32
+      extent: `add r0,r0,#0x10; bx lr` at 0x083b6a54..0x083b6a58. The next
+      separately linked function begins at 0x083b6a5c. The body has zero
+      outbound plain BL and zero outbound predicated BL instructions.
+      Independent whole-image A32 decoding finds two inbound plain BL call
+      sites, at 0x083ba750 and 0x083d72bc, and zero predicated inbound BL
+      sites. Both callers pass a red-black-tree node and use the result as its
+      +0x10 byte-key payload address. No callee seam is needed. The Rust port
+      uses wrapping u32 addition, preserving the ARM modulo-2^32 result; no
+      behavioral deviations were made. Host tests cover zero, an ordinary
+      target address, and both wrap boundaries.
