@@ -49267,6 +49267,39 @@ functions:
       mutex_unlock, preserving the load/guard/unlock behavior. Host test
       covers a live mutex signal and the NULL-mutex early-out.
 
+  - address: 0x0839df4c
+    ghidra: FUN_0839df4c
+    name: dma_aligned_12byte_array_construct
+    size: 132
+    sig: "DmaAlignedArray *dma_aligned_12byte_array_construct(DmaAlignedArray *array, u32 element_count, u32 allocation_tag)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      param_2/r1: element_count
+      param_3/r2: allocation_tag
+      iVar1/r0: allocation
+      uVar2/r0: aligned_data
+      FUN_080eb67c: malloc_wrapper
+      FUN_08044c10: dcache_clean_invalidate
+    notes: >-
+      Raw osos.dec words establish the exact 132-byte A32 extent
+      0x0839df4c..0x0839dfd0; the paired 12-byte-array destructor begins with
+      push {r4,lr} at the next address. Decoding every ARM BL immediate in the
+      image finds exactly two direct inbound calls, both plain unconditional BL
+      at 0x08104ea0 and 0x08104eb0, with no predicated BL forms. The body calls
+      already ported malloc_wrapper @ 0x080eb67c with element_count * 12 + 0x40
+      and allocation_tag, aligns a successful allocation to 32 bytes, and when
+      bit 27 is set clean-invalidates element_count units through
+      dcache_clean_invalidate @ 0x08044c10 before setting bit 31 for the
+      uncached alias. It records the count, makes the empty trivial-element
+      construction walk, sets constructed at +0x0c, and returns array.
+      black_box deliberately preserves that otherwise empty count-dependent
+      walk; it has no memory effect. A target-only link section keeps this
+      separately hookable template instance from being folded into its
+      byte-array sibling. Host tests cover the 12-byte allocation stride,
+      cache-alias path, and allocation failure state.
+
   - address: 0x0839dfd0
     ghidra: FUN_0839dfd0
     name: dma_aligned_12byte_array_destroy
