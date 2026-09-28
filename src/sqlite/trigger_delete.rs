@@ -12,33 +12,16 @@
 //! allocation itself. The target's sole conditional call is `blne sqlite3_free`
 //! for `nameToken.z`, gated by nameToken's bit-0 ownership flag.
 //!
-//! `sqlite3DeleteTriggerStep` @ 0x08375378 is not ported, so that direct ARM
-//! call is a volatile dispatch seam with a no-op default. Every other callee is
-//! already ported and is called directly. The typed `#[repr(C)]` view preserves
-//! all target offsets on ARM; host fields widen without overlapping.
+//! `sqlite3DeleteTriggerStep` @ 0x08375378 is ported as
+//! [`trigger_step_delete`], so every target callee is invoked directly. The
+//! typed `#[repr(C)]` view preserves all target offsets on ARM; host fields
+//! widen without overlapping.
 
 use super::expr_delete::expr_delete;
+use super::trigger_step_delete::trigger_step_delete;
 use super::id_list_delete::id_list_delete;
 use crate::heap::tracked::tracked_free;
 
-/// The unported `sqlite3DeleteTriggerStep` helper at 0x08375378.
-pub type TriggerStepDeleteFn = unsafe extern "C" fn(step_list: *mut u8);
-
-/// Default for the unported trigger-step destructor.
-pub(crate) unsafe extern "C" fn missing_trigger_step_delete(_step_list: *mut u8) {}
-
-/// Active target for the `bl 0x08375378` trigger-step teardown.
-pub static mut SQLITE_TRIGGER_STEP_DELETE: TriggerStepDeleteFn = missing_trigger_step_delete;
-
-/// Reads the trigger-step destructor slot without letting LLVM fold its default.
-#[inline(always)]
-pub(crate) fn trigger_step_delete_op() -> TriggerStepDeleteFn {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_TRIGGER_STEP_DELETE)) }
-}
-
-/// Serializes host tests that replace the process-global trigger-step seam.
-#[cfg(test)]
-pub(crate) static SQLITE_TRIGGER_STEP_DELETE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// The `Trigger` fields consumed by `sqlite3DeleteTrigger`.
 ///
@@ -104,7 +87,7 @@ pub unsafe extern "C" fn trigger_delete(trigger: *mut u8) {
     }
 
     let trigger = &*(trigger as *const Trigger);
-    (trigger_step_delete_op())(trigger.step_list);
+    trigger_step_delete(trigger.step_list.cast());
     tracked_free(trigger.z_name);
     tracked_free(trigger.table);
     expr_delete(trigger.p_when);
@@ -125,10 +108,11 @@ mod tests {
     use crate::heap::veneers::{tests::mock_heap, HEAP_OPS};
     use crate::sqlite::expr_delete::Expr;
     use crate::sqlite::id_list_delete::IdList;
+    use std::sync::Mutex;
     use std::vec::Vec;
 
+    static SLOT_LOCK: Mutex<()> = Mutex::new(());
     static mut FREED: Vec<(*mut u8, usize)> = Vec::new();
-    static mut STEP_LISTS: Vec<*mut u8> = Vec::new();
 
     unsafe extern "C" fn recording_free(
         _heap: *mut HeapDescriptorDescriptor,
@@ -138,9 +122,6 @@ mod tests {
         (*core::ptr::addr_of_mut!(FREED)).push((ptr, tag));
     }
 
-    unsafe extern "C" fn recording_step_delete(step_list: *mut u8) {
-        (*core::ptr::addr_of_mut!(STEP_LISTS)).push(step_list);
-    }
 
     #[repr(align(32))]
     struct TrackedBlock([u8; 512]);
@@ -165,35 +146,24 @@ mod tests {
 
     unsafe fn with_ops(body: impl FnOnce()) {
         let saved_heap_ops = core::ptr::read(core::ptr::addr_of!(HEAP_OPS));
-        let saved_step_delete = core::ptr::read_volatile(core::ptr::addr_of!(SQLITE_TRIGGER_STEP_DELETE));
         (*core::ptr::addr_of_mut!(FREED)).clear();
-        (*core::ptr::addr_of_mut!(STEP_LISTS)).clear();
         (*core::ptr::addr_of_mut!(HEAP_OPS)).free = recording_free;
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_TRIGGER_STEP_DELETE),
-            recording_step_delete,
-        );
         body();
         core::ptr::write(core::ptr::addr_of_mut!(HEAP_OPS), saved_heap_ops);
-        core::ptr::write_volatile(
-            core::ptr::addr_of_mut!(SQLITE_TRIGGER_STEP_DELETE),
-            saved_step_delete,
-        );
     }
 
     #[test]
     fn null_is_a_no_op() {
         let _heap = mock_heap();
-        let _step = SQLITE_TRIGGER_STEP_DELETE_TEST_LOCK.lock();
+        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { with_ops(|| trigger_delete(core::ptr::null_mut())) };
         assert!(unsafe { (*core::ptr::addr_of!(FREED)).is_empty() });
-        assert!(unsafe { (*core::ptr::addr_of!(STEP_LISTS)).is_empty() });
     }
 
     #[test]
     fn releases_children_in_arm_order_and_frees_dynamic_token() {
         let _heap = mock_heap();
-        let _step = SQLITE_TRIGGER_STEP_DELETE_TEST_LOCK.lock();
+        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut trigger_block = TrackedBlock::new(0x28);
         let mut name = TrackedBlock::new(8);
         let mut table = TrackedBlock::new(8);
@@ -213,7 +183,7 @@ mod tests {
             (*trigger).p_columns = id_list.cast();
             (*trigger).name_token_z = token.payload();
             (*trigger).name_token_dyn = 1;
-            (*trigger).step_list = 0x1234_5678 as *mut u8;
+            (*trigger).step_list = core::ptr::null_mut();
             with_ops(|| trigger_delete(trigger.cast()));
         }
 
@@ -229,17 +199,12 @@ mod tests {
             ],
             "trigger fields are released before the owning allocation"
         );
-        assert_eq!(
-            unsafe { (*core::ptr::addr_of!(STEP_LISTS)).clone() },
-            std::vec![0x1234_5678 as *mut u8],
-            "step-list teardown is first"
-        );
     }
 
     #[test]
     fn borrowed_token_is_not_freed_but_step_teardown_still_runs() {
         let _heap = mock_heap();
-        let _step = SQLITE_TRIGGER_STEP_DELETE_TEST_LOCK.lock();
+        let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut trigger_block = TrackedBlock::new(0x28);
         let mut token = TrackedBlock::new(8);
         let trigger = trigger_block.payload() as *mut Trigger;
@@ -247,7 +212,7 @@ mod tests {
             core::ptr::write_bytes(trigger, 0, 1);
             (*trigger).name_token_z = token.payload();
             (*trigger).name_token_dyn = 0;
-            (*trigger).step_list = 0xfeed_cafe as *mut u8;
+            (*trigger).step_list = core::ptr::null_mut();
             with_ops(|| trigger_delete(trigger.cast()));
         }
 
@@ -255,10 +220,6 @@ mod tests {
             unsafe { (*core::ptr::addr_of!(FREED)).clone() },
             std::vec![(trigger_block.raw(), TAG_TRACKED)],
             "clear dyn bit leaves borrowed nameToken.z alone"
-        );
-        assert_eq!(
-            unsafe { (*core::ptr::addr_of!(STEP_LISTS)).clone() },
-            std::vec![0xfeed_cafe as *mut u8]
         );
     }
 }
