@@ -49361,6 +49361,28 @@ functions:
       deletes (ROM_KERNEL dispatch included), so match.py shows a larger
       body with the same guard/destruct/unlock/teardown structure.
 
+  - address: 0x0839cc50
+    ghidra: FUN_0839cc50
+    name: refcounted_body_mutex_lock_copy
+    size: 16
+    sig: "void refcounted_body_mutex_lock_copy(RefcountedBody *body)"
+    module: cxx/handle
+    status: ported
+    renames:
+      param_1/r0: body
+      body_plus_0x8/r0: mutex
+      FUN_0807f5c4: mutex_lock
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte extent
+      0x0839cc50..0x0839cc5f: ldr r0,[r0,#8]; cmp r0,#0; bne
+      0x0807f5c4; bx lr. The separately linked
+      refcounted_body_mutex_unlock_copy begins at 0x0839cc60. Decoding every
+      A32 B/BL word finds two inbound plain direct BL sites, 0x0816ccc4 and
+      0x0839cbd4, and no predicated BL sites. The helper loads the optional
+      RefcountedBody mutex at target +8 and tail-branches to mutex_lock only
+      when non-NULL; body itself is intentionally unguarded. No deliberate
+      behavioral deviations: Rust calls the existing mutex seam, and a
+      target-only section prevents folding with byte-identical helpers.
   - address: 0x0839cc60
     ghidra: FUN_0839cc60
     name: refcounted_body_mutex_unlock_copy
