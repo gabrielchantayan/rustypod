@@ -55333,6 +55333,30 @@ functions:
       are decoded as u32 words so host fixtures retain the target offsets;
       no behavioral deviation.
 
+  # ---- SQLite multibyte u32 varint encoder (src/sqlite/put_varint32.rs) ----
+  - address: 0x083817c0
+    ghidra: FUN_083817c0
+    name: put_varint32
+    size: 44
+    sig: "u32 sqlite3PutVarint32(u8 *out, u32 value) [multibyte-only caller contract]"
+    module: sqlite/put_varint32
+    status: ported
+    vars: {param_1: out, param_2: value}
+    notes: >-
+      Raw osos.dec words at 0x083817c0..0x083817e8 establish the true
+      44-byte extent: `lsrs r2,r1,#14; movne r2,r1; movne r3,#0; bne
+      0x083816ec`, then a fully predicated two-byte store and `bx lr`.
+      Independently decoded caller references are the two plain bl sites in
+      FUN_08386ecc and FUN_08386ef8; no predicated bl target occurs. This is
+      SQLite 3.5.x big-endian base-128 encoding under the stock
+      multibyte-only contract: callers inline values below 0x80; values below
+      0x4000 write 0x80|(value>>7), value&0x7f; larger u32 values take three
+      through five bytes. The branch target at 0x083816ec is a preceding
+      64-bit encoder body, absent from names.yaml and not made into a seam.
+      Deliberate deviation: its >=0x4000 behavior is inlined so the port is
+      self-contained rather than tail-branching to an unported address; values
+      below 0x80 intentionally retain the stock noncanonical two-byte result.
+
   # ---- B-tree varint decoder (src/sqlite/get_varint.rs) ----
   - address: 0x0837ac30
     ghidra: FUN_0837ac30
