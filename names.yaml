@@ -154611,3 +154611,29 @@ functions:
       uses wrapping u32 addition, preserving the ARM modulo-2^32 result; no
       behavioral deviations were made. Host tests cover zero, an ordinary
       target address, and both wrap boundaries.
+
+  # --- red-black-tree leftmost descendant ---
+  - address: 0x083b6a10
+    ghidra: FUN_083b6a10
+    name: red_black_tree_leftmost_descendant_083b6a10
+    size: 20
+    sig: "u32 red_black_tree_leftmost_descendant_083b6a10(u32 node)"
+    module: cxx/red_black_tree_leftmost_descendant_083b6a10
+    status: ported
+    renames:
+      param_1/r0: node
+      "*(node + 0x08)": left_child
+      return/r0: leftmost_node
+    notes: >-
+      Raw osos.dec words `e5901008 e3510000 11a00001 1afffffb e12fff1e`
+      establish the exact 20-byte A32 extent at 0x083b6a10..0x083b6a20; the
+      next real function begins at 0x083b6a24. The function repeatedly follows
+      the target-width left-child word at node+0x08 until it is null, returning
+      that terminal node. Raw A32 decoding confirms zero outbound plain BL and
+      zero outbound predicated BL instructions. Independent whole-image
+      decoding confirms two inbound plain BL sites, at 0x083bf7d4 and
+      0x083c00b0, and zero predicated BL sites. No callee seam is needed. Rust
+      reads word index 2 using volatile access and keeps target pointers as u32,
+      preserving the four-byte target layout on 64-bit hosts. Host tests cover
+      the terminal-node case and a multi-node chain with non-null right links.
+      No behavioral deviations were made.
