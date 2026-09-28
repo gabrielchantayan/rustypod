@@ -11,11 +11,12 @@
 //! SQLite 3.5.9's `sqlite3BtreeCommitPhaseTwo` commits the pager for a write
 //! transaction, releases its B-tree locks, decrements the shared transaction
 //! count for every active transaction, then unlocks an unused shared B-tree.
-//! Pager commit and lock release remain retailOS boundaries. Host builds use a
-//! private dispatch table because target 32-bit pointer slots widen on the host;
-//! target builds call the original boundaries directly.
+//! Pager commit and unlock-if-unused remain retailOS boundaries. Lock release
+//! is the direct `btree_release_locks` port; host builds use a private dispatch
+//! table for the remaining boundaries because target 32-bit pointer slots widen.
 
 use crate::sqlite::btree_lock::{btree_enter, btree_leave};
+use crate::sqlite::btree_release_locks::btree_release_locks;
 
 const WORD: usize = core::mem::size_of::<*mut u8>();
 const BTREE_DATABASE: usize = 0x00;
@@ -131,10 +132,7 @@ pub unsafe extern "C" fn btree_commit_phase_two(btree: *mut u8) -> i32 {
         shared.add(SHARED_UNLOCK_GUARD).write(0);
     }
 
-    #[cfg(target_os = "none")]
-    release_btree_locks(btree);
-    #[cfg(not(target_os = "none"))]
-    (host_ops().release_btree_locks)(btree);
+    btree_release_locks(btree);
     if btree.add(BTREE_IN_TRANS).read() != 0 {
         let transactions = shared.add(SHARED_TRANSACTION_COUNT).cast::<u32>();
         let remaining = transactions.read().wrapping_sub(1);
@@ -195,14 +193,14 @@ mod tests {
     #[test]
     fn write_commit_completes_and_releases_last_transaction() {
         let _bench = bench(0);
-        let mut btree = [0usize; 8]; let mut shared = [0usize; 16];
+        let mut btree = [0usize; 8]; let mut shared = [0usize; 24];
         let mut database = [0u8; 1]; let mut pager = [0u8; 1];
         unsafe {
             initialize_fixture(btree.as_mut_ptr().cast(), shared.as_mut_ptr().cast(), database.as_mut_ptr(), pager.as_mut_ptr());
             btree.as_mut_ptr().cast::<u8>().add(BTREE_IN_TRANS).write(TRANS_WRITE);
             shared.as_mut_ptr().cast::<u8>().add(SHARED_TRANSACTION_COUNT).cast::<u32>().write(1);
             assert_eq!(btree_commit_phase_two(btree.as_mut_ptr().cast()), 0);
-            assert_eq!(EVENTS, [4, 1, 2, 3, 5]);
+            assert_eq!(EVENTS, [4, 1, 3, 5, 0]);
             assert_eq!(shared.as_ptr().cast::<u8>().add(pointer_offset(SHARED_DATABASE)).cast::<*mut u8>().read(), database.as_mut_ptr());
             assert_eq!(shared.as_ptr().cast::<u8>().add(SHARED_IN_TRANS).read(), 0);
             assert_eq!(btree.as_ptr().cast::<u8>().add(BTREE_IN_TRANS).read(), 0);
@@ -211,7 +209,7 @@ mod tests {
     #[test]
     fn pager_error_only_leaves_btree() {
         let _bench = bench(7);
-        let mut btree = [0usize; 8]; let mut shared = [0usize; 16]; let mut pager = [0u8; 1];
+        let mut btree = [0usize; 8]; let mut shared = [0usize; 24]; let mut pager = [0u8; 1];
         unsafe {
             initialize_fixture(btree.as_mut_ptr().cast(), shared.as_mut_ptr().cast(), core::ptr::null_mut(), pager.as_mut_ptr());
             btree.as_mut_ptr().cast::<u8>().add(BTREE_IN_TRANS).write(TRANS_WRITE);
@@ -223,13 +221,13 @@ mod tests {
     #[test]
     fn read_transaction_skips_pager_commit() {
         let _bench = bench(0);
-        let mut btree = [0usize; 8]; let mut shared = [0usize; 16]; let mut pager = [0u8; 1];
+        let mut btree = [0usize; 8]; let mut shared = [0usize; 24]; let mut pager = [0u8; 1];
         unsafe {
             initialize_fixture(btree.as_mut_ptr().cast(), shared.as_mut_ptr().cast(), core::ptr::null_mut(), pager.as_mut_ptr());
             btree.as_mut_ptr().cast::<u8>().add(BTREE_IN_TRANS).write(1);
             shared.as_mut_ptr().cast::<u8>().add(SHARED_TRANSACTION_COUNT).cast::<u32>().write(2);
             assert_eq!(btree_commit_phase_two(btree.as_mut_ptr().cast()), 0);
-            assert_eq!(EVENTS, [4, 2, 3, 5, 0]);
+            assert_eq!(EVENTS, [4, 3, 5, 0, 0]);
             assert_eq!(shared.as_ptr().cast::<u8>().add(SHARED_TRANSACTION_COUNT).cast::<u32>().read(), 1);
         }
     }

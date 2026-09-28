@@ -9,14 +9,15 @@
 //!
 //! SQLite's `sqlite3BtreeRollback` saves active cursors, trips them if saving
 //! fails, rolls the pager back for a write transaction, refreshes page one,
-//! updates transaction counts, and releases an unused shared B-tree. The
-//! pager, cursor-save/trip, and unlock helpers are still retailOS boundaries;
-//! host builds dispatch those three calls through a private table because their
-//! target-layout pointers are 32-bit. The direct ports remain direct calls.
+//! updates transaction counts, and releases an unused shared B-tree. Pager,
+//! cursor-save/trip, and unlock helpers remain retailOS boundaries; lock release
+//! is the direct `btree_release_locks` port. Host builds dispatch the remaining
+//! boundaries through a private table because target pointers are 32-bit.
 
 use crate::cxx::context_child_handle::context_child_handle_acquire;
 use crate::cxx::release::release_via_field_0x48;
 use crate::sqlite::btree_lock::{btree_enter, btree_leave};
+use crate::sqlite::btree_release_locks::btree_release_locks;
 
 const WORD: usize = core::mem::size_of::<*mut u8>();
 const BTREE_DATABASE: usize = 0x00;
@@ -141,6 +142,7 @@ pub unsafe extern "C" fn btree_rollback(btree: *mut u8) -> i32 {
         (host_ops().trip_cursors)(btree, rc);
     }
 
+    btree_release_locks(btree);
     if btree.add(BTREE_IN_TRANS).read() == TRANS_WRITE {
         shared.add(SHARED_ROLLBACK_MARK).cast::<u32>().write(0);
         let pager = pointer_at(shared, SHARED_PAGER);
@@ -212,7 +214,7 @@ mod tests {
     #[test]
     fn write_rollback_trips_cursors_and_pager_error_wins() {
         let _bench = bench(7, 13);
-        let mut btree = [0usize; 8]; let mut shared = [0usize; 16]; let mut database = [0u8; 1];
+        let mut btree = [0usize; 8]; let mut shared = [0usize; 24]; let mut database = [0u8; 1];
         unsafe { initialize_fixture(btree.as_mut_ptr().cast(), shared.as_mut_ptr().cast(), database.as_mut_ptr()); }
         unsafe {
             btree.as_mut_ptr().cast::<u8>().add(BTREE_IN_TRANS).write(TRANS_WRITE);
@@ -227,7 +229,7 @@ mod tests {
     #[test]
     fn read_transaction_skips_pager_and_preserves_save_error() {
         let _bench = bench(7, 0);
-        let mut btree = [0usize; 8]; let mut shared = [0usize; 16]; let mut database = [0u8; 1];
+        let mut btree = [0usize; 8]; let mut shared = [0usize; 24]; let mut database = [0u8; 1];
         unsafe { initialize_fixture(btree.as_mut_ptr().cast(), shared.as_mut_ptr().cast(), database.as_mut_ptr()); }
         unsafe {
             btree.as_mut_ptr().cast::<u8>().add(BTREE_IN_TRANS).write(1);
