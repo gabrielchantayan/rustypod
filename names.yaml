@@ -157325,3 +157325,33 @@ functions:
       ported walker siblings; match.py confirms the same field/call sequence,
       with expected LLVM register allocation and a non-predicated recursive
       branch.
+
+  - address: 0x083975b0
+    ghidra: FUN_083975b0
+    name: sqlite_vfs_unregister
+    size: 84
+    sig: "void sqlite_vfs_unregister(sqlite3_vfs *vfs)"
+    module: sqlite/vfs_unregister
+    status: ported
+    renames:
+      param_1/r0: vfs
+      DAT_08397604: VFS_REGISTRY_HEAD
+      iVar1/r1: current
+      iVar2/r2: next
+    notes: >-
+      Raw osos.dec proves the 84-byte A32 body is exactly
+      0x083975b0..0x08397600 (21 words): the following word at 0x08397604
+      is the 0x08a09918 registry-head literal, and a distinct function starts
+      with push {r4-r11,lr} at 0x08397608. Decoding every body word finds zero
+      unconditional plain BL and zero predicated BL instructions; the two BL
+      sites Ghidra reports are not in this body. sqlite_vfs_unregister removes
+      a non-NULL sqlite3_vfs from the singly linked registry at 0x08a09918:
+      update the head when it is the target, otherwise walk next at target
+      offset +0x0c and splice the predecessor on a match. Null and absent
+      nodes are inert and the removed node's next word is deliberately left
+      intact. The shared VfsRegistry type and host stand-in remain in
+      sqlite/vfs_find, so both ports model the same retail global; target
+      builds retain the fixed BSS address. Host tests cover head removal,
+      interior splicing, and null/absent no-ops. match.py shows the same
+      null guard, head fast path, next-link walk, and splice stores; LLVM adds
+      a frame and rearranges the loop branches.

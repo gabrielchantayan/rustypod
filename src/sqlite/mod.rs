@@ -236,6 +236,7 @@ pub mod os_sync;
 pub mod os_truncate;
 pub mod os_write;
 pub mod vfs_find;
+pub mod vfs_unregister;
 pub mod write32bits;
 pub mod read_be32;
 pub mod pager_read_pending;
