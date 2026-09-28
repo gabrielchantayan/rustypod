@@ -203,6 +203,7 @@ pub mod red_black_tree_byte_word_node_pool_acquire;
 pub mod red_black_tree_node_pool_acquire_083bd3c4;
 pub mod red_black_tree_payload_word_node_pool_acquire_083c0ba8;
 pub mod red_black_tree_payload_12_node_pool_acquire_083c2c54;
+pub mod red_black_tree_payload_12_node_pool_acquire_083b73f0;
 pub mod refcounted_list_node_pool_acquire;
 pub mod list_node_pool_acquire_083dd1a8;
 pub mod list_node_pool_acquire_083dd2e4;
