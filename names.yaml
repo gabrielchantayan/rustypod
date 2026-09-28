@@ -157463,3 +157463,30 @@ functions:
       released. The hash key and both links are then cleared. Deliberate
       deviation: target pointers are retained as u32 words to preserve the
       target layout on 64-bit host fixtures.
+
+  # ---- Unaligned little-endian halfword reader (src/util/le_read.rs) ----
+  - address: 0x083943b8
+    ghidra: FUN_083943b8
+    name: read_u16_le
+    size: 24
+    sig: "u32 read_u16_le(const u8 *bytes)"
+    module: util/le_read
+    status: ported
+    renames:
+      param_1/r0: bytes
+      r0: low_byte_and_result
+      r1: high_byte
+      r2: high_byte_mask
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent from 0x083943b8
+      through bx lr at 0x083943cc; the push {r4,lr} at 0x083943d0 begins the
+      next real function. Whole-image aligned A32 decoding finds two inbound
+      unconditional plain BL sites (0x082d0a60 and 0x082e0dc8), zero predicated
+      inbound BL sites, and no outbound calls. The function reads bytes +0 and
+      +1, shifts the latter by eight, masks it with 0xff00, and ORs it with the
+      low byte: an unaligned little-endian u16, zero-extended in r0. The 0xff00
+      mask is redundant after ldrb. Deliberate deviation: this address reuses
+      the existing read_u16_le seam for FUN_080ed738; its nonvolatile byte reads
+      omit the redundant mask but preserve the observable value and exact
+      two-byte access extent. Existing host tests cover every alignment, zero
+      bytes, and the high-bit boundary.
