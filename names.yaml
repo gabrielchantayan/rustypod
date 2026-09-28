@@ -16,6 +16,25 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6ad4
+    ghidra: FUN_083b6ad4
+    name: red_black_tree_rightmost_descendant
+    size: 20
+    sig: "u32 red_black_tree_rightmost_descendant(u32 node)"
+    module: cxx/red_black_tree_rightmost_descendant
+    status: ported
+    renames:
+      param_1/r0: node
+      "node+0x0c/r1": right
+    notes: >-
+      Raw osos.dec establishes the exact 20-byte A32 extent: ldr r1,[r0,#0xc]
+      at 0x083b6ad4 through bx lr at 0x083b6ae4; 0x083b6ae8 begins the
+      separately linked leftmost-descendant sibling. Branch-immediate decoding
+      finds exactly two inbound unconditional plain BL sites and no predicated
+      inbound BL sites. The loop replaces r0 with every non-NULL right child
+      before returning the rightmost node. Deliberate deviation: target
+      pointers remain u32 addresses, preserving the firmware's four-byte node
+      layout on 64-bit hosts.
   - address: 0x083b6b04
     ghidra: FUN_083b6b04
     name: red_black_tree_node_payload_address_083b6b04
