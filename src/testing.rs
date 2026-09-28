@@ -3135,6 +3135,9 @@ pub mod hints {
     // target-width Expr and token fixtures; mappings never unmap.
     pub const SQLITE_EXPR_IS_INTEGER: usize = 0x6a40_0000;
     pub const SQLITE_EXPR_IS_INTEGER_FAILURE: usize = 0x6a50_0000;
+    // 0xeeee_0000: dedicated to sqlite/parse_free_temporary's target-width
+    // Parse object and tracked-allocation fixture; mappings never unmap.
+    pub const SQLITE_PARSE_FREE_TEMPORARY: usize = 0xeeee_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

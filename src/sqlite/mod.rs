@@ -223,6 +223,7 @@ pub mod mem_release;
 pub mod name_from_token;
 pub mod nested_parse;
 pub mod parse;
+pub mod parse_free_temporary;
 pub mod prepare;
 pub mod prepare16;
 pub mod pager_lookup;

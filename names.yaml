@@ -56456,6 +56456,32 @@ functions:
       preserve target offsets while host pointers widen safely. Host tests
       cover the read-only, schema-write, nested-parse, ordinary-view,
       permitted-view, compound-view, and unmaterialized-view paths.
+  - address: 0x08376780
+    ghidra: FUN_08376780
+    name: parse_free_temporary
+    size: 32
+    sig: "void parse_free_temporary(Parse *parse)"
+    module: sqlite/parse_free_temporary
+    status: ported
+    renames:
+      param_1/r0/r4: parse
+      "[parse + 0x08]": temporary
+      "[parse + 0x40]": related_state
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the complete 32-byte extent
+      0x08376780..0x083767a0: push {r4,lr}; mov r4,r0; ldr r0,[r4,#8];
+      plain BL tracked_free @ 0x083906f4; zero r0; str r0,[r4,#8]; str
+      r0,[r4,#0x40]; pop {r4,pc}. The successor at 0x083767a0 is separately
+      linked and begins with push {r4-r11,lr}. The body has one outbound plain
+      BL and no predicated BL. Complete-image decoding finds two inbound plain
+      BL instructions at 0x082d92e4 and 0x08375798, and no predicated inbound
+      BL. It frees the target-width temporary pointer at +0x08 through the
+      existing tracked_free port, then clears +0x08 and +0x40 even when the
+      pointer was NULL. Deliberate deviation: Rust represents pointer slots as
+      u32 words to preserve their target byte offsets on 64-bit host fixtures;
+      host tests verify both the tracked raw-block/tag forwarding and the NULL
+      path.
   - address: 0x083767a0
     ghidra: FUN_083767a0
     name: sqlite_error_msg
