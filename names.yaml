@@ -156763,3 +156763,35 @@ functions:
       chains to the base destructor and returns its result. ARM builds call
       both existing ports directly; host tests use narrow seams because host
       pointer widths do not preserve the target container layout.
+
+  - address: 0x0839c380
+    ghidra: FUN_0839c380
+    name: collection_delete_first_indexed_value
+    size: 76
+    sig: "void collection_delete_first_indexed_value(void *collection)"
+    module: app/collection_delete_first_indexed_value
+    status: ported
+    renames:
+      param_1/r0: collection
+      iVar1/r0: value
+      iVar2/r4: index
+      iVar3/r5: count
+      "[collection + 0x04]": count
+      "[collection + 0x28]": enabled
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte A32 extent: nineteen words
+      from push {r4,r5,r6,lr} at 0x0839c380 through pop {r4,r5,r6,pc} at
+      0x0839c3c4; 0x0839c3cc begins the next real function. The body has
+      three unconditional plain direct bl instructions—at 0x0839c3a8 to
+      FUN_083d5f5c, 0x0839c3b4 to FUN_08186dc4, and 0x0839c3b8 to the
+      ported operator_delete/FUN_082aad24—and no predicated direct bl.
+      Whole-image A32 branch decoding finds two inbound unconditional plain
+      bl sites at 0x0839c418 and 0x0839c45c, with no predicated inbound bl.
+      When enabled byte +0x28 is nonzero, it scans signed indices
+      [0,count), gets each value via the collection vtable +0x40 operation,
+      and destructs then tag-2-deletes the first non-null value. Ghidra
+      omits the index argument to FUN_083d5f5c and incorrectly presents the
+      latter two calls as argument-free; the raw register flow establishes
+      them. Rust expands the two unidentified helper bodies into their
+      verified vtable dispatches rather than inventing callee identities;
+      host tests use native-width seams for those dispatches.
