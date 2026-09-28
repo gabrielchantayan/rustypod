@@ -158334,3 +158334,32 @@ functions:
       strict-over-limit reporting with the forwarded object word. match.py
       reports the same null guard, signed comparison, limit load, and error
       path; its larger Rust frame is the explicit VaList/direct-call deviation.
+
+  - address: 0x0837850c
+    ghidra: FUN_0837850c
+    name: sqlite_expr_is_integer
+    size: 112
+    sig: "int sqlite_expr_is_integer(const Expr *expression, int *value, u32 unused, int initial_value)"
+    module: sqlite/expr_is_integer
+    status: ported
+    vars:
+      param_1/r0: expression
+      param_2/r1: value
+      param_3/r2: unused
+      param_4/r3: initial_value
+      r4: expression_cursor
+      "[sp]": child_value
+    notes: >-
+      Raw osos.dec establishes the 112-byte extent: 28 ARM words from push
+      {r3-r5,lr} at 0x0837850c through pop {r3-r5,pc} at 0x08378578;
+      0x0837857c starts the next real function. The body has exactly two
+      unconditional plain BL instructions, self-recursion at 0x08378550 and
+      sqlite3GetInt32 at 0x08378538, and no predicated BL instructions.
+      SQLite 3.5.x semantics identify it as sqlite3ExprIsInteger: repeatedly
+      skip unary-plus ('V') nodes through Expr.pLeft at +0x08; recursively
+      evaluate unary-minus ('U') then negate its local result; parse integer
+      literal ('|') tokens through sqlite3GetInt32 at 0x0837a28c using
+      Expr.u.zToken at +0x14. The proposed callee has no names.yaml entry or
+      established Rust port, so the target deliberately calls its verified
+      retail address and host tests inject a recorder seam. Tests cover
+      nested unary signs, literal success, parser failure, and an unknown tag.

@@ -144,6 +144,7 @@ pub mod expr_affinity;
 pub mod expr_and;
 pub mod expr_coll_seq;
 pub mod expr_compare_affinity;
+pub mod expr_is_integer;
 pub mod expr_comparison_affinity;
 pub mod expr_code;
 pub mod expr_code_and_cache;

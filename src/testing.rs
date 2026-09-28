@@ -3131,6 +3131,10 @@ pub mod hints {
     // 0x7770_0000: dedicated to sqlite/emit_cursor_setup's target-width
     // Parse, source, and Vdbe fixtures; mappings never unmap.
     pub const SQLITE_EMIT_CURSOR_SETUP: usize = 0x7770_0000;
+    // 0x6a40_0000 / 0x6a50_0000: dedicated to sqlite/expr_is_integer's
+    // target-width Expr and token fixtures; mappings never unmap.
+    pub const SQLITE_EXPR_IS_INTEGER: usize = 0x6a40_0000;
+    pub const SQLITE_EXPR_IS_INTEGER_FAILURE: usize = 0x6a50_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
