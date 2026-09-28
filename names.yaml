@@ -16,6 +16,27 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6a2c
+    ghidra: FUN_083b6a2c
+    name: word_key_set_node_key
+    size: 8
+    sig: "u32 word_key_set_node_key(u32 node)"
+    module: cxx/word_key_set_node_key
+    status: ported
+    renames:
+      param_1/r0: node
+      "node+0x10/r0": key
+    notes: >-
+      Raw osos.dec establishes the exact 8-byte A32 extent: add r0,r0,#0x10
+      at 0x083b6a2c followed by bx lr at 0x083b6a30; the identical leaf at
+      0x083b6a34 is the next separately linked function. The body has zero
+      outbound plain and predicated BL calls. Independent raw branch-immediate
+      decoding finds exactly two inbound unconditional plain BL sites,
+      0x083c02a0 and 0x083c0964, and zero predicated inbound BL sites. Both
+      callers pass a word-keyed red-black-tree node whose u32 key begins at
+      +0x10. Deliberate deviation: the host implementation represents target
+      addresses as wrapping u32 values; the target export emits the two retail
+      instructions directly.
   - address: 0x083b6a34
     ghidra: FUN_083b6a34
     name: red_black_tree_node_payload_address_083b6a34
