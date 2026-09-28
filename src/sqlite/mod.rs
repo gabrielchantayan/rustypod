@@ -329,6 +329,7 @@ pub mod vdbe_op;
 pub mod vdbe_opcode_has_property;
 pub mod vdbe_real_value;
 pub mod vdbe_record_compare;
+pub mod vdbe_delete_unpacked_record;
 pub mod vdbe_record_unpack;
 pub mod vdbe_serial_get;
 pub mod vdbe_serial_put;

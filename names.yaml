@@ -53661,6 +53661,31 @@ functions:
       inlines tracked_free into the raw-free path, and calls the aux
       slots with blx).
 
+  - address: 0x08386e6c
+    ghidra: FUN_08386e6c
+    name: vdbe_delete_unpacked_record
+    size: 96
+    sig: "void vdbe_delete_unpacked_record(UnpackedRecord *record)"
+    module: sqlite/vdbe_delete_unpacked_record
+    status: ported
+    renames:
+      param_1: record
+      iVar4: index
+      iVar5: mem
+    notes: >-
+      SQLite 3.5.9's sqlite3VdbeDeleteUnpackedRecord (vdbeaux.c).
+      Raw osos.dec words establish the exact 96-byte extent
+      0x08386e6c..0x08386ecc; 0x08386ecc is the next stmdb function
+      entry. The function has two inbound plain-BL callers
+      (sqlite3BtreeMoveto and sqlite3VdbeIdxKeyCompare), zero plain
+      outbound BLs, one predicated BLNE to sqlite3VdbeMemRelease
+      (0x0838c04c), and one predicated tail BNE to sqlite3_free
+      (0x083906f4). NULL returns untouched. needDestroy (+0x07) walks
+      nField (+0x04) raw 0x28-byte Mem slots at aMem (+0x08), releasing
+      only slots with non-NULL zMalloc (+0x24); needFree (+0x06)
+      releases the record shell. Host pointer fields widen only in the
+      typed header; raw Mem stride and offsets remain target-width.
+
   # ---- Case-insensitive compare (src/sqlite/stricmp.rs) ----
   - address: 0x08384fa0
     ghidra: FUN_08384fa0
