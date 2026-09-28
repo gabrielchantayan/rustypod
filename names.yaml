@@ -154383,3 +154383,29 @@ functions:
       no predicated bl sites. Both callers pass red-black-tree nodes to
       comparators as node+0x10. The port returns that payload address using
       wrapping pointer addition; this is the ARM modulo-2^32 add on target.
+
+  # --- red-black-tree leftmost descendant ---
+  - address: 0x083b6ae8
+    ghidra: FUN_083b6ae8
+    name: red_black_tree_leftmost_descendant
+    size: 20
+    sig: "u32 *red_black_tree_leftmost_descendant(u32 *node)"
+    module: cxx/red_black_tree_leftmost_descendant
+    status: ported
+    renames:
+      param_1/r0: node
+      "*(node + 0x08)": left_child
+    notes: >-
+      Raw osos.dec words establish the exact 20-byte function extent:
+      `ldr r1,[r0,#8]; cmp r1,#0; movne r0,r1; bne 0x083b6ae8; bx lr`.
+      The next real function begins at 0x083b6afc. This is the libstdc++
+      red-black-tree leftmost-descendant walk: repeatedly follow the
+      target-width left-child word at node+0x08 until it is null, then return
+      that terminal node. Raw decoding finds zero outbound plain BL and zero
+      outbound predicated BL instructions. Independent inbound-call decoding
+      finds two plain BL call sites, at 0x083c50f8 and 0x083c58f4, and zero
+      predicated BL call sites. No callee seam is needed. Rust reads the child
+      at word index 2, preserving the four-byte target layout on 64-bit hosts.
+      Host tests use the unique hints::RED_BLACK_TREE_LEFTMOST_DESCENDANT
+      low-address slab to cover a multi-node chain and the terminal-node case.
+      No behavioral deviations were made.

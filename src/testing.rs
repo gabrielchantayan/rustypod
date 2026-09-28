@@ -3001,6 +3001,9 @@ pub mod hints {
     // 0x7730_0000: dedicated to cxx/red_black_tree_node_cow_pair_clone's
     // target-width node and COW-string fixture; mappings never unmap.
     pub const RED_BLACK_TREE_NODE_COW_PAIR_CLONE: usize = 0x7730_0000;
+    // 0x4b80_0000: dedicated to cxx/red_black_tree_leftmost_descendant's
+    // target-width tree-node fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_LEFTMOST_DESCENDANT: usize = 0x4b80_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
