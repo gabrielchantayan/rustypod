@@ -157291,3 +157291,37 @@ functions:
       sites, and no outbound BL instructions. It compares Index nColumn,
       onError, aiColumn entries, collation-name bytes, and collation-sequence
       words. The final two ABI arguments are unused.
+
+  - address: 0x083986f8
+    ghidra: FUN_083986f8
+    name: sqlite_select_expr_walk
+    size: 116
+    sig: "i32 sqlite_select_expr_walk(Select *select, ExprVisit visit, void *context)"
+    module: sqlite/select_expr_walk
+    status: ported
+    renames:
+      param_1/r4: select
+      param_2/r5: visit
+      param_3/r6: context
+      "[select + 0x00]": result_expressions
+      "[select + 0x10]": where_expression
+      "[select + 0x14]": group_by_expressions
+      "[select + 0x18]": having_expression
+      "[select + 0x1c]": order_by_expressions
+      "[select + 0x20]": prior_select
+      FUN_08398614: sqlite_expr_list_walk
+      FUN_0839866c: sqlite_expr_walk
+    notes: >-
+      Raw osos.dec establishes the exact 116-byte A32 extent
+      0x083986f8..0x0839876c: the pop {r4,r5,r6,pc} at 0x08398768 is followed
+      by the next real function at 0x0839876c. Decoding every word finds five
+      unconditional plain BL instructions at 0x0839870c, 0x0839871c,
+      0x0839872c, 0x0839873c, and 0x0839874c, plus one predicated BLNE
+      recursive call at 0x08398760. It visits result, WHERE, GROUP BY, HAVING,
+      and ORDER BY clauses in field order, then recursively visits pPrior when
+      non-NULL; all child return values are deliberately discarded and it
+      returns zero. Ghidra reports two inbound BL call sites. Rust uses typed
+      Select fields to preserve host pointer width and directly calls the two
+      ported walker siblings; match.py confirms the same field/call sequence,
+      with expected LLVM register allocation and a non-predicated recursive
+      branch.
