@@ -91,6 +91,17 @@
 //! This exact duplicate deliberately reuses the exported
 //! `red_black_tree_advance_cursor` seam and its host tests; deliberate
 //! deviations: none.
+//!
+//! `FUN_083b6198` at load address `0x083b6198` is a byte-identical,
+//! 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
+//! `bx lr` at `0x083b61e8`; the next separately linked function begins at
+//! `0x083b61ec`. Raw A32 decoding confirms its two inbound calls are plain,
+//! unconditional `bl` instructions at 0x083cc36c and 0x083cc83c, with zero
+//! predicated `bl` calls; the body itself contains no calls. It advances an
+//! in-order cursor by descending the right subtree's left spine or climbing
+//! parent links from right-child edges, retaining the header sentinel. The
+//! byte-identical body deliberately reuses this dispatch seam and its shared
+//! host tests; deliberate deviations: none.
 
 
 
