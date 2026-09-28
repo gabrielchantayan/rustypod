@@ -155,6 +155,18 @@
 //! `red_black_tree_advance_cursor` seam and its host tests; deliberate
 //! deviations: none.
 //!
+//! `FUN_083b5568` at load address `0x083b5568` is a byte-identical,
+//! 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
+//! `bx lr` at `0x083b55b8`; the next independently linked function begins at
+//! `0x083b55bc`. Whole-image A32 B/BL-immediate decoding finds two inbound
+//! unconditional plain `bl` calls and zero predicated `bl` calls; the body
+//! itself makes no calls. It returns the cursor address unchanged while
+//! advancing the target-width cursor to its in-order successor by descending
+//! the right subtree's left spine or climbing parent links to the first
+//! left-child ancestor, preserving the header sentinel. This exact duplicate
+//! deliberately reuses the exported `red_black_tree_advance_cursor` seam and
+//! its host tests; deliberate deviations: none.
+//!
 //! `FUN_083b6198` at load address `0x083b6198` is a byte-identical,
 //! 84-byte (21-word) copy of `red_black_tree_advance_cursor`, ending with
 //! `bx lr` at `0x083b61e8`; the next separately linked function begins at
