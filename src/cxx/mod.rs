@@ -206,6 +206,7 @@ pub mod red_black_tree_payload_word_node_pool_acquire_083c0ba8;
 pub mod red_black_tree_payload_12_node_pool_acquire_083c2c54;
 pub mod red_black_tree_payload_12_node_pool_acquire_083b73f0;
 pub mod red_black_tree_payload_12_node_pool_recycle_chain_083b73ac;
+pub mod red_black_tree_node_payload_address_083b6b14;
 pub mod red_black_tree_node_payload_address_083b6b1c;
 pub mod red_black_tree_node_payload_address_083b6b24;
 pub mod red_black_tree_node_payload_address_083b6b2c;
