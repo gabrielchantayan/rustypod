@@ -158252,3 +158252,30 @@ functions:
       with ARM's wrapping add and is returned. The Rust port preserves the
       three target-layout u32 words and uses a host-only target-width callback
       seam for the indirect BLX.
+
+  - address: 0x0837a04c
+    ghidra: FUN_0837a04c
+    name: emit_cursor_setup
+    size: 136
+    sig: "void emit_cursor_setup(Parse *parse, void *source, int cursor, int attach_source_word)"
+    module: sqlite/emit_cursor_setup
+    status: ported
+    vars: {param_1: parse, param_2: source, param_3: cursor, param_5: attach_source_word, iVar1: op_address, iVar2: vdbe}
+    notes: >-
+      Raw osos.dec establishes the 136-byte extent
+      0x0837a04c..0x0837a0d4: the following push at 0x0837a0d4 starts a
+      distinct function. It has three plain outbound BL instructions
+      (vdbe_add_op3 @ 0x08386840, retail helper 0x0837a0d4, and
+      vdbe_add_op2 @ 0x08386824), one predicated BLNE
+      (vdbe_change_p4 @ 0x08386aa4), and a tail B to vdbe_change_p3
+      @ 0x08386a74. It appends opcode 45 with (cursor,0,0), invokes the
+      unported 0x0837a0d4 with (parse,source,cursor,NULL), appends opcode
+      89 with (cursor, attach_source_word!=0), conditionally applies the
+      source first word with raw P4 tag -2 to the newest op, then patches
+      the first op's P3 to Vdbe.nOp. The helper's semantic identity is not
+      established, so the target build deliberately calls its verified
+      retail address; host tests install a recorder seam. match.py:
+      original 34 instructions versus Rust 42; the same call order,
+      predicate, constants, source-word load, and final P3 patch remain,
+      while LLVM uses a literal-pool BLX for the intentionally retained
+      retail seam and a normal epilogue before the final ported call.

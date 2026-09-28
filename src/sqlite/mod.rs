@@ -112,6 +112,7 @@ pub mod get_and_init_page;
 pub mod move_to_root;
 pub mod check_read_locks;
 pub mod cell_size;
+pub mod emit_cursor_setup;
 pub mod change_cookie;
 pub mod check_object_name;
 pub mod column_default;
