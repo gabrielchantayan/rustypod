@@ -271,6 +271,7 @@ pub mod select_height;
 pub mod select_expr_height;
 pub mod select_expr_walk;
 pub mod select_dest_init;
+pub mod materialize_view;
 pub mod select_delete;
 pub mod src_list_delete;
 pub mod src_list_assign_cursors;
