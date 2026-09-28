@@ -1951,6 +1951,10 @@ pub mod hints {
     // 0x1090_0000: dedicated to FUN_083b57b8's target-width cursor fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const RED_BLACK_TREE_ADVANCE_CURSOR_083B57B8: usize = 0x1090_0000;
+    // 0x10b0_0000: dedicated to FUN_083b56b8's target-width cursor fixture;
+    // mappings never unmap, so no other user may share this hint.
+    pub const RED_BLACK_TREE_ADVANCE_CURSOR_083B56B8: usize = 0x10b0_0000;
+
 
     // 0x8140_0000: dedicated to cxx/red_black_tree_increment's raw-u32
     // cursor-decrement fixture; mappings never unmap, so no other user may

@@ -155302,3 +155302,31 @@ functions:
       remain u32 words, retaining the firmware's four-byte layout on 64-bit
       hosts. The dedicated host test covers multi-level right-subtree descent.
       No behavioral deviations were made.
+  - address: 0x083b56b8
+    ghidra: FUN_083b56b8
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: next
+      iVar2/r2: current
+      "[node + 0x4]": parent
+      "[node + 0x8]": left
+      "[node + 0xc]": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte A32 extent
+      0x083b56b8..0x083b5708, ending in bx lr; 0x083b570c begins the next
+      independently entered function. Decoding the complete aligned A32 body
+      finds no outbound calls. The two inbound direct calls are unconditional
+      plain BL instructions at 0x083beb84 and 0x083bf054; there are zero
+      predicated BL calls. Its 21 words are byte-identical to
+      red_black_tree_advance_cursor at 0x083b609c, so this entry deliberately
+      reuses that dispatch seam and its dedicated host test. It advances the
+      target-width cursor to the red-black-tree in-order successor: descend
+      through the right subtree's left spine, or climb parent links while
+      leaving right-child edges, retaining the header sentinel. Target links
+      remain u32 words to preserve the retail four-byte layout on hosts;
+      deliberate deviations: none.
