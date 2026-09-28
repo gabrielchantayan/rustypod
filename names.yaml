@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b6048
+    ghidra: FUN_083b6048
+    name: red_black_tree_advance_cursor_083b6048
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor_083b6048(u32 *cursor)"
+    module: cxx/red_black_tree_advance_cursor_083b6048
+    status: ported
+    renames:
+      param_1/r0: cursor
+      "*cursor/r0": node
+      "node+0x04/r1": parent
+      "node+0x08/r1": left
+      "node+0x0c/r1": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte A32 extent
+      0x083b6048..0x083b6098; the next independently entered function begins
+      at 0x083b609c. The function has no outbound calls. Independent complete
+      aligned A32 B/BL-immediate decoding finds two inbound unconditional plain
+      BL sites at 0x083cb980 and 0x083cbe28 and zero predicated BL sites.
+      It leaves r0 unchanged while advancing the target-width cursor to the
+      red-black-tree in-order successor: descend the right subtree's left spine
+      or climb parent links while leaving right-child edges, retaining the
+      header sentinel. Deliberate deviation: target addresses remain u32 words
+      rather than host pointers, preserving the retail four-byte layout on
+      64-bit host test builds.
   - address: 0x083b69cc
     ghidra: FUN_083b69cc
     name: vector_growth_capacity
