@@ -236,8 +236,6 @@ unsafe fn build_ops() -> EventListBuildOps {
 /// [`event_list_tree_erase_range`].
 #[derive(Clone, Copy)]
 pub struct EventListOps {
-    /// Original 0x083b5bb0: advance the one-word in-order iterator.
-    pub advance_iterator: unsafe extern "C" fn(iterator: *mut u32),
     /// Original 0x083c17d8: rebalance, destroy, recycle, and decrement for
     /// one node. `out` receives the successor iterator.
     pub erase_node: unsafe extern "C" fn(out: *mut u32, tree: *mut u8, node: *mut u32),
@@ -254,7 +252,6 @@ pub struct EventListOps {
 
 /// Defaults for lower tree-runtime dependencies. They deliberately do no
 /// ownership work: their production implementations remain unported.
-unsafe extern "C" fn missing_advance_iterator(_iterator: *mut u32) {}
 unsafe extern "C" fn missing_erase_node(out: *mut u32, _tree: *mut u8, _node: *mut u32) {
     unsafe { out.write(0) };
 }
@@ -270,7 +267,6 @@ unsafe extern "C" fn missing_recycle_header_node(
 
 /// Wired defaults for [`EVENT_LIST_OPS`].
 pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
-    advance_iterator: missing_advance_iterator,
     erase_node: missing_erase_node,
     destroy_subtree: missing_destroy_subtree,
     copy_subtree: missing_copy_subtree,
@@ -282,11 +278,6 @@ pub const DEFAULT_EVENT_LIST_OPS: EventListOps = EventListOps {
 pub static mut EVENT_LIST_OPS: EventListOps = DEFAULT_EVENT_LIST_OPS;
 
 #[inline(always)]
-unsafe fn advance_iterator_op() -> unsafe extern "C" fn(*mut u32) {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.advance_iterator)) }
-}
-
-#[inline(always)]
 unsafe fn erase_node_op() -> unsafe extern "C" fn(*mut u32, *mut u8, *mut u32) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.erase_node)) }
 }
@@ -296,18 +287,11 @@ unsafe fn destroy_subtree_op() -> unsafe extern "C" fn(*mut u8, u32) {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(EVENT_LIST_OPS.destroy_subtree)) }
 }
 
-#[cfg(target_arch = "arm")]
-#[inline(always)]
-unsafe fn advance_iterator(iterator: *mut u32) {
-    let advance: unsafe extern "C" fn(*mut u32) =
-        unsafe { core::mem::transmute(0x083b_5bb0usize) };
-    unsafe { advance(iterator) }
-}
 
-#[cfg(not(target_arch = "arm"))]
+
 #[inline(always)]
 unsafe fn advance_iterator(iterator: *mut u32) {
-    unsafe { (advance_iterator_op())(iterator) }
+    unsafe { crate::cxx::red_black_tree_increment::red_black_tree_advance_cursor(iterator) };
 }
 
 #[cfg(target_arch = "arm")]
@@ -484,9 +468,10 @@ pub unsafe extern "C" fn event_list_acquire(source: *mut u8) -> *mut u8 {
 /// erase's successor through `out`. Empty and non-whole ranges leave header
 /// bookkeeping to the lower operation exactly as the ARM code does.
 ///
-/// The iterator increment, single-node RB-tree erase, and payload/allocator
-/// destruction are still explicit lower-runtime seams; this function owns
-/// their ordering and all full-range header bookkeeping.
+/// The iterator increment is the ported `red_black_tree_advance_cursor`;
+/// single-node RB-tree erase and payload/allocator destruction remain explicit
+/// lower-runtime seams. This function owns their ordering and all full-range
+/// header bookkeeping.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn event_list_tree_erase_range(
@@ -734,7 +719,6 @@ mod tests {
         Resolve { key: u32, value: u32 },
         Append { tree: usize, bytes: usize, length: u32 },
         Fail,
-        Advance(u32),
         Erase { tree: usize, node: u32 },
         Destroy { tree: usize, root: u32 },
         Copy { tree: usize, source_root: u32, destination_header: u32 },
@@ -780,15 +764,6 @@ mod tests {
         unsafe { EVENTS.push(Call::Fail) };
     }
 
-    unsafe extern "C" fn recording_advance_iterator(iterator: *mut u32) {
-        let node = unsafe { iterator.read() };
-        unsafe {
-            EVENTS.push(Call::Advance(node));
-            iterator.write(word(
-                (node as usize as *const u8).add(TREE_RIGHTMOST_OFFSET),
-            ));
-        }
-    }
 
     unsafe extern "C" fn recording_erase_node(out: *mut u32, tree: *mut u8, node: *mut u32) {
         let current = unsafe { node.read() };
@@ -883,7 +858,6 @@ mod tests {
                 fail: recording_fail,
             };
             EVENT_LIST_OPS = EventListOps {
-                advance_iterator: recording_advance_iterator,
                 erase_node: recording_erase_node,
                 destroy_subtree: recording_destroy_subtree,
                 copy_subtree: recording_copy_subtree,
@@ -1394,13 +1368,10 @@ mod tests {
         assert_eq!(out, last, "single-node erase returns its successor");
         assert_eq!(
             events(),
-            std::vec![
-                Call::Advance(unsafe { node(slab, 1) }),
-                Call::Erase {
-                    tree: tree as usize,
-                    node: unsafe { node(slab, 1) },
-                },
-            ]
+            std::vec![Call::Erase {
+                tree: tree as usize,
+                node: unsafe { node(slab, 1) },
+            }]
         );
         assert_eq!(
             unsafe { word(tree.add(TREE_NODE_COUNT_OFFSET)) },
@@ -1429,12 +1400,10 @@ mod tests {
         assert_eq!(
             events(),
             std::vec![
-                Call::Advance(unsafe { node(slab, 0) }),
                 Call::Erase {
                     tree: tree as usize,
                     node: unsafe { node(slab, 0) },
                 },
-                Call::Advance(unsafe { node(slab, 1) }),
                 Call::Erase {
                     tree: tree as usize,
                     node: unsafe { node(slab, 1) },

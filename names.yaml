@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b5bb0
+    ghidra: FUN_083b5bb0
+    name: red_black_tree_advance_cursor
+    size: 84
+    sig: "u32 *red_black_tree_advance_cursor(u32 *cursor)"
+    module: cxx/red_black_tree_increment
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: next
+      "*cursor/r0": node
+      "node+0x04/r1": parent
+      "node+0x08/r1": left
+      "node+0x0c/r1": right
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte A32 extent
+      0x083b5bb0..0x083b5c00, ending in bx lr; the next independently entered
+      function begins at 0x083b5c04. Complete aligned A32 B/BL-immediate
+      decoding finds two inbound unconditional plain BL instructions at
+      0x083c1814 and 0x083c1ce4, zero predicated BL instructions, and no
+      outbound calls. The 21 words are byte-identical to
+      red_black_tree_advance_cursor at 0x083b609c, so this entry deliberately
+      reuses that implementation and its dedicated host test. It advances the
+      target-width cursor to the red-black-tree in-order successor: descend
+      through the right subtree's left spine, or climb parent links while
+      leaving right-child edges, retaining the header sentinel. Target links
+      remain u32 words to preserve the retail four-byte layout on hosts;
+      deliberate deviations: none.
   - address: 0x083b5c04
     ghidra: FUN_083b5c04
     name: red_black_tree_advance_cursor
@@ -74559,7 +74587,8 @@ functions:
       restore root=0, leftmost=rightmost=header, and count=0. Other ranges
       save each node, advance its iterator @ 0x083b5bb0 before invalidating
       it, and call single-node erase @ 0x083c17d8, forwarding its successor
-      to out. Those three lower runtime calls remain EVENT_LIST_OPS seams;
+      to out. Iterator advance now uses ported red_black_tree_advance_cursor;
+      the two remaining lower runtime calls are EVENT_LIST_OPS seams, and
       their allocator/value cleanup belongs to 0x083c1648. Host tests cover
       empty, partial single, partial multiple, and whole-tree releases plus
       successor, destruction ordering, and header bookkeeping. match.py:

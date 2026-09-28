@@ -383,6 +383,9 @@ pub mod hints {
     // 0x0e10_0000: dedicated to app/event_list_tree_copy_subtree's raw-u32
     // source tree, destination header, and clone-node fixture; mappings never unmap.
     pub const EVENT_LIST_TREE_COPY_SUBTREE: usize = 0x0e10_0000;
+    // 0x0e20_0000: dedicated to cxx/red_black_tree_increment's 0x083b5bb0
+    // target-width iterator fixture; mappings never unmap.
+    pub const RED_BLACK_TREE_ADVANCE_CURSOR_083B5BB0: usize = 0x0e20_0000;
     // 0x7e00_0000: dedicated to app/observer_list_register's raw-u32
     // context, intrusive-list anchor, successor, and record fixture.
     pub const OBSERVER_LIST_REGISTER: usize = 0x7e00_0000;
