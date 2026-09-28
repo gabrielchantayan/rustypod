@@ -48385,6 +48385,25 @@ functions:
       predicated bl instructions; the reported two call sites omits mktime.
       A non-NULL out receives -1 when either conversion reports zero.
 
+  - address: 0x0837b204
+    ghidra: FUN_0837b204
+    name: string_table_find_index
+    size: 80
+    sig: "int string_table_find_index(const u32 *table, const char *key)"
+    module: sqlite/string_table_find_index
+    status: ported
+    vars: {param_1: table, param_2: key, iVar2: index}
+    notes: >-
+      Raw ARM words establish the exact 80-byte extent
+      0x0837b204..0x0837b254, ending at the next function's stmdb prologue.
+      The body issues one unconditional bl to str_icmp @ 0x08384f14 and no
+      predicated bl forms. Two direct incoming bl call sites are known:
+      0x082c250c and 0x082e6e2c, both unconditional. A non-NULL two-word
+      header supplies an entry base and signed count; each 8-byte entry's
+      first word is compared case-insensitively with key. The first matching
+      index is returned, otherwise -1; NULL headers and nonpositive counts
+      also return -1.
+
   - address: 0x08384f14
     ghidra: FUN_08384f14
     name: str_icmp
