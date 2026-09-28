@@ -157685,3 +157685,34 @@ functions:
       u64 out-param rather than the original u32 store; each decoded value is
       deliberately truncated to u32 before the matching address arithmetic
       or serial-type call.
+
+  - address: 0x0838af84
+    ghidra: FUN_0838af84
+    name: sqlite_vdbe_finalize
+    size: 108
+    sig: "int sqlite_vdbe_finalize(Vdbe *statement)"
+    module: sqlite/finalize
+    status: ported
+    renames:
+      param_1: statement
+      iVar2: magic
+      uVar3: result
+      DAT_0838aff0: VDBE_MAGIC_RUN
+      DAT_0838aff4: VDBE_MAGIC_HALT
+      DAT_0838aff8: VDBE_MAGIC_INIT
+    notes: >-
+      SQLite 3.5.9 sqlite3VdbeFinalize. Raw osos.dec words establish the
+      108-byte extent 0x0838af84..0x0838aff0: the body ends at 0x0838afec,
+      followed by three literal words at 0x0838aff0..0x0838aff8 and the
+      separate vdbe_free_cursor prologue at 0x0838affc. Whole-image ARM
+      branch decoding finds two inbound direct plain bl sites, 0x082b7a64 and
+      0x08382090, no predicated bl sites, and one tail b from sqlite3_finalize
+      at 0x083906f0. RUN (0xbdf20da3) and HALT (0x519c2973) call the ported
+      sqlite_vdbe_reset(statement, 1); INIT (0x26bceaa5) skips reset; every
+      other magic returns SQLITE_MISUSE (21). The accepted paths release
+      aColName +0x28 for nResColumn +0x48 Mems, then delete the Vdbe.
+      release_mem_array and sqlite_vdbe_reset are direct ports. Deliberate
+      deviation: sqlite3VdbeDelete at 0x08386d24 is not ported, so target
+      builds call its verified retail address and host tests use a replaceable
+      seam. match.py records the LLVM structural comparison. Host tests cover
+      INIT's delete-and-OK path and unknown-magic's misuse/no-delete path.

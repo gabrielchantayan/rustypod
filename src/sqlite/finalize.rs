@@ -24,6 +24,68 @@
 //! call appears in the verified 32-byte body, so none is introduced here.
 
 use super::vdbe::Vdbe;
+use super::release_mem_array::release_mem_array;
+use super::vdbe_reset::sqlite_vdbe_reset;
+
+const VDBE_MAGIC_RUN: u32 = 0xbdf2_0da3;
+const VDBE_MAGIC_HALT: u32 = 0x519c_2973;
+const VDBE_MAGIC_INIT: u32 = 0x26bc_eaa5;
+const SQLITE_MISUSE: i32 = 21;
+
+type VdbeDelete = unsafe extern "C" fn(*mut Vdbe);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_vdbe_delete(statement: *mut Vdbe) {
+    let delete: VdbeDelete = core::mem::transmute(0x0838_6d24usize);
+    delete(statement);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_vdbe_delete(_statement: *mut Vdbe) {
+    panic!("sqlite_vdbe_finalize requires sqlite3VdbeDelete @ 0x08386d24")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut VDBE_DELETE: VdbeDelete = missing_vdbe_delete;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn vdbe_delete_op() -> VdbeDelete {
+    core::ptr::read_volatile(core::ptr::addr_of!(VDBE_DELETE))
+}
+
+/// Finalize and destroy a VDBE — retailOS `FUN_0838af84` at `0x0838af84`
+/// (108 bytes, `0x0838af84..0x0838aff0`, followed by three literal words and
+/// the distinct `vdbe_free_cursor` prologue at `0x0838affc`). Raw ARM branch
+/// decoding finds two inbound plain `bl` sites (`0x082b7a64`, `0x08382090`)
+/// and no predicated `bl` sites.
+///
+/// SQLite 3.5.9's `sqlite3VdbeFinalize`: reset a running or halted statement,
+/// reject every state except INIT, release its result-column `Mem` array, then
+/// delete the VDBE. Deliberate deviation: `sqlite3VdbeDelete` at `0x08386d24`
+/// is not yet ported, so target builds use its verified retail address and
+/// host builds retain a replaceable seam.
+///
+/// # Safety
+/// `statement` must be a live VDBE whose result-column array and delete
+/// dependencies are valid. The statement is destroyed before this returns.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sqlite_vdbe_finalize(statement: *mut Vdbe) -> i32 {
+    let mut result = 0;
+    match (*statement).magic {
+        VDBE_MAGIC_RUN | VDBE_MAGIC_HALT => result = sqlite_vdbe_reset(statement, 1usize as *mut u8),
+        VDBE_MAGIC_INIT => {}
+        _ => return SQLITE_MISUSE,
+    }
+    release_mem_array((*statement).a_col_name.cast(), (*statement).n_res_column, 1);
+    #[cfg(target_os = "none")]
+    retail_vdbe_delete(statement);
+    #[cfg(not(target_os = "none"))]
+    vdbe_delete_op()(statement);
+    result
+}
+
 
 /// RetailOS load address of SQLite's private `stmtLruRemove` helper.
 pub const STMT_LRU_REMOVE_ADDRESS: usize = 0x0839_1d64;
@@ -42,8 +104,7 @@ unsafe extern "C" fn retail_stmt_lru_remove(statement: *mut Vdbe) {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_vdbe_finalize(statement: *mut Vdbe) -> i32 {
-    let finalize: VdbeFinalize = core::mem::transmute(VDBE_FINALIZE_ADDRESS);
-    finalize(statement)
+    sqlite_vdbe_finalize(statement)
 }
 
 #[cfg(not(target_os = "none"))]
@@ -117,6 +178,7 @@ mod tests {
     static mut CALLS: [(u8, usize); 2] = [(0, 0); 2];
     static mut CALL_COUNT: usize = 0;
     static mut FINALIZE_RESULT: i32 = 0;
+    static mut DELETE_CALL: usize = 0;
 
     unsafe extern "C" fn recording_stmt_lru_remove(statement: *mut Vdbe) {
         CALLS[CALL_COUNT] = (1, statement as usize);
@@ -127,6 +189,10 @@ mod tests {
         CALLS[CALL_COUNT] = (2, statement as usize);
         CALL_COUNT += 1;
         FINALIZE_RESULT
+    }
+
+    unsafe extern "C" fn recording_vdbe_delete(statement: *mut Vdbe) {
+        DELETE_CALL = statement as usize;
     }
 
     unsafe fn with_recorders<R>(result: i32, body: impl FnOnce() -> R) -> R {
@@ -142,6 +208,15 @@ mod tests {
         FINALIZE_RESULT = result;
         let result = body();
         core::ptr::write_volatile(core::ptr::addr_of_mut!(FINALIZE_OPS), DEFAULT_FINALIZE_OPS);
+        result
+    }
+
+    unsafe fn with_delete_recorder<R>(body: impl FnOnce() -> R) -> R {
+        let saved = VDBE_DELETE;
+        VDBE_DELETE = recording_vdbe_delete;
+        DELETE_CALL = 0;
+        let result = body();
+        VDBE_DELETE = saved;
         result
     }
 
@@ -170,6 +245,32 @@ mod tests {
                 assert_eq!(sqlite3_finalize(statement), 0x11);
                 assert_eq!(CALL_COUNT, 2);
                 assert_eq!(CALLS, [(1, statement as usize), (2, statement as usize)]);
+            });
+        }
+    }
+
+    #[test]
+    fn vdbe_finalize_deletes_initialized_statement_and_returns_ok() {
+        let _guard = lock();
+        let mut statement: Vdbe = unsafe { core::mem::zeroed() };
+        statement.magic = VDBE_MAGIC_INIT;
+        unsafe {
+            with_delete_recorder(|| {
+                assert_eq!(sqlite_vdbe_finalize(&mut statement), 0);
+                assert_eq!(DELETE_CALL, (&mut statement as *mut Vdbe) as usize);
+            });
+        }
+    }
+
+    #[test]
+    fn vdbe_finalize_rejects_unknown_magic_without_deleting() {
+        let _guard = lock();
+        let mut statement: Vdbe = unsafe { core::mem::zeroed() };
+        statement.magic = 0;
+        unsafe {
+            with_delete_recorder(|| {
+                assert_eq!(sqlite_vdbe_finalize(&mut statement), SQLITE_MISUSE);
+                assert_eq!(DELETE_CALL, 0);
             });
         }
     }
