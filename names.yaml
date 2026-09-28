@@ -54997,6 +54997,33 @@ functions:
       preservation, successful empty-root descent and big-endian child
       decoding, and the raw +0x04 no-descent gate.
 
+  # ---- B-tree cursor index-key payload fetcher (src/sqlite/key_fetch.rs) ----
+  - address: 0x08370e54
+    ghidra: FUN_08370e54
+    name: btree_key_fetch
+    size: 24
+    sig: "ptr btree_key_fetch(cursor: *mut BtCursor, out: *mut u32)"
+    module: sqlite/key_fetch
+    status: ported
+    vars:
+      param_1/r0: cursor
+      param_2/r1: out
+      r2: skip_key (one)
+      FUN_082cdedc: btree_fetch_payload (unported dispatch seam)
+    notes: >-
+      Raw osos.dec words prove the 24-byte extent 0x08370e54..0x08370e6c:
+      ldrb r2,[r0,#0x43]; cmp r2,#1; movne r0,#0; moveq r2,#1; beq
+      0x082cdedc; bx lr. The next real function starts with push
+      {r4,r5,r6,lr} at 0x08370e6c. The body contains zero plain and zero
+      predicated BL instructions; binary caller scanning finds two direct BL
+      sites, 0x083882a0 and 0x0838bce8. This is SQLite 3.5.x
+      sqlite3BtreeKeyFetch: non-VALID cursors return null without writing
+      through out; VALID tail-dispatches fetchPayload(cursor,out,1) at
+      0x082cdedc, where one selects the index-key branch. fetchPayload remains
+      unported, so the direct branch uses the existing volatile
+      BTREE_FETCH_PAYLOAD_OPS seam with its null default. Host tests cover all
+      non-VALID state values and the valid tail-call ABI.
+
   # ---- B-tree cursor data/key-size accessors (src/sqlite/data_size.rs) ----
   - address: 0x08370e6c
     ghidra: FUN_08370e6c
