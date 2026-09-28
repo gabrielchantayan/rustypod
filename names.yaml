@@ -58520,6 +58520,34 @@ functions:
       No names.yaml entry provides a ported callable seam for that address,
       so replacing the walker callback would alter its stack-dependent
       continuation.
+  - address: 0x083784e0
+    ghidra: FUN_083784e0
+    name: sqlite_expr_is_constant_or_function
+    size: 40
+    sig: "i32 sqlite_expr_is_constant_or_function(Expr *expr)"
+    module: sqlite/expr_is_constant_or_function
+    status: identified
+    renames:
+      param_1/r0: expr
+      DAT_08378508: constant_or_function_expression_visitor
+    notes: >-
+      Deferred: raw ARM establishes the exact 40-byte A32 extent
+      0x083784e0..0x08378508; 0x08378508 is its callback literal and
+      0x0837850c begins the next real function. It initializes a stack-local
+      i32 to 3, calls sqlite_expr_walk @ 0x0839866c with (expr,
+      0x082c2a44, &is_constant), then returns whether that local is nonzero.
+      Decoding every instruction word finds exactly one outbound direct BL,
+      the unconditional call at 0x083784f4, and no predicated BL; exactly two
+      inbound direct calls target this entry, both unconditional BL at
+      0x082ccdfc and 0x0838d9a8. The selector value 3 and the adjacent
+      sqlite_expr_is_constant wrapper identify the SQLite
+      sqliteExprIsConstantOrFunction shape. A faithful Rust port is blocked:
+      0x082c2a44 is a stock-code continuation, not a callable visitor seam.
+      Its first instruction reads the inherited walker stack, its path at
+      0x082c2a88 restores 0xa4 bytes and pops r4-r9, sl, fp, and pc, consuming
+      the walker caller frame rather than returning to sqlite_expr_walk's blx.
+      No names.yaml entry supplies a ported callable identity for this literal,
+      so replacing it would invent stack-dependent callback behavior.
   - address: 0x083787a8
     ghidra: FUN_083787a8
     name: sqlite_resolve_expr_names
