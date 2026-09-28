@@ -156979,3 +156979,33 @@ functions:
       function-pointer seam and host tests inject both callees. match.py is
       expected to show the seam-induced BLX and frame differences from stock's
       direct BL/tail-B structure.
+
+  - address: 0x0839bf94
+    ghidra: FUN_0839bf94
+    name: registry_container_construct_with_byte_state
+    size: 32
+    sig: "Registry *registry_container_construct_with_byte_state(Registry *storage, u8 enabled)"
+    module: app/class_registry
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1/r4: enabled
+      FUN_0813533c: registry_container_construct_default
+      DAT_0839bfb0: BYTE_STATE_REGISTRY_VTABLE_ADDRESS
+    notes: >-
+      Raw osos.dec establishes the true 32-byte extent: seven A32 instructions
+      from 0x0839bf94 through 0x0839bfac plus the 0x08981f14 vtable literal at
+      0x0839bfb0; the next real function starts with push {r4,lr} at
+      0x0839bfb4. Decoding the caller at 0x0812b6e8 independently finds two
+      unconditional plain BL sites, 0x0812b764 and 0x0812b778, and no
+      predicated BL site. The body preserves enabled in r4, directly calls the
+      already-ported registry_container_construct_default, installs its own
+      vtable, stores enabled at target offset +0x28, and returns the base
+      constructor result. The concrete class identity remains unrecovered, so
+      the name records only the verified construction and byte-state behavior.
+      Deliberate deviation: Rust retains the target +0x28 byte offset instead
+      of projecting a host struct field because Registry contains host-width
+      pointers. Host tests verify base construction with (4,4), vtable
+      replacement, exact byte write, and adjacent-byte preservation. match.py
+      confirms the direct-call/store structure; its expected diff is LLVM's
+      larger frame and unresolved archive-local BL relocation.
