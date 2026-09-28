@@ -52257,6 +52257,30 @@ functions:
       its target offsets are asserted in sqlite/vdbe.rs. The pre-existing
       raw-pointer value_text dispatch seam now defaults to this port and
       remains only for its recorder tests.
+  - address: 0x0837d374
+    ghidra: FUN_0837d374
+    name: sqlite3_malloc_size
+    size: 24
+    sig: "i32 sqlite3_malloc_size(u8 *payload)"
+    module: sqlite/malloc_size
+    status: ported
+    renames:
+      param_1: payload
+      uVar1: size
+    notes: >-
+      Raw osos.dec establishes the 24-byte extent
+      0x0837d374..0x0837d38c: cmp r0,#0; ldrne r1,[r0,#-4];
+      subne r0,r0,r1; ldrne r0,[r0,#-8]; moveq r0,#0; bx lr. The next
+      real function starts at 0x0837d38c (stmdb sp!, {r4-r6,lr}).
+      NULL yields zero; otherwise the alignment-pad word immediately
+      before payload rewinds to the tag-57 tracked header, whose first
+      word is the requested signed allocation size. Decoding every ARM
+      B/BL immediate in osos.dec finds exactly two inbound direct calls:
+      plain bl at 0x0838bdcc and 0x08391054; none are predicated.
+      Deliberate deviation: Rust expresses the same two aligned word
+      reads with raw pointers rather than ARM predication. Host tests
+      cover NULL plus zero, four-byte, and twelve-byte padding, including
+      a negative size.
   - address: 0x0838bdb0
     ghidra: FUN_0838bdb0
     name: vdbe_mem_grow
@@ -52306,13 +52330,12 @@ functions:
       ported vdbe_mem_set_str @ 0x0838c158 (left dispatching through
       its own seam); 0x0838c348 in the ported vdbe_mem_stringify
       @ 0x0838c32c; and 0x0838eed8 in FUN_0838ee8c. Deviations -
-      sqlite3MallocSize @ 0x0837d374 (20 bytes, unported) is
-      reproduced inline as the private tracked_block_size helper: the
-      original's exact two-word walk of the tag-57 tracked header
-      (pad at payload-4, size at payload-pad-8), NULL yielding 0, no
-      ops slot; the allocator family is called directly through its
-      ported twins (sqlite/mem's db_realloc_or_free and
-      db_malloc_raw, heap/tracked's tracked_free,
+      sqlite3MallocSize @ 0x0837d374 is the separately ported
+      sqlite/malloc_size::sqlite3_malloc_size; it retains the original's
+      exact two-word tracked-header walk (pad at payload-4, size at
+      payload-pad-8), NULL yielding 0. The allocator family is called
+      directly through its ported twins (sqlite/mem's db_realloc_or_free
+      and db_malloc_raw, heap/tracked's tracked_free,
       libc/rt_memcpy's __rt_memcpy). Two firmware deviations from
       upstream 3.5.9, kept as-is and pinned by host tests: the flags
       mask is bic #0x180 applied on success AND failure alike
@@ -52320,9 +52343,9 @@ functions:
       so MEM_Dyn (0x40) survives the grow with xDel NULLed, and a
       failed free+malloc grow keeps the type bits instead of becoming
       MEM_Null (only the failed realloc arm stamps MEM_Null).
-      match.py structural: same skeleton - the capacity gate with the
-      malloc-size walk inlined (ldr [r0,#-4]/sub/ldr [r1,#-8]), the
-      cmp/movle #32 floor, the realloc arm with its strheq MEM_Null,
+      match.py structural: same skeleton - the capacity gate calls
+      sqlite3_malloc_size before the cmp/movle #32 floor, the realloc
+      arm with its strheq MEM_Null,
       the free+malloc arm (LLVM inlines tracked_free's stats update),
       the four-way cmpne memcpy condition, the xDel blx with the old
       z, and the unconditional and #0xfe7f/moveq #7 tail. Host tests

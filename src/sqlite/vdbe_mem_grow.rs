@@ -131,11 +131,9 @@
 //!
 //! ### Deviations
 //!
-//! - `sqlite3MallocSize` @ 0x0837d374 (20 bytes, unported) is
-//!   reproduced inline by [`tracked_block_size`]: the original's exact
-//!   two-word walk of the tag-57 tracked header (`pad` at payload-4,
-//!   size word at `payload - pad - 8`), NULL yielding 0. It is a pure
-//!   read of the layout `heap::tracked` documents, so no ops slot.
+//! - `sqlite3MallocSize` @ 0x0837d374 is [`super::malloc_size::sqlite3_malloc_size`],
+//!   a direct port of the original tracked-header walk. It is a pure read
+//!   of the layout `heap::tracked` documents, so no ops slot.
 //! - Firmware deviation from upstream 3.5.9, kept as-is: the flags
 //!   mask is `bic #0x180` (`MEM_Static | MEM_Ephem`) applied
 //!   UNCONDITIONALLY — upstream clears `MEM_Ephem | MEM_Static |
@@ -151,8 +149,9 @@
 //!   typed `repr(C)` struct (offsets asserted on 32-bit targets in
 //!   `sqlite/vdbe.rs`).
 
-use crate::heap::tracked::{tracked_free, BLOCK_HEADER_SIZE};
+use crate::heap::tracked::tracked_free;
 use crate::libc::rt_memcpy::__rt_memcpy;
+use super::malloc_size::sqlite3_malloc_size;
 use super::mem::{db_malloc_raw, db_realloc_or_free};
 use super::mem_release::FLAG_DYN;
 use super::value_new::MEM_NULL;
@@ -164,20 +163,6 @@ use super::vdbe_mem_shallow_copy::MEM_EPHEM;
 /// Minimum request the original allocates — the signed
 /// `cmp r5,#0x20; movle r5,#0x20` floor.
 const MIN_GROWTH: i32 = 0x20;
-
-/// `sqlite3MallocSize` @ 0x0837d374, reproduced inline (see the module
-/// header): the tag-57 tracked block's requested-size word, recovered
-/// exactly the way the original walks it — `pad` at `payload - 4`,
-/// size at `payload - pad - `[`BLOCK_HEADER_SIZE`]. NULL has no block,
-/// so 0.
-unsafe fn tracked_block_size(payload: *mut u8) -> i32 {
-    if payload.is_null() {
-        return 0;
-    }
-    let pad = (payload.sub(4) as *const u32).read() as usize;
-    let raw = payload.sub(pad).sub(BLOCK_HEADER_SIZE);
-    (raw as *const i32).read()
-}
 
 /// vdbe_mem_grow — original: `FUN_0838bdb0` @ 0x0838bdb0 (232 bytes;
 /// 13 `bl` call sites).
@@ -198,7 +183,7 @@ unsafe fn tracked_block_size(payload: *mut u8) -> i32 {
 #[inline(never)]
 pub unsafe extern "C" fn vdbe_mem_grow(p_mem: *mut Mem, size: i32, preserve: i32) -> i32 {
     let mut size = size;
-    if (*p_mem).z_malloc.is_null() || tracked_block_size((*p_mem).z_malloc) < size {
+    if (*p_mem).z_malloc.is_null() || sqlite3_malloc_size((*p_mem).z_malloc) < size {
         if size <= MIN_GROWTH {
             size = MIN_GROWTH;
         }
