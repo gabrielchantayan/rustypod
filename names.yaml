@@ -54607,6 +54607,39 @@ functions:
       cover fault precedence, incrblob abort, exact movement arguments,
       successful key clearing, and failure retention.
 
+  # ---- B-tree cursor faulting (src/sqlite/btree_trip_all_cursors.rs) ----
+  - address: 0x08372d8c
+    ghidra: FUN_08372d8c
+    name: btree_trip_all_cursors
+    size: 72
+    sig: "void btree_trip_all_cursors(Btree *btree, i32 error_code)"
+    module: sqlite/btree_trip_all_cursors
+    status: ported
+    renames:
+      param_1/r0/r7: btree
+      param_2/r1/r5: error_code
+      iVar1/r4: cursor
+      FUN_0837118c: btree_enter
+      FUN_082c3528: btree_clear_cursor
+      FUN_08371da4: btree_leave (tail branch)
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x08372d8c..0x08372dd4: push {r4,r5,r6,r7,r8,lr} begins the body, its
+      final instruction is a tail branch to btree_leave, and the following
+      push {r4-r10,lr} begins a separate function. Raw decoding identifies
+      two inbound direct calls, both predicated BLNE at 0x082d6cf0 and
+      0x08372b84; no plain or other predicated BL targets it. The body holds
+      two unconditional plain BL calls (btree_enter @ 0x0837118c and
+      btree_clear_cursor @ 0x082c3528), no predicated calls, and the tail B
+      btree_leave @ 0x08371da4. This is SQLite 3.5's
+      sqlite3BtreeTripAllCursors: enter the Btree, walk BtShared.pCursor
+      through BtCursor.pNext (+0x08), clear each cursor, store FAULT (3) at
+      eState +0x43 and the supplied error at skip +0x50, then leave. No
+      deliberate deviations: Btree.pBt, BtShared.pCursor, and BtCursor.pNext
+      are target-width u32 fields; host tests map all fixture objects below
+      4 GiB and cover a two-cursor chain, negative errors, lock nesting, and
+      the empty non-shared path.
+
   # ---- B-tree rollback (src/sqlite/btree_rollback.rs) ----
   - address: 0x08372b50
     ghidra: FUN_08372b50
