@@ -197,6 +197,7 @@ pub mod red_black_tree_cow_pair_subtree_clone;
 pub mod red_black_tree_node_cow_pair_clone;
 pub mod red_black_tree_payload_56_node_pool_acquire;
 pub mod red_black_tree_node_pool_acquire_083ba9b8;
+pub mod red_black_tree_byte_word_node_pool_acquire;
 pub mod red_black_tree_node_pool_acquire_083bd3c4;
 pub mod red_black_tree_payload_word_node_pool_acquire_083c0ba8;
 pub mod red_black_tree_payload_12_node_pool_acquire_083c2c54;
