@@ -128,6 +128,7 @@ pub mod column_text;
 pub mod context_malloc;
 pub mod corrupt_schema;
 pub mod data_size;
+pub mod data_fetch;
 pub mod key;
 pub mod restore_cursor_position;
 pub mod save_cursor_position;
