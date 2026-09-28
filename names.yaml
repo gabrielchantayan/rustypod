@@ -156534,3 +156534,32 @@ functions:
       because registry pointers are native-width on the host; device builds
       call the port directly. match.py structural review records the
       vtable-store / dispose-call / tail-destructor sequence.
+
+  - address: 0x0839c964
+    ghidra: FUN_0839c964
+    name: vtable_0898285c_destruct
+    size: 36
+    sig: "StringObject *vtable_0898285c_destruct(StringObject *this)"
+    module: cxx/vtable_0898285c_destruct
+    status: ported
+    renames:
+      param_1/r0: this
+      r4: this
+      DAT_0839c988: vtable_0898285c
+      FUN_0839c8b0: string_object_opaque_base_destroy
+      FUN_08135380: registry_container_destruct
+    notes: >-
+      Raw osos.dec decodes eight instruction words from 0x0839c964 through the
+      tail b at 0x0839c984, followed by literal 0x0898285c at 0x0839c988;
+      0x0839c98c starts the next real function. The true extent is 36 bytes,
+      matching Ghidra only when its trailing literal is included. The body
+      installs the literal vtable, calls the ported
+      string_object_opaque_base_destroy @ 0x0839c8b0, restores this to r0,
+      then tail-branches to the ported registry_container_destruct @
+      0x08135380. Whole-image A32 branch decoding finds two inbound plain BL
+      sites (0x0811da00, 0x08284a98) and zero predicated BL sites. The class
+      identity remains unestablished; the semantic name deliberately states
+      only the verified vtable destructor role. ARM builds call both ported
+      callees directly. Host tests use a narrow final-tail seam because
+      Registry has host-width pointer fields while stock passes target layout
+      unchanged.
