@@ -674,6 +674,7 @@ pub mod word_key_map;
 pub mod tagged_buffer_release;
 pub mod tagged_buffer_range_release;
 pub mod word_key_set;
+pub mod word_key_set_node_key;
 pub mod opaque_tree_node_pool;
 pub mod word_key_set_count;
 pub mod owner_callback_dispatch;
