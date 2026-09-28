@@ -64910,6 +64910,35 @@ functions:
       an fp frame, a volatile seam load and blx rather than the retail
       direct bl; the key pair, result load, and node+0x11 return remain.
 
+  - address: 0x083b8a24
+    ghidra: FUN_083b8a24
+    name: settings_byte_tree_allocate_node
+    size: 184
+    sig: "SettingsByteTreeNode *settings_byte_tree_allocate_node(SettingsByteTreeNodePool *pool)"
+    module: cxx/settings_byte_tree
+    status: ported
+    vars: {param_1: pool, puVar1: node, piVar3: chunk, iVar4: arena, uVar2: previous_capacity, uVar5: grown_capacity, uVar6: capacity}
+    renames:
+      FUN_08266c70: operator_new_checked
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte A32 extent: 46 words from
+      push {r4-r8,lr} at 0x083b8a24 through pop {r4-r8,pc} at 0x083b8ad8;
+      0x083b8adc begins the next real function. The body has two unconditional
+      plain bl instructions at 0x083b8a88 and 0x083b8a9c, both to
+      operator_new_checked @ 0x08266c70, and no predicated bl instructions.
+      Ghidra and raw callers agree on two inbound unconditional plain bl sites,
+      at 0x08259f60 and 0x083b934c. This libstdc++ pool pops a recycled
+      0x14-byte byte-key/byte-value red-black-tree node through node+0x0c, or
+      grows 0x0c-byte chunk headers and capacity*0x14 arenas, starting at 0x20
+      entries and using max(previous+0x20, previous+previous/2+previous/8).
+      It clears color and parent/left/right while preserving the two-byte payload
+      at node+0x10. Ghidra types it void, but both callers consume r0, so the
+      Rust port returns the node. Deliberate deviations: the dead r1=0 allocator
+      argument is omitted, size_of preserves target layout while host pointers
+      widen safely, and an inline(never) allocator front-end retains the two
+      allocation boundaries. Host tests cover initial growth/bump allocation and
+      recycled-node reinitialization with payload preservation.
+
   - address: 0x083b8adc
     ghidra: FUN_083b8adc
     name: byte_key_tree_equal_range

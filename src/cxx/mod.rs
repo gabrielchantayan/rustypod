@@ -440,6 +440,7 @@ pub mod resource_handle_execute;
 pub mod zero_selector_timeout_dispatch;
 pub mod return_forwarder;
 pub mod settings;
+pub mod settings_byte_tree;
 pub mod scaled_cursor;
 pub mod selector_item_base;
 pub mod shared_cell;
