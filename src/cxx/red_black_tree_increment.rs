@@ -64,6 +64,18 @@
 //! none.
 //!
 //!
+//! `FUN_083b5c04` at load address `0x083b5c04` is an 84-byte (21-word)
+//! byte-identical copy of `red_black_tree_advance_cursor`, ending with `bx lr`
+//! at `0x083b5c54`; the next independently entered function begins at
+//! `0x083b5c58`. Complete aligned A32 B/BL-immediate decoding finds two
+//! inbound unconditional plain `bl` instructions at 0x083c2398 and
+//! 0x083c2870, zero predicated `bl` instructions, and no outbound calls. It
+//! advances the target-width cursor to its in-order successor: descend through
+//! the right subtree's left spine, or climb parent links while leaving
+//! right-child edges, retaining the header sentinel. This exact duplicate
+//! deliberately reuses the established dispatch seam; its dedicated host test
+//! covers the sibling-successor path. Deliberate deviations: none.
+//!
 //! `FUN_083b5c58` at load address `0x083b5c58` is an 84-byte (21-word)
 //! byte-identical copy of `red_black_tree_advance_cursor`, through `bx lr` at
 //! `0x083b5ca8`; the next separately linked sibling begins at `0x083b5cac`.
@@ -441,6 +453,14 @@ mod tests {
         .map(|p| p as usize)
     });
 
+    static ADVANCE_CURSOR_083B5C04_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
+        crate::testing::try_map_u32_slab(
+            crate::testing::hints::RED_BLACK_TREE_ADVANCE_CURSOR_083B5C04,
+            0x1000,
+        )
+        .map(|p| p as usize)
+    });
+
     static DECREMENT_CURSOR_SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         crate::testing::try_map_u32_slab(
             crate::testing::hints::RED_BLACK_TREE_DECREMENT_CURSOR,
@@ -455,6 +475,10 @@ mod tests {
 
     fn try_advance_cursor_slab() -> Option<*mut u8> {
         (*ADVANCE_CURSOR_SLAB).map(|p| p as *mut u8)
+    }
+
+    fn try_advance_cursor_083b5c04_slab() -> Option<*mut u8> {
+        (*ADVANCE_CURSOR_083B5C04_SLAB).map(|p| p as *mut u8)
     }
 
     fn try_decrement_cursor_slab() -> Option<*mut u8> {
@@ -589,6 +613,31 @@ mod tests {
             let cursor_address = &mut cursor as *mut u32;
             assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
             assert_eq!(cursor, header as usize as u32);
+        }
+    }
+
+    #[test]
+    fn advance_cursor_083b5c04_selects_the_first_left_edge_ancestor() {
+        let Some(base) = try_advance_cursor_083b5c04_slab() else {
+            crate::testing::note_missing_u32_fixture("red_black_tree_advance_cursor_083b5c04");
+            return;
+        };
+
+        unsafe {
+            reset(base);
+            let header = node(base, 0);
+            let ancestor = node(base, 1);
+            let current = node(base, 2);
+            let sibling = node(base, 3);
+            initialize(header, ptr::null_mut(), ancestor, ptr::null_mut());
+            initialize(ancestor, header, current, sibling);
+            initialize(current, ancestor, ptr::null_mut(), ptr::null_mut());
+            initialize(sibling, ancestor, ptr::null_mut(), ptr::null_mut());
+            let mut cursor = current as usize as u32;
+            let cursor_address = &mut cursor as *mut u32;
+
+            assert_eq!(red_black_tree_advance_cursor(cursor_address), cursor_address);
+            assert_eq!(cursor, ancestor as usize as u32);
         }
     }
 
