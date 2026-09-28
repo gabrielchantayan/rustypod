@@ -155873,3 +155873,27 @@ functions:
       appends it to the head/tail anchor at owner+4, invokes cleanup on
       owner+20, then unlocks owner+12. The port uses target-width word indices
       and target-address/host-ABI seams for the two unnamed callees.
+  - address: 0x0839e59c
+    ghidra: FUN_0839e59c
+    name: singly_linked_list_is_empty_0839e59c
+    size: 24
+    sig: "u32 singly_linked_list_is_empty_0839e59c(SinglyLinkedList *list)"
+    module: util/singly_linked_list_is_empty_0839e59c
+    status: ported
+    renames:
+      param_1/r0: list
+      param_1_plus_0x04: head_link
+      FUN_0807a13c: singly_linked_list_count
+      uVar1/r0: node_count
+    notes: >-
+      Raw osos.dec establishes the exact 24-byte A32 extent
+      0x0839e59c..0x0839e5b4: push {r4,lr}; add r0,r0,#4; bl
+      singly_linked_list_count; rsbs r0,r0,#1; cmp r0,#1; movhi r0,#0;
+      pop {r4,pc}. The separately linked successor starts at 0x0839e5b4.
+      Whole-image A32 B/BL decoding finds exactly two inbound unconditional
+      plain BL sites, 0x081ba5d8 and 0x081ba640, and zero predicated BL
+      sites. The body has one outbound plain BL to ported
+      singly_linked_list_count @ 0x0807a13c and zero predicated BL calls.
+      It counts the NULL-terminated intrusive chain at list+4 and returns
+      one only for a zero count; the list address has no NULL guard.
+      Deliberate deviations: none.
