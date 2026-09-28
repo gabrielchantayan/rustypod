@@ -431,6 +431,34 @@ pub unsafe extern "C" fn dma_aligned_u32_array_destroy(
 ) -> *mut DmaAlignedArray {
     unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
 }
+/// dma_aligned_array_destroy_variant_0839e1b8 — original: `FUN_0839e1b8` @
+/// 0x0839e1b8 (72 bytes exactly, 0x0839e1b8..0x0839e200; the u32-array
+/// constructor opens immediately after). Whole-image A32 decoding finds two
+/// direct inbound `bl` callers, both unconditional (0x081c16fc, 0x081c1858),
+/// and no predicated inbound `bl` form. Its sole outbound call is predicated
+/// `blne free_wrapper` @ 0x080e7970 with tag 3.
+///
+/// A separately linked DMA-aligned-array destructor instance. If `constructed`
+/// is nonzero, it makes the count-sized empty trivial-element destruction walk;
+/// it always clears `constructed`, releases a non-NULL raw allocation through
+/// tag-3 [`free_wrapper`], and returns `array`. `aligned_data` and
+/// `element_count` remain untouched.
+///
+/// # Safety
+///
+/// `array` must be non-NULL, word-aligned, and point to writable target-size
+/// [`DmaAlignedArray`] storage. A nonzero `allocation` must be owned by this
+/// object and valid for the retailOS tag-3 heap free path.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.dma_aligned_array_destroy_variant_0839e1b8")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dma_aligned_array_destroy_variant_0839e1b8(
+    array: *mut DmaAlignedArray,
+) -> *mut DmaAlignedArray {
+    unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
+}
+
+
 
 
 unsafe extern "C" fn release_tag3_allocation(allocation: *mut u8) {
@@ -444,8 +472,9 @@ unsafe fn dma_aligned_array_destroy_with_release(
 ) -> *mut DmaAlignedArray {
     unsafe {
         if (*array).constructed != 0 {
+            let element_count = (*array).element_count;
             let mut index = 0u32;
-            while index < (*array).element_count {
+            while index < element_count {
                 let _ = core::hint::black_box(index);
                 index = index.wrapping_add(1);
             }
@@ -704,6 +733,30 @@ mod tests {
             crate::heap::veneers::tests::free_log(),
             (1, before.allocation as usize as *mut u8, 3),
             "the construction byte only guards the empty walk, not the free"
+        );
+    }
+
+    #[test]
+    fn e1b8_variant_clears_construction_and_releases_tag3_allocation() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let mut array = DmaAlignedArray {
+            allocation: 0x0821_0300,
+            aligned_data: 0x8821_0320,
+            element_count: 2,
+            constructed: 1,
+        };
+        let before = array;
+
+        let result = unsafe { dma_aligned_array_destroy_variant_0839e1b8(&mut array) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array));
+        assert_eq!(array.allocation, before.allocation);
+        assert_eq!(array.aligned_data, before.aligned_data);
+        assert_eq!(array.element_count, before.element_count);
+        assert_eq!(array.constructed, 0);
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (1, before.allocation as usize as *mut u8, 3),
         );
     }
 
