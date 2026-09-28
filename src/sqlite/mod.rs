@@ -311,6 +311,7 @@ pub mod vdbe_unbind;
 pub mod vdbe_mem_apply_affinity;
 pub mod vdbe_mem_set_double;
 pub mod vdbe_mem_expand_blob;
+pub mod src_list_shift_join_type;
 pub mod vdbe_mem_make_writeable;
 pub mod vdbe_mem_grow;
 pub mod vdbe_mem_copy;

@@ -57414,6 +57414,32 @@ functions:
       inline-item loop, seven cleanup calls, and final free; LLVM adds its
       frame and emits blx through the two unported-release seams.
 
+  - address: 0x083845dc
+    ghidra: FUN_083845dc
+    name: src_list_shift_join_type
+    size: 60
+    sig: "void src_list_shift_join_type(SrcList *source_list)"
+    module: sqlite/src_list_shift_join_type
+    status: ported
+    renames:
+      param_1/r0: source_list
+      iVar1/r1: index
+      "source_list+0x00": n_src
+      "source_list+0x1d": join_type
+    notes: >-
+      SQLite 3.5.x's sqlite3SrcListShiftJoinType. Raw osos.dec establishes
+      the exact 60-byte extent 0x083845dc..0x08384614; the next separately
+      linked function begins with push {r4-r11,lr} at 0x08384618. Decoding
+      whole-image ARM B/BL-immediate words finds exactly two direct inbound
+      call sites, both unconditional plain BL, and no predicated BL forms.
+      NULL and 0xfffffff8 return without accessing memory. Otherwise the
+      signed SrcList.nSrc halfword at +0x00 is decremented before the
+      comparison, causing each +0x1d join-type byte to copy into its
+      successor at a 0x30-byte stride, then clearing the first byte. Host
+      tests cover all shifting positions, nonpositive and singleton counts,
+      adjacent-byte preservation, and both sentinel no-ops. No deliberate
+      deviations from firmware behavior.
+
   - address: 0x08384570
     ghidra: FUN_08384570
     name: src_list_lookup
