@@ -156628,3 +156628,29 @@ functions:
       the two existing Rust ports directly. Host tests cover disabled, negative
       count, and first-live-owner traversal; match.py exit 1 is the expected
       structural review (LLVM frame and equivalent count guard).
+
+  - address: 0x0839c7ac
+    ghidra: FUN_0839c7ac
+    name: vtable_089826ac_destruct
+    size: 36
+    sig: "ValidatedRegistry *vtable_089826ac_destruct(ValidatedRegistry *registry)"
+    module: cxx/vtable_089826ac_destruct
+    vars: {param_1/r0/r4: registry, DAT_0839c7d0: VTABLE_089826AC, FUN_0839c6ec: validated_registry_validate, FUN_08135380: registry_container_destruct}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes eight ARM words of code from 0x0839c7ac
+      through the tail `b 0x08135380` at 0x0839c7cc, plus the vtable literal
+      0x089826ac at 0x0839c7d0; 0x0839c7d4 starts the next real function.
+      The true size is 36 bytes, unlike Ghidra's 36-byte C extent that
+      incorrectly absorbs the subsequent function. The body stores the
+      derived vtable at +0x00, calls the unported validation helper
+      0x0839c6ec, and tail-branches to the ported registry_container_destruct
+      @ 0x08135380, preserving its registry return value. Independent raw ARM
+      decoding finds two inbound plain BL sites (0x0811d9d0, 0x08135a90) and
+      no predicated BL sites. The validation helper tests the byte at +0x28,
+      then uses vtable slot +0x40 to assert that every indexed entry is
+      empty. Host tests replace only this unported helper and the final direct
+      tail call to observe order and arguments; target builds use the fixed
+      helper address and direct port call. Class identity remains unproven, so
+      ValidatedRegistry describes the observed invariant rather than inventing
+      a specific class name.
