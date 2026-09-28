@@ -48014,6 +48014,34 @@ functions:
       `*mut *mut u8` (stride 4 on target, 8 on host) because the cookie
       and elements are pointer-sized - the word-index rule.
 
+  - address: 0x08391cbc
+    ghidra: FUN_08391cbc
+    name: sqlite_delete_column_names
+    size: 104
+    sig: "void sqlite_delete_column_names(Table *table)"
+    module: sqlite/delete_column_names
+    status: ported
+    vars:
+      param_1/r6: table
+      "[table + 0x04]": nCol
+      "[table + 0x08]": aCol
+      "[aCol + 0x00]": zName
+      "[aCol + 0x04]": pDflt
+      "[aCol + 0x08]": zType
+      "[aCol + 0x0c]": zColl
+      FUN_08377e00: expr_delete
+      FUN_083906f4: tracked_free
+    notes: >-
+      Raw osos.dec words establish the complete 104-byte extent
+      0x08391cbc..0x08391d24; the successor is the independent 8-byte
+      free_tag57 veneer beginning `mov r1,#57`. The raw loop uses signed
+      nCol at table+0x04 and 20-byte Column records at table+0x08. Per
+      record it directly frees zName, directly deletes pDflt, then directly
+      frees zType and zColl; it frees aCol after the loop and clears aCol
+      then nCol even when aCol is NULL. Decoding finds five unconditional
+      direct BL instructions (four to tracked_free and one to expr_delete)
+      and no predicated BL instructions. The Rust port preserves target
+      pointer words and the 20-byte stride on 64-bit hosts.
   - address: 0x08391d24
     ghidra: FUN_08391d24
     name: free_tag57
