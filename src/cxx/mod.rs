@@ -121,6 +121,7 @@ pub mod slot_array_owner_get;
 pub mod byte_key_map;
 pub mod byte_key_tree_equal_range;
 pub mod byte_key_tree_erase_key;
+pub mod byte_key_tree_recycle_subtree;
 pub mod resource_value_map_lookup_or_insert;
 pub mod string_value_map_lookup_or_insert;
 pub mod string_vector_map_lookup_or_insert;

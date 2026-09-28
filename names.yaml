@@ -65005,6 +65005,25 @@ functions:
       self-loop check, ascend loop, hook blx and flag stores all
       present; LLVM inlines the leaf callees (deviation, documented).
 
+  - address: 0x083b8808
+    ghidra: FUN_083b8808
+    name: byte_key_tree_recycle_subtree
+    size: 60
+    sig: "void byte_key_tree_recycle_subtree(ByteKeyTree *tree, u8 *node)"
+    module: cxx/byte_key_tree_recycle_subtree
+    status: ported
+    vars: {param_1: tree, param_2: node, iVar1: free_head}
+    notes: >-
+      Ported. Depth-first post-order recycle of a byte-keyed red-black tree:
+      recursively process the right child at node+0x0c, save the left child
+      at node+0x08, then prepend the current node through its +0x0c word to
+      the tree pool free-list at tree+0x04. The saved left child becomes the
+      next loop iteration. Raw osos.dec establishes the 60-byte extent
+      0x083b8808..0x083b8843 and one recursive plain BL; exactly two inbound
+      plain BL sites (0x083b8608 and 0x083b8820), with no predicated BL
+      forms. Target pointers remain u32 words to preserve four-byte retail
+      field offsets on 64-bit host tests. No other deviations.
+
   - address: 0x083b8844
     ghidra: FUN_083b8844
     name: byte_key_tree_insert_node
