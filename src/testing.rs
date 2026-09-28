@@ -60,6 +60,11 @@ pub mod hints {
     // fixtures; mappings never unmap, so each test uses a distinct address.
     pub const LIST_NODE_POOL_RECYCLE_CHAIN_083CAB00: usize = 0x6d20_0000;
     pub const LIST_NODE_POOL_RECYCLE_CHAIN_083CAB00_NULL: usize = 0x6d30_0000;
+    // 0x6de0_0000 / 0x6df0_0000: dedicated to
+    // cxx/red_black_tree_payload_12_node_pool_recycle_chain_083b73ac's
+    // target-width pool and node fixtures; mappings never unmap.
+    pub const RED_BLACK_TREE_PAYLOAD_12_NODE_POOL_RECYCLE_CHAIN_083B73AC: usize = 0x6de0_0000;
+    pub const RED_BLACK_TREE_PAYLOAD_12_NODE_POOL_RECYCLE_CHAIN_083B73AC_NULL: usize = 0x6df0_0000;
     // 0x6c60_0000: dedicated to util/hash_table_bucket_construct's
     // target-width table and bucket-allocation fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CONSTRUCT: usize = 0x6c60_0000;

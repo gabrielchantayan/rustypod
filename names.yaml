@@ -48,6 +48,31 @@ functions:
       three-word payload. Deliberate deviations: target pointers are u32 target
       words to preserve firmware layout on 64-bit hosts, and the retail dead r1
       = 0 argument to checked new is omitted from the Rust signature.
+  - address: 0x083b73ac
+    ghidra: FUN_083b73ac
+    name: red_black_tree_payload_12_node_pool_recycle_chain_083b73ac
+    size: 68
+    sig: "void red_black_tree_payload_12_node_pool_recycle_chain_083b73ac(u32 *pool, u32 *chain)"
+    module: cxx/red_black_tree_payload_12_node_pool_recycle_chain_083b73ac
+    status: ported
+    renames:
+      param_1/r0/r5: pool
+      param_2/r1/r4: chain
+      "pool+0x04": free
+      "chain+0x0c": right/free_next
+      "chain+0x10": embedded_string
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte A32 extent: 17 words from
+      push {r4,r5,r6,lr} at 0x083b73ac through pop {r4,r5,r6,pc} at
+      0x083b73ec; 0x083b73f0 begins the next real function. The body contains
+      exactly two unconditional plain BL calls: recursive self-call at
+      0x083b73c4 and string_object_destroy (0x08277484) at 0x083b73d8; it has
+      no predicated BL calls. It recursively drains a right-linked node chain,
+      then links each node to pool+0x04, destroys its embedded StringObject, and
+      makes that node the free-list head, preserving incoming order. Deliberate
+      deviations: Rust uses named u32 word indices in place of retail register
+      shuffling while preserving target-width accesses and operation order.
   - address: 0x083b7d2c
     ghidra: FUN_083b7d2c
     name: tree_children_flatten_into_parent_083b7d2c
