@@ -209,6 +209,7 @@ pub mod hex_to_int;
 pub mod id_list_delete;
 pub mod id_list_dup;
 pub mod mem;
+pub mod malloc_size;
 pub mod mprintf;
 pub mod mem_extern_release;
 pub mod mem_finalize;
