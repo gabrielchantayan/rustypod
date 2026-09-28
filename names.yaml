@@ -158188,3 +158188,27 @@ functions:
       host tests replace both volatile seams. match.py reports the same
       duplicate/wrap/execute/delete control flow; LLVM adds seam dispatches
       and a larger frame.
+
+  - address: 0x0837cafc
+    ghidra: FUN_0837cafc
+    name: callback_record_invoke
+    size: 72
+    sig: "u32 callback_record_invoke(CallbackRecord *record)"
+    module: app/callback_record_invoke
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      "record+0x00": callback
+      "record+0x04": context
+      "record+0x08": call_count
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent
+      0x0837cafc..0x0837cb43; the separately entered next function starts
+      with push {r4,lr} at 0x0837cb44. ARM-word decoding confirms two inbound
+      direct plain bl calls and no predicated bl calls. For a non-NULL record,
+      MOVS gates loading the callback word; a NULL callback or negative signed
+      call_count returns zero. Otherwise it BLX-dispatches callback(context).
+      A zero result stores -1 to call_count; a nonzero result increments it
+      with ARM's wrapping add and is returned. The Rust port preserves the
+      three target-layout u32 words and uses a host-only target-width callback
+      seam for the indirect BLX.
