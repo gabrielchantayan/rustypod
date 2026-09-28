@@ -6118,6 +6118,33 @@ functions:
       non-NULL string object returned through that slot, and deletes it. Host
       fixtures widen the vtable pointer; target accesses retain the original
       32-bit offsets.
+  - address: 0x0839c0ec
+    ghidra: FUN_0839c0ec
+    name: observable_element_array_release_enabled_items
+    size: 88
+    sig: "void observable_element_array_release_enabled_items(void *array)"
+    module: cxx/observable_element_array_release_enabled_items
+    status: ported
+    renames:
+      param_1/r0/r5: array
+      "[array + 0x4]": count
+      "[array + 0x28]": enabled
+      iVar2/r4: index
+      iVar3/r6: count
+      "[array.vtable + 0x40]": indexed_element_slot
+      "[element.vtable + 0x4]": dispose
+    notes: >-
+      Raw osos.dec establishes the exact 88-byte extent 0x0839c0ec..0x0839c143:
+      twenty-two A32 words from push {r4,r5,r6,lr} through pop {r4,r5,r6,pc};
+      the push at 0x0839c144 begins the next independently entered function.
+      Full-image A32 branch decoding finds two inbound unconditional plain BL
+      sites, 0x0839c164 and 0x0839c1b0, with no predicated direct BL callers.
+      The body has one unconditional indirect BLX through the array vtable
+      slot +0x40 and one predicated indirect BLXNE through each non-NULL
+      element vtable slot +0x04. When byte +0x28 is nonzero, it visits signed
+      indices [0,count), obtains each element through that slot, and invokes
+      its disposal slot when non-NULL. Host fixtures deliberately widen vtable
+      pointers while preserving target field meanings.
   - address: 0x0839c1c8
     ghidra: FUN_0839c1c8
     name: observable_element_array_dispose_items
