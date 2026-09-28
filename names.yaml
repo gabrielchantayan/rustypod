@@ -54675,6 +54675,31 @@ functions:
       target calls; host tests deliberately replace them with a volatile
       dispatch table while preserving the target's u32 pointer-field layout.
 
+  # ---- B-tree cursor page flags (src/sqlite/btree_cursor_page_flags.rs) ----
+  - address: 0x08371300
+    ghidra: FUN_08371300
+    name: btree_cursor_page_flags
+    size: 48
+    sig: "u8 btree_cursor_page_flags(BtCursor *cursor)"
+    module: sqlite/btree_cursor_page_flags
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      iVar2/r0: page
+      uVar1/r0: page_flags
+      FUN_08372ae0: btree_restore_cursor_position
+    notes: >-
+      Raw osos.dec disassembly establishes the 48-byte extent
+      0x08371300..0x08371330: push {r4,lr} begins this function and the
+      next sibling begins with mov r3,r0. Whole-image ARM branch decoding
+      finds exactly two inbound plain BL calls at 0x08388e10 and 0x0838947c,
+      no inbound predicated calls, zero outbound plain BL calls, and one
+      outbound BLCS at 0x08371314 to ported
+      btree_restore_cursor_position. It restores eState >= REQUIRESEEK but
+      deliberately ignores its result, then returns zero for a null pPage or
+      pPage->aData[pPage->hdrOffset]. Target pointer fields remain little-
+      endian u32 words so host fixtures preserve target offsets.
+
   # ---- B-tree cursor position restoration (src/sqlite/restore_cursor_position.rs) ----
   - address: 0x08372ae0
     ghidra: FUN_08372ae0
