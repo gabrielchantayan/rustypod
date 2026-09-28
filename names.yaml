@@ -49384,6 +49384,32 @@ functions:
       the original's count-dependent empty busy-wait; all object state and free
       behavior match the ARM body.
 
+  - address: 0x0839e280
+    ghidra: FUN_0839e280
+    name: dma_aligned_u32_array_destroy
+    size: 72
+    sig: "DmaAlignedArray *dma_aligned_u32_array_destroy(DmaAlignedArray *array)"
+    module: cxx/dma_aligned_array_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: array
+      uVar1/r0: element_index
+      iVar1/r0: allocation
+    notes: >-
+      Raw osos.dec words establish the exact 72-byte A32 extent
+      0x0839e280..0x0839e2c8; the following push {r4,lr} begins the u16
+      constructor. The only two inbound direct BL sites are unconditional,
+      at 0x080fab9c and 0x080fc3d8; none are predicated. The body has one
+      predicated blne to already ported free_wrapper @ 0x080e7970 with tag 3,
+      and no other call. This u32-specialized DMA-array destructor pairs with
+      the 0x0839e200 constructor: a nonzero construction byte +0x0c runs an
+      element-count (+0x08) sized empty trivial-element destruction walk,
+      then the byte is unconditionally cleared. A non-NULL raw allocation at
+      +0x00 is freed through free_wrapper; aligned_data +0x04 and
+      element_count are untouched, and array is returned. Rust uses black_box
+      to retain the otherwise empty walk and a target-only section to keep
+      this separately hookable copy from folding into an identical destructor.
+
   - address: 0x0839e2c8
     ghidra: FUN_0839e2c8
     name: dma_aligned_u16_array_construct

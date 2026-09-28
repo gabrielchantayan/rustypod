@@ -330,6 +330,37 @@ pub unsafe extern "C" fn dma_aligned_byte_array_destroy_variant(
 ) -> *mut DmaAlignedArray {
     unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
 }
+/// dma_aligned_u32_array_destroy — original: `FUN_0839e280` @ 0x0839e280
+/// (72 bytes exactly, 0x0839e280..0x0839e2c8; the u16 constructor begins
+/// immediately after). Two direct inbound `bl` calls, at 0x080fab9c and
+/// 0x080fc3d8, are unconditional; there are no predicated inbound calls. The
+/// body contains one predicated `blne` to `free_wrapper` @ 0x080e7970 with
+/// tag 3 and no other call.
+///
+/// Separately linked u32-specialized DMA-array destructor paired with the
+/// constructor at 0x0839e200. If `constructed` is nonzero, it performs the
+/// count-sized empty trivial-element destruction walk; it always clears that
+/// byte, frees a non-NULL raw allocation through tag-3 `free_wrapper`, and
+/// returns `array`. `aligned_data` and `element_count` remain untouched.
+///
+/// Deliberate deviations: [`core::hint::black_box`] retains the empty
+/// count-dependent walk, and the target-only link section prevents LLVM from
+/// folding this separately hookable body into an identical destructor.
+///
+/// # Safety
+///
+/// `array` must be non-NULL, word-aligned, and point to writable target-size
+/// [`DmaAlignedArray`] storage. A nonzero `allocation` must be owned by this
+/// object and valid for the retailOS tag-3 heap free path.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.dma_aligned_u32_array_destroy")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn dma_aligned_u32_array_destroy(
+    array: *mut DmaAlignedArray,
+) -> *mut DmaAlignedArray {
+    unsafe { dma_aligned_array_destroy_with_release(array, release_tag3_allocation) }
+}
+
 
 unsafe extern "C" fn release_tag3_allocation(allocation: *mut u8) {
     unsafe { free_wrapper(allocation, DMA_ALIGNED_ARRAY_FREE_TAG) };
@@ -532,6 +563,31 @@ mod tests {
         assert_eq!(array.aligned_data, before.aligned_data);
         assert_eq!(array.element_count, before.element_count);
         assert_eq!(array.constructed, 0);
+    }
+
+    #[test]
+    fn u32_destructor_frees_an_unconstructed_nonnull_allocation() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let mut array = DmaAlignedArray {
+            allocation: 0x0821_0200,
+            aligned_data: 0x8821_0220,
+            element_count: u32::MAX,
+            constructed: 0,
+        };
+        let before = array;
+
+        let result = unsafe { dma_aligned_u32_array_destroy(&mut array) };
+
+        assert_eq!(result, core::ptr::addr_of_mut!(array));
+        assert_eq!(array.allocation, before.allocation);
+        assert_eq!(array.aligned_data, before.aligned_data);
+        assert_eq!(array.element_count, before.element_count);
+        assert_eq!(array.constructed, 0);
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (1, before.allocation as usize as *mut u8, 3),
+            "the construction byte only guards the empty walk, not the free"
+        );
     }
 
     #[test]
