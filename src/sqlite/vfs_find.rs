@@ -73,9 +73,9 @@ const VFS_REGISTRY_ADDRESS: usize = 0x08a0_9918;
 
 /// The two registry words this function touches, at their retail offsets.
 #[repr(C)]
-struct VfsRegistry {
+pub(super) struct VfsRegistry {
     /// `+0x00`: head of the registered `sqlite3_vfs` list.
-    head: *mut SqliteVfs,
+    pub(super) head: *mut SqliteVfs,
     /// `+0x04..+0x14`: untouched by this function.
     _pad: [u32; 4],
     /// `+0x14`: nonzero once `head` has been seeded from the os-init getter.
@@ -86,7 +86,7 @@ struct VfsRegistry {
 const _: [u8; 0x14] = [0; core::mem::offset_of!(VfsRegistry, initialized)];
 
 #[cfg(target_os = "none")]
-fn registry() -> *mut VfsRegistry {
+pub(super) fn registry() -> *mut VfsRegistry {
     VFS_REGISTRY_ADDRESS as *mut VfsRegistry
 }
 
@@ -98,7 +98,7 @@ static mut HOST_REGISTRY: VfsRegistry = VfsRegistry {
 };
 
 #[cfg(not(target_os = "none"))]
-fn registry() -> *mut VfsRegistry {
+pub(super) fn registry() -> *mut VfsRegistry {
     core::ptr::addr_of_mut!(HOST_REGISTRY)
 }
 
