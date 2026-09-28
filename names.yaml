@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083b4fc0
+    ghidra: FUN_083b4fc0
+    name: rgb555a1_rect_to_rgba4444
+    size: 208
+    sig: "void rgb555a1_rect_to_rgba4444(const u16 *source, u32 source_width, u32 source_format, u32 source_x, u32 source_y, u32 width, u32 height, u16 *destination, u32 destination_width, u32 destination_format, u32 destination_x, u32 destination_y, u32 unused_13, u32 unused_14, u32 source_row_alignment, u32 destination_row_alignment)"
+    module: cxx/rgb555a1_rect_to_rgba4444
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: source_width
+      param_3/r2: source_format
+      param_4/r3: source_x
+      param_5: source_y
+      param_6/r5: width
+      param_7/r4: height
+      param_8: destination
+      param_9/r7: destination_width
+      param_10: destination_format
+      param_11: destination_x
+      param_12/r11: destination_y
+      param_15/r2: source_row_alignment
+      param_16/r6: destination_row_alignment
+      r8: source_stride
+      r0: destination_stride
+      "[sp + 0x8]": source_cursor
+      "[sp + 0x4]": destination_cursor
+    notes: >-
+      Raw osos.dec establishes the exact 208-byte extent: 52 ARM words from
+      push {r0-r11,lr} at 0x083b4fc0 through pop {r4-r11,pc} at
+      0x083b508c; 0x083b5090 begins the next real function, with no literal
+      pool. The function converts a nonempty RGB555A1 rectangle to RGBA4444,
+      using source and destination strides of align_up(width * 2, alignment),
+      applying x/y offsets, and advancing each row after width pixels.
+      Complete raw-image decoding finds exactly two unconditional inbound bl
+      sites (0x0825eac8 and 0x0825fbac) and zero predicated bl sites. It calls
+      the separately ported RGB555A1 cursor reader at 0x0825ecdc and RGBA4444
+      cursor writer at 0x0825ec88. match.py reported the expected structural
+      difference from LLVM inlining align_up and using the two existing Rust
+      seams; host tests cover an offset single pixel and independent padded
+      source/destination strides.
+
   - address: 0x083b5568
     ghidra: FUN_083b5568
     name: red_black_tree_advance_cursor
