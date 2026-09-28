@@ -158302,3 +158302,35 @@ functions:
       predicate, constants, source-word load, and final P3 patch remain,
       while LLVM uses a literal-pool BLX for the intentionally retained
       retail seam and a normal epilogue before the final ported call.
+
+  - address: 0x0837864c
+    ghidra: FUN_0837864c
+    name: sqlite_expr_list_check_length
+    size: 32
+    sig: "void sqlite_expr_list_check_length(Parse *parse, ExprList *list, const char *object)"
+    module: sqlite/expr_list_check_length
+    status: ported
+    vars:
+      param_1/r0: parse
+      param_2/r1: list
+      param_3/r2: object
+      r3: column_limit
+    notes: >-
+      SQLite 3.5.x's sqlite3ExprListCheckLength. Raw osos.dec words establish
+      the exact 32-byte executable extent 0x0837864c..0x0837866c: ldr
+      r3,[parse]; cmp list,#0; ldrne r1,[list]; ldr r3,[r3,#0x58]; cmpne
+      r1,r3; ldrgt r1,[pc,#4]; bgt sqlite_error_msg; bx lr. The following
+      word at 0x0837866c is the relocated format pointer 0x088fe1e4, not a
+      function entry; 0x08378670 begins the independently linked ExprList
+      destructor. Reading that pointer with the image's verified +0xaed8
+      skew yields "too many columns in %s". ARM-word decoding finds exactly
+      two inbound direct plain BL calls and no predicated BL calls. A NULL
+      list, or nExpr <= db->aLimit[SQLITE_LIMIT_COLUMN] at db +0x58, returns;
+      a strictly larger signed nExpr tail-branches to sqlite_error_msg
+      @0x083767a0 with object as its only vararg. The Rust port calls that
+      established port directly rather than tail-branching and represents its
+      C vararg register as a one-word VaList; raw target-width offsets retain
+      the 32-bit layout on the host. Host tests cover NULL, equality, and
+      strict-over-limit reporting with the forwarded object word. match.py
+      reports the same null guard, signed comparison, limit load, and error
+      path; its larger Rust frame is the explicit VaList/direct-call deviation.
