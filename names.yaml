@@ -14115,6 +14115,28 @@ functions:
       at 0x08001edc; the Rust target uses volatile MMIO and host tests use
       its existing deterministic timer-counter seam.
 
+  - address: 0x0836d854
+    ghidra: FUN_0836d854
+    name: notify_wait_enter
+    size: 36
+    sig: "u32 notify_wait_enter(void)"
+    module: drivers/notify_wait_enter
+    status: ported
+    renames: {FUN_0836d854: notify_wait_enter, FUN_0836b5b0: gpio_pin_configure}
+    notes: >-
+      Raw osos.dec establishes the true 36-byte extent
+      0x0836d854..0x0836d878: `push {r4,lr}; mov r2,#0; mov r1,#3; mov
+      r0,#6; bl 0x0836b5b0; pop {r4,lr}; mov r2,#0; mov r1,#5; mov r0,#7;
+      b 0x0836b5b0`. The next independently linked function begins with
+      `push {r3,lr}` at 0x0836d878. Whole-image aligned A32 decoding finds
+      exactly two inbound direct plain BL calls (0x082bc538, 0x0839390c) and
+      no predicated BL calls. The function configures GPIO 6/function 3,
+      then tail-calls the existing gpio_pin_configure for GPIO 7/function 5,
+      returning its zero result. Rust uses a normal return after the second
+      call; this preserves observable order, arguments, GPIO writes, and
+      result. Host tests confirm both writes and the returned zero. match.py
+      structural review was completed.
+
   - address: 0x0836d8c8
     ghidra: FUN_0836d8c8
     name: mmio_wait_low_three_status_bits_then_read_response
