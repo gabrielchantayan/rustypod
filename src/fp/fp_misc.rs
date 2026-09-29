@@ -1068,31 +1068,6 @@ pub unsafe extern "C" fn context_text_to_cxx_string(string: *mut *mut u8) {
     counted_u16_deserialize(counted.as_ptr(), string);
 }
 
-/// Host-swappable entry point for the mutexed PMU register-0x87 bit-1 read
-/// `FUN_082e55dc` @ 0x082e55dc (68 bytes, unported). It writes `(byte & 2)
-/// >> 1` through its argument and returns the raw-transfer status. The target
-/// build calls its fixed address; host tests install recording mocks.
-#[cfg(not(target_os = "none"))]
-pub static mut PMU_REG87_BIT1_READ: usize = 0x082e_55dc;
-
-/// PMU read seam signature: writes the extracted bit and returns transfer
-/// status, which the query intentionally ignores.
-type PmuReg87Bit1ReadFn = unsafe extern "C" fn(*mut u32) -> i32;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn pmu_reg87_bit1_read(bit: *mut u32) -> i32 {
-    let read: PmuReg87Bit1ReadFn = core::mem::transmute(0x082e_55dcusize);
-    read(bit)
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn pmu_reg87_bit1_read(bit: *mut u32) -> i32 {
-    let address = core::ptr::addr_of!(PMU_REG87_BIT1_READ).read_volatile();
-    let read: PmuReg87Bit1ReadFn = core::mem::transmute(address);
-    read(bit)
-}
 
 /// pmu_reg87_bit1_query — original: `FUN_08086e4c` @ 0x08086e4c (28 bytes,
 /// 0x08086e4c..0x08086e68; raw-decoded). Five direct reachable `bl` call
@@ -1100,18 +1075,18 @@ unsafe fn pmu_reg87_bit1_read(bit: *mut u32) -> i32 {
 /// `thunk_FUN_08086e4c` @ 0x0805381c and two target this body directly; all
 /// are unconditional, with zero predicated `bl` call sites.
 ///
-/// Stages a u32 stack slot, invokes the PMU read to extract bit 1 of register
-/// 0x87, then returns 1 only when that slot is zero. The PMU transfer status
-/// is deliberately ignored, exactly as the original overwrites r0 from the
-/// slot after its `bl`.
+/// Stages a u32 stack slot, invokes the ported mutexed PMU read to extract bit
+/// 1 of register 0x87, then returns 1 only when that slot is zero. The PMU
+/// transfer status is deliberately ignored, exactly as the original overwrites
+/// r0 from the slot after its `bl`.
 ///
-/// Deviations: Rust omits the ADS `{r3,lr}` frame and calls the unported PMU
-/// read through a fixed-address/host-swappable seam.
+/// Deviations: Rust omits the ADS `{r3,lr}` frame and calls the ported I2C
+/// wrapper instead of the retail direct call.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pmu_reg87_bit1_query() -> i32 {
     let mut bit = 0u32;
-    pmu_reg87_bit1_read(&mut bit);
+    crate::drivers::i2c::pmu_reg87_bit1_read(&mut bit);
     if bit == 0 { 1 } else { 0 }
 }
 /// pmu_reg87_bit1_query_veneer — original: `thunk_FUN_08086e4c` @
@@ -5049,95 +5024,13 @@ mod tests {
         }
     }
 
-    // ---- pmu_reg87_bit1_query ----
-
-    /// Serializes access to the PMU_REG87_BIT1_READ seam cell.
-    static PMU_FLAG_LOCK: Mutex<()> = Mutex::new(());
-    static mut PMU_FLAG_BIT: u32 = 0;
-    static mut PMU_FLAG_STATUS: i32 = 0;
-    static mut PMU_FLAG_CALLS: usize = 0;
-
-    unsafe extern "C" fn recording_pmu_flag_read(bit: *mut u32) -> i32 {
-        PMU_FLAG_CALLS += 1;
-        bit.write(PMU_FLAG_BIT);
-        PMU_FLAG_STATUS
-    }
-
-    struct PmuFlagInstall {
-        previous: usize,
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for PmuFlagInstall {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(PMU_REG87_BIT1_READ).write_volatile(self.previous);
-            }
-        }
-    }
-
-    fn install_pmu_flag(bit: u32, status: i32) -> PmuFlagInstall {
-        let lock = PMU_FLAG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            let previous = core::ptr::addr_of!(PMU_REG87_BIT1_READ).read_volatile();
-            core::ptr::addr_of_mut!(PMU_REG87_BIT1_READ)
-                .write_volatile(recording_pmu_flag_read as usize);
-            PMU_FLAG_BIT = bit;
-            PMU_FLAG_STATUS = status;
-            PMU_FLAG_CALLS = 0;
-            PmuFlagInstall {
-                previous,
-                _lock: lock,
-            }
-        }
-    }
-
-    #[test]
-    fn pmu_reg87_bit1_query_reads_once_and_ignores_transfer_status() {
-        let _mock = install_pmu_flag(0, 0);
-
-        for (bit, status, expected) in [(0, 0, 1), (1, -1, 0), (2, i32::MIN, 0), (u32::MAX, i32::MAX, 0)] {
-            unsafe {
-                PMU_FLAG_BIT = bit;
-                PMU_FLAG_STATUS = status;
-                PMU_FLAG_CALLS = 0;
-            }
-            assert_eq!(unsafe { pmu_reg87_bit1_query() }, expected, "bit={bit:#x}, status={status:#x}");
-            unsafe {
-                assert_eq!(PMU_FLAG_CALLS, 1, "bit={bit:#x}, status={status:#x}");
-            }
-        }
-    }
-
-    #[test]
-    fn pmu_reg87_bit1_query_veneer_forwards_the_query_result() {
-        let _mock = install_pmu_flag(0, 0);
-
-        for (bit, expected) in [(0, 1), (1, 0), (u32::MAX, 0)] {
-            unsafe {
-                PMU_FLAG_BIT = bit;
-                PMU_FLAG_CALLS = 0;
-            }
-            assert_eq!(unsafe { pmu_reg87_bit1_query_veneer() }, expected, "bit={bit:#x}");
-            unsafe {
-                assert_eq!(PMU_FLAG_CALLS, 1, "bit={bit:#x}");
-            }
-        }
-    }
 
     #[test]
     fn pmu_reg87_bit1_clear_booleanizes_the_ported_query() {
-        let _mock = install_pmu_flag(0, 0);
-
-        for (bit, expected) in [(0, true), (1, false), (0, true), (2, false)] {
-            unsafe {
-                PMU_FLAG_BIT = bit;
-                PMU_FLAG_CALLS = 0;
-            }
-            assert_eq!(unsafe { pmu_reg87_bit1_clear() }, expected, "bit={bit:#x}");
-            unsafe {
-                assert_eq!(PMU_FLAG_CALLS, 1, "bit={bit:#x}");
-            }
+        for (value, expected) in [(0, true), (1, true), (2, false), (u8::MAX, false)] {
+            let fixture = crate::drivers::i2c::tests::install_raw_i2c_for_test(0, 0, value);
+            assert_eq!(unsafe { pmu_reg87_bit1_clear() }, expected, "value={value:#x}");
+            drop(fixture);
         }
     }
 

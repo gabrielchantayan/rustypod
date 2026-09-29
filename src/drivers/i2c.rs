@@ -363,6 +363,32 @@ pub unsafe extern "C" fn pmu_i2c_read(reg: u32, len: i32, buf: *mut u8) -> i32 {
     }
     status
 }
+/// pmu_reg87_bit1_read — original: `FUN_082e55dc` @ 0x082e55dc (68 bytes;
+/// 2 plain `bl` call sites, 0 predicated `bl`, binary-verified by decoding
+/// every ARM B/BL word in osos.dec).
+///
+/// Acquires PMU semaphores 17 then 5, reads one byte from PCF50635 register
+/// 0x87, stores bit 1 as a canonical u32 boolean through `bit`, releases 5
+/// then 17 unconditionally, and returns the raw I2C status verbatim.
+///
+/// # Deviation
+///
+/// The five retail direct calls become ordinary calls to already-ported
+/// semaphore and raw-I2C wrappers; those wrappers preserve the fixed target
+/// hardware seams for the two unported S5L8702 I2C primitives.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_reg87_bit1_read(bit: *mut u32) -> i32 {
+    let mut value = 0u8;
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = pmu_i2c_read(0x87, 1, &mut value);
+    bit.write(((value & 2) >> 1) as u32);
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+    status
+}
+
 
 /// i2c_0x39_read_register — original: `FUN_0836e36c` @ 0x0836e36c
 /// (92 bytes; 15 plain `bl` call sites, 0 predicated `bl`,
@@ -1097,6 +1123,34 @@ pub(crate) mod tests {
             addr_of_mut!(TASK_LOCK_ROM_KERNEL).write(state.1);
         }
         drop(state.0);
+    }
+
+    #[test]
+    fn reg87_bit1_read_extracts_the_sampled_bit_and_releases_locks_on_error() {
+        let fixture = install_raw_i2c_for_test(0, -5, 0);
+        unsafe {
+            for (value, expected) in [(0, 0), (1, 0), (2, 1), (u8::MAX, 1)] {
+                *addr_of_mut!(RAW_READ_VALUE) = value;
+                let mut bit = u32::MAX;
+                assert_eq!(pmu_reg87_bit1_read(&mut bit), -5, "value={value:#x}");
+                assert_eq!(bit, expected, "value={value:#x}");
+            }
+            assert_eq!(
+                raw_i2c_calls_for_test().2,
+                std::vec![
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                ],
+                "the read result is stored and both locks release on every error"
+            );
+        }
+        drop(fixture);
     }
 
     #[test]
