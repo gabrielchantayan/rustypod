@@ -20,6 +20,7 @@ pub mod ata_pio_read_halfword;
 pub mod ata_pio_write_byte;
 pub mod ata_pio_write_halfword;
 pub mod clear_controller_state_and_delay;
+pub mod controller_mode_set_and_settle;
 pub mod audio_output_level;
 pub mod cache_address_translate;
 pub mod byte_identity_slot_init;

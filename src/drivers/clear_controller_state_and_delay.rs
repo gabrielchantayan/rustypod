@@ -29,16 +29,26 @@ use core::sync::atomic::{AtomicU32, Ordering};
 static HOST_CONTROLLER_STATE: AtomicU32 = AtomicU32::new(u32::MAX);
 
 #[inline(always)]
-unsafe fn clear_controller_state() {
+pub(crate) unsafe fn controller_state_write(value: u32) {
     #[cfg(target_os = "none")]
     unsafe {
-        core::ptr::write_volatile(CONTROLLER_STATE_REGISTER, 0);
+        core::ptr::write_volatile(CONTROLLER_STATE_REGISTER, value);
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        HOST_CONTROLLER_STATE.store(0, Ordering::SeqCst);
+        HOST_CONTROLLER_STATE.store(value, Ordering::SeqCst);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn controller_state_for_test() -> u32 {
+    HOST_CONTROLLER_STATE.load(Ordering::SeqCst)
+}
+
+#[inline(always)]
+unsafe fn clear_controller_state() {
+    unsafe { controller_state_write(0) };
 }
 
 /// clear_controller_state_and_delay — original: `FUN_080bb648` @ 0x080bb648
