@@ -65,6 +65,7 @@
 //! Scanning every pointer literal into 0x088e0000..0x08920000 agrees:
 //! their targets are readable C strings only at `+0xaed8`.
 
+pub mod affinity_type;
 pub mod api_exit;
 pub mod append_owned_pointer;
 pub mod aux_sweep;

@@ -158938,3 +158938,32 @@ functions:
       Rust port for either target. Replacing this callback would alter how
       sqlite_stat1 rows initialize Index estimates, while calling sqlite_exec
       without it would silently discard all statistics.
+
+  # ---- SQLite declared-type affinity (src/sqlite/affinity_type.rs) ----
+  - address: 0x0836e90c
+    ghidra: FUN_0836e90c
+    name: sqlite3_affinity_type
+    size: 192
+    sig: "u8 sqlite3_affinity_type(const Token *token)"
+    module: sqlite/affinity_type
+    status: ported
+    vars:
+      param_1/r0: token
+      r0: affinity
+      r1: rolling_type_suffix
+      r2: type_name
+      lr: type_name_end
+    notes: >-
+      SQLite 3.5.9 sqlite3AffinityType. Raw osos.dec establishes the exact
+      192-byte body at 0x0836e90c..0x0836e9cb; the literal pool is
+      0x0836e9cc..0x0836e9ef and the next independent function begins with
+      push at 0x0836e9f0. Raw A32 branch decoding finds two direct inbound
+      BL instructions, both unconditional: 0x080ddcdc and 0x080e680e;
+      there are no predicated BL forms. The function scans exactly
+      Token.n_and_dyn >> 1 bytes through sqlite3UpperToLower, carrying a
+      four-byte rolling suffix. char/clob/text select TEXT (a), blob selects
+      BLOB (b) only from NUMERIC (c) or REAL (e), real/floa/doub select REAL
+      only from NUMERIC, and a trailing int suffix returns INTEGER (d).
+      The Rust port preserves these state gates and bounded scan. Deliberate
+      deviation: the retail table pointer is subject to the documented image
+      skew, so Rust uses the equivalent direct ASCII upper-to-lower fold.
