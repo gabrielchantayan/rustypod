@@ -160542,3 +160542,24 @@ functions:
       match.py intentionally compares the assigned veneer with this canonical
       Rust body and reports that structural difference; the ARM release object
       otherwise has the same byte loads and bit-mask construction.
+  - address: 0x082e5a4c
+    ghidra: FUN_082e5a4c
+    name: mode_one_handler_pair
+    size: 36
+    sig: "u32 mode_one_handler_pair(u32 mode)"
+    module: app/mode_one_handler_pair
+    status: ported
+    renames:
+      param_1/r0: mode
+      r0: zero_result_or_handler_argument
+      r4: saved_mode
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte function from
+      0x082e5a4c through pop {r4,pc} at 0x082e5a6c; the next real function
+      begins with push {r3,lr} at 0x082e5a70. Complete-image ARM decoding
+      finds exactly two inbound plain BL sites (0x08369b08 and 0x08369b24)
+      and zero predicated BL sites. The body compares mode with one, invokes
+      the unresolved retail handlers at 0x082e595c and 0x082e5a20 in order
+      with zero only on equality, and always returns zero. Target builds call
+      those verified addresses; host tests inject handlers. match.py was
+      reviewed against the ARM release object.

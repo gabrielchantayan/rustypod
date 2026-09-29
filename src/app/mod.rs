@@ -60,6 +60,7 @@ pub mod timing_wheel_node_replace_value;
 pub mod copy_eighteen_records_and_tail;
 pub mod identity_noop;
 pub mod always_zero;
+pub mod mode_one_handler_pair;
 pub mod opaque_tail_dispatch;
 pub mod artwork_slot_available;
 pub mod showcase_initialization_complete;
