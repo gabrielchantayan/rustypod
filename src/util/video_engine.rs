@@ -93,6 +93,40 @@ pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
 
+/// `video_engine_query_property` — retailOS `FUN_082cafc8` @ 0x082cafc8
+/// (60 bytes; 2 direct plain inbound `bl` calls, no predicated inbound
+/// `bl`; one outbound plain `bl` to `video_engine_get`, no predicated
+/// outbound `bl`).
+///
+/// Raw A32 words establish the body from 0x082cafc8 through 0x082cb000; the
+/// following `bx lr` at 0x082cb004 is a separate empty leaf. Gets the current
+/// video engine and returns its word at +0xae0 for property 0x3059 or +0xae4
+/// for property 0x305a. A missing engine or any other property returns zero.
+///
+/// # Deliberate deviations
+///
+/// The original uses predicated loads and returns; Rust uses an ordinary
+/// `match`. Host builds use `video_engine_get`'s mock instance slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_query_property(property_id: u32) -> u32 {
+    const FIRST_PROPERTY_ID: u32 = 0x3059;
+    const SECOND_PROPERTY_ID: u32 = 0x305a;
+    const FIRST_PROPERTY_OFFSET: usize = 0xae0;
+    const SECOND_PROPERTY_OFFSET: usize = 0xae4;
+
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return 0;
+    }
+
+    match property_id {
+        FIRST_PROPERTY_ID => engine.add(FIRST_PROPERTY_OFFSET).cast::<u32>().read(),
+        SECOND_PROPERTY_ID => engine.add(SECOND_PROPERTY_OFFSET).cast::<u32>().read(),
+        _ => 0,
+    }
+}
+
 /// Firmware entry of the opaque video-engine word dispatcher
 /// (`FUN_08252f68`, unported).
 #[cfg(target_os = "none")]
@@ -2072,6 +2106,28 @@ mod tests {
     use core::ptr;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
+
+    #[test]
+    fn query_property_returns_recognized_engine_words_and_zero_otherwise() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u32; 0xae4 / 4 + 1];
+        engine[0xae0 / 4] = 0x1234_5678;
+        engine[0xae4 / 4] = 0x89ab_cdef;
+
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            assert_eq!(video_engine_query_property(0x3059), 0);
+
+            set_mock_instance(engine.as_mut_ptr().cast());
+            assert_eq!(video_engine_query_property(0x3059), 0x1234_5678);
+            assert_eq!(video_engine_query_property(0x305a), 0x89ab_cdef);
+            assert_eq!(video_engine_query_property(0x3058), 0);
+            assert_eq!(video_engine_query_property(0x305b), 0);
+            assert_eq!(video_engine_query_property(u32::MAX), 0);
+
+            set_mock_instance(ptr::null_mut());
+        }
+    }
 
     #[test]
     fn type_selector_index_preserves_sparse_order_and_rejects_boundaries() {
