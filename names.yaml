@@ -54176,6 +54176,35 @@ functions:
       0/1 returns; expected differences are LLVM's frame, the explicit
       stack home for the vararg word, and a byte-narrowed flags test
       (ldrb db+13; tsteq #8 == ldreq word db+12; tsteq #0x800).
+  # ---- B-tree commit (src/sqlite/btree_commit.rs) ----
+  - address: 0x08370bc0
+    ghidra: FUN_08370bc0
+    name: btree_commit
+    size: 56
+    sig: "int btree_commit(Btree *btree)"
+    module: sqlite/btree_commit
+    status: ported
+    renames:
+      param_1/r4: btree
+      FUN_0837118c: btree_enter
+      FUN_08370bfc: btree_commit_phase_one
+      FUN_08370c8c: btree_commit_phase_two
+      FUN_08371da4: btree_leave
+    notes: >-
+      SQLite 3.5.9 sqlite3BtreeCommit. Raw osos.dec words establish the exact
+      56-byte extent 0x08370bc0..0x08370bfc: push {r4,lr} at 0x08370bc0 is
+      followed by pop {r4,pc} at 0x08370bf8, and the next separately linked
+      function begins with push {r3-r7,lr}. Decoding every body word finds four
+      unconditional plain bl instructions and no predicated bl: btree_enter @
+      0x0837118c, btree_commit_phase_one @ 0x08370bfc,
+      btree_commit_phase_two @ 0x08370c8c, and btree_leave @ 0x08371da4.
+      It enters, performs phase one with a null master-journal pointer, runs
+      phase two only if phase one returns zero, always leaves, and returns the
+      selected phase status. Target builds directly call the existing ported
+      boundaries. Deliberate host-only deviation: a private phase dispatch
+      table makes phase ordering and error cleanup testable without widening
+      target pointer fields. Tests cover phase-two error propagation and
+      phase-one early failure with lock release.
   # ---- B-tree commit phase one (src/sqlite/btree_commit_phase_one.rs) ----
   - address: 0x08370bfc
     ghidra: FUN_08370bfc
