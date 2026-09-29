@@ -16,6 +16,24 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082cafbc
+    ghidra: thunk_FUN_08252bec
+    name: video_engine_get_veneer
+    size: 4
+    sig: "void *video_engine_get_veneer(void)"
+    module: util/video_engine
+    status: ported
+    renames:
+      FUN_08252bec: video_engine_get
+    notes: >-
+      Raw osos.dec A32 word 0xeafe1f0a establishes the exact four-byte body:
+      an unconditional tail branch from 0x082cafbc to video_engine_get at
+      0x08252bec. The following mov r0, #0 at 0x082cafc0 begins the next
+      independently linked function. Complete raw-image A32 branch decoding
+      finds two inbound plain BL calls (0x08295b14 and 0x08295b20) and no
+      predicated BL calls. Target Rust uses the same tail branch with a linker
+      relocation; host Rust calls video_engine_get to make its unchanged
+      singleton result testable.
   - address: 0x082cafc0
     ghidra: FUN_082cafc0
     name: video_engine_null_context

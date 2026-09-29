@@ -92,6 +92,36 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+// video_engine_get_veneer — original: `thunk_FUN_08252bec` @ `0x082cafbc`
+// (4 bytes; **2** direct plain inbound `bl` calls, no predicated `bl` calls).
+//
+// Raw A32 word `0xeafe1f0a` is an unconditional tail `b 0x08252bec` to
+// [`video_engine_get`]. The next independently linked function begins at
+// 0x082cafc0, establishing the four-byte extent. It preserves the caller's
+// link register and returns the video-engine singleton unchanged.
+//
+// # Deliberate deviations
+//
+// None on target: the assembly is the same tail branch with a linker
+// relocation for the Rust body. Host builds express that branch as a call so
+// its return value can be tested.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    r#"
+    .section .text.video_engine_get_veneer,"ax",%progbits
+    .globl video_engine_get_veneer
+    .type video_engine_get_veneer,%function
+video_engine_get_veneer:
+    b video_engine_get
+    .size video_engine_get_veneer, . - video_engine_get_veneer
+"#
+);
+
+#[cfg(not(target_os = "none"))]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_get_veneer() -> *mut u8 {
+    video_engine_get()
+}
 // `video_engine_null_context` — retailOS `FUN_082cafc0` @ `0x082cafc0`
 // (8 bytes; `0x082cafc8` begins the next independently linked function).
 //
@@ -2166,6 +2196,22 @@ mod tests {
             assert_eq!(video_engine_query_property(0x3058), 0);
             assert_eq!(video_engine_query_property(0x305b), 0);
             assert_eq!(video_engine_query_property(u32::MAX), 0);
+
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn getter_veneer_returns_the_singleton_without_changing_it() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 1];
+
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            assert!(video_engine_get_veneer().is_null());
+
+            set_mock_instance(engine.as_mut_ptr());
+            assert_eq!(video_engine_get_veneer(), engine.as_mut_ptr());
 
             set_mock_instance(ptr::null_mut());
         }
