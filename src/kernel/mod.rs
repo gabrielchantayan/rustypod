@@ -41,6 +41,7 @@ pub mod task;
 pub mod task_queue_callback_find;
 pub mod signal_object_51;
 pub mod signal_object_53;
+pub mod signal_object_8;
 pub mod task_local;
 pub mod task_delay;
 pub mod task_priority;

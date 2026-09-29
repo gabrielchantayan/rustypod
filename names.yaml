@@ -160779,3 +160779,20 @@ functions:
       inbound plain BL sites (0x082bc4e0 and 0x082e5878), zero predicated
       inbound BL sites, one plain body BL to __rt_udiv, and no predicated
       body calls. Rust preserves the ported divider seam; no deviations.
+  - address: 0x082e4bc8
+    ghidra: FUN_082e4bc8
+    name: signal_object_8
+    size: 8
+    sig: "u32 signal_object_8(void)"
+    module: kernel/signal_object_8
+    status: ported
+    notes: >-
+      Raw words 0xe3a00008 (`mov r0,#8`) and 0xeaf54ca9 (`b 0x08037e78`)
+      make this an 8-byte fixed-id tail wrapper: it signals kernel object 8
+      through the recovered signal gateway and forwards its status word. The
+      next real function begins at 0x082e4bd0. Every ARM B/BL decode found
+      exactly two direct call sites, both predicated blne at 0x080608f4 and
+      0x0806804c; there are no plain bl calls. Rust deliberately calls
+      gateway_signal_object rather than emitting the ARM tail branch,
+      preserving the observable fixed id and returned status on both target
+      and host.
