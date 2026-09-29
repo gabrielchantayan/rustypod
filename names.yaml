@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082c5718
+    ghidra: FUN_082c5718
+    name: accumulate_shared_counter
+    size: 28
+    sig: "u32 accumulate_shared_counter(u32 first, u32 second)"
+    module: util/accumulate_shared_counter
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      DAT_082c5734: shared_counter
+      r2: counter_value
+      r3: shared_counter_address
+    notes: >-
+      Raw osos.dec words establish the exact 28-byte body from 0x082c5718
+      through 0x082c5730: ldr r3,[pc,#20]; ldr r2,[r3]; add r0,r2,r0; add
+      r0,r0,r1; str r0,[r3]; mov r0,#1; bx lr. The literal at 0x082c5734 is
+      0x08a0a748, and the next independently linked function begins at
+      0x082c5738 with mov r2,#0. Ghidra's call graph identifies two inbound
+      plain BL callers (FUN_082c3168 and FUN_082c3174) and no predicated
+      inbound BL callers; the body has no outbound calls. The function wraps
+      the shared word after adding both arguments and returns one regardless
+      of the accumulated value. Host Rust substitutes private backing for the
+      fixed retailOS word; target Rust uses volatile access at 0x08a0a748.
   - address: 0x082cafbc
     ghidra: thunk_FUN_08252bec
     name: video_engine_get_veneer
