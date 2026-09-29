@@ -123347,6 +123347,33 @@ functions:
       multiplier 0x76b4197f, and re-encodes the retained count with
       0xed99887f while preserving its sign. No deliberate deviations.
 
+  # --- Video-engine opaque-word dispatch wrapper (src/util/video_engine.rs) ---
+  - address: 0x082d120c
+    ghidra: FUN_082d120c
+    name: video_engine_dispatch_opaque_word
+    size: 28
+    sig: "void video_engine_dispatch_opaque_word(u32 word)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: word
+      r4: word
+      FUN_08252bec: video_engine_get
+      FUN_08252f68: video_engine_opaque_word_dispatch
+    notes: >-
+      Raw osos.dec establishes the 28-byte body from push {r4,lr} at
+      0x082d120c through pop {r4,pc} at 0x082d1228; the next separately linked
+      wrapper starts at 0x082d122c, so Ghidra's reported 184-byte extent
+      incorrectly combines seven adjacent wrappers. The wrapper has one
+      outbound plain bl (0x082d1214 -> video_engine_get), no predicated
+      outbound bl, and exactly two inbound predicated blne calls
+      (0x08274234 and 0x0827d4f0), with no inbound plain bl. It gets the video
+      engine, silently returns on NULL, otherwise tail-branches with the
+      instance and one unmodified opaque word to unported FUN_08252f68.
+      Deliberate deviation: Rust expresses the tail branch as a typed resident
+      seam; host tests record NULL-session no-dispatch and zero, control-like,
+      and all-ones raw words.
+
   # --- Video-engine control-code enable wrapper (src/util/video_engine.rs) ---
   - address: 0x082d12b0
     ghidra: FUN_082d12b0

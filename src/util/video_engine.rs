@@ -92,6 +92,70 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+
+/// Firmware entry of the opaque video-engine word dispatcher
+/// (`FUN_08252f68`, unported).
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_OPAQUE_WORD_DISPATCH_ADDR: usize = 0x0825_2f68;
+
+/// ABI recovered from the wrapper's tail branch: engine followed by one raw
+/// word.
+type VideoEngineOpaqueWordDispatch = unsafe extern "C" fn(*mut u8, u32);
+
+/// Host-test stand-in for the opaque resident dispatcher.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_OPAQUE_WORD_DISPATCH: Option<VideoEngineOpaqueWordDispatch> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_dispatch_opaque_word`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_opaque_word_dispatch(dispatch: Option<VideoEngineOpaqueWordDispatch>) {
+    core::ptr::addr_of_mut!(MOCK_OPAQUE_WORD_DISPATCH).write(dispatch);
+}
+
+/// Transfers a raw word to the resident dispatcher at 0x08252f68.
+unsafe fn dispatch_opaque_word(engine: *mut u8, word: u32) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineOpaqueWordDispatch =
+            core::mem::transmute(VIDEO_ENGINE_OPAQUE_WORD_DISPATCH_ADDR);
+        dispatch(engine, word);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_OPAQUE_WORD_DISPATCH).read() {
+            Some(dispatch) => dispatch(engine, word),
+            None => panic!("video_engine_dispatch_opaque_word requires dispatcher 0x08252f68"),
+        }
+    }
+}
+
+/// `video_engine_dispatch_opaque_word` — retailOS `FUN_082d120c` @
+/// **0x082d120c** (28 bytes, `0x082d120c..0x082d1228`); `0x082d122c` starts
+/// the next independently linked wrapper. Raw A32 decoding finds one outbound
+/// plain `bl` (`0x082d1214 -> video_engine_get`) and no predicated `bl`.
+/// Complete raw-image branch-target decoding finds exactly two inbound
+/// predicated `blne` calls (0x08274234 and 0x0827d4f0), and no plain `bl`
+/// calls.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it tail-dispatches the instance and its unmodified
+/// input word to the resident target.
+///
+/// # Deliberate deviation
+///
+/// `FUN_08252f68` has no verified semantic identity, so the raw word remains
+/// opaque. Rust expresses the tail branch as a typed call; target builds use
+/// the resident entry and host tests install a recording seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_dispatch_opaque_word(word: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        dispatch_opaque_word(engine, word);
+    }
+}
+
 /// `video_engine_set_render_buffer` — retailOS `FUN_082d20e0` @
 /// **0x082d20e0** (28 bytes, `0x082d20e0..0x082d20f8`; `add r0, r0,
 /// #0x1000` at 0x082d20fc begins the next real function).
@@ -3305,6 +3369,47 @@ mod tests {
             }
 
             assert_eq!(render_target[..0x68], [0u8; 0x68]);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
+    // --- video_engine_dispatch_opaque_word (FUN_082d120c) ---
+
+    static mut OPAQUE_WORD_DISPATCH_RECORDED: Option<(*mut u8, u32)> = None;
+
+    unsafe extern "C" fn record_opaque_word_dispatch(engine: *mut u8, word: u32) {
+        *addr_of_mut!(OPAQUE_WORD_DISPATCH_RECORDED) = Some((engine, word));
+    }
+
+    #[test]
+    fn opaque_word_dispatch_null_instance_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            set_mock_opaque_word_dispatch(Some(record_opaque_word_dispatch));
+            OPAQUE_WORD_DISPATCH_RECORDED = None;
+            video_engine_dispatch_opaque_word(u32::MAX);
+            assert_eq!(OPAQUE_WORD_DISPATCH_RECORDED, None);
+            set_mock_opaque_word_dispatch(None);
+        }
+    }
+
+    #[test]
+    fn opaque_word_dispatch_prepends_instance_and_preserves_raw_word() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_opaque_word_dispatch(Some(record_opaque_word_dispatch));
+            for word in [0, 0x8074, 0x8b9c, u32::MAX] {
+                OPAQUE_WORD_DISPATCH_RECORDED = None;
+                video_engine_dispatch_opaque_word(word);
+                assert_eq!(
+                    OPAQUE_WORD_DISPATCH_RECORDED,
+                    Some((engine.as_mut_ptr(), word)),
+                );
+            }
+            set_mock_opaque_word_dispatch(None);
             set_mock_instance(ptr::null_mut());
         }
     }
