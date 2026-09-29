@@ -159986,3 +159986,28 @@ functions:
       other callees are their ported Rust twins. Host coverage verifies
       collision-chain links, prev links, bucket counts, and reversed
       insertion-order reconstruction.
+
+  # --- intrusive doubly-linked list head promotion ---
+  - address: 0x08367390
+    ghidra: FUN_08367390
+    name: doubly_linked_list_promote_head
+    size: 32
+    sig: "void doubly_linked_list_promote_head(u32 *list, u32 *node)"
+    module: util/doubly_linked_list_promote_head
+    status: ported
+    vars:
+      param_1/r4: list
+      param_2/r5: node
+      FUN_083673b0: doubly_linked_list_remove
+      FUN_08367358: doubly_linked_list_prepend
+    notes: >-
+      Raw osos.dec establishes the exact eight-word A32 extent
+      0x08367390..0x083673af: push {r4,r5,lr} starts this function and the
+      next independently entered function starts at 0x083673b0. Whole-image
+      branch decoding finds exactly two unconditional plain inbound BL calls
+      and zero predicated inbound BL calls. The body saves list and node across
+      one plain BL to 0x083673b0, then tail-branches to 0x08367358. Those
+      verified helpers remove node from its intrusive doubly linked list and
+      prepend it to list, respectively. Rust inlines both helpers rather than
+      creating unverified seams; it retains the target's u32 pointer-word
+      layout and volatile accesses.
