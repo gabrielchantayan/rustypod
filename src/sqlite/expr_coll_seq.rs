@@ -136,11 +136,10 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use parking_lot::Mutex;
+    use crate::testing::SQLITE_EXPR_COLL_SEQ_TEST_LOCK;
     use std::vec;
     use std::vec::Vec;
 
-    static HOOK_LOCK: Mutex<()> = Mutex::new(());
     static mut GET_RESULT: *mut CollSeq = ptr::null_mut();
     static mut GET_CALLS: Vec<(*mut u8, *mut CollSeq, *const u8, i32)> = Vec::new();
 
@@ -194,7 +193,7 @@ mod tests {
 
     #[test]
     fn null_expression_does_not_call_lookup() {
-        let _lock = HOOK_LOCK.lock();
+        let _lock = SQLITE_EXPR_COLL_SEQ_TEST_LOCK.lock();
         let _hooks = install_recorder(ptr::null_mut());
         let mut parse = parse(0x1000usize as *mut u8, 0);
 
@@ -205,7 +204,7 @@ mod tests {
 
     #[test]
     fn transparent_nodes_walk_left_and_return_original_collation() {
-        let _lock = HOOK_LOCK.lock();
+        let _lock = SQLITE_EXPR_COLL_SEQ_TEST_LOCK.lock();
         let name = b"NOCASE\0";
         let mut coll = CollSeq { name: name.as_ptr() };
         let mut leaf = expr(0x55, &mut coll, ptr::null_mut());
@@ -224,7 +223,7 @@ mod tests {
 
     #[test]
     fn ordinary_uncollated_node_does_not_walk_left() {
-        let _lock = HOOK_LOCK.lock();
+        let _lock = SQLITE_EXPR_COLL_SEQ_TEST_LOCK.lock();
         let name = b"BINARY\0";
         let mut coll = CollSeq { name: name.as_ptr() };
         let mut leaf = expr(0x55, &mut coll, ptr::null_mut());
@@ -238,7 +237,7 @@ mod tests {
 
     #[test]
     fn failed_lookup_with_existing_error_only_increments_once() {
-        let _lock = HOOK_LOCK.lock();
+        let _lock = SQLITE_EXPR_COLL_SEQ_TEST_LOCK.lock();
         let name = b"missing\0";
         let mut coll = CollSeq { name: name.as_ptr() };
         let mut root = expr(0x55, &mut coll, ptr::null_mut());
@@ -252,7 +251,7 @@ mod tests {
 
     #[test]
     fn first_failed_lookup_reports_then_increments_error_twice() {
-        let _lock = HOOK_LOCK.lock();
+        let _lock = SQLITE_EXPR_COLL_SEQ_TEST_LOCK.lock();
         let name = b"missing\0";
         let mut coll = CollSeq { name: name.as_ptr() };
         let mut root = expr(0x55, &mut coll, ptr::null_mut());
