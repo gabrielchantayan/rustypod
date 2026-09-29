@@ -129,6 +129,65 @@ unsafe fn dispatch_opaque_word(engine: *mut u8, word: u32) {
         }
     }
 }
+/// Firmware entry of the opaque video-engine value dispatcher.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_OPAQUE_VALUE_DISPATCH_ADDR: usize = 0x0825_53e4;
+
+/// ABI recovered from `FUN_082d115c`'s tail branch.
+type VideoEngineOpaqueValueDispatch = unsafe extern "C" fn(*mut u8, u32);
+
+/// Host-test stand-in for the opaque resident dispatcher.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_OPAQUE_VALUE_DISPATCH: Option<VideoEngineOpaqueValueDispatch> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_dispatch_opaque_value`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_opaque_value_dispatch(dispatch: Option<VideoEngineOpaqueValueDispatch>) {
+    core::ptr::addr_of_mut!(MOCK_OPAQUE_VALUE_DISPATCH).write(dispatch);
+}
+
+/// Transfers a raw value to the resident dispatcher at 0x082553e4.
+unsafe fn dispatch_opaque_value(engine: *mut u8, value: u32) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineOpaqueValueDispatch =
+            core::mem::transmute(VIDEO_ENGINE_OPAQUE_VALUE_DISPATCH_ADDR);
+        dispatch(engine, value);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_OPAQUE_VALUE_DISPATCH).read() {
+            Some(dispatch) => dispatch(engine, value),
+            None => panic!("video_engine_dispatch_opaque_value requires dispatcher 0x082553e4"),
+        }
+    }
+}
+
+/// `video_engine_dispatch_opaque_value` — retailOS `FUN_082d115c` @
+/// **0x082d115c** (32 bytes, `0x082d115c..0x082d1178`); the independent next
+/// wrapper starts at 0x082d117c. Raw A32 decoding finds one outbound plain
+/// `bl` (`0x082d1164 -> video_engine_get`), no predicated `bl`, and a
+/// conditional tail `bne` at 0x082d1174 to 0x082553e4.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it tail-dispatches the instance and unmodified input
+/// value to the resident target.
+///
+/// # Deliberate deviation
+///
+/// The tail target has no verified semantic identity, so the value remains
+/// opaque. Rust expresses the tail branch as a typed call; target builds use
+/// the resident entry and host tests install a recording seam.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_dispatch_opaque_value(value: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        dispatch_opaque_value(engine, value);
+    }
+}
+
 
 /// `video_engine_dispatch_opaque_word` — retailOS `FUN_082d120c` @
 /// **0x082d120c** (28 bytes, `0x082d120c..0x082d1228`); `0x082d122c` starts
@@ -3410,6 +3469,47 @@ mod tests {
                 );
             }
             set_mock_opaque_word_dispatch(None);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
+    // --- video_engine_dispatch_opaque_value (FUN_082d115c) ---
+
+    static mut OPAQUE_VALUE_DISPATCH_RECORDED: Option<(*mut u8, u32)> = None;
+
+    unsafe extern "C" fn record_opaque_value_dispatch(engine: *mut u8, value: u32) {
+        *addr_of_mut!(OPAQUE_VALUE_DISPATCH_RECORDED) = Some((engine, value));
+    }
+
+    #[test]
+    fn opaque_value_dispatch_null_instance_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            set_mock_opaque_value_dispatch(Some(record_opaque_value_dispatch));
+            OPAQUE_VALUE_DISPATCH_RECORDED = None;
+            video_engine_dispatch_opaque_value(u32::MAX);
+            assert_eq!(OPAQUE_VALUE_DISPATCH_RECORDED, None);
+            set_mock_opaque_value_dispatch(None);
+        }
+    }
+
+    #[test]
+    fn opaque_value_dispatch_prepends_instance_and_preserves_raw_value() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_opaque_value_dispatch(Some(record_opaque_value_dispatch));
+            for value in [0, 0x3f80_0000, 0x825c_10c, u32::MAX] {
+                OPAQUE_VALUE_DISPATCH_RECORDED = None;
+                video_engine_dispatch_opaque_value(value);
+                assert_eq!(
+                    OPAQUE_VALUE_DISPATCH_RECORDED,
+                    Some((engine.as_mut_ptr(), value)),
+                );
+            }
+            set_mock_opaque_value_dispatch(None);
             set_mock_instance(ptr::null_mut());
         }
     }
