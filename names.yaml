@@ -89052,6 +89052,30 @@ functions:
       0x00060000 plus entries (value-identical); the diff is the
       crate fp frame and the stm merge.
 
+  - address: 0x082c5f30
+    ghidra: FUN_082c5f30
+    name: word_list_assign_be_bytes
+    size: 140
+    sig: "void word_list_assign_be_bytes(const u8 *payload, FramedWordBuffer *destination, u32 payload_bytes)"
+    module: util/framed_word_buffer_decode
+    status: ported
+    renames:
+      param_1/r0: payload
+      param_2/r1: destination
+      param_3/r2: payload_bytes
+    notes: >-
+      Raw osos.dec words establish 35 ARM instructions from 0x082c5f30
+      through the tail branch at 0x082c5fb8, with the next function's
+      push {r4-r9,lr} at 0x082c5fbc. Decoding every B/BL word in osos.dec
+      finds two direct plain BL callers (0x082bdf5c and 0x082d66ec) and
+      zero predicated BL callers. For nonzero input, it reads bytes from
+      the end and fills little-endian u32 limbs low byte first, stores
+      ceil(payload_bytes / 4) into the target-layout header, then tail
+      calls word_list_trim_trailing_zeros @ 0x082d27d4. Empty input only
+      clears the count. The port calls that existing tail-callee directly;
+      host tests cover rejected decoder frames, zero input, cross-word
+      packing, and trimming leading zero input groups. match.py is used
+      to compare the resulting loop and tail-call structure.
   - address: 0x082d27a8
     ghidra: FUN_082d27a8
     name: word_list_copy

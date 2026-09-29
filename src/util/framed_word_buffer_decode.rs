@@ -12,14 +12,12 @@
 //! rejected unless its header and full payload fit in `available`, and unless
 //! `destination.capacity_words` has at least one word for an empty payload or
 //! can contain `ceil(payload_bytes / 4)` words otherwise.
-//! It then transfers the payload to `FUN_082c5f30` @ `0x082c5f30`, which packs
+//! It then transfers the payload to `word_list_assign_be_bytes`, which packs
 //! the bytes from the end into little-endian target words and trims high zero
 //! words. The result is the consumed header-plus-payload byte count with bit
 //! 16 cleared, preserving the retail `bic r0, r0, #0x10000` wrap quirk.
 //!
-//! Deliberate deviation: none. Target builds preserve the unported packer
-//! transfer through a literal veneer; host builds expose a volatile callback
-//! seam so the boundary and its observable output can be tested.
+//! Deliberate deviation: none.
 
 /// Target-layout destination consumed by `FUN_082c5f30`.
 ///
@@ -38,75 +36,84 @@ const _: [u8; 0x02] = [0; core::mem::offset_of!(FramedWordBuffer, capacity_words
 const _: [u8; 0x04] = [0; core::mem::offset_of!(FramedWordBuffer, data)];
 const _: [u8; 0x08] = [0; core::mem::size_of::<FramedWordBuffer>()];
 
-/// ABI of the unported retail payload packer at `0x082c5f30`.
-pub type WordBufferPayloadPacker = unsafe extern "C" fn(
-    payload: *const u8,
-    destination: *mut FramedWordBuffer,
-    payload_bytes: u32,
-);
-
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_word_buffer_payload_packer(
-    _payload: *const u8,
-    _destination: *mut FramedWordBuffer,
-    _payload_bytes: u32,
-) {
-}
-
-/// Host callback replacing the stock payload packer at `0x082c5f30`.
+/// word_list_assign_be_bytes — original: `FUN_082c5f30` @ `0x082c5f30`
+/// (140 bytes).
 ///
-/// Read volatily by [`decode_word_buffer_frame`] so test replacements cannot
-/// be folded into the caller.
-#[cfg(not(target_arch = "arm"))]
-pub static mut WORD_BUFFER_PAYLOAD_PACKER: WordBufferPayloadPacker = missing_word_buffer_payload_packer;
-
-#[cfg(not(target_arch = "arm"))]
-#[inline(always)]
-unsafe fn pack_payload(
+/// Verified extent: the final `b 0x082d27d4` at `0x082c5fb8` makes this a
+/// 35-word tail-calling function ending at `0x082c5fbc`; the next function
+/// begins with `push {r4-r9, lr}` at `0x082c5fbc`. Decoding every ARM B/BL
+/// word in `osos.dec` finds two direct, plain `bl` callers (0x082bdf5c and
+/// 0x082d66ec) and zero predicated direct `bl` callers.
+///
+/// Converts a nonempty big-endian byte sequence into little-endian `u32`
+/// limbs by reading from the final byte and filling each limb low byte first.
+/// It stores `ceil(payload_bytes / 4)` before tail-calling
+/// [`crate::util::word_list::word_list_trim_trailing_zeros`] to drop leading
+/// zero input groups. A zero-length sequence only clears `word_count`.
+///
+/// Deliberate deviation: target builds make the retail tail call directly.
+/// Host builds adapt the 32-bit `FramedWordBuffer::data` address into a
+/// temporary host-width [`crate::util::word_list::WordList`] for the existing
+/// tail-callee, then copy its count back; this preserves the observable data
+/// and count without assuming a 64-bit host pointer lives at target offset 4.
+///
+/// # Safety
+///
+/// `payload` must name `payload_bytes` readable bytes. For nonzero
+/// `payload_bytes`, `destination.data` must be a valid target-width pointer
+/// to `ceil(payload_bytes / 4)` writable `u32` limbs; the original does not
+/// validate capacity. The practical input domain is at most 65536 bytes:
+/// retail decrements its remaining counter through a 16-bit truncation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_assign_be_bytes(
     payload: *const u8,
     destination: *mut FramedWordBuffer,
     payload_bytes: u32,
 ) {
-    let packer = unsafe {
-        core::ptr::read_volatile(core::ptr::addr_of!(WORD_BUFFER_PAYLOAD_PACKER))
-    };
-    unsafe { packer(payload, destination, payload_bytes) };
-}
+    if payload_bytes == 0 {
+        (*destination).word_count = 0;
+        return;
+    }
 
-// The payload is relocated away from the stock PC-relative BL range. This
-// veneer enters the unported retail packer with the same r0/r1/r2 ABI.
-#[cfg(target_arch = "arm")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .text
-    .p2align 2
-    .globl retail_word_buffer_payload_packer
-    .type retail_word_buffer_payload_packer, %function
-retail_word_buffer_payload_packer:
-    ldr     pc, [pc, #-4]
-    .word   0x082c5f30
-    .size retail_word_buffer_payload_packer, . - retail_word_buffer_payload_packer
-"#
-);
+    let word_count = payload_bytes.wrapping_add(3) >> 2;
+    let words = (*destination).data as usize as *mut u32;
+    let mut source = payload.add(payload_bytes as usize - 1);
+    let mut remaining = payload_bytes as u16;
+    let mut output_word = 0u16;
 
-#[cfg(target_arch = "arm")]
-unsafe extern "C" {
-    fn retail_word_buffer_payload_packer(
-        payload: *const u8,
-        destination: *mut FramedWordBuffer,
-        payload_bytes: u32,
-    );
-}
+    loop {
+        let mut word = 0u32;
+        let mut byte_index = 0u16;
+        loop {
+            remaining = remaining.wrapping_sub(1);
+            word |= (core::ptr::read_volatile(source) as u32) << (byte_index * 8);
+            source = source.sub(1);
+            if remaining == 0 || byte_index.wrapping_add(1) >= 4 {
+                break;
+            }
+            byte_index = byte_index.wrapping_add(1);
+        }
+        core::ptr::write_volatile(words.add(output_word as usize), word);
+        output_word = output_word.wrapping_add(1);
+        if remaining == 0 {
+            break;
+        }
+    }
 
-#[cfg(target_arch = "arm")]
-#[inline(always)]
-unsafe fn pack_payload(
-    payload: *const u8,
-    destination: *mut FramedWordBuffer,
-    payload_bytes: u32,
-) {
-    unsafe { retail_word_buffer_payload_packer(payload, destination, payload_bytes) };
+    (*destination).word_count = word_count as u16;
+    #[cfg(target_arch = "arm")]
+    crate::util::word_list::word_list_trim_trailing_zeros(destination.cast());
+    #[cfg(not(target_arch = "arm"))]
+    {
+        let mut list = crate::util::word_list::WordList {
+            count: (*destination).word_count,
+            capacity: (*destination).capacity_words,
+            entries: words,
+        };
+        crate::util::word_list::word_list_trim_trailing_zeros(&mut list);
+        (*destination).word_count = list.count;
+    }
 }
 
 /// Validates and unpacks one big-endian-length-prefixed word-buffer frame.
@@ -152,7 +159,7 @@ pub unsafe extern "C" fn decode_word_buffer_frame(
         return 0;
     }
 
-    unsafe { pack_payload(frame.add(2), destination, payload_bytes) };
+    unsafe { word_list_assign_be_bytes(frame.add(2), destination, payload_bytes) };
     payload_bytes.wrapping_add(2) & !0x0001_0000
 }
 
@@ -163,75 +170,12 @@ mod tests {
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
-    use std::sync::{LazyLock, Mutex};
+    use std::sync::LazyLock;
 
     const FIXTURE_LEN: usize = 0x1000;
     static FIXTURE: LazyLock<Option<usize>> = LazyLock::new(|| {
-        try_map_u32_slab(hints::FRAMED_WORD_BUFFER_DECODE, FIXTURE_LEN).map(|base| base as usize)
+        try_map_u32_slab(hints::WORD_LIST_ASSIGN_BE_BYTES, FIXTURE_LEN).map(|base| base as usize)
     });
-    static PACKER_LOCK: Mutex<()> = Mutex::new(());
-    static mut PACKER_CALL: Option<(*const u8, *mut FramedWordBuffer, u32)> = None;
-
-    struct Reset;
-
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::write(
-                    ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER),
-                    missing_word_buffer_payload_packer,
-                );
-                ptr::write(ptr::addr_of_mut!(PACKER_CALL), None);
-            }
-        }
-    }
-
-    unsafe extern "C" fn record_packer(
-        payload: *const u8,
-        destination: *mut FramedWordBuffer,
-        payload_bytes: u32,
-    ) {
-        unsafe {
-            ptr::write(
-                ptr::addr_of_mut!(PACKER_CALL),
-                Some((payload, destination, payload_bytes)),
-            );
-        }
-    }
-
-    unsafe extern "C" fn model_retail_packer(
-        payload: *const u8,
-        destination: *mut FramedWordBuffer,
-        mut payload_bytes: u32,
-    ) {
-        if payload_bytes == 0 {
-            unsafe { ptr::addr_of_mut!((*destination).word_count).write_volatile(0) };
-            return;
-        }
-
-        let words = unsafe {
-            core::ptr::read_volatile(core::ptr::addr_of!((*destination).data)) as usize as *mut u32
-        };
-        let mut output_word = 0usize;
-        let mut source = unsafe { payload.add(payload_bytes as usize - 1) };
-        while payload_bytes != 0 {
-            let mut word = 0u32;
-            let mut byte_index = 0u32;
-            while payload_bytes != 0 && byte_index < 4 {
-                word |= unsafe { core::ptr::read_volatile(source) as u32 } << (byte_index * 8);
-                payload_bytes -= 1;
-                source = unsafe { source.sub(1) };
-                byte_index += 1;
-            }
-            unsafe { words.add(output_word).write_volatile(word) };
-            output_word += 1;
-        }
-
-        while output_word != 0 && unsafe { words.add(output_word - 1).read_volatile() } == 0 {
-            output_word -= 1;
-        }
-        unsafe { ptr::addr_of_mut!((*destination).word_count).write_volatile(output_word as u16) };
-    }
 
     fn fixture() -> Option<*mut u8> {
         let base = *FIXTURE;
@@ -242,40 +186,30 @@ mod tests {
 
     #[test]
     fn rejects_short_headers_and_out_of_bounds_payloads_without_packing() {
-        let _guard = PACKER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset;
         let mut destination = FramedWordBuffer { word_count: 0xaaaa, capacity_words: u16::MAX, data: 0 };
         let frame = [0, 1, 0x99];
         unsafe {
-            ptr::write(ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER), record_packer);
             assert_eq!(decode_word_buffer_frame(frame.as_ptr(), 1, &mut destination), 0);
             assert_eq!(decode_word_buffer_frame(frame.as_ptr(), 2, &mut destination), 0);
-            assert_eq!(ptr::read(ptr::addr_of!(PACKER_CALL)), None);
         }
         assert_eq!(destination.word_count, 0xaaaa);
     }
 
     #[test]
     fn rejects_insufficient_word_capacity_including_empty_frames() {
-        let _guard = PACKER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset;
         let mut destination = FramedWordBuffer { word_count: 0xaaaa, capacity_words: 1, data: 0 };
         let five_bytes = [0, 5, 1, 2, 3, 4, 5];
         let empty = [0, 0];
         unsafe {
-            ptr::write(ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER), record_packer);
             assert_eq!(decode_word_buffer_frame(five_bytes.as_ptr(), five_bytes.len() as u32, &mut destination), 0);
             destination.capacity_words = 0;
             assert_eq!(decode_word_buffer_frame(empty.as_ptr(), empty.len() as u32, &mut destination), 0);
-            assert_eq!(ptr::read(ptr::addr_of!(PACKER_CALL)), None);
         }
         assert_eq!(destination.word_count, 0xaaaa);
     }
 
     #[test]
-    fn packs_reverse_source_groups_into_little_endian_words() {
-        let _guard = PACKER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset;
+    fn packs_reverse_source_groups_and_trims_leading_zero_words() {
         let Some(base) = fixture() else {
             assert!(note_missing_u32_fixture("util::framed_word_buffer_decode"));
             return;
@@ -283,38 +217,26 @@ mod tests {
         let words = unsafe { base.cast::<u32>() };
         let mut destination = FramedWordBuffer {
             word_count: 0xffff,
-            capacity_words: 2,
+            capacity_words: 3,
             data: words as usize as u32,
         };
-        let frame = [0, 5, 1, 2, 3, 4, 5];
+        let frame = [0, 9, 0, 0, 0, 0, 1, 2, 3, 4, 5];
         unsafe {
-            ptr::write(ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER), model_retail_packer);
-            assert_eq!(decode_word_buffer_frame(frame.as_ptr(), frame.len() as u32, &mut destination), 7);
+            assert_eq!(decode_word_buffer_frame(frame.as_ptr(), frame.len() as u32, &mut destination), 11);
             assert_eq!(destination.word_count, 2);
             assert_eq!(words.read_volatile(), 0x0203_0405);
             assert_eq!(words.add(1).read_volatile(), 1);
+            assert_eq!(words.add(2).read_volatile(), 0);
         }
     }
 
     #[test]
-    fn zero_payload_clears_count_and_ffffe_payload_wraps_consumed_count() {
-        let _guard = PACKER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _reset = Reset;
+    fn zero_payload_clears_count() {
         let mut empty_destination = FramedWordBuffer { word_count: 7, capacity_words: 1, data: 0 };
         let empty = [0, 0];
-        let mut wrapped_destination = FramedWordBuffer { word_count: 0xaaaa, capacity_words: 0x4000, data: 0 };
-        let wrapped = [0xff, 0xfe];
         unsafe {
-            ptr::write(ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER), model_retail_packer);
             assert_eq!(decode_word_buffer_frame(empty.as_ptr(), 2, &mut empty_destination), 2);
             assert_eq!(empty_destination.word_count, 0);
-            ptr::write(ptr::addr_of_mut!(WORD_BUFFER_PAYLOAD_PACKER), record_packer);
-            assert_eq!(decode_word_buffer_frame(wrapped.as_ptr(), 0x1_0000, &mut wrapped_destination), 0);
-            let (payload, destination, payload_bytes) =
-                ptr::read(ptr::addr_of!(PACKER_CALL)).expect("accepted frame reaches packer");
-            assert_eq!(payload, wrapped.as_ptr().add(2));
-            assert_eq!(destination, ptr::addr_of_mut!(wrapped_destination));
-            assert_eq!(payload_bytes, 0xfffe);
         }
     }
 }
