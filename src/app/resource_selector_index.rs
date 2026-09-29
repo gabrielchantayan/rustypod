@@ -71,31 +71,25 @@ pub unsafe extern "C" fn resource_selector_index(selector: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cxx::object_flags::NAMESPACE_PROVIDER_SORT;
     use parking_lot::{Mutex, MutexGuard};
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    unsafe extern "C" fn no_op_sort(_providers: *mut usize) {}
     unsafe extern "C" fn equal_comparator(_entry: *const u8, _key: *const u8) -> i32 { 0 }
 
-    struct ProviderReset {
-        sorter: unsafe extern "C" fn(*mut usize),
-    }
+    struct ProviderReset;
     impl Drop for ProviderReset {
         fn drop(&mut self) {
             unsafe {
                 HOST_RESOURCE_SELECTOR_PROVIDER = ptr::null_mut();
-                NAMESPACE_PROVIDER_SORT = self.sorter;
             }
         }
     }
 
     fn reset_provider() -> (MutexGuard<'static, ()>, ProviderReset) {
         let guard = TEST_LOCK.lock();
-        let sorter = unsafe { NAMESPACE_PROVIDER_SORT };
         unsafe { HOST_RESOURCE_SELECTOR_PROVIDER = ptr::null_mut(); }
-        (guard, ProviderReset { sorter })
+        (guard, ProviderReset)
     }
 
     #[test]
@@ -113,7 +107,6 @@ mod tests {
         let table = [0usize];
         let mut provider = [1usize, table.as_ptr() as usize, 0, 1, equal_comparator as usize];
         unsafe {
-            NAMESPACE_PROVIDER_SORT = no_op_sort;
             HOST_RESOURCE_SELECTOR_PROVIDER = provider.as_mut_ptr();
             assert_eq!(resource_selector_index(0x1234), 8);
         }
