@@ -162843,3 +162843,21 @@ functions:
       advances state to (state - i2d(trunc(state))) * 10. Volatile
       function-pointer loads deliberately preserve the four helper-call
       boundaries instead of allowing LLVM to inline their soft-float bodies.
+
+  - address: 0x082cb17c
+    ghidra: FUN_082cb17c
+    name: always_one
+    size: 8
+    sig: "u32 always_one(void)"
+    module: app/always_one
+    status: ported
+    renames:
+      r0: return_value
+    notes: >-
+      Raw osos.dec A32 words establish the exact eight-byte body from
+      0x082cb17c through 0x082cb183; the identical mov r0, #1; bx lr sequence
+      at 0x082cb184 is the next independently linked function. Full-image raw
+      A32 decoding finds two inbound plain BL instructions at 0x08142a94 and
+      0x0816e8a0, and no predicated BL instructions. It ignores incoming
+      argument registers and returns one. Deliberate deviations: none; target
+      builds retain the verified A32 body to preserve the callable symbol.
