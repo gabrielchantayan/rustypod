@@ -20,10 +20,10 @@
 //!
 //! # Deliberate deviation
 //!
-//! The two validation targets are not ported. Firmware builds call their
-//! verified retail addresses. Host builds use replaceable callbacks and a
-//! target-word state model, because narrowed target pointers cannot be safely
-//! dereferenced on the host.
+//! The status-2 validator is ported, but this caller's host target-word model
+//! cannot safely dereference its narrowed backend pointer. Firmware builds call
+//! the verified retail validator address; host builds use replaceable callbacks
+//! for both validators.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
