@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083276f0
+    ghidra: FUN_083276f0
+    name: inline_encoded_word_block_is_zero
+    size: 84
+    sig: "i32 inline_encoded_word_block_is_zero(const InlineEncodedWordBlock *block)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      r0: decoded_count
+      r1: remaining_or_decoded_word
+      r2: block
+      r3: word_compare_multiplier
+      DAT_08327744: encoded_count_multiplier
+      DAT_08327748: encoded_word_compare_multiplier
+    notes: >-
+      Raw words establish a 21-instruction, 84-byte leaf through 0x08327740,
+      followed by the two-word literal pool at 0x08327744..0x08327748; the
+      next real function begins at 0x0832774c. Complete-image ARM decoding
+      finds two inbound plain BL sites (0x082f7738, 0x0833be14) and zero
+      predicated BL sites. It decodes a signed inline-word count with
+      0x4b6143ff, scans its wrapping absolute magnitude backward, and reports
+      whether every payload word decodes to zero with 0x3399e27f. The 0x08340ee0
+      Ghidra xref is a tail branch, not a BL. Host tests cover zero and i32::MIN
+      counts without payload access, positive and negative counts, every active
+      nonzero position, and ignored trailing data. match.py reports the same
+      descending loop and terminal paths; LLVM correctly folds the odd
+      payload-multiplier zero test to a raw zero comparison.
   - address: 0x08340f04
     ghidra: FUN_08340f04
     name: negative_product_rescale_in_place
