@@ -893,6 +893,56 @@ pub unsafe extern "C" fn namespace_provider_at(
     }
 }
 
+/// namespace_provider_remove_value — original: `FUN_08369490` @
+/// `0x08369490` (56 bytes, `0x08369490..0x083694c8`; the next separately
+/// linked function begins `push {r4,r5,r6,lr}` at `0x083694c8`). Raw A32
+/// decoding verifies **2 inbound plain `bl` call sites** (`0x08071010` and
+/// `0x08073348`) and **0 predicated `bl` call sites**.
+///
+/// Scans the namespace-provider table's signed +0x00 count entries for
+/// `value`. A miss returns null. A hit tail-branches to the preceding
+/// remove-at helper (`FUN_08369420`), which deliberately refuses index zero;
+/// a matching first entry consequently also returns null unchanged. For a
+/// later hit it returns that entry, shifts following entries down, and
+/// decrements the count.
+///
+/// Deliberate deviation: `FUN_08369420` has no registered Rust seam, so its
+/// reached remove-at path is inlined. The helper's count reload and target
+/// layout's unaligned +0x04 table-pointer load remain explicit.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_remove_value(
+    providers: *mut u32,
+    value: *mut u32,
+) -> *mut u32 {
+    let count = providers.read_volatile() as i32;
+    let mut index = 0i32;
+    while count > index {
+        #[cfg(target_os = "none")]
+        let table = providers.add(1).cast::<*mut *mut u32>().read_volatile();
+        #[cfg(not(target_os = "none"))]
+        let table = core::ptr::read_unaligned(providers.add(1).cast::<*mut *mut u32>());
+        if table.add(index as usize).read_volatile() == value {
+            let count = providers.read_volatile() as i32;
+            if count == 0 || index == 0 || index < 0 || index >= count {
+                return core::ptr::null_mut();
+            }
+            let entry = table.add(index as usize).read_volatile();
+            let last_index = count - 1;
+            while index < last_index {
+                table
+                    .add(index as usize)
+                    .write_volatile(table.add(index as usize + 1).read_volatile());
+                index += 1;
+            }
+            providers.write_volatile(last_index as u32);
+            return entry;
+        }
+        index += 1;
+    }
+    core::ptr::null_mut()
+}
+
 /// namespace_provider_pop_last — original: `FUN_08369790` @ `0x08369790`
 /// (28 bytes, `0x08369790..0x083697ac`; the next independently linked
 /// function begins `push {r4,r5,r6,lr}` at `0x083697ac`). Raw A32 decoding
@@ -3550,6 +3600,69 @@ mod tests {
         assert_eq!(entries[0], core::ptr::addr_of!(first) as *mut u32);
         assert_eq!(entries[1], core::ptr::addr_of!(second) as *mut u32);
         assert_eq!(entries[2], core::ptr::addr_of!(third) as *mut u32);
+    }
+
+    #[test]
+    fn namespace_provider_remove_value_keeps_first_entry_and_misses_unchanged() {
+        let first = 0x1111_1111u32;
+        let second = 0x2222_2222u32;
+        let mut entries = [
+            core::ptr::addr_of!(first) as *mut u32,
+            core::ptr::addr_of!(second) as *mut u32,
+        ];
+        let mut providers = NamespaceProviders::new(2, entries.as_mut_ptr().cast());
+
+        assert!(
+            unsafe {
+                namespace_provider_remove_value(
+                    providers.mut_ptr(),
+                    core::ptr::addr_of!(first) as *mut u32,
+                )
+            }
+            .is_null(),
+            "the shared remove-at helper rejects index zero"
+        );
+        assert!(
+            unsafe { namespace_provider_remove_value(providers.mut_ptr(), core::ptr::null_mut()) }
+                .is_null()
+        );
+        assert_eq!(unsafe { providers.mut_ptr().read_unaligned() }, 2);
+        assert_eq!(entries, [core::ptr::addr_of!(first) as *mut u32, core::ptr::addr_of!(second) as *mut u32]);
+    }
+
+    #[test]
+    fn namespace_provider_remove_value_shifts_later_entries_and_decrements_count() {
+        let first = 0x1111_1111u32;
+        let second = 0x2222_2222u32;
+        let third = 0x3333_3333u32;
+        let fourth = 0x4444_4444u32;
+        let mut entries = [
+            core::ptr::addr_of!(first) as *mut u32,
+            core::ptr::addr_of!(second) as *mut u32,
+            core::ptr::addr_of!(third) as *mut u32,
+            core::ptr::addr_of!(fourth) as *mut u32,
+        ];
+        let mut providers = NamespaceProviders::new(4, entries.as_mut_ptr().cast());
+
+        assert_eq!(
+            unsafe {
+                namespace_provider_remove_value(
+                    providers.mut_ptr(),
+                    core::ptr::addr_of!(second) as *mut u32,
+                )
+            },
+            core::ptr::addr_of!(second) as *mut u32
+        );
+        assert_eq!(unsafe { providers.mut_ptr().read_unaligned() }, 3);
+        assert_eq!(
+            entries,
+            [
+                core::ptr::addr_of!(first) as *mut u32,
+                core::ptr::addr_of!(third) as *mut u32,
+                core::ptr::addr_of!(fourth) as *mut u32,
+                core::ptr::addr_of!(fourth) as *mut u32,
+            ]
+        );
     }
     #[test]
     fn namespace_provider_slot_at_handles_null_and_count_boundaries() {
