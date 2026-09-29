@@ -130,6 +130,8 @@ pub mod volume_seek;
 pub mod drive_slot;
 /// Drive-slot creation and dependent initialization phases @ 0x082e2458.
 pub mod drive_slot_initialize;
+/// Reads selected-drive total and data-area sector counts @ 0x082e172c.
+pub mod drive_sector_counts;
 /// Drive-slot cleanup and reference-count release @ 0x082e073c.
 pub mod drive_slot_cleanup;
 /// Four-slot filesystem drive-index validator @ 0x082e4b3c.

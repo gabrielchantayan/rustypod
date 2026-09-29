@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e172c
+    ghidra: FUN_082e172c
+    name: drive_sector_counts
+    size: 132
+    sig: "u32 drive_sector_counts(const u8 *path, u32 *data_sectors, u32 *total_sectors)"
+    module: fs/drive_sector_counts
+    status: ported
+    renames:
+      param_1/r0: path
+      param_2/r1: data_sectors
+      param_3/r2: total_sectors
+      r6: drive_index
+      r7/r0: capacity_status
+      FUN_082c3000: resolve_path_drive_index
+      FUN_082d7934: ata_semaphore_wait
+      FUN_082e24a0: refresh_drive_capacity
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082d7954: ata_semaphore_signal
+    notes: >-
+      Raw osos.dec establishes the exact 132-byte extent 0x082e172c..0x082e17af:
+      push {r4-r8,lr} at the start through pop {r4-r8,pc}; the following push
+      at 0x082e17b0 starts a separate function. The body has five unconditional
+      BL instructions at 0x082e173c, 0x082e174c, 0x082e1754, 0x082e1760, and
+      0x082e17a4, and no predicated BL instructions. Complete-image
+      decompilation identifies two inbound direct plain-BL callers at
+      0x081bd3fc and 0x081bd79c, with no predicated inbound calls. It resolves
+      path to a drive index, locks it, refreshes capacity, then reads the
+      present drive slot's total-count +0x1f4 and data-count +0x7c-2, scaling
+      both by the u16 factor at +0x1cc before unlocking. A missing index or
+      slot returns 0xffffffff; a slot preserves refresh capacity's return
+      value. FUN_082e24a0 has no established identity beyond this observed
+      role, so target builds call its verified address and host builds use a
+      recording seam. Deliberate deviations: target-width slot offsets use
+      byte arithmetic; host seams replace private target tables.
   - address: 0x082e2458
     ghidra: FUN_082e2458
     name: drive_slot_initialize
