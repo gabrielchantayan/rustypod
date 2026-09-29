@@ -161336,3 +161336,28 @@ functions:
       copying at most eight base and three extension bytes. Deliberate
       deviation: Rust uses write_bytes for the two verified fixed-range
       zero_bytes calls rather than creating an unverified callable seam.
+
+  # --- Opaque 32-byte record copy ---
+  - address: 0x082e066c
+    ghidra: FUN_082e066c
+    name: opaque_record_copy
+    size: 136
+    sig: "void opaque_record_copy(void *dst, const void *src)"
+    module: app/opaque_record_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      FUN_082c4f38: forward_byte_copy
+    notes: >-
+      Raw osos.dec extent is exactly 136 bytes from 0x082e066c through
+      pop {r4,r5,r6,pc} at 0x082e06f0; the next independently linked function
+      begins at 0x082e06f4. The body makes two unconditional plain bl calls
+      to forward_byte_copy at 0x082c4f38, for 8 bytes at +0x00 and 3 bytes at
+      +0x08; no predicated bl forms occur. Independent caller decoding finds
+      two inbound unconditional plain bl calls, at 0x082e1298 and 0x082e217c,
+      and zero predicated forms. Remaining scalar loads/stores copy the
+      opaque record through +0x1f, including the retail body's deliberate
+      second copy of halfword +0x14. Callers establish only 32-byte record
+      extent, not field semantics; the port retains the opaque representation
+      and uses volatile scalar accesses to preserve the original ordering.
