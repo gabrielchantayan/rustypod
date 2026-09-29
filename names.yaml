@@ -160455,3 +160455,30 @@ functions:
       BL sites, and no outgoing BL instructions. The apparent semantic body
       cannot be faithfully recovered from this raw address; no Rust seam or
       port is created.
+  - address: 0x082e8248
+    ghidra: FUN_082e8248
+    name: opaque_handle_result_query
+    size: 88
+    sig: "u32 opaque_handle_result_query(const OpaqueHandle *handle, u32 *first_result, u32 *second_result)"
+    module: cxx/opaque_handle_result
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: first_result
+      param_3/r2: second_result
+      DAT_082e82a0: rhtp_handle_magic
+      r3: handle_magic_or_result_count
+      r0: status_or_second_result
+    notes: >-
+      Raw osos.dec words establish the exact 88-byte leaf from 0x082e8248
+      through bx lr at 0x082e829c. The 0x50544852 RHTP magic literal at
+      0x082e82a0 is followed by the next real function at 0x082e82a4.
+      Complete-image ARM decoding finds exactly two inbound plain BL sites
+      (0x08262020 and 0x08262050), zero predicated BL sites, and no outbound
+      BL instructions. The function validates the non-null RHTP handle and
+      both output pointers, returns 7 when signed handle+0x18c is not
+      positive, otherwise copies words at +0x214 and +0x220 to the outputs
+      and returns zero; invalid arguments return 0x1a. Host tests cover null
+      and magic rejection, each null output, zero and negative counts, and
+      successful distinct output copies. match.py was reviewed against the
+      ARM release object.
