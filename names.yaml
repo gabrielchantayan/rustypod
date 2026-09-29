@@ -160102,3 +160102,37 @@ functions:
       builds call the existing port directly because the host C ABI cannot
       model the target-only register behavior. Host tests install the existing
       random-service callbacks and verify one entropy read and result return.
+
+  # --- Deferred opaque dispatch loop (unclassified) ---
+  - address: 0x08343050
+    ghidra: FUN_08343050
+    name: opaque_nonreturning_dispatch_loop
+    size: 212
+    sig: "void opaque_nonreturning_dispatch_loop(u32 input)"
+    module: null
+    status: identified
+    renames:
+      param_1/r0/r9: input
+      FUN_0835450c: opaque_retail_callee
+    notes: >-
+      Deferred rather than ported: raw osos.dec establishes a 184-byte A32
+      instruction body at 0x08343050..0x08343107, followed by seven literal
+      words at 0x08343108..0x08343123; the next separately entered function
+      starts with `push {r4,r5,r6,lr}` at 0x08343124. Thus the occupied extent
+      is 212 bytes, not Ghidra's body-only 184-byte extent. The body contains
+      one unconditional direct BL at 0x083430b4 to 0x0835450c and no
+      predicated BL instructions. Its two verified inbound plain BL words are
+      0xeb0bb15d at 0x08056ad4 and 0xeb0b4054 at 0x08072ef8; no predicated
+      inbound BL is present in the recovered call-site listing. The literal
+      state machine first branches on the input's truthiness. A zero input
+      cycles between its state-2 and state-3 blocks without invoking a callee;
+      a nonzero input repeatedly calls 0x0835450c with that input, multiplies
+      its r0 result, and returns to the same dispatch state. No raw path
+      reaches the `pop {...,pc}` return block after setup. Ghidra's claimed
+      integer return is therefore not a verified ABI. The only direct callee,
+      FUN_0835450c, has no names.yaml identity and its recovered body itself
+      depends on unported 0x082b2270 and 0x0802edc8. Creating a Rust seam,
+      assigning it a return contract, or converting this loop into a normal
+      returning function would invent observable behavior. Retain identified
+      until the callee contract and a reachable return/nonlocal-exit path are
+      established.
