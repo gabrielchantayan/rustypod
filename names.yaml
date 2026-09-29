@@ -52902,6 +52902,28 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x083674c0
+    ghidra: FUN_083674c0
+    name: verify_named_schema_locks
+    size: 92
+    sig: "void verify_named_schema_locks(Parse *parse, const char *name)"
+    module: sqlite/verify_named_schema_locks
+    status: ported
+    renames:
+      param_1: parse
+      param_2: name
+      FUN_0836751c: verify_table_locks
+    notes: >-
+      SQLite 3.5.9 sqlite3CodeVerifyNamedSchema. Raw ARM words establish
+      the exact 92-byte body at 0x083674c0..0x0836751c; the
+      verify_table_locks prologue begins at 0x0836751c. The body has one
+      unconditional plain BL, to verify_table_locks at 0x0836751c, and
+      no predicated BL. Its two direct incoming call sites, both
+      unconditional plain BL, are 0x08381e2c and 0x08381e8c. It walks
+      Parse->db's signed nDb and 24-byte aDb entries, then each Schema
+      table-hash chain (HashElem next +0x00, data +0x08), passing every
+      Table and the caller's optional name to verify_table_locks. The Rust
+      port has no deliberate deviation: it directly calls the ported callee.
   - address: 0x0836751c
     ghidra: FUN_0836751c
     name: verify_table_locks

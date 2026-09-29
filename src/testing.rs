@@ -1890,6 +1890,9 @@ pub mod hints {
     // 0x6300_0000: dedicated to sqlite/verify_table_locks' target-width
     // Parse, Table, and index-name-pointer fixtures; mappings never unmap.
     pub const SQLITE_VERIFY_TABLE_LOCKS: usize = 0x6300_0000;
+    // 0x6400_0000: dedicated to sqlite/verify_named_schema_locks' target-width
+    // Parse, Db, Schema, HashElem, and Table fixtures; mappings never unmap.
+    pub const SQLITE_VERIFY_NAMED_SCHEMA_LOCKS: usize = 0x6400_0000;
     // 0xa400_0000: dedicated to sqlite/move_to_root's target-width cursor,
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.
