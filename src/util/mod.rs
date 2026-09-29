@@ -263,6 +263,7 @@ pub mod word_array_remove_prefix;
 pub mod singly_linked_list_remove;
 pub mod singly_linked_list_unlink;
 pub mod singly_linked_list_append;
+pub mod doubly_linked_list_promote_head;
 pub mod tree_children_flatten_into_parent_083c8c34;
 pub mod tree_children_flatten_into_parent;
 pub mod tree_children_flatten_into_parent_083bb2f4;
