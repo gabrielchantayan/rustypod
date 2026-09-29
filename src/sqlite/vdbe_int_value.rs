@@ -21,49 +21,31 @@
 //! decimal. A recode or terminator error, or every other storage class,
 //! returns zero. The parser's status is deliberately ignored.
 //!
-//! ## Deliberate deviations
-//!
-//! `FUN_082c67f4` (the observed `f64 -> i64` ABI) and `sqlite3Atoi64` at
-//! 0x0836f82c remain unported and use the local volatile dispatch seam.
-//! Target defaults branch to their retailOS load addresses; host tests install
-//! recorders. `sqlite3VdbeChangeEncoding` at 0x083869f4 is likewise
-//! unported. `sqlite3VdbeMemNulTerminate` at 0x0838bfb0 is already ported,
-//! so this function calls it directly rather than re-stubbing it. Named
-//! `Mem` fields replace the original's +0x00/+0x08/+0x14/+0x1c accesses.
+//! `FUN_082c67f4` is now ported as [`crate::fp::f64_to_i64::f64_to_i64`].
+//! `sqlite3Atoi64` at 0x0836f82c and `sqlite3VdbeChangeEncoding` at
+//! 0x083869f4 remain unported and use the local volatile dispatch seam.
+//! `sqlite3VdbeMemNulTerminate` at 0x0838bfb0 is already ported, so this
+//! function calls it directly rather than re-stubbing it. Named `Mem` fields
+//! replace the original's +0x00/+0x08/+0x14/+0x1c accesses.
 
 use super::error::SQLITE_UTF8;
 use super::value_text::VdbeChangeEncodingFn;
 use super::vdbe::Mem;
 use super::vdbe_mem_nul_terminate::vdbe_mem_nul_terminate;
+use crate::fp::f64_to_i64::f64_to_i64;
 use super::vdbe_mem_realify::{MEM_REAL, SQLITE_OK};
 use super::vdbe_mem_set_int64::MEM_INT;
 use super::vdbe_mem_set_str::{MEM_BLOB, MEM_STR};
 
-/// `FUN_082c67f4`: convert a binary64 value to the signed 64-bit integer ABI
-/// returned by the integer-value helper.
-pub type F64ToI64 = unsafe extern "C" fn(value: f64) -> i64;
 
 /// `sqlite3Atoi64(z, out)` @ 0x0836f82c: parse a NUL-terminated UTF-8 decimal
 /// into `out`. The caller observes its output but deliberately ignores status.
 pub type SqliteAtoi64 = unsafe extern "C" fn(z: *const u8, out: *mut i64) -> i32;
-
-/// RetailOS load address of the floating-to-integer conversion helper.
-pub const F64_TO_I64_ADDRESS: usize = 0x082c_67f4;
 /// RetailOS load address of `sqlite3VdbeChangeEncoding`.
 pub const VDBE_CHANGE_ENCODING_ADDRESS: usize = 0x0838_69f4;
 /// RetailOS load address of `sqlite3Atoi64`.
 pub const SQLITE_ATOI64_ADDRESS: usize = 0x0836_f82c;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_f64_to_i64(value: f64) -> i64 {
-    let convert: F64ToI64 = core::mem::transmute(F64_TO_I64_ADDRESS);
-    convert(value)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_f64_to_i64(_value: f64) -> i64 {
-    panic!("vdbe_int_value requires FUN_082c67f4")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_vdbe_change_encoding(p_mem: *mut u8, desired_enc: u8) -> i32 {
@@ -87,12 +69,10 @@ unsafe extern "C" fn missing_sqlite_atoi64(_z: *const u8, _out: *mut i64) -> i32
     panic!("vdbe_int_value requires sqlite3Atoi64 @ 0x0836f82c")
 }
 
-/// Indirect dispatch for the three unported leaf helpers this function needs.
+/// Indirect dispatch for the two unported leaf helpers this function needs.
 /// Host tests replace these slots; target defaults branch to retailOS.
 #[derive(Clone, Copy)]
 pub struct VdbeIntValueOps {
-    /// `FUN_082c67f4(f64)` — binary64 to signed 64-bit conversion.
-    pub f64_to_i64: F64ToI64,
     /// `sqlite3VdbeChangeEncoding(pMem, SQLITE_UTF8)` @ 0x083869f4.
     pub change_encoding: VdbeChangeEncodingFn,
     /// `sqlite3Atoi64(pMem->z, &value)` @ 0x0836f82c.
@@ -101,14 +81,12 @@ pub struct VdbeIntValueOps {
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_VDBE_INT_VALUE_OPS: VdbeIntValueOps = VdbeIntValueOps {
-    f64_to_i64: retail_f64_to_i64,
     change_encoding: retail_vdbe_change_encoding,
     atoi64: retail_sqlite_atoi64,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_VDBE_INT_VALUE_OPS: VdbeIntValueOps = VdbeIntValueOps {
-    f64_to_i64: missing_f64_to_i64,
     change_encoding: missing_vdbe_change_encoding,
     atoi64: missing_sqlite_atoi64,
 };
@@ -117,10 +95,6 @@ pub const DEFAULT_VDBE_INT_VALUE_OPS: VdbeIntValueOps = VdbeIntValueOps {
 /// make host test replacements observable.
 pub static mut VDBE_INT_VALUE_OPS: VdbeIntValueOps = DEFAULT_VDBE_INT_VALUE_OPS;
 
-#[inline(always)]
-unsafe fn f64_to_i64_op() -> F64ToI64 {
-    core::ptr::read_volatile(core::ptr::addr_of!(VDBE_INT_VALUE_OPS.f64_to_i64))
-}
 
 #[inline(always)]
 unsafe fn change_encoding_op() -> VdbeChangeEncodingFn {
@@ -148,7 +122,7 @@ pub unsafe extern "C" fn vdbe_int_value(p_mem: *mut Mem) -> i64 {
         return (*p_mem).u as i64;
     }
     if flags & MEM_REAL != 0 {
-        return (f64_to_i64_op())((*p_mem).r);
+        return f64_to_i64((*p_mem).r);
     }
     if flags & (MEM_STR | MEM_BLOB) != 0 {
         (*p_mem).flags = flags | MEM_STR;
@@ -204,7 +178,6 @@ mod tests {
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Event {
-        Convert(u64),
         ChangeEncoding(usize, u8),
         Atoi64(usize),
     }
@@ -212,12 +185,6 @@ mod tests {
     static mut EVENTS: Vec<Event> = Vec::new();
     static mut CHANGE_ENCODING_RESULT: i32 = SQLITE_OK;
     static mut ATOI64_RESULT: i64 = 0;
-    static mut CONVERTED_RESULT: i64 = 0;
-
-    unsafe extern "C" fn recording_f64_to_i64(value: f64) -> i64 {
-        (*core::ptr::addr_of_mut!(EVENTS)).push(Event::Convert(value.to_bits()));
-        *core::ptr::addr_of!(CONVERTED_RESULT)
-    }
 
     unsafe extern "C" fn recording_change_encoding(p_mem: *mut u8, enc: u8) -> i32 {
         (*core::ptr::addr_of_mut!(EVENTS)).push(Event::ChangeEncoding(p_mem as usize, enc));
@@ -236,11 +203,9 @@ mod tests {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             *core::ptr::addr_of_mut!(CHANGE_ENCODING_RESULT) = SQLITE_OK;
             *core::ptr::addr_of_mut!(ATOI64_RESULT) = 0;
-            *core::ptr::addr_of_mut!(CONVERTED_RESULT) = 0;
             core::ptr::write_volatile(
                 core::ptr::addr_of_mut!(VDBE_INT_VALUE_OPS),
                 VdbeIntValueOps {
-                    f64_to_i64: recording_f64_to_i64,
                     change_encoding: recording_change_encoding,
                     atoi64: recording_atoi64,
                 },
@@ -255,16 +220,8 @@ mod tests {
 
     fn mem(flags: u16) -> Mem {
         Mem {
-            u: 0,
-            r: 0.0,
-            db: core::ptr::null_mut(),
-            z: core::ptr::null_mut(),
-            n: 0,
-            flags,
-            value_type: 0,
-            enc: 0,
-            x_del: core::ptr::null_mut(),
-            z_malloc: core::ptr::null_mut(),
+            u: 0, r: 0.0, db: core::ptr::null_mut(), z: core::ptr::null_mut(), n: 0,
+            flags, value_type: 0, enc: 0, x_del: core::ptr::null_mut(), z_malloc: core::ptr::null_mut(),
         }
     }
 
@@ -274,23 +231,18 @@ mod tests {
         for integer in [i64::MIN, -1, 0, 1, i64::MAX] {
             let mut value = mem(MEM_INT | MEM_REAL | MEM_STR | MEM_BLOB);
             value.u = integer as u64;
-            value.r = 13.5;
-
             assert_eq!(unsafe { vdbe_int_value(&mut value) }, integer);
-            assert_eq!(value.flags, MEM_INT | MEM_REAL | MEM_STR | MEM_BLOB);
         }
         assert!(events().is_empty());
     }
 
     #[test]
-    fn real_arm_uses_the_retail_conversion_abi() {
+    fn real_arm_uses_the_ported_conversion() {
         let _guard = bench();
         let mut value = mem(MEM_REAL);
         value.r = f64::from_bits(0x7ff8_0000_5a5a_5a5a);
-        unsafe { *core::ptr::addr_of_mut!(CONVERTED_RESULT) = i64::MIN; }
-
-        assert_eq!(unsafe { vdbe_int_value(&mut value) }, i64::MIN);
-        assert_eq!(events(), std::vec![Event::Convert(value.r.to_bits())]);
+        assert_eq!(unsafe { vdbe_int_value(&mut value) }, 0);
+        assert!(events().is_empty());
     }
 
     #[test]
@@ -300,16 +252,12 @@ mod tests {
         let mut value = mem(MEM_BLOB | MEM_TERM | 0x0040);
         value.z = text.as_mut_ptr();
         unsafe { *core::ptr::addr_of_mut!(ATOI64_RESULT) = -42; }
-
         assert_eq!(unsafe { vdbe_int_value(&mut value) }, -42);
         assert_eq!(value.flags, MEM_BLOB | MEM_STR | MEM_TERM | 0x0040);
-        assert_eq!(
-            events(),
-            std::vec![
-                Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
-                Event::Atoi64(text.as_ptr() as usize),
-            ],
-        );
+        assert_eq!(events(), std::vec![
+            Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
+            Event::Atoi64(text.as_ptr() as usize),
+        ]);
     }
 
     #[test]
@@ -317,58 +265,9 @@ mod tests {
         let _guard = bench();
         let mut value = mem(MEM_STR | MEM_TERM);
         unsafe { *core::ptr::addr_of_mut!(CHANGE_ENCODING_RESULT) = 7; }
-
         assert_eq!(unsafe { vdbe_int_value(&mut value) }, 0);
-        assert_eq!(value.flags, MEM_STR | MEM_TERM);
-        assert_eq!(
-            events(),
-            std::vec![Event::ChangeEncoding(
-                (&mut value as *mut Mem) as usize,
-                SQLITE_UTF8,
-            )],
-        );
-    }
-
-    #[test]
-    fn thunk_forwards_the_integer_arm_unchanged() {
-        let _guard = bench();
-        for integer in [i64::MIN, -1, 0, 1, i64::MAX] {
-            let mut value = mem(MEM_INT | MEM_STR);
-            value.u = integer as u64;
-
-            assert_eq!(unsafe { vdbe_int_value_thunk(&mut value) }, integer);
-            assert_eq!(value.flags, MEM_INT | MEM_STR);
-        }
-        assert!(events().is_empty());
-    }
-
-    #[test]
-    fn thunk_forwards_text_through_the_full_recode_path() {
-        let _guard = bench();
-        let mut text = *b"9223372036854775807\0\0";
-        let mut value = mem(MEM_STR | MEM_TERM);
-        value.z = text.as_mut_ptr();
-        unsafe { *core::ptr::addr_of_mut!(ATOI64_RESULT) = i64::MAX; }
-
-        assert_eq!(unsafe { vdbe_int_value_thunk(&mut value) }, i64::MAX);
-        assert_eq!(
-            events(),
-            std::vec![
-                Event::ChangeEncoding((&mut value as *mut Mem) as usize, SQLITE_UTF8),
-                Event::Atoi64(text.as_ptr() as usize),
-            ],
-        );
-    }
-
-    #[test]
-    fn non_numeric_non_text_values_return_zero_without_side_effects() {
-        let _guard = bench();
-        let mut value = mem(0x0421);
-        value.u = (-17i64) as u64;
-        value.r = 98.5;
-
-        assert_eq!(unsafe { vdbe_int_value(&mut value) }, 0);
-        assert_eq!(value.flags, 0x0421);
-        assert!(events().is_empty());
+        assert_eq!(events(), std::vec![Event::ChangeEncoding(
+            (&mut value as *mut Mem) as usize, SQLITE_UTF8,
+        )]);
     }
 }

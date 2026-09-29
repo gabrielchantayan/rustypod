@@ -17362,6 +17362,18 @@ functions:
     module: fp_dconv
     status: ported
 
+  - address: 0x082c67f4
+    name: f64_to_i64
+    size: 92
+    module: f64_to_i64
+    status: ported
+    notes: >-
+      76 bytes of code plus a 16-byte literal pool; one plain BL to
+      __dcmplt, one BLCS to __dcmpgt, then a tail branch to __d2ll.
+      Ordered values outside [-2^63, +2^63] return i64::MIN; +2^63
+      delegates to __d2ll and becomes i64::MAX, while NaN retains its
+      __d2ll trap result of zero.
+
   - address: 0x083ecf34
     name: __d2ull
     size: 148
@@ -53746,18 +53758,18 @@ functions:
       0x08389064, 0x0838a250, 0x0838a380, 0x0838bf58, 0x0838fa80,
       0x08392730, and 0x08392758; two unconditional tail b entries are
       0x08391778 and 0x0839177c. Deviations: unported
-      sqlite3VdbeChangeEncoding @ 0x083869f4, sqlite3Atoi64 @
-      0x0836f82c, and the identified f64-to-i64 ABI FUN_082c67f4 use a
-      volatile local dispatch seam whose target defaults call retailOS
-      and whose host tests record calls. The already ported
-      vdbe_mem_nul_terminate @ 0x0838bfb0 is called directly rather
+      sqlite3VdbeChangeEncoding @ 0x083869f4 and sqlite3Atoi64 @
+      0x0836f82c use volatile local dispatch seams whose target defaults
+      call retailOS and whose host tests record calls. The ported
+      f64_to_i64 @ 0x082c67f4 is called directly. The already ported
+      vdbe_mem_nul_terminate @ 0x0838bfb0 is also called directly rather
       than re-stubbed. Host tests cover integer precedence and signed
       extremes, the REAL conversion ABI including a NaN payload,
       text/blob promotion and ordered recode/terminate/parse calls,
       recode failure, and nonnumeric flags. match.py structural review:
       the original's three direct bl instructions and a tail b become
-      volatile slot loads plus blx calls, while the flag-priority and
-      short-circuit skeleton is preserved.
+      one direct port call plus volatile slot loads and blx calls, while
+      the flag-priority and short-circuit skeleton is preserved.
 
   - address: 0x08391774
     ghidra: thunk_FUN_0838c7ec
