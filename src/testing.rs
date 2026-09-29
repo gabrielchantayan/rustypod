@@ -2852,6 +2852,9 @@ pub mod hints {
     // state and payload fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const ZEROING_BUMP_ALLOC: usize = 0x80a0_0000;
+    // 0x5abc_0000: dedicated to drivers/ata_cmd's ATA handle factory
+    // target-width handle and table fixture; mappings never unmap.
+    pub const ATA_HANDLE_FACTORY: usize = 0x5abc_0000;
     // 0x80b0_0000: dedicated to app/entry_match_successor's raw-u32 entry,
     // nested-container, and target fixture; mappings never unmap.
     pub const ENTRY_MATCH_SUCCESSOR: usize = 0x80b0_0000;

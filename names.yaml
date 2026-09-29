@@ -60505,6 +60505,32 @@ functions:
       direct destroy call; LLVM peeled the first loop-gate test and grew
       the frame.
 
+  - address: 0x083696f4
+    ghidra: FUN_083696f4
+    name: ata_handle_factory
+    size: 132
+    sig: "u32 *ata_handle_factory(u32 param)"
+    module: drivers/ata_cmd
+    status: ported
+    renames:
+      param_1: param
+      puVar1: handle
+      iVar2: table
+      FUN_08043c18: traced_alloc
+      FUN_08043994: traced_free
+    notes: >-
+      Raw ARM words establish the exact 132-byte extent
+      0x083696f4..0x08369778: the next real function is the
+      `mov r0,#0; b 0x083696f4` veneer at 0x08369778. Decoding every word in
+      that extent finds three plain BL instructions and no predicated BL:
+      traced_alloc(0x14,0,0), traced_alloc(0x10,0,0), and traced_free(handle)
+      when the table allocation fails. The factory returns NULL if either
+      allocation fails; otherwise it builds a five-word handle
+      `[0]=0, [1]=zeroed four-word table, [2]=0, [3]=4, [4]=param`.
+      Deliberate deviation: the already-ported allocator/free descriptor
+      seams replace retail's RAM service descriptor. Host tests use a
+      low-mapped u32 fixture because the target table pointer is a four-byte
+      word. match.py: pending.
   - address: 0x08369618
     ghidra: FUN_08369618
     name: namespace_provider_destroy

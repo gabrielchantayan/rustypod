@@ -64,13 +64,9 @@
 //!   99 `bl` + 7 tail-`b` call sites). A NULL-guarded word-indexed
 //!   lookup into the table the handle's second word points at:
 //!   `((const u32 *)handle[1])[index]`, or 0 when the handle is NULL.
-//! - `ata_call_with_zero` — `FUN_08369778` @ 0x08369778 (8 bytes;
-//!   24 `bl` + 1 tail-`b` call sites). The zero-argument entry point of
-//!   the handle factory @ 0x083696f4 (`mov r0, #0; b 0x083696f4`) —
-//!   allocates the 5-word handle both leaves above read. The factory
-//!   itself is not ported yet (its allocator is the ported
-//!   [`traced_alloc`]), so the veneer dispatches through
-//!   [`ATA_HANDLE_HOOKS`].
+//! - `ata_handle_factory` — `FUN_083696f4` @ 0x083696f4 (132 bytes;
+//!   3 plain `bl`, no predicated `bl`). Allocates a 5-word handle and its
+//!   zeroed 4-word table; `ata_call_with_zero` is its zero-argument veneer.
 //! - `traced_alloc` — `FUN_08043c18` @ 0x08043c18 (168 bytes; 88 `bl`
 //!   call sites, binary-scanned — the ATA handle factory @ 0x083696f4
 //!   among them). The firmware-wide traced allocator front-end: zeroes
@@ -699,69 +695,63 @@ pub unsafe extern "C" fn ata_handle_table_entry(handle: *const u32, index: u32) 
 }
 
 // ---------------------------------------------------------------------------
-// The handle factory's zero-argument veneer.
+// ATA handle factory and its zero-argument veneer.
 // ---------------------------------------------------------------------------
 
-/// ATA handle-factory services. The factory proper @ 0x083696f4 is not
-/// ported yet — it allocates through the ported [`traced_alloc`]
-/// (0x08043c18) and frees through the ported [`traced_free`]
-/// (0x08043994) — so the
-/// veneer below dispatches through this table (the [`ATA_ERROR_HOOKS`]
-/// pattern) and the default stub reports allocation failure. Every
-/// caller already handles that: each `bl 0x08369778` site compares the
-/// result against NULL and takes its error path.
-#[derive(Copy, Clone)]
-pub struct AtaHandleHooks {
-    /// The handle factory @ 0x083696f4: allocates a 5-word handle and a
-    /// zeroed 4-entry table, then lays it out as `[0]=0, [1]=table,
-    /// [2]=0, [3]=4, [4]=param`. Swap in the real port when 0x083696f4
-    /// lands; host tests install a mock.
-    pub create: unsafe extern "C" fn(param: u32) -> *mut u32,
-}
+/// ata_handle_factory — original: `FUN_083696f4` @ `0x083696f4` (132 bytes;
+/// 3 plain `bl`, no predicated `bl`).
+///
+/// Raw `osos.dec` words establish the exact extent
+/// `0x083696f4..0x08369778`: the next function begins at 0x08369778 with
+/// `mov r0, #0; b 0x083696f4`. The three calls are `traced_alloc(0x14, 0, 0)`,
+/// `traced_alloc(0x10, 0, 0)`, and the second-allocation failure cleanup
+/// `traced_free(handle)`.
+///
+/// Allocates a five-word handle and its four-word table. On success it stores
+/// `[0]=0, [1]=table, [2]=0, [3]=4, [4]=param`; on either allocation failure
+/// it returns NULL, releasing only the already-allocated handle. The target's
+/// table pointer is stored as a `u32`, so host tests supply low mapped storage.
+///
+/// Deliberate deviation: the two ported allocator services use their existing
+/// descriptor-hook seams rather than the stock RAM descriptor.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_handle_factory(param: u32) -> *mut u32 {
+    let handle = traced_alloc(0x14, 0, 0).cast::<u32>();
+    if handle.is_null() {
+        return core::ptr::null_mut();
+    }
 
-/// Default stub: no factory wired in — behave as if the underlying
-/// allocator failed and return NULL. Faithful to the original's own
-/// failure path (0x083696f4 returns NULL when either allocation fails),
-/// and the only behavior reachable until the factory is ported.
-unsafe extern "C" fn missing_handle_factory(_param: u32) -> *mut u32 {
-    core::ptr::null_mut()
-}
+    let table = traced_alloc(0x10, 0, 0).cast::<u32>();
+    handle.add(1).write(table as usize as u32);
+    if table.is_null() {
+        traced_free(handle.cast());
+        return core::ptr::null_mut();
+    }
 
-/// Hook table for the unported factory. Replace before first use on
-/// target; host tests install mocks via `core::ptr::addr_of_mut!`.
-pub static mut ATA_HANDLE_HOOKS: AtaHandleHooks = AtaHandleHooks {
-    create: missing_handle_factory,
-};
-
-/// Reads the hook table. Volatile so LLVM cannot constant-fold the load
-/// to the default stub (the heap/wrappers.rs pattern).
-#[inline(always)]
-fn handle_hooks() -> AtaHandleHooks {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(ATA_HANDLE_HOOKS)) }
+    for index in 0..4 {
+        table.add(index).write(0);
+    }
+    handle.add(3).write(4);
+    handle.add(4).write(param);
+    handle.write(0);
+    handle.add(2).write(0);
+    handle
 }
 
 /// ata_call_with_zero — original: `FUN_08369778` @ 0x08369778 (8 bytes;
 /// 24 `bl` + 1 tail-`b` call sites, binary-scanned).
 ///
-/// A zero-argument veneer over the ATA handle factory @ 0x083696f4:
-/// `mov r0, #0; b 0x083696f4`. The factory builds the 5-word handle
-/// (`[0]=0, [1]=zeroed 4-entry table, [2]=0, [3]=4, [4]=param`) that
-/// [`ata_handle_first_word_or_minus1`] and [`ata_handle_table_entry`]
-/// read; this entry point is the common case where the factory's extra
-/// word (+0x10) stays 0. Callers store the result into object fields
-/// (e.g. @ 0x0803bbd8, 0x08070644/0x08070650) and treat NULL as
-/// allocation failure.
+/// A zero-argument veneer over [`ata_handle_factory`]: `mov r0, #0; b
+/// 0x083696f4`. The factory builds the five-word handle consumed by
+/// [`ata_handle_first_word_or_minus1`] and [`ata_handle_table_entry`].
 ///
-/// Deviation: the original tail-branches into the factory; the port
-/// calls it indirectly through [`ATA_HANDLE_HOOKS`] because the factory
-/// itself is not ported yet — its allocator [`traced_alloc`] and the
-/// free [`traced_free`] it pairs with now are. The default stub returns
-/// NULL — the same value the original produces on an allocation
-/// failure.
+/// Deliberate deviation: Rust makes the retail tail branch an ordinary direct
+/// call; both paths preserve the factory result in `r0`.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ata_call_with_zero() -> *mut u32 {
-    (handle_hooks().create)(0)
+    ata_handle_factory(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -2160,57 +2150,125 @@ mod tests {
         assert_eq!(record_word(slot1, RECORD_ERROR), 0x2222_2222, "id 8's record");
     }
 
-    // ---- the zero-argument factory veneer ---------------------------
+    // ---- ATA handle factory and zero-argument veneer -----------------
 
-    static VENEER_TEST_LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::TRACED_ALLOC_TEST_LOCK as ALLOC_TEST_LOCK;
 
-    static mut VENEER_SEEN_PARAM: u32 = u32::MAX;
-    const SENTINEL_HANDLE: usize = 0x0836_0004;
+    use std::sync::LazyLock;
+    use parking_lot::Mutex as ParkingMutex;
 
-    unsafe extern "C" fn mock_handle_factory(param: u32) -> *mut u32 {
-        VENEER_SEEN_PARAM = param;
-        SENTINEL_HANDLE as *mut u32
+    static FACTORY_ALLOC_CALLS: ParkingMutex<std::vec::Vec<(i32, u32, u32)>> = ParkingMutex::new(std::vec::Vec::new());
+    static FACTORY_FREES: ParkingMutex<std::vec::Vec<u32>> = ParkingMutex::new(std::vec::Vec::new());
+    static mut FACTORY_ALLOC_INDEX: usize = 0;
+    static mut FACTORY_FAIL_AT: Option<usize> = None;
+
+    fn try_factory_arena() -> Option<*mut u8> {
+        static ARENA: LazyLock<Option<usize>> = LazyLock::new(|| {
+            crate::testing::try_map_u32_slab(crate::testing::hints::ATA_HANDLE_FACTORY, 0x1000)
+                .map(|p| p as usize)
+        });
+        (*ARENA).map(|p| p as *mut u8)
     }
 
-    /// Restores the default hook when a test ends (declared after the
-    /// guard, so it runs before the lock is released).
-    struct HandleHookReset;
-    impl Drop for HandleHookReset {
+    unsafe extern "C" fn factory_alloc(size: i32, tag1: u32, tag2: u32) -> *mut u8 {
+        FACTORY_ALLOC_CALLS.lock().push((size, tag1, tag2));
+        let index = FACTORY_ALLOC_INDEX;
+        FACTORY_ALLOC_INDEX += 1;
+        if FACTORY_FAIL_AT == Some(index) {
+            core::ptr::null_mut()
+        } else {
+            try_factory_arena().unwrap().add(index * 0x40)
+        }
+    }
+
+    unsafe extern "C" fn factory_free(block: *mut u8) {
+        FACTORY_FREES.lock().push(block as usize as u32);
+    }
+
+    struct FactoryHookReset;
+    impl Drop for FactoryHookReset {
         fn drop(&mut self) {
             unsafe {
-                (*core::ptr::addr_of_mut!(ATA_HANDLE_HOOKS)).create = missing_handle_factory;
+                (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = missing_allocator;
+                (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace = None;
+                (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).free = missing_free;
+                (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = None;
             }
         }
     }
 
-    #[test]
-    fn the_veneer_passes_zero_and_returns_the_factory_result_verbatim() {
-        let _guard = VENEER_TEST_LOCK.lock().unwrap();
-        let _reset = HandleHookReset;
+    fn prepare_factory(fail_at: Option<usize>) {
+        FACTORY_ALLOC_CALLS.lock().clear();
+        FACTORY_FREES.lock().clear();
         unsafe {
-            VENEER_SEEN_PARAM = u32::MAX;
-            (*core::ptr::addr_of_mut!(ATA_HANDLE_HOOKS)).create = mock_handle_factory;
+            FACTORY_ALLOC_INDEX = 0;
+            FACTORY_FAIL_AT = fail_at;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).alloc = factory_alloc;
+            (*core::ptr::addr_of_mut!(TRACED_ALLOC_HOOKS)).trace = None;
+            (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).free = factory_free;
+            (*core::ptr::addr_of_mut!(TRACED_FREE_HOOKS)).trace = None;
         }
-        let handle = unsafe { ata_call_with_zero() };
-        assert_eq!(handle as usize, SENTINEL_HANDLE, "the factory's result, untouched");
-        assert_eq!(unsafe { VENEER_SEEN_PARAM }, 0, "the original's mov r0, #0");
     }
 
     #[test]
-    fn the_default_stub_reports_allocation_failure() {
-        let _guard = VENEER_TEST_LOCK.lock().unwrap();
-        let _reset = HandleHookReset;
-        assert!(
-            unsafe { ata_call_with_zero() }.is_null(),
-            "no factory wired in: NULL, like the original's alloc-failure path"
-        );
+    fn handle_factory_builds_the_target_word_layout() {
+        let _alloc_guard = ALLOC_TEST_LOCK.lock();
+        let _free_guard = TRACED_FREE_TEST_LOCK.lock();
+        let _reset = FactoryHookReset;
+        if try_factory_arena().is_none() {
+            return;
+        }
+        prepare_factory(None);
+        let handle = unsafe { ata_handle_factory(0x1234_5678) };
+        assert!(!handle.is_null());
+        let table = unsafe { handle.add(1).read() as *const u32 };
+        assert_eq!(unsafe { [handle.read(), handle.add(1).read(), handle.add(2).read(), handle.add(3).read(), handle.add(4).read()] },
+            [0, table as usize as u32, 0, 4, 0x1234_5678]);
+        assert_eq!(unsafe { core::slice::from_raw_parts(table, 4) }, &[0; 4]);
+        assert_eq!(*FACTORY_ALLOC_CALLS.lock(), [(0x14, 0, 0), (0x10, 0, 0)]);
+        assert!(FACTORY_FREES.lock().is_empty());
+    }
+
+    #[test]
+    fn handle_factory_returns_null_on_first_allocation_failure() {
+        let _alloc_guard = ALLOC_TEST_LOCK.lock();
+        let _free_guard = TRACED_FREE_TEST_LOCK.lock();
+        let _reset = FactoryHookReset;
+        prepare_factory(Some(0));
+        assert!(unsafe { ata_handle_factory(9) }.is_null());
+        assert_eq!(*FACTORY_ALLOC_CALLS.lock(), [(0x14, 0, 0)]);
+        assert!(FACTORY_FREES.lock().is_empty());
+    }
+
+    #[test]
+    fn handle_factory_releases_only_the_handle_on_second_allocation_failure() {
+        let _alloc_guard = ALLOC_TEST_LOCK.lock();
+        let _free_guard = TRACED_FREE_TEST_LOCK.lock();
+        let _reset = FactoryHookReset;
+        if try_factory_arena().is_none() {
+            return;
+        }
+        prepare_factory(Some(1));
+        let expected_handle = try_factory_arena().unwrap() as usize as u32;
+        assert!(unsafe { ata_handle_factory(9) }.is_null());
+        assert_eq!(*FACTORY_ALLOC_CALLS.lock(), [(0x14, 0, 0), (0x10, 0, 0)]);
+        assert_eq!(*FACTORY_FREES.lock(), [expected_handle]);
+    }
+
+    #[test]
+    fn the_veneer_passes_zero_to_the_factory() {
+        let _alloc_guard = ALLOC_TEST_LOCK.lock();
+        let _free_guard = TRACED_FREE_TEST_LOCK.lock();
+        if try_factory_arena().is_none() {
+            return;
+        }
+        prepare_factory(None);
+        let handle = unsafe { ata_call_with_zero() };
+        assert_eq!(unsafe { handle.add(4).read() }, 0);
     }
 
     // ---- the traced allocator -----------------------------------------
 
-    // Shared with every other module that mocks TRACED_ALLOC_HOOKS
-    // (sqlite/blob_to_hex.rs), so those tests cannot race these.
-    use crate::testing::TRACED_ALLOC_TEST_LOCK as ALLOC_TEST_LOCK;
 
     /// One observable call into the descriptor, in order.
     #[derive(Debug, Clone, PartialEq, Eq)]

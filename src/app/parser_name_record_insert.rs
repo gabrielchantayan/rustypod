@@ -75,17 +75,18 @@ pub unsafe extern "C" fn parser_name_record_insert(
 mod tests {
     use super::*;
     use crate::crypto::obj_dat::{LhashNode, LhashGetrn, LHASH_GETRN, LHASH_TEST_LOCK};
-    use crate::drivers::ata_cmd::{AtaHandleHooks, TracedAllocHooks, ATA_HANDLE_HOOKS, TRACED_ALLOC_HOOKS};
+    use crate::drivers::ata_cmd::{TracedAllocHooks, TRACED_ALLOC_HOOKS};
     use crate::testing::TRACED_ALLOC_TEST_LOCK;
     use parking_lot::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut HANDLE: [u32; 5] = [0; 5];
+    static mut HANDLE_TABLE: [u32; 4] = [0; 4];
     static mut RECORD: ParserNameRecord = ParserNameRecord { name: core::ptr::null_mut(), reserved: 0, handle: core::ptr::null_mut() };
     static mut TEXT: [u8; 32] = [0; 32];
     static mut NODE: LhashNode = LhashNode { data: core::ptr::null_mut(), next: core::ptr::null_mut() };
     static mut BUCKET: *mut LhashNode = core::ptr::null_mut();
-    static mut ALLOC_CALLS: [i32; 4] = [0; 4];
+    static mut ALLOC_CALLS: [i32; 6] = [0; 6];
     static mut FAIL_SIZE: i32 = -1;
 
     unsafe extern "C" fn make_handle(_param: u32) -> *mut u32 { core::ptr::addr_of_mut!(HANDLE).cast() }
@@ -96,8 +97,10 @@ mod tests {
         if size == FAIL_SIZE { return core::ptr::null_mut(); }
         (*calls)[index + 1] = size;
         match index {
-            0 => core::ptr::addr_of_mut!(RECORD).cast(),
-            1 => core::ptr::addr_of_mut!(TEXT).cast(),
+            0 => core::ptr::addr_of_mut!(HANDLE).cast(),
+            1 => core::ptr::addr_of_mut!(HANDLE_TABLE).cast(),
+            2 => core::ptr::addr_of_mut!(RECORD).cast(),
+            3 => core::ptr::addr_of_mut!(TEXT).cast(),
             _ => core::ptr::addr_of_mut!(NODE).cast(),
         }
     }
@@ -105,9 +108,9 @@ mod tests {
         core::ptr::addr_of_mut!(BUCKET)
     }
 
-    struct Reset { alloc: TracedAllocHooks, handle: AtaHandleHooks, getrn: LhashGetrn }
+    struct Reset { alloc: TracedAllocHooks, getrn: LhashGetrn }
     impl Drop for Reset {
-        fn drop(&mut self) { unsafe { TRACED_ALLOC_HOOKS = self.alloc; ATA_HANDLE_HOOKS = self.handle; LHASH_GETRN = self.getrn; } }
+        fn drop(&mut self) { unsafe { TRACED_ALLOC_HOOKS = self.alloc; LHASH_GETRN = self.getrn; } }
     }
 
     #[test]
@@ -115,11 +118,10 @@ mod tests {
         let _test = TEST_LOCK.lock();
         let _alloc = TRACED_ALLOC_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _lhash = LHASH_TEST_LOCK.lock();
-        let reset = unsafe { Reset { alloc: TRACED_ALLOC_HOOKS, handle: ATA_HANDLE_HOOKS, getrn: LHASH_GETRN } };
+        let reset = unsafe { Reset { alloc: TRACED_ALLOC_HOOKS, getrn: LHASH_GETRN } };
         unsafe {
-            ALLOC_CALLS = [0; 4]; FAIL_SIZE = -1; BUCKET = core::ptr::null_mut();
+            ALLOC_CALLS = [0; 6]; FAIL_SIZE = -1; BUCKET = core::ptr::null_mut();
             TRACED_ALLOC_HOOKS = TracedAllocHooks { alloc: allocate, trace: None };
-            ATA_HANDLE_HOOKS = AtaHandleHooks { create: make_handle };
             LHASH_GETRN = bucket_for_insert;
             let mut table = Lhash::empty(); table.num_nodes = 1; table.up_load = 256;
             let mut parser = [0usize; 2]; parser[1] = core::ptr::addr_of_mut!(table) as usize;
@@ -128,13 +130,13 @@ mod tests {
             assert_eq!((*record).reserved, 0);
             assert_eq!((*record).handle, core::ptr::addr_of_mut!(HANDLE).cast::<usize>());
             assert_eq!(&TEXT[..5], b"edge\0");
-            assert_eq!(ALLOC_CALLS, [3, 12, 5, 12]);
+            assert_eq!(ALLOC_CALLS, [5, 20, 16, 12, 5, 12]);
             assert_eq!(BUCKET, core::ptr::addr_of_mut!(NODE));
             assert_eq!(NODE.data, record.cast());
-            ALLOC_CALLS = [0; 4];
+            ALLOC_CALLS = [0; 6];
             FAIL_SIZE = 5;
             assert!(parser_name_record_insert(parser.as_mut_ptr().cast(), b"edge\0".as_ptr()).is_null());
-            assert_eq!(ALLOC_CALLS, [2, 12, 0, 0]);
+            assert_eq!(ALLOC_CALLS, [4, 20, 16, 12, 0, 0]);
         }
         drop(reset);
     }
