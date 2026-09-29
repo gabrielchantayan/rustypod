@@ -30902,6 +30902,33 @@ functions:
       tests use recording seams to prove the pool-empty, allocation-failure,
       and success paths.
 
+  - address: 0x082e2a7c
+    ghidra: FUN_082e2a7c
+    name: path_component_is_current_reference
+    size: 80
+    sig: "u32 path_component_is_current_reference(const u8 *component, u8 *accumulator_contribution)"
+    module: fs/path_component_is_current_reference
+    status: ported
+    renames:
+      param_1: component
+      param_2: accumulator_contribution
+      DAT_082e2acc: path_split_accumulator
+      thunk_FUN_082e014c: remaining_path_bytes_are_spaces
+    notes: >-
+      Raw ARM establishes the exact 80-byte code extent
+      0x082e2a7c..0x082e2acb: the following word at 0x082e2acc is its
+      accumulator-address literal and the next separately entered function
+      starts at 0x082e2ad0. Decoding every ARM B/BL word in osos.dec finds
+      exactly two direct callers, both plain unconditional bl at 0x082e1684
+      and 0x082e4170; there are no predicated forms or tail branches. The
+      function adds the numeric value of accumulator_contribution to resident
+      word 0x08a0a748, then returns one for `.` followed by NUL or when the
+      next ten bytes are ASCII spaces. Its sole outbound call is a plain bl
+      through veneer 0x082e0138 to 0x082e014c. The bounded whitespace helper
+      is not yet ported; target builds call its verified load address and host
+      tests install a recording seam to prove its exact pointer and limit.
+      Deliberate deviation: none.
+
   - address: 0x082e2f04
     ghidra: FUN_082e2f04
     name: path_node_pool_pop_or_recycle
