@@ -194,6 +194,9 @@ pub mod hints {
     // 0x6a10_0000: dedicated to sqlite/btree_set_cache_size's target-width
     // Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_SET_CACHE_SIZE: usize = 0x6a10_0000;
+    // 0x6a40_0000: dedicated to sqlite/btree_clear_table's target-width
+    // Btree and BtShared fixture; mappings never unmap.
+    pub const SQLITE_BTREE_CLEAR_TABLE: usize = 0x6a40_0000;
     // 0x6a60_0000: dedicated to sqlite/btree_set_page_size_fixed's
     // target-width Btree and BtShared fixture; mappings never unmap.
     pub const SQLITE_BTREE_SET_PAGE_SIZE_FIXED: usize = 0x6a60_0000;
