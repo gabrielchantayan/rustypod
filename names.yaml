@@ -16,6 +16,20 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08340f04
+    ghidra: FUN_08340f04
+    name: negative_product_rescale_in_place
+    size: 40
+    sig: "u32 negative_product_rescale_in_place(u32 *value)"
+    module: util/negative_product_rescale_in_place
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_08340f2c: initial_scale
+      DAT_08340f30: negative_product_scale
+    notes: >-
+      Raw words establish a 40-byte leaf ending at 0x08340f2c, followed by
+      BL at 0x0830a468 and 0x0830a488; no predicated direct calls exist.
   - address: 0x083b4d58
     ghidra: FUN_083b4d58
     name: rgba4444_rect_to_rgba8
