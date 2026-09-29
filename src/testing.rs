@@ -39,6 +39,10 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x5310_0000 / 0x5320_0000: dedicated to fs/path_attribute_update's
+    // target-width node and header fixtures; mappings never unmap.
+    pub const PATH_ATTRIBUTE_UPDATE: usize = 0x5310_0000;
+    pub const PATH_ATTRIBUTE_UPDATE_MODE_MISMATCH: usize = 0x5320_0000;
     // 0x6c00_0000: dedicated to cxx/vector_copy_construct_elem32's
     // target-width source, destination, and allocation fixture; mappings never unmap.
     pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;
