@@ -39,8 +39,8 @@ unsafe fn is_component_delimiter(byte: u8) -> bool {
     byte == delimiter_at(0) || byte == delimiter_at(1) || byte == delimiter_at(2)
 }
 
-#[inline(always)]
-unsafe fn add_accumulator_contribution(contribution: *mut u8) {
+pub(crate) unsafe fn add_accumulator_contribution(contribution: *mut u8)
+{
     #[cfg(target_os = "none")]
     let accumulator = PATH_SPLIT_ACCUMULATOR_ADDRESS;
     #[cfg(not(target_os = "none"))]
@@ -121,20 +121,26 @@ pub unsafe extern "C" fn split_path_at_last_delimiter(
 }
 
 #[cfg(test)]
+pub(crate) static PATH_COMPONENT_ACCUMULATOR_TEST_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
+
+#[cfg(test)]
+pub(crate) unsafe fn path_component_accumulator() -> u32 {
+    ptr::read_volatile(ptr::addr_of!(HOST_PATH_SPLIT_ACCUMULATOR))
+}
+
+#[cfg(test)]
+pub(crate) unsafe fn reset_path_component_accumulator() {
+    ptr::write_volatile(ptr::addr_of_mut!(HOST_PATH_SPLIT_ACCUMULATOR), 0xf347_b05c);
+}
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
 
-    static PATH_COMPONENT_SPLIT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
-    unsafe fn accumulator() -> u32 {
-        ptr::read_volatile(ptr::addr_of!(HOST_PATH_SPLIT_ACCUMULATOR))
-    }
-
-    unsafe fn reset_accumulator() {
-        ptr::write_volatile(ptr::addr_of_mut!(HOST_PATH_SPLIT_ACCUMULATOR), 0xf347_b05c);
-    }
 
     unsafe fn split(path: &[u8]) -> ([u8; 32], [u8; 32]) {
         assert_eq!(path.last(), Some(&0));
@@ -155,8 +161,8 @@ mod tests {
 
     #[test]
     fn no_delimiter_leaves_prefix_empty_and_copies_the_whole_path() {
-        let _guard = PATH_COMPONENT_SPLIT_TEST_LOCK.lock();
-        unsafe { reset_accumulator() };
+        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
+        unsafe { reset_path_component_accumulator() };
         let (prefix, component) = unsafe { split(b"plain\0") };
         assert_eq!(&prefix[..1], b"\0");
         assert_eq!(&component[..6], b"plain\0");
@@ -164,8 +170,8 @@ mod tests {
 
     #[test]
     fn a_single_delimiter_remains_at_the_end_of_the_prefix() {
-        let _guard = PATH_COMPONENT_SPLIT_TEST_LOCK.lock();
-        unsafe { reset_accumulator() };
+        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
+        unsafe { reset_path_component_accumulator() };
         let (prefix, component) = unsafe { split(b"abucd\0") };
         assert_eq!(&prefix[..4], b"abu\0");
         assert_eq!(&component[..3], b"cd\0");
@@ -173,8 +179,8 @@ mod tests {
 
     #[test]
     fn repeated_delimiters_remove_only_the_last_one_from_the_prefix() {
-        let _guard = PATH_COMPONENT_SPLIT_TEST_LOCK.lock();
-        unsafe { reset_accumulator() };
+        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
+        unsafe { reset_path_component_accumulator() };
         let (prefix, component) = unsafe { split(b"abucvd\0") };
         assert_eq!(&prefix[..5], b"abuc\0");
         assert_eq!(&component[..2], b"d\0");
@@ -182,8 +188,8 @@ mod tests {
 
     #[test]
     fn delimiter_run_and_empty_tail_are_nul_terminated() {
-        let _guard = PATH_COMPONENT_SPLIT_TEST_LOCK.lock();
-        unsafe { reset_accumulator() };
+        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
+        unsafe { reset_path_component_accumulator() };
         let (prefix, component) = unsafe { split(b"tuv\0") };
         assert_eq!(&prefix[..3], b"tu\0");
         assert_eq!(&component[..1], b"\0");
@@ -191,9 +197,9 @@ mod tests {
 
     #[test]
     fn accumulator_receives_the_third_argument_address_on_each_call() {
-        let _guard = PATH_COMPONENT_SPLIT_TEST_LOCK.lock();
-        unsafe { reset_accumulator() };
-        let before = unsafe { accumulator() };
+        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
+        unsafe { reset_path_component_accumulator() };
+        let before = unsafe { path_component_accumulator() };
         let mut first_contribution = 0u8;
         let mut second_contribution = 0u8;
         let mut prefix = [0u8; 8];
@@ -207,7 +213,7 @@ mod tests {
                 b"\0".as_ptr(),
             );
         }
-        let after_first = unsafe { accumulator() };
+        let after_first = unsafe { path_component_accumulator() };
         assert_eq!(
             after_first,
             before.wrapping_add(&mut first_contribution as *mut u8 as usize as u32),
@@ -222,7 +228,7 @@ mod tests {
             );
         }
         assert_eq!(
-            unsafe { accumulator() },
+            unsafe { path_component_accumulator() },
             after_first.wrapping_add(&mut second_contribution as *mut u8 as usize as u32),
         );
     }

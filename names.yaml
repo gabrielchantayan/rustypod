@@ -160985,3 +160985,32 @@ functions:
       unspecified scratch arguments are supplied as zero. Host tests cover
       zero-total output clearing and both-block offsets, counts, capacities,
       and release order.
+
+  # --- Parent-directory path component predicate ---
+  - address: 0x082e2ad0
+    ghidra: FUN_082e2ad0
+    name: path_component_is_parent_reference
+    size: 80
+    sig: "u32 path_component_is_parent_reference(const u8 *component, u8 *accumulator_contribution)"
+    module: fs/path_component_is_parent_reference
+    status: ported
+    renames:
+      param_1/r0: component
+      param_2/r1: accumulator contribution
+      DAT_082e2b28: path split accumulator address
+      thunk_FUN_082e014c: remaining path bytes are spaces
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent 0x082e2ad0..0x082e2b1f:
+      its literal pool begins at 0x082e2b20 and the next separately entered
+      function begins at 0x082e2b28. Whole-image ARM immediate-branch
+      decoding finds exactly two inbound direct calls, both plain unconditional
+      bl at 0x082e16bc and 0x082e4184, with zero predicated bl forms and no
+      tail branches. The body adds r1's numeric pointer value to resident word
+      0x08a0a748, then returns one only for ".." followed by NUL or for ".."
+      whose next nine bytes make thunk_FUN_082e014c return one. Raw confirms
+      that 0x082e0138 is a branch veneer to 0x082e014c; the helper scans its
+      bounded bytes for ASCII spaces. Deliberate deviation: the helper is not
+      ported, so target builds call verified retailOS address 0x082e014c and
+      host tests install a recording seam. match.py exits 1 with the expected
+      structural diff: LLVM frame setup and tail call replace the retail
+      callee-saved frame and bl/cmp sequence.
