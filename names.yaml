@@ -161281,3 +161281,33 @@ functions:
       ordinary call; its returned u32 and observable memory accesses are the
       same. Host tests cover the directory short circuit, FAT16 low-cluster
       mapping, and FAT32 bounded-cluster rejection.
+
+  - address: 0x082e1390
+    ghidra: FUN_082e1390
+    name: fat_dirent_write_volume_info
+    size: 184
+    sig: "void fat_dirent_write_volume_info(const u8 *entry, u8 *output)"
+    module: fs/fat_dirent_volume_info
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: output
+      param_1_plus_0x2c: volume
+      param_2_plus_0x08: mode
+      param_2_plus_0x24: data_sector_count
+      param_2_plus_0x28: allocated_sector_count
+    notes: >-
+      Raw osos.dec establishes the exact 184-byte extent
+      0x082e1390..0x082e1448: pop {pc} at 0x082e1444 ends the body and the
+      next separately entered function begins with push {r4,lr} at
+      0x082e1448. Decoding every ARM B/BL word finds two incoming plain BL
+      calls (0x082e1a1c and 0x082e4704), no predicated calls, and no outgoing
+      calls. The body writes the 48-byte volume-information record from a FAT
+      short directory entry: file size, timestamps, data-sector count from the
+      target-width volume pointer at entry+0x2c, size rounded up to 512-byte
+      sectors, and mode bits selected from attribute bits 0, 3, and 4.
+      match.py exits 1 with the expected structural difference: LLVM combines
+      the flag tests and reorders independent stores while preserving all
+      observed values and offsets. Deliberate deviation: raw byte pointers
+      retain the verified target layout rather than inventing complete object
+      types; the target volume pointer remains a u32 word on 64-bit hosts.

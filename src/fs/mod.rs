@@ -2,6 +2,8 @@
 //! HFS B-tree node access).
 /// FAT directory-entry start-cluster extraction @ 0x082e1378.
 pub mod fat_dirent;
+/// FAT directory-entry volume-information record writer @ 0x082e1390.
+pub mod fat_dirent_volume_info;
 /// FAT directory-entry cache-block index lookup @ 0x082e1448.
 pub mod fat_dirent_block_index;
 /// FAT 8.3 short-name renderer @ 0x082e2fe0.

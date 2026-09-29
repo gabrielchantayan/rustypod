@@ -3222,6 +3222,12 @@ pub mod hints {
     // 0x089c_e000: dedicated to util/opaque_constant_zero's fixed retailOS
     // seed-word fixture; mappings never unmap.
     pub const OPAQUE_CONSTANT_ZERO: usize = 0x089c_e000;
+    // 0x5370_0000: dedicated to fs/fat_dirent_volume_info's target-width
+    // directory-entry, volume, and output fixtures; mappings never unmap.
+    pub const FAT_DIRENT_VOLUME_INFO: usize = 0x5370_0000;
+    // 0x5380_0000: dedicated to fs/volume_info's target-width query fixture;
+    // mappings never unmap.
+    pub const VOLUME_INFO_QUERY: usize = 0x5380_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
