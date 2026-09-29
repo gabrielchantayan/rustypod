@@ -6,8 +6,9 @@
 //! and no predicated call. The routine space-pads the two fixed-width text
 //! fields, writes the record metadata, clears its ten-byte reserved range,
 //! then tail-calls a four-word state clear.
-//! Deliberate deviation: the three unported retailOS callees are inlined from
-//! their verified ARM behavior, so this port has no invented dispatch seam.
+//! Deliberate deviation: the two remaining unported retailOS callees are
+//! inlined from their verified ARM behavior; text copying uses the dedicated
+//! binary-verified `copy_text_padded_with_spaces` port.
 
 const FIRST_TEXT_OFFSET: usize = 0;
 const FIRST_TEXT_LEN: usize = 8;
@@ -26,12 +27,6 @@ const STATE_FOURTH_OFFSET: usize = 0x50;
 const LOW_VALUE_OFFSET: usize = 0x1a;
 const CONTEXT_OFFSET: usize = 0x1c;
 
-unsafe fn copy_text_padded_with_spaces(destination: *mut u8, source: *const u8, len: usize) {
-    for offset in 0..len {
-        let byte = source.add(offset).read_volatile();
-        destination.add(offset).write_volatile(if byte == 0 { b' ' } else { byte });
-    }
-}
 
 /// initialize_packet_record — original: `FUN_082e2674` @ 0x082e2674
 /// (120 bytes).
@@ -51,8 +46,12 @@ pub unsafe extern "C" fn initialize_packet_record(
     context: u32,
     pair: *const u16,
 ) {
-    copy_text_padded_with_spaces(record.add(FIRST_TEXT_OFFSET), first_text, FIRST_TEXT_LEN);
-    copy_text_padded_with_spaces(record.add(SECOND_TEXT_OFFSET), second_text, SECOND_TEXT_LEN);
+    crate::copy_text_padded_with_spaces::copy_text_padded_with_spaces(
+        record.add(FIRST_TEXT_OFFSET), first_text, FIRST_TEXT_LEN as u32,
+    );
+    crate::copy_text_padded_with_spaces::copy_text_padded_with_spaces(
+        record.add(SECOND_TEXT_OFFSET), second_text, SECOND_TEXT_LEN as u32,
+    );
     record.add(KIND_OFFSET).write_volatile(kind);
 
     for offset in 0..RESERVED_LEN {
@@ -112,8 +111,8 @@ mod tests {
             );
         }
 
-        assert_eq!(&record.0[0..8], b"A CDE GH");
-        assert_eq!(&record.0[8..11], b" Y ");
+        assert_eq!(&record.0[0..8], b"A       ");
+        assert_eq!(&record.0[8..11], b"   ");
         assert_eq!(record.0[KIND_OFFSET], 0x7e);
         assert_eq!(&record.0[RESERVED_OFFSET..HIGH_VALUE_OFFSET], &[0; 8]);
         assert_eq!(&record.0[HIGH_VALUE_OFFSET..HIGH_VALUE_OFFSET + 2], &0x89abu16.to_le_bytes());

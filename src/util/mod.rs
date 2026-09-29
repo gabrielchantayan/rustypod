@@ -47,6 +47,7 @@ pub mod context_finalize_if_present;
 pub mod copy_four_bytes;
 pub mod copy_fourteen_bytes;
 pub mod copy_two_u32_pairs;
+pub mod copy_text_padded_with_spaces;
 pub mod copy_range_if_destination;
 pub mod copy_range_nonnull_destination_loop_entry_9138;
 pub mod copy_u32_pair_if_destination;

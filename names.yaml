@@ -5844,6 +5844,27 @@ functions:
       a resident boundary; target builds dispatch to its verified address and
       host tests use its established recording seam. match.py reports the
       expected structural differences from LLVM's frame and pointer code.
+  - address: 0x082e04d0
+    ghidra: FUN_082e04d0
+    name: copy_text_padded_with_spaces
+    size: 44
+    sig: "void copy_text_padded_with_spaces(u8 *destination, const u8 *source, u32 len)"
+    module: util/copy_text_padded_with_spaces
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: len
+      r12: space
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte extent 0x082e04d0..0x082e04fb:
+      bx lr returns at the end, and push {r4,lr} at 0x082e04fc starts the next
+      independent function. Complete-image ARM decoding finds exactly two
+      inbound plain BL calls at 0x082e2694 and 0x082e26a4, zero inbound
+      predicated BL calls, and no outbound calls. For each remaining byte, the
+      leaf copies a non-NUL source byte and advances both pointers; on NUL it
+      writes a space and advances only the destination, padding the rest of
+      the fixed width without another source read. No deliberate deviations.
   - address: 0x082e04fc
     ghidra: FUN_082e04fc
     name: volume_table_release_buffer
