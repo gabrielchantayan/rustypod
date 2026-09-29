@@ -174,10 +174,138 @@ pub unsafe extern "C" fn sqlite3_bitvec_test(mut bitvec: *const Bitvec, mut bit:
         }
     }
 }
+/// sqlite3_bitvec_clear — original `FUN_083704b0` @ `0x083704b0`
+/// (188 bytes, `0x083704b0..0x0837056c`; three plain and one predicated
+/// outgoing `bl`, with one plain and one predicated inbound `bl`).
+///
+/// Clears a valid bit from an adaptive SQLite Bitvec. Inline vectors clear the
+/// selected bitmap bit directly. Child vectors recurse with the quotient and
+/// one-based remainder of `bit - 1`. Hash vectors are rebuilt from their 125
+/// slots after clearing the table and resetting `n_set`, omitting the requested
+/// value; this preserves the original's insertion order and conversion to
+/// child vectors at 62 entries.
+///
+/// Deliberate deviation: the original copies and zeroes the target-width hash
+/// array through memcpy/memset thunks. This port uses volatile word accesses,
+/// avoiding libc substitution while preserving the target's 125-word storage
+/// semantics on widened-pointer hosts.
+///
+/// # Safety
+///
+/// `bitvec` must point to a valid Bitvec and `bit` must be a valid one-based
+/// bit number for that vector and every descended child.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.sqlite3_bitvec_clear")]
+pub unsafe extern "C" fn sqlite3_bitvec_clear(mut bitvec: *mut Bitvec, mut bit: u32) {
+    loop {
+        if (*bitvec).size <= 4_000 {
+            let bit = bit.wrapping_sub(1);
+            let byte = (*bitvec).storage.bitmap.get_unchecked_mut((bit >> 3) as usize);
+            core::ptr::write_volatile(byte, core::ptr::read_volatile(byte) & !(1 << (bit & 7)));
+            return;
+        }
+
+        let divisor = (*bitvec).i_divisor;
+        if divisor != 0 {
+            let bit_minus_one = bit.wrapping_sub(1);
+            bitvec = *(*bitvec).storage.children.get_unchecked((bit_minus_one / divisor) as usize);
+            bit = bit_minus_one % divisor + 1;
+            if bitvec.is_null() {
+                return;
+            }
+            continue;
+        }
+
+        let mut saved = [0u32; BITVEC_NPTR];
+        let mut index = 0;
+        while index < BITVEC_NPTR {
+            let slot = (*bitvec).storage.hashes.get_unchecked_mut(index);
+            saved[index] = core::ptr::read_volatile(slot);
+            core::ptr::write_volatile(slot, 0);
+            index += 1;
+        }
+        (*bitvec).n_set = 0;
+
+        for value in saved {
+            if value != 0 && value != bit {
+                bitvec_set(bitvec, value);
+            }
+        }
+        return;
+    }
+}
+
+/// Internal target-layout equivalent of sqlite3BitvecSet, used solely while
+/// rebuilding a hash vector in [`sqlite3_bitvec_clear`].
+unsafe fn bitvec_set(mut bitvec: *mut Bitvec, mut bit: u32) -> u32 {
+    loop {
+        if (*bitvec).size <= 4_000 {
+            let bit = bit.wrapping_sub(1);
+            let byte = (*bitvec).storage.bitmap.get_unchecked_mut((bit >> 3) as usize);
+            core::ptr::write_volatile(byte, core::ptr::read_volatile(byte) | (1 << (bit & 7)));
+            return 0;
+        }
+
+        let divisor = (*bitvec).i_divisor;
+        if divisor != 0 {
+            let bit_minus_one = bit.wrapping_sub(1);
+            let index = (bit_minus_one / divisor) as usize;
+            bit = bit_minus_one % divisor + 1;
+            let child = (*bitvec).storage.children.get_unchecked_mut(index);
+            if (*child).is_null() {
+                *child = sqlite3_bitvec_create(divisor);
+                if (*child).is_null() {
+                    return 7;
+                }
+            }
+            bitvec = *child;
+            continue;
+        }
+
+        let mut index = (bit.wrapping_mul(37) % BITVEC_NPTR as u32) as usize;
+        loop {
+            let slot = (*bitvec).storage.hashes.get_unchecked_mut(index);
+            let value = core::ptr::read_volatile(slot);
+            if value == 0 {
+                (*bitvec).n_set = (*bitvec).n_set.wrapping_add(1);
+                if (*bitvec).n_set < 62 {
+                    core::ptr::write_volatile(slot, bit);
+                    return 0;
+                }
+                break;
+            }
+            if value == bit {
+                return 0;
+            }
+            index += 1;
+            if index == BITVEC_NPTR {
+                index = 0;
+            }
+        }
+
+        let mut saved = [0u32; BITVEC_NPTR];
+        let mut index = 0;
+        while index < BITVEC_NPTR {
+            let slot = (*bitvec).storage.hashes.get_unchecked_mut(index);
+            saved[index] = core::ptr::read_volatile(slot);
+            core::ptr::write_volatile(slot, 0);
+            index += 1;
+        }
+        (*bitvec).i_divisor = ((*bitvec).size.wrapping_add(124)) / BITVEC_NPTR as u32;
+        let mut result = bitvec_set(bitvec, bit);
+        for value in saved {
+            if value != 0 {
+                result |= bitvec_set(bitvec, value);
+            }
+        }
+        return result;
+    }
+}
 #[cfg(test)]
 mod tests {
     extern crate std;
-    use super::{sqlite3_bitvec_create, sqlite3_bitvec_destroy, sqlite3_bitvec_test, Bitvec, BitvecStorage, BITVEC_NPTR};
+    use super::{sqlite3_bitvec_clear, sqlite3_bitvec_create, sqlite3_bitvec_destroy, sqlite3_bitvec_test, Bitvec, BitvecStorage, BITVEC_NPTR};
     use crate::heap::types::HeapDescriptorDescriptor;
     use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
     use crate::sqlite::mem::tests::{install_recorder, realloc_log};
@@ -387,6 +515,62 @@ mod tests {
             bitvec.storage.hashes[0] = 152;
             assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 152), 1);
             assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 277), 0);
+        }
+    }
+
+    #[test]
+    fn clear_clears_inline_bits_without_changing_the_header_count() {
+        let mut bitvec = Box::new(Bitvec {
+            size: 4_000,
+            n_set: 17,
+            i_divisor: 0,
+            storage: BitvecStorage { bitmap: [0; 500] },
+        });
+        unsafe {
+            bitvec.storage.bitmap[0] = 0x81;
+            sqlite3_bitvec_clear(bitvec.as_mut(), 8);
+            assert_eq!(bitvec.storage.bitmap[0], 0x01);
+            assert_eq!(bitvec.n_set, 17);
+        }
+    }
+
+    #[test]
+    fn clear_rebuilds_a_wrapped_hash_table_without_the_requested_value() {
+        let mut bitvec = Box::new(Bitvec {
+            size: 4_001,
+            n_set: 2,
+            i_divisor: 0,
+            storage: BitvecStorage { hashes: [0; BITVEC_NPTR] },
+        });
+        unsafe {
+            bitvec.storage.hashes[124] = 27;
+            bitvec.storage.hashes[0] = 152;
+            sqlite3_bitvec_clear(bitvec.as_mut(), 27);
+            assert_eq!(bitvec.n_set, 1);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 27), 0);
+            assert_eq!(sqlite3_bitvec_test(bitvec.as_ref(), 152), 1);
+        }
+    }
+
+    #[test]
+    fn clear_descends_to_the_child_quotient_and_remainder() {
+        let mut child = Box::new(Bitvec {
+            size: 4_000,
+            n_set: 1,
+            i_divisor: 0,
+            storage: BitvecStorage { bitmap: [0; 500] },
+        });
+        let mut parent = Box::new(Bitvec {
+            size: 4_001,
+            n_set: 1,
+            i_divisor: 4_000,
+            storage: BitvecStorage { children: [core::ptr::null_mut(); BITVEC_NPTR] },
+        });
+        unsafe {
+            child.storage.bitmap[0] = 0x01;
+            parent.storage.children[1] = child.as_mut();
+            sqlite3_bitvec_clear(parent.as_mut(), 4_001);
+            assert_eq!(child.storage.bitmap[0], 0);
         }
     }
 }

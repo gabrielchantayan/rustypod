@@ -116946,6 +116946,42 @@ functions:
       worktree archive reports the expected 8-vs-11 instruction diff: LLVM
       returns the NULL case early and saves fp instead of retailOS's unused r4.
 
+  # --- SQLite adaptive Bitvec bit clear ---
+  - address: 0x083704b0
+    ghidra: FUN_083704b0
+    name: sqlite3_bitvec_clear
+    size: 188
+    sig: "void sqlite3BitvecClear(Bitvec *bitvec, u32 bit)"
+    module: sqlite/bitvec
+    status: ported
+    renames:
+      param_1/r0/r5: bitvec
+      param_2/r1/r6: bit
+      local_208: saved_hashes
+      FUN_08036f14: __rt_udiv
+      FUN_08037df8: memcpy
+      FUN_08037db8: memset
+      FUN_083705c8: sqlite3_bitvec_set
+    notes: >-
+      Raw osos.dec establishes the exact 188-byte A32 extent
+      0x083704b0..0x0837056c: the next separately linked function starts with
+      push {r4,lr} at 0x0837056c. The body has three unconditional plain bl
+      calls (to __rt_udiv, memcpy, and memset) and one predicated blne to
+      sqlite3BitvecSet; it has no other call forms. Whole-image aligned ARM
+      B/BL-immediate decoding finds two inbound direct call sites: plain bl at
+      0x08370410 and predicated blge at 0x0837e2d4. This is SQLite 3.5.9's
+      sqlite3BitvecClear. For iSize <= 4000 it clears bit-1 in the inline
+      bitmap. A nonzero iDivisor selects child [(bit-1)/iDivisor] and recurses
+      with the one-based remainder, returning if that child is NULL. Otherwise
+      it copies the 125-word hash array to its stack frame, zeroes the table
+      and nSet, then reinserts every nonzero saved value except bit. Rust uses
+      volatile target-width word accesses rather than the memcpy/memset
+      thunks, and an internal equivalent of sqlite3BitvecSet for reinsertion;
+      named repr(C) fields keep host pointer widening from changing target
+      offsets. Host tests cover inline-bit clearing without an nSet change,
+      hash reinsertion across the final-slot wrap, and quotient/remainder child
+      descent.
+
   # --- SQLite adaptive Bitvec constructor ---
   - address: 0x0837056c
     ghidra: FUN_0837056c
