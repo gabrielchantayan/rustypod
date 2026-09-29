@@ -1707,6 +1707,71 @@ pub unsafe extern "C" fn video_engine_submit_frame(
     );
 }
 
+/// Firmware entry of the opaque mode-command dispatcher reached by
+/// `FUN_082d2108`. Its body has no independently verified semantic name.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_OPAQUE_MODE_COMMAND_ADDR: usize = 0x0824_de1c;
+
+/// ABI recovered from the wrapper's tail branch: engine followed by one raw
+/// command word.
+type VideoEngineOpaqueModeCommand = unsafe extern "C" fn(*mut u8, u32);
+
+/// Host-test stand-in for the opaque resident command dispatcher.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_OPAQUE_MODE_COMMAND: Option<VideoEngineOpaqueModeCommand> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_dispatch_opaque_mode_command`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_opaque_mode_command(
+    dispatch: Option<VideoEngineOpaqueModeCommand>,
+) {
+    core::ptr::addr_of_mut!(MOCK_OPAQUE_MODE_COMMAND).write(dispatch);
+}
+
+/// Transfers a raw mode command to the resident dispatcher at 0x0824de1c.
+unsafe fn dispatch_opaque_mode_command(engine: *mut u8, command: u32) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineOpaqueModeCommand =
+            core::mem::transmute(VIDEO_ENGINE_OPAQUE_MODE_COMMAND_ADDR);
+        dispatch(engine, command);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_OPAQUE_MODE_COMMAND).read() {
+            Some(dispatch) => dispatch(engine, command),
+            None => panic!("video_engine_dispatch_opaque_mode_command requires dispatcher 0x0824de1c"),
+        }
+    }
+}
+
+/// video_engine_dispatch_opaque_mode_command — retailOS `FUN_082d2108` @
+/// **0x082d2108** (32 bytes, `0x082d2108..0x082d2124`); the next independent
+/// wrapper begins at `0x082d2128`. Raw A32 decoding finds one outbound plain
+/// `bl` (`0x082d2110 -> video_engine_get`), no predicated `bl`, and a
+/// conditional tail `bne` to `0x0824de1c`. Complete branch-target decoding
+/// finds two inbound plain `bl` calls and no predicated inbound `bl` calls.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it tail-dispatches `(engine, command)` to resident
+/// address `0x0824de1c`. Callers provide `0x1d00` and one global raw command;
+/// the target's behavior has not been independently identified.
+///
+/// # Deliberate deviations
+///
+/// Ghidra's 84-byte extent and recovered byte-store implementation are false:
+/// the raw `popne {r4,lr}; bne` ends this wrapper. The resident target remains
+/// an intentionally opaque typed seam; host tests record the unmodified word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_dispatch_opaque_mode_command(command: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        dispatch_opaque_mode_command(engine, command);
+    }
+}
+
 /// Firmware entry of the video-engine request dispatcher `FUN_08252220`,
 /// which remains resident.
 #[cfg(target_os = "none")]
@@ -3127,6 +3192,47 @@ mod tests {
             set_mock_instance(ptr::null_mut());
         }
     }
+    // --- video_engine_dispatch_opaque_mode_command (FUN_082d2108) ---
+
+    static mut OPAQUE_MODE_COMMAND_RECORDED: Option<(*mut u8, u32)> = None;
+
+    unsafe extern "C" fn record_opaque_mode_command(engine: *mut u8, command: u32) {
+        *addr_of_mut!(OPAQUE_MODE_COMMAND_RECORDED) = Some((engine, command));
+    }
+
+    #[test]
+    fn opaque_mode_command_null_instance_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            set_mock_opaque_mode_command(Some(record_opaque_mode_command));
+            OPAQUE_MODE_COMMAND_RECORDED = None;
+            video_engine_dispatch_opaque_mode_command(0x1d00);
+            assert_eq!(OPAQUE_MODE_COMMAND_RECORDED, None);
+            set_mock_opaque_mode_command(None);
+        }
+    }
+
+    #[test]
+    fn opaque_mode_command_prepends_instance_and_preserves_raw_word() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_opaque_mode_command(Some(record_opaque_mode_command));
+            for command in [0x1d00, 0x1d01, 0, u32::MAX] {
+                OPAQUE_MODE_COMMAND_RECORDED = None;
+                video_engine_dispatch_opaque_mode_command(command);
+                assert_eq!(
+                    OPAQUE_MODE_COMMAND_RECORDED,
+                    Some((engine.as_mut_ptr(), command)),
+                );
+            }
+            set_mock_opaque_mode_command(None);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
 }
 /// `video_engine_present_default_frame` — retailOS `FUN_08167460` @
 /// **0x08167460** (56 bytes, `0x08167460..0x08167497`; `push {r2,r3,r4,lr}`
