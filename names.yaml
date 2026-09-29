@@ -47164,6 +47164,36 @@ functions:
       address and host tests use a recording seam. No selector or
       continuation validation is added.
 
+  - address: 0x082d21a8
+    ghidra: FUN_082d21a8
+    name: video_engine_dispatch_request
+    size: 52
+    sig: "void video_engine_dispatch_request(u32 request, u32 kind, u32 value, u32 context)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: request
+      param_2/r1: kind
+      param_3/r2: value
+      param_4/r3: context
+      FUN_08252bec: video_engine_get
+      FUN_08252220: video_engine_request_dispatch
+    notes: >-
+      Raw A32 words establish the exact 52-byte extent
+      0x082d21a8..0x082d21d8: save four argument registers, call
+      video_engine_get, silently return for NULL, otherwise restore the
+      original four words after the engine pointer and conditionally BL to
+      0x08252220. The next independently linked wrapper starts at
+      0x082d21dc. The body has one plain BL (0x082d21bc -> 0x08252bec) and
+      one predicated BL (0x082d21d4 -> 0x08252220). Complete raw-image
+      branch-target decoding finds exactly two direct inbound plain BL sites
+      (0x0827d4dc and 0x0828cb14) and no predicated inbound BL; a separate
+      tail B at 0x083d3a48 also targets this entry. Ghidra identifies
+      0x08252220's five-word ABI and dispatch role but not the meanings of
+      its four request words. Rust preserves them unchanged through a typed
+      resident-firmware seam, with host tests covering NULL suppression and
+      zero/high-bit/all-ones word forwarding. No validation is added.
+
   - address: 0x082d223c
   - address: 0x082d229c
     ghidra: FUN_082d229c
