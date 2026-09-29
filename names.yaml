@@ -159537,3 +159537,36 @@ functions:
       +4 at 0x089ca458 remains null, and always restores the saved clock
       state. match.py is expected to report a structural diff because the
       Rust port dispatches the two opaque calls through relocated pointers.
+
+  - address: 0x0836991c
+    ghidra: FUN_0836991c
+    name: selection_record_matches_target
+    size: 100
+    sig: "u32 selection_record_matches_target(u32 target, u32 *state, u32 context, u32 *out)"
+    module: util/selection_record_matches_target
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1/r4: state
+      param_3/r2/r1: context
+      param_4/r3/r5: out
+      "state+0xc": selected_record_holder
+      "selected_record_holder+0x0": selected_record
+      "selected_record+0x0": tag
+      "selected_record+0x24": target
+      "selected_record+0x28": terminal_record_index
+      "selected_record_holder+0x8": match_kind
+      FUN_083672e4: unported record validation callee
+    notes: >-
+      Raw osos.dec words establish the 100-byte A32 extent
+      0x0836991c..0x0836997f; the next real function starts with push
+      {r4,lr} at 0x08369980. Whole-image branch decoding finds two
+      unconditional plain inbound BL calls at 0x082b6e88 and 0x082b7050,
+      no predicated inbound BL calls; the body has one unconditional plain
+      BL at 0x0836995c to the unported 0x083672e4 and no predicated BL calls.
+      The port checks tag 0x95, target equality at +0x24, and signed -1 at
+      +0x28 before calling that exact unresolved target with
+      (state,context,1,target). A zero result stores holder byte +8 and
+      returns one. ARM is the stock instruction sequence with a relocated
+      absolute veneer; host uses a recording seam and a below-4-GiB fixture
+      for the target-width record pointer.

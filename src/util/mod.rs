@@ -287,6 +287,7 @@ pub mod scheduler_handle_label_lookup;
 pub mod client_completion_notify;
 pub mod state_flags;
 pub mod selected_or_all_entry_range;
+pub mod selection_record_matches_target;
 pub mod ring_buffer_used_bytes;
 pub mod ring_write;
 pub mod short_filename_byte_is_rejected;
