@@ -6,6 +6,7 @@ pub mod ata_data_transfer_status;
 pub mod ata_command_submit_wait;
 pub mod ata_set_features;
 pub mod ata_taskfile_program;
+pub mod ata_taskfile_program_48bit;
 pub mod ata_command_prepare;
 pub mod ata_command_wait;
 pub mod ata_command_wait_idle;

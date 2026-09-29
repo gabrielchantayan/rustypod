@@ -118787,6 +118787,34 @@ functions:
       volatile byte stores. Host tests cover invalid-device short-circuiting
       and the flags-ready exception with sparse destination-byte checks.
 
+  - address: 0x0836c764
+    ghidra: FUN_0836c764
+    name: ata_taskfile_program_48bit
+    size: 208
+    sig: "u32 ata_taskfile_program_48bit(AtaCommandDevice *device, const u8 *command)"
+    module: drivers/ata_taskfile_program_48bit
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: command
+      DAT_0836c834: ata_device_signature
+      FUN_080c4ba8: ata_pio_write_byte
+      return/r0: status
+    notes: >-
+      Raw osos.dec has 204 instruction bytes at 0x0836c764..0x0836c833,
+      followed by the "Ide1" literal at 0x0836c834, for a 208-byte extent;
+      the next real function begins at 0x0836c838. Decoding every ARM B/BL
+      immediate finds exactly two inbound unconditional plain bl calls at
+      0x0836c5f8 and 0x0836cfc8, with no predicated forms or direct tail
+      branches. Twelve body bl calls invoke the already ported
+      ata_pio_write_byte. It validates a non-NULL Ide1 device with a nonzero
+      +0x44 ready word, returning 7 on failure; then writes command bytes
+      +0..+4 and +5..+9 to the overlapping task-file offsets
+      +0x4..+0x14, so the latter are the low halves, and writes bytes +10 and
+      +11 to +0x18 and +0x1c. No deliberate deviations: the shared PIO port
+      preserves readiness polling and volatile byte stores. Host tests cover
+      validation short-circuiting and final task-file register values.
+
   - address: 0x0839b864
     ghidra: FUN_0839b864
     name: record_stream_begin
