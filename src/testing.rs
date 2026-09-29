@@ -369,6 +369,10 @@ pub mod hints {
     // 0xf200_0000: dedicated to sqlite/pager_page_unlink's target-width page
     // and owner fixture; mappings never unmap, so no other port may share it.
     pub const SQLITE_PAGER_PAGE_UNLINK: usize = 0xf200_0000;
+    // 0x4c00_0000: dedicated to sqlite/pager_finish_truncate's target-width
+    // pager and sqlite3_file fixture; mappings never unmap, so no other port
+    // may share this hint.
+    pub const SQLITE_PAGER_FINISH_TRUNCATE: usize = 0x4c00_0000;
     // 0x0010_0000: dedicated to sqlite/pcache_pin_page's target-width page
     // and cache fixture; mappings never unmap, so no other port may share it.
     pub const SQLITE_PCACHE_PIN_PAGE: usize = 0x0010_0000;
