@@ -255,6 +255,7 @@ pub mod pager_reset;
 pub mod pager_close;
 pub mod pager_unlock_and_rollback;
 pub mod pager_page_unlink;
+pub mod pager_refresh_cache_state;
 pub mod pager_end_transaction;
 pub mod pager_set_page_size;
 pub mod pager_set_sector_size;

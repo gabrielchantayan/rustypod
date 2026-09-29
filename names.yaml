@@ -161859,3 +161859,30 @@ functions:
       address on target, explicit host reference); the equivalent temporary
       header fields are initialized directly because host pointers are wider
       than the target's four-byte entries field.
+
+
+  - address: 0x082d8e74
+    ghidra: FUN_082d8e74
+    name: pager_refresh_cache_state
+    size: 60
+    sig: "void pager_refresh_cache_state(Pager *pager)"
+    module: sqlite/pager_refresh_cache_state
+    status: ported
+    renames:
+      param_1/r0: pager
+      "*(u32*)(pager+0x7c)": pager->pDirty
+      "*(u32*)(pager+0x84)": pager->pDirtyCache
+      "*(u8*)(pager+0x14)": pager->memDb
+      DAT_082d8eb0: allocator_state
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 body
+      0x082d8e74..0x082d8eaf; the word at 0x082d8eb0 is the literal
+      0x08adc2c0, and push {r4-r8,lr} at 0x082d8eb4 starts the next real
+      function. Whole-image aligned A32 branch decoding finds two inbound
+      plain BL calls (0x082ddc1c and 0x08392afc) and zero predicated BL calls.
+      The body contains no BL instructions. It copies pager+0x7c to pager+0x84
+      then, unless pager+0x14 is nonzero, follows node+0x2c from the global
+      state head until the first node whose +0x1e byte is clear and stores it
+      at global+0x08. Deliberate deviation: Rust supplies the fixed global
+      address directly on target and passes an equivalent target-width state
+      block in host tests.
