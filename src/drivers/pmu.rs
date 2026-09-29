@@ -207,6 +207,33 @@ pub unsafe extern "C" fn pmu_board_version_status_bit(
 
     ((status_byte as u32 >> ((1 - version_0x11) << 1)) & 1) as u32
 }
+/// pmu_register_0x18_bit0 — original: `FUN_082e572c` @ `0x082e572c`
+/// (64 bytes; 5 plain, unconditional callee `bl` instructions; no predicated
+/// calls, binary-verified).
+///
+/// Clears the one-byte stack result, holds PMU transaction semaphores 17 then
+/// 5, reads PCF50635 register 0x18, releases 5 then 17, and returns bit zero
+/// of the result. The raw I2C status is ignored; because retail explicitly
+/// initializes the scratch byte to zero, a failed transfer returns zero.
+///
+/// # Deviations
+///
+/// None. All five verified retail callee targets are existing Rust ports.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_register_0x18_bit0() -> u32 {
+    let mut status_byte = 0_u8;
+
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    pmu_i2c_read(0x18, 1, &mut status_byte);
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+
+    (status_byte & 1) as u32
+}
+
+
 
 /// pmu_status_available_without_keypress — original: `FUN_082e576c` @
 /// `0x082e576c` (40 bytes; 2 plain, unconditional callee `bl` instructions,
@@ -524,6 +551,7 @@ mod tests {
             assert_eq!(unsafe { pmu_write_register_0x0c_one() }, 0);
             let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
             assert_eq!(writes, std::vec![(0x73, 2, PMU_REGISTER_0X0C as u8)]);
+
             assert!(reads.is_empty());
             assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![std::vec![0x0c, 1]]);
             assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
@@ -533,6 +561,25 @@ mod tests {
         assert_eq!(unsafe { pmu_write_register_0x0c_one() }, -5);
         let (_writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
         assert!(reads.is_empty());
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+    #[test]
+    fn register_18_bit_zero_returns_sample_and_zero_after_transfer_error() {
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 1);
+
+            assert_eq!(unsafe { pmu_register_0x18_bit0() }, 1);
+            let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+            assert_eq!(writes, std::vec![(0x73, 1, 0x18)]);
+            assert_eq!(reads.len(), 1);
+            assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 1);
+        assert_eq!(unsafe { pmu_register_0x18_bit0() }, 0);
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert_eq!(writes, std::vec![(0x73, 1, 0x18)]);
+        assert!(reads.is_empty(), "a failed register write suppresses the read");
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
     }
     use crate::sysinfo::install_host_cached_board_version;

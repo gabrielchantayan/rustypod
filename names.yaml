@@ -27214,6 +27214,32 @@ functions:
       reference. ABI: words in r0, byte_len in r1; no return value or null
       checks. Port deviation: none.
 
+  # --- PMU register 0x18 bit zero (drivers/pmu) ---
+  # --- PMU register 0x18 bit zero (drivers/pmu) ---
+  - address: 0x082e572c
+    ghidra: FUN_082e572c
+    name: pmu_register_0x18_bit0
+    size: 64
+    sig: "u32 pmu_register_0x18_bit0()"
+    module: drivers/pmu
+    status: ported
+    renames:
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d3b8: pmu_i2c_read
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw osos.dec words prove the 64-byte extent 0x082e572c..0x082e5768;
+      the following push {r4,lr} at 0x082e576c starts the next function.
+      The body has exactly five plain unconditional callee bl instructions,
+      at 0x082e5738, 0x082e573c, 0x082e574c, 0x082e5754, and 0x082e5758,
+      and zero predicated bl calls. It zeroes its stack byte, waits on PMU
+      semaphores 17 then 5, reads one byte from PCF50635 register 0x18,
+      signals 5 then 17, and returns its bit zero. The raw I2C status is
+      intentionally ignored; a failed transfer leaves the initialized byte
+      zero. All five direct callee targets are already ported; deviation: none.
+
   # --- PMU status availability without keypress (drivers/pmu) ---
   - address: 0x082e576c
     ghidra: FUN_082e576c
