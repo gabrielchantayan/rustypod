@@ -418,6 +418,7 @@ pub mod hash_word;
 pub mod free_index_table_grow;
 pub mod free_index_table_grow_083b4a08;
 pub mod video_engine_dispatch_opaque_two_words_d0e4;
+pub mod video_engine_dispatch_opaque_four_words_ce14;
 pub mod video_engine_dispatch_opaque_four_words;
 pub mod video_engine_dispatch_opaque_two_words_ffb4;
 pub mod word_list;
