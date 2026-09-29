@@ -55380,6 +55380,34 @@ functions:
       raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
       than the original's aligned ldrh/ldrd/ldr.
 
+  - address: 0x08368f40
+    ghidra: FUN_08368f40
+    name: expr_set_join_table
+    size: 60
+    sig: "void expr_set_join_table(Expr *expr, int right_join_table)"
+    module: sqlite/expr_set_join_table
+    status: ported
+    vars:
+      param_1/r0/r4: expr
+      param_2/r1/r5: right_join_table
+    renames:
+      FUN_08368f40: expr_set_join_table
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte A32 extent
+      0x08368f40..0x08368f7b; the push at 0x08368f7c begins the next real
+      function. Whole-image A32 branch decoding finds two target call sites:
+      one plain BL (the recursive call at 0x08368f68) and one predicated
+      BLNE (0x08391b24); no other forms target it. SQLite 3.5.x's
+      setJoinExpr walks the right-child chain, sets EP_FromJoin (bit 0 of
+      flags at +0x02), stores the supplied right-join table cursor at +0x34,
+      and recursively processes each left child at +0x08. Target pointers
+      use u32 words so host pointer width cannot alter firmware offsets.
+      Host tests cover a NULL expression and a mixed right-chain/left-subtree
+      hierarchy while preserving unrelated flag bits. cargo test --target
+      x86_64-unknown-linux-gnu passed (12,912 tests); ARM release build passed.
+      match.py exits 1 as expected: LLVM emits an early NULL return and a frame
+      pointer, but retains the halfword flag update, cursor store, recursion,
+      and right-chain loop.
   - address: 0x08368fc0
     ghidra: FUN_08368fc0
     name: sqlite_token_quote_identifier
