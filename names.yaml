@@ -56172,6 +56172,34 @@ functions:
       BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam (retail target default,
       explicit host mock); release_via_field_0x48 @ 0x0836761c is direct.
 
+  - address: 0x082d9a34
+    ghidra: FUN_082d9a34
+    name: btree_move_to_leftmost
+    size: 96
+    sig: "i32 btree_move_to_leftmost(BtCursor *cursor)"
+    module: sqlite/move_to_leftmost
+    status: ported
+    renames:
+      param_1/r0/r4: cursor
+      param_1+0x18: cursor->pPage
+      param_1+0x1c: cursor->idx
+      cursor->pPage+0x04: page->leaf_flags
+      cursor->pPage+0x08: page->hdrOffset
+      cursor->pPage+0x0e: page->cell_offset_array
+      cursor->pPage+0x44: page->aData
+      FUN_0837a158: load_be32/sqlite3Get4byte (direct ported callee)
+      FUN_082d99d0: btree_move_to_child (direct ported callee)
+    notes: >-
+      Raw osos.dec words prove the exact 96-byte extent
+      0x082d9a34..0x082d9a94: the pop {r4,pc} at 0x082d9a90 is immediately
+      followed by the next separately linked prologue at 0x082d9a94. The body
+      has two plain outbound bl instructions, load_be32 at 0x082d9a68 and
+      btree_move_to_child at 0x082d9a74; no predicated bl occurs. On each
+      internal page it reads the first big-endian cell offset at
+      aData[hdrOffset], loads that cell's big-endian child number, and moves
+      into the child. A leaf returns zero; any child-move error is propagated
+      unchanged. No deliberate deviations.
+
   - address: 0x082d9a94
     ghidra: FUN_082d9a94
     name: btree_move_to_rightmost
