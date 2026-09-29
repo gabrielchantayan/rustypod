@@ -162014,3 +162014,29 @@ functions:
       link, and selects a deferred node only when the queue slot and node byte
       +0x1e are both zero. Target pointers remain u32 words to preserve the
       retail four-byte layout on host tests. Deliberate deviations: none.
+
+  - address: 0x082d7740
+    ghidra: FUN_082d7740
+    name: keyword_code
+    size: 192
+    sig: "u8 sqlite3KeywordCode(const char *text, i32 len)"
+    module: sqlite/keyword_code
+    status: ported
+    renames:
+      FUN_082d7740: keyword_code
+      param_1/r0: text
+      param_2/r1: len
+    notes: >-
+      Raw osos.dec establishes a 192-byte extent from 0x082d7740 through the
+      five literal words ending at 0x082d77fc; the next push at 0x082d7800
+      starts another function. The 172-byte instruction body has exactly two
+      plain unconditional bl instructions, to __rt_sdiv at 0x08031568 and
+      str_nicmp at 0x08384fa0, and no predicated bl. Direct raw-word decoding
+      finds exactly two plain unconditional inbound bl sites, 0x082d4adc and
+      0x0837aa8c, with no predicated forms. It computes SQLite's generated
+      case-folded first/last-byte hash modulo 127 and walks its keyword chain,
+      returning the matched parser token or TK_ID (0x17). The static table is
+      captured verbatim from the decrypted image's +0xaed8 runtime-data skew.
+      Deliberate deviation: the non-negative hash uses Rust % 127 rather than
+      observing the ADS divide remainder in r1; the resulting bucket is
+      identical.

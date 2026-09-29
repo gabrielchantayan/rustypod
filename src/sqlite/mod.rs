@@ -190,6 +190,7 @@ pub mod expr_list_append;
 pub mod delete_column_names;
 pub mod expr_list_key_info;
 pub mod expr_list_height;
+pub mod keyword_code;
 pub mod expr_list_walk;
 pub mod expr_list_check_length;
 pub mod expr_new;
