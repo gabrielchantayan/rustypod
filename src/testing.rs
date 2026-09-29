@@ -373,6 +373,9 @@ pub mod hints {
     // pager and sqlite3_file fixture; mappings never unmap, so no other port
     // may share this hint.
     pub const SQLITE_PAGER_FINISH_TRUNCATE: usize = 0x4c00_0000;
+    // 0x4d80_0000: dedicated to sqlite/pager_checksum's target-width Pager
+    // and page-data fixture; mappings never unmap, so no other port may share it.
+    pub const SQLITE_PAGER_CHECKSUM: usize = 0x4d80_0000;
     // 0x0010_0000: dedicated to sqlite/pcache_pin_page's target-width page
     // and cache fixture; mappings never unmap, so no other port may share it.
     pub const SQLITE_PCACHE_PIN_PAGE: usize = 0x0010_0000;
