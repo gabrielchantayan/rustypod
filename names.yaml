@@ -42899,6 +42899,38 @@ functions:
       deviation: Rust models the pointer slot as a u32 word so its target
       offset remains 0x58 on 64-bit hosts. Host tests cover NULL and a valid
       tracked allocation, including raw-block/tag forwarding and field clear.
+  - address: 0x082d6d24
+    ghidra: FUN_082d6d24
+    name: change_temp_storage
+    size: 92
+    sig: "int change_temp_storage(Parse *parse)"
+    module: sqlite/change_temp_storage
+    status: ported
+    renames:
+      param_1/r0: parse
+      "[parse + 0x00]": db
+      "[db + 0x08]": a_db
+      "[a_db + 0x1c]": temporary_btree
+      "[db + 0x1c]": active_vdbe_count
+      FUN_083767a0: sqlite_error_msg
+      FUN_08370a20: sqlite3BtreeClose
+      FUN_0838209c: sqlite3ResetInternalSchema
+    notes: >-
+      Raw osos.dec establishes the complete 92-byte extent
+      0x082d6d24..0x082d6d80: push {r4,lr}; db = parse->db; load
+      db->aDb[1].pBt (+0x08 then +0x1c); report the literal "temporary
+      storage cannot be changed from within a transaction" if db byte +0x1c
+      is nonzero; otherwise close pBt, clear it, and reset the internal
+      schema. The successor is that literal string, not code. The body has
+      three outbound unconditional plain BL instructions (sqlite_error_msg @
+      0x083767a0, sqlite3BtreeClose @ 0x08370a20, and
+      sqlite3ResetInternalSchema @ 0x0838209c) and no predicated BL. Whole
+      image decoding finds two inbound plain BL instructions at 0x0837fb4c
+      and 0x0837fc34, with no predicated inbound BL. sqlite_error_msg is
+      ported and called directly. Deliberate deviations: the unported Btree
+      close and schema-reset callees are volatile dispatch seams on host
+      builds and absolute retail calls on target; target pointers remain u32
+      words to preserve field offsets on 64-bit fixtures.
   - address: 0x082d6c24
     ghidra: FUN_082d6c24
     name: cg_inst_create_base

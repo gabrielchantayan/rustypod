@@ -129,6 +129,7 @@ pub mod check_read_locks;
 pub mod cell_size;
 pub mod emit_cursor_setup;
 pub mod change_cookie;
+pub mod change_temp_storage;
 pub mod check_object_name;
 pub mod column_default;
 pub mod column_index;
