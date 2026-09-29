@@ -31,6 +31,8 @@ pub mod path_component_is_parent_reference;
 pub mod drive_prefix_parse;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
+/// Creates a path-resolution node for a mounted volume @ 0x082e21dc.
+pub mod path_node_create_for_volume;
 /// Shared path-data reference release @ 0x082e1960.
 pub mod shared_data;
 /// Path-resolution child lookup with default continuation state @ 0x082e2004.

@@ -30935,6 +30935,34 @@ functions:
       tests use recording seams to prove the pool-empty, allocation-failure,
       and success paths.
 
+
+  - address: 0x082e21dc
+    ghidra: FUN_082e21dc
+    name: path_node_create_for_volume
+    size: 120
+    sig: "u8 *path_node_create_for_volume(u8 *volume)"
+    module: fs/path_node_create_for_volume
+    status: ported
+    renames:
+      param_1: volume
+      FUN_082e0100: path_node_create
+      FUN_082e42b0: shared_data_find_and_retain
+      FUN_082e2e9c: shared_data_initialize
+      FUN_082e1960: shared_data_release
+    notes: >-
+      Raw ARM establishes the exact 120-byte extent
+      0x082e21dc..0x082e2253: the next separately entered function begins at
+      0x082e2254. The body has four direct plain BL instructions and no
+      predicated BL: path_node_create at 0x082e21e4, shared-data lookup at
+      0x082e21fc, shared-data release at 0x082e220c, and initialization at
+      0x082e2224. It creates a node; retains existing shared data keyed by
+      (volume, 0, 0), replacing the freshly allocated data after
+      releasing it; otherwise initializes the fresh data with that key. It
+      then writes volume at node +0, copies volume +0x70 to node +0x08 and
+      +0x0c, clears +0x10, and sets +0x14 to one. Deliberate deviation: the
+      Rust port calls the four already ported helpers rather than emitting
+      the original direct BL instructions. Host tests record the failed-node,
+      retained-data, and fresh-data paths.
   - address: 0x082e2a7c
     ghidra: FUN_082e2a7c
     name: path_component_is_current_reference
