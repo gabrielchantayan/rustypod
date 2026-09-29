@@ -129,6 +129,7 @@ pub unsafe extern "C" fn ft_mem_qalloc(
 /// # Safety
 /// As [`ft_mem_qalloc`]. The allocator must return a block of at least
 /// `size` writable bytes.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_mem_alloc(
     memory: *mut FtMemory,
@@ -165,6 +166,7 @@ pub unsafe extern "C" fn ft_mem_alloc(
 /// When `block` is non-null, `memory` must be a valid `FtMemory` whose
 /// `free` callback is callable and `block` must have come from the same
 /// allocator.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ft_mem_free(memory: *mut FtMemory, block: *mut u8) {
     if !block.is_null() {
