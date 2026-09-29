@@ -82404,6 +82404,26 @@ functions:
       hoists the status constants and returns through bx r2 on the
       indirect release.
 
+  - address: 0x082e84a4
+    ghidra: FUN_082e84a4
+    name: pthread_mutexattr_init
+    size: 52
+    sig: "u32 pthread_mutexattr_init(u8 *attr)"
+    module: cxx/mutex_attr_init
+    status: ported
+    renames:
+      param_1: attr
+      DAT_082e84d8: mutexattr_magic
+    notes: >-
+      Raw osos.dec decoding establishes 52 code bytes
+      (0x082e84a4..0x082e84d8); the following 0x4d545841 word is the
+      MTXA literal pool entry, not code. NULL returns 0x1a with no
+      stores. Otherwise stores MTXA at +0, 0xffc2 at +4, clears bits
+      0..5 and sets bit 3 in the u16 at +6, then returns zero. The body
+      has no plain or predicated BL; CodeGraph identifies two inbound
+      plain BL call sites. Port uses byte offsets to preserve the target
+      four-byte field spacing on 64-bit hosts. No deliberate deviations.
+
   - address: 0x08261e20
     ghidra: (veneer)
     name: posix_mutex_lock_veneer_a

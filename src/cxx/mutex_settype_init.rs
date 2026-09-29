@@ -306,9 +306,8 @@ mod tests {
     /// stores (pthread_mutexattr_init @ 0x082e84a4, see
     /// src/cxx/mutex_attr_init.rs): plant the magic and the default
     /// halfword, then read-modify-write the +0x06 halfword. Seeds the
-    /// attr for the end-to-end tests WITHOUT touching the
-    /// CXX_MUTEXATTR_INIT_OPS slot (mutex_attr_init's own tests race
-    /// it in the shared test process).
+    /// attr for the end-to-end tests independently of the port's direct
+    /// initializer call.
     fn reference_attr_init(attr: &mut [u8; 8]) {
         attr[0..4].copy_from_slice(&MUTEXATTR_MAGIC.to_le_bytes());
         attr[4..6].copy_from_slice(&MUTEXATTR_DEFAULT_HALFWORD.to_le_bytes());

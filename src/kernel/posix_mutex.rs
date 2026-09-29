@@ -404,29 +404,16 @@ mod mutexattr_settype_tests {
     }
 }
 
-pub type PthreadMutexattrInit = unsafe extern "C" fn(attr: *mut u8) -> u32;
 pub type KernelObjectAllocate = unsafe extern "C" fn(kind: u32, out: *mut u32) -> u32;
 
 #[derive(Clone, Copy)]
 pub struct PosixMutexInitOps {
-    pub attr_init: PthreadMutexattrInit,
+    pub attr_init: unsafe extern "C" fn(attr: *mut u8) -> u32,
     pub allocate: KernelObjectAllocate,
 }
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_DEFAULT_MUTEX_ATTR: [u8; 8] = [0; 8];
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_pthread_mutexattr_init(attr: *mut u8) -> u32 {
-    if attr.is_null() {
-        return ERR_INVALID_OBJECT;
-    }
-    attr.cast::<u32>().write(MUTEXATTR_MAGIC);
-    attr.add(4).cast::<u16>().write(MUTEXATTR_DEFAULT_HALFWORD);
-    let scope = attr.add(6).cast::<u16>();
-    scope.write((scope.read() & !0x3f) | MUTEXATTR_PROCESS_SCOPE_BIT);
-    0
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn host_kernel_object_allocate(_kind: u32, out: *mut u32) -> u32 {
@@ -435,15 +422,7 @@ unsafe extern "C" fn host_kernel_object_allocate(_kind: u32, out: *mut u32) -> u
 }
 
 unsafe extern "C" fn default_pthread_mutexattr_init(attr: *mut u8) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let init: PthreadMutexattrInit = core::mem::transmute(0x082e84a4usize);
-        init(attr)
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        host_pthread_mutexattr_init(attr)
-    }
+    crate::cxx::mutex_attr_init::pthread_mutexattr_init(attr)
 }
 
 unsafe extern "C" fn default_kernel_object_allocate(_kind: u32, out: *mut u32) -> u32 {
