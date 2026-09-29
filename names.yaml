@@ -159865,3 +159865,33 @@ functions:
       returns one. ARM is the stock instruction sequence with a relocated
       absolute veneer; host uses a recording seam and a below-4-GiB fixture
       for the target-width record pointer.
+
+  # --- System reset request (drivers/system_reset) ---
+  - address: 0x08367f00
+    ghidra: FUN_08367f00
+    name: system_reset
+    size: 44
+    sig: "void system_reset(void) __attribute__((noreturn))"
+    module: drivers/system_reset
+    status: ported
+    renames:
+      DAT_3c800000: watchdog_control
+      DAT_3c500050: reset_request
+      DAT_08367f2c: reset_request_key
+    notes: >-
+      Raw osos.dec establishes the exact 44-byte A32 extent:
+      0x08367f00..0x08367f2b executes the two MMIO stores and four nops, and
+      the 0x00000aa5 literal at 0x08367f2c is part of the body; ldr r0,[pc,#72]
+      at 0x08367f30 begins the next real function. Whole-image branch decoding
+      finds exactly two unconditional plain inbound BL calls, at 0x0813a824
+      and 0x08392fa0, and no predicated inbound BL calls. It clears
+      0x3c800000, writes reset key 0x0aa5 to 0x3c500050, then loops through
+      the four nops forever. The callers invoke it after shutdown/powerdown
+      preparation, establishing the system-reset identity. Rust uses volatile
+      MMIO writes to preserve hardware side effects; stock instructions are
+      ordinary str. Host tests cover both register values and adjacent-word
+      preservation.
+      match.py reports the expected structural diff: LLVM materializes the
+      reset-register address directly and keeps a frame for the diverging
+      function, while the stock body derives it by subtracting 0x300000 from
+      the watchdog address and spins through four explicit nops.
