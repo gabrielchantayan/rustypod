@@ -14115,6 +14115,27 @@ functions:
       at 0x08001edc; the Rust target uses volatile MMIO and host tests use
       its existing deterministic timer-counter seam.
 
+  - address: 0x0836d8c8
+    ghidra: FUN_0836d8c8
+    name: mmio_wait_low_three_status_bits_then_read_response
+    size: 24
+    sig: "u32 mmio_wait_low_three_status_bits_then_read_response(void)"
+    module: drivers/mmio_wait_status_then_read_response
+    status: ported
+    renames: {DAT_0836d8e0: mmio_register_base}
+    notes: >-
+      Raw osos.dec establishes the true 24-byte extent
+      0x0836d8c8..0x0836d8e0: `ldr r1,[pc,#16]`, `ldr r0,[r1]`,
+      `tst r0,#7`, and `beq` back to the status load, then
+      `ldr r0,[r1,#4]` and `bx lr`, followed by literal 0x3c100000;
+      the next function begins with `push {r4-r10,lr}` at 0x0836d8e4.
+      It polls the volatile word at 0x3c100000 until any low-three status
+      bit is set, then returns one volatile word from +4. A whole-image A32
+      B/BL decode finds two direct call sites, both unconditional bl
+      (0x08054974 and 0x08054984), no predicated bl, and no body calls.
+      The register block has no established peripheral identity, so the
+      target uses verified generic MMIO names; host tests use atomic status
+      and response seams because the physical addresses are unavailable.
   - address: 0x0836dc14
     ghidra: FUN_0836dc14
     name: timer_channel_configure

@@ -59,6 +59,7 @@ pub mod interrupts;
 pub mod lcd_write_register;
 pub mod mailbox_controller_reset;
 pub mod mmio_bit_write;
+pub mod mmio_wait_status_then_read_response;
 pub mod mode_register_block_configure;
 pub mod piezo;
 pub mod pwrcon;
