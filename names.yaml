@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082d0d30
+    ghidra: FUN_082d0d30
+    name: video_engine_dispatch_opaque_four_words_ce14
+    size: 52
+    sig: "void video_engine_dispatch_opaque_four_words_ce14(u32 first, u32 second, u32 third, u32 fourth)"
+    module: util/video_engine_dispatch_opaque_four_words_ce14
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      param_3/r2: third
+      param_4/r3: fourth
+      r0: video_engine
+      r4: first
+      r5: second
+      r6: third
+      r7: fourth
+      FUN_08252bec: video_engine_get
+      0x0824ce14: video_engine_opaque_four_word_dispatch
+    notes: >-
+      Raw osos.dec A32 words establish the exact 52-byte body from
+      0x082d0d30 through 0x082d0d60; the push at 0x082d0d64 starts the next
+      independently linked wrapper. The body has one plain BL
+      (0x082d0d44 -> 0x08252bec) and one predicated BLNE
+      (0x082d0d5c -> 0x0824ce14). Raw-image disassembly finds two inbound
+      plain BL calls (0x081bb760 and 0x083d3a10) and no predicated inbound BL.
+      It gets the video engine, silently returns on NULL, otherwise passes the
+      instance and all four unmodified caller words to 0x0824ce14. Ghidra's C
+      omits the three register arguments and stack argument passed to that
+      target. The target is absent from names.yaml and has no verified semantic
+      identity, so Rust uses a typed resident seam with recording host tests.
+      Deliberate deviations: Rust expresses the conditional BLNE as a normal
+      call.
   - address: 0x082d0d64
     ghidra: FUN_082d0d64
     name: video_engine_dispatch_opaque_four_words
