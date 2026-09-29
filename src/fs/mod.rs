@@ -2,6 +2,8 @@
 //! HFS B-tree node access).
 /// FAT directory-entry start-cluster extraction @ 0x082e1378.
 pub mod fat_dirent;
+/// FAT directory-entry name and metadata population @ 0x082e4970.
+pub mod fat_dirent_populate_names;
 /// FAT long-file-name fragment-state update @ 0x082dfdc0.
 pub mod fat_lfn_fragment;
 /// FAT long-file-name checksum for an 11-byte short name @ 0x082e0194.
