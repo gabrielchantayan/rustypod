@@ -30904,6 +30904,35 @@ functions:
       early return, same ldr of node +4, same call order, same
       pass-through return of the pool result.
 
+  - address: 0x082e1cd0
+    ghidra: FUN_082e1cd0
+    name: path_context_release
+    size: 92
+    sig: "void path_context_release(u8 *context)"
+    module: fs/path_context_release
+    status: ported
+    renames:
+      param_1: context
+      FUN_082b155c: unknown_storage_pools_initialize
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082d7934: ata_semaphore_wait
+      FUN_082e19cc: path_node_release
+      FUN_082d7954: ata_semaphore_signal
+    notes: >-
+      Raw bytes establish the exact 92-byte extent 0x082e1cd0..0x082e1d2b:
+      the following 0x082e1d2c push {r4-r8,lr} begins a separate function.
+      Whole-image aligned A32 decoding finds exactly two inbound plain bl
+      calls at 0x081bd2fc and 0x081bda70, and no predicated bl calls. The
+      body has three unconditional bl instructions (0x082b155c,
+      drive_slot_lookup, ata_semaphore_wait) and two blne calls to
+      path_node_release. It initializes the storage pools, returns early on
+      initialization failure or a missing drive slot, then follows context
+      +0x244 through its first word to read the ATA index at +0x78, waits,
+      releases non-NULL context words +0x240 and +0x244, and tail-branches to
+      ata_semaphore_signal. The 0x082b155c
+      helper has no established identity in names.yaml, so it remains a
+      verified target-address seam; known ports are called directly on target
+      and all operations are injected recording seams on host.
   - address: 0x082e1d2c
     ghidra: FUN_082e1d2c
     name: read_path_attributes
