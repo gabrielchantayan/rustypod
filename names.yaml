@@ -162559,3 +162559,31 @@ functions:
       host tests model the target's three separately allocated pointer-bearing
       objects with native-width pointers while retaining the observed field
       offsets; target builds directly use the retail video-engine singleton.
+  - address: 0x082d115c
+    ghidra: FUN_082d115c
+    name: video_engine_dispatch_opaque_value
+    size: 32
+    sig: "void video_engine_dispatch_opaque_value(u32 value)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: value
+      r4: value
+      r0: video_engine
+      r1: value
+      FUN_08252bec: video_engine_get
+      FUN_082553e4: video_engine_opaque_value_dispatch
+    notes: >-
+      Raw osos.dec A32 words establish the exact 32-byte extent
+      0x082d115c..0x082d1178: push {r4,lr}; preserve value in r4; BL
+      video_engine_get; compare the returned instance; then on non-NULL move
+      value to r1, restore r4/lr, and tail-branch (bne) to 0x082553e4.
+      The unconditional pop {r4,pc} at 0x082d1178 handles the NULL case; the
+      next independently linked wrapper starts at 0x082d117c. The body has one
+      plain outbound BL (0x082d1164 -> 0x08252bec), no predicated BL, and one
+      conditional tail branch. The two direct inbound calls at 0x0825bf9c and
+      0x0825bfbc are plain BL; no predicated inbound BL is present. Ghidra's
+      76-byte extent and recovered call to 0x0825e1bc are false. The target
+      0x082553e4 has no verified semantic identity, so Rust keeps the value
+      opaque, calls the resident target on-device, and exposes a recording
+      seam for host tests.
