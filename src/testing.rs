@@ -1887,6 +1887,9 @@ pub mod hints {
     // 0x6200_0000: dedicated to sqlite/btree_balance's target-width MemPage
     // and BtShared fixture; mappings never unmap, so no other user may share it.
     pub const BTREE_BALANCE_PAGE: usize = 0x6200_0000;
+    // 0x6300_0000: dedicated to sqlite/verify_table_locks' target-width
+    // Parse, Table, and index-name-pointer fixtures; mappings never unmap.
+    pub const SQLITE_VERIFY_TABLE_LOCKS: usize = 0x6300_0000;
     // 0xa400_0000: dedicated to sqlite/move_to_root's target-width cursor,
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.
