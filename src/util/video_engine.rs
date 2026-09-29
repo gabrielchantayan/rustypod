@@ -1606,6 +1606,107 @@ pub unsafe extern "C" fn video_output_configuration_assign(
     video_output_configuration_update(mode, 0x140c, 0, configuration);
 }
 
+/// Firmware entry of the video-engine frame submission dispatcher
+/// `FUN_0824de50`, which remains resident.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_SUBMIT_FRAME_ADDR: usize = 0x0824_de50;
+
+/// ABI of the frame-submission dispatcher: engine followed by the wrapper's
+/// nine raw argument words.
+type VideoEngineSubmitFrame = unsafe extern "C" fn(
+    *mut u8, u32, u32, u32, u32, u32, u32, u32, u32, u32,
+);
+
+/// Host-test stand-in for frame submission dispatcher `FUN_0824de50`.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_SUBMIT_FRAME: Option<VideoEngineSubmitFrame> = None;
+
+/// Host only: install the frame-submission dispatcher reached by the wrapper.
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_submit_frame(dispatch: Option<VideoEngineSubmitFrame>) {
+    core::ptr::addr_of_mut!(MOCK_SUBMIT_FRAME).write(dispatch);
+}
+
+/// Calls the resident video-engine frame-submission dispatcher.
+unsafe fn submit_frame(
+    engine: *mut u8,
+    command: u32,
+    frame_index: u32,
+    frame_descriptor: u32,
+    width: u32,
+    height: u32,
+    reserved: u32,
+    source_descriptor: u32,
+    output_descriptor: u32,
+    completion: u32,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineSubmitFrame = core::mem::transmute(VIDEO_ENGINE_SUBMIT_FRAME_ADDR);
+        dispatch(
+            engine, command, frame_index, frame_descriptor, width, height, reserved,
+            source_descriptor, output_descriptor, completion,
+        );
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_SUBMIT_FRAME).read() {
+            Some(dispatch) => dispatch(
+                engine, command, frame_index, frame_descriptor, width, height, reserved,
+                source_descriptor, output_descriptor, completion,
+            ),
+            None => panic!("video_engine_submit_frame requires dispatcher 0x0824de50"),
+        }
+    }
+}
+
+/// video_engine_submit_frame — retailOS `FUN_082d229c` @ **0x082d229c**
+/// (72 bytes, `0x082d229c..0x082d22e3`); `0x082d22e4` starts the next
+/// independently linked function. Raw A32 decoding finds two plain `bl`
+/// calls (to `video_engine_get` and `FUN_0824de50`) and no predicated `bl`.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it prepends that instance to all nine input words and
+/// calls the resident frame-submission dispatcher. The dispatcher accepts
+/// command 0xde1, selects a frame slot, records the input geometry, and
+/// performs the associated image-plane conversion.
+///
+/// # Deliberate deviation
+///
+/// `FUN_0824de50` is unported. Target builds call its verified resident entry;
+/// host tests install a recording seam. This wrapper deliberately validates no
+/// argument: all nine input words reach the dispatcher unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_submit_frame(
+    command: u32,
+    frame_index: u32,
+    frame_descriptor: u32,
+    width: u32,
+    height: u32,
+    reserved: u32,
+    source_descriptor: u32,
+    output_descriptor: u32,
+    completion: u32,
+) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    submit_frame(
+        engine,
+        command,
+        frame_index,
+        frame_descriptor,
+        width,
+        height,
+        reserved,
+        source_descriptor,
+        output_descriptor,
+        completion,
+    );
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -2041,6 +2142,70 @@ mod tests {
                     "the wrapper prepends the current instance without validation"
                 );
             }
+        }
+    }
+
+    // --- video_engine_submit_frame (FUN_082d229c) ---
+
+    static mut SUBMIT_FRAME_RECORDED: Option<(*mut u8, [u32; 9])> = None;
+
+    unsafe extern "C" fn record_submit_frame(
+        engine: *mut u8,
+        command: u32,
+        frame_index: u32,
+        frame_descriptor: u32,
+        width: u32,
+        height: u32,
+        reserved: u32,
+        source_descriptor: u32,
+        output_descriptor: u32,
+        completion: u32,
+    ) {
+        *addr_of_mut!(SUBMIT_FRAME_RECORDED) = Some((
+            engine,
+            [
+                command,
+                frame_index,
+                frame_descriptor,
+                width,
+                height,
+                reserved,
+                source_descriptor,
+                output_descriptor,
+                completion,
+            ],
+        ));
+    }
+
+    #[test]
+    fn submit_frame_without_a_session_does_not_call_dispatcher() {
+        let _guard = LOCK.lock();
+        unsafe {
+            SUBMIT_FRAME_RECORDED = None;
+            set_mock_submit_frame(Some(record_submit_frame));
+            set_mock_instance(ptr::null_mut());
+            video_engine_submit_frame(0xde1, 0, 1, 1, 0, u32::MAX, 1, 0x234, 0);
+            assert_eq!(SUBMIT_FRAME_RECORDED, None);
+            set_mock_submit_frame(None);
+        }
+    }
+
+    #[test]
+    fn submit_frame_prepends_current_engine_and_preserves_all_nine_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        let words = [0, u32::MAX, 0x89ab_cdef, 1, 0x8000_0000, 0, 0xfeed_beef, 0x234, 1];
+        unsafe {
+            SUBMIT_FRAME_RECORDED = None;
+            set_mock_submit_frame(Some(record_submit_frame));
+            set_mock_instance(engine.as_mut_ptr());
+            video_engine_submit_frame(
+                words[0], words[1], words[2], words[3], words[4], words[5], words[6],
+                words[7], words[8],
+            );
+            assert_eq!(SUBMIT_FRAME_RECORDED, Some((engine.as_mut_ptr(), words)));
+            set_mock_instance(ptr::null_mut());
+            set_mock_submit_frame(None);
         }
     }
 
