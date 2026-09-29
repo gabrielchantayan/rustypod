@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082cafc8
+    ghidra: FUN_082cafc8
+    name: video_engine_query_property
+    size: 60
+    sig: "u32 video_engine_query_property(u32 property_id)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: property_id
+      r0: video_engine/property_value
+      r4: property_id
+      r12: property_id_minus_expected
+      thunk_FUN_08252bec: video_engine_get
+    notes: >-
+      Raw osos.dec A32 words establish the exact 60-byte body from
+      0x082cafc8 through 0x082cb000; the following bx lr at 0x082cb004 is an
+      independently linked empty leaf, not part of this function. The body has
+      one outbound plain BL (0x082cafd0 -> 0x082cafbc, the direct thunk for
+      video_engine_get) and no predicated BL. Complete raw-image A32
+      disassembly finds two inbound plain BL calls (0x08295b14 and
+      0x08295b20) and no predicated inbound BL. It reads the singleton and
+      returns its word at +0xae0 for property 0x3059 or +0xae4 for 0x305a;
+      no singleton or an unrecognized property returns zero. Rust uses a
+      normal match rather than the original predicated loads and returns, and
+      host tests use video_engine_get's mock instance slot.
   - address: 0x082d0d30
     ghidra: FUN_082d0d30
     name: video_engine_dispatch_opaque_four_words_ce14
