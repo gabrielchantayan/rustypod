@@ -3294,6 +3294,10 @@ pub mod hints {
     // 0x089c_e000: dedicated to util/opaque_constant_zero's fixed retailOS
     // seed-word fixture; mappings never unmap.
     pub const OPAQUE_CONSTANT_ZERO: usize = 0x089c_e000;
+    // 0x082c_4000 / 0x082c_5000: dedicated to sqlite/code_real's target-width
+    // sqlite3 fixtures; mappings never unmap, so each test needs its own hint.
+    pub const SQLITE_CODE_REAL_FINITE: usize = 0x082c_4000;
+    pub const SQLITE_CODE_REAL_NAN: usize = 0x082c_5000;
     // 0x5370_0000: dedicated to fs/fat_dirent_volume_info's target-width
     // directory-entry, volume, and output fixtures; mappings never unmap.
     pub const FAT_DIRENT_VOLUME_INFO: usize = 0x5370_0000;

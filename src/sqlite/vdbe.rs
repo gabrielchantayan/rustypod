@@ -359,6 +359,9 @@ pub(crate) unsafe fn free_p4_op() -> unsafe extern "C" fn(i32, *mut u8) {
 pub const P4_NOTUSED: i8 = 0;
 /// `p4` is an owned [`db_str_ndup`] duplicate; released by freeP4.
 pub const P4_DYNAMIC: i32 = -1;
+/// `p4` is an owned eight-byte binary64 literal (`OP_Real`); released by
+/// freeP4.
+pub const P4_REAL: i32 = -12;
 /// `p4` points at storage the statement never owns (upstream's
 /// P4_STATIC). Named here because
 /// [`vdbe_set_col_name`](super::vdbe_set_col_name::vdbe_set_col_name)

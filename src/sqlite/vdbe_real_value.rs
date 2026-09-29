@@ -135,6 +135,17 @@ unsafe fn atof_op() -> SqliteAtoF {
     core::ptr::read_volatile(core::ptr::addr_of!(VDBE_REAL_VALUE_OPS.atof))
 }
 
+/// Parses a SQLite numeric literal through the shared `sqlite3AtoF` seam.
+///
+/// # Safety
+///
+/// `z` must name a NUL-terminated numeric string and `out` writable binary64
+/// storage, as required by retailOS `sqlite3AtoF`.
+#[inline(always)]
+pub(crate) unsafe fn sqlite_atof(z: *const u8, out: *mut f64) -> i32 {
+    unsafe { (atof_op())(z, out) }
+}
+
 /// vdbe_real_value — original: `FUN_0838c7ec` @ 0x0838c7ec (136 bytes;
 /// 5 `bl` call sites plus a thunk).
 ///
@@ -196,15 +207,19 @@ pub unsafe extern "C" fn vdbe_real_value_thunk(p_mem: *mut Mem) -> f64 {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    extern crate std;
+
+    pub static VDBE_REAL_VALUE_OPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
-
-    /// Serializes tests that replace the shared helper dispatch slots.
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Event {
@@ -235,7 +250,7 @@ mod tests {
     }
 
     fn bench() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let guard = test_support::VDBE_REAL_VALUE_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             (*core::ptr::addr_of_mut!(EVENTS)).clear();
             *core::ptr::addr_of_mut!(CHANGE_ENCODING_RESULT) = SQLITE_OK;

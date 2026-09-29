@@ -163256,3 +163256,40 @@ functions:
       those bytes at image address 0x0890882c due to the verified +0xaed8
       SQLite read-only-data skew. The Rust port embeds the verified literal
       instead of modeling that skew; no behavioral deviation.
+
+  # ---- SQLite REAL-literal bytecode emission (src/sqlite/code_real.rs) ----
+  - address: 0x082c40b0
+    ghidra: FUN_082c40b0
+    name: code_real
+    size: 156
+    sig: "void code_real(Vdbe *vdbe, const u8 *literal, u32 literal_len, int negate, int target)"
+    module: sqlite/code_real
+    status: ported
+    renames:
+      param_1/r0: vdbe
+      param_2/r1: literal
+      param_3/r2: literal_len
+      param_4/r3: negate
+      param_5/stack: target
+      FUN_0836f528: sqlite3AtoF
+      FUN_0837cb44: sqlite_is_nan
+      FUN_082c68ec: alloc_i64_copy
+      FUN_08386840: vdbe_add_op3
+      FUN_083868c8: vdbe_add_op4
+    notes: >-
+      SQLite 3.5.9's codeReal. Raw osos.dec words establish the exact
+      156-byte A32 extent 0x082c40b0..0x082c414b: the next independent
+      function starts with push {r4-r11,lr} at 0x082c414c. Full-image
+      immediate-branch decoding finds two inbound plain BL sites
+      (0x082c4030 and 0x08377454) and no predicated BL sites. The body has
+      five unconditional BL instructions: sqlite3AtoF @ 0x0836f528,
+      sqlite3IsNaN @ 0x0837cb44, sqlite3VdbeAddOp3 @ 0x08386840,
+      alloc_i64_copy @ 0x082c68ec, and sqlite3VdbeAddOp4 @ 0x083868c8.
+      A NULL literal emits nothing. Otherwise it parses a binary64, emits
+      OP_Halt (0x71) with target as p2 for NaN, or optionally flips the
+      parsed value's sign bit, allocates an owned eight-byte copy, and emits
+      OP_Real (0x7d) with that copy as P4_REAL (-12). The literal length
+      argument is preserved but unused by the raw body. Deliberate deviations:
+      the port reuses the established VDBE_REAL_VALUE_OPS sqlite3AtoF seam
+      and direct Rust ports for all other callees; it represents the raw
+      binary64 sign-bit flip as `to_bits() ^ 0x8000_0000_0000_0000`.
