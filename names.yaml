@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082c5444
+    ghidra: FUN_082c5444
+    name: select_emit_open_ephemeral
+    size: 68
+    sig: "void select_emit_open_ephemeral(Parse *parse, Select *select, u32 *temporary)"
+    module: sqlite/select_emit_open_ephemeral
+    status: ported
+    renames:
+      param_1/r0: parse
+      param_2/r1: select
+      param_3/r2: temporary
+      r4: select
+      FUN_08386824: vdbe_add_op2
+    notes: >-
+      Raw osos.dec decoding establishes the exact 68-byte extent from
+      0x082c5444 through 0x082c5484; the next independently linked function
+      begins at 0x082c5488. It returns immediately when temporary is NULL.
+      Otherwise it assigns Parse.nTab (+0x44) to temporary[2], increments
+      nTab with A32 wrapping arithmetic, then emits VDBE opcode 0x70 through
+      vdbe_add_op2 @ 0x08386824 with p1=temporary[2] and p2=temporary[0]+1.
+      The returned instruction address is stored at Select +0x44. Complete
+      raw-image A32 branch decoding finds exactly two inbound plain BL calls
+      and no predicated BL calls; its sole outbound BL is unconditional.
+      The Rust port uses u32 word offsets for target layouts on the 64-bit
+      host and delegates directly to the already ported VDBE seam.
   - address: 0x082c5718
     ghidra: FUN_082c5718
     name: accumulate_shared_counter

@@ -171,6 +171,7 @@ pub mod expr_is_integer;
 pub mod expr_comparison_affinity;
 pub mod expr_code;
 pub mod expr_code_and_cache;
+pub mod select_emit_open_ephemeral;
 pub mod expr_code_compare;
 pub mod expr_code_expr_list;
 pub mod emit_compound_select_rows;

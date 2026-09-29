@@ -2311,6 +2311,10 @@ pub mod hints {
     // 0x0700_0000: dedicated to sqlite/expr_code_pair's raw-u32 Expr
     // fixtures; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_EXPR_CODE_PAIR: usize = 0x0700_0000;
+    // 0x0780_0000: dedicated to sqlite/select_emit_open_ephemeral's
+    // target-width Parse, Select, temporary-table, and Vdbe fixtures;
+    // mappings never unmap, so no other user may share this hint.
+    pub const SQLITE_SELECT_EMIT_OPEN_EPHEMERAL: usize = 0x0780_0000;
     // 0xd800_0000: dedicated to sqlite/step's target-width Vdbe and
     // connection fixtures; mappings never unmap, so no other user may share it.
     pub const SQLITE_STEP: usize = 0xd800_0000;
