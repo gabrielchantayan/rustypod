@@ -142804,6 +142804,34 @@ functions:
       this deliberately replaces the retail tail branch with ordinary Rust
       calls while preserving the transfer order and raw status behavior.
 
+  - address: 0x0836e298
+    ghidra: FUN_0836e298
+    name: peripheral_0x39_apply_mode
+    size: 176
+    sig: "i32 peripheral_0x39_apply_mode(u32 mode)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: mode
+      r4: final_value
+      FUN_0836e3c8: i2c_0x39_write_register
+      thunk_EXT_FUN_22003d44: rom_task_delay
+      thunk_EXT_FUN_22001f38: iram_msec_delay_veneer
+    notes: >-
+      Raw osos.dec establishes the exact 176-byte extent from cmp r0,#0 at
+      0x0836e298 through pop {r4,pc} at 0x0836e344; the next independently
+      linked function starts with push at 0x0836e348. The body has seven
+      unconditional BL instructions and one BLEQ at 0x0836e33c. Complete
+      aligned ARM B/BL decoding finds two inbound plain BL sites (0x080f4c18
+      and 0x082d96c4) and no predicated BL callers. Modes 0/1/2 write
+      register 0 with 0x35/0xad/0x65, return a failed first-write status,
+      otherwise delay the current task ten ticks and write 0x36/0xaf/0x66.
+      Other modes write zero directly. A zero final-write status invokes the
+      one-millisecond IRAM delay and is still returned. Deliberate deviation:
+      retail's direct BLs become calls to the existing Rust I2C and delay
+      ports, preserving their arguments, ordering, status propagation, and
+      ignored delay returns.
+
   - address: 0x0836e348
     ghidra: FUN_0836e348
     name: i2c_0x39_register4_high_bits
