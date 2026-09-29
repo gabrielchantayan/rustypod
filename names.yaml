@@ -82546,6 +82546,31 @@ functions:
       port; the unported tail target remains a fixed-address target seam on
       firmware and a replaceable host callback. Host tests cover every switch
       boundary and prove only the tail cases invoke that callback.
+  # --- retailOS Ide1 storage-backend deactivation ---
+  - address: 0x0836bc9c
+    ghidra: FUN_0836bc9c
+    name: storage_backend_deactivate
+    size: 80
+    sig: "u32 storage_backend_deactivate(u32 *backend)"
+    module: drivers/storage_backend_deactivate
+    status: ported
+    renames:
+      param_1/r0: backend
+      DAT_0836bcec: ide1_tag
+      DAT_0836bcf0: backend_runtime_global
+      FUN_080564ec: waiter_delete
+    notes: >-
+      Raw osos.dec establishes the true occupied range as 80 bytes,
+      0x0836bc9c through the two literal-pool words at 0x0836bcf0; the next
+      independently callable function starts at 0x0836bcf4. ARM B/BL decoding
+      finds two incoming plain direct BL call sites, 0x0836be40 and
+      0x0836ce54, and no incoming predicated BL call sites. The body has one
+      predicated outbound blne to waiter_delete @ 0x080564ec. It returns 7
+      unless backend is non-null, begins with the "Ide1" tag, and has a
+      nonzero +0x44 word. On success it clears +0x44; a nonzero waiter id at
+      backend_runtime_global (0x089d0438) +0x10 is then deleted, and it
+      returns zero. Host builds model that fixed RAM object with private
+      backing; its subsystem role remains unrecovered.
   # --- retailOS Ide1 storage-backend validator ---
   - address: 0x0836bf28
     ghidra: FUN_0836bf28

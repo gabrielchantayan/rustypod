@@ -258,6 +258,7 @@ pub unsafe extern "C" fn waiter_create() -> u32 {
 ///
 /// Task-lock/-unlock on the id, then ROM delete via a stack copy of the
 /// id. Nothing is freed.
+#[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn waiter_delete(id: u32) {
     let h = hooks();
