@@ -232,6 +232,7 @@ pub mod pool_entry_is_live;
 pub mod paletted_image_copy;
 pub mod masked_u16_rectangle_fill;
 pub mod parse_ascii_decimal_cursor;
+pub mod parse_node_type_bit;
 pub mod plane_cursor;
 pub mod q15_mul;
 pub mod q15_multiply_add_saturating;

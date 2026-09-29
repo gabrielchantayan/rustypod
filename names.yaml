@@ -161677,3 +161677,24 @@ functions:
       method's result. The virtual target has no recovered semantic identity,
       so it is represented only by its verified slot. Deliberate host
       deviation: native-width vtable entries model ARM's four-byte words.
+
+  - address: 0x082dc26c
+    ghidra: FUN_082dc26c
+    name: parse_node_type_bit
+    size: 36
+    sig: "u32 parse_node_type_bit(u32 node_type)"
+    module: util/parse_node_type_bit
+    status: ported
+    renames:
+      param_1/r0: node_type
+      iVar1/r0: node_type_bit
+    notes: >-
+      Raw A32 words establish the exact 36-byte extent
+      0x082dc26c..0x082dc290; the next separately linked function begins
+      with `ldr r2,[r0]` at 0x082dc290. Whole-image A32 branch decoding finds
+      exactly two inbound unconditional plain BL calls, no predicated BL
+      callers, and no direct calls in this leaf. It maps parser node types
+      0x40 and 0x41 to 1 and 0x80 respectively; all others return
+      2 shifted left by the low byte of node_type - 0x44. ARM returns zero
+      for register shift counts at least 32; Rust spells that behavior
+      explicitly. No deliberate deviations.
