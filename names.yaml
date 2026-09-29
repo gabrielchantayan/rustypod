@@ -160073,3 +160073,32 @@ functions:
       call its verified address through a volatile seam and host tests record
       all five forwarded words. The stack shuffle is deliberately represented
       as a normal five-argument Rust call.
+
+  # --- RTC-seeded random result wrapper (runtime) ---
+  - address: 0x0835a2f8
+    ghidra: FUN_0835a2f8
+    name: rtc_seeded_random_result
+    size: 68
+    sig: "u32 rtc_seeded_random_result(u32 discarded_r0, u32 discarded_r1, u32 retained_r2, u32 retained_r3)"
+    module: runtime/rtc_seeded_random_result
+    status: ported
+    renames:
+      DAT_0835a338: random_word_r1_literal
+      param_1/r0: discarded_r0
+      param_2/r1: discarded_r1
+      param_3/r2: retained_r2
+      param_4/r3: retained_r3
+    notes: >-
+      Raw osos.dec establishes a 68-byte extent: 16 A32 instructions from
+      0x0835a2f8 through the tail branch at 0x0835a334, followed by literal
+      0xde8743fe at 0x0835a338; the next real function starts at 0x0835a33c
+      with push {r0-r11,lr}. Whole-image A32 BL-immediate decoding finds two
+      inbound plain BL sites, 0x0832c830 and 0x0832e5e4, and zero predicated
+      BL sites. The body has one plain BL at 0x0835a32c to the existing
+      rtc_seeded_random_word port (FUN_0834f3e4), no predicated BL forms.
+      The opaque subtraction loop deterministically invokes that wrapper once,
+      retaining incoming r2/r3 and returning its random word. Target builds
+      preserve the complete retail instruction sequence and literal pool; host
+      builds call the existing port directly because the host C ABI cannot
+      model the target-only register behavior. Host tests install the existing
+      random-service callbacks and verify one entropy read and result return.
