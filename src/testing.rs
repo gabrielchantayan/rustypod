@@ -3173,6 +3173,9 @@ pub mod hints {
     // 0xeeee_0000: dedicated to sqlite/parse_free_temporary's target-width
     // Parse object and tracked-allocation fixture; mappings never unmap.
     pub const SQLITE_PARSE_FREE_TEMPORARY: usize = 0xeeee_0000;
+    // 0x7780_0000: dedicated to util/big_endian_pending_map_set's fixed
+    // pending-map fixture; mappings never unmap.
+    pub const PENDING_MAP_SET: usize = 0x7780_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -3463,3 +3466,5 @@ pub static DRAW_STATE_FILL_OPS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::
 
 /// Serializes host tests that replace big-endian bit-cell store seams.
 pub static BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Serializes host tests that install the fixed pending-map backing.
+pub static PENDING_MAP_SET_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());

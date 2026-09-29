@@ -8773,6 +8773,33 @@ functions:
       represented on the little-endian CPU. match.py structural review and host
       tests cover every byte boundary plus high input bits. Deliberate
       deviations: none.
+  # --- big-endian pending-map bit update ---
+  - address: 0x0836b6fc
+    ghidra: FUN_0836b6fc
+    name: big_endian_pending_map_set
+    size: 68
+    sig: "u32 big_endian_pending_map_set(u32 group, i32 pending)"
+    module: util/big_endian_pending_map_set
+    status: ported
+    renames:
+      param_1/r0: group
+      param_2/r1: pending
+      DAT_0836b740: pending_map_base (0x39a00080)
+      r3: pending_map_word_index
+      stack_local/r2: big_endian_bit_index
+    notes: >-
+      Raw osos.dec establishes the exact 68-byte extent: 17 ARM words from
+      push {r3,r4,lr} at 0x0836b6fc through pop {r3,r4,pc} at 0x0836b73c.
+      The following word at 0x0836b740 is the 0x39a00080 pending-map base
+      literal; the next function starts at 0x0836b744. The function calls
+      big_endian_word_bit_index for group[4:0], selects pending-map word
+      6 - (group >> 5), then sets its bit for nonzero pending or clears it for
+      zero, returning zero. Raw decoding verifies one outbound plain bl to
+      0x0836b698, and two inbound direct calls: plain bl at 0x0804b3d0 and
+      predicated blne at 0x080cb668. Host tests cover set, clear, nonzero
+      pending, big-endian bit order, and preservation of a neighbouring word.
+      Deliberate deviations: host tests install a mapped pending-map backing
+      instead of dereferencing the retail fixed address.
   # --- u32 maximum-sentinel predicate ---
   - address: 0x083b4788
     ghidra: FUN_083b4788
