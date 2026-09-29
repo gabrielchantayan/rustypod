@@ -42875,6 +42875,33 @@ functions:
       Deliberate deviation: pointer slots are target-width u32 words so
       offsets remain correct on 64-bit host fixtures. The existing direct
       clear_saved_overflow port provides the callee behavior.
+  - address: 0x082d6cb4
+    ghidra: FUN_082d6cb4
+    name: btree_trip_write_cursors
+    size: 84
+    sig: "void btree_trip_write_cursors(sqlite3 *database)"
+    module: sqlite/btree_trip_write_cursors
+    status: ported
+    renames:
+      param_1/r0/r5: database
+      "[database + 0x04]": n_db
+      "[database + 0x08]": databases
+      "[Db + 0x04]": btree
+      FUN_08371bdc: btree_in_write_trans
+      FUN_08372d8c: btree_trip_all_cursors
+    notes: >-
+      Raw osos.dec establishes the exact 84-byte extent
+      0x082d6cb4..0x082d6d08: push {r4,r5,r6,lr}; scan signed sqlite3.nDb
+      records of 24 bytes through target-width sqlite3.aDb; load each Db.pBt;
+      call btree_in_write_trans @ 0x08371bdc; and, only for a nonzero result,
+      issue the predicated BLNE to btree_trip_all_cursors @ 0x08372d8c with
+      SQLITE_ABORT (4). The next separately linked function begins with push
+      {r4,lr} at 0x082d6d08. Whole-image branch decoding finds exactly two
+      inbound unconditional plain BL calls (0x0838b1e0, 0x0838b254) and zero
+      predicated BL calls. The body has one plain BL and one predicated BLNE.
+      Deliberate host-only deviation: aDb and pBt are decoded as u32 target
+      pointers, so the original 24-byte Db stride and offsets remain valid on
+      64-bit test hosts.
   - address: 0x082d6d08
     ghidra: FUN_082d6d08
     name: clear_saved_overflow

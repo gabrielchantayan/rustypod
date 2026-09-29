@@ -45,6 +45,9 @@ pub mod hints {
     pub const SQLITE_TEMP_STORAGE: usize = 0x7420_0000;
     pub const SQLITE_TEMP_STORAGE_ACTIVE: usize = 0x7430_0000;
     pub const SQLITE_TEMP_STORAGE_EMPTY: usize = 0x7440_0000;
+    // 0x7450_0000: dedicated to sqlite/btree_trip_write_cursors's raw-u32
+    // sqlite3, Db-array, Btree, BtShared, and BtCursor fixture; mappings never unmap.
+    pub const BTREE_TRIP_WRITE_CURSORS: usize = 0x7450_0000;
     // 0x5310_0000 / 0x5320_0000: dedicated to fs/path_attribute_update's
     // target-width node and header fixtures; mappings never unmap.
     pub const PATH_ATTRIBUTE_UPDATE: usize = 0x5310_0000;
