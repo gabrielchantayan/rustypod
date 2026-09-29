@@ -8,6 +8,7 @@ pub mod afm_next_statement_token;
 pub mod binary_data_read;
 pub mod assign_active_entry_labels;
 pub mod always_succeeds;
+pub mod battery_adc_code_to_millivolts;
 pub mod ascii_to_uppercase;
 pub mod ascii_string_to_uppercase;
 pub mod ascii_uppercase_record_copy;

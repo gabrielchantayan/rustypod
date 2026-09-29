@@ -160723,3 +160723,26 @@ functions:
       with zero only on equality, and always returns zero. Target builds call
       those verified addresses; host tests inject handlers. match.py was
       reviewed against the ARM release object.
+
+  - address: 0x082e554c
+    ghidra: FUN_082e554c
+    name: battery_adc_code_to_millivolts
+    size: 40
+    sig: "u32 battery_adc_code_to_millivolts(u32 adc_code)"
+    module: util/battery_adc_code_to_millivolts
+    status: ported
+    renames:
+      param_1/r0: adc_code
+      r0: millivolts
+      r1: divisor_1023
+    notes: >-
+      Raw osos.dec words e3a01e7d e0000091 e92d4010 e59f1014 ebf5466c
+      e2800b02 e28000ca e1a00800 e1a00820 e8bd8010 establish the exact
+      40-byte A32 body 0x082e554c..0x082e5570. The following literal word
+      0x000003ff is the divisor and push {r4,lr} at 0x082e5578 begins the
+      next real function. It wraps adc_code * 2000, calls __rt_udiv
+      (0x08036f14) with divisor 1023, adds 2250, and zero-extends the low
+      halfword. Complete-image aligned ARM B/BL-immediate decoding finds two
+      inbound plain BL sites (0x082bc4e0 and 0x082e5878), zero predicated
+      inbound BL sites, one plain body BL to __rt_udiv, and no predicated
+      body calls. Rust preserves the ported divider seam; no deviations.
