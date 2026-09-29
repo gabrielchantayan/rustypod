@@ -2,6 +2,7 @@
 //! accessor ported from retailOS.
 use crate::crypto::obj_dat::{lh_insert, Lhash};
 use crate::drivers::ata_cmd::{traced_alloc, traced_free, traced_realloc};
+use crate::runtime::qsort::qsort;
 use crate::strto::strtod::{bsearch, BsearchCmpFn};
 
 /// object_low_flags_clear — original: `FUN_0808539c` @ `0x0808539c`
@@ -980,35 +981,31 @@ const PROVIDER_CAPACITY_WORD: usize = 3;
 /// negative / zero / positive ordering result.
 pub type NamespaceProviderComparator = BsearchCmpFn;
 
-/// Sorter ABI of unported `FUN_0836982c`. It orders the table at +0x04 with
-/// the comparator at +0x10 and marks the +0x08 sorted flag.
-type NamespaceProviderSort = unsafe extern "C" fn(providers: *mut usize);
-
-/// Host builds inject the still-unported namespace-provider sorter. On device
-/// the helper below instead reaches its fixed retailOS load address.
-#[cfg(not(target_os = "none"))]
-pub(crate) static mut NAMESPACE_PROVIDER_SORT: NamespaceProviderSort =
-    missing_namespace_provider_sort;
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_namespace_provider_sort(_providers: *mut usize) {
-    loop {
-        core::hint::spin_loop();
+/// namespace_provider_sort — original: `FUN_0836982c` @ `0x0836982c`
+/// (56 bytes; true extent `0x0836982c..0x08369864`; next independently linked
+/// function begins with `cmp r0,#0` at `0x08369864`).
+///
+/// Raw A32 decoding verifies **2 inbound plain `bl` call sites**
+/// (`0x0807523c`, `0x0836959c`) and **0 predicated `bl` call sites**; its one
+/// outbound call is an unconditional `bl` to [`qsort`]. A null provider object
+/// returns unchanged. An object whose +0x08 sorted flag is nonzero also returns
+/// unchanged. Otherwise it qsorts the +0x04 table's +0x00 count entries as
+/// four-byte records with the +0x10 comparator, then stores one at +0x08.
+///
+/// Deliberate deviation: host fixtures use pointer-sized table entries, so
+/// host qsort receives `size_of::<usize>()`; this is four bytes on the target.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_sort(providers: *mut usize) {
+    if providers.is_null() || providers.add(PROVIDER_SORTED_WORD).read_volatile() != 0 {
+        return;
     }
-}
-
-/// Calls the separately linked namespace-provider sort helper.
-#[inline(always)]
-unsafe fn namespace_provider_sort(providers: *mut usize) {
-    #[cfg(target_os = "none")]
-    {
-        let sort: NamespaceProviderSort = core::mem::transmute(0x0836_982cusize);
-        sort(providers);
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        core::ptr::read_volatile(core::ptr::addr_of!(NAMESPACE_PROVIDER_SORT))(providers);
-    }
+    let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut u8;
+    let count = providers.add(PROVIDER_COUNT_WORD).read_volatile();
+    let comparator: extern "C" fn(*const u8, *const u8) -> i32 =
+        core::mem::transmute(providers.add(PROVIDER_COMPARATOR_WORD).read_volatile());
+    qsort(table, count, core::mem::size_of::<usize>(), comparator);
+    providers.add(PROVIDER_SORTED_WORD).write_volatile(1);
 }
 
 /// Word index of the comparison callback (`ldr r2,[r4,#16]`).
@@ -3536,72 +3533,29 @@ mod tests {
         assert_eq!(unsafe { namespace_provider_find(providers.ptr(), 0x99) }, -1);
     }
 
-    /// Serializes host replacement of the unported namespace-provider sort
-    /// sibling used by namespace_provider_find.
-    static PROVIDER_FIND_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-    static mut PROVIDER_FIND_SORT_CALLS: usize = 0;
-
     unsafe extern "C" fn compare_provider_words(left: *const u8, right: *const u8) -> i32 {
         let left = left.cast::<usize>().read_volatile();
         let right = right.cast::<usize>().read_volatile();
         (left > right) as i32 - (left < right) as i32
     }
+    #[test]
+    fn namespace_provider_sort_handles_null_and_only_sorts_unflagged_tables() {
+        assert_eq!(unsafe { namespace_provider_sort(core::ptr::null_mut()) }, ());
 
-    unsafe extern "C" fn recording_provider_sort(providers: *mut usize) {
-        assert!(PROVIDER_FIND_SORT_CALLS < 8, "unexpected sort call");
-        PROVIDER_FIND_SORT_CALLS += 1;
-        let table = providers.add(PROVIDER_TABLE_WORD).read_volatile() as *mut usize;
-        let count = providers.add(PROVIDER_COUNT_WORD).read_volatile();
-        let comparator: NamespaceProviderComparator =
-            core::mem::transmute(providers.add(PROVIDER_COMPARATOR_WORD).read_volatile());
-        for index in 1..count {
-            let mut current = index;
-            while current > 0
-                && comparator(table.add(current).cast(), table.add(current - 1).cast()) < 0
-            {
-                let right = table.add(current).read_volatile();
-                let left = table.add(current - 1).read_volatile();
-                table.add(current).write_volatile(left);
-                table.add(current - 1).write_volatile(right);
-                current -= 1;
-            }
-        }
-        providers.add(PROVIDER_SORTED_WORD).write_volatile(1);
-    }
+        let mut providers =
+            ProvidersFixture::new(4, 4, std::vec![7, 3, 5, 3, 0, 0, 0, 0], 1);
+        providers.words[PROVIDER_COMPARATOR_WORD] = compare_provider_words as usize;
+        unsafe { namespace_provider_sort(providers.ptr()) };
+        assert_eq!(&providers.table[..4], &[7, 3, 5, 3], "sorted flag skips qsort");
 
-    struct ProviderFindSortReset {
-        _guard: parking_lot::MutexGuard<'static, ()>,
-        previous: NamespaceProviderSort,
-    }
-
-    impl Drop for ProviderFindSortReset {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::write_volatile(
-                    core::ptr::addr_of_mut!(NAMESPACE_PROVIDER_SORT),
-                    self.previous,
-                );
-            }
-        }
-    }
-
-    fn install_recording_provider_sort() -> ProviderFindSortReset {
-        let guard = PROVIDER_FIND_TEST_LOCK.lock();
-        unsafe {
-            let previous =
-                core::ptr::read_volatile(core::ptr::addr_of!(NAMESPACE_PROVIDER_SORT));
-            PROVIDER_FIND_SORT_CALLS = 0;
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!(NAMESPACE_PROVIDER_SORT),
-                recording_provider_sort,
-            );
-            ProviderFindSortReset { _guard: guard, previous }
-        }
+        providers.words[PROVIDER_SORTED_WORD] = 0;
+        unsafe { namespace_provider_sort(providers.ptr()) };
+        assert_eq!(&providers.table[..4], &[3, 3, 5, 7]);
+        assert_eq!(providers.words[PROVIDER_SORTED_WORD], 1);
     }
 
     #[test]
     fn namespace_provider_find_sorts_then_returns_first_duplicate_or_miss() {
-        let _sort = install_recording_provider_sort();
         let mut providers =
             ProvidersFixture::new(5, 7, std::vec![7, 3, 5, 3, 9, 0, 0, 0, 0], 0);
         providers.words[PROVIDER_COMPARATOR_WORD] = compare_provider_words as usize;
@@ -3613,7 +3567,6 @@ mod tests {
         );
         assert_eq!(&providers.table[..5], &[3, 3, 5, 7, 9]);
         assert_eq!(providers.words[PROVIDER_SORTED_WORD], 1);
-        assert_eq!(unsafe { PROVIDER_FIND_SORT_CALLS }, 1);
 
         assert_eq!(unsafe { namespace_provider_find(providers.ptr(), 8) }, -1);
         assert_eq!(
@@ -3621,7 +3574,6 @@ mod tests {
             -1,
             "zero is rejected after the sort helper runs"
         );
-        assert_eq!(unsafe { PROVIDER_FIND_SORT_CALLS }, 3);
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

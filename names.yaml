@@ -60223,15 +60223,37 @@ functions:
       unconditional (0 predicated): 0x0806ea28, 0x0806fbc0, 0x0806fc04,
       0x0806fe1c, 0x08070724, and 0x080eebf4. NULL providers returns -1.
       A null +0x10 comparator takes a linear first-exact-word search. Otherwise
-      the function calls the still-unported sort sibling 0x0836982c, rejects
-      zero value, calls the ported ADS bsearch over +0x04 table words, then
-      scans backwards while comparator(table[index-1], &key) >= 0 to select
-      the first duplicate. Host words are pointer-sized to keep the target's
-      five 32-bit fields disjoint, so bsearch uses a host-sized stride; device
-      stride remains the literal four bytes. The unported sort sibling is a
-      host-injected seam and direct target call. match.py: expected structural
-      difference from an indirect host/test seam; control flow preserves the
-      null, linear, sort, zero, bsearch, and duplicate-backscan paths.
+      the function calls the ported sort sibling 0x0836982c, rejects zero
+      value, calls the ported ADS bsearch over +0x04 table words, then scans
+      backwards while comparator(table[index-1], &key) >= 0 to select the first
+      duplicate. Host words are pointer-sized to keep the target's five 32-bit
+      fields disjoint, so bsearch uses a host-sized stride; device stride remains
+      the literal four bytes. match.py: expected structural difference from the
+      host pointer-width layout; control flow preserves the null, linear, sort,
+      zero, bsearch, and duplicate-backscan paths.
+
+  - address: 0x0836982c
+    ghidra: FUN_0836982c
+    name: namespace_provider_sort
+    size: 56
+    sig: "void namespace_provider_sort(usize *providers)"
+    module: cxx/object_flags
+    status: ported
+    renames:
+      param_1/r0: providers
+      FUN_08030cd4: qsort
+    notes: >-
+      Raw A32 words establish the exact 56-byte extent
+      0x0836982c..0x08369864: the next separate function begins `cmp r0,#0`
+      at 0x08369864. Direct ARM decode found two inbound unconditional BLs,
+      at 0x0807523c and 0x0836959c, and no predicated BL calls. The sole
+      outbound call is qsort(table @ +0x04, count @ +0x00, 4, comparator @
+      +0x10), made only for non-null objects whose sorted flag at +0x08 is
+      zero; it then stores one to that flag. Host storage uses pointer-sized
+      table entries, so its qsort record size is `size_of::<usize>()`, which
+      remains four bytes on ARM. match.py: expected host-layout-independent
+      setup difference; target control flow retains both early returns,
+      qsort, and final flag store.
 
   - address: 0x08369780
     ghidra: FUN_08369780
