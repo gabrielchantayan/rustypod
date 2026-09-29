@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x083199ac
+    ghidra: FUN_083199ac
+    name: encoded_word_block_bit_length
+    size: 156
+    sig: "i32 encoded_word_block_bit_length(const EncodedWordBlock *block)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      r0: decoded_count_or_result
+      r1: decoded_word_or_bit_index
+      r2: word_array_or_shifted_bit
+      r3: decoded_word
+      DAT_08319a40: encoded_count_multiplier
+      DAT_08319a44: encoded_word_decode_multiplier
+    notes: >-
+      Raw osos.dec words establish a 37-instruction, 148-byte leaf from
+      0x083199ac through 0x08319a3c, followed by literal-pool words
+      function begins at 0x08319a48, for a true 156-byte extent. Complete-image
+      ARM decoding finds two inbound plain BL sites (0x08322f3c, 0x0834f850),
+      zero predicated BL sites, and no outbound BL instructions. It decodes the
+      bounded encoded-count block, scans decoded limbs from high to low, and
+      returns the one-based highest set-bit position, or zero for an empty,
+      all-zero, or out-of-range block. Host tests cover a high limb, intervening
+      zero limbs, empty and negative counts, and the 29-limb rejection. match.py
+      was reviewed against the ARM release object.
   - address: 0x0831fff0
     ghidra: FUN_0831fff0
     name: inline_encoded_word_block_to_bytes
