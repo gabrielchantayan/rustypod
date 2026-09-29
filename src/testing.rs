@@ -2667,6 +2667,10 @@ pub mod hints {
     // 0x4244_0000: dedicated to sqlite/btree_query_table_lock's raw-u32
     // Btree, BtShared, pager, and table-lock fixture; mappings never unmap.
     pub const SQLITE_BTREE_QUERY_TABLE_LOCK: usize = 0x4244_0000;
+    // 0x4245_0000: dedicated to sqlite/btree_lock_table's raw-u32 Btree,
+    // BtShared, sqlite3, and BtLock fixture; mappings never unmap, so no
+    // other user may share this hint.
+    pub const BTREE_LOCK_TABLE: usize = 0x4245_0000;
     // 0x3e00_0000: dedicated to sqlite/ptrmap_put_overflow_cell's raw-u32
     // segmented-entry table and entry-data fixture; mappings never unmap, so
     // no other user may share this hint.
