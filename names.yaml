@@ -159072,3 +159072,32 @@ functions:
       target overwrites those argument registers before branching onward.
       Neither target is ported, so the ARM build calls their verified addresses
       directly and host tests use role-based seams; no behavioral deviations.
+
+  # ---- Mode register-block setup (src/drivers/mode_register_block_configure.rs) ----
+  - address: 0x0836dff8
+    ghidra: FUN_0836dff8
+    name: mode_register_block_configure
+    size: 136
+    sig: "void mode_register_block_configure(u32 mode)"
+    module: drivers/mode_register_block_configure
+    status: ported
+    renames:
+      param_1/r0: mode
+      DAT_0836e080: mode_register_blocks
+      DAT_0836e084: mode_format
+      r1: selected_register_block
+      r3: selected_register_block_for_stride
+    notes: >-
+      Raw osos.dec establishes the exact 136-byte A32 extent
+      0x0836dff8..0x0836e07f: 33 instructions through pop {pc}, followed by
+      the two-word literal pool at 0x0836e080; 0x0836e088 begins the next real
+      function. The Ghidra pointer arithmetic is misleading: the literal is
+      0x3cc04000 and the selected blocks are 0x3cc00000, 0x3cc04000,
+      0x3cc08000, or 0x3cc0c000 for modes 0, 1, 2, or all other values.
+      Complete aligned A32 B/BL-immediate decoding finds two inbound
+      unconditional plain BL sites at 0x080c9cc4 and 0x080cb690, zero
+      predicated BL sites, and no outbound calls. It writes format 0x405,
+      mode 3, controls 1 and 7, dimension 0x170, and stride 12 at offsets
+      4, 0, 12, 8, 16, and 40 respectively. Deliberate deviation: target
+      stores are volatile MMIO stores, and host builds substitute an installable
+      base pointer for the fixed register address.
