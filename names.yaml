@@ -161543,3 +161543,36 @@ functions:
       pages. Rust calls the three ported SQLite OS wrappers directly;
       pager_truncate_cache remains a fixed retailOS target call and uses a
       recording host seam.
+
+  # ---- SQLite pager cache reclamation (src/sqlite/pager_reclaim_cache_page.rs) ----
+  - address: 0x082de33c
+    ghidra: FUN_082de33c
+    name: pager_reclaim_cache_page
+    size: 200
+    sig: "i32 pager_reclaim_cache_page(Pager *pager, u32 *page_out)"
+    module: sqlite/pager_reclaim_cache_page
+    status: ported
+    renames:
+      param_1/r0/r5: pager
+      param_2/r1/r7: page_out
+      r4: page
+      pager+108: pager->fd
+      pager+124: pager->pPageToRecycle
+      pager+132: pager->pBusyPage
+      page+29: page->isOnLruList
+      page+31: page->needsSync
+    notes: >-
+      Raw osos.dec establishes the exact 200-byte A32 extent
+      0x082de33c..0x082de403; the push at 0x082de404 begins the next
+      independently entered function. The body contains six unconditional
+      plain BL instructions (to sqlite_os_device_characteristics, pager_sync,
+      the unported 0x08398a2c helper, pcache_remove_from_lru_list, the
+      unported 0x082decf0 helper, and pcache_unlink_and_remove_from_hash) and
+      no predicated BL. Whole-image ARM decoding finds exactly two inbound
+      unconditional plain BL calls at 0x082dd3a8 and 0x0837e9b4, with no
+      predicated BL calls. It clears page_out, synchronizes an idle pager,
+      conditionally resets its journal state, temporarily pins the selected
+      LRU page while the recycling helper runs, propagates failures, records
+      needsSync, then unlinks and returns the page. Deliberate deviation:
+      unported helpers retain fixed target addresses; host tests inject
+      recording seams.
