@@ -160901,3 +160901,39 @@ functions:
       otherwise it reports 2. A found node is always released before the
       semaphore is signaled. Deviation: path_node_lookup remains a verified
       resident call at 0x082e15d8; all other direct callees use existing ports.
+
+  - address: 0x082e44b4
+    ghidra: FUN_082e44b4
+    name: fat_lfn_reconstruct
+    size: 196
+    sig: "u8 *fat_lfn_reconstruct(void *context, const u32 *state, u8 *output, u32 cache_key)"
+    module: fs/fat_lfn_reconstruct
+    status: ported
+    renames:
+      param_1/r0: cache context
+      param_2/r1: LFN reconstruction state
+      param_3/r2: output
+      r3: cache key
+      FUN_082e3f98: cache_block_acquire
+      FUN_082d7a50: FAT LFN record formatter
+      FUN_082e18bc: cache_entry_release
+    notes: >-
+      Raw osos.dec establishes the exact 196-byte extent
+      0x082e44b4..0x082e4574; the next separately entered function begins
+      at 0x082e4578. Decoding every body instruction finds six plain
+      unconditional bl sites (0x082e44e0, 0x082e4514, 0x082e4520,
+      0x082e4534, 0x082e4560, 0x082e456c) and zero predicated bl sites.
+      It clears output, acquires state word 3's cache block, formats
+      min(state word 0, state word 1 + 1) reverse LFN records from
+      entry+0x18+current*0x20, and releases it. State word 4 is a nonzero
+      preceding-block index; it appends the remaining records from that
+      acquired entry+0x1f8, at output+count*13 with capacity
+      0x100-count*13, then releases it. Ghidra's prototype is incomplete:
+      raw ARM preserves inbound r3 as the first cache acquire's key, while
+      its second call only establishes r0/r1 and leaves r2/r3 unspecified.
+      Deliberate deviation: the target calls the existing
+      cache_block_acquire and cache_entry_release ports, the unported
+      formatter remains a direct retailOS call, and the second acquire's
+      unspecified scratch arguments are supplied as zero. Host tests cover
+      zero-total output clearing and both-block offsets, counts, capacities,
+      and release order.

@@ -6,6 +6,8 @@ pub mod fat_dirent;
 pub mod fat_dirent_populate_names;
 /// FAT long-file-name fragment-state update @ 0x082dfdc0.
 pub mod fat_lfn_fragment;
+/// FAT long-file-name reconstruction from accumulated directory entries @ 0x082e44b4.
+pub mod fat_lfn_reconstruct;
 /// FAT long-file-name checksum for an 11-byte short name @ 0x082e0194.
 pub mod fat_lfn_short_name_checksum;
 /// FAT data-cluster to cache-block-index conversion @ 0x082e01cc.
