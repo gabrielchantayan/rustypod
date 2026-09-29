@@ -82625,6 +82625,31 @@ functions:
       returns zero. Host builds model that fixed RAM object with private
       backing; its subsystem role remains unrecovered.
   # --- retailOS Ide1 storage-backend validator ---
+  - address: 0x08369da8
+    ghidra: FUN_08369da8
+    name: storage_backend_validate_status_3
+    size: 64
+    sig: "u32 storage_backend_validate_status_3(const void *backend, u32 *validated)"
+    module: drivers/storage_backend_validate_status_3
+    status: ported
+    renames:
+      param_1: backend
+      param_2: validated
+      DAT_08369de8: ide1_tag
+    notes: >-
+      Raw osos.dec confirms the 64-byte body from 0x08369da8 through
+      0x08369de7; 0x08369de8 is the "Ide1" literal pool and 0x08369dec begins
+      the next independently entered function. The body has no outgoing BL
+      calls. It has two incoming plain, unconditional BL calls at 0x080e70b8
+      and 0x082bcbfc, and no incoming predicated BL calls. It returns 7 unless
+      backend is non-null, its first word is "Ide1", and its +0x44 word is
+      nonzero. On success it optionally stores backend +8 in validated and
+      returns zero. Firmware uses a `mov r12, r12` no-op to prevent LLVM from
+      folding this required BL target into status-2; host builds preserve the
+      target ABI by truncating that pointer to a u32 because firmware pointers
+      are 32-bit.
+
+  # --- retailOS Ide1 storage-backend validator ---
   - address: 0x0836bf28
     ghidra: FUN_0836bf28
     name: storage_backend_validate_status_2
