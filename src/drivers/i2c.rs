@@ -158,6 +158,33 @@ pub(crate) unsafe extern "C" fn pmu_read_regs_stub(_bank: u32, _buf: *mut u8) ->
 /// The active PMU register-block read. Shipped default: the ported
 /// [`pmu_i2c_read_bank`]; host tests install a recording mock.
 pub static mut PMU_READ_REGS: PmuReadRegsFn = pmu_i2c_read_bank;
+/// ABI of PMU transaction `FUN_0836d664`, which fills the caller's
+/// six-byte response buffer.
+type PmuTransaction85Fn = unsafe extern "C" fn(response: *mut u8) -> i32;
+
+const PMU_TRANSACTION_85_ADDRESS: usize = 0x0836_d664;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_i2c_transaction_0x85(response: *mut u8) -> i32 {
+    let transaction: PmuTransaction85Fn = core::mem::transmute(PMU_TRANSACTION_85_ADDRESS);
+    transaction(response)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_pmu_i2c_transaction_0x85(_response: *mut u8) -> i32 {
+    panic!("pmu_i2c_read_status requires PMU transaction 0x0836d664")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PMU_TRANSACTION_85: PmuTransaction85Fn = missing_pmu_i2c_transaction_0x85;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_i2c_transaction_0x85(response: *mut u8) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PMU_TRANSACTION_85))(response)
+}
+
 
 /// Reads the ROM kernel table and the read slot (volatile — same
 /// rationale as every dispatch table: a build in which nothing swaps
@@ -186,6 +213,31 @@ pub unsafe extern "C" fn pmu_i2c_read_regs(bank: u32, buf: *mut u8) -> i32 {
     let status = (read_regs)(bank, buf);
     (kernel.sema_signal)(PMU_I2C_INNER_SEM);
     (kernel.sema_signal)(PMU_I2C_OUTER_SEM);
+    status
+}
+/// pmu_i2c_read_status — original: `FUN_082e5888` @ 0x082e5888 (44
+/// bytes; 2 plain `bl` call sites, 0 predicated `bl`, binary-verified by
+/// decoding every ARM B/BL word in osos.dec).
+///
+/// Acquires PMU semaphores 17 then 5, invokes transaction 0x85 to fill
+/// `response`, releases 5 then 17 unconditionally, and returns the
+/// transaction status verbatim. The following `push {r4,r5,r6,lr}` at
+/// 0x082e58b4 starts the next real function, confirming the 44-byte extent.
+///
+/// # Deviation
+///
+/// The retail direct calls to fixed semaphore veneers become calls to their
+/// existing Rust ports. `FUN_0836d664` is deliberately retained as a
+/// fixed-address target on-device and a volatile host-test seam; its exact
+/// PMU protocol is not part of this 44-byte wrapper.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_read_status(response: *mut u8) -> i32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = pmu_i2c_transaction_0x85(response);
+    kernel_sem5_signal();
+    kernel_sem17_signal();
     status
 }
 
@@ -762,6 +814,15 @@ pub(crate) mod tests {
     /// Calls made through the unported preparation helper used by action 1.
     static mut PERIPHERAL_0X39_LOG: Vec<(u8, u32)> = Vec::new();
     static mut PERIPHERAL_0X39_PREPARE_STATUS: i32 = 0;
+    static mut STATUS_TRANSACTION_LOG: Vec<usize> = Vec::new();
+    static mut STATUS_TRANSACTION_STATUS: i32 = 0;
+
+    unsafe extern "C" fn mock_pmu_i2c_transaction_0x85(response: *mut u8) -> i32 {
+        (*addr_of_mut!(STATUS_TRANSACTION_LOG)).push(response as usize);
+        response.write(0xa5);
+        *addr_of!(STATUS_TRANSACTION_STATUS)
+    }
+
 
     unsafe extern "C" fn mock_peripheral_0x39_prepare() -> i32 {
         (*addr_of_mut!(PERIPHERAL_0X39_LOG)).push((0, 0));
@@ -833,6 +894,33 @@ pub(crate) mod tests {
         }
         drop(state.0);
     }
+    #[test]
+    fn status_transaction_forwards_response_and_releases_locks_on_error() {
+        let fixture = install_raw_i2c_for_test(0, 0, 0);
+        unsafe {
+            (*addr_of_mut!(STATUS_TRANSACTION_LOG)).clear();
+            *addr_of_mut!(STATUS_TRANSACTION_STATUS) = -5;
+            let saved = addr_of!(PMU_TRANSACTION_85).read_volatile();
+            addr_of_mut!(PMU_TRANSACTION_85).write(mock_pmu_i2c_transaction_0x85);
+            let mut response = [0u8; 6];
+            assert_eq!(pmu_i2c_read_status(response.as_mut_ptr()), -5);
+            assert_eq!(response[0], 0xa5);
+            assert_eq!((*addr_of!(STATUS_TRANSACTION_LOG)).clone(), std::vec![response.as_mut_ptr() as usize]);
+            assert_eq!(
+                (*addr_of!(SEM_LOG)).clone(),
+                std::vec![
+                    (0, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_OUTER_SEM),
+                ],
+                "the wrapper releases both locks despite a transaction error"
+            );
+            addr_of_mut!(PMU_TRANSACTION_85).write(saved);
+        }
+        drop(fixture);
+    }
+
 
     #[test]
     fn locks_bracket_the_read_outer_first_inner_released_first() {

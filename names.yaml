@@ -27517,6 +27517,34 @@ functions:
       Host tests cover packet construction, wrapping/range behavior, status
       passthrough, and unconditional lock release.
 
+  # --- Locked PMU transaction 0x85 (drivers/i2c) ---
+  - address: 0x082e5888
+    ghidra: FUN_082e5888
+    name: pmu_i2c_read_status
+    size: 44
+    sig: "i32 pmu_i2c_read_status(u8 *response)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: response
+      uVar1/r4: status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d664: pmu_i2c_transaction_0x85
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM words establish the exact 44-byte extent 0x082e5888..0x082e58b4:
+      the following push {r4,r5,r6,lr} starts the next real function.
+      Decoding every ARM B/BL word in osos.dec finds two inbound plain
+      unconditional bl call sites and zero predicated forms. The wrapper waits
+      semaphores 17 then 5, calls FUN_0836d664(response), signals 5 then 17
+      unconditionally, and returns the callee status verbatim. Deliberate
+      deviation: existing Rust semaphore ports replace the four veneer calls;
+      the unported protocol transaction is a fixed-address target on-device
+      and volatile host seam. Host tests verify response forwarding, status
+      passthrough, and release order on an error path.
+
   # --- Locked PCF50635 register-range read (drivers/i2c) ---
   - address: 0x082e58b4
     ghidra: FUN_082e58b4
