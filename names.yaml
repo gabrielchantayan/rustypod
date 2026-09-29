@@ -71,6 +71,35 @@ functions:
       all-zero, or out-of-range block. Host tests cover a high limb, intervening
       zero limbs, empty and negative counts, and the 29-limb rejection. match.py
       was reviewed against the ARM release object.
+  - address: 0x082f38dc
+    ghidra: FUN_082f38dc
+    name: inline_encoded_word_block_to_bytes_082f38dc
+    size: 176
+    sig: "u32 inline_encoded_word_block_to_bytes_082f38dc(const u32 *source, u8 *destination, u32 destination_len)"
+    module: util/inline_encoded_word_block_to_bytes_082f38dc
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      param_3/r2: destination_len
+      r0: decoded_word_or_status
+      r1: byte_shift
+      r3: word_index
+      DAT_082f3984: encoded_count_multiplier
+      DAT_082f3988: encoded_word_multiplier
+    notes: >-
+      Raw osos.dec words establish the 168-byte instruction body at
+      0x082f38dc..0x082f3984, followed by the two-word literal pool at
+      0x082f3984..0x082f398c; the next real function begins at 0x082f398c,
+      for a true 176-byte extent. Complete-image ARM decoding finds two
+      inbound plain BL sites (0x0832dbfc and 0x0832df74), zero predicated BL
+      sites, and no outbound BL instructions. The signed inline count is
+      decoded with 0x0a7e377f; its wrapping absolute magnitude requires four
+      output bytes per payload word. Accepted buffers are filled backward
+      from decoded payload bytes with leading zero padding. A short buffer
+      returns 1 without writes. Host tests cover positive and negative counts,
+      leading padding, the no-write short path, and i32::MIN wrapping
+      behavior. match.py was reviewed against the ARM release object.
   - address: 0x0831fff0
     ghidra: FUN_0831fff0
     name: inline_encoded_word_block_to_bytes
