@@ -159304,3 +159304,30 @@ functions:
       match.py reports the expected LLVM structural diff from source-level
       calls and loop layout. Deliberate deviation: host builds reuse the
       existing controller MMIO storage seam.
+  - address: 0x0836ccbc
+    ghidra: FUN_0836ccbc
+    name: ata_set_features
+    size: 112
+    sig: "u32 ata_set_features(AtaCommandDevice* device, u8 sector_number)"
+    module: drivers/ata_set_features
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1: sector_number
+      "[device + 0x0c]": feature_selector
+      local_command: set_features_command
+    notes: >-
+      Raw osos.dec establishes the true 112-byte extent 0x0836ccbc..0x0836cd2b:
+      27 A32 instructions (108 bytes) end with pop {r2,r3,ip,pc}, then the
+      "Ide1" literal occupies 0x0836cd28; push {r1,r2,r3,lr} at 0x0836cd2c
+      starts the next real function. The sole verified caller, FUN_080ce0e0,
+      has two inbound direct plain BL instructions at 0x080ce138 and
+      0x080ce144, with no predicated BL forms. The body has one outbound plain
+      BL at 0x0836cd20 to the existing ata_command_submit_wait port. It rejects
+      a null, non-Ide1, or unready device with 7; otherwise it builds a
+      12-byte ATA SET FEATURES (0xef) descriptor with sector count 3,
+      caller-supplied sector number, and the low byte at device +0x0c as the
+      feature selector, then submits it. Host tests cover descriptor bytes,
+      sector-number boundaries, and all local validation failures. match.py
+      reports the expected structural diff from the Rust wrapper and relocated
+      direct call; there are no deliberate deviations.
