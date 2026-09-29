@@ -1874,6 +1874,70 @@ pub unsafe extern "C" fn video_engine_dispatch_request(
 
 
 
+/// Firmware entry of the two-word opaque video-engine dispatcher
+/// (`FUN_0824e1ec`, unported).
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_OPAQUE_TWO_WORD_DISPATCH_ADDR: usize = 0x0824_e1ec;
+
+/// ABI recovered from the wrapper's tail branch: engine followed by two opaque
+/// words.
+type VideoEngineOpaqueTwoWordDispatch = unsafe extern "C" fn(*mut u8, u32, u32);
+
+/// Host-test stand-in for the opaque resident dispatcher.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_OPAQUE_TWO_WORD_DISPATCH: Option<VideoEngineOpaqueTwoWordDispatch> = None;
+
+/// Host only: install the dispatcher reached by
+/// [`video_engine_dispatch_opaque_two_words`].
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_opaque_two_word_dispatch(
+    dispatch: Option<VideoEngineOpaqueTwoWordDispatch>,
+) {
+    core::ptr::addr_of_mut!(MOCK_OPAQUE_TWO_WORD_DISPATCH).write(dispatch);
+}
+
+/// Transfers two raw words to the resident dispatcher at 0x0824e1ec.
+unsafe fn dispatch_opaque_two_words(engine: *mut u8, first: u32, second: u32) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineOpaqueTwoWordDispatch =
+            core::mem::transmute(VIDEO_ENGINE_OPAQUE_TWO_WORD_DISPATCH_ADDR);
+        dispatch(engine, first, second);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_OPAQUE_TWO_WORD_DISPATCH).read() {
+            Some(dispatch) => dispatch(engine, first, second),
+            None => panic!("video_engine_dispatch_opaque_two_words requires dispatcher 0x0824e1ec"),
+        }
+    }
+}
+
+/// `video_engine_dispatch_opaque_two_words` — retailOS `FUN_082d1460` @
+/// **0x082d1460** (40 bytes, `0x082d1460..0x082d1484`); `0x082d1488` starts
+/// the next independently linked wrapper. Raw A32 decoding finds one outbound
+/// plain `bl` (`0x082d146c -> video_engine_get`) and no predicated `bl`.
+/// The two direct callers are plain `bl` at 0x0825bf9c and 0x082813a4.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it tail-dispatches `(engine, first, second)` to the
+/// resident 0x0824e1ec target without modifying either caller word.
+///
+/// # Deliberate deviations
+///
+/// Ghidra's 188-byte body and free-index-table recovered C are false: the raw
+/// `popne {r4,r5,r6,lr}; bne` ends this wrapper. The tail target has no
+/// independently verified semantic identity, so it remains an opaque typed
+/// seam; host tests record both unmodified words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_dispatch_opaque_two_words(first: u32, second: u32) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        dispatch_opaque_two_words(engine, first, second);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -3286,6 +3350,50 @@ mod tests {
         }
     }
 
+    // --- video_engine_dispatch_opaque_two_words (FUN_082d1460) ---
+
+    static mut OPAQUE_TWO_WORD_DISPATCH_RECORDED: Option<(*mut u8, u32, u32)> = None;
+
+    unsafe extern "C" fn record_opaque_two_word_dispatch(
+        engine: *mut u8,
+        first: u32,
+        second: u32,
+    ) {
+        *addr_of_mut!(OPAQUE_TWO_WORD_DISPATCH_RECORDED) = Some((engine, first, second));
+    }
+
+    #[test]
+    fn opaque_two_word_dispatch_null_instance_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_instance(ptr::null_mut());
+            set_mock_opaque_two_word_dispatch(Some(record_opaque_two_word_dispatch));
+            OPAQUE_TWO_WORD_DISPATCH_RECORDED = None;
+            video_engine_dispatch_opaque_two_words(0, u32::MAX);
+            assert_eq!(OPAQUE_TWO_WORD_DISPATCH_RECORDED, None);
+            set_mock_opaque_two_word_dispatch(None);
+        }
+    }
+
+    #[test]
+    fn opaque_two_word_dispatch_prepends_instance_and_preserves_raw_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        unsafe {
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_opaque_two_word_dispatch(Some(record_opaque_two_word_dispatch));
+            for (first, second) in [(1, 0), (0, u32::MAX), (u32::MAX, 0x8000_0000)] {
+                OPAQUE_TWO_WORD_DISPATCH_RECORDED = None;
+                video_engine_dispatch_opaque_two_words(first, second);
+                assert_eq!(
+                    OPAQUE_TWO_WORD_DISPATCH_RECORDED,
+                    Some((engine.as_mut_ptr(), first, second)),
+                );
+            }
+            set_mock_opaque_two_word_dispatch(None);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
 }
 /// `video_engine_present_default_frame` — retailOS `FUN_08167460` @
 /// **0x08167460** (56 bytes, `0x08167460..0x08167497`; `push {r2,r3,r4,lr}`
