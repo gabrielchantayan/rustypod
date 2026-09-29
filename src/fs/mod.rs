@@ -41,6 +41,8 @@ pub mod disk_block;
 pub mod cache_block_prepare;
 /// Flushes a pending cache request and its drive metadata @ 0x082b172c.
 pub mod cache_request_flush;
+/// Updates a resolved path node's mode-preserving header attributes @ 0x082e4578.
+pub mod path_attribute_update;
 /// Cache-entry writeback through the storage-block writer @ 0x082e4b4c.
 pub mod cache_entry_flush;
 /// Clears cache-entry transient fields while retaining its context link @ 0x082e4b84.

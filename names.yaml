@@ -160866,3 +160866,38 @@ functions:
       inbound plain BL sites (0x082e26e8 and 0x082e26f8), zero predicated BL
       sites, and no body calls. Volatile byte accesses deliberately prevent
       LLVM from replacing the freestanding loop with a libc copy primitive.
+
+  - address: 0x082e4578
+    ghidra: FUN_082e4578
+    name: update_path_attributes
+    size: 148
+    sig: "u32 update_path_attributes(const u8 *path, u8 attributes)"
+    module: fs/path_attribute_update
+    status: ported
+    renames:
+      param_1/r0: path
+      param_2/r1: attributes
+      iVar1/r7: drive_index
+      iVar2/r4: path_node
+      iVar4/r8: write_result
+      uVar3/r5: ata_error
+      FUN_082c3000: resolve_path_drive_index
+      FUN_082d7934: ata_semaphore_wait
+      FUN_082e15d8: path_node_lookup
+      FUN_082e48bc: cache_block_prepare
+      FUN_082e19cc: path_node_release
+      FUN_082d7954: ata_semaphore_signal
+      FUN_083690a8: ata_report_error
+    notes: >-
+      Raw ARM establishes the exact 148-byte body from 0x082e4578 through
+      pop {r4,r5,r6,r7,r8,pc} at 0x082e4608; the separately entered next
+      function begins at 0x082e460c. Whole-image ARM immediate-branch
+      decoding finds exactly two direct inbound calls, both plain unconditional
+      bl at 0x081bd5fc and 0x081bd818, with zero predicated bl forms. It
+      resolves the path drive index, returns zero directly on failure, then
+      brackets a path-node lookup with that drive ATA semaphore. When bits
+      3-4 of header byte +0x0b equal the requested bits, it replaces the byte,
+      flushes the cache block, and reports ATA error 28 on a zero write result;
+      otherwise it reports 2. A found node is always released before the
+      semaphore is signaled. Deviation: path_node_lookup remains a verified
+      resident call at 0x082e15d8; all other direct callees use existing ports.
