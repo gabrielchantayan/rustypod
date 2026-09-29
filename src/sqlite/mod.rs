@@ -118,6 +118,7 @@ pub mod btree_drop_cell;
 pub mod btree_balance;
 pub mod btree_factory;
 pub mod move_to_child;
+pub mod move_to_rightmost;
 pub mod get_and_init_page;
 pub mod move_to_root;
 pub mod btree_last;

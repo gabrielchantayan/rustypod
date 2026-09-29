@@ -1937,6 +1937,10 @@ pub mod hints {
     // Btree, and MemPage fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const BTREE_MOVE_TO_CHILD: usize = 0x5d00_0000;
+    // 0x5f00_0000: dedicated to sqlite/move_to_rightmost's target-width
+    // cursor, Btree, and MemPage fixture; mappings never unmap, so no other
+    // module may share this hint.
+    pub const BTREE_MOVE_TO_RIGHTMOST: usize = 0x5f00_0000;
     // 0x5e00_0000: dedicated to sqlite/btree_cursor_pop_parent's target-width
     // cursor, page, object, and context fixture; mappings never unmap, so no
     // other module may share this hint.

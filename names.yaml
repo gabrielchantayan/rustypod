@@ -56172,6 +56172,38 @@ functions:
       BTREE_MOVE_TO_ROOT_OPS.get_and_init_page seam (retail target default,
       explicit host mock); release_via_field_0x48 @ 0x0836761c is direct.
 
+  - address: 0x082d9a94
+    ghidra: FUN_082d9a94
+    name: btree_move_to_rightmost
+    size: 108
+    sig: "i32 btree_move_to_rightmost(BtCursor *cursor)"
+    module: sqlite/move_to_rightmost
+    status: ported
+    renames:
+      param_1/r0/r5: cursor
+      param_1+0x18: cursor->pPage
+      param_1+0x1c: cursor->idx
+      param_1+0x3e: cursor->info.nSize
+      param_1+0x42: cursor->validNKey
+      cursor->pPage+0x04: page->leaf_flags
+      cursor->pPage+0x08: page->hdrOffset
+      cursor->pPage+0x14: page->nCell
+      cursor->pPage+0x44: page->aData
+      FUN_0837a158: load_be32/sqlite3Get4byte (direct ported callee)
+      FUN_082d99d0: btree_move_to_child (direct ported callee)
+    notes: >-
+      Raw osos.dec words prove the 108-byte extent 0x082d9a94..0x082d9b00:
+      the pop {r4,r5,r6,pc} at 0x082d9afc is immediately followed by the
+      next separately linked prologue at 0x082d9b00. The body has two plain
+      outbound bl instructions, load_be32 at 0x082d9ab0 and
+      btree_move_to_child at 0x082d9ac4; no predicated bl occurs. Its two
+      direct callers at 0x08371d64 and 0x083729a4 use plain bl. For a leaf,
+      it stores nCell - 1 as idx and clears info.nSize and validNKey. For an
+      internal page, it reads the big-endian right-child number at
+      aData[hdrOffset + 8], stores nCell as idx, then repeats after
+      btree_move_to_child. A child-move error ends the routine with zero:
+      retail deliberately discards it. No deliberate deviations.
+
   - address: 0x082d9b00
     ghidra: FUN_082d9b00
     name: btree_move_to_root
