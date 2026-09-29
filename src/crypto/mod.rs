@@ -86,6 +86,7 @@ pub mod standard_cipher_table_offset;
 pub mod i2a_asn1_object;
 pub mod digest_init;
 pub mod hmac_digest_20;
+pub mod hmac_finalize;
 pub mod digest_update_u32;
 pub mod evp_digest_init_ex;
 pub mod evp_digest;
