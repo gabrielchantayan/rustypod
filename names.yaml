@@ -27214,6 +27214,39 @@ functions:
       reference. ABI: words in r0, byte_len in r1; no return value or null
       checks. Port deviation: none.
 
+  # --- PMU register 0x39 scaled write (drivers/pmu) ---
+  - address: 0x082e5468
+    ghidra: FUN_082e5468
+    name: pmu_write_register_0x39_scaled_value
+    size: 76
+    sig: "void pmu_write_register_0x39_scaled_value(u32 value)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: value
+      uVar1/r1: first_byte
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_08036f14: __rt_udiv
+      FUN_0836d0b4: pmu_i2c_write_packed_selector
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte extent
+      0x082e5468..0x082e54b0: push {r4,lr}; move value into r4; wait
+      semaphores 17 then 5; select first byte 0x18 for zero or low byte of
+      unsigned (value - 0x321) / 100 otherwise; invoke selector 6 with
+      encoded value one; signal 5; and tail-branch to signal 17. The following
+      push {r4,lr} at 0x082e54b4 starts the next real function. Independent
+      whole-image ARM branch decoding finds two direct inbound plain
+      unconditional bl instructions, at 0x080e2570 and 0x080e25c0, and zero
+      predicated inbound bl forms. The body has five plain unconditional
+      callee bl instructions and no predicated callee bl. Selector 6 maps to
+      PCF50635 register 0x39, where the packed command serializes as
+      [0x39, first_byte, 1]. Retail discards its I2C status; this port does
+      likewise. Its five direct callee edges resolve to existing Rust ports,
+      deliberately becoming ordinary Rust calls.
+
   # --- PMU register 0x18 bit zero (drivers/pmu) ---
   # --- PMU register 0x18 bit zero (drivers/pmu) ---
   - address: 0x082e572c
