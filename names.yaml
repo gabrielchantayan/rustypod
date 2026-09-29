@@ -55380,6 +55380,39 @@ functions:
       raw u16/u32 reads to little-endian byte loads/orrs on ARMv5 rather
       than the original's aligned ldrh/ldrd/ldr.
 
+  - address: 0x08368fc0
+    ghidra: FUN_08368fc0
+    name: sqlite_token_quote_identifier
+    size: 120
+    sig: "void sqlite_token_quote_identifier(sqlite3 *db, Token *token, const char *source)"
+    module: sqlite/token_quote_identifier
+    status: ported
+    vars:
+      param_1/r0: db
+      param_2/r1/r4: token
+      param_3/r2: source
+      r3: scanned byte
+    renames:
+      FUN_0837d358: sqlite_set_string_formatted (sqlite3MPrintf, direct formatter dispatch)
+      FUN_08392478: strlen
+    notes: >-
+      Raw osos.dec and ARM decoding establish the exact 120-byte extent
+      0x08368fc0..0x08369038; 0x08369038 is the literal pool ("\"%w\""),
+      and 0x08369040 begins the next function. The body has two unconditional
+      plain BL instructions (0x0837d358 and 0x08392478) and no predicated BL.
+      It scans source for a double quote. Without one, it borrows source and
+      writes length << 1 with ownership clear. With one, sqlite3MPrintf uses
+      the literal format "\"%w\""; NULL is stored while the packed length
+      stays untouched, otherwise it stores strlen(result) << 1 | 1. The Rust
+      port uses the existing sqlite3VMPrintf dispatch with a one-u32 AAPCS
+      varargs area because sqlite_set_string_formatted exposes that varargs
+      area explicitly. Host tests cover empty and ordinary borrowed strings,
+      allocation failure, and formatter input/result behavior for embedded
+      quotes. cargo test --target x86_64-unknown-linux-gnu passed (12,910
+      tests). match.py exits 1 as expected: target 30 instructions, Rust 35;
+      LLVM folds the unquoted packed-length computation and routes mprintf
+      through the documented formatter dispatch, while retaining both paths
+      and the strlen call.
   - address: 0x08369040
     ghidra: FUN_08369040
     name: pager_set_sector_size
