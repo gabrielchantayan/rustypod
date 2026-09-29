@@ -5695,6 +5695,33 @@ functions:
       0x61..0xff; non-byte u32 values do not match. Deliberate deviation:
       Rust represents the literal list with equivalent ranges and singleton
       comparisons rather than dereferencing firmware storage.
+  - address: 0x082d8574
+    ghidra: FUN_082d8574
+    name: btree_lock_table
+    size: 184
+    sig: "u32 btree_lock_table(Btree *btree, u32 table, u32 lock_mode)"
+    module: sqlite/btree_lock_table
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: table
+      param_3/r2: lock_mode
+      iVar6/r6: shared
+      piVar1/r0: lock
+    notes: >-
+      Raw osos.dec establishes the 184-byte extent: push {r4-r8,lr} begins
+      at 0x082d8574, pop {r4-r8,pc} ends at 0x082d8628, and the next real
+      function begins at 0x082d862c. Decoding every instruction word finds
+      one unconditional plain bl, sqlite3_malloc_zero at 0x0837d38c, and no
+      predicated bl; Ghidra's two-call-site report is not supported by the
+      raw body. This is SQLite's sqlite3BtreeLockTable: non-sharable Btrees
+      and the exclusive schema-write exception skip the list; otherwise it
+      finds or zero-allocates a 16-byte BtLock, links it at BtShared.pLock,
+      and retains the greatest lock mode. Deliberate host-only deviation:
+      target pointer fields remain u32 words, with host tests using a
+      below-4-GiB fixture; allocation calls the established sqlite3_malloc_zero
+      port directly.
+
   - address: 0x082d8e30
     ghidra: FUN_082d8e30
     name: pager_page_unlink
