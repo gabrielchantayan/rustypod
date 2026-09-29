@@ -92,6 +92,48 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+// `video_engine_null_context` — retailOS `FUN_082cafc0` @ `0x082cafc0`
+// (8 bytes; `0x082cafc8` begins the next independently linked function).
+//
+// Raw A32 is `mov r0, #0; bx lr`. Complete-image decoding finds two direct
+// inbound plain `bl` calls (0x08295a60 and 0x08295b28) and no predicated
+// `bl` calls. It supplies the NULL context accepted and ignored by the
+// video-engine setup and teardown wrappers.
+//
+// # Deliberate deviations
+//
+// None. Target builds retain the retail two-instruction A32 body; host builds
+// express the same constant result in Rust.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    r#"
+    .section .text.video_engine_null_context,"ax",%progbits
+    .globl video_engine_null_context
+    .type video_engine_null_context,%function
+video_engine_null_context:
+    mov r0, #0
+    bx lr
+    .size video_engine_null_context, . - video_engine_null_context
+"#
+);
+
+#[cfg(not(target_os = "none"))]
+#[inline(never)]
+pub extern "C" fn video_engine_null_context() -> *mut u8 {
+    core::ptr::null_mut()
+}
+
+#[cfg(test)]
+mod null_context_tests {
+    use super::video_engine_null_context;
+
+    #[test]
+    fn always_returns_a_null_context() {
+        assert!(video_engine_null_context().is_null());
+        assert!(video_engine_null_context().is_null());
+    }
+}
+
 
 /// `video_engine_query_property` — retailOS `FUN_082cafc8` @ 0x082cafc8
 /// (60 bytes; 2 direct plain inbound `bl` calls, no predicated inbound
