@@ -5649,6 +5649,31 @@ functions:
       The Rust u32 target preserves the ARM four-byte field on 64-bit hosts;
       it returns this because r0 passes through unchanged. Deliberate
       deviations: none.
+  - address: 0x082d668c
+    ghidra: FUN_082d668c
+    name: cg_binding_reset_and_free
+    size: 60
+    sig: "void cg_binding_reset_and_free(CgCodegen *codegen, CgBinding *binding)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: codegen
+      param_2/r1: binding
+      FUN_08367358: cg_binding_push
+    notes: >-
+      Raw osos.dec words e3a02000 e5812008 e5812004 e5812000 e5812010
+      e5812014 e5912018 e3a03c01 e3c22c02 e00330a2 e3c22c01 e1822003
+      e2800e1f e5812018 ea024323 establish the exact 60-byte body
+      0x082d668c..0x082d66c7; push {r4,lr} at 0x082d66c8 begins the next
+      independently linked function. Whole-image aligned A32 decoding finds
+      exactly two inbound plain BL calls (0x082b6d3c and 0x082b6dd0), zero
+      predicated inbound BL calls, and one outbound tail B to
+      FUN_08367358 at 0x08367358. It clears binding links +0x00/+0x04,
+      anchor +0x08, bound register +0x10, auxiliary word +0x14, and flags
+      0x100/0x200 before pushing the binding onto codegen's free anchor at
+      +0x1f0. Deliberate deviation: Rust performs the tail branch as a normal
+      call; target pointer slots use word indices so their four-byte layout
+      survives 64-bit host fixtures.
   - address: 0x082d7bb8
     ghidra: FUN_082d7bb8
     name: hash_table_visit

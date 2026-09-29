@@ -3277,6 +3277,10 @@ pub const CG_BINDING_RESOURCE: usize = 0x0c / 4;
 /// bound to (written by the rebind helper's `str r2,[r1,#0x10]`,
 /// read by its back-pointer guard `ldr r0,[r0,#0x10]`).
 pub const CG_BINDING_REG: usize = 0x10 / 4;
+/// `cg_binding_t + 0x14` — auxiliary binding word reset before a binding
+/// re-enters the free list.
+pub const CG_BINDING_AUXILIARY: usize = 0x14 / 4;
+
 /// `cg_binding_t + 0x18` — the binding's flags word (bit 0x100 =
 /// [`CG_BINDING_FLAG_BOUND`], released by the block-exit walker
 /// `FUN_082cea24`; bit 0x200 = [`CG_BINDING_FLAG_BLOCK_ENTRY`]).
@@ -3459,6 +3463,42 @@ pub unsafe extern "C" fn cg_binding_push(anchor: *mut u8, node: *mut CgBinding) 
     slot(node, CG_BINDING_NEXT).write(core::ptr::null_mut());
     slot(node, CG_BINDING_ANCHOR).write(anchor);
 }
+/// cg_binding_reset_and_free — original: `FUN_082d668c` @ `0x082d668c`
+/// (60 bytes).
+///
+/// Raw `osos.dec` words establish the complete body at
+/// `0x082d668c..0x082d66c4`; the following `push {r4,lr}` starts the next
+/// independently linked function. Complete-image ARM decoding finds two
+/// inbound plain `bl` instructions (0x082b6d3c and 0x082b6dd0), zero
+/// predicated `bl` instructions, and a tail `b` to [`cg_binding_push`] at
+/// 0x082d66c4.
+///
+/// Clears the binding's list links, owner, bound-register and auxiliary
+/// word, removes flags 0x100 and 0x200, then returns it to `codegen`'s free
+/// binding list. Deliberate deviation: the tail branch is a normal Rust call;
+/// it preserves all observable stores and the target-width list layout is
+/// represented by word indices on 64-bit hosts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_binding_reset_and_free(
+    codegen: *mut CgCodegen,
+    binding: *mut CgBinding,
+) {
+    let codegen = codegen as *mut u8;
+    let binding = binding as *mut u8;
+    slot(binding, CG_BINDING_NEXT).write(core::ptr::null_mut());
+    slot(binding, CG_BINDING_PREV).write(core::ptr::null_mut());
+    slot(binding, CG_BINDING_ANCHOR).write(core::ptr::null_mut());
+    slot(binding, CG_BINDING_REG).write(core::ptr::null_mut());
+    slot(binding, CG_BINDING_AUXILIARY).write(core::ptr::null_mut());
+    let flags = word(binding, CG_BINDING_FLAGS);
+    flags.write(flags.read() & !(CG_BINDING_FLAG_BOUND | CG_BINDING_FLAG_BLOCK_ENTRY));
+    cg_binding_push(
+        slot(codegen, CG_CODEGEN_FREE_BINDINGS) as *mut u8,
+        binding as *mut CgBinding,
+    );
+}
+
 
 /// cg_binding_rebind — original: `FUN_082b5234` @ 0x082b5234 (100
 /// bytes; **13 `bl` call sites**, all inside the register-binding
@@ -9398,6 +9438,54 @@ mod tests {
             }
         }
         drop(f);
+        teardown();
+    }
+
+    // --- cg_binding_reset_and_free ----------------------------------
+
+    #[test]
+    fn binding_reset_and_free_clears_state_and_prepends_to_free_list() {
+        let _g = setup();
+        let mut codegen = [0usize; CG_CODEGEN_FREE_BINDINGS + 2];
+        let mut old_head = [0usize; 8];
+        let mut binding = [0usize; 8];
+        let free_anchor = unsafe {
+            codegen.as_mut_ptr().add(CG_CODEGEN_FREE_BINDINGS) as *mut u8
+        };
+        let old_head_ptr = old_head.as_mut_ptr() as usize;
+        let binding_ptr = binding.as_mut_ptr() as usize;
+
+        codegen[CG_CODEGEN_FREE_BINDINGS] = old_head_ptr;
+        codegen[CG_CODEGEN_FREE_BINDINGS + CG_BINDING_LIST_TAIL] = old_head_ptr;
+        binding[CG_BINDING_NEXT] = 0x1111;
+        binding[CG_BINDING_PREV] = 0x2222;
+        binding[CG_BINDING_ANCHOR] = 0x3333;
+        binding[CG_BINDING_RESOURCE] = 7;
+        binding[CG_BINDING_REG] = 0x4444;
+        binding[CG_BINDING_AUXILIARY] = 0x5555;
+        binding[CG_BINDING_FLAGS] = 0xa700;
+
+        unsafe {
+            cg_binding_reset_and_free(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                binding.as_mut_ptr() as *mut CgBinding,
+            );
+        }
+
+        assert_eq!(codegen[CG_CODEGEN_FREE_BINDINGS], binding_ptr);
+        assert_eq!(
+            codegen[CG_CODEGEN_FREE_BINDINGS + CG_BINDING_LIST_TAIL],
+            old_head_ptr,
+            "a nonempty free list retains its tail"
+        );
+        assert_eq!(binding[CG_BINDING_NEXT], 0, "new head's next is NULL");
+        assert_eq!(binding[CG_BINDING_PREV], old_head_ptr, "new head links to old head");
+        assert_eq!(binding[CG_BINDING_ANCHOR], free_anchor as usize);
+        assert_eq!(old_head[CG_BINDING_NEXT], binding_ptr);
+        assert_eq!(binding[CG_BINDING_RESOURCE], 7, "resource index survives reset");
+        assert_eq!(binding[CG_BINDING_REG], 0);
+        assert_eq!(binding[CG_BINDING_AUXILIARY], 0);
+        assert_eq!(binding[CG_BINDING_FLAGS], 0xa400, "only flags 0x100 and 0x200 clear");
         teardown();
     }
 
