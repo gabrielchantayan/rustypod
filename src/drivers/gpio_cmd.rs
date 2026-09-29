@@ -64,6 +64,7 @@ pub fn gpio_command_word(pin_id: u32, mode: u32, level: i32) -> u32 {
 /// gpio_pin_configure — original @ 0x0836b5b0. Programs one GPIO pin's
 /// function (and, for outputs, its level) and returns 0.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn gpio_pin_configure(pin_id: u32, mode: u32, level: i32) -> u32 {
     gpiocmd_write(gpio_command_word(pin_id, mode, level));
     0

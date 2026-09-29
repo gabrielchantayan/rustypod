@@ -62,6 +62,7 @@ pub mod mmio_bit_write;
 pub mod mmio_wait_status_then_read_response;
 pub mod mode_register_block_configure;
 pub mod piezo;
+pub mod notify_wait_enter;
 pub mod pwrcon;
 pub mod pmu;
 pub mod pmu_operation_retry;
