@@ -92,6 +92,31 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+/// `video_engine_set_render_buffer` — retailOS `FUN_082d20e0` @
+/// **0x082d20e0** (28 bytes, `0x082d20e0..0x082d20f8`; `add r0, r0,
+/// #0x1000` at 0x082d20fc begins the next real function).
+///
+/// Raw A32 decoding finds one outbound plain `bl` at 0x082d20e8 to
+/// [`video_engine_get`] and no predicated `bl`. Complete-image decoding finds
+/// two inbound plain `bl` sites (0x0816e674 and 0x0816e740), and no predicated
+/// inbound `bl`. It stores `buffer_address` through the video engine's
+/// `+0xa8c -> +0x34 -> +0x68` render-buffer chain.
+///
+/// # Deliberate deviations
+///
+/// The target uses target-width pointer fields. Host tests use native pointers
+/// in separately allocated objects while preserving every observed byte
+/// offset. As in the raw function, a missing video engine or either nested
+/// pointer is invalid and is not checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_render_buffer(buffer_address: u32) {
+    let engine = video_engine_get();
+    let render_state = (engine.add(0xa8c).cast::<*mut u8>()).read();
+    let render_target = (render_state.add(0x34).cast::<*mut u8>()).read();
+    (render_target.add(0x68).cast::<u32>()).write(buffer_address);
+}
+
 
 /// video_engine_type_selector_index — retailOS `FUN_0825e1bc` @
 /// **0x0825e1bc** (120 bytes, `0x0825e1bc..0x0825e230`; the next distinct
@@ -3192,6 +3217,34 @@ mod tests {
             set_mock_instance(ptr::null_mut());
         }
     }
+    // --- video_engine_set_render_buffer (FUN_082d20e0) ---
+
+    #[test]
+    fn render_buffer_store_follows_the_complete_pointer_chain() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 0xa8c + core::mem::size_of::<*mut u8>()];
+        let mut render_state = [0u8; 0x34 + core::mem::size_of::<*mut u8>()];
+        let mut render_target = [0u8; 0x6c];
+
+        unsafe {
+            (engine.as_mut_ptr().add(0xa8c).cast::<*mut u8>()).write(render_state.as_mut_ptr());
+            (render_state.as_mut_ptr().add(0x34).cast::<*mut u8>()).write(render_target.as_mut_ptr());
+            (render_target.as_mut_ptr().add(0x68).cast::<u32>()).write(0x1234_5678);
+            set_mock_instance(engine.as_mut_ptr());
+
+            for buffer_address in [0, 0x89ab_cdef, u32::MAX] {
+                video_engine_set_render_buffer(buffer_address);
+                assert_eq!(
+                    (render_target.as_ptr().add(0x68).cast::<u32>()).read(),
+                    buffer_address,
+                );
+            }
+
+            assert_eq!(render_target[..0x68], [0u8; 0x68]);
+            set_mock_instance(ptr::null_mut());
+        }
+    }
+
     // --- video_engine_dispatch_opaque_mode_command (FUN_082d2108) ---
 
     static mut OPAQUE_MODE_COMMAND_RECORDED: Option<(*mut u8, u32)> = None;

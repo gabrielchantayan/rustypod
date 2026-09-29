@@ -162450,3 +162450,30 @@ functions:
       its result. Host tests cover NULL and non-NULL argument forwarding.
       match.py reports the same ldr, tail branch, and literal, with relocation
       placeholders in the archive disassembly. No deliberate deviations.
+  - address: 0x082d20e0
+    ghidra: FUN_082d20e0
+    name: video_engine_set_render_buffer
+    size: 28
+    sig: "void video_engine_set_render_buffer(u32 buffer_address)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: buffer_address
+      r4: buffer_address
+      r0: video_engine_or_render_state_or_render_target
+      FUN_08252bec: video_engine_get
+    notes: >-
+      Raw A32 words establish the exact 28-byte extent
+      0x082d20e0..0x082d20f8: push {r4,lr}, preserve r0 in r4, call
+      video_engine_get, follow engine+0xa8c then +0x34, store r4 at +0x68,
+      and pop {r4,pc}. The add/store/bx sequence at 0x082d20fc begins the
+      independently linked next function. The body has one unconditional BL
+      at 0x082d20e8 to 0x08252bec and no predicated BL instructions. Raw
+      caller decoding finds two direct inbound plain BL sites, 0x0816e674 and
+      0x0816e740, with no predicated inbound BL. The caller allocates a
+      width*height*2 buffer, installs it before rendering, then restores its
+      previous buffer address. The port follows the same unguarded target
+      pointer chain and writes the exact input word. Deliberate deviation:
+      host tests model the target's three separately allocated pointer-bearing
+      objects with native-width pointers while retaining the observed field
+      offsets; target builds directly use the retail video-engine singleton.
