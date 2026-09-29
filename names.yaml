@@ -16,6 +16,23 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082cafc0
+    ghidra: FUN_082cafc0
+    name: video_engine_null_context
+    size: 8
+    sig: "void *video_engine_null_context(void)"
+    module: util/video_engine
+    status: ported
+    renames:
+      r0: null_context
+    notes: >-
+      Raw osos.dec words at 0x082cafc0 are mov r0, #0; bx lr, establishing
+      the eight-byte body and the next independently linked function at
+      0x082cafc8. Complete raw-image A32 decoding finds exactly two inbound
+      plain BL calls (0x08295a60 and 0x08295b28) and no predicated BL calls.
+      Both callers pass the NULL result as the context argument to video-engine
+      wrappers whose raw bodies ignore that argument. Target builds retain the
+      retail two-instruction A32 body; host builds return a null pointer.
   - address: 0x082cafc8
     ghidra: FUN_082cafc8
     name: video_engine_query_property
