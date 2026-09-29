@@ -162127,3 +162127,28 @@ functions:
       return. The port calls that established free seam for non-NULL input and
       returns zero directly. Deliberate deviation: it removes opaque
       arithmetic and control flow whose only observable result is zero.
+  - address: 0x082d6990
+    ghidra: FUN_082d6990
+    name: hash_table_bucket_insert_node
+    size: 96
+    sig: "void hash_table_bucket_insert_node(u32 *table, u32 *bucket, u32 *node)"
+    module: util/hash_table_bucket_insert_node
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: bucket
+      param_3/r2: node
+      r3: bucket_head_or_table_head
+      r12: previous_node
+    notes: >-
+      Raw osos.dec establishes the exact 96-byte extent 0x082d6990..0x082d69ef:
+      ldr r3,[r1,#4] through bx lr; ldr r2,[r0] at 0x082d69f0 starts the next
+      real function. Complete-image ARM decoding finds two inbound plain BL
+      sites at 0x08367504 and 0x0837af84, zero predicated inbound BL sites,
+      and no outbound BL instructions. The leaf inserts node before a bucket's
+      current head in the table-wide intrusive doubly linked list, increments
+      bucket word +0 with u32 wrapping, and updates bucket word +4. An empty
+      bucket prepends to table word +12. There are no deliberate deviations:
+      links and counters use target-width u32 words. Host tests cover empty
+      bucket insertion with a prior table head, populated-bucket insertion,
+      and count wraparound.
