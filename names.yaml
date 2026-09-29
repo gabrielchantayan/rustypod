@@ -163207,3 +163207,27 @@ functions:
       +0x28/+0x2c through the target-width pointer at +0x40, and writes the
       selected pair to +0x0a/+0x0c. Deliberate deviation: Rust uses explicit
       unaligned accesses rather than a host-layout-dependent structure.
+
+  - address: 0x082c4e10
+    ghidra: FUN_082c4e10
+    name: cg_unpack_tagged_operand
+    size: 116
+    sig: "i32 cg_unpack_tagged_operand(u32 *operand_slot)"
+    module: codegen/unpack_tagged_operand
+    status: ported
+    renames:
+      param_1/r0: operand_slot
+      iVar1/r1: child
+      iVar2/r2: payload_or_immediate
+    notes: >-
+      Raw osos.dec A32 words establish the 116-byte extent 0x082c4e10..0x082c4e84:
+      the final bx lr is at 0x082c4e80 and the next independent function starts
+      at 0x082c4e84. The body has zero plain and zero predicated outbound BL
+      instructions. Full-image raw A32 decoding finds two inbound plain BL call
+      sites, both in FUN_082d6a90, and no predicated inbound BL. It follows the
+      operand slot to its wrapper child at +0x18, accepts child readiness byte
+      +0x09 == 1, and rewrites the slot from child words +0x14/+0x18 for kind 2.
+      For kind 15 it does the same only when the signed +0x18 word is 0..255.
+      Deliberate deviations: Rust uses target-width u32 pointer words and byte
+      offsets instead of host pointer-field layout. Reference C:
+      decomp/c/030/082c4e10_FUN_082c4e10.c.

@@ -3311,6 +3311,9 @@ pub mod hints {
     // target-width GENERAL_NAMES and entry-table fixtures; mappings never unmap.
     pub const I2V_GENERAL_NAMES: usize = 0x77b0_0000;
     pub const I2V_GENERAL_NAMES_NEGATIVE: usize = 0x77c0_0000;
+    // 0x8fff_0000: dedicated to codegen/unpack_tagged_operand's target-width
+    // operand slot, wrapper, and child fixtures; mappings never unmap.
+    pub const CG_UNPACK_TAGGED_OPERAND: usize = 0x8fff_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
