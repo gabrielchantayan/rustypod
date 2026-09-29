@@ -51,6 +51,8 @@
 
 use crate::kernel::sync_mutex::{RomKernelOps, ROM_KERNEL};
 use crate::kernel::task_lock::{kernel_sem17_signal, kernel_sem17_wait, kernel_sem5_signal, kernel_sem5_wait};
+use crate::drivers::timer::iram_msec_delay_veneer;
+use crate::kernel::task_lock::rom_task_delay;
 #[cfg(test)]
 use crate::kernel::task_lock::{RomThunkOps, ROM_KERNEL as TASK_LOCK_ROM_KERNEL};
 
@@ -409,13 +411,66 @@ pub unsafe extern "C" fn i2c_0x39_set_register1_low_nibble(value: u32) -> i32 {
 }
 
 
-/// ABI of the two unported peripheral-0x39 helpers reached by
+/// peripheral_0x39_apply_mode — original: `FUN_0836e298` @ 0x0836e298
+/// (176 bytes; 7 plain `bl` and 1 predicated `bleq` call sites,
+/// binary-verified by decoding every B/BL word in osos.dec). Two plain `bl`
+/// call sites at 0x080f4c18 and 0x082d96c4 invoke this entry.
+///
+/// Modes 0, 1, and 2 first write `(register 0, value 0x35, 0xad, or 0x65)`,
+/// respectively. A failed first write returns immediately. On success, the
+/// current RTXC task sleeps for ten ticks, then register 0 receives
+/// `(0x36, 0xaf, or 0x66)`. Every other mode skips directly to a register-0
+/// write of zero. A successful final write delays one millisecond; its delay
+/// return value is ignored and the write status passes through.
+///
+/// # Deviation
+///
+/// Retail calls the I2C writer, RTXC delay veneer, and IRAM millisecond-delay
+/// veneer directly. This port calls their existing Rust ports, preserving
+/// arguments, error exits, ordering, and ignored delay results.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
+    let final_value = match mode {
+        0 => {
+            let status = i2c_0x39_write_register(0, 0x35);
+            if status != 0 {
+                return status;
+            }
+            rom_task_delay(0, 10);
+            0x36
+        }
+        1 => {
+            let status = i2c_0x39_write_register(0, 0xad);
+            if status != 0 {
+                return status;
+            }
+            rom_task_delay(0, 10);
+            0xaf
+        }
+        2 => {
+            let status = i2c_0x39_write_register(0, 0x65);
+            if status != 0 {
+                return status;
+            }
+            rom_task_delay(0, 10);
+            0x66
+        }
+        _ => 0,
+    };
+
+    let status = i2c_0x39_write_register(0, final_value);
+    if status == 0 {
+        iram_msec_delay_veneer(1);
+    }
+    status
+}
+
+/// ABI of the unported peripheral-0x39 preparation helper reached by
 /// `peripheral_0x39_mode_action`.
 type Peripheral0x39PrepareFn = unsafe extern "C" fn() -> i32;
-type Peripheral0x39ApplyModeFn = unsafe extern "C" fn(mode: u32) -> i32;
 
 const PERIPHERAL_0X39_PREPARE_ADDRESS: usize = 0x0836_e400;
-const PERIPHERAL_0X39_APPLY_MODE_ADDRESS: usize = 0x0836_e298;
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -424,40 +479,18 @@ unsafe fn peripheral_0x39_prepare() -> i32 {
     prepare()
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
-    let apply_mode: Peripheral0x39ApplyModeFn =
-        core::mem::transmute(PERIPHERAL_0X39_APPLY_MODE_ADDRESS);
-    apply_mode(mode)
-}
-
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_peripheral_0x39_prepare() -> i32 {
     panic!("peripheral_0x39_mode_action requires 0x0836e400")
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_peripheral_0x39_apply_mode(_mode: u32) -> i32 {
-    panic!("peripheral_0x39_mode_action requires 0x0836e298")
-}
-
-#[cfg(not(target_os = "none"))]
 static mut PERIPHERAL_0X39_PREPARE: Peripheral0x39PrepareFn = missing_peripheral_0x39_prepare;
-#[cfg(not(target_os = "none"))]
-static mut PERIPHERAL_0X39_APPLY_MODE: Peripheral0x39ApplyModeFn =
-    missing_peripheral_0x39_apply_mode;
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
 unsafe fn peripheral_0x39_prepare() -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(PERIPHERAL_0X39_PREPARE))()
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(PERIPHERAL_0X39_APPLY_MODE))(mode)
 }
 
 /// peripheral_0x39_mode_action — original: `FUN_082d967c` @ `0x082d967c`
@@ -474,11 +507,10 @@ unsafe fn peripheral_0x39_apply_mode(mode: u32) -> i32 {
 ///
 /// # Deviation
 ///
-/// The preparation and mode helpers at 0x0836e400 and 0x0836e298 remain
-/// unported. Target builds reach their verified fixed addresses through
-/// indirect `blx` calls; host tests replace the volatile function-pointer
-/// seams. The action-1 low-bit update directly calls its existing Rust port
-/// rather than retail's direct `bl`; call ordering and returned status match.
+/// The preparation helper at 0x0836e400 remains unported and reaches its
+/// verified fixed address through an indirect `blx`. The now-ported mode
+/// helper is called directly; the action-1 low-bit update likewise directly
+/// calls its existing Rust port.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn peripheral_0x39_mode_action(action: i32, mode: i32) -> i32 {
@@ -634,40 +666,13 @@ pub(crate) mod tests {
     static mut READ_LOG: Vec<(u32, usize)> = Vec::new();
     /// Status the register-block read mock hands back.
     static mut READ_STATUS: i32 = 0;
-    /// Calls made through the two unported helpers used by the mode-action port:
-    /// 0 = prepare, 1 = apply mode.
+    /// Calls made through the unported preparation helper used by action 1.
     static mut PERIPHERAL_0X39_LOG: Vec<(u8, u32)> = Vec::new();
     static mut PERIPHERAL_0X39_PREPARE_STATUS: i32 = 0;
-    static mut PERIPHERAL_0X39_APPLY_STATUS: i32 = 0;
 
     unsafe extern "C" fn mock_peripheral_0x39_prepare() -> i32 {
         (*addr_of_mut!(PERIPHERAL_0X39_LOG)).push((0, 0));
         *addr_of!(PERIPHERAL_0X39_PREPARE_STATUS)
-    }
-
-    unsafe extern "C" fn mock_peripheral_0x39_apply_mode(mode: u32) -> i32 {
-        (*addr_of_mut!(PERIPHERAL_0X39_LOG)).push((1, mode));
-        *addr_of!(PERIPHERAL_0X39_APPLY_STATUS)
-    }
-
-    fn install_peripheral_0x39_mode_action() -> MutexGuard<'static, ()> {
-        let guard = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
-            *addr_of_mut!(PERIPHERAL_0X39_PREPARE_STATUS) = 0;
-            *addr_of_mut!(PERIPHERAL_0X39_APPLY_STATUS) = 0;
-            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(mock_peripheral_0x39_prepare);
-            addr_of_mut!(PERIPHERAL_0X39_APPLY_MODE).write(mock_peripheral_0x39_apply_mode);
-        }
-        guard
-    }
-
-    fn restore_peripheral_0x39_mode_action(guard: MutexGuard<'static, ()>) {
-        unsafe {
-            addr_of_mut!(PERIPHERAL_0X39_PREPARE).write(missing_peripheral_0x39_prepare);
-            addr_of_mut!(PERIPHERAL_0X39_APPLY_MODE).write(missing_peripheral_0x39_apply_mode);
-        }
-        drop(guard);
     }
 
 
@@ -1232,39 +1237,54 @@ pub(crate) mod tests {
 
     #[test]
     fn peripheral_0x39_mode_action_routes_only_the_verified_pairs() {
-        let guard = install_peripheral_0x39_mode_action();
+        let state = install_0x39_read(-7, 0);
         unsafe {
-            *addr_of_mut!(PERIPHERAL_0X39_APPLY_STATUS) = -7;
-
             for action in [3, 4, 5, 8, 10] {
                 assert_eq!(peripheral_0x39_mode_action(action, 1), -7);
             }
             assert_eq!(
-                (*addr_of!(PERIPHERAL_0X39_LOG)).clone(),
-                std::vec![(1, 1), (1, 1), (1, 1), (1, 1), (1, 1)],
-                "only the five enumerated actions route through mode 1"
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0, 0xad]; 5],
+                "mode 1 routes only the five enumerated actions to its first write"
             );
 
-            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
             assert_eq!(peripheral_0x39_mode_action(i32::MIN, 0), -7);
             assert_eq!(peripheral_0x39_mode_action(-1, 2), -7);
             assert_eq!(peripheral_0x39_mode_action(6, 3), -7);
             assert_eq!(
-                (*addr_of!(PERIPHERAL_0X39_LOG)).clone(),
-                std::vec![(1, 1), (1, 2), (1, 2)],
-                "mode 0 accepts every nonzero action; modes 2 and 3 select helper mode 2"
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0, 0xad], std::vec![0, 0x65], std::vec![0, 0x65]],
+                "mode 0 maps to mode 1 while modes 2 and 3 map to mode 2"
             );
 
-            (*addr_of_mut!(PERIPHERAL_0X39_LOG)).clear();
+            (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
             for (action, mode) in [(0, 0), (0, 2), (2, 1), (3, 4), (6, 1), (-1, -1)] {
                 assert_eq!(peripheral_0x39_mode_action(action, mode), 0);
             }
             assert!(
-                (*addr_of!(PERIPHERAL_0X39_LOG)).is_empty(),
+                (*addr_of!(RAW_WRITE_PACKETS)).is_empty(),
                 "zero actions and unsupported pairs make no helper call"
             );
         }
-        restore_peripheral_0x39_mode_action(guard);
+        restore_0x39_read(state);
+    }
+
+    #[test]
+    fn peripheral_0x39_apply_mode_stops_before_delay_when_its_first_write_fails() {
+        let state = install_0x39_read(-5, 0);
+        unsafe {
+            for (mode, expected) in [(0, 0x35), (1, 0xad), (2, 0x65)] {
+                (*addr_of_mut!(RAW_WRITE_PACKETS)).clear();
+                assert_eq!(peripheral_0x39_apply_mode(mode), -5);
+                assert_eq!(
+                    (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                    std::vec![std::vec![0, expected]],
+                    "mode {mode} returns the first write error without either delay or final write"
+                );
+            }
+        }
+        restore_0x39_read(state);
     }
 
     #[test]
