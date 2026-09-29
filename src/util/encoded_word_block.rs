@@ -502,6 +502,54 @@ pub unsafe extern "C" fn inline_encoded_word_block_is_zero(
     }
 }
 
+/// Returns the one-based position of the highest decoded set bit in an inline
+/// encoded-word block, or zero when every active word is zero.
+///
+/// Original: `FUN_0830eae8` @ 0x0830eae8. Raw A32 decoding establishes a
+/// 32-instruction, 128-byte leaf at 0x0830eae8..0x0830eb64, followed by the
+/// two-word literal pool at 0x0830eb68..0x0830eb6c; the next function starts
+/// at 0x0830eb70, for a true 136-byte extent. Complete-image call analysis
+/// finds two inbound plain `bl` sites, zero predicated inbound `bl` sites, and
+/// no calls in this leaf.
+///
+/// The signed inline count is decoded with `0x4b6143ff`, then converted to its
+/// wrapping absolute magnitude. Decoded words are scanned from high to low
+/// with `0x3399e27f`; the first nonzero word contributes its one-based
+/// highest-set-bit position plus 32 times its zero-based word index.
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `block` must point to a readable [`InlineEncodedWordBlock`]. When its
+/// decoded count has a nonzero representable magnitude, the inline payload
+/// must contain that many readable, aligned `u32` words. RetailOS has no NULL
+/// guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn inline_encoded_word_block_bit_length(
+    block: *const InlineEncodedWordBlock,
+) -> i32 {
+    let decoded_count = (*block)
+        .encoded_count
+        .wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+    let mut remaining = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+
+    while remaining > 0 {
+        remaining -= 1;
+        let decoded_word = (*block.cast::<u32>().add(remaining as usize + 1))
+            .wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+        if decoded_word != 0 {
+            return (31 - decoded_word.leading_zeros() as i32) + remaining * 32 + 1;
+        }
+    }
+    0
+}
+
+
 /// Returns the selected magnitude bit from an inline encoded-word block, or
 /// zero when the bit lies outside its decoded word count.
 ///
@@ -743,9 +791,10 @@ mod tests {
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
         copy_inline_encoded_word_block, encoded_word_block_bit_length, encoded_word_block_is_zero,
-        encoded_word_block_set_int, encoded_word_block_sign, inline_encoded_word_block_compare,
-        inline_encoded_word_block_is_zero, inline_encoded_word_block_test_bit,
-        inline_encoded_word_block_write_be_bytes, EncodedWordBlock, InlineEncodedWordBlock,
+        encoded_word_block_set_int, encoded_word_block_sign, inline_encoded_word_block_bit_length,
+        inline_encoded_word_block_compare, inline_encoded_word_block_is_zero,
+        inline_encoded_word_block_test_bit, inline_encoded_word_block_write_be_bytes,
+        EncodedWordBlock, InlineEncodedWordBlock,
     };
 
     const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
@@ -1026,6 +1075,44 @@ mod tests {
         assert_eq!(unsafe { test_inline_bit(&block, 31) }, 1);
         assert_eq!(unsafe { test_inline_bit(&block, 33) }, 1);
         assert_eq!(unsafe { test_inline_bit(&block, -33) }, 1);
+    }
+
+    #[test]
+    fn inline_bit_length_scans_high_words_and_wraps_negative_counts() {
+        let cases = [
+            (0, &[][..], 0),
+            (3, &[0u32, 0, 1][..], 65),
+            (3, &[0x8000_0000u32, 0, 0][..], 32),
+            (-2, &[0u32, 0x8000_0000][..], 64),
+        ];
+
+        for (count, decoded_words, expected) in cases {
+            let encoded_words: Vec<u32> = decoded_words
+                .iter()
+                .map(|word| (*word).wrapping_mul(INLINE_ENCODED_WORD_INVERSE))
+                .collect();
+            let block = inline_block(count, &encoded_words);
+
+            assert_eq!(
+                unsafe { inline_encoded_word_block_bit_length(block.as_ptr().cast()) },
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn inline_bit_length_empty_and_wrapping_minimum_do_not_read_payload() {
+        let empty = inline_block(0, &[]);
+        let wrapping_minimum = [inline_encoded_count(i32::MIN) as u32];
+
+        assert_eq!(
+            unsafe { inline_encoded_word_block_bit_length(empty.as_ptr().cast()) },
+            0
+        );
+        assert_eq!(
+            unsafe { inline_encoded_word_block_bit_length(wrapping_minimum.as_ptr().cast()) },
+            0
+        );
     }
 
     #[test]

@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0830eae8
+    ghidra: FUN_0830eae8
+    name: inline_encoded_word_block_bit_length
+    size: 108
+    sig: "i32 inline_encoded_word_block_bit_length(const InlineEncodedWordBlock *block)"
+    module: util/encoded_word_block
+    status: ported
+    renames:
+      param_1/r0: block
+      r0: decoded_count_or_result
+      r1: block_or_bit_index
+      r2: encoded_word_multiplier_or_bit
+      r3: decoded_word
+      DAT_0830eb68: encoded_count_multiplier
+      DAT_0830eb6c: encoded_word_compare_multiplier
+    notes: >-
+      Raw osos.dec words establish a 32-instruction, 128-byte leaf through
+      0x0830eb64, followed by literal-pool words 0x4b6143ff and 0x3399e27f
+      at 0x0830eb68..0x0830eb6c; the next real function begins at 0x0830eb70,
+      for a true 136-byte extent. Ghidra's 108-byte size omits five executable
+      instructions and the literal pool. Complete-image call analysis finds two
+      inbound plain BL sites, zero predicated BL sites, and no outbound BL
+      instructions. It decodes the signed inline word count, scans decoded
+      payload words from high to low, and returns the one-based highest set-bit
+      position or zero for empty and all-zero blocks. Host tests cover high
+      limbs, intervening zero limbs, negative counts, zero counts, and i32::MIN
+      without payload access. match.py reports the same reverse scan and
+      highest-set-bit terminal path; LLVM substitutes CLZ for the retail
+      shift-and-test loop.
   - address: 0x083199ac
     ghidra: FUN_083199ac
     name: encoded_word_block_bit_length
