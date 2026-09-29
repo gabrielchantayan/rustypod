@@ -162953,3 +162953,30 @@ functions:
       ABI-only resident seams: target builds call their verified addresses and
       host builds record them. Deliberate deviations: target calls are typed
       indirect calls, and Rust's normal calls replace predicated BLNE.
+
+  - address: 0x082cad7c
+    ghidra: FUN_082cad7c
+    name: global_record_match_search
+    size: 20
+    sig: "u32 global_record_match_search(u32 source_handle, const void *query, u32 *matches, u32 capacity, u32 *match_count)"
+    module: app/global_record_match_search
+    status: ported
+    renames:
+      param_1/r0: source_handle
+      param_2/r1: query
+      param_3/r2: matches
+      param_4/r3: capacity
+      param_5/[sp]: match_count
+      FUN_0824c860: global_record_match_search_target
+    notes: >-
+      Raw osos.dec A32 words establish the true 20-byte extent from
+      0x082cad7c through 0x082cad8f; Ghidra's reported 168-byte extent
+      absorbs three following functions and literal data. The body shifts r1,
+      r2, r3, and the stack fifth argument into r0-r3, discards r0, and
+      unconditional-branches to 0x0824c860. It has zero plain and zero
+      predicated outbound BL instructions. Full-image raw A32 decoding finds
+      two inbound plain BL instructions at 0x0825bdfc and 0x08295b44, with no
+      predicated inbound BL. The target scans eight global 104-byte records,
+      counts matching entries, and writes up to capacity record addresses.
+      Deliberate deviation: the target call is typed indirect Rust rather than
+      the original tail branch; host builds use an ABI-only seam.

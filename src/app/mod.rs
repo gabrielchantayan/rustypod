@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod app_motor;
+pub mod global_record_match_search;
 pub mod application_mode_transition;
 pub mod counted_string_template_initialize;
 pub mod input_sequence_find_item;
