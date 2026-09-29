@@ -83883,6 +83883,29 @@ functions:
       timer_channel_stop dispatch slot now defaults directly to this port;
       its tests may still replace the table.
 
+  - address: 0x0836dde8
+    ghidra: FUN_0836dde8
+    name: controller_command_initialize
+    size: 64
+    sig: "void controller_command_initialize(u32 selector)"
+    module: drivers/controller_command_initialize
+    status: ported
+    renames:
+      param_1: selector
+      DAT_0836de18: CONTROLLER_BASE_1
+      DAT_0836de1c: CONTROLLER_BASE_OTHER
+      DAT_0836de20: CONTROLLER_BASE_2
+      DAT_0836de24: INITIAL_COMMAND
+    notes: >-
+      Raw ARM establishes a 48-byte instruction span from 0x0836dde8 through
+      0x0836de14 plus four literal-pool words through 0x0836de24; the next
+      real function begins at 0x0836de28, so the true extent is 64 bytes.
+      There are 2 verified direct bl call sites, both unconditional
+      (0x080c9ccc and 0x080cb698), and no predicated bl calls. Selector zero
+      maps to 0x3cc00000, one to 0x3cc04000, two to 0x3cc08000, and every
+      other value to 0x3cc0c000; it volatile-writes 0x00015c85 at offset +4.
+      Host tests use local backing words in place of the fixed MMIO blocks.
+
   - address: 0x0811d6cc
     ghidra: FUN_0811d6cc
     name: vtable_set_50_commit_probe_kind4
