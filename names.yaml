@@ -162196,3 +162196,29 @@ functions:
       links and counters use target-width u32 words. Host tests cover empty
       bucket insertion with a prior table head, populated-bucket insertion,
       and count wraparound.
+
+  - address: 0x082d4b00
+    ghidra: FUN_082d4b00
+    name: quoted_cstr_escaped_len
+    size: 44
+    sig: "usize quoted_cstr_escaped_len(const u8 *text)"
+    module: util/quoted_cstr_escaped_len
+    status: ported
+    renames:
+      param_1/r0: text
+      r0: text_or_result
+      r1: escaped_length
+      r2: byte
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte leaf at
+      0x082d4b00..0x082d4b2c; the following push {r4-r8,lr} at 0x082d4b2c
+      starts the next real function. Its body has no BL instructions.
+      Complete-image reference analysis identifies two inbound plain BL call
+      sites in FUN_082c5488 and no predicated BL sites. It scans an unguarded
+      NUL-terminated string, counting every byte and a second byte for each
+      double quote, then adds two enclosing quotes. Host tests cover empty,
+      ordinary, quote-containing, and embedded-NUL strings. match.py reviewed
+      the same scan and accumulation structure; LLVM emits a framed loop and
+      tests the quote before NUL, unlike retailOS, but the NUL branch returns
+      before that increment. Deliberate deviation: volatile loads prevent an
+      unavailable libc strlen substitution without changing behavior.
