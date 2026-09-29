@@ -160396,3 +160396,24 @@ functions:
       frees the data and returns 0xffff5bd4. Rust preserves target pointers
       as u32 words and calls the existing malloc/free ports rather than the
       direct retail BLs so host tests can use the established heap seam.
+
+  - address: 0x082e84dc
+    ghidra: FUN_082e84dc
+    name: pthread_mutexattr_settype_veneer
+    size: 4
+    sig: "u32 pthread_mutexattr_settype_veneer(void)"
+    status: identified
+    renames:
+      r0-r3: inherited caller argument registers; the veneer neither reads nor writes them
+    notes: >-
+      BLOCKED FROM PORTING: raw osos.dec word 0xea00222f at 0x082e84dc is
+      an unconditional A32 B to 0x082f0da0, so the true extent is the
+      one-instruction, 4-byte veneer; 0x082e84e0 begins a sequence of distinct
+      unconditional branches. It is not the 80-byte pthread_mutexattr_settype
+      body Ghidra attributes here, and its destination begins another branch
+      chain (0x082f0da0 -> 0x082f0dd4) rather than the proposed mutex-attribute
+      algorithm. Whole-image A32 branch decoding independently finds exactly
+      two inbound plain BL sites (0x08261dfc and 0x08262184), zero predicated
+      BL sites, and no outgoing BL instructions. The apparent semantic body
+      cannot be faithfully recovered from this raw address; no Rust seam or
+      port is created.
