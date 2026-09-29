@@ -1899,6 +1899,9 @@ pub mod hints {
     // 0x8d00_0000: dedicated to cxx/descriptor_lookup_exact_or_tail's
     // descriptor-result fixture; mappings never unmap.
     pub const DESCRIPTOR_LOOKUP_EXACT_OR_TAIL: usize = 0x8d00_0000;
+    // 0x8d10_0000: dedicated to cxx/tagged_entry_value_table_initialize's
+    // raw-u32 context, entry, and value-table fixtures; mappings never unmap.
+    pub const TAGGED_ENTRY_VALUE_TABLE_INITIALIZE: usize = 0x8d10_0000;
     // 0x8f00_0000: dedicated to mov/chain_value_span's raw-u32 chain-value
     // record fixture; mappings never unmap, so no other user may share it.
     pub const MOV_CHAIN_TABLE_LOAD_SPAN: usize = 0x8f00_0000;
