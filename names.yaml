@@ -27453,6 +27453,40 @@ functions:
       resolve to already-ported Rust functions. Host tests cover a successful
       sampled bit and the failed-write incoming-r3 result.
 
+  # --- Locked PCF50635 packet write (drivers/i2c) ---
+  - address: 0x082e5bb0
+    ghidra: FUN_082e5bb0
+    name: pmu_i2c_write_locked
+    size: 60
+    sig: "i32 pmu_i2c_write_locked(u32 reg, u32 len, const u8 *buf)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: reg
+      param_2/r1: len
+      param_3/r2: buf
+      uVar1/r4: status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d508: pmu_i2c_write
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent
+      0x082e5bb0..0x082e5bec; the following push {r4,r5,r6,lr} begins the
+      next real sibling. Decoding every ARM B/BL word in osos.dec finds two
+      inbound plain unconditional bl call sites, 0x0809f004 and 0x0809f014,
+      and zero predicated forms. The body waits semaphore 17 then 5, calls
+      FUN_0836d508(reg,len,buf), signals 5 then 17 unconditionally, and
+      returns that status verbatim. FUN_0836d508 accepts only wrapping ranges
+      whose reg + len is below 16, prefixes the payload with
+      (reg + 0x67) & 0xff, and writes it to PMU slave 0x73. Deliberate
+      deviation: its 16-byte packet body is inlined through the existing
+      raw-I2C write seam at 0x0836bb84, rather than adding a new callee seam;
+      the five retail direct bl instructions therefore become Rust calls.
+      Host tests cover packet construction, wrapping/range behavior, status
+      passthrough, and unconditional lock release.
+
   # --- Locked PCF50635 register-range read (drivers/i2c) ---
   - address: 0x082e58b4
     ghidra: FUN_082e58b4
