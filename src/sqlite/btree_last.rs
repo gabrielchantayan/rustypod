@@ -11,12 +11,12 @@
 //! SQLite 3.5.x's `sqlite3BtreeLast`: move to the root; report an empty tree
 //! through `*res = 1`; otherwise descend to the rightmost entry, parse the
 //! current cell when its cache is stale, and set `atLast` exactly when the
-//! descent succeeded. Deliberate deviation: the identified but unported
-//! `btree_move_to_rightmost` is a volatile dispatch seam rather than the
-//! original direct branch. The target-width `pPage` field remains a u32.
+//! descent succeeded. `btree_move_to_rightmost` is now a direct ported callee;
+//! the target-width `pPage` field remains a u32.
 
 use crate::sqlite::move_to_root::btree_move_to_root;
 use crate::sqlite::parse_cell::btree_parse_cell;
+use crate::sqlite::move_to_rightmost::btree_move_to_rightmost;
 
 const CUR_P_PAGE: usize = 0x18;
 const CUR_IDX: usize = 0x1c;
@@ -27,29 +27,6 @@ const CUR_VALID_N_KEY: usize = 0x42;
 const CUR_E_STATE: usize = 0x43;
 const CURSOR_INVALID: u8 = 0;
 
-/// Raw call shape of identified but unported `moveToRightmost` @ 0x082d9a94.
-#[derive(Clone, Copy)]
-pub struct BtreeMoveToRightmostOps {
-    pub move_to_rightmost: unsafe extern "C" fn(cursor: *mut u8) -> i32,
-}
-
-unsafe extern "C" fn missing_btree_move_to_rightmost(_cursor: *mut u8) -> i32 {
-    0
-}
-
-/// Default while `moveToRightmost` @ 0x082d9a94 remains unported.
-pub const DEFAULT_BTREE_MOVE_TO_RIGHTMOST_OPS: BtreeMoveToRightmostOps = BtreeMoveToRightmostOps {
-    move_to_rightmost: missing_btree_move_to_rightmost,
-};
-
-/// Active rightmost-descent service; tests replace this target-width boundary.
-pub static mut BTREE_MOVE_TO_RIGHTMOST_OPS: BtreeMoveToRightmostOps =
-    DEFAULT_BTREE_MOVE_TO_RIGHTMOST_OPS;
-
-#[inline(always)]
-unsafe fn move_to_rightmost_op() -> unsafe extern "C" fn(*mut u8) -> i32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(BTREE_MOVE_TO_RIGHTMOST_OPS.move_to_rightmost))
-}
 
 #[inline(always)]
 unsafe fn rd_u16(base: *const u8, off: usize) -> u16 {
@@ -81,7 +58,7 @@ pub unsafe extern "C" fn btree_last(cursor: *mut u8, res: *mut u32) -> i32 {
     }
 
     res.write(0);
-    rc = move_to_rightmost_op()(cursor);
+    rc = btree_move_to_rightmost(cursor);
     if rd_u16(cursor, CUR_INFO_N_SIZE) == 0 {
         let page = rd_u32(cursor, CUR_P_PAGE) as *const u8;
         let index = rd_u32(cursor, CUR_IDX);
@@ -98,7 +75,6 @@ mod tests {
 
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab, BTREE_CELL_TEST_LOCK};
-    use core::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
     use std::sync::{LazyLock, MutexGuard};
 
     const SLAB_LEN: usize = 0x1000;
@@ -111,14 +87,6 @@ mod tests {
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::BTREE_LAST, SLAB_LEN).map(|pointer| pointer as usize)
     });
-    static RIGHTMOST_RC: AtomicI32 = AtomicI32::new(0);
-    static RIGHTMOST_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn mock_move_to_rightmost(cursor: *mut u8) -> i32 {
-        RIGHTMOST_CALLS.fetch_add(1, Ordering::Relaxed);
-        cursor.add(CUR_INFO_N_SIZE).cast::<u16>().write(1);
-        RIGHTMOST_RC.load(Ordering::Relaxed)
-    }
 
     struct Fixture {
         _guard: MutexGuard<'static, ()>,
@@ -142,23 +110,13 @@ mod tests {
                 cursor.add(CUR_P_PAGE).cast::<u32>().write(page as usize as u32);
                 page.add(PAGE_NUMBER).cast::<u32>().write(7);
                 page.add(PAGE_N_CELL).cast::<u16>().write(1);
+                page.add(4).write(1);
                 cursor.add(CUR_INFO_N_SIZE).cast::<u16>().write(1);
-                (*core::ptr::addr_of_mut!(BTREE_MOVE_TO_RIGHTMOST_OPS)).move_to_rightmost = mock_move_to_rightmost;
-                RIGHTMOST_RC.store(0, Ordering::Relaxed);
-                RIGHTMOST_CALLS.store(0, Ordering::Relaxed);
                 Some(Self { _guard: guard, cursor })
             }
         }
     }
 
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            unsafe {
-                (*core::ptr::addr_of_mut!(BTREE_MOVE_TO_RIGHTMOST_OPS)).move_to_rightmost =
-                    DEFAULT_BTREE_MOVE_TO_RIGHTMOST_OPS.move_to_rightmost;
-            }
-        }
-    }
 
     #[test]
     fn fault_from_move_to_root_preserves_result_and_skips_rightmost() {
@@ -170,7 +128,6 @@ mod tests {
             assert_eq!(btree_last(fixture.cursor, &mut result), 17);
             assert_eq!(result, 99);
         }
-        assert_eq!(RIGHTMOST_CALLS.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -184,7 +141,6 @@ mod tests {
             assert_eq!(btree_last(fixture.cursor, &mut result), 0);
             assert_eq!(result, 1);
         }
-        assert_eq!(RIGHTMOST_CALLS.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -196,19 +152,6 @@ mod tests {
             assert_eq!(result, 0);
             assert_eq!(*fixture.cursor.add(CUR_AT_LAST), 1);
         }
-        assert_eq!(RIGHTMOST_CALLS.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn failed_rightmost_descent_clears_at_last() {
-        let Some(fixture) = Fixture::new() else { return };
-        RIGHTMOST_RC.store(5, Ordering::Relaxed);
-        unsafe {
-            *fixture.cursor.add(CUR_AT_LAST) = 1;
-            let mut result = 99;
-            assert_eq!(btree_last(fixture.cursor, &mut result), 5);
-            assert_eq!(result, 0);
-            assert_eq!(*fixture.cursor.add(CUR_AT_LAST), 0);
-        }
     }
 }
+
