@@ -162040,3 +162040,31 @@ functions:
       Deliberate deviation: the non-negative hash uses Rust % 127 rather than
       observing the ADS divide remainder in r1; the resulting bucket is
       identical.
+
+  # --- Owned allocation release ---
+  - address: 0x082d73e4
+    ghidra: FUN_082d73e4
+    name: release_owned_allocation
+    size: 164
+    sig: "u32 release_owned_allocation(void *allocation)"
+    module: util/release_owned_allocation
+    status: ported
+    renames:
+      param_1/r0/r5: allocation
+      FUN_0830a234: release_allocation_if_nonnull
+      FUN_0802edc8: free
+      r0: result
+    notes: >-
+      Raw osos.dec establishes the 164-byte extent: the 140-byte instruction
+      body at 0x082d73e4..0x082d746f is followed by its six-word literal pool
+      through 0x082d7484, and the next push at 0x082d7488 starts the next real
+      function. Decoding its instructions finds one plain unconditional
+      outbound bl, at 0x082d7464 to FUN_0830a234, and zero predicated bl.
+      Raw decoding of every direct ARM BL immediate finds exactly two inbound
+      plain unconditional sites, 0x08078bb4 and 0x080fda70, with zero
+      predicated forms. FUN_0830a234 conditionally reaches the already ported
+      ADS free entry FUN_0802edc8 for a non-NULL allocation and returns zero;
+      the surrounding literal-driven state machines multiply that zero before
+      return. The port calls that established free seam for non-NULL input and
+      returns zero directly. Deliberate deviation: it removes opaque
+      arithmetic and control flow whose only observable result is zero.

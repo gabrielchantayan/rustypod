@@ -261,6 +261,7 @@ pub mod raster_span_setup;
 pub mod replace_owned_pointer;
 pub mod range_state;
 pub mod request_queue_clear_matching_entries;
+pub mod release_owned_allocation;
 pub mod queue_match_and_promote;
 pub mod queue_remove_source_tail_index;
 pub mod queue_refresh_and_match_kind_two;
