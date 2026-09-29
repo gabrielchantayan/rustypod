@@ -161698,3 +161698,33 @@ functions:
       2 shifted left by the low byte of node_type - 0x44. ARM returns zero
       for register shift counts at least 32; Rust spells that behavior
       explicitly. No deliberate deviations.
+
+  - address: 0x082dad24
+    ghidra: FUN_082dad24
+    name: cstr_matches_runtime_name_list
+    size: 144
+    sig: "u32 cstr_matches_runtime_name_list(const char *candidate)"
+    module: util/cstr_matches_runtime_name_list
+    status: ported
+    renames:
+      param_1/r0: candidate
+      DAT_082dadb4: RUNTIME_NAME_LIST_ADDRESS (0x08a6a0ec)
+      iVar4/r4: entry
+      iVar5/r12: list_index
+      iVar2/r1: byte_index
+      bVar1/lr: matches
+    notes: >-
+      Raw osos.dec establishes the exact 144-byte extent
+      0x082dad24..0x082dadb4: the final word at 0x082dadb0 is
+      pop {r4,r5,pc}; 0x082dadb4 is its trailing 0x08a6a0ec literal, and
+      the following mov r3,r1 starts the next distinct function. Raw caller
+      words independently identify exactly two inbound direct calls, both
+      unconditional plain bl at 0x082e4a18 and 0x082e4a94; there are no
+      predicated inbound bl words. This leaf has no plain or predicated
+      outbound bl instructions. It scans the NULL-terminated C-string pointer
+      table at 0x08a6a0ec; each candidate must equal a list entry except that
+      a differing entry byte may match after adding 0x20, and spaces after a
+      completed entry are ignored. The table address lies outside osos.dec's
+      decrypted body, so only its verified runtime pointer-list interface is
+      modeled. Deliberate host deviation: table entries are native-width
+      pointers for fixtures, while firmware reads four-byte ARM pointer words.
