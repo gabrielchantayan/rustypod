@@ -379,6 +379,7 @@ pub mod locked_handle_resolve;
 pub mod magic_tagged_object;
 pub mod phta_tagged_state_set_mode;
 pub mod mutex;
+pub mod opaque_handle_result;
 pub mod mutex_opaque_context_construct;
 pub mod opaque_context_array_construct;
 pub mod mutex_opaque_context_acquire;
