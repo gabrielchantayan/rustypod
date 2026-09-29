@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082d1460
+    ghidra: FUN_082d1460
+    name: video_engine_dispatch_opaque_two_words
+    size: 40
+    sig: "void video_engine_dispatch_opaque_two_words(u32 first, u32 second)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      r0: video_engine
+      r4: first
+      r5: second
+      FUN_08252bec: video_engine_get
+      FUN_0824e1ec: video_engine_opaque_two_word_dispatch
+    notes: >-
+      Raw osos.dec A32 words establish a 40-byte body from 0x082d1460 through
+      0x082d1484: the following push {r4,r5,r6,lr} at 0x082d1488 begins the
+      next independently linked wrapper, not the remaining 148 bytes claimed
+      by Ghidra. It has one outbound plain BL (0x082d146c -> 0x08252bec) and
+      no predicated BL. The two inbound direct calls are plain BL at
+      0x0825bf9c and 0x082813a4; no predicated call is present. It gets the
+      video engine, silently returns on NULL, otherwise tail-branches with
+      the instance followed by both unmodified caller words to 0x0824e1ec.
+      The target has no verified semantic identity, so Rust keeps it as a
+      typed resident seam with recording host tests. Deliberate deviations:
+      Rust expresses the conditional tail branch as a normal call.
+
   - address: 0x082e172c
     ghidra: FUN_082e172c
     name: drive_sector_counts
