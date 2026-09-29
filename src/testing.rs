@@ -855,6 +855,9 @@ pub mod hints {
     // 0x6900_0000: dedicated to fs/cache_block_prepare's raw-u32 request
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const CACHE_BLOCK_PREPARE: usize = 0x6900_0000;
+    // 0x6910_0000: dedicated to fs/fat_dirent_populate_names's raw-u32 path,
+    // context, and directory-entry fixture; mappings never unmap.
+    pub const FAT_DIRENT_POPULATE_NAMES: usize = 0x6910_0000;
     // 0x6b00_0000: dedicated to fp_misc query-object destructor tests;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const QUERY_OBJECT_DESTROY: usize = 0x6b00_0000;

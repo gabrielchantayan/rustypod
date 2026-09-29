@@ -113032,6 +113032,36 @@ functions:
       acquire after dirty/timestamp mutation, successful slot placement,
       flush return propagation, and reference release.
 
+  # --- FAT directory-entry name population ---
+  - address: 0x082e4970
+    ghidra: FUN_082e4970
+    name: fat_dirent_populate_names
+    size: 160
+    sig: "u8 *fat_dirent_populate_names(FatPath *path)"
+    module: fs/fat_dirent_populate_names
+    status: ported
+    renames:
+      param_1/r0: path
+      puVar8: dirent_context
+      iVar7: directory_entry
+      FUN_082c4f38: forward_byte_copy
+      FUN_082e2fe0: render_short_name
+      FUN_082e44b4: long_name_builder
+    notes: >-
+      Raw ARM confirms the exact 160-byte extent from 0x082e4970 through
+      0x082e4a0c; the next separately entered function begins at 0x082e4a10.
+      Whole-image branch decoding finds exactly two inbound plain bl call
+      sites, at 0x082e22f4 and 0x082e23fc, and no predicated bl forms. The
+      body has four unconditional bl instructions: two calls to the ported
+      forward_byte_copy, one to the shared 8.3 renderer at 0x082e2fe0, and
+      one to the unported long-name builder at 0x082e44b4. The port preserves
+      raw directory-entry and metadata offsets, renders 8.3 names locally,
+      calls 0x082e44b4 on device through a verified address boundary, and
+      falls back to 8.3 only when that builder leaves the display buffer
+      empty. Host tests use a recording long-name-builder seam and a unique
+      target-width fixture to cover long-name retention, metadata transfer,
+      boundary arguments, and empty-long-name fallback.
+
   # --- Filesystem cache-entry writeback ---
   - address: 0x082e4b4c
     ghidra: FUN_082e4b4c
