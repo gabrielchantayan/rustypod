@@ -160045,3 +160045,31 @@ functions:
       prepend it to list, respectively. Rust inlines both helpers rather than
       creating unverified seams; it retains the target's u32 pointer-word
       layout and volatile accesses.
+
+  # ---- Indexed operation forwarding wrapper (src/sqlite/indexed_operation_forwarder.rs) ----
+  - address: 0x083653cc
+    ghidra: FUN_083653cc
+    name: indexed_operation_forwarder
+    size: 28
+    sig: "u32 indexed_operation_forwarder(u32 index, u32 argument, u32 third, u32 fourth, u32 mode)"
+    module: sqlite/indexed_operation_forwarder
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: argument
+      param_3/r2: third
+      param_4/r3: fourth
+      param_5/stack_arg_1: mode
+      FUN_082c63c8: indexed operation (unclassified)
+    notes: >-
+      Raw words establish the 28-byte body exactly:
+      0x083653cc..0x083653e7, followed by a distinct function beginning at
+      0x083653e8 with push {r4,r5,r6,lr}. Whole-image A32 decoding finds two
+      inbound plain bl calls (0x082c62a4 and 0x082c6344), no predicated bl
+      calls, and one outbound plain bl to FUN_082c63c8. The wrapper copies its
+      fifth incoming stack word into the outgoing stack slot and otherwise
+      forwards r0-r3 unchanged, returning the callee status untouched.
+      FUN_082c63c8 has no verified identity in names.yaml, so target builds
+      call its verified address through a volatile seam and host tests record
+      all five forwarded words. The stack shuffle is deliberately represented
+      as a normal five-argument Rust call.
