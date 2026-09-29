@@ -75,6 +75,7 @@ mod tests {
     /// documented default so a failed assertion cannot leak the mock
     /// into the next test.
     unsafe fn with_formatter(result: *mut u8, body: impl FnOnce()) {
+        let _guard = crate::testing::SQLITE_VM_PRINTF_TEST_LOCK.lock();
         NEXT_RESULT = result;
         core::ptr::write_volatile(core::ptr::addr_of_mut!(SQLITE_VM_PRINTF), recording_vm_printf);
         body();

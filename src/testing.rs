@@ -3182,6 +3182,9 @@ pub mod hints {
     // 0x7790_0000: dedicated to util/selection_record_matches_target's
     // target-width record holder and record fixture; mappings never unmap.
     pub const SELECTION_RECORD_MATCHES_TARGET: usize = 0x7790_0000;
+    // 0x77a0_0000: dedicated to sqlite/token_quote_identifier's target-width
+    // quoted-source fixture; mappings never unmap.
+    pub const SQLITE_TOKEN_QUOTE_IDENTIFIER: usize = 0x77a0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
@@ -3234,6 +3237,10 @@ pub static CTYPE_TABLE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new((
 /// `sqlite::walk_expr::SQLITE_EXPR_LIST_WALK` against the `expr_list_walk`
 /// port's own tests, which rely on that slot's real-port default.
 pub static SQLITE_EXPR_WALK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serializes every host test that replaces `sqlite::error_msg::SQLITE_VM_PRINTF`.
+/// The formatter wrapper and its callers must share this lock.
+pub static SQLITE_VM_PRINTF_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 
 /// Serializes every host test that installs mocks into the crate-global
 /// `drivers::ata_cmd::TRACED_ALLOC_HOOKS`. That table is one shared
