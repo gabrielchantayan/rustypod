@@ -61662,6 +61662,32 @@ functions:
       Deliberate deviations: target code calls the engine at its verified fixed
       address; host tests use a volatile seam and pointer-sized provider slots
       to preserve disjoint target words.
+  - address: 0x082d7a50
+    ghidra: FUN_082d7a50
+    name: utf8_append_packed_record_text_reverse
+    size: 216
+    sig: "unsigned char * utf8_append_packed_record_text_reverse(unsigned char *destination, unsigned int destination_len, const unsigned char *last_record, int record_count)"
+    module: cxx/string_encoding
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: destination_len
+      param_3/r2: last_record
+      param_4/r3: record_count
+      FUN_0803bc8c: utf8_write_codepoint_from_bytes
+    notes: >-
+      Raw osos.dec establishes the exact 216-byte extent
+      0x082d7a50..0x082d7b28; the next real function starts with `push
+      {r3,r4,r5,lr}` at 0x082d7b28. It has three plain, unpredicated outbound
+      BL instructions (0x082d7a84, 0x082d7ab8, 0x082d7aec), each to the
+      verified `utf8_write_codepoint_from_bytes` veneer, and two plain
+      inbound BL call sites (0x082e4514, 0x082e4560), with no predicated BL
+      forms in either direction. It appends 13 UTF-16LE code units selected
+      from three ranges in each 32-byte record, processes records backward,
+      reserves four bytes before each codepoint, and NUL-terminates after
+      each record. Deliberate deviation: retailOS restores r0/r1 from its
+      saved arguments; Rust returns the observable r0 destination pointer
+      only, and both verified callers ignore the return.
   - address: 0x0803bc8c
     ghidra: FUN_0803bc8c
     name: utf8_write_codepoint_from_bytes
