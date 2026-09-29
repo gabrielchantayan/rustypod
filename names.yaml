@@ -160516,3 +160516,29 @@ functions:
       and magic rejection, each null output, zero and negative counts, and
       successful distinct output copies. match.py was reviewed against the
       ARM release object.
+  - address: 0x082e5b3c
+    ghidra: thunk_FUN_0836d718
+    name: input_report_action_flags
+    size: 4
+    sig: "u32 input_report_action_flags(const u8 *report)"
+    module: ui/input_report_action_flags
+    status: ported
+    renames:
+      param_1/r0: report
+      r0: action_flags
+      r1: report_byte_1
+      r2: report_byte_3_or_5
+      r3: report_byte_0_or_3
+    notes: >-
+      Raw osos.dec establishes that 0x082e5b3c is a four-byte veneer, `b
+      0x0836d718`. The canonical body is the 124-byte leaf at
+      0x0836d718..0x0836d790, ending in bx lr; 0x0836d794 is the next real
+      function. Complete-image ARM decoding finds exactly two inbound plain
+      BL sites (0x0805caf8 and 0x080e3d7c), zero predicated BL sites, and no
+      outbound BL instructions in the canonical body. It maps selected bits
+      from report bytes 0, 1, 3, and 5 to the action mask consumed by
+      FUN_0806088c; either byte-1 low bit sets action bit 11. Host tests cover
+      empty, independent field, shared low-bit, and unrelated-bit reports.
+      match.py intentionally compares the assigned veneer with this canonical
+      Rust body and reports that structural difference; the ARM release object
+      otherwise has the same byte loads and bit-mask construction.
