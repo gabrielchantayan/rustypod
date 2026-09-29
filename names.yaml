@@ -163068,3 +163068,24 @@ functions:
       counts matching entries, and writes up to capacity record addresses.
       Deliberate deviation: the target call is typed indirect Rust rather than
       the original tail branch; host builds use an ABI-only seam.
+
+  - address: 0x082c5d1c
+    ghidra: FUN_082c5d1c
+    name: stream_flags_configure
+    size: 140
+    sig: "void stream_flags_configure(u8 *stream, u32 flags)"
+    module: sqlite/stream_flags_configure
+    status: ported
+    renames:
+      param_1/r0: stream
+      param_2/r1: flags
+      iVar5: configuration
+    notes: >-
+      Raw osos.dec A32 words establish the true 140-byte body from 0x082c5d1c
+      through 0x082c5da7; 0x082c5da8 starts the next real function. The body
+      has zero plain and zero predicated outbound BL instructions, contrary to
+      Ghidra's reported call sites. It derives byte flags at stream offsets +3..+9
+      from bits 0..3, selects configuration halfwords at +0x20/+0x24 or
+      +0x28/+0x2c through the target-width pointer at +0x40, and writes the
+      selected pair to +0x0a/+0x0c. Deliberate deviation: Rust uses explicit
+      unaligned accesses rather than a host-layout-dependent structure.
