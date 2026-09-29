@@ -53,6 +53,8 @@ pub mod cache_entry;
 pub mod cache_entry_next;
 /// Bounded cache-entry allocation with a cleared 512-byte payload @ 0x082e254c.
 pub mod cache_entry_allocate_cleared;
+/// Flushes each cache entry for a FAT-cluster range @ 0x082e044c.
+pub mod cache_blocks_flush;
 /// Cache-backed disk-block acquisition @ 0x082e3f98.
 pub mod cache_block;
 /// Four-slot disk block read/write gates and dispatch @ 0x082c6244 / 0x082c62f0.

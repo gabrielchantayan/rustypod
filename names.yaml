@@ -5815,6 +5815,35 @@ functions:
       unported: target builds dispatch to 0x082e2b34 and host tests use a
       recording seam. match.py reports the expected structural diff from the
       target address literal and LLVM frame setup.
+  - address: 0x082e044c
+    ghidra: FUN_082e044c
+    name: cache_blocks_flush
+    size: 132
+    sig: "u32 cache_blocks_flush(u8 *volume, u32 first_cluster, u32 limit, u32 cache_key)"
+    module: fs/cache_blocks_flush
+    status: ported
+    renames:
+      param_1/r0/r8: volume
+      param_2/r1/r5: first_cluster
+      param_3/r2: limit
+      param_4/r3: cache_key
+      r4: entry_index
+      r6: entry
+      FUN_082e01cc: fat_cluster_to_block_index
+      FUN_082e254c: cache_entry_allocate_cleared
+      FUN_082e4b4c: cache_entry_flush
+      FUN_082e18bc: cache_entry_release
+    notes: >-
+      Raw osos.dec words establish the exact 132-byte extent
+      0x082e044c..0x082e04cf; mov r12,#0x20 at 0x082e04d0 begins the next
+      independent function. Complete-image ARM decoding finds exactly two
+      inbound plain BL calls at 0x082e29a8 and 0x082e3258, zero inbound
+      predicated BL calls, and four outbound plain BL calls. After conversion
+      from first cluster to cache-block index, the routine allocates and flushes
+      one cache entry per volume +0x1cc count. Successful entries are released
+      without detaching their owner; allocation or flush failure returns zero,
+      detaching the failed flush entry first. Target builds call the verified
+      existing Rust ports for all four callees; host tests use a recording seam.
   - address: 0x082e03f4
     ghidra: FUN_082e03f4
     name: fat_cluster_clear
