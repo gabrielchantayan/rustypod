@@ -113088,6 +113088,28 @@ functions:
       a NULL guard nor any conditional control flow. Host coverage verifies
       each cleared word and preservation of the context link.
 
+  # --- Filesystem cache-entry marker range ---
+  - address: 0x082e4b9c
+    ghidra: FUN_082e4b9c
+    name: cache_entry_set_marker_range
+    size: 24
+    sig: "void cache_entry_set_marker_range(u8 *entry, u32 count)"
+    module: fs/cache_entry_set_marker_range
+    status: ported
+    renames:
+      param_1/r0: entry
+      param_2/r1: count
+      r2: marker
+    notes: >-
+      Raw ARM confirms the 24-byte extent from 0x082e4b9c through
+      0x082e4bb0; the separately entered next function begins at 0x082e4bb4.
+      The body loads r2 with 0xe5, then for each nonzero count decrements r1,
+      stores r2 as a byte through r0 with post-index -32, and branches back.
+      Exactly two direct ARM B/BL words target this entry: both unconditional
+      bl at 0x082e056c and 0x082e05cc; no predicated BL calls exist. The
+      callers pass pointers into 32-byte cache-entry arrays. The function has
+      no NULL guard; a zero count performs no access.
+
   # --- Filesystem cache-page halfword transfer ---
   - address: 0x082e1a34
     ghidra: FUN_082e1a34
