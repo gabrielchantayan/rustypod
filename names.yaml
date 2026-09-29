@@ -60232,6 +60232,27 @@ functions:
       host pointer-width layout; control flow preserves the null, linear, sort,
       zero, bsearch, and duplicate-backscan paths.
 
+  - address: 0x08369810
+    ghidra: FUN_08369810
+    name: namespace_provider_swap_comparator
+    size: 28
+    sig: "usize namespace_provider_swap_comparator(usize *providers, usize comparator)"
+    module: cxx/object_flags
+    status: ported
+    vars: {param_1/r0: providers, param_2/r1: comparator, iVar1/r2: previous_comparator}
+    notes: >-
+      Raw A32 words establish the exact 28-byte extent
+      0x08369810..0x0836982c; the next separately linked sibling begins
+      `push {r4,lr}` at 0x0836982c. Direct ARM decoding finds two inbound
+      unconditional BLs at 0x08075230 and 0x08075278, and no predicated BL
+      calls. This leaf loads the +0x10 comparator, clears the +0x08 sorted
+      flag only if it differs from the replacement, stores the replacement,
+      and returns the old comparator. Host fixture fields are pointer-sized
+      to preserve disjoint target words on 64-bit hosts; they remain
+      four-byte words on ARM. match.py reports LLVM's frame and register
+      allocation difference while preserving the comparison, conditional
+      sorted-flag clear, comparator store, and old-value return.
+
   - address: 0x0836982c
     ghidra: FUN_0836982c
     name: namespace_provider_sort

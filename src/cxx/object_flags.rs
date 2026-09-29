@@ -959,6 +959,39 @@ pub unsafe extern "C" fn namespace_provider_set(
     value
 }
 
+/// namespace_provider_swap_comparator — original: `FUN_08369810` @
+/// `0x08369810` (28 bytes, `0x08369810..0x0836982c`; the next independently
+/// linked function begins with `push {r4,lr}` at `0x0836982c`).
+///
+/// Raw A32 decoding verifies **2 inbound plain `bl` call sites**
+/// (`0x08075230`, `0x08075278`) and **0 predicated `bl` call sites**; this
+/// leaf has no outbound calls. It swaps the namespace-provider object's +0x10
+/// comparator callback, returning the previous callback. A changed callback
+/// clears the +0x08 sorted flag so the next lookup re-sorts the table; an
+/// equal callback leaves that flag untouched. Deliberate host-layout deviation:
+/// fixture words are pointer-sized to keep callback storage disjoint; they are
+/// four bytes on the target. match.py reports LLVM's frame and register
+/// allocation difference while preserving the comparison, conditional store,
+/// replacement store, and returned old comparator.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_swap_comparator(
+    providers: *mut usize,
+    comparator: usize,
+) -> usize {
+    let previous = providers
+        .add(PROVIDER_COMPARATOR_WORD)
+        .read_volatile();
+    if previous != comparator {
+        providers.add(PROVIDER_SORTED_WORD).write_volatile(0);
+    }
+    providers
+        .add(PROVIDER_COMPARATOR_WORD)
+        .write_volatile(comparator);
+    previous
+}
+
+
 
 /// Word index of the entry count (`ldr/str [r4]` / `[r0]`). Pointer-sized
 /// word indexing: byte-exact on the 32-bit target, disjoint slots on a
@@ -3479,6 +3512,33 @@ mod tests {
             0xd0d0_d0d0
         );
         assert_eq!(table, [0xa0a0_a0a0, 0x2222_2222, 0x3333_3333, 0xd0d0_d0d0]);
+    }
+
+    #[test]
+    fn namespace_provider_swap_comparator_returns_old_value_and_invalidates_only_on_change() {
+        let mut providers =
+            ProvidersFixture::new(0, 0, std::vec![0, 0], 1);
+        providers.words[PROVIDER_COMPARATOR_WORD] = 0x1111_1111;
+
+        assert_eq!(
+            unsafe { namespace_provider_swap_comparator(providers.ptr(), 0x1111_1111) },
+            0x1111_1111
+        );
+        assert_eq!(providers.words[PROVIDER_COMPARATOR_WORD], 0x1111_1111);
+        assert_eq!(
+            providers.words[PROVIDER_SORTED_WORD], 1,
+            "an unchanged comparator preserves the sorted flag"
+        );
+
+        assert_eq!(
+            unsafe { namespace_provider_swap_comparator(providers.ptr(), 0x2222_2222) },
+            0x1111_1111
+        );
+        assert_eq!(providers.words[PROVIDER_COMPARATOR_WORD], 0x2222_2222);
+        assert_eq!(
+            providers.words[PROVIDER_SORTED_WORD], 0,
+            "a changed comparator invalidates cached sort order"
+        );
     }
 
     /// Serializes namespace_provider_insert_at/push tests and their shared
