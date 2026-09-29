@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082c53a4
+    ghidra: FUN_082c53a4
+    name: sqlite3_create_module_v2
+    size: 160
+    sig: "i32 sqlite3_create_module_v2(sqlite3 *db, char *name, sqlite3_module *module, void *auxiliary, void (*destroy)(void *))"
+    module: sqlite/create_module_v2
+    status: ported
+    renames:
+      param_1/r0: db
+      param_2/r1: name
+      param_3/r2: module
+      param_4/r3: auxiliary
+      param_5/stack: destroy
+      FUN_0837ae08: sqlite3HashInsert
+      FUN_0836f468: sqlite3ApiExit
+    notes: >-
+      Raw osos.dec A32 decoding establishes the exact 160-byte body from
+      0x082c53a4 through 0x082c5440; the push at 0x082c5444 starts the next
+      independently linked function. The body has six unconditional BL calls
+      and one predicated BLXNE. It allocates and fills a 16-byte Module record,
+      replaces the name in db.aModule (+0xf4), conditionally destroys and frees
+      the prior record, invokes the resident 0x0838209c connection operation,
+      then tail-calls sqlite3ApiExit(db, 0). Hash insertion and the reset
+      operation remain direct resident seams because neither is ported.
   - address: 0x082c5444
     ghidra: FUN_082c5444
     name: select_emit_open_ephemeral
