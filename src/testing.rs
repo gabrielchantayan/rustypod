@@ -1519,6 +1519,9 @@ pub mod hints {
     // expression-node fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const CG_EXPRESSION_DEPENDENCY_MASK: usize = 0xd400_0000;
+    // 0xda20_0000: dedicated to fs/path_context_release's target-width context
+    // and drive-slot fixture; mappings never unmap, so no other user may share it.
+    pub const PATH_CONTEXT_RELEASE: usize = 0xda20_0000;
     // 0xd500_0000: dedicated to codegen/expression_collection_dependency_mask's
     // raw-u32 collection, entry, expression-node, and context fixture;
     // mappings never unmap, so no other user may share this hint.

@@ -31,6 +31,8 @@ pub mod path_component_is_parent_reference;
 pub mod drive_prefix_parse;
 /// Path-resolution node release @ 0x082e19cc.
 pub mod path_node;
+/// Releases a path-resolution context under its drive's ATA semaphore @ 0x082e1cd0.
+pub mod path_context_release;
 /// Path-node header attribute reader @ 0x082e1d2c.
 pub mod path_attributes;
 /// Creates a path-resolution node for a mounted volume @ 0x082e21dc.
