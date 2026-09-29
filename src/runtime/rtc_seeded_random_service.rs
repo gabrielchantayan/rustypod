@@ -154,9 +154,7 @@ rtc_seeded_random_service:
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::Mutex;
-
-    static LOCK: Mutex<()> = Mutex::new(());
+    use crate::testing::RTC_SEEDED_RANDOM_SERVICE_TEST_LOCK;
     static mut RTC: [u8; 7] = [0; 7];
     static mut WORD: u32 = 0;
     static mut READS: u32 = 0;
@@ -172,7 +170,7 @@ mod tests {
 
     #[test]
     fn seeds_once_from_all_rtc_bytes_and_drains_entropy() {
-        let _lock = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _lock = RTC_SEEDED_RANDOM_SERVICE_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         unsafe {
             let (mut initialized, mut entropy_word, mut seed) = (0u32, 5u32, 0xdead_beefu32);
             RTC = [1, 2, 3, 4, 5, 6, 7]; WORD = 0xa5a5_5a5a; READS = 0; RELEASED = 0;
@@ -189,7 +187,7 @@ mod tests {
 
     #[test]
     fn veneer_forwards_to_the_rtc_seeded_service() {
-        let _lock = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _lock = RTC_SEEDED_RANDOM_SERVICE_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         unsafe {
             let (mut initialized, mut entropy_word, mut seed) = (1u32, 0x1234_5678u32, 0u32);
             let saved_word = WORD;

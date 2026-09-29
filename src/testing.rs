@@ -3496,3 +3496,5 @@ pub static DRAW_STATE_FILL_OPS_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::
 pub static BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// Serializes host tests that install the fixed pending-map backing.
 pub static PENDING_MAP_SET_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Serializes host tests that replace RTC-seeded random-service callbacks.
+pub static RTC_SEEDED_RANDOM_SERVICE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
