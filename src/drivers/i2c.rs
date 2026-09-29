@@ -571,6 +571,34 @@ pub unsafe extern "C" fn pmu_i2c_write(reg: u32, len: i32, data: *const u8) -> i
     }
     i2c_write(PMU_I2C_SLAVE, (len as u32).wrapping_add(1), packet.as_ptr())
 }
+/// pmu_write_mode_registers — original: `FUN_0836d560` @ 0x0836d560
+/// (72 bytes; 2 plain `bl` call sites, 0 predicated `bl` call sites,
+/// binary-verified by decoding every B/BL word in osos.dec).
+///
+/// Writes byte 10 to PCF50635 register 0x1d. If that transfer succeeds,
+/// writes `mode != 0` to register 0x1b and returns its raw status; otherwise
+/// returns the first status without making the second transfer. Although
+/// Ghidra declares it `void`, its second caller compares the returned r0.
+/// The following `push {r3,r4,r5,lr}` at 0x0836d5a8 establishes the exact
+/// extent 0x0836d560..0x0836d5a4.
+///
+/// # Deviation
+///
+/// Both retail direct calls to `FUN_0836d524` become ordinary calls to its
+/// existing Rust port.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_write_mode_registers(mode: u32) -> i32 {
+    let first_value = 10_u8;
+    let status = pmu_i2c_write(0x1d, 1, &first_value);
+    if status != 0 {
+        return status;
+    }
+
+    let mode_value = (mode != 0) as u8;
+    pmu_i2c_write(0x1b, 1, &mode_value)
+}
+
 /// pmu_i2c_write_packed_selector — original: `FUN_0836d0b4` @
 /// 0x0836d0b4 (68 bytes; 3 plain `bl` call sites, 0 predicated `bl`;
 /// binary-verified from `osos.dec`).
@@ -1371,6 +1399,40 @@ pub(crate) mod tests {
         }
         restore_raw(guard);
     }
+    #[test]
+    fn mode_register_write_serializes_boolean_mode_and_returns_final_status() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            assert_eq!(pmu_write_mode_registers(0), 0);
+            assert_eq!(pmu_write_mode_registers(0xfeed_beef), 0);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![
+                    std::vec![0x1d, 10],
+                    std::vec![0x1b, 0],
+                    std::vec![0x1d, 10],
+                    std::vec![0x1b, 1],
+                ],
+                "zero maps to zero and every nonzero mode maps to one"
+            );
+        }
+        restore_raw(guard);
+    }
+
+    #[test]
+    fn mode_register_write_returns_initial_failure_without_final_transfer() {
+        let guard = install_raw(-5, 0);
+        unsafe {
+            assert_eq!(pmu_write_mode_registers(1), -5);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0x1d, 10]],
+                "a nonzero first status skips the register 0x1b write"
+            );
+        }
+        restore_raw(guard);
+    }
+
     #[test]
     fn packed_selector_write_maps_register_and_packs_value_bits() {
         let guard = install_raw(0, 0);

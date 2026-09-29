@@ -27071,6 +27071,31 @@ functions:
       deliberately replacing retail direct bl edges with ordinary Rust calls.
       Host tests cover packet serialization, status propagation, and lock
       release after both successful and failed writes.
+  # --- PMU mode-register write (drivers/i2c) ---
+  - address: 0x0836d560
+    ghidra: FUN_0836d560
+    name: pmu_write_mode_registers
+    size: 72
+    sig: "i32 pmu_write_mode_registers(u32 mode)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r4: mode
+      local_10/sp: mode_register_value
+      FUN_0836d524: pmu_i2c_write
+    notes: >-
+      Raw ARM extent is exactly 72 bytes, 0x0836d560..0x0836d5a4; the
+      following push {r3,r4,r5,lr} at 0x0836d5a8 starts the distinct next
+      function. Independent raw decoding finds two direct inbound calls, both
+      plain unconditional bl (cond=e), at 0x082e57c4 and 0x082e5974; no
+      predicated bl form exists. The body writes byte 10 to PCF50635 register
+      0x1d through pmu_i2c_write. A nonzero first status returns immediately;
+      otherwise it writes mode != 0 to register 0x1b and returns that second
+      raw status. Ghidra's void prototype is wrong: the caller at 0x082e5974
+      compares r0. Both retail direct callee bl edges resolve to the existing
+      Rust pmu_i2c_write port, deliberately becoming ordinary Rust calls.
+      Host tests cover zero/nonzero mode serialization and first-transfer
+      failure suppressing the final transfer.
 
   # --- PMU board-version status bit (drivers/pmu) ---
   - address: 0x082e5b64
