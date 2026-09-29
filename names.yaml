@@ -162786,3 +162786,29 @@ functions:
       a NULL-terminated chain of nine-word records and ORs masks from
       collections at words 0, 5, and 7 and expressions at words 4 and 6.
       Deliberate deviations: none; Rust reads all links as 32-bit target words.
+
+  - address: 0x082cd88c
+    ghidra: FUN_082cd88c
+    name: cg_expression_collection_process_reverse
+    size: 56
+    sig: "void cg_expression_collection_process_reverse(void *context, const u32 *collection)"
+    module: codegen/expression_collection_process_reverse
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: collection
+      r4: index
+      r5: collection
+      r6: context
+      FUN_082ccf94: collection_item_processor
+    notes: >-
+      Raw osos.dec A32 words establish the exact 56-byte body from
+      0x082cd88c through 0x082cd8c3; push {r4-r8,lr} at 0x082cd8c4 starts the
+      next independently linked function. The body loads the signed count from
+      collection word 2, decrements it, and calls 0x082ccf94 once per
+      non-negative index in descending order. It has one outbound unconditional
+      plain BL at 0x082cd8b0 and no predicated BL instructions. Complete-image
+      decoding finds two inbound plain BL sites, 0x082cd358 and 0x0838da0c,
+      and no predicated inbound BL. FUN_082ccf94 has no verified semantic
+      identity, so target builds retain its verified absolute call and host
+      tests use a recording seam to prove call order, bounds, and ABI.
