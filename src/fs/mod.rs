@@ -23,6 +23,8 @@ pub mod path_limits;
 pub mod ds_store_path;
 /// Splits a path at its final configured delimiter @ 0x082e37d4.
 pub mod path_component_split;
+/// Current-directory path-component predicate @ 0x082e2a7c.
+pub mod path_component_is_current_reference;
 /// Parent-directory path-component predicate @ 0x082e2ad0.
 pub mod path_component_is_parent_reference;
 /// Optional `X:` drive-prefix parser @ 0x082e377c.
