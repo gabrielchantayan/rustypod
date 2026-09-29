@@ -30269,6 +30269,29 @@ functions:
       failures all reach FreeType as the same "no". 1 bl call site
       (ft_stream_new @ 0x0804f250), binary-scanned.
 
+  - address: 0x082d38dc
+    ghidra: FUN_082d38dc
+    name: opaque_descriptor_convert_089062ec
+    size: 12
+    sig: "i32 opaque_descriptor_convert_089062ec(void *source, void **output_slot)"
+    module: cxx/opaque_descriptor_convert_089062ec
+    status: ported
+    vars:
+      param_1/r0: source
+      param_2/r1: output_slot
+      DAT_082d38e4: opaque_descriptor_089062ec
+      FUN_0803b3b8: generic_descriptor_convert
+    notes: >-
+      Raw osos.dec establishes the 12-byte extent: `ldr r2,[pc]; b
+      0x0803b3b8` at 0x082d38dc..0x082d38e0, then its local descriptor
+      literal 0x089062ec at 0x082d38e4; the next real function begins at
+      0x082d38e8. Complete-image ARM B/BL decoding finds two plain,
+      unconditional BL callers (0x080eb9f8 and 0x080eba20), no predicated BL
+      callers, and no inbound tail branches. It loads the opaque descriptor
+      into r2 then tail-branches to generic_descriptor_convert, preserving r0,
+      r1, and the result. No deliberate deviation: ARM global assembly retains
+      the literal and tail branch; host tests use the generic-engine recorder seam.
+
   - address: 0x082d3ddc
     ghidra: FUN_082d3ddc
     name: ft_platform_stream_open
