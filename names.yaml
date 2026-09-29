@@ -47164,6 +47164,31 @@ functions:
       address and host tests use a recording seam. No selector or
       continuation validation is added.
 
+  - address: 0x082d2108
+    ghidra: FUN_082d2108
+    name: video_engine_dispatch_opaque_mode_command
+    size: 32
+    sig: "void video_engine_dispatch_opaque_mode_command(u32 command)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: command
+      FUN_08252bec: video_engine_get
+      0x0824de1c: video_engine_opaque_mode_command_dispatch
+    notes: >-
+      Raw A32 words prove Ghidra's 84-byte extent and recovered byte-store
+      implementation false. This wrapper is exactly 32 bytes at
+      0x082d2108..0x082d2124; push {r4,lr} begins the next independently
+      linked wrapper at 0x082d2128. It preserves the command in r4, calls
+      video_engine_get, and silently returns for a NULL session. Otherwise it
+      restores (engine,command) in r0/r1 and conditionally tail-branches
+      (bne) to 0x0824de1c. The body has one plain outbound bl
+      (0x082d2110 -> 0x08252bec), no predicated outbound bl, and no literal
+      pool. Complete raw-image aligned A32 branch-target decoding finds two
+      inbound plain bl calls and no predicated inbound bl calls. Callers pass
+      0x1d00 and a global raw command; the resident tail target has no
+      independently verified semantic identity, so Rust keeps it as a typed
+      opaque seam with recording host tests and forwards the command unchanged.
   - address: 0x082d21a8
     ghidra: FUN_082d21a8
     name: video_engine_dispatch_request
