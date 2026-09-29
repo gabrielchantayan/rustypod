@@ -20,6 +20,7 @@ pub mod errno;
 pub mod empty_object_destruct;
 pub mod exit;
 pub mod i2c0_idle;
+pub mod i2c0_configure_and_strobe;
 pub mod global_state;
 pub mod global_status_flags;
 pub mod global_object_address;

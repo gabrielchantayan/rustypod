@@ -46901,6 +46901,32 @@ functions:
       folded 0x3cf00004 literal, and emits both orr and bic selecting on
       the cmp flags; same address, same bits, plus a frame push/pop.
 
+  # --- I2C0 controller configure-and-strobe ---
+  - address: 0x0836b77c
+    ghidra: FUN_0836b77c
+    name: i2c0_configure_and_strobe
+    size: 52
+    sig: "void i2c0_configure_and_strobe(void)"
+    module: runtime/i2c0_configure_and_strobe
+    status: ported
+    renames:
+      DAT_0836b7b0: i2c0_register_base_literal (0x3c600000)
+      puVar1/r1: i2c0_register_base
+    notes: >-
+      Raw osos.dec verifies a 52-byte extent: 48 bytes of code at
+      0x0836b77c..0x0836b7ac, followed by the 0x3c600000 I2C0 base literal
+      at 0x0836b7b0; the next real function starts with push
+      {r4-r8,lr} at 0x0836b7b4. It first spins until IICCON (+0x10) is
+      zero, read-modify-writes IICSTA2 (+0x20) to set bits 8..13
+      (0x3f00), spins on IICCON again, then writes the base word back to
+      itself as a volatile hardware strobe. Verified call count: zero BL
+      instructions inside the function (zero plain and zero predicated);
+      its two callers are the I2C state handler FUN_0836b7b4 and startup
+      setup FUN_08058388. Deviation: the five volatile MMIO accesses
+      dispatch through a host-testable ops slot; target defaults preserve
+      the stock access order and volatile semantics, while host defaults
+      use private atomics for the unmapped controller.
+
   # --- shared-cell handle constructor ---
   - address: 0x083b5090
     ghidra: FUN_083b5090
