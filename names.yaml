@@ -163231,3 +163231,28 @@ functions:
       Deliberate deviations: Rust uses target-width u32 pointer words and byte
       offsets instead of host pointer-field layout. Reference C:
       decomp/c/030/082c4e10_FUN_082c4e10.c.
+
+  # ---- SQLite signed-64-bit boundary comparator (src/sqlite/compare_2pow63.rs) ----
+  - address: 0x082c46b8
+    ghidra: FUN_082c46b8
+    name: sqlite3_compare_2pow63
+    size: 36
+    sig: "i32 sqlite3_compare_2pow63(const u8 *z_num)"
+    module: sqlite/compare_2pow63
+    status: ported
+    renames:
+      param_1/r0: z_num
+      DAT_082c46dc: pow63_div10
+      FUN_08030f64: memcmp
+    notes: >-
+      SQLite 3.5.9 compare2pow63, recovered from the raw ARM body at
+      0x082c46b8..0x082c46db: nine instructions end in pop {r4,pc} at
+      0x082c46d8, followed by its literal-pool word; the next independent
+      function starts at 0x082c46e0. Full-image decoding finds two inbound
+      plain bl sites (0x082c3fac and 0x0836f900) and no predicated bl sites.
+      The body has one plain bl to memcmp @ 0x08030f64 and no predicated bl.
+      It compares 18 bytes to "922337203685477580" and, only on equality,
+      returns digit 19 minus 0x38. The literal pointer 0x088fd954 names
+      those bytes at image address 0x0890882c due to the verified +0xaed8
+      SQLite read-only-data skew. The Rust port embeds the verified literal
+      instead of modeling that skew; no behavioral deviation.

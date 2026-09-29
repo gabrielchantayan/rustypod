@@ -69,6 +69,7 @@ pub mod affinity_type;
 pub mod alloc_i64_copy;
 pub mod api_exit;
 pub mod append_owned_pointer;
+pub mod compare_2pow63;
 pub mod aux_sweep;
 pub mod array_allocate;
 pub mod aggregate_context;
