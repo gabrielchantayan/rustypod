@@ -88615,6 +88615,25 @@ functions:
       scan/store shape; LLVM adds the crate frame and changes register
       allocation/loop layout. Host tests cover a nonzero tail, interior
       zero preserved, trailing-zero trim, and all-zero list.
+  - address: 0x082d4c50
+    ghidra: FUN_082d4c50
+    name: word_list_multiply_u32_assign
+    size: 92
+    sig: "void word_list_multiply_u32_assign(u32 scalar, WordList *value)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1/r0: scalar
+      param_2/r1: value
+    notes: >-
+      Multiplies each active little-endian u32 WordList limb by scalar,
+      adds the previous high-half carry, stores the low half in place, and
+      appends a nonzero final carry. The header count is written on both
+      paths. Raw osos.dec decoding establishes the true 23-word / 92-byte
+      extent from 0x082d4c50 through the bx lr at 0x082d4ca8; the next real
+      function starts at 0x082d4cac with push {r4-r7,lr}. Direct-branch
+      decoding finds two inbound plain bl call sites (0x082cdb7c and
+      0x082cf7a4) and no predicated bl call sites. No deliberate deviations.
   - address: 0x082cf7bc
     ghidra: FUN_082cf7bc
     name: word_list_modular_square_assign
