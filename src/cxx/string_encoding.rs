@@ -65,6 +65,69 @@ pub unsafe extern "C" fn utf8_write_codepoint_from_bytes(
 ) {
     utf8_write_codepoint(cursor, low_byte | (high_byte << 8));
 }
+/// utf8_append_packed_record_text_reverse — original: FUN_082d7a50 @
+/// 0x082d7a50 (216 bytes, 0x082d7a50..0x082d7b28). Raw ARM decoding finds
+/// three plain direct `bl` instructions (at 0x082d7a84, 0x082d7ab8, and
+/// 0x082d7aec), all targeting `utf8_write_codepoint_from_bytes`, and no
+/// predicated `bl` instructions. The two direct inbound `bl` call sites are
+/// 0x082e4514 and 0x082e4560.
+/// Append the 13 UTF-16LE code units stored in byte ranges 1..11, 14..26,
+/// and 28..32 of each 32-byte packed record, walking records backward.
+/// Encoding stops before a code unit unless four destination bytes remain;
+/// a NUL is written after every record that was requested. Deliberate
+/// deviation: retailOS preserves its first two argument registers on return;
+/// this Rust ABI returns only the destination pointer, which is the observed
+/// return value and is ignored by both verified callers.
+///
+/// # Safety
+///
+/// `destination` must point to writable storage of `destination_len` bytes.
+/// `last_record` must designate the final record in a contiguous, backward-
+/// readable sequence of `record_count` 32-byte records. `record_count` must
+/// be nonnegative.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_append_packed_record_text_reverse(
+    destination: *mut u8, destination_len: usize, mut last_record: *const u8,
+    mut record_count: i32,
+) -> *mut u8 {
+    let mut cursor = destination;
+    let output_limit = (destination as usize).wrapping_add(destination_len).wrapping_sub(4);
+
+    while record_count != 0 {
+        for offset in (1..11).step_by(2) {
+            if (cursor as usize) >= output_limit {
+                break;
+            }
+            utf8_write_codepoint_from_bytes(
+                &mut cursor, u32::from(last_record.add(offset).read()),
+                u32::from(last_record.add(offset + 1).read()),
+            );
+        }
+        for offset in (14..26).step_by(2) {
+            if (cursor as usize) >= output_limit {
+                break;
+            }
+            utf8_write_codepoint_from_bytes(
+                &mut cursor, u32::from(last_record.add(offset).read()),
+                u32::from(last_record.add(offset + 1).read()),
+            );
+        }
+        for offset in (28..32).step_by(2) {
+            if (cursor as usize) >= output_limit {
+                break;
+            }
+            utf8_write_codepoint_from_bytes(
+                &mut cursor, u32::from(last_record.add(offset).read()),
+                u32::from(last_record.add(offset + 1).read()),
+            );
+        }
+        record_count = record_count.wrapping_sub(1);
+        last_record = last_record.sub(32);
+        cursor.write(0);
+    }
+    destination
+}
 
 
 /// Emit one UTF-16 code unit without a terminator or surrogate pairing.
@@ -805,6 +868,66 @@ mod tests {
         assert_eq!(seen_destination, unsafe { destination.as_mut_ptr().add(1) as usize });
         assert_eq!(seen_max, 0xff);
         assert_ne!(seen_count, 0);
+    }
+
+    fn packed_record(code_units: &[(usize, u16)]) -> [u8; 32] {
+        let mut record = [0; 32];
+        for &(offset, unit) in code_units {
+            record[offset] = unit as u8;
+            record[offset + 1] = (unit >> 8) as u8;
+        }
+        record
+    }
+
+    fn packed_ascii_record(text: &[u8; 13]) -> [u8; 32] {
+        let mut record = [0; 32];
+        let mut character = 0;
+        for range in [1..11, 14..26, 28..32] {
+            for offset in range.step_by(2) {
+                record[offset] = text[character];
+                character += 1;
+            }
+        }
+        record
+    }
+
+    #[test]
+    fn packed_record_text_uses_selected_ranges_and_walks_records_backward() {
+        let records = [
+            packed_ascii_record(b"ABCDEFGHIJKLM"),
+            packed_ascii_record(b"NOPQRSTUVWXYZ"),
+        ];
+        let mut output = [0xa5; 40];
+
+        let returned = unsafe {
+            utf8_append_packed_record_text_reverse(
+                output.as_mut_ptr(), output.len(), records.as_ptr().add(1).cast(), 2,
+            )
+        };
+
+        assert_eq!(returned, output.as_mut_ptr());
+        assert_eq!(&output[..27], b"NOPQRSTUVWXYZABCDEFGHIJKLM\0");
+        assert!(output[27..].iter().all(|&byte| byte == 0xa5));
+    }
+
+    #[test]
+    fn packed_record_text_reserves_four_bytes_and_zero_count_does_nothing() {
+        let record = packed_record(&[(1, 0x0800)]);
+        let mut limited = [0xa5; 6];
+        unsafe {
+            utf8_append_packed_record_text_reverse(
+                limited.as_mut_ptr(), limited.len(), record.as_ptr(), 1,
+            );
+        }
+        assert_eq!(limited, [0xe0, 0xa0, 0x80, 0, 0xa5, 0xa5]);
+
+        let mut untouched = [0xa5; 4];
+        unsafe {
+            utf8_append_packed_record_text_reverse(
+                untouched.as_mut_ptr(), untouched.len(), record.as_ptr(), 0,
+            );
+        }
+        assert_eq!(untouched, [0xa5; 4]);
     }
 
     // Standard Unicode supplies an independent oracle for scalars. retailOS
