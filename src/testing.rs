@@ -3242,6 +3242,9 @@ pub mod hints {
     // 0x5380_0000: dedicated to fs/volume_info's target-width query fixture;
     // mappings never unmap.
     pub const VOLUME_INFO_QUERY: usize = 0x5380_0000;
+    // 0x5390_0000: dedicated to cxx/indexed_bit_set_contains_with_override's
+    // target-width context, object, and bit-set fixture; mappings never unmap.
+    pub const INDEXED_BIT_SET_CONTAINS_WITH_OVERRIDE: usize = 0x5390_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

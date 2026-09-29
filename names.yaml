@@ -161629,3 +161629,29 @@ functions:
       scope, then always tail-transfers the unchanged pager pointer to
       context_recover. Deliberate deviation: context_recover remains a fixed
       retailOS target; host tests inject a recording boundary for it.
+  - address: 0x082dd00c
+    ghidra: FUN_082dd00c
+    name: indexed_bit_set_contains_with_override
+    size: 40
+    sig: "u32 indexed_bit_set_contains_with_override(const u8 *context)"
+    module: cxx/indexed_bit_set_contains_with_override
+    status: ported
+    renames:
+      param_1/r0: context
+      r1: index
+      r2: object
+      FUN_08370738: indexed_bit_set_contains
+    notes: >-
+      Raw osos.dec establishes the exact 40-byte extent 0x082dd00c..0x082dd033:
+      ldr r2,[r0] through bx lr; the push at 0x082dd034 starts the next real
+      function. The body has no plain or predicated BL instructions; its clear
+      flag path is a direct branch to the separately decoded
+      indexed-bit-set predicate at 0x08370738. Complete-image decoding finds
+      two inbound direct plain-BL callers at 0x082de9b4 and 0x082debb4, and no
+      predicated inbound calls. It tests object+0x14: clear delegates the
+      bit-set pointer at +0x58 and context index +4; set reads the byte at
+      context + object[+0x3c] + 0x48. The helper's identity follows its raw
+      bounds, direct bit-mask, chained table, and 125-slot probe paths.
+      Deliberate deviations: the unported helper remains a verified resident
+      address call on target and a recording host seam; target pointer fields
+      remain u32 reads on every host.
