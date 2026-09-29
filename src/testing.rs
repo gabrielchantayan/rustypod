@@ -2252,6 +2252,9 @@ pub mod hints {
     // 0x4900_0000: dedicated to sqlite/pager_read_pending's raw-u32 PgHdr
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const SQLITE_PAGER_READ_PENDING: usize = 0x4900_0000;
+    // 0x4b00_0000: dedicated to sqlite/pager_read_db_page's target-width
+    // pager, page, data, and sqlite3_file fixture; mappings never unmap.
+    pub const SQLITE_PAGER_READ_DB_PAGE: usize = 0x4b00_0000;
     // 0x4a00_0000: dedicated to sqlite/pager_dont_write's target-width page
     // and pager fixture; mappings never unmap, so no other port may share it.
     pub const SQLITE_PAGER_DONT_WRITE: usize = 0x4a00_0000;
