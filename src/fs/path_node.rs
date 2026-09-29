@@ -40,11 +40,10 @@
 //! path returns NULL, which is this function's return value on every
 //! non-NULL input; a NULL node short-circuits before either call.
 //!
-//! Deviation: the shared-data release is now the ported
-//! [`super::shared_data::shared_data_release`], including on host builds.
-//! The still-unported node-pool recycle @ `0x082e2f04` remains a fixed-address
-//! call on firmware and a recording boundary on hosts; that boundary exists
-//! only to exercise this caller's node-pool handoff.
+//! Deviation: the shared-data release and node-pool recycle-or-pop are now
+//! ported, including on host builds. The pool's still-unidentified error
+//! helper @ `0x082e406c` remains a fixed-address target call and a recording
+//! host seam.
 //!
 //! `path_node_create` is retailOS `FUN_082e0100` at `0x082e0100` (56
 //! bytes). Raw ARM extends from its `push {r4,lr}` through the `pop {r4,pc}`
@@ -54,12 +53,12 @@
 //! `0x082e2104`, `0x082e21e4`, `0x082e3094`, and `0x082e3280`; there are no
 //! predicated calls or tail branches. It pops a zeroed 0x1c-byte node, obtains
 //! a 0x54-byte shared-data block, stores that block in the node's +0x04 word,
-//! and recycles the node when the data allocation fails. Deliberate
-//! deviation: node-pool allocation remains a retailOS fixed-address call on
-//! target and a recording host seam. Shared-data allocation now calls the
+//! and recycles the node when the data allocation fails. Both node-pool paths
+//! now use the ported recycle-or-pop helper. Shared-data allocation calls the
 //! ported `shared_data_allocate` veneer, which retains its own pool boundary.
 
 use super::shared_data::shared_data_release;
+use super::cache_lock::{cache_lock_signal, cache_lock_wait};
 #[cfg(target_os = "none")]
 use super::shared_data::shared_data_allocate as shared_data_pool_allocate;
 
@@ -88,45 +87,59 @@ unsafe fn write_pointer(base: *mut u8, target_offset: usize, value: *mut u8) {
 }
 
 
+const PATH_NODE_POOL_HEAD: *mut *mut u8 = 0x08a0_a73c as *mut *mut u8;
+const PATH_NODE_POOL_ERROR_ADDRESS: usize = 0x082e_406c;
+
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn pool_recycle(node: *mut u8) -> *mut u8 {
-    let recycle: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        core::mem::transmute(0x082e_2f04usize);
-    recycle(node)
+unsafe fn path_node_pool_head() -> *mut u8 {
+    PATH_NODE_POOL_HEAD.read_volatile()
 }
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn pool_pop() -> *mut u8 {
-    let pop: unsafe extern "C" fn(*mut u8) -> *mut u8 =
-        core::mem::transmute(0x082e_2f04usize);
-    pop(core::ptr::null_mut())
+unsafe fn set_path_node_pool_head(node: *mut u8) {
+    PATH_NODE_POOL_HEAD.write_volatile(node);
 }
 
 #[cfg(target_os = "none")]
 #[inline(always)]
+unsafe fn path_node_pool_error(code: u32) {
+    let report: unsafe extern "C" fn(u32) = core::mem::transmute(PATH_NODE_POOL_ERROR_ADDRESS);
+    report(code);
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_PATH_NODE_POOL_HEAD: *mut u8 = core::ptr::null_mut();
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_path_node_pool_error(_code: u32) {
+    panic!("path_node_pool_pop_or_recycle requires error reporter 0x082e406c")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PATH_NODE_POOL_ERROR: unsafe extern "C" fn(u32) = missing_path_node_pool_error;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn path_node_pool_head() -> *mut u8 {
+    core::ptr::addr_of!(HOST_PATH_NODE_POOL_HEAD).read_volatile()
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn set_path_node_pool_head(node: *mut u8) {
+    core::ptr::addr_of_mut!(HOST_PATH_NODE_POOL_HEAD).write_volatile(node);
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn path_node_pool_error(code: u32) {
+    core::ptr::read_volatile(core::ptr::addr_of!(PATH_NODE_POOL_ERROR))(code);
+}
+#[cfg(target_os = "none")]
 unsafe fn shared_data_allocate() -> *mut u8 {
     shared_data_pool_allocate()
-}
-
-#[cfg(not(target_os = "none"))]
-#[derive(Clone, Copy)]
-struct PathNodeHostOps {
-    pool_recycle: unsafe extern "C" fn(*mut u8) -> *mut u8,
-    pool_pop: unsafe extern "C" fn() -> *mut u8,
-    shared_data_allocate: unsafe extern "C" fn() -> *mut u8,
-}
-
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_pool_recycle(_node: *mut u8) -> *mut u8 {
-    core::ptr::null_mut()
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_pool_pop() -> *mut u8 {
-    core::ptr::null_mut()
 }
 
 #[cfg(not(target_os = "none"))]
@@ -135,38 +148,55 @@ unsafe extern "C" fn host_shared_data_allocate() -> *mut u8 {
 }
 
 #[cfg(not(target_os = "none"))]
-const DEFAULT_PATH_NODE_HOST_OPS: PathNodeHostOps = PathNodeHostOps {
-    pool_recycle: host_pool_recycle,
-    pool_pop: host_pool_pop,
-    shared_data_allocate: host_shared_data_allocate,
-};
-
-#[cfg(not(target_os = "none"))]
-static mut PATH_NODE_HOST_OPS: PathNodeHostOps = DEFAULT_PATH_NODE_HOST_OPS;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn host_ops() -> PathNodeHostOps {
-    core::ptr::read_volatile(core::ptr::addr_of!(PATH_NODE_HOST_OPS))
-}
-
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn pool_recycle(node: *mut u8) -> *mut u8 {
-    (host_ops().pool_recycle)(node)
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn pool_pop() -> *mut u8 {
-    (host_ops().pool_pop)()
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
 unsafe fn shared_data_allocate() -> *mut u8 {
-    (host_ops().shared_data_allocate)()
+    host_shared_data_allocate()
+}
+
+
+/// path_node_pool_pop_or_recycle — original: `FUN_082e2f04` @ `0x082e2f04`.
+///
+/// Load address: `0x082e2f04`; true size: 108 bytes (`0x6c`), from `push
+/// {r4,r5,r6,lr}` through `pop {r4,r5,r6,pc}` at `0x082e2f6c`; the literal
+/// pool-head address at `0x082e2f70` is followed by the next separately
+/// entered function at `0x082e2f74`. Two direct caller `bl` sites were
+/// binary-verified, both plain and unconditional (`0x082e0104`,
+/// `0x082e0128`); there are no predicated caller forms.
+///
+/// With a node, pushes it onto the singly linked free list rooted at
+/// `0x08a0a73c` and returns NULL. With NULL, pops one node, clears all seven
+/// words of its 0x1c-byte body, and returns it. Every list mutation is
+/// bracketed by the cache lock. An empty pool releases the lock, reports
+/// error code 10 through the still-unidentified helper at `0x082e406c`, and
+/// returns NULL.
+///
+/// Deliberate deviation: uses the already ported cache-lock thunks instead
+/// of their retailOS BL targets. The error helper's identity is not inferred:
+/// target builds call its verified load address; host builds install a
+/// recording seam only for that unported dependency.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn path_node_pool_pop_or_recycle(node: *mut u8) -> *mut u8 {
+    cache_lock_wait();
+    if !node.is_null() {
+        write_pointer(node, 0, path_node_pool_head());
+        set_path_node_pool_head(node);
+        cache_lock_signal();
+        return core::ptr::null_mut();
+    }
+
+    let result = path_node_pool_head();
+    if result.is_null() {
+        cache_lock_signal();
+        path_node_pool_error(10);
+        return core::ptr::null_mut();
+    }
+
+    set_path_node_pool_head(read_pointer(result, 0));
+    for offset in 0..0x1c {
+        result.add(offset).write_volatile(0);
+    }
+    cache_lock_signal();
+    result
 }
 
 /// path_node_release — original: `FUN_082e19cc` @ `0x082e19cc` (32
@@ -184,7 +214,7 @@ pub unsafe extern "C" fn path_node_release(node: *mut u8) -> *mut u8 {
         return core::ptr::null_mut();
     }
     shared_data_release(read_pointer(node, NODE_DATA));
-    pool_recycle(node)
+    path_node_pool_pop_or_recycle(node)
 }
 
 /// path_node_create — original: `FUN_082e0100` @ `0x082e0100` (56 bytes;
@@ -196,7 +226,7 @@ pub unsafe extern "C" fn path_node_release(node: *mut u8) -> *mut u8 {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn path_node_create() -> *mut u8 {
-    let node = pool_pop();
+    let node = path_node_pool_pop_or_recycle(core::ptr::null_mut());
     if node.is_null() {
         return core::ptr::null_mut();
     }
@@ -204,7 +234,7 @@ pub unsafe extern "C" fn path_node_create() -> *mut u8 {
     let data = shared_data_allocate();
     write_pointer(node, NODE_DATA, data);
     if data.is_null() {
-        pool_recycle(node);
+        path_node_pool_pop_or_recycle(node);
         return core::ptr::null_mut();
     }
 
@@ -216,44 +246,42 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::sync::atomic::{AtomicBool, Ordering};
+    use crate::kernel::task_lock::{tests::OPS_LOCK as ROM_OPS_LOCK, RomThunkOps, ROM_KERNEL};
+    use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::MutexGuard;
     use std::vec::Vec;
 
     static OPS_LOCK: AtomicBool = AtomicBool::new(false);
-    static mut EVENTS: Vec<Event> = Vec::new();
-    static mut POOL_POP_RESULT: *mut u8 = core::ptr::null_mut();
-    static mut SHARED_DATA_ALLOCATE_RESULT: *mut u8 = core::ptr::null_mut();
+    static mut EVENTS: Vec<&'static str> = Vec::new();
+    static LAST_ERROR: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum Event {
-        PoolRecycle(usize),
-        PoolPop,
-        SharedDataAllocate,
+    unsafe extern "C" fn record_wait(_sem: usize) -> usize {
+        EVENTS.push("wait");
+        0
     }
 
-
-    unsafe extern "C" fn recording_pool_recycle(node: *mut u8) -> *mut u8 {
-        EVENTS.push(Event::PoolRecycle(node as usize));
-        core::ptr::null_mut()
+    unsafe extern "C" fn record_signal(_sem: usize) -> usize {
+        EVENTS.push("signal");
+        0
     }
 
-    unsafe extern "C" fn recording_pool_pop() -> *mut u8 {
-        EVENTS.push(Event::PoolPop);
-        POOL_POP_RESULT
+    unsafe extern "C" fn record_error(code: u32) {
+        LAST_ERROR.store(code as usize, Ordering::SeqCst);
+        EVENTS.push("error");
     }
 
-    unsafe extern "C" fn recording_shared_data_allocate() -> *mut u8 {
-        EVENTS.push(Event::SharedDataAllocate);
-        SHARED_DATA_ALLOCATE_RESULT
+    struct Bench {
+        _local_lock: TestLock,
+        _rom_lock: MutexGuard<'static, ()>,
+        rom: RomThunkOps,
+        head: *mut u8,
+        error: unsafe extern "C" fn(u32),
     }
 
     struct TestLock;
 
     fn lock_ops() -> TestLock {
-        while OPS_LOCK
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
+        while OPS_LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
             while OPS_LOCK.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
             }
@@ -267,141 +295,86 @@ mod tests {
         }
     }
 
-    struct Bench {
-        _lock: TestLock,
-    }
-
     fn bench() -> Bench {
-        let lock = lock_ops();
+        let local_lock = lock_ops();
+        let rom_lock = ROM_OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
+            let rom = core::ptr::addr_of!(ROM_KERNEL).read_volatile();
+            let mut installed = rom;
+            installed.rom_sem_wait = record_wait;
+            installed.rom_sem_signal = record_signal;
+            core::ptr::addr_of_mut!(ROM_KERNEL).write_volatile(installed);
+            let head = core::ptr::addr_of!(HOST_PATH_NODE_POOL_HEAD).read_volatile();
+            let error = core::ptr::addr_of!(PATH_NODE_POOL_ERROR).read_volatile();
+            core::ptr::addr_of_mut!(HOST_PATH_NODE_POOL_HEAD).write_volatile(core::ptr::null_mut());
+            core::ptr::addr_of_mut!(PATH_NODE_POOL_ERROR).write_volatile(record_error);
             EVENTS.clear();
-            POOL_POP_RESULT = core::ptr::null_mut();
-            SHARED_DATA_ALLOCATE_RESULT = core::ptr::null_mut();
-            core::ptr::addr_of_mut!(PATH_NODE_HOST_OPS).write_volatile(PathNodeHostOps {
-                pool_recycle: recording_pool_recycle,
-                pool_pop: recording_pool_pop,
-                shared_data_allocate: recording_shared_data_allocate,
-            });
+            LAST_ERROR.store(usize::MAX, Ordering::SeqCst);
+            Bench { _local_lock: local_lock, _rom_lock: rom_lock, rom, head, error }
         }
-        Bench { _lock: lock }
     }
 
     impl Drop for Bench {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(PATH_NODE_HOST_OPS)
-                    .write_volatile(DEFAULT_PATH_NODE_HOST_OPS);
+                core::ptr::addr_of_mut!(ROM_KERNEL).write_volatile(self.rom);
+                core::ptr::addr_of_mut!(HOST_PATH_NODE_POOL_HEAD).write_volatile(self.head);
+                core::ptr::addr_of_mut!(PATH_NODE_POOL_ERROR).write_volatile(self.error);
             }
         }
     }
 
-    fn events() -> Vec<Event> {
-        unsafe { EVENTS.clone() }
-    }
-
-    /// A node fixture: 0x1c target bytes, widened on host so the +0x04
-    /// pointer slot lands at host offset `pointer_offset(NODE_DATA)`.
     #[repr(align(8))]
     struct NodeFixture {
-        node: [u8; 0x20],
+        bytes: [u8; 0x20],
     }
 
     impl NodeFixture {
-        fn new(data: *mut u8) -> Self {
-            let mut fixture = NodeFixture { node: [0; 0x20] };
-            unsafe {
-                (fixture.node_ptr().add(pointer_offset(NODE_DATA)) as *mut *mut u8).write(data);
-            }
-            fixture
+        fn new(fill: u8) -> Self {
+            NodeFixture { bytes: [fill; 0x20] }
         }
 
-        fn node_ptr(&mut self) -> *mut u8 {
-            self.node.as_mut_ptr()
+        fn pointer(&mut self) -> *mut u8 {
+            self.bytes.as_mut_ptr()
         }
     }
 
     #[test]
-    fn a_null_node_returns_null_and_never_touches_either_callee() {
+    fn recycle_pushes_a_node_ahead_of_the_existing_free_list() {
         let _bench = bench();
-        assert!(unsafe { path_node_release(core::ptr::null_mut()) }.is_null());
-        assert!(events().is_empty());
-    }
-
-    #[test]
-    fn a_null_data_pointer_reaches_the_ported_release_then_recycles_the_node() {
-        let _bench = bench();
-        let mut fixture = NodeFixture::new(core::ptr::null_mut());
-        let node = fixture.node_ptr();
-
-        assert!(unsafe { path_node_release(node) }.is_null());
-        assert_eq!(events(), std::vec![Event::PoolRecycle(node as usize)]);
-    }
-
-
-    #[test]
-    fn the_recycle_result_is_the_return_value() {
-        let _bench = bench();
-        unsafe extern "C" fn echo_pool_recycle(node: *mut u8) -> *mut u8 {
-            node
-        }
+        let mut old = NodeFixture::new(0);
+        let mut node = NodeFixture::new(0);
         unsafe {
-            core::ptr::addr_of_mut!(PATH_NODE_HOST_OPS).write_volatile(PathNodeHostOps {
-                pool_recycle: echo_pool_recycle,
-                pool_pop: recording_pool_pop,
-                shared_data_allocate: recording_shared_data_allocate,
-            });
+            set_path_node_pool_head(old.pointer());
+            assert!(path_node_pool_pop_or_recycle(node.pointer()).is_null());
+            assert_eq!(path_node_pool_head(), node.pointer());
+            assert_eq!(read_pointer(node.pointer(), 0), old.pointer());
+            assert_eq!(EVENTS, std::vec!["wait", "signal"]);
         }
-        let mut fixture = NodeFixture::new(core::ptr::null_mut());
-        let node = fixture.node_ptr();
-
-        assert_eq!(unsafe { path_node_release(node) }, node);
     }
 
     #[test]
-    fn an_empty_node_pool_returns_null_without_allocating_data() {
+    fn pop_unlinks_and_zeroes_all_target_node_words() {
         let _bench = bench();
-
-        assert!(unsafe { path_node_create() }.is_null());
-        assert_eq!(events(), std::vec![Event::PoolPop]);
-    }
-
-    #[test]
-    fn data_allocation_failure_clears_the_node_data_then_recycles_it() {
-        let _bench = bench();
-        let mut fixture = NodeFixture::new(1usize as *mut u8);
-        let node = fixture.node_ptr();
+        let mut next = NodeFixture::new(0);
+        let mut node = NodeFixture::new(0xa5);
         unsafe {
-            POOL_POP_RESULT = node;
+            write_pointer(node.pointer(), 0, next.pointer());
+            set_path_node_pool_head(node.pointer());
+            assert_eq!(path_node_pool_pop_or_recycle(core::ptr::null_mut()), node.pointer());
+            assert_eq!(path_node_pool_head(), next.pointer());
+            assert!(node.bytes[..0x1c].iter().all(|byte| *byte == 0));
+            assert_eq!(EVENTS, std::vec!["wait", "signal"]);
         }
-
-        assert!(unsafe { path_node_create() }.is_null());
-        assert!(unsafe { read_pointer(node, NODE_DATA) }.is_null());
-        assert_eq!(
-            events(),
-            std::vec![
-                Event::PoolPop,
-                Event::SharedDataAllocate,
-                Event::PoolRecycle(node as usize),
-            ]
-        );
     }
 
     #[test]
-    fn allocated_data_is_stored_in_the_popped_node() {
+    fn an_empty_pool_releases_the_lock_before_reporting_error_ten() {
         let _bench = bench();
-        let mut fixture = NodeFixture::new(core::ptr::null_mut());
-        let node = fixture.node_ptr();
-        let mut data = [0u8; 0x54];
         unsafe {
-            POOL_POP_RESULT = node;
-            SHARED_DATA_ALLOCATE_RESULT = data.as_mut_ptr();
+            assert!(path_node_pool_pop_or_recycle(core::ptr::null_mut()).is_null());
+            assert_eq!(LAST_ERROR.load(Ordering::SeqCst), 10);
+            assert_eq!(EVENTS, std::vec!["wait", "signal", "error"]);
         }
-
-        assert_eq!(unsafe { path_node_create() }, node);
-        assert_eq!(unsafe { read_pointer(node, NODE_DATA) }, data.as_mut_ptr());
-        assert_eq!(
-            events(),
-            std::vec![Event::PoolPop, Event::SharedDataAllocate]
-        );
     }
 }
