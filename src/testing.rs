@@ -979,6 +979,12 @@ pub mod hints {
     // 0x6ce0_0000: dedicated to util/hash_table_bucket_chain_insert's
     // target-width table and intrusive-chain fixture; mappings never unmap.
     pub const HASH_TABLE_BUCKET_CHAIN_INSERT: usize = 0x6ce0_0000;
+    // 0x7130_0000 / 0x7140_0000: dedicated to
+    // util/hash_table_bucket_insert_node's target-width table, bucket, and
+    // intrusive-list fixtures; mappings never unmap, so each test uses a
+    // distinct address.
+    pub const HASH_TABLE_BUCKET_INSERT_NODE: usize = 0x7130_0000;
+    pub const HASH_TABLE_BUCKET_INSERT_NODE_POPULATED: usize = 0x7140_0000;
     // 0x6cc0_0000: dedicated to util/hash_table_chain_prepend's target-width
     // table and intrusive-chain fixture; mappings never unmap, so no other
     // user may share it.
