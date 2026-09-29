@@ -1219,6 +1219,8 @@ pub mod hints {
     // Parse and Table fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SQLITE_OPEN_TABLE_AND_INDICES: usize = 0x8600_0000;
+    // 0x8200_0000: dedicated to sqlite/emit_trigger_programs's raw-u32 target-layout fixtures.
+    pub const SQLITE_EMIT_TRIGGER_PROGRAMS: usize = 0x8200_0000;
     // 0x8400_0000: dedicated to sqlite/expr_list_key_info's raw-u32 Parse,
     // ExprList, KeyInfo, and allocation fixtures; mappings never unmap.
     pub const SQLITE_EXPR_LIST_KEY_INFO: usize = 0x8400_0000;

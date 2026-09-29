@@ -276,6 +276,7 @@ pub mod pcache_pin_page;
 pub mod parse_release_deferred_vdbe;
 pub mod open_table;
 pub mod open_table_and_indices;
+pub mod emit_trigger_programs;
 pub mod os_close;
 pub mod os_close_free;
 pub mod os_access;

@@ -60459,6 +60459,28 @@ functions:
       cover multi-column layout and arguments, allocation failure, completion
       of all lookups before cleanup after a latched failure, and nColumn=0.
 
+  - address: 0x082ce1c0
+    ghidra: FUN_082ce1c0
+    name: emit_trigger_programs
+    size: 96
+    sig: "void emit_trigger_programs(Parse *parse, const TriggerProgramList *programs)"
+    module: sqlite/emit_trigger_programs
+    status: ported
+    vars: {param_1: parse, param_2: programs, piVar2: program_record,
+      uVar4: vdbe, uVar1: n_mem}
+    notes: >-
+      SQLite trigger-subprogram opcode emission. Raw osos.dec establishes the
+      exact 96-byte body from 0x082ce1c0 through 0x082ce21c; the next real
+      function begins at 0x082ce220. It has one unconditional plain bl, at
+      0x082ce204 to sqlite3VdbeAddOp4 / vdbe_add_op4 @ 0x083868c8, and zero
+      predicated bl forms (Ghidra's reported two bl call sites is incorrect).
+      Reads Parse.pVdbe at +0x0c, then iterates the count at programs +0x24
+      over 16-byte records from the pointer at +0x20. Each emits OP_Program
+      (0x5a) with p1 from record +0x08, p2 from *(*(record +0x00) +0x10)
+      when that indirect pointer is non-NULL (otherwise zero), p3 zero, p4
+      from record +0x04, and P4_SUBPROGRAM (-5). Target-width pointer fields
+      are decoded as u32 words so host fixtures preserve retail offsets.
+
   - address: 0x082ce2e8
     ghidra: FUN_082ce2e8
     name: find_element_given_hash
