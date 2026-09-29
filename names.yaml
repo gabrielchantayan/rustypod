@@ -113093,6 +113093,30 @@ functions:
       exclusive-limit rejection, cache-hit bypass, miss read arguments, and
       failed-miss detach/release.
 
+  # --- Filesystem cache timestamp splitting ---
+  - address: 0x082e2264
+    ghidra: FUN_082e2264
+    name: timestamp_halves
+    size: 32
+    sig: "u16 *timestamp_halves(u16 *output)"
+    module: fs/timestamp_halves
+    status: ported
+    renames:
+      param_1/r0: output
+      uVar1: packed_timestamp
+      FUN_08051d1c: packed_calendar_timestamp
+    notes: >-
+      Raw ARM confirms the 32-byte extent from 0x082e2264 through
+      0x082e2280; the separately entered next function begins at 0x082e2284.
+      Exactly two direct ARM B/BL words target this entry, both unconditional
+      bl: 0x082e32a4 and 0x082e48fc. There are no predicated calls or tail
+      branches. The function calls the opaque packed-calendar timestamp source
+      at 0x08051d1c, writes bits 31..16 to output[0] and bits 15..0 to
+      output[1], and returns output. The source remains a verified retailOS
+      target call because its underlying clock semantics are not yet ported;
+      host tests install a recording source seam. cache_block_prepare now uses
+      this port on target builds while retaining its independent host boundary.
+
   # --- Filesystem cache-block slot preparation ---
   - address: 0x082e48bc
     ghidra: FUN_082e48bc
@@ -113130,10 +113154,11 @@ functions:
       acquires request context/block words +0x00/+0x0c, stores the entry in
       request +0x18, copies request header +0x04 into entry
       +0x18 + slot * 32, flushes it, then releases it with detach_owner when
-      flush returns zero. FUN_082e2264 and FUN_082e26e8 remain unported, so
-      target builds call their verified addresses and host tests install
-      recording seams. The raw body never reloads input r3 after saving it
-      as the stack timestamp scratch word; the cache-acquire r2/r3 slots are
+      flush returns zero. FUN_082e26e8 remains unported, so target builds call
+      its verified address and host tests install a recording seam. The
+      timestamp helper is now the timestamp_halves port on target builds. The
+      raw body never reloads input r3 after saving it as the stack timestamp
+      scratch word; the cache-acquire r2/r3 slots are
       caller-clobbered after the lock boundary. The port deliberately passes
       zero for those unspecified slots. Existing ports replace the remaining
       helpers. Host coverage exercises the early slot rejection, a NULL

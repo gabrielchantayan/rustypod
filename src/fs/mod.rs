@@ -57,6 +57,8 @@ pub mod cache_entry_flush;
 pub mod cache_entry_reset;
 /// Marks a backward cache-entry range with byte `0xe5` @ 0x082e4b9c.
 pub mod cache_entry_set_marker_range;
+/// Splits an opaque packed calendar timestamp into two target halfwords @ 0x082e2264.
+pub mod timestamp_halves;
 /// Cache-page halfword transfer through the page resolver @ 0x082e1a34.
 pub mod cache_page;
 /// Format-specific default cache-position value writer @ 0x082e3bcc.

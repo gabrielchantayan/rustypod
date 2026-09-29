@@ -12,14 +12,13 @@
 //! 32-byte slot, flushes the entry, and releases its reference. A failed flush
 //! detaches the entry owner during that release.
 //!
-//! Deliberate deviations: the timestamp and cache-header-copy helpers at
-//! `0x082e2264` and `0x082e26e8` remain unported, so device builds invoke their
-//! verified retailOS addresses. The original enters `cache_block_acquire` with
-//! caller-clobbered r2/r3 after the lock boundary; this port passes zero for
-//! those unspecified ABI slots. Host builds use recording seams for the two
-//! unported helpers and the acquire/flush boundaries, while the target uses
-//! the existing cache-lock, cache-block, cache-entry-flush, and
-//! cache-entry-release ports.
+//! Deliberate deviation: the cache-header-copy helper at `0x082e26e8` remains
+//! unported, so device builds invoke its verified retailOS address. The
+//! original enters `cache_block_acquire` with caller-clobbered r2/r3 after the
+//! lock boundary; this port passes zero for those unspecified ABI slots. Host
+//! builds use recording seams for the cache-header-copy and acquire/flush
+//! boundaries, while the target uses the existing cache-lock, cache-block,
+//! cache-entry-flush, cache-entry-release, and timestamp-halves ports.
 
 use super::{
     cache_block::cache_block_acquire,
@@ -57,8 +56,7 @@ type CacheHeaderCopy = unsafe extern "C" fn(*mut u8, *mut u8);
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn timestamp_halves(output: *mut u16) {
-    let function: TimestampHalves = core::mem::transmute(0x082e2264usize);
-    function(output);
+    super::timestamp_halves::timestamp_halves(output);
 }
 
 #[cfg(target_os = "none")]
