@@ -160315,3 +160315,25 @@ functions:
       retail's sp+4 local without changing its bytes. The unported core-final
       and output-transform callees are volatile fixed-address seams; existing
       digest_init and digest_update interfaces preserve their call boundaries.
+
+  - address: 0x082fd288
+    ghidra: FUN_082fd288
+    name: opaque_constant_zero
+    size: 80
+    sig: "u32 opaque_constant_zero(void)"
+    module: util/opaque_constant_zero
+    status: ported
+    renames:
+      DAT_082fd2e0: opaque_seed_word
+      DAT_082fd2dc: encoded_terminal_state
+      DAT_082fd2d8: encoded_initial_state
+    notes: >-
+      Raw osos.dec establishes the exact 80-byte A32 body
+      0x082fd288..0x082fd2d8; its literal pool follows and 0x082fd2e4 begins
+      the next separately linked function with push {r0-r11,lr}. The leaf has
+      no outgoing plain or predicated BL instructions. Whole-image A32 branch
+      decoding finds exactly two inbound plain BL sites (0x082f5680 and
+      0x08314258) and no predicated BL sites. It volatile-reads the word at
+      0x089ce3d0, multiplies it by 0x4f0efc81, then follows the encoded state
+      transition; 0x4f0efc81 - 0x5251d9fc = 0xfcbd2285, so it always returns
+      zero without exposing the product. Deliberate deviations: none.
