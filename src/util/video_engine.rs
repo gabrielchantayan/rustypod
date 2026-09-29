@@ -1707,6 +1707,82 @@ pub unsafe extern "C" fn video_engine_submit_frame(
     );
 }
 
+/// Firmware entry of the video-engine request dispatcher `FUN_08252220`,
+/// which remains resident.
+#[cfg(target_os = "none")]
+const VIDEO_ENGINE_REQUEST_DISPATCH_ADDR: usize = 0x0825_2220;
+
+/// ABI of the resident request dispatcher: engine followed by four opaque
+/// request words.
+type VideoEngineRequestDispatch = unsafe extern "C" fn(*mut u8, u32, u32, u32, u32);
+
+/// Host-test stand-in for request dispatcher `FUN_08252220`.
+#[cfg(not(target_os = "none"))]
+static mut MOCK_REQUEST_DISPATCH: Option<VideoEngineRequestDispatch> = None;
+
+/// Host only: install the request dispatcher reached by the wrapper.
+#[cfg(not(target_os = "none"))]
+pub unsafe fn set_mock_request_dispatch(dispatch: Option<VideoEngineRequestDispatch>) {
+    core::ptr::addr_of_mut!(MOCK_REQUEST_DISPATCH).write(dispatch);
+}
+
+/// Calls the resident video-engine request dispatcher.
+unsafe fn dispatch_request(
+    engine: *mut u8,
+    request: u32,
+    kind: u32,
+    value: u32,
+    context: u32,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let dispatch: VideoEngineRequestDispatch =
+            core::mem::transmute(VIDEO_ENGINE_REQUEST_DISPATCH_ADDR);
+        dispatch(engine, request, kind, value, context);
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        match core::ptr::addr_of!(MOCK_REQUEST_DISPATCH).read() {
+            Some(dispatch) => dispatch(engine, request, kind, value, context),
+            None => panic!("video_engine_dispatch_request requires dispatcher 0x08252220"),
+        }
+    }
+}
+
+/// video_engine_dispatch_request — retailOS `FUN_082d21a8` @ **0x082d21a8**
+/// (52 bytes, `0x082d21a8..0x082d21d8`); `0x082d21dc` starts the next
+/// independently linked wrapper. Raw A32 decoding finds one plain `bl`
+/// (`0x082d21bc -> video_engine_get`) and one predicated `bl`
+/// (`0x082d21d4 -> FUN_08252220`). Complete raw-image branch-target decoding
+/// finds exactly two inbound plain `bl` calls (0x0827d4dc and 0x0828cb14) and
+/// no predicated inbound `bl` calls.
+///
+/// Loads the video-engine singleton and silently returns when no session is
+/// installed. Otherwise it prepends that instance to all four input words and
+/// conditionally calls the resident request dispatcher.
+///
+/// # Deliberate deviation
+///
+/// `FUN_08252220` is unported. Its dispatch role and five-word ABI are
+/// verified, but the individual request-word meanings are not; target builds
+/// therefore call its resident entry through a typed seam and host tests
+/// record every unmodified word. This wrapper deliberately adds no validation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_dispatch_request(
+    request: u32,
+    kind: u32,
+    value: u32,
+    context: u32,
+) {
+    let engine = video_engine_get();
+    if engine.is_null() {
+        return;
+    }
+    dispatch_request(engine, request, kind, value, context);
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -2142,6 +2218,50 @@ mod tests {
                     "the wrapper prepends the current instance without validation"
                 );
             }
+        }
+    }
+
+    // --- video_engine_dispatch_request (FUN_082d21a8) ---
+
+    static mut REQUEST_DISPATCH_RECORDED: Option<(*mut u8, [u32; 4])> = None;
+
+    unsafe extern "C" fn record_request_dispatch(
+        engine: *mut u8,
+        request: u32,
+        kind: u32,
+        value: u32,
+        context: u32,
+    ) {
+        *addr_of_mut!(REQUEST_DISPATCH_RECORDED) =
+            Some((engine, [request, kind, value, context]));
+    }
+
+    #[test]
+    fn request_dispatch_without_a_session_is_a_silent_no_op() {
+        let _guard = LOCK.lock();
+        unsafe {
+            REQUEST_DISPATCH_RECORDED = None;
+            set_mock_request_dispatch(Some(record_request_dispatch));
+            set_mock_instance(ptr::null_mut());
+            video_engine_dispatch_request(0, u32::MAX, 0x8000_0000, 1);
+            assert_eq!(REQUEST_DISPATCH_RECORDED, None);
+            set_mock_request_dispatch(None);
+        }
+    }
+
+    #[test]
+    fn request_dispatch_prepends_instance_and_preserves_all_words() {
+        let _guard = LOCK.lock();
+        let mut engine = [0u8; 16];
+        let words = [0, u32::MAX, 0x8000_0000, 0x89ab_cdef];
+        unsafe {
+            REQUEST_DISPATCH_RECORDED = None;
+            set_mock_request_dispatch(Some(record_request_dispatch));
+            set_mock_instance(engine.as_mut_ptr());
+            video_engine_dispatch_request(words[0], words[1], words[2], words[3]);
+            assert_eq!(REQUEST_DISPATCH_RECORDED, Some((engine.as_mut_ptr(), words)));
+            set_mock_instance(ptr::null_mut());
+            set_mock_request_dispatch(None);
         }
     }
 
