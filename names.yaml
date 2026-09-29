@@ -162287,3 +162287,28 @@ functions:
       and direct stock-address call; LLVM adds a frame, reloads the count at
       loop bottom, and routes the unported callee through a literal-loaded
       `blx` on target builds.
+
+  - address: 0x082d3900
+    ghidra: FUN_082d3900
+    name: opaque_descriptor_convert_0891fa80
+    size: 12
+    sig: "i32 opaque_descriptor_convert_0891fa80(u8 *source, u8 **output_slot)"
+    module: cxx/opaque_descriptor_convert_0891fa80
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: output_slot
+      DAT_082d3908: opaque_descriptor_0891fa80
+      FUN_0803b3b8: generic_descriptor_convert
+    notes: >-
+      Raw osos.dec establishes the true 12-byte extent: ldr r2,[pc] and b
+      generic_descriptor_convert at 0x082d3900..0x082d3904, followed by its
+      function-local descriptor literal 0x0891fa80 at 0x082d3908; push
+      {r3,r4,r5,lr} at 0x082d390c starts the next function. Direct A32
+      decoding finds exactly two inbound plain unconditional BL sites
+      (0x08062f74 and 0x08062fec), zero predicated BL sites, and no inbound
+      tail branches. The wrapper binds r2 to the opaque descriptor and
+      tail-branches to generic_descriptor_convert while forwarding r0/r1 and
+      its result. Host tests cover NULL and non-NULL argument forwarding.
+      match.py reports the same ldr, tail branch, and literal, with relocation
+      placeholders in the archive disassembly. No deliberate deviations.
