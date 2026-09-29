@@ -60948,6 +60948,29 @@ functions:
       src/codegen/ir.rs::emit_mrs_cpsr_masks_the_resource_byte_and_uses_the_codegen_output.
       match.py reports the expected Rust frame and literal materialization;
       its emitted instruction construction and call arguments are equivalent.
+  - address: 0x0836816c
+    ghidra: FUN_0836816c
+    name: cg_emit_msr_cpsr_flags
+    size: 24
+    sig: "void cg_emit_msr_cpsr_flags(CgCodegen *codegen, CgBinding *binding)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r0: codegen
+      param_2/r1: hardware binding
+      FUN_082c231c: cg_buffer_emit_word
+    notes: >-
+      Raw osos.dec establishes 20 instruction bytes at
+      0x0836816c..0x08368180 followed by the four-byte literal pool at
+      0x08368184; the next separately linked function starts at 0x08368188,
+      for a true 24-byte extent. Verified call count: 0 plain bl sites and
+      0 predicated bl sites in the body; two inbound plain-bl callers are
+      0x082c14e8 and 0x082c150c. The function loads codegen +0x10, combines
+      0xe128f000 with the low nibble of binding +0x0c as Rm, then
+      tail-branches to cg_buffer_emit_word to emit MSR CPSR_f,Rm. Deliberate
+      deviation: Rust calls the canonical emitter rather than tail-branching.
+      Host test:
+      src/codegen/ir.rs::emit_msr_cpsr_flags_masks_rm_and_preserves_emitter_alignment.
 
   - address: 0x082d7870
     ghidra: FUN_082d7870
