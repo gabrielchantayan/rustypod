@@ -162,6 +162,7 @@ pub mod exec_first_column_sql;
 pub mod execute_sql;
 pub mod error_msg;
 pub mod parser_stack_push;
+pub mod create_module_v2;
 pub mod expire_prepared_statements;
 pub mod expr_affinity;
 pub mod expr_and;
