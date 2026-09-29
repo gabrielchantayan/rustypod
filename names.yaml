@@ -58284,6 +58284,33 @@ functions:
       mallocFailed flag here - that is db_str_ndup's job. Ported
       together with db_str_ndup, its assigned caller.
 
+  - address: 0x082c3d0c
+    ghidra: FUN_082c3d0c
+    name: emit_temp_register_ops
+    size: 128
+    sig: "void emit_temp_register_ops(Parse *parse, int first, int second, int third, int fourth)"
+    module: sqlite/emit_temp_register_ops
+    status: ported
+    renames:
+      param_1: parse
+      param_2: first
+      param_3: second
+      param_4: third
+      param_5: fourth
+      iVar1: temp_reg
+    notes: >-
+      Raw ARM establishes the 128-byte extent
+      0x082c3d0c..0x082c3d8c; the following push at 0x082c3d8c starts
+      a distinct function. Three unconditional BL instructions, no
+      predicated BL instructions: get_temp_reg @ 0x0837a3bc once, and
+      vdbe_add_op3 @ 0x08386840 twice. The helper obtains a temporary
+      register, appends OP 0x55 (third, fourth, temp), OP 0x7a (first,
+      second, temp), and OP 0x68 (first, temp, 0) to Parse.pVdbe, then
+      tail-branches to release_temp_reg @ 0x08381f98. Its SQLite source
+      name is not established; the port name describes the verified
+      operation emission. Parse.pVdbe uses the existing host-width
+      pointer field convention at the target +0x0c slot.
+
   # ---- Parse context (src/sqlite/parse.rs) ----
   - address: 0x08381f98
     ghidra: FUN_08381f98
