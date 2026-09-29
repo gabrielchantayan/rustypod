@@ -1182,6 +1182,28 @@ pub unsafe extern "C" fn cg_buffer_emit_word(output: *mut CgCodegenBuffer, value
     let cursor = word(output as *mut u8, CG_CODEGEN_OUTPUT_OFFSET);
     cursor.write(cursor.read().wrapping_add(4));
 }
+/// cg_emit_mrs_cpsr — original: `FUN_083685d4` @ **0x083685d4**
+/// (24 bytes; **0 plain `bl` sites, 0 predicated `bl` sites**; 2 inbound
+/// plain-`bl` callers).
+///
+/// Loads the output buffer from `codegen + 0x10`, reads the low nibble of
+/// `binding + 0x0c`, and tail-branches to [`cg_buffer_emit_word`] with the
+/// ARM instruction `MRS rd, CPSR` (`0xe10f_0000 | (rd << 12)`).
+///
+/// Deliberate deviation: Rust calls the canonical emitter rather than
+/// tail-branching; its externally observable arguments and effects match the
+/// original tail call.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_mrs_cpsr(codegen: *mut CgCodegen, binding: *mut CgBinding) {
+    let resource = (binding as *const u8).add(CG_BINDING_RESOURCE * WORD).read() & 0x0f;
+    let instruction = 0xe10f_0000u32 | (u32::from(resource) << 12);
+    cg_buffer_emit_word(
+        slot(codegen as *mut u8, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer,
+        instruction,
+    );
+}
+
 
 /// cg_buffer_copy_out — original: `FUN_082c2350` @ 0x082c2350
 /// (96 bytes, 1 `bl` call site: 0x0824325c inside the compile-and-patch
@@ -3724,10 +3746,6 @@ pub unsafe extern "C" fn cg_binding_acquire(
 ///
 /// Raw extent is 0x082d7870..0x082d7920; the next function starts at
 /// 0x082d7924. No aligned osos.dec data word references this address.
-/// Deliberate deviation: the complete observable sequence of the 24-byte
-/// unported direct callee `FUN_083685d4` is expressed through the
-/// already-ported canonical word emitter, rather than introducing a second
-/// exported port.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_materialize_cpsr_vreg(codegen: *mut CgCodegen) {
@@ -3755,14 +3773,7 @@ pub unsafe extern "C" fn cg_materialize_cpsr_vreg(codegen: *mut CgCodegen) {
 
     let binding = cg_binding_acquire(codegen as *mut CgCodegen, reg as *mut CgVirtualReg, 0);
     cg_binding_rebind(codegen as *mut CgCodegen, binding, reg as *mut CgVirtualReg);
-    let resource = (binding as *const u8)
-        .add(CG_BINDING_RESOURCE * WORD)
-        .read();
-    let instruction = 0xe10f_0000u32 | (u32::from(resource & 0x0f) << 12);
-    cg_buffer_emit_word(
-        slot(codegen, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer,
-        instruction,
-    );
+    cg_emit_mrs_cpsr(codegen as *mut CgCodegen, binding);
     let flags = word(binding as *mut u8, CG_BINDING_FLAGS);
     flags.write(
         (flags.read() & !CG_BINDING_FLAG_BOUND)
@@ -9972,6 +9983,39 @@ mod tests {
         teardown();
     }
     // --- cg_materialize_cpsr_vreg ------------------------------------
+
+    #[test]
+    fn emit_mrs_cpsr_masks_the_resource_byte_and_uses_the_codegen_output() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut codegen = [0usize; CG_CODEGEN_OUTPUT + 1];
+        let mut binding = [0usize; CG_BINDING_RESOURCE + 1];
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut cell = 0u32;
+
+        unsafe {
+            let saved = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = recording_page_pointer;
+            PAGE_POINTER_CALLS.clear();
+            PAGE_POINTER_RESULT = core::ptr::addr_of_mut!(cell) as *mut u8;
+
+            codegen[CG_CODEGEN_OUTPUT] = output.as_mut_ptr() as usize;
+            binding[CG_BINDING_RESOURCE] = 0xf5;
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 2;
+            cg_emit_mrs_cpsr(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                binding.as_mut_ptr() as *mut CgBinding,
+            );
+
+            *core::ptr::addr_of_mut!(CG_BUFFER_PAGE_POINTER) = saved;
+            assert_eq!(cell, 0xe10f_5000, "only the resource byte's low nibble selects rd");
+            assert_eq!(
+                PAGE_POINTER_CALLS.as_slice(),
+                &[(output.as_mut_ptr() as *mut CgCodegenBuffer, 4)],
+                "the tail emitter aligns the output cursor before resolving its page"
+            );
+            assert_eq!(output[CG_CODEGEN_OUTPUT_OFFSET], 8);
+        }
+    }
 
     struct CpsrMaterializeFixture {
         codegen: [usize; record_size(CG_CODEGEN_BYTES) / WORD],
