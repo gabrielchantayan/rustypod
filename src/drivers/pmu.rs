@@ -95,6 +95,33 @@ unsafe fn pmu_set_register_0x43_bit0(enabled: u32) -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(PMU_SET_REGISTER_0X43_BIT0))(enabled)
 }
 
+/// ABI of the still-unported key-matrix scan `FUN_080d3ce0`.
+type KeyMatrixScanFn = unsafe extern "C" fn() -> u32;
+
+const KEY_MATRIX_SCAN_ADDRESS: usize = 0x080d_3ce0;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn key_matrix_scan() -> u32 {
+    let scan: KeyMatrixScanFn = core::mem::transmute(KEY_MATRIX_SCAN_ADDRESS);
+    scan()
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_key_matrix_scan() -> u32 {
+    panic!("pmu_status_available_without_keypress requires key-matrix scan 0x080d3ce0")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut KEY_MATRIX_SCAN: KeyMatrixScanFn = missing_key_matrix_scan;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn key_matrix_scan() -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(KEY_MATRIX_SCAN))()
+}
+
+
 /// pmu_update_register_0x43_bit0 — original: `FUN_082e5a20` @
 /// `0x082e5a20` (44 bytes; 2 unconditional `bl` call sites, binary-verified).
 ///
@@ -179,6 +206,37 @@ pub unsafe extern "C" fn pmu_board_version_status_bit(
     kernel_sem17_signal();
 
     ((status_byte as u32 >> ((1 - version_0x11) << 1)) & 1) as u32
+}
+
+/// pmu_status_available_without_keypress — original: `FUN_082e576c` @
+/// `0x082e576c` (40 bytes; 2 plain, unconditional callee `bl` instructions,
+/// no predicated calls, binary-verified).
+///
+/// Returns one only when the board-selected PMU status bit is set and the
+/// 3x3 key-matrix scan returns zero; otherwise returns zero. The PMU check
+/// short-circuits the matrix scan when unavailable.
+///
+/// # Deviations
+///
+/// The PMU status-bit callee is already ported. `FUN_080d3ce0` is an
+/// unported key-matrix scan inferred from its verified GPIO threshold-table
+/// behavior, so target builds call its verified address through a no-argument
+/// typed boundary and host tests replace that boundary.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_status_available_without_keypress(
+    incoming_r0: u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    if pmu_board_version_status_available(incoming_r0, incoming_r1, incoming_r2, incoming_r3) != 0
+        && key_matrix_scan() == 0
+    {
+        1
+    } else {
+        0
+    }
 }
 
 /// pmu_board_version_status_available — original: `FUN_082e5794` @
@@ -347,6 +405,29 @@ mod tests {
     static PMU_REGISTER_0X43_BIT0_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut PMU_REGISTER_0X43_BIT0_ENABLED: u32 = 0;
     static mut PMU_REGISTER_0X43_BIT0_STATUS: i32 = 0;
+    static KEY_MATRIX_SCAN_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut KEY_MATRIX_SCAN_RESULT: u32 = 0;
+
+    unsafe extern "C" fn record_key_matrix_scan() -> u32 {
+        KEY_MATRIX_SCAN_RESULT
+    }
+
+    struct KeyMatrixScanFixture;
+
+    impl Drop for KeyMatrixScanFixture {
+        fn drop(&mut self) {
+            unsafe {
+                KEY_MATRIX_SCAN = missing_key_matrix_scan;
+            }
+        }
+    }
+
+    unsafe fn install_key_matrix_scan_for_test(result: u32) -> KeyMatrixScanFixture {
+        KEY_MATRIX_SCAN_RESULT = result;
+        KEY_MATRIX_SCAN = record_key_matrix_scan;
+        KeyMatrixScanFixture
+    }
+
 
     unsafe extern "C" fn record_pmu_set_register_0x43_bit0(enabled: u32) -> i32 {
         PMU_REGISTER_0X43_BIT0_ENABLED = enabled;
@@ -483,6 +564,26 @@ mod tests {
 
         let _i2c = install_raw_i2c_for_test(-5, 0, 0);
         assert_eq!(unsafe { pmu_board_version_status_available(0, 0, 0, 1) }, 1);
+    }
+
+    #[test]
+    fn status_without_keypress_requires_status_then_zero_matrix_scan() {
+        let _lock = KEY_MATRIX_SCAN_TEST_LOCK.lock();
+        let _board = install_host_cached_board_version(0x0011_0000);
+
+        {
+            let _matrix = unsafe { install_key_matrix_scan_for_test(0) };
+            let _i2c = install_raw_i2c_for_test(0, 0, 0);
+            assert_eq!(unsafe { pmu_status_available_without_keypress(0, 0, 0, 0) }, 0);
+        }
+        {
+            let _matrix = unsafe { install_key_matrix_scan_for_test(7) };
+            let _i2c = install_raw_i2c_for_test(0, 0, 1);
+            assert_eq!(unsafe { pmu_status_available_without_keypress(0, 0, 0, 0) }, 0);
+        }
+        let _matrix = unsafe { install_key_matrix_scan_for_test(0) };
+        let _i2c = install_raw_i2c_for_test(0, 0, 1);
+        assert_eq!(unsafe { pmu_status_available_without_keypress(0, 0, 0, 0) }, 1);
     }
     #[test]
     fn other_boards_read_register_12_and_return_bit_two() {
