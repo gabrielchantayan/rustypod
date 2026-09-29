@@ -68,6 +68,7 @@ pub mod notify_wait_enter;
 pub mod pwrcon;
 pub mod pmu;
 pub mod pmu_operation_retry;
+pub mod pmu_powerdown_if_ready;
 pub mod sixteen_slot_identity_init;
 pub mod surface;
 pub mod surface_config_from_image;

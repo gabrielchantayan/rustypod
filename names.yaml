@@ -159460,3 +159460,28 @@ functions:
       sector-number boundaries, and all local validation failures. match.py
       reports the expected structural diff from the Rust wrapper and relocated
       direct call; there are no deliberate deviations.
+
+  # --- PMU powerdown readiness gate (drivers/pmu) ---
+  - address: 0x0836b1f0
+    ghidra: FUN_0836b1f0
+    name: pmu_powerdown_if_ready
+    size: 36
+    sig: "u32 pmu_powerdown_if_ready(u32 value)"
+    module: drivers/pmu_powerdown_if_ready
+    status: ported
+    renames:
+      param_1/r0: value
+      DAT_0836b214: pmu_powerdown_state
+      thunk_FUN_082e5b40: pmu_powerdown_transition
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte instruction body
+      0x0836b1f0..0x0836b213; the following 0x089ca458 literal is not code,
+      and push {r4,lr} at 0x0836b218 begins the next real function. The body
+      has one unconditional BL at 0x0836b208, through veneer 0x080d3de4 to
+      0x082e5b40, and no predicated BL. It reads word +4 of the state at
+      0x089ca458, returns 11 when that word is zero, otherwise forwards the
+      caller word to the verified transition entry and returns zero. The
+      transition's concrete identity is unrecovered: target Rust invokes its
+      verified veneer address while host tests inject a seam. match.py exits
+      1 with the expected structural diff: LLVM loads the +4 word directly,
+      uses bx{eq} lr, and dispatches through the relocated function pointer.
