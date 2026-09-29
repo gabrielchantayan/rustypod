@@ -161728,3 +161728,25 @@ functions:
       decrypted body, so only its verified runtime pointer-list interface is
       modeled. Deliberate host deviation: table entries are native-width
       pointers for fixtures, while firmware reads four-byte ARM pointer words.
+
+  - address: 0x082da7fc
+    ghidra: FUN_082da7fc
+    name: select_coll_seq
+    size: 76
+    sig: "CollSeq *sqlite3SelectCollSeq(Parse *parse, Select *select, int column)"
+    module: sqlite/select_coll_seq
+    status: ported
+    vars: {param_1/r0: parse, param_2/r1: select, param_3/r2: column,
+      iVar1/r0: collation, puVar2/r1: expression}
+    notes: >-
+      Raw osos.dec establishes the exact 76-byte extent
+      0x082da7fc..0x082da848: `push {lr}` at 0x082da848 begins the next
+      function. Whole-image A32 branch decoding finds exactly two inbound
+      unconditional plain BL calls at 0x082da668 and 0x082da820, with no
+      predicated inbound BL. The body makes one unconditional plain BL to
+      itself at 0x082da820 and no predicated BL; its final `b 0x08377bf0`
+      is a tail call to ported sqlite3ExprCollSeq. SQLite 3.5.9's
+      sqlite3SelectCollSeq first resolves the same result column through
+      Select->pPrior, preserving a non-NULL leftmost collation; otherwise it
+      takes the 12-byte ExprList_item at column and resolves its expression.
+      Deliberate deviation: the retail tail branch is a direct Rust call.

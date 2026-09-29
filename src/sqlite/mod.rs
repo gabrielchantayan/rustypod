@@ -180,6 +180,7 @@ pub mod expr_dup;
 pub mod expr_function;
 pub mod expr_height;
 pub mod expr_height_of;
+pub mod select_coll_seq;
 pub mod expr_list_delete;
 pub mod expr_list_append;
 pub mod delete_column_names;

@@ -3543,3 +3543,7 @@ pub static BIG_ENDIAN_BIT_CELL_STORE_TEST_LOCK: parking_lot::Mutex<()> = parking
 pub static PENDING_MAP_SET_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 /// Serializes host tests that replace RTC-seeded random-service callbacks.
 pub static RTC_SEEDED_RANDOM_SERVICE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializes every host test that replaces `sqlite::expr_coll_seq`'s
+/// unresolved collation lookup seam.
+pub static SQLITE_EXPR_COLL_SEQ_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
