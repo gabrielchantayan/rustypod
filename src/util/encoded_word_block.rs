@@ -455,6 +455,53 @@ pub unsafe extern "C" fn copy_inline_encoded_word_block(
         remaining -= 1;
     }
 }
+/// Returns one if every active inline encoded word decodes to zero.
+///
+/// Original: `FUN_083276f0` @ 0x083276f0. Raw decoding establishes an
+/// 84-byte, 21-word leaf from 0x083276f0 through 0x08327740, followed by its
+/// two-word literal pool at 0x08327744..0x08327748; the next real function
+/// begins at 0x0832774c. Complete-image decoding finds two plain inbound
+/// `bl` sites (0x082f7738 and 0x0833be14), zero predicated inbound `bl`
+/// sites, and no calls in this leaf.
+///
+/// The encoded signed count is multiplied by `0x4b6143ff`, negated with
+/// wrapping arithmetic when negative, then used to scan the inline payload
+/// backward. Each raw payload word is multiplied by `0x3399e27f`; the block
+/// is zero only if every decoded word is zero. A zero count, and the
+/// unrepresentable absolute value `i32::MIN`, return one without dereferencing
+/// a payload word. No deliberate deviations.
+///
+/// # Safety
+/// `block` must point to a readable [`InlineEncodedWordBlock`]. When its
+/// decoded count has a nonzero representable magnitude, the inline payload
+/// must contain that many readable, aligned `u32` words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn inline_encoded_word_block_is_zero(
+    block: *const InlineEncodedWordBlock,
+) -> i32 {
+    let decoded_count = (*block)
+        .encoded_count
+        .wrapping_mul(INLINE_ENCODED_COUNT_MULTIPLIER);
+    let mut remaining = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+
+    loop {
+        if remaining < 1 {
+            return 1;
+        }
+        remaining -= 1;
+        let decoded_word = (*block.cast::<u32>().add(remaining as usize + 1))
+            .wrapping_mul(INLINE_ENCODED_WORD_COMPARE_MULTIPLIER);
+        if decoded_word != 0 {
+            return 0;
+        }
+    }
+}
+
 /// Returns the selected magnitude bit from an inline encoded-word block, or
 /// zero when the bit lies outside its decoded word count.
 ///
@@ -650,8 +697,8 @@ mod tests {
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
         copy_inline_encoded_word_block, encoded_word_block_is_zero, encoded_word_block_set_int,
         encoded_word_block_sign, inline_encoded_word_block_compare,
-        inline_encoded_word_block_test_bit, inline_encoded_word_block_write_be_bytes,
-        EncodedWordBlock, InlineEncodedWordBlock,
+        inline_encoded_word_block_is_zero, inline_encoded_word_block_test_bit,
+        inline_encoded_word_block_write_be_bytes, EncodedWordBlock, InlineEncodedWordBlock,
     };
 
     const ENCODED_COUNT_INVERSE: u32 = 0xed99_887f;
@@ -1232,6 +1279,40 @@ mod tests {
                 words[index] = 9u32.wrapping_mul(ENCODED_WORD_MULTIPLIER);
                 assert_eq!(
                     unsafe { encoded_word_block_is_zero(&block) },
+                    0,
+                    "decoded_count {decoded_count}, nonzero index {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_zero_scan_handles_zero_and_minimum_counts_without_reading_words() {
+        let minimum_header =
+            (i32::MIN as u32).wrapping_mul(INLINE_ENCODED_COUNT_INVERSE) as i32;
+        for encoded_count in [0, minimum_header] {
+            let block = [encoded_count as u32];
+            assert_eq!(
+                unsafe { inline_encoded_word_block_is_zero(block.as_ptr().cast()) },
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn inline_zero_scan_checks_signed_counts_and_trailing_words() {
+        for decoded_count in [3, -3] {
+            let mut block = inline_block(decoded_count, &[0, 0, 0, 0xfeed_face]);
+            assert_eq!(
+                unsafe { inline_encoded_word_block_is_zero(block.as_ptr().cast()) },
+                1
+            );
+
+            for index in 0..3 {
+                block = inline_block(decoded_count, &[0, 0, 0, 0xfeed_face]);
+                block[index + 1] = 9u32.wrapping_mul(INLINE_ENCODED_WORD_INVERSE);
+                assert_eq!(
+                    unsafe { inline_encoded_word_block_is_zero(block.as_ptr().cast()) },
                     0,
                     "decoded_count {decoded_count}, nonzero index {index}"
                 );
