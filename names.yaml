@@ -5844,6 +5844,29 @@ functions:
       a resident boundary; target builds dispatch to its verified address and
       host tests use its established recording seam. match.py reports the
       expected structural differences from LLVM's frame and pointer code.
+  - address: 0x082e04fc
+    ghidra: FUN_082e04fc
+    name: volume_table_release_buffer
+    size: 36
+    sig: "void volume_table_release_buffer(u8 *volume_slot)"
+    module: fs/volume_table_release_buffer
+    status: ported
+    renames:
+      param_1/r0/r4: volume_slot
+      param_1+0x20: owned_buffer
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec establishes the exact 36-byte extent
+      0x082e04fc..0x082e051f: ldmia sp!,{r4,pc} at 0x082e051c returns, and
+      the next independent function begins with stmdb sp!,{r4-r8,lr} at
+      0x082e0520. Whole-image ARM decoding finds exactly two incoming plain
+      BL call sites (0x082e5e3c and 0x082e6690) and no predicated BL calls.
+      The sole outbound plain BL is to the already ported free @ 0x0802edc8.
+      A NULL slot or NULL owned-buffer returns; otherwise it frees the
+      +0x20 buffer and then writes zero to that field. Deliberate deviation:
+      the Rust port makes a normal call to the existing free port rather than
+      reproducing the original direct BL, retaining free's established NULL
+      guard and host heap seam.
   - address: 0x082e38b4
     ghidra: FUN_082e38b4
     name: dos_wildcard_match_including_deleted
