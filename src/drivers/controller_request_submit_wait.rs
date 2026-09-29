@@ -33,7 +33,7 @@ const TIMEOUT_USEC: u32 = 1_500;
 static mut HOST_CONTROLLER_WORDS: [u32; 8] = [0; 8];
 
 #[inline(always)]
-unsafe fn controller_words() -> *mut u32 {
+pub(crate) unsafe fn controller_words() -> *mut u32 {
     #[cfg(target_os = "none")]
     {
         CONTROLLER_BASE as *mut u32

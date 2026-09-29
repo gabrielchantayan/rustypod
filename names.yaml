@@ -159177,3 +159177,35 @@ functions:
       behavior. Host builds substitute private controller words; the timing operations
       remain existing Timer E ports. match.py reports the expected structural diff from
       the payload relocation and wrapper frame.
+  - address: 0x0836d8e4
+    ghidra: FUN_0836d8e4
+    name: controller_request_wait_response
+    size: 144
+    sig: "u32 controller_request_wait_response(u32 request)"
+    module: drivers/controller_request_wait_response
+    status: ported
+    renames:
+      param_1/r0: request
+      DAT_0836d970/r6: controller_base (0x3c200000)
+      r9: pending_state
+      r8: start_usec
+      "[controller + 0xc]": response_ready_status
+      "[controller + 0x10]": pending_state_word
+      "[controller + 0x14]": waiting_word
+      "[controller + 0x18]": response_word
+    notes: >-
+      Raw osos.dec establishes the true 144-byte extent
+      0x0836d8e4..0x0836d974: 35 A32 instructions (140 bytes) end with
+      pop {r4-r10,pc}, followed by the 0x3c200000 literal; push {r4-r8,lr}
+      at 0x0836d974 begins the next real function. Direct decoding finds four
+      outbound plain BL instructions at 0x0836d8f4, 0x0836d910, 0x0836d914,
+      and 0x0836d948, with zero predicated BL instructions. It takes the
+      pending-state word, submits the request, and polls a 2000-usec deadline;
+      while the waiting word is set it checks response-ready status. It returns
+      response word 6 only when status bit 0 is set, then restores the waiting
+      word and saved pending state. Existing ports establish all callees:
+      pending_state_take, controller_request_submit_wait, and the IRAM Timer E
+      veneers. Host tests cover ready-response and deadline-expiry paths.
+      match.py reports the expected LLVM structural diff from source-level
+      calls and loop layout. Deliberate deviation: host builds reuse the
+      existing controller MMIO storage seam.
