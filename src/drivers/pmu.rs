@@ -173,6 +173,41 @@ pub unsafe extern "C" fn pmu_write_register_0x0c_one() -> i32 {
 
     status
 }
+/// pmu_write_register_0x39_scaled_value — original: `FUN_082e5468` @
+/// `0x082e5468` (76 bytes; 2 plain inbound `bl` call sites, 0 predicated
+/// inbound `bl`, and 5 plain unconditional callee `bl` instructions,
+/// binary-verified from `osos.dec`).
+///
+/// Holds PMU transaction semaphores 17 then 5 while writing the two-byte
+/// packed selector-6 command to PCF50635 register 0x39. A zero `value` writes
+/// first byte 0x18; every other value writes the low byte of
+/// `(value - 0x321) / 100`. The command's second byte is one. Releases
+/// semaphore 5 then semaphore 17 unconditionally; retail discards the I2C
+/// status.
+///
+/// # Deviation
+///
+/// Retail calls the semaphore veneers, ADS unsigned divider, and packed
+/// selector helper directly. The Rust port uses existing Rust ports; the
+/// direct `bl` edges become ordinary Rust calls and Rust's `u32` division
+/// preserves the verified nonzero-input quotient.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_write_register_0x39_scaled_value(value: u32) {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+
+    let first_byte = if value == 0 {
+        0x18
+    } else {
+        crate::runtime::rt_div::__rt_udiv(value.wrapping_sub(0x321), 100)
+    };
+    crate::drivers::i2c::pmu_i2c_write_packed_selector(6, first_byte, 1);
+
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+}
+
 
 
 /// pmu_board_version_status_bit — original: `FUN_082e5b64` @ `0x082e5b64`
@@ -563,6 +598,29 @@ mod tests {
         assert!(reads.is_empty());
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
     }
+    #[test]
+    fn register_39_scaled_value_serializes_zero_and_wrapped_quotient() {
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+            unsafe { pmu_write_register_0x39_scaled_value(0) };
+
+            let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+            assert_eq!(writes, std::vec![(0x73, 3, 0x39)]);
+            assert!(reads.is_empty());
+            assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![std::vec![0x39, 0x18, 1]]);
+            assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+        unsafe { pmu_write_register_0x39_scaled_value(0x321 + 100 * 0x1ff) };
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert_eq!(writes, std::vec![(0x73, 3, 0x39)]);
+        assert!(reads.is_empty());
+        assert_eq!(unsafe { raw_i2c_packets_for_test() }, std::vec![std::vec![0x39, 0xff, 1]]);
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
     #[test]
     fn register_18_bit_zero_returns_sample_and_zero_after_transfer_error() {
         {
