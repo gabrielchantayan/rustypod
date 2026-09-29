@@ -69,40 +69,6 @@ const AFFINITY_NUMERIC: u8 = b'c';
 const AFFINITY_INTEGER: u8 = b'd';
 const AFFINITY_REAL: u8 = b'e';
 
-#[inline]
-fn upper_to_lower(byte: u8) -> u8 {
-    if byte >= b'A' && byte <= b'Z' {
-        byte + (b'a' - b'A')
-    } else {
-        byte
-    }
-}
-
-/// The `sqlite3AffinityType` body reached by the retail function's `TK_CAST`
-/// tail branch. It scans exactly `token.n_and_dyn >> 1` bytes.
-unsafe fn affinity_type(token: *const Token) -> u8 {
-    let mut affinity = AFFINITY_NUMERIC;
-    let mut rolling = 0_u32;
-    let text = (*token).text;
-    let length = ((*token).n_and_dyn >> 1) as usize;
-
-    for index in 0..length {
-        rolling = (rolling << 8).wrapping_add(upper_to_lower(*text.add(index)) as u32);
-        match rolling {
-            0x6368_6172 | 0x636c_6f62 | 0x7465_7874 => affinity = AFFINITY_TEXT,
-            0x626c_6f62 if affinity == AFFINITY_NUMERIC || affinity == AFFINITY_REAL => {
-                affinity = AFFINITY_BLOB;
-            }
-            0x7265_616c | 0x666c_6f61 | 0x646f_7562 if affinity == AFFINITY_NUMERIC => {
-                affinity = AFFINITY_REAL;
-            }
-            _ if rolling & 0x00ff_ffff == 0x0069_6e74 => return AFFINITY_INTEGER,
-            _ => {}
-        }
-    }
-
-    affinity
-}
 
 /// `expr_affinity` — original: `FUN_083768e0` @ `0x083768e0` (48 bytes).
 ///
@@ -113,10 +79,8 @@ unsafe fn affinity_type(token: *const Token) -> u8 {
 /// `0x083735c0`, and `0x08382448`. This is SQLite 3.5.9's
 /// `sqlite3ExprAffinity`: a `TK_SELECT` (110) follows
 /// `select->expressions->items[0].expr`; a `TK_CAST` (31) classifies its
-/// token's bounded type name; every other expression returns its affinity
-/// byte. Deliberate deviation: retail tail-branches to the unported 192-byte
-/// `sqlite3AffinityType` at `0x0836e90c`; its verified byte-scan is inlined
-/// here, avoiding a new dispatch seam while preserving the returned affinity.
+/// token's bounded type name through `sqlite3AffinityType` at `0x0836e90c`;
+/// every other expression returns its affinity. Deliberate deviations: none.
 ///
 /// # Safety
 /// `expr` must name a valid SQLite expression. A `TK_SELECT` expression must
@@ -130,7 +94,7 @@ pub unsafe extern "C" fn expr_affinity(mut expr: *mut Expr) -> u8 {
     }
 
     if (*expr).op == TK_CAST {
-        affinity_type(core::ptr::addr_of!((*expr).token))
+        super::affinity_type::sqlite3_affinity_type(core::ptr::addr_of!((*expr).token))
     } else {
         (*expr).affinity
     }
