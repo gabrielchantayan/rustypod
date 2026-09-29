@@ -128911,6 +128911,32 @@ functions:
       word, all explicit ports, and the default-to-port-three path. Deliberate
       deviations: hardware names for the control word and bit 17 remain
       unverified, so the source uses behavior-oriented recovery names.
+  # --- Controller mode selection and settling ---
+  - address: 0x0836e118
+    ghidra: FUN_0836e118
+    name: controller_mode_set_and_settle
+    size: 76
+    sig: "u32 controller_mode_set_and_settle(u32 mode)"
+    module: drivers/controller_mode_set_and_settle
+    status: ported
+    renames:
+      param_1/r0: mode
+      "0x3c400018": controller_timer_config
+      "0x3c400030": controller_control
+      "0x38400e00": controller_state
+    notes: >-
+      Raw osos.dec establishes the 76-byte extent from 0x0836e118 through
+      0x0836e160; the next separately linked function begins at 0x0836e164.
+      It calls clear_controller_state_and_delay, performs the exact mode
+      updates to the two otherwise unidentified controller words, then stores
+      one to controller state and tail-branches to the 10-usec delay path.
+      Direct raw decoding finds two unconditional BL callers at 0x08108260
+      and 0x081082d0, zero predicated BL callers, and no direct tail-B
+      callers. match.py reports the expected structural diff: the Rust port
+      inlines the unported 0x080b1b50 three-way timer-config write and calls
+      the existing delay seams rather than preserving ARM's tail branch.
+      Host tests cover modes zero, one, two, and an unsupported mode.
+
 
   # --- Format-specific default cache-position value writer ---
   - address: 0x082e3bcc
