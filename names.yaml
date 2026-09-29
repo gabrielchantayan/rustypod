@@ -110209,6 +110209,29 @@ functions:
       preservation, signed high-bit grow, and NULL-source no-terminator
       behavior.
 
+  # --- Retail control code submit ---
+  - address: 0x0836e224
+    ghidra: FUN_0836e224
+    name: retail_control_submit_code
+    size: 16
+    sig: "i32 retail_control_submit_code(u32 code)"
+    module: app/retail_control_submit_code
+    status: ported
+    renames:
+      param_1/r0: code
+      FUN_0836e3c8: i2c_0x39_write_register
+    notes: >-
+      Raw osos.dec words establish the exact 16-byte A32 body
+      0x0836e224..0x0836e234; 0x0836e234 begins the next real function.
+      The body is mvn r0,r0; and r1,r0,#0xff; mov r0,#3; b 0x0836e3c8:
+      it writes the low-byte complement of code to I2C slave 0x39 register
+      3 and preserves the callee status as its return. It has no direct bl
+      instruction, plain or predicated. Decoding all ARM B/BL immediates
+      finds two inbound direct calls, both unconditional bl, at 0x080845e8
+      and 0x080f4c04. Rust calls the existing i2c_0x39_write_register port
+      rather than reproducing the stock tail branch; its returned status and
+      wire-visible arguments are preserved.
+
   # --- I2C slave 0x39 one-byte register read ---
   - address: 0x0836e36c
     ghidra: FUN_0836e36c

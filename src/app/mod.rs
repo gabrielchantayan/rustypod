@@ -701,6 +701,7 @@ pub mod app_command_63800021_dispatch;
 pub mod message_selector_read;
 pub mod control_profile_mode_apply;
 pub mod retail_control_profile_apply;
+pub mod retail_control_submit_code;
 pub mod initializer_profile_dispatch;
 pub mod guarded_global_index_transform;
 pub mod string_pointer_list_join;
