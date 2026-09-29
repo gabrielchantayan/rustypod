@@ -47,6 +47,7 @@ unsafe fn word(record: *mut u8, index: usize) -> *mut usize {
 /// operand or filled from the stack-slot allocator reachable from
 /// `codegen +0x208`.  The return and cache are signed 32-bit frame offsets.
 #[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
 pub unsafe extern "C" fn cg_operand_stack_offset(
     codegen: *mut CgCodegen,
     operand: *mut CgStackOperand,

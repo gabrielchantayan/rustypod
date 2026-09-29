@@ -3438,6 +3438,55 @@ unsafe fn cg_binding_mask_allows(binding: *mut u8, mask: u32) -> bool {
     let resource = word(binding, CG_BINDING_RESOURCE).read();
     resource < u32::BITS as usize && mask & (1u32 << resource) != 0
 }
+/// cg_emit_stack_store — original: `FUN_083685f0` @ **0x083685f0** (140
+/// bytes; **2 direct `bl` call sites**, both plain at 0x082c5cf8 and
+/// 0x082cea9c; no predicated `bl` forms).
+///
+/// Resolves `operand`'s signed frame offset, then emits one ARM `str` word
+/// that spills the hardware register selected by `binding +0x0c` to that
+/// frame-pointer-relative stack slot. The offset resolver is deliberately
+/// called up to three times: values outside `[-0x1000, 0x1000)` clamp to the
+/// matching 12-bit displacement limit, while an in-range value is resolved a
+/// third time and encoded exactly as returned. The binding's bound flag is
+/// cleared after emission.
+///
+/// Deliberate deviation: this uses Rust's `unsigned_abs` rather than the
+/// original `rsblt`; both preserve `i32::MIN` as `0x8000_0000`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_stack_store(
+    codegen: *mut CgCodegen,
+    binding: *mut CgBinding,
+    operand: *mut CgVirtualReg,
+) {
+    let codegen_bytes = codegen as *mut u8;
+    let binding_bytes = binding as *mut u8;
+    let operand = operand as *mut crate::stdio::cg_stack_slot::CgStackOperand;
+    let offset = crate::stdio::cg_stack_slot::cg_operand_stack_offset(codegen, operand);
+    let offset = if offset <= -0x1000 {
+        -0x0fff
+    } else {
+        let offset = crate::stdio::cg_stack_slot::cg_operand_stack_offset(codegen, operand);
+        if offset >= 0x1000 {
+            0x0fff
+        } else {
+            crate::stdio::cg_stack_slot::cg_operand_stack_offset(codegen, operand)
+        }
+    };
+    let resource = word(binding_bytes, CG_BINDING_RESOURCE).read() as u8 as u32;
+    let instruction = 0xe50b_0000
+        | offset.unsigned_abs()
+        | (resource << 12)
+        | if offset >= 0 { 0x0080_0000 } else { 0 };
+
+    cg_buffer_emit_word(
+        slot(codegen_bytes, CG_CODEGEN_OUTPUT).read() as *mut CgCodegenBuffer,
+        instruction,
+    );
+    let flags = word(binding_bytes, CG_BINDING_FLAGS);
+    flags.write(flags.read() & !CG_BINDING_FLAG_BOUND);
+}
+
 
 /// The direct callees of [`cg_binding_acquire`] and
 /// [`cg_binding_release`]. [`cg_binding_unlink`] and
@@ -3452,9 +3501,8 @@ pub struct CgBindingAcquireOps {
     /// `FUN_082c5c58` @ 0x082c5c58: release a selected active binding.
     /// PORTED as [`cg_binding_release`].
     pub binding_release: unsafe extern "C" fn(codegen: *mut CgCodegen, node: *mut CgBinding),
-    /// Direct callee `FUN_083685f0` @ 0x083685f0 of
-    /// [`cg_binding_release`]. Its identity is not yet recovered; it
-    /// receives the codegen, binding, and its previously bound register.
+    /// `cg_emit_stack_store` ports direct callee `FUN_083685f0` @
+    /// 0x083685f0: emit the bound hardware register's stack spill.
     pub binding_release_effect:
         unsafe extern "C" fn(codegen: *mut CgCodegen, node: *mut CgBinding, reg: *mut CgVirtualReg),
     /// `FUN_083673b0` @ 0x083673b0: remove a free binding from its anchor.
@@ -3465,10 +3513,11 @@ pub struct CgBindingAcquireOps {
 
 unsafe extern "C" fn default_cg_binding_promote(_anchor: *mut u8, _node: *mut CgBinding) {}
 unsafe extern "C" fn default_cg_binding_release_effect(
-    _codegen: *mut CgCodegen,
-    _node: *mut CgBinding,
-    _reg: *mut CgVirtualReg,
+    codegen: *mut CgCodegen,
+    node: *mut CgBinding,
+    reg: *mut CgVirtualReg,
 ) {
+    cg_emit_stack_store(codegen, node, reg);
 }
 
 /// The wired defaults of [`CG_BINDING_ACQUIRE_OPS`].
@@ -3502,9 +3551,9 @@ pub static mut CG_BINDING_ACQUIRE_OPS: CgBindingAcquireOps = DEFAULT_CG_BINDING_
 /// Raw ARM's `bic r0,#0x200; and r1,#0x100,r0,lsr #1; bic r0,#0x100`
 /// sequence at 0x082c5d04-0x082c5d10 makes the apparent 0x200→0x100
 /// shift dead, so the precise result is `flags & !0x300`; Ghidra drops
-/// the 0x200 clear. Deliberate deviation: only direct callee
-/// `FUN_083685f0` remains an inert seam; its identity is deliberately
-/// not inferred.
+/// the 0x200 clear. The release-effect default is now the ported
+/// [`cg_emit_stack_store`]; the remaining list-operation seams retain
+/// their ported defaults for host-test interception.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *mut CgBinding) {
@@ -3605,10 +3654,10 @@ pub unsafe extern "C" fn cg_release_call_clobbered_bindings(codegen: *mut CgCode
 /// original, no eligible binding reaches the release/unlink path as NULL.
 ///
 /// Deliberate deviation: only `FUN_08367390` remains a documented
-/// no-op promotion seam in [`CG_BINDING_ACQUIRE_OPS`], and the ported
-/// [`cg_binding_release`] retains the no-op seam for direct callee
-/// `FUN_083685f0`. Both list operations are now direct port defaults.
-/// The raw branch census found no data word referencing 0x082b3c34.
+/// no-op promotion seam in [`CG_BINDING_ACQUIRE_OPS`]. The release effect
+/// is now the ported [`cg_emit_stack_store`]; both list operations retain
+/// their ported defaults. The raw branch census found no data word
+/// referencing 0x082b3c34.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cg_binding_acquire(
@@ -4170,6 +4219,7 @@ pub unsafe extern "C" fn cg_cell_table_cell_destroy(cell: *mut u8) {
         return;
     }
 
+
     let allocator =
         (cell.add(CG_CELL_ALLOCATOR) as *const u32).read_volatile() as usize as *mut u8;
     crate::heap::allocator_registry_release::allocator_registry_release(allocator, buffer);
@@ -4219,6 +4269,15 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     static LOCK: Mutex<()> = Mutex::new(());
+
+    static mut STACK_STORE_PAGE: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn stack_store_page_pointer(
+        _output: *mut CgCodegenBuffer,
+        _offset: usize,
+    ) -> *mut u8 {
+        STACK_STORE_PAGE
+    }
 
     /// Header the test allocator prepends so `free` can rebuild the layout.
     const HDR: usize = 16;
@@ -9587,6 +9646,59 @@ mod tests {
         teardown();
     }
 
+    #[test]
+    fn emit_stack_store_encodes_signed_and_clamped_frame_offsets() {
+        let _g = setup();
+        let mut codegen = [0usize; 0x208 / 4 + 1];
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut binding = [0usize; 7];
+        let mut operand = [0usize; record_size(CG_VREG_BYTES) / WORD];
+        let mut emitted = 0u32;
+        unsafe {
+            let saved_page_pointer = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            STACK_STORE_PAGE = &mut emitted as *mut u32 as *mut u8;
+            CG_BUFFER_PAGE_POINTER = stack_store_page_pointer;
+            codegen[CG_CODEGEN_OUTPUT] = output.as_mut_ptr() as usize;
+            binding[CG_BINDING_RESOURCE] = 13;
+
+            operand[0x14 / 4] = (-0x2c_i32) as u32 as usize;
+            binding[CG_BINDING_FLAGS] = CG_BINDING_FLAG_BOUND | 0x40;
+            cg_emit_stack_store(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                binding.as_mut_ptr() as *mut CgBinding,
+                operand.as_mut_ptr() as *mut CgVirtualReg,
+            );
+            assert_eq!(emitted, 0xe50b_d02c, "negative offsets use the ARM down bit");
+            assert_eq!(output[CG_CODEGEN_OUTPUT_OFFSET], 4);
+            assert_eq!(binding[CG_BINDING_FLAGS], 0x40);
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 0;
+            binding[CG_BINDING_RESOURCE] = 1;
+            binding[CG_BINDING_FLAGS] = CG_BINDING_FLAG_BOUND;
+            operand[0x14 / 4] = 0x2000;
+            cg_emit_stack_store(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                binding.as_mut_ptr() as *mut CgBinding,
+                operand.as_mut_ptr() as *mut CgVirtualReg,
+            );
+            assert_eq!(emitted, 0xe58b_1fff, "positive overflow clamps to +0xfff");
+            assert_eq!(binding[CG_BINDING_FLAGS], 0);
+
+            output[CG_CODEGEN_OUTPUT_OFFSET] = 0;
+            binding[CG_BINDING_RESOURCE] = 0;
+            operand[0x14 / 4] = (-0x1000_i32) as u32 as usize;
+            cg_emit_stack_store(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                binding.as_mut_ptr() as *mut CgBinding,
+                operand.as_mut_ptr() as *mut CgVirtualReg,
+            );
+            assert_eq!(emitted, 0xe50b_0fff, "negative boundary clamps to -0xfff");
+
+            CG_BUFFER_PAGE_POINTER = saved_page_pointer;
+            STACK_STORE_PAGE = core::ptr::null_mut();
+        }
+    }
+
     // --- cg_release_call_clobbered_bindings --------------------------
 
     struct CallClobberedReleaseFixture {
@@ -9847,16 +9959,13 @@ mod tests {
     }
 
     #[test]
-    fn binding_acquire_seams_wire_the_ported_release_helper() {
+    fn binding_acquire_seams_wire_the_ported_release_effect() {
         let _g = setup();
         unsafe {
             let ops = hook(core::ptr::addr_of!(CG_BINDING_ACQUIRE_OPS));
             assert_eq!(ops.binding_promote as usize, default_cg_binding_promote as usize);
             assert_eq!(ops.binding_release as usize, cg_binding_release as usize);
-            assert_eq!(
-                ops.binding_release_effect as usize,
-                default_cg_binding_release_effect as usize
-            );
+            assert_eq!(ops.binding_release_effect as usize, default_cg_binding_release_effect as usize);
             assert_eq!(ops.binding_unlink as usize, cg_binding_unlink as usize);
             assert_eq!(ops.binding_push as usize, cg_binding_push as usize);
         }
