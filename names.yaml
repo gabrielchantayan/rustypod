@@ -160170,3 +160170,35 @@ functions:
       returning function would invent observable behavior. Retain identified
       until the callee contract and a reachable return/nonlocal-exit path are
       established.
+
+  - address: 0x083385b8
+    ghidra: FUN_083385b8
+    name: hmac_finalize
+    size: 92
+    sig: "void hmac_finalize(u8 *output, HmacCtx *ctx)"
+    module: crypto/hmac_finalize
+    status: ported
+    renames:
+      param_1/r6: output
+      param_2/r4: ctx
+      auStack_24/r5: inner_digest
+      param_2_plus_0x68: outer_pad
+      FUN_082fbbfc: core_digest_final
+      FUN_082f0a1c: digest_init
+      FUN_08338384: digest_update
+      FUN_08318200: output_digest_final
+    notes: >-
+      Raw osos.dec establishes the exact 92-byte A32 extent
+      0x083385b8..0x08338614; the next separately linked function starts
+      with push {r4-r11,lr} at 0x08338614. The body has five unconditional
+      direct BL instructions, to core_digest_final @ 0x082fbbfc,
+      digest_init @ 0x082f0a1c, digest_update @ 0x08338384 twice, and
+      output_digest_final @ 0x08318200; no predicated BL occurs. Whole-image
+      branch decoding finds exactly two inbound plain unconditional BL sites
+      and no predicated inbound BL sites. It finalizes the inner digest into
+      a 20-byte stack local, reinitializes the context from its selector,
+      digests the saved 64-byte outer pad and the inner output length, then
+      invokes the output transform. Rust's four-byte-aligned local replaces
+      retail's sp+4 local without changing its bytes. The unported core-final
+      and output-transform callees are volatile fixed-address seams; existing
+      digest_init and digest_update interfaces preserve their call boundaries.
