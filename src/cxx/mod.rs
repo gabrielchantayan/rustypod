@@ -278,6 +278,7 @@ pub mod owned_offset_object_delete;
 pub mod opaque_owned_record_destroy;
 pub mod optional_vtable_slot4_invoke;
 pub mod optional_vtable_slot4_dispatch;
+pub mod optional_vtable_slot_20_dispatch;
 pub mod optional_vtable_slot4_invoke_737c;
 pub mod buffered_read_context_destroy;
 pub mod stream_read_u64;

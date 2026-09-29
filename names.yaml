@@ -161655,3 +161655,25 @@ functions:
       Deliberate deviations: the unported helper remains a verified resident
       address call on target and a recording host seam; target pointer fields
       remain u32 reads on every host.
+  - address: 0x082dc290
+    ghidra: FUN_082dc290
+    name: optional_vtable_slot_20_dispatch
+    size: 24
+    sig: "u32 optional_vtable_slot_20_dispatch(void *object)"
+    module: cxx/optional_vtable_slot_20_dispatch
+    status: ported
+    renames:
+      param_1/r0: object
+      r2: vtable_or_method
+      "[vtable + 0x20]": vtable_slot_20_method
+    notes: >-
+      Raw osos.dec establishes the exact six-word, 24-byte extent
+      0x082dc290..0x082dc2a8: ldr r2,[r0] through bx lr; the following push
+      at 0x082dc2a8 begins the next real function. Complete-image ARM decoding
+      finds two inbound plain BL sites (0x082ddbe8, 0x082de840), zero
+      predicated inbound BL sites, and no direct outbound BL instructions.
+      It returns zero for a NULL object; otherwise it tail-dispatches the
+      object's vtable slot +0x20 with object unchanged in r0 and returns that
+      method's result. The virtual target has no recovered semantic identity,
+      so it is represented only by its verified slot. Deliberate host
+      deviation: native-width vtable entries model ARM's four-byte words.
