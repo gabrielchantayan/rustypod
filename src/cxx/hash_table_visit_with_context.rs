@@ -29,7 +29,7 @@ pub type HashTableBucketChainVisitor = unsafe extern "C" fn(
     *mut u8,
     u32,
     Option<unsafe extern "C" fn(u32)>,
-    HashTableValueCallback,
+    Option<HashTableValueCallback>,
     u32,
 );
 
@@ -38,7 +38,7 @@ unsafe extern "C" fn firmware_hash_table_bucket_chain_visitor(
     table: *mut u8,
     mode: u32,
     mode_zero_callback: Option<unsafe extern "C" fn(u32)>,
-    callback: HashTableValueCallback,
+    callback: Option<HashTableValueCallback>,
     context: u32,
 ) {
     let visit: HashTableBucketChainVisitor =
@@ -51,10 +51,10 @@ unsafe extern "C" fn missing_hash_table_bucket_chain_visitor(
     _table: *mut u8,
     _mode: u32,
     _mode_zero_callback: Option<unsafe extern "C" fn(u32)>,
-    _callback: HashTableValueCallback,
+    _callback: Option<HashTableValueCallback>,
     _context: u32,
 ) {
-    panic!("hash_table_visit_with_context requires visitor 0x080846f4")
+    panic!("hash table visitor requires visitor 0x080846f4")
 }
 
 /// Boundary for the unported bucket-chain visitor. Device builds call its fixed
@@ -66,6 +66,10 @@ pub static mut HASH_TABLE_BUCKET_CHAIN_VISITOR: HashTableBucketChainVisitor =
 #[cfg(not(target_os = "none"))]
 pub static mut HASH_TABLE_BUCKET_CHAIN_VISITOR: HashTableBucketChainVisitor =
     missing_hash_table_bucket_chain_visitor;
+
+#[cfg(test)]
+pub(crate) static HASH_TABLE_VISITOR_SEAM_LOCK: parking_lot::Mutex<()> =
+    parking_lot::Mutex::new(());
 
 /// `hash_table_visit_with_context` — original `FUN_082d7bd4` @ `0x082d7bd4`.
 ///
@@ -80,7 +84,7 @@ pub unsafe extern "C" fn hash_table_visit_with_context(
     context: u32,
 ) {
     let visit = core::ptr::read_volatile(addr_of!(HASH_TABLE_BUCKET_CHAIN_VISITOR));
-    visit(table, 1, None, callback, context);
+    visit(table, 1, None, Some(callback), context);
 }
 
 #[cfg(test)]
@@ -88,23 +92,21 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use parking_lot::Mutex;
-
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
+    
     static mut CALLS: std::vec::Vec<(usize, u32, bool, usize, u32)> = std::vec::Vec::new();
 
     unsafe extern "C" fn recording_visitor(
         table: *mut u8,
         mode: u32,
         mode_zero_callback: Option<unsafe extern "C" fn(u32)>,
-        callback: HashTableValueCallback,
+        callback: Option<HashTableValueCallback>,
         context: u32,
     ) {
         (*core::ptr::addr_of_mut!(CALLS)).push((
             table as usize,
             mode,
             mode_zero_callback.is_some(),
-            callback as usize,
+            callback.map_or(0, |callback| callback as usize),
             context,
         ));
     }
@@ -133,7 +135,7 @@ mod tests {
 
     #[test]
     fn fixes_mode_and_forwards_callback_context_and_table() {
-        let _lock = SEAM_LOCK.lock();
+        let _lock = HASH_TABLE_VISITOR_SEAM_LOCK.lock();
         let _seam = unsafe { SeamGuard::install() };
         for (table, context) in [(core::ptr::null_mut(), 0), (0x1234_5678usize as *mut u8, u32::MAX)] {
             unsafe { hash_table_visit_with_context(table, callback, context) };
