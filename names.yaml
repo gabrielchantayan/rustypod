@@ -162759,3 +162759,30 @@ functions:
       0x082553e4 has no verified semantic identity, so Rust keeps the value
       opaque, calls the resident target on-device, and exposes a recording
       seam for host tests.
+
+  - address: 0x082cd9b4
+    ghidra: FUN_082cd9b4
+    name: cg_expression_linked_collection_dependency_mask
+    size: 148
+    sig: "u64 cg_expression_linked_collection_dependency_mask(const u32 *context, const u8 *record)"
+    module: codegen/expression_linked_collection_dependency_mask
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: record
+      r4: record
+      r5/r0: mask_low
+      r6/r1: mask_high
+      r7: context
+      FUN_082cd8c4: cg_expression_collection_dependency_mask
+      FUN_082cda48: cg_expression_dependency_mask
+    notes: >-
+      Raw osos.dec A32 words establish the exact 148-byte body from
+      0x082cd9b4 through 0x082cda44; the push at 0x082cda48 starts the next
+      real function. It has five outbound plain BL instructions at 0x082cd9d4,
+      0x082cd9e8, 0x082cd9fc, 0x082cda10, and 0x082cda24, and no predicated
+      BL instructions. Complete-image decoding finds two inbound plain BL sites
+      at 0x082cd020 and 0x082cdab8, with no predicated inbound calls. It walks
+      a NULL-terminated chain of nine-word records and ORs masks from
+      collections at words 0, 5, and 7 and expressions at words 4 and 6.
+      Deliberate deviations: none; Rust reads all links as 32-bit target words.

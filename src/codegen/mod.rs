@@ -37,6 +37,9 @@ pub mod exp_golomb;
 /// `cg_expression_collection_dependency_mask` @ 0x082cd8c4 — ORs the
 /// dependency masks of a counted collection's 12-byte expression entries.
 pub mod expression_collection_dependency_mask;
+/// `cg_expression_linked_collection_dependency_mask` @ 0x082cd9b4 — ORs
+/// dependency masks from a linked record's three collections and two nodes.
+pub mod expression_linked_collection_dependency_mask;
 /// `cg_expression_dependency_mask` @ 0x082cda48 — recursively combines
 /// an opaque expression node's two child and two collection dependency masks.
 pub mod expression_dependency_mask;
