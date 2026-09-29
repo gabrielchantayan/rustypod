@@ -571,6 +571,32 @@ pub unsafe extern "C" fn pmu_i2c_write(reg: u32, len: i32, data: *const u8) -> i
     }
     i2c_write(PMU_I2C_SLAVE, (len as u32).wrapping_add(1), packet.as_ptr())
 }
+/// pmu_write_register_0x29_boolean — original: `FUN_0836d23c` @
+/// 0x0836d23c (36 bytes; 2 inbound plain `bl` call sites, 0 predicated
+/// inbound `bl` call sites; one unconditional body `bl`).
+///
+/// Converts `enabled` to the canonical byte boolean and writes it to PCF50635
+/// register 0x29 through [`pmu_i2c_write`]. Raw words establish the exact
+/// extent 0x0836d23c..0x0836d25c: `cmp r0,#0; push {r3,lr}; movne r0,#1;
+/// str r0,[sp]; mov r0,#0x29; mov r2,sp; mov r1,#1; bl 0x0836d524; pop
+/// {r12,pc}`. The following `push {r2,r3,r4,r5,r6,r7,r8,r9,r10,lr}` at
+/// 0x0836d260 begins the next real function. The two direct callers are
+/// unconditional `bl` instructions at 0x082e59c4 and 0x082e5b54.
+///
+/// # Deliberate deviations
+///
+/// The direct retail `bl` becomes an ordinary Rust call to the existing
+/// `pmu_i2c_write` port. Although Ghidra declares this routine `void`, the
+/// raw epilogue preserves the transfer status in r0, so this port returns it.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_write_register_0x29_boolean(enabled: u32) -> i32 {
+    let value = (enabled != 0) as u8;
+    pmu_i2c_write(0x29, 1, &value)
+}
+
+
+
 /// pmu_write_mode_registers — original: `FUN_0836d560` @ 0x0836d560
 /// (72 bytes; 2 plain `bl` call sites, 0 predicated `bl` call sites,
 /// binary-verified by decoding every B/BL word in osos.dec).
@@ -1399,6 +1425,22 @@ pub(crate) mod tests {
         }
         restore_raw(guard);
     }
+    #[test]
+    fn register_0x29_write_canonicalizes_boolean_and_preserves_status() {
+        let guard = install_raw(0, 0);
+        unsafe {
+            assert_eq!(pmu_write_register_0x29_boolean(0), 0);
+            *addr_of_mut!(RAW_WRITE_STATUS) = -5;
+            assert_eq!(pmu_write_register_0x29_boolean(0xfeed_beef), -5);
+            assert_eq!(
+                (*addr_of!(RAW_WRITE_PACKETS)).clone(),
+                std::vec![std::vec![0x29, 0], std::vec![0x29, 1]],
+                "cmp/movne serializes zero as zero and every nonzero input as one"
+            );
+        }
+        restore_raw(guard);
+    }
+
     #[test]
     fn mode_register_write_serializes_boolean_mode_and_returns_final_status() {
         let guard = install_raw(0, 0);
