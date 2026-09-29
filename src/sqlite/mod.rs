@@ -331,6 +331,7 @@ pub mod snprintf;
 pub mod str_accum;
 pub mod strdup;
 pub mod stmt_lru_remove;
+pub mod stream_flags_configure;
 pub mod token_copy;
 pub mod token_init;
 pub mod trigger_delete;
