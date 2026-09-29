@@ -161249,3 +161249,35 @@ functions:
       host tests install a recording seam. match.py exits 1 with the expected
       structural diff: LLVM frame setup and tail call replace the retail
       callee-saved frame and bl/cmp sequence.
+
+
+  # --- FAT directory-entry cache-block index lookup ---
+  - address: 0x082e1448
+    ghidra: FUN_082e1448
+    name: fat_dirent_block_index
+    size: 60
+    sig: "u32 fat_dirent_block_index(const FatDirentHandle *handle)"
+    module: fs/fat_dirent_block_index
+    status: ported
+    renames:
+      param_1/r0/r4: handle
+      param_1_plus_0x08: cached directory block index
+      param_1_plus_0x14: directory flag
+      FUN_082e2a48: fat_dirent_is_directory
+      FUN_082e1378: fat_dirent_start_cluster
+      FUN_082e01cc: fat_cluster_to_block_index
+    notes: >-
+      Raw osos.dec establishes the exact 60-byte extent 0x082e1448..0x082e1483:
+      the separately entered next function begins with push {r4,lr} at
+      0x082e1484. Decoding every ARM immediate-branch instruction establishes
+      exactly two outbound plain unconditional bl calls, at 0x082e1450 to
+      fat_dirent_is_directory and 0x082e1474 to fat_dirent_start_cluster, with
+      no predicated bl forms. Directory handles return their cached +0x08 word
+      without dereferencing volume or entry; other handles derive the start
+      cluster and tail-branch at 0x082e1480 to fat_cluster_to_block_index.
+      match.py exits 1 with the expected structural diff: LLVM saves extra
+      callee registers and emits relocatable calls while preserving the branch
+      shape. Deliberate deviation: Rust represents the stock tail branch as an
+      ordinary call; its returned u32 and observable memory accesses are the
+      same. Host tests cover the directory short circuit, FAT16 low-cluster
+      mapping, and FAT32 bounded-cluster rejection.
