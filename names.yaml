@@ -5792,6 +5792,39 @@ functions:
       before each wrapping byte addition, and returns the result zero-extended
       in r0. This is the FAT LFN checksum. No deliberate deviations; the Rust
       fixed-count loop is equivalent to the retail index-mask loop.
+  - address: 0x082e026c
+    ghidra: FUN_082e026c
+    name: allocate_cache_position
+    size: 152
+    sig: "u32 allocate_cache_position(u8 *cache, u32 requested_position, u32 unused, u32 packed_value)"
+    module: fs/cache_position_allocate
+    status: ported
+    renames:
+      param_1/r0/r5: cache
+      param_2/r1/r6: requested_position
+      param_3/r2: unused
+      param_4/r3: packed_value
+      r4: found_position
+      "cache+0x7c": fallback_end
+      "cache+0x1ec": primary_end
+      "cache+0x1f4": outstanding_count
+      FUN_082e1098: find_zero_cache_position
+      FUN_082e3bcc: cache_position_write_default_value
+    notes: >-
+      Raw osos.dec words establish the exact 152-byte extent from 0x082e026c
+      through the pop at 0x082e0300; the next separately entered function
+      begins with push {r4,r5,r6,lr} at 0x082e0304. Decoding every instruction
+      finds four direct calls, all unconditional plain BL at 0x082e0294,
+      0x082e02ac, 0x082e02c4, and 0x082e02d8; there are zero predicated BL
+      calls. The routine normalizes the requested position to two when below
+      two or not below cache+0x1ec, searches the primary, wraparound, then
+      fallback ranges for a zero position, initializes it with the
+      format-specific default writer, and decrements a nonzero cache+0x1f4
+      counter only after a successful write. Raw register flow proves r3 is
+      preserved by FUN_082e1098 and forwarded unchanged to FUN_082e3bcc;
+      Rust exposes that ABI value as packed_value and names incoming r2 unused.
+      No other deliberate deviations: existing ports provide both callees and
+      host tests record their shared resident seams.
   - address: 0x082e36c8
     ghidra: FUN_082e36c8
     name: fat_cursor_advance_block
