@@ -46097,6 +46097,32 @@ functions:
       match.py reports LLVM frame/call-layout differences but retains the
       decoder walk, conditional pair skip, rewind, and component-count flow.
       No deliberate deviations.
+  - address: 0x082cf988
+    ghidra: FUN_082cf988
+    name: ft_glyphslot_alloc_bitmap
+    size: 92
+    sig: "i32 ft_glyphslot_alloc_bitmap(FtGlyphSlot *slot, i32 size)"
+    module: ft/glyph_slot
+    status: ported
+    vars:
+      param_1: slot
+      param_2: size
+      uVar1: bitmap_flags
+      uVar2: memory
+      local_18: error
+    notes: >-
+      FreeType ft_glyphslot_alloc_bitmap (ftobjs.c). Raw ARM words establish
+      the true 92-byte extent 0x082cf988..0x082cf9e3, ending before
+      ft_glyphslot_free_bitmap at 0x082cf9e4. It has exactly two plain BL
+      calls, ft_mem_free @ 0x082cfae8 and ft_mem_alloc @ 0x082cfaa4, and no
+      predicated outgoing call. FT_GlyphSlotRec bitmap.buffer is +0x58 and
+      internal is +0x9c; internal->flags is +0x04 and face->memory is +0x64.
+      If the ownership bit is clear it is set; otherwise the old buffer is
+      freed and nulled. ft_mem_alloc then stores a zeroed replacement and its
+      error result. A zero size succeeds with a null buffer. Host tests cover
+      first allocation, allocator zeroing, owned-buffer replacement, and the
+      zero-size path. No deliberate deviations.
+
   - address: 0x082cf9e4
     ghidra: FUN_082cf9e4
     name: ft_glyphslot_free_bitmap

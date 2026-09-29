@@ -6,7 +6,7 @@
 
 use core::ffi::c_void;
 
-use crate::ft::memory::{ft_mem_free, FtMemory};
+use crate::ft::memory::{ft_mem_alloc, ft_mem_free, FtMemory};
 use crate::ft::types::{FtBBox, FtGlyphMetrics, FtOutline, FtVector};
 
 /// `FT_Generic` — two pointer-sized fields in FreeType's public records.
@@ -188,12 +188,43 @@ pub unsafe extern "C" fn ft_glyphslot_free_bitmap(slot: *mut FtGlyphSlot) {
     }
 }
 
+/// FreeType `ft_glyphslot_alloc_bitmap` (ftobjs.c) — original:
+/// `FUN_082cf988` @ 0x082cf988 (92 bytes; 2 plain `bl`, no predicated
+/// outgoing calls).
+///
+/// Replaces a glyph slot's bitmap storage.  On the first allocation it marks
+/// the slot as owning its bitmap; on replacement it releases the owned buffer
+/// first.  It then obtains a zeroed `size`-byte block from the face allocator
+/// and stores both that block and its error code.  A zero size is a successful
+/// allocation of a null buffer.  No deliberate deviations.
+///
+/// # Safety
+/// `slot`, its `internal` record, and its `face` must be valid.  When the
+/// ownership bit is set, `bitmap.buffer` must belong to `face->memory`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_glyphslot_alloc_bitmap(slot: *mut FtGlyphSlot, size: i32) -> i32 {
+    let internal = (*slot).internal;
+    let memory = (*(*slot).face).memory;
+
+    if (*internal).flags & FT_GLYPH_OWN_BITMAP == 0 {
+        (*internal).flags |= FT_GLYPH_OWN_BITMAP;
+    } else {
+        ft_mem_free(memory, (*slot).bitmap.buffer);
+        (*slot).bitmap.buffer = core::ptr::null_mut();
+    }
+
+    let mut error = 0;
+    (*slot).bitmap.buffer = ft_mem_alloc(memory, size, &mut error);
+    error
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
     use std::sync::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -201,9 +232,15 @@ mod tests {
     static FREED_BLOCK: AtomicUsize = AtomicUsize::new(0);
     static CHAR_INDEX_CMAP: AtomicUsize = AtomicUsize::new(0);
     static CHAR_INDEX_CODE: AtomicU32 = AtomicU32::new(0);
+    static ALLOC_SIZE: AtomicI32 = AtomicI32::new(-1);
 
     unsafe extern "C" fn unused_alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
         core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn recording_alloc(memory: *mut FtMemory, size: i32) -> *mut u8 {
+        ALLOC_SIZE.store(size, Ordering::Relaxed);
+        (*memory).user.cast()
     }
 
     unsafe extern "C" fn recording_free(_: *mut FtMemory, block: *mut u8) {
@@ -284,6 +321,59 @@ mod tests {
         assert_eq!(FREED_BLOCK.load(Ordering::Relaxed), 0);
         assert!(slot.bitmap.buffer.is_null());
         assert_eq!(internal.flags, 0x80);
+    }
+
+    #[test]
+    fn bitmap_allocation_takes_ownership_and_uses_the_face_allocator() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        FREE_CALLS.store(0, Ordering::Relaxed);
+        ALLOC_SIZE.store(-1, Ordering::Relaxed);
+
+        let mut bytes = [0xffu8; 8];
+        let mut memory = allocator();
+        memory.user = bytes.as_mut_ptr().cast();
+        memory.alloc = recording_alloc;
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.memory = &mut memory;
+        let mut internal = FtGlyphSlotInternal { loader: core::ptr::null_mut(), flags: 0x80 };
+        let mut slot: FtGlyphSlot = unsafe { core::mem::zeroed() };
+        slot.face = &mut face;
+        slot.internal = &mut internal;
+
+        assert_eq!(unsafe { ft_glyphslot_alloc_bitmap(&mut slot, 8) }, 0);
+        assert_eq!(ALLOC_SIZE.load(Ordering::Relaxed), 8);
+        assert_eq!(FREE_CALLS.load(Ordering::Relaxed), 0);
+        assert_eq!(slot.bitmap.buffer, bytes.as_mut_ptr());
+        assert_eq!(internal.flags, FT_GLYPH_OWN_BITMAP | 0x80);
+        assert_eq!(bytes, [0; 8]);
+    }
+
+    #[test]
+    fn bitmap_replacement_frees_the_owned_buffer_and_zero_size_returns_null() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        FREE_CALLS.store(0, Ordering::Relaxed);
+        FREED_BLOCK.store(0, Ordering::Relaxed);
+        ALLOC_SIZE.store(-1, Ordering::Relaxed);
+
+        let mut old = [0u8; 4];
+        let mut memory = allocator();
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.memory = &mut memory;
+        let mut internal = FtGlyphSlotInternal {
+            loader: core::ptr::null_mut(),
+            flags: FT_GLYPH_OWN_BITMAP | 0x80,
+        };
+        let mut slot: FtGlyphSlot = unsafe { core::mem::zeroed() };
+        slot.face = &mut face;
+        slot.internal = &mut internal;
+        slot.bitmap.buffer = old.as_mut_ptr();
+
+        assert_eq!(unsafe { ft_glyphslot_alloc_bitmap(&mut slot, 0) }, 0);
+        assert_eq!(FREE_CALLS.load(Ordering::Relaxed), 1);
+        assert_eq!(FREED_BLOCK.load(Ordering::Relaxed), old.as_mut_ptr() as usize);
+        assert_eq!(ALLOC_SIZE.load(Ordering::Relaxed), -1);
+        assert!(slot.bitmap.buffer.is_null());
+        assert_eq!(internal.flags, FT_GLYPH_OWN_BITMAP | 0x80);
     }
 
     #[test]
