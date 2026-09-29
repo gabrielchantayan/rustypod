@@ -379,5 +379,6 @@ pub mod vdbe_last_serial_type_len;
 pub mod vdbe_serial_type_len;
 pub mod vdbe_set_col_name;
 pub mod vdbe_set_num_cols;
+pub mod return_single_int;
 pub mod vdbe_uses_btree;
 pub mod vm_printf;
