@@ -162222,3 +162222,31 @@ functions:
       tests the quote before NUL, unlike retailOS, but the NUL branch returns
       before that increment. Deliberate deviation: volatile loads prevent an
       unavailable libc strlen substitution without changing behavior.
+
+  - address: 0x082d3e5c
+    ghidra: FUN_082d3e5c
+    name: word_list_add_u16_assign
+    size: 140
+    sig: "void word_list_add_u16_assign(u16 value, WordList *list)"
+    module: util/word_list_add_u16_assign
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: list
+      r4: value_or_index
+      r5: list
+      r6: original_count
+      r7: entries
+      r1: carry
+    notes: >-
+      Raw osos.dec establishes the exact 140-byte extent
+      0x082d3e5c..0x082d3ee4; push {r0-r11,lr} at 0x082d3ee8 begins the next
+      real function. The body has one plain BL, at 0x082d3e70 to
+      word_list_is_zero, and zero predicated BL instructions. When all active
+      words are zero it tail-branches to word_list_assign_value with value
+      explicitly truncated to u16. Otherwise it adds the u16 value to the
+      little-endian words, propagates carry, and appends a final carry while
+      incrementing count. Host tests cover all-zero assignment, zero-value
+      no-op, carry propagation and carry absorption. match.py reviewed the
+      same list test, carry loop, and final append structure; LLVM retains an
+      additional sum-versus-input carry test. No deliberate deviations.
