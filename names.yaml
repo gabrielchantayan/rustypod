@@ -24751,6 +24751,30 @@ functions:
       entered==1 boundary; fixtures assert every word outside +0xe0 is
       untouched and +0xdc is never written.
 
+  - address: 0x082dd844
+    ghidra: FUN_082dd844
+    name: pager_checksum
+    size: 40
+    sig: "u32 pager_checksum(const Pager *pager, const u8 *page_data)"
+    module: sqlite/pager_checksum
+    status: ported
+    vars: {param_1: pager, param_2: page_data}
+    renames:
+      "*(u32*)(pager+0x34)": pager->cksumInit
+      "*(u32*)(pager+0x40)": pager->pageSize
+    notes: >-
+      Raw A32 establishes the exact 40-byte extent 0x082dd844..0x082dd868;
+      0x082dd86c begins a separately entered function with push
+      {r0,r1,r4-r11,lr}. The body has no outbound BL: it seeds from
+      Pager.cksumInit at +0x34, then repeatedly subtracts 200 from the
+      signed pageSize at +0x40 and, while positive, adds page_data at that
+      descending offset with wrapping u32 arithmetic. Ghidra's two callers
+      are direct raw unconditional BL call sites; no predicated BL calls
+      reach it. match.py reports the same sparse descending-byte loop, with
+      LLVM hoisting the first subtract/termination check into a preheader.
+      Host tests cover zero, exact-200, just-over-boundary, multi-sample,
+      and wrapping-seed cases. No deliberate deviations.
+
   - address: 0x082ddc40
     ghidra: FUN_082ddc40
     name: context_record_line_terminator

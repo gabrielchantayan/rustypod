@@ -246,6 +246,7 @@ pub mod parse_free_temporary;
 pub mod prepare;
 pub mod prepare16;
 pub mod pager_lookup;
+pub mod pager_checksum;
 pub mod pager_dont_write;
 pub mod pager_reset;
 pub mod pager_close;
