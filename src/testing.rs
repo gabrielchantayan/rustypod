@@ -2281,6 +2281,10 @@ pub mod hints {
     // 0x4a00_0000: dedicated to sqlite/pager_dont_write's target-width page
     // and pager fixture; mappings never unmap, so no other port may share it.
     pub const SQLITE_PAGER_DONT_WRITE: usize = 0x4a00_0000;
+    // 0x4c00_0000: dedicated to sqlite/pager_reclaim_cache_page's raw-u32
+    // pager and page fixture; mappings never unmap, so no other user may
+    // share this hint.
+    pub const SQLITE_PAGER_RECLAIM_CACHE_PAGE: usize = 0x4c00_0000;
     // 0x3300_0000: dedicated to sqlite/pager_set_page_size's raw-u32 Pager
     // and replacement-temporary-space fixture; mappings never unmap.
     pub const SQLITE_PAGER_SET_PAGE_SIZE: usize = 0x3300_0000;
