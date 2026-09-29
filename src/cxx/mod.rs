@@ -730,6 +730,7 @@ pub mod opaque_indexed_handle_initialize;
 pub mod opaque_descriptor_convert;
 pub mod opaque_descriptor_convert_0891fa80;
 pub mod generic_descriptor_convert;
+pub mod opaque_descriptor_convert_089062ec;
 pub mod value_compare;
 pub mod word_slot_equal;
 pub mod object_matches_active_context;
