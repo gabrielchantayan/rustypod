@@ -39,6 +39,12 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // 0x7420_0000 / 0x7430_0000 / 0x7440_0000: dedicated to
+    // sqlite/change_temp_storage's target-width connection and aDb fixtures;
+    // mappings never unmap, so each test uses a distinct address.
+    pub const SQLITE_TEMP_STORAGE: usize = 0x7420_0000;
+    pub const SQLITE_TEMP_STORAGE_ACTIVE: usize = 0x7430_0000;
+    pub const SQLITE_TEMP_STORAGE_EMPTY: usize = 0x7440_0000;
     // 0x5310_0000 / 0x5320_0000: dedicated to fs/path_attribute_update's
     // target-width node and header fixtures; mappings never unmap.
     pub const PATH_ATTRIBUTE_UPDATE: usize = 0x5310_0000;
