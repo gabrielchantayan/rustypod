@@ -161750,3 +161750,31 @@ functions:
       Select->pPrior, preserving a non-NULL leftmost collation; otherwise it
       takes the 12-byte ExprList_item at column and resolves its expression.
       Deliberate deviation: the retail tail branch is a direct Rust call.
+
+  - address: 0x082d9bf8
+    ghidra: FUN_082d9bf8
+    name: word_list_multiply_assign
+    size: 60
+    sig: "void word_list_multiply_assign(const WordList *multiplicand, WordList *accumulator)"
+    module: util/word_list_multiply_assign
+    status: ported
+    renames:
+      param_1/r0/r3: multiplicand
+      param_2/r1/r4: accumulator
+      local_38/sp: product
+      FUN_082d81c8: word_list_init_capacity_10
+      FUN_082d9c34: word_list_multiply_core (volatile seam)
+      FUN_082d27a8: word_list_copy
+    notes: >-
+      Raw ARM establishes the exact 60-byte extent 0x082d9bf8..0x082d9c34:
+      the push at 0x082d9c34 starts the next real function. It contains three
+      unconditional plain BL instructions at 0x082d9c0c, 0x082d9c1c, and
+      0x082d9c28, with no predicated BL; this corrects Ghidra's two-call-site
+      report. It initializes a ten-word stack-local WordList, calls the
+      schoolbook product core with multiplicand and accumulator, then copies
+      the product into the accumulator while retaining the accumulator's
+      storage and capacity. Deliberate deviation: unported product core
+      0x082d9c34 is the volatile WORD_LIST_MULTIPLY_CORE seam (firmware
+      address on target, explicit host reference); the equivalent temporary
+      header fields are initialized directly because host pointers are wider
+      than the target's four-byte entries field.

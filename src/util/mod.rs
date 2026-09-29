@@ -415,6 +415,7 @@ pub mod hash_word;
 pub mod free_index_table_grow;
 pub mod free_index_table_grow_083b4a08;
 pub mod word_list;
+pub mod word_list_multiply_assign;
 pub mod word_list_assign_value;
 pub mod word_list_modular_add;
 pub mod tree_children_flatten_into_parent_083be7dc;
