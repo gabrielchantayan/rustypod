@@ -80,6 +80,7 @@ pub mod transfer_default_mode;
 pub mod iram_queue_transfer_default_mode_veneer;
 pub mod timer;
 pub mod timer_channel_start;
+pub mod timer_channel_configure;
 pub mod timer_channel_stop;
 pub mod uart;
 pub mod usb_high_speed_mode;
