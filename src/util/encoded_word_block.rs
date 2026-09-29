@@ -686,6 +686,53 @@ pub unsafe extern "C" fn inline_encoded_word_block_write_be_bytes(
 }
 
 
+/// Returns the one-based position of the highest set bit in an encoded word
+/// block, or zero when its decoded count is out of range or all limbs are zero.
+///
+/// Original: `FUN_083199ac` @ 0x083199ac (156-byte full extent: 148-byte
+/// instruction body at 0x083199ac..0x08319a3c, followed by literal-pool
+/// multipliers `0x0a7e377f` and `0x76b4197f` at
+/// 0x08319a40..0x08319a44; the next real function begins at 0x08319a48).
+/// Complete-image ARM decoding finds two plain inbound `bl` sites
+/// (0x08322f3c, 0x0834f850), zero predicated inbound `bl` sites, and no
+/// outbound `bl` instructions.
+///
+/// The encoded signed count is multiplied by `0x0a7e377f`, negated with
+/// wrapping arithmetic when negative, and rejected above 28 limbs. Active
+/// limbs are decoded with `0x76b4197f`, scanned from high to low, and the
+/// first nonzero decoded limb contributes its one-based highest-set-bit
+/// position plus `32 * limb_index`. Deliberate deviation: none.
+///
+/// # Safety
+///
+/// `block` must point to a readable [`EncodedWordBlock`]. When its decoded
+/// count has a positive representable magnitude at most 28, `block.words`
+/// must name that many readable, aligned `u32` words. RetailOS has no NULL
+/// guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn encoded_word_block_bit_length(block: *const EncodedWordBlock) -> i32 {
+    let decoded_count = (*block).encoded_count.wrapping_mul(ENCODED_COUNT_MULTIPLIER);
+    let mut remaining = if decoded_count < 0 {
+        decoded_count.wrapping_neg()
+    } else {
+        decoded_count
+    };
+    if remaining > MAX_DECODED_WORD_COUNT {
+        return 0;
+    }
+
+    while remaining > 0 {
+        remaining -= 1;
+        let decoded_word = (*(*block).words.add(remaining as usize))
+            .wrapping_mul(core::ptr::read_volatile(&ENCODED_WORD_DECODE_MULTIPLIER));
+        if decoded_word != 0 {
+            return (31 - decoded_word.leading_zeros() as i32) + remaining * 32 + 1;
+        }
+    }
+    0
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -695,8 +742,8 @@ mod tests {
 
     use super::{
         copy_encoded_word_block, copy_encoded_word_block_checked, copy_encoded_word_block_from,
-        copy_inline_encoded_word_block, encoded_word_block_is_zero, encoded_word_block_set_int,
-        encoded_word_block_sign, inline_encoded_word_block_compare,
+        copy_inline_encoded_word_block, encoded_word_block_bit_length, encoded_word_block_is_zero,
+        encoded_word_block_set_int, encoded_word_block_sign, inline_encoded_word_block_compare,
         inline_encoded_word_block_is_zero, inline_encoded_word_block_test_bit,
         inline_encoded_word_block_write_be_bytes, EncodedWordBlock, InlineEncodedWordBlock,
     };
@@ -1366,6 +1413,33 @@ mod tests {
         }
 
         assert_eq!(destination, [0xa5; 7]);
+    }
+
+    #[test]
+    fn encoded_block_bit_length_skips_zero_high_limbs() {
+        let mut words = [
+            0x0000_0001u32.wrapping_mul(ENCODED_WORD_MULTIPLIER),
+            0,
+            0x8000_0000u32.wrapping_mul(ENCODED_WORD_MULTIPLIER),
+        ];
+        let block = EncodedWordBlock {
+            encoded_count: encoded_count(3),
+            words: words.as_mut_ptr(),
+        };
+
+        assert_eq!(unsafe { encoded_word_block_bit_length(&block) }, 96);
+    }
+
+    #[test]
+    fn encoded_block_bit_length_handles_empty_negative_and_out_of_range_counts() {
+        let mut words = [0u32; 29];
+        for decoded_count in [0, -2, 29] {
+            let block = EncodedWordBlock {
+                encoded_count: encoded_count(decoded_count),
+                words: words.as_mut_ptr(),
+            };
+            assert_eq!(unsafe { encoded_word_block_bit_length(&block) }, 0);
+        }
     }
 
 
