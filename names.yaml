@@ -43031,6 +43031,22 @@ functions:
       pattern) so host tests can supply an allocator; all three
       defaults are the real ports.
 
+  - address: 0x082c568c
+    ghidra: FUN_082c568c
+    name: tagged_entry_value_table_initialize
+    size: 88
+    sig: "void tagged_entry_value_table_initialize(tagged_entry_value_table_t *context)"
+    module: cxx/tagged_entry_value_table_initialize
+    status: ported
+    notes: >-
+      Verified against raw osos.dec: the true extent is 0x082c568c..0x082c56e4,
+      ending immediately before cg_heap_block_create. Two direct callers
+      (0x0838efec and 0x0838f068) use plain unconditional bl; no predicated
+      bl callers exist. This leaf initializes +0x3c's one-based value table
+      once from +0x14's 20-byte entries: tag 0x1a writes entry +0x10 to slot
+      entry +0x04 minus one, then sets +0x40. Rust deliberately preserves
+      the raw u32 pointer fields for the target's four-byte layout.
+
   - address: 0x082c56e4
     ghidra: FUN_082c56e4
     name: cg_heap_block_create
