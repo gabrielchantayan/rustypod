@@ -82546,6 +82546,29 @@ functions:
       port; the unported tail target remains a fixed-address target seam on
       firmware and a replaceable host callback. Host tests cover every switch
       boundary and prove only the tail cases invoke that callback.
+  # --- retailOS Ide1 storage-backend validator ---
+  - address: 0x0836bf28
+    ghidra: FUN_0836bf28
+    name: storage_backend_validate_status_2
+    size: 64
+    sig: "u32 storage_backend_validate_status_2(const void *backend, u32 *validated)"
+    module: drivers/storage_backend_validate_status_2
+    status: ported
+    renames:
+      param_1: backend
+      param_2: validated
+      DAT_0836bf68: ide1_tag
+    notes: >-
+      Raw osos.dec confirms the 64-byte body from 0x0836bf28 through
+      0x0836bf67; 0x0836bf68 is the "Ide1" literal pool and 0x0836bf6c begins
+      the next independently entered function. The body has no outgoing BL
+      calls. It has two incoming plain, unconditional BL calls at 0x080e70b8
+      and 0x082bcbfc, and no incoming predicated BL calls. It returns 7 unless
+      backend is non-null, its first word is "Ide1", and its +0x44 word is
+      nonzero. On success it optionally stores backend +8 in validated and
+      returns zero. Host builds preserve the target ABI by truncating that
+      pointer to a u32; firmware pointers are 32-bit.
+
   # --- retailOS storage-backend sector-size query ---
   - address: 0x080e7064
     ghidra: FUN_080e7064
