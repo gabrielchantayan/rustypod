@@ -82,6 +82,7 @@ pub mod crts_object;
 pub mod crts_tag;
 pub mod cstr_dotted_prefix_compare;
 pub mod cstr_matches_runtime_name_list;
+pub mod quoted_cstr_escaped_len;
 pub mod cursor;
 pub mod encoded_word_block;
 pub mod encoded_fixed_value;
