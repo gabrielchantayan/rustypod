@@ -159151,3 +159151,29 @@ functions:
       4, 0, 12, 8, 16, and 40 respectively. Deliberate deviation: target
       stores are volatile MMIO stores, and host builds substitute an installable
       base pointer for the fixed register address.
+
+  - address: 0x0836daa8
+    ghidra: FUN_0836daa8
+    name: controller_request_submit_wait
+    size: 128
+    sig: "void controller_request_submit_wait(u32 request)"
+    module: drivers/controller_request_submit_wait
+    status: ported
+    renames:
+      param_1/r6: request
+      DAT_0836db28/r5: controller_base
+      DAT_0836db2c/r7: timeout_usec
+    notes: >-
+      Raw osos.dec establishes the exact 128-byte A32 extent 0x0836daa8..0x0836db27;
+      0x0836db28 and 0x0836db2c are the 0x3c200000 controller-base and 1500-
+      microsecond literal-pool words, and 0x0836db30 is the next real function.
+      Complete A32 B/BL-immediate decoding finds two inbound direct calls: plain BL at
+      0x0836d910 and predicated BLNE at 0x0836da74; there are no other predicated
+      forms. The body makes three unconditional BL calls, to the existing one-ms delay,
+      Timer E read, and elapsed-time veneers. It clears then restores controller bit 21
+      around the delay, writes request >> 1 | 0x80000000 at +0x1c, sets bit 0 at +0x04,
+      and polls +0x0c bit 3 until clear or 1500 microseconds elapse. The controller's
+      higher-level identity remains unrecovered, so the name describes only verified
+      behavior. Host builds substitute private controller words; the timing operations
+      remain existing Timer E ports. match.py reports the expected structural diff from
+      the payload relocation and wrapper frame.
