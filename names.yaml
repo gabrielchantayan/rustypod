@@ -27552,6 +27552,39 @@ functions:
       resolve to already-ported Rust functions. Host tests cover a successful
       sampled bit and the failed-write incoming-r3 result.
 
+  # --- PMU register 0x87 bit 1 read (drivers/i2c) ---
+  - address: 0x082e55dc
+    ghidra: FUN_082e55dc
+    name: pmu_reg87_bit1_read
+    size: 68
+    sig: "i32 pmu_reg87_bit1_read(u32 *bit)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: bit
+      local_4/sp: value
+      uVar1/r5: status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d3b8: pmu_i2c_read
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw ARM establishes the exact 68-byte extent 0x082e55dc..0x082e5620:
+      the following push {r4,lr} at 0x082e5620 begins the next real sibling.
+      Decoding every ARM B/BL word in osos.dec finds two inbound plain
+      unconditional bl call sites, 0x080609fc and 0x08086e54, and zero
+      predicated forms. The body waits semaphores 17 then 5, reads one byte
+      from PCF50635 register 0x87, stores (value & 2) >> 1 through its
+      unguarded output pointer, signals 5 then 17 unconditionally, and
+      returns the raw read status verbatim. All five direct callee edges
+      resolve to existing Rust ports. Deliberate deviation: the retail direct
+      bl calls become ordinary Rust calls; their raw I2C primitives retain
+      the existing fixed-address target and volatile host-test seams. Host
+      tests cover all bit-1 values, status pass-through, and error-path lock
+      release. match.py structural: the same wait/read/store/signal spine;
+      LLVM frame and Rust call lowering differ from ADS.
+
   # --- Locked PCF50635 packet write (drivers/i2c) ---
   - address: 0x082e5bb0
     ghidra: FUN_082e5bb0
