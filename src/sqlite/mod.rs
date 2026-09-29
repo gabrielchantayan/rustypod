@@ -254,6 +254,7 @@ pub mod pager_end_transaction;
 pub mod pager_set_page_size;
 pub mod pager_set_sector_size;
 pub mod pager_truncate_image;
+pub mod pager_finish_truncate;
 pub mod pcache_remove_from_lru_list;
 pub mod pcache_add_to_lru_list;
 pub mod pcache_truncate;

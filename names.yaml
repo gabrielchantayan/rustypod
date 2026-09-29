@@ -161516,3 +161516,30 @@ functions:
       pointer held at resident word 0x08a0a728. Rust reuses the established
       fixed-address accumulator representation and supplies a host resident
       list-head fixture; no behavioral deviation.
+
+  # ---- SQLite pager truncate completion (src/sqlite/pager_finish_truncate.rs) ----
+  - address: 0x082de6c4
+    ghidra: FUN_082de6c4
+    name: pager_finish_truncate
+    size: 196
+    sig: "i32 pager_finish_truncate(Pager *pager, u32 page_count)"
+    module: sqlite/pager_finish_truncate
+    status: ported
+    renames:
+      param_1/r0: pager
+      param_2/r1: page_count
+      local_20: file_size
+      DAT_082de788: zero
+    notes: >-
+      Raw osos.dec establishes 49 ARM words from 0x082de6c4 through
+      0x082de784, then a four-byte zero literal at 0x082de788; the separately
+      entered pager_truncate_cache begins at 0x082de78c. The body has four
+      unconditional direct plain bl calls at 0x082de6f4, 0x082de740,
+      0x082de764, and 0x082de778, with zero predicated bl forms. When pager
+      byte +0x0e exceeds three and the SQLite file has methods, it obtains the
+      file size, computes signed page_size * page_count, truncates a longer
+      file or writes the literal zero byte at target_size - 1 to extend a
+      shorter one, then stores page_count at pager +0x24 and purges cached
+      pages. Rust calls the three ported SQLite OS wrappers directly;
+      pager_truncate_cache remains a fixed retailOS target call and uses a
+      recording host seam.
