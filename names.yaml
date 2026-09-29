@@ -5695,6 +5695,32 @@ functions:
       0x61..0xff; non-byte u32 values do not match. Deliberate deviation:
       Rust represents the literal list with equivalent ranges and singleton
       comparisons rather than dereferencing firmware storage.
+  - address: 0x082d8520
+    ghidra: FUN_082d8520
+    name: btree_end_transaction
+    size: 84
+    sig: "i32 btree_end_transaction(Btree *btree)"
+    module: sqlite/btree_end_transaction
+    status: ported
+    renames:
+      param_1/r0: btree
+      iVar2/r0: status
+      uVar1/r5: shared_in_trans
+      FUN_083707f0: end_transaction_worker
+    notes: >-
+      Raw osos.dec words establish the exact 84-byte A32 body
+      0x082d8520..0x082d8573: push {r4-r6,lr} starts it, pop {r4-r6,pc}
+      ends it, and the independent push at 0x082d8574 starts
+      btree_lock_table. It has two inbound unconditional plain BL sites
+      (0x082bdbe8 and 0x08371860), no inbound predicated BL sites, and one
+      outbound plain BL to FUN_083707f0 at 0x083707f0 with no predicated BL.
+      For an active Btree transaction, it saves BtShared+0x30, calls that
+      still-unported worker with mode zero, restores the saved byte, clears
+      Btree+0x08, and decrements BtShared+0x34 only on SQLITE_OK. An inactive
+      Btree returns zero without touching BtShared. The worker has no
+      names.yaml entry or verified Rust identity, so it remains a fixed
+      target-address call with a typed host seam; this is the only deliberate
+      host-only deviation.
   - address: 0x082d8574
     ghidra: FUN_082d8574
     name: btree_lock_table

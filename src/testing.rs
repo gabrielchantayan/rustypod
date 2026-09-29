@@ -2708,6 +2708,10 @@ pub mod hints {
     // 0x2f00_0000: dedicated to sqlite/pager_unlock_and_rollback's raw-u32
     // Pager fixture. Mappings never unmap, so no other port may share this hint.
     pub const SQLITE_PAGER_UNLOCK_AND_ROLLBACK: usize = 0x2f00_0000;
+    // 0x2f10_0000 / 0x2f20_0000: dedicated to sqlite/btree_end_transaction's
+    // target-width Btree and BtShared fixtures; mappings never unmap.
+    pub const SQLITE_BTREE_END_TRANSACTION_SUCCESS: usize = 0x2f10_0000;
+    pub const SQLITE_BTREE_END_TRANSACTION_ERROR: usize = 0x2f20_0000;
     // 0x2d00_0000: dedicated to sqlite/get_and_init_page's raw-u32 page
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const BTREE_GET_AND_INIT_PAGE: usize = 0x2d00_0000;
