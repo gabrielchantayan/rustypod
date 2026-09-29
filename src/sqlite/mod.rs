@@ -280,6 +280,7 @@ pub mod vfs_unregister;
 pub mod write32bits;
 pub mod read_be32;
 pub mod pager_read_pending;
+pub mod pager_read_db_page;
 pub mod randomness;
 pub mod parse_cell;
 pub mod parse_expr;

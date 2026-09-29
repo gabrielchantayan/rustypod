@@ -57709,6 +57709,40 @@ functions:
       local as MaybeUninit: as in ARM, it is only consumed after xRead
       returns success, whose SQLite contract initializes all four bytes.
 
+  # ---- SQLite pager database-page reader (src/sqlite/pager_read_db_page.rs) ----
+  - address: 0x083655cc
+    ghidra: FUN_083655cc
+    name: pager_read_db_page
+    size: 112
+    sig: "i32 pager_read_db_page(Pager *pager, PgHdr *page, u32 page_number)"
+    module: sqlite/pager_read_db_page
+    status: ported
+    renames:
+      param_1/r0: pager
+      param_2/r1: page
+      param_3/r2: page_number
+      "*(u32*)(pager+0x40)": pager->pageSize
+      "*(u32*)(pager+0x6c)": pager->fd
+      "*(u32*)(page+0x34)": page->pData
+      FUN_0837dba0: sqlite_os_read
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw words establish the 112-byte extent 0x083655cc..0x0836563c: the
+      next separately linked function begins at 0x08365640 with push
+      {r2,r3,r4,r5,lr}, and 0x0836563c is the SQLITE_IOERR_READ (0x20a)
+      literal. Whole-image A32 decoding finds exactly two inbound plain bl
+      calls (0x082dd1e0 and 0x082ddc98), no inbound predicated bl forms, one
+      outbound plain bl to sqlite_os_read (0x0837dba0), and one bleq to the
+      known __rt_memcpy veneer (0x08037db0 -> 0x22000020). It returns
+      SQLITE_IOERR_READ if pager->fd is null; otherwise it reads pageSize
+      bytes into page->pData at signed offset (page_number-1)*pageSize. For
+      page one, it copies pData+0x18..+0x27 to pager+0xe8 even after a read
+      failure. The port directly calls the existing Rust sqlite_os_read and
+      __rt_memcpy ports; target-layout pointer fields remain u32 words so
+      host pointer width cannot change recovered offsets. Tests cover null
+      fd, error propagation with the page-one header copy, and a later page
+      with a negative signed page size.
+
   # ---- SQLite forced open-flag wrapper (src/sqlite/os_open_forced_flags.rs) ----
   - address: 0x0837e784
     ghidra: FUN_0837e784
