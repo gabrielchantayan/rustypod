@@ -159485,3 +159485,30 @@ functions:
       verified veneer address while host tests inject a seam. match.py exits
       1 with the expected structural diff: LLVM loads the +4 word directly,
       uses bx{eq} lr, and dispatches through the relocated function pointer.
+
+  # --- PMU powerdown preparation (drivers/pmu_powerdown_prepare) ---
+  - address: 0x0836b1b4
+    ghidra: FUN_0836b1b4
+    name: pmu_powerdown_prepare
+    size: 56
+    sig: "u32 pmu_powerdown_prepare(void)"
+    module: drivers/pmu_powerdown_prepare
+    status: ported
+    renames:
+      uVar1/r5: was_enabled
+      uVar2/r4: result
+      DAT_0836b1ec: pmu_powerdown_state
+    notes: >-
+      Raw osos.dec words establish the 56-byte function extent
+      0x0836b1b4..0x0836b1eb: the 0x089ca458 literal at 0x0836b1ec is data,
+      and push {r4,lr} at 0x0836b1f0 starts the next real function. There are
+      four unconditional direct BL instructions in the body at 0x0836b1bc,
+      0x0836b1c4, 0x0836b1c8, and 0x0836b1e0, and no predicated BL
+      instructions. The first and last invoke the existing clock-2 acquire
+      and restore ports. The intermediate entries 0x080d4ad8 and 0x080c9998
+      have no names.yaml identities; target Rust invokes their verified raw
+      addresses and host tests inject seams rather than inventing identities.
+      It configures and initializes PMU powerdown state, returns 20 if word
+      +4 at 0x089ca458 remains null, and always restores the saved clock
+      state. match.py is expected to report a structural diff because the
+      Rust port dispatches the two opaque calls through relocated pointers.
