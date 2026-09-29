@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e2458
+    ghidra: FUN_082e2458
+    name: drive_slot_initialize
+    size: 72
+    sig: "u32 drive_slot_initialize(u32 index)"
+    module: fs/drive_slot_initialize
+    status: ported
+    renames:
+      param_1/r0: index
+      r4: slot
+      r5/r0: status
+      FUN_082e07a4: drive_slot_create_phase
+      FUN_082e06f4: drive_slot_lookup
+      FUN_082d0a14: drive_slot_initialize_data_phase
+      FUN_082c62bc: drive_slot_finalize_phase
+    notes: >-
+      Raw osos.dec establishes the exact 72-byte extent: push {r4,r5,r6,lr} at
+      0x082e2458 through pop {r4,r5,r6,pc} at 0x082e249c; the next separately
+      entered function starts with push {r3,r4,r5,r6,r7,lr} at 0x082e24a0.
+      The body has four unconditional BL instructions at 0x082e2460,
+      0x082e2470, 0x082e2488, and 0x082e2494, with no predicated BL
+      instructions. Complete-image decompilation identifies three inbound
+      direct plain-BL callers at 0x081bdd84, 0x082c3130, and 0x082c3160; no
+      predicated inbound calls are identified. The first phase's nonzero
+      status gates lookup of the 508-byte drive slot. A present slot receives
+      the data phase with slot+8 and slot+4, then finalization with slot+22;
+      the first status returns unchanged. FUN_082e06f4 is the existing
+      drive_slot_lookup port. The remaining callees have no established
+      identity beyond their observed roles and are target-address seams, with
+      recording host seams for edge-case tests. Deliberate deviations: the
+      host lookup seam replaces the private target-width drive-slot table
+      model; device builds call the ported lookup directly.
+
   - address: 0x082e2fe0
     ghidra: FUN_082e2fe0
     name: fat_short_name_render

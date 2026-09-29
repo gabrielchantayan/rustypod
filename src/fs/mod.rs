@@ -120,6 +120,8 @@ pub mod volume_info;
 pub mod volume_seek;
 /// Four-slot filesystem drive lookup @ 0x082e06f4.
 pub mod drive_slot;
+/// Drive-slot creation and dependent initialization phases @ 0x082e2458.
+pub mod drive_slot_initialize;
 /// Drive-slot cleanup and reference-count release @ 0x082e073c.
 pub mod drive_slot_cleanup;
 /// Four-slot filesystem drive-index validator @ 0x082e4b3c.
