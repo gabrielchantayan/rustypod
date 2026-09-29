@@ -12159,6 +12159,35 @@ functions:
       predicated bl or direct B sites. Deliberate deviations: none. Reference
       C: decomp/c/032/0833dd18_FUN_0833dd18.c.
 
+  - address: 0x082c4eec
+    ghidra: FUN_082c4eec
+    name: sqlite_pager_write_copy
+    size: 76
+    sig: "i32 sqlite_pager_write_copy(void *dst, const void *src, usize byte_count, i32 mark_writable, DbPage *page)"
+    module: sqlite/pager_write_copy
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      param_3/r2: byte_count
+      param_4/r3: mark_writable
+      param_5/[sp+0x10]: page
+      FUN_0837ef64: sqlite3PagerWrite
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec words establish the 76-byte extent 0x082c4eec..0x082c4f38:
+      push {r4-r6,lr} starts the entry and pop {r4-r6,pc} returns at
+      0x082c4f34; the next independent function starts at 0x082c4f38.
+      Decoding all ARM B/BL words independently finds two inbound plain bl
+      calls (0x082b2a5c and 0x082b2be4), no inbound predicated bl, and two
+      outbound plain bl calls with no predicated forms: sqlite3PagerWrite at
+      0x0837ef64 then the __rt_memcpy veneer at 0x08037db0 (target
+      0x22000020). A nonzero mark_writable calls sqlite3PagerWrite(page) and
+      returns its nonzero status without touching either copy buffer; otherwise
+      it copies byte_count bytes from src to dst and returns zero. The Rust
+      port calls the established __rt_memcpy seam directly. sqlite3PagerWrite
+      remains an absolute target call; host tests use a private boundary to
+      model that unavailable resident service.
   - address: 0x082c4f38
     ghidra: FUN_082c4f38
     size: 24
