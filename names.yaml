@@ -52902,6 +52902,37 @@ functions:
       finalize slot with blx through a literal-pool load (the slot, not
       the original's bl @ 0x0838bc38) and reloads value into r4 late.
 
+  - address: 0x0836751c
+    ghidra: FUN_0836751c
+    name: verify_table_locks
+    size: 164
+    sig: "void verify_table_locks(Parse *parse, Table *table, const char *name)"
+    module: sqlite/verify_table_locks
+    status: ported
+    renames:
+      param_1: parse
+      param_2: table
+      param_3: name
+      FUN_08382ddc: schema_to_index
+      FUN_0837021c: begin_write_operation
+      FUN_0838182c: code_table_locks
+      FUN_08384f14: str_icmp
+    notes: >-
+      Raw ARM-word decoding fixes the body at
+      0x0836751c..0x083675c0, ending at release_mem_array's stmdb
+      prologue. It contains four unconditional plain bl instructions
+      (str_icmp @ 0x08384f14, schema_to_index @ 0x08382ddc,
+      begin_write_operation @ 0x0837021c, and code_table_locks @
+      0x0838182c) and no predicated bl. Two direct incoming bl call
+      sites are at 0x083674f8 and 0x08381ef0. The function walks
+      Table records through +0x20; NULL name selects each table,
+      otherwise it scans the signed count at +0x04 and its +0x2c
+      string-pointer array for exact or SQLite case-insensitive match.
+      A selected Table supplies pSchema at +0x4c to schema_to_index,
+      then begins a read operation and invokes the still-unported
+      code_table_locks with -1. The Rust port uses volatile hook slots:
+      ported callees are defaults and the unported callee uses its
+      verified stock load address only on target.
   - address: 0x083675c0
     ghidra: FUN_083675c0
     name: release_mem_array
