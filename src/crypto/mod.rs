@@ -117,3 +117,5 @@ pub mod sha1_update;
 pub mod sha1_update_payload;
 pub mod sha1_update_context;
 pub mod ensure_initialized;
+
+pub mod encoded_buffer_allocate;

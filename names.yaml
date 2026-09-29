@@ -160337,3 +160337,33 @@ functions:
       0x089ce3d0, multiplies it by 0x4f0efc81, then follows the encoded state
       transition; 0x4f0efc81 - 0x5251d9fc = 0xfcbd2285, so it always returns
       zero without exposing the product. Deliberate deviations: none.
+
+  - address: 0x082fafac
+    ghidra: FUN_082fafac
+    name: encoded_buffer_allocate
+    size: 196
+    sig: "u32 encoded_buffer_allocate(u32 count, u32 *output)"
+    module: crypto/encoded_buffer_allocate
+    status: ported
+    vars:
+      param_1/r0: count
+      param_2/r1: output
+      DAT_082fb070: allocation_factor
+      DAT_082fb074: invalid_argument
+      DAT_082fb078: out_of_memory
+      FUN_0802edac: malloc
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec is exactly 49 ARM words from 0x082fafac through
+      0x082fb06c; 0x082fb070..0x082fb078 is its literal pool and the next
+      real function begins at 0x082fb07c. Independent ARM word decoding
+      finds three plain BL instructions (two malloc calls at 0x0802edac and
+      one free at 0x0802edc8), zero predicated BL instructions, and two
+      unique callees. It rejects a NULL output word or count below 20 with
+      0xffff5bd9; otherwise it allocates
+      0xfc05a7ff * (count + 12) target bytes and then 12 descriptor bytes,
+      zeroes the first 12 data bytes, writes {data, scaled_capacity, 0},
+      and publishes the descriptor. If the descriptor allocation fails it
+      frees the data and returns 0xffff5bd4. Rust preserves target pointers
+      as u32 words and calls the existing malloc/free ports rather than the
+      direct retail BLs so host tests can use the established heap seam.
