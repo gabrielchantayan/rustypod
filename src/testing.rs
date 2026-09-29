@@ -3265,6 +3265,10 @@ pub mod hints {
     // 0x5390_0000: dedicated to cxx/indexed_bit_set_contains_with_override's
     // target-width context, object, and bit-set fixture; mappings never unmap.
     pub const INDEXED_BIT_SET_CONTAINS_WITH_OVERRIDE: usize = 0x5390_0000;
+    // 0x53a0_0000 / 0x53b0_0000: dedicated to app/intrusive_queue_append's
+    // target-width queue and node fixtures; mappings never unmap.
+    pub const INTRUSIVE_QUEUE_APPEND_EMPTY: usize = 0x53a0_0000;
+    pub const INTRUSIVE_QUEUE_APPEND_CHAIN: usize = 0x53b0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span

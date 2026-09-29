@@ -161939,3 +161939,28 @@ functions:
       at global+0x08. Deliberate deviation: Rust supplies the fixed global
       address directly on target and passes an equivalent target-width state
       block in host tests.
+  - address: 0x082d7fdc
+    ghidra: FUN_082d7fdc
+    name: intrusive_queue_append
+    size: 64
+    sig: "void intrusive_queue_append(IntrusiveQueue *queue, IntrusiveQueueLink *node_link, u8 *node)"
+    module: app/intrusive_queue_append
+    status: ported
+    renames:
+      param_1/r0: queue
+      param_2/r1: node_link
+      param_3/r2: node
+      "queue+0x00": head
+      "queue+0x04": tail
+      "queue+0x08": deferred_node
+      "node+0x1e": deferred_processing_flag
+    notes: >-
+      Raw osos.dec A32 words establish the exact 64-byte leaf at
+      0x082d7fdc..0x082d801c, ending in bx lr; the next separately linked
+      function begins with push {lr} at 0x082d801c. Independent raw
+      branch-immediate decoding finds two inbound direct calls, one plain BL
+      and one predicated BLEQ, with no outbound BL instructions. The routine
+      appends a node through an intrusive two-word link, repairs the old tail
+      link, and selects a deferred node only when the queue slot and node byte
+      +0x1e are both zero. Target pointers remain u32 words to preserve the
+      retail four-byte layout on host tests. Deliberate deviations: none.
