@@ -53,6 +53,8 @@ pub mod cache_entry;
 pub mod cache_entry_next;
 /// Bounded cache-entry allocation with a cleared 512-byte payload @ 0x082e254c.
 pub mod cache_entry_allocate_cleared;
+/// Cache-operation accounting and resident list-head lookup @ 0x082e015c.
+pub mod cache_operation_begin;
 /// Allocates a cache position and initializes its format-specific default value @ 0x082e026c.
 pub mod cache_position_allocate;
 /// Flushes each cache entry for a FAT-cluster range @ 0x082e044c.

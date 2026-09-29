@@ -161467,3 +161467,29 @@ functions:
       second copy of halfword +0x14. Callers establish only 32-byte record
       extent, not field semantics; the port retains the opaque representation
       and uses volatile scalar accesses to preserve the original ordering.
+
+  # --- Cache-operation accounting and list-head lookup ---
+  - address: 0x082e015c
+    ghidra: FUN_082e015c
+    name: cache_operation_begin
+    size: 28
+    sig: "void *cache_operation_begin(void *contribution)"
+    module: fs/cache_operation_begin
+    status: ported
+    renames:
+      param_1/r0: contribution
+      DAT_082e0178: path_split_accumulator
+      DAT_082e017c: cache_operation_list_head
+      return/r0: list_head
+    notes: >-
+      Raw osos.dec establishes a 28-byte instruction body from 0x082e015c
+      through bx lr at 0x082e0174, followed by its two 4-byte resident-address
+      literals at 0x082e0178 and 0x082e017c. The next independently entered
+      function begins at 0x082e0180, making the complete image extent
+      0x082e015c..0x082e017f. Whole-image ARM decoding independently finds two
+      inbound direct plain bl calls at 0x082dfe10 and 0x082e17b8, zero
+      predicated bl calls, and no outbound calls. The function adds the numeric
+      value of contribution to resident word 0x08a0a748, then returns the
+      pointer held at resident word 0x08a0a728. Rust reuses the established
+      fixed-address accumulator representation and supplies a host resident
+      list-head fixture; no behavioral deviation.
