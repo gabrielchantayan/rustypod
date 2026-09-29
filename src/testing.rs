@@ -458,6 +458,9 @@ pub mod hints {
     // 0x0837_1000: dedicated to sqlite/fix_expr_list's raw-u32 ExprList
     // and 12-byte ExprList_item fixture; mappings never unmap.
     pub const SQLITE_FIX_EXPR_LIST: usize = 0x0837_1000;
+    // 0x0836_1000: dedicated to sqlite/expr_set_join_table's raw-u32 Expr
+    // hierarchy fixture; mappings never unmap, so no other user may share it.
+    pub const SQLITE_EXPR_SET_JOIN_TABLE: usize = 0x0836_1000;
     // 0x0838_0000: dedicated to sqlite/fix_src_list's raw-u32 DbFixer,
     // Parse, SrcList, and SrcList_item fixture; mappings never unmap.
     pub const SQLITE_FIX_SRC_LIST: usize = 0x0838_0000;
