@@ -423,6 +423,7 @@ pub mod wstr_default_trim_compare;
 pub mod value_predicate;
 pub mod prefix_before_space_has_no_rejected_bytes;
 pub mod xor_transposed_block;
+pub mod xor_b2_in_place;
 pub mod xor_c6_in_place;
 pub mod xor_6b_in_place;
 pub mod xor_8d_in_place;
