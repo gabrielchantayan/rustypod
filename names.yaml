@@ -47165,6 +47165,39 @@ functions:
       continuation validation is added.
 
   - address: 0x082d223c
+  - address: 0x082d229c
+    ghidra: FUN_082d229c
+    name: video_engine_submit_frame
+    size: 72
+    sig: "void video_engine_submit_frame(u32 command, u32 frame_index, u32 frame_descriptor, u32 width, u32 height, u32 reserved, u32 source_descriptor, u32 output_descriptor, u32 completion)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: command
+      param_2/r1: frame_index
+      param_3/r2: frame_descriptor
+      param_4/r3: width
+      param_5/stack[0]: height
+      param_6/stack[4]: reserved
+      param_7/stack[8]: source_descriptor
+      param_8/stack[12]: output_descriptor
+      param_9/stack[16]: completion
+      FUN_08252bec: video_engine_get
+      FUN_0824de50: video_engine_submit_frame_dispatch
+    notes: >-
+      Raw A32 words establish the exact 72-byte extent
+      0x082d229c..0x082d22e3: push r0-r11/lr; spill the five stack arguments;
+      call video_engine_get; return silently on NULL; otherwise restore all
+      nine original words after the engine pointer and call FUN_0824de50.
+      0x082d22e4 begins the next independently linked function. The body has
+      exactly two plain BL instructions (0x082d22b8 -> 0x08252bec and
+      0x082d22d8 -> 0x0824de50), with no predicated BL. The resident target
+      accepts command 0xde1, selects a frame slot, and converts image planes;
+      Rust deliberately leaves that unported target resident through a typed
+      transmute seam while host tests record NULL-session suppression and all
+      nine forwarded words. match.py exit 1 prints the expected LLVM
+      structural diff: a function-pointer BLX replaces the stock direct BL.
+
     ghidra: FUN_082d223c
     name: video_engine_set_frame_property
     size: 48
