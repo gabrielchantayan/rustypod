@@ -68,6 +68,58 @@ static mut PMU_QUERY: PmuQueryFn = missing_pmu_query;
 unsafe fn pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(PMU_QUERY))(request, flags, response)
 }
+/// ABI of the still-unported PCF50635 register 0x43 bit-0 update
+/// `FUN_0836d5a8`.
+type PmuRegister43Bit0Fn = unsafe extern "C" fn(enabled: u32) -> i32;
+
+const PMU_REGISTER_0X43_BIT0_ADDRESS: usize = 0x0836_d5a8;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_set_register_0x43_bit0(enabled: u32) -> i32 {
+    let set_bit: PmuRegister43Bit0Fn = core::mem::transmute(PMU_REGISTER_0X43_BIT0_ADDRESS);
+    set_bit(enabled)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_pmu_set_register_0x43_bit0(_enabled: u32) -> i32 {
+    panic!("pmu_update_register_0x43_bit0 requires PMU register 0x43 update 0x0836d5a8")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PMU_SET_REGISTER_0X43_BIT0: PmuRegister43Bit0Fn = missing_pmu_set_register_0x43_bit0;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_set_register_0x43_bit0(enabled: u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PMU_SET_REGISTER_0X43_BIT0))(enabled)
+}
+
+/// pmu_update_register_0x43_bit0 — original: `FUN_082e5a20` @
+/// `0x082e5a20` (44 bytes; 2 unconditional `bl` call sites, binary-verified).
+///
+/// Holds PMU transaction semaphores 17 then 5 while setting or clearing bit 0
+/// of PCF50635 register 0x43. Releases semaphore 5 then 17 unconditionally
+/// and returns the underlying register-update status.
+///
+/// # Deviations
+///
+/// The bit update at `0x0836d5a8` is not ported. Target builds call its
+/// verified typed address; host tests replace that boundary. The four
+/// semaphore veneers are existing Rust ports, so their retail direct calls
+/// become ordinary Rust calls.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_update_register_0x43_bit0(enabled: u32) -> i32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = pmu_set_register_0x43_bit0(enabled);
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+
+    status
+}
+
 
 /// pmu_write_register_0x0c_one — original: `FUN_082e5a70` @ `0x082e5a70`
 /// (60 bytes; 1 plain `bl` and 2 predicated `bl` call sites,
@@ -266,6 +318,32 @@ mod tests {
     static mut PMU_QUERY_ARGS: (u32, u32) = (0, 0);
     static mut PMU_QUERY_RESPONSE: u32 = 0;
     static mut PMU_QUERY_STATUS: i32 = 0;
+    static PMU_REGISTER_0X43_BIT0_TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut PMU_REGISTER_0X43_BIT0_ENABLED: u32 = 0;
+    static mut PMU_REGISTER_0X43_BIT0_STATUS: i32 = 0;
+
+    unsafe extern "C" fn record_pmu_set_register_0x43_bit0(enabled: u32) -> i32 {
+        PMU_REGISTER_0X43_BIT0_ENABLED = enabled;
+        PMU_REGISTER_0X43_BIT0_STATUS
+    }
+
+    struct PmuRegister43Bit0Fixture;
+
+    impl Drop for PmuRegister43Bit0Fixture {
+        fn drop(&mut self) {
+            unsafe {
+                PMU_SET_REGISTER_0X43_BIT0 = missing_pmu_set_register_0x43_bit0;
+            }
+        }
+    }
+
+    unsafe fn install_pmu_set_register_0x43_bit0_for_test(status: i32) -> PmuRegister43Bit0Fixture {
+        PMU_REGISTER_0X43_BIT0_ENABLED = 0;
+        PMU_REGISTER_0X43_BIT0_STATUS = status;
+        PMU_SET_REGISTER_0X43_BIT0 = record_pmu_set_register_0x43_bit0;
+        PmuRegister43Bit0Fixture
+    }
+
 
     unsafe extern "C" fn record_pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
         PMU_QUERY_ARGS = (request, flags);
@@ -290,6 +368,20 @@ mod tests {
         PMU_QUERY = record_pmu_query;
         PmuQueryFixture
     }
+    #[test]
+    fn register_43_bit_zero_update_forwards_mode_status_and_releases_locks() {
+        let _lock = PMU_REGISTER_0X43_BIT0_TEST_LOCK.lock();
+        let _callee = unsafe { install_pmu_set_register_0x43_bit0_for_test(-5) };
+        let _i2c = install_raw_i2c_for_test(0, 0, 0);
+
+        assert_eq!(unsafe { pmu_update_register_0x43_bit0(0xfeed_beef) }, -5);
+        assert_eq!(unsafe { PMU_REGISTER_0X43_BIT0_ENABLED }, 0xfeed_beef);
+        let (writes, reads, semaphores) = unsafe { raw_i2c_calls_for_test() };
+        assert!(writes.is_empty());
+        assert!(reads.is_empty());
+        assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
 
     #[test]
     fn query_modes_select_the_verified_request_pairs() {

@@ -27279,6 +27279,36 @@ functions:
       deviations: direct retail calls become ordinary Rust calls or the seam's
       indirect target call.
 
+  # --- PMU register 0x43 bit 0 update (drivers/pmu) ---
+  - address: 0x082e5a20
+    ghidra: FUN_082e5a20
+    name: pmu_update_register_0x43_bit0
+    size: 44
+    sig: "i32 pmu_update_register_0x43_bit0(u32 enabled)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: enabled
+      uVar1/r4: register_update_status
+      FUN_0806a4b0: kernel_sem17_wait
+      FUN_0806a4a0: kernel_sem5_wait
+      FUN_0836d5a8: pmu_set_register_0x43_bit0
+      FUN_080645a8: kernel_sem5_signal
+      FUN_08064604: kernel_sem17_signal
+    notes: >-
+      Raw osos.dec words establish the exact 44-byte extent
+      0x082e5a20..0x082e5a48: push {r4,lr}; move enabled into r4; wait
+      semaphores 17 then 5; call 0x0836d5a8; preserve its r0 status in r4;
+      signal 5 then 17; and return that status. The following cmp r0,#1 at
+      0x082e5a4c starts the distinct next function. Decoding every ARM B/BL
+      word independently finds two direct inbound plain unconditional bl
+      instructions, at 0x080af281 and 0x080b9699; zero predicated bl forms.
+      The verified callee reads PCF50635 register 0x43, sets or clears bit 0
+      from enabled, and returns the read or write status. It is not ported:
+      target builds call its verified typed address through a seam and host
+      tests inject it. The four semaphore calls resolve to existing Rust ports
+      and deliberately become ordinary Rust calls.
+
   # --- PMU register 0x0c one write (drivers/pmu) ---
   - address: 0x082e5a70
     ghidra: FUN_082e5a70
