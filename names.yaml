@@ -31105,6 +31105,29 @@ functions:
       the target build calls its resident load address; host builds use
       recording boundaries for every direct callee.
 
+  # --- Bounded path-suffix whitespace predicate ---
+  - address: 0x082e0138
+    ghidra: thunk_FUN_082e014c
+    name: remaining_path_bytes_are_spaces
+    size: 36
+    sig: "u32 remaining_path_bytes_are_spaces(const u8 *bytes, u32 limit)"
+    module: fs/remaining_path_bytes_are_spaces
+    status: ported
+    renames:
+      param_1: bytes
+      param_2: limit
+    notes: >-
+      Raw ARM establishes the exact 36-byte code extent
+      0x082e0138..0x082e015b: the entry branch targets the loop setup at
+      0x082e014c, which branches back to its loop body at 0x082e013c, and
+      0x082e015c begins the next separately entered function. Decoding every
+      ARM B/BL word in osos.dec finds exactly two inbound direct callers, both
+      plain unconditional bl at 0x082e2a9c and 0x082e2af0; no predicated BL
+      calls or tail branches target it. It returns one if every byte in the
+      bounded range is ASCII space, including a zero-length range, and zero at
+      the first non-space byte. Deliberate deviation: volatile reads prevent
+      LLVM from replacing the byte loop with a libc helper.
+
   # --- Path-resolution node factory ---
   - address: 0x082e0100
     ghidra: FUN_082e0100

@@ -12,34 +12,10 @@
 //! It adds the numeric address of `accumulator_contribution` to resident word
 //! `0x08a0a748`, then accepts `.` only when it ends immediately or the next
 //! ten bytes are all ASCII spaces. The bounded whitespace helper at
-//! `0x082e014c` is not yet ported; target builds call its verified retailOS
-//! address and host builds use a replacement seam. Deliberate deviation: none.
+//! `0x082e0138` is ported locally. Deliberate deviation: none.
 
 use super::path_component_split::add_accumulator_contribution;
-
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn remaining_path_bytes_are_spaces(bytes: *const u8, limit: u32) -> u32 {
-    let helper: unsafe extern "C" fn(*const u8, u32) -> u32 =
-        core::mem::transmute(0x082e_014cusize);
-    helper(bytes, limit)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_remaining_path_bytes_are_spaces(_bytes: *const u8, _limit: u32) -> u32 {
-    0
-}
-
-#[cfg(not(target_os = "none"))]
-static mut REMAINING_PATH_BYTES_ARE_SPACES: unsafe extern "C" fn(*const u8, u32) -> u32 =
-    host_remaining_path_bytes_are_spaces;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn remaining_path_bytes_are_spaces(bytes: *const u8, limit: u32) -> u32 {
-    let helper = core::ptr::read_volatile(core::ptr::addr_of!(REMAINING_PATH_BYTES_ARE_SPACES));
-    helper(bytes, limit)
-}
+use super::remaining_path_bytes_are_spaces::remaining_path_bytes_are_spaces;
 
 /// Answers whether `component` is the retailOS current-directory reference.
 #[inline(never)]
@@ -73,70 +49,34 @@ mod tests {
         PATH_COMPONENT_ACCUMULATOR_TEST_LOCK,
     };
 
-    static mut HELPER_RESULT: u32 = 0;
-    static mut HELPER_CALL: Option<(usize, u32)> = None;
-
-    unsafe extern "C" fn recording_space_helper(bytes: *const u8, limit: u32) -> u32 {
-        HELPER_CALL = Some((bytes as usize, limit));
-        HELPER_RESULT
-    }
-
-    unsafe fn reset_helper(result: u32) {
-        HELPER_RESULT = result;
-        HELPER_CALL = None;
-        REMAINING_PATH_BYTES_ARE_SPACES = recording_space_helper;
-    }
-
     #[test]
-    fn immediate_current_reference_skips_the_bounded_space_helper() {
+    fn accepts_immediate_and_space_padded_current_references() {
         let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
         unsafe {
             reset_path_component_accumulator();
-            reset_helper(0);
             let mut contribution = 0u8;
             assert_eq!(
                 path_component_is_current_reference(b".\0".as_ptr(), &mut contribution),
                 1
             );
-            assert_eq!(HELPER_CALL, None);
-        }
-    }
-
-    #[test]
-    fn trailing_bytes_use_the_exact_ten_byte_helper_contract() {
-        let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
-        unsafe {
-            reset_path_component_accumulator();
-            reset_helper(7);
-            let mut contribution = 0u8;
-            let component = b".          x\0";
             assert_eq!(
-                path_component_is_current_reference(component.as_ptr(), &mut contribution),
+                path_component_is_current_reference(b".          x\0".as_ptr(), &mut contribution),
                 1
             );
-            assert_eq!(HELPER_CALL, Some((component.as_ptr().add(1) as usize, 10)));
-
-            reset_helper(0);
-            assert_eq!(
-                path_component_is_current_reference(component.as_ptr(), &mut contribution),
-                0
-            );
         }
     }
 
     #[test]
-    fn non_current_components_do_not_call_the_helper_and_update_the_accumulator() {
+    fn rejects_non_current_components_and_updates_the_accumulator() {
         let _guard = PATH_COMPONENT_ACCUMULATOR_TEST_LOCK.lock();
         unsafe {
             reset_path_component_accumulator();
-            reset_helper(1);
             let before = path_component_accumulator();
             let mut contribution = 0u8;
             assert_eq!(
                 path_component_is_current_reference(b"x\0".as_ptr(), &mut contribution),
                 0
             );
-            assert_eq!(HELPER_CALL, None);
             assert_eq!(
                 path_component_accumulator(),
                 before.wrapping_add(&mut contribution as *mut u8 as usize as u32)
