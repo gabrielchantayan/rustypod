@@ -699,6 +699,7 @@ pub mod event_subscription_rtc_sync;
 pub mod status_value_set;
 pub mod app_command_63800021_dispatch;
 pub mod message_selector_read;
+pub mod control_profile_mode_apply;
 pub mod retail_control_profile_apply;
 pub mod initializer_profile_dispatch;
 pub mod guarded_global_index_transform;

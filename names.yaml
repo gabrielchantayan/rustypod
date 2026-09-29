@@ -158967,3 +158967,31 @@ functions:
       The Rust port preserves these state gates and bounded scan. Deliberate
       deviation: the retail table pointer is subject to the documented image
       skew, so Rust uses the equivalent direct ASCII upper-to-lower fold.
+
+
+  # ---- Control profile mode application (src/app/control_profile_mode_apply.rs) ----
+  - address: 0x0836e400
+    ghidra: FUN_0836e400
+    name: control_profile_mode_apply
+    size: 28
+    sig: "void control_profile_mode_apply(void)"
+    module: app/control_profile_mode_apply
+    status: ported
+    renames:
+      r0: selector_then_first_tail_argument
+      r1: mode_flag_then_second_tail_argument
+      r2: third_tail_argument
+      FUN_0836e3c8: retail_selector_write
+      FUN_0836e460: retail_mode_apply_tail
+    notes: >-
+      Raw osos.dec establishes the exact 28-byte extent
+      0x0836e400..0x0836e41b: `push {r4,lr}; mov r1,#0x80; mov r0,#1; bl
+      0x0836e3c8; pop {r4,lr}; mov r0,#2; b 0x0836e460`. The next real
+      function begins at 0x0836e41c. Ghidra's 112-byte extent is wrong because
+      it absorbs the adjacent wrappers. Raw instruction decoding finds one
+      outbound plain BL and zero predicated BL forms; the whole image has two
+      inbound plain BL sites and zero predicated BL sites. It writes 0x80 to
+      selector 1, then tail-calls 0x0836e460 with (0,3,2), where the tail
+      target overwrites those argument registers before branching onward.
+      Neither target is ported, so the ARM build calls their verified addresses
+      directly and host tests use role-based seams; no behavioral deviations.
