@@ -8720,6 +8720,41 @@ functions:
       and every relative triplet overlap. match.py structural review was
       completed. Deliberate deviations: volatile Rust accesses preserve the ARM
       load/store ordering against LLVM optimization.
+  # --- JIT frame-stack spill emitter ---
+  - address: 0x083685f0
+    ghidra: FUN_083685f0
+    name: cg_emit_stack_store
+    size: 140
+    sig: "void cg_emit_stack_store(CgCodegen *codegen, CgBinding *binding, CgVirtualReg *operand)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r3: codegen
+      param_2/r4: binding
+      param_3/r5: operand
+      r0: signed_stack_offset_then_emitted_instruction
+      r1: absolute_stack_offset_then_emitted_instruction
+      r2: binding_resource_then_positive_offset_bit
+      FUN_082cf274: cg_operand_stack_offset
+      FUN_082c231c: cg_buffer_emit_word
+    notes: >-
+      Raw osos.dec establishes the 140-byte instruction extent
+      0x083685f0..0x0836867c: `pop {r4-r6,pc}` ends at 0x08368678; the
+      following two literal words are 0xfffff001 and 0x00000fff, and the
+      next independently linked function begins at 0x08368684. Decoding every
+      aligned ARM B/BL-immediate word in osos.dec finds exactly two inbound
+      direct calls, both unconditional bl at 0x082c5cf8 and 0x082cea9c;
+      there are no predicated bl forms or direct tail-B callers. The body
+      resolves operand+0x14 through cg_operand_stack_offset, clamping offsets
+      below -0x1000 to -0xfff and at least 0x1000 to +0xfff. It emits
+      `str r<binding+0x0c>,[fp,#signed_offset]` through cg_buffer_emit_word,
+      then clears binding flags bit 0x100. Raw ARM invokes the resolver once
+      for each out-of-range branch and three times for an in-range offset;
+      the port preserves that call pattern. Host tests cover negative,
+      positive-overflow, and negative-boundary encodings, output advancement,
+      and the flag clear. match.py structural review was completed.
+      Deliberate deviation: Rust `i32::unsigned_abs` replaces `rsblt` while
+      retaining the same i32::MIN bit pattern.
   # --- H.264 stream-position block rounding ---
   - address: 0x08368784
     ghidra: FUN_08368784
@@ -89853,14 +89888,12 @@ functions:
       active-push transfer. The raw body is exactly 204 bytes:
       0x082b3c34..0x082b3cfc, followed by distinct FUN_082b3d00.
       Deliberate deviation: unported FUN_08367390/FUN_08367358 use the
-      CG_BINDING_ACQUIRE_OPS no-op defaults; ported FUN_082c5c58 is now
-      the release default but retains its documented no-op direct-callee
-      FUN_083685f0 and list-push FUN_08367358 seams. Ported
-      FUN_083673b0 remains the unlink default. Host tests cover a
-      zero-mask bit-31 parent reuse, an out-of-range bit-32 free-tail
-      skip before bit-31 selection, active-list release fallback, call
-      order and seam defaults. match.py exit 1 diff dispatch replaces
-      stock direct bl calls, while LLVM may merge the two tail-to-head
+      CG_BINDING_ACQUIRE_OPS no-op defaults. The release effect is now the
+      ported cg_emit_stack_store default; cg_binding_unlink remains the
+      ported default. Host tests cover a zero-mask bit-31 parent reuse, an
+      out-of-range bit-32 free-tail skip before bit-31 selection,
+      active-list release fallback, call order and seam defaults. match.py exit
+      1 diff dispatch replaces stock direct bl calls, while LLVM may merge the
       filter loops.
 
   - address: 0x082c5c58
@@ -89878,8 +89911,8 @@ functions:
         (+0x10 CG_VREG_NO)
       r0/r1: current block live-OUT bitset and its bitmap word, then the
         queued-use head and final flags word
-      FUN_083685f0: unported direct callee; identity deliberately unrecovered
-        (called with codegen, binding, bound register)
+      FUN_083685f0: cg_emit_stack_store (ported stack-spill emitter;
+        called with codegen, binding, bound register)
       FUN_083673b0: cg_binding_unlink (ported active-list removal)
       FUN_08367358: unported binding_push (free-list insertion)
     notes: >-
@@ -89899,16 +89932,16 @@ functions:
       onto +0x1f0; and it clears flags 0x100 and 0x200. The raw
       bic-0x200/and-0x100-(flags>>1)/bic-0x100 sequence makes the apparent
       0x200-to-0x100 shift dead, so the exact final flags are flags & ~0x300;
-      Ghidra drops the first clear. Deliberate deviation: FUN_083685f0 and
-      FUN_08367358 dispatch through CG_BINDING_ACQUIRE_OPS inert defaults
-      until their own ports; their identities are not invented. Host tests
-      prove queued-use release and active-to-free order, bit-31 live-OUT
-      release without dereferencing the use table, stale back-pointer
-      short-circuiting before liveness reads, unconditional detachment, and
-      the raw 0x300 flag clear. match.py exit 1 diff expected: stock direct
-      bl/blne calls become ops-table dispatch; same back-pointer guard,
-      live-OUT/use-head split, active-anchor transfer, and terminal flag
-      mask remain.
+      Ghidra drops the first clear. Deliberate deviation: FUN_08367358
+      still dispatches through the CG_BINDING_ACQUIRE_OPS inert default
+      until its port; cg_emit_stack_store is now the release-effect
+      default. Host tests prove queued-use release and active-to-free order,
+      bit-31 live-OUT release without dereferencing the use table, stale
+      back-pointer short-circuiting before liveness reads, unconditional
+      detachment, and the raw 0x300 flag clear. match.py exit 1 diff
+      expected: stock direct bl/blne calls become ops-table dispatch; same
+      back-pointer guard, live-OUT/use-head split, active-anchor transfer,
+      and terminal flag mask remain.
 
   - address: 0x082d7800
     ghidra: FUN_082d7800
