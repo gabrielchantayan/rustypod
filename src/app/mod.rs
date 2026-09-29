@@ -206,6 +206,7 @@ pub mod timer_rearm_after_15000;
 pub mod derived_object_construct;
 pub mod derived_object_construct_0899f394;
 pub mod configuration_entry;
+pub mod message_builder_allocate_and_construct;
 pub mod controller_secondary_interface;
 pub mod controller_pending_command;
 pub mod controller_directional_command;

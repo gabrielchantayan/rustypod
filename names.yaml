@@ -162921,3 +162921,35 @@ functions:
       0x0816e8a0, and no predicated BL instructions. It ignores incoming
       argument registers and returns one. Deliberate deviations: none; target
       builds retain the verified A32 body to preserve the callable symbol.
+  - address: 0x082caec0
+    ghidra: FUN_082caec0
+    name: message_builder_allocate_and_construct
+    size: 144
+    sig: "void *message_builder_allocate_and_construct(u32 unused, u32 key, const void *configuration)"
+    module: app/message_builder_allocate_and_construct
+    status: ported
+    renames:
+      param_1/r0: unused
+      param_2/r1: key
+      param_3/r2: configuration
+      r4: configuration
+      r5/r0: constructed_object
+      FUN_0824cb64: message_builder_initialize
+      FUN_0824c8f8: message_builder_append
+      FUN_082aadd4: operator_new
+      FUN_08256938: message_object_construct
+    notes: >-
+      Raw osos.dec words establish the exact 144-byte body from 0x082caec0
+      through 0x082caf4f; five literal words follow, and the next real
+      function begins at 0x082caf64. The body has four plain outbound BL
+      instructions (0x082caedc, 0x082caeec, 0x082caf30, 0x082caf3c) and two
+      predicated BLNE instructions (0x082caf14, 0x082caf24). Full-image A32
+      decoding identifies two inbound plain BL calls at 0x0825bdc4 and
+      0x08295b68, and no predicated inbound calls. It initializes a 104-byte
+      message builder, appends selector 0x3033 with value four, conditionally
+      appends selectors 0x3057 and 0x3056, then allocates 0xa8 bytes and
+      constructs the result. A NULL configuration writes 0x300b to
+      0x089ca320 and returns zero. The three unported callee identities remain
+      ABI-only resident seams: target builds call their verified addresses and
+      host builds record them. Deliberate deviations: target calls are typed
+      indirect calls, and Rust's normal calls replace predicated BLNE.
