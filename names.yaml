@@ -31036,17 +31036,44 @@ functions:
       call sites, all plain bl at 0x082e16a8, 0x082e2344, 0x082e23fc,
       0x082e2e70, 0x082e3190, 0x082e3520, 0x082e4110, 0x082e415c,
       0x082e41b0 and 0x082e4840; there are no predicated calls or tail
-      branches. The wrapper preserves all five ABI arguments, supplies
-      -1 as the sixth stack argument to unported 0x082e202c, and returns
-      that helper's r0 unchanged. Callers use the non-NULL return as a
-      child path node while processing components, so the name describes
-      the wrapper's observed role; the exact identity of 0x082e202c and
-      its sixth argument's field meaning are deliberately not invented.
-      Ghidra incorrectly declares this wrapper void; raw ARM and every
-      caller demonstrate its pointer return. Target builds call the
-      unported helper through its retailOS load address; host tests use a
-      recording boundary to prove all argument pass-through, the -1
-      default and return propagation.
+      branches. The wrapper preserves all five ABI arguments, supplies -1 as
+      the sixth stack argument to path_node_lookup_component_with_continuation,
+      and returns that helper's r0 unchanged. Callers use the non-NULL return
+      as a child path node while processing components. Ghidra incorrectly
+      declares this wrapper void; raw ARM and every caller demonstrate its
+      pointer return. The port directly calls the ported helper, preserving the
+      default continuation state and return propagation on host and target
+      builds. Deliberate deviation: none.
+
+  - address: 0x082e202c
+    ghidra: FUN_082e202c
+    name: path_node_lookup_component_with_continuation
+    size: 164
+    sig: "u8 *path_node_lookup_component_with_continuation(u8 *node, u8 *parent, u8 *component, u8 *component_state, u32 flags, i32 continuation_state)"
+    module: fs/path_node_lookup
+    status: ported
+    renames:
+      param_1: node
+      param_2: parent
+      param_3: component
+      param_4: component_state
+      param_5: flags
+      param_6: continuation_state
+      FUN_082e3080: path_node_create_from_parent
+      FUN_082e36c8: fat_cursor_advance_block
+      FUN_082e10ec: path_node_scan_component
+      FUN_082e19cc: path_node_release
+    notes: >-
+      Raw ARM establishes the exact 164-byte extent 0x082e202c..0x082e20cf:
+      the next separate function begins with push {r4-r9,sl,lr} at 0x082e20d0.
+      Complete-image decoding finds two inbound plain bl calls (0x082e2024 and
+      0x082e640c), no predicated calls, three outbound plain bl calls, and one
+      predicated blne release. The helper creates a node from parent when node
+      is NULL, stores a non--1 continuation state at +0x0c, advances a cursor
+      after 16 entries, then scans the component. Failed scans release only
+      nodes created in this call. Deliberate deviation: the two unported
+      dependencies at 0x082e3080 and 0x082e10ec remain fixed-address target
+      calls with recording host seams; advancement and release use Rust ports.
 
   - address: 0x0812120c
     ghidra: (absent from functions.csv)
