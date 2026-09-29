@@ -309,6 +309,7 @@ pub mod str_accum;
 pub mod strdup;
 pub mod stmt_lru_remove;
 pub mod token_copy;
+pub mod token_init;
 pub mod trigger_delete;
 pub mod trigger_step_delete;
 pub mod trigger_step_dup;
