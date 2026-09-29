@@ -3200,6 +3200,9 @@ pub mod hints {
     // 0x77a0_0000: dedicated to sqlite/token_quote_identifier's target-width
     // quoted-source fixture; mappings never unmap.
     pub const SQLITE_TOKEN_QUOTE_IDENTIFIER: usize = 0x77a0_0000;
+    // 0x089c_e000: dedicated to util/opaque_constant_zero's fixed retailOS
+    // seed-word fixture; mappings never unmap.
+    pub const OPAQUE_CONSTANT_ZERO: usize = 0x089c_e000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
