@@ -18,4 +18,5 @@ pub mod printf_x;
 pub mod printf_float;
 pub mod power_of_ten;
 pub mod printf_float_dtoa;
+pub mod printf_decimal_digit;
 pub mod printf_radix_integer;

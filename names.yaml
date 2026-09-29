@@ -162812,3 +162812,34 @@ functions:
       and no predicated inbound BL. FUN_082ccf94 has no verified semantic
       identity, so target builds retain its verified absolute call and host
       tests use a recording seam to prove call order, bounds, and ABI.
+
+  - address: 0x082ccd14
+    ghidra: FUN_082ccd14
+    name: printf_decimal_digit
+    size: 116
+    sig: "i32 printf_decimal_digit(u64 *decimal_state, i32 *digit_count)"
+    module: printf/printf_decimal_digit
+    status: ported
+    renames:
+      param_1/r0: decimal_state
+      param_2/r1: digit_count
+      iVar1/r0: integer
+      DAT_082ccd80/DAT_082ccd84: 10.0
+      FUN_083eb7d0: __d2i
+      FUN_083eb908: __i2d
+      FUN_083ec09c: __dsub
+      FUN_083eba48: __dmul
+    notes: >-
+      Raw osos.dec establishes the 116-byte true extent
+      0x082ccd14..0x082ccd87: 108 bytes of code through the final pop, then
+      the 64-bit 10.0 literal; the next real function begins at 0x082ccd88.
+      Decoding the code finds four outbound unconditional BL instructions
+      (__d2i, __i2d, __dsub, __dmul) and no predicated BL instructions.
+      The two inbound direct BL call sites are both in sqlite3VXPrintf
+      (0x0839788c), which uses it for its integer and fractional digit runs.
+      It increments digit_count with wrapping arithmetic, emits 16 decimal
+      digits at most, and otherwise returns ASCII '0' without touching the
+      double state. For an active digit, it returns trunc(state) + '0' and
+      advances state to (state - i2d(trunc(state))) * 10. Volatile
+      function-pointer loads deliberately preserve the four helper-call
+      boundaries instead of allowing LLVM to inline their soft-float bodies.
