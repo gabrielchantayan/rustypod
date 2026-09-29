@@ -181,6 +181,32 @@ pub unsafe extern "C" fn pmu_board_version_status_bit(
     ((status_byte as u32 >> ((1 - version_0x11) << 1)) & 1) as u32
 }
 
+/// pmu_board_version_status_available — original: `FUN_082e5794` @
+/// `0x082e5794` (20 bytes; one plain, unconditional callee `bl`, no
+/// predicated calls; two plain direct callers, binary-verified).
+///
+/// Calls `pmu_board_version_status_bit` with its four incoming ABI words and
+/// normalizes its result to a zero-or-one availability flag.
+///
+/// # Deviations
+///
+/// The sole verified retail callee is the existing Rust PMU status-bit port,
+/// so the direct `bl` becomes an ordinary Rust call. The explicit ABI words
+/// preserve the callee's incoming-r3 failed-transfer behavior. A volatile
+/// stack read preserves the retail call-and-normalize structure against LLVM
+/// tail-call elimination; it does not change the returned value.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_board_version_status_available(
+    incoming_r0: u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    let status = pmu_board_version_status_bit(incoming_r0, incoming_r1, incoming_r2, incoming_r3);
+    (core::ptr::read_volatile(&status) != 0) as u32
+}
+
 /// pmu_register_0x4b_bit2 — original: `FUN_082e53d8` @ `0x082e53d8`
 /// (52 bytes; 6 unconditional `bl` call sites, binary-verified).
 ///
@@ -445,6 +471,19 @@ mod tests {
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
     }
 
+
+    #[test]
+    fn board_status_availability_normalizes_selected_status_bit() {
+        let _board = install_host_cached_board_version(0x0011_0000);
+
+        {
+            let _i2c = install_raw_i2c_for_test(0, 0, 0);
+            assert_eq!(unsafe { pmu_board_version_status_available(0, 0, 0, 0) }, 0);
+        }
+
+        let _i2c = install_raw_i2c_for_test(-5, 0, 0);
+        assert_eq!(unsafe { pmu_board_version_status_available(0, 0, 0, 1) }, 1);
+    }
     #[test]
     fn other_boards_read_register_12_and_return_bit_two() {
         let _board = install_host_cached_board_version(0x0010_ffff);
