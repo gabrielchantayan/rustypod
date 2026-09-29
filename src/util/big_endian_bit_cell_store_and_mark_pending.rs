@@ -13,23 +13,17 @@
 ///
 /// # Deliberate deviations
 ///
-/// The first helper is the already ported `big_endian_bit_cell_store`. The
-/// two map helpers have no `names.yaml` entries, so ARM calls their verified
-/// retail addresses; host tests use explicit callback seams. This preserves
-/// the original call order and arguments without assigning unverified helper
-/// identities.
+/// The bit-cell helper and `big_endian_pending_map_set` are already ported.
+/// The final map helper has no `names.yaml` entry, so ARM calls its verified
+/// retail address; host tests retain an explicit callback seam for that one
+/// unverified call. This preserves the original call order and arguments
+/// without assigning an unverified helper identity.
 use super::big_endian_bit_cell_store::big_endian_bit_cell_store;
+use super::big_endian_pending_map_set::big_endian_pending_map_set;
 
 type RetailPendingMapUpdate = unsafe extern "C" fn(u32, i32) -> u32;
-
-const SET_PENDING_MAP_ADDRESS: usize = 0x0836_b6fc;
 const OR_PENDING_MAPS_ADDRESS: usize = 0x0836_b634;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn set_pending_map() -> RetailPendingMapUpdate {
-    unsafe { core::mem::transmute(SET_PENDING_MAP_ADDRESS) }
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -75,7 +69,7 @@ pub unsafe extern "C" fn big_endian_bit_cell_store_and_mark_pending(
 
     #[cfg(target_os = "none")]
     unsafe {
-        set_pending_map()(channel, pending);
+        big_endian_pending_map_set(channel, pending);
         return or_pending_maps()(channel, payload);
     }
     #[cfg(not(target_os = "none"))]

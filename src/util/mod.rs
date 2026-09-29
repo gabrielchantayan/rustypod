@@ -26,6 +26,7 @@ pub mod byte_bit_set_mask;
 pub mod big_endian_word_bit_index;
 pub mod big_endian_bit_cell_store;
 pub mod big_endian_bit_cell_store_and_mark_pending;
+pub mod big_endian_pending_map_set;
 pub mod bounded_word_bit_set_contains;
 pub mod checked_word_block;
 pub mod choice_state_prune_duplicate_tail;
