@@ -1939,6 +1939,9 @@ pub unsafe extern "C" fn video_engine_dispatch_opaque_two_words(first: u32, seco
 }
 
 #[cfg(test)]
+pub(crate) static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
 
@@ -2137,9 +2140,6 @@ mod tests {
 
 
 
-    /// Serializes wrapper tests: MOCK_INSTANCE and their host dispatch seams
-    /// are shared mutable state.
-    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     // --- video_engine_set_output_transform (FUN_082d0dec) ---
 

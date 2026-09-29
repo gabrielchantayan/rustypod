@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082d1438
+    ghidra: FUN_082d1438
+    name: video_engine_dispatch_opaque_two_words_d0e4
+    size: 40
+    sig: "void video_engine_dispatch_opaque_two_words_d0e4(u32 first, u32 second)"
+    module: util/video_engine_dispatch_opaque_two_words_d0e4
+    status: ported
+    renames:
+      param_1/r0: first
+      param_2/r1: second
+      r0: video_engine
+      r4: first
+      r5: second
+      FUN_08252bec: video_engine_get
+      0x0824d0e4: video_engine_opaque_two_word_dispatch
+    notes: >-
+      Raw osos.dec A32 words establish a 40-byte body from 0x082d1438 through
+      0x082d145c; the push at 0x082d1460 starts the next independently linked
+      wrapper, rather than the remaining 148 bytes claimed by Ghidra. The body
+      has one outbound plain BL (0x082d1444 -> 0x08252bec), no predicated BL,
+      two inbound plain BL calls (0x081bb718 and 0x083d39c8), and no predicated
+      inbound BL. It gets the video engine, silently returns on NULL, otherwise
+      tail-branches with the instance and both unmodified words to 0x0824d0e4.
+      That target is absent from names.yaml and has no verified semantic
+      identity, so Rust uses a typed resident seam with recording host tests.
+      Deliberate deviations: Rust expresses the conditional tail branch as a
+      normal call.
   - address: 0x082d1460
     ghidra: FUN_082d1460
     name: video_engine_dispatch_opaque_two_words
