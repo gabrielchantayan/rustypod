@@ -17,28 +17,8 @@
 //! tail branches or predicated call forms. No aligned image word equals its
 //! address, so it is not a data-dispatched virtual target.
 //!
-//! Deviation: pthread_mutex_destroy @ 0x082e82a4 is not ported. The calls
-//! therefore cross [`CXX_MUTEX_DESTROY_OPS`], whose default is an inert,
-//! success-returning stub. Neither wrapper is hook-ready until that callee is
-//! ported; the dispatch retains the exact one-call and return-this contract.
-
-/// Indirect callee for the unresolved pthread_mutex_destroy @ 0x082e82a4.
-/// The native return status is intentionally discarded by
-/// [`cxx_mutex_destroy`].
-#[derive(Clone, Copy)]
-pub struct CxxMutexDestroyOps {
-    pub mutex_destroy: unsafe extern "C" fn(mutex: *mut u8) -> u32,
-}
-
-unsafe extern "C" fn mutex_destroy_unported(_mutex: *mut u8) -> u32 { 0 }
-
-/// Default while pthread_mutex_destroy remains unported.
-pub const DEFAULT_CXX_MUTEX_DESTROY_OPS: CxxMutexDestroyOps = CxxMutexDestroyOps {
-    mutex_destroy: mutex_destroy_unported,
-};
-
-/// Active native-destroy boundary. Host tests replace it with a recorder.
-pub static mut CXX_MUTEX_DESTROY_OPS: CxxMutexDestroyOps = DEFAULT_CXX_MUTEX_DESTROY_OPS;
+//! pthread_mutex_destroy is now ported directly in
+//! [`crate::pthread_mutex_destroy`].
 
 /// cxx_mutex_destroy — original: `FUN_08261e54` @ 0x08261e54
 /// (20 bytes; 19 unconditional `bl` call sites, no predicated calls, and
@@ -50,8 +30,7 @@ pub static mut CXX_MUTEX_DESTROY_OPS: CxxMutexDestroyOps = DEFAULT_CXX_MUTEX_DES
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cxx_mutex_destroy(this: *mut u8) -> *mut u8 {
-    let mutex_destroy = core::ptr::read_volatile(core::ptr::addr_of!(CXX_MUTEX_DESTROY_OPS.mutex_destroy));
-    mutex_destroy(this);
+    crate::cxx::pthread_mutex_destroy::pthread_mutex_destroy(this);
     this
 }
 
@@ -61,16 +40,14 @@ pub unsafe extern "C" fn cxx_mutex_destroy(this: *mut u8) -> *mut u8 {
 ///
 /// Calls pthread_mutex_destroy on the mutex at `this`, discards its status,
 /// and returns `this` unchanged. Like the raw ARM body, this wrapper has no
-/// NULL guard: NULL reaches the native destroy boundary. It deliberately
-/// reuses the existing unported native-destroy seam; its unique target text
+/// guard: NULL reaches the native destroy entry. Its unique target text
 /// section preserves this separately linked wrapper's hook identity despite
 /// its byte-identical sibling [`cxx_mutex_destroy`].
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(target_os = "none", link_section = ".text.mutex_destroy_return_this")]
 #[inline(never)]
 pub unsafe extern "C" fn mutex_destroy_return_this(this: *mut u8) -> *mut u8 {
-    let mutex_destroy = core::ptr::read_volatile(core::ptr::addr_of!(CXX_MUTEX_DESTROY_OPS.mutex_destroy));
-    mutex_destroy(this);
+    crate::cxx::pthread_mutex_destroy::pthread_mutex_destroy(this);
     this
 }
 
@@ -79,83 +56,40 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static CXX_MUTEX_DESTROY_OPS_LOCK: Mutex<()> = Mutex::new(());
-    static mut DESTROY_ARGUMENT: *mut u8 = core::ptr::null_mut();
-
-    unsafe extern "C" fn recording_mutex_destroy(mutex: *mut u8) -> u32 {
-        *core::ptr::addr_of_mut!(DESTROY_ARGUMENT) = mutex;
-        20
-    }
-
-    struct DestroyOpsGuard {
-        _lock: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for DestroyOpsGuard {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::addr_of_mut!(CXX_MUTEX_DESTROY_OPS)
-                    .write_volatile(DEFAULT_CXX_MUTEX_DESTROY_OPS);
-            }
-        }
-    }
-
-    fn install_destroy_recorder() -> DestroyOpsGuard {
-        let lock = CXX_MUTEX_DESTROY_OPS_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        unsafe {
-            *core::ptr::addr_of_mut!(DESTROY_ARGUMENT) = core::ptr::null_mut();
-            core::ptr::addr_of_mut!(CXX_MUTEX_DESTROY_OPS).write_volatile(CxxMutexDestroyOps {
-                mutex_destroy: recording_mutex_destroy,
-            });
-        }
-        DestroyOpsGuard { _lock: lock }
-    }
 
     #[test]
-    fn destroy_forwards_this_discards_status_and_returns_this() {
+    fn destroy_returns_this_without_writing_wrapper_storage() {
         let mut wrapper = [0xa5u8; 0x1c];
         let this = wrapper.as_mut_ptr();
-        let _ops = install_destroy_recorder();
 
         let returned = unsafe { cxx_mutex_destroy(this) };
 
-        assert_eq!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read() }, this, "the only call receives the embedded mutex at this+0");
         assert_eq!(returned, this, "the native status is discarded and mov r0, r4 returns this");
         assert_eq!(wrapper, [0xa5u8; 0x1c], "the wrapper itself performs no writes");
     }
 
     #[test]
     fn destroy_forwards_null_without_a_wrapper_guard() {
-        let _ops = install_destroy_recorder();
-
         let returned = unsafe { cxx_mutex_destroy(core::ptr::null_mut()) };
 
-        assert!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read().is_null() }, "NULL reaches pthread_mutex_destroy");
         assert!(returned.is_null(), "the unchanged NULL this pointer is returned");
     }
 
     #[test]
-    fn sibling_destroy_forwards_this_discards_status_and_returns_this() {
+    fn sibling_destroy_returns_this_without_writing_wrapper_storage() {
         let mut wrapper = [0xa5u8; 0x1c];
         let this = wrapper.as_mut_ptr();
-        let _ops = install_destroy_recorder();
 
         let returned = unsafe { mutex_destroy_return_this(this) };
 
-        assert_eq!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read() }, this, "the only call receives the embedded mutex at this+0");
         assert_eq!(returned, this, "the native status is discarded and mov r0, r4 returns this");
         assert_eq!(wrapper, [0xa5u8; 0x1c], "the wrapper itself performs no writes");
     }
 
     #[test]
     fn sibling_destroy_forwards_null_without_a_wrapper_guard() {
-        let _ops = install_destroy_recorder();
-
         let returned = unsafe { mutex_destroy_return_this(core::ptr::null_mut()) };
 
-        assert!(unsafe { core::ptr::addr_of!(DESTROY_ARGUMENT).read().is_null() }, "NULL reaches pthread_mutex_destroy");
         assert!(returned.is_null(), "the unchanged NULL this pointer is returned");
     }
 }

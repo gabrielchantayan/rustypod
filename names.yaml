@@ -82318,6 +82318,31 @@ functions:
       so its seam's otherwise-unused second argument is explicitly zero
       rather than inheriting the original caller's incidental r1.
 
+  - address: 0x082e82a4
+    ghidra: FUN_082e82a4
+    name: pthread_mutex_destroy
+    size: 84
+    sig: "u32 pthread_mutex_destroy(void *mutex)"
+    module: cxx/pthread_mutex_destroy
+    status: ported
+    renames:
+      param_1/r0: mutex
+      DAT_082e82f4: MUTEX_MAGIC
+      FUN_080a3cf0: kernel_slot_create
+    notes: >-
+      Raw words establish the true 84-byte extent 0x082e82a4..0x082e82f8:
+      76 bytes of code followed by its 4-byte 0x4d555458 mutex-magic literal;
+      the next real function begins with push {r4,r5,r6,lr} at 0x082e82f8.
+      NULL or a non-magic first word returns EINVAL (26). A nonzero owner at
+      +4, or (when the owner is zero) a nonzero semaphore word at +8, returns
+      EBUSY (20). Otherwise it calls kernel_slot_create on the handle cell at
+      +20, ignores that status, zeros the magic, and returns zero. The body has
+      one plain internal bl and no predicated bl; decoding every ARM B/BL word
+      in osos.dec finds two plain incoming bl sites and no predicated incoming
+      calls. The port's default volatile seam calls the existing
+      kernel_slot_create port on firmware; host tests replace the seam to
+      preserve the target's 4-byte field layout on 64-bit hosts.
+
   - address: 0x082e8390
     ghidra: FUN_082e8390
     name: posix_mutex_lock
@@ -82541,7 +82566,7 @@ functions:
     status: ported
     renames:
       param_1: this
-      FUN_082e82a4: pthread_mutex_destroy (unported)
+      FUN_082e82a4: pthread_mutex_destroy
     notes: >-
       20 bytes of code, no literal pool (0x08261e54..0x08261e68; next
       function starts at 0x08261e68), decoded from osos.dec as push
@@ -82557,13 +82582,9 @@ functions:
       bl sites, zero predicated calls, and 4 tail-b sites
       (0x08261c44, 0x08261cd8, 0x082628e8, 0x08262a98); no data word
       equals 0x08261e54, so no virtual dispatch uses this address.
-      Deliberate deviation: unported pthread_mutex_destroy crosses the
-      CXX_MUTEX_DESTROY_OPS volatile dispatch slot, whose default is an
-      inert success-returning stub. Thus this port is not hook-ready
-      until 0x082e82a4 is ported. Host tests prove one-call forwarding,
-      ignored callee status, this passthrough, no direct writes, and
-      NULL forwarding. match.py structural review records the expected
-      blx-through-dispatch difference.
+      Deliberate deviation: none. The wrapper now directly calls the ported
+      pthread_mutex_destroy entry; host tests prove its status is ignored,
+      this passes through, no direct wrapper stores occur, and NULL forwards.
 
 
   - address: 0x08261e68
@@ -82654,7 +82675,7 @@ functions:
     status: ported
     renames:
       param_1/r0: this
-      FUN_082e82a4: pthread_mutex_destroy (unported)
+      FUN_082e82a4: pthread_mutex_destroy
     notes: >-
       Raw osos.dec extent is exactly 20 bytes: five ARM words from
       0x082621dc through `pop {r4,pc}` at 0x082621ec; the separately linked
@@ -82664,13 +82685,10 @@ functions:
       B/BL word finds exactly six direct call sites, all unconditional bl
       (0x0817dbd4, 0x081f00d0, 0x081f15d4, 0x081fc970, 0x08280520,
       0x0828e758); no predicated bl or direct B site exists. Deliberate
-      deviation: pthread_mutex_destroy is unported, so the direct target
-      crosses the pre-existing CXX_MUTEX_DESTROY_OPS volatile seam, whose
-      default returns success. The unique target text section preserves this
+      deviation: none. The unique target text section preserves this
       byte-identical C++ wrapper as a distinct hook target from
-      cxx_mutex_destroy @ 0x08261e54. Host tests prove forwarding, ignored
-      status, unchanged storage, and NULL forwarding. match.py review is
-      expected to show the volatile indirect call instead of raw `bl`.
+      cxx_mutex_destroy @ 0x08261e54. Host tests prove ignored status,
+      unchanged wrapper storage, and NULL forwarding.
   - address: 0x082621a8
     ghidra: (veneer)
     name: posix_mutex_lock_veneer_b

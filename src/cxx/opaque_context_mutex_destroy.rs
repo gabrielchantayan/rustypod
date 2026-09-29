@@ -30,9 +30,9 @@
 //! # Deliberate deviation
 //!
 //! The opaque-context retail callee is represented by its existing Rust port
-//! and host seam. The C++ mutex wrapper is likewise called through its Rust
-//! port, preserving unguarded calls, pointer adjustment, call order, and the
-//! original-pointer return while the ultimate pthread callee remains unhooked.
+//! and host seam. The C++ mutex wrapper calls the now-ported pthread destroy,
+//! preserving unguarded calls, pointer adjustment, call order, and the
+//! original-pointer return.
 
 use core::ffi::c_void;
 
@@ -61,13 +61,13 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use crate::cxx::mutex_destroy::{CxxMutexDestroyOps, DEFAULT_CXX_MUTEX_DESTROY_OPS, CXX_MUTEX_DESTROY_OPS};
     use crate::cxx::opaque_context_destroy::{OpaqueContextDestroyOps, OPAQUE_CONTEXT_DESTROY_OPS};
+    use crate::cxx::pthread_mutex_destroy::{PthreadMutexDestroyOps, DEFAULT_PTHREAD_MUTEX_DESTROY_OPS, PTHREAD_MUTEX_DESTROY_OPS};
     use parking_lot::Mutex;
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut CONTEXT_ARGUMENT: *mut c_void = core::ptr::null_mut();
-    static mut MUTEX_ARGUMENT: *mut u8 = core::ptr::null_mut();
+    static mut SLOT_ARGUMENT: *mut u8 = core::ptr::null_mut();
 
     unsafe extern "C" fn record_context(context: *mut c_void) -> u32 {
         CONTEXT_ARGUMENT = context;
@@ -76,8 +76,8 @@ mod tests {
 
     unsafe extern "C" fn missing_context(_context: *mut c_void) -> u32 { 0 }
 
-    unsafe extern "C" fn record_mutex(mutex: *mut u8) -> u32 {
-        MUTEX_ARGUMENT = mutex;
+    unsafe extern "C" fn record_slot(slot: *mut u8) -> u32 {
+        SLOT_ARGUMENT = slot;
         0x14
     }
 
@@ -87,7 +87,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 OPAQUE_CONTEXT_DESTROY_OPS = OpaqueContextDestroyOps { destroy: missing_context };
-                CXX_MUTEX_DESTROY_OPS = DEFAULT_CXX_MUTEX_DESTROY_OPS;
+                PTHREAD_MUTEX_DESTROY_OPS = DEFAULT_PTHREAD_MUTEX_DESTROY_OPS;
             }
         }
     }
@@ -95,9 +95,9 @@ mod tests {
     fn install_recorders() -> RestoreOps {
         unsafe {
             CONTEXT_ARGUMENT = core::ptr::null_mut();
-            MUTEX_ARGUMENT = core::ptr::null_mut();
+            SLOT_ARGUMENT = core::ptr::null_mut();
             OPAQUE_CONTEXT_DESTROY_OPS = OpaqueContextDestroyOps { destroy: record_context };
-            CXX_MUTEX_DESTROY_OPS = CxxMutexDestroyOps { mutex_destroy: record_mutex };
+            PTHREAD_MUTEX_DESTROY_OPS = PthreadMutexDestroyOps { kernel_slot_create: record_slot };
         }
         RestoreOps
     }
@@ -106,15 +106,18 @@ mod tests {
     fn destroys_embedded_context_then_returns_this_through_mutex_wrapper() {
         let _lock = OPS_LOCK.lock();
         let _restore = install_recorders();
-        let mut object = [0xa5u8; 0x40];
-        let this = object.as_mut_ptr();
+        let mut object = [0xa5u32; 16];
+        object[0] = 0x4d55_5458;
+        object[1] = 0;
+        object[2] = 0;
+        let this = object.as_mut_ptr().cast::<u8>();
 
         let returned = unsafe { destroy_opaque_context_and_mutex(this) };
 
         assert_eq!(unsafe { CONTEXT_ARGUMENT }, unsafe { this.add(0x1c).cast() });
-        assert_eq!(unsafe { MUTEX_ARGUMENT }, this);
+        assert_eq!(unsafe { SLOT_ARGUMENT }, unsafe { this.add(20) });
         assert_eq!(returned, this, "the tail-called C++ mutex wrapper returns this");
-        assert_eq!(object, [0xa5; 0x40], "the wrapper has no local stores");
+        assert_eq!(object[0], 0, "pthread_mutex_destroy clears the mutex magic");
     }
 
     #[test]
@@ -125,7 +128,7 @@ mod tests {
         let returned = unsafe { destroy_opaque_context_and_mutex(core::ptr::null_mut()) };
 
         assert_eq!(unsafe { CONTEXT_ARGUMENT as usize }, 0x1c);
-        assert!(unsafe { MUTEX_ARGUMENT.is_null() });
+        assert!(unsafe { SLOT_ARGUMENT.is_null() });
         assert!(returned.is_null());
     }
 }

@@ -384,6 +384,7 @@ pub mod opaque_context_array_construct;
 pub mod mutex_opaque_context_acquire;
 pub mod mutex_opaque_context_release_default;
 pub mod mutex_destroy;
+pub mod pthread_mutex_destroy;
 pub mod mutex_attr_init;
 pub mod mutex_settype_init;
 pub mod recursive_mutex;
