@@ -1441,27 +1441,31 @@ unsafe fn initialize_video_output_once() {
     }
 }
 
-/// Firmware entry of the output-configuration wrapper `FUN_082d243c`.
+/// Firmware entry of the video-engine output-configuration handler
+/// (`FUN_08251594`, unported).
 #[cfg(target_os = "none")]
-const VIDEO_OUTPUT_CONFIGURATION_UPDATE_ADDR: usize = 0x082d_243c;
+const VIDEO_ENGINE_SET_OUTPUT_CONFIGURATION_ADDR: usize = 0x0825_1594;
 
-/// ABI of `FUN_082d243c`: mode, format, reserved word, configuration.
-type VideoOutputConfigurationUpdate = unsafe extern "C" fn(u32, u32, u32, *const u32);
+/// ABI of the resident handler: engine followed by all four caller words.
+type VideoEngineSetOutputConfiguration = unsafe extern "C" fn(*mut u8, u32, u32, u32, *const u32);
 
+/// Host-test stand-in for `FUN_08251594`.
 #[cfg(not(target_os = "none"))]
-static mut MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE: Option<VideoOutputConfigurationUpdate> = None;
+static mut MOCK_SET_OUTPUT_CONFIGURATION: Option<VideoEngineSetOutputConfiguration> = None;
 
-/// Host only: installs the `FUN_082d243c` seam used by
-/// [`video_output_configuration_assign`].
+/// Host only: install the handler reached by
+/// [`video_output_configuration_update`].
 #[cfg(not(target_os = "none"))]
-pub unsafe fn set_mock_video_output_configuration_update(
-    update: Option<VideoOutputConfigurationUpdate>,
+pub unsafe fn set_mock_set_output_configuration(
+    update: Option<VideoEngineSetOutputConfiguration>,
 ) {
-    *addr_of_mut!(MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE) = update;
+    *addr_of_mut!(MOCK_SET_OUTPUT_CONFIGURATION) = update;
 }
 
-#[inline(always)]
-unsafe fn update_video_output_configuration(
+/// Transfers an output configuration to the resident video-engine handler.
+#[inline]
+unsafe fn set_output_configuration(
+    engine: *mut u8,
     mode: u32,
     format: u32,
     reserved: u32,
@@ -1469,16 +1473,52 @@ unsafe fn update_video_output_configuration(
 ) {
     #[cfg(target_os = "none")]
     {
-        let update: VideoOutputConfigurationUpdate =
-            core::mem::transmute(VIDEO_OUTPUT_CONFIGURATION_UPDATE_ADDR);
-        update(mode, format, reserved, configuration);
+        let update: VideoEngineSetOutputConfiguration =
+            core::mem::transmute(VIDEO_ENGINE_SET_OUTPUT_CONFIGURATION_ADDR);
+        update(engine, mode, format, reserved, configuration);
     }
     #[cfg(not(target_os = "none"))]
     {
-        match *addr_of!(MOCK_VIDEO_OUTPUT_CONFIGURATION_UPDATE) {
-            Some(update) => update(mode, format, reserved, configuration),
-            None => panic!("video_output_configuration_assign requires wrapper 0x082d243c"),
+        match *addr_of!(MOCK_SET_OUTPUT_CONFIGURATION) {
+            Some(update) => update(engine, mode, format, reserved, configuration),
+            None => panic!("video_output_configuration_update requires handler 0x08251594"),
         }
+    }
+}
+
+/// video_output_configuration_update — retailOS `FUN_082d243c` @
+/// **0x082d243c** (52 bytes, `0x082d243c..0x082d246c`; the next independent
+/// function begins at `0x082d2470`).
+///
+/// Saves all four input words, calls [`video_engine_get`], and returns silently
+/// when no video session is installed. Otherwise it calls the unported
+/// `FUN_08251594` with `(engine, mode, format, reserved, configuration)`.
+/// Complete aligned A32 immediate-BL decoding of `osos.dec` finds two direct
+/// inbound plain `bl` calls (0x0827d400 and 0x0828cab4) and no predicated BL
+/// calls. The body itself makes one plain `bl` to the getter and one `blne` to
+/// the handler.
+///
+/// # Deliberate deviations
+///
+/// `FUN_08251594` remains resident firmware. Target builds call its verified
+/// address; host tests install a recording seam. Rust makes the conditional
+/// call explicit while preserving the NULL-session no-op and all four words.
+///
+/// # Safety
+///
+/// The installed video-engine singleton and configuration pointer are forwarded
+/// without validation, exactly as retailOS does.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_output_configuration_update(
+    mode: u32,
+    format: u32,
+    reserved: u32,
+    configuration: *const u32,
+) {
+    let engine = video_engine_get();
+    if !engine.is_null() {
+        set_output_configuration(engine, mode, format, reserved, configuration);
     }
 }
 
@@ -1524,15 +1564,14 @@ unsafe fn release_video_output(state: *mut u32) {
 /// Releases a prior owned configuration when word 4 is nonzero, initializes
 /// video output once, optionally releases the current engine handle and clears
 /// selector 0x8892, then stores `{configuration, reserved, mode}` in words
-/// 1 through 3. It tail-transfers `(mode, 0x140c, 0, configuration)` to the
-/// resident output-configuration wrapper @ 0x082d243c.
+/// 1 through 3. It calls [`video_output_configuration_update`] with
+/// `(mode, 0x140c, 0, configuration)`.
 ///
 /// # Deliberate deviations
 ///
 /// Rust calls the stock tail target normally. The release helper @ 0x082d110c
-/// and output-configuration wrapper @ 0x082d243c are still unported: target
-/// builds transfer to their exact resident addresses; host tests install only
-/// the latter seam. Target-width object fields are addressed as `u32` words.
+/// remains a resident seam; the output-configuration wrapper is ported.
+/// Target-width object fields are addressed as `u32` words.
 ///
 /// # Safety
 ///
@@ -1564,7 +1603,7 @@ pub unsafe extern "C" fn video_output_configuration_assign(
     state.add(1).write(configuration as usize as u32);
     state.add(2).write(reserved);
     state.add(3).write(mode);
-    update_video_output_configuration(mode, 0x140c, 0, configuration);
+    video_output_configuration_update(mode, 0x140c, 0, configuration);
 }
 
 
@@ -2683,21 +2722,61 @@ mod tests {
         }
     }
 
-    static mut OUTPUT_CONFIGURATION_UPDATE: Option<(u32, u32, u32, *const u32)> = None;
+    static mut OUTPUT_CONFIGURATION_UPDATE: Option<(*mut u8, u32, u32, u32, *const u32)> = None;
     static mut OUTPUT_RELEASE: Option<(u32, *mut u32)> = None;
 
     unsafe extern "C" fn record_output_configuration_update(
+        engine: *mut u8,
         mode: u32,
         format: u32,
         reserved: u32,
         configuration: *const u32,
     ) {
         *addr_of_mut!(OUTPUT_CONFIGURATION_UPDATE) =
-            Some((mode, format, reserved, configuration));
+            Some((engine, mode, format, reserved, configuration));
     }
 
     unsafe extern "C" fn record_output_release(count: u32, state: *mut u32) {
         *addr_of_mut!(OUTPUT_RELEASE) = Some((count, state));
+    }
+
+    #[test]
+    fn output_configuration_update_ignores_null_engine() {
+        let _guard = LOCK.lock();
+        let configuration = [0u32; 4];
+        unsafe {
+            OUTPUT_CONFIGURATION_UPDATE = None;
+            set_mock_instance(ptr::null_mut());
+            set_mock_set_output_configuration(Some(record_output_configuration_update));
+            video_output_configuration_update(u32::MAX, 0, 7, configuration.as_ptr());
+            assert_eq!(OUTPUT_CONFIGURATION_UPDATE, None);
+            set_mock_set_output_configuration(None);
+        }
+    }
+
+    #[test]
+    fn output_configuration_update_prepends_engine_and_preserves_all_words() {
+        let _guard = LOCK.lock();
+        let configuration = [0u32; 4];
+        let mut engine = [0u8; 1];
+        unsafe {
+            OUTPUT_CONFIGURATION_UPDATE = None;
+            set_mock_instance(engine.as_mut_ptr());
+            set_mock_set_output_configuration(Some(record_output_configuration_update));
+            video_output_configuration_update(u32::MAX, 0, 0x8000_0000, configuration.as_ptr());
+            assert_eq!(
+                OUTPUT_CONFIGURATION_UPDATE,
+                Some((
+                    engine.as_mut_ptr(),
+                    u32::MAX,
+                    0,
+                    0x8000_0000,
+                    configuration.as_ptr()
+                ))
+            );
+            set_mock_set_output_configuration(None);
+            set_mock_instance(ptr::null_mut());
+        }
     }
 
     #[test]
@@ -2713,7 +2792,7 @@ mod tests {
             ENABLE_CONTROL_RECORDED = None;
             set_mock_instance(engine.as_mut_ptr());
             set_mock_enable_control(Some(record_enable_control));
-            set_mock_video_output_configuration_update(Some(record_output_configuration_update));
+            set_mock_set_output_configuration(Some(record_output_configuration_update));
 
             video_output_configuration_assign(state.as_mut_ptr(), configuration.as_ptr(), 7, 9);
 
@@ -2724,9 +2803,9 @@ mod tests {
             assert_eq!(ENABLE_CONTROL_RECORDED, Some((engine.as_mut_ptr(), 0x8074, 1)));
             assert_eq!(
                 OUTPUT_CONFIGURATION_UPDATE,
-                Some((9, 0x140c, 0, configuration.as_ptr()))
+                Some((engine.as_mut_ptr(), 9, 0x140c, 0, configuration.as_ptr()))
             );
-            set_mock_video_output_configuration_update(None);
+            set_mock_set_output_configuration(None);
             set_mock_enable_control(None);
             set_mock_instance(ptr::null_mut());
         }
@@ -2747,7 +2826,7 @@ mod tests {
             set_mock_instance(engine.as_mut_ptr());
             set_mock_video_output_release(Some(record_output_release));
             set_mock_set_selector_value(Some(record_selector_value));
-            set_mock_video_output_configuration_update(Some(record_output_configuration_update));
+            set_mock_set_output_configuration(Some(record_output_configuration_update));
 
             video_output_configuration_assign(state.as_mut_ptr(), configuration.as_ptr(), 0, 0);
 
@@ -2757,7 +2836,7 @@ mod tests {
                 Some((engine.as_mut_ptr(), 0x8892, 0))
             );
             assert_eq!(MOCK_VIDEO_OUTPUT_RESET_PENDING, 0);
-            set_mock_video_output_configuration_update(None);
+            set_mock_set_output_configuration(None);
             set_mock_set_selector_value(None);
             set_mock_video_output_release(None);
             set_mock_instance(ptr::null_mut());

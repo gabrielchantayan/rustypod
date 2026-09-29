@@ -47195,6 +47195,33 @@ functions:
       1 prints the expected compiler structural diff; it is not an automatic
       failure.
 
+  - address: 0x082d243c
+    ghidra: FUN_082d243c
+    name: video_output_configuration_update
+    size: 52
+    sig: "void video_output_configuration_update(u32 mode, u32 format, u32 reserved, const u32 *configuration)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: mode
+      param_2/r1: format
+      param_3/r2: reserved
+      param_4/r3: configuration
+      FUN_08252bec: video_engine_get
+      FUN_08251594: video_engine_set_output_configuration
+    notes: >-
+      Raw ARM establishes the 52-byte extent 0x082d243c..0x082d246c:
+      it saves all four words, calls video_engine_get, returns silently
+      on NULL, then calls the still-unported 0x08251594 with the engine
+      prepended and the four words restored in order. The independent next
+      function begins at 0x082d2470. Complete aligned A32 immediate-BL
+      decoding of osos.dec finds exactly two inbound plain bl calls
+      (0x0827d400 and 0x0828cab4) and zero predicated BL calls. The body
+      contains one plain bl to the getter and one blne to 0x08251594.
+      Ghidra's five-argument recovered call is correct, but its four-
+      argument wrapper signature omits the stack-passed configuration word.
+      Deliberate deviation: 0x08251594 remains a fixed-address target seam;
+      host tests record the prepended engine and all four forwarded words.
   - address: 0x082d2314
     ghidra: FUN_082d2314
     name: video_engine_set_property
