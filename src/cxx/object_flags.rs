@@ -892,6 +892,48 @@ pub unsafe extern "C" fn namespace_provider_at(
             .read_volatile()
     }
 }
+
+/// namespace_provider_pop_last — original: `FUN_08369790` @ `0x08369790`
+/// (28 bytes, `0x08369790..0x083697ac`; the next independently linked
+/// function begins `push {r4,r5,r6,lr}` at `0x083697ac`). Raw A32 decoding
+/// verifies **2 inbound plain `bl` call sites** (`0x0807110c`, `0x080cc7b0`)
+/// and **0 predicated `bl` call sites**.
+///
+/// Removes and returns the last entry of a namespace-provider table, but only
+/// when its signed count exceeds one. NULL, zero, negative, and singleton
+/// tables return null unchanged. The retail body loads and decrements the
+/// count, then tail-branches to `FUN_08369420`; its verified remove-at path
+/// reloads the count, reads `table[count - 1]`, and stores `count - 1`.
+///
+/// Deliberate deviation: `FUN_08369420` has no registered Rust seam, so its
+/// reached remove-at path is inlined here rather than represented as an
+/// ordinary returning call. The count reload and target-layout unaligned
+/// table-pointer load are retained.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_pop_last(providers: *mut u32) -> *mut u32 {
+    if providers.is_null() {
+        return core::ptr::null_mut();
+    }
+    let index = providers.read_volatile() as i32;
+    if index <= 0 {
+        return core::ptr::null_mut();
+    }
+    let index = index - 1;
+
+    let count = providers.read_volatile() as i32;
+    if count == 0 || index == 0 || index < 0 || index >= count {
+        return core::ptr::null_mut();
+    }
+    #[cfg(target_os = "none")]
+    let table = providers.add(1).cast::<*mut *mut u32>().read_volatile();
+    #[cfg(not(target_os = "none"))]
+    let table = core::ptr::read_unaligned(providers.add(1).cast::<*mut *mut u32>());
+    let entry = table.add(index as usize).read_volatile();
+    providers.write_volatile(index as u32);
+    entry
+}
+
 /// namespace_provider_slot_at — original: `FUN_08043af0` @ `0x08043af0`
 /// (56 bytes, `0x08043af0..0x08043b28`; the next separately linked function
 /// begins with `stmdb sp!,{r4,r5,r6,lr}` at `0x08043b28`). Raw-word decoding
@@ -3471,6 +3513,43 @@ mod tests {
         );
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 2) }, table[2]);
         assert_eq!(unsafe { namespace_provider_at(providers.ptr(), 3) }, table[3]);
+    }
+
+    #[test]
+    fn namespace_provider_pop_last_rejects_null_and_non_populatable_counts() {
+        assert!(unsafe { namespace_provider_pop_last(core::ptr::null_mut()) }.is_null());
+
+        let mut entries: [*mut u32; 2] = [core::ptr::null_mut(), core::ptr::null_mut()];
+        for count in [0, 1, u32::MAX] {
+            let mut providers = NamespaceProviders::new(count, entries.as_mut_ptr().cast());
+            assert!(
+                unsafe { namespace_provider_pop_last(providers.mut_ptr()) }.is_null(),
+                "count={count:#010x}"
+            );
+            assert_eq!(unsafe { providers.mut_ptr().read_unaligned() }, count);
+        }
+    }
+
+    #[test]
+    fn namespace_provider_pop_last_returns_last_entry_and_decrements_count() {
+        let first = 0x1111_1111u32;
+        let second = 0x2222_2222u32;
+        let third = 0x3333_3333u32;
+        let mut entries = [
+            core::ptr::addr_of!(first) as *mut u32,
+            core::ptr::addr_of!(second) as *mut u32,
+            core::ptr::addr_of!(third) as *mut u32,
+        ];
+        let mut providers = NamespaceProviders::new(3, entries.as_mut_ptr().cast());
+
+        assert_eq!(
+            unsafe { namespace_provider_pop_last(providers.mut_ptr()) },
+            core::ptr::addr_of!(third) as *mut u32
+        );
+        assert_eq!(unsafe { providers.mut_ptr().read_unaligned() }, 2);
+        assert_eq!(entries[0], core::ptr::addr_of!(first) as *mut u32);
+        assert_eq!(entries[1], core::ptr::addr_of!(second) as *mut u32);
+        assert_eq!(entries[2], core::ptr::addr_of!(third) as *mut u32);
     }
     #[test]
     fn namespace_provider_slot_at_handles_null_and_count_boundaries() {
