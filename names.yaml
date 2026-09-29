@@ -161600,3 +161600,32 @@ functions:
       needsSync, then unlinks and returns the page. Deliberate deviation:
       unported helpers retain fixed target addresses; host tests inject
       recording seams.
+
+  # ---- SQLite pager unlock-and-rollback (src/sqlite/pager_unlock_and_rollback.rs) ----
+  - address: 0x082dd800
+    ghidra: FUN_082dd800
+    name: pager_unlock_and_rollback
+    size: 68
+    sig: "void pager_unlock_and_rollback(Pager *pager)"
+    module: sqlite/pager_unlock_and_rollback
+    status: ported
+    renames:
+      param_1/r0/r4: pager
+      "*(u32*)(pager+0x20)": pager->errCode
+      "*(u8*)(pager+0x0e)": pager->eState
+      FUN_083789ac: fault_begin_benign
+      FUN_0837ea84: pager_rollback
+      FUN_083789f8: fault_end_benign
+      FUN_082de814: context_recover (retail boundary)
+    notes: >-
+      Raw ARM establishes the 68-byte extent 0x082dd800..0x082dd843: push
+      {r4,lr} begins the body and the adjacent mov r2,r0 at 0x082dd844
+      begins the next separately linked function. Whole-image ARM decoding
+      finds exactly two inbound unconditional plain bl sites, 0x0837ddfc and
+      0x0837ef4c, with no predicated bl sites. The body contains three plain
+      bl instructions, to fault_begin_benign, pager_rollback, and
+      fault_end_benign, followed by a tail b to context_recover. For a clean
+      pager in state >= 2 it brackets sqlite3PagerRollback in the benign-fault
+      scope, then always tail-transfers the unchanged pager pointer to
+      context_recover. Deliberate deviation: context_recover remains a fixed
+      retailOS target; host tests inject a recording boundary for it.

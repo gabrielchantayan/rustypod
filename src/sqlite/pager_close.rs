@@ -7,12 +7,11 @@
 //! resets its cache, closes open journal files, destroys the journal bitvec,
 //! closes the primary file, then frees its owned allocations and itself.
 //!
-//! Deliberate deviation: `0x082dd800` remains retailOS-owned. Target builds
-//! call that fixed address; host builds use private recording seams for it and
-//! embedded target-layout file fields.
+//! `pager_unlock_and_rollback` now provides the former `0x082dd800` boundary
+//! directly, including its host-test seam for the still-retail tail target.
 
 use crate::heap::tracked::tracked_free;
-use crate::sqlite::{bitvec::{sqlite3_bitvec_destroy, Bitvec}, mem::{fault_begin_benign, fault_end_benign}, os_close::sqlite_os_close, os_write::SqliteFile, pager_reset::pager_reset};
+use crate::sqlite::{bitvec::{sqlite3_bitvec_destroy, Bitvec}, mem::{fault_begin_benign, fault_end_benign}, os_close::sqlite_os_close, os_write::SqliteFile, pager_reset::pager_reset, pager_unlock_and_rollback::pager_unlock_and_rollback};
 
 const MEMORY_PAGER: usize = 0x14;
 const ERROR_CODE: usize = 0x20;
@@ -28,23 +27,8 @@ const EXTRA: usize = 0xd0;
 const BACKUP: usize = 0xe4;
 const PAGER_LIST: usize = 0x08a0_9918;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn release_pager_context(pager: *mut u8) {
-    let release: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x082d_d800usize);
-    release(pager);
-}
 #[cfg(not(target_os = "none"))]
 static mut PAGER_LIST_HEAD: [*mut u8; 2] = [core::ptr::null_mut(); 2];
-#[cfg(not(target_os = "none"))]
-static mut RELEASE_PAGER_CONTEXT: unsafe extern "C" fn(*mut u8) = host_release_pager_context;
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn host_release_pager_context(_pager: *mut u8) {}
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn release_pager_context(pager: *mut u8) {
-    (core::ptr::read_volatile(core::ptr::addr_of!(RELEASE_PAGER_CONTEXT)))(pager);
-}
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn close_file(file: *mut u8) { sqlite_os_close(file.cast::<SqliteFile>()); }
@@ -81,7 +65,7 @@ pub unsafe extern "C" fn pager_close(pager: *mut u8) -> i32 {
     pager.add(ERROR_CODE).cast::<u32>().write(0);
     pager.add(0x17).write(0);
     pager_reset(pager);
-    release_pager_context(pager);
+    pager_unlock_and_rollback(pager);
     fault_end_benign(-1);
     if pager.add(JOURNAL_OPEN).read() != 0 { close_file(pager.add(JOURNAL_FILE).cast::<u32>().read() as usize as *mut u8); }
     sqlite3_bitvec_destroy(pager.add(JOURNAL_BITVEC).cast::<u32>().read() as usize as *mut Bitvec);
@@ -99,8 +83,6 @@ mod tests {
     use super::*;
     use crate::{heap::veneers::tests::mock_heap, testing::{hints, note_missing_u32_fixture, try_map_u32_slab}};
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    static mut RELEASED: *mut u8 = core::ptr::null_mut();
-    unsafe extern "C" fn record_release(pager: *mut u8) { RELEASED = pager; }
 
     #[test]
     fn unlinks_listed_pager_and_runs_teardown() {
@@ -114,8 +96,6 @@ mod tests {
             let previous = slab.add(0x300);
             let next = slab.add(0x500);
             PAGER_LIST_HEAD = [core::ptr::null_mut(), pager];
-            RELEASE_PAGER_CONTEXT = record_release;
-            RELEASED = core::ptr::null_mut();
             pager.sub(0x20).cast::<i32>().write(0);
             pager.sub(4).cast::<u32>().write(0x1c);
             pager.add(MEMORY_PAGER).write(0);
@@ -124,9 +104,7 @@ mod tests {
             pager_close(pager);
             assert_eq!(next.add(PREVIOUS).cast::<u32>().read(), previous as usize as u32);
             assert_eq!(previous.add(NEXT).cast::<u32>().read(), next as usize as u32);
-            assert_eq!(RELEASED, pager);
             assert_eq!(pager.add(0x17).read(), 0);
-            RELEASE_PAGER_CONTEXT = host_release_pager_context;
         }
     }
 }
