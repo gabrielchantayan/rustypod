@@ -160848,3 +160848,21 @@ functions:
       gateway_signal_object rather than emitting the ARM tail branch,
       preserving the observable fixed id and returned status on both target
       and host.
+
+  - address: 0x082e4764
+    ghidra: FUN_082e4764
+    name: ascii_uppercase_copy_n
+    size: 52
+    sig: "void ascii_uppercase_copy_n(destination: *mut u8, source: *const u8, len: i32)"
+    module: util/ascii_uppercase_copy_n
+    status: ported
+    vars: {param_1: destination, param_2: source, param_3: len, iVar2: copied}
+    notes: >-
+      Raw words from 0x082e4764 through 0x082e4794 establish the 52-byte
+      body; the mov r1,#2 at 0x082e4798 begins the next real function. It
+      copies exactly positive signed len bytes forward, folding only ASCII
+      a..z to uppercase after each source byte is read and before it is
+      written. Complete-image aligned ARM B/BL-immediate decoding found two
+      inbound plain BL sites (0x082e26e8 and 0x082e26f8), zero predicated BL
+      sites, and no body calls. Volatile byte accesses deliberately prevent
+      LLVM from replacing the freestanding loop with a libc copy primitive.

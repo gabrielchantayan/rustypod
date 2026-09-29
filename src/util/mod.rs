@@ -12,6 +12,7 @@ pub mod battery_adc_code_to_millivolts;
 pub mod ascii_to_uppercase;
 pub mod ascii_string_to_uppercase;
 pub mod ascii_uppercase_record_copy;
+pub mod ascii_uppercase_copy_n;
 pub mod align;
 pub mod alignment_padding;
 pub mod be_read;

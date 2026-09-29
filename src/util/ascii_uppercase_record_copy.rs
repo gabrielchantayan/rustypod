@@ -3,13 +3,13 @@
 //! zero predicated `bl` call sites).
 //!
 //! The raw ARM body occupies 0x082e26e8..0x082e2770; the `push` at
-//! 0x082e2770 is the next real function boundary. It calls the unported
-//! fixed-length ASCII-uppercase helper at 0x082e4764 for bytes 0..8 and
-//! 8..11, then transfers bytes 11..32 with three byte, seven halfword, a
-//! repeated halfword-at-20, and one word transfer. Every source unit is read
-//! before its destination unit is written, preserving the retail overlap
-//! behavior. Deliberate deviation: the two helper calls are transcribed
-//! locally rather than creating an unverified Rust seam for 0x082e4764.
+//! 0x082e2770 is the next real function boundary. It calls
+//! `ascii_uppercase_copy_n` for bytes 0..8 and 8..11, then transfers bytes
+//! 11..32 with three byte, seven halfword, a repeated halfword-at-20, and one
+//! word transfer. Every source unit is read before its destination unit is
+//! written, preserving the retail overlap behavior.
+
+use crate::util::ascii_uppercase_copy_n::ascii_uppercase_copy_n;
 
 /// Copies a 32-byte record, uppercasing ASCII lowercase bytes 0 through 10.
 ///
@@ -20,15 +20,8 @@
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn ascii_uppercase_record_copy(destination: *mut u8, source: *const u8) {
-    for offset in 0..11 {
-        let byte = unsafe { source.add(offset).read_volatile() };
-        let folded = if byte.wrapping_sub(b'a') <= b'z' - b'a' {
-            byte.wrapping_sub(0x20)
-        } else {
-            byte
-        };
-        unsafe { destination.add(offset).write_volatile(folded) };
-    }
+    unsafe { ascii_uppercase_copy_n(destination, source, 8) };
+    unsafe { ascii_uppercase_copy_n(destination.add(8), source.add(8), 3) };
 
     for offset in [11usize, 12, 13] {
         let byte = unsafe { source.add(offset).read_volatile() };
