@@ -87,6 +87,41 @@ pub unsafe extern "C" fn word_list_copy(src: *const WordList, dst: *mut WordList
     memcpy_forward_words(dst_entries as *mut u8, src_entries as *const u8, count * 4);
     (*dst).count = (*src).count;
 }
+/// word_list_multiply_u32_assign — original: `FUN_082d4c50` @ 0x082d4c50
+/// (92 bytes, 0x082d4c50..0x082d4cac; 2 plain `bl` call sites and zero
+/// predicated `bl` call sites, verified by decoding `osos.dec`).
+///
+/// Multiplies every active little-endian word by `scalar`, propagating the
+/// 32-bit carry into the next word. A nonzero final carry is appended and the
+/// count increases by one; otherwise the original count is written back.
+/// The next distinct function begins with `push {r4-r7,lr}` at `0x082d4cac`.
+/// No deliberate deviations.
+///
+/// # Safety
+///
+/// `value` must name a writable [`WordList`] whose entries buffer holds every
+/// active word and one additional word when the product emits a final carry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_multiply_u32_assign(scalar: u32, value: *mut WordList) {
+    let count = unsafe { (*value).count };
+    let entries = unsafe { (*value).entries };
+    let mut carry = 0u32;
+    let mut index = 0u16;
+    while index < count {
+        let product = unsafe { entries.add(index as usize).read() as u64 * scalar as u64 + carry as u64 };
+        unsafe { entries.add(index as usize).write(product as u32) };
+        carry = (product >> 32) as u32;
+        index = index.wrapping_add(1);
+    }
+    if carry != 0 {
+        unsafe { entries.add(count as usize).write(carry) };
+        unsafe { (*value).count = count.wrapping_add(1) };
+    } else {
+        unsafe { (*value).count = count };
+    }
+}
+
 
 /// word_list_trim_trailing_zeros — original: `FUN_082d27d4` @ 0x082d27d4
 /// (68 bytes).
@@ -192,6 +227,7 @@ pub unsafe extern "C" fn word_list_init(this: *mut WordList) -> *mut WordList {
     this
 }
 
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -199,6 +235,7 @@ mod tests {
     use super::{
         word_list_copy, word_list_init, word_list_init_capacity_10, word_list_trim_trailing_zeros,
         WordList, WORD_LIST_INLINE_CAPACITY, WORD_LIST_INLINE_CAPACITY_10,
+        word_list_multiply_u32_assign,
     };
     use std::vec;
 
@@ -208,6 +245,28 @@ mod tests {
             capacity: buf.len() as u16,
             entries: buf.as_mut_ptr(),
         }
+    }
+
+    #[test]
+    fn multiply_propagates_carry_and_appends_high_word() {
+        let mut words = [u32::MAX, u32::MAX, 0xdead_beef];
+        let mut word_list = list(&mut words, 2);
+
+        unsafe { word_list_multiply_u32_assign(2, &mut word_list) };
+
+        assert_eq!(word_list.count, 3);
+        assert_eq!(words, [0xffff_fffe, u32::MAX, 1]);
+    }
+
+    #[test]
+    fn multiply_zero_keeps_count_and_does_not_touch_tail() {
+        let mut words = [9, 4, 0xdead_beef];
+        let mut word_list = list(&mut words, 2);
+
+        unsafe { word_list_multiply_u32_assign(0, &mut word_list) };
+
+        assert_eq!(word_list.count, 2);
+        assert_eq!(words, [0, 0, 0xdead_beef]);
     }
 
     #[test]

@@ -13,7 +13,7 @@
 
 use core::ptr::addr_of_mut;
 
-use crate::util::word_list::WordList;
+use crate::util::word_list::{word_list_multiply_u32_assign, WordList};
 use crate::util::word_list_modular_multiply::{ModularReductionContext, WordListReduceCore};
 
 /// Unported reduction dependency of [`word_list_modular_scale_assign`].
@@ -79,21 +79,7 @@ pub unsafe extern "C" fn word_list_modular_scale_assign(
     value: *mut WordList,
     modulus: *const ModularReductionContext,
 ) {
-    let count = unsafe { (*value).count };
-    let mut carry = 0u32;
-    let mut index = 0u16;
-    while index < count {
-        let product = unsafe { (*value).entries.add(index as usize).read() as u64 * scalar as u64 + carry as u64 };
-        unsafe { (*value).entries.add(index as usize).write(product as u32) };
-        carry = (product >> 32) as u32;
-        index += 1;
-    }
-    if carry != 0 {
-        unsafe { (*value).entries.add(count as usize).write(carry) };
-        unsafe { (*value).count = count + 1 };
-    } else {
-        unsafe { (*value).count = count };
-    }
+    unsafe { word_list_multiply_u32_assign(scalar, value) };
     let reduce = unsafe { addr_of_mut!(WORD_LIST_MODULAR_SCALE_OPS.reduce).read_volatile() };
     unsafe { reduce(value, modulus, 0) };
 }
