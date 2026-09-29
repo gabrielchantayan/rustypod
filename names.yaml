@@ -158899,3 +158899,42 @@ functions:
       established Rust port, so the target deliberately calls its verified
       retail address and host tests inject a recorder seam. Tests cover
       nested unary signs, literal success, parser failure, and an unknown tag.
+  # ---- SQLite statistics analysis load (deferred: opaque retail callback) ----
+  - address: 0x0836f26c
+    ghidra: FUN_0836f26c
+    name: sqlite_analysis_load
+    size: 160
+    sig: "int sqlite_analysis_load(sqlite3 *db, int database_index)"
+    module: sqlite/analysis_load
+    status: identified
+    vars:
+      param_1/r5: db
+      param_2/r1: database_index
+      r4: hash_element
+      FUN_08374a70: default_row_est
+      FUN_08379024: sqlite_find_table
+      FUN_0837d358: sqlite_set_string_formatted
+      FUN_0839034c: sqlite_exec
+      FUN_083906f4: tracked_free
+      DAT_0836f348: analysis_loader_callback
+    notes: >-
+      SQLite 3.5.9 sqlite3AnalysisLoad (analyze.c). Raw osos.dec establishes
+      the true 160-byte extent 0x0836f26c..0x0836f30c: the pop
+      {r1,r2,r3,r4,r5,r6,r7,pc} at 0x0836f30c is immediately followed by the
+      sqlite_stat1 string data at 0x0836f310. This corrects Ghidra's claimed
+      164 bytes. Decoding every A32 branch word in that extent finds five
+      unconditional plain BL instructions (default_row_est @ 0x08374a70,
+      sqlite_find_table @ 0x08379024, sqlite_set_string_formatted @
+      0x0837d358, sqlite_exec @ 0x0839034c, and tracked_free @ 0x083906f4)
+      and no predicated BL instructions. It restores default estimates for
+      every Index in aDb[database_index].pSchema->idxHash; if sqlite_stat1 is
+      absent, returns 1. Otherwise it formats "SELECT idx, stat FROM
+      %Q.sqlite_stat1", executes it with the literal callback pointer held at
+      0x0836f348, frees the formatted SQL, and returns sqlite_exec's status.
+      Deferred rather than inventing a callback seam: the literal is
+      0x082a8e28, whose raw word is a branch to 0x082a8e40; that body consumes
+      r5 and then calls unnamed 0x08266abc, so it is not an independently
+      identified AAPCS callback implementation. names.yaml has no entry or
+      Rust port for either target. Replacing this callback would alter how
+      sqlite_stat1 rows initialize Index estimates, while calling sqlite_exec
+      without it would silently discard all statistics.
