@@ -14115,6 +14115,33 @@ functions:
       at 0x08001edc; the Rust target uses volatile MMIO and host tests use
       its existing deterministic timer-counter seam.
 
+  - address: 0x0836dc14
+    ghidra: FUN_0836dc14
+    name: timer_channel_configure
+    size: 136
+    sig: "void timer_channel_configure(u32 channel, u32 requested_hz)"
+    module: drivers/timer_channel_configure
+    status: ported
+    renames: {FUN_0836dc14: timer_channel_configure,
+      FUN_0836ddbc: timer_channel_stop,
+      FUN_08036f14: __rt_udiv,
+      DAT_0836dc94: timer_channel_extended_base,
+      DAT_0836dc98: timer_source_hz}
+    notes: >-
+      Raw osos.dec establishes the true 136-byte extent
+      0x0836dc14..0x0836dc9c: 128 bytes of A32 instructions followed by
+      literal words 0x3c700020 and 0x002dc6c0; the next real function begins
+      with `cmp r0,#3` at 0x0836dc9c. The body has two unconditional plain
+      bl instructions (to the channel-stop helper at 0x0836ddbc and
+      __rt_udiv at 0x08036f14), no predicated body calls. Whole-image aligned
+      A32 decoding finds one plain inbound bl (0x082bc534) and one predicated
+      blne (0x08393960). It clears command bit 0, increases a multiplier from
+      one until 0x002dc6c0 / (requested_hz * multiplier) fits in 16 bits,
+      then stores the quotient at +8, multiplier-1 at +16, 0x40 at +0, and
+      sets command bit 1. The multiplication is wrapping ARM u32 arithmetic;
+      absent a fitting quotient by multiplier 1024, the original loops
+      indefinitely. Rust calls the existing __rt_udiv port and uses host
+      register storage in place of target MMIO.
   - address: 0x08037df0
     ghidra: thunk_EXT_FUN_22001f38
     name: iram_msec_delay_veneer
