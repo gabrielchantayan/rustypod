@@ -31,11 +31,11 @@
 //! ldmia sp!,{r4,r5,r6,pc}
 //! ```
 //!
-//! What the wrapped callees do (both decoded from the raw ARM, both
-//! still unported):
+//! What the wrapped callees do (both decoded from raw ARM; the settype
+//! callee is now ported in `kernel/posix_mutex.rs):
 //!
-//! - **pthread_mutexattr_settype** @ 0x082e84dc (80 bytes): a NULL
-//!   attr, a bad magic at attr+0x00 (its literal @ 0x082e852c holds
+//! - **pthread_mutexattr_settype** @ 0x082e84dc (84 bytes including its
+//!   literal): a NULL attr, a bad magic at attr+0x00 (its literal @ 0x082e852c holds
 //!   0x4d545841 "MTXA", binary-verified in osos.dec — the word
 //!   pthread_mutexattr_init @ 0x082e84a4 plants), or a kind outside
 //!   {0, 1, 2} (`cmp`/`cmpne`/`cmpne` chain) all return 0x1a with no
@@ -69,19 +69,13 @@
 //! runs, while on success the initializer's status (0 included)
 //! OVERWRITES the recorded 0.
 //!
-//! Deviations: both callees ride the [`CXX_MUTEX_SETTYPE_INIT_OPS`]
-//! dispatch slots (the facade_registry_walk fixed-address pattern): on
-//! target the wired defaults transmute 0x082e84dc / 0x082e82f8
-//! (hook-ready); on host they are behavioral models of the decoded
-//! bodies so tests can observe the planted fields — with one
-//! simplification: the kernel-object allocator @ 0x0808b1c0 is
-//! mask-ROM machinery, so the init model plants a fixed nonzero
-//! sentinel handle at mutex+0x14 instead of allocating. The attr is
-//! passed as `*mut usize`, matching the two-word stack scope model of
-//! src/cxx/mutex.rs (byte-exact on the 32-bit target). The port is
-//! wired as src/cxx/mutex.rs's `CXX_MUTEX_CONSTRUCT_OPS.mutex_init`
-//! default (that module's documented "a later port replaces its
-//! default" pattern).
+//! Deviation: `pthread_mutexattr_settype` now calls the ported canonical
+//! body directly. The mutex initializer remains in the
+//! [`CXX_MUTEX_SETTYPE_INIT_OPS`] test-dispatch slot; its host default
+//! models the kernel allocator with a fixed nonzero semaphore handle.
+//! The attr is passed as `*mut usize`, matching the two-word stack scope
+//! model of src/cxx/mutex.rs (byte-exact on the 32-bit target). The port is
+//! wired as src/cxx/mutex.rs's `CXX_MUTEX_CONSTRUCT_OPS.mutex_init` default.
 
 #[cfg(test)]
 use super::mutex_attr_init::{
@@ -89,11 +83,6 @@ use super::mutex_attr_init::{
     MUTEXATTR_SCOPE_CLEAR_MASK,
 };
 
-/// Load address of the wrapped `pthread_mutexattr_settype`; the wired
-/// target default branches here (the facade_registry_walk
-/// fixed-address pattern).
-#[cfg(target_os = "none")]
-const PTHREAD_MUTEXATTR_SETTYPE_ADDRESS: usize = 0x082e84dc;
 
 
 /// The `kind` argument the veneer always passes (`mov r1, #0x0`):
@@ -144,43 +133,13 @@ pub type PthreadMutexattrSettype = unsafe extern "C" fn(attr: *mut usize, kind: 
 /// r1, a status (0, 0x1a or 0x27) back in r0.
 pub type PosixMutexInit = unsafe extern "C" fn(mutex: *mut u8, attr: *mut usize) -> u32;
 
-/// Host model of the wrapped settype: the decoded body of
-/// 0x082e84dc..0x082e8528. Not compiled on target, where the wired
-/// default calls the firmware body.
-#[cfg(not(target_os = "none"))]
-unsafe fn host_model_pthread_mutexattr_settype(attr: *mut usize, kind: u32) -> u32 {
-    if attr.is_null() {
-        return MUTEX_SETTYPE_INVALID;
-    }
-    if attr.cast::<u32>().read() != MUTEXATTR_MAGIC {
-        return MUTEX_SETTYPE_INVALID;
-    }
-    if kind > MUTEX_KIND_MAX {
-        return MUTEX_SETTYPE_INVALID;
-    }
-    let halfword = attr.cast::<u8>().add(6).cast::<u16>();
-    halfword.write(
-        (halfword.read() & !MUTEXATTR_TYPE_MASK) | ((kind as u16) << 4 & MUTEXATTR_TYPE_MASK),
-    );
-    0
-}
 
 
-/// Wired default for the unported `pthread_mutexattr_settype` @
-/// 0x082e84dc: the firmware body on target, the behavioral host model
-/// elsewhere.
+/// Wired default for the ported `pthread_mutexattr_settype` @ 0x082e84dc.
+/// The pointer is widened only by the host ABI; the function itself indexes
+/// the target's fixed eight-byte attribute layout by byte offsets.
 unsafe extern "C" fn default_pthread_mutexattr_settype(attr: *mut usize, kind: u32) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let settype: PthreadMutexattrSettype =
-            core::mem::transmute(PTHREAD_MUTEXATTR_SETTYPE_ADDRESS);
-        settype(attr, kind)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        host_model_pthread_mutexattr_settype(attr, kind)
-    }
+    crate::kernel::posix_mutex::pthread_mutexattr_settype(attr.cast::<u8>(), kind)
 }
 
 /// Wired default for the ported mutex initializer @ 0x082e82f8.

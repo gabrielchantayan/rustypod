@@ -325,6 +325,84 @@ pub const ERR_SEMAPHORE_CREATE_FAILED: u32 = 0x27;
 const MUTEXATTR_DEFAULT_HALFWORD: u16 = 0xffc2;
 const MUTEXATTR_PROCESS_SCOPE_BIT: u16 = 8;
 const MUTEX_OBJECT_TYPE: u32 = 3;
+/// `pthread_mutexattr_settype` — original: `FUN_082e84dc` @
+/// **0x082e84dc** (**84 bytes**, 0x082e84dc..0x082e8530: 76 bytes of
+/// code plus the trailing `MTXA` literal at 0x082e852c). Raw A32 decoding
+/// finds no outbound `bl` instructions, plain or predicated; complete image
+/// decoding finds two inbound plain `bl` instructions and no predicated
+/// inbound `bl` instructions.
+///
+/// Validates an `MTXA` attribute and a mutex kind in `0..=2`, then replaces
+/// only bits 4..5 of the halfword at attribute offset +6. Invalid pointers,
+/// magic, and kinds return [`ERR_INVALID_OBJECT`] without storing.
+/// Deliberate deviation: Rust has no distinct one-halfword RMW instruction;
+/// the aligned `u16` read and write express its observed memory effect.
+pub const MUTEXATTR_TYPE_MASK: u16 = 0x0030;
+pub const MUTEX_KIND_MAX: u32 = 2;
+
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pthread_mutexattr_settype(attr: *mut u8, kind: u32) -> u32 {
+    if attr.is_null() || attr.cast::<u32>().read() != MUTEXATTR_MAGIC || kind > MUTEX_KIND_MAX {
+        return ERR_INVALID_OBJECT;
+    }
+    let type_halfword = attr.add(6).cast::<u16>();
+    type_halfword.write(
+        (type_halfword.read() & !MUTEXATTR_TYPE_MASK)
+            | ((kind as u16) << 4 & MUTEXATTR_TYPE_MASK),
+    );
+    0
+}
+
+#[cfg(test)]
+mod mutexattr_settype_tests {
+    extern crate std;
+    use super::*;
+
+    #[test]
+    fn validates_magic_and_kind_without_mutating_the_attribute() {
+        let mut attr = [0xa5u8; 8];
+        let snapshot = attr;
+        unsafe {
+            assert_eq!(
+                pthread_mutexattr_settype(attr.as_mut_ptr(), 0),
+                ERR_INVALID_OBJECT
+            );
+            assert_eq!(pthread_mutexattr_settype(core::ptr::null_mut(), 0), ERR_INVALID_OBJECT);
+        }
+        assert_eq!(attr, snapshot);
+
+        attr[..4].copy_from_slice(&MUTEXATTR_MAGIC.to_le_bytes());
+        let snapshot = attr;
+        unsafe {
+            assert_eq!(
+                pthread_mutexattr_settype(attr.as_mut_ptr(), MUTEX_KIND_MAX + 1),
+                ERR_INVALID_OBJECT
+            );
+        }
+        assert_eq!(attr, snapshot);
+    }
+
+    #[test]
+    fn replaces_only_the_two_type_bits_for_every_accepted_kind() {
+        for kind in 0..=MUTEX_KIND_MAX {
+            let mut attr = [0u8; 8];
+            attr[..4].copy_from_slice(&MUTEXATTR_MAGIC.to_le_bytes());
+            attr[4..6].copy_from_slice(&0xc3a5u16.to_le_bytes());
+            attr[6..8].copy_from_slice(&0xffcfu16.to_le_bytes());
+            unsafe {
+                assert_eq!(pthread_mutexattr_settype(attr.as_mut_ptr(), kind), 0);
+            }
+            let flags = u16::from_le_bytes([attr[6], attr[7]]);
+            assert_eq!(
+                flags,
+                (0xffcf & !MUTEXATTR_TYPE_MASK)
+                    | ((kind as u16) << 4 & MUTEXATTR_TYPE_MASK)
+            );
+            assert_eq!(&attr[4..6], &0xc3a5u16.to_le_bytes());
+        }
+    }
+}
 
 pub type PthreadMutexattrInit = unsafe extern "C" fn(attr: *mut u8) -> u32;
 pub type KernelObjectAllocate = unsafe extern "C" fn(kind: u32, out: *mut u32) -> u32;
