@@ -15,6 +15,7 @@
 //! retailOS-address boundary with a recording host seam.
 
 use crate::libc::forward_byte_copy::forward_byte_copy;
+use crate::fs::fat_short_name_render::fat_short_name_render;
 
 const DIRENT_POINTER_OFFSET: usize = 0x240;
 const DISPLAY_NAME_OFFSET: usize = 0x10d;
@@ -42,34 +43,6 @@ unsafe fn build_long_name(volume: *mut u8, entry: *const u8, output: *mut u8) {
     unsafe { LONG_NAME_BUILDER(volume, entry, output) };
 }
 
-unsafe fn render_short_name(output: *mut u8, stem: *const u8, extension: *const u8) -> *mut u8 {
-    let mut written = 0usize;
-    let mut cursor = output;
-    while written != 8 {
-        let byte = unsafe { stem.add(written).read() };
-        if byte == 0 || byte == b' ' { break; }
-        unsafe { cursor.write(byte) };
-        cursor = unsafe { cursor.add(1) };
-        written += 1;
-    }
-    if cursor != output {
-        unsafe { cursor.write(b'.') };
-        cursor = unsafe { cursor.add(1) };
-        written = 0;
-        while written != 3 {
-            let byte = unsafe { extension.add(written).read() };
-            if byte == 0 || byte == b' ' { break; }
-            unsafe { cursor.write(byte) };
-            cursor = unsafe { cursor.add(1) };
-            written += 1;
-        }
-    }
-    if cursor != output && unsafe { cursor.sub(1).read() } == b'.' {
-        cursor = unsafe { cursor.sub(1) };
-    }
-    unsafe { cursor.write(0) };
-    output
-}
 
 /// Populates a FAT path object's raw 8.3, display-name, and directory metadata fields.
 ///
@@ -85,7 +58,7 @@ pub unsafe extern "C" fn fat_dirent_populate_names(path: *mut u8) -> *mut u8 {
     unsafe { path.add(8).write(0) };
     unsafe { forward_byte_copy(path.add(9), entry.add(8), 3) };
     unsafe { path.add(12).write(0) };
-    let display_name = unsafe { render_short_name(path.add(DISPLAY_NAME_OFFSET), path, path.add(9)) };
+    let display_name = unsafe { fat_short_name_render(path.add(DISPLAY_NAME_OFFSET), path, path.add(9)) };
     unsafe { path.add(METADATA_OFFSET).write(entry.add(11).read()) };
     unsafe { path.add(METADATA_OFFSET + 2).cast::<u16>().write(entry.add(0x16).cast::<u16>().read()) };
     unsafe { path.add(METADATA_OFFSET + 4).cast::<u16>().write(entry.add(0x18).cast::<u16>().read()) };
@@ -93,7 +66,7 @@ pub unsafe extern "C" fn fat_dirent_populate_names(path: *mut u8) -> *mut u8 {
     let volume = unsafe { dirent_context.cast::<u32>().read() } as usize as *mut u8;
     unsafe { build_long_name(volume, entry.add(0x40), display_name) };
     if unsafe { display_name.read() } == 0 {
-        unsafe { render_short_name(display_name, path, path.add(9)) }
+        unsafe { fat_short_name_render(display_name, path, path.add(9)) }
     } else {
         display_name
     }

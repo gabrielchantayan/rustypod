@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082e2fe0
+    ghidra: FUN_082e2fe0
+    name: fat_short_name_render
+    size: 160
+    sig: "char *fat_short_name_render(char *output, const char *stem, const char *extension)"
+    module: fs/fat_short_name_render
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: stem
+      param_3/r2: extension
+      pcVar2/r0: cursor
+      iVar5/r12: index
+    notes: >-
+      Raw osos.dec decoding establishes the 160-byte extent through
+      0x082e307c; the push at 0x082e3080 starts the next real function.
+      Complete-image ARM decoding finds two inbound plain BL sites at
+      0x082e1234 and 0x082e49b8, zero predicated inbound BL sites, and no
+      outbound calls. The port copies a bounded 8-byte stem and 3-byte
+      extension, conditionally inserts a dot, removes a dangling dot, and
+      NUL-terminates. No deliberate deviations.
+
   - address: 0x0830eae8
     ghidra: FUN_0830eae8
     name: inline_encoded_word_block_bit_length
