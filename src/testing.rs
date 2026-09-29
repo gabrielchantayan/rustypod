@@ -43,6 +43,9 @@ pub mod hints {
     // target-width node and header fixtures; mappings never unmap.
     pub const PATH_ATTRIBUTE_UPDATE: usize = 0x5310_0000;
     pub const PATH_ATTRIBUTE_UPDATE_MODE_MISMATCH: usize = 0x5320_0000;
+    // 0x8820_0000: dedicated to fs/path_attributes' target-width node and
+    // header fixture; mappings never unmap.
+    pub const PATH_ATTRIBUTES: usize = 0x8820_0000;
     // 0x6c00_0000: dedicated to cxx/vector_copy_construct_elem32's
     // target-width source, destination, and allocation fixture; mappings never unmap.
     pub const VECTOR_COPY_CONSTRUCT_ELEM32: usize = 0x6c00_0000;

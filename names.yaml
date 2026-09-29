@@ -30904,6 +30904,38 @@ functions:
       early return, same ldr of node +4, same call order, same
       pass-through return of the pool result.
 
+  - address: 0x082e1d2c
+    ghidra: FUN_082e1d2c
+    name: read_path_attributes
+    size: 108
+    sig: "bool read_path_attributes(const u8 *path, u8 *attributes)"
+    module: fs/path_attributes
+    status: ported
+    renames:
+      param_1: path
+      param_2: attributes
+      FUN_082c3000: resolve_path_drive_index
+      FUN_082d7934: ata_semaphore_wait
+      FUN_082e15d8: path_node_lookup
+      FUN_082e19cc: path_node_release
+      FUN_082d7954: ata_semaphore_signal
+      FUN_083690a8: ata_report_error
+    notes: >-
+      Raw ARM establishes the exact 108-byte extent 0x082e1d2c..0x082e1d98:
+      the next separately entered function starts with push
+      {r3,r4,r5,r6,r7,r8,r9,sl,fp,lr} at 0x082e1d98. The body resolves the
+      path drive index, returns false immediately for a negative result, then
+      brackets path-node lookup with that drive's ATA semaphore. A found node
+      supplies byte 0x0b from its target-width header pointer at node +4,
+      releases the node, reports ATA error zero, and returns true; a missing
+      node leaves the output untouched, reports error two, and returns false.
+      Whole-image reference analysis finds two inbound direct calls, both
+      plain bl at 0x081bcee8 and 0x081bd6c8; no predicated bl callers.
+      The function contains six unconditional outbound bl instructions and no
+      predicated calls. Deliberate deviation: path_node_lookup is unported, so
+      the target build calls its resident load address; host builds use
+      recording boundaries for every direct callee.
+
   # --- Path-resolution node factory ---
   - address: 0x082e0100
     ghidra: FUN_082e0100
