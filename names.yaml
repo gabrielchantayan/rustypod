@@ -53851,6 +53851,41 @@ functions:
       through the two seam slots instead of direct bl's, LLVM frame
       setup, and loop peeling of the temp-database second pass.
 
+  # ---- B-tree table clear (src/sqlite/btree_clear_table.rs) ----
+  - address: 0x0837098c
+    ghidra: FUN_0837098c
+    name: btree_clear_table
+    size: 148
+    sig: "i32 btree_clear_table(Btree *btree, u32 root_page)"
+    module: sqlite/btree_clear_table
+    status: ported
+    renames:
+      param_1/r0: btree
+      param_2/r1: root_page
+      iVar2/r6: shared
+      iVar1/r4: status
+      FUN_0837118c: btree_enter
+      FUN_082c28a0: check_read_locks
+      FUN_083684fc: btree_save_all_cursors
+      FUN_082c3548: retail_clear_table_worker
+      FUN_08371da4: btree_leave
+    notes: >-
+      SQLite 3.5.x's sqlite3BtreeClearTable. Raw osos.dec establishes the
+      exact 148-byte extent 0x0837098c..0x08370a20: push
+      {r4-r8,lr} begins the body and the next separately linked function
+      begins with push {r4,r5,r6,lr} at 0x08370a20. Decoding every ARM
+      B/BL-immediate word independently finds five unconditional plain BL
+      instructions, not Ghidra's two, and no predicated BL: btree_enter @
+      0x0837118c, check_read_locks @ 0x082c28a0, btree_save_all_cursors @
+      0x083684fc, the still-unidentified retail worker @ 0x082c3548, and
+      btree_leave @ 0x08371da4. It enters, copies Btree.db to BtShared.db
+      (+0x04), returns SQLITE_ERROR (1) or SQLITE_READONLY (8) outside a
+      write transaction according to BtShared.readOnly (+0x11), otherwise
+      checks locks, saves cursors, and calls the worker with
+      (BtShared, root_page, 0, 0); it always leaves. The unknown worker
+      remains an absolute target call; host tests use a private seam solely
+      to observe its verified ABI and call order.
+
   # ---- B-tree shared-schema accessor (src/sqlite/btree_schema.rs) ----
   - address: 0x08371370
     ghidra: FUN_08371370

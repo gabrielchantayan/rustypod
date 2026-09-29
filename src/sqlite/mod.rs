@@ -88,6 +88,7 @@ pub mod btree_cursor_page_flags;
 pub mod btree_cursor_is_eof;
 pub mod btree_close_cursor;
 pub mod btree_clear_cursor;
+pub mod btree_clear_table;
 pub mod btree_cursor_pop_parent;
 pub mod btree_trip_all_cursors;
 pub mod clear_page_overflow_cells;
