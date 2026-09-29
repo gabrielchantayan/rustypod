@@ -229,6 +229,7 @@ pub mod get_temp_range;
 pub mod put_varint32;
 pub mod put_varint;
 pub mod get_temp_reg;
+pub mod update_master_root_page;
 pub mod hash_clear;
 pub mod hash_rehash;
 pub mod integrity_check_append_msg;

@@ -1167,6 +1167,9 @@ pub mod hints {
     // 0x7400_0000: dedicated to sqlite/nested_parse's raw-u32 Parse/db
     // fixture; mappings never unmap.
     pub const SQLITE_NESTED_PARSE: usize = 0x7400_0000;
+    // 0x7610_0000: dedicated to sqlite/update_master_root_page's raw-u32
+    // Parse/connection/database fixture; mappings never unmap.
+    pub const SQLITE_UPDATE_MASTER_ROOT_PAGE: usize = 0x7610_0000;
     // 0x6800_0000: dedicated to sqlite/src_list_lookup's raw-u32 database,
     // schema, and Table reference-count fixture; mappings never unmap.
     pub const SQLITE_SRC_LIST_LOOKUP: usize = 0x6800_0000;

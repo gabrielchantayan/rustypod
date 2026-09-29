@@ -43019,6 +43019,33 @@ functions:
       malloc(16) for the header, malloc(size) for the payload,
       `stmib` writes base+total, then current = 0 and next = NULL.
 
+
+  - address: 0x082c5fbc
+    ghidra: FUN_082c5fbc
+    name: update_master_root_page
+    size: 132
+    sig: "void update_master_root_page(Parse *parse, int root_page, int database_index)"
+    module: sqlite/update_master_root_page
+    status: ported
+    vars:
+      FUN_0837acf4: get_vdbe
+      FUN_0837a3bc: get_temp_reg
+      FUN_08386840: vdbe_add_op3
+      FUN_0837d7dc: sqlite_nested_parse
+      FUN_08381f98: release_temp_reg
+    notes: >-
+      Raw ARM establishes the 132-byte extent
+      0x082c5fbc..0x082c6040; the following bytes are the sqlite_master,
+      sqlite_temp_master, and UPDATE format strings. Whole-image decoding
+      finds two incoming plain BL call sites and no predicated BL forms.
+      Internally it makes four plain BL calls (get_vdbe, get_temp_reg,
+      vdbe_add_op3, sqlite_nested_parse) then tail-branches to
+      release_temp_reg. It emits OP_ParseSchema (0x6a) with
+      (root_page, temp_reg, database_index), nested-parses
+      "UPDATE %Q.%s SET rootpage=%d WHERE #%d AND rootpage=#%d", and picks
+      sqlite_temp_master only for database index 1. get_vdbe uses the
+      existing BEGIN_WRITE_OPS volatile seam because its Rust port is absent;
+      the remaining callees are direct ports.
   - address: 0x082c1a78
     ghidra: FUN_082c1a78
     name: cg_heap_create
