@@ -159948,3 +159948,41 @@ functions:
       reset-register address directly and keeps a frame for the diverging
       function, while the stock body derives it by subtracting 0x300000 from
       the watchdog address and spins through four explicit nops.
+
+  - address: 0x0836741c
+    ghidra: FUN_0836741c
+    name: hash_rehash
+    size: 164
+    sig: "void hash_rehash(Hash *hash, int bucket_count)"
+    module: sqlite/hash_rehash
+    status: ported
+    vars: {param_1/r5: hash, param_2/r7: bucket_count, iVar1/r6: buckets,
+      pcVar2/r8: hash_function, piVar4/r4: elem, iVar5/r7: next,
+      uVar3/r0: hash_value}
+    renames:
+      FUN_083789ac: fault_begin_benign
+      FUN_0837d38c: sqlite3_malloc_zero
+      FUN_083789f8: fault_end_benign
+      FUN_083906f4: tracked_free
+      FUN_082d2a1c: hash_function
+      FUN_082d6990: hash_insert_element
+    notes: >-
+      SQLite 3.4.x/3.5.x hash.c's rehash helper, reached by the two
+      unconditional BL sites in sqlite3HashInsert @ 0x0837ae08
+      (0x0837aea0 initializes 16 buckets and 0x0837aea8 doubles a live
+      table). Raw osos.dec establishes the exact 164-byte body
+      0x0836741c..0x083674c0: the next independently linked function begins
+      push {r4-r9,sl,lr} at 0x083674c0. Its outbound calls are four plain BL
+      (sqlite3_malloc_zero, tracked_free, hash_function, hash_insert_element),
+      two predicated BLGT (fault_begin_benign and fault_end_benign), and one
+      indirect BLX through the selected hash function. A positive signed
+      htsize enters the benign fault section around the zeroed allocation of
+      bucket_count * 8 bytes. Failure returns without touching the old table.
+      Success frees old ht, writes ht and htsize, selects the hash function
+      from key_class, clears first, and reinserts every old insertion-order
+      node with hash(key,nKey) & (bucket_count - 1) through the established
+      hash_insert_element algorithm. The dispatcher is a volatile callback
+      seam because hash_function returns firmware runtime code addresses;
+      other callees are their ported Rust twins. Host coverage verifies
+      collision-chain links, prev links, bucket counts, and reversed
+      insertion-order reconstruction.

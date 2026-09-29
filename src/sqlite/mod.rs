@@ -220,6 +220,7 @@ pub mod put_varint32;
 pub mod put_varint;
 pub mod get_temp_reg;
 pub mod hash_clear;
+pub mod hash_rehash;
 pub mod integrity_check_append_msg;
 pub mod integrity_check_ref;
 pub mod is_nan;
