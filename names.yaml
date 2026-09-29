@@ -5649,6 +5649,30 @@ functions:
       The Rust u32 target preserves the ARM four-byte field on 64-bit hosts;
       it returns this because r0 passes through unchanged. Deliberate
       deviations: none.
+  - address: 0x082d7bb8
+    ghidra: FUN_082d7bb8
+    name: hash_table_visit
+    size: 28
+    sig: "void hash_table_visit(u8 *table, void (*callback)(u32))"
+    module: cxx/hash_table_visit
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: callback
+      FUN_080846f4: hash_table_bucket_chain_visitor
+    notes: >-
+      Raw osos.dec words e92d4008 e3a03000 e1a02001 e3a01000 e58d3000
+      ebf6b2c8 e8bd9000 establish the exact 28-byte body
+      0x082d7bb8..0x082d7bd3; push {r3,lr} at 0x082d7bd4 begins the next
+      independently linked function. Whole-image A32 decoding finds two
+      inbound plain BL calls (0x080782f8 and 0x082d9020), zero predicated
+      inbound BL calls, and one outbound plain BL to FUN_080846f4 at
+      0x080846f4. It forwards table and callback to that resident
+      bucket-chain visitor with mode=0, the mode-one callback NULL, and
+      context=0. FUN_080846f4 has no names.yaml entry and remains a
+      fixed-address target seam; host tests verify mode, NULL mode-one
+      callback, zero context, and forwarding for null/non-null table values.
+      Deliberate deviations: none.
   - address: 0x082d7bd4
     ghidra: FUN_082d7bd4
     name: hash_table_visit_with_context
