@@ -162250,3 +162250,40 @@ functions:
       no-op, carry propagation and carry absorption. match.py reviewed the
       same list test, carry loop, and final append structure; LLVM retains an
       additional sum-versus-input carry test. No deliberate deviations.
+
+  - address: 0x082d3bfc
+    ghidra: FUN_082d3bfc
+    name: i2v_general_names
+    size: 92
+    sig: "u32 *i2v_general_names(X509V3_EXT_METHOD *method, const u32 *names, u32 *values)"
+    module: crypto/i2v_general_names
+    status: ported
+    renames:
+      param_1: method
+      param_2: names
+      param_3: values
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+      FUN_082d3a30: i2v_general_name
+      FUN_08369778: ata_call_with_zero
+    notes: >-
+      Raw osos.dec words establish the exact 92-byte extent
+      0x082d3bfc..0x082d3c58; Ghidra's claimed 96 bytes consumes the first
+      word (`smulbb r5,r0,r1`) of the next independently linked function at
+      0x082d3c5c. Direct A32 decoding finds three plain outbound BL calls
+      (namespace_provider_at, i2v_general_name, and
+      namespace_provider_count) and no predicated BL forms. Complete-image
+      branch decoding finds exactly two inbound plain BL sites (0x080aee20
+      and 0x080ef434) and no predicated inbound BL. This is OpenSSL
+      i2v_GENERAL_NAMES: while the signed provider count exceeds the index,
+      obtain each GENERAL_NAME, pass it with method and the accumulator to
+      i2v_GENERAL_NAME, then return its output or create an empty stack with
+      ata_call_with_zero when it is NULL. Deliberate deviation:
+      i2v_GENERAL_NAME at 0x082d3a30 is unported, so host builds use a
+      serialized callback seam while target builds directly call its verified
+      retail address. Target-width provider pointer fields retain u32 layout;
+      host tests use distinct low mapped fixtures. match.py: same signed-count
+      loop, indexed provider load, threaded conversion result, NULL fallback,
+      and direct stock-address call; LLVM adds a frame, reloads the count at
+      loop bottom, and routes the unported callee through a literal-loaded
+      `blx` on target builds.

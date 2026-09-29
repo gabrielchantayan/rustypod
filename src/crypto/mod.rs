@@ -107,6 +107,7 @@ pub mod standard_cipher_table_two;
 pub mod buf_strdup;
 pub mod standard_cipher_table_three;
 pub mod x509v3_add_value;
+pub mod i2v_general_names;
 pub mod standard_cipher_table_four;
 pub mod standard_cipher_table_five;
 pub mod standard_cipher_table_six;
