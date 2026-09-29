@@ -60276,6 +60276,27 @@ functions:
       setup difference; target control flow retains both early returns,
       qsort, and final flag store.
 
+  - address: 0x08369490
+    ghidra: FUN_08369490
+    name: namespace_provider_remove_value
+    size: 56
+    sig: "u32 *namespace_provider_remove_value(u32 *providers, u32 *value)"
+    module: cxx/object_flags
+    status: ported
+    vars: {param_1/r0: providers, param_2/r1: value, iVar1/r1: index, iVar2/r2: entry, iVar3/r3: entry_count}
+    notes: >-
+      Raw A32 words establish the exact 56-byte extent
+      0x08369490..0x083694c8; the next separately linked function begins
+      `push {r4,r5,r6,lr}` at 0x083694c8. Full-firmware ARM decoding finds
+      exactly two inbound unconditional BL calls, at 0x08071010 and
+      0x08073348, and no predicated BL calls. The body snapshots the signed
+      count, scans table entries at +0x04 for an exact value match, and
+      tail-branches to FUN_08369420 on a hit. That shared remove-at helper
+      rejects index zero; later matches return the entry, shift the following
+      entries down, and decrement the count. Its unregistered Rust seam is
+      deliberately inlined, retaining its count reload and the host's
+      unaligned target +0x04 table-pointer load.
+
   - address: 0x08369790
     ghidra: FUN_08369790
     name: namespace_provider_pop_last
