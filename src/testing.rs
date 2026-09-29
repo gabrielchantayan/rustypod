@@ -386,6 +386,9 @@ pub mod hints {
     // 0x7f70_0000: dedicated to drivers/ata_taskfile_program's raw-u32
     // task-file fixture; mappings never unmap, so no other user may share it.
     pub const ATA_TASKFILE_PROGRAM: usize = 0x7f70_0000;
+    // 0x7f71_0000: dedicated to drivers/ata_taskfile_program_48bit's raw-u32
+    // task-file fixture; mappings never unmap, so no other user may share it.
+    pub const ATA_TASKFILE_PROGRAM_48BIT: usize = 0x7f71_0000;
     // 0x6600_0000: dedicated to ui/object_stack_push's raw-u32 owner items
     // array and growth-allocation slab; mappings never unmap, so no other
     // user may share this hint.
