@@ -186,6 +186,7 @@ pub mod indexed_operation_forwarder;
 pub mod left_join_null_row;
 pub mod expr_code_temp;
 pub mod expr_code_pair;
+pub mod emit_temp_register_ops;
 pub mod expr_delete;
 pub mod expr_dup;
 pub mod expr_function;
