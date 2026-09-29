@@ -132,10 +132,12 @@ pub unsafe extern "C" fn parse_expr(
 /// [`parse_expr`], returning that constructor result unchanged.
 ///
 /// Raw ARM contains two unconditional calls: the token initializer at
-/// 0x08369074 and [`parse_expr`] at 0x0837dc18. The former is not separately
-/// ported, so its verified byte-at-a-time `strlen` and two-word `Token`
-/// initialization are inlined here; volatile byte loads keep LLVM from
-/// replacing that loop with an unavailable libc `strlen`. The raw scan finds
+/// 0x08369074 ([`sqlite3TokenInit`](crate::sqlite::token_init::sqlite3TokenInit))
+/// and [`parse_expr`] at 0x0837dc18. The initializer is now separately
+/// ported. This helper deliberately retains its inline initialization because
+/// its widened host-test `Token` has `n_dyn` after an 8-byte host pointer,
+/// while the target initializer operates on fixed +0/+4 words. Volatile byte
+/// loads preserve the original byte-at-a-time length scan. The raw scan finds
 /// six inbound calls, all unconditional plain `bl`: 0x082b2dbc,
 /// 0x082b2dcc, 0x082b2de4, 0x082b2dfc, 0x08396330, and 0x083963b4.
 ///
