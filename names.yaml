@@ -52011,6 +52011,26 @@ functions:
       with the first five arguments, then vdbe_change_p4
       @ 0x08386aa4 (now ported) with (p, returned address, p4, p4type),
       and returns that address.
+  - address: 0x08368188
+    ghidra: FUN_08368188
+    name: return_single_int
+    size: 148
+    sig: "void return_single_int(Parse *parse, char *label, int value)"
+    module: sqlite/return_single_int
+    status: ported
+    vars: {param_1: parse, param_2: label, param_3: value}
+    notes: >-
+      SQLite's returnSingleInt. Raw ARM confirms the 148-byte extent
+      0x08368188..0x0836821c and four unconditional outbound BL
+      instructions (sqlite3GetVdbe, sqlite3VdbeAddOp3,
+      sqlite3VdbeSetNumCols, sqlite3VdbeSetColName), with no predicated
+      BL. There are two unconditional inbound BL call sites: 0x082ce5ac
+      and 0x0837f57c. Allocates Parse.nMem, emits OP_Integer and
+      OP_ResultRow, and adds a one-column result name unless Parse.explain
+      is nonzero. sqlite3GetVdbe's stale ported ledger entry has no Rust
+      symbol, so the port uses the existing volatile BEGIN_WRITE_OPS
+      resolver and documents its stored-pVdbe default.
+
 
   - address: 0x08367f88
     ghidra: FUN_08367f88
