@@ -541,6 +541,9 @@ pub const CG_VREG_PARENT: usize = 1;
 pub const CG_VREG_NO: usize = 4;
 /// `cg_virtual_reg_t + 0x20` — the register's type, a single byte.
 pub const CG_VREG_TYPE: usize = 8;
+/// `cg_virtual_reg_t + 0x24` — flags tested by the block-exit binding
+/// release walker; bit 0x10000 prevents a live-out release.
+pub const CG_VREG_FLAGS: usize = 0x24 / 4;
 /// `cg_virtual_reg_t + 0x18` — instruction that defines this register,
 /// followed by [`cg_mark_inst_dependencies`] during dead-code marking.
 pub const CG_VREG_DEFINING_INST: usize = 6;
@@ -3041,7 +3044,7 @@ pub struct CgBlockEmitOps {
     /// descriptor anchors (codegen `+0x14 + i*0x1c`) carrying flag
     /// `0x100`, releases the register's binding through `FUN_083685f0`
     /// when the passed bitset is NULL or names the bound register.
-    /// Called with the block's live-OUT set. Default: no releases.
+    /// Called with the block's live-OUT set. Default: the ported walker.
     pub release_hw_reg_bindings:
         unsafe extern "C" fn(codegen: *mut CgCodegen, live_out: *mut u8),
     /// `FUN_082ccae4` @ 0x082ccae4 (204 bytes) — the block-exit
@@ -3061,11 +3064,12 @@ pub struct CgBlockEmitOps {
 unsafe extern "C" fn default_cg_emit_inst(_codegen: *mut CgCodegen, _inst: *mut CgInst) {}
 
 /// The wired default of [`CgBlockEmitOps::release_hw_reg_bindings`]:
-/// no releases. See the field's doc for the original.
+/// the ported [`cg_release_live_out_hw_reg_bindings`].
 unsafe extern "C" fn default_cg_release_hw_reg_bindings(
-    _codegen: *mut CgCodegen,
-    _live_out: *mut u8,
+    codegen: *mut CgCodegen,
+    live_out: *mut u8,
 ) {
+    cg_release_live_out_hw_reg_bindings(codegen, live_out);
 }
 
 /// The wired default of [`CgBlockEmitOps::flush_pending_bindings`]:
@@ -3729,6 +3733,62 @@ pub unsafe extern "C" fn cg_binding_release(codegen: *mut CgCodegen, binding: *m
     }
     let flags = word(binding, CG_BINDING_FLAGS);
     flags.write(flags.read() & !(CG_BINDING_FLAG_BOUND | CG_BINDING_FLAG_BLOCK_ENTRY));
+}
+
+/// cg_release_live_out_hw_reg_bindings — original: `FUN_082cea24` @
+/// **0x082cea24** (152 bytes; **1 direct plain `bl` in its body** at
+/// 0x082ceaa8; no predicated `bl` forms; 2 inbound plain `bl` call sites at
+/// 0x082c0f30 and 0x082cbb24).
+///
+/// Walks all 16 hardware-register binding records at codegen `+0x14`. A
+/// record marked bound (flags `+0x18`, bit 0x100) emits its stack-store release
+/// when `live_out` is NULL, or only when its bound virtual register is a
+/// non-flagged, matching back-pointer and its resource bit is set in
+/// `live_out`. This is the block-exit release pass before pending bindings are
+/// flushed.
+///
+/// Deliberate deviation: the ARM `tst r1,ip,lsl r3` yields false for resource
+/// indices at least 32; the explicit bound preserves that behavior in Rust.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_release_live_out_hw_reg_bindings(
+    codegen: *mut CgCodegen,
+    live_out: *mut u8,
+) {
+    let codegen = codegen as *mut u8;
+    for descriptor_index in 0..CG_HW_REG_COUNT {
+        let binding = slot(
+            codegen,
+            CG_CODEGEN_HW_REG_BINDINGS + descriptor_index * CG_HW_REG_ENTRY_WORDS,
+        ) as *mut u8;
+        if word(binding, CG_BINDING_FLAGS).read() & CG_BINDING_FLAG_BOUND == 0 {
+            continue;
+        }
+        let reg = slot(binding, CG_BINDING_REG).read();
+        let should_release = if live_out.is_null() {
+            true
+        } else if !reg.is_null() && word(reg, CG_VREG_FLAGS).read() & 0x10000 == 0 {
+            let parent = slot(reg, CG_VREG_PARENT).read();
+            word(parent, CG_VREG_FLAGS).read() & 0x10000 == 0
+                && slot(reg, CG_VREG_BINDING).read() == binding
+                && {
+                    let resource = word(reg, CG_VREG_NO).read();
+                    resource < u32::BITS as usize
+                        && word(live_out, CG_BITSET_BITS + (resource >> 5)).read()
+                            & (1usize << (resource & 31))
+                            != 0
+                }
+        } else {
+            false
+        };
+        if should_release {
+            cg_emit_stack_store(
+                codegen as *mut CgCodegen,
+                binding as *mut CgBinding,
+                reg as *mut CgVirtualReg,
+            );
+        }
+    }
 }
 
 /// cg_release_call_clobbered_bindings — original: `FUN_082d7800` @
@@ -8943,7 +9003,7 @@ mod tests {
             assert_eq!(
                 ops.release_hw_reg_bindings as usize,
                 default_cg_release_hw_reg_bindings as usize,
-                "FUN_082cea24 stays a documented no-op until ported"
+                "FUN_082cea24 is wired through its ported default"
             );
             assert_eq!(
                 ops.flush_pending_bindings as usize,
@@ -9934,6 +9994,37 @@ mod tests {
             );
             assert_eq!(emitted, 0xe50b_0fff, "negative boundary clamps to -0xfff");
 
+            CG_BUFFER_PAGE_POINTER = saved_page_pointer;
+            STACK_STORE_PAGE = core::ptr::null_mut();
+        }
+    }
+
+    #[test]
+    fn release_live_out_hw_reg_bindings_releases_bound_records_for_null_live_out() {
+        let _g = setup();
+        let mut codegen = [0usize; record_size(CG_CODEGEN_BYTES) / WORD];
+        let mut output = [0usize; CG_CODEGEN_OUTPUT_OFFSET + 1];
+        let mut reg = [0usize; record_size(CG_VREG_BYTES) / WORD];
+        let mut emitted = 0u32;
+        unsafe {
+            let saved_page_pointer = hook(core::ptr::addr_of!(CG_BUFFER_PAGE_POINTER));
+            STACK_STORE_PAGE = &mut emitted as *mut u32 as *mut u8;
+            CG_BUFFER_PAGE_POINTER = stack_store_page_pointer;
+            codegen[CG_CODEGEN_OUTPUT] = output.as_mut_ptr() as usize;
+            let binding = codegen.as_mut_ptr().add(CG_CODEGEN_HW_REG_BINDINGS) as *mut u8;
+            word(binding, CG_BINDING_FLAGS).write(CG_BINDING_FLAG_BOUND);
+            word(binding, CG_BINDING_RESOURCE).write(3);
+            slot(binding, CG_BINDING_REG).write(reg.as_mut_ptr().cast());
+            reg[0x14 / 4] = (-4_i32) as u32 as usize;
+
+            cg_release_live_out_hw_reg_bindings(
+                codegen.as_mut_ptr() as *mut CgCodegen,
+                core::ptr::null_mut(),
+            );
+
+            assert_eq!(word(binding, CG_BINDING_FLAGS).read(), 0, "the bound record releases");
+            assert_eq!(emitted, 0xe50b_3004, "the release emits the selected register spill");
+            assert_eq!(output[CG_CODEGEN_OUTPUT_OFFSET], 4);
             CG_BUFFER_PAGE_POINTER = saved_page_pointer;
             STACK_STORE_PAGE = core::ptr::null_mut();
         }

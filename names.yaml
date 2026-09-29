@@ -9355,6 +9355,38 @@ functions:
       and the flag clear. match.py structural review was completed.
       Deliberate deviation: Rust `i32::unsigned_abs` replaces `rsblt` while
       retaining the same i32::MIN bit pattern.
+  # --- JIT block-exit hardware-binding release walker ---
+  - address: 0x082cea24
+    ghidra: FUN_082cea24
+    name: cg_release_live_out_hw_reg_bindings
+    size: 152
+    sig: "void cg_release_live_out_hw_reg_bindings(CgCodegen *codegen, CgBitSet *live_out)"
+    module: codegen/ir
+    status: ported
+    renames:
+      param_1/r6: codegen
+      param_2/r5: live_out
+      r0: hardware_binding
+      r1: binding_flags_then_live_out_word
+      r2: bound_virtual_register
+      r3: resource_bit_index
+      FUN_083685f0: cg_emit_stack_store
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte, thirty-eight-word A32 body
+      from `push {r4-r6,lr}` at 0x082cea24 through `pop {r4-r6,pc}` at
+      0x082ceab8; the next independently linked function begins at 0x082ceabc.
+      The body contains one unconditional direct bl, at 0x082ceaa8 to
+      cg_emit_stack_store, and zero predicated bl forms. Full-image branch
+      decoding finds exactly two inbound direct calls, both unconditional bl at
+      0x082c0f2c and 0x082cbb24; there are no predicated bl forms or direct
+      tail-B callers. The walker visits all sixteen 28-byte hardware binding
+      records at codegen+0x14. It spills each bound record when live_out is
+      NULL, otherwise only when the virtual register and parent both lack
+      flag 0x10000, the back-pointer names the binding, and its resource bit is
+      live-out. Host tests cover a bound-record stack spill and the NULL-live-out
+      path. match.py structural review was completed. Deliberate deviation: Rust
+      explicitly rejects resource indices at least 32, matching ARM's
+      variable-shift zero result.
   # --- H.264 stream-position block rounding ---
   - address: 0x08368784
     ghidra: FUN_08368784
