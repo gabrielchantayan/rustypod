@@ -541,6 +541,9 @@ pub const CG_VREG_PARENT: usize = 1;
 pub const CG_VREG_NO: usize = 4;
 /// `cg_virtual_reg_t + 0x20` — the register's type, a single byte.
 pub const CG_VREG_TYPE: usize = 8;
+/// `cg_virtual_reg_t + 0x18` — instruction that defines this register,
+/// followed by [`cg_mark_inst_dependencies`] during dead-code marking.
+pub const CG_VREG_DEFINING_INST: usize = 6;
 /// Size of `cg_virtual_reg_t` in target bytes.
 pub const CG_VREG_BYTES: usize = 40;
 
@@ -550,6 +553,9 @@ pub const CG_INST_NEXT: usize = 0;
 pub const CG_INST_BLOCK: usize = 1;
 /// `cg_inst_t + 0x08` — instruction kind, a single byte.
 pub const CG_INST_KIND: usize = 2;
+/// `cg_inst_t + 0x08` — flags sharing the kind/opcode word. Dead-code
+/// marking sets bit 0x10000 and leaves the kind/opcode bytes intact.
+pub const CG_INST_FLAGS: usize = 2;
 /// Byte offset of the opcode inside the kind word (`cg_inst_t + 0x09`).
 const CG_INST_OPCODE_IN_KIND_WORD: usize = 1;
 /// The opcode byte [`cg_resolve_phis`] matches to find phi instructions
@@ -2045,6 +2051,47 @@ pub unsafe extern "C" fn cg_reg_append_bounded(
         cursor
     }
 }
+/// `cg_mark_inst_dependencies` — retailOS `FUN_082d90ec` @ **0x082d90ec**
+/// (100 bytes exactly, `0x082d90ec..0x082d9150`; `push {r4,r5,lr}` starts
+/// the distinct next function).
+///
+/// Raw ARM has one plain `bl` (`cg_inst_collect_used_regs` @ 0x082c1bfc)
+/// and one predicated `bleq` self-call. If the instruction's flag word at
+/// +0x08 already has bit 0x10000, it returns. Otherwise it sets that bit,
+/// collects up to sixteen input registers, and recursively marks each
+/// non-NULL defining instruction found at virtual-register +0x18.
+///
+/// Deliberate deviations: the target reserves sixteen 4-byte slots on its
+/// stack; this uses sixteen pointer slots so the bounded collector remains
+/// disjoint on 64-bit host tests.
+///
+/// # Safety
+///
+/// `inst` must be a valid instruction record and every selected input
+/// register must be valid for its defining-instruction word.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_mark_inst_dependencies(inst: *mut CgInst) {
+    let inst_bytes = inst as *mut u8;
+    let flags = word(inst_bytes, CG_INST_FLAGS);
+    if flags.read() & 0x10000 != 0 {
+        return;
+    }
+    flags.write(flags.read() | 0x10000);
+
+    let mut regs = [const { core::mem::MaybeUninit::<*mut CgVirtualReg>::uninit() }; 16];
+    let cursor = regs.as_mut_ptr() as *mut *mut CgVirtualReg;
+    let end = cg_inst_collect_used_regs(inst, cursor, cursor.add(regs.len()));
+    let mut cursor = cursor;
+    while cursor != end {
+        let defining_inst = slot((*cursor) as *mut u8, CG_VREG_DEFINING_INST).read() as *mut CgInst;
+        if !defining_inst.is_null() {
+            cg_mark_inst_dependencies(defining_inst);
+        }
+        cursor = cursor.add(1);
+    }
+}
+
 
 /// cg_inst_visit_by_kind — original: `FUN_082c1adc` @ 0x082c1adc
 /// (288 bytes, 4 `bl` call sites).
@@ -7499,6 +7546,72 @@ mod tests {
             let (out, count) = collect_raw_used(1, [0, 0, 0, 0, 0]);
             assert_eq!(count, 1, "selected NULL still consumes bounded capacity");
             assert!(out[0].is_null());
+        }
+    }
+
+    // --- cg_mark_inst_dependencies --------------------------------------
+
+    #[test]
+    fn dependency_marker_marks_transitive_input_definitions_once() {
+        let _g = setup();
+        unsafe {
+            let mut root = [0usize; 8];
+            let mut middle = [0usize; 8];
+            let mut leaf = [0usize; 8];
+            let mut root_reg = [0usize; 9];
+            let mut middle_reg = [0usize; 9];
+
+            root[CG_INST_UNARY_SOURCE] = root_reg.as_mut_ptr() as usize;
+            middle[CG_INST_UNARY_SOURCE] = middle_reg.as_mut_ptr() as usize;
+            root_reg[CG_VREG_DEFINING_INST] = middle.as_mut_ptr() as usize;
+            middle_reg[CG_VREG_DEFINING_INST] = leaf.as_mut_ptr() as usize;
+            for record in [&mut root, &mut middle] {
+                (record.as_mut_ptr() as *mut u8)
+                    .add(CG_INST_KIND * WORD)
+                    .write(CG_INST_KIND_UNARY as u8);
+            }
+            (leaf.as_mut_ptr() as *mut u8)
+                .add(CG_INST_KIND * WORD)
+                .write(CG_INST_KIND_LOAD_IMMED as u8);
+
+            cg_mark_inst_dependencies(root.as_mut_ptr() as *mut CgInst);
+            for record in [&root, &middle, &leaf] {
+                assert_ne!(record[CG_INST_FLAGS] & 0x10000, 0);
+            }
+
+            cg_mark_inst_dependencies(root.as_mut_ptr() as *mut CgInst);
+            for record in [&root, &middle, &leaf] {
+                assert_ne!(record[CG_INST_FLAGS] & 0x10000, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn dependency_marker_does_not_traverse_an_already_marked_definition() {
+        let _g = setup();
+        unsafe {
+            let mut root = [0usize; 8];
+            let mut marked = [0usize; 8];
+            let mut hidden = [0usize; 8];
+            let mut root_reg = [0usize; 9];
+            let mut marked_reg = [0usize; 9];
+
+            root[CG_INST_UNARY_SOURCE] = root_reg.as_mut_ptr() as usize;
+            marked[CG_INST_UNARY_SOURCE] = marked_reg.as_mut_ptr() as usize;
+            root_reg[CG_VREG_DEFINING_INST] = marked.as_mut_ptr() as usize;
+            marked_reg[CG_VREG_DEFINING_INST] = hidden.as_mut_ptr() as usize;
+            for record in [&mut root, &mut marked, &mut hidden] {
+                (record.as_mut_ptr() as *mut u8)
+                    .add(CG_INST_KIND * WORD)
+                    .write(CG_INST_KIND_UNARY as u8);
+            }
+            marked[CG_INST_FLAGS] |= 0x10000;
+
+            cg_mark_inst_dependencies(root.as_mut_ptr() as *mut CgInst);
+
+            assert_ne!(root[CG_INST_FLAGS] & 0x10000, 0);
+            assert_ne!(marked[CG_INST_FLAGS] & 0x10000, 0);
+            assert_eq!(hidden[CG_INST_FLAGS] & 0x10000, 0);
         }
     }
 

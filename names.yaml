@@ -24680,6 +24680,27 @@ functions:
       SVC plus the exact op/pointer order and preservation of SYS_READC's
       return over both ignored SYS_WRITE0 results.
 
+  - address: 0x082d90ec
+    ghidra: FUN_082d90ec
+    name: cg_mark_inst_dependencies
+    size: 100
+    sig: "void cg_mark_inst_dependencies(cg_inst_t *inst)"
+    module: codegen/ir
+    status: ported
+    vars: {param_1/r0: inst, r4: cursor, r5: end, piVar1: defining_inst, local_4c: input_regs}
+    notes: >-
+      Raw ARM establishes the exact 100-byte extent
+      0x082d90ec..0x082d9150: push {r4,r5,lr} opens this function and the
+      next push at 0x082d9150 opens a distinct function. It makes one plain
+      bl call to cg_inst_collect_used_regs @ 0x082c1bfc and one predicated
+      bleq self-call; these are the only two BL instructions. If inst +0x08
+      already carries bit 0x10000, return. Otherwise set that bit, collect
+      up to sixteen input virtual registers, and for each non-NULL defining
+      instruction at register +0x18 recursively mark its dependencies.
+      The host port reserves sixteen pointer slots rather than the target's
+      sixteen four-byte stack slots, preserving bounded-collector behavior
+      under 64-bit host pointer width.
+
   - address: 0x082d90b0
     ghidra: FUN_082d90b0
     name: pcache_add_to_lru_list
