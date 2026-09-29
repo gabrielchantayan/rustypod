@@ -27071,6 +27071,33 @@ functions:
       deliberately replacing retail direct bl edges with ordinary Rust calls.
       Host tests cover packet serialization, status propagation, and lock
       release after both successful and failed writes.
+  # --- PMU register 0x29 boolean write (drivers/i2c) ---
+  - address: 0x0836d23c
+    ghidra: FUN_0836d23c
+    name: pmu_write_register_0x29_boolean
+    size: 36
+    sig: "i32 pmu_write_register_0x29_boolean(u32 enabled)"
+    module: drivers/i2c
+    status: ported
+    renames:
+      param_1/r0: enabled
+      local_8/sp: value
+      FUN_0836d524: pmu_i2c_write
+    notes: >-
+      Raw osos.dec words establish the exact 36-byte extent
+      0x0836d23c..0x0836d25c: cmp r0,#0; push {r3,lr}; movne r0,#1;
+      str r0,[sp]; mov r0,#0x29; mov r2,sp; mov r1,#1; bl 0x0836d524;
+      pop {r12,pc}. The following push {r2,r3,r4,r5,r6,r7,r8,r9,r10,lr}
+      at 0x0836d260 begins the next real function. Direct branch-word
+      decoding finds two inbound unconditional plain bl call sites
+      (0x082e59c4 and 0x082e5b54), no predicated inbound bl calls, and one
+      unconditional body bl to pmu_i2c_write. It canonicalizes enabled to
+      byte 0/1 and writes it to PCF50635 register 0x29. Though Ghidra marks
+      the result void, the raw epilogue returns the I2C status left in r0.
+      The Rust port deliberately replaces the direct retail bl with the
+      existing pmu_i2c_write call; host tests cover zero/nonzero
+      serialization and status propagation.
+
   # --- PMU mode-register write (drivers/i2c) ---
   - address: 0x0836d560
     ghidra: FUN_0836d560
