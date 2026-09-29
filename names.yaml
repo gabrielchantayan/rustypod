@@ -55677,6 +55677,31 @@ functions:
       the retail +0x04 field layout; host tests map the fixture below 4 GiB at
       dedicated hint 0x6a60_0000. Deliberate deviations: none.
 
+  - address: 0x082c68ec
+    ghidra: FUN_082c68ec
+    name: alloc_i64_copy
+    size: 48
+    sig: "void *alloc_i64_copy(sqlite3 **owner, const i64 *source)"
+    module: sqlite/alloc_i64_copy
+    status: ported
+    renames:
+      param_1: owner
+      param_2: source
+      FUN_08374960: db_malloc_raw
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec words establish 48 code bytes at
+      0x082c68ec..0x082c6918; the next independent entry starts at
+      0x082c691c with push {r4-r6,lr}. The body has one plain bl to
+      sqlite3DbMallocRaw @ 0x08374960 and one predicated blne to the
+      IRAM __rt_memcpy veneer @ 0x08037db0, with no other calls. It loads
+      owner->db, allocates exactly eight bytes, and copies source only
+      after a non-NULL allocation; allocation failure returns NULL without
+      reading source. The Rust port directly calls the ported allocator and
+      copy implementations rather than their retailOS entry points, and
+      models owner as a target-width u32 pointer word so host pointer width
+      cannot alter the +0 db field.
+
   # ---- B-tree shared-cache sizing (src/sqlite/btree_set_cache_size.rs) ----
   - address: 0x08372cb8
     ghidra: FUN_08372cb8

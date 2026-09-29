@@ -485,6 +485,9 @@ pub mod hints {
     // Db-array/DbFixer fixture page; all xx00_0000 slots are taken, so it
     // uses the function's own address prefix. Mappings never unmap.
     pub const SQLITE_FIX_INIT: usize = 0x0837_0000;
+    // 0x0837_2000: dedicated to sqlite/alloc_i64_copy's raw-u32 owner
+    // fixture; mappings never unmap, so no other user may share it.
+    pub const SQLITE_ALLOC_I64_COPY: usize = 0x0837_2000;
     // 0x0837_1000: dedicated to sqlite/fix_expr_list's raw-u32 ExprList
     // and 12-byte ExprList_item fixture; mappings never unmap.
     pub const SQLITE_FIX_EXPR_LIST: usize = 0x0837_1000;
