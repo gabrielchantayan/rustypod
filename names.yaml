@@ -161311,3 +161311,28 @@ functions:
       observed values and offsets. Deliberate deviation: raw byte pointers
       retain the verified target layout rather than inventing complete object
       types; the target volume pointer remains a u32 word on 64-bit hosts.
+
+  - address: 0x082e0e8c
+    ghidra: FUN_082e0e8c
+    name: fat_short_name_split
+    size: 204
+    sig: "u32 fat_short_name_split(u8 *base, u8 *extension, const u8 *input)"
+    module: fs/fat_short_name_split
+    status: ported
+    renames:
+      param_1/r0: base
+      param_2/r1: extension
+      param_3/r2: input
+      FUN_082e2ef0: zero_bytes
+    notes: >-
+      Raw osos.dec establishes the exact 204-byte extent
+      0x082e0e8c..0x082e0f57: the following word at 0x082e0f58 is the push
+      prologue of the next separately entered function. Decoding the raw ARM
+      instructions finds exactly two direct plain unconditional bl calls,
+      at 0x082e0ea4 and 0x082e0eb8, both to zero_bytes at 0x082e2ef0; there
+      are no predicated bl forms. The function fills base[0..8] and
+      extension[0..3] with spaces, NUL-terminates both buffers, then accepts
+      only `.` and `..` as leading-dot inputs or splits at the first later dot,
+      copying at most eight base and three extension bytes. Deliberate
+      deviation: Rust uses write_bytes for the two verified fixed-range
+      zero_bytes calls rather than creating an unverified callable seam.

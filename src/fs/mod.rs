@@ -8,6 +8,8 @@ pub mod fat_dirent_volume_info;
 pub mod fat_dirent_block_index;
 /// FAT 8.3 short-name renderer @ 0x082e2fe0.
 pub mod fat_short_name_render;
+/// FAT 8.3 short-name base/extension splitter @ 0x082e0e8c.
+pub mod fat_short_name_split;
 /// FAT directory-entry name and metadata population @ 0x082e4970.
 pub mod fat_dirent_populate_names;
 /// FAT long-file-name fragment-state update @ 0x082dfdc0.
