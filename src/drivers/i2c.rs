@@ -239,6 +239,45 @@ pub unsafe extern "C" fn pmu_i2c_read_locked(reg: u32, len: u32, buf: *mut u8) -
     status
 }
 
+/// pmu_i2c_write_locked — original: `FUN_082e5bb0` @ 0x082e5bb0 (60
+/// bytes; 2 plain `bl` call sites, 0 predicated `bl`, binary-verified by
+/// decoding every B/BL word in osos.dec).
+///
+/// Acquires PMU semaphores 17 then 5, writes a packet containing the PMU
+/// register byte `(reg + 0x67) & 0xff` followed by `len` source bytes, then
+/// releases 5 then 17 unconditionally. The raw packet writer only runs when
+/// `reg + len` wraps to a value below 16; otherwise it returns the stock
+/// bad-range status 8 without dereferencing `buf`. Its raw 16-byte stack
+/// packet makes the maximum accepted length 15. The next `push
+/// {r4,r5,r6,lr}` at 0x082e5bec begins the sibling function.
+///
+/// # Deviation
+///
+/// Retail calls `FUN_0836d508`, whose recovered body constructs this packet
+/// and calls the existing raw S5L8702 I2C-write seam at 0x0836bb84. This port
+/// inlines that recovered body through the same seam, replacing the five
+/// direct retail `bl` instructions with Rust calls.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_i2c_write_locked(reg: u32, len: u32, buf: *const u8) -> i32 {
+    kernel_sem17_wait();
+    kernel_sem5_wait();
+    let status = if reg.wrapping_add(len) < 16 {
+        let mut packet = core::mem::MaybeUninit::<[u8; 16]>::uninit();
+        let packet = packet.as_mut_ptr().cast::<u8>();
+        packet.write_volatile(reg.wrapping_add(0x67) as u8);
+        for index in 0..len as usize {
+            packet.add(index + 1).write_volatile(buf.add(index).read_volatile());
+        }
+        i2c_write(PMU_I2C_SLAVE, len.wrapping_add(1), packet)
+    } else {
+        8
+    };
+    kernel_sem5_signal();
+    kernel_sem17_signal();
+    status
+}
+
 /// pmu_i2c_read — original: `FUN_0836d3b8` @ 0x0836d3b8 (84 bytes;
 /// 18 plain `bl` call sites, 0 predicated `bl`, binary-verified by
 /// decoding every B/BL word in osos.dec).
@@ -1037,6 +1076,42 @@ pub(crate) mod tests {
                     (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
                 ],
                 "both success and bad-range paths retain the retail lock bracket"
+            );
+        }
+    }
+    #[test]
+    fn locked_write_builds_packet_checks_wrapping_range_and_releases_locks() {
+        let _fixture = install_raw_i2c_for_test(0x15, 0, 0);
+        unsafe {
+            let bytes = [0xa1, 0xb2, 0xc3];
+            assert_eq!(pmu_i2c_write_locked(0, 3, bytes.as_ptr()), 0x15);
+            assert_eq!(
+                raw_i2c_packets_for_test(),
+                std::vec![std::vec![0x67, 0xa1, 0xb2, 0xc3]],
+                "the PMU register byte precedes the caller's payload"
+            );
+
+            assert_eq!(pmu_i2c_write_locked(15, 1, bytes.as_ptr()), 8);
+            assert_eq!(pmu_i2c_write_locked(u32::MAX, 1, bytes.as_ptr()), 0x15);
+            assert_eq!(
+                raw_i2c_packets_for_test(),
+                std::vec![
+                    std::vec![0x67, 0xa1, 0xb2, 0xc3],
+                    std::vec![0x66, 0xa1],
+                ],
+                "the stock wrapping addition admits u32::MAX + 1 but rejects 15 + 1"
+            );
+            assert_eq!(
+                raw_i2c_calls_for_test().2,
+                std::vec![
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                    (0, PMU_I2C_OUTER_SEM), (0, PMU_I2C_INNER_SEM),
+                    (1, PMU_I2C_INNER_SEM), (1, PMU_I2C_OUTER_SEM),
+                ],
+                "the release pair runs on successful, rejected, and failed raw writes"
             );
         }
     }
