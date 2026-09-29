@@ -83,6 +83,7 @@ pub mod encoded_word_block;
 pub mod encoded_fixed_value;
 pub mod encoded_pair_matches_magic;
 pub mod encoded_integer_value;
+pub mod inline_encoded_word_block_to_bytes;
 pub mod encoded_word_block_shift;
 pub mod empty_destructor_08057164;
 pub mod empty_destructor_08027698;
