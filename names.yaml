@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a4d90
+    ghidra: FUN_082a4d90
+    name: rgba8_equal
+    size: 64
+    sig: "u32 rgba8_equal(const u8 *left, const u8 *right)"
+    module: ui/color
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: right_byte
+      r3: left_byte
+    notes: >-
+      Raw A32 words establish the true 64-byte extent at
+      0x082a4d90..0x082a4dd0; the next independent function returns 5.
+      Whole-image branch decoding finds two plain inbound BLs at
+      0x0819eb00 and 0x0819eb20, zero predicated inbound BLs, and no
+      outgoing calls. Caller 0x0819ea00 builds an RGBA8 quad and compares
+      it against the same canned color addresses used by color_to_rgba8.
+      Compare four unsigned bytes in R/G/B/A order, loading right before
+      left; skip remaining reads after the first mismatch and return
+      exactly 0 or 1. No alignment or NULL guard is added. Deliberate
+      deviation: Rust control flow replaces ARM predication; volatile
+      byte reads preserve access order and avoid widened loads. Host tests
+      cover all input alignments, equal/aliased colors, each differing
+      channel, high-bit values, and allocations ending at the mismatch.
+      All 13278 host tests pass; the release ARM build succeeds.
+      Actual-source host smoke verifies equality, alpha mismatch and a
+      one-byte mismatch. match.py reports 22 Rust instructions versus
+      16 original: four ordered byte-load pairs and early mismatch exits
+      survive; LLVM adds a frame and uses sub/clz/lsr for the final boolean.
   - address: 0x082a52a0
     ghidra: FUN_082a52a0
     name: string_object_prefix

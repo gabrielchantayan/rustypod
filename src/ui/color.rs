@@ -168,6 +168,77 @@ pub unsafe extern "C" fn color_to_rgba8(color: u32, format: u32, out: *mut u8) {
     }
 }
 
+/// RGBA8 equality — original: `FUN_082a4d90` @ **0x082a4d90**.
+///
+/// True extent: 64 bytes, ending at the independent `mov r0,#5; bx lr`
+/// function at 0x082a4dd0. Whole-image A32 decoding verifies two plain
+/// inbound BLs (0x0819eb00, 0x0819eb20), zero predicated inbound BLs,
+/// and no outgoing calls. Compare R, G, B, then A; return exactly 0 or 1.
+/// Each channel loads right before left, and a mismatch skips later reads.
+/// Deliberate deviation: Rust branches replace ARM predicated instructions;
+/// volatile byte reads preserve access order, short circuiting and alignment.
+///
+/// # Safety
+/// Both pointers must be readable through the first differing channel,
+/// or through all four channels when equal. No alignment is required.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rgba8_equal(left: *const u8, right: *const u8) -> u32 {
+    for channel in 0..4 {
+        let right_byte = unsafe { right.add(channel).read_volatile() };
+        let left_byte = unsafe { left.add(channel).read_volatile() };
+        if right_byte != left_byte {
+            return 0;
+        }
+    }
+    1
+}
+
+#[cfg(test)]
+mod equality_tests {
+    extern crate std;
+    use super::rgba8_equal;
+
+    #[test]
+    fn channels_alignments_and_unsigned_values() {
+        for left_offset in 0..4 {
+            for right_offset in 0..4 {
+                for value in [0, 1, 0x7f, 0x80, 0xff] {
+                    let color = [value, 0x80, 0, 0xff];
+                    let mut left = [0u8; 8];
+                    let mut right = [0u8; 8];
+                    left[left_offset..left_offset + 4].copy_from_slice(&color);
+                    right[right_offset..right_offset + 4].copy_from_slice(&color);
+                    let lhs = unsafe { left.as_ptr().add(left_offset) };
+                    let rhs = unsafe { right.as_ptr().add(right_offset) };
+                    assert_eq!(unsafe { rgba8_equal(lhs, rhs) }, 1);
+                    assert_eq!(unsafe { rgba8_equal(lhs, lhs) }, 1);
+                    for channel in 0..4 {
+                        right[right_offset + channel] ^= 0xff;
+                        let expected = u32::from(
+                            left[left_offset..left_offset + 4]
+                                == right[right_offset..right_offset + 4],
+                        );
+                        assert_eq!(unsafe { rgba8_equal(lhs, rhs) }, expected);
+                        assert_eq!(unsafe { rgba8_equal(rhs, lhs) }, expected);
+                        right[right_offset + channel] ^= 0xff;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mismatch_does_not_require_later_channels() {
+        for channel in 0..4 {
+            let left = std::vec![0x80u8; channel + 1].into_boxed_slice();
+            let mut right = std::vec![0x80u8; channel + 1].into_boxed_slice();
+            right[channel] = 0xff;
+            assert_eq!(unsafe { rgba8_equal(left.as_ptr(), right.as_ptr()) }, 0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
