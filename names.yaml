@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8c04
+    ghidra: FUN_082a8c04
+    name: opaque_refcounted_assign
+    size: 96
+    sig: "OpaqueRefcountedObject **opaque_refcounted_assign(OpaqueRefcountedObject **dst, OpaqueRefcountedObject *const *src)"
+    module: cxx/opaque_refcounted_assign
+    status: ported
+    renames:
+      param_1/r4: dst
+      param_2/r5: src
+      object_plus_0x1c: references
+      FUN_0826709c: unidentified_opaque_refcounted_destructor
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes 24 words, 96 bytes through pop at 0x082a8c60;
+      the next separately entered constructor begins at 0x082a8c64.
+      Two outbound plain BLs at 0x082a8c4c and 0x082a8c50, zero predicated
+      BLs. Whole-image decoding finds two inbound plain BLs at 0x082a71a4
+      and 0x082a7da0, zero predicated BLs. Equal pointees are a no-op;
+      otherwise wrapping-retain replacement before wrapping-release old.
+      On final release call the unidentified destructor at 0x0826709c and
+      pass its returned r0 to canonical tag-2 operator_delete. Reload src
+      after callbacks and return dst. Unequal NULL pointees are invalid,
+      matching the unconditional count accesses. Destructor raw code calls
+      tag-3 delete on +0x18, destroys +8, then subtracts eight from returned
+      r0 and tail-branches to 0x083b6c00; no class identity is inferred.
+      Deliberate deviations are an address-backed destructor call and
+      native-width host pointer slots; the count remains at target +0x1c.
+      Host tests cover aliasing, equal NULLs, count overflow/underflow,
+      final-release ordering, destructor return forwarding and callback
+      mutation of src. Host suite and ARM release build pass. Standalone
+      source-backed smoke verifies replacement, retain/release counts and
+      pointer return without final-drop dependencies. match.py reports
+      24 original versus 30 Rust lines, retaining equality, both wrapping
+      count operations, zero guard, destructor/delete and source reload.
+      LLVM shrink-wraps the frame and uses BLX through literal 0x0826709c
+      rather than a direct BL. No behavioral deviation is intended.
   - address: 0x082a8c64
     ghidra: FUN_082a8c64
     name: opaque_header_089a8a0c_construct

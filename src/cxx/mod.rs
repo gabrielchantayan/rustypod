@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod bit_set;
+pub mod opaque_refcounted_assign;
 pub mod opaque_header_089a8a3c_construct;
 pub mod opaque_header_089a8a0c_construct;
 pub mod string_triple_member_destroy;
