@@ -84256,7 +84256,7 @@ functions:
       param_1/r0: this (the concrete observable array)
       param_2/r1: element (opaque value representation forwarded to the concrete writer)
       iVar1/r5: index (the pre-growth element count, returned to the caller)
-      FUN_082a4ca0: observable_array_notify_append (unported observer broadcast)
+      FUN_082a4ca0: observable_array_notify_append
     notes: >-
       Extent is binary-verified: 0x0827196c begins `push {r4,r5,r6,lr}`,
       0x082719f8 is its `pop {r4,r5,r6,pc}`, and the distinct next
@@ -84273,14 +84273,45 @@ functions:
       0x082a4ca0 to notify every observer of that index, calls +0x88 with
       zero, and returns the old index. The slot targets are runtime
       concrete-vtable data, so none is assigned an invented callee
-      identity. The direct helper is separately decoded as a 40-byte
-      observer-list walk calling 0x08155cc8, but is intentionally not
-      ported by this one-function change: the target seam reaches its
-      retailOS address; host tests install a recorder. The host vtable
+      identity. The direct helper is now ported as the 44-byte
+      observable_array_notify_append observer-list walk; its adjustment
+      callee 0x08155cc8 still runs in retailOS. Host append tests install a
+      native-layout broadcast recorder. The host vtable
       fixture uses native function pointers rather than the target's u32
       vtable word; it proves both branches, including the deferred
       0x7fffffff sentinel, `u32::MAX` old-index wrap edge, exact call
       order, return values, and no wrapper-owned length mutation.
+
+  - address: 0x082a4ca0
+    ghidra: FUN_082a4ca0
+    name: observable_array_notify_append
+    size: 44
+    sig: "void observable_array_notify_append(ObservableArray *this, u32 index)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r5: index
+      iVar1/r4: observer
+      FUN_08155cc8: observer_inserted (verified unported insertion adjustment)
+    notes: >-
+      Raw ARM words establish the extent 0x082a4ca0..0x082a4ccc:
+      push at entry, pop at 0x082a4cc8, next independent push at
+      0x082a4ccc. Two inbound unconditional BL sites at 0x082719dc
+      and 0x08271be0; no predicated BL sites. One internal BL at
+      0x082a4cb8 targets 0x08155cc8, whose raw code adjusts observer
+      indices for insertion. Reads the list head at owner+0x0c,
+      calls the adjustment with each node and the unchanged index,
+      then reads node+0x10 after the callback. Empty lists do nothing.
+      Stored pointer fields are u32 on host and target. The adjustment
+      remains an on-device retailOS call; host tests supply a behavioral
+      model. The existing native-vtable append fixture retains a host-only
+      broadcast boundary; target append calls the port directly.
+      Host regression covers empty lists, signed insertion indices,
+      sentinel preservation, overflow and callback-driven next-link changes.
+      ARM release build passes. match.py finds the same list traversal and
+      post-call link load; LLVM emits an absolute BLX through the verified
+      0x08155cc8 literal and a larger frame instead of ADS's direct BL.
   - address: 0x0827213c
     ghidra: FUN_0827213c
     name: zero_three_words_four_halfwords
