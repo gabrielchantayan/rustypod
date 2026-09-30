@@ -19047,6 +19047,29 @@ functions:
       the target descriptor is an absolute firmware pointer and cannot be
       dereferenced on the host. Target builds retain the descriptor read.
 
+  - address: 0x082a7868
+    ghidra: FUN_082a7868
+    name: conditional_member_destroy
+    size: 28
+    sig: "void *conditional_member_destroy(void *record, u32 destroy_member)"
+    module: cxx/conditional_member_destroy
+    status: ported
+    vars:
+      param_1/r0: record
+      param_2/r1: destroy_member
+      FUN_082a94d0: shared_handle_owner_destroy
+    notes: >-
+      Raw osos.dec establishes seven A32 instructions at
+      0x082a7868..0x082a7880, followed by the next real function at
+      0x082a7884 (two word loads and a comparison). Whole-image aligned
+      branch decoding finds two incoming plain BL calls at 0x082a77cc
+      and 0x082a7ea8, zero predicated BL calls, and one outgoing plain
+      BL at 0x082a7878 to the already ported shared_handle_owner_destroy
+      at 0x082a94d0. Zero returns record without accessing memory;
+      any nonzero flag destroys the embedded owner at record+4 and
+      subtracts four from its return. Rust reuses the existing owner
+      destructor; LLVM chooses its conditional-return sequence.
+
   - address: 0x082a7e70
     ghidra: FUN_082a7e70
     name: opaque_vtable_record_construct
