@@ -26,6 +26,8 @@
 //!   a validity-gated predicate over the token owner's flags word.
 //! - [`scoped_context_owner_byte_8f_bit_0`] — `FUN_082a4574` @ 0x082a4574,
 //!   a validity-gated predicate over bit 0 of the token owner's byte +0x8f.
+//! - [`scoped_context_owner_byte_8f_bit_4`] — `FUN_082a4540` @ 0x082a4540,
+//!   a validity-gated predicate over bit 4 of the token owner's byte +0x8f.
 //! - [`scoped_context_owner_flags_bit_21`] — `FUN_082a45a4` @ 0x082a45a4,
 //!   a validity-gated predicate over bit 21 of the token owner's flags word.
 //! - [`scoped_context_member_owner_byte_8f_bit_0`] — `FUN_08113438` @
@@ -1229,6 +1231,40 @@ pub unsafe extern "C" fn scoped_context_owner_byte_8f_bit_2(
     u32::from(((*this).owner.add(OWNER_BYTE_8F_OFFSET).read() & OWNER_BYTE_8F_BIT_2_MASK) >> 2)
 }
 
+/// scoped_context_owner_byte_8f_bit_4 — original: `FUN_082a4540` @
+/// 0x082a4540 (52 bytes: thirteen A32 words through `pop {r4,pc}` at
+/// 0x082a4570; the next independently entered function starts at 0x082a4574).
+/// Whole-image raw-word decoding verifies two plain inbound BLs at
+/// 0x081159d8 and 0x08115fb4, zero predicated inbound BLs, zero direct
+/// outbound BLs, and one unconditional indirect BLX at 0x082a4554.
+///
+/// Dispatches vtable slot +0x08 with the token as receiver. If its result
+/// is zero, returns zero without reading owner. Otherwise reloads owner
+/// at token +0x08 and returns (owner[0x8f] & 0x10) >> 4. The concrete
+/// virtual callee and capability meaning remain unrecovered; no fixed
+/// callee seam is introduced.
+///
+/// Deliberate deviations: existing repr(C) ScopedContext and pointer-width
+/// vtable slots widen host pointer fields, while preserving target offsets.
+/// Rust expresses ADS's predicated loads as a branch. No target behavior
+/// deviation; any nonzero validity result is accepted.
+///
+/// # Safety
+/// `this` must have a readable vtable and callable validity slot. After a
+/// nonzero result, its reloaded owner must be readable through byte +0x8f.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_byte_8f_bit_4(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    u32::from(((*this).owner.add(OWNER_BYTE_8F_OFFSET).read() & 0x10) >> 4)
+}
+
 /// scoped_context_member_owner_byte_8f_bit_0 — original: `FUN_08113438` @
 /// 0x08113438 (8 bytes, exact: `add r0, r0, #0x38; b 0x082a4574`; the next
 /// separately linked function begins at 0x08113440). **6 `bl` call sites**,
@@ -2291,6 +2327,48 @@ mod tests {
                 assert_eq!(VALIDITY_TOKEN as usize, &fixture.token as *const _ as usize);
             }
         }
+    }
+
+    #[test]
+    fn byte_8f_bit_4_gates_owner_access_and_exhaustively_isolates_bit() {
+        let _guard = SLOT_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        reset_validity_recording(0);
+        let mut fixture = predicate_fixture(0xffff_ffff);
+        link_fixture(&mut fixture, true);
+        assert_eq!(unsafe { scoped_context_owner_byte_8f_bit_4(&fixture.token) }, 0);
+
+        for validity in [1, 2, 0x8000_0000, u32::MAX] {
+            for byte in 0..=u8::MAX {
+                reset_validity_recording(validity);
+                set_owner_byte_8f(&mut fixture, byte);
+                link_fixture(&mut fixture, false);
+                assert_eq!(
+                    unsafe { scoped_context_owner_byte_8f_bit_4(&fixture.token) },
+                    u32::from((byte >> 4) & 1),
+                    "validity {validity:#x}, owner byte {byte:#x}",
+                );
+            }
+        }
+    }
+
+    unsafe extern "C" fn validity_replaces_owner(token: *const ScopedContext) -> u32 {
+        let token = token as *mut ScopedContext;
+        (*token).owner = (*token).service_context;
+        2
+    }
+
+    #[test]
+    fn byte_8f_bit_4_reads_owner_after_virtual_validity_changes_it() {
+        let mut original = [0u8; OWNER_BYTE_8F_OFFSET + 1];
+        let mut replacement = [0u8; OWNER_BYTE_8F_OFFSET + 1];
+        replacement[OWNER_BYTE_8F_OFFSET] = 0x10;
+        let mut fixture = predicate_fixture(0);
+        fixture.vtable.slots[VALIDITY_SLOT] = validity_replaces_owner as usize;
+        link_fixture(&mut fixture, false);
+        fixture.token.owner = original.as_mut_ptr();
+        fixture.token.service_context = replacement.as_mut_ptr();
+        assert_eq!(unsafe { scoped_context_owner_byte_8f_bit_4(&fixture.token) }, 1);
+        assert_eq!(fixture.token.owner, replacement.as_mut_ptr());
     }
 
     #[test]
