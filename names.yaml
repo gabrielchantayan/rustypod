@@ -164246,3 +164246,46 @@ functions:
       duplicates, preserved older cells and unrelated source fields.
       ARM match shows the same pointer chain, allocator BL and ordered
       stores; LLVM changes register assignment and adds a frame pointer.
+
+  - address: 0x082b2c50
+    ghidra: FUN_082b2c50
+    name: vtab_arg_extend
+    size: 68
+    sig: "void vtab_arg_extend(Parse *parse)"
+    module: sqlite/vtab_arg_extend
+    status: ported
+    vars:
+      param_1/r4: parse
+      r5: db
+      "[parse + 0x180]": new_table
+      "[parse + 0x190]": argument_text
+      "[parse + 0x194]": argument_packed_length
+      FUN_08374a40: db_str_ndup
+      FUN_082b2c94: append_owned_pointer
+    notes: >-
+      SQLite virtual-table argument extension. Raw osos.dec establishes the
+      68-byte extent 0x082b2c50..0x082b2c94. The successor is independently
+      called at 0x0838d414, 0x0838d438, and 0x0838d454; restoring LR and SP
+      at 0x082b2c8c then executing the NOP at 0x082b2c90 falls through into
+      append_owned_pointer as a tail call. Whole-image ARM-word decoding
+      finds two inbound plain BL sites, 0x0838d4e8 and 0x0839b594, with no
+      predicated BL; the wrapper contains one outbound plain BL at
+      0x082b2c7c to db_str_ndup and no predicated BL. Ghidra incorrectly
+      incorporates the successor's body and invents extra parameters.
+      NULL argument text or new table returns without mutation. Otherwise
+      duplicate exactly the unsigned packed length shifted right one,
+      reload the new table after duplication, and append the owned copy.
+      Duplication failure still enters append, whose existing port performs
+      allocation-failure cleanup. Both callees are existing ports, not new
+      seams. Explicit u32 pointer words preserve target layout on hosts.
+      Host tests cover both NULL guards, empty and bounded nonterminated
+      spans, both packed low-bit values, preservation of Parse, NULL
+      sentinel publication, and duplication-failure cleanup. All 13212 host
+      tests pass; ARM release builds. match.py prints an expected structural
+      diff (exit 1): LLVM delays the prologue, adds a frame pointer, and
+      replaces fall-through with an explicit tail B. Relocations confirm
+      R_ARM_CALL db_str_ndup and R_ARM_JUMP24 append_owned_pointer.
+      Standalone host smoke executes the real wrapper and both ported
+      callees with low-address buffers and allocation slots, verifying
+      abc plus NUL, count one, owned pointer, and NULL sentinel. Device
+      execution is not tested.

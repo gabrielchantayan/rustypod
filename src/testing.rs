@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const SQLITE_VTAB_ARG_EXTEND: usize = 0x74a0_0000;
     pub const SQLITE_ANALYZE_DATABASE: usize = 0x7490_0000;
     pub const DESCRIPTOR_VARIANT_INDEX: usize = 0x7480_0000;
     // Dedicated target-width Parse/Vdbe fixture; mappings never unmap.
