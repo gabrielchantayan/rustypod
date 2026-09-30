@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8b50
+    ghidra: FUN_082a8b50
+    name: opaque_refcounted_copy_construct
+    size: 24
+    sig: "OpaqueRefcountedObject **opaque_refcounted_copy_construct(OpaqueRefcountedObject **dst, OpaqueRefcountedObject *const *src)"
+    module: cxx/opaque_refcounted_copy_construct
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      object_plus_0x1c: references
+      return/r0: dst
+    notes: >-
+      Raw words e5911000 e5801000 e591201c e2822001 e581201c e1a0f00e
+      establish six instructions, 24 bytes through mov pc,lr at 0x082a8b64;
+      the next independently entered function starts at 0x082a8b68. Full-image
+      aligned A32 decoding verifies two inbound plain BLs at 0x082a7d6c and
+      0x083e7938, zero predicated inbound BLs and zero outbound BLs of either
+      kind. Copy src pointee into dst before wrapping-incrementing count at
+      +0x1c; return unchanged dst in r0, as consumed by caller 0x082a7d70.
+      No NULL guard, equality shortcut or old-destination release. Reuses
+      OpaqueRefcountedObject from the assignment port; no callee seams.
+      Deliberate deviation: native-width host pointer slots, unchanged
+      target eight-word object prefix and no inferred class identity.
+      Migrates adjusted_subobject_initializer from the resident retain seam
+      to this port. Host edge tests cover zero, normal and overflowing counts,
+      slot aliasing, equal pointees, unchanged source, old object and prefix,
+      and destination return. All 13229 host tests and ARM release build pass.
+      Source-backed standalone smoke verifies pointer copy, return, overflow,
+      alias retain and prefix preservation. match.py shows six original versus
+      eight Rust instructions: identical five load/store/add instructions,
+      with LLVM frame setup and pop replacing mov pc,lr.
   - address: 0x082a8c04
     ghidra: FUN_082a8c04
     name: opaque_refcounted_assign
@@ -121631,7 +121663,7 @@ functions:
     renames:
       param_1/r0/r4: subobject
       param_2/r1: initialization_flag
-      FUN_082a8b50: shared_handle_retain_copy
+      FUN_082a8b50: opaque_refcounted_copy_construct
       FUN_082a7280: typed_handler_registry_lookup
       FUN_082a8ba0: shared_handle_release
       vtable+0x30: handler_slot_30
@@ -121651,8 +121683,8 @@ functions:
       The port initializes the fixed state fields, retain-copies the +0x18
       shared handle, finds the fixed type handler, invokes it with selector
       0x20, releases the temporary handle, and stores the returned low
-      halfword at +0x3c. Deliberate deviations: the two unported shared-handle
-      operations and the unrecovered virtual slot use fixed target addresses
+      halfword at +0x3c. Retain-copy now uses opaque_refcounted_copy_construct.
+      Deliberate deviations: unported release and the virtual slot use fixed addresses
       on ARM and replaceable host seams; the target-only type-ID address is a
       host fixture on native builds.
 
