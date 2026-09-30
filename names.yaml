@@ -43040,6 +43040,31 @@ functions:
       BL to 0x082a5e48. Host tests cover inactive short-circuiting, full-u32
       equality rather than low-halfword equality, nonzero resolve truthiness,
       and failed resolution.
+  - address: 0x082a5e0c
+    ghidra: FUN_082a5e0c
+    name: ui_element_reference_target_word_10_is_zero
+    size: 60
+    sig: "u32 ui_element_reference_target_word_10_is_zero(const UiElementReference *reference)"
+    module: ui/element_reference_target_word_10_is_zero
+    status: ported
+    vars: {param_1/r4: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x10": target_word}
+    notes: >-
+      Raw osos.dec proves the 60-byte extent 0x082a5e0c..0x082a5e48;
+      the next function begins with push {r4,lr}. Scanning all aligned
+      ARM BL words finds two plain callers at 0x0813e1f4 and 0x0813e258,
+      zero predicated callers. The body has one indirect BLX through
+      vtable slot 3 (+0xc). Resolve zero returns zero without reading
+      target; any nonzero result loads the updated target at +4 and
+      returns one iff its full u32 word at +0x10 is zero, without a NULL
+      guard. Callers filter two enumerations; the word's meaning remains
+      unestablished. Sibling ledger evidence identifies static slot value
+      0x0826acd8 as unresolved descriptor data; raw dispatch is preserved
+      without inventing a callee seam. No target deviations. Host fixtures
+      use native-width function pointers while object links remain u32.
+      Tests cover failed resolve with unreadable target, arbitrary nonzero
+      resolve results, full-word comparison, and target replacement during
+      resolve. ARM match retains indirect dispatch and gated loads; LLVM
+      uses predicated CLZ/LSR for the zero predicate and a frame prologue.
   - address: 0x082a5e48
     ghidra: FUN_082a5e48
     name: ui_element_reference_target_item_count
