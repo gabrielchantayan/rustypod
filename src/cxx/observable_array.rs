@@ -721,50 +721,148 @@ pub unsafe extern "C" fn observable_array_erase_at(this: *mut ObservableArray, m
     index
 }
 
-/// Load address of the unported append observer broadcast
-/// `FUN_082a4ca0`. It walks `this->observers` and calls 0x08155cc8 for each
-/// node with the appended index.
-pub const OBSERVABLE_ARRAY_NOTIFY_APPEND_ADDRESS: usize = 0x082a_4ca0;
-
-/// Target default for [`OBSERVABLE_ARRAY_NOTIFY_APPEND`]: the retailOS
-/// observer broadcast remains mapped at its load address.
+/// Verified insertion adjustment callee @ 0x08155cc8: shifts observer
+/// indices and resolves the -3 end sentinel. Not ported by this change.
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_observable_array_notify_append(
-    this: *mut ObservableArray,
-    index: u32,
-) {
-    let notify: unsafe extern "C" fn(*mut ObservableArray, u32) =
-        core::mem::transmute(OBSERVABLE_ARRAY_NOTIFY_APPEND_ADDRESS);
-    notify(this, index);
+unsafe extern "C" fn observer_inserted(node: *mut u32, index: u32) {
+    let adjust: unsafe extern "C" fn(*mut u32, u32) =
+        core::mem::transmute(0x0815_5cc8usize);
+    adjust(node, index);
 }
 
-/// Host default for [`OBSERVABLE_ARRAY_NOTIFY_APPEND`]: host callers must
-/// install their own observer model because the retailOS callback remains
-/// unported.
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_observable_array_notify_append(
-    _this: *mut ObservableArray,
-    _index: u32,
-) {
-    panic!("observable_array_append requires observer broadcast 0x082a4ca0")
+unsafe extern "C" fn missing_observer_inserted(_node: *mut u32, _index: u32) {
+    panic!("observer insertion adjustment 0x08155cc8 requires a host model")
 }
 
-/// Direct-call boundary for the unported observer broadcast 0x082a4ca0.
+#[cfg(not(target_os = "none"))]
+static mut OBSERVER_INSERTED: unsafe extern "C" fn(*mut u32, u32) =
+    missing_observer_inserted;
+
+/// Broadcast insertion — `FUN_082a4ca0` @ 0x082a4ca0.
 ///
-/// Target builds dispatch to the still-mapped retailOS function; host tests
-/// install a recorder. A later port can replace this seam without changing
-/// the append wrapper.
-#[cfg(target_os = "none")]
-pub static mut OBSERVABLE_ARRAY_NOTIFY_APPEND: unsafe extern "C" fn(
-    this: *mut ObservableArray,
-    index: u32,
-) = firmware_observable_array_notify_append;
+/// True extent: 44 bytes, ending at the next function's push at 0x082a4ccc.
+/// Raw-word scan: 2 inbound plain BL sites, 0 predicated BL sites; one
+/// internal BL to 0x08155cc8. Walk the head at array+0x0c, calling the
+/// insertion adjustment with the unchanged index, then read the next link
+/// at node+0x10 AFTER the callback. Empty lists do nothing.
+///
+/// Deliberate deviation: the unported callee uses its verified retailOS
+/// address on-device and a replaceable behavioral model on the host.
+/// Stored pointers remain 32-bit words on both platforms.
+///
+/// # Safety
+/// `this` must be readable; reachable nodes must contain five aligned
+/// readable words and satisfy the insertion adjustment's object contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_notify_append(this: *mut ObservableArray, index: u32) {
+    let mut node = core::ptr::read_volatile(core::ptr::addr_of!((*this).observers));
+    while node != 0 {
+        let observer = node as *mut u32;
+        #[cfg(target_os = "none")]
+        observer_inserted(observer, index);
+        #[cfg(not(target_os = "none"))]
+        (core::ptr::read_volatile(core::ptr::addr_of!(OBSERVER_INSERTED)))(observer, index);
+        node = core::ptr::read_volatile(observer.add(4));
+    }
+}
+
+#[cfg(test)]
+mod insertion_broadcast_tests {
+    use super::*;
+
+    // Behavioral model of the raw 0x08155cc8 adjustment, not another port.
+    unsafe extern "C" fn adjust(node: *mut u32, index: u32) {
+        let index = index as i32;
+        let cursor = node.add(1).read() as i32;
+        if cursor >= index {
+            node.add(1).write(cursor.wrapping_add(1) as u32);
+        }
+        let end = node.add(3).read() as i32;
+        if end == -3 {
+            let owner = node.read() as *const u32;
+            node.add(3).write(owner.add(1).read().wrapping_sub(1));
+        } else if end >= index {
+            node.add(3).write(end.wrapping_add(1) as u32);
+        }
+        let start = node.add(2).read() as i32;
+        if start != -4 && start != -3 && start >= index {
+            node.add(2).write(start.wrapping_add(1) as u32);
+        }
+        // A callback may rewrite the link; the walk must read it afterwards.
+        let replacement = node.add(5).read();
+        if replacement != 0 {
+            node.add(4).write(replacement);
+        }
+    }
+
+    struct AdjustmentGuard;
+    impl Drop for AdjustmentGuard {
+        fn drop(&mut self) {
+            unsafe { OBSERVER_INSERTED = missing_observer_inserted; }
+        }
+    }
+
+    #[test]
+    fn insertion_walk_preserves_sentinels_signed_indices_and_post_call_links() {
+        let slab = crate::testing::try_map_u32_slab(
+            crate::testing::hints::OBSERVABLE_ARRAY_INSERT_BROADCAST, 4096,
+        ).expect("low-address observer fixture");
+        unsafe {
+            let owner = slab.cast::<ObservableArray>();
+            owner.write(ObservableArray {
+                base: FrameworkObject { vtable: 0 }, len: 9, storage: 0, observers: 0,
+            });
+            // Empty list must not invoke the missing host callee.
+            observable_array_notify_append(owner, u32::MAX);
+            OBSERVER_INSERTED = adjust;
+            let _guard = AdjustmentGuard;
+            let first = slab.add(64).cast::<u32>();
+            let skipped = first.add(6);
+            let last = skipped.add(6);
+            for (index, before, expected) in [
+                (5u32, [5, 4, 5], [6, 4, 6]),
+                (0, [u32::MAX, (-4i32) as u32, (-3i32) as u32],
+                    [u32::MAX, (-4i32) as u32, 8]),
+                (u32::MAX, [0, (-3i32) as u32, 0],
+                    [1, (-3i32) as u32, 1]),
+                (i32::MAX as u32, [i32::MAX as u32; 3], [i32::MIN as u32; 3]),
+            ] {
+                for node in [first, skipped, last] {
+                    node.write(owner as u32);
+                    for word in 0..3 { node.add(word + 1).write(before[word]); }
+                    node.add(4).write(0);
+                    node.add(5).write(0);
+                }
+                (*owner).observers = first as u32;
+                first.add(4).write(skipped as u32);
+                first.add(5).write(last as u32);
+                skipped.add(4).write(last as u32);
+                observable_array_notify_append(owner, index);
+                for node in [first, last] {
+                    for word in 0..3 { assert_eq!(node.add(word + 1).read(), expected[word]); }
+                }
+                for word in 0..3 { assert_eq!(skipped.add(word + 1).read(), before[word]); }
+                assert_eq!((*owner).len, 9);
+                assert_eq!((*owner).observers, first as u32);
+            }
+        }
+    }
+}
+
+/// Host boundary for the native-vtable append fixture, whose prefix is not
+/// target-layout-compatible. Real target callers use the port directly.
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_native_append_broadcast(_this: *mut ObservableArray, _index: u32) {
+    panic!("native-vtable append fixtures require a layout-compatible broadcast model")
+}
 
 #[cfg(not(target_os = "none"))]
 pub static mut OBSERVABLE_ARRAY_NOTIFY_APPEND: unsafe extern "C" fn(
     this: *mut ObservableArray,
     index: u32,
-) = missing_observable_array_notify_append;
+) = missing_native_append_broadcast;
 
 /// observable_array_append — original: `FUN_0827196c` @ `0x0827196c`
 /// (**144 bytes**, 0x0827196c..0x082719f8; the next independent function is
@@ -782,9 +880,9 @@ pub static mut OBSERVABLE_ARRAY_NOTIFY_APPEND: unsafe extern "C" fn(
 ///
 /// Deliberate host deviation: [`ObservableArrayAppendHost`] carries a native
 /// vtable pointer, while target code reads 32-bit vtable words. The direct
-/// observer broadcast is not ported, so target builds call its verified
-/// retailOS entry and host builds require a test seam. No word-aligned DATA
-/// occurrence of 0x0827196c exists in the image, so this wrapper is never
+/// observer walk is ported; its insertion adjustment callee remains in
+/// retailOS. Host append fixtures install a native-layout broadcast seam.
+/// No word-aligned DATA occurrence of 0x0827196c exists in the image, so it is never
 /// itself reached through a vtable.
 ///
 /// # Safety
@@ -838,8 +936,7 @@ pub unsafe extern "C" fn observable_array_append(
     let append_write: ObservableArrayAppendWrite =
         core::mem::transmute(core::ptr::read_volatile(vtable.add(0xa8 / 4)));
     append_write(this, index, element);
-    let notify = core::ptr::read_volatile(core::ptr::addr_of!(OBSERVABLE_ARRAY_NOTIFY_APPEND));
-    notify(this, index);
+    observable_array_notify_append(this, index);
     let append_finish: ObservableArrayAppendFinish =
         core::mem::transmute(core::ptr::read_volatile(vtable.add(0x88 / 4)));
     append_finish(this, 0);
@@ -1616,12 +1713,8 @@ mod tests {
     impl Drop for AppendSeamGuard {
         fn drop(&mut self) {
             unsafe {
-                #[cfg(target_os = "none")]
                 core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_APPEND)
-                    .write_volatile(firmware_observable_array_notify_append);
-                #[cfg(not(target_os = "none"))]
-                core::ptr::addr_of_mut!(OBSERVABLE_ARRAY_NOTIFY_APPEND)
-                    .write_volatile(missing_observable_array_notify_append);
+                    .write_volatile(missing_native_append_broadcast);
             }
         }
     }
