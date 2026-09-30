@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082b79dc
+    ghidra: FUN_082b79dc
+    name: blob_read_write
+    size: 164
+    sig: "i32 blob_read_write(Incrblob *blob, void *buffer, i32 length, i32 offset, BlobTransfer transfer)"
+    module: sqlite/blob_read_write
+    status: ported
+    renames:
+      param_1/r4: blob
+      param_2/r10: buffer
+      param_3/r7: length
+      param_4/r6: offset
+      param_5/r9: transfer
+      iVar4/r8: database
+      iVar2/r5: statement
+      uVar3/r6: result
+      FUN_0837118c: btree_enter
+      FUN_08371da4: btree_leave
+      FUN_0838af84: sqlite_vdbe_finalize
+      FUN_0836f468: sqlite_api_exit
+    notes: >-
+      SQLite's private incremental-blob blobReadWrite helper. Raw A32 establishes
+      164 bytes at 0x082b79dc..0x082b7a80, ending in the API-exit tail branch
+      before the next independent push prologue. Whole-image aligned decoding
+      finds two inbound plain BL at 0x0838f69c and 0x0838f6bc, no predicated BL.
+      The body has three plain BL, no predicated BL, one callback BLX, and one
+      tail B. Both public callers supply the fifth-argument transfer callback.
+      Ghidra incorrectly folds API-exit semantics into this function. Compare
+      wrapping signed offset+length against nByte; oversized ranges return ERROR
+      directly, expired statements yield ABORT. Otherwise enter the cursor's
+      Btree, transfer at wrapping iOffset+offset, and leave. ABORT finalizes and
+      clears the statement; other results update database+0x14 and Vdbe+0x74.
+      Finish through sqlite_api_exit. All dependencies reuse existing Rust ports,
+      with no new seams or behavioral deviations; pointer fields remain u32.
+      Host tests cover exact and oversized boundaries, zero and negative lengths,
+      negative offsets, signed overflow, extended error masking, balanced Btree
+      nesting, ABORT invalidation, and stale-cursor avoidance. All 13184 host
+      tests pass and the ARM release build succeeds. Standalone host smoke returns
+      expired exact-boundary=4 and oversized=1 without invoking the callback;
+      it uses test configuration because unrelated modules lack non-test host
+      dependencies. match.py shows 41 original versus 52 Rust instructions with
+      the same guard, callback, three calls, error stores, invalidation branch,
   - address: 0x082bc600
     ghidra: FUN_082bc600
     name: iram_copy_start_offset

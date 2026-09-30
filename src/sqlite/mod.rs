@@ -69,6 +69,7 @@ pub mod affinity_type;
 pub mod select_clear;
 pub mod alloc_i64_copy;
 pub mod api_exit;
+pub mod blob_read_write;
 pub mod append_owned_pointer;
 pub mod compare_2pow63;
 pub mod aux_sweep;
