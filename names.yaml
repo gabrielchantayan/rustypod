@@ -28071,6 +28071,42 @@ functions:
       Rust calls. Host tests cover nonzero-mode serialization, lock order,
       and the failed-second-write path that skips register 0x1b.
 
+  # --- Serialized PMU mode/response transform (drivers/pmu) ---
+  - address: 0x082bc940
+    ghidra: FUN_082bc940
+    name: pmu_transform_mode_response_locked
+    size: 52
+    sig: "u32 pmu_transform_mode_response_locked(u32 mode, u32 *response)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: mode
+      param_2/r5: response
+      uVar1/r4: transform_status
+      thunk_EXT_FUN_22003fd0: rom_sem_wait
+      FUN_082e5844: pmu_transform_mode_response
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw ARM establishes 13 instruction words at 0x082bc940..0x082bc970;
+      the push at 0x082bc974 begins the next real function. Independent
+      full-image branch decoding finds two unconditional inbound BL sites,
+      0x080d3d30 and 0x080d3d54, and zero predicated inbound BL sites.
+      The body has three unconditional callee BL instructions and zero
+      predicated calls: semaphore wait at 0x08037e08, mode/response transform
+      at 0x082e5844, and semaphore signal at 0x08037e10. It holds semaphore
+      18 around the transform, ignores both semaphore statuses, signals even
+      after transform failure, and returns the transform result word unchanged.
+      Both callers pass mode 4 and a stack response word during key-matrix
+      scanning. The unregistered callee was independently decoded: it queries
+      mode/response via 0x082e57d4, transforms the pointed word for mode 2 or 4,
+      and returns 1 for other modes. No deeper callee identity is assumed.
+      Deliberate deviations: reuse the existing semaphore ports and call the
+      unported transform through its verified typed load-address seam on ARM;
+      host builds inject that seam. Host tests cover failed wait and signal,
+      release ordering after transform errors, full-width result preservation,
+      response mutation, and an invalid mode with a NULL response.
+
+
   # --- PMU mode response query (drivers/pmu) ---
   - address: 0x082e57d4
     ghidra: FUN_082e57d4
