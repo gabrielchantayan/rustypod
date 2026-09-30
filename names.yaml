@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8b18
+    ghidra: FUN_082a8b18
+    name: opaque_refcounted_construct
+    size: 56
+    sig: "OpaqueRefcountedObject **opaque_refcounted_construct(OpaqueRefcountedObject **dst, OpaqueRefcountedObject *object)"
+    module: cxx/opaque_refcounted_construct
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1: object
+      DAT_082a8b4c: lazy_string_tables_holder
+      object_plus_0x1c: references
+      FUN_082a89e0: lazy_string_tables_initialize
+      return/r0: dst
+    notes: >-
+      Raw A32 establishes 52 instruction bytes through pop at 0x082a8b48
+      and holder literal 0x08a0fbcc at 0x082a8b4c, giving 56 bytes before
+      the independently entered copy constructor at 0x082a8b50.
+      Whole-image aligned decoding finds two inbound plain BLs at
+      0x082a7408 and 0x082a8ae8, zero predicated inbound BLs, zero
+      outbound plain BLs and one outbound BLEQ at 0x082a8b30 to the
+      already-ported lazy_string_tables_initialize at 0x082a89e0.
+      Publish object into dst, initialize if holder+16 is zero, reload
+      dst, wrapping-increment its pointee count at +0x1c, and return dst.
+      No NULL guard, equality shortcut or previous-destination release.
+      Reuses the existing registered Rust implementation and initializer;
+      no new seam or inferred class identity. Deliberate deviation:
+      native-width host pointer slots; unchanged eight-word object prefix.
+      Host tests cover warm/cold holders, publication before initialization,
+      callback replacement and reload, overflow, equal-pointee retain,
+      old-object and prefix preservation, and destination return.
+      All 13232 host tests and ARM release build pass. Standalone exported
+      constructor smoke proves pointer return, overflow, equal-pointee
+      retain and prefix preservation. match.py reports 13 original versus
+      16 Rust lines: frame setup, BNE around BL instead of BLEQ, holder+16
   - address: 0x082a8b50
     ghidra: FUN_082a8b50
     name: opaque_refcounted_copy_construct
