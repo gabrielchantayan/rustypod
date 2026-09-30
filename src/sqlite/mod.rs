@@ -223,6 +223,7 @@ pub mod find_table;
 pub mod find_db_name;
 pub mod find_index;
 pub mod string_table_find_index;
+pub mod check_column_overlap;
 pub mod locate_coll_seq;
 pub mod locate_table;
 pub mod lock_and_prepare;
