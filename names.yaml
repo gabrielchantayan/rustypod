@@ -163320,3 +163320,32 @@ functions:
       the port reuses the established VDBE_REAL_VALUE_OPS sqlite3AtoF seam
       and direct Rust ports for all other callees; it represents the raw
       binary64 sign-bit flip as `to_bits() ^ 0x8000_0000_0000_0000`.
+
+  - address: 0x082c39e0
+    ghidra: FUN_082c39e0
+    name: code_apply_index_affinity
+    size: 88
+    sig: "void code_apply_index_affinity(Parse *parse, int first_reg, int count, Index *index)"
+    module: sqlite/code_apply_index_affinity
+    status: ported
+    renames:
+      param_1: parse
+      param_2: first_reg
+      param_3: count
+      param_4: index
+      uVar1: vdbe
+      FUN_08386840: vdbe_add_op3
+      FUN_0837b254: vdbe_attach_index_affinity
+      FUN_08376b48: expr_cache_affinity_change
+    notes: >-
+      Raw osos.dec A32 words verify the 88-byte extent 0x082c39e0..0x082c3a38,
+      with the next independent push at 0x082c3a38. Image-wide immediate BL
+      decoding finds two inbound unconditional calls at 0x0838e840 and
+      0x0838e8d8, no predicated calls. The body contains three unconditional
+      BL instructions at 0x082c3a14, 0x082c3a20, and 0x082c3a30. A signed
+      nonpositive count returns without dereferencing arguments. Otherwise
+      it loads Parse.pVdbe at +0x0c, emits opcode 2 with first_reg, count,
+      and zero, attaches the Index affinity string to the last operation,
+      and marks the column-cache affinity changes. All callees use existing
+      direct Rust ports. Deliberate deviation: Parse.pVdbe is a u32 target
+      pointer while the established repr(C) Vdbe preserves host pointer width.

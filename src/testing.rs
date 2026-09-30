@@ -3311,6 +3311,8 @@ pub mod hints {
     // target-width queue and node fixtures; mappings never unmap.
     pub const INTRUSIVE_QUEUE_APPEND_EMPTY: usize = 0x53a0_0000;
     pub const INTRUSIVE_QUEUE_APPEND_CHAIN: usize = 0x53b0_0000;
+    // Dedicated target-width Parse, Vdbe, and Index fixture; never unmapped.
+    pub const SQLITE_CODE_APPLY_INDEX_AFFINITY: usize = 0x53c0_0000;
     // 0x77b0_0000 / 0x77c0_0000: dedicated to crypto/i2v_general_names'
     // target-width GENERAL_NAMES and entry-table fixtures; mappings never unmap.
     pub const I2V_GENERAL_NAMES: usize = 0x77b0_0000;

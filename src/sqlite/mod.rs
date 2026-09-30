@@ -180,6 +180,7 @@ pub mod expr_code_expr_list;
 pub mod emit_compound_select_rows;
 pub mod expr_code_move;
 pub mod expr_cache_affinity_change;
+pub mod code_apply_index_affinity;
 pub mod expr_worklist;
 pub mod index_name_filter;
 pub mod indexed_operation_forwarder;
