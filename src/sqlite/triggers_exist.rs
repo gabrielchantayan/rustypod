@@ -9,8 +9,9 @@
 //! For a non-virtual table, walk its trigger chain. A trigger whose operation
 //! matches `op` and whose update-column list overlaps `changes` contributes
 //! its before/after/instead-of mask to the result. Virtual tables deliberately
-//! report no triggers. The overlap helper is not ported, so its direct call is
-//! represented by a volatile seam; host tests install the exact predicate.
+//! report no triggers. The overlap predicate calls the ported helper directly.
+
+use super::check_column_overlap::check_column_overlap;
 
 const TABLE_TRIGGER_LIST: usize = 0x20;
 const TABLE_IS_VIRTUAL: usize = 0x39;
@@ -19,20 +20,6 @@ const TRIGGER_TIMING_MASK: usize = 0x09;
 const TRIGGER_COLUMNS: usize = 0x10;
 const TRIGGER_NEXT: usize = 0x28;
 
-/// `checkColumnOverlap` @ 0x082c24f0, as called with a trigger's column list
-/// and the update's changed-column list.
-pub type CheckColumnOverlap = unsafe extern "C" fn(*const u8, *const u8) -> i32;
-
-unsafe extern "C" fn missing_check_column_overlap(_columns: *const u8, _changes: *const u8) -> i32 {
-    0
-}
-
-pub static mut TRIGGER_OPS: CheckColumnOverlap = missing_check_column_overlap;
-
-#[inline(always)]
-unsafe fn check_column_overlap() -> CheckColumnOverlap {
-    core::ptr::read_volatile(core::ptr::addr_of!(TRIGGER_OPS))
-}
 
 #[inline(always)]
 unsafe fn target_word(pointer: *const u8, offset: usize) -> *const u8 {
@@ -57,7 +44,7 @@ pub unsafe extern "C" fn triggers_exist(
     let mut mask = 0u8;
     while !trigger.is_null() {
         if core::ptr::read(trigger.add(TRIGGER_OPERATION)) as u32 == op
-            && check_column_overlap()(target_word(trigger, TRIGGER_COLUMNS), changes) != 0 {
+            && check_column_overlap(target_word(trigger, TRIGGER_COLUMNS).cast(), changes.cast()) != 0 {
             mask |= core::ptr::read(trigger.add(TRIGGER_TIMING_MASK));
         }
         trigger = target_word(trigger, TRIGGER_NEXT);
@@ -71,15 +58,6 @@ mod tests {
 
     use super::*;
     use crate::testing::{hints, try_map_u32_slab};
-    use parking_lot::Mutex;
-
-    static LOCK: Mutex<()> = Mutex::new(());
-    static mut EXPECTED_COLUMNS: *const u8 = core::ptr::null();
-    static mut EXPECTED_CHANGES: *const u8 = core::ptr::null();
-
-    unsafe extern "C" fn overlaps(columns: *const u8, changes: *const u8) -> i32 {
-        if columns == EXPECTED_COLUMNS && changes == EXPECTED_CHANGES { 1 } else { 0 }
-    }
 
     unsafe fn word(at: *mut u8, offset: usize, value: *const u8) {
         (at.add(offset) as *mut u32).write_unaligned(value as usize as u32);
@@ -87,7 +65,6 @@ mod tests {
 
     #[test]
     fn combines_only_matching_overlapping_trigger_masks() {
-        let _guard = LOCK.lock();
         let Some(slab) = try_map_u32_slab(hints::SQLITE_TRIGGERS_EXIST, 0x1000) else { return };
         unsafe {
             let table = slab;
@@ -107,9 +84,11 @@ mod tests {
             third.add(TRIGGER_OPERATION).write(100);
             third.add(TRIGGER_TIMING_MASK).write(4);
             word(third, TRIGGER_COLUMNS, columns);
-            EXPECTED_COLUMNS = columns;
-            EXPECTED_CHANGES = changes;
-            TRIGGER_OPS = overlaps;
+            // An empty UPDATE list cannot overlap a nonempty column list.
+            // NULL trigger column lists are unrestricted.
+            second.add(TRIGGER_OPERATION).write(99);
+            word(first, TRIGGER_COLUMNS, core::ptr::null());
+            word(third, TRIGGER_COLUMNS, core::ptr::null());
             assert_eq!(triggers_exist(core::ptr::null(), table, 99, changes), 1);
             third.add(TRIGGER_OPERATION).write(99);
             assert_eq!(triggers_exist(core::ptr::null(), table, 99, changes), 5);
@@ -118,11 +97,9 @@ mod tests {
 
     #[test]
     fn virtual_table_skips_the_trigger_chain() {
-        let _guard = LOCK.lock();
         let Some(slab) = try_map_u32_slab(hints::SQLITE_TRIGGERS_EXIST_VIRTUAL, 0x1000) else { return };
         unsafe {
             slab.add(TABLE_IS_VIRTUAL).write(1);
-            TRIGGER_OPS = overlaps;
             assert_eq!(triggers_exist(core::ptr::null(), slab, 99, slab.add(0x300)), 0);
         }
     }

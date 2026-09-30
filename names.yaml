@@ -145167,7 +145167,7 @@ functions:
       param_4/r3: changes
       iVar2/r4: trigger
       bVar3/r5: timing_mask
-      FUN_082c24f0: checkColumnOverlap (unported seam)
+      FUN_082c24f0: check_column_overlap (direct Rust port)
     notes: >-
       Raw osos.dec establishes the exact 92-byte body
       0x08385220..0x0838527c: the return is `pop {r4-r8,pc}` at
@@ -145178,9 +145178,9 @@ functions:
       sqlite3TriggersExist: a virtual table (Table+0x39) returns zero;
       otherwise the Table+0x20 Trigger chain is walked, ORing each matching
       Trigger+0x09 timing mask when Trigger+0x08 equals op and
-      checkColumnOverlap(Trigger+0x10, changes) is nonzero. The unported
-      overlap callee is a volatile target seam (host tests install its
-      predicate); all target pointer fields remain u32 words, deliberately
+      check_column_overlap(Trigger+0x10, changes) is nonzero. The overlap
+      callee is now a direct Rust port, also exercised by host tests;
+      all target pointer fields remain u32 words, deliberately
       decoded with unaligned reads on host. match.py exits 1 with the expected
       structural diff: the Rust seam is blx through a literal slot and LLVM
       expands target-word reads into byte loads, while preserving the
@@ -163508,3 +163508,25 @@ functions:
       Tests cover all 256 destination kinds, signed count boundaries,
       prior-error preservation, wrapping error count, and untouched Parse
       on accepted paths.
+
+  - address: 0x082c24f0
+    ghidra: FUN_082c24f0
+    name: check_column_overlap
+    size: 92
+    sig: "int check_column_overlap(const u32 *columns, const u32 *changes)"
+    module: sqlite/check_column_overlap
+    status: ported
+    vars: {param_1: columns, param_2: changes, iVar1: match_index, iVar2: index}
+    notes: >-
+      SQLite checkColumnOverlap. Raw ARM establishes the 92-byte extent
+      0x082c24f0..0x082c254c, ending at the next push prologue. Whole-image
+      aligned-word decoding finds two incoming unconditional BLs at 0x08372fdc
+      and 0x08385258, no predicated BLs. One outbound unconditional BL at
+      0x082c2520 targets string_table_find_index at 0x0837b204; no predicated BL.
+      NULL IdList or ExprList means unrestricted overlap and returns one.
+      Otherwise scan the signed ExprList count at word zero, with items at
+      word three, stride twelve bytes, and name pointer at item word one.
+      Return one on the first case-insensitive IdList match, zero on exhaustion.
+      Nonpositive change counts return zero. Preserve target pointers as u32
+      words for host parity. LLVM uses a twelve-byte offset induction variable
+      and emits 29 instructions versus 23; null handling, signed bounds,

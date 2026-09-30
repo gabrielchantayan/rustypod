@@ -1068,6 +1068,8 @@ pub mod hints {
     // 0x6d95_0000: dedicated to sqlite/string_table_find_index's raw-u32
     // header, records, and C-string fixture; mappings never unmap.
     pub const SQLITE_STRING_TABLE_FIND_INDEX: usize = 0x6d95_0000;
+    // Dedicated to sqlite/check_column_overlap's target-width lists.
+    pub const SQLITE_CHECK_COLUMN_OVERLAP: usize = 0x6d97_0000;
     // 0x6dc0_0000: dedicated to heap/owned_pair_destroy_and_deallocate's
     // target-width owner and pair fixture; mappings never unmap, so no other
     // user may share it.
