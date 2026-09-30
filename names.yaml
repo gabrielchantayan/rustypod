@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082c3174
+    ghidra: FUN_082c3174
+    name: disk_drive_ready
+    size: 12
+    sig: "u32 disk_drive_ready(u32 device, u32 flags)"
+    module: fs/drive_ready
+    status: ported
+    renames:
+      param_1/r0: device
+      param_2/r1/r2: flags
+      FUN_082c3074: drive_readiness_resident_body
+    notes: >-
+      Raw words e1a02001 e3a01000 eaffffbc establish the 12-byte extent
+      0x082c3174..0x082c317f, before the independent function at 0x082c3180.
+      This adapter preserves device in r0, copies flags from r1 to r2,
+      clears r1, and tail-branches to the verified resident shared body
+      at 0x082c3074. Ghidra incorrectly folds that shared body into this
+      adapter. Whole-image aligned raw decoding finds two inbound plain
+      BL calls at 0x082c626c and 0x082c6318, no predicated BL calls,
+      and no outbound BL. The shared body remains unported; its name
+      describes only its observed readiness role. Disk read and write
+      target callers now use the Rust adapter. Host tests exercise zero,
+      full-width flags, device boundaries, and unchanged non-boolean
+      results through an injected body. All 13167 host tests pass and
+      the ARM release build succeeds. match.py reports three original
+      instructions versus eight Rust lines including the address literal:
+      both argument moves remain, followed by an indirect tail bx r3 to
+      literal 0x082c3074 with balanced frame setup/teardown. The indirect
+      transfer and injected host body are deliberate deviations.
   - address: 0x082c53a4
     ghidra: FUN_082c53a4
     name: sqlite3_create_module_v2

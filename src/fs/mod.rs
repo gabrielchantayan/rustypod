@@ -156,5 +156,7 @@ pub mod drive_slot_index;
 pub mod drive_slot_flush;
 /// Path prefix drive-index resolver @ 0x082c3000.
 pub mod path_drive_index;
+/// Disk-I/O readiness argument adapter @ 0x082c3174.
+pub mod drive_ready;
 /// Volume-prefixed music-library path construction @ 0x0806b4a0.
 pub mod music_path_resolve;
