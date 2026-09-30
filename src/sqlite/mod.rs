@@ -66,6 +66,7 @@
 //! their targets are readable C strings only at `+0xaed8`.
 
 pub mod affinity_type;
+pub mod analyze_database;
 pub mod select_clear;
 pub mod alloc_i64_copy;
 pub mod api_exit;
