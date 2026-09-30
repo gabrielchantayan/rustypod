@@ -1,6 +1,7 @@
 //! Software floating point (IEEE 754 soft-float primitives).
 pub mod d2f_checked;
 pub mod f64_to_i64;
+pub mod f64_is_finite;
 pub mod decimal_magnitude_bias;
 pub mod bigint_sign;
 pub mod bigint_trim_high_zero_limbs;
