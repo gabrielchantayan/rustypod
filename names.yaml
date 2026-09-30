@@ -163418,3 +163418,36 @@ functions:
       match.py reports 29 versus 23 instructions (including Rust literals):
       LLVM uses BLX for fixed-address validation and BX for the shared tail,
       preserving null precedence, stride 20, callback +8, and result mapping.
+  - address: 0x082c36c4
+    ghidra: FUN_082c36c4
+    name: select_clear
+    size: 84
+    sig: 'void select_clear(Select *select)'
+    module: sqlite/select_clear
+    status: ported
+    vars:
+      param_1: select
+      r4: select
+    notes: >-
+      SQLite Select-content cleanup, not a NULL-safe destructor. Raw ARM
+      establishes the 84-byte extent before the separate function at
+      0x082c3718. Independent aligned-word scanning finds two incoming
+      plain BLs at 0x08383c98 and 0x08383ec4, no predicated incoming BLs.
+      The body has eight plain BLs, no predicated BLs, and a tail B to
+      expr_delete. Release result list, FROM list, WHERE, GROUP BY, HAVING,
+      ORDER BY, prior Select, LIMIT, and OFFSET in that order; do not clear
+      any fields or free the containing Select. All callees already have
+      ported manifest identities: expr_list_delete at 0x08378670,
+      src_list_delete at 0x083843e8, expr_delete at 0x08377e00, and
+      select_delete at 0x08383c88. select_delete now calls this port rather
+      than duplicating its teardown. Deliberate deviation: reuse the
+      repr(C) Select view, with native host pointers and checked ARM field
+      offsets. Host regression covers NULL child fields, ordered nested
+      prior teardown, retaining the container, and preserving its bytes.
+      All 13166 host tests pass and the ARM release build succeeds.
+      match.py reports 21 versus 22 instructions; relocation inspection
+      confirms identical field offsets, eight direct calls, and final
+      expr_delete tail branch. LLVM adds a frame-pointer instruction.
+      Standalone host-library smoke is blocked by six unrelated missing
+      host functions in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule; no device execution was performed.
