@@ -166,7 +166,7 @@ pub unsafe extern "C" fn vdbe_int_value_thunk(p_mem: *mut Mem) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
@@ -174,7 +174,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::vec::Vec;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Event {
