@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const OBJECT_TREE_CHARACTERS: usize = 0x519d_0000;
     pub const INDEXED_OBJECT_STORE: usize = 0x62ab_0000;
     pub const WORD_KEY_TREE_POOL_DESTRUCT: usize = 0x62a8_0000;
     pub const POOLED_TREE_DESTRUCT: usize = 0x62a9_0000;
