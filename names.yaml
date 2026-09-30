@@ -46133,6 +46133,38 @@ functions:
       negative-count pass-through, ordinary indices, and direct virtual
       stride calculation.
 
+  - address: 0x082a4d10
+    ghidra: FUN_082a4d10
+    name: observable_array_read_at
+    size: 96
+    sig: "i32 observable_array_read_at(ObservableArray *this, i32 index, u8 *output)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: index
+      param_3/r2: output
+      r5: resolved_index
+      r6: success
+      "vtable+0xa4": read_element
+    notes: >-
+      Raw ARM extent is 0x082a4d10..0x082a4d6f, ending in pop
+      {r4-r8,pc}; the independent next function starts at 0x082a4d70
+      with mov r2,r0. Whole-image aligned branch decoding finds two
+      incoming plain BL sites at 0x081bad90 and 0x08203464, zero
+      predicated BL sites. Body contains one plain BL to ported
+      observable_array_index_is_valid at 0x082a48e4, zero predicated
+      BL instructions, and one indirect BLX through vtable +0xa4.
+      INT_MAX resolves to signed len-1 only when len is positive.
+      Invalid indices return zero without virtual dispatch or output
+      changes; valid indices dispatch (this,index,output) and return one
+      regardless of the virtual return register. Both callers pass an
+      initialized stack word and consume the resulting word. The virtual
+      callee's concrete identity is not established, so direct vtable
+      dispatch is retained. Host-only widened vtables and equivalent
+      signed bounds comparison follow the existing erase convention;
+      ARM retains the direct validator call and target-width slot read.
+
   - address: 0x082a4f58
     ghidra: FUN_082a4f58
     name: field_10_low_u16
@@ -150230,15 +150262,17 @@ functions:
       Raw osos.dec establishes the exact 24-byte extent: six ARM words from
       push {r3,lr} at 0x08203458 through pop {r3,pc} at 0x0820346c; the next
       real function starts at 0x08203470. The sole body BL is plain and
-      unconditional to unresolved FUN_082a4d10, with no predicated BL.
+      unconditional to observable_array_read_at, with no predicated BL.
       Independent raw disassembly finds three inbound plain direct BL sites
       (0x082034e0, 0x082036d0, 0x08203738) and zero predicated inbound BL
       sites. The wrapper puts fallback_item in a stack output word, passes
-      selection_state+0xe8, item_index, and its address to FUN_082a4d10, then
+      selection_state+0xe8, item_index, and its address to observable_array_read_at, then
       returns the output word while ignoring the callee's boolean result.
-      FUN_082a4d10 dynamically selects a virtual copy callback and has no
-      recovered concrete identity, so target Rust calls its fixed retail
-      address and host tests replace only that explicit typed boundary.
+      The caller now uses the ported observable_array_read_at directly on
+      target and host; the obsolete fixed-address seam is removed.
+      Target assembly retains the original r3 fallback ABI. Host integration
+      coverage verifies last-element selection and unchanged fallback for
+      an out-of-range index and an empty array.
   - address: 0x082004f0
     ghidra: FUN_082004f0
     name: range_value_to_u8

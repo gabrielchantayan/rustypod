@@ -3618,10 +3618,6 @@ pub static FIXED_RECORD_U16_LOOKUP_TEST_LOCK: std::sync::Mutex<()> = std::sync::
 /// Serializes every host test that replaces the unported `FUN_081d6380` base
 /// constructor seam shared by derived-object constructor ports.
 pub static BASE_CONSTRUCT_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-/// Serializes host tests that replace
-/// `app::selection_state_copy_item_at::ARRAY_COPY_DISPATCH`.
-pub static SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK: parking_lot::Mutex<()> =
-    parking_lot::Mutex::new(());
 /// Serializes host tests that replace transfer_slot_reconcile's unported
 /// `FUN_081e39e8` advance seam.
 pub static TRANSFER_SLOT_RECONCILE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
