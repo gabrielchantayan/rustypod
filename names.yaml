@@ -15702,6 +15702,28 @@ functions:
     status: ported
     notes: bit 0x08 = lowercase (subtracts 0x20); 0xdf guard (dead under C locale).
 
+  - address: 0x082b79c0
+    ghidra: FUN_082b79c0
+    name: word_list_test_bit
+    size: 28
+    sig: "u32 word_list_test_bit(const WordList *value, u32 bit_index)"
+    module: util/word_list
+    status: ported
+    renames:
+      param_1: value
+      param_2: bit_index
+    notes: >-
+      Seven raw ARM words at 0x082b79c0..0x082b79d8, ending in bx lr;
+      the next independent function starts at 0x082b79dc with push
+      {r4-r10,lr}. Binary decoding finds two unconditional incoming bl
+      calls (0x082cb260, 0x082cb370), zero predicated bl calls, and no
+      outgoing calls. Loads the existing WordList entries pointer at +4,
+      reads entries[bit_index >> 5], and returns word & (1 << (bit_index & 31)).
+      Returns the actual mask, not a normalized boolean; neither count nor
+      capacity is checked. The callers branch on zero while scanning bits
+      of a multiword operand. No target deviations; host fixtures use the
+      existing repr(C) native-pointer WordList layout.
+
   - address: 0x082d72a0
     ghidra: FUN_082d72a0
     name: word_list_is_zero
