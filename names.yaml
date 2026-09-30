@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a78c4
+    ghidra: FUN_082a78c4
+    name: char_traits_not_eof
+    size: 16
+    sig: "int32_t char_traits_not_eof(const int32_t *value)"
+    module: cxx/char_traits_not_eof
+    status: ported
+    renames:
+      param_1/r0: value
+      iVar1/loaded_r0: integer_character
+      return/r0: non_eof_character
+    notes: >-
+      Raw words e5900000 e3700001 03a00000 e12fff1e establish the
+      16-byte body ending in bx lr at 0x082a78d0. Next real function
+      starts at 0x082a78d4, independently called from 0x083d9d54.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x083d9544 and 0x083daba0, zero inbound predicated BLs, and no
+      outbound calls. Load the aligned i32 pointed to by the argument,
+      replace EOF (-1) with zero, and preserve every other bit unchanged.
+      Stream-buffer callers 0x083d9318 and 0x083dab68 support the
+      char_traits::not_eof interpretation; no concrete class is claimed.
+      No new callee seam, NULL check, input writes, or behavioral deviations.
+      Host regressions cover EOF, zero, byte boundaries, other negative
+      values and signed extrema. Full x86_64 host suite and ARM release
+      build pass. Standalone actual-source smoke verifies EOF normalization
+      and non-EOF full-word preservation. match.py exits 1: four original
+      instructions versus seven Rust instructions; LLVM adds a frame and
+      uses subtraction plus movne instead of cmn plus moveq, retaining
+      one aligned load, the exact EOF comparison and leaf return.
+      No device execution was performed.
   - address: 0x082a7d8c
     ghidra: FUN_082a7d8c
     name: opaque_refcounted_record_assign
