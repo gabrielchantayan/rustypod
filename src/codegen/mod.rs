@@ -62,6 +62,9 @@ pub mod heap;
 /// `cg_interference_edge_link` @ 0x082b2e98 — prepends a missing
 /// target-width edge identity to a code-generator interference list.
 pub mod interference;
+/// `cg_block_predecessor_prepend` @ 0x082b2ee8 — prepends an incoming
+/// control-flow edge to a basic block's predecessor list.
+pub mod block_predecessor;
 /// `cg_block_successor_prepend` @ 0x082b2f60 — prepends a control-flow
 /// successor to a basic block's live-out propagation list.
 pub mod block_successor;
