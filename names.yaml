@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a7730
+    ghidra: FUN_082a7730
+    name: stream_flags_radix
+    size: 68
+    sig: "uint32_t stream_flags_radix(const uint32_t *stream_words)"
+    module: cxx/stream_flags_radix
+    status: ported
+    renames:
+      param_1/r0: stream_words
+      uVar1/masked_r0: base_flags
+      DAT_082a7770: base_flags_mask
+      return/r0: radix
+    notes: >-
+      Raw words establish 64 instruction bytes ending with bx lr at
+      0x082a776c, followed by the mask literal 0x0000804a at 0x082a7770.
+      True extent is 68 bytes through the next independently called
+      function at 0x082a7774. Whole-image aligned A32 decoding verifies
+      two inbound plain BLs at 0x083b64ec and 0x083b6980, zero predicated
+      inbound BLs, and zero outbound calls. Read the aligned target-width
+      flags word at offset +4 and mask with 0x804a. Exact masked values
+      0x40, 2, 8, and 0x8000 yield radices 8, 10, 16, and 2 respectively;
+      absent or conflicting base flags yield zero. Numeric-input callers
+      store the returned radix; 0x083b6440 later defaults zero to ten.
+      No callee seams, concrete class identity, input writes, null checks,
+      or behavioral deviations. Host tests cover all sixteen base-flag
+      combinations with unrelated bits individually and collectively set.
+      Full x86_64 host suite and ARM release build pass. Standalone
+      actual-source smoke checks all 65536 low-word flag values against
+      the raw ARM decision sequence. match.py exits 1 with a structural
+      diff: 16 original instructions versus 25 Rust instructions.
+      LLVM constructs the same mask with mov/orr, adds a frame, and
+      splits the exact-value comparisons into a decision tree. The
+      aligned +4 load, four radix results, zero fallback, and absence
+      of outbound calls are preserved. No device execution performed.
   - address: 0x082a78c4
     ghidra: FUN_082a78c4
     name: char_traits_not_eof

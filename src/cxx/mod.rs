@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod char_traits_move;
 pub mod char_traits_not_eof;
+pub mod stream_flags_radix;
 pub mod bit_set;
 pub mod opaque_buffer_owner_destroy;
 pub mod opaque_refcounted_assign;
