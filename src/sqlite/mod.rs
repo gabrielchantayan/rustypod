@@ -72,6 +72,7 @@ pub mod alloc_i64_copy;
 pub mod api_exit;
 pub mod blob_read_write;
 pub mod append_owned_pointer;
+pub mod vtab_arg_extend;
 pub mod compare_2pow63;
 pub mod aux_sweep;
 pub mod array_allocate;
