@@ -65,6 +65,21 @@ mod tests {
     }
 
     #[test]
+    fn equal_pointee_still_retains() {
+        let state = [0, 0, 0, 0, 1];
+        let mut object = OpaqueRefcountedObject { unresolved_00_18: [0x87654321; 7], references: 9 };
+        let pointer = &mut object as *mut _;
+        let mut slot = pointer;
+        let dst = &mut slot as *mut _;
+        unsafe {
+            assert_eq!(construct_with_initializer(dst, pointer, state.as_ptr(), || panic!("already initialized")), dst);
+        }
+        assert_eq!(slot, pointer);
+        assert_eq!(object.references, 10);
+        assert_eq!(object.unresolved_00_18, [0x87654321; 7]);
+    }
+
+    #[test]
     fn cold_holder_publishes_before_initializing_and_reloads_afterwards() {
         let state = [0; 5];
         let mut original = OpaqueRefcountedObject { unresolved_00_18: [0; 7], references: 12 };
