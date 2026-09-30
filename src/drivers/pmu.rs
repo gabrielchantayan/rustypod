@@ -42,6 +42,52 @@ const PMU_REGISTER_0X4B: u32 = 0x4b;
 /// established from the retail image.
 const PMU_REGISTER_0X0C: u32 = 0x0c;
 
+/// Retail selector-0 scaled PMU write, verified at 0x082e5500.
+/// Returns the final semaphore-17 signal word, not the discarded I2C status.
+type PmuSelector0ScaledWriteFn = unsafe extern "C" fn(value: u32) -> u32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_write_selector0_scaled_value(value: u32) -> u32 {
+    let write: PmuSelector0ScaledWriteFn = core::mem::transmute(0x082e_5500_usize);
+    write(value)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_pmu_selector0_scaled_write(_value: u32) -> u32 {
+    panic!("pmu_select_3000_or_3300 requires retail PMU writer 0x082e5500")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PMU_SELECTOR0_SCALED_WRITE: PmuSelector0ScaledWriteFn = missing_pmu_selector0_scaled_write;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_write_selector0_scaled_value(value: u32) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PMU_SELECTOR0_SCALED_WRITE))(value)
+}
+
+/// pmu_select_3000_or_3300 — original: `FUN_082bc55c` @ `0x082bc55c`.
+/// True extent: 24 bytes (16 instruction bytes plus two literal words);
+/// the next real function starts at 0x082bc574. Raw ARM branch decoding
+/// finds 2 plain inbound BL calls, 0 predicated inbound BL calls, and no
+/// outgoing BL instructions; the only outgoing call is an unconditional B.
+///
+/// Selects 3000 for zero and 3300 for every nonzero input, then tail-calls
+/// the selector-0 scaled PMU writer at 0x082e5500. Its final semaphore signal
+/// result passes through r0 unchanged. Ghidra incorrectly includes code
+/// reached through the tail branch in its reported 92-byte extent.
+///
+/// Deliberate deviations: the unported writer is invoked through a typed
+/// fixed-address boundary (replaceable on hosts). Exposes the observable
+/// r0 result even though both known retail callers ignore it. The hardware
+/// role and units of these two values are not assumed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_select_3000_or_3300(high: u32) -> u32 {
+    pmu_write_selector0_scaled_value(if high == 0 { 3000 } else { 3300 })
+}
+
 /// ABI of the still-unported PMU command/response transaction
 /// `FUN_0836d260`.
 type PmuQueryFn = unsafe extern "C" fn(request: u32, flags: u32, response: *mut u32) -> i32;
@@ -520,6 +566,35 @@ mod tests {
     static mut PMU_REGISTER_0X43_BIT0_STATUS: i32 = 0;
     static KEY_MATRIX_SCAN_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut KEY_MATRIX_SCAN_RESULT: u32 = 0;
+
+    static PMU_SELECTOR0_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    unsafe extern "C" fn encode_selected_value(value: u32) -> u32 {
+        // The verified nonzero-input retail encoding; retain a high-bit
+        // signal sentinel to detect accidental result normalization.
+        0x8000_0000 | (value.wrapping_sub(0x321) / 100)
+    }
+
+    struct Selector0Fixture;
+
+    impl Drop for Selector0Fixture {
+        fn drop(&mut self) {
+            unsafe { PMU_SELECTOR0_SCALED_WRITE = missing_pmu_selector0_scaled_write; }
+        }
+    }
+
+    #[test]
+    fn selector0_distinguishes_zero_from_all_nonzero_words() {
+        let _lock = PMU_SELECTOR0_TEST_LOCK.lock();
+        let _fixture = Selector0Fixture;
+        unsafe {
+            PMU_SELECTOR0_SCALED_WRITE = encode_selected_value;
+            assert_eq!(pmu_select_3000_or_3300(0), 0x8000_0015);
+            for high in [1, 2, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+                assert_eq!(pmu_select_3000_or_3300(high), 0x8000_0018);
+            }
+        }
+    }
 
     static mut TRANSFORM_PHASE: u32 = 0;
     static mut TRANSFORM_STATUS: u32 = 0;

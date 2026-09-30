@@ -27962,6 +27962,38 @@ functions:
       reference. ABI: words in r0, byte_len in r1; no return value or null
       checks. Port deviation: none.
 
+  # --- PMU two-value selector (drivers/pmu) ---
+  - address: 0x082bc55c
+    ghidra: FUN_082bc55c
+    name: pmu_select_3000_or_3300
+    size: 24
+    sig: "u32 pmu_select_3000_or_3300(u32 high)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r0: high
+      DAT_082bc56c: low_value_3000
+      DAT_082bc570: high_value_3300
+      FUN_082e5500: pmu_write_selector0_scaled_value
+    notes: >-
+      Raw words are cmp r0,0; ldreq r0,[pc,4]; ldrne r0,[pc,4];
+      b 0x082e5500; literal 3000; literal 3300. True extent is
+      0x082bc55c..0x082bc574, 24 bytes including eight literal bytes.
+      The push at 0x082bc574 starts a distinct function. Ghidra's 92-byte
+      extent includes tail-target code incorrectly. Whole-image ARM BL
+      decoding finds two plain callers at 0x08294898 and 0x08294978,
+      zero predicated callers, and zero outgoing BL instructions.
+      Zero selects 3000; every nonzero word selects 3300. The only outgoing
+      edge is an unconditional tail branch to the unported selector-0
+      scaled PMU writer at 0x082e5500, independently decoded through its
+      final branch at 0x082e5548 to kernel_sem17_signal. That writer holds
+      semaphores 17 then 5, encodes nonzero values as the low byte of
+      unsigned (value - 0x321) / 100, sends selector zero with encoded
+      value one, signals 5, and tail-signals 17. No hardware units are
+      inferred. Port uses a typed fixed-address seam for this existing
+      retail callee and preserves its final r0 word; known callers ignore
+      that result. Host tests cover zero and noncanonical nonzero words.
+
   # --- PMU register 0x39 scaled write (drivers/pmu) ---
   - address: 0x082e5468
     ghidra: FUN_082e5468
