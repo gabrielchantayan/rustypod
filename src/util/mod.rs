@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod long_filename_byte_is_rejected;
 pub mod payload_word_exchange;
 pub mod attr_record;
 pub mod address_in_range_or_zero;
