@@ -164065,3 +164065,40 @@ functions:
       guards, ordered calls, i64 commit and flag masking; differences are
       frame setup, initialized locals and three volatile indirect calls.
       Hardware execution was not tested.
+
+  - address: 0x082b4094
+    ghidra: FUN_082b4094
+    name: analyze_database
+    size: 144
+    sig: "void analyze_database(Parse *parse, int i_db)"
+    module: sqlite/analyze_database
+    status: ported
+    vars: {param_1: parse, param_2: i_db, iVar1: schema, iVar3: cursor, puVar2: hash_element}
+    notes: >-
+      SQLite database-wide ANALYZE generator. Raw extent 0x082b4094 through
+      0x082b4120, followed by the real prologue at 0x082b4124. Independently
+      decoded ARM words verify three outgoing unconditional BL instructions
+      (0x082b40c0, 0x082b40e0, 0x082b4104), zero predicated BLs, and a tail
+      B at 0x082b4120 to 0x082d80a4. Ghidra's two-call report and apparent
+      get_vdbe/add_op3 ending are wrong. Snapshot aDb[i_db].pSchema using
+      the 24-byte Db stride; begin_write_operation(parse, 0, i_db); reserve
+      Parse.nTab (+0x44) with wrapping increment; open sqlite_stat1 through
+      0x082dc100(parse, i_db, cursor, NULL). Snapshot Parse.nMem (+0x48)+1
+      after opening, then walk schema's table hash at +0x10, next at +0,
+      table at +8. Analyze each table through 0x082b4124 with the same
+      cursor and register base even when the helper allocates registers.
+      Finally tail-call the 0x082d80a4 reload helper: get_vdbe, then guarded
+      vdbe_add_op1(v, 0x6d, i_db). All four helper seams execute real retail
+      addresses on-device, including begin_write_operation because its
+      existing Rust schema-verification default is not behaviorally faithful.
+      No new callee ports or no-op fallbacks. Host export rejects execution
+      without retail helpers; isolated core tests supply explicit operations.
+      Deliberate deviation: LLVM controls tail-call lowering and skips the
+      unused nMem read on an empty table chain. Host suite: 13200 passed.
+      ARM release build passed. match.py structural diff: 36 stock versus
+      46 Rust listing entries including four address literals, indirect
+      BLX calls, and BX tail; allocation order, hash traversal, shared
+      register base and fourth arguments preserved. Unicorn executed the
+      actual generated ARM against stock for zero, one and three tables,
+      with identical fixture memory and reload events under state-mutating
+      helper boundaries. Physical device execution was not tested.
