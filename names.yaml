@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8418
+    ghidra: FUN_082a8418
+    name: word_key_tree_pool_destruct
+    size: 88
+    sig: "uint32_t *word_key_tree_pool_destruct(uint32_t *tree)"
+    module: cxx/word_key_tree_pool_destruct
+    status: ported
+    vars:
+      param_1/r0/r4: tree
+      local_18: header_iterator
+      local_14: begin_iterator
+      uStack_10: erased_iterator
+      FUN_083bfa44: type_specific_erase_range_address_seam
+      FUN_083bf5a0: pool_release_address_seam
+    notes: >-
+      Raw ARM establishes 88 bytes through the return at 0x082a846c;
+      the next function starts at 0x082a8470. Two outbound plain BLs,
+      zero predicated BLs; two inbound plain BLs at 0x0819f228 and
+      0x0819fd10. For a non-null header at tree word 4, erase the range
+      [header word 2, header), reload the header and recycle-chain head,
+      prepend the header via its word 3 to tree word 1, then release the
+      pool. A null header preserves all fields and skips both calls.
+      Return the original tree pointer; Ghidra's extra arguments and u64
+      return are artifacts of saved/restored r1-r3. Verified unported
+      runtime helpers remain address seams, not guessed Rust callees.
+      Deviations: Rust iterator locals and target-width u32 fields.
+      Host tests cover null-header preservation, post-erase header and
+      chain reloads, cleanup ordering, and terminal pool state.
+      ARM match retains the conditional cleanup, both runtime targets,
+      header reload and recycling stores, and pointer return. LLVM uses
+      literal-loaded BLX calls and a different stack frame.
   - address: 0x082a8948
     ghidra: FUN_082a8948
     name: opaque_buffer_owner_destroy
