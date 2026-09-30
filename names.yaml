@@ -164135,3 +164135,34 @@ functions:
       Standalone smoke executes the actual Rust function with a host libc
       allocator, confirming NULL for a negative request, retry success,
       504 writable payload bytes and cache retention. Device not tested.
+
+  - address: 0x082b39b8
+    ghidra: FUN_082b39b8
+    name: fifo_page_allocate
+    size: 64
+    sig: "FifoPage *fifo_page_allocate(uint32_t capacity)"
+    module: sqlite/fifo_page
+    status: ported
+    vars: {param_1: capacity, r4: clamped_capacity, puVar1: page, DAT_082b39f4: max_capacity}
+    notes: >-
+      SQLite VDBE FIFO page allocator. Raw osos.dec establishes extent
+      0x082b39b8..0x082b39f8: 60 instruction bytes ending in pop {r4,pc},
+      then the 0x7ffe literal; next function starts with push {r4-r6,lr}.
+      Full-image ARM BL decode finds two plain incoming calls at
+      0x0838a398 and 0x0838a3c4, no predicated calls. Body has one plain
+      BL to already-ported sqlite3_malloc at 0x08390b14. Unsigned clamp
+      to 32766, allocate capacity*8+16, initialize only capacity (+0),
+      write index (+4), read index (+8), and next-page word (+12).
+      Return allocation in r0 including NULL; Ghidra's void return is wrong.
+      VDBE callers append 64-bit entries at +16+write_index*8 and link
+      a new page through +12 when capacity is exhausted.
+      Deliberate deviations: existing DB_MEM_OPS malloc dispatch seam,
+      defaulting to the ported allocator; target-width next word on hosts.
+      Host edge tests cover zero, clamp boundaries, high unsigned values,
+      allocation failure, and untouched payload. Standalone source smoke
+      with libc allocation verifies zero/14/maximum capacity and payload
+      round-trip. ARM release build passed; match.py confirms unsigned
+      clamp, size calculation, NULL guard, and four stores. LLVM uses BLX
+      through the allocator slot, a different frame, and reordered stores.
+      Full host suite aborts in hash_rehash's existing collision-chain test;
+      isolated FIFO tests pass. Device execution not tested.
