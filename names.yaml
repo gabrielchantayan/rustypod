@@ -163530,3 +163530,33 @@ functions:
       Nonpositive change counts return zero. Preserve target pointers as u32
       words for host parity. LLVM uses a twelve-byte offset induction variable
       and emits 29 instructions versus 23; null handling, signed bounds,
+
+  - address: 0x082bdfbc
+    ghidra: FUN_082bdfbc
+    name: packed_read_u16_be
+    size: 16
+    sig: "u32 packed_read_u16_be(const u8 *source)"
+    module: util/be_read
+    status: ported
+    renames:
+      param_1/r0: source
+      r1: low_byte
+      r0: high_byte/result
+    notes: >-
+      Raw words e5d01001 e5d00000 e1810400 e12fff1e establish the exact
+      16-byte extent 0x082bdfbc..0x082bdfcc; the next function begins with
+      push {r4-r8,lr}. Whole-image aligned ARM branch decoding verifies two
+      inbound plain BL sites, 0x080d4188 and 0x080d41c8, zero predicated BL
+      sites, zero tail B callers, and zero outbound BLs. Read two packed
+      bytes and return source[0] shifted left eight OR source[1], zero-extended
+      to u32, without alignment, NULL, or bounds checks. Caller 0x080d4164
+      compares the first field with 0xdead/0xfeed and reads another at offset
+      four. Reuse the existing util/be_read module with a distinct symbol and
+      text section rather than introducing a callee seam. Host tests cover
+      every u16 value at all four byte alignments with adjacent-byte sentinels;
+      the full host suite and ARM release build pass. Direct runtime smoke
+      returns 0xdead, 0xfeed, and 0xffff. match.py finds four retail instructions
+      versus six Rust instructions: both byte loads and the shifted OR remain,
+      with frame push/mov/pop added and the load order reversed. Deliberate
+      deviations: code-generation frame and nonvolatile read reordering only;
+      no behavioral deviations for ordinary readable memory.
