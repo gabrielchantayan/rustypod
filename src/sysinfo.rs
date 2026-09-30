@@ -208,6 +208,111 @@ pub unsafe extern "C" fn board_version() -> u32 {
     cache.read_volatile()
 }
 
+#[cfg(not(target_os = "none"))]
+static mut HOST_IRAM_COPY_END_OFFSET: u32 = u32::MAX;
+
+/// iram_copy_end_offset — retailOS `FUN_082bc794` at `0x082bc794`.
+///
+/// True occupied extent: 48 bytes through `0x082bc7c3`, including the
+/// literal at `0x082bc7c0`; the instruction body is 44 bytes. The next
+/// independent function starts at `0x082bc7c4`. Raw A32 decoding verifies
+/// two inbound plain BLs (`0x080a6c7c`, `0x080b5208`), one outbound plain
+/// BL to shared_context (`0x08369bec`), and zero predicated BLs.
+///
+/// Read system-info word +0xc at `0x089caaac`. If it is `u32::MAX`, fetch
+/// the shared context and, only when non-NULL, cache its aligned word +0xe8.
+/// Reload and return the cache. A sentinel-valued source remains retryable;
+/// zero and every other word are valid cached values. Both stock callers
+/// subtract 0x18000 to obtain the byte count copied from IRAM mirror
+/// 0x22000000, hence this is the copy's exclusive end offset.
+///
+/// Deviations: host builds substitute a static for fixed RAM; target calls
+/// the existing Rust shared_context port. No target behavioral deviations.
+///
+/// # Safety
+/// Fixed target RAM must be writable, and a non-NULL shared context must
+/// contain a readable, word-aligned u32 at +0xe8. Access is externally serialized.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iram_copy_end_offset() -> u32 {
+    #[cfg(target_os = "none")]
+    let cache = (SYSTEM_INFO_BASE + 0xc) as *mut u32;
+    #[cfg(not(target_os = "none"))]
+    let cache = core::ptr::addr_of_mut!(HOST_IRAM_COPY_END_OFFSET);
+
+    if cache.read_volatile() == u32::MAX {
+        let context = shared_context();
+        if !context.is_null() {
+            cache.write_volatile(context.add(0xe8).cast::<u32>().read_volatile());
+        }
+    }
+    cache.read_volatile()
+}
+
+#[cfg(test)]
+mod iram_copy_end_offset_tests {
+    use super::*;
+    use std::sync::MutexGuard;
+
+    struct Fixture(MutexGuard<'static, ()>);
+
+    impl Fixture {
+        fn install(cache: u32, context: *mut u8) -> Self {
+            let guard = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK
+                .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsafe {
+                core::ptr::addr_of_mut!(HOST_IRAM_COPY_END_OFFSET).write(cache);
+                crate::ui::object_state::host_install_shared_context(context);
+            }
+            Self(guard)
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(HOST_IRAM_COPY_END_OFFSET).write(u32::MAX);
+                crate::ui::object_state::host_install_shared_context(core::ptr::null_mut());
+            }
+        }
+    }
+
+    #[test]
+    fn null_context_leaves_cache_retryable() {
+        let _fixture = Fixture::install(u32::MAX, core::ptr::null_mut());
+        unsafe {
+            assert_eq!(iram_copy_end_offset(), u32::MAX);
+            let mut context = [0u32; 0xec / 4];
+            context[0xe8 / 4] = 0x24000;
+            crate::ui::object_state::host_install_shared_context(context.as_mut_ptr().cast());
+            assert_eq!(iram_copy_end_offset(), 0x24000);
+        }
+    }
+
+    #[test]
+    fn every_non_sentinel_value_is_cached_without_refresh() {
+        let mut context = [0u32; 0xec / 4];
+        context[0xe8 / 4] = 0x12345678;
+        for value in [0, 1, 0x18000, 0x80000000, u32::MAX - 1] {
+            let _fixture = Fixture::install(value, context.as_mut_ptr().cast());
+            assert_eq!(unsafe { iram_copy_end_offset() }, value);
+        }
+    }
+
+    #[test]
+    fn refresh_uses_field_e8_and_sticks_except_for_sentinel() {
+        for value in [0, 0x24000, 0x80000000, u32::MAX] {
+            let mut context = [0xa5a5a5a5u32; 0xec / 4];
+            context[0xe8 / 4] = value;
+            let _fixture = Fixture::install(u32::MAX, context.as_mut_ptr().cast());
+            assert_eq!(unsafe { iram_copy_end_offset() }, value);
+            context[0xe8 / 4] = 0x34567;
+            assert_eq!(unsafe { iram_copy_end_offset() },
+                if value == u32::MAX { 0x34567 } else { value });
+        }
+    }
+}
+
 /// storage_backend_status — retailOS `FUN_082bc7c4` at `0x082bc7c4`.
 ///
 /// Raw ARM runs from `push {r4,lr}` through `pop {r4,pc}` at `0x082bc844`:

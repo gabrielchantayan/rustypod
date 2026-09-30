@@ -163596,3 +163596,37 @@ functions:
       with frame push/mov/pop added and the load order reversed. Deliberate
       deviations: code-generation frame and nonvolatile read reordering only;
       no behavioral deviations for ordinary readable memory.
+  - address: 0x082bc794
+    ghidra: FUN_082bc794
+    name: iram_copy_end_offset
+    size: 48
+    sig: "u32 iram_copy_end_offset(void)"
+    module: sysinfo
+    status: ported
+    renames:
+      DAT_082bc7c0: system_info_base
+      iVar1/r4: system_info
+      iVar2/r0: shared_context
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw words verify 44 instruction bytes at 0x082bc794..0x082bc7bf plus
+      the literal 0x089caaac at 0x082bc7c0, for a true occupied extent of
+      48 bytes before the independent push at 0x082bc7c4. Whole-image A32
+      decoding finds two inbound plain BLs at 0x080a6c7c and 0x080b5208,
+      one outbound plain BL at 0x082bc7a8 to the already-ported shared_context
+      getter at 0x08369bec, and no predicated BLs. Lazily refresh system-info
+      word +0xc from context word +0xe8 only while the cache is 0xffffffff
+      and the context is non-NULL; reload and return the cache. Both callers
+      subtract 0x18000 and copy that many bytes from IRAM mirror 0x22000000,
+      establishing the returned word's exclusive-copy-end-offset role.
+      Volatile aligned word accesses preserve the original reload and store.
+      Host tests cover NULL retry, zero and high-bit cached values, adjacent
+      field isolation, sticky refresh, and a sentinel-valued source that
+      remains retryable. All 13177 host tests pass; ARM release build passes.
+      Standalone smoke compiled the actual accessor and shared-context source
+      slices and observed NULL retry, refresh to 0x24000, then sticky caching.
+      match.py reports 11 original versus 15 Rust instructions; comparison,
+      guarded +0xe8 load/store, and final cache reload are retained. LLVM
+      materializes cache address 0x089caab8 directly, reverses branch polarity,
+      duplicates the return, and adds a frame. Deliberate deviations: host
+      static storage replaces fixed RAM; no target behavioral deviations.
