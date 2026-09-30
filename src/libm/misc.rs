@@ -37,11 +37,10 @@
 //!   surrounding plumbing bit-exactly.
 //!
 //! Other dependencies modeled here:
-//! - Double "is finite" @ 0x082ab120 (32 bytes: exponent field != 0x7ff)
-//!   and double copysign @ 0x082c4f50 (44 bytes: magnitude of first, sign
-//!   of second) are called by ldexp but not yet committed as their own
-//!   ports; they are ported as private helpers below, deliberately NOT
-//!   `#[no_mangle]` so a future dedicated port can't collide.
+//! - Double "is finite" @ 0x082ab120 is exported below as
+//!   `is_finite_double` (36 bytes including its literal pool).
+//! - Double copysign @ 0x082c4f50 (44 bytes: magnitude of first, sign
+//!   of second) remains a private helper, not a dedicated exported port.
 //!
 //! Behavioral notes:
 //! - ADS soft-float has no subnormal support: subnormal inputs flush to
@@ -95,10 +94,20 @@ const DOUBLE_POS_INF: u64 = 0x7ff0_0000_0000_0000;
 /// +0.0 (double) — ldexp underflow magnitude, original const @ 0x08986040.
 const DOUBLE_ZERO: u64 = 0;
 
-/// Double "is finite" — original @ 0x082ab120 (32 bytes). Returns 1 when
-/// the exponent field is not 0x7ff (finite, including zero/subnormal), 0
-/// for ±Inf/NaN. PRIVATE port — see module header.
-fn is_finite_double(x: u64) -> i32 {
+/// Double "is finite" — `FUN_082ab120` @ 0x082ab120.
+///
+/// True extent: 36 bytes (32 bytes of instructions, then the 0xffe00000
+/// literal at 0x082ab140; next function starts at 0x082ab144).
+/// Verified calls: 2 incoming plain BL, 0 predicated BL; no outgoing BL.
+/// Returns 1 for finite raw IEEE-754 doubles, including signed zero and
+/// subnormals, or 0 for either infinity and every NaN payload. The original
+/// shifts the high word right 20 then left 21, discarding the sign and
+/// comparing the exponent against 0xffe00000; the low word is ignored.
+/// Deliberate deviation: express that comparison as an exponent mask and
+/// omit the original register-save frame and literal load.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn is_finite_double(x: u64) -> i32 {
     // Original: `cmp 0xffe00000, (hi >> 20) << 21; moveq r0,#0; movne r0,#1`
     // — the sign bit shifts out, so only the exponent field matters.
     if (x >> 52) & 0x7ff == 0x7ff {
@@ -302,6 +311,21 @@ mod tests {
             rest += 1022;
         }
         result * pow2d(rest)
+    }
+
+    #[test]
+    fn finite_double_covers_exponents_signs_and_payloads() {
+        for exponent in 0..=0x7ff {
+            for negative in [false, true] {
+                for fraction in [0, 1, 0x0000_0001_0000_0000,
+                                 0x0008_0000_0000_0000, 0x000f_ffff_ffff_ffff] {
+                    let bits = d(exponent, fraction, negative);
+                    assert_eq!(is_finite_double(bits),
+                               f64::from_bits(bits).is_finite() as i32,
+                               "bits={bits:016x}");
+                }
+            }
+        }
     }
 
     // ---- ldexp ----
