@@ -6231,6 +6231,34 @@ functions:
       0x61..0xff; non-byte u32 values do not match. Deliberate deviation:
       Rust represents the literal list with equivalent ranges and singleton
       comparisons rather than dereferencing firmware storage.
+  - address: 0x082b14e8
+    ghidra: FUN_082b14e8
+    name: long_filename_byte_is_rejected
+    size: 52
+    sig: "u32 long_filename_byte_is_rejected(u32 byte)"
+    module: util/long_filename_byte_is_rejected
+    status: ported
+    renames:
+      param_1/r0: byte
+      iVar1/r1: list_index
+      r2: candidate
+      DAT_082b151c/r3: rejection_list
+    notes: >-
+      Raw osos.dec words establish the exact 52-byte A32 body
+      0x082b14e8..0x082b151b, followed by the literal pointer 0x089059a5
+      at 0x082b151c. The next real function begins with push {r4,lr} at
+      0x082b1520. Whole-image aligned A32 decoding finds two inbound plain
+      BL calls at 0x082e4a4c and 0x08396df4, zero inbound predicated BL
+      calls, and no outbound calls. The callers use it for filename byte
+      rejection. Scan the 205-byte list until the NUL at 0x08905a72;
+      compare each zero-extended byte against the full u32 input. Return
+      one for space, 3, L, Q, S, and 0x5b..0xff, otherwise zero, including
+      for NUL and values above 0xff. The list runs into adjacent SQLite
+      format 3 bytes; those memberships are intentional parity, not a
+      corrected filename policy. Deliberate deviation: equivalent ranges
+      and singleton comparisons replace immutable firmware reads. Host
+      tests compare every byte against an independently reconstructed
+      raw-list scan and check full-width inputs that would match if truncated.
   - address: 0x082d8520
     ghidra: FUN_082d8520
     name: btree_end_transaction
