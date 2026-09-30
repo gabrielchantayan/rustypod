@@ -5935,6 +5935,34 @@ functions:
       inbound BL call sites are the callers FUN_082b47bc, FUN_082b4814,
       and FUN_082c6430. The Rust loop deliberately retains the original
       mask-walk rather than using trailing_zeros; no semantic deviations.
+  - address: 0x082b47bc
+    ghidra: FUN_082b47bc
+    name: count_even_aligned_byte_chunks
+    size: 60
+    sig: "u32 count_even_aligned_byte_chunks(u32 value)"
+    module: util/count_even_aligned_byte_chunks
+    status: ported
+    vars:
+      param_1: value
+      iVar1: lowest_bit_one_based
+      iVar2: count
+      r4: remaining_bits
+      r5: count
+      r6: byte_mask
+    notes: >-
+      Raw osos.dec words establish the extent 0x082b47bc..0x082b47f8,
+      ending at pop {r4-r6,pc}; the next function starts with
+      sub r1,r0,#1 and tests whether r0 has at most one set bit.
+      Each iteration calls lowest_set_bit_one_based at 0x082b478c,
+      subtracts one, clears index bit zero, and clears an eight-bit
+      window at that even shift. The mask truncates at bit 31 without
+      rotation. Returns zero for zero and otherwise the greedy window
+      count used to compare constant versus complement emission costs.
+      Raw aligned ARM word decoding finds one internal plain BL at
+      0x082b47d4 and two incoming plain BLs at 0x082b48bc and
+      0x082b48c8, with zero predicated BLs. The Ghidra caller claim
+      for FUN_082c6430 is not supported by the raw BL scan.
+      Reuses the ported helper; no deliberate semantic deviations.
   - address: 0x081f0888
     ghidra: FUN_081f0888
     name: context_lifecycle_rearm
