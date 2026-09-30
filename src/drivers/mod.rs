@@ -55,6 +55,7 @@ pub mod gpio_pin_read;
 pub mod gpio_pin_is_high;
 pub mod gpio_port_registers_load;
 pub mod gpio_pin_write;
+pub mod storage_backend_pin_89_status;
 pub mod gpioic;
 pub mod i2c;
 pub mod interrupts;
