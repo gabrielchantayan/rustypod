@@ -43158,6 +43158,49 @@ functions:
       Host tests cover both gates and a valid 'tdat'-tagged lookup miss,
       proving no destination mutation on every zero result.
 
+  - address: 0x082a600c
+    ghidra: FUN_082a600c
+    name: resource_cache_auxiliary_get_if_available
+    size: 52
+    sig: "u32 resource_cache_auxiliary_get_if_available(void *object)"
+    module: app/resource/cache_available
+    renames:
+      param_1/r4: object
+      "object+0x0": vtable
+      "object+0x4": cache_object
+      "vtable+0xc": available
+      "cache_object+0x61c": auxiliary_cache_word
+      FUN_08047060: resident_auxiliary_cache_get
+    status: ported
+    notes: >-
+      Raw osos.dec establishes a 52-byte body at 0x082a600c..0x082a603c;
+      the distinct push at 0x082a6040 starts the next function. Ghidra's
+      112-byte body incorrectly incorporates resident tail-target logic.
+      Independent ARM-word decoding finds two incoming unconditional BL
+      calls at 0x08176fb4 and 0x08177228, zero incoming predicated BL,
+      zero body direct BL, one indirect BLX at 0x082a6020, and a conditional
+      tail B at 0x082a6034 to 0x08047060 with r1 zero. The virtual +0xc
+      gate returns zero without reading object+4; any nonzero gate reloads
+      that cache-object pointer and invokes the resident getter. Raw words
+      at 0x08047060 establish the same dirty-byte clearing and callback
+      refresh as resource_cache_refresh_get, but return +0x61c instead of
+      +0x620. No registered port exists for 0x08047060; ARM calls its exact
+      resident address. The virtual target identity and auxiliary word's
+      meaning remain unresolved. Host execution reuses the sibling refresh
+      port and reads +0x61c, adding one discarded volatile +0x620 read.
+      Native host vtable slots and firmware-u32 object links follow the
+      existing module convention. Tests cover an unavailable invalid cache
+      pointer, multiple nonzero gate values, distinct auxiliary and primary
+      cache words, and absence of a forced refresh on a clean cache.
+      Host suite passes 13267 tests; ARM release builds. The required
+      match.py command uses Ghidra's incorrect 112-byte extent; repeating
+      with --size 52 confirms virtual dispatch, zero gate, reloaded cache
+      pointer, zero force argument, and tail transfer to 0x08047060. LLVM
+      uses a larger frame and literal-loaded BX rather than predicated B.
+      A standalone smoke run exercises clean auxiliary return and dirty
+      refresh with a null root: dispatcher -50 is ignored and both cache
+      words and the dirty byte are cleared, producing zero.
+
   - address: 0x082a6040
     ghidra: FUN_082a6040
     name: resource_cache_get_if_available
