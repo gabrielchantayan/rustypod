@@ -13,9 +13,7 @@
 //! layout is modeled as a typed `#[repr(C)]` view so offsets stay correct on
 //! the 64-bit host; the 32-bit field offsets are asserted.
 
-use super::expr_delete::expr_delete;
-use super::expr_list_delete::expr_list_delete;
-use super::src_list_delete::src_list_delete;
+use super::select_clear::select_clear;
 use crate::heap::tracked::tracked_free;
 
 
@@ -84,16 +82,7 @@ pub unsafe extern "C" fn select_delete(select: *mut u8) {
         return;
     }
 
-    let node = &*(select as *const Select);
-    expr_list_delete(node.p_elist);
-    src_list_delete(node.p_src);
-    expr_delete(node.p_where);
-    expr_list_delete(node.p_group_by);
-    expr_delete(node.p_having);
-    expr_list_delete(node.p_order_by);
-    select_delete(node.p_prior.cast());
-    expr_delete(node.p_limit);
-    expr_delete(node.p_offset);
+    select_clear(select);
     tracked_free(select);
 }
 
@@ -193,6 +182,15 @@ mod tests {
 
     #[test]
     fn owned_fields_free_in_order() {
+        check_owned_fields(false);
+    }
+
+    #[test]
+    fn clear_preserves_container_and_fields() {
+        check_owned_fields(true);
+    }
+
+    fn check_owned_fields(clear_only: bool) {
         let _heap = mock_heap();
         let _guard = SLOT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -246,15 +244,19 @@ mod tests {
         };
         let top_ptr = write_select(&mut top_block, top);
 
+        let before = top_block.0;
         unsafe {
             with_slots(|| {
-                select_delete(top_ptr);
+                if clear_only {
+                    select_clear(top_ptr);
+                } else {
+                    select_delete(top_ptr);
+                }
             });
         }
+        assert_eq!(top_block.0, before, "destruction must not clear fields");
 
-        assert_eq!(
-            freed(),
-            std::vec![
+        let mut expected = std::vec![
                 (top_elist_block.raw(), TAG_TRACKED),
                 (top_where_block.raw(), TAG_TRACKED),
                 (top_group_block.raw(), TAG_TRACKED),
@@ -264,9 +266,11 @@ mod tests {
                 (prior_block.raw(), TAG_TRACKED),
                 (top_limit_block.raw(), TAG_TRACKED),
                 (top_offset_block.raw(), TAG_TRACKED),
-                (top_block.raw(), TAG_TRACKED),
-            ],
-            "owned children free before the select block, and the prior chain recurses in place"
-        );
+            ];
+        if !clear_only {
+            expected.push((top_block.raw(), TAG_TRACKED));
+        }
+        assert_eq!(freed(), expected,
+            "children free in order; only select_delete frees the container");
     }
 }
