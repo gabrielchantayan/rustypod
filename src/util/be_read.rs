@@ -50,6 +50,28 @@ pub unsafe extern "C" fn read_u16_be(p: *const u8) -> u32 {
     ((*p as u32) << 8) | (*p.add(1) as u32)
 }
 
+/// `packed_read_u16_be` — original: `FUN_082bdfbc` @ 0x082bdfbc.
+///
+/// True size: 16 bytes, through `bx lr` at 0x082bdfc8; the next function
+/// starts with `push {r4-r8,lr}` at 0x082bdfcc. Raw whole-image ARM decoding
+/// verifies two plain BL callers (0x080d4188 and 0x080d41c8), zero predicated
+/// BL callers, and zero outbound BLs. Assemble two packed bytes as
+/// `source[0] << 8 | source[1]`, zero-extended in r0. The caller compares
+/// the first decoded field with 0xdead/0xfeed and reads another at offset 4.
+/// No deliberate behavioral deviations; a dedicated text section preserves
+/// this separate firmware entry despite the equivalent `read_u16_be` body.
+///
+/// # Safety
+/// `source` must point to two readable bytes; no alignment is required.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.packed_read_u16_be")]
+#[inline(never)]
+pub unsafe extern "C" fn packed_read_u16_be(source: *const u8) -> u32 {
+    let low = *source.add(1) as u32;
+    let high = *source as u32;
+    low | (high << 8)
+}
+
 /// read_u32_be — original: `FUN_080743b8` @ 0x080743b8 (24 bytes;
 /// 41 `bl` call sites, all unpredicated, counted by decoding every B/BL
 /// word in osos.dec).
@@ -100,6 +122,22 @@ mod tests {
     use super::*;
     use std::vec;
     use std::vec::Vec;
+
+    #[test]
+    fn packed_read_u16_be_all_values_and_alignments() {
+        let mut bytes = [0xa5u8; 8];
+        for value in 0..=u16::MAX {
+            for offset in 0..4 {
+                bytes.fill(0xa5);
+                bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+                assert_eq!(
+                    unsafe { packed_read_u16_be(bytes.as_ptr().add(offset)) },
+                    value as u32,
+                    "value={value:#06x}, offset={offset}",
+                );
+            }
+        }
+    }
 
     fn pattern(size: usize, seed: u8) -> Vec<u8> {
         (0..size).map(|i| ((i as u16 * seed as u16 + 7) % 251) as u8).collect()
