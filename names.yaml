@@ -132194,6 +132194,38 @@ functions:
       call; OBJ_obj2nid and diag_ring_record use their existing ports. Raw
       u32 target-pointer words retain the ARM layout on 64-bit hosts.
 
+  - address: 0x082b4bc4
+    ghidra: FUN_082b4bc4
+    name: asn1_do_ref
+    size: 96
+    sig: "i32 asn1_do_ref(const u32 *value_slot, i32 amount, const u32 *item)"
+    module: crypto/asn1_refcount
+    status: ported
+    vars: {param_1: value_slot, param_2: amount, param_3: item, iVar3: auxiliary, piVar1: reference_count}
+    calls:
+      FUN_08043828: crypto_add_lock
+    notes: >-
+      Raw ARM extent is 0x082b4bc4..0x082b4c24, exactly 96 bytes, ending
+      with pop {r12,pc} before the next function's push {r4,lr}.
+      Whole-image aligned branch decoding finds two plain inbound BLs
+      at 0x080c8728 and 0x080d3c0c, zero predicated inbound BLs.
+      The body has one plain BL at 0x082b4c1c to the already-ported
+      crypto_add_lock and zero predicated BLs. This is OpenSSL asn1_do_ref:
+      only sequence kind 1 with non-NULL auxiliary data and flag bit 0
+      supports reference counting. Auxiliary words 2 and 3 provide the
+      count byte offset and lock type. Amount zero stores one directly;
+      other amounts delegate to crypto_add_lock with NULL file and line
+      zero, returning its result. Unsupported items return zero without
+      touching the value slot. Target pointers remain u32 words on hosts;
+      address addition explicitly wraps at 32 bits. The direct BL becomes
+      an ordinary Rust call using the existing services-descriptor seam.
+      Host suite passes 13193 tests; executable smoke proves initialize,
+      retain, and release using the real lock port. ARM release code has
+      30 instructions versus stock 24; match.py reports a structural diff.
+      LLVM separates the initialization branch and early returns, narrows
+      the flags bit test to a byte load, and uses a frame only on the call
+      path. The single R_ARM_CALL relocation targets crypto_add_lock.
+
   # --- opaque header-payload record constructor ---
   - address: 0x082a89b4
     ghidra: FUN_082a89b4
