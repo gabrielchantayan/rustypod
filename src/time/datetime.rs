@@ -168,6 +168,27 @@ pub unsafe extern "C" fn datetime_compare(left: *const DateTime, right: *const D
     left.second as i32 - right.second as i32
 }
 
+/// datetime_not_equal — original: `FUN_082aadbc` @ 0x082aadbc
+/// (**24 bytes, 0x082aadbc..0x082aadd4**; two inbound plain `bl`
+/// calls at 0x081e90f0 and 0x081e9190, zero predicated `bl` calls).
+///
+/// Calls [`datetime_compare`] and returns 0 for equal calendar fields,
+/// otherwise 1. The original `rsbs r0,r0,#1; movcc r0,#0; eor r0,r0,#1`
+/// normalizes both negative and positive differences, including differences
+/// larger than one. Weekday and padding do not participate. The body has
+/// one plain BL and no predicated BL; the next function starts at 0x082aadd4.
+/// Deliberate deviations: Rust expresses the flag-based normalization as a
+/// nonzero comparison; no behavioral deviation.
+///
+/// # Safety
+///
+/// Both pointers must reference readable, properly aligned [`DateTime`] records.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn datetime_not_equal(left: *const DateTime, right: *const DateTime) -> u32 {
+    (datetime_compare(left, right) != 0) as u32
+}
+
 
 /// Day number of 1970-01-01 under `FUN_0807ea68`'s Rata Die numbering —
 /// the literal 0xfff506c5 = -719163 @ 0x08093c98, added rather than
@@ -338,6 +359,31 @@ mod tests {
         assert_eq!(unsafe { datetime_compare(&reference, &equal_with_ignored_bytes) }, 0);
         for (candidate, expected) in cases {
             assert_eq!(unsafe { datetime_compare(&candidate, &reference) }, expected);
+        }
+    }
+
+    #[test]
+    fn datetime_not_equal_normalizes_all_calendar_fields_and_ignores_metadata() {
+        let reference = dt(0, 0, 0, 0, 0, 0);
+        let metadata_only = DateTime {
+            reserved: 255,
+            weekday: 6,
+            reserved2: 255,
+            ..reference
+        };
+        assert_eq!(unsafe { datetime_not_equal(&reference, &reference) }, 0);
+        assert_eq!(unsafe { datetime_not_equal(&reference, &metadata_only) }, 0);
+        for candidate in [
+            dt(1, 0, 0, 0, 0, 0),
+            dt(u16::MAX, 0, 0, 0, 0, 0),
+            dt(0, 255, 0, 0, 0, 0),
+            dt(0, 0, 255, 0, 0, 0),
+            dt(0, 0, 0, 255, 0, 0),
+            dt(0, 0, 0, 0, 255, 0),
+            dt(0, 0, 0, 0, 0, 255),
+        ] {
+            assert_eq!(unsafe { datetime_not_equal(&candidate, &reference) }, 1);
+            assert_eq!(unsafe { datetime_not_equal(&reference, &candidate) }, 1);
         }
     }
 

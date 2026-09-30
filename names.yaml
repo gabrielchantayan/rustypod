@@ -97328,6 +97328,32 @@ functions:
       unsigned field difference left - right; weekday and padding bytes are
       ignored. No deviations. Host tests cover equality despite differing
       ignored bytes and every comparison field's signed difference.
+  - address: 0x082aadbc
+    ghidra: FUN_082aadbc
+    name: datetime_not_equal
+    size: 24
+    sig: "u32 datetime_not_equal(const DateTime *left, const DateTime *right)"
+    module: time/datetime
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      FUN_08093af8: datetime_compare
+    notes: >-
+      Raw ARM words establish the exact 24-byte extent 0x082aadbc..0x082aadd4.
+      The next real function starts with mov r1,#2 at 0x082aadd4 and branches
+      to the allocator. Full-image A32 decoding finds two inbound plain BL
+      calls at 0x081e90f0 and 0x081e9190, with zero predicated BL calls.
+      The body has one plain BL to the already-ported datetime_compare at
+      0x08093af8 and no predicated BL. Both incoming record pointers pass
+      through unchanged; Ghidra incorrectly declares no arguments. The
+      rsbs/movcc/eor sequence returns zero exactly for a zero comparator
+      result and one for every other unsigned bit pattern, including
+      negative signed differences. Calendar fields participate; padding
+      and weekday do not. Rust uses a nonzero comparison instead of ARM
+      flags, with no behavioral deviation. Host tests cover equality,
+      metadata-only changes, each calendar field, both argument orders,
+      unit differences and maximum byte/halfword differences.
   - address: 0x08093c38
     ghidra: FUN_08093c38
     name: datetime_to_unix_seconds
