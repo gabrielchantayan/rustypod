@@ -208,6 +208,43 @@ pub unsafe extern "C" fn board_version() -> u32 {
     cache.read_volatile()
 }
 
+/// iram_copy_start_offset — retailOS `FUN_082bc600` at `0x082bc600`.
+///
+/// True extent: 8 bytes, ending before the independent literal-load getter
+/// at `0x082bc608`. Raw words `e3a00906 e12fff1e` decode to
+/// `mov r0,#0x18000; bx lr`. Whole-image aligned A32 decoding verifies
+/// two inbound plain BLs (`0x080a6c84`, `0x080b5210`), zero predicated
+/// BLs, and no outbound calls.
+///
+/// Return the fixed start offset subtracted from [`iram_copy_end_offset`]
+/// by both callers to obtain the byte count copied from IRAM mirror
+/// `0x22000000`. No memory access, arguments, or deliberate deviations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn iram_copy_start_offset() -> u32 {
+    0x0001_8000
+}
+
+#[cfg(test)]
+mod iram_copy_start_offset_tests {
+    use super::iram_copy_start_offset;
+
+    #[test]
+    fn caller_byte_count_preserves_zero_and_unsigned_wraparound() {
+        // The callers use ARM SUB without saturating or validating the end.
+        for (end, expected) in [
+            (0x18000u32, 0),
+            (0x18001, 1),
+            (0x24000, 0xc000),
+            (0x17fff, u32::MAX),
+            (0, 0xfffe_8000),
+            (u32::MAX, 0xfffe_7fff),
+        ] {
+            assert_eq!(end.wrapping_sub(iram_copy_start_offset()), expected);
+        }
+    }
+}
+
 #[cfg(not(target_os = "none"))]
 static mut HOST_IRAM_COPY_END_OFFSET: u32 = u32::MAX;
 
