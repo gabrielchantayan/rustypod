@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const DESCRIPTOR_VARIANT_INDEX: usize = 0x7480_0000;
     // Dedicated target-width Parse/Vdbe fixture; mappings never unmap.
     pub const SQLITE_EMIT_AUTOINCREMENT_STEP: usize = 0x7470_0000;
     // Target-width incremental-blob, cursor, Btree, and database fixtures.
