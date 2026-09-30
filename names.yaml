@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a7d8c
+    ghidra: FUN_082a7d8c
+    name: opaque_refcounted_record_assign
+    size: 32
+    sig: "OpaqueRefcountedRecord *opaque_refcounted_record_assign(OpaqueRefcountedRecord *dst, const OpaqueRefcountedRecord *src)"
+    module: cxx/opaque_refcounted_record_assign
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1: src
+      record_plus_0: word
+      record_plus_4: handle
+      FUN_082a8c04: opaque_refcounted_assign
+      return/r0: dst
+    notes: >-
+      Raw words e92d4010 e1a04000 e4910004 e5840000 e2840004 eb000397
+      e1a00004 e8bd8010 establish 32 bytes through pop at 0x082a7da8.
+      Next independently entered function starts at 0x082a7dac, with inbound
+      branches including 0x081cdbf8. Whole-image aligned A32 decoding finds
+      two inbound plain BLs at 0x082a7120 and 0x082a7150, one outbound
+      plain BL at 0x082a7da0 to canonical opaque_refcounted_assign at
+      0x082a8c04, and zero predicated BLs in either direction. Callers
+      traverse eight-byte records. Copy the leading word before assigning
+      the following handle and return original dst, ignoring callee return.
+      No class identity or new seam is inferred. Deliberate deviation:
+      repr(C) native-width host pointer and alignment; target handle is +4.
+      Tests cover equal and NULL handles, self-assignment, wrapping retain
+      and release, unchanged source and object prefixes, and pointer return.
+      All 13245 host tests and ARM release build pass. Actual-source standalone
+      smoke verifies word copy, replacement, retain overflow, release, alias
+      and return; it does not exercise final destruction. match.py reports
+      eight instructions on both sides, preserving copy-before-call and
+      destination return; LLVM changes registers and frame setup and uses
+      post-indexed destination store. R_ARM_CALL resolves the single BL to
+      opaque_refcounted_assign. Its existing final-release tests are unchanged.
   - address: 0x082a7ec8
     ghidra: FUN_082a7ec8
     name: pooled_rb_tree_destruct

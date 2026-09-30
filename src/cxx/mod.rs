@@ -5,6 +5,7 @@
 pub mod bit_set;
 pub mod opaque_buffer_owner_destroy;
 pub mod opaque_refcounted_assign;
+pub mod opaque_refcounted_record_assign;
 pub mod opaque_refcounted_copy_construct;
 pub mod opaque_refcounted_construct;
 pub mod opaque_header_089a8a3c_construct;
