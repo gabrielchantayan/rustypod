@@ -66,6 +66,32 @@ pub struct WordList {
     pub entries: *mut u32,
 }
 
+/// word_list_test_bit — original: `FUN_082b79c0` @ 0x082b79c0.
+///
+/// True extent: 28 bytes, seven ARM words through `bx lr` at 0x082b79d8;
+/// the next independent function starts with `push {r4-r10, lr}` at
+/// 0x082b79dc. Raw binary scan finds two plain incoming `bl` calls
+/// (0x082cb260, 0x082cb370), zero predicated `bl` calls, and no outgoing calls.
+///
+/// Reads `entries[bit_index >> 5]` and returns its intersection with
+/// `1 << (bit_index & 31)`. The result is the bit mask, not normalized to 1.
+/// Neither count nor capacity is consulted. Callers test the result against
+/// zero while iterating the bits of a multiword operand.
+///
+/// Deliberate deviations: none on target. Host fixtures use the existing
+/// native-pointer `WordList` layout rather than literal target byte offsets.
+///
+/// # Safety
+///
+/// `value` must point to a valid header with aligned readable entries through
+/// `bit_index >> 5`, even when that index is outside the active count.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn word_list_test_bit(value: *const WordList, bit_index: u32) -> u32 {
+    let word = (*value).entries.add((bit_index >> 5) as usize).read();
+    word & (1u32 << (bit_index & 31))
+}
+
 /// word_list_copy — original: `FUN_082d27a8` @ 0x082d27a8 (44 bytes).
 ///
 /// Copies `src`'s element words and count into `dst`'s own buffer,
@@ -245,6 +271,33 @@ mod tests {
             capacity: buf.len() as u16,
             entries: buf.as_mut_ptr(),
         }
+    }
+
+    #[test]
+    fn bit_test_returns_exact_masks_across_word_boundaries() {
+        let mut words = [0x8000_0001, 0x5555_5555, 0xaaaa_aaaa, u32::MAX, 0];
+        let value = list(&mut words, 5);
+        for bit_index in 0..160u32 {
+            // Independent byte-oriented reference for the little-endian words.
+            let byte = words[(bit_index / 32) as usize].to_le_bytes()
+                [((bit_index / 8) & 3) as usize];
+            let expected = if byte & (1 << (bit_index & 7)) != 0 {
+                1u32 << (bit_index % 32)
+            } else {
+                0
+            };
+            assert_eq!(unsafe { super::word_list_test_bit(&value, bit_index) }, expected);
+        }
+        assert_eq!(words, [0x8000_0001, 0x5555_5555, 0xaaaa_aaaa, u32::MAX, 0]);
+    }
+
+    #[test]
+    fn bit_test_reads_storage_even_outside_count_and_capacity() {
+        let mut words = [0, 0x8000_0001];
+        let value = WordList { count: 0, capacity: 0, entries: words.as_mut_ptr() };
+        assert_eq!(unsafe { super::word_list_test_bit(&value, 32) }, 1);
+        assert_eq!(unsafe { super::word_list_test_bit(&value, 63) }, 0x8000_0000);
+        assert_eq!(unsafe { super::word_list_test_bit(&value, 62) }, 0);
     }
 
     #[test]
