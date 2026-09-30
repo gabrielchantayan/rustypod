@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082b332c
+    ghidra: thunk_FUN_082b3334
+    name: byte_range_is_spaces
+    size: 56
+    sig: "u32 byte_range_is_spaces(const u8 *bytes, i32 len)"
+    module: libc/byte_range_is_spaces
+    status: ported
+    renames:
+      param_1/r0: bytes
+      param_2/r1: remaining
+      r2: current_byte
+    notes: >-
+      Raw A32 establishes the complete 56-byte extent 0x082b332c..0x082b3364,
+      before the next independent push prologue. Ghidra reports only the
+      four-byte entry branch to 0x082b3334; the loop decrement at 0x082b3330
+      is part of the same implementation. Whole-image aligned branch decoding
+      finds two plain inbound BLs at 0x082b7844 and 0x082b7858, no predicated
+      inbound BLs, and no outbound calls. The caller at 0x082b77f8 compares
+      common prefixes and accepts remaining suffixes only if they are spaces.
+      Scan backward for ASCII 0x20, fail at the first other byte, accept zero
+      length, and reject negative signed lengths without reading memory.
+      Neither entry nor shared interior entry has an existing names.yaml mapping;
+      no callee seam is needed. Deliberate deviations are volatile byte reads
+      preserving access order and preventing builtin substitution, and no separate
+      interior-entry export. Host tests cover lengths 0..64, alignments 0..3,
+      every mismatch position, all byte values, and null nonpositive inputs.
+      All 13208 host tests and the ARM release build pass. Standalone smoke
+      verifies spaces, an interior mismatch, tab, zero and negative lengths.
+      The required match.py run sees only Ghidra's four-byte thunk; --size 56
+      compares 14 original and 14 Rust instructions. The signed guard, backward
+      byte loop, mismatch exit and exact zero test remain; LLVM adds a frame
+      and uses CLZ/LSR for the final boolean. Both diffs exit 1 as expected.
   - address: 0x082b4648
     ghidra: FUN_082b4648
     name: format_repeat_literal

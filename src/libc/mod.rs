@@ -6,6 +6,7 @@ pub mod byte_copy_signed;
 pub mod byte_fill;
 pub mod swap_byte_ranges;
 pub mod byte_ranges_equal;
+pub mod byte_range_is_spaces;
 pub mod forward_byte_copy;
 pub mod forward_byte_copy_returning_dst;
 pub mod null_guarded_forward_byte_copy;
