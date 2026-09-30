@@ -11,6 +11,7 @@ pub mod chval;
 pub mod cpp_array_construct;
 pub mod cpp_array_allocate;
 pub mod cpp_array_allocate_without_header;
+pub mod cpp_array_allocate_with_callbacks;
 pub mod ctype;
 pub mod cxa_atexit_veneer;
 pub mod cxa_guard_acquire_veneer;

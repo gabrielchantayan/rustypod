@@ -164317,3 +164317,40 @@ functions:
       callees with low-address buffers and allocation slots, verifying
       abc plus NUL, count one, owned pointer, and NULL sentinel. Device
       execution is not tested.
+
+  - address: 0x082ab454
+    ghidra: FUN_082ab454
+    name: cpp_array_allocate_with_callbacks
+    size: 96
+    sig: "u32 *cpp_array_allocate_with_callbacks(u32 element_count, u32 element_size, u32 allocation_header_bytes, u32 element_initializer, u32 initializer_context, u32 allocator_callback, u32 allocator_context)"
+    module: runtime/cpp_array_allocate_with_callbacks
+    status: ported
+    renames:
+      param_1: element_count
+      param_2: element_size
+      param_3: allocation_header_bytes
+      param_4: element_initializer
+      param_5: initializer_context
+      param_6: allocator_callback
+      param_7: allocator_context
+    notes: >-
+      Raw osos.dec establishes the 96-byte extent 0x082ab454..0x082ab4b4,
+      where the next independently linked function starts with a prologue.
+      Full aligned A32 BL decoding finds two plain incoming calls at
+      0x08267000 and 0x082a70f4, zero predicated incoming calls, and one
+      outgoing plain BL to 0x082b498c with no predicated body calls.
+      The seven input words become (0, count, size, header_bytes, 0,
+      initializer, initializer_context, allocator, allocator_context, 0, 0).
+      The pointer result remains in r0 through the epilogue; Ghidra's void
+      return is incorrect. The helper has no standalone names entry and is
+      already represented by PairHeaderElementArrayOps; this port reuses
+      that exact eleven-word seam without porting or renaming the helper.
+      Host behavioral fixtures cover allocated headers and initialized
+      elements, zero-count construction suppression, and allocation failure.
+      All 13215 host tests pass and the ARM release build succeeds.
+      match.py exits 1 with an expected structural diff: LLVM uses a frame
+      pointer and an indirect BLX through the seam instead of the stock
+      direct BL, preserving all register/stack slots and the pointer return.
+      Standalone host smoke executes the actual adapter and verifies all
+      eleven ABI slots with extreme opaque words and the raw pointer result.
+      Device execution is not tested.
