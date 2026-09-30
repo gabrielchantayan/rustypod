@@ -34,6 +34,7 @@ mod tests {
 
     #[test]
     fn returns_false_for_no_pin_without_observing_gpio() {
+        let _guard = host_gpio_data::LOCK.lock();
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(host_gpio_data::DATA_WORD), 0xff);
             assert_eq!(gpio_pin_is_high(0xc8), 0);
@@ -42,6 +43,7 @@ mod tests {
 
     #[test]
     fn normalizes_gpio_read_result_for_set_and_clear_bits() {
+        let _guard = host_gpio_data::LOCK.lock();
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(host_gpio_data::DATA_WORD), 0x80);
             assert_eq!(gpio_pin_is_high(7), 1);

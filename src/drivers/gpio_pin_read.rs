@@ -53,6 +53,8 @@ unsafe fn gpio_data_read(pin_id: u32) -> u32 {
 #[cfg(not(target_arch = "arm"))]
 pub(crate) mod host_gpio_data {
     pub static mut DATA_WORD: u32 = 0;
+    #[cfg(test)]
+    pub static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 }
 
 #[cfg(not(target_arch = "arm"))]
@@ -89,6 +91,7 @@ mod tests {
 
     #[test]
     fn entry_point_writes_normalized_level_and_returns_zero() {
+        let _guard = host_gpio_data::LOCK.lock();
         unsafe {
             core::ptr::write_volatile(core::ptr::addr_of_mut!(host_gpio_data::DATA_WORD), 0x80);
             let mut out = 0xffff_ffff;

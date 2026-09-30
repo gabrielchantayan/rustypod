@@ -48583,6 +48583,33 @@ functions:
       stand-in data word rather than mapped GPIO MMIO; ARM reads the exact
       volatile register address.
 
+  # --- GPIO-selected storage-backend status ---
+  - address: 0x082bc488
+    ghidra: FUN_082bc488
+    name: storage_backend_pin_89_status
+    size: 48
+    sig: "u32 storage_backend_pin_89_status(void)"
+    module: drivers/storage_backend_pin_89_status
+    status: ported
+    renames:
+      local_8[0]/[sp]: pin_level
+      iVar1/r0_after_call: read_status
+      uVar2/r0: storage_backend_status_code
+      FUN_0836b6cc: gpio_pin_read
+    notes: >-
+      Raw extent is 48 bytes at 0x082bc488..0x082bc4b7; independently
+      called function 0x082bc4b8 starts with push {r3,r4,r5,lr}. Full raw
+      ARM scan finds two unconditional BL callers at 0x08283b44 and
+      0x082bc774, zero predicated BL callers, and one outgoing BL at
+      0x082bc494 to gpio_pin_read. storage_backend_status also tail-branches
+      here. Reads pin 0x59 (port 11, bit 1), returns 0 on read failure,
+      2 for a zero level, and 3 for any nonzero level. Incoming r3 is only
+      saved into the output stack slot, not consumed as an argument;
+      Rust initializes this local because the verified callee overwrites it.
+      Host tests cover level boundaries, error precedence, and board-selector
+      integration with real GPIO reads. LLVM removes the failure branch
+      because gpio_pin_read always returns zero; the BL and level mapping
+      remain. Hardware execution was not tested.
   # --- GPIO pin level predicate ---
   - address: 0x082743a0
     ghidra: FUN_082743a0
@@ -84839,10 +84866,8 @@ functions:
     status: ported
     renames:
       FUN_080e624c: board_version
-      FUN_082bc488: >-
-        storage_backend_pin_89_status (unported tail target: calls
-        gpio_pin_read(0x59) and maps its output to status 2 or 3)
-      FUN_0836b6cc: gpio_pin_read (callee of the unported tail target)
+      FUN_082bc488: storage_backend_pin_89_status
+      FUN_0836b6cc: gpio_pin_read (callee of the ported tail target)
     notes: >-
       Raw ARM confirms Ghidra's 132-byte extent: 33 words from 0x082bc7c4
       through 0x082bc844; 0x082bc848 begins the next independently entered
@@ -84854,10 +84879,10 @@ functions:
       0; 13, 15..18, and 20 return 4; 1..12, 19, and 21 tail-call the
       pin-0x59 status target. The tail target's raw body invokes
       gpio_pin_read(0x59,&out), returning 2 when out is zero and 3 otherwise.
-      Deliberate deviation: board_version is called through its existing Rust
-      port; the unported tail target remains a fixed-address target seam on
-      firmware and a replaceable host callback. Host tests cover every switch
-      boundary and prove only the tail cases invoke that callback.
+      Deliberate deviation: board_version and storage_backend_pin_89_status
+      are called through their Rust ports. Host tests cover switch boundaries
+      and exercise high and low GPIO levels for each tail-selected board
+      generation; the obsolete fixed-address and host callback seams are gone.
   # --- retailOS Ide1 storage-backend deactivation ---
   - address: 0x0836bc9c
     ghidra: FUN_0836bc9c
