@@ -22,34 +22,19 @@
 //!
 //! The state embeds an array-like object at target offset `+0xe8`. This wrapper
 //! passes that object, `item_index`, and a pointer to its stack-resident
-//! `fallback_item` to the stock `0x082a4d10` array dispatch, then returns the
+//! `fallback_item` to ported `observable_array_read_at`, then returns the
 //! resulting output word. The callee's boolean result is deliberately ignored.
 //!
 //! # Deliberate deviation
 //!
-//! `FUN_082a4d10` has no recovered concrete identity or Rust port. The target
-//! calls it at its fixed retail address; host tests replace that one explicit
-//! boundary with a typed callback. The target uses a four-byte stack word,
-//! whereas the host callback receives a native pointer to the same `u32` value.
+//! Target assembly preserves the original caller's r3 fallback word. Host
+//! code uses a native stack pointer and the read wrapper's widened vtable.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
 
 const EMBEDDED_ARRAY_OFFSET: usize = 0xe8;
 
-type ArrayCopyDispatch = unsafe extern "C" fn(*mut u8, i32, *mut u32) -> u32;
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_array_copy_dispatch(
-    _array: *mut u8,
-    _item_index: i32,
-    _output: *mut u32,
-) -> u32 {
-    panic!("selection_state_copy_item_at requires dispatch 0x082a4d10")
-}
-
-#[cfg(not(target_os = "none"))]
-static mut ARRAY_COPY_DISPATCH: ArrayCopyDispatch = missing_array_copy_dispatch;
 
 #[cfg(target_os = "none")]
 core::arch::global_asm!(
@@ -61,13 +46,10 @@ selection_state_copy_item_at:
     push    {{r3,lr}}
     mov     r2,sp
     add     r0,r0,#0xe8
-    bl      .Lretail_array_copy_dispatch
+    bl      observable_array_read_at
     ldr     r0,[sp]
     pop     {{r12,pc}}
     .size selection_state_copy_item_at, .-selection_state_copy_item_at
-.Lretail_array_copy_dispatch:
-    ldr     pc,[pc,#-4]
-    .word   0x082a4d10
 "#
 );
 
@@ -92,69 +74,46 @@ pub unsafe extern "C" fn selection_state_copy_item_at(
     fallback_item: u32,
 ) -> u32 {
     let mut item = fallback_item;
-    let dispatch = ptr::read_volatile(ptr::addr_of!(ARRAY_COPY_DISPATCH));
-    dispatch(selection_state.add(EMBEDDED_ARRAY_OFFSET), item_index, ptr::addr_of_mut!(item));
+    crate::cxx::observable_array::observable_array_read_at(
+        selection_state.add(EMBEDDED_ARRAY_OFFSET).cast(), item_index,
+        ptr::addr_of_mut!(item).cast(),
+    );
     item
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use super::*;
-    use crate::testing::SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK;
-
-    static mut EXPECTED_ARRAY: *mut u8 = ptr::null_mut();
-    static mut RECORDED_INDEX: i32 = 0;
-    static mut RESULT: u32 = 0;
-    static mut WRITE_RESULT: bool = false;
-
-    unsafe extern "C" fn recording_dispatch(array: *mut u8, item_index: i32, output: *mut u32) -> u32 {
-        assert_eq!(array, ptr::addr_of!(EXPECTED_ARRAY).read());
-        ptr::addr_of_mut!(RECORDED_INDEX).write(item_index);
-        if ptr::addr_of!(WRITE_RESULT).read() {
-            output.write(ptr::addr_of!(RESULT).read());
-        }
-        0
-    }
-
-    struct DispatchGuard(ArrayCopyDispatch);
-    impl Drop for DispatchGuard {
-        fn drop(&mut self) {
-            unsafe { ptr::addr_of_mut!(ARRAY_COPY_DISPATCH).write_volatile(self.0) }
-        }
-    }
-
-    unsafe fn install(expected_array: *mut u8, result: u32, write_result: bool) -> DispatchGuard {
-        ptr::addr_of_mut!(EXPECTED_ARRAY).write(expected_array);
-        ptr::addr_of_mut!(RECORDED_INDEX).write(0);
-        ptr::addr_of_mut!(RESULT).write(result);
-        ptr::addr_of_mut!(WRITE_RESULT).write(write_result);
-        let seam = ptr::addr_of_mut!(ARRAY_COPY_DISPATCH);
-        let previous = seam.read_volatile();
-        seam.write_volatile(recording_dispatch);
-        DispatchGuard(previous)
-    }
+    use crate::cxx::observable_array::{
+        ObservableArray, ObservableArrayReadHost, ObservableArrayReadVtable,
+    };
 
     #[test]
-    fn returns_the_dispatch_written_item_and_passes_embedded_array() {
-        let _lock = SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK.lock();
-        let mut selection_state = [0u8; EMBEDDED_ARRAY_OFFSET + 4];
-        unsafe {
-            let _guard = install(selection_state.as_mut_ptr().add(EMBEDDED_ARRAY_OFFSET), 0xa5a5_5a5a, true);
-            assert_eq!(selection_state_copy_item_at(selection_state.as_mut_ptr(), -7, 0), 0xa5a5_5a5a);
-            assert_eq!(ptr::addr_of!(RECORDED_INDEX).read(), -7);
+    fn indexed_copy_keeps_fallback_only_when_index_is_invalid() {
+        unsafe extern "C" fn copy(
+            _: *mut ObservableArray, index: i32, output: *mut u8,
+        ) -> u32 {
+            output.cast::<u32>().write(0x1234_0000 + index as u32);
+            0
         }
-    }
-
-    #[test]
-    fn preserves_fallback_when_dispatch_leaves_output_unchanged() {
-        let _lock = SELECTION_STATE_COPY_ITEM_AT_TEST_LOCK.lock();
-        let mut selection_state = [0u8; EMBEDDED_ARRAY_OFFSET + 4];
+        #[repr(C)]
+        struct Selection {
+            prefix: [u8; EMBEDDED_ARRAY_OFFSET],
+            array: ObservableArrayReadHost,
+        }
+        let vtable = ObservableArrayReadVtable {
+            unresolved_00_a0: [0; 41], read_element: copy,
+        };
+        let mut selection = Selection {
+            prefix: [0; EMBEDDED_ARRAY_OFFSET],
+            array: ObservableArrayReadHost { vtable: &vtable, len: 3 },
+        };
+        let state = (&mut selection as *mut Selection).cast();
         unsafe {
-            let _guard = install(selection_state.as_mut_ptr().add(EMBEDDED_ARRAY_OFFSET), 0, false);
-            assert_eq!(selection_state_copy_item_at(selection_state.as_mut_ptr(), 0x7fff_ffff, 0xdec0_de01), 0xdec0_de01);
-            assert_eq!(ptr::addr_of!(RECORDED_INDEX).read(), 0x7fff_ffff);
+            assert_eq!(selection_state_copy_item_at(state, i32::MAX, 0xdead_beef), 0x1234_0002);
+            assert_eq!(selection_state_copy_item_at(state, 3, 0xdead_beef), 0xdead_beef);
+            selection.array.len = 0;
+            assert_eq!(selection_state_copy_item_at(state, i32::MAX, 0xdead_beef), 0xdead_beef);
         }
     }
 }

@@ -546,6 +546,91 @@ pub unsafe extern "C" fn observable_array_index_is_valid(
     (len > index) as i32
 }
 
+/// Host-width representation of the indexed output dispatch at target +0xa4.
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayReadHost {
+    pub vtable: *const ObservableArrayReadVtable,
+    pub len: i32,
+}
+
+pub type ObservableArrayReadElement =
+    unsafe extern "C" fn(*mut ObservableArray, i32, *mut u8) -> u32;
+
+#[cfg(not(target_arch = "arm"))]
+#[repr(C)]
+pub struct ObservableArrayReadVtable {
+    pub unresolved_00_a0: [usize; 41],
+    pub read_element: ObservableArrayReadElement,
+}
+
+#[cfg(all(not(target_arch = "arm"), target_pointer_width = "32"))]
+const _: [u8; 0xa4] = [0; core::mem::offset_of!(ObservableArrayReadVtable, read_element)];
+
+/// observable_array_read_at — `FUN_082a4d10` @ 0x082a4d10.
+///
+/// True size: 96 bytes, ending with pop at 0x082a4d6c; the next real
+/// function starts at 0x082a4d70 with mov r2,r0. Whole-image raw ARM decoding
+/// finds two incoming plain BL sites (0x081bad90 and 0x08203464), zero
+/// predicated BL sites. The body has one plain BL to the ported signed index
+/// validator and one indirect BLX through vtable +0xa4.
+///
+/// Resolve INT_MAX to len-1 only for a positive signed length, validate the
+/// resulting index, and dispatch (this,index,output) through +0xa4 on success.
+/// Return exactly 0 or 1, ignoring the virtual return. Both callers pass an
+/// initialized output word and consume it afterwards; invalid indices leave
+/// it untouched. No concrete virtual callee identity is asserted.
+///
+/// Deliberate host deviation: a widened vtable fixture and signed length
+/// comparison replace the target-width object read and direct validator call,
+/// following the erase wrapper's convention. Target behavior is unchanged.
+///
+/// # Safety
+///
+/// Nonnegative indices and the sentinel require a readable array. Successful
+/// validation additionally requires a readable vtable and valid +0xa4 callback;
+/// output must satisfy that concrete callback's contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_read_at(
+    this: *mut ObservableArray,
+    mut index: i32,
+    output: *mut u8,
+) -> i32 {
+    if index == crate::cxx::array_element_at::LAST_ELEMENT_INDEX {
+        #[cfg(target_arch = "arm")]
+        let len_ptr = core::ptr::addr_of!((*this).len).cast::<i32>();
+        #[cfg(not(target_arch = "arm"))]
+        let len_ptr = core::ptr::addr_of!((*this.cast::<ObservableArrayReadHost>()).len);
+        let len = len_ptr.read_volatile();
+        if len > 0 {
+            index = len - 1;
+        }
+    }
+    #[cfg(target_arch = "arm")]
+    let valid = observable_array_index_is_valid(this, index) != 0;
+    #[cfg(not(target_arch = "arm"))]
+    let valid = index >= 0
+        && core::ptr::addr_of!((*this.cast::<ObservableArrayReadHost>()).len)
+            .read_volatile() > index;
+    if !valid {
+        return 0;
+    }
+    #[cfg(target_arch = "arm")]
+    let read_element: ObservableArrayReadElement = {
+        let vtable = core::ptr::addr_of!((*this).base.vtable).read_volatile() as *const u32;
+        core::mem::transmute(vtable.add(0xa4 / 4).read_volatile())
+    };
+    #[cfg(not(target_arch = "arm"))]
+    let read_element = {
+        let vtable = core::ptr::addr_of!((*this.cast::<ObservableArrayReadHost>()).vtable)
+            .read_volatile();
+        core::ptr::addr_of!((*vtable).read_element).read_volatile()
+    };
+    read_element(this, index, output);
+    1
+}
+
 /// Direct-call boundary for `FUN_082a4c74` @ 0x082a4c74, the observer
 /// broadcast following an erase. Its concrete observer callback is unported.
 #[cfg(target_os = "none")]
@@ -1036,6 +1121,51 @@ mod tests {
                 "len {len}, index {index}"
             );
         }
+    }
+
+    #[test]
+    fn indexed_read_resolves_sentinel_and_preserves_output_on_rejection() {
+        #[repr(C)]
+        struct Output {
+            receiver: *mut ObservableArray,
+            index: i32,
+        }
+        unsafe extern "C" fn read(
+            this: *mut ObservableArray, index: i32, output: *mut u8,
+        ) -> u32 {
+            output.cast::<Output>().write(Output { receiver: this, index });
+            0 // A zero virtual return must not turn success into failure.
+        }
+        let vtable = ObservableArrayReadVtable {
+            unresolved_00_a0: [0; 41],
+            read_element: read,
+        };
+        for len in [i32::MIN, -1, 0, 1, 3, i32::MAX] {
+            for requested in [i32::MIN, -1, 0, 1, 2, 3, i32::MAX - 1, i32::MAX] {
+                let mut array = ObservableArrayReadHost { vtable: &vtable, len };
+                let this = (&mut array as *mut ObservableArrayReadHost).cast();
+                let mut output = Output { receiver: core::ptr::null_mut(), index: -99 };
+                let resolved = if requested == i32::MAX && len > 0 {
+                    len - 1
+                } else {
+                    requested
+                };
+                let expected = resolved >= 0 && resolved < len;
+                let result = unsafe {
+                    observable_array_read_at(this, requested, (&mut output as *mut Output).cast())
+                };
+                assert_eq!(result, expected as i32, "len {len}, index {requested}");
+                assert_eq!(output.index, if expected { resolved } else { -99 });
+                assert_eq!(output.receiver, if expected { this } else { core::ptr::null_mut() });
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_read_negative_index_does_not_dereference_null_array() {
+        assert_eq!(unsafe {
+            observable_array_read_at(core::ptr::null_mut(), -1, core::ptr::null_mut())
+        }, 0);
     }
 
     #[test]
