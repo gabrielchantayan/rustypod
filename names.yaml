@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8c64
+    ghidra: FUN_082a8c64
+    name: opaque_header_089a8a0c_construct
+    size: 28
+    sig: "u32 *opaque_header_089a8a0c_construct(u32 *this, u32 payload)"
+    module: cxx/opaque_header_089a8a0c_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_082a8c7c: opaque_header_089a8a0c
+      FUN_082a89b4: opaque_header_payload_construct
+    notes: >-
+      Raw A32 establishes six instructions and the literal 0x089a8a0c
+      at 0x082a8c7c, giving 28 bytes before the independent function at
+      0x082a8c80; Ghidra excludes the literal. Two inbound plain BLs at
+      0x083b6328 and 0x083b6c7c, zero predicated BLs. One outbound plain
+      BL to the already-ported opaque_header_payload_construct, zero
+      predicated BLs. Initialize words to [opaque header, 32, 0, payload]
+      and return this unchanged; the caller stores through returned r0
+      at 0x083b6c80 despite Ghidra's void signature. No inferred class
+      identity, extra guards, new seams, or behavioral deviations.
+      Host tests cover zero and full-width payloads, adjacent-word
+      preservation, pointer return and reconstruction of dirty state.
+      Host suite and ARM release build pass. match.py shows six original
+      versus eight Rust lines, retaining the argument constant, base
+      call, literal and header store; LLVM adds a frame-pointer save.
+      Standalone host smoke verifies a high-bit payload, exact four-word
+      initialization, adjacent sentinels and unchanged pointer return.
+      ARM relocation confirms the BL targets opaque_header_payload_construct.
   - address: 0x082a95f0
     ghidra: FUN_082a95f0
     name: cxx_string_triple_member_destroy
