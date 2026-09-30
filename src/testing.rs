@@ -1303,6 +1303,8 @@ pub mod hints {
     // raw-u32 reference/target fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const ELEMENT_REFERENCE_TARGET_FLAG_BIT_0: usize = 0x6a00_0000;
+    // Dedicated raw-u32 reference/vtable/target fixture; mappings never unmap.
+    pub const ELEMENT_REFERENCE_TARGET_FLAG_BIT_6: usize = 0xd710_0000;
     // 0x6800_0000: dedicated to cxx/tagged_record's raw-u32 payload field
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const TAGGED_RECORD_PAYLOAD_LITI_CLASS_CHECK: usize = 0x6800_0000;

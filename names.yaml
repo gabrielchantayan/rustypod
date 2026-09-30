@@ -43387,6 +43387,33 @@ functions:
       LLVM lowers the cookie test to two ldr + orrs instead of
       ldrd + cmp/cmpeq and adds its sl/fp frame.
 
+  - address: 0x082a6738
+    ghidra: FUN_082a6738
+    name: ui_element_reference_target_flag_bit_6
+    size: 52
+    sig: "u32 ui_element_reference_target_flag_bit_6(const UiElementReference *reference)"
+    module: ui/element_reference_target_flag_bit_6
+    status: ported
+    vars: {param_1: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": target, "target+0x18c": flag_byte}
+    notes: >-
+      Raw extent 0x082a6738..0x082a676c is 52 bytes; the next function
+      starts with add r0,r0,#0x34 and a tail branch to 0x083d68dc.
+      Independently decoded ARM branch words identify two unconditional
+      direct BL callers, 0x081749d0 and 0x08239a5c, and zero predicated
+      BL callers. The body makes one indirect BLX through vtable slot 3.
+      Zero resolve result returns zero without reading the target; any
+      nonzero result loads the post-resolve target at reference+4 and
+      returns (target[0x18c] & 0x40) >> 6. The flag's identity remains
+      unestablished. Runtime dispatch is preserved without inventing a
+      callee seam, following the sibling property readers. Host vtables
+      hold native-width function pointers; reference links stay u32.
+      Tests cover failed resolve with an unreadable target, all 256 flag
+      bytes with three nonzero resolve values, and target replacement
+      during resolve. No deliberate target behavior deviations.
+      match.py confirms resolve dispatch and conditional target-byte load;
+      LLVM uses and with a shifted operand to extract bit 6 and adds
+      sl/fp frame saves. Structural diff is intentional, not byte-identical.
+
   - address: 0x082a2330
     ghidra: FUN_082a2330
     name: rect_height
