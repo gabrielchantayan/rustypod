@@ -3,6 +3,7 @@ pub mod civil;
 pub mod calendar_schedule;
 pub mod calendar_update_fields;
 pub mod clock_state;
+pub mod clock_gettime;
 pub mod compare_clock_records;
 pub mod daylight_saving_offset_is_nonzero;
 pub mod current_day_and_seconds;
