@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a7ec8
+    ghidra: FUN_082a7ec8
+    name: pooled_rb_tree_destruct
+    size: 136
+    sig: "uint32_t *pooled_rb_tree_destruct(uint32_t *tree)"
+    module: app/pooled_rb_tree_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: tree
+      r5: chunk
+      local_18: end
+      local_14: first
+      uStack_10: erased_iterator
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw ARM extent is 0x082a7ec8..0x082a7f4f; the next real prologue
+      begins at 0x082a7f50. Three plain internal BLs at 0x082a7efc,
+      0x082a7f28, and 0x082a7f38 call 0x083bc500 once and the registered
+      cxx_array_dealloc at 0x08266f2c twice. There are no predicated BLs.
+      Whole-image word decoding finds two plain inbound BLs, at 0x08124f40
+      and 0x0812529c, with no predicated inbound calls.
+      With a non-null header, erase [header->left, header), reread the header,
+      link it onto tree word one, then unlink and release every chunk's
+      block and the chunk itself. A null header skips all work. Target
+      fields remain aligned four-byte words. Saved scratch arguments and
+      the Ghidra double-word return are not semantic ABI values; return
+      only tree. The verified erase specialization has no names.yaml
+      identity and remains an ARM address seam rather than an invented
+      callee port. Share the identical teardown algorithm with the
+      0x082a8280 specialization. Host tests cover post-erase header
+      replacement, unlink-before-free, multi-chunk release order, null
+      zero-capacity blocks, and null-header preservation. All 13243 host
+      tests and the ARM release build pass. match.py reports 34 original
+      and 34 Rust instructions with matching guard, erase, recycle, and
+      chunk loop; LLVM uses BLX for the fixed erase seam and eliminates
+      unused deallocator size arguments. Isolated actual-source public-entry
+      smoke confirms the null-header path; the complete non-test host crate
+      build is blocked by six unrelated unresolved functions.
   - address: 0x082a8418
     ghidra: FUN_082a8418
     name: word_key_tree_pool_destruct
