@@ -11,9 +11,9 @@
 //! `0x082ab400` helper ABI as `(null, element_count, element_size, 0, 0,
 //! element_initializer, 0, 0, 0, 0, 0)` and returns the helper result.
 //!
-//! Deliberate deviation: the shared helper at `0x082b498c` remains unported,
-//! so this uses its existing exact-ABI `PAIR_HEADER_ELEMENT_ARRAY_OPS` seam
-//! rather than naming or reimplementing that helper.
+//! Deliberate deviation: the shared helper remains behind the existing
+//! exact-ABI seam in `cpp_array_allocate_helper_adapter`; this wrapper now
+//! follows the original call path through that adapter.
 
 /// Allocates an ARM ADS array without an allocation header.
 ///
@@ -25,20 +25,8 @@ pub unsafe extern "C" fn cpp_array_allocate_without_header(
     element_count: u32,
     element_initializer: u32,
 ) -> *mut u32 {
-    let allocate = core::ptr::addr_of!(crate::cxx::pair_header::PAIR_HEADER_ELEMENT_ARRAY_OPS.reset)
-        .read_volatile();
-    allocate(
-        core::ptr::null_mut(),
-        element_count,
-        element_size,
-        0,
-        0,
-        element_initializer,
-        0,
-        0,
-        0,
-        0,
-        0,
+    super::cpp_array_allocate_helper_adapter::cpp_array_allocate_helper_adapter(
+        element_count, element_size, 0, element_initializer, 0,
     )
 }
 

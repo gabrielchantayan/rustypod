@@ -69444,6 +69444,36 @@ functions:
       helper's identity; host tests verify literal slots, opaque extreme words,
       one call, and r0-result forwarding.
 
+  - address: 0x082ab400
+    ghidra: FUN_082ab400
+    name: cpp_array_allocate_helper_adapter
+    size: 84
+    sig: "u32 *cpp_array_allocate_helper_adapter(u32 element_count, u32 element_size, u32 allocation_header_bytes, u32 element_initializer, u32 initializer_context)"
+    module: runtime/cpp_array_allocate_helper_adapter
+    status: ported
+    renames:
+      param_1: element_count
+      param_2: element_size
+      param_3: allocation_header_bytes
+      param_4: element_initializer
+      param_5: initializer_context
+      FUN_082b498c: unported_array_helper (existing PairHeaderElementArrayOps seam)
+    notes: >-
+      Raw A32 establishes the exact 84-byte extent 0x082ab400..0x082ab454,
+      ending at the next real prologue. Independent aligned BL-word decoding
+      finds two incoming plain BLs at 0x082ab280 and 0x082ab2a8, zero
+      predicated; the body has one plain BL at 0x082ab448 to 0x082b498c,
+      zero predicated. Expands five arguments into (null, element_count,
+      element_size, allocation_header_bytes, 0, element_initializer,
+      initializer_context, 0, 0, 0, 0) without arithmetic or validation.
+      The helper result survives unchanged in r0, correcting Ghidra's void
+      return. Deliberate deviation: reuses the existing exact eleven-word
+      PairHeaderElementArrayOps seam for the unported dependency rather than
+      implementing its allocation algorithm. Both existing Rust caller
+      wrappers now follow this adapter. Host behavioral fixtures exercise
+      array header placement, element initialization, empty arrays and null
+      allocation results.
+
   - address: 0x082ab288
     ghidra: FUN_082ab288
     name: cpp_array_allocate_without_header
