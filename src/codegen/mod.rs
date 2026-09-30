@@ -62,6 +62,9 @@ pub mod heap;
 /// `cg_interference_edge_link` @ 0x082b2e98 — prepends a missing
 /// target-width edge identity to a code-generator interference list.
 pub mod interference;
+/// `cg_block_successor_prepend` @ 0x082b2f60 — prepends a control-flow
+/// successor to a basic block's live-out propagation list.
+pub mod block_successor;
 /// `cg_register_bitset_create` @ 0x082c0c54 — allocates the code generator's
 /// register-count header and its zeroed 32-bit bitset words.
 pub mod register_bitset;

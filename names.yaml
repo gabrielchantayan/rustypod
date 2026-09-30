@@ -164198,3 +164198,29 @@ functions:
       through the allocator slot, a different frame, and reordered stores.
       Full host suite aborts in hash_rehash's existing collision-chain test;
       isolated FIFO tests pass. Device execution not tested.
+
+  - address: 0x082b2f60
+    ghidra: FUN_082b2f60
+    name: cg_block_successor_prepend
+    size: 52
+    sig: "void cg_block_successor_prepend(cg_block_t *source, cg_block_t *successor)"
+    module: codegen/block_successor
+    status: ported
+    vars: {param_1: source, param_2: successor, puVar1: cell}
+    notes: >-
+      Raw osos.dec establishes 0x082b2f60..0x082b2f94, ending with
+      pop {r4,r5,r6,pc} before the next function's push. Whole-image
+      ARM-word scan finds two plain incoming BLs at 0x082c1e1c and
+      0x082c1e60, no predicated incoming BLs. Body has one plain BL
+      at 0x082b2f7c to ported cg_heap_alloc (0x082c1a08), no
+      predicated BLs. Resolve source +4 to procedure, procedure +4
+      to module, module +0 to heap; allocate eight bytes. Store successor
+      at cell +4, old source +0x28 at cell +0, then publish cell at
+      source +0x28. Caller adds branch targets and fall-through blocks
+      and later consumes the list for live-out propagation. No checks
+      or deduplication. Host pointer words and allocation expand through
+      the existing IR record_size convention; target layout is unchanged.
+      Host tests cover empty and populated lists, NULL, self edges,
+      duplicates, preserved older cells and unrelated source fields.
+      ARM match shows the same pointer chain, allocator BL and ordered
+      stores; LLVM changes register assignment and adds a frame pointer.
