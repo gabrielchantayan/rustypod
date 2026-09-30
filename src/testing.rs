@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // Target-width incremental-blob, cursor, Btree, and database fixtures.
+    pub const SQLITE_BLOB_READ_WRITE: usize = 0x7460_0000;
     // 0x7420_0000 / 0x7430_0000 / 0x7440_0000: dedicated to
     // sqlite/change_temp_storage's target-width connection and aDb fixtures;
     // mappings never unmap, so each test uses a distinct address.
