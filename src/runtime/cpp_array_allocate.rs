@@ -13,9 +13,9 @@
 //! initializer_context, 0, 0, 0, 0)`. The helper's pointer result is left in
 //! r0 through `pop {ip, pc}`; Ghidra's `void` return is therefore incorrect.
 //!
-//! Deliberate deviation: `FUN_082b498c` remains unported, so this uses its
-//! existing exact-ABI `PAIR_HEADER_ELEMENT_ARRAY_OPS` seam rather than naming
-//! or reimplementing that helper.
+//! Deliberate deviation: the shared helper remains behind the existing
+//! exact-ABI seam in `cpp_array_allocate_helper_adapter`; this wrapper now
+//! follows the original call path through that adapter.
 
 const ARRAY_ALLOCATION_HEADER_BYTES: u32 = 8;
 
@@ -30,20 +30,9 @@ pub unsafe extern "C" fn cpp_array_allocate(
     element_initializer: u32,
     initializer_context: u32,
 ) -> *mut u32 {
-    let allocate = core::ptr::addr_of!(crate::cxx::pair_header::PAIR_HEADER_ELEMENT_ARRAY_OPS.reset)
-        .read_volatile();
-    allocate(
-        core::ptr::null_mut(),
-        element_count,
-        element_size,
-        ARRAY_ALLOCATION_HEADER_BYTES,
-        0,
-        element_initializer,
-        initializer_context,
-        0,
-        0,
-        0,
-        0,
+    super::cpp_array_allocate_helper_adapter::cpp_array_allocate_helper_adapter(
+        element_count, element_size, ARRAY_ALLOCATION_HEADER_BYTES,
+        element_initializer, initializer_context,
     )
 }
 

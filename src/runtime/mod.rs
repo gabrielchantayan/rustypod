@@ -10,6 +10,7 @@ pub mod signed_div_quotient_round_up;
 pub mod chval;
 pub mod cpp_array_construct;
 pub mod cpp_array_allocate;
+pub mod cpp_array_allocate_helper_adapter;
 pub mod cpp_array_allocate_without_header;
 pub mod cpp_array_allocate_with_callbacks;
 pub mod ctype;
