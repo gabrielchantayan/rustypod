@@ -163380,3 +163380,41 @@ functions:
       LLVM changes frame/register allocation and loop layout but preserves
       signed bounds, predicated vtab guard, the real release BL, and the
       post-release array/count reloads and slot clear.
+
+  - address: 0x082c372c
+    ghidra: FUN_082c372c
+    name: clock_gettime
+    size: 96
+    sig: "int clock_gettime(int clock_id, ClockTimespec *out)"
+    module: time/clock_gettime
+    status: ported
+    vars:
+      param_1/r4: clock_id
+      param_2/r5: out
+      iVar2/r0: error
+      uVar3/r1: result
+      DAT_082c3788: clock dispatch table at 0x088fa8ec
+    notes: >-
+      Raw osos.dec establishes 0x082c372c..0x082c378c: 92 code bytes plus
+      the four-byte table literal; the next real prologue is at 0x082c378c.
+      Independent image-wide aligned-word decoding finds two plain inbound
+      BLs at 0x080c97c0 and 0x080cdddc and zero predicated inbound BLs.
+      The body has one plain BL to the verified clock-ID validator at
+      0x08084310, no predicated BLs, one BLX-register callback at 0x082c3770,
+      and a tail B to the errno/result helper at 0x080f4fbc. Null output
+      reports 26 without validating or dispatching. Otherwise IDs 0..3
+      dispatch the +8 gettime slot of the 20-byte records at 0x088fa8ec.
+      Preserve callback writes and signed error codes, store errno on every
+      path including success, and return 0 for zero error or -1 otherwise.
+      Ghidra incorrectly flattens the shared tail helper into this body.
+      Deliberate deviations: keep the unported validator and errno/result
+      helper as fixed-address target calls; host validation models the
+      verified domain and repr(C) host table records use native callback
+      pointer width. Host seams replace table callbacks and the tail helper.
+      Host tests cover invalid signed IDs, null output, all four slots,
+      partial output writes on failure, and failure-to-success errno reset.
+      Public API smoke uses the existing errno runtime and observes invalid
+      ID errno 26 followed by successful clock 3 output and errno 0.
+      match.py reports 29 versus 23 instructions (including Rust literals):
+      LLVM uses BLX for fixed-address validation and BX for the shared tail,
+      preserving null precedence, stride 20, callback +8, and result mapping.
