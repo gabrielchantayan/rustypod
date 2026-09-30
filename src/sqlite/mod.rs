@@ -75,6 +75,7 @@ pub mod append_owned_pointer;
 pub mod compare_2pow63;
 pub mod aux_sweep;
 pub mod array_allocate;
+pub mod btree_allocate_temp_space;
 pub mod aggregate_context;
 pub mod auth_check;
 pub mod auth_context_push;

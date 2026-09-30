@@ -164102,3 +164102,36 @@ functions:
       actual generated ARM against stock for zero, one and three tables,
       with identical fixture memory and reload events under state-mutating
       helper boundaries. Physical device execution was not tested.
+
+  - address: 0x082b3b34
+    ghidra: FUN_082b3b34
+    name: btree_allocate_temp_space
+    size: 40
+    sig: "void btree_allocate_temp_space(BtShared *shared)"
+    module: sqlite/btree_allocate_temp_space
+    status: ported
+    vars: {param_1: shared, uVar1: tmp_space}
+    notes: >-
+      SQLite allocateTempSpace. Raw words establish the 40-byte extent
+      0x082b3b34..0x082b3b5c, ending in pop {r4,pc} immediately before
+      the next function's push {r4-r8,lr}. Independent full-image BL decode
+      finds two plain incoming callers at 0x083710b8 and 0x083716c4 and
+      zero predicated callers. Body has one plain outgoing BL to the
+      already-ported sqlite3_malloc at 0x08390b14, no predicated BLs.
+      If BtShared.pTmpSpace (+0x60) is non-NULL, return without allocation;
+      otherwise promote unsigned pageSize (+0x1c) to i32, subtract eight,
+      allocate and store the result including NULL. Failure permits retry;
+      existing space is never replaced or zero-filled. Both callers test
+      pTmpSpace afterward and return SQLITE_NOMEM (7) when NULL.
+      Deliberate deviations: reuse repr(C) BtreeShared with host-widened
+      pointers, and the existing DB_MEM_OPS malloc seam wired to the real
+      sqlite3_malloc port. No new callee seam. Host regression tests cover
+      success caching, failure followed by successful retry, and halfword
+      size boundaries including below eight and 0xffff. ARM release build
+      passed. match.py shows 10 stock versus 16 Rust listing entries,
+      including a relocation literal; the NULL guard, unsigned halfword
+      load, signed subtraction and unconditional result store are preserved.
+      LLVM uses BLX via the allocator slot and a different frame/return.
+      Standalone smoke executes the actual Rust function with a host libc
+      allocator, confirming NULL for a negative request, retry success,
+      504 writable payload bytes and cache retention. Device not tested.
