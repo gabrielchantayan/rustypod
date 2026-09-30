@@ -16,6 +16,26 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082b512c
+    ghidra: FUN_082b512c
+    name: descriptor_variant_index
+    size: 16
+    sig: "i32 descriptor_variant_index(const u32 *object_slot, const u32 *descriptor)"
+    module: cxx/descriptor_variant_index
+    status: ported
+    renames:
+      param_1/r0: object_slot
+      param_2/r1: descriptor
+      "object_slot+0": object_address
+      "descriptor+4": index_byte_offset
+    notes: >-
+      Raw words e5900000 e5911004 e7900001 e12fff1e establish the exact
+      16-byte extent 0x082b512c..0x082b513c, before the next real function.
+      Whole-image aligned ARM decoding finds two plain inbound BL sites,
+      0x0803b174 and 0x080c8670, zero predicated BLs, and no outbound calls.
+      Load the signed variant index from object_slot[0] + descriptor[1],
+      using a wrapping 32-bit byte address. Callers range-check the result
+      before selecting a 20-byte variant record. No NULL or bounds guards,
   - address: 0x082b79dc
     ghidra: FUN_082b79dc
     name: blob_read_write

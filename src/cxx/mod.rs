@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod bit_set;
+pub mod descriptor_variant_index;
 pub mod vtable_089a58c8_destruct;
 pub mod vtable_08981fec_destruct;
 pub mod vtable_08981e3c_destruct;
