@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082b4648
+    ghidra: FUN_082b4648
+    name: format_repeat_literal
+    size: 76
+    sig: "void format_repeat_literal(void *buffer, u32 count)"
+    module: printf/format_repeat_literal
+    status: ported
+    renames:
+      param_1/r0/r5: buffer
+      param_2/r1/r4: count
+      DAT_082b4690: repeat_literal
+      FUN_08384ce4: format_buffer_append
+    notes: >-
+      Raw A32 establishes 72 instruction bytes plus a four-byte literal pool,
+      ending at the next independent push prologue at 0x082b4694. Whole-image
+      aligned decoding finds zero plain inbound BLs and two BLGTs at
+      0x083985ac and 0x083985d8. Outbound calls are one plain BL and zero
+      predicated BLs, plus one BGT tail branch to 0x08384ce4. Append 29-byte
+      prefixes of the literal at 0x088fcb90 until the unsigned count is below
+      29, then append any remainder. The literal is not spaces in this raw
+      image; its exact bytes and target address are preserved. The append
+      worker is absent from names.yaml and remains a typed resident seam;
+      its length-explicit append semantics are verified from raw instructions
+      and formatter callers. Ghidra incorrectly inlines that worker into this
+      function and omits its explicit length argument. Host tests cover zero,
+      28/29/30 and multiple-chunk boundaries, embedded NULs, and truncation.
+      Host tests and ARM release build pass. Standalone smoke appends 59 bytes
+      as two identical chunks plus a one-byte tail, preserving an existing
+      prefix. match.py reports 18 original instructions versus 27 Rust lines;
+      unsigned chunk loop, subtraction, zero-remainder guard and tail transfer
+      remain. Deliberate deviations are the callback seam and host literal
+      backing; LLVM emits BLX/BX through the verified stock address.
   - address: 0x082b512c
     ghidra: FUN_082b512c
     name: descriptor_variant_index

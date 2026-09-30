@@ -5,6 +5,7 @@ pub mod format_field_padding;
 pub mod write_nul_padding;
 pub mod format_buffer;
 pub mod format_with_descriptor;
+pub mod format_repeat_literal;
 pub mod printf_api;
 pub mod printf_core;
 pub mod printf_d;
