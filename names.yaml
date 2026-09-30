@@ -165384,3 +165384,32 @@ functions:
       instructions: LLVM adds push/mov/pop frame bookkeeping but keeps
       add r0,#52 and the tail branch. The archive branch target is an
       unresolved relocation placeholder, not a recursive call.
+
+  - address: 0x082a4e28
+    ghidra: FUN_082a4e28
+    name: word_pair_not_equal
+    size: 36
+    sig: "bool word_pair_not_equal(const u32 *left, const u32 *right)"
+    module: cxx/word_pair_not_equal
+    status: ported
+    vars: {param_1: left, param_2: right, iVar1: left_first, iVar2: right_first}
+    notes: >-
+      Raw osos.dec words establish extent 0x082a4e28..0x082a4e4c,
+      ending with bx lr at 0x082a4e48; next function starts with push
+      at 0x082a4e4c. Independent full-image aligned ARM decoding finds
+      two inbound plain BL calls at 0x0812b19c and 0x0812b228, zero
+      predicated BL calls, and zero outgoing BL calls. Compares two
+      opaque u32 pairs by value, returning exactly zero or one. Reads
+      second words only when first words match. Caller compares stored
+      object fields at +0x30/+0x34 against replacement two-word state
+      before invoking an update. No pointer-value dereference, mutation,
+      NULL checks, new callee seams, or deliberate semantic deviations.
+      Word indexing preserves four-byte fields on host and target.
+      Host tests cover both-word equality, independent mismatches,
+      zero/high-bit/all-ones words, aliasing, and single-word readable
+      inputs when first words differ. Full host suite and ARM release
+      build passed. Standalone source smoke returned false for equal
+      state and true for second-word change and single-word mismatch.
+      match.py reports 13 Rust versus 9 original instructions: LLVM adds
+      a frame and early conditional return, preserving conditional second
+      loads and exact boolean results. Exit 1 denotes this structural diff.
