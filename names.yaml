@@ -165058,3 +165058,37 @@ functions:
       disjoint ranges, pointer alignments, lengths 0 through 64, identical
       ranges, returned destination, and zero count with null pointers.
       Source padding follows the existing memmove contract.
+
+  - address: 0x082a7454
+    ghidra: FUN_082a7454
+    name: indexed_object_store
+    size: 220
+    sig: "void indexed_object_store(u32 *owner, u32 *object, u32 *index)"
+    module: app/indexed_object_store
+    status: ported
+    renames:
+      param_1/r0/r6: owner
+      param_2/r1/r4: object
+      param_3/r2/r5: index
+      param_4: unused_stack_padding
+      FUN_083b6b54: vector4_resize_fill
+      DAT_082a752c: next_object_index
+    notes: >-
+      Raw osos.dec establishes 220 bytes from 0x082a7454 through the literal
+      0x08a0fc70 at 0x082a752c; the next real function starts at 0x082a7530.
+      Ghidra's 216-byte extent excludes the literal. Whole-image A32 decoding
+      verifies two inbound plain BL sites at 0x082a7418 and 0x082a7440, no
+      predicated BL sites. Outbound code has one plain BL to the ported
+      vector4_resize_fill at 0x082a74dc, no predicated BL, and two virtual
+      calls via mov pc (initialize vtable +8; destroy vtable +4). Uses only
+      three arguments. Initializes object once under flags bit 0, allocating
+      an index from global 0x08a0fc70 only when the supplied index is zero.
+      Grows owner's vector at +8/+12 with zero fill, decrements any old
+      entry's references at +12 and destroys it at zero, then increments
+      replacement references and stores it. Retains modulo-u32 arithmetic,
+      self replacement, and owner reloads after callbacks. Deliberate
+      deviations: reuse Rust vector4_resize_fill; host callbacks and a host
+      counter replace firmware vtable dispatch and the global. ARM comparison
+      shows 57 Rust instructions versus 54 retail code instructions, with
+      equivalent initialization, growth, release, retain and store branches;
+      LLVM uses BLX instead of legacy mov-pc calls and a byte flag test.
