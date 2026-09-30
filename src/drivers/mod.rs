@@ -69,6 +69,7 @@ pub mod pwrcon;
 pub mod pmu;
 pub mod pmu_status_class;
 pub mod pmu_operation_retry;
+pub mod battery_voltage_is_sufficient;
 pub mod pmu_powerdown_if_ready;
 pub mod pmu_powerdown_prepare;
 pub mod sixteen_slot_identity_init;
