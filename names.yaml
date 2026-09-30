@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a8948
+    ghidra: FUN_082a8948
+    name: opaque_buffer_owner_destroy
+    size: 60
+    sig: "uint32_t *opaque_buffer_owner_destroy(uint32_t *owner)"
+    module: cxx/opaque_buffer_owner_destroy
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      DAT_082a8980: owner_vtable_089a8994
+      FUN_082aad14: operator_delete_tag3
+      owner_plus_0x18: owns_first_allocation
+    notes: >-
+      Raw A32 establishes 56 instruction bytes and the literal 0x089a8994
+      at 0x082a8980, giving 60 bytes before the next function at 0x082a8984.
+      Two outbound plain BLs and one BLNE all target operator_delete_tag3.
+      Two inbound plain BLs at 0x082a7bc4 and 0x082a893c, no predicated
+      inbound BLs; both callers subsequently tag-2 delete the returned owner.
+      Set vtable, conditionally release word +0x14 using byte +0x18, then
+      release words +0x2c and +0x30; preserve fields and return owner.
+      Deviations: existing Rust delete port and volatile target-width words.
+      Host tests cover byte flags, preservation, ordering, null and reloads.
+      ARM match retains every body operation and all three calls; LLVM adds
+      frame setup and saves sl/fp. Public API null-allocation smoke passes.
   - address: 0x082a8b18
     ghidra: FUN_082a8b18
     name: opaque_refcounted_construct
