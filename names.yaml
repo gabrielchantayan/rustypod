@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a759c
+    ghidra: FUN_082a759c
+    name: codecvt_always_noconv_dispatch
+    size: 24
+    sig: "uint32_t codecvt_always_noconv_dispatch(const void *receiver)"
+    module: cxx/codecvt_always_noconv_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      return/r0: no_conversion_result
+    notes: >-
+      Raw A32 words establish 24 bytes ending at the separate constant-true
+      method at 0x082a75b4. Whole-image aligned decoding verifies two inbound
+      plain BLs at 0x083d9410 and 0x083d9618, zero predicated and zero outbound
+      BLs. Indirect call loads vtable word seven (+0x1c), preserves receiver
+      and returned r0; both stream callers bypass conversion for nonzero.
+      Ghidra's void return and low-bit mask are not supported by raw code.
+      No concrete callee identity or seam invented. Host cells use pointer
+      width, target cells four bytes; u32 preserves the full return register.
+      Host regression exercises the raw constant-true method with a minimal
+      receiver and checks immutability. Full host suite: 13256 passed.
+      ARM release build passed. Actual-source smoke checks zero/nonzero
+      bypass decisions and receiver preservation. match.py exited 1 with
+      six stock and six Rust instructions: same slot-seven load, LLVM frame
+      setup and bx r1 tail dispatch replace the stock synthetic-LR trampoline.
+      No masking, validation, or device execution added.
   - address: 0x082a75bc
     ghidra: FUN_082a75bc
     name: codecvt_byte_out_dispatch
