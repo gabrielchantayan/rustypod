@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a55e4
+    ghidra: FUN_082a55e4
+    name: path_object_copy_join_cstr
+    size: 52
+    sig: "StringObject *path_object_copy_join_cstr(StringObject *this, const StringObject *source, const char *suffix)"
+    module: app/path_object_copy_join_cstr
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      param_3/r2: suffix
+      sp: temporary_path
+      r4: saved_suffix
+      r5: destination
+      FUN_082792b4: path_object_copy_construct
+      FUN_08279338: path_object_join_cstr
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the 52-byte extent 0x082a55e4..0x082a5617;
+      the next real function starts with push at 0x082a5618. Four outgoing
+      plain BLs at 0x082a55f4, 0x082a55fc, 0x082a5608, and 0x082a5610,
+      zero predicated BLs. Whole-image aligned ARM branch decoding finds two
+      incoming plain BLs at 0x0815e8a8 and 0x082857b0, zero predicated.
+      Copy-construct a stack PathObject from r1, join the r2 C string onto
+      it, copy-construct the destination from the join return, then destroy
+      the temporary. Ghidra's apparent fourth argument is just the saved
+      r3 stack word, not an input. All callees were checked against names.yaml
+      and use existing Rust ports and virtual-method boundaries. Preserve
+      the final destructor return (expired stack-object address, ignored by
+      observed callers), not the destination. Host tests cover NULL/NUL-only
+      payload and suffix combinations plus source/destination aliasing.
+      match.py reviewed: four BLs and straight-line structure preserved;
+      LLVM uses a separate eight-byte stack slot and frame pointer, and
+      substitutes the known temporary address for the join return. No
+      additional seam or algorithm deviation.
   - address: 0x082a6970
     ghidra: FUN_082a6970
     name: object_tree_root
