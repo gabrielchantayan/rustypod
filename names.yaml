@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a75bc
+    ghidra: FUN_082a75bc
+    name: codecvt_byte_out_dispatch
+    size: 76
+    sig: "int32_t codecvt_byte_out_dispatch(void *receiver, uint32_t *state, const uint8_t *input_begin, const uint8_t *input_end, const uint8_t **input_next, uint8_t *output_begin, uint8_t *output_end, uint8_t **output_next)"
+    module: cxx/codecvt_byte_out_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: state
+      param_3/r2: input_begin
+      param_4/r3: input_end
+      param_5: input_next
+      param_6: output_begin
+      param_7: output_end
+      param_8: output_next
+      return/r0: conversion_result
+    notes: >-
+      Raw A32 words establish 76 bytes through the separate no-conversion
+      method at 0x082a7608, which stores next pointers and returns 3.
+      Aligned whole-image decoding counts two inbound plain BLs at
+      0x083d8fa8 and 0x083d9474, zero predicated and zero outbound BLs.
+      No concrete virtual callee identity or seam invented.
+      Forwards eight arguments through unresolved vtable word three (+0x0c).
+      Ghidra's void return is wrong: byte-stream callers compare r0 to 2.
+      Host vtable cells are pointer-width; ARM cells remain four bytes.
+      Regression checks raw no-conversion behavior on empty/nonempty ranges.
+      Full host suite: 13255 passed. ARM release build passed.
+      Actual-source smoke: success, partial, error, zero-capacity passed.
+      match.py exited 1: 19 stock versus 14 Rust instructions. LLVM preserves
+      registers and four stack arguments with bx ip tail dispatch rather than
+      stock's local trampoline. No masking/checks added or device run performed.
   - address: 0x082a7678
     ghidra: FUN_082a7678
     name: codecvt_out_dispatch
