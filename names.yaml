@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082ab120
+    ghidra: FUN_082ab120
+    name: is_finite_double
+    size: 36
+    sig: "i32 is_finite_double(u64 bits)"
+    module: libm/misc
+    status: ported
+    renames:
+      param_1/r0: bits_low
+      param_2/r1: bits_high
+      DAT_082ab140: shifted_exponent_mask
+    notes: >-
+      Raw A32 establishes 32 instruction bytes and the 0xffe00000 literal
+      at 0x082ab140, ending before the independent push at 0x082ab144.
+      Full-image aligned decoding finds two inbound plain BLs at 0x08031c24
+      and 0x08031c88, zero predicated BLs, and no outbound calls. Both callers
+      are in the already-ported ldexp wrapper. Return 1 for finite raw doubles,
+      including signed zeros and subnormals, and 0 for infinities and all NaNs.
+      The high-word shift pair discards sign and mantissa; the low word is
+      ignored. Promote the existing helper; no new module or callee seam.
+      Deliberate deviation is an exponent mask instead of the register-save
+      frame, literal load and shifts. Host tests check every exponent, both
+      signs and representative low/high mantissa payloads. Host suite and
+      ARM release build pass. Source-backed standalone smoke checks signed
+      zeros, subnormal, maximal finite, infinities and NaNs. LLVM folds the
+      exported symbol into f64_is_finite, confirmed by the ARM symbol table.
+      The required match command cannot find the alias label; comparison
+      against f64_is_finite reports eight original versus seven Rust
+      instructions with the exponent test, exact 0/1 result and no calls.
+
   - address: 0x082b332c
     ghidra: thunk_FUN_082b3334
     name: byte_range_is_spaces
