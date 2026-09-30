@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a7678
+    ghidra: FUN_082a7678
+    name: codecvt_out_dispatch
+    size: 76
+    sig: "int32_t codecvt_out_dispatch(void *receiver, uint32_t *state, const uint16_t *input_begin, const uint16_t *input_end, const uint16_t **input_next, uint8_t *output_begin, uint8_t *output_end, uint8_t **output_next)"
+    module: cxx/codecvt_out_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: state
+      param_3/r2: input_begin
+      param_4/r3: input_end
+      param_5: input_next
+      param_6: output_begin
+      param_7: output_end
+      param_8: output_next
+      return/r0: conversion_result
+    notes: >-
+      Raw A32 words establish 76 bytes through the independent push-lr
+      conversion body at 0x082a76c4. Two inbound plain BLs at 0x083d998c
+      and 0x083d9c80; zero predicated BLs and zero outbound BLs. Calls
+      unresolved vtable word three (+0x0c), forwarding all eight arguments.
+      Stream output callers compare r0 to error result 2; Ghidra's void
+      declaration is incorrect. No concrete callee identity or seam invented.
+      Host vtable cells are pointer-width; ARM cells remain four bytes.
+      Full host suite: 13254 passed. ARM release build passed. Actual-source
+      smoke verified success, full-output and error results with state and
+      next-pointer effects. match.py exited 1: 19 stock versus 14 Rust
+      instructions. LLVM tail-dispatches via bx ip, preserving argument
+      registers, four stack arguments and returned r0; stock uses a local
+      indirect-call trampoline. No device execution performed.
   - address: 0x082a7730
     ghidra: FUN_082a7730
     name: stream_flags_radix
