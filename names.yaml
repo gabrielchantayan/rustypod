@@ -163849,3 +163849,31 @@ functions:
       26 Rust instructions; the three calls, failure exit, class-dependent
       threshold and inclusive comparison remain, with extra frame setup.
       Hardware execution was not tested.
+
+  - address: 0x082b5888
+    ghidra: FUN_082b5888
+    name: emit_autoincrement_step
+    size: 28
+    sig: "void emit_autoincrement_step(Parse *parse, int tracking_register, int rowid_register)"
+    module: sqlite/emit_autoincrement_step
+    status: ported
+    vars: {param_1: parse, param_2: tracking_register, param_3: rowid_register}
+    notes: >-
+      Raw ARM decoding establishes the 28-byte extent ending at the next
+      push prologue at 0x082b58a4. Two inbound plain BL sites at 0x0837c66c
+      and 0x08399194, zero predicated BL sites. The body has zero outbound
+      BL and one BGT tail branch to vdbe_add_op2 at 0x08386824, not the
+      vdbe_add_op3 target reported by Ghidra. INSERT code generators use
+      this to emit opcode 0x2c with tracking_register, rowid_register,
+      and zero P3 only when tracking_register is signed-positive.
+      Nonpositive values return without reading Parse. Parse.pVdbe at
+      +0x0c is read as an aligned u32; the existing Vdbe Rust layout is
+      used for host-safe native pointers. The void API discards the
+      emitter's incidental return value. Host tests cover signed bounds,
+      negative rowid operands, prior-op preservation and unchanged Parse.
+      All 13188 host tests passed; ARM release build passed. match.py
+      reports seven retail versus ten Rust instructions: LLVM adds frame
+      setup and an early signed-LE return, preserving the positive-path
+      load, operand shuffle and tail dispatch. A standalone host smoke
+      observed opcode 44 with operands (1,42,0) and the zero-register skip.
+      Hardware execution was not tested.

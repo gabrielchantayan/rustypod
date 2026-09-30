@@ -85,6 +85,7 @@ pub mod hex_to_blob;
 pub mod bind_int64;
 pub mod bind_text;
 pub mod bitvec;
+pub mod emit_autoincrement_step;
 pub mod btree_lock;
 pub mod btree_query_table_lock;
 pub mod btree_lock_table;
