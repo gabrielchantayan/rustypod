@@ -559,6 +559,7 @@ pub mod stream_write_exact;
 pub mod stream_state_set;
 pub mod stream_write_cstr;
 pub mod shared_handle_owner_destroy;
+pub mod conditional_member_destroy;
 pub mod opaque_vtable_record_copy_construct;
 pub mod opaque_vtable_record_construct;
 pub mod opaque_base_destroy;
