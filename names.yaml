@@ -165187,3 +165187,37 @@ functions:
       BL targets are unresolved relocation placeholders in the diff.
       Temporary public API smoke collected A, a and e-acute with cardinality
       3 and was removed after verification.
+
+  - address: 0x082a676c
+    ghidra: FUN_082a676c
+    name: opaque_secondary_collection_item_at
+    size: 8
+    sig: "void *opaque_secondary_collection_item_at(void *owner, usize index)"
+    module: app/opaque_secondary_collection_item_at
+    status: ported
+    vars: {param_1: owner, param_2: index}
+    notes: >-
+      Raw words e2800034 ea04c059 decode as add r0,r0,#0x34 followed
+      by tail B to 0x083d68dc, the already ported
+      container_element_at_alias_68dc. True extent is
+      0x082a676c..0x082a6774; the next independent count accessor starts
+      at 0x082a6774. Full-image aligned A32 decoding finds two plain
+      unconditional inbound BLs at 0x08299a64 and 0x08299bcc, zero
+      predicated BLs; the body contains zero BLs and one tail B.
+      Both callers pass the loop index in r1 and owner in r0. Ghidra
+      omits this live index argument and splits the caller's control flow.
+      Access the collection embedded at owner +0x34 through its vtable
+      slot +0x40, dereference the returned element slot, and return its
+      pointer value, including NULL. No bounds checks, NULL guards or
+      writes. Separate sibling collection is at +0x08; secondary count
+      is at +0x38. Reuses the existing verified callee with no new seam.
+      Target has no semantic deviation; host unaligned pointer reads
+      preserve the literal +0x34 layout, following opaque_collection_item_at.
+      Host suite and ARM release build passed. Regression covers first
+      and last element, NULL element, changed slot and unchanged owner
+      prefix/payloads. Standalone smoke exercised the actual accessor
+      source and returned byte 73 then NULL; staticlib-only crate cannot
+      be imported by a Cargo example. match.py reports 5 versus 2
+      instructions: LLVM adds push/mov/pop frame bookkeeping but keeps
+      add r0,#52 and the tail branch. The archive branch target is an
+      unresolved relocation placeholder, not a recursive call.
