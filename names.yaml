@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a6970
+    ghidra: FUN_082a6970
+    name: object_tree_root
+    size: 20
+    sig: "void *object_tree_root(ObjectTreeOwner *owner)"
+    module: app/object_tree_root
+    status: ported
+    vars:
+      param_1/r0: owner
+      iVar1/r1: root_override
+      owner_plus_0x58: embedded_tree
+      owner_plus_0xd8: root_override
+    notes: >-
+      Raw words e59010d8 e3510000 02800058 11a00001 e12fff1e
+      establish the 20-byte leaf through bx lr at 0x082a6980;
+      the next independently entered function starts at 0x082a6984.
+      Whole-image aligned ARM decoding verifies two inbound plain BLs
+      at 0x0828aa38 and 0x082a6940, zero predicated BLs and no outgoing
+      calls. Ghidra's assembly listing omits the second caller.
+      Return the optional pointer at +0xd8 unchanged when non-NULL,
+      otherwise return the embedded tree at +0x58. One caller casts
+      the root to class 0x4a00 for path resolution; the other passes it
+      to the existing object_tree_collect_characters port. No callee seam,
+      invented class identity, tree dereference or NULL owner guard added.
+      Deliberate deviation: repr(C) host pointers use native width.
+      Host tests cover override clearing, aliasing, opaque pointer values
+      and owner preservation. All 13262 host tests and ARM release build
+      pass; runtime smoke confirms embedded/override/embedded transitions.
+      match.py exits 1: five original instructions versus seven Rust
+      instructions. The +0xd8 load, NULL comparison and +0x58 fallback
+      remain; LLVM adds a frame and uses a final unconditional move.
   - address: 0x082a759c
     ghidra: FUN_082a759c
     name: codecvt_always_noconv_dispatch
