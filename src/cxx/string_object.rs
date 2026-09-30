@@ -2537,6 +2537,39 @@ pub unsafe extern "C" fn string_object_substring_from_range(
 }
 
 
+/// string_object_prefix — original: `FUN_082a52a0` @ load address
+/// 0x082a52a0 (40 bytes, all code, ending at 0x082a52c8 where the next
+/// function starts). Raw words verify two inbound plain BL calls at
+/// 0x08046dcc and 0x08279140, zero predicated inbound BLs; the body has
+/// one plain BL to 0x08277440, zero predicated BLs, and a BNE tail branch
+/// to 0x082764d8.
+///
+/// Default-construct `out`, then read `source.payload`. A NULL payload
+/// leaves the constructed empty object; otherwise assign its leading
+/// `max_codepoints` decoded sequences through the existing capped UTF-8
+/// assignment. This includes that helper's nonpositive-bound clear and
+/// malformed-sequence sizing behavior. Construction precedes the source
+/// load, so aliasing `out` and `source` produces an empty object.
+///
+/// Deliberate deviations: the existing StringObject host representation
+/// widens pointer fields and models the virtual assignment slots through
+/// STRING_OBJECT_ASSIGN_CSTR_OPS. The retail tail branch is a Rust call.
+/// Both objects must be valid, and a non-NULL payload must satisfy
+/// string_object_assign_utf8_capped's readable-source contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_prefix(
+    out: *mut StringObject,
+    source: *const StringObject,
+    max_codepoints: i32,
+) {
+    let out = string_default_construct(out);
+    let payload = (*source).payload;
+    if !payload.is_null() {
+        string_object_assign_utf8_capped(out, payload, max_codepoints);
+    }
+}
+
 /// string_object_suffix — original: `FUN_082a52e8` @ 0x082a52e8 (128
 /// bytes, all code; the next separately linked function begins at
 /// 0x082a5368). **6 direct `bl` call sites**, all unconditional, zero
@@ -5269,6 +5302,62 @@ pub(crate) mod tests {
         assert_eq!(&destination[..6], b"\xc2\xa9\xe2\x82\xac\0");
         assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
         assert!(out.payload.is_null());
+    }
+
+    #[test]
+    fn prefix_preserves_construction_order_and_null_payload_guard() {
+        let source = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        let mut out = substring_garbage_out();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe { string_object_prefix(&mut out, &source, 3) };
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+        let mut payload = *b"abc\0";
+        out.payload = payload.as_mut_ptr();
+        let alias = core::ptr::addr_of_mut!(out);
+        unsafe { string_object_prefix(alias, alias, 2) };
+        assert!(out.payload.is_null());
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() });
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+    }
+
+    #[test]
+    fn prefix_copies_bounded_sequences_and_retains_capped_edge_behavior() {
+        for (text, bound, expected) in [
+            (&b"A\xc2\xa9\xe2\x82\xacZ\0"[..], 2, &b"A\xc2\xa9\0"[..]),
+            (&b"A\xc2\xa9\0"[..], 20, &b"A\xc2\xa9\0"[..]),
+            (&b"\0"[..], 1, &b"\0"[..]),
+            (&b"\xf0\x9f\x98\x80Z\0"[..], 1, &b"\xf0\0"[..]),
+        ] {
+            let source = StringObject {
+                vtable: core::ptr::null(), payload: text.as_ptr() as *mut u8,
+            };
+            let mut out = substring_garbage_out();
+            let mut destination = [0xa5u8; 16];
+            let _bench = assign_cstr_bench(destination.as_mut_ptr());
+            unsafe { string_object_prefix(&mut out, &source, bound) };
+            assert_eq!(&destination[..expected.len()], expected);
+            assert!(destination[expected.len()..].iter().all(|&byte| byte == 0xa5));
+            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+    }
+
+    #[test]
+    fn prefix_nonpositive_bounds_clear_and_failed_allocation_leaves_empty_output() {
+        let source = StringObject {
+            vtable: core::ptr::null(), payload: b"abc\0".as_ptr() as *mut u8,
+        };
+        let mut out = substring_garbage_out();
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        for bound in [0, -1, i32::MIN] {
+            unsafe { string_object_prefix(&mut out, &source, bound) };
+            assert!(out.payload.is_null());
+        }
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).len() }, 3);
+        unsafe { string_object_prefix(&mut out, &source, 2) };
+        assert!(out.payload.is_null());
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).len() }, 3);
     }
 
     #[test]
