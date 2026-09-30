@@ -1631,6 +1631,8 @@ pub mod hints {
     // header, and chunk-record fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const RB_TREE_POOL_DESTRUCT: usize = 0xee10_0000;
+    // Dedicated target-width owner, header, and chunk fixture; never unmapped.
+    pub const EMBEDDED_LIST_POOL_DESTRUCT: usize = 0x4a84_7000;
     // 0x8280_0000: dedicated to app/item_collection_dispatch's raw-u32
     // context, owner, and collection fixture; mappings never unmap, so no
     // other user may share this hint.

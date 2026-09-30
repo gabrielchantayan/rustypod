@@ -164663,3 +164663,55 @@ functions:
       Standalone host smoke executes both real ports and verifies the
       returned pointer, all four words, and untouched surrounding words.
       Device execution is not tested.
+
+  - address: 0x082a8470
+    ghidra: FUN_082a8470
+    name: embedded_list_pool_destruct
+    size: 136
+    sig: "u32 *embedded_list_pool_destruct(u32 *owner)"
+    module: cxx/embedded_list_clear
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      local_18: header
+      local_14: first
+      uStack_10: erase_output
+      puVar2/r5: chunk
+      FUN_083cc794: embedded_list_clear_operation
+      FUN_08266f2c: cxx_array_dealloc
+      param_2/param_3/param_4: >-
+        Not arguments; Ghidra promotes scratch register spills from the push.
+    notes: >-
+      Raw osos.dec A32 establishes the exact 136-byte extent
+      [0x082a8470, 0x082a84f8): pop at 0x082a84f4, next sibling push at
+      0x082a84f8. There are three unconditional outbound BL instructions:
+      0x082a84a4 to 0x083cc794, and 0x082a84d0/0x082a84e0 to the verified
+      0x08266f2c array-deallocation veneer. No predicated outbound BL occurs.
+      Whole-image word decoding finds exactly two inbound unconditional BLs,
+      0x0819fd00 and 0x0819fd08, with no predicated BL. These callers subtract
+      0x1c from returned r0 to reach the next embedded owner; r1 is restored
+      scratch state, not a meaningful second result.
+
+      A null owner+0x10 header skips all cleanup, including any chunk chain.
+      Otherwise passes stack-local output, header+0x08 link, and header to
+      the existing 0x083cc794 operation seam. Its concrete class identity
+      remains unknown; no new callee identity or seam is invented. Reloads
+      owner+0x10 after the call, writes owner+0x04 into header+0x0c, and
+      places header at owner+0x04. Drains the owner+0x00 12-byte chunk chain,
+      unlinking each chunk before freeing its +0x08 block with +0x04 capacity
+      and zero element size, then the chunk with count one and element zero.
+      Header, count and other owner words deliberately remain unchanged.
+
+      Reuses cxx/embedded_list_clear's target/host operation seam and the
+      ported cxx_array_dealloc. Aligned u32 word indexing preserves target
+      offsets on hosts. Dead ADS spills are omitted. LLVM removes inert
+      deallocation count/element arguments because the veneer uses only the
+      pointer. Host regressions cover null-header preservation, no-chunk
+      recycling, post-operation header/recycle-chain reload, multi-chunk
+      unlink/free ordering, null blocks, and maximum capacity.
+      All 13237 host tests pass; ARM release build succeeds. match.py exits
+      1 with the expected structural diff: 34 original instructions versus
+      35 Rust instructions, including a literal; the null guard, opaque
+      operation call, header reload/recycling and two-release loop remain.
+      Exported-path standalone host smoke verifies null-header preservation,
+      empty-pool recycling and returned owner. No device execution was tested.
