@@ -444,6 +444,7 @@ pub mod metadata_record;
 pub mod indexed_slot_pending_reset;
 pub mod path_object_join;
 pub mod path_object_duplicate_join;
+pub mod path_object_copy_join_cstr;
 pub mod indexed_timestamp_bounds;
 pub mod timestamp_index_seek;
 pub mod format_duration;
