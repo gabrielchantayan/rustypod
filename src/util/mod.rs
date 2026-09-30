@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod payload_word_exchange;
 pub mod attr_record;
 pub mod address_in_range_or_zero;
 pub mod accumulate_shared_counter;
