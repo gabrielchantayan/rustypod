@@ -65,6 +65,49 @@ pub unsafe extern "C" fn resource_cache_get_if_available(object: *mut u8) -> u32
     resource_cache_refresh_get(cache_object, 0)
 }
 
+/// resource_cache_auxiliary_get_if_available — `FUN_082a600c` @ 0x082a600c.
+/// True extent: 52 bytes, ending at 0x082a603c; the next function starts
+/// at 0x082a6040. Raw words verify two inbound plain BL calls
+/// (0x08176fb4, 0x08177228), zero predicated BL calls, and a body with
+/// zero direct BL, one indirect BLX, and one conditional tail B.
+///
+/// Calls virtual slot +0x0c. Zero returns zero without reading object+4.
+/// Otherwise calls resident 0x08047060(cache_object, 0), which refreshes
+/// a dirty resource cache and returns its auxiliary word at +0x61c.
+/// Neither the virtual target nor the auxiliary word's meaning is invented.
+///
+/// Rust expresses the tail branch as a call/return; LLVM retains a tail BX
+/// to 0x08047060 with a larger frame.
+/// Host execution reuses the real sibling refresh port, then reads +0x61c;
+/// this adds a discarded read of +0x620 but preserves refresh side effects.
+/// Host vtable slots are native-width; object links remain target u32 words.
+///
+/// # Safety
+/// Same object/vtable requirements as [`resource_cache_get_if_available`].
+/// A successful gate requires a valid writable cache object through +0x620
+/// and a valid resource callback tree when its dirty byte is nonzero.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn resource_cache_auxiliary_get_if_available(object: *mut u8) -> u32 {
+    let vtable = object.cast::<u32>().read() as usize as *const u8;
+    let available: AvailableSlot = vtable.add(VTABLE_AVAILABLE_OFFSET).cast::<AvailableSlot>().read();
+    if available(object) == 0 {
+        return 0;
+    }
+    let cache_object = object.add(CACHE_OBJECT_OFFSET).cast::<u32>().read() as usize as *mut u8;
+    #[cfg(target_os = "none")]
+    {
+        let auxiliary_get: unsafe extern "C" fn(*mut u8, u32) -> u32 =
+            core::mem::transmute(0x0804_7060usize);
+        auxiliary_get(cache_object, 0)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        resource_cache_refresh_get(cache_object, 0);
+        cache_object.add(0x61c).cast::<u32>().read_volatile()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -147,6 +190,39 @@ mod tests {
             assert_eq!(resource_cache_get_if_available(object), 0xa5c3_1e7f);
             assert_eq!(AVAILABLE_CALLS, 1);
             assert_eq!(AVAILABLE_OBJECT, object);
+        }
+    }
+
+    #[test]
+    fn auxiliary_unavailable_does_not_dereference_invalid_cache() {
+        let _lock = FIXTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if try_slab().is_none() {
+            crate::testing::note_missing_u32_fixture("app::resource::cache_available");
+            return;
+        }
+        unsafe {
+            let object = prepare(0, 0xfeed_face);
+            write_word(object, CACHE_OBJECT_OFFSET, 1);
+            assert_eq!(resource_cache_auxiliary_get_if_available(object), 0);
+        }
+    }
+
+    #[test]
+    fn auxiliary_nonzero_gate_returns_auxiliary_not_primary_cache_without_refresh() {
+        let _lock = FIXTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if try_slab().is_none() {
+            crate::testing::note_missing_u32_fixture("app::resource::cache_available");
+            return;
+        }
+        unsafe {
+            for gate in [1, 2, 0x8000_0000, u32::MAX] {
+                let object = prepare(gate, 0xa5c3_1e7f);
+                let cache = object.add(0x100);
+                write_word(cache, 0x61c, 0x1234_abcd);
+                assert_eq!(resource_cache_auxiliary_get_if_available(object), 0x1234_abcd);
+                assert_eq!(cache.add(0x618).read(), 0);
+                assert_eq!(cache.add(0x620).cast::<u32>().read(), 0xa5c3_1e7f);
+            }
         }
     }
 }
