@@ -79960,6 +79960,41 @@ functions:
       retains an address seam while host tests inject and observe it. Rust
       compacts redundant ADS stack temporaries only; target-layout pointers
       remain aligned u32 fields.
+  - address: 0x082a8280
+    ghidra: FUN_082a8280
+    name: pooled_tree_destruct
+    size: 136
+    sig: "uint32_t *pooled_tree_destruct(uint32_t *tree)"
+    module: app/pooled_tree_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: tree
+      r5: chunk
+      local_18: end
+      local_14: first
+      uStack_10: erased_iterator
+    notes: >-
+      Raw ARM extent is 0x082a8280..0x082a8307; the next independently
+      entered prologue is at 0x082a8308. Three unconditional internal BLs
+      call 0x083cdc44 once and cxx_array_dealloc at 0x08266f2c twice;
+      no predicated BLs. Whole-image decoding finds two unconditional
+      inbound BLs at 0x081e1608 and 0x081e1610, none predicated. The
+      caller uses returned r0 between member teardowns. Ghidra's extra
+      arguments and CONCAT44 return are saved scratch-register artifacts.
+      A null tree+0x10 header skips all work. Otherwise erase
+      [header->left, header), reread the header and prepend it to tree+4,
+      then unlink each tree+0 chunk before freeing its +8 block with its
+      +4 capacity and freeing the chunk with count one. Fields remain
+      aligned target-width words. The unported erase specialization
+      0x083cdc44 has no registered identity and remains an address seam.
+      Host tests exercise header replacement, multi-chunk release order,
+      zero-capacity/null blocks, and null-header preservation.
+      Host suite and ARM release build pass. match.py reports 34 original
+      instructions and 34 Rust instructions: matching null-header guard,
+      iterator erase, header reload/recycle, and chunk loop. LLVM uses BLX
+      for the fixed erase seam and folds unused deallocator size arguments;
+      the two deallocation relocations target the existing heap veneer.
+      Public-entry host smoke confirms null-header preservation and return.
   - address: 0x082a7fd8
     ghidra: FUN_082a7fd8
     name: event_list_tree_destruct

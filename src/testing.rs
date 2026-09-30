@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const WORD_KEY_TREE_POOL_DESTRUCT: usize = 0x62a8_0000;
+    pub const POOLED_TREE_DESTRUCT: usize = 0x62a9_0000;
     pub const SQLITE_VTAB_ARG_EXTEND: usize = 0x74a0_0000;
     pub const SQLITE_ANALYZE_DATABASE: usize = 0x7490_0000;
     pub const DESCRIPTOR_VARIANT_INDEX: usize = 0x7480_0000;
