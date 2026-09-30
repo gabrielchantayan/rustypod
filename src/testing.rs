@@ -544,6 +544,8 @@ pub mod hints {
     // stream and configuration fixture; mappings never unmap, so no other
     // port may share this hint.
     pub const SQLITE_STREAM_FLAGS_CONFIGURE: usize = 0x1a50_0000;
+    // Dedicated target-width VDBE and cursor array fixture.
+    pub const VDBE_CLOSE_ALL_CURSORS: usize = 0x1a60_0000;
     pub const PENDING_EVENT_TAKE: usize = 0x1b00_0000;
     pub const PENDING_EVENT_DISCARD_ALL_FOR_KEY: usize = 0x1b10_0000;
     // 0x1b20_0000: dedicated to app/pending_event_timer_rearm's raw-u32

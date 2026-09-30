@@ -163349,3 +163349,34 @@ functions:
       and marks the column-cache affinity changes. All callees use existing
       direct Rust ports. Deliberate deviation: Parse.pVdbe is a u32 target
       pointer while the established repr(C) Vdbe preserves host pointer width.
+
+  # ---- VDBE cursor array cleanup (src/sqlite/vdbe_close_all_cursors.rs) ----
+  - address: 0x082c387c
+    ghidra: FUN_082c387c
+    name: vdbe_close_all_cursors
+    size: 104
+    sig: "void sqlite3VdbeCloseAllCursors(Vdbe *vdbe)"
+    module: sqlite/vdbe_close_all_cursors
+    status: ported
+    renames:
+      param_1/r5: vdbe
+      iVar3/r4: index
+      iVar2/r1: cursor
+    notes: >-
+      Raw osos.dec confirms extent 0x082c387c..0x082c38e4, ending at
+      pop {r4,r5,r6,pc}; the next word starts a separate function prologue.
+      Independent aligned ARM-word decoding finds two inbound plain BL sites
+      (0x08044c84, 0x0838b0a8), no predicated inbound BLs, and one outbound
+      plain BL (0x082c38c4 to vdbe_free_cursor at 0x0838affc), with no
+      predicated outbound BLs. Ghidra misses the live r1 cursor argument.
+      Walk signed nCursor (+0x2c) and target-width apCsr (+0x30), skipping
+      NULL entries and vtab cursors (+0x60) while inVtabMethod (+0x101) is
+      nonzero. Release eligible cursors and reload apCsr before clearing
+      each slot. Existing vdbe_free_cursor is reused without a new seam.
+      No deliberate behavioral deviations. Host tests exercise NULL arrays,
+      zero and negative counts, NULL slots, reentrant vtab preservation,
+      eligible cursor clearing, and the untouched slot beyond the bound.
+      match.py reports 31 Rust instructions versus 26 retail instructions:
+      LLVM changes frame/register allocation and loop layout but preserves
+      signed bounds, predicated vtab guard, the real release BL, and the
+      post-release array/count reloads and slot clear.

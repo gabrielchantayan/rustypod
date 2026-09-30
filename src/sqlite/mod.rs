@@ -360,6 +360,7 @@ pub mod utf16_to_utf8;
 pub mod utf8_char_len;
 pub mod value_blob;
 pub mod vdbe_free_cursor;
+pub mod vdbe_close_all_cursors;
 pub mod vdbe_cursor_reference_list_release;
 pub mod vdbe_cursor_reference_list_retain;
 pub mod vdbe_frame_list_clear;
