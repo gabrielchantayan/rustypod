@@ -163480,3 +163480,31 @@ functions:
       Standalone host-library smoke is blocked by six unrelated missing
       host functions in prepare_entry_metadata, shared_payload_select_kind,
       and calendar_schedule; no device execution was performed.
+
+  - address: 0x082c254c
+    ghidra: FUN_082c254c
+    name: check_single_column_destination
+    size: 56
+    sig: "int check_single_column_destination(Parse *parse, const SelectDest *destination, int column_count)"
+    module: sqlite/check_single_column_destination
+    status: ported
+    vars: {param_1: parse, param_2: destination, param_3: column_count}
+    notes: >-
+      Raw ARM establishes 52 instruction bytes and a four-byte literal pool,
+      ending at the next real function prologue at 0x082c2584. One outbound
+      unconditional plain BL at 0x082c256c targets the already ported
+      sqlite_error_msg at 0x083767a0; no predicated BL. Complete aligned-word
+      scanning finds two inbound plain BL sites at 0x08368954 and 0x08382fa0,
+      with no predicated inbound BL. Unconditionally read destination byte
+      zero, then reject signed column_count greater than one for memory/set
+      destination kinds 6 and 7, reporting an error and returning one.
+      All other cases return zero without accessing Parse. Ghidra incorrectly
+      short-circuits the destination read. Raw literal 0x088fe0d4 points to
+      UTF-8 U+3002 followed by NUL, preserved exactly rather than substituting
+      the conventional SQLite English diagnostic. Deliberate deviations:
+      relocate the diagnostic into Rust rodata, use the existing reporter's
+      explicit NULL VaList for this conversion-free format and repr(C) Parse
+      host layout, and retain the unconditional read with read_volatile.
+      Tests cover all 256 destination kinds, signed count boundaries,
+      prior-error preservation, wrapping error count, and untouched Parse
+      on accepted paths.
