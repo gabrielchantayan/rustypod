@@ -383,6 +383,7 @@ pub mod allocate_cursor;
 pub mod vdbe_reset;
 pub mod vdbe_unbind;
 pub mod vdbe_mem_apply_affinity;
+pub mod vdbe_mem_apply_numeric_affinity;
 pub mod vdbe_mem_set_double;
 pub mod vdbe_mem_expand_blob;
 pub mod src_list_shift_join_type;

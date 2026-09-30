@@ -13,11 +13,9 @@
 //! no-op. Every other affinity first applies numeric affinity, then applies
 //! integer affinity only when that left a REAL representation.
 //!
-//! The numeric- and integer-affinity helpers at `0x082b46f8` and `0x0838b644`
-//! are not ported. They are an explicit dispatch boundary: target builds call
-//! their retailOS bodies and host tests install faithful local observations.
-//! `sqlite3VdbeMemStringify` @ `0x0838c32c` is already ported and is called
-//! directly. No deliberate behavioral deviations.
+//! Numeric affinity calls the ported helper through its recording ops slot.
+//! Integer affinity @ 0x0838b644 remains a retailOS dispatch boundary.
+//! Stringification is also called directly. No behavioral deviations.
 
 use super::vdbe::Mem;
 use super::vdbe_mem_realify::MEM_REAL;
@@ -33,22 +31,13 @@ pub const SQLITE_AFF_NONE: u8 = b'b';
 /// The numeric representations cleared after stringification (`MEM_Int | MEM_Real`).
 const MEM_NUMERIC: u16 = MEM_INT | MEM_REAL;
 
-/// RetailOS load address of `sqlite3VdbeMemApplyNumericAffinity`.
-#[cfg(target_os = "none")]
-const VDBE_MEM_APPLY_NUMERIC_AFFINITY_ADDRESS: usize = 0x082b_46f8;
 /// RetailOS load address of `sqlite3VdbeIntegerAffinity`.
 #[cfg(target_os = "none")]
 const VDBE_INTEGER_AFFINITY_ADDRESS: usize = 0x0838_b644;
 
-/// ABI shared by the two unported in-place affinity helpers.
+/// ABI shared by the in-place affinity helpers.
 pub type VdbeMemAffinity = unsafe extern "C" fn(p_mem: *mut Mem);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_vdbe_mem_apply_numeric_affinity(p_mem: *mut Mem) {
-    let apply_numeric_affinity: VdbeMemAffinity =
-        core::mem::transmute(VDBE_MEM_APPLY_NUMERIC_AFFINITY_ADDRESS);
-    apply_numeric_affinity(p_mem);
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_vdbe_integer_affinity(p_mem: *mut Mem) {
@@ -56,10 +45,6 @@ unsafe extern "C" fn retail_vdbe_integer_affinity(p_mem: *mut Mem) {
     integer_affinity(p_mem);
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_vdbe_mem_apply_numeric_affinity(_p_mem: *mut Mem) {
-    panic!("vdbe_mem_apply_affinity requires sqlite3VdbeMemApplyNumericAffinity @ 0x082b46f8")
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_vdbe_integer_affinity(_p_mem: *mut Mem) {
@@ -75,19 +60,19 @@ pub struct VdbeMemApplyAffinityOps {
     pub integer: VdbeMemAffinity,
 }
 
-/// Target defaults branch into the original unported affinity helpers.
+/// Target default uses ported numeric affinity and retailOS integer affinity.
 #[cfg(target_os = "none")]
 pub const DEFAULT_VDBE_MEM_APPLY_AFFINITY_OPS: VdbeMemApplyAffinityOps =
     VdbeMemApplyAffinityOps {
-        apply_numeric: retail_vdbe_mem_apply_numeric_affinity,
+        apply_numeric: super::vdbe_mem_apply_numeric_affinity::vdbe_mem_apply_numeric_affinity,
         integer: retail_vdbe_integer_affinity,
     };
 
-/// Host defaults fail loudly until a test supplies the unported helpers.
+/// Host default uses ported numeric affinity and requires an integer helper.
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_VDBE_MEM_APPLY_AFFINITY_OPS: VdbeMemApplyAffinityOps =
     VdbeMemApplyAffinityOps {
-        apply_numeric: missing_vdbe_mem_apply_numeric_affinity,
+        apply_numeric: super::vdbe_mem_apply_numeric_affinity::vdbe_mem_apply_numeric_affinity,
         integer: missing_vdbe_integer_affinity,
     };
 

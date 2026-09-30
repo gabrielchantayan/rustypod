@@ -120074,10 +120074,10 @@ functions:
       stringifies an otherwise numeric cell through the ported
       sqlite3VdbeMemStringify @ 0x0838c32c, then clears MEM_Int|MEM_Real;
       NONE ('b') is a no-op; all other affinity codes apply numeric affinity,
-      then integer affinity only if the result still has MEM_Real. The two
-      unported helper bodies @ 0x082b46f8 and @ 0x0838b644 use a volatile
-      dispatch seam: target defaults call retailOS and host tests supply
-      recorders. No deliberate behavioral deviations. Tests cover the numeric
+      then integer affinity only if the result still has MEM_Real. Numeric
+      affinity @ 0x082b46f8 now defaults to its Rust port through the recording
+      slot; integer affinity @ 0x0838b644 remains a retailOS dispatch seam.
+      No deliberate behavioral deviations. Tests cover the numeric
       text-render path, already-text suppression, NONE preservation, and both
       post-numeric REAL branches.
   - address: 0x082a014c
@@ -163988,4 +163988,48 @@ functions:
       setup and an early signed-LE return, preserving the positive-path
       load, operand shuffle and tail dispatch. A standalone host smoke
       observed opcode 44 with operands (1,42,0) and the zero-register skip.
+      Hardware execution was not tested.
+
+  - address: 0x082b46f8
+    ghidra: FUN_082b46f8
+    name: vdbe_mem_apply_numeric_affinity
+    size: 148
+    sig: "void vdbe_mem_apply_numeric_affinity(Mem *p_mem)"
+    module: sqlite/vdbe_mem_apply_numeric_affinity
+    status: ported
+    renames:
+      param_1/r0/r4: p_mem
+      local_c: real
+      local_18/iStack_14: value
+      FUN_0838bfb0: vdbe_mem_nul_terminate
+      FUN_0837cb60: sqlite3IsNumber
+      FUN_083869f4: sqlite3VdbeChangeEncoding
+      FUN_0836f82c: sqlite3Atoi64
+      FUN_0838c024: vdbe_mem_realify
+    notes: >-
+      SQLite numeric affinity. Raw extent 0x082b46f8..0x082b478c:
+      the final pop at 0x082b4788 precedes the next real function's
+      movs r2,r0; no literal pool. Independently scanned aligned raw
+      ARM words show two incoming unconditional BL sites, 0x082b46dc
+      and 0x08391788, zero predicated BL sites, and five outgoing
+      unconditional BL instructions. Skip MEM_Int or MEM_Real; otherwise
+      NUL-terminate and require MEM_Str, then recognize numeric syntax in
+      the current encoding. The recognizer walks stride one for UTF-8,
+      stride two for UTF-16, with a byte bias for UTF-16BE. Recode to
+      UTF-8 ignoring its status. Decimal/exponent syntax or failed i64
+      conversion calls ported realification. Successful integer conversion
+      stores the result and replaces low five flags with MEM_Int,
+      retaining ownership and termination bits. Existing encoding/atoi64
+      seams are reused; the unported recognizer uses a volatile slot with
+      retailOS target default. Already ported termination/realification
+      are direct calls. The affinity caller's numeric slot now defaults
+      to this port, with its obsolete retail wrapper removed. Deliberate
+      ABI deviation: no incidental restored r0/r1 return pair, unused by
+      both callers. Typed Mem fields keep host pointers disjoint.
+      All 13198 host tests passed. Standalone smoke with supplied unported
+      callees covered i64 minimum, positive overflow to REAL, fractional
+      and exponent input, and rejected syntax. ARM release build passed.
+      match.py reports 37 stock versus 54 Rust instructions, preserving
+      guards, ordered calls, i64 commit and flag masking; differences are
+      frame setup, initialized locals and three volatile indirect calls.
       Hardware execution was not tested.
