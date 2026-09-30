@@ -163654,3 +163654,44 @@ functions:
       materializes cache address 0x089caab8 directly, reverses branch polarity,
       duplicates the return, and adds a frame. Deliberate deviations: host
       static storage replaces fixed RAM; no target behavioral deviations.
+
+  - address: 0x082bc5b8
+    ghidra: FUN_082bc5b8
+    name: pmu_status_class
+    size: 72
+    sig: "u32 pmu_status_class(u32 incoming_r0, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu_status_class
+    status: ported
+    renames:
+      local_8: status
+      in_r3: incoming_r3
+      FUN_080bfbd4: store_pmu_register_0x4b_bit2
+      FUN_080c8890: store_board_status_bit
+      FUN_082e540c: query_cached_register_18_inverted_bit0
+    notes: >-
+      Raw osos.dec establishes extent 0x082bc5b8..0x082bc600, 72 bytes;
+      the next real function starts with mov r0,#0x18000 then bx lr.
+      Independently decoding aligned ARM BL words finds two incoming calls,
+      both unconditional, at 0x082bc4bc and 0x082bcf44; zero predicated calls.
+      The body has three unconditional BL instructions at 0x082bc5c0,
+      0x082bc5d8 and 0x082bc5ec; zero predicated BL instructions.
+      Returns class 2 for nonzero register-0x4b bit 2, otherwise class 3 for
+      the board-selected status bit, otherwise normalizes the locked cached
+      inverted register-0x18 bit-0 query to class 0 or 1. All queries
+      short-circuit. The second callee is a verified output-pointer wrapper
+      around 0x082e5b64. The third locks semaphores 17 then 5, calls
+      0x0836d5f0, unlocks 5 then 17 and returns its cached sample; raw code
+      at 0x0836d5f0 reads register 0x18 and updates 0x089ca994 only on
+      success with inverted bit 0. Neither unported callee has a names.yaml
+      identity. Rust retains all three retail edges through verified fixed
+      address seams, including the already-ported first callee, to capture
+      actual caller-saved r1-r3 between calls rather than inventing scratch
+      values on failed transfers. Explicit incoming r0-r3 preserve this ABI.
+      Deliberate deviations are indirect BLX calls and omission of the final
+      dead stack store. All 13179 host tests pass and the ARM release build
+      passes. Host edge cases prove priority, early exits, arbitrary nonzero
+      normalization and scratch-register propagation. A standalone source
+      smoke observed class 1 after two zero samples and a nonzero cached
+      query while preserving r3 clobbers. Hardware execution was not tested.
+      match.py shows 18 original versus 30 Rust instructions including three
+      address literals; query order, branches and final normalization remain.

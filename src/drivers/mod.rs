@@ -67,6 +67,7 @@ pub mod piezo;
 pub mod notify_wait_enter;
 pub mod pwrcon;
 pub mod pmu;
+pub mod pmu_status_class;
 pub mod pmu_operation_retry;
 pub mod pmu_powerdown_if_ready;
 pub mod pmu_powerdown_prepare;
