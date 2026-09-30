@@ -119943,6 +119943,38 @@ functions:
       Firmware calls the unported scanner and target-width callback directly;
       host builds expose seams for both.
 
+  # --- descriptor-selected payload word exchange ---
+  - address: 0x082b5154
+    ghidra: FUN_082b5154
+    name: payload_word_exchange
+    size: 24
+    sig: "u32 payload_word_exchange(u8 **context_slot, u32 replacement, const PayloadWordDescriptor *descriptor)"
+    module: util/payload_word_exchange
+    status: ported
+    renames:
+      param_1/r0: context_slot
+      param_2/r1: replacement
+      param_3/r2: descriptor
+      descriptor_plus_0x04: word_offset
+      return/r0: previous
+    notes: >-
+      Raw osos.dec verifies the exact 24-byte extent 0x082b5154..0x082b516c:
+      e5900000 e5922004 e0802002 e5920000 e5821000 e12fff1e. The next
+      independently entered function at 0x082b516c starts with push
+      {r0-r11,lr}. Whole-image A32 decoding finds two inbound unconditional
+      BL calls at 0x0803ad14 and 0x080d3ba4, zero predicated BL calls, and
+      zero outbound calls. Loads *context_slot and descriptor +4's byte
+      offset, returns the old aligned u32 at base + offset, and stores
+      replacement there. The initialization caller passes 0xffffffff;
+      descriptor flags (including 0x400) are ignored. No callee seams or
+      NULL guards. No deliberate deviations; repr(C) u32 descriptor fields
+      preserve +4 on hosts and the context slot holds a native pointer.
+      Host tests cover first/interior/last offsets, full-width replacement
+      values, unchanged neighbors, and destination aliasing the descriptor
+      offset. ARM match.py shows the same word load/store exchange using
+      indexed addressing, with LLVM's frame-pointer prologue/epilogue and
+      reordered independent base/offset loads rather than ADS's explicit add.
+
   # --- tagged payload address helper ---
   - address: 0x082b513c
     ghidra: FUN_082b513c
