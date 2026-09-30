@@ -14,18 +14,16 @@
 //!
 //! # Deliberate deviations
 //!
-//! The two direct callees remain unported and are represented by their verified
-//! retailOS addresses. Their identities are not asserted beyond the gating and
-//! dispatch roles observable in this wrapper; host tests replace both seams.
+//! Readiness uses the ported argument adapter; the dispatch body remains at
+//! its verified retailOS address. Host tests replace both seams.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
 
+#[cfg(not(target_os = "none"))]
 type DiskReadinessCheck = unsafe extern "C" fn(u32, u32) -> u32;
 type DiskReadDispatch = unsafe extern "C" fn(u32, u32, *mut u8, u32, u32) -> u32;
 
-#[cfg(target_os = "none")]
-const DISK_READINESS_CHECK_ADDRESS: usize = 0x082c_3174;
 #[cfg(target_os = "none")]
 const DISK_READ_DISPATCH_ADDRESS: usize = 0x0836_53cc;
 
@@ -71,8 +69,7 @@ unsafe fn host_ops() -> DiskBlockReadHostOps {
 unsafe fn disk_readiness_check(device: u32, wait_for_ready: u32) -> u32 {
     #[cfg(target_os = "none")]
     {
-        let check: DiskReadinessCheck = core::mem::transmute(DISK_READINESS_CHECK_ADDRESS);
-        check(device, wait_for_ready)
+        super::drive_ready::disk_drive_ready(device, wait_for_ready)
     }
 
     #[cfg(not(target_os = "none"))]
@@ -140,8 +137,8 @@ pub unsafe extern "C" fn disk_block_read(
 ///
 /// # Deliberate deviations
 ///
-/// The readiness and dispatch helpers remain unported, so target builds call
-/// their verified retailOS addresses and host tests install recording seams.
+/// Readiness uses the ported argument adapter; dispatch retains its verified
+/// retailOS address. Host tests install recording seams.
 ///
 /// # Safety
 ///
