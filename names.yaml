@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a95f0
+    ghidra: FUN_082a95f0
+    name: cxx_string_triple_member_destroy
+    size: 44
+    sig: "CxxStringTripleMemberObject *cxx_string_triple_member_destroy(CxxStringTripleMemberObject *object)"
+    module: cxx/string_triple_member_destroy
+    status: ported
+    vars: {param_1: object}
+    renames:
+      param_1/r0/r5: object
+      r4: member_base
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw A32 establishes the exact 44-byte extent 0x082a95f0..0x082a961c,
+      ending at pop {r4,r5,r6,pc} before the next independent function.
+      Three outbound plain BLs at 0x082a9600, 0x082a9608 and 0x082a9610
+      release COW strings at object+0x1c, +0x18 and +0x14, respectively;
+      zero predicated BLs. Whole-image aligned branch decoding finds two
+      inbound plain BLs at 0x082a7d44 and 0x082a95e4, zero predicated calls
+      and no direct B or aligned pointer-word references. Returns object
+      unchanged; no NULL guard, vtable store or object deallocation. Reuses
+      the existing ported cxx_string_release seam. No target deviations;
+      repr(C) widens host pointer fields without overlapping slots. Tests
+      cover distinct shared reps, aliased ownership and shared empty strings.
+      All 13222 host tests and ARM release build pass. Standalone host smoke
+      verifies mixed empty/aliased members and unchanged prefix/slots/return.
+      match.py reports 11 instructions on both sides, preserving reverse
+      offsets and all three calls; relocations resolve to cxx_string_release.
   - address: 0x082ab120
     ghidra: FUN_082ab120
     name: is_finite_double
