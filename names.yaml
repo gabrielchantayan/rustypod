@@ -82776,6 +82776,32 @@ functions:
       the original tail branch. Host tests prove the
       +0x38 member selection, forwarded vtable receiver, low-bit result, and
       validity short-circuit.
+  - address: 0x082a4540
+    ghidra: FUN_082a4540
+    name: scoped_context_owner_byte_8f_bit_4
+    size: 52
+    sig: "u32 scoped_context_owner_byte_8f_bit_4(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars:
+      param_1/r0/r4: this
+      iVar1/r0: validity_result
+      uVar2/r0: owner_byte_bit_4
+      vtable_plus_0x08/r1: unresolved_validity_slot
+    notes: >-
+      Raw osos.dec verifies thirteen A32 words from 0x082a4540 through
+      pop {r4,pc} at 0x082a4570; the next independently entered function
+      starts at 0x082a4574. Whole-image aligned branch decoding finds two
+      plain inbound BLs at 0x081159d8 and 0x08115fb4, zero predicated
+      inbound BLs, zero direct outbound BLs, and one unconditional BLX
+      through vtable slot +0x08 at 0x082a4554. Calls that slot with this;
+      zero returns zero without owner access. Otherwise reloads owner at
+      token +0x08 and returns (owner byte +0x8f & 0x10) >> 4. Concrete
+      capability and virtual callee identities remain unresolved; no seam
+      invented. Reuses ScopedContext and its pointer-width vtable model;
+      host pointer fields widen, target layout and behavior do not change.
+      Host tests exhaust all byte values and nonboolean validity results,
+      reject NULL owner before access, and verify post-call owner reload.
   - address: 0x082a4574
     ghidra: FUN_082a4574
     name: scoped_context_owner_byte_8f_bit_0
