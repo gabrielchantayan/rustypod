@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a52a0
+    ghidra: FUN_082a52a0
+    name: string_object_prefix
+    size: 40
+    sig: "void string_object_prefix(StringObject *out, const StringObject *source, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1/r4: source
+      UNRECOVERED_JUMPTABLE/r2/r5: max_codepoints
+    notes: >-
+      Raw osos.dec verifies ten A32 words at 0x082a52a0..0x082a52c4;
+      the next real function begins with push at 0x082a52c8. Whole-image
+      BL decoding finds two plain inbound calls at 0x08046dcc and
+      0x08279140 and zero predicated calls. The body has one plain BL
+      to string_default_construct at 0x08277440, zero predicated BLs,
+      and a BNE tail branch to string_object_assign_utf8_capped at
+      0x082764d8. Default-construct out before loading source payload;
+      NULL leaves out empty, otherwise assign the leading max_codepoints
+      sequences. Aliased source/out therefore becomes empty. Ghidra
+      incorrectly incorporates the tail target into its C decompilation.
+      Existing Rust callees are reused; host pointer fields widen and
+      virtual assignment uses the existing StringObject ops boundary.
+      Host edge tests cover NULL, aliasing, nonpositive bounds, multibyte
+      prefixes, oversized bounds, empty text, malformed leads and allocation
+      failure. All 13273 host tests pass and the release ARM build succeeds.
+      match.py reports 12 Rust instructions versus 10 original; constructor,
+      payload load, NULL guard and assignment tail branch are retained.
+      Actual-source standalone smoke proves NULL and alias construction
+      paths; full non-test host smoke is blocked by six unrelated unresolved
+      functions in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule.
   - address: 0x082a55e4
     ghidra: FUN_082a55e4
     name: path_object_copy_join_cstr
