@@ -39,7 +39,7 @@ pub unsafe extern "C" fn pooled_tree_destruct(tree: *mut u32) -> *mut u32 {
     unsafe { destruct_with(tree, erase_range, crate::heap::veneers::cxx_array_dealloc) }
 }
 
-unsafe fn destruct_with(tree: *mut u32, erase: EraseRange, free: Dealloc) -> *mut u32 {
+pub(super) unsafe fn destruct_with(tree: *mut u32, erase: EraseRange, free: Dealloc) -> *mut u32 {
     let mut end = unsafe { tree.add(4).read() };
     if end != 0 {
         let mut first = unsafe { (end as usize as *const u32).add(2).read() };
