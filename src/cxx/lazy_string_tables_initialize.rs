@@ -42,14 +42,14 @@ unsafe fn allocate_table() -> *mut u8 { operator_new(TABLE_SIZE) }
 unsafe fn allocate_table() -> *mut u8 { core::ptr::without_provenance_mut(TABLE_SIZE) }
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn holder() -> *mut u32 { RETAIL_HOLDER as *mut u32 }
+pub(super) unsafe fn holder() -> *mut u32 { RETAIL_HOLDER as *mut u32 }
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_HOLDER: [u32; 5] = [0; 5];
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn holder() -> *mut u32 { core::ptr::addr_of_mut!(HOST_HOLDER).cast() }
+pub(super) unsafe fn holder() -> *mut u32 { core::ptr::addr_of_mut!(HOST_HOLDER).cast() }
 
 #[cfg(target_os = "none")]
 #[inline(always)]
