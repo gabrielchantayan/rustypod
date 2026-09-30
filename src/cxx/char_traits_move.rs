@@ -7,7 +7,7 @@
 /// Move `count` bytes with overlap allowed and return the original destination.
 /// Stream-buffer callers at 0x083d9048 and 0x083d95f8 preserve trailing
 /// characters using this char_traits::move operation. The call targets
-/// 0x08037dd8: `ldr pc,[pc,#-4]` with literal 0x220000d4, the IRAM mirror
+/// 0x08037e00: `ldr pc,[pc,#-4]` with literal 0x220000d4, the IRAM mirror
 /// of osos memmove at 0x080000d4. Deliberate deviation: call the existing
 /// Rust memmove directly instead of the firmware veneer; behavior unchanged.
 ///
@@ -51,6 +51,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn identical_ranges_preserve_all_bytes() {
+        let mut bytes = [0x00, 0x80, 0xff, 0x37, 0x00, 0xa5, 0x01, 0xfe];
+        let expected = bytes;
+        let dst = bytes.as_mut_ptr();
+        assert_eq!(unsafe { char_traits_move(dst, dst, bytes.len()) }, dst);
+        assert_eq!(bytes, expected);
     }
 
     #[test]

@@ -164884,3 +164884,31 @@ functions:
       operation call, header reload/recycling and two-release loop remain.
       Exported-path standalone host smoke verifies null-header preservation,
       empty-pool recycling and returned owner. No device execution was tested.
+
+  - address: 0x082a78b0
+    ghidra: FUN_082a78b0
+    name: char_traits_move
+    size: 20
+    sig: "char *char_traits_move(char *dst, const char *src, size_t count)"
+    module: cxx/char_traits_move
+    status: ported
+    vars:
+      param_1/r0/r4: dst
+      r1: src
+      r2: count
+    notes: >-
+      Raw words e92d4010 e1a04000 ebf64150 e1a00004 e8bd8010 establish
+      the complete A32 body [0x082a78b0, 0x082a78c4); the next real
+      function starts with ldr r0,[r0] at 0x082a78c4. Whole-image word
+      decoding finds two inbound plain BLs at 0x083d9048 and 0x083d95f8,
+      zero inbound predicated BLs, one outbound plain BL at 0x082a78b8
+      to 0x08037e00, and zero outbound predicated BLs. Veneer words
+      e51ff004 220000d4 target the IRAM mirror of ported osos memmove
+      at 0x080000d4, not mask ROM. Preserves dst in r4, moves count
+      bytes from src with overlap allowed, then restores dst as its result.
+      Stream-buffer callers preserve trailing characters. Deliberate
+      deviation: calls the existing Rust memmove directly, bypassing the
+      IRAM veneer; no new seam. Host tests cover overlap in both directions,
+      disjoint ranges, pointer alignments, lengths 0 through 64, identical
+      ranges, returned destination, and zero count with null pointers.
+      Source padding follows the existing memmove contract.
