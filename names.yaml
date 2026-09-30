@@ -164468,3 +164468,40 @@ functions:
       Standalone host smoke executes the actual adapter and verifies all
       eleven ABI slots with extreme opaque words and the raw pointer result.
       Device execution is not tested.
+
+  - address: 0x082a8c8c
+    ghidra: FUN_082a8c8c
+    name: opaque_header_089a8a3c_construct
+    size: 28
+    sig: "u32 *opaque_header_089a8a3c_construct(u32 *this, u32 payload)"
+    module: cxx/opaque_header_089a8a3c_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_082a8ca4: opaque_header_089a8a3c
+      FUN_082a89b4: opaque_header_payload_construct
+    notes: >-
+      Raw A32 establishes the true 28-byte extent 0x082a8c8c..0x082a8ca8:
+      six instructions ending with pop pc at 0x082a8ca0 and the literal
+      0x089a8a3c at 0x082a8ca4. The next independent function starts with
+      cmp r0,0 at 0x082a8ca8. Ghidra's 24-byte size excludes the literal.
+      Whole-image aligned BL decoding finds two plain incoming calls at
+      0x083b6374 and 0x083b6ca0, zero predicated incoming calls, and one
+      plain outbound BL at 0x082a8c94 to the existing port
+      opaque_header_payload_construct, with zero predicated body BLs.
+      Pass this, payload, and 32 to that base constructor, overwrite word
+      zero with the opaque literal, and return this unchanged. The caller
+      at 0x083b6ca4 writes through returned r0; Ghidra's void return is
+      incorrect. No class identity or new callee seam is invented.
+      Aligned u32 word indexing preserves the four-word target layout on
+      hosts. No deliberate behavioral deviations or added null checks.
+      Host tests cover zero and extreme payloads, surrounding sentinels,
+      pointer return, and reconstruction clearing prior state. All 13224
+      host tests pass; ARM release builds. match.py exits 1 with an expected
+      structural diff: LLVM adds a frame pointer, preserves the single BL
+      and literal store, and includes the literal in its displayed listing.
+      ARM relocation confirms R_ARM_CALL opaque_header_payload_construct.
+      Standalone host smoke executes both real ports and verifies the
+      returned pointer, all four words, and untouched surrounding words.
+      Device execution is not tested.
