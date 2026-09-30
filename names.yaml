@@ -147566,6 +147566,27 @@ functions:
       recovered; host fixtures use pointer-width vtable cells because host
       pointers exceed the target's four-byte cells.
 
+  - address: 0x082a677c
+    ghidra: FUN_082a677c
+    name: secondary_collection_count
+    size: 8
+    sig: "u32 secondary_collection_count(const u32 *receiver)"
+    module: util/secondary_collection_count
+    status: ported
+    vars:
+      param_1/r0: receiver
+      receiver+0x38: secondary_collection_count
+    notes: >-
+      Current raw osos.dec words e5900038 and e12fff1e prove the eight-byte
+      body at 0x082a677c..0x082a6784: ldr r0,[r0,#0x38]; bx lr. The next
+      independently called function starts at 0x082a6784. Whole-image aligned
+      A32 decoding verifies two inbound plain BL calls at 0x08299a4c and
+      0x08299bb4, zero predicated BL calls, and no outgoing calls. Callers use
+      the returned word as the bound for the secondary collection accessed
+      at receiver+0x34; its domain identity remains unrecovered. Rust uses
+      u32 word indices so the +0x38 field offset is unchanged on hosts.
+      No deliberate deviations or callee seams; all 32 result bits pass through.
+
   - address: 0x082a6784
     ghidra: FUN_082a6784
     name: subobject_vtable_slot_0x40_result_word
