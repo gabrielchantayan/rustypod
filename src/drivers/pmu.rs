@@ -68,6 +68,32 @@ static mut PMU_QUERY: PmuQueryFn = missing_pmu_query;
 unsafe fn pmu_query(request: u32, flags: u32, response: *mut u32) -> i32 {
     core::ptr::read_volatile(core::ptr::addr_of!(PMU_QUERY))(request, flags, response)
 }
+
+/// Verified mode/response word transform ABI at `FUN_082e5844`.
+/// Its body queries the mode, transforms the response for modes 2 or 4,
+/// and returns 1 for other modes. The transform itself remains retail code.
+type PmuModeResponseTransformFn = unsafe extern "C" fn(mode: u32, response: *mut u32) -> u32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn pmu_transform_mode_response(mode: u32, response: *mut u32) -> u32 {
+    let transform: PmuModeResponseTransformFn = core::mem::transmute(0x082e_5844_usize);
+    transform(mode, response)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_pmu_transform_mode_response(_mode: u32, _response: *mut u32) -> u32 {
+    panic!("pmu_transform_mode_response_locked requires retail transform 0x082e5844")
+}
+
+#[cfg(not(target_os = "none"))]
+static mut PMU_TRANSFORM_MODE_RESPONSE: PmuModeResponseTransformFn = missing_pmu_transform_mode_response;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn pmu_transform_mode_response(mode: u32, response: *mut u32) -> u32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(PMU_TRANSFORM_MODE_RESPONSE))(mode, response)
+}
 /// ABI of the still-unported PCF50635 register 0x43 bit-0 update
 /// `FUN_0836d5a8`.
 type PmuRegister43Bit0Fn = unsafe extern "C" fn(enabled: u32) -> i32;
@@ -450,6 +476,31 @@ pub unsafe extern "C" fn pmu_query_mode_response(mode: u32, response: *mut u32) 
     status
 }
 
+/// pmu_transform_mode_response_locked — original: `FUN_082bc940` @
+/// `0x082bc940` (52 bytes; 2 plain inbound BL, 0 predicated inbound BL;
+/// 3 plain callee BL, 0 predicated callee BL, independently binary-verified).
+///
+/// Waits on semaphore 18, runs the retail mode/response transform, then
+/// signals semaphore 18 unconditionally. Semaphore statuses are ignored,
+/// including a failed wait; the transform's full result word is preserved.
+/// The next real function starts with a push at `0x082bc974`.
+///
+/// Deliberate deviations: semaphore veneers use existing Rust ports; the
+/// unported transform at `0x082e5844` uses a typed target-address seam and a
+/// replaceable host callback. No argument validation or status remapping.
+///
+/// # Safety
+/// `response` must satisfy the retail transform's pointer requirements for
+/// the supplied mode; no NULL guard is added by this wrapper.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_transform_mode_response_locked(mode: u32, response: *mut u32) -> u32 {
+    crate::kernel::task_lock::rom_sem_wait(18);
+    let status = pmu_transform_mode_response(mode, response);
+    crate::kernel::task_lock::rom_sem_signal(18);
+    status
+}
+
 
 
 #[cfg(test)]
@@ -469,6 +520,68 @@ mod tests {
     static mut PMU_REGISTER_0X43_BIT0_STATUS: i32 = 0;
     static KEY_MATRIX_SCAN_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut KEY_MATRIX_SCAN_RESULT: u32 = 0;
+
+    static mut TRANSFORM_PHASE: u32 = 0;
+    static mut TRANSFORM_STATUS: u32 = 0;
+
+    unsafe extern "C" fn failing_transform_wait(sem: usize) -> usize {
+        assert_eq!(sem, 18);
+        assert_eq!(TRANSFORM_PHASE, 0);
+        TRANSFORM_PHASE = 1;
+        9
+    }
+
+    unsafe extern "C" fn failing_transform_signal(sem: usize) -> usize {
+        assert_eq!(sem, 18);
+        assert_eq!(TRANSFORM_PHASE, 2);
+        TRANSFORM_PHASE = 3;
+        10
+    }
+
+    unsafe extern "C" fn transform_under_lock(mode: u32, response: *mut u32) -> u32 {
+        assert_eq!(TRANSFORM_PHASE, 1);
+        TRANSFORM_PHASE = 2;
+        if mode == 4 {
+            *response = (*response).wrapping_add(1);
+        } else {
+            assert!(response.is_null());
+        }
+        TRANSFORM_STATUS
+    }
+
+    struct TransformFixture;
+
+    impl Drop for TransformFixture {
+        fn drop(&mut self) {
+            unsafe { PMU_TRANSFORM_MODE_RESPONSE = missing_pmu_transform_mode_response; }
+        }
+    }
+
+    #[test]
+    fn mode_transform_releases_after_errors_and_preserves_result_word() {
+        let _kernel = install_raw_i2c_for_test(0, 0, 0);
+        let _transform = TransformFixture;
+        unsafe {
+            PMU_TRANSFORM_MODE_RESPONSE = transform_under_lock;
+            let kernel = core::ptr::addr_of_mut!(crate::kernel::task_lock::ROM_KERNEL);
+            let mut ops = kernel.read_volatile();
+            ops.rom_sem_wait = failing_transform_wait;
+            ops.rom_sem_signal = failing_transform_signal;
+            kernel.write_volatile(ops);
+            for status in [0, 1, 0x8000_0000, u32::MAX] {
+                TRANSFORM_STATUS = status;
+                TRANSFORM_PHASE = 0;
+                let mut response = u32::MAX;
+                assert_eq!(pmu_transform_mode_response_locked(4, &mut response), status);
+                assert_eq!(response, 0);
+                assert_eq!(TRANSFORM_PHASE, 3);
+            }
+            TRANSFORM_STATUS = 1;
+            TRANSFORM_PHASE = 0;
+            assert_eq!(pmu_transform_mode_response_locked(u32::MAX, core::ptr::null_mut()), 1);
+            assert_eq!(TRANSFORM_PHASE, 3);
+        }
+    }
 
     unsafe extern "C" fn record_key_matrix_scan() -> u32 {
         KEY_MATRIX_SCAN_RESULT
