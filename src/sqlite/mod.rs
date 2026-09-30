@@ -413,3 +413,4 @@ pub mod vdbe_set_num_cols;
 pub mod return_single_int;
 pub mod vdbe_uses_btree;
 pub mod vm_printf;
+pub mod check_single_column_destination;
