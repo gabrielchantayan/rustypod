@@ -43503,6 +43503,28 @@ functions:
       host pointers, preserving target record offsets and links.
 
 
+  - address: 0x082b2ee8
+    ghidra: FUN_082b2ee8
+    name: cg_block_predecessor_prepend
+    size: 52
+    sig: "void cg_block_predecessor_prepend(cg_block_t *destination, cg_block_t *predecessor)"
+    module: codegen/block_predecessor
+    status: ported
+    vars: {param_1: destination, param_2: predecessor, puVar1: cell}
+    notes: >-
+      Raw ARM establishes the 52-byte extent ending at the real function
+      boundary 0x082b2f1c. One outgoing plain BL targets the already-ported
+      cg_heap_alloc at 0x082c1a08; no predicated outgoing BLs. Whole-image
+      raw-word scan finds two incoming plain BLs at 0x082c1e28 and
+      0x082c1e6c, no predicated incoming BLs. Resolves destination -> procedure
+      -> module -> heap and allocates an eight-byte {next, predecessor} cell.
+      Stores the predecessor, links the old head, then publishes at +0x24.
+      The caller pairs this with successor insertion for explicit branches
+      and fall-through edges; no NULL checks or deduplication. Deliberate
+      host deviation: pointer words and allocation scale to native width,
+      matching the existing IR convention. match.py preserves the allocation
+      and stores; LLVM adds a frame pointer and changes register allocation.
+
   - address: 0x082b2f1c
     ghidra: FUN_082b2f1c
     name: cg_reg_append_bounded
