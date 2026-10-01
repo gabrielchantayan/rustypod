@@ -165823,3 +165823,37 @@ functions:
       six instructions instead of four, adding frame setup and combining
       the mask/shift into and r0,r1,r0,lsr #6 with r1=1. The +0x48 word
       load and normalized return are preserved; there are no added calls.
+
+  - address: 0x082a243c
+    ghidra: FUN_082a243c
+    name: timer_deadline_is_after
+    size: 28
+    sig: "uint32_t timer_deadline_is_after(const uint32_t *left, const uint32_t *right)"
+    module: drivers/timer
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+    notes: >-
+      Raw words e5900000 e5911000 e0400001 e3500000 d3a00000 c3a00001
+      e12fff1e establish the 28-byte leaf at 0x082a243c..0x082a2458.
+      The next real function loads its object's +0x48 flag word, masks
+      bit 1, shifts, and returns. Whole-image A32 BL decoding finds two
+      plain inbound sites (0x0807a290 and 0x0808f784), zero predicated
+      inbound BLs, and zero outbound BLs. timer_arm compares queued and
+      incoming +0x8 deadlines; the second caller compares a stack word
+      against an object's +0x8 deadline. Loads aligned words and returns
+      exactly one iff the modulo-2^32 difference interpreted as i32 is
+      positive. Equal words and either direction of a half-range
+      difference return zero; ordinary signed/unsigned ordering would
+      be incorrect. No deliberate behavioral deviations or new seams.
+      Replaces the default TimerOps comparator stub; the existing queue
+      test recorder delegates to the real port. Host edge tests cover
+      equality, ordinary ordering, counter rollover, signed-boundary
+      crossing, and differences around 0x80000000. Full host suite passes
+      (13295 tests), ARM release build passes, and an extracted-production
+      runtime smoke verifies rollover, equality, half-range, and ordering.
+      match.py exits 1 with a structural diff: LLVM adds frame setup,
+      reverses the independent load order, and initializes zero before
+      the signed-positive conditional move. Two loads, wrapping SUB,
+      signed comparison, normalized result, and no calls are preserved.
