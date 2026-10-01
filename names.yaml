@@ -166539,3 +166539,40 @@ functions:
       signed-byte equality, branches instead of predicated payload loads,
       and normalizes the final equality using sub/clz/lsr. No outgoing call
       or wider load is introduced.
+  - address: 0x0829f7c8
+    ghidra: FUN_0829f7c8
+    name: q16_quad_to_bytes
+    size: 128
+    sig: "void q16_quad_to_bytes(u8 *dst, const i32 *src)"
+    module: ui/q16_quad_to_bytes
+    status: ported
+    renames:
+      param_1/r0/r4: dst
+      param_2/r1/r5: src
+      r6: first_byte
+      r7: second_byte
+      r8: third_byte
+    notes: >-
+      Raw ARM establishes the exact 128-byte extent 0x0829f7c8..0x0829f848,
+      with a pop return at 0x0829f844 and an independent prologue at
+      0x0829f848. Whole-image aligned ARM decoding finds two plain incoming
+      BLs at 0x08253ce4 and 0x08253d5c, zero predicated incoming BLs, and
+      four plain outgoing BLs to 0x080f0f44 at 0x0829f7e0, 0x0829f7f8,
+      0x0829f810 and 0x0829f828, with zero predicated outgoing BLs.
+      Ghidra's FUN_082d0d98 caller attribution disagrees with raw bytes;
+      real callers pass r8 as source and stack +4 as destination.
+      Clamp four aligned signed Q16 words to 0..65536 through the existing
+      signed_clamp_i32_q16 seam, then store (value * 511) >> 17 as bytes.
+      Read all source words before writing, preserving overlap. Component
+      domain and ordering are unproven; no RGBA identity is assumed.
+      No deliberate behavioral deviations or new seams. Tests exhaust the
+      full clamped range and adjacent values, signed extrema, byte canaries,
+      and every destination offset wholly overlapping the source words.
+      All 13348 host tests and the ARM release build pass. Actual-source
+      overlapping runtime smoke produces [0, 1, 127, 255]. match.py exits 1:
+      36 Rust instructions versus 32 stock preserve four loads and clamp
+      calls before stores, rsb multiplication by 511, and byte extraction.
+      Relocations verify all four calls target signed_clamp_i32_q16.
+      LLVM adds frame setup, reorders independent stores, and uses logical
+      shifts equivalent for these nonnegative bounded products. No device
+      execution performed.
