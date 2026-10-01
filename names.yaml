@@ -92121,6 +92121,32 @@ functions:
       and NULL payloads matching the shared empty string.
 
   # --- Opaque record payload length ---
+  - address: 0x082a1ec8
+    ghidra: FUN_082a1ec8
+    name: opaque_record_decode_parameter
+    size: 8
+    sig: "const u32 *opaque_record_decode_parameter(const u8 *record)"
+    module: cxx/opaque_record_decode_parameter
+    status: ported
+    renames:
+      param_1/r0: record
+    notes: >-
+      Raw words e280000c e12fff1e prove add r0,r0,#12; bx lr,
+      not a word load. The next real function at 0x082a1ed0 starts
+      add r0,r0,#20; bx lr, establishing the true eight-byte extent.
+      A raw ARM BL-immediate scan finds two unconditional plain BLs
+      at 0x081044c0 and 0x08104860, with zero predicated BLs.
+      Both callers load the returned word and pass it as argument four
+      to FUN_082d74c0 while processing record payloads. Its precise
+      parameter meaning remains unknown; no callee seam is required.
+      No memory access, validation, or alignment check is performed.
+      Host arithmetic uses host pointer width; ARM preserves the original
+      wrapping 32-bit byte addition. Tests cover field identity, zero and
+      maximum values, NULL, unaligned inputs, and address wraparound.
+      ARM match.py shows the same add r0,r0,#12 with an additional
+      LLVM frame-pointer prologue and epilogue (four versus two instructions).
+      A dedicated text section prevents identical-accessor symbol folding.
+
   - address: 0x082a1ec0
     ghidra: FUN_082a1ec0
     name: opaque_record_payload_length
@@ -92132,7 +92158,7 @@ functions:
       param_1/r0: record
     notes: >-
       Raw osos.dec is exactly `ldr r0,[r0,#8]; bx lr` from 0x082a1ec0 through
-      0x082a1ec4; the separately linked next leaf begins `ldr r0,[r0,#12]` at
+      0x082a1ec4; the separately linked next leaf begins `add r0,r0,#12` at
       0x082a1ec8, establishing the eight-byte extent. A binary scan of every
       ARM B/BL-immediate word found four direct inbound calls, all
       unconditional plain bl (zero predicated forms): 0x081043b8, 0x081043f8,
