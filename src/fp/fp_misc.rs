@@ -2844,6 +2844,54 @@ fn timespec_is_after_uses_unsigned_seconds_and_signed_nanoseconds() {
     }
 }
 
+/// timespec_is_before — original: `FUN_082a1ce4` @ 0x082a1ce4
+/// (**56 bytes, 0x082a1ce4..0x082a1d1b; 2 plain inbound `bl` calls,
+/// zero predicated inbound calls and zero internal BLs — raw-byte verified**).
+///
+/// Compares `{ seconds, nanoseconds }` pairs lexicographically: seconds are
+/// unsigned, and nanoseconds break a seconds tie as signed values. Returns
+/// one exactly when `left` is earlier than `right`, otherwise zero.
+/// Nanoseconds are read only when seconds are equal. The next real function
+/// begins at 0x082a1d1c. Deliberate deviations: none.
+///
+/// # Safety
+///
+/// `left` and `right` must each point to readable, four-byte-aligned
+/// two-word timespec pairs.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timespec_is_before(left: *const i32, right: *const i32) -> u32 {
+    let left_seconds = left.read() as u32;
+    let right_seconds = right.read() as u32;
+    if left_seconds != right_seconds {
+        return (left_seconds < right_seconds) as u32;
+    }
+    (left.add(1).read() < right.add(1).read()) as u32
+}
+
+#[cfg(test)]
+#[test]
+fn timespec_is_before_matches_mixed_signedness_lexicographic_order() {
+    let seconds = [0_u32, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX];
+    let nanoseconds = [i32::MIN, -1, 0, 999_999_999, i32::MAX];
+    for left_seconds in seconds {
+        for right_seconds in seconds {
+            for left_nanoseconds in nanoseconds {
+                for right_nanoseconds in nanoseconds {
+                    let left = [left_seconds as i32, left_nanoseconds];
+                    let right = [right_seconds as i32, right_nanoseconds];
+                    let expected = ((left_seconds, left_nanoseconds)
+                        < (right_seconds, right_nanoseconds)) as u32;
+                    unsafe {
+                        assert_eq!(timespec_is_before(left.as_ptr(), right.as_ptr()), expected,
+                            "left={left:?}, right={right:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// fixed16_cos — original: `FUN_082572e4` @ 0x082572e4 (192 bytes of
 /// code plus the two literal-pool words at 0x082573a4/0x082573a8; true
 /// extent 200 bytes through 0x082573ab, where FUN_082573ac begins).

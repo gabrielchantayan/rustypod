@@ -6636,6 +6636,34 @@ functions:
       unsigned seconds and signed nanoseconds. The callers are the POSIX
       wait/deadline machinery; the first two sites are in FUN_081fe3fc and
       the third is in FUN_081ffd54. No deliberate deviations.
+  - address: 0x082a1ce4
+    ghidra: FUN_082a1ce4
+    name: timespec_is_before
+    size: 56
+    sig: "u32 timespec_is_before(const i32 *left, const i32 *right)"
+    module: fp/fp_misc
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      "*left+0x0/r2": left_seconds
+      "*right+0x0/r3": right_seconds
+      left+0x4/r0: left_nanoseconds
+      right+0x4/r1: right_nanoseconds
+    notes: >-
+      Raw osos.dec establishes a 14-instruction A32 leaf occupying
+      0x082a1ce4..0x082a1d1b (56 bytes), ending in bx lr at 0x082a1d18.
+      The next real function starts at 0x082a1d1c with argument adjustments
+      for the timer-record comparator. Full-image word decoding finds two
+      plain inbound BLs at 0x08262498 and 0x08262540, zero predicated
+      inbound BLs, and zero internal BLs. Both callers are in FUN_08262450:
+      compare current time against a timer deadline, then advance a periodic
+      deadline until it is no longer earlier than current time. Returns
+      one for strict lexicographic left-before-right ordering, using unsigned
+      seconds and signed nanoseconds; nanoseconds are loaded only on equal
+      seconds. Equality returns zero. No callee seams or deliberate deviations.
+      Host tests cover unsigned seconds boundaries, signed nanoseconds
+      extremes, equality, and seconds precedence over opposing nanoseconds.
   - address: 0x082b478c
     ghidra: FUN_082b478c
     name: lowest_set_bit_one_based
