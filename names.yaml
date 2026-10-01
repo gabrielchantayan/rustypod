@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829f9f8
+    ghidra: FUN_0829f9f8
+    name: optional_signed_byte_record_equal
+    size: 48
+    sig: "u32 optional_signed_byte_record_equal(const u8 *left, const u8 *right)"
+    module: ui/optional_signed_byte_record_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      cVar1/r2: left_present
+      r3: right_present
+    notes: >-
+      Raw aligned ARM words establish the 48-byte extent through bx lr at
+      0x0829fa24, before the next real function at 0x0829fa28. Whole-image
+      decoding finds two plain incoming BLs at 0x0829fccc and 0x0829fe60,
+      zero predicated incoming BLs, and zero outgoing BLs of either kind.
+      Both callers pass object +0x91; domain identity is unproven. Compare
+      presence bytes exactly; unequal bytes return 0, equal zero bytes
+      return 1 without reading payload, otherwise compare signed byte +1.
+      No callee seams or NULL guard. Volatile reads preserve conditional
+      access. Tests exhaust all presence pairs and all signed payload pairs
+      for representative nonzero tags, absent payload, aliasing and ignored
+      trailing storage. Full x86_64 host suite, ARM release build and
+      actual-source runtime smoke pass. LLVM intentionally folds the export
+      into optional_byte_record_equal: objdump's symbol table verifies both
+      global function symbols at offset zero in the same 72-byte section.
+      match.py with the assigned symbol cannot find its disassembly label;
+      the folded-body comparison using optional_byte_record_equal exits 1,
+      with 18 Rust instructions versus 12 stock. Byte gates and conditional
+      payload reads survive without calls; LLVM adds a frame, branches
+      instead of predication, unsigned loads equivalent for equality, and
+      sub/clz/lsr boolean conversion. No device execution performed.
   - address: 0x0829fa28
     ghidra: FUN_0829fa28
     name: optional_mixed_record_equal
