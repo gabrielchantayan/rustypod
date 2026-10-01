@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a1eb4
+    ghidra: FUN_082a1eb4
+    name: resource_record_auxiliary_flag
+    size: 8
+    sig: "u32 resource_record_auxiliary_flag(const u8 *record)"
+    module: app/resource_record_auxiliary_flag
+    status: ported
+    renames:
+      param_1/r0: record
+      return/r0: auxiliary_flag
+    notes: >-
+      Raw words e5d00019 e12fff1e establish the true eight-byte extent
+      0x082a1eb4..0x082a1ebc; the next independently entered function
+      begins at 0x082a1ebc. Whole-image aligned A32 decoding verifies
+      two plain inbound BLs at 0x081046e4 and 0x081048a8, zero
+      predicated inbound BLs, and zero outgoing BLs of either kind.
+      Return the unsigned byte at resource record offset +0x19,
+      zero-extended to the full return register. Both callers belong
+      to FUN_0810453c: the first gates an auxiliary-file read and the
+      second gates subsequent processing through FUN_0806e0e0.
+      The precise file format and flag encoding remain unknown.
+      No callee seam, boolean normalization, null guard, or deliberate
+      behavioral deviation. The existing implementation and module
+      registration were retained unchanged. Host tests cover every
+      byte value, four base alignments, differing neighboring bytes,
+      input preservation, and a minimum-sized record with a high-bit
+      flag. All 13305 x86_64 host tests pass; ARM release build passes.
+      Actual-source runtime smoke returns 0, 1, 128, and 255 unchanged.
+      match.py exits 1 with four Rust instructions versus two stock:
+      the same ldrb at +25 remains, with LLVM frame setup and a pop
+      return replacing bx lr. No device execution performed.
   - address: 0x082a4d90
     ghidra: FUN_082a4d90
     name: rgba8_equal
