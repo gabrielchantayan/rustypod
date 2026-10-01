@@ -18,9 +18,22 @@
 //! its verified receiver-and-tagged-value ABI remains virtual.
 
 use crate::app::resource_reference_value::resource_reference_value;
-use crate::app::scoped_context::{scoped_context_construct_from_source, scoped_context_destroy, ScopedContext};
+use crate::app::scoped_context::{
+    scoped_context_construct_from_source, scoped_context_destroy, ScopedContext,
+};
 use crate::app::singletons::media_player_interface_get;
 use crate::cxx::tagged_value::{tagged_value_default_construct, TaggedValue};
+
+// The retail selector veneer reads the source kind at +4 and owner word at
+// +8. On the 32-bit firmware target the direct cast below is therefore exact.
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(TaggedValue, kind)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x04] = [0; core::mem::offset_of!(ScopedContext, owner_valid)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(TaggedValue, payload)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x08] = [0; core::mem::offset_of!(ScopedContext, owner)];
 
 /// Media-player interface vtable prefix through the observed +0xe4 slot.
 #[repr(C)]
@@ -75,6 +88,38 @@ unsafe fn selected_resource_value(context: *mut ScopedContext) -> u32 {
     core::ptr::read_volatile(core::ptr::addr_of!(HOST_OPS)).1(context)
 }
 
+/// Constructs a scoped context from the firmware-layout tagged source.
+///
+/// On the 32-bit target, the selector veneer at 0x0826fd24 reads the kind
+/// byte at +4 and, only when nonzero, the owner word at +8. Those offsets
+/// already coincide with `ScopedContext.owner_valid` and `.owner`. Native
+/// pointers move those fields on a 64-bit host, so adapt only the two fields
+/// consumed by `scoped_context_construct_from_source` instead of casting the
+/// 16-byte firmware object to a larger native `ScopedContext`.
+#[inline(always)]
+unsafe fn construct_context_from_tagged_value(
+    context: *mut ScopedContext,
+    source: *const TaggedValue,
+    mode: u8,
+) -> *mut ScopedContext {
+    #[cfg(target_pointer_width = "32")]
+    {
+        scoped_context_construct_from_source(context, source.cast(), mode)
+    }
+
+    #[cfg(not(target_pointer_width = "32"))]
+    {
+        let kind = core::ptr::addr_of!((*source).kind).read();
+        let mut adapted = core::mem::MaybeUninit::<ScopedContext>::uninit();
+        core::ptr::addr_of_mut!((*adapted.as_mut_ptr()).owner_valid).write(kind.into());
+        if kind != 0 {
+            let owner = core::ptr::addr_of!((*source).payload).read() as usize as *mut u8;
+            core::ptr::addr_of_mut!((*adapted.as_mut_ptr()).owner).write(owner);
+        }
+        scoped_context_construct_from_source(context, adapted.as_ptr(), mode)
+    }
+}
+
 /// # Safety
 /// The media-player interface getter must return a valid interface. Its vtable
 /// slot +0xe4 must accept the interface and writable [`TaggedValue`]; all
@@ -92,7 +137,7 @@ pub unsafe extern "C" fn media_player_resource_value() -> u32 {
     ((*vtable).selected_value)(interface, value.as_mut_ptr());
 
     let mut context = core::mem::MaybeUninit::<ScopedContext>::uninit();
-    scoped_context_construct_from_source(context.as_mut_ptr(), value.as_ptr().cast(), 0);
+    construct_context_from_tagged_value(context.as_mut_ptr(), value.as_ptr(), 0);
     let result = selected_resource_value(context.as_mut_ptr());
     scoped_context_destroy(context.as_mut_ptr());
     result
@@ -111,17 +156,31 @@ mod tests {
     static LOCK: Mutex<()> = Mutex::new(());
     static mut INTERFACE: *mut u8 = core::ptr::null_mut();
     static mut SEEN_RECEIVER: *mut u8 = core::ptr::null_mut();
-    static mut SEEN_TAGGED_VALUE: TaggedValue = TaggedValue { vtable: 0, kind: 0, padding: [0; 3], payload: 0, auxiliary: 0 };
+    static mut SEEN_VTABLE: u32 = 0;
+    static mut SEEN_KIND: u8 = 0xff;
     static mut RESOURCE_CALLS: u32 = 0;
 
-    unsafe extern "C" fn test_interface() -> *mut u8 { INTERFACE }
+    unsafe extern "C" fn test_interface() -> *mut u8 {
+        INTERFACE
+    }
     unsafe extern "C" fn fill_selected_value(receiver: *mut u8, value: *mut TaggedValue) {
         SEEN_RECEIVER = receiver;
-        SEEN_TAGGED_VALUE = value.read();
+        SEEN_VTABLE = core::ptr::addr_of!((*value).vtable).read();
+        SEEN_KIND = core::ptr::addr_of!((*value).kind).read();
+    }
+    unsafe extern "C" fn fill_default_with_poisoned_payload(
+        receiver: *mut u8,
+        value: *mut TaggedValue,
+    ) {
+        fill_selected_value(receiver, value);
+        core::ptr::addr_of_mut!((*value).padding).write([0xa5; 3]);
+        core::ptr::addr_of_mut!((*value).payload).write(0xa5a5_a5a5);
+        core::ptr::addr_of_mut!((*value).auxiliary).write(0xa5a5_a5a5);
     }
     unsafe extern "C" fn test_resource_value(context: *mut ScopedContext) -> u32 {
         RESOURCE_CALLS += 1;
         assert_eq!((*context).mode, 0);
+        assert!((*context).owner.is_null());
         0x6a09_e667
     }
 
@@ -135,17 +194,45 @@ mod tests {
     }
 
     #[test]
+    fn firmware_source_offsets_match_selector_veneer() {
+        assert_eq!(core::mem::offset_of!(TaggedValue, kind), 0x04);
+        assert_eq!(core::mem::offset_of!(TaggedValue, payload), 0x08);
+    }
+
+    #[test]
     fn dispatches_default_tagged_value_and_returns_resource_value() {
         let guard = install();
-        let vtable = MediaPlayerInterfaceVtable { _slots_before_selected_value: [0; 0xe4 / 4], selected_value: fill_selected_value };
+        let vtable = MediaPlayerInterfaceVtable {
+            _slots_before_selected_value: [0; 0xe4 / 4],
+            selected_value: fill_selected_value,
+        };
         let mut interface = Interface { vtable: &vtable };
         let interface = (&mut interface as *mut Interface).cast::<u8>();
         unsafe {
             addr_of_mut!(INTERFACE).write(interface);
             assert_eq!(media_player_resource_value(), 0x6a09_e667);
             assert_eq!(SEEN_RECEIVER, interface);
-            assert_eq!(SEEN_TAGGED_VALUE.vtable, crate::cxx::tagged_value::TAGGED_VALUE_VTABLE);
-            assert_eq!(SEEN_TAGGED_VALUE.kind, 0);
+            assert_eq!(SEEN_VTABLE, crate::cxx::tagged_value::TAGGED_VALUE_VTABLE);
+            assert_eq!(SEEN_KIND, 0);
+            assert_eq!(RESOURCE_CALLS, 1);
+            addr_of_mut!(HOST_OPS).write((unavailable_interface, unavailable_resource_value));
+        }
+        drop(guard);
+    }
+
+    #[test]
+    fn default_kind_ignores_poisoned_payload_at_firmware_offset_eight() {
+        let guard = install();
+        let vtable = MediaPlayerInterfaceVtable {
+            _slots_before_selected_value: [0; 0xe4 / 4],
+            selected_value: fill_default_with_poisoned_payload,
+        };
+        let mut interface = Interface { vtable: &vtable };
+        let interface = (&mut interface as *mut Interface).cast::<u8>();
+        unsafe {
+            addr_of_mut!(INTERFACE).write(interface);
+            assert_eq!(media_player_resource_value(), 0x6a09_e667);
+            assert_eq!(SEEN_KIND, 0);
             assert_eq!(RESOURCE_CALLS, 1);
             addr_of_mut!(HOST_OPS).write((unavailable_interface, unavailable_resource_value));
         }
