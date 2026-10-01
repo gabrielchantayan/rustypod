@@ -166606,3 +166606,36 @@ functions:
       match.py exits 1: LLVM emits 12 instructions versus seven stock,
       preserving the r3 seed, query call, status comparison, and zero-on-error
       selection with extra frame setup. No device execution performed.
+
+  - address: 0x0829e208
+    ghidra: FUN_0829e208
+    name: counted_container_is_empty
+    size: 48
+    module: cxx/counted_container_is_empty
+    status: ported
+    sig: "uint32_t counted_container_is_empty(CountedContainer *container)"
+    renames:
+      param_1: container
+      uVar1: empty
+      FUN_08094404: mutex_lock_counted
+      FUN_083d75f0: container_is_empty (byte-identical alias)
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw A32 establishes extent 0x0829e208..0x0829e237; the independent
+      literal-return function starts at 0x0829e238. Complete aligned-word
+      branch decoding verifies two inbound plain BL sites at 0x082027d8
+      and 0x0820285c, no predicated inbound BL, and three outgoing plain
+      BL instructions at 0x0829e218, 0x0829e220, and 0x0829e22c with no
+      predicated outgoing BL. Acquire the counted mutex at +0x2c, return
+      whether the container count at +0x20 is exactly zero, and release
+      the mutex before returning the saved result. All callees reuse
+      existing ports; 0x083d75f0 is the recorded container_is_empty alias.
+      repr(C) keeps native pointer fields aligned on the host while
+      preserving target offsets. Host tests cover nonzero count extremes,
+      wrapping hold counts, read-after-wait and saved-result-before-release
+      ordering. Host suite and ARM release build pass. Native API smoke
+      returns 1,0,0,0 for counts 0,1,2,ffffffff with hold count unchanged.
+      match.py exits 1 with 16 Rust versus 12 stock instructions: LLVM
+      inlines counted acquire into mutex_lock plus the increment at +0x34,
+      retains predicate and counted-unlock calls, and adds frame setup.
+      No device execution performed.

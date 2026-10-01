@@ -607,6 +607,7 @@ pub mod string_export_counted_utf16;
 pub mod byte_key_tree_find_predecessor;
 pub mod red_black_tree_leftmost_descendant;
 pub mod templates;
+pub mod counted_container_is_empty;
 pub mod container_dispose_elements;
 pub mod fixed_record_range_copy;
 pub mod copy_record_24_if_destination;
