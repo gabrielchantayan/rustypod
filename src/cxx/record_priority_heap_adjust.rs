@@ -11,34 +11,18 @@
 //! children with the fixed record ordering (unsigned word +0x1c, then signed
 //! word +0x20), then invoke the matching sift-up helper to place `value`.
 //!
-//! Deliberate deviation: the two unported direct callees remain fixed-address
-//! calls on the target; host builds reproduce their byte-observed behavior so
-//! the complete adjustment can be tested.
+//! Deliberate deviation: comparison calls the ported Rust implementation;
+//! sift-up remains a fixed-address target call with a host behavioral model.
 
-const RETAIL_RECORD_PRIORITY_GREATER: usize = 0x082a_1d1c;
+use crate::util::record_priority_is_greater::record_priority_is_greater;
+
 const RETAIL_RECORD_PRIORITY_SIFT_UP: usize = 0x083e_7d7c;
 
-type RecordPriorityGreater = unsafe extern "C" fn(*const u8, u32, u32) -> i32;
 type RecordPrioritySiftUp = unsafe extern "C" fn(*mut u32, i32, i32, u32, *const u8);
 
-#[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn record_priority_greater(context: *const u8, left: u32, right: u32) -> i32 {
-    let compare: RecordPriorityGreater = unsafe { core::mem::transmute(RETAIL_RECORD_PRIORITY_GREATER) };
-    unsafe { compare(context, left, right) }
-}
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn record_priority_greater(_context: *const u8, left: u32, right: u32) -> i32 {
-    let left = left as usize as *const u32;
-    let right = right as usize as *const u32;
-    let left_priority = unsafe { left.add(7).read() };
-    let right_priority = unsafe { right.add(7).read() };
-    let left_tiebreak = unsafe { left.add(8).read() as i32 };
-    let right_tiebreak = unsafe { right.add(8).read() as i32 };
-    ((left_priority > right_priority)
-        || (left_priority == right_priority && left_tiebreak > right_tiebreak)) as i32
+unsafe fn record_priority_greater(context: *const u8, left: u32, right: u32) -> u32 {
+    unsafe { record_priority_is_greater(context, left as usize as *const u32, right as usize as *const u32) }
 }
 
 #[cfg(target_os = "none")]

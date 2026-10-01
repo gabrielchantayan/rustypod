@@ -4351,14 +4351,14 @@ functions:
       Raw osos.dec establishes the exact 92-byte extent
       0x083e7d7c..0x083e7dd7: pop {r4-r8,pc} returns at the end, and the next
       independently linked function begins at 0x083e7dd8. Raw A32 decoding
-      finds one plain unconditional body BL at 0x083e7dc4 to the unported
+      finds one plain unconditional body BL at 0x083e7dc4 to the now-ported
       comparator 0x082a1d1c, and zero predicated body BL instructions. The two
       inbound BL callers are 0x083d9e28 and 0x083e7eb8. The function inserts a
       target-width record pointer into a binary min-heap, moving strict-greater
       parents down while the insertion index exceeds its lower bound. Comparator
       inspection establishes lexicographic unsigned +0x1c then signed +0x20
       ordering. Rust uses indexed u32 access rather than literal lsl #2
-      arithmetic; its unported comparator is a target call and host test seam.
+      arithmetic; its comparator now calls the Rust port on both platforms.
   - address: 0x083e7dd8
     ghidra: FUN_083e7dd8
     name: string_object_word_upper_bound
@@ -158829,8 +158829,32 @@ functions:
       calls (0x082622f4 and 0x082624d4) and zero predicated BL calls. The
       body directly calls 0x082a1d1c to order records by unsigned +0x1c then
       signed +0x20, and 0x083e7d7c to sift the held value upward. The Rust
-      target retains those fixed-address callees; host builds faithfully model
-      them to test right-child selection and signed tiebreak behavior.
+      comparison calls the Rust port on both platforms; sift-up remains a
+      fixed-address target call with a host model for adjustment tests.
+
+  - address: 0x082a1d1c
+    ghidra: FUN_082a1d1c
+    name: record_priority_is_greater
+    size: 64
+    sig: "u32 record_priority_is_greater(const void *context, const u32 *left, const u32 *right)"
+    module: util/record_priority_is_greater
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: left
+      param_3/r2: right
+      uVar1: inverted_comparison
+    notes: >-
+      Raw osos.dec establishes the 64-byte extent 0x082a1d1c..0x082a1d5c:
+      bx lr at 0x082a1d58 precedes a separate ldrb/bx lr accessor at 0x082a1d5c.
+      Independent full-image A32 decoding finds two plain inbound BL sites,
+      0x083e7dc4 and 0x083e7ee8, and zero predicated inbound BLs.
+      The body contains zero plain and zero predicated BLs. Context is ignored.
+      Returns exactly 1 for strict lexicographic greater-than of unsigned
+      priority +0x1c then signed tiebreak +0x20, otherwise 0, including equality.
+      Rust uses aligned u32 indices 7 and 8 and a boolean rather than the
+      original inverted branch/eor sequence. Both existing comparator callers
+      now use the Rust port instead of fixed-address or replaceable host seams.
 
   # --- opaque derived constructor ---
   - address: 0x083e798c

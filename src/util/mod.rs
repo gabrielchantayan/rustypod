@@ -259,6 +259,7 @@ pub mod record_fields_configure;
 pub mod record_min_heap_pop_adjust;
 pub mod record_min_heap_push;
 pub mod record_min_heap_sift_up;
+pub mod record_priority_is_greater;
 pub mod resource_record_find_nth;
 pub mod resource_record_find_and_decode;
 pub mod resource_query_account;
