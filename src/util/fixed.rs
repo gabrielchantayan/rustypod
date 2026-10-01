@@ -18,6 +18,7 @@
 //!
 //! - `fixed16_mul` — `FUN_080e9878` @ 0x080e9878 (20 bytes; 94 call sites).
 //! - `fixed16_dot3` — `FUN_082a014c` @ 0x082a014c (64 bytes; 9 call sites).
+//! - `fixed16_add3` — `FUN_082a01b0` @ 0x082a01b0 (52 bytes; 2 call sites).
 //! - `fixed16_det2` — `FUN_0823627c` @ 0x0823627c (36 bytes; 9 call sites).
 //! - `raster_det2_i64` — `FUN_08260848` @ 0x08260848 (40 bytes; 6 call
 //!   sites).
@@ -270,6 +271,34 @@ pub unsafe extern "C" fn fixed16_dot3(a: *const i32, b: *const i32) -> i32 {
     let second = fixed16_mul(unsafe { core::ptr::read(a.add(1)) }, unsafe { core::ptr::read(b.add(1)) });
     let third = fixed16_mul(unsafe { core::ptr::read(a.add(2)) }, unsafe { core::ptr::read(b.add(2)) });
     first.wrapping_add(second).wrapping_add(third)
+}
+
+/// fixed16_add3 — original: `FUN_082a01b0` @ 0x082a01b0 (52 bytes).
+///
+/// Adds corresponding signed Q16.16 components modulo 2^32, without
+/// scaling, rounding, or saturation. All six source words are read before
+/// any destination write, preserving exact and partial overlap.
+///
+/// Raw A32 establishes 0x082a01b0..0x082a01e3; the next function starts
+/// with its own push at 0x082a01e4. Whole-image decoding finds two plain
+/// inbound BLs (0x0824c198, 0x0824c34c), zero predicated inbound BLs,
+/// and zero outbound BLs of either kind. Deliberate deviations: none.
+///
+/// # Safety
+/// `a` and `b` must each point to three aligned readable i32 words; `dst`
+/// must point to three aligned writable i32 words. All may overlap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_add3")]
+pub unsafe extern "C" fn fixed16_add3(dst: *mut i32, a: *const i32, b: *const i32) {
+    let x = unsafe { core::ptr::read(a) }.wrapping_add(unsafe { core::ptr::read(b) });
+    let y = unsafe { core::ptr::read(a.add(1)) }.wrapping_add(unsafe { core::ptr::read(b.add(1)) });
+    let z = unsafe { core::ptr::read(a.add(2)) }.wrapping_add(unsafe { core::ptr::read(b.add(2)) });
+    unsafe {
+        core::ptr::write(dst, x);
+        core::ptr::write(dst.add(1), y);
+        core::ptr::write(dst.add(2), z);
+    }
 }
 
 
@@ -948,6 +977,42 @@ mod tests {
         let a = [i32::MAX, i32::MAX, ONE];
         let b = [ONE, ONE, ONE];
         assert_eq!(unsafe { fixed16_dot3(a.as_ptr(), b.as_ptr()) }, 0xfffe);
+    }
+
+    #[test]
+    fn fixed16_add3_signed_components_and_wrap() {
+        for (a, b, expected) in [
+            ([0; 3], [0; 3], [0; 3]),
+            ([ONE, -2 * ONE, 7], [-ONE, ONE / 2, -3], [0, -3 * ONE / 2, 4]),
+            ([i32::MAX, i32::MIN, -1], [1, -1, i32::MIN],
+             [i32::MIN, i32::MAX, i32::MAX]),
+        ] {
+            let mut dst = [0x1234; 5];
+            unsafe { fixed16_add3(dst.as_mut_ptr().add(1), a.as_ptr(), b.as_ptr()); }
+            assert_eq!(dst, [0x1234, expected[0], expected[1], expected[2], 0x1234]);
+        }
+    }
+
+    #[test]
+    fn fixed16_add3_snapshots_overlapping_sources() {
+        // Every relative placement within one slab, including all-equal,
+        // forward/backward partial overlap, and nonoverlapping vectors.
+        for a in 0..=6 {
+            for b in 0..=6 {
+                for dst in 0..=6 {
+                    let mut words = [i32::MAX, 1, i32::MIN, -1, ONE, -ONE, 7, 9, 11];
+                    let before = words;
+                    let mut expected = before;
+                    for lane in 0..3 {
+                        expected[dst + lane] =
+                            (i64::from(before[a + lane]) + i64::from(before[b + lane])) as i32;
+                    }
+                    let p = words.as_mut_ptr();
+                    unsafe { fixed16_add3(p.add(dst), p.add(a), p.add(b)); }
+                    assert_eq!(words, expected, "a={a}, b={b}, dst={dst}");
+                }
+            }
+        }
     }
 
 
