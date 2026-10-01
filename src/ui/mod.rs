@@ -1,6 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
 pub mod optional_byte_record_equal;
+pub mod optional_signed_byte_record_equal;
 pub mod optional_mixed_record_equal;
 pub mod block_map;
 pub mod byte_store;
