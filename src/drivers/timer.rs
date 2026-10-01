@@ -1220,9 +1220,6 @@ unsafe extern "C" fn missing_trace_validate(_timer: *mut u8) {}
 unsafe extern "C" fn missing_tick() -> u32 {
     0
 }
-unsafe extern "C" fn missing_compare_deadlines(_a: *const u32, _b: *const u32) -> u32 {
-    0
-}
 unsafe extern "C" fn missing_notify_pending(_cell: *const u32) {}
 
 // The wired defaults: trace/assert and arm are ported below; the remaining
@@ -1234,7 +1231,7 @@ const DEFAULT_TIMER_OPS: TimerOps = TimerOps {
     construct_timer: missing_construct_timer,
     trace_validate: missing_trace_validate,
     tick: missing_tick,
-    compare_deadlines: missing_compare_deadlines,
+    compare_deadlines: timer_deadline_is_after,
     notify_pending: missing_notify_pending,
 };
 
@@ -1445,6 +1442,52 @@ pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
     (timer_ops().arm_timer)(timer);
 }
 
+/// timer_deadline_is_after — original: `FUN_082a243c` @ 0x082a243c.
+///
+/// True extent: 28 bytes, 0x082a243c..0x082a2458; the next function
+/// loads its own object's +0x48 flags. Raw ARM decoding verifies two plain
+/// inbound BL sites (0x0807a290 and 0x0808f784), no predicated inbound BLs,
+/// and no outbound calls.
+///
+/// Loads both deadline words, subtracts modulo 2^32, and returns one if
+/// the signed interpretation of the difference is positive, otherwise zero.
+/// Equal deadlines remain FIFO in timer_arm. The half-range difference
+/// 0x80000000 is negative in either direction, so neither deadline is after
+/// the other. This is not ordinary signed or unsigned word ordering.
+/// Deliberate deviations: none; u32 preserves the exact ARM 0/1 result.
+///
+/// # Safety
+///
+/// Both pointers must refer to readable, aligned u32 deadline words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn timer_deadline_is_after(left: *const u32, right: *const u32) -> u32 {
+    ((*left).wrapping_sub(*right) as i32 > 0) as u32
+}
+
+#[cfg(test)]
+mod deadline_comparison_tests {
+    use super::timer_deadline_is_after;
+
+    #[test]
+    fn preserves_equality_wrap_and_half_range_boundaries() {
+        let cases = [
+            (0, 0, 0), (u32::MAX, u32::MAX, 0),
+            (101, 100, 1), (100, 101, 0),
+            (0, u32::MAX, 1), (u32::MAX, 0, 0),
+            (0x8000_0000, 0x7fff_ffff, 1),
+            (0x7fff_ffff, 0x8000_0000, 0),
+            (0x7fff_ffff, 0, 1), (0, 0x7fff_ffff, 0),
+            (0x8000_0000, 0, 0), (0, 0x8000_0000, 0),
+            (0x8000_0001, 0, 0), (0, 0x8000_0001, 1),
+        ];
+        for (left, right, expected) in cases {
+            assert_eq!(unsafe { timer_deadline_is_after(&left, &right) }, expected,
+                "left={left:#010x}, right={right:#010x}");
+        }
+    }
+}
+
 /// timer_arm — original: `FUN_0807a228` @ 0x0807a228 (176 bytes).
 ///
 /// Arms `timer` onto the deadline-sorted pending queue. When the armed
@@ -1463,8 +1506,8 @@ pub unsafe extern "C" fn timer_restart(timer: *mut u8) {
 /// runs on BOTH the queued and the zero-period path (the original's
 /// shared epilogue), and the unlock @ 0x0807f6a0 is the original's tail
 /// branch. The `timer` argument is not NULL-checked, as in the
-/// original. The four unported callees dispatch through `TimerOps` (see
-/// the module header); the link-word representation is the
+/// original. The helper callees dispatch through `TimerOps`; the deadline
+/// comparator now defaults to `timer_deadline_is_after`. The link-word representation is the
 /// `heap/alloc_core.rs` offset-link precedent on host test builds.
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn timer_arm(timer: *mut u8) {
@@ -1676,12 +1719,11 @@ mod tests {
         record(Call::Tick);
         unsafe { MOCK_TICK }
     }
-    /// The mock comparator implements the original @ 0x082a243c exactly:
-    /// 1 when the signed difference *a - *b is > 0, else 0.
+    /// Records queue comparisons while exercising the ported comparator.
     unsafe extern "C" fn mock_compare(a: *const u32, b: *const u32) -> u32 {
         let (a, b) = unsafe { (*a, *b) };
         record(Call::Compare(a, b));
-        (a.wrapping_sub(b) as i32 > 0) as u32
+        timer_deadline_is_after(&a, &b)
     }
     unsafe extern "C" fn mock_notify(cell: *const u32) {
         record(Call::Notify(cell as usize));
