@@ -49,9 +49,40 @@ pub unsafe extern "C" fn rgba8_packed_equal(left: *const u8, right: *const u8) -
     u32::from(left_word == right_word)
 }
 
+/// `tagged_rgba8_equal` — original: `FUN_0829ff54` @ `0x0829ff54`
+/// (64 bytes; 2 unconditional incoming BLs at 0x0829fc08 and 0x0829fdd0,
+/// zero predicated BLs, verified by decoding raw ARM words in osos.dec).
+///
+/// Compares the leading tag bytes. Unequal tags return 0; equal zero tags
+/// return 1 without touching the payload. Equal nonzero tags compare the
+/// following four RGBA bytes via `rgba8_packed_equal` at 0x082a0124.
+/// The sole outgoing BL is unconditional at 0x0829ff78. The final pop is
+/// at 0x0829ff90; the next independent function starts at 0x0829ff94.
+/// Deliberate deviations: none.
+///
+/// # Safety
+///
+/// Both pointers must identify a readable tag byte. If the tags are equal
+/// and nonzero, each must also have four readable bytes following it.
+/// Alignment is unrestricted.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_rgba8_equal")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_rgba8_equal(left: *const u8, right: *const u8) -> u32 {
+    let left_tag = *left;
+    let right_tag = *right;
+    if left_tag != right_tag {
+        return 0;
+    }
+    if left_tag == 0 {
+        return 1;
+    }
+    u32::from(rgba8_packed_equal(left.add(1), right.add(1)) != 0)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{rgba8_packed_equal, rgba8_to_rgba8888};
+    use super::{rgba8_packed_equal, rgba8_to_rgba8888, tagged_rgba8_equal};
 
     #[test]
     fn packs_each_component_in_rgba_order() {
@@ -107,5 +138,46 @@ mod tests {
         assert_eq!(unsafe {
             rgba8_packed_equal(bytes.as_ptr(), bytes.as_ptr().add(1))
         }, 0);
+    }
+
+    #[test]
+    fn tagged_equality_short_circuits_without_a_payload() {
+        let absent = [0u8];
+        let present = [0xffu8];
+        assert_eq!(unsafe { tagged_rgba8_equal(absent.as_ptr(), absent.as_ptr()) }, 1);
+        assert_eq!(unsafe { tagged_rgba8_equal(absent.as_ptr(), present.as_ptr()) }, 0);
+        assert_eq!(unsafe { tagged_rgba8_equal(present.as_ptr(), absent.as_ptr()) }, 0);
+        let left = [0, 1, 2, 3, 4];
+        let right = [0, 5, 6, 7, 8];
+        assert_eq!(unsafe { tagged_rgba8_equal(left.as_ptr(), right.as_ptr()) }, 1);
+    }
+
+    #[test]
+    fn tagged_equality_checks_tags_and_every_payload_byte() {
+        for left_offset in 0..4 {
+            for right_offset in 0..4 {
+                for tag in [1, 0x80, 0xff] {
+                    let record = [tag, 0, 0x80, 0xff, 1];
+                    let mut left = [0xa5; 8];
+                    let mut right = [0x5a; 8];
+                    left[left_offset..left_offset + 5].copy_from_slice(&record);
+                    right[right_offset..right_offset + 5].copy_from_slice(&record);
+                    let lhs = unsafe { left.as_ptr().add(left_offset) };
+                    let rhs = unsafe { right.as_ptr().add(right_offset) };
+                    assert_eq!(unsafe { tagged_rgba8_equal(lhs, rhs) }, 1);
+                    assert_eq!(unsafe { tagged_rgba8_equal(lhs, lhs) }, 1);
+                    for byte in 0..5 {
+                        right[right_offset + byte] ^= 0x80;
+                        assert_eq!(unsafe { tagged_rgba8_equal(lhs, rhs) }, 0);
+                        assert_eq!(unsafe { tagged_rgba8_equal(rhs, lhs) }, 0);
+                        right[right_offset + byte] ^= 0x80;
+                    }
+                }
+            }
+        }
+        let overlap = [0xff; 6];
+        assert_eq!(unsafe {
+            tagged_rgba8_equal(overlap.as_ptr(), overlap.as_ptr().add(1))
+        }, 1);
     }
 }
