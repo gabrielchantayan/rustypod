@@ -2890,6 +2890,8 @@ pub mod hints {
     // successor, child, and value fixtures; mappings never unmap, so no other
     // user may share this hint.
     pub const RESOLVE_SUCCESSOR_VALUE: usize = 0x7702_0000;
+    // Dedicated to app/object_cached_byte's object, vtable, and cache.
+    pub const OBJECT_CACHED_BYTE: usize = 0x7703_0000;
     // 0x7800_0000: dedicated to util/object_selected_payload_index's
     // target-width object, descriptor, and payload fixture; mappings never
     // unmap, so no other user may share this hint.
