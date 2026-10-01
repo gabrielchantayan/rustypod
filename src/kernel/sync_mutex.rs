@@ -739,6 +739,77 @@ mod tests {
         guard
     }
 
+    #[test]
+    fn counted_container_empty_handles_counts_and_wrapping_hold_count() {
+        use crate::cxx::counted_container_is_empty::{CountedContainer, counted_container_is_empty};
+        let _guard = mock_kernel();
+        let mut object = CountedContainer {
+            container_words: [0xa5a5a5a5; 11],
+            lock: CountedMutex {
+                mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: 0x1234 },
+                hold_count: u32::MAX,
+            },
+        };
+        for count in [0, 1, 2, 0x80000000, u32::MAX] {
+            object.container_words[8] = count;
+            let before = object.container_words;
+            assert_eq!(unsafe { counted_container_is_empty(&mut object) }, u32::from(count == 0));
+            assert_eq!(object.container_words, before);
+            assert_eq!(object.lock.hold_count, u32::MAX);
+            assert_eq!(object.lock.mutex.unused, 0x1234);
+        }
+    }
+
+    static mut EMPTY_QUERY_OBJECT: *mut crate::cxx::counted_container_is_empty::CountedContainer =
+        core::ptr::null_mut();
+
+    unsafe extern "C" fn empty_query_wait(handle: u32) {
+        let object = EMPTY_QUERY_OBJECT;
+        record(Call::Wait(handle));
+        // Model a producer finishing before the wait returns.
+        (*object).container_words[8] = 0;
+    }
+
+    unsafe extern "C" fn empty_query_signal(handle: u32) {
+        let object = EMPTY_QUERY_OBJECT;
+        // Observe the decrement before release, and mutate after the query.
+        record(Call::Signal((*object).lock.hold_count));
+        (*object).container_words[8] = handle;
+    }
+
+    #[test]
+    fn counted_container_empty_reads_after_wait_and_preserves_result_across_release() {
+        use crate::cxx::counted_container_is_empty::{CountedContainer, counted_container_is_empty};
+        let _guard = mock_kernel();
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                unsafe {
+                    ROM_KERNEL = MOCK_KERNEL;
+                    EMPTY_QUERY_OBJECT = core::ptr::null_mut();
+                }
+            }
+        }
+        let _reset = Reset;
+        let mut cell = 0x42;
+        let mut object = CountedContainer {
+            container_words: [7; 11],
+            lock: CountedMutex {
+                mutex: Mutex { sem_cell: &mut cell, unused: 0 },
+                hold_count: 9,
+            },
+        };
+        unsafe {
+            EMPTY_QUERY_OBJECT = &mut object;
+            ROM_KERNEL.sema_wait = empty_query_wait;
+            ROM_KERNEL.sema_signal = empty_query_signal;
+            assert_eq!(counted_container_is_empty(&mut object), 1);
+        }
+        assert_eq!(object.container_words[8], 0x42);
+        assert_eq!(object.lock.hold_count, 9);
+        assert_eq!(calls(), vec![Call::Wait(0x42), Call::Signal(9)]);
+    }
+
     struct HeapOpsReset;
 
     impl Drop for HeapOpsReset {
