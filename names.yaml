@@ -47061,6 +47061,32 @@ functions:
       r1 and r3 ABI arguments are unused. No deliberate deviations; all seven
       callees were already ported and are called directly. Host tests cover
       escaped versus unescaped separators and a multibyte final component.
+  - address: 0x082a1e54
+    ghidra: FUN_082a1e54
+    name: string_record_find_key_pair
+    size: 60
+    sig: "uint32_t *string_record_find_key_pair(const uint32_t *owner, uint32_t first_key, uint32_t second_key)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: first_key
+      param_3/r2: second_key
+      r3: record
+      r12: end
+      owner+0x44: begin
+      owner+0x48: end
+    notes: >-
+      Raw ARM words establish a 60-byte leaf ending at the independent
+      accessor at 0x082a1e90. Whole-image decoding finds two plain BL callers
+      at 0x0807a554 and 0x082a1e00, zero predicated callers and no outgoing
+      calls. Snapshots begin/end, scans seven-word records, compares keys at
+      +4/+8 with a conditional second load and returns the first match or
+      NULL. Larger record identity remains undecoded. No seams or deviations;
+      u32 word indexing preserves target pointer fields and stride on hosts.
+      Host reference tests and standalone smoke cover empty ranges, misses,
+      partial-key mismatches, duplicates and last-record matches. ARM diff
+      preserves conditional loads and 28-byte stride with added frame setup.
   - address: 0x082a1e90
     ghidra: FUN_082a1e90
     name: string_record_string_at_0x14
