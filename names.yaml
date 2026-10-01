@@ -73703,6 +73703,36 @@ functions:
       set values. match.py structural review is expected to differ from ADS
       code generation.
 
+  - address: 0x082a0124
+    ghidra: FUN_082a0124
+    name: rgba8_packed_equal
+    size: 40
+    sig: "u32 rgba8_packed_equal(const u8 *left, const u8 *right)"
+    module: ui/rgba8888_pack
+    status: ported
+    renames:
+      param_1/r0: left (four RGBA8 component bytes)
+      param_2/r1: right (four RGBA8 component bytes)
+      iVar1/r4: left_word
+      iVar2/r0: right_word
+      FUN_082a0100: rgba8_to_rgba8888 (existing port)
+    notes: >-
+      Raw extent is 40 bytes, ten ARM instructions ending with pop at
+      0x082a0148; the next function begins with push at 0x082a014c, with
+      no literal pool. Full-image ARM-word decoding finds two unconditional
+      incoming BLs at 0x0829fad8 and 0x0829ff78, zero predicated BLs and
+      zero incoming plain branches. Two unconditional outgoing BLs at
+      0x082a012c and 0x082a0138 target the existing rgba8_to_rgba8888 port
+      at 0x082a0100. Packs left then right and returns integer 1 iff
+      the packed words match, otherwise 0. Callers pass embedded four-byte
+      records at object offset 1. No semantic deviations or validation.
+      Host tests cover every channel, all byte alignments, zero/high-bit/
+      all-set values, aliasing and overlapping records. Standalone smoke
+      verifies equality and each channel mismatch. Host suite and ARM
+      release build pass. match.py shows eleven Rust instructions versus
+      ten original: two BLs remain, LLVM adds a frame pointer and uses
+      sub/clz/lsr instead of cmp and conditional moves for the integer boolean.
+
   - address: 0x082a1bc4
     ghidra: FUN_082a1bc4
     name: plist_node_child_count
