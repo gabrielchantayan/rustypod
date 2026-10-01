@@ -2,7 +2,7 @@
 //!
 //! Raw ARM establishes the true eight-byte extent: `ldr r0, [r0, #8]; bx lr`
 //! at `0x082a1ec0..0x082a1ec4`; the separately linked next leaf begins with
-//! `ldr r0, [r0, #12]` at `0x082a1ec8`. Decoding every ARM B/BL-immediate word
+//! `add r0, r0, #12` at `0x082a1ec8`. Decoding every ARM B/BL-immediate word
 //! in `osos.dec` finds four direct inbound calls, all unconditional plain `bl`
 //! at `0x081043b8`, `0x081043f8`, `0x08104488`, and `0x081044ac`; no predicated
 //! `bl` calls or direct-tail branches target this leaf.
