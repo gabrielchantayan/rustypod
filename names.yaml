@@ -92044,6 +92044,35 @@ functions:
       afterward. The function has no NULL, bounds, or alignment checks.
       Deliberate deviation: Rust invokes the direct helper port rather than
       tail-branching; the helper preserves the original byte-copy order.
+  # --- Draw-state foreground-colour getter ---
+  - address: 0x082a1d6c
+    ghidra: FUN_082a1d6c
+    name: draw_state_get_foreground_color
+    size: 8
+    sig: "void draw_state_get_foreground_color(u8 *dst, const u8 *record)"
+    module: cxx/draw_state_get_foreground_color
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: record
+      param_2_plus_0x11/r1: foreground_color
+    notes: >-
+      Raw words e2811011 eaff40cd decode as add r1,r1,#0x11 followed by
+      b 0x082720ac. The true extent is 0x082a1d6c..0x082a1d74 (8 bytes);
+      the next function starts with add r0,r0,#0x20. Independently scanning
+      every aligned ARM BL-immediate word finds two unconditional plain BL
+      callers, 0x08128b18 and 0x081b3454, and zero predicated BL callers.
+      Both callers copy the foreground RGBA field at record+0x11 to stack
+      storage. Reuses the named, ported color_copy_unaligned helper rather
+      than introducing a firmware seam. Deliberate deviation: Rust calls
+      the helper port instead of explicitly tail-branching; volatile byte
+      accesses retain the ascending load/store order and forward overlap
+      propagation. No NULL, bounds, or alignment checks are added. Host
+      tests cover all 16 source/destination alignments, NUL and high-bit
+      components, surrounding-byte preservation, self-copy and both overlap
+      directions. match.py shows the same source adjustment and tail branch
+      with an extra frame prologue/epilogue; R_ARM_JUMP24 resolves the branch
+      to color_copy_unaligned (the displayed self-target is unlinked).
 # --- Tagged payload signed-field +0x52 getter ---
   - address: 0x082a1d74
     ghidra: FUN_082a1d74
