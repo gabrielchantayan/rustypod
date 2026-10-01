@@ -165789,3 +165789,37 @@ functions:
       preserving indirect dispatch and conditional post-query owner/value
       loads. Build artifacts use temporary storage because root disk space
       is limited.
+
+  - address: 0x082a259c
+    ghidra: FUN_082a259c
+    name: ui_element_has_flag_64
+    size: 16
+    sig: "uint32_t ui_element_has_flag_64(const UiElement *element)"
+    module: ui/content_bounds
+    status: ported
+    renames:
+      param_1/r0: element
+      r0: flags_then_flag_64
+      "element+0x48": flags
+    notes: >-
+      Raw osos.dec words e5900048 e2000040 e1a00320 e12fff1e establish
+      the exact 16-byte A32 body at 0x082a259c..0x082a25ac. The next real
+      function starts at 0x082a25ac with ldr r3,[r0,#0x44] followed by a
+      comparison against r2. This leaf loads the aligned flag word at +0x48,
+      masks bit 6, and shifts it to exactly 0 or 1, without a NULL guard.
+      Whole-image aligned A32 BL decoding finds two unconditional inbound
+      call sites at 0x082866f0 and 0x082867f0, zero predicated inbound BLs,
+      and zero outbound BLs. Both callers pass the result of a virtual
+      callback at vtable +0x5c and compare the accessor result against zero.
+      Bit 6's higher-level meaning is not established; the name follows
+      the existing ui_element_has_flag_2 convention rather than inventing
+      an identity. No callee seams or new modules are needed. Host tests
+      cover every single-bit flag, all-ones, unrelated-bit combinations,
+      neighboring-word independence, normalized results, and unchanged
+      flags. Deliberate deviations: none.
+      Full host suite passed (13294 tests), and the ARM release build passed.
+      An extracted-production-function runtime smoke verified zero, bit-only,
+      bit-cleared all-ones, and all-ones inputs. match.py exits 1: LLVM emits
+      six instructions instead of four, adding frame setup and combining
+      the mask/shift into and r0,r1,r0,lsr #6 with r1=1. The +0x48 word
+      load and normalized return are preserved; there are no added calls.

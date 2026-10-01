@@ -59,6 +59,26 @@ pub unsafe extern "C" fn ui_element_has_flag_2(element: *const u8) -> i32 {
     ((flags & 2) >> 1) as i32
 }
 
+/// ui_element_has_flag_64 — original: `FUN_082a259c` @ 0x082a259c
+/// (16 bytes; `0x082a259c..0x082a25ac`; the next distinct function starts at
+/// `0x082a25ac`).
+///
+/// Loads the element flag word at +0x48 and returns bit 6 as exactly 0 or 1.
+/// Raw decoding finds two direct, unconditional inbound `bl` call sites,
+/// zero predicated forms, and no outbound calls. Callers test the result of
+/// this accessor on the element returned by a virtual callback.
+///
+/// # Deliberate deviations
+///
+/// None. Like retailOS, this requires a live, word-aligned element pointer
+/// and does not guard against NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_element_has_flag_64(element: *const u8) -> u32 {
+    let flags = ptr::addr_of!((*element.cast::<ElementFields>()).flags).read();
+    (flags & 0x40) >> 6
+}
+
 /// ui_element_content_inset — original: `FUN_082a2468` @ 0x082a2468
 /// (84 bytes; `0x082a2468..0x082a24bc`; the next function starts at
 /// `0x082a24bc`).
@@ -269,6 +289,33 @@ mod tests {
             );
         }
         out
+    }
+
+    #[test]
+    fn flag_64_is_normalized_and_ignores_other_bits_and_neighboring_words() {
+        let mut fixture = Fixture {
+            _before_flags: [0xff; 0x48],
+            flags: 0,
+            _before_bounds: [0xff; 0x34],
+            bounds: rect(-1, -1, -1, -1),
+        };
+        for flags in core::iter::once(0)
+            .chain((0..32).map(|bit| 1u32 << bit))
+            .chain([u32::MAX, !0x40, 0x3f, 0x80, 0x8000_0040])
+        {
+            fixture.flags = flags;
+            let element = (&fixture as *const Fixture).cast::<u8>();
+            let expected = if flags & 0x40 != 0 { 1 } else { 0 };
+            assert_eq!(unsafe { ui_element_has_flag_64(element) }, expected,
+                "flags={flags:#010x}");
+            assert_eq!(fixture.flags, flags);
+        }
+        fixture._before_flags.fill(0);
+        fixture._before_bounds.fill(0);
+        fixture.flags = 0x40;
+        assert_eq!(unsafe {
+            ui_element_has_flag_64((&fixture as *const Fixture).cast())
+        }, 1);
     }
 
     #[test]
