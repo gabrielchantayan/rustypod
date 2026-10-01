@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829fd50
+    ghidra: FUN_0829fd50
+    name: optional_four_word_record_equal
+    size: 92
+    sig: "u32 optional_four_word_record_equal(const u8 *left, const u8 *right)"
+    module: ui/optional_four_word_record_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r2: left_word
+      iVar2/r3: right_word
+    notes: >-
+      Raw ARM words establish the 92-byte extent ending at bx lr at
+      0x0829fda8, before the next real function's push at 0x0829fdac.
+      Full-image aligned decoding finds two plain incoming BLs at
+      0x0829fcb8 and 0x0829ff00, zero predicated incoming BLs, and zero
+      plain or predicated outgoing BLs. Ghidra's 0x0829fefc caller is
+      an interior fragment of FUN_0829fea0. Callers pass object +0x68;
+      domain identity is unproven. Compare the presence byte exactly;
+      equal zero bytes ignore payload, otherwise compare aligned u32
+      fields at +4/+8/+12/+16 with short-circuit reads. Ignore padding
+      +1..+3. No callee seams or behavioral deviations. Volatile reads
+      preserve access boundaries. Host edge tests and full host suite,
+      ARM release build, and actual-source standalone smoke pass.
+      match.py exits 1: 30 Rust instructions versus 23 original retain
+      the byte gate and four ordered word pairs without calls; LLVM adds
+      a frame, early branches and sub/clz/lsr final equality conversion.
   - address: 0x0829ff94
     ghidra: FUN_0829ff94
     name: five_byte_record_equal

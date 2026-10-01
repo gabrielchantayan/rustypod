@@ -201,3 +201,4 @@ pub mod app_controller_release_mode_resource;
 pub mod mutex_handoff_guarded_reset;
 pub mod four_slot_buffer_process;
 pub mod five_byte_record_equal;
+pub mod optional_four_word_record_equal;
