@@ -165599,3 +165599,36 @@ functions:
       match.py reports 13 Rust versus 9 original instructions: LLVM adds
       a frame and early conditional return, preserving conditional second
       loads and exact boolean results. Exit 1 denotes this structural diff.
+
+  - address: 0x082a2fb0
+    ghidra: FUN_082a2fb0
+    name: guarded_record_value
+    size: 52
+    sig: "u64 guarded_record_value(GuardedRecord *record)"
+    module: app/guarded_record_value
+    status: ported
+    vars: {param_1: record, iVar1: query_result, uVar2: value}
+    notes: >-
+      Raw words establish extent 0x082a2fb0..0x082a2fe4; next function
+      begins with push {r4,lr}. Full-image aligned A32 decoding finds
+      two plain inbound BLs at 0x081fd1ec and 0x08208bd4, zero predicated
+      BLs. Body has zero direct BLs and one unconditional BLX r1 through
+      vtable slot +8. Return zero if this virtual query returns zero;
+      otherwise reload backing pointer at record +8, then return low/high
+      words at backing +0x110/+0x114 in r0/r1. Ghidra incorrectly reports
+      a 32-bit result; raw words and both callers establish u64. Concrete
+      virtual callee identity and value units remain unknown. No direct
+      callee seam or additional validation. repr(C) object/vtable pointer
+      fields widen on hosts while retaining their roles; backing fields
+      use aligned four-byte word indexing on both platforms. No target
+      semantic deviation. Tests cover zero query with NULL backing,
+      noncanonical nonzero query results, high-half-only and all-ones
+      values, unchanged backing, and backing replacement during query.
+      Full host suite passed 13288 tests; ARM release build passed.
+      Standalone source smoke returned zero with NULL backing and
+      0xfedcba9889abcdef with a high-bit query result. Build artifacts
+      relocated to temporary storage after root-disk exhaustion caused
+      a host-linker SIGBUS. match.py exits 1 with 16 Rust versus 13 stock
+      instructions: added frame setup and conditional branch replace
+      predicated loads; same virtual dispatch, post-query backing load,
+      low/high word reads and zero result in both return registers.
