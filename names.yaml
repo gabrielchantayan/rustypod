@@ -165857,3 +165857,37 @@ functions:
       reverses the independent load order, and initializes zero before
       the signed-positive conditional move. Two loads, wrapping SUB,
       signed comparison, normalized result, and no calls are preserved.
+
+  - address: 0x082a1f3c
+    ghidra: FUN_082a1f3c
+    name: opaque_byte_range_last
+    size: 24
+    sig: "uint32_t opaque_byte_range_last(const uint32_t *object)"
+    module: app/opaque_byte_range_last
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x08": start
+      "object+0x0c": end
+    notes: >-
+      Raw words e5901008 e590000c e1510000 15500001 03a00000 e12fff1e
+      establish the exact 24-byte leaf at 0x082a1f3c..0x082a1f54. The next
+      real function starts at 0x082a1f54 and independently loads +0x14/+0x18.
+      Whole-image aligned A32 BL decoding finds two plain inbound calls at
+      0x0820ffc4 and 0x08213ec0, zero predicated inbound BLs, and zero outbound
+      BLs. The first caller compares the result against 11; the second saves
+      it before another operation and compares it against small values.
+      The concrete owner type is not established. Load aligned u32 pointer
+      words at +0x08/+0x0c; return zero if equal, otherwise unsigned byte
+      end[-1]. No start dereference, null guard, or ordering validation.
+      Target-width pointer words preserve field offsets on 64-bit hosts.
+      Deliberate behavioral deviations: none. No callee seams introduced.
+      Host tests cover empty invalid pointers, all 256 byte values across
+      lengths 1..64, unchanged fields and neighboring bytes, and unequal
+      reversed pointers. Full host suite passed: 13297 tests. ARM release
+      build passed. Standalone production-function runtime smoke verified
+      empty invalid pointers and unsigned bytes 0,11,127,128,255. match.py
+      exits 1: LLVM emits ten instructions versus six, using an early equal
+      return and a frame around the nonempty byte load instead of predicated
+      instructions. Both field loads, equality test, end[-1] unsigned load,
+      zero empty result, and absence of calls are preserved.

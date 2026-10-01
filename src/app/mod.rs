@@ -506,6 +506,7 @@ pub mod opaque_keyed_collection_vector_select;
 pub mod opaque_keyed_collection_find_item_by_id;
 pub mod object_dispatch_target;
 pub mod object_subobject_at_0c;
+pub mod opaque_byte_range_last;
 pub mod object_word_at_d4_or_zero;
 pub mod associated_object_word_at_0c_or_negative_one;
 pub mod once_initializer;
