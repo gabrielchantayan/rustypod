@@ -47061,6 +47061,35 @@ functions:
       r1 and r3 ABI arguments are unused. No deliberate deviations; all seven
       callees were already ported and are called directly. Host tests cover
       escaped versus unescaped separators and a multibyte final component.
+  - address: 0x082a1e90
+    ghidra: FUN_082a1e90
+    name: string_record_string_at_0x14
+    size: 8
+    sig: "StringObject *string_record_string_at_0x14(StringRecordWithStringAt0x14 *record)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: record
+      return/r0: string
+      param_1+0x14: string
+    notes: >-
+      Raw osos.dec words e2800014 e12fff1e decode as add r0,r0,#0x14;
+      bx lr. The next real function begins at 0x082a1e98 (bx lr), establishing
+      the true 8-byte extent. Whole-image ARM BL decoding finds exactly two
+      plain calls at 0x0807a564 and 0x0807a584 and zero predicated BL calls.
+      Those callers immediately consume the returned member through the
+      already ported string_object_is_empty at 0x082a5370 and
+      string_object_c_str at 0x082a50b0 respectively. This leaf returns the
+      embedded StringObject address without accessing memory or calling either
+      accessor. The larger record identity remains unknown. Reuses the existing
+      repr(C) StringRecordWithStringAt0x14; deliberate host deviation is its
+      widened header-word layout, handled with the named field offset.
+      Wrapping pointer arithmetic preserves NULL and address-overflow behavior
+      without forming a reference. Host tests cover mutable member aliasing,
+      unchanged header/vtable, NULL receiver, unaligned address and wraparound.
+      An isolated smoke executable exercised the verbatim Rust body and types.
+      ARM match.py confirms add r0,r0,#20; LLVM adds push/mov frame setup and
+      pop return instead of the original bx lr. No callee seams or new modules.
   - address: 0x082a50b0
     ghidra: FUN_082a50b0
     name: string_object_c_str

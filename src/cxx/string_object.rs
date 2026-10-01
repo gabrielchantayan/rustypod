@@ -2324,6 +2324,28 @@ pub unsafe extern "C" fn string_record_string_at_0x14_c_str(
     string_object_c_str(&(*record).string)
 }
 
+/// string_record_string_at_0x14 — original: `FUN_082a1e90` @ 0x082a1e90
+/// (8 bytes; 2 plain BL callers at 0x0807a564 and 0x0807a584, zero predicated).
+///
+/// Raw words `e2800014 e12fff1e` add 0x14 to the receiver and return; the
+/// next real function starts at 0x082a1e98. Returns the embedded StringObject
+/// address without reading the record, payload, or vtable. Both callers pass
+/// this result to existing string accessors (is_empty and c_str).
+///
+/// Deliberate deviations: the existing repr(C) record widens its header words
+/// on hosts, so use the named field's offset rather than a host byte offset
+/// of 0x14. Wrapping pointer arithmetic preserves the ARM leaf's behavior for
+/// NULL and address overflow without requiring a live record.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn string_record_string_at_0x14(
+    record: *mut StringRecordWithStringAt0x14,
+) -> *mut StringObject {
+    record.cast::<u8>()
+        .wrapping_add(core::mem::offset_of!(StringRecordWithStringAt0x14, string))
+        .cast()
+}
+
 /// primary_string_record_assign_from_string_object — original:
 /// `FUN_0826bcf0` @ 0x0826bcf0 (32 bytes; **6 direct `bl` call sites**,
 /// all unconditional and zero predicated, binary-scanned: 0x0811850c,
@@ -4535,6 +4557,36 @@ pub(crate) mod tests {
             let fallback = string_record_string_at_0x14_c_str(&record);
             assert!(!fallback.is_null());
             assert_eq!(fallback.read(), 0);
+        }
+    }
+
+    #[test]
+    fn embedded_string_address_is_mutable_without_inspecting_payload() {
+        let mut record = StringRecordWithStringAt0x14 {
+            header: [0x11, 0x22, 0x33, 0x44, 0x55],
+            string: StringObject {
+                vtable: core::ptr::null(),
+                payload: core::ptr::null_mut(),
+            },
+        };
+        let member = string_record_string_at_0x14(&mut record);
+        assert_eq!(member, core::ptr::addr_of_mut!(record.string));
+        let mut text = *b"value\0";
+        unsafe { (*member).payload = text.as_mut_ptr(); }
+        assert_eq!(record.string.payload, text.as_mut_ptr());
+        assert_eq!(record.header, [0x11, 0x22, 0x33, 0x44, 0x55]);
+        assert!(record.string.vtable.is_null());
+    }
+
+    #[test]
+    fn embedded_string_address_wraps_without_dereferencing_receiver() {
+        let offset = core::mem::offset_of!(StringRecordWithStringAt0x14, string);
+        for address in [0usize, 1, usize::MAX - offset + 1, usize::MAX] {
+            let result = string_record_string_at_0x14(address as *mut _);
+            assert_eq!(result as usize, address.wrapping_add(offset));
+        }
+        if core::mem::size_of::<usize>() == 4 {
+            assert_eq!(offset, 0x14);
         }
     }
 
