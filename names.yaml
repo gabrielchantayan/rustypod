@@ -166314,3 +166314,37 @@ functions:
       both bodies have 13 instructions, six word loads, three additions,
       and three word stores; LLVM uses paired LDM loads, individual stores,
       and a larger frame/register-save prologue instead of the ADS layout.
+
+  - address: 0x0829ff54
+    ghidra: FUN_0829ff54
+    name: tagged_rgba8_equal
+    size: 64
+    sig: "u32 tagged_rgba8_equal(const u8 *left, const u8 *right)"
+    module: ui/rgba8888_pack
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: left_tag
+      r3: right_tag
+      FUN_082a0124: rgba8_packed_equal (existing port)
+    notes: >-
+      Raw ARM extent is 64 bytes, ending with pop at 0x0829ff90;
+      the next independent function starts at 0x0829ff94, with no literal
+      pool. Full-image aligned ARM BL decoding finds two unconditional
+      incoming calls at 0x0829fc08 and 0x0829fdd0 and zero predicated calls.
+      One unconditional outgoing BL at 0x0829ff78 targets the existing
+      rgba8_packed_equal port at 0x082a0124. Both callers pass embedded
+      tagged records at object offset 0x18. Unequal tags return 0; equal
+      zero tags return 1 without reading the payload; equal nonzero tags
+      compare the following four RGBA bytes and return integer 0 or 1.
+      No behavioral deviations or new callee seams. Host tests cover
+      one-byte short-circuit inputs, ignored absent payloads, high-bit tags,
+      tag and every channel mismatch, all byte alignments, aliasing and
+      overlap. Full host suite and ARM release build passed; standalone
+      optimized runtime smoke passed absence, tag mismatch, equality and
+      each payload mismatch. match.py exits 1 with a structural diff:
+      both bodies have 16 instructions; LLVM adds a frame pointer and
+      tail-branches to rgba8_packed_equal instead of BL plus normalization.
+      R_ARM_JUMP24 verifies the tail target; the callee already returns
+      exactly 0 or 1, making this code-generation deviation equivalent.
