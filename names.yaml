@@ -82696,6 +82696,35 @@ functions:
       bit-3 mask/extraction, and 0/1 result; the diff is the crate fp
       frame and predicate-versus-branch code generation.
 
+  - address: 0x082a3ff8
+    ghidra: FUN_082a3ff8
+    name: scoped_context_owner_signed_byte_7e_or_zero
+    size: 44
+    sig: "i32 scoped_context_owner_signed_byte_7e_or_zero(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    vars: {param_1: this, iVar1: value}
+    notes: >-
+      Raw osos.dec confirms eleven ARM words through pop {r4,pc} at
+      0x082a4020; the next independent push begins at 0x082a4024.
+      Whole-image BL decoding finds two plain unconditional callers,
+      0x08114508 and 0x08114514, and zero predicated BL callers.
+      Both are in 0x081144fc and pass the member token at receiver +0x38;
+      the caller stores the first value at +0x530 and multiplies the
+      second by 20. The field identity is not recovered. Dispatches the
+      token vtable slot +0x08 using blx r1; zero validity returns zero
+      without touching owner, otherwise reloads owner at token +0x08
+      and sign-extends byte +0x7e using ldrsbne. Reuses ScopedContext
+      and its existing validity-slot ABI, without inventing a virtual
+      callee identity or new seam. Deliberate deviations: repr(C)
+      token and native-width vtable slots retain target layout and host
+      consistency; the opaque byte offset is preserved. Host tests cover
+      every byte value with multiple nonzero validity results, invalid
+      NULL-owner short-circuit, and owner replacement during dispatch.
+      match.py confirms the same virtual dispatch, validity comparison,
+      predicated owner and signed-byte loads; differences are the crate
+      frame and moving the zero-result instruction before those loads.
+
   - address: 0x082a40c8
     ghidra: FUN_082a40c8
     name: scoped_context_owner_flags_any_8062

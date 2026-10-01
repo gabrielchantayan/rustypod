@@ -39,6 +39,8 @@
 //!   a validity-gated owner chapter-count lookup.
 //! - [`scoped_context_owner_word_5c_or_zero`] — `FUN_082a2c80` @ 0x082a2c80,
 //!   a validity-gated opaque owner-word getter.
+//! - [`scoped_context_owner_signed_byte_7e_or_zero`] — `FUN_082a3ff8` @
+//!   0x082a3ff8, a validity-gated signed owner-byte getter.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -901,6 +903,38 @@ pub unsafe extern "C" fn scoped_context_owner_word_5c_or_zero(
         return 0;
     }
     (*(*this).owner.cast::<OwnerWord5c>()).value
+}
+
+/// scoped_context_owner_signed_byte_7e_or_zero — original: `FUN_082a3ff8`
+/// @ 0x082a3ff8 (**44 bytes**, eleven ARM instructions ending at 0x082a4020;
+/// the next function starts at 0x082a4024). Verified **2 plain direct BL
+/// call sites**, at 0x08114508 and 0x08114514; zero predicated BL sites.
+/// The body makes one indirect `blx r1`, not a direct BL.
+///
+/// Dispatches the token's vtable slot +0x08. Zero validity returns zero
+/// without accessing the owner; otherwise loads the owner after dispatch
+/// and sign-extends its byte +0x7e to i32. The caller stores the value and
+/// multiplies another lookup by 20; the field's identity is unrecovered.
+///
+/// Deliberate deviations: the existing repr(C) token and native-width
+/// vtable slots preserve ARM layout while supporting host fixtures.
+/// Rust may branch where ADS predicates its loads. The opaque byte offset
+/// and signed load are preserved; no virtual callee identity is invented.
+///
+/// # Safety
+/// `this` and its validity slot must be callable; a nonzero slot result
+/// must leave an owner readable through byte +0x7e.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_signed_byte_7e_or_zero(
+    this: *const ScopedContext,
+) -> i32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (*(*this).owner.add(0x7e).cast::<i8>()) as i32
 }
 
 /// Opaque owner fragment whose +0x10 word names a conditionally present
@@ -3130,5 +3164,59 @@ mod tests {
             assert_eq!(OWNER_STRING_ALLOCATE_CALLS, 1);
             assert_eq!(OWNER_STRING_CLEAR_CALLS, 1, "the empty literal reaches clear");
         }
+    }
+
+    unsafe extern "C" fn signed_byte_validity(token: *const ScopedContext) -> u32 {
+        (*token).owner_valid
+    }
+
+    #[test]
+    fn signed_byte_7e_getter_gates_null_and_sign_extends_every_byte() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = signed_byte_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+        assert_eq!(unsafe { scoped_context_owner_signed_byte_7e_or_zero(&token) }, 0);
+        let mut owner = [0xa5u8; 0x80];
+        token.owner = owner.as_mut_ptr();
+        for validity in [1, 2, 0x8000_0000, u32::MAX] {
+            token.owner_valid = validity;
+            for byte in 0..=255u16 {
+                owner[0x7e] = byte as u8;
+                let expected = if byte < 128 { byte as i32 } else { byte as i32 - 256 };
+                assert_eq!(
+                    unsafe { scoped_context_owner_signed_byte_7e_or_zero(&token) },
+                    expected,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn signed_byte_7e_getter_reads_owner_after_validity_dispatch() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = validity_replaces_owner as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut owner = [0u8; 0x80];
+        owner[0x7e] = 0x80;
+        let mut token = ScopedContext {
+            vtable: &vtable,
+            owner_valid: 0,
+            owner: ptr::null_mut(),
+            service_context: owner.as_mut_ptr(),
+            registry_token: ptr::null_mut(),
+            mode: 0,
+        };
+        assert_eq!(
+            unsafe { scoped_context_owner_signed_byte_7e_or_zero(&mut token) },
+            -128,
+        );
     }
 }
