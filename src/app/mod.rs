@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod guarded_record_value;
 pub mod object_tree_root;
 pub mod object_tree_collect_characters;
 pub mod indexed_object_store;
