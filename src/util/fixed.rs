@@ -391,6 +391,30 @@ pub extern "C" fn fixed16_round_64(acc: i64) -> i32 {
     (acc.wrapping_add(0x8000) >> 16) as i32
 }
 
+/// fixed16_dot4 — original: `FUN_082a01e4` @ 0x082a01e4 (116 bytes,
+/// next function at 0x082a0258). Raw A32: four plain outbound BLs to
+/// `mul_wide_i64`, zero predicated BLs, and a tail B to `fixed16_round_64`.
+///
+/// Multiply four signed Q16.16 component pairs at offsets 0, 4, 8, 12,
+/// accumulate the full products modulo 2^64, and round once by adding
+/// 0x8000 and extracting bits [47:16]. Half ties go toward positive
+/// infinity; the i32 result wraps rather than saturating. The clipping
+/// caller uses the signed result to classify vertices against planes.
+/// Deliberate deviation: allow LLVM to inline the existing arithmetic
+/// seams instead of preserving ADS's four multiply calls and rounding tail
+/// branch. No behavioral deviations; the original only consumes r0/r1.
+///
+/// # Safety
+/// Both pointers must address four readable, aligned i32 components.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fixed16_dot4(a: *const i32, b: *const i32) -> i32 {
+    let p3 = mul_wide_i64(*a.add(3), *b.add(3));
+    let p2 = mul_wide_i64(*a.add(2), *b.add(2));
+    let p1 = mul_wide_i64(*a.add(1), *b.add(1));
+    let p0 = mul_wide_i64(*a, *b);
+    fixed16_round_64(p0.wrapping_add(p1).wrapping_add(p2).wrapping_add(p3))
+}
+
 /// fixed16_recip_unguarded — original: `FUN_080377e4` @ 0x080377e4
 /// (48 bytes listed in decomp/functions.csv, but the listing ends at the
 /// computed jump; the true body runs 0x080377e4..0x080379a8, 452 bytes.
@@ -1266,6 +1290,51 @@ mod tests {
                 if acc & 0xffff == 0 {
                     assert_eq!(rounded, truncated);
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed16_dot4_components_and_rounding() {
+        let a = [ONE, -2 * ONE, 3 * ONE, -4 * ONE];
+        for lane in 0..4 {
+            let mut b = [0; 4];
+            b[lane] = ONE;
+            assert_eq!(unsafe { fixed16_dot4(a.as_ptr(), b.as_ptr()) }, a[lane]);
+        }
+        for (a, b, expected) in [
+            ([0; 4], [i32::MIN; 4], 0),
+            ([1, 0, 0, 0], [0x7fff, 0, 0, 0], 0),
+            ([1, 0, 0, 0], [0x8000, 0, 0, 0], 1),
+            ([-1, 0, 0, 0], [0x8000, 0, 0, 0], 0),
+            ([-1, 0, 0, 0], [0x8001, 0, 0, 0], -1),
+            ([1; 4], [0x2000; 4], 1),
+            ([ONE; 4], [ONE, -ONE, ONE, -ONE], 0),
+        ] {
+            assert_eq!(unsafe { fixed16_dot4(a.as_ptr(), b.as_ptr()) }, expected);
+        }
+        assert_eq!(unsafe { fixed16_dot4(a.as_ptr(), a.as_ptr()) }, 30 * ONE);
+    }
+
+    #[test]
+    fn fixed16_dot4_full_width_wrap_and_carry() {
+        let vectors = [
+            [i32::MIN; 4],
+            [i32::MAX; 4],
+            [i32::MIN, i32::MAX, -1, 1],
+            [0xffff, 0xffff, 0xffff, 0xffff],
+            [0x10000, 0x10000, 0x10000, 0x10000],
+            [0x12345678, -0x7654321, 0x7fff8000, -0x8000],
+        ];
+        for a in &vectors {
+            for b in &vectors {
+                // i128 keeps the mathematical sum even when ADS's pair
+                // of registers overflows. The final cast extracts the
+                // same bits regardless of the discarded multiples of 2^64.
+                let sum: i128 = (0..4).map(|i| a[i] as i128 * b[i] as i128).sum();
+                let expected = ((sum + 0x8000) >> 16) as i32;
+                assert_eq!(unsafe { fixed16_dot4(a.as_ptr(), b.as_ptr()) }, expected,
+                           "a={a:?} b={b:?}");
             }
         }
     }

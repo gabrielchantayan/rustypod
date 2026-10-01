@@ -166148,3 +166148,38 @@ functions:
       unreachable diagnostics, returns early for unsigned length < 2,
       and directly reads end[-2]; field loads, wrapping subtraction,
       unsigned comparison and unsigned byte return are preserved.
+
+  - address: 0x082a01e4
+    ghidra: FUN_082a01e4
+    name: fixed16_dot4
+    size: 116
+    sig: "i32 fixed16_dot4(const i32 *a, const i32 *b)"
+    module: util/fixed
+    status: ported
+    vars: {param_1: a, param_2: b, lVar1: p3, lVar2: p2, lVar3: p1, lVar4: p0}
+    notes: >-
+      Raw A32 establishes the full 116-byte extent 0x082a01e4..0x082a0258;
+      the next function begins with its own literal load and comparison.
+      Independently decoded aligned words give four plain outbound BLs to
+      mul_wide_i64 at 0x080f0fa4 (0x082a01f8, 0x082a020c, 0x082a0220,
+      0x082a0234), zero predicated outbound BLs, and a tail B at 0x082a0254
+      to fixed16_round_64 at 0x08076214. Both identities were checked in
+      names.yaml and reuse existing Rust seams. Whole-image BL decoding
+      finds two plain inbound calls at 0x0824fc90 and 0x0824fcc0, zero
+      predicated inbound BLs. The clipping caller classifies signed
+      vertex/plane dot products against zero. Multiply four signed i32
+      component pairs at offsets 0/4/8/12, sum modulo 2^64, add 0x8000,
+      and extract bits 47:16 as a wrapping Q16.16 result, ties toward
+      positive infinity. Only r0/r1 are inputs; Ghidra's param_3/param_4
+      are spurious. Aligned readable four-component arrays are required;
+      inputs may alias. No behavioral deviations or new callee seams.
+      Deliberate codegen deviation: inline arithmetic instead of ADS BLs
+      and rounding tail B. Host tests cover independent components, aliasing,
+      zero, positive/negative rounding boundaries, rounding once after the
+      sum, cancellation, low-word carry, signed extremes and 64-bit overflow
+      against an i128 reference. Full host suite passed, 13316 tests; ARM
+      release build passed. Standalone runtime smoke of extracted production
+      functions verified signed sums, accumulated half ties, negative ties
+      and overflowing four-product sums. match.py exits 1 with a structural
+      diff: LLVM emits 18 instructions versus ADS's 29, one SMULL and three
+      SMLAL instructions followed by the same adds/adc/lsr/orr rounding core.
