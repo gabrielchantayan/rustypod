@@ -20,6 +20,8 @@
 use crate::app::scoped_context::{scoped_context_construct, scoped_context_destroy};
 use crate::app::scoped_context::ScopedContext;
 #[cfg(target_os = "none")]
+use crate::app::scoped_context_result_id::scoped_context_result_id;
+#[cfg(target_os = "none")]
 use crate::app::singletons::media_player_get;
 #[cfg(target_os = "none")]
 use core::mem::MaybeUninit;
@@ -55,11 +57,9 @@ unsafe fn current_context_id() -> Option<u32> {
     let mut context = MaybeUninit::<ScopedContext>::uninit();
     scoped_context_construct(context.as_mut_ptr(), core::ptr::null_mut(), 0);
     ((*vtable).fill_context)(player, context.as_mut_ptr());
-    let context_vtable = (context.as_ptr() as *const *const usize).read();
-    let valid = core::mem::transmute::<usize, unsafe extern "C" fn(*mut ScopedContext) -> u32>(context_vtable.add(2).read());
-    let id = if valid(context.as_mut_ptr()) != 0 {
-        let owner = (context.as_ptr() as *const u32).add(1).read() as usize as *const u32;
-        Some(owner.add(6).read())
+    let mut identifier = 0;
+    let id = if scoped_context_result_id(context.as_mut_ptr(), &mut identifier) != 0 {
+        Some(identifier)
     } else {
         None
     };

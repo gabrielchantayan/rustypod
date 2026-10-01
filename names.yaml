@@ -14883,7 +14883,7 @@ functions:
       epilogue; the next separately entered function starts at 0x080535f0,
       proving the 196-byte extent. There are four internal unconditional
       plain BL instructions (media_player_get @ 0x0805356c,
-      scoped_context_construct @ 0x08053598, the unported-but-recovered
+      scoped_context_construct @ 0x08053598, the ported
       scoped_context_result_id @ 0x080535b8, and scoped_context_destroy @
       0x080535e4), zero predicated BL instructions, and two indirect BLX
       calls through media-player vtable slots +0x190 and +0x15c. Raw ARM
@@ -14894,9 +14894,44 @@ functions:
       permits it. The +0x15c virtual fills that context; its vtable +8
       validity operation and the context's +4 owner-valid word resolve the
       identifier at owner-valid+0x18, which is compared to selected
-      object+0xeec[index]+0x10. Rust keeps the two virtual calls and models
-      the recovered 0x082a3018 body locally; host tests substitute this
+      object+0xeec[index]+0x10. Rust keeps the two virtual calls and reuses
+      scoped_context_result_id; host tests substitute this
       unresolved virtual/context chain with a native callback.
+
+  - address: 0x082a3018
+    ghidra: FUN_082a3018
+    name: scoped_context_result_id
+    size: 60
+    sig: "u32 scoped_context_result_id(ScopedContext *context, u32 *output)"
+    module: app/scoped_context_result_id
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1/r5: output
+      "context-vtable+0x08": unresolved_predicate
+      "context+0x04": result_pointer
+      "result_pointer+0x18": identifier
+    notes: >-
+      Raw osos.dec has fifteen A32 words from push at 0x082a3018 through
+      pop at 0x082a3050; the next independent push begins at 0x082a3054,
+      establishing the true 60-byte extent. Whole-image aligned decoding
+      finds two inbound unconditional plain BLs, at 0x08052c1c and
+      0x080535b8, zero predicated inbound BLs, and zero outgoing direct
+      plain or predicated BLs. The body calls one unresolved virtual slot
+      +8 through BLX at 0x082a3030. It requires that result and the reloaded
+      context word +4 to be nonzero, copies pointed word +0x18 to output,
+      and returns one; failure returns zero without touching output.
+      Identifier zero is still success. No virtual callee identity is
+      invented. Reuses ScopedContext with native-width host vtable slots;
+      owner_valid remains a target-width pointer, distinct from owner +8.
+      The media_item_matches_context caller now uses this port instead of
+      its local reconstruction, including the recovered null-word guard.
+      Host edge tests cover rejection, callback mutation, null result,
+      high-bit predicate success, zero identifier and aliased output.
+      All 13285 host tests pass; release ARM build passes. match.py exits
+      1 with 15 stock versus 17 Rust instructions: identical BLX, reloaded
+      +4 zero check, predicated +0x18 load/store and normalized return;
+      LLVM adds frame-pointer setup and changes register allocation.
 
   # --- retailOS UI 16-byte resource-vector counted-string reader ---
   - address: 0x08053768
