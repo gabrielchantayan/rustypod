@@ -166471,3 +166471,43 @@ functions:
       tail-branches to rgba8_packed_equal instead of BL plus normalization.
       R_ARM_JUMP24 verifies the tail target; the callee already returns
       exactly 0 or 1, making this code-generation deviation equivalent.
+
+  - address: 0x0829f8fc
+    ghidra: FUN_0829f8fc
+    name: tri_byte_field_equal
+    size: 68
+    sig: "u32 tri_byte_field_equal(const u8 *left, const u8 *right)"
+    module: ui/tri_byte_field_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      pcVar1: left_first_payload
+      pcVar2: right_first_payload
+      r2: left_byte
+      r3: right_byte
+    notes: >-
+      Raw osos.dec words establish the 68-byte extent from 0x0829f8fc
+      through bx lr at 0x0829f93c; the next real function starts with
+      stmdb sp!,{r4,lr} at 0x0829f940. Full-image aligned ARM BL decoding
+      finds two plain incoming calls at 0x0829fca4 and 0x0829fe4c, zero
+      predicated incoming calls, and zero outgoing calls. Both callers
+      compare embedded fields at record +0x8c. Compare unsigned presence
+      bytes exactly, returning 0 on mismatch and 1 for equal zero bytes
+      without reading payload. For equal nonzero bytes compare signed
+      payload bytes at +1 and then +2 only if +1 matches. Return exactly
+      0 or 1. Ghidra's apparent pointer comparison is signed-byte equality,
+      as verified by ldrsb/ldrsbeq and cmpeq in the raw words. No new
+      callee seams or domain identity assumptions. Deliberate deviation:
+      volatile byte reads preserve conditional access. Host tests cover
+      all presence pairs, all mismatching first payload pairs without a
+      second byte, all byte pairs at each payload position with high-bit
+      presence values, absent payloads, aliasing and ignored trailing bytes.
+      Full host suite and ARM release build pass. Optimized standalone
+      guard-page smoke verifies both early exits and both payload outcomes
+      without reading beyond the conditionally required extent. match.py
+      exits 1 with a reviewed structural diff (17 stock instructions versus
+      22 Rust instructions): LLVM adds a frame, uses ldrb for equivalent
+      signed-byte equality, branches instead of predicated payload loads,
+      and normalizes the final equality using sub/clz/lsr. No outgoing call
+      or wider load is introduced.

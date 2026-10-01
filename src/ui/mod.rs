@@ -3,6 +3,7 @@
 pub mod optional_byte_record_equal;
 pub mod optional_signed_byte_record_equal;
 pub mod optional_mixed_record_equal;
+pub mod tri_byte_field_equal;
 pub mod block_map;
 pub mod byte_store;
 pub mod checked_byte_block_forwarder;
