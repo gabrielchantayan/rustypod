@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829f8b8
+    ghidra: FUN_0829f8b8
+    name: optional_byte_word_record_equal
+    size: 68
+    sig: "u32 optional_byte_word_record_equal(const u8 *left, const u8 *right)"
+    module: ui/optional_byte_word_record_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r2: left_present / left_byte
+      r3: right_present / right_byte
+    notes: >-
+      Raw aligned ARM words establish the 68-byte extent through bx lr at
+      0x0829f8f8, before independent presence loads at 0x0829f8fc. Full-image
+      decoding verifies two plain incoming BLs at 0x0829fc90 and 0x0829fe38,
+      zero predicated incoming BLs, and zero outgoing BLs of either kind.
+      Both callers pass record +0x84; domain identity is unproven. Compare
+      presence bytes exactly; unequal bytes return 0, equal zero bytes
+      return 1 without payload access, otherwise compare signed byte +1
+      and then aligned u32 +4. Ignore padding +2/+3; never dereference +4.
+      No callee seams. Volatile reads preserve conditional access. Tests
+      cover presence pairs, signed-byte mismatches, every word bit, padding,
+      high-bit values and aliasing. Full host suite, ARM release build and
+      actual-source runtime smoke pass. match.py exits 1: 22 Rust instructions
+      versus 17 stock preserve byte gates and conditional word loads without
+      calls. LLVM adds a frame, branches in place of predication, unsigned
+      byte loads equivalent for equality, and sub/clz/lsr boolean conversion.
   - address: 0x0829f9f8
     ghidra: FUN_0829f9f8
     name: optional_signed_byte_record_equal
