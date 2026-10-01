@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829ff94
+    ghidra: FUN_0829ff94
+    name: five_byte_record_equal
+    size: 76
+    sig: "u32 five_byte_record_equal(const u8 *left, const u8 *right)"
+    module: ui/five_byte_record_equal
+    status: ported
+    renames:
+      param_1/r0: left (five-byte record)
+      param_2/r1: right (five-byte record)
+      cVar1/r2: left_byte
+      cVar2/r3: right_byte
+    notes: >-
+      Raw extent is 76 bytes, nineteen ARM instructions ending in bx lr at
+      0x0829ffdc. The next function begins at 0x0829ffe0 with argument
+      shuffling and a tail branch to 0x0829fdac; no literal pool.
+      Full-image aligned ARM-word decoding finds two unconditional incoming
+      BLs at 0x0829fc7c and 0x0829fe24, zero predicated incoming BLs,
+      zero incoming B instructions and zero outgoing BLs. Both callers pass
+      embedded records at object offset 0x7c; domain identity is unproven.
+      Compares five bytes in order, stopping at the first mismatch, returning
+      integer 1 for equality and 0 otherwise. No semantic deviations or
+      added validation. Volatile byte reads preserve conditional access.
+      Host tests cover every byte mismatch, zero and high-bit values, all
+      alignments, aliasing, overlap, ignored trailing bytes and short prefixes.
+      Host suite passes 13325 tests; ARM release build succeeds. match.py
+      shows 26 Rust instructions versus 19 original: explicit early branches
+      replace predication, a frame is added, and sub/clz/lsr produces the final
+      boolean. All five byte pairs remain ordered, with no outgoing calls.
+
   - address: 0x082a018c
     ghidra: FUN_082a018c
     name: negate_fixed16_vec3
