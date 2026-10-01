@@ -156,6 +156,7 @@ pub mod resource_value;
 pub mod draw_state_setup;
 pub mod draw_surface_background;
 pub mod shown_state;
+pub mod flagged_value_matches;
 pub mod set_flag_bit_3;
 pub mod default_navigation_request;
 pub mod current_window;
