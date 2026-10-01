@@ -166183,3 +166183,39 @@ functions:
       and overflowing four-product sums. match.py exits 1 with a structural
       diff: LLVM emits 18 instructions versus ADS's 29, one SMULL and three
       SMLAL instructions followed by the same adds/adc/lsr/orr rounding core.
+
+  - address: 0x082a01b0
+    ghidra: FUN_082a01b0
+    name: fixed16_add3
+    size: 52
+    sig: "void fixed16_add3(i32 *dst, const i32 *a, const i32 *b)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: a
+      param_3/r2: b
+      r3: sum_x
+      r12: sum_y
+      r1_after_loads: sum_z
+    notes: >-
+      Raw A32 words establish the exact 52-byte extent
+      0x082a01b0..0x082a01e3, ending with pop {pc}; the next real function
+      at 0x082a01e4 begins with push {r3-r11,lr}. Whole-image aligned
+      BL-immediate decoding finds two plain incoming calls at 0x0824c198
+      and 0x0824c34c, zero predicated incoming BLs, and no outgoing BLs.
+      Both callers add (0,0,0x10000) to a three-component Q16.16 vector
+      before normalization and a dot product. Add corresponding signed
+      words modulo 2^32 without scaling, rounding, or saturation. All six
+      inputs are loaded before any store, preserving exact and partial
+      overlap of dst with either input. Requires aligned readable source
+      words and writable destination words; no NULL or bounds guards.
+      No behavioral deviations or new callee seams. Host tests cover zero,
+      mixed signs, fractional bits, signed overflow, output sentinels, and
+      all 343 relative placements of three overlapping vectors in a slab.
+      Full host suite and ARM release build passed. Standalone optimized
+      runtime smoke of the production function passed overlapping-input
+      and signed-wrap checks. match.py exits 1 with a structural diff:
+      both bodies have 13 instructions, six word loads, three additions,
+      and three word stores; LLVM uses paired LDM loads, individual stores,
+      and a larger frame/register-save prologue instead of the ADS layout.
