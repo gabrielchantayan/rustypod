@@ -9740,6 +9740,35 @@ functions:
       signed child word at +4 is positive. The unrecovered layouts use raw
       u32 words, deliberately preserving the verified four-byte target
       offsets on 64-bit hosts.
+  - address: 0x082a270c
+    ghidra: FUN_082a270c
+    name: object_cached_byte
+    size: 48
+    sig: "u32 object_cached_byte(u32 *object)"
+    module: app/object_cached_byte
+    status: ported
+    renames:
+      param_1/r0: object
+      r4: object
+      "object+0": vtable
+      "vtable+8": predicate
+      "object+8": cached_object
+      "cached_object+0x54": cached_halfword_low_byte
+    notes: >-
+      Raw osos.dec verifies extent 0x082a270c..0x082a273c, with the next
+      distinct push prologue at 0x082a273c. Independently decoding all A32
+      BL words finds two plain callers at 0x0817e198 and 0x0817e1a8, zero
+      predicated callers, and no address-word references. One outgoing
+      virtual BLX calls the predicate at vtable +8 with object. Zero skips
+      the cached pointer access; nonzero reads object +8 after the callback
+      and returns the low byte of the halfword at cached object +0x54.
+      No unsupported callee identity or null-cache fallback is introduced.
+      Raw u32 object words and a repr(C) vtable prefix preserve target offsets
+      on hosts. Tests cover rejection with an invalid cache, byte boundaries,
+      noncanonical nonzero predicate values, and callback cache mutation.
+      ARM match shows the same dispatch and conditional load; LLVM reduces
+      halfword-read-and-mask to a byte load and adds frame setup, with no
+      behavioral deviation for ordinary readable memory.
   - address: 0x082a273c
     ghidra: FUN_082a273c
     name: object_has_resolved_flag_0x40
