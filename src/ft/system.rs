@@ -485,6 +485,38 @@ pub unsafe extern "C" fn ft_platform_file_length(
     result
 }
 
+/// ft_platform_file_length_or_zero — original: `FUN_0829e35c` @ 0x0829e35c.
+/// True extent: 28 bytes, ending before the push at 0x0829e378.
+/// Raw firmware scan: two plain BL callers (0x081e1e50, 0x081e1ecc),
+/// zero predicated BL callers; the body contains one plain BL to
+/// [`ft_platform_file_length`] and no predicated BL.
+///
+/// Seeds a stack output word with incoming r3, queries the cached file
+/// length, and returns that word on status zero or zero on any error.
+/// The seed matters when the directory-entry index is -1 and open status
+/// is zero: the query succeeds without writing its output.
+/// r1/r2 are unused ABI slots, not query arguments. No deliberate
+/// behavioral deviations; native-pointer host layouts follow the callee.
+///
+/// # Safety
+///
+/// `handle` must satisfy [`ft_platform_file_length`]'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_platform_file_length_or_zero(
+    handle: *mut core::ffi::c_void,
+    _unused_r1: u32,
+    _unused_r2: u32,
+    initial_length: u32,
+) -> u32 {
+    let mut length = initial_length;
+    if ft_platform_file_length(handle, &mut length) == 0 {
+        length
+    } else {
+        0
+    }
+}
+
 /// ft_platform_file_tell — original: `FUN_082a539c` @ `0x082a539c`
 /// (116 bytes; 11 direct `bl` call sites, binary-scanned from `osos.dec`;
 /// no predicated direct calls).
@@ -958,6 +990,35 @@ mod tests {
             assert_eq!(ft_platform_file_length(handle, &mut size), -37);
             assert_eq!(size, 0xdead_beef, "missing entry does not write size");
             assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+        }
+    }
+
+    #[test]
+    fn length_or_zero_preserves_full_width_lengths_and_unwritten_success() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            for (entry, cached, seed, expected) in [
+                (0, 0, 0xdead_beef, 0),
+                (7, 0x8000_0000, 3, 0x8000_0000),
+                (-2, u32::MAX, 0, u32::MAX),
+                (-1, 42, 0x1234_5678, 0x1234_5678),
+            ] {
+                let handle = prepare_length_query(0, entry, 0, cached);
+                assert_eq!(ft_platform_file_length_or_zero(handle, 11, 22, seed), expected);
+                assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+            }
+        }
+    }
+
+    #[test]
+    fn length_or_zero_discards_seed_on_state_and_open_status_errors() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            for (state, entry, status) in [(1, 7, 0), (255, -1, 0), (0, -1, -37), (0, -1, 19)] {
+                let handle = prepare_length_query(state, entry, status, u32::MAX);
+                assert_eq!(ft_platform_file_length_or_zero(handle, 0, 0, 0xdead_beef), 0);
+                assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+            }
         }
     }
 

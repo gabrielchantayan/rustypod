@@ -166576,3 +166576,33 @@ functions:
       LLVM adds frame setup, reorders independent stores, and uses logical
       shifts equivalent for these nonnegative bounded products. No device
       execution performed.
+
+  - address: 0x0829e35c
+    ghidra: FUN_0829e35c
+    name: ft_platform_file_length_or_zero
+    size: 28
+    sig: "u32 ft_platform_file_length_or_zero(void *handle, u32 unused_r1, u32 unused_r2, u32 initial_length)"
+    module: ft/system
+    status: ported
+    vars: {param_1: handle, param_2: unused_r1, param_3: unused_r2, param_4: initial_length, local_8: length, iVar1: query_status}
+    notes: >-
+      Raw ARM establishes the 28-byte extent 0x0829e35c..0x0829e378,
+      with pop at 0x0829e374 followed by an independent push prologue.
+      Whole-image aligned decoding finds two plain incoming BLs at
+      0x081e1e50 and 0x081e1ecc, no predicated incoming BLs, and one plain
+      outgoing BL to the already ported ft_platform_file_length at
+      0x082a5418. Push r3/lr seeds the stack output from incoming r3;
+      r1/r2 are unused. Query status zero returns the output word, every
+      nonzero status returns zero. Preserve the seed when a missing
+      directory entry has zero open status and the callee leaves output
+      untouched. No deliberate behavioral deviations or new seams.
+      Host edge tests cover zero/high-bit/max lengths, unwritten success,
+      state and signed open-status errors, and balanced counted locking.
+      Host suite and ARM release build pass. Standalone native API smoke
+      using the actual crate compiled with its test configuration returns
+      ffffffff, seed 12345678, and error zero with hold count unchanged.
+      The normal non-test host build has six unrelated missing-function
+      errors in metadata, shared payload, and calendar modules.
+      match.py exits 1: LLVM emits 12 instructions versus seven stock,
+      preserving the r3 seed, query call, status comparison, and zero-on-error
+      selection with extra frame setup. No device execution performed.
