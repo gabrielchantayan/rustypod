@@ -2346,6 +2346,40 @@ pub extern "C" fn string_record_string_at_0x14(
         .cast()
 }
 
+/// string_record_find_key_pair — original: `FUN_082a1e54` @ 0x082a1e54.
+/// True size: 60 bytes, ending at the accessor @ 0x082a1e90. Whole-image
+/// ARM decoding verifies 2 plain BL callers (0x0807a554, 0x082a1e00),
+/// zero predicated BL callers, and no outgoing calls.
+///
+/// Snapshot the begin/end target pointers at owner +0x44/+0x48, then scan
+/// 28-byte records for keys at +4/+8. Return the first exact pair match,
+/// or NULL at the exclusive end. The second key is read only when the first
+/// matches. The record's larger semantic identity remains undecoded.
+/// Deliberate deviations: none; u32 words preserve the firmware layout on
+/// hosts rather than widening embedded pointers or record headers.
+///
+/// # Safety
+/// `owner` must expose at least 19 aligned words. Its begin/end words must
+/// delimit a readable array of seven-word records, with representable u32
+/// addresses. The array must remain live and unmodified during the scan.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_record_find_key_pair(
+    owner: *const u32,
+    first_key: u32,
+    second_key: u32,
+) -> *mut u32 {
+    let mut record = owner.add(17).read() as usize as *mut u32;
+    let end = owner.add(18).read() as usize as *mut u32;
+    while record != end {
+        if record.add(1).read() == first_key && record.add(2).read() == second_key {
+            return record;
+        }
+        record = record.wrapping_add(7);
+    }
+    core::ptr::null_mut()
+}
+
 /// primary_string_record_assign_from_string_object — original:
 /// `FUN_0826bcf0` @ 0x0826bcf0 (32 bytes; **6 direct `bl` call sites**,
 /// all unconditional and zero predicated, binary-scanned: 0x0811850c,
@@ -4535,6 +4569,40 @@ pub(crate) mod tests {
             let fallback = string_record_string_at_0x0c_c_str(&record);
             assert!(!fallback.is_null());
             assert_eq!(fallback.read(), 0);
+        }
+    }
+
+    #[test]
+    fn key_pair_lookup_checks_both_keys_and_returns_first_match() {
+        unsafe {
+            let Some(slab) = crate::testing::try_map_u32_slab(
+                crate::testing::hints::STRING_RECORD_FIND_KEY_PAIR, 4096,
+            ) else { return; };
+            let owner = slab.cast::<u32>();
+            let records = owner.add(32);
+            let pairs = [(9, 8), (7, 6), (7, 8), (7, 8), (u32::MAX, 0)];
+            for (index, &(first, second)) in pairs.iter().enumerate() {
+                let record = records.add(index * 7);
+                for word in 0..7 { record.add(word).write(0xa5a5a5a5); }
+                record.add(1).write(first);
+                record.add(2).write(second);
+            }
+            owner.add(17).write(records as u32);
+            // Compare every prefix against an independent slice search:
+            // empty, partial-key mismatches, duplicates, last record, misses.
+            for count in 0..=pairs.len() {
+                owner.add(18).write(records.add(count * 7) as u32);
+                for &(first, second) in &[(7, 8), (9, 8), (7, 6), (u32::MAX, 0), (0, u32::MAX)] {
+                    let expected = pairs[..count].iter()
+                        .position(|&pair| pair == (first, second))
+                        .map_or(core::ptr::null_mut(), |index| records.add(index * 7));
+                    assert_eq!(string_record_find_key_pair(owner, first, second), expected);
+                }
+            }
+            // Equal NULL endpoints must not dereference record storage.
+            owner.add(17).write(0);
+            owner.add(18).write(0);
+            assert!(string_record_find_key_pair(owner, 0, 0).is_null());
         }
     }
 
