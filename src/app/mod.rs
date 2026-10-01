@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod resource_record_auxiliary_flag;
+pub mod resource_record_decode_flag;
 pub mod opaque_byte_range_penultimate;
 pub mod guarded_record_value;
 pub mod object_tree_root;

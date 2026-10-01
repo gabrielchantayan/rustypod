@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a1eac
+    ghidra: FUN_082a1eac
+    name: resource_record_decode_flag
+    size: 8
+    sig: "u32 resource_record_decode_flag(const u8 *record)"
+    module: app/resource_record_decode_flag
+    status: ported
+    renames:
+      param_1/r0: record
+      return/r0: decode_flag
+    notes: >-
+      Raw words e5d00018 e12fff1e establish the true eight-byte extent
+      0x082a1eac..0x082a1eb4; the next real function starts at 0x082a1eb4.
+      Whole-image aligned A32 decoding verifies two plain inbound BLs
+      at 0x081043d8 and 0x08104850, zero predicated inbound BLs, and
+      zero outgoing BLs. Return the unsigned byte at record offset +0x18,
+      zero-extended to the full return register. FUN_08104294 and
+      FUN_0810453c test zero/nonzero to gate payload decoding through
+      FUN_082d74c0 using the parameter at record offset +0x0c.
+      The precise file format and flag encoding remain unknown.
+      No callee seam, boolean normalization, null guard, or deliberate
+      behavioral deviation. Host tests cover all byte values, four base
+      alignments, differing neighbors, input preservation, and a
+      minimum-sized record. The complete host suite and ARM release
+      build pass. Actual-source smoke returns 0, 1, 128, and 255 unchanged.
+      match.py exits 1: four Rust instructions versus two stock retain
+      the same ldrb at +24 with LLVM frame setup and a pop return.
+
   - address: 0x082a1eb4
     ghidra: FUN_082a1eb4
     name: resource_record_auxiliary_flag
