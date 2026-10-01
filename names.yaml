@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829e1d8
+    ghidra: FUN_0829e1d8
+    name: current_record_status
+    size: 36
+    sig: "u32 current_record_status(const CurrentRecordCursor *cursor)"
+    module: app/current_record_status
+    status: ported
+    renames:
+      param_1/r0: cursor
+      r1: current_index
+      r2: cursor
+      uVar1: status
+    notes: >-
+      Raw ARM words establish the 36-byte extent through bx lr at
+      0x0829e1f8; the next real function starts at 0x0829e1fc with an
+      independent constant load and return. Whole-image decoding verifies
+      two plain incoming BL sites at 0x081af5d8 and 0x081af630, zero
+      predicated incoming BL sites, and zero outgoing BLs of either kind.
+      FUN_081af564 compares the result with 1 before looking up the record
+      handle; other status meanings remain unproven. Reuse CurrentRecordCursor
+      with target-width fields. Return zero only for index -1, otherwise
+      zero-extend byte records + index * 20 + 8 using wrapping u32 arithmetic.
+      No callee seams, bounds checks, NULL checks, or behavioral deviations.
+      Host tests cover every byte value, record stride, sentinel non-access,
+      negative non-sentinel indices, and address overflow. Full host tests,
+      ARM release build, and actual-source runtime smoke passed. match.py
+      exits 1 with 11 Rust instructions versus 9 stock instructions: LLVM
+      replaces predication with an early sentinel return and adds a frame,
+      preserving both shifted additions and the unsigned byte load without calls.
   - address: 0x0829f8b8
     ghidra: FUN_0829f8b8
     name: optional_byte_word_record_equal

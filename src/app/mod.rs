@@ -234,6 +234,7 @@ pub mod counting_path_acquire;
 pub mod directory_iterator;
 pub mod context_scope_selector;
 pub mod current_record_handle;
+pub mod current_record_status;
 pub mod object_state_initialize;
 pub mod indexed_item_value;
 pub mod selector_record_first_word;
