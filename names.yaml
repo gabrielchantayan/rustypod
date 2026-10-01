@@ -165632,3 +165632,53 @@ functions:
       instructions: added frame setup and conditional branch replace
       predicated loads; same virtual dispatch, post-query backing load,
       low/high word reads and zero result in both return registers.
+  - address: 0x082a2e10
+    ghidra: FUN_082a2e10
+    name: resource_context_assign_name
+    size: 196
+    sig: "u32 resource_context_assign_name(ResourceContext *source, i32 record_id, StringObject *destination)"
+    module: app/resource_context_assign_name
+    status: identified
+    renames:
+      param_1/r0/r4: source
+      param_2/r1/r5: record_id
+      param_3/r2/r7: destination
+      r6: assigned
+      FUN_0804482c: opaque_object_flags
+      FUN_08276400: string_object_assign_cstr_bounded
+      FUN_082765a8: string_object_assign_utf16
+    notes: >-
+      BLOCKED: raw osos.dec establishes 192 instruction bytes at
+      0x082a2e10..0x082a2ecf plus the four-byte tag literal 0x6e616d65
+      at 0x082a2ed0; the next real function starts with push
+      {r0,r1,r2,r3,r4,lr} at 0x082a2ed4, giving a true extent of
+      196 bytes. An independent complete-image aligned A32 branch scan
+      finds two inbound unconditional BLs at 0x0817542c and 0x081f4150,
+      zero inbound predicated BLs. The body has four unconditional BLs
+      at 0x082a2e60 (0x0804482c), 0x082a2e98 (0x08044528),
+      0x082a2ea8 (0x082765a8), and 0x082a2ebc (0x08276400),
+      zero predicated BLs, and one indirect BLX r1 at 0x082a2e30
+      through source's vtable +8. A zero virtual-query result returns
+      zero without touching destination. Otherwise source +8 points
+      to backing state whose +0x10 points to a descriptor. Descriptor
+      bit 0, a non-NULL descriptor +0x14 child, record_id != -1,
+      and child flags bit 0 gate the read; failing a gate clears
+      destination through bounded C-string assignment with NULL and
+      zero and returns zero. Success normalizes record_id zero to one,
+      reloads the child, and calls unnamed, unported 0x08044528 with
+      child, record_id, tag 0x6e616d65, zero, 255, and stack +12.
+      The caller ignores its return, reads a u16 count at stack +12,
+      assigns UTF-16 units from stack +14, and returns one.
+      Raw 0x080445cc..0x080445d8 proves a missing record can return
+      -50 without writing the output; 0x080445f4..0x080445f8 provides
+      another such path. The caller never initializes its 524-byte
+      scratch allocation before reading the count. Raw 0x0805a2bc
+      also has error paths without a copy, and receives NULL for its
+      optional length output. Available callers and registrations do
+      not establish an invariant guaranteeing a successful producer
+      write. A faithful Rust implementation needs that invariant or
+      an explicitly approved definition of the stale-stack failure
+      behavior: zero initialization, error suppression, or a guessed
+      host producer would change behavior, while reading uninitialized
+      Rust u16 storage is undefined behavior. No callee seam, Rust
+      implementation, tests, or claimed port is added.
