@@ -165682,3 +165682,42 @@ functions:
       host producer would change behavior, while reading uninitialized
       Rust u16 storage is undefined behavior. No callee seam, Rust
       implementation, tests, or claimed port is added.
+
+  - address: 0x082a2de4
+    ghidra: FUN_082a2de4
+    name: scoped_context_owner_word_60_or_zero
+    size: 44
+    sig: "u32 scoped_context_owner_word_60_or_zero(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "*this/r0": vtable
+      this+8/r0: owner
+      owner+0x60/r0: value
+      iVar1: validity_result
+      uVar2: value
+    notes: >-
+      Raw osos.dec words establish extent 0x082a2de4..0x082a2e10,
+      eleven ARM instructions ending with pop {r4,pc} at 0x082a2e0c;
+      the next function begins with push {r4-r7,lr}. Full-image aligned
+      A32 branch decoding finds two unconditional inbound BLs at
+      0x0817df6c and 0x0817e144, zero predicated BLs. The body has zero
+      direct BLs and one unconditional BLX r1 through vtable slot +8.
+      Zero validity returns zero without reading owner; any nonzero
+      result reloads owner at this +8 and reads its aligned word +0x60.
+      Both callers forward the value to the context update operation.
+      Concrete field identity and virtual callee identity remain unknown;
+      reuse the existing ScopedContext validity contract without a new seam.
+      Deliberate host deviation: repr(C) native context/vtable pointers
+      widen, while owner words retain four-byte spacing. No target semantic
+      deviation. Tests cover NULL owner on failed validity, noncanonical
+      nonzero results, zero/high-bit/all-ones values, unchanged owner words,
+      and replacement of owner during the virtual query. Full host suite
+      passed 13290 tests; ARM release build passed. Extracted production
+      source smoke returned zero with NULL owner and 0xfedcba98 after query
+      replacement. Host linker initially failed with SIGBUS on a full root
+      filesystem; isolated build artifacts were relocated to temporary storage.
+      match.py exits 1 with 12 Rust versus 11 original instructions:
+      added frame setup and reordered zero move, preserving indirect dispatch,
+      conditional post-query owner/value loads, and the original return value.

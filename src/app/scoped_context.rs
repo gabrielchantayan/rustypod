@@ -41,6 +41,8 @@
 //!   a validity-gated opaque owner-word getter.
 //! - [`scoped_context_owner_signed_byte_7e_or_zero`] — `FUN_082a3ff8` @
 //!   0x082a3ff8, a validity-gated signed owner-byte getter.
+//! - [`scoped_context_owner_word_60_or_zero`] — `FUN_082a2de4` @
+//!   0x082a2de4, a validity-gated opaque owner-word getter.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -903,6 +905,38 @@ pub unsafe extern "C" fn scoped_context_owner_word_5c_or_zero(
         return 0;
     }
     (*(*this).owner.cast::<OwnerWord5c>()).value
+}
+
+/// scoped_context_owner_word_60_or_zero — original: `FUN_082a2de4` @
+/// 0x082a2de4 (44 bytes, true extent 0x082a2de4..0x082a2e10; the next
+/// function starts with push {r4-r7,lr}). Full-image aligned A32 decoding
+/// verifies two plain inbound BLs at 0x0817df6c and 0x0817e144, zero
+/// predicated BLs. The body has zero direct BLs and one indirect BLX r1.
+///
+/// Dispatches vtable slot +8. Zero validity returns zero without touching
+/// the owner; otherwise reloads the owner and returns its aligned word at
+/// +0x60. Callers forward this value to the context update operation;
+/// its concrete field identity remains unknown.
+///
+/// Deliberate deviations: the existing repr(C) context/vtable model widens
+/// host pointers, while owner word indices remain four bytes apart. Rust
+/// branches replace ARM predicated loads. No semantic deviation or new seam.
+///
+/// # Safety
+/// `this` and its vtable validity slot must be valid. After a nonzero
+/// query result, the possibly replaced owner must permit an aligned u32
+/// read at +0x60. The query may mutate the token through its firmware ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_word_60_or_zero(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (*this).owner.cast::<u32>().add(0x60 / 4).read()
 }
 
 /// scoped_context_owner_signed_byte_7e_or_zero — original: `FUN_082a3ff8`
@@ -3218,5 +3252,44 @@ mod tests {
             unsafe { scoped_context_owner_signed_byte_7e_or_zero(&mut token) },
             -128,
         );
+    }
+
+    #[test]
+    fn word_60_getter_gates_null_and_preserves_all_value_bits() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = signed_byte_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut token = ScopedContext {
+            vtable: &vtable, owner_valid: 0, owner: ptr::null_mut(),
+            service_context: ptr::null_mut(), registry_token: ptr::null_mut(), mode: 0,
+        };
+        assert_eq!(unsafe { scoped_context_owner_word_60_or_zero(&token) }, 0);
+        let mut owner = [0xa5a5_a5a5u32; 26];
+        token.owner = owner.as_mut_ptr().cast();
+        for validity in [1, 2, 0x8000_0000, u32::MAX] {
+            token.owner_valid = validity;
+            for value in [0, 1, 0x8000_0000, 0x7654_3210, u32::MAX] {
+                owner[24] = value;
+                let before = owner;
+                assert_eq!(unsafe { scoped_context_owner_word_60_or_zero(&token) }, value);
+                assert_eq!(owner, before);
+            }
+        }
+    }
+
+    #[test]
+    fn word_60_getter_reloads_owner_after_virtual_query() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = validity_replaces_owner as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut owner = [0u32; 25];
+        owner[24] = 0xfedc_ba98;
+        let mut token = ScopedContext {
+            vtable: &vtable, owner_valid: 0, owner: ptr::null_mut(),
+            service_context: owner.as_mut_ptr().cast(),
+            registry_token: ptr::null_mut(), mode: 0,
+        };
+        assert_eq!(unsafe { scoped_context_owner_word_60_or_zero(&mut token) }, 0xfedc_ba98);
+        assert_eq!(token.owner, owner.as_mut_ptr().cast());
     }
 }
