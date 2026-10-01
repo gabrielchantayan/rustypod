@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082a018c
+    ghidra: FUN_082a018c
+    name: negate_fixed16_vec3
+    size: 36
+    sig: "void negate_fixed16_vec3(i32 *dst, const i32 *src)"
+    module: fp/fixed16_vec3
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      iVar2: y
+      iVar1: z
+    notes: >-
+      Raw A32 words establish the true extent 0x082a018c..0x082a01b0:
+      three ldr instructions, three rsb-from-zero instructions, stm,
+      str, and bx lr. The next independently called function begins with
+      push {lr} at 0x082a01b0. Whole-image aligned A32 decoding counts
+      two plain inbound BLs at 0x08252320 and 0x08252fa8, zero predicated
+      inbound BLs, and zero outgoing BLs. Callers FUN_082522e8 and
+      FUN_08252f70 select either the original three-component vector at
+      object offset +0x30 or its negated stack copy according to a side
+      selector. Negate each Q16.16 component modulo 2^32 after reading
+      all three aligned words; preserve arbitrary word-aligned overlap.
+      No callee seams, null guards, or deliberate behavioral deviations.
+      The existing fp/fixed16_vec3 module registration is unchanged.
+      Host tests cover zero, signs, fractional values, i32 boundaries,
+      in-place operation, both partial-overlap directions, and untouched
+      neighboring words. The complete x86_64 host suite and ARM release
+      build pass. Actual-source runtime smoke with forward overlap yields
+      [-2147483648, -2147483648, -98304, 7].
+      match.py exits 1 with twelve Rust instructions versus nine stock:
+      all three loads precede stores, wrapping rsb operations remain,
+      separate str instructions replace stm, and LLVM adds frame setup
+      and a pop return. No device execution performed.
+
   - address: 0x082a1eac
     ghidra: FUN_082a1eac
     name: resource_record_decode_flag
