@@ -165721,3 +165721,42 @@ functions:
       match.py exits 1 with 12 Rust versus 11 original instructions:
       added frame setup and reordered zero move, preserving indirect dispatch,
       conditional post-query owner/value loads, and the original return value.
+
+  - address: 0x082a2c08
+    ghidra: FUN_082a2c08
+    name: scoped_context_owner_word_68_or_zero
+    size: 44
+    sig: "u32 scoped_context_owner_word_68_or_zero(const ScopedContext *this)"
+    module: app/scoped_context
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      "*this/r0": vtable
+      this+8/r0: owner
+      owner+0x68/r0: value
+      iVar1: validity_result
+      uVar2: value
+    notes: >-
+      Raw osos.dec words establish extent 0x082a2c08..0x082a2c34,
+      eleven ARM instructions ending with pop {r4,pc} at 0x082a2c30;
+      the next real function starts with push {r4,lr}. Full-image aligned
+      A32 decoding finds two unconditional inbound BLs at 0x0823b0e4
+      and 0x0823b0f4, zero predicated BLs. The body has zero direct BLs
+      and one unconditional BLX r1 through vtable slot +8. Zero validity
+      returns zero without reading owner; any nonzero result reloads
+      owner at this +8 and reads its aligned word +0x68. Both calls are
+      in 0x0823b020, which tests the value against zero, 0x2000, and
+      0x2710. Concrete field and virtual callee identities remain unknown;
+      reuse the existing ScopedContext validity contract without a new seam.
+      Deliberate host deviation: repr(C) native context/vtable pointers
+      widen, while owner words retain four-byte spacing. No target semantic
+      deviation. Tests cover NULL owner on failed validity, noncanonical
+      nonzero results, zero/high-bit/all-ones and caller-boundary values,
+      unchanged owner words, and owner replacement during the virtual query.
+      Full x86_64 host suite and ARM release build passed. Extracted
+      production source smoke returned zero with NULL owner and 0xfedcba98
+      after query replacement. match.py exits 1 with 12 Rust versus 11
+      original instructions: added frame setup and reordered zero move,
+      preserving indirect dispatch and conditional post-query owner/value
+      loads. Build artifacts use temporary storage because root disk space
+      is limited.

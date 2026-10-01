@@ -43,6 +43,8 @@
 //!   0x082a3ff8, a validity-gated signed owner-byte getter.
 //! - [`scoped_context_owner_word_60_or_zero`] — `FUN_082a2de4` @
 //!   0x082a2de4, a validity-gated opaque owner-word getter.
+//! - [`scoped_context_owner_word_68_or_zero`] — `FUN_082a2c08` @
+//!   0x082a2c08, a validity-gated opaque owner-word getter.
 //! ## What the class is
 //!
 //! Every constructor in the family plants the same vtable literal,
@@ -937,6 +939,39 @@ pub unsafe extern "C" fn scoped_context_owner_word_60_or_zero(
         return 0;
     }
     (*this).owner.cast::<u32>().add(0x60 / 4).read()
+}
+
+/// scoped_context_owner_word_68_or_zero — original: `FUN_082a2c08` @
+/// 0x082a2c08 (44 bytes, true extent 0x082a2c08..0x082a2c34; eleven ARM
+/// instructions ending in pop {r4,pc}, followed by a new push {r4,lr}).
+/// Full-image aligned A32 decoding verifies two plain inbound BLs at
+/// 0x0823b0e4 and 0x0823b0f4, zero predicated BLs. The body has zero
+/// direct BLs and one unconditional indirect BLX r1 through vtable slot +8.
+///
+/// Returns zero when the virtual validity query returns zero. Otherwise
+/// reloads the owner after the query and reads its aligned word at +0x68.
+/// The caller compares this opaque value with 0x2000 and 0x2710; available
+/// evidence does not establish a more specific field identity.
+///
+/// Deliberate deviations: existing repr(C) context/vtable pointers widen on
+/// hosts, but owner word indices preserve four-byte spacing. Rust branches
+/// replace predicated loads. No target semantic deviation or new callee seam.
+///
+/// # Safety
+/// `this` and its validity slot must be valid. A nonzero query result requires
+/// the possibly replaced owner to permit an aligned u32 read at +0x68.
+/// The virtual query may mutate the token through its firmware ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_owner_word_68_or_zero(
+    this: *const ScopedContext,
+) -> u32 {
+    let validity: ScopedContextValidity =
+        core::mem::transmute((*(*this).vtable).slots[VALIDITY_SLOT]);
+    if validity(this) == 0 {
+        return 0;
+    }
+    (*this).owner.cast::<u32>().add(0x68 / 4).read()
 }
 
 /// scoped_context_owner_signed_byte_7e_or_zero — original: `FUN_082a3ff8`
@@ -3290,6 +3325,45 @@ mod tests {
             registry_token: ptr::null_mut(), mode: 0,
         };
         assert_eq!(unsafe { scoped_context_owner_word_60_or_zero(&mut token) }, 0xfedc_ba98);
+        assert_eq!(token.owner, owner.as_mut_ptr().cast());
+    }
+
+    #[test]
+    fn word_68_getter_gates_null_and_preserves_all_value_bits() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = signed_byte_validity as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut token = ScopedContext {
+            vtable: &vtable, owner_valid: 0, owner: ptr::null_mut(),
+            service_context: ptr::null_mut(), registry_token: ptr::null_mut(), mode: 0,
+        };
+        assert_eq!(unsafe { scoped_context_owner_word_68_or_zero(&token) }, 0);
+        let mut owner = [0xa5a5_a5a5u32; 28];
+        token.owner = owner.as_mut_ptr().cast();
+        for validity in [1, 2, 0x8000_0000, u32::MAX] {
+            token.owner_valid = validity;
+            for value in [0, 1, 0x2000, 0x2710, 0x8000_0000, u32::MAX] {
+                owner[26] = value;
+                let before = owner;
+                assert_eq!(unsafe { scoped_context_owner_word_68_or_zero(&token) }, value);
+                assert_eq!(owner, before);
+            }
+        }
+    }
+
+    #[test]
+    fn word_68_getter_reloads_owner_after_virtual_query() {
+        let mut slots = [0usize; 15];
+        slots[VALIDITY_SLOT] = validity_replaces_owner as usize;
+        let vtable = ScopedContextVtable { slots };
+        let mut owner = [0u32; 27];
+        owner[26] = 0xfedc_ba98;
+        let mut token = ScopedContext {
+            vtable: &vtable, owner_valid: 0, owner: ptr::null_mut(),
+            service_context: owner.as_mut_ptr().cast(),
+            registry_token: ptr::null_mut(), mode: 0,
+        };
+        assert_eq!(unsafe { scoped_context_owner_word_68_or_zero(&mut token) }, 0xfedc_ba98);
         assert_eq!(token.owner, owner.as_mut_ptr().cast());
     }
 }
