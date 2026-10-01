@@ -165891,3 +165891,39 @@ functions:
       return and a frame around the nonempty byte load instead of predicated
       instructions. Both field loads, equality test, end[-1] unsigned load,
       zero empty result, and absence of calls are preserved.
+
+  - address: 0x082a1ee8
+    ghidra: FUN_082a1ee8
+    name: opaque_byte_range_penultimate
+    size: 84
+    sig: "uint32_t opaque_byte_range_penultimate(const uint32_t *object)"
+    module: app/opaque_byte_range_penultimate
+    status: ported
+    vars: {param_1/r4: object, uVar2/r0: length, uVar3/r5: offset}
+    renames: {FUN_08266abc: cxx_new_handler_dispatch}
+    notes: >-
+      Raw ARM establishes 80 instruction bytes at 0x082a1ee8..0x082a1f38
+      plus the zero diagnostic literal at 0x082a1f38; the next real function
+      begins at 0x082a1f3c, making the full extent 84 bytes. Whole-image
+      aligned A32 decoding independently finds two plain inbound BLs at
+      0x08213dd4 and 0x08223288, zero predicated inbound BLs, zero plain
+      outbound BLs, and one predicated outbound BL at 0x082a1f28 to
+      cxx_new_handler_dispatch (0x08266abc, checked against names.yaml).
+      Load aligned target-width pointer words at object+0x08 and +0x0c,
+      compute unsigned wrapping end-start, return zero if less than two,
+      otherwise return unsigned end[-2]. Callers compare against small
+      discriminator values including 7, 11, and 17; concrete owner identity
+      is not established. Deliberate deviation: remove the unreachable
+      code-9 diagnostic call and literal, since length >= 2 implies
+      length-2 < length and the LS call predicate is always false.
+      No behavioral deviations, extra validation, or new callee seams.
+      Host tests cover invalid empty/one-byte pointers including rollover,
+      lengths 2..64, all 256 byte values, unchanged object and neighbor
+      bytes, reversed pointers and unsigned wrapping lengths. Full host
+      suite passed: 13299 tests. ARM release build passed. Standalone
+      production accessor smoke passed for short wrapping ranges, unsigned
+      bytes, and reversed ranges. match.py exits 1 with the expected
+      structural diff: LLVM uses 11 instructions rather than 20, drops
+      unreachable diagnostics, returns early for unsigned length < 2,
+      and directly reads end[-2]; field loads, wrapping subtraction,
+      unsigned comparison and unsigned byte return are preserved.

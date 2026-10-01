@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const OPAQUE_BYTE_RANGE_PENULTIMATE: usize = 0x519e_0000;
     pub const OPAQUE_BYTE_RANGE_LAST: usize = 0x519f_0000;
     pub const SCOPED_CONTEXT_RESULT_ID: usize = 0x518d_0000;
     pub const OBSERVABLE_ARRAY_INSERT_BROADCAST: usize = 0x518e_0000;
