@@ -166668,3 +166668,28 @@ functions:
       inlines counted acquire into mutex_lock plus the increment at +0x34,
       retains predicate and counted-unlock calls, and adds frame setup.
       No device execution performed.
+
+  - address: 0x0829dd5c
+    ghidra: FUN_0829dd5c
+    name: ui_flagged_value_matches
+    size: 36
+    module: ui/flagged_value_matches
+    status: ported
+    sig: "uint32_t ui_flagged_value_matches(const uint8_t *object, uint32_t requested_value)"
+    vars: {param_1: object, param_2: requested_value}
+    notes: >-
+      Raw ARM establishes the exact 36-byte extent 0x0829dd5c..0x0829dd80:
+      the preceding function returns at 0x0829dd58, and a separate
+      literal-return function begins at 0x0829dd80. Whole-image aligned
+      decoding finds two plain incoming BLs at 0x08141128 and 0x0814116c,
+      zero predicated incoming BLs, and zero outgoing BLs of either kind.
+      Read byte +0xec first; when nonzero, compare aligned word +0xe8
+      against the requested 32-bit value. Return exactly one on equality
+      and zero otherwise. The disabled path does not read the word.
+      The caller selects drawing attributes from this predicate; the
+      stored value's domain remains unproven, so no calendar/date identity
+      is assumed. No deliberate behavioral deviations, null guard, or
+      new callee seams. Host fixtures use aligned byte storage, not native
+      pointer fields. Tests cover every flag byte, zero and high-bit word
+      values, full-word mismatches, unchanged storage, and an uninitialized
+      value word on the disabled path.
