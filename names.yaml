@@ -201175,3 +201175,41 @@ functions:
       versus six stock instructions: LLVM clears bit zero then tests
       equality to four via sub/clz/lsr, which accepts precisely four/five,
       and adds a frame-pointer prologue/epilogue. No on-device run claimed.
+
+  - address: 0x0828020c
+    ghidra: FUN_0828020c
+    name: refcounted_allocation_handle_assign
+    size: 84
+    sig: "void refcounted_allocation_handle_assign(RefcountedAllocationHandle *handle, void *allocation, PosixMutex *mutex)"
+    module: cxx/refcounted_allocation_handle_release
+    status: ported
+    renames:
+      param_1/r0: handle
+      param_2/r1: allocation
+      param_3/r2: mutex
+      puVar1: cell
+      FUN_082801f8: region_ref_lock
+      FUN_082803c0: refcounted_allocation_handle_release
+      FUN_082aadd4: operator_new
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM confirms 84 bytes ending with pop at 0x0828025c; the next
+      real function begins at 0x08280260. Three plain outbound BLs and one
+      predicated BLEQ to heap_panic; two inbound plain BL callers at
+      0x0818ab00 and 0x081fc124. Locks the old cell's mutex through the
+      existing mutex port, ignores lock status, releases the old cell,
+      allocates 16 bytes and installs refcount 1, allocation, mutex and zero
+      continuation. Publishes the cell and caches its allocation word.
+      Existing release handles unlocking and final tag-43 free/tag-2 delete.
+      Initialization precedes the nominal NULL panic check, so allocation
+      failure faults first, as in stock. Host typed pointers widen the cell
+      and allocation size; cache retains the low 32-bit target pointer word.
+      Host tests cover empty, final, shared and wrapping old references,
+      NULL new allocation/mutex, ignored lock failure and dirty new storage.
+      Full host suite and ARM release build pass; executable host smoke
+      verifies installed allocation/cache, reference count and continuation.
+      match.py exits 1: 22 Rust instructions versus 21 stock instructions.
+      LLVM expands the lock wrapper into a conditional mutex call and removes
+      the unreachable NULL panic check after non-NULL writes; initialization,
+      release, allocation and cache publication retain stock behavior.
+      No on-device execution claimed.
