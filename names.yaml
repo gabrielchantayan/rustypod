@@ -198266,3 +198266,31 @@ functions:
       replace predication, preserving scaled address arithmetic and byte
       clearing. ARM relocation proves the BL targets active_slot_count.
       Opaque byte layout preserves target stride on hosts; no semantic deviation.
+
+  - address: 0x0829c468
+    ghidra: FUN_0829c468
+    name: opaque_vtable_string_owner_has_text
+    size: 24
+    sig: "uint32_t opaque_vtable_string_owner_has_text(const OpaqueVtableStringOwner *this)"
+    module: cxx/opaque_vtable_string_owner_has_text
+    status: ported
+    vars:
+      param_1: this
+      iVar1: codepoint_count
+      FUN_082770e0: utf8_codepoint_count_safe
+    notes: >-
+      Raw A32 words establish the true 24-byte extent 0x0829c468..0x0829c47f,
+      followed by a real function at 0x0829c480 (mov r0,#0x200; bx lr).
+      Whole-image word decoding finds two incoming plain BL calls at
+      0x081dc6ac and 0x081dcae4, zero incoming predicated BL calls, and
+      one outgoing plain BL at 0x0829c470 to the already-ported
+      utf8_codepoint_count_safe at 0x082770e0, zero outgoing predicated BLs.
+      Loads the embedded StringObject payload at owner+0x18, completes the
+      decoder count, and normalizes it to exactly zero or one. Callers
+      construct this owner through opaque_vtable_string_owner_construct
+      and pass the predicate alongside its embedded string to 0x081dccc0.
+      Reuses the existing repr(C) owner and native-pointer StringObject
+      model rather than applying target byte offsets to host pointers.
+      NULL, empty, overlong decoded NUL and unsupported leading sequences
+      return zero; supported multibyte text and a nonzero prefix before a
+      decoder-zero sequence return one. No semantic deviations or new seams.
