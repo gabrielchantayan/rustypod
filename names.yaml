@@ -199139,3 +199139,56 @@ functions:
       Host tests cover absent/present child, teardown order, clearing after
       dispatch, repeated teardown without double release, and preservation
       of unowned state.
+  - address: 0x082972e4
+    ghidra: FUN_082972e4
+    name: buffer_pool_owner_construct
+    size: 216
+    sig: "u8 *buffer_pool_owner_construct(u8 *owner, u32 interface, u32 mode, u32 parameter, u32 limit, u32 child_context, u32 flag)"
+    module: app/buffer_pool_owner_construct
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_2/r1: interface
+      param_3/r2: mode
+      param_4/r3: parameter
+      param_5: limit
+      param_6: child_context
+      param_7: flag
+      FUN_08296efc: owner_capacity_query
+      FUN_081e2078: pool_construct
+      FUN_0807f680: condvar_init
+      FUN_081a81c4: aligned_buffer_init
+      FUN_082aadd4: operator_new
+      FUN_081bfbec: mode_one_child_construct
+      FUN_081be1f8: mode_two_child_construct
+      FUN_081bc95c: basic_child_construct
+    notes: >-
+      Raw osos.dec proves 208 executable bytes plus vtable 0x089a7378
+      and allocation-size 0x428 literals; next real function starts
+      0x082973bc, making the true extent 216 bytes. Two inbound plain
+      BLs at 0x0814a260 and 0x081efc50; ten outbound plain BLs; zero
+      predicated BLs. Constructs the 88-byte buffer-pool owner: vtable,
+      interface, cleared child, low-byte mode and flag, parameter and
+      limit; capacity at +28 and capacity >> 9 at +32; embedded pool
+      +36 with lock +68, condvar +68, aligned buffer +80. Both member
+      constructor returns are rebased before subsequent accesses.
+      Full mode 1 allocates 1064 bytes and calls 0x081bfbec; mode 2
+      allocates 100 and calls 0x081be1f8; all other modes allocate 12
+      and call 0x081bc95c. Child constructor return is stored at +8,
+      including NULL. Existing capacity, allocator, condvar and buffer
+      ports are reused. Full YAML registry query found no entries for
+      the four unported constructors; names describe structure only.
+      Raw 0x081bc95c leaves r0 unchanged, correcting Ghidra's void
+      signature; 0x081bfbec passes entry r3 to 0x0816217c, which never
+      reads it, correcting the apparent fourth argument. Deliberate
+      deviations: fixed target-word layout on hosts and explicit host
+      operations, including the native-pointer condvar replacement.
+      Host tests cover full-width mode versus truncated stored mode,
+      capacity boundaries, padding, NULL child, and returned-member
+      rebasing. Exported smoke verified mode 257 selects basic with
+      real NULL-interface capacity query returning 512 and one sector.
+      ARM build succeeds. match.py exits 1 with structural diff:
+      LLVM preserves mode branches, capacity shift and field offsets,
+      emits BLX for resident seams, reorders independent initial
+      stores, and eliminates the aligned-buffer rebase because the
+      existing port always returns its input.
