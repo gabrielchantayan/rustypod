@@ -760,3 +760,4 @@ pub mod buffer_pool_owner_destruct;
 pub mod buffer_pool_owner_construct;
 pub mod wait_until_idle;
 pub mod input_record_pool;
+pub mod notes_value_demo_mode_dispatch;

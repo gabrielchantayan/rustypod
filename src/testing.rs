@@ -686,6 +686,8 @@ pub mod hints {
     // fixture for field_dc_as_class_4b00; mappings never unmap, so no other
     // user may share this hint.
     pub const FIELD_DC_AS_CLASS_4B00: usize = 0x6d00_0000;
+    // Dedicated target-width owner and notes fixture for notes_value_demo_mode_dispatch.
+    pub const NOTES_VALUE_DEMO_DISPATCH: usize = 0x6d98_0000;
     // 0x6d60_0000: dedicated to util/synchronized_list_append's target-width
     // owner and allocation fixture; mappings never unmap.
     pub const SYNCHRONIZED_LIST_APPEND: usize = 0x6d60_0000;

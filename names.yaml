@@ -200407,3 +200407,39 @@ functions:
       25 original versus 31 Rust instructions, preserving guards and offsets;
       LLVM adds a frame pointer and uses the allocation pointer for the image
       after proving the existing constructor returns its input storage.
+
+  - address: 0x0828b81c
+    ghidra: FUN_0828b81c
+    name: notes_value_demo_mode_dispatch
+    size: 56
+    sig: "void notes_value_demo_mode_dispatch(void *owner)"
+    status: ported
+    module: app/notes_value_demo_mode_dispatch
+    args:
+      r0: owner
+    locals:
+      r4: notes_value
+    calls:
+      FUN_0828b854: field_dc_as_class_4b00 (ported)
+      FUN_0829cef8: inline word getter at +0x7c
+      FUN_081883fc: demo_mode_instance (ported)
+      vtable+0x184: unidentified demo-mode value dispatch
+    notes: >-
+      Raw osos.dec establishes 56 bytes through bx r2 at 0x0828b850;
+      the next real function starts at 0x0828b854. Whole-image ARM word
+      decoding finds 2 plain inbound BLs at 0x0810c37c and 0x0828ae30,
+      zero predicated inbound BLs. Body has 3 plain BLs, zero predicated
+      BLs. Cast owner word +0xdc to class 0x4b00; return on NULL.
+      Read accepted object word +0x7c, return on 0xffffffff, otherwise
+      resolve TCDemoMode and tail-dispatch vtable +0x184 with that value.
+      Notes-list callers establish context, not the unknown slot identity.
+      Existing cast and singleton ports are reused directly. Deliberate
+      deviation: inline 0x0829cef8, verified ldr r0,[r0,#0x7c]; bx lr,
+      rather than introduce a seam or separately port another function.
+      Host tests exercise null, class rejection, sentinel, zero, positive,
+      high-bit and adjacent-to-sentinel values; 13468 host tests passed.
+      Actual-source smoke with dependency stand-ins exercises both early
+      return paths. ARM release build passed. match.py exits 1 with 14
+      original versus 13 Rust instructions: LLVM predicates the getter
+      load and sentinel comparison, adds a frame pointer, and retains
+      the singleton call and bx r2 tail dispatch at +0x184. No device run.
