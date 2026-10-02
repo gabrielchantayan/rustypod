@@ -193,6 +193,7 @@ pub mod view_transition_mode;
 pub mod view_lifecycle_mode;
 pub mod lifecycle_view;
 pub mod view_interaction_mode;
+pub mod view_interaction_sync;
 pub mod range_view;
 pub mod range_release;
 pub mod container_view;

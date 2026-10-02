@@ -202129,3 +202129,41 @@ functions:
       122 Rust instructions versus 50 original, with rectangle comparisons
       and union inlined, volatile BLX centering, conditional real invalidation
       call and final vtable dispatch preserved. No device execution performed.
+  # --- Silver UI framework: linked-view interaction synchronization ---
+  - address: 0x0826eca4
+    ghidra: FUN_0826eca4
+    name: view_sync_interaction_mode
+    size: 160
+    sig: "void view_sync_interaction_mode(ViewBase *view, u32 request)"
+    module: ui/view_interaction_sync
+    vars:
+      param_1: view
+      param_2: request
+      uVar1: old_mode
+      uVar2: notification
+      UNRECOVERED_JUMPTABLE: interaction_changed
+    status: ported
+    notes: >-
+      Raw osos.dec verifies extent 0x0826eca4..0x0826ed44, ending with
+      bx r2 at 0x0826ed40; the next real function begins with ldr at
+      0x0826ed44. Independent ARM-word scan finds two unconditional BL
+      callers at 0x081585d8 and 0x08158688 and zero predicated BL callers;
+      Ghidra's apparent caller at 0x0811e2f8 is not a raw BL reference.
+      Two internal BL instructions and one tail B reuse the already ported
+      view_set_interaction_mode at 0x0826db24. Zero request always sets
+      mode 0x600, notifying vtable slot +0xc8 with zero only when the old
+      mode was 0x200. Nonzero request ignores modes other than 0x600.
+      In mode 0x600, a nonnull linked view at +0x34 with mode 0x200
+      permits activation: set 0x200 then notify +0xc8 with one. Otherwise
+      set 0x400 without notification. Other flag bits are preserved.
+      Target pointer fields remain u32; host vtable fixtures use native-width
+      slots, the only deliberate deviation. Tests exercise all four modes,
+      null and all four linked-view modes, zero and multiple nonzero requests,
+      callback-visible post-setter flags, callback mutations, and unchanged
+      linked-view flags. Host suite passes 13539 tests; ARM release build
+      succeeds. Standalone actual-source smoke observes activation,
+      deactivation, and inactive-parent fallback. match.py exits 1 with
+      35 Rust versus 40 original instructions: mode checks, +0x34/+0x48
+      loads, two setter BLs, setter tail B and final +0xc8 BX retained.
+      LLVM changes register allocation, branch layout and frame-pointer setup.
+      No device execution performed.
