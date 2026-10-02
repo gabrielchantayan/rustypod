@@ -135,6 +135,7 @@ pub mod tdat_counter_addrefs;
 pub mod tdat_counter_releases;
 pub mod tdat_flag_20_bit_2;
 pub mod element_change_notify;
+pub mod checked_payload_value_set;
 pub mod navigation_mode;
 pub mod tdat_payload;
 pub mod pool_entry_create;
