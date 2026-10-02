@@ -201726,3 +201726,47 @@ functions:
       match.py exits 1: LLVM emits 14 instructions versus 12, adding a
       frame and reordering the same nine stores without extra calls.
       Deliberate deviations: none; ordinary memory, not MMIO, is required.
+
+  - address: 0x0826fd38
+    ghidra: FUN_0826fd38
+    name: checked_payload_value_set
+    size: 104
+    sig: "void checked_payload_value_set(CheckedPayloadObject *object, u32 value)"
+    module: ui/checked_payload_value_set
+    status: ported
+    renames:
+      param_1/r4: object
+      param_2/r5: value
+      param_1[2]: payload
+      payload+0x68: value
+      FUN_08067b4c: tdat_element_set_flag_20_bit_2
+      FUN_08066bb8: tagged_list_notify (seam, unported)
+      DAT_0826fd9c: raw_event_key_6d746274
+    notes: >-
+      Raw osos.dec proves 100 instruction bytes through the pop at
+      0x0826fd98 plus event literal 0x6d746274 at 0x0826fd9c, giving
+      104 bytes before the independently called function at 0x0826fda0.
+      Whole-image aligned ARM decoding finds two plain incoming BLs at
+      0x0817df78 and 0x0817e150, zero predicated incoming BLs, two plain
+      outgoing BLs, and one indirect BLX through vtable slot 2. The
+      virtual check gates payload access; a changed payload+0x68 value
+      is stored before calling the existing TDAT flag-bit-2 setter with
+      *payload and 1. Reloads object+8 afterward because flag callbacks
+      may replace the payload, then notifies (*payload)+0x54 with the
+      raw event key, payload context, and two zero arguments. Callers
+      use this while transitioning byte states to 5 and 6; the finer
+      value and event meanings remain unknown. No invented virtual
+      callee identity or new seam for the already ported flag setter.
+      The unported walker at 0x08066bb8 uses PAYLOAD_VALUE_NOTIFY_OPS.
+      Deliberate deviations: none on target; repr(C) pointer fields use
+      native host widths for fixtures. Tests cover a failed check with
+      NULL payload, unchanged zero and maximum values, full-width
+      changes, preserved neighboring words, store-before-callback order,
+      and callback replacement followed by reloaded notification context.
+      All 13522 host tests pass; ARM release build passes. Standalone
+      native smoke exercises the real flag setter and changed/unchanged
+      updates, verifying event tuple and preserved neighbors. match.py
+      exits 1: LLVM adds a frame and volatile notification dispatch,
+      retaining the virtual check, conditional comparison, +0x68 store,
+      +0x54 list, and exact event key. R_ARM_CALL resolves to the existing
+      tdat_element_set_flag_20_bit_2; the export is a distinct real symbol.
