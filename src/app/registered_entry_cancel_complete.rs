@@ -11,9 +11,9 @@
 //! channel operation at `0x081073f8` with its `+0x34` context and entry key,
 //! and finds that key's 24-byte registration record. An inactive record unlocks
 //! and tail-posts its `+0x04` mailbox cell. An active record repeatedly invokes
-//! the unrecovered drain operation at `0x082938f8` until it returns zero, then
-//! unlocks. Deliberate deviation: the two unrecovered operations are expressed
-//! as typed retail-address calls on target and injected callbacks in host tests;
+//! the ported ring drain operation until it returns zero, then
+//! unlocks. Deliberate deviation: the unrecovered channel operation is expressed
+//! as a typed retail-address call on target and injected callbacks in host tests;
 //! target tail branches become ordinary Rust returns.
 
 #[cfg(target_os = "none")]
@@ -29,7 +29,6 @@ const ENTRY_POST_CELL_OFFSET: usize = 0x04;
 const ENTRY_ACTIVE_OFFSET: usize = 0x11;
 const CONTROLLER_CHANNEL_CONTEXT_OFFSET: usize = 0x34;
 const RETAIL_CHANNEL_OPERATION: usize = 0x0810_73f8;
-const RETAIL_ENTRY_DRAIN: usize = 0x0829_38f8;
 
 type EntryOperation = unsafe extern "C" fn(*mut u8, u32);
 type EntryDrain = unsafe extern "C" fn(*mut u8, u32, u32) -> i32;
@@ -42,12 +41,6 @@ unsafe fn retail_channel_operation(context: *mut u8, entry_id: u32) {
     operation(context, entry_id);
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn retail_entry_drain(controller: *mut u8, entry_id: u32) -> i32 {
-    let drain: EntryDrain = core::mem::transmute(RETAIL_ENTRY_DRAIN);
-    drain(controller, entry_id, 1)
-}
 
 /// Completes cancellation for the registered entry selected by `entry_id`.
 ///
@@ -70,7 +63,7 @@ pub unsafe extern "C" fn registered_entry_cancel_complete(controller: *mut u8, e
             mailbox_slot_post(core::ptr::read(entry.add(ENTRY_POST_CELL_OFFSET).cast::<u32>()) as *mut *mut Mailbox);
             return;
         }
-        while retail_entry_drain(controller, core::ptr::read_volatile(entry) as u32) != 0 {}
+        while crate::app::registered_entry_drain::registered_entry_drain(controller, core::ptr::read_volatile(entry) as u32) != 0 {}
         mutex_unlock(controller.cast::<Mutex>());
     }
     #[cfg(not(target_os = "none"))]

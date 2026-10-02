@@ -646,6 +646,7 @@ pub mod slot_request_release;
 pub mod slot_signal_reset;
 pub mod slot_value_process;
 pub mod four_slot_key_index;
+pub mod registered_entry_drain;
 pub mod registered_entry_cancel_complete;
 pub mod registered_entry_cancel;
 pub mod registered_entry_activate;
