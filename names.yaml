@@ -198705,3 +198705,32 @@ functions:
       inline +4 and resource +0x48 accesses and both tail calls, adds a frame,
       and inlines task_ctx_field_0x30's existing dispatch-slot read plus +0x30
       context-word load. The export remains a distinct symbol.
+
+  - address: 0x08299d4c
+    ghidra: FUN_08299d4c
+    name: indexed_string_c_str
+    size: 20
+    sig: "const char *indexed_string_c_str(IndexedStringCollection *owner, u32 index)"
+    module: app/indexed_string_c_str
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1: index, return/r0: c_str}
+    notes: >-
+      Raw words establish 0x08299d4c..0x08299d60 (20 bytes), not Ghidra's
+      24 bytes; the next function starts at 0x08299d60 with push
+      {r0,r1,r4,lr}. Two incoming unconditional BLs at 0x08126aa4 and
+      0x082999cc, zero predicated BLs. Adds +4 to the receiver and calls
+      the existing container_element_at_alias_5fbc with the unchanged r1
+      index, then tail-branches to 0x082a678c. That veneer is the raw word
+      0xeafffa47, a branch to the existing string_object_c_str at 0x082a50b0.
+      No receiver or element NULL guard; NULL payload yields the shared
+      empty string. Host repr(C) fields widen the opaque leading word and
+      embedded vtable pointer; ARM retains +4. The existing accessor's
+      modeled static empty string is reused. Host tests cover two distinct
+      indexed elements, NULL payload and non-NULL empty payload. ARM release
+      build passes. match.py exits 1: LLVM adds a frame-pointer move and
+      preserves +4, BL, register restore and tail branch. The default
+      comparison includes the next function's push because its extent is
+      Ghidra's incorrect 24 bytes.
+      Standalone runtime smoke executes the actual Rust accessor and its
+      existing callees with a high-bit index, verifying text pointer identity
+      and the shared empty byte after changing the payload to NULL.
