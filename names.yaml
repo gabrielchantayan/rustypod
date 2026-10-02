@@ -199679,3 +199679,51 @@ functions:
       structural diff: LLVM emits explicit branches instead of predication,
       adds a frame pointer, folds the shared-global offset into its literal,
       and retains the zero-path tail dispatch. No device execution performed.
+  - address: 0x08292d88
+    ghidra: FUN_08292d88
+    name: shared_input_tick_advance
+    size: 208
+    sig: "u32 shared_input_tick_advance(u32 input, u32 divisor)"
+    module: app/shared_input_tick_advance
+    status: ported
+    renames:
+      param_1: input
+      param_2: divisor
+      DAT_08292e44: shared_input_state (0x089cc928)
+      DAT_08292e4c: shared_tick_accumulator (0x08ac6cbc)
+      FUN_081bb450: tick_accumulator_construct
+      FUN_081bb3d0: tick_accumulator_reset_timing_state
+      FUN_081bb294: tick_accumulator_set_input_divisor
+      FUN_081bb3a0: tick_accumulator_step
+      FUN_0826c5e8: usec_timer_read_seconds
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab338: cxa_guard_release
+      FUN_082ab1c8: cxa_atexit
+    notes: >-
+      Raw osos.dec establishes 188 code bytes ending at 0x08292e44 and five
+      literal words through 0x08292e58, where the next independently entered
+      function begins. True extent is 208 bytes. Whole-image ARM BL decoding
+      finds two plain inbound calls at 0x081f6930 and 0x08202e18 and zero
+      predicated inbound calls; the body contains nine plain BLs and one BLNE.
+      Both callers pass an input event word and divisor 16. The global state
+      contains guard at +8, cached divisor at +12, and last sample at +16.
+      A successful guard acquire constructs the fixed accumulator using the
+      cached divisor, mode zero and backoff 350, then registers constructor
+      return with handler word 0x081b0638 and DSO handle 0x089ca09c.
+      Changed divisor or wrapping unsigned elapsed interval above 1000 resets
+      timing and installs the cached divisor. Unchanged divisor samples the
+      clock twice; changed divisor samples once. Every call stamps the sample,
+      steps input at measured rate zero, returns the step result, and sets
+      accumulator divisor to one after any nonzero output without changing
+      the cached divisor. All identified callees reuse existing Rust ports.
+      Host context replaces fixed globals with native pointers; no algorithmic
+      deviation. Host edge tests cover elapsed 1000/1001, wraparound, backward
+      time, divisor changes, zero/nonzero output and guard values 0/1/2.
+      Standalone smoke using actual constructor, step, reset and setter ports
+      produced init=2, active=32, timeout=0, resumed=2 with a controlled clock
+      and update dependency. ARM release build passes. match.py exits one with
+      an expected structural diff: 47 original instructions versus 65 Rust
+      entries, frame pointer, explicit branches, inlined shutdown registration
+      and eliminated no-op guard release. Guard, unsigned threshold, reset,
+      clock sampling, step and conditional divisor transition remain intact.
+      No device execution performed.
