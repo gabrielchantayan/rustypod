@@ -100,6 +100,33 @@ pub unsafe extern "C" fn opaque_record_source_get() -> *mut OpaqueRecordSource {
     unsafe { cache.read_volatile() }
 }
 
+/// Returns the record-table address stored in the shared record source.
+///
+/// retailOS `FUN_08284434` @ **0x08284434**, **8 bytes**: raw words
+/// `e5900004 e12fff1e` (`ldr r0,[r0,#4]; bx lr`), immediately followed
+/// by the next function's push at 0x0828443c. Whole-image A32 decoding
+/// verifies **2 plain inbound BLs** (0x081c47ec, 0x081c7a04), **0 predicated
+/// BLs**, and no outgoing calls or inbound B instructions.
+///
+/// Reads the second aligned word unchanged. Callers use it as the base of
+/// 80-byte records. No NULL guard, pointer dereference, or validation is added.
+/// Deliberate representation choice: return a target `u32` address rather
+/// than a native pointer, preserving all bits and the +4 offset on hosts.
+///
+/// LLVM intentionally folds this body with `object_word_at_4`: both exported
+/// symbols address the same 16-byte ARM section (frame push/mov, load, pop).
+/// # Safety
+///
+/// `source` must point to an aligned readable record-source allocation with
+/// at least eight bytes initialized. A NULL receiver is invalid.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn opaque_record_source_records_address(
+    source: *const OpaqueRecordSource,
+) -> u32 {
+    unsafe { source.cast::<u32>().add(1).read() }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -244,5 +271,24 @@ mod tests {
             assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![OPAQUE_RECORD_SOURCE_ALLOCATION_SIZE]);
             assert_eq!(*ptr::addr_of!(CTOR_BLOCKS), std::vec![ptr::null_mut()]);
         }
+    }
+
+    #[test]
+    fn records_address_preserves_target_bits_and_does_not_modify_source() {
+        for address in [0, 0x0800_0000, 0x8000_0000, 0xffff_ffff] {
+            let words = [0x1122_3344u32, address];
+            let original = words;
+            let source = words.as_ptr().cast::<OpaqueRecordSource>();
+            assert_eq!(unsafe { opaque_record_source_records_address(source) }, address);
+            assert_eq!(words, original);
+        }
+    }
+
+    #[test]
+    fn records_address_uses_receiver_relative_second_word() {
+        let words = [0xdead_beefu32, 0x1234_5678, 0x89ab_cdef, 0x7654_3210];
+        let source = unsafe { words.as_ptr().add(1) }.cast::<OpaqueRecordSource>();
+        assert_eq!(unsafe { opaque_record_source_records_address(source) }, words[2]);
+        assert_eq!(words, [0xdead_beef, 0x1234_5678, 0x89ab_cdef, 0x7654_3210]);
     }
 }
