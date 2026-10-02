@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827cb9c
+    ghidra: FUN_0827cb9c
+    name: indexed_record_payload_clear
+    size: 48
+    sig: "void indexed_record_payload_clear(u32 *owner, u32 index)"
+    module: app/indexed_record_payload_clear
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      "owner+index*0x38+0x20..0x3c": eight_word_payload
+    notes: >-
+      Raw words verify a 48-byte leaf ending at 0x0827cbcc, the next real
+      function boundary. Two incoming plain BLs at 0x0827cc4c and 0x0827ceb0;
+      zero predicated incoming BLs and zero outgoing calls. RSB and shifted
+      ADD compute the 56-byte stride; eight STRs clear offsets 32 through 60.
+      Constructor and bulk-reset callers visit indices zero through two.
+      No invented record type, index validation, callee seams or behavioral
+      deviations. Volatile aligned word stores preserve write order and avoid
+      memset substitution. Host suite and ARM release build pass. Host tests
+      verify exact write bounds, indices zero, one, two and five, and the
+      constructor sequence. Actual-source smoke confirms all 24 cleared words
+      and preserved trailing state. match.py exits one: identical stride and
+      eight stores, different zero register and added LLVM frame; 14 Rust
+      instructions versus 12 stock instructions. No device execution.
   - address: 0x0827eb30
     ghidra: FUN_0827eb30
     name: passkey_digit_complete
