@@ -201123,3 +201123,33 @@ functions:
       branch switch with two descriptor tables, retaining the unsigned
       range guard and nine-word call to video_engine_submit_frame.
       No on-device execution claimed.
+
+  - address: 0x08280b10
+    ghidra: FUN_08280b10
+    name: object_kind_is_four_or_five
+    size: 24
+    sig: "u32 object_kind_is_four_or_five(const u8 *object)"
+    module: app/object_kind_is_four_or_five
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0x74: kind
+    notes: >-
+      Raw A32 words at 0x08280b10..0x08280b28 are ldrb r0,[r0,#0x74],
+      sub r0,r0,#4, cmp r0,#1, movhi r0,#0, movls r0,#1, bx lr.
+      The next real function begins with push {r4,r5,r6,lr} at 0x08280b28;
+      the true extent is 24 bytes without literals. Independent full-image
+      aligned BL decoding finds exactly two plain inbound calls at
+      0x081cbcc4 and 0x081cc75c, no predicated inbound BLs, and no outbound
+      BLs. Both raw callers pass the resolved object in r0 after a call to
+      0x083d60bc; Ghidra incorrectly omits this argument at the call sites.
+      Returns u32 one only for byte discriminator values four and five.
+      The domain meaning of these codes is not established. No NULL guard
+      or side effects; no callee seams are needed. No behavioral deviations.
+      Host tests cover all 256 byte values at four base alignments,
+      unchanged object storage and neighboring-byte isolation. The full
+      host suite and ARM release build pass. Executable host smoke verifies
+      codes 0,3,4,5,6,255. match.py exits 1 with eight Rust instructions
+      versus six stock instructions: LLVM clears bit zero then tests
+      equality to four via sub/clz/lsr, which accepts precisely four/five,
+      and adds a frame-pointer prologue/epilogue. No on-device run claimed.
