@@ -525,6 +525,50 @@ pub unsafe extern "C" fn display_get(display_id: u32) -> *mut Display {
         _ => core::ptr::null_mut(),
     }
 }
+/// ABI of the unported pending-state stack push at 0x081d91f0.
+pub type DisplayPendingStatePush = unsafe extern "C" fn(*mut Display);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn retail_display_pending_state_push(display: *mut Display) {
+    let push: DisplayPendingStatePush = core::mem::transmute(0x081d_91f0usize);
+    push(display);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn retail_display_pending_state_push(_display: *mut Display) {
+    panic!("retail display pending-state push requires a host implementation");
+}
+
+/// Device calls retain the verified retail routine; host tests install a model.
+pub(crate) static mut DISPLAY_PENDING_STATE_PUSH: DisplayPendingStatePush = retail_display_pending_state_push;
+
+/// display_save_pending_state — original: FUN_0828c5e8 @ 0x0828c5e8.
+/// True extent 0x0828c5e8..0x0828c600: 24 bytes, followed by the distinct
+/// coordinate-owner prologue. Raw A32 decoding verifies two inbound plain
+/// BL calls (0x0817ae10, 0x0819a66c), zero predicated inbound BL calls.
+/// The body has zero plain BLs, one BLEQ to display_get, and a tail B to
+/// 0x081d91f0. A null display selects the secondary singleton; otherwise the
+/// caller's display is retained. The callee saves the panel-specific pending
+/// command into its bounded 16-entry stack under the display mutex.
+///
+/// Deliberate deviations: the unported push is a volatile verified-address
+/// seam and the tail branch is a return-position call. The existing getter's
+/// constructor limitations still apply; this wrapper is not hook-ready until
+/// that dependency is installed. Ghidra incorrectly expands the tail callee.
+///
+/// # Safety
+/// A non-null display must be a live, initialized retail display; for null,
+/// the secondary singleton and its constructor hook must be initialized.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_save_pending_state(mut display: *mut Display) {
+    if display.is_null() {
+        display = display_get(SECONDARY_DISPLAY_ID as u32);
+    }
+    let push = core::ptr::read_volatile(core::ptr::addr_of!(DISPLAY_PENDING_STATE_PUSH));
+    push(display);
+}
+
 /// internal_display_request_clear — original: `FUN_080a76b8` @ 0x080a76b8
 /// (28 bytes exactly, 0x080a76b8..0x080a76d4; the next function opens at
 /// 0x080a76d4 with `stmdb sp!, {r4, r5, lr}`). Raw A32 word decoding finds
@@ -989,6 +1033,60 @@ mod tests {
     extern crate std;
 
     use super::*;
+
+    // Model the verified callee's state transitions, using native Display fields
+    // rather than target byte offsets. reserved_56_8f contains selector at 0,
+    // depth at 6..10 and the 16 three-byte entries at 10..58.
+    unsafe extern "C" fn model_pending_state_push(display: *mut Display) {
+        let d = &mut *display;
+        let depth = u32::from_le_bytes(d.reserved_56_8f[6..10].try_into().unwrap());
+        if depth == 16 { return; }
+        let entry = 10 + depth as usize * 3;
+        match d.display_id {
+            0 => {
+                d.reserved_56_8f[entry] = d.pending_command;
+                d.reserved_56_8f[entry + 1] = d.pending_command_parameter;
+            }
+            1 => d.reserved_56_8f[entry + 2] = d.reserved_56_8f[0],
+            _ => {}
+        }
+        d.reserved_56_8f[6..10].copy_from_slice(&(depth + 1).to_le_bytes());
+    }
+
+    #[test]
+    fn save_pending_state_preserves_panel_specific_stack_and_full_boundary() {
+        let _guard = DISPLAY_TEST_LOCK.lock();
+        unsafe {
+            let old_push = DISPLAY_PENDING_STATE_PUSH;
+            let old_guard = SECONDARY_DISPLAY_GUARD;
+            let secondary = core::ptr::addr_of_mut!(SECONDARY_DISPLAY);
+            let old_secondary = secondary.read();
+            DISPLAY_PENDING_STATE_PUSH = model_pending_state_push;
+            SECONDARY_DISPLAY_GUARD = 1; // exercise the real singleton fast path
+            secondary.write(ZEROED_DISPLAY);
+            (*secondary).display_id = 1;
+            (*secondary).reserved_56_8f[0] = 9;
+            let mut internal = ZEROED_DISPLAY;
+            internal.pending_command = 0x42;
+            internal.pending_command_parameter = 0x81;
+            display_save_pending_state(&mut internal);
+            assert_eq!(&internal.reserved_56_8f[10..13], &[0x42, 0x81, 0]);
+            assert_eq!(&internal.reserved_56_8f[6..10], &1u32.to_le_bytes());
+            assert_eq!(&(&(*secondary).reserved_56_8f)[6..10], &[0; 4]);
+            for _ in 0..16 { display_save_pending_state(core::ptr::null_mut()); }
+            assert_eq!(&(&(*secondary).reserved_56_8f)[6..10], &16u32.to_le_bytes());
+            for entry in (&(*secondary).reserved_56_8f)[10..58].chunks_exact(3) {
+                assert_eq!(entry, &[0, 0, 9]);
+            }
+            (*secondary).reserved_56_8f[0] = 7;
+            display_save_pending_state(core::ptr::null_mut());
+            assert_eq!(&(&(*secondary).reserved_56_8f)[55..58], &[0, 0, 9]);
+            assert_eq!(&(&(*secondary).reserved_56_8f)[6..10], &16u32.to_le_bytes());
+            DISPLAY_PENDING_STATE_PUSH = old_push;
+            SECONDARY_DISPLAY_GUARD = old_guard;
+            secondary.write(old_secondary);
+        }
+    }
     use crate::drivers::display_layer::DriverVtable;
     use crate::heap::veneers::tests::{alloc_log, mock_heap, set_alloc_ret};
     use parking_lot::MutexGuard as DisplayMutexGuard;
