@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284388
+    ghidra: FUN_08284388
+    name: record_cache_set_flag
+    size: 8
+    sig: "uint8_t *record_cache_set_flag(uint8_t *cache, uint32_t flag)"
+    module: app/record_cache_set_flag
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: flag
+      "cache+0x18": byte_flag
+    notes: >-
+      Raw words e5c01018 and e12fff1e establish STRB r1,[r0,#24]; BX lr,
+      ending at the next independent PUSH at 0x08284390. Whole-image ARM
+      decoding finds two plain inbound BLs at 0x081c5c4c and 0x081c7b68,
+      zero predicated inbound BLs and no outbound calls. Callers obtain
+      opaque_record_source_get at 0x082841c8 and store zero before cursor
+      reset or one after record traversal. Precise flag meaning unresolved.
+      Store the low byte without normalization; expose unchanged r0 despite
+      Ghidra's void prototype. No new seams or host pointer-width assumptions.
+      Host tests cover truncation, unaligned objects, repeated transitions,
+      unchanged surrounding fields and identity return.
   - address: 0x08284910
     ghidra: FUN_08284910
     name: named_object_dispatch_value
