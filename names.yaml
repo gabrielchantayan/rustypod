@@ -43595,6 +43595,37 @@ functions:
       predicated forms: 0x0819981c, 0x0819a678, and 0x0819a848. The wrapper
       passes its display and selector to configure_display_pending_nibbles
       with -1 for each nibble, retaining all four pending nibble values.
+  - address: 0x0828d64c
+    ghidra: FUN_0828d64c
+    name: configure_display_pending_first_nibble
+    size: 32
+    sig: "void configure_display_pending_first_nibble(Display *display, i32 first)"
+    module: ui/display_pending_nibbles
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: first
+      FUN_0828d6cc: configure_display_pending_nibbles
+    notes: >-
+      Raw osos.dec establishes eight ARM words at 0x0828d64c..0x0828d66c:
+      push {r2,r3,r4,lr}, set r3=-1, move incoming r1 to r2, set r1=-1,
+      store r3 at sp and sp+4, bl 0x0828d6cc, pop {r2,r3,r4,pc}.
+      The next real function opens at 0x0828d66c. Whole-image ARM BL
+      decoding finds two unconditional callers at 0x0817f4b4 and
+      0x0817f594, no predicated callers, and one unconditional BL in the
+      body. Both caller paths select slot zero and pass 15. Reuses the
+      existing configure_display_pending_nibbles port with selector and
+      second through fourth set to -1. First -1 retains its byte, 0..15
+      updates it, and other signed values reject before mutation or lookup.
+      NULL defaults to the secondary display. No behavioral deviations;
+      Rust supplies ABI stack arguments and register preservation.
+      All 13455 host tests and the ARM release build passed. Host tests
+      cover boundaries, retention, rejection, and NULL fallback. A throwaway
+      host executable exercised the actual Rust source with a firmware-
+      equivalent pending-byte writer, verifying pending flags as well.
+      No device run. match.py exits 1 for the structural diff: LLVM uses
+      frame-pointer saves and an 8-byte argument area instead of ADS saved
+      registers, preserving the six-argument setup and single BL.
   - address: 0x0828d66c
     ghidra: FUN_0828d66c
     name: configure_display_pending_second_nibble
