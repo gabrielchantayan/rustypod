@@ -199952,3 +199952,33 @@ functions:
       match.py printed a structural diff (exit 1): LLVM narrows the flag
       test to byte +0x4b bit 3, preserves signed spec loads and seven
       arguments, and uses BLX through the seam instead of the fixed BL.
+
+  - address: 0x08290498
+    ghidra: FUN_08290498
+    name: identifier_value_lookup
+    size: 56
+    sig: "const uint8_t *identifier_value_lookup(uint32_t identifier)"
+    module: app/identifier_value_lookup
+    status: ported
+    renames:
+      param_1/r0: identifier
+      uVar1/r1: record_index
+      DAT_082904c8: record_table_address
+      DAT_082904cc: unknown_value_string
+    notes: >-
+      Raw words establish 48 instruction bytes, a table literal at
+      0x082904c8 and the fallback ??? NUL string at 0x082904cc. The next
+      function begins at 0x082904d0, giving a true extent of 56 bytes.
+      Independent whole-image A32 BL decoding finds two plain incoming
+      calls at 0x0819fd58 and 0x081e9b94, no predicated incoming calls,
+      and no outgoing BLs. Scan 3920 eight-byte records at 0x083f8728;
+      compare second word with identifier and return the first matching
+      first word as a pointer, including NULL. Missing identifiers return
+      0x082904cc. Callers feed the result to the COW string constructor;
+      captured table words do not establish more specific semantics.
+      No target deviations or callee seams. Host tests cover duplicates,
+      NULL, high-bit words, final-record inclusion and scan bounds.
+      Host suite, ARM release build and exported-entry mmap smoke pass.
+      match.py exits 1: LLVM uses a countdown and postincremented key
+      pointer, preserving eight-byte stride, first match and fallback.
+      The firmware table remains in place; no device execution performed.
