@@ -43534,6 +43534,36 @@ functions:
       branch; host fixtures use native-width pointers at +0x78 while target
       builds use the retail aligned 32-bit layout.
 
+  - address: 0x0828d57c
+    ghidra: FUN_0828d57c
+    name: coordinate_owner_clear_words
+    size: 120
+    sig: "void coordinate_owner_clear_words(CoordinateWordOwner *owner)"
+    module: ui/coordinate_owner_clear_words
+    status: ported
+    renames:
+      param_1/r0: owner
+      puVar4/ip: words_begin
+      puVar5/lr: words_end
+      piVar3/r3: render_context
+      "owner+0x14": words
+      "owner+0x78": render_context
+      "context vtable+0xf4": dispatch_words
+    notes: >-
+      Raw words establish the 120-byte extent 0x0828d57c..0x0828d5f4,
+      where the next distinct push prologue begins. Two incoming plain BL
+      calls at 0x081576b4 and 0x081586d8, zero predicated BL calls. The body
+      has no BL and conditionally tail-dispatches with BX through context
+      vtable slot +0xf4, passing the context and owner+0x14 vector address.
+      Clears the aligned word vector by setting end to begin, preserving
+      capacity and backing data, even when no context exists. Dispatch
+      occurs for empty vectors too. The copy loop never executes because
+      its two source cursors start equal; the subsequent empty traversal
+      is omitted for valid aligned vectors. Malformed vectors that would
+      hang are outside the contract. No concrete virtual callee identity
+      is invented. Rust uses an indirect call instead of the tail BX and
+      repr(C) fields with native-width pointers for host fixtures.
+
   - address: 0x0828d5f4
     ghidra: FUN_0828d5f4
     name: coordinate_owner_flush_pending
