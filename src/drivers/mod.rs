@@ -1,4 +1,5 @@
 //! Low-level hardware drivers (S5L8702 peripherals, MMIO).
+pub mod usb_endpoint_packet_size;
 pub mod usb_high_speed_query;
 pub mod ata_cmd;
 pub mod ata_command_execute;
