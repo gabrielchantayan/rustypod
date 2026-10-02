@@ -201636,3 +201636,37 @@ functions:
       the outer pointer in r4 instead of subtracting four from returned r0.
       It adds a frame and emits separate store/return instructions instead
       of the stock pre-decrement STR. No intentional symbol folding.
+
+  - address: 0x0827dda8
+    ghidra: FUN_0827dda8
+    name: stream_buffer_mailbox_post
+    size: 16
+    sig: "void stream_buffer_mailbox_post(void)"
+    module: app/stream_buffer_mailbox_post
+    status: ported
+    renames:
+      DAT_0827ddb4: stream_buffer_mailbox_slot_089cfd40
+      FUN_080dad28: mailbox_slot_post_dispatch
+    notes: >-
+      Raw words e59f0004 e3a01000 eaf973dc 089cfd40 establish 12 bytes of
+      instructions and a four-byte literal, ending at the next real entry
+      0x0827ddb8. Loads slot address 0x089cfd40 into r0, sets r1 to zero,
+      and tail-branches to the already ported mailbox_slot_post_dispatch
+      at 0x080dad28. Ghidra expands this into the downstream atomic and
+      wake routines; those are not this function's body. Whole-image aligned
+      ARM decoding finds two plain incoming BLs at 0x08168040 and
+      0x08168084, zero predicated incoming BLs, and no outgoing BLs.
+      Both callers are in the stream-buffer writer at 0x08167f28, after
+      advancing a filled buffer and checking buffered bytes <= 0x180000.
+      No new callee seam: mode zero takes the existing normal mailbox post.
+      Rust retains the fixed firmware slot; host builds substitute a
+      native-width slot. No NULL checks, slot writes, or symbol folds.
+      Host regression exercises -2 to -1 without wake, -1 to zero with
+      normal wake, per-call slot replacement, and zero to one without wake.
+      All 13518 host tests pass; ARM release build passes. match.py exits
+      1: LLVM adds and removes a frame before the tail branch, retaining
+      mode zero and the exact slot literal. R_ARM_JUMP24 resolves to
+      mailbox_slot_post_dispatch. A throwaway A32 instruction smoke runs
+      both raw stock and emitted release wrapper words, verifying slot,
+      mode, and preserved fp/sp/lr at dispatch. It does not execute the
+      downstream kernel or claim a device run.
