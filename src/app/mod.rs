@@ -229,6 +229,7 @@ pub mod view_event_prepare_resource_provider;
 pub mod volume_controller_post_commands;
 pub mod volume_controller_post_byte_90_code;
 pub mod volume_limit_state_refresh_if_pending;
+pub mod volume_limit_entry_reset;
 pub mod volume_controller_adjust;
 pub mod media_player_set_volume;
 pub mod linked_list_snapshot_create;

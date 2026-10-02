@@ -201427,3 +201427,34 @@ functions:
       versus eight stock: LLVM uses a conditional skip and literal-address BLX
       instead of BLEQ, plus a frame-pointer prologue. Store, condition, exact
       callee address, second argument 1 and post-call reload are preserved.
+
+  - address: 0x0827f67c
+    ghidra: FUN_0827f67c
+    name: volume_limit_entry_reset
+    size: 20
+    sig: "void volume_limit_entry_reset(u32 *object)"
+    module: app/volume_limit_entry_reset
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: stored_value
+      "object+0xa0": opaque_entry_state_word
+      "object+0x8c": opaque_entry_reset_word
+    notes: >-
+      Raw osos.dec words establish exactly 20 bytes at 0x0827f67c..0x0827f68f:
+      mov r1,#1; str r1,[r0,#0xa0]; mov r1,#0; str r1,[r0,#0x8c]; bx lr.
+      The next real function starts at 0x0827f690 with push {r4,lr}.
+      Whole-image aligned A32 decoding finds two incoming plain BLs at
+      0x0820e878 and 0x08227f94, zero predicated incoming BLs, and zero
+      outgoing plain or predicated BLs. Callers reset this volume-limit
+      object during entry setup and before the locked-screen transition.
+      Individual field meanings remain unverified; no callee seam is needed.
+      Volatile aligned word stores preserve the original write order and
+      leave all other fields unchanged. No deliberate behavior deviation;
+      the original leaves r0 untouched but callers use no return value.
+      Host tests cover arbitrary prior words, neighboring-field preservation,
+      and repeated resets. All 13510 host tests pass; ARM release build passes.
+      Exported-function smoke observes +0xa0=1 and +0x8c=0 with the other
+      45 fixture words unchanged. match.py reports seven Rust instructions
+      versus five stock instructions: identical ordered stores, with an LLVM
+      frame-pointer prologue and pop {fp,pc} instead of bx lr.
