@@ -200474,3 +200474,48 @@ functions:
       original versus 13 Rust instructions: LLVM predicates the getter
       load and sentinel comparison, adds a frame pointer, and retains
       the singleton call and bx r2 tail dispatch at +0x184. No device run.
+
+  - address: 0x0828ae88
+    ghidra: FUN_0828ae88
+    name: notes_dispatcher_select
+    size: 160
+    sig: "u32 notes_dispatcher_select(NotesDispatcher *dispatcher, FrameworkObject *candidate)"
+    module: app/notes_dispatcher_select
+    status: ported
+    renames:
+      param_1/r4: dispatcher
+      param_2/r5: candidate
+      DAT_0828af18: candidate_class_id_4a80
+      DAT_0828af1c: rejected_status_41a2
+      DAT_0828af20: immediate_status_41a9
+      DAT_0828af24: scheduled_status_41a4
+      FUN_08275b9c: object_cast_to_class
+      FUN_0828ae4c: optional_vtable_slot_18_result
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+      FUN_0828a978: notes_dispatcher_status_strings
+      dispatcher_plus_0xdc: target
+      dispatcher_plus_0x4e8: mode
+      dispatcher_plus_0x548: timer
+    notes: >-
+      Raw ARM establishes 144 code bytes at 0x0828ae88..0x0828af18,
+      followed by four literal words; the next real function begins at
+      0x0828af28, giving a true 160-byte extent. Five outgoing plain BLs,
+      zero predicated BLs. Two incoming plain BLs at 0x0828a63c and
+      0x0828b11c, zero predicated BLs. Checked-casts candidate to class
+      0x4a80; failure returns 0x41a2 without changing dispatcher. Nonzero
+      cast-result byte +0x71 stores the original candidate and returns
+      0x41a9 without timer or display work. Otherwise queries the previous
+      target's optional slot +0x18 and, only for result zero, maps mode zero
+      to one and every other u32 to zero. Stores the original candidate,
+      starts embedded timer +0x548 after 500, restarts it, displays status
+      strings, and returns 0x41a4. Resource text remains unidentified.
+      All five callees reuse existing ports. Shared typed host dispatcher
+      widens pointers; target offsets are compile-time checked. Host tests
+      cover rejection, distinct cast-result pointer, nonzero flag, missing
+      previous target, full-u32 mode boundaries and nonzero predicate results.
+      Full host suite passes. Stock and linked Rust ARM NULL-candidate smoke
+      both return 0x41a2 with unchanged dispatcher. match.py shows structural
+      differences: LLVM uses CLZ for the zero-to-one mapping, materializes
+      status constants and inlines timer_restart while preserving its state
+      store and arm dispatch. No exact instruction match is claimed.

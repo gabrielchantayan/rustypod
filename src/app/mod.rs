@@ -493,6 +493,7 @@ pub mod node_list;
 pub mod child_table_reconcile;
 pub mod notes_dispatcher_status;
 pub mod notes_dispatcher_status_strings;
+pub mod notes_dispatcher_select;
 pub mod notes_dispatcher_append_timestamp;
 pub mod no_content_layout_default;
 pub mod object_string_construct;
