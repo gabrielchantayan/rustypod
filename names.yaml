@@ -201962,3 +201962,49 @@ functions:
       and ARM release build pass. match.py exits 1: LLVM emits 38 rather
       than 34 instructions, adding frame setup while preserving six calls,
       opcode sequence 40/1/39, stack-passed ADD source, and result register.
+  - address: 0x0826f1a4
+    ghidra: FUN_0826f1a4
+    name: ui_element_set_bounds
+    size: 200
+    sig: "void ui_element_set_bounds(UiElement *element, const Rect *requested, u32 redraw)"
+    module: ui/set_bounds
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r5: requested
+      param_3/r6: redraw
+      param_4: unused_incoming_register
+      local_20: dirty_union
+      "element+0x48": flags
+      "element+0x80": bounds
+      "vtable+0x60": bounds_changed
+      FUN_082a23fc: rect_not_equals
+      FUN_0826c3d8: rect_union
+      FUN_0826c9a8: center_in_parent_retail_seam
+      FUN_0826ec14: ui_element_invalidate_region
+    notes: >-
+      Raw ARM verifies 200 bytes through pop at 0x0826f268, followed by the
+      independent push at 0x0826f26c. Whole-image aligned BL decoding finds
+      two unconditional inbound calls, at 0x0815874c and 0x08291c00, zero
+      predicated inbound calls. Body has three plain BL and three BLNE calls,
+      plus virtual tail dispatch through vtable+0x60. Both callers discard
+      the result, so the Rust signature is void rather than Ghidra's undefined8.
+      Equal bounds return unless flags bit 4 forces update. Nonzero redraw
+      saves the union of old and requested bounds before assignment. Bit 8
+      invokes the unported helper at 0x0826c9a8: raw code reads parent+0x80
+      and element layout fields, computes signed half-extents, and dispatches
+      offset adjustments through vtable+0x6c. Its identity is not invented;
+      this exact retail address is retained through a volatile usize seam.
+      After that helper, redraw invalidates the saved union only if current
+      bounds differ from the still-live request, including alias semantics.
+      Updates always finish through virtual slot +0x60. Existing rectangle
+      and invalidation ports are reused. Host pointer padding keeps target
+      byte offsets; no u32-pointer fixtures are required. Tests cover equality,
+      forced updates, zero/nonzero redraw, signed wrap, centering and aliasing.
+      Full host suite passes 13534 tests and ARM release build succeeds.
+      Actual-source host smoke observes equal skip, assignment and forced
+      aliased notification. Host smoke requires cfg(test) because unrelated
+      host non-test modules have six missing seam functions. match.py exits 1:
+      122 Rust instructions versus 50 original, with rectangle comparisons
+      and union inlined, volatile BLX centering, conditional real invalidation
+      call and final vtable dispatch preserved. No device execution performed.
