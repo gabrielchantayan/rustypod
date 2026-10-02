@@ -42,9 +42,6 @@ pub type RenderContextInvalidateRect = unsafe extern "C" fn(render_context: *mut
 /// r1 after its caller sets it to zero.
 pub type CoordinateOwnerRefresh = unsafe extern "C" fn(owner: *mut u8);
 
-/// ABI of `FUN_0828d5f4`, which completes and clears the owner's pending
-/// coordinate handoff before changing its selected display layer.
-pub type CoordinateOwnerFlushPending = unsafe extern "C" fn(owner: *mut u8);
 
 /// ABI of `FUN_081204a0`, which commits a selected layer's pending state.
 pub type LayerCommitPendingState = unsafe extern "C" fn(layer: *mut u8) -> u32;
@@ -77,8 +74,6 @@ const RENDER_CONTEXT_INVALIDATE_RECT_ADDRESS: usize = 0x0828_d9b4;
 #[cfg(target_os = "none")]
 const COORDINATE_OWNER_REFRESH_ADDRESS: usize = 0x0828_d110;
 #[cfg(target_os = "none")]
-const COORDINATE_OWNER_FLUSH_PENDING_ADDRESS: usize = 0x0828_d5f4;
-#[cfg(target_os = "none")]
 const LAYER_COMMIT_PENDING_STATE_ADDRESS: usize = 0x0812_04a0;
 
 #[cfg(target_os = "none")]
@@ -94,12 +89,6 @@ unsafe extern "C" fn firmware_coordinate_owner_refresh(owner: *mut u8) {
     refresh(owner);
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_coordinate_owner_flush_pending(owner: *mut u8) {
-    let flush_pending: CoordinateOwnerFlushPending =
-        core::mem::transmute(COORDINATE_OWNER_FLUSH_PENDING_ADDRESS);
-    flush_pending(owner);
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_layer_commit_pending_state(layer: *mut u8) -> u32 {
@@ -114,8 +103,6 @@ unsafe extern "C" fn missing_invalidate_rect(_render_context: *mut u8, _rect: *c
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_coordinate_owner_refresh(_owner: *mut u8) {}
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_coordinate_owner_flush_pending(_owner: *mut u8) {}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_layer_commit_pending_state(_layer: *mut u8) -> u32 {
@@ -136,14 +123,6 @@ pub static mut COORDINATE_OWNER_REFRESH: CoordinateOwnerRefresh = firmware_coord
 #[cfg(not(target_os = "none"))]
 pub static mut COORDINATE_OWNER_REFRESH: CoordinateOwnerRefresh = missing_coordinate_owner_refresh;
 
-/// The unported handoff completion at `FUN_0828d5f4`. Firmware calls its
-/// verified retail address; host tests use a recorder.
-#[cfg(target_os = "none")]
-pub static mut COORDINATE_OWNER_FLUSH_PENDING: CoordinateOwnerFlushPending =
-    firmware_coordinate_owner_flush_pending;
-#[cfg(not(target_os = "none"))]
-pub static mut COORDINATE_OWNER_FLUSH_PENDING: CoordinateOwnerFlushPending =
-    missing_coordinate_owner_flush_pending;
 
 /// The unported layer-state commit at `FUN_081204a0`. Firmware calls its
 /// verified retail address; host tests use a recorder.
@@ -209,10 +188,6 @@ unsafe fn coordinate_owner_refresh() -> CoordinateOwnerRefresh {
     ptr::read_volatile(ptr::addr_of!(COORDINATE_OWNER_REFRESH))
 }
 
-#[inline(always)]
-unsafe fn coordinate_owner_flush_pending() -> CoordinateOwnerFlushPending {
-    ptr::read_volatile(ptr::addr_of!(COORDINATE_OWNER_FLUSH_PENDING))
-}
 
 #[inline(always)]
 unsafe fn layer_commit_pending_state() -> LayerCommitPendingState {
@@ -354,6 +329,50 @@ pub unsafe extern "C" fn coordinate_owner_set_origin(owner: *mut u8, origin: *co
     }
 }
 
+/// Completes a pending coordinate handoff — `FUN_0828d5f4` @ **0x0828d5f4**.
+/// True extent: 88 bytes, ending before the independent prologue at
+/// 0x0828d64c. Raw ARM words give two incoming unconditional BL calls
+/// (0x0828ccfc, 0x0828e5d4), zero predicated BL calls; the body has one BLX.
+///
+/// A NULL context is a no-op. Otherwise add context +0x30/+0x34 to the
+/// owner's corresponding origin words with wrapping arithmetic, invoke the
+/// context's embedded interface (+4), vtable byte slot +0x28, passing the
+/// address of a local owner pointer, then clear owner +0 even if the callback
+/// rewrites that local pointer or the owner's context.
+///
+/// Deviation: host fixtures use native-width vtable/function pointers at the
+/// same byte offsets, read unaligned; firmware uses aligned 32-bit pointers.
+/// The callback identity is intentionally unresolved: this is virtual dispatch.
+///
+/// # Safety
+/// `owner` must have readable/writable words through +0x34. Its nonzero context
+/// must provide origin words and a valid embedded interface/vtable callback.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn coordinate_owner_flush_pending(owner: *mut u8) {
+    let context = owner_word(owner, 0) as usize as *mut u8;
+    if context.is_null() {
+        return;
+    }
+    let dx = owner_word(context, 0x30);
+    let dy = owner_word(context, 0x34);
+    set_owner_word(owner, 0x30, owner_word(owner, 0x30).wrapping_add(dx));
+    set_owner_word(owner, 0x34, owner_word(owner, 0x34).wrapping_add(dy));
+    let interface = context.add(4);
+    #[cfg(target_os = "none")]
+    let vtable = interface.cast::<*const u8>().read();
+    #[cfg(not(target_os = "none"))]
+    let vtable = interface.cast::<*const u8>().read_unaligned();
+    type Complete = unsafe extern "C" fn(*mut u8, *mut *mut u8);
+    #[cfg(target_os = "none")]
+    let complete = vtable.add(0x28).cast::<Complete>().read();
+    #[cfg(not(target_os = "none"))]
+    let complete = vtable.add(0x28).cast::<Complete>().read_unaligned();
+    let mut pending_owner = owner;
+    complete(interface, &mut pending_owner);
+    set_owner_word(owner, 0, 0);
+}
+
 /// coordinate_owner_select_display_layer — original: `FUN_0828cccc` @
 /// **0x0828cccc** (132 code bytes plus the 4-byte literal pool at
 /// 0x0828cd50; the next function starts at 0x0828cd54). Decoding every ARM
@@ -372,10 +391,9 @@ pub unsafe extern "C" fn coordinate_owner_set_origin(owner: *mut u8, origin: *co
 ///
 /// # Deliberate deviations
 ///
-/// `FUN_0828d5f4` and `FUN_081204a0` are absent from `names.yaml`, so their
-/// calls use volatile seams to their verified retail addresses on-device and
-/// recording models in host tests. `display_get_layer` and the recursive
-/// mutex pair are already ported and are called directly. The third ABI
+/// `FUN_081204a0` uses a volatile seam to its verified retail address on-device
+/// and a recording model in host tests. Handoff completion, `display_get_layer`,
+/// and the recursive mutex pair are direct Rust calls. The third ABI
 /// argument is forwarded by the stock caller into `r1` for
 /// `FUN_0828d110`, but raw decoding of that callee proves it is never read;
 /// the port therefore preserves its ABI but deliberately ignores it.
@@ -405,7 +423,7 @@ pub unsafe extern "C" fn coordinate_owner_select_display_layer(
 
     let mutex = owner.add(0x110).cast::<PosixMutex>();
     posix_mutex_lock(mutex);
-    coordinate_owner_flush_pending()(owner);
+    coordinate_owner_flush_pending(owner);
 
     if selection < LAYER_SELECTORS.len() as u32 {
         let layer_selector = LAYER_SELECTORS[selection as usize];
@@ -436,8 +454,6 @@ mod tests {
     static mut INVALIDATE_CALLS: u32 = 0;
     static mut REFRESHED_OWNER: *mut u8 = ptr::null_mut();
     static mut REFRESH_CALLS: u32 = 0;
-    static mut FLUSHED_OWNER: *mut u8 = ptr::null_mut();
-    static mut FLUSH_CALLS: u32 = 0;
     static mut COMMITTED_LAYER: *mut u8 = ptr::null_mut();
     static mut COMMIT_CALLS: u32 = 0;
     static mut EVENT_LOG: [u8; 3] = [0; 3];
@@ -461,11 +477,6 @@ mod tests {
         record_event(3);
     }
 
-    unsafe extern "C" fn record_flush(owner: *mut u8) {
-        FLUSHED_OWNER = owner;
-        FLUSH_CALLS += 1;
-        record_event(1);
-    }
 
     unsafe extern "C" fn record_commit(layer: *mut u8) -> u32 {
         COMMITTED_LAYER = layer;
@@ -483,7 +494,6 @@ mod tests {
             unsafe {
                 RENDER_CONTEXT_INVALIDATE_RECT = missing_invalidate_rect;
                 COORDINATE_OWNER_REFRESH = missing_coordinate_owner_refresh;
-                COORDINATE_OWNER_FLUSH_PENDING = missing_coordinate_owner_flush_pending;
                 LAYER_COMMIT_PENDING_STATE = missing_layer_commit_pending_state;
             }
         }
@@ -497,15 +507,12 @@ mod tests {
             INVALIDATE_CALLS = 0;
             REFRESHED_OWNER = ptr::null_mut();
             REFRESH_CALLS = 0;
-            FLUSHED_OWNER = ptr::null_mut();
-            FLUSH_CALLS = 0;
             COMMITTED_LAYER = ptr::null_mut();
             COMMIT_CALLS = 0;
             EVENT_LOG = [0; 3];
             EVENT_COUNT = 0;
             RENDER_CONTEXT_INVALIDATE_RECT = record_invalidation;
             COORDINATE_OWNER_REFRESH = record_refresh;
-            COORDINATE_OWNER_FLUSH_PENDING = record_flush;
             LAYER_COMMIT_PENDING_STATE = record_commit;
         }
         SeamGuard { _lock: lock }
@@ -680,15 +687,13 @@ mod tests {
 
             coordinate_owner_select_display_layer(owner, 0, 0x1234_5678);
 
-            assert_eq!(FLUSH_CALLS, 1);
-            assert_eq!(FLUSHED_OWNER, owner);
             assert_eq!(COMMIT_CALLS, 1);
             assert_eq!(COMMITTED_LAYER, layer.as_mut_ptr());
             assert_eq!(REFRESH_CALLS, 1);
             assert_eq!(REFRESHED_OWNER, owner);
             assert_eq!(owner_word(owner, 0xfc), 0x1382_20ff);
             assert_eq!(owner_word(owner, 0x100), 0);
-            assert_eq!(&EVENT_LOG[..EVENT_COUNT], &[1, 2, 3]);
+            assert_eq!(&EVENT_LOG[..EVENT_COUNT], &[2, 3]);
         }
     }
 
@@ -705,12 +710,11 @@ mod tests {
 
             coordinate_owner_select_display_layer(owner, 5, 0);
 
-            assert_eq!(FLUSH_CALLS, 1);
             assert_eq!(COMMIT_CALLS, 0);
             assert_eq!(REFRESH_CALLS, 0);
             assert_eq!(owner_word(owner, 0xfc), 0xfeed_face);
             assert_eq!(owner_word(owner, 0x100), 0xdead_beef);
-            assert_eq!(&EVENT_LOG[..EVENT_COUNT], &[1]);
+            assert_eq!(&EVENT_LOG[..EVENT_COUNT], &[]);
         }
     }
 
@@ -726,11 +730,46 @@ mod tests {
 
             coordinate_owner_select_display_layer(owner, 0, 0);
 
-            assert_eq!(FLUSH_CALLS, 0);
             assert_eq!(COMMIT_CALLS, 0);
             assert_eq!(REFRESH_CALLS, 0);
             assert_eq!(owner_word(owner, 0xfc), 0xfeed_face);
             assert_eq!(owner_word(owner, 0x100), 0xdead_beef);
+        }
+    }
+
+    #[test]
+    fn pending_handoff_wraps_origins_dispatches_before_clear_and_ignores_local_rewrite() {
+        let Some(context) = try_map_u32_slab(hints::COORDINATE_OWNER_FLUSH_PENDING, 0x1000)
+        else { return; };
+        unsafe extern "C" fn complete(interface: *mut u8, owner_slot: *mut *mut u8) {
+            let owner = owner_slot.read();
+            assert_eq!(owner_word(owner, 0), interface.sub(4) as usize as u32);
+            assert_eq!(owner_word(owner, 0x30), 0);
+            assert_eq!(owner_word(owner, 0x34), 0x8000_0000);
+            set_owner_word(interface.sub(4), 0x38, owner_word(interface.sub(4), 0x38) + 1);
+            set_owner_word(owner, 0, 0x1234);
+            owner_slot.write(ptr::null_mut());
+        }
+        let mut storage = LayerSelectionOwner([0; 0x128]);
+        let owner = storage.0.as_mut_ptr();
+        let mut vtable = [0usize; 8];
+        unsafe {
+            ptr::write_bytes(context, 0, 0x1000);
+            vtable.as_mut_ptr().cast::<u8>().add(0x28)
+                .cast::<unsafe extern "C" fn(*mut u8, *mut *mut u8)>().write_unaligned(complete);
+            context.add(4).cast::<*const usize>().write_unaligned(vtable.as_ptr());
+            set_owner_word(context, 0x30, 1);
+            set_owner_word(context, 0x34, 1);
+            set_owner_word(owner, 0, context as usize as u32);
+            set_owner_word(owner, 0x30, u32::MAX);
+            set_owner_word(owner, 0x34, 0x7fff_ffff);
+            coordinate_owner_flush_pending(owner);
+            assert_eq!(owner_word(owner, 0), 0);
+            assert_eq!(owner_word(context, 0x38), 1);
+            let snapshot = storage.0;
+            coordinate_owner_flush_pending(owner);
+            assert_eq!(storage.0, snapshot);
+            assert_eq!(owner_word(context, 0x38), 1);
         }
     }
 
