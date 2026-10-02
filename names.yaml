@@ -43595,6 +43595,37 @@ functions:
       predicated forms: 0x0819981c, 0x0819a678, and 0x0819a848. The wrapper
       passes its display and selector to configure_display_pending_nibbles
       with -1 for each nibble, retaining all four pending nibble values.
+  - address: 0x0828d6ac
+    ghidra: FUN_0828d6ac
+    name: configure_display_pending_fourth_nibble
+    size: 32
+    sig: "void configure_display_pending_fourth_nibble(Display *display, i32 fourth)"
+    module: ui/display_pending_nibbles
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: fourth
+      FUN_0828d6cc: configure_display_pending_nibbles
+    notes: >-
+      Raw osos.dec establishes eight ARM words at 0x0828d6ac..0x0828d6cc:
+      push {r2,r3,r4,lr}, set r2=-1, store incoming r1 at sp+4, set
+      r1=r3=-1, store r2 at sp, bl 0x0828d6cc, pop {r2,r3,r4,pc}.
+      The next real function begins at 0x0828d6cc. Independent raw BL
+      decoding finds zero plain and two predicated BLEQ callers at
+      0x0817f4a8 and 0x0817f584; the body contains one plain BL.
+      Calls the existing Rust configure_display_pending_nibbles with
+      selector and first three nibbles -1, updating only the fourth.
+      Values -1..15 are valid, with -1 retaining the byte; invalid values
+      reject before state mutation or display lookup. NULL selects the
+      secondary display. Host tests cover retention, boundaries, invalid
+      signed extremes, and NULL fallback. No behavioral deviations;
+      Rust supplies ARM ABI stack arguments and register preservation.
+      match.py shows the same argument setup and single BL, with LLVM's
+      frame-pointer prologue/epilogue replacing ADS register saves.
+      A throwaway ARM instruction runner executed stock and compiled Rust
+      for seven boundary inputs: identical six-argument calls, restored
+      stack, and preserved callee-saved registers. All 13449 host tests and
+      the ARM release build passed.
   - address: 0x0828d6cc
     ghidra: FUN_0828d6cc
     name: configure_display_pending_nibbles
