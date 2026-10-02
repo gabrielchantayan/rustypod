@@ -199609,3 +199609,38 @@ functions:
       42 instructions): LLVM uses BLX for the retail stub, a countdown loop,
       and a frame pointer; cursor rollback, twelve-byte strides, early stop,
       keyed lookup, mailbox post, and return values remain intact.
+  - address: 0x08293714
+    ghidra: FUN_08293714
+    name: input_feedback_level_set
+    size: 96
+    sig: "void input_feedback_level_set(void *controller, u32 level)"
+    module: app/input_feedback_level_set
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: level
+      DAT_08293770: input_feedback_shared_base
+    notes: >-
+      Raw osos.dec establishes 92 bytes of ARM code through the return at
+      0x0829376c, followed by literal 0x089d049c at 0x08293770; the separately
+      entered next function starts at 0x08293774, giving a 96-byte extent.
+      Whole-image immediate-branch decoding finds two plain inbound BLs at
+      0x08293704 and 0x082943c0 and no predicated callers. The body has two
+      plain BLs (cleanup 0x08294a94 and feedback update 0x0829329c), one BLNE
+      to audio_output_set_level at 0x081071b8, and a BEQ tail transition to
+      unported 0x08293774. It cleans up the old sequence, clears controller
+      +0xc4, updates feedback with delta 100, and stores level at 0x089d04a8.
+      Zero delegates to the verified retail transition; UINT_MAX skips the
+      audio call, while every other nonzero level calls audio with apply=0.
+      All nonzero levels select mode 4 at controller +0xc1. Existing named
+      ports are reused on target; the zero transition remains an address seam.
+      Volatile state/global access deliberately preserves effect ordering.
+      Host operations replace controller calls to accommodate the cleanup
+      port's incompatible native-pointer host representation and unmapped
+      retail globals. Host edge tests cover zero, ordinary levels, high-bit
+      values and UINT_MAX, including delegated state writes and adjacent-byte
+      preservation. Host suite and ARM release build pass; standalone source
+      smoke exercises zero, 77 and UINT_MAX. match.py prints the expected
+      structural diff: LLVM emits explicit branches instead of predication,
+      adds a frame pointer, folds the shared-global offset into its literal,
+      and retains the zero-path tail dispatch. No device execution performed.
