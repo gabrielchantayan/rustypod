@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827f8c8
+    ghidra: FUN_0827f8c8
+    name: fixed_string_object_assign_unterminated_suffix
+    size: 80
+    sig: "void fixed_string_object_assign_unterminated_suffix(const void *unused_context, StringObject *destination)"
+    status: identified
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: destination
+      auStack_3c: buffer
+      local_18: suffix_words
+      DAT_0827f910: suffix_address
+      DAT_0827f914: prefix_address
+      FUN_08030ff4: strcpy
+      FUN_080311b4: strcat
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      Blocked on faithful reproduction of an ABI-dependent stack overread.
+      Raw osos.dec establishes 72 code bytes at 0x0827f8c8..0x0827f90f
+      plus eight literal bytes; the next real function starts at 0x0827f918.
+      Aligned-word decoding verifies three outgoing plain BLs, zero
+      predicated BLs, two incoming plain BLs at 0x0827f780 and 0x0827fb1c,
+      and zero incoming predicated BLs. The body saves incoming r4/lr,
+      reserves 56 stack bytes, saves destination from r1 in r4, copies four
+      words from 0x083eadd4 to sp+40, strcpy's the prefix at 0x083ead98
+      to sp+4, then strcat's the stack suffix and assigns destination via
+      string_object_assign_cstr. The first argument is never read.
+      The prefix begins 01 00. The suffix is exactly 02 10 41 e0 41 01
+      80 e0 70 80 bd e8 70 40 2d e9, with no NUL in any of its 16 bytes.
+      Consequently strcat reads beyond sp+55 into saved incoming r4 at
+      sp+56, saved lr at sp+60, and potentially the caller's stack until
+      a NUL occurs. Output length and possible destination-buffer overflow
+      therefore depend on those runtime bytes, not just the two arguments.
+      Both callers construct a temporary string and pass it as destination;
+      neither supplies an explicit suffix length. The sibling at 0x0827fa90
+      uses a different, NUL-terminated suffix and is not a faithful substitute.
+      No Rust body or new seam is created: truncating or terminating the
+      suffix would change behavior, and ordinary Rust stack layout cannot
+      preserve the original saved-register overread. Required prerequisite
+      is an established ABI-preserving implementation strategy or evidence
+      of different runtime bytes at these literal addresses. Raw binary
+      decoding and byte inspection performed; no device execution performed.
   - address: 0x0827fa90
     ghidra: FUN_0827fa90
     name: fixed_string_object_assign
