@@ -680,6 +680,7 @@ pub mod three_word_message_post;
 pub mod triple_scaled_cursor_advance;
 pub mod triple_scaled_word_cursor_advance;
 pub mod tick_accumulator;
+pub mod shared_input_tick_advance;
 pub mod timed_transition;
 pub mod progress_layout_transition;
 pub mod activity_media_player_cleanup;
