@@ -232,6 +232,57 @@ pub unsafe extern "C" fn surface_new(
     unsafe { ctor(block, format, width, stride, height, flags, plane0, plane1, plane2, plane3) }
 }
 
+/// `render_context_create_owned_image_surface` — original:
+/// `FUN_0828cc4c` @ `0x0828cc4c` (100 bytes, ending at the next real
+/// function's push at `0x0828ccb0`). Raw-word decoding verifies two inbound
+/// plain BL sites, zero predicated sites; the body has four plain BLs.
+///
+/// If the source image at context+0x54 is absent, leave every field alone.
+/// Otherwise allocate a 0xb8-byte owned image, construct it from the source's
+/// four-word descriptor at +0x98 and format halfword at +0x14, with zero tag,
+/// context and pool. Reload the source after allocation, as retail does.
+/// Store the constructed image at +0x58; only a non-NULL image proceeds to
+/// surface creation. Store that result at +0x4c before the fatal NULL check.
+/// No allocation NULL guard is added before the constructor.
+///
+/// Deliberate deviations: none in this wrapper. It inherits the existing
+/// pooled-payload dependency dispatch and surface constructor limitations
+/// documented by its ported callees; it is not independently hook-ready.
+///
+/// # Safety
+/// `render_context` is word-aligned writable storage through +0x5b, with
+/// target-width pointer words. A nonzero source must reference a valid image
+/// through +0xa7; the allocator and downstream constructor contracts apply.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn render_context_create_owned_image_surface(
+    render_context: *mut u32,
+) {
+    if unsafe { render_context.add(0x54 / 4).read() } == 0 {
+        return;
+    }
+    let block = unsafe { operator_new(0xb8) };
+    let source = unsafe { render_context.add(0x54 / 4).read() } as usize as *const u8;
+    let image = unsafe {
+        crate::cxx::pair_header::pair_header_base_construct_with_pooled_owned_payload(
+            block.cast(),
+            source.add(0x98).cast(),
+            (source.add(0x14) as *const u16).read() as u32,
+            0, 0, 0,
+        )
+    };
+    unsafe { render_context.add(0x58 / 4).write(image as usize as u32) };
+    if !image.is_null() {
+        let surface = unsafe {
+            render_context_create_image_surface(render_context.cast(), image.cast())
+        };
+        unsafe { render_context.add(0x4c / 4).write(surface as usize as u32) };
+        if surface.is_null() {
+            unsafe { crate::heap::veneers::heap_panic() };
+        }
+    }
+}
+
 /// `render_context_create_image_surface` — original: `FUN_0828d458` @
 /// `0x0828d458` (136 bytes; 2 verified BL instructions: one plain `bl` and
 /// one predicated `blne`).
@@ -696,6 +747,19 @@ mod tests {
             "format 0 requires its fourth argument to remain zero"
         );
     }
+    #[test]
+    fn absent_source_preserves_existing_image_surface_and_context() {
+        for (image, surface) in [(0, 0), (0x1234_5678, 0x8765_4320)] {
+            let mut context = [0xa5a5_a5a5u32; 0x5c / 4];
+            context[0x54 / 4] = 0;
+            context[0x58 / 4] = image;
+            context[0x4c / 4] = surface;
+            let before = context;
+            unsafe { render_context_create_owned_image_surface(context.as_mut_ptr()) };
+            assert_eq!(context, before, "no source must not clear old output slots");
+        }
+    }
+
     #[repr(align(4))]
     struct AlignedBytes<const N: usize>([u8; N]);
 
