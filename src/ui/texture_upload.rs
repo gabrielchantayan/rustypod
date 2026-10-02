@@ -14,15 +14,14 @@
 //! requested dimensions with the texture's stored u16 dimensions. A change
 //! stores the low 16 bits and invokes `FUN_08281208` to define the complete
 //! image. Equal dimensions invoke `FUN_082812c4` to update the image at
-//! origin (0, 0). The definition helper also receives the original u32
-//! dimensions, a stack-argument detail Ghidra omitted from its four-argument
-//! prototype.
+//! origin (0, 0). The definition helper ignores the original dimensions left
+//! on the caller's stack and consumes only the four register arguments.
 //!
 //! # Deliberate deviations
 //!
-//! The three GL helpers are still unported. Device builds reach their retail
-//! bodies through volatile dispatch seams; host defaults are inert, while
-//! tests install recording models. The original leaves an unobservable helper
+//! Binding and subimage replacement still use resident dispatch seams.
+//! Full image definitions use the Rust port; tests install recording models.
+//! The original leaves an unobservable helper
 //! value in r0; every one of the six callers overwrites or discards it, so the
 //! port exposes the Ghidra-verified void interface.
 
@@ -43,18 +42,8 @@ pub struct Texture {
     pub reserved_a: [u8; 2],
 }
 
-/// `FUN_08281208` @ 0x08281208: define a complete texture image.
-///
-/// `requested_width` and `requested_height` are stack arguments in the
-/// retail call, retained before the u16 stores by `FUN_08281194`.
-pub type TextureDefineImage = unsafe extern "C" fn(
-    width: u16,
-    height: u16,
-    pixel_format: u8,
-    pixels: *const u8,
-    requested_width: u32,
-    requested_height: u32,
-);
+#[cfg(test)]
+pub type TextureDefineImage = unsafe extern "C" fn(u32, u32, u32, *const u8);
 
 /// `FUN_082812c4` @ 0x082812c4: replace a texture image region.
 pub type TextureUpdateSubimage = unsafe extern "C" fn(
@@ -68,38 +57,6 @@ pub type TextureUpdateSubimage = unsafe extern "C" fn(
 
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_texture_define_image(
-    width: u16,
-    height: u16,
-    pixel_format: u8,
-    pixels: *const u8,
-    requested_width: u32,
-    requested_height: u32,
-) {
-    let define_image: TextureDefineImage = unsafe { core::mem::transmute(0x0828_1208usize) };
-    unsafe {
-        define_image(
-            width,
-            height,
-            pixel_format,
-            pixels,
-            requested_width,
-            requested_height,
-        )
-    };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_texture_define_image(
-    _width: u16,
-    _height: u16,
-    _pixel_format: u8,
-    _pixels: *const u8,
-    _requested_width: u32,
-    _requested_height: u32,
-) {
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_texture_update_subimage(
@@ -126,12 +83,10 @@ unsafe extern "C" fn missing_texture_update_subimage(
 }
 
 
-/// Active `FUN_08281208` dispatch seam for full image definitions.
-#[cfg(target_os = "none")]
-pub static mut TEXTURE_DEFINE_IMAGE: TextureDefineImage = firmware_texture_define_image;
-/// Host's inert full-image seam default.
-#[cfg(not(target_os = "none"))]
-pub static mut TEXTURE_DEFINE_IMAGE: TextureDefineImage = missing_texture_define_image;
+/// Test-only replacement for the ported full-image definition.
+#[cfg(test)]
+pub static mut TEXTURE_DEFINE_IMAGE: TextureDefineImage =
+    crate::ui::texture_define_image::texture_define_image;
 
 /// Active `FUN_082812c4` dispatch seam for same-size image replacement.
 #[cfg(target_os = "none")]
@@ -167,17 +122,16 @@ pub unsafe extern "C" fn texture_upload_pixels(
             (*texture).width = width as u16;
             (*texture).height = height as u16;
         }
-        let define_image = unsafe {
-            core::ptr::read_volatile(core::ptr::addr_of!(TEXTURE_DEFINE_IMAGE))
-        };
+        #[cfg(test)]
+        let define_image = unsafe { core::ptr::addr_of!(TEXTURE_DEFINE_IMAGE).read() };
+        #[cfg(not(test))]
+        let define_image = crate::ui::texture_define_image::texture_define_image;
         unsafe {
             define_image(
-                width as u16,
-                height as u16,
-                (*texture).pixel_format,
+                width as u16 as u32,
+                height as u16 as u32,
+                (*texture).pixel_format as u32,
                 pixels,
-                width,
-                height,
             )
         };
     } else {
@@ -212,7 +166,7 @@ mod tests {
     static mut ACTIVATION_CALLS: u32 = 0;
     static mut DEFINE_CALLS: u32 = 0;
     static mut UPDATE_CALLS: u32 = 0;
-    static mut DEFINITION: (u16, u16, u8, *const u8, u32, u32) = (0, 0, 0, ptr::null(), 0, 0);
+    static mut DEFINITION: (u32, u32, u32, *const u8) = (0, 0, 0, ptr::null());
     static mut UPDATE: (u32, u32, u16, u16, u8, *const u8) = (0, 0, 0, 0, 0, ptr::null());
     static mut ORDER: [u8; 4] = [0; 4];
     static mut ORDER_LEN: usize = 0;
@@ -226,16 +180,14 @@ mod tests {
     }
 
     unsafe extern "C" fn record_definition(
-        width: u16,
-        height: u16,
-        pixel_format: u8,
+        width: u32,
+        height: u32,
+        pixel_format: u32,
         pixels: *const u8,
-        requested_width: u32,
-        requested_height: u32,
     ) {
         unsafe {
             DEFINE_CALLS += 1;
-            DEFINITION = (width, height, pixel_format, pixels, requested_width, requested_height);
+            DEFINITION = (width, height, pixel_format, pixels);
             ORDER[ORDER_LEN] = 2;
             ORDER_LEN += 1;
         }
@@ -265,7 +217,7 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 crate::ui::texture_activate::reset_mock_texture_binding_cache();
-                TEXTURE_DEFINE_IMAGE = missing_texture_define_image;
+                TEXTURE_DEFINE_IMAGE = crate::ui::texture_define_image::texture_define_image;
                 TEXTURE_UPDATE_SUBIMAGE = missing_texture_update_subimage;
             }
         }
@@ -277,7 +229,7 @@ mod tests {
             ACTIVATION_CALLS = 0;
             DEFINE_CALLS = 0;
             UPDATE_CALLS = 0;
-            DEFINITION = (0, 0, 0, ptr::null(), 0, 0);
+            DEFINITION = (0, 0, 0, ptr::null());
             UPDATE = (0, 0, 0, 0, 0, ptr::null());
             ORDER = [0; 4];
             ORDER_LEN = 0;
@@ -323,7 +275,7 @@ mod tests {
             assert_eq!(ACTIVATION_CALLS, 1);
             assert_eq!(DEFINE_CALLS, 1);
             assert_eq!(UPDATE_CALLS, 0);
-            assert_eq!(DEFINITION, (640, 480, 4, pixels.as_ptr(), 640, 480));
+            assert_eq!(DEFINITION, (640, 480, 4, pixels.as_ptr()));
             assert_eq!(&ORDER[..ORDER_LEN], &[1, 2]);
         }
     }
@@ -356,7 +308,7 @@ mod tests {
             texture_upload_pixels(&mut texture, pixels.as_ptr(), 0x1_0001, 0x2_0002);
             assert_eq!(DEFINE_CALLS, 2);
             assert_eq!(UPDATE_CALLS, 0);
-            assert_eq!(DEFINITION, (1, 2, 4, pixels.as_ptr(), 0x1_0001, 0x2_0002));
+            assert_eq!(DEFINITION, (1, 2, 4, pixels.as_ptr()));
             assert_eq!(&ORDER[..ORDER_LEN], &[1, 2, 2]);
         }
         assert_eq!(texture.width, 1);

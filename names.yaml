@@ -201063,7 +201063,7 @@ functions:
       FUN_082d0ce0: video_engine_set_control_value
       FUN_082d2314: video_engine_set_property
       FUN_082d223c: video_engine_set_frame_property
-      FUN_08281208: resident_texture_define_image
+      FUN_08281208: texture_define_image
     notes: >-
       Raw osos.dec A32 words establish 176 executable bytes at
       0x08281378..0x08281424 plus 24 bytes of literals through 0x0828143c;
@@ -201075,17 +201075,51 @@ functions:
       name at +0 and padding at +5. Registers (1,texture), binds its name
       to 0xde1, sets properties 0x2801/0x2800 to 0x2600 and
       0x2802/0x2803 to 0x812f, then sets (0x2300,0x2200,0x1e01),
-      reloads descriptor fields for the resident image helper and returns
-      the input pointer. Reuses existing Rust video wrappers and the
-      TEXTURE_DEFINE_IMAGE seam. Its two extra dimension arguments are
-      ignored by raw 0x08281208, which never reads incoming stack slots.
+      reloads descriptor fields for the Rust image-definition port and returns
+      the input pointer. Reuses existing Rust video wrappers and the four-word
+      texture_define_image ABI; raw 0x08281208 never reads incoming stack slots.
       Host regression covers zero/max dimensions, unsupported format,
       preserved name/padding/neighbors and pointer identity with no engine.
       Host suite passes 13496 tests; ARM release build passes.
       Executable source smoke with stand-in resident dispatchers observes
       all four property updates, image 65535x0 format 255 with NULL pixels,
       cleared flags, preserved name/padding and identical return pointer.
-      match.py exits 1 with a structural diff: LLVM synthesizes literal
-      constants, uses a frame and indirect BLX for the existing image seam,
-      and passes two unused stack words; store/call ordering is retained.
+      Prior resident-seam match.py exited 1 with a structural diff; that seam
+      has now been replaced by the Rust texture_define_image call.
+      No on-device execution claimed.
+  - address: 0x08281208
+    ghidra: FUN_08281208
+    name: texture_define_image
+    size: 188
+    sig: "void texture_define_image(u32 width, u32 height, u32 pixel_format, const u8 *pixels)"
+    module: ui/texture_define_image
+    status: ported
+    renames:
+      param_1/r0: width
+      param_2/r1: height
+      param_3/r2: pixel_format
+      param_4/r3: pixels
+      iVar1/r5: source_descriptor
+      iVar2/r2: output_descriptor
+      FUN_082d229c: video_engine_submit_frame
+    notes: >-
+      Raw aligned A32 decoding establishes 164 executable bytes through
+      0x082812a8 and 24 literal bytes through 0x082812c0; the next real
+      prologue starts at 0x082812c4, for a true size of 188 bytes.
+      Two plain inbound BLs at 0x08281200 and 0x0828141c, one plain
+      outbound BL at 0x082812a0 to the already ported frame wrapper,
+      and no predicated BLs. Formats 0..5 select source/output pairs
+      (0x1907,0x8363), (0x1908,0x8033), (0x1908,0x8034),
+      (0x1906,0x1401), (0x1907,0x1401), (0x1908,0x1401).
+      Other unsigned format words return without submission.
+      Submits (0xde1,0,source,width,height,0,source,output,pixels).
+      Never reads incoming stack arguments: removes the previous resident
+      six-argument seam and migrates both Rust callers to four arguments.
+      Host tests cover all encodings and invalid unsigned boundaries.
+      Executed temporary smoke verifies all six submissions, full-width
+      dimensions, opaque target address, invalid format and NULL session.
+      Host suite and ARM release build pass. match.py exits 1 with 23
+      Rust instructions versus 41 stock instructions: LLVM replaces the
+      branch switch with two descriptor tables, retaining the unsigned
+      range guard and nine-word call to video_engine_submit_frame.
       No on-device execution claimed.
