@@ -43595,6 +43595,39 @@ functions:
       predicated forms: 0x0819981c, 0x0819a678, and 0x0819a848. The wrapper
       passes its display and selector to configure_display_pending_nibbles
       with -1 for each nibble, retaining all four pending nibble values.
+  - address: 0x0828d66c
+    ghidra: FUN_0828d66c
+    name: configure_display_pending_second_nibble
+    size: 36
+    sig: "void configure_display_pending_second_nibble(Display *display, i32 second)"
+    module: ui/display_pending_nibbles
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: second
+      FUN_0828d6cc: configure_display_pending_nibbles
+    notes: >-
+      Raw osos.dec proves nine ARM words at 0x0828d66c..0x0828d690:
+      push {r2,r3,r4,lr}, set r3=-1, store it at sp and sp+4,
+      move incoming r1 to r3, set r1=r2=-1, bl 0x0828d6cc, and
+      pop {r2,r3,r4,pc}. The next real function starts at 0x0828d690.
+      Independent whole-image raw BL decoding finds two plain callers
+      at 0x0817f4c0 and 0x0817f5a4 and zero predicated callers; the body
+      has one plain BL. Both callers select the second slot and pass 15.
+      Reuses configure_display_pending_nibbles with selector, first,
+      third, and fourth set to -1. Second -1 retains its byte, 0..15
+      updates it, and all other signed values reject before mutation
+      or display lookup. NULL defaults to the secondary display.
+      No behavioral deviations; Rust supplies ABI stack arguments and
+      register preservation. Host suite and ARM release build passed.
+      Host boundary tests cover signed extremes, sentinel retention,
+      untouched fields, rejection, and NULL fallback. A throwaway host
+      executable exercised the actual Rust source with a firmware-equivalent
+      pending-byte writer, including pending-flag writes; no device run.
+      match.py exits 1 for the structural diff: LLVM uses a frame pointer
+      and an 8-byte argument area rather than ADS saved argument registers.
+      The six arguments and single BL are preserved; the ARM relocation
+      explicitly targets configure_display_pending_nibbles.
   - address: 0x0828d690
     ghidra: FUN_0828d690
     name: configure_display_pending_third_nibble
