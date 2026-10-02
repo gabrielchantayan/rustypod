@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08289a40
+    ghidra: FUN_08289a40
+    name: root_query_is_zero
+    size: 28
+    sig: "u32 root_query_is_zero(const RootQueryReceiver *receiver)"
+    module: app/root_query_is_zero
+    status: ported
+    renames:
+      param_1/r0: receiver
+      "receiver+0x28": root
+      FUN_081115e4: root_slot_190_query (existing port)
+      return/r0: query_is_zero
+    notes: >-
+      Raw ARM establishes 28 bytes at 0x08289a40..0x08289a5c exclusive,
+      ending in pop {r4,pc}; the following bx lr is a separate entry.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x08289718 and 0x08289c80, zero predicated BLs, and one outgoing
+      plain BL at 0x08289a48 to the already ported root_slot_190_query
+      at 0x081115e4. Ghidra misattributes the first caller to
+      FUN_082898e8; raw code places it in the 0x082896f8 entry.
+      Load receiver+0x28 root, query its +0x888 subobject's virtual
+      slot +0x190, return one for zero and zero for every nonzero u32.
+      No NULL guards or behavioral deviations. Native host pointers
+      widen; repr(C) target offset +0x28 is compile-time checked.
+      Host tests cover zero, low nonzero, high-bit, all-ones, repeated
+      queries and one callback execution per invocation. Full host
+      suite and ARM release build pass. Actual-source standalone smoke
+      observes 0->1 and 1/0x80000000/0xffffffff->0. match.py reports
+      seven instructions on both sides with a structural diff: LLVM
+      adds frame-pointer setup and replaces CMP/MOVEQ/MOVNE with
+      CLZ/LSR #5. Receiver load remains +0x28; archive R_ARM_CALL
+      relocation resolves to root_slot_190_query.
+
   - address: 0x0828a8d0
     ghidra: FUN_0828a8d0
     name: notes_view_refresh_resources
