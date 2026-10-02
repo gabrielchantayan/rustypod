@@ -199104,3 +199104,38 @@ functions:
       values. match.py exits 1 with a structural diff: LLVM adds a frame and
       uses subtraction plus movne rather than cmn plus moveq; the +0xe8
       aligned load and exact sentinel normalization are retained.
+  - address: 0x08297458
+    ghidra: FUN_08297458
+    name: buffer_pool_owner_destruct
+    size: 88
+    sig: "BufferPoolOwner *buffer_pool_owner_destruct(BufferPoolOwner *owner)"
+    module: app/buffer_pool_owner_destruct
+    status: ported
+    vars:
+      param_1: owner
+      iVar1: returned_member
+      DAT_082974ac: destructor_vtable
+      FUN_081a8204: aligned_buffer_reset
+      FUN_08094424: mutex_delete_counted
+      FUN_081e20dc: embedded_pool_destruct (verified retail-address seam)
+    notes: >-
+      Raw extent 0x08297458..0x082974b0: 84 executable bytes and the
+      0x089a7378 vtable literal at 0x082974ac; next function is bx lr.
+      Whole-image aligned BL decoding verifies two unconditional callers,
+      0x081efc80 and 0x0829744c, and zero predicated callers. Both callers
+      are NULL-guarded deleting destructors that tail-call operator delete.
+      Body has three unconditional BLs, no predicated BLs, and one indirect
+      BLX through child vtable slot +4. Installs the destructor vtable,
+      releases and then clears child +8, resets aligned buffer +0x50,
+      deletes counted mutex +0x44, destroys embedded pool +0x24, and
+      rebases the returned pool pointer by -0x24. Reuses both existing
+      Rust teardown functions. No entry exists for 0x081e20dc; its raw
+      136-byte body preserves r1-r5, takes one pool pointer, drains owned
+      allocations when pool +0x10 is nonzero, and returns that pointer.
+      It remains a firmware-address seam, not an invented concrete class
+      identity. Ghidra's four-argument/u64 callee signature is incorrect.
+      Deliberate deviations: repr(C) host pointer widening and an explicit
+      host pool-destructor operation. Target field offsets remain exact.
+      Host tests cover absent/present child, teardown order, clearing after
+      dispatch, repeated teardown without double release, and preservation
+      of unowned state.
