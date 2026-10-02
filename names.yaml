@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284a88
+    ghidra: FUN_08284a88
+    name: composite_array_members_destruct
+    size: 48
+    sig: "void *composite_array_members_destruct(void *this)"
+    module: cxx/composite_array_members_destruct
+    status: ported
+    renames:
+      param_1/r0: this_or_member_destructor_result
+      FUN_083d052c: observable_array_pre_destruct_check_destruct
+      FUN_0839c964: vtable_0898285c_destruct
+      FUN_083d0250: observable_array_attached_release_cells_destruct_083d0250
+      FUN_0839c1a0: vtable_089820c4_destruct
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw extent is 48 bytes, 0x08284a88..0x08284ab8 exclusive; the next
+      function begins with push at 0x08284ab8. Four outbound plain BLs,
+      zero predicated BLs, and final tail B to 0x08277484. Whole-image
+      decoding finds two inbound plain BLs at 0x0839c814 and 0x0839c858,
+      zero predicated inbound BLs. Reverse teardown at +0x78, +0x4c,
+      +0x34, +8 then leading StringObject; each next pointer derives from
+      the preceding return, subtracting 0x2c, 0x18, 0x2c and 8. All five
+      callees ported; no new seam. Class unknown. Ghidra folds the final
+      string destructor incorrectly. Rust models tail B as return. Host
+      tests and actual-source export smoke cover adjusted returns and
+      untouched storage. Host suite and ARM build pass. match.py exits 1:
+      15 versus 12 instructions, known identity returns fold arithmetic.
   - address: 0x08289a40
     ghidra: FUN_08289a40
     name: root_query_is_zero
