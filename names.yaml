@@ -202363,3 +202363,29 @@ functions:
       showing 58 versus 52 instructions with four direct calls, four indirect
       calls, identical slot offsets and branch behavior; differences are frame,
       registers, stack placement, and duplicated return epilogue.
+
+  - address: 0x0827b3f0
+    ghidra: FUN_0827b3f0
+    name: mov_sample_cache_entries
+    size: 8
+    module: mov/sample_cache_entries
+    sig: "uint32_t mov_sample_cache_entries(const uint32_t *cache)"
+    status: ported
+    renames:
+      param_1: cache
+      field_0x08: sample_entry_array_address
+    notes: >-
+      Raw osos.dec words e5900008 and e12fff1e prove an aligned word load
+      from cache +8 followed by bx lr. True extent is eight bytes; the
+      next independent function at 0x0827b3f8 begins with push {r4, lr}.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x081c4600 and 0x081c77a8, zero predicated inbound BLs, and zero
+      outgoing BLs. Initializer 0x0827b31c allocates and zeroes an array
+      of 16-byte sample records in this field; callers 0x081c45a0 and
+      0x081c776c populate and consume those records. Returns the address
+      verbatim, including zero, without dereferencing it or changing cache.
+      Deliberate deviation: returns a u32 firmware address rather than a
+      host-width pointer, preserving four-byte field spacing on hosts.
+      Host edge tests cover zero, high-bit and all-ones addresses, unrelated
+      fields, unchanged storage, replacement, and clearing. Standalone
+      real-source smoke observes 0x00000000, 0x08000000, and 0xffffffff.
