@@ -199344,3 +199344,44 @@ functions:
       aligned +0x84 load, high-halfword extraction, and 0/1/3/2 mapping remain.
       The call relocation at +8 resolves to shared_context; the displayed
       self-call is an archive relocation placeholder, not recursion.
+
+  - address: 0x08295fdc
+    ghidra: FUN_08295fdc
+    name: pending_list_clear
+    size: 52
+    sig: "void pending_list_clear(PendingListOwner *owner)"
+    module: app/pending_list_clear
+    status: ported
+    vars:
+      param_1/r4: owner
+      iVar1/r0: node
+      r1: next
+    renames:
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes thirteen A32 words, 52 bytes from
+      0x08295fdc through pop at 0x0829600c; the next real function starts
+      with push at 0x08296010. Independent word decoding finds zero plain
+      outbound BL and one predicated BLNE at 0x08295ff4 to already ported
+      tag-2 operator_delete at 0x082aad24. Whole-image BL decoding finds
+      two inbound plain calls, 0x08295e08 and 0x08296310, and no predicated
+      inbound calls. Advance owner+0x2ac to node+8 before deleting each
+      node, reload the head after deletion, then clear owner+0x2b0 even
+      when initially empty. No payload or node destructor is called.
+      Callers drain after a callback and during state-zero cleanup; the
+      containing class identity remains unknown. Ghidra's non-returning
+      operator_delete annotation incorrectly truncates the loop.
+      Deliberate deviations: repr(C) pointer fields widen for host fixtures
+      while preserving ARM offsets, volatile owner accesses preserve
+      store/reload ordering, and the redundant inner non-null predicate
+      is omitted. Host regression checks empty, singleton, three-node,
+      repeated-clear, tag-2 deletion order, head-before-free, tail-last,
+      node overwrite during free, and preservation of the opaque prefix.
+      All 13414 host tests pass and ARM release build succeeds. Standalone
+      smoke executes the exact port with three actual Box deallocations
+      and confirms cleared state and repeated-clear behavior. match.py
+      exits 1: LLVM emits 15 instructions versus 13, adds a frame pointer,
+      hoists the initial head load, and uses plain BL inside the guarded
+      loop instead of BLNE. Node+8 load, head advance/reload, loop, and
+      tail clear match; R_ARM_CALL at +0x20 resolves to operator_delete,
+      not the apparent self-call printed for the archive placeholder.
