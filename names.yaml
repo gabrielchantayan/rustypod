@@ -11276,6 +11276,32 @@ functions:
       then clear that word; always write the -1/0xff empty sentinel to +0.
       Deliberate deviation: the direct ARM call is the existing direct Rust
       operator_delete_tag3 port; target pointer fields stay u32 words on host.
+  - address: 0x0827c18c
+    ghidra: FUN_0827c18c
+    name: tagged_buffer_copy_construct
+    size: 68
+    sig: "u8 *tagged_buffer_copy_construct(u8 *destination, const u8 *source)"
+    module: cxx/tagged_buffer_copy_construct
+    status: ported
+    renames:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      FUN_0827c158: tagged_buffer_release
+      return/r0: destination
+    notes: >-
+      Raw osos.dec verifies 17 ARM words at 0x0827c18c..0x0827c1d0:
+      pop {r4,r5,r6,pc} ends the body; mov r1,#255 begins the next function.
+      One internal plain BL at 0x0827c1b4 calls tagged_buffer_release;
+      zero predicated internal BL. Whole-image A32 branch decoding finds
+      zero plain inbound BL and two BLNE sites, 0x083e4268 and 0x083e8e60.
+      Initialize destination byte +0 to 0xff and words +8/+c to zero,
+      release the empty destination, then copy source byte +0 and payload
+      words +8/+c, returning destination. Bytes +1..+7 are untouched.
+      Self-copy observes initialization and yields empty state and zero
+      payload. Deliberate deviation: existing Rust release port and aligned
+      volatile u32 operations replace the BL and LDRD/STRD; both payload
+      reads precede both stores to preserve overlapping-buffer behavior.
+      The range-copy port now calls this exported constructor directly.
   - address: 0x08277d1c
     ghidra: FUN_08277d1c
     name: buffered_stream_flush_pending
@@ -19242,7 +19268,7 @@ functions:
       param_2/r1/r6: last
       param_3/r2/r4: output
       return/r0: output_cursor
-      FUN_0827c18c: tagged_buffer_copy_construct_unported
+      FUN_0827c18c: tagged_buffer_copy_construct
     module: cxx/tagged_buffer_range_copy_construct
     status: ported
     notes: >-
@@ -19254,11 +19280,10 @@ functions:
       plain BL calls (0x083e435c, 0x083e4438) and no predicated incoming BL
       calls. The body has no plain BL and one predicated BLNE
       (0x083e8e60 -> 0x0827c18c). Ghidra's C and 56-byte size agree.
-      Deliberate deviation: because 0x0827c18c has no names.yaml entry, Rust
-      inlines its raw observed copy operation rather than creating an
-      unverified callee seam; it writes the empty state, clears target words
-      +8/+c, releases, then copies source byte +0 and words +8/+c. Host tests
-      cover the partial target-word copy, empty range, and NULL-output
+      Deliberate deviation: the direct call uses the ported
+      tagged_buffer_copy_construct rather than duplicating its operation.
+      Target pointer fields remain 32-bit words on hosts. Host tests cover
+      the partial target-word copy, empty range, and NULL-output
       skip-and-advance behavior.
   - address: 0x083e8edc
     ghidra: FUN_083e8edc
