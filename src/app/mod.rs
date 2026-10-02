@@ -277,6 +277,7 @@ pub mod datetime_adjust;
 pub mod notes_view_reset_resources;
 pub mod notes_view_initialize;
 pub mod demo_mode_slot_18c_dispatch;
+pub mod notes_value_capture_demo_mode;
 pub mod object_slot_d8_notify_demo_mode_then_get_dispatcher;
 pub mod fallback_keyed_object;
 pub mod opaque_object_implementation;
