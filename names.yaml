@@ -202167,3 +202167,50 @@ functions:
       loads, two setter BLs, setter tail B and final +0xc8 BX retained.
       LLVM changes register allocation, branch layout and frame-pointer setup.
       No device execution performed.
+  # --- Silver UI framework: parent-dependent shown-state synchronization ---
+  - address: 0x0826ea9c
+    ghidra: FUN_0826ea9c
+    name: view_sync_transition_mode
+    size: 192
+    sig: "void view_sync_transition_mode(ViewBase *view, u32 request)"
+    module: ui/view_transition_sync
+    vars:
+      param_1: view
+      param_2: request
+      uVar3: old_mode
+      uVar2: notification
+      UNRECOVERED_JUMPTABLE: shown_changed
+      "view+0x34": parent
+      "view+0x48": flags
+      "view+0x80": bounds
+      FUN_082a26c8: ui_element_is_shown
+      FUN_0826ddd4: view_set_transition_mode
+      FUN_0826ec14: ui_element_invalidate_region
+    status: ported
+    notes: >-
+      Raw osos.dec verifies the 192-byte extent 0x0826ea9c..0x0826eb5c:
+      push at the start, indirect tail bx r2 at 0x0826eb58, and the next
+      independent push at 0x0826eb5c. An independent aligned ARM-word scan
+      finds two plain BL callers at 0x08158508 and 0x081585b8, zero
+      predicated BL callers; the body has five plain BL instructions and
+      zero predicated BL instructions, plus a setter tail B and virtual
+      tail BX. Ghidra's apparent caller in FUN_0811e294 is not a raw BL
+      reference. Zero request does nothing in mode 0x1800; otherwise
+      invalidate bounds before setting 0x1800, and notify vtable +0xa8
+      with zero only if the old mode was 0x800. Nonzero requests only
+      act in mode 0x1800: a nonnull shown parent at +0x34 permits mode
+      0x800, bounds invalidation, then notification one. Null or unshown
+      parents cause mode 0x1000 without invalidation or notification.
+      Reuses all three existing Rust callees without introducing seams.
+      Object pointer words remain u32; host vtable entries have native
+      width, and Rust need not reproduce stock tail-call lowering.
+      Host tests cover all modes, null and all parent modes, multiple
+      nonzero requests, unrelated bits, post-setter callback flags,
+      callback mutations, and unchanged parent flags. Full host suite
+      and ARM release build pass. Actual-library standalone host smoke
+      exercises unsuppressed real invalidation with parent clipping and
+      root-owner resolution, activation, deactivation, and unshown-parent
+      fallback. match.py exits 1 with 44 Rust versus 48 original
+      instructions: five BLs, setter tail B, +0x34/+0x48 loads and final
+      +0xa8 BX are retained; register allocation, branch layout and
+      frame-pointer setup differ. No device execution performed.
