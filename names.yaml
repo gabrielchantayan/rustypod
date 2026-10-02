@@ -200779,3 +200779,33 @@ functions:
       erase address, BL to existing pending port, and final virtual BX.
       LLVM materializes 0x6182 with MOV/ORR and uses a larger frame.
       No on-device execution claimed.
+  - address: 0x08284434
+    ghidra: FUN_08284434
+    name: opaque_record_source_records_address
+    size: 8
+    sig: "u32 opaque_record_source_records_address(const OpaqueRecordSource *source)"
+    module: app/opaque_record_source_get
+    status: ported
+    renames: {param_1: source, return: records_address}
+    notes: >-
+      Raw words e5900004 e12fff1e decode as ldr r0,[r0,#4]; bx lr.
+      The next real function begins at 0x0828443c with push {r4,r5,r6,lr},
+      establishing the eight-byte extent with no literals. Independent
+      whole-image aligned A32 branch decoding finds two plain inbound BLs,
+      at 0x081c47ec and 0x081c7a04, zero predicated BLs, no inbound B,
+      and no outgoing calls. Both callers obtain the shared record source
+      through the existing opaque_record_source_get port and use the returned
+      address as the base of 80-byte records. Reads the aligned second word
+      unchanged, with no NULL guard or address validation and no callee seam.
+      Deliberate representation choice: a u32 target address instead of a
+      host-native pointer preserves the four-byte field offset and all bits.
+      Host tests cover zero, high-bit and all-ones addresses, receiver-relative
+      indexing, a minimal eight-byte readable prefix, and absence of mutation.
+      Direct host smoke returns 0x00000000, 0x08000000, 0x80000000, and
+      0xffffffff unchanged. No on-device execution claimed.
+      Required host suite and ARM release build pass. LLVM folds this body
+      with object_word_at_4; objdump's symbol table verifies both exported
+      symbols occupy the same 16-byte section. match.py cannot find the
+      folded alias heading, so the verified canonical body was compared:
+      four instructions versus two, retaining ldr r0,[r0,#4] and adding
+      frame-pointer push/mov/pop instead of bx lr. No added calls.
