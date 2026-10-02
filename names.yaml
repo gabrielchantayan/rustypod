@@ -200030,3 +200030,34 @@ functions:
       expands predicates to branches, inlines emptiness, preserves release
       order and uses the shared setup seam for the tail dispatch. No
       device execution performed.
+
+  - address: 0x0828dccc
+    ghidra: FUN_0828dccc
+    name: render_context_begin_update
+    size: 4
+    module: ui/render_context_begin_update
+    sig: "u8 *render_context_begin_update(u8 *context)"
+    status: ported
+    vars:
+      r0: context
+    notes: >-
+      Raw word 0xe12fff1e is bx lr; the next real function starts at
+      0x0828dcd0. Whole-image A32 BL decoding finds zero plain and two
+      predicated inbound calls: blne at 0x08158428 and 0x0826ea60.
+      There are no outbound calls or aligned address-word references.
+      Both callers pass the render context loaded from owner +0x3c before
+      updating and call 0x0828da34 afterward. The name describes this
+      observed ordering, not an inferred lock or destructor. The hook
+      touches no memory and preserves r0, exposed as a pointer return;
+      both observed callers ignore that return. No semantic deviations
+      or new callee seams. Host tests cover null, unaligned nonobject
+      pointers and unchanged context storage; full host suite 13445 passed.
+      ARM release build passed. Direct actual-source smoke preserves null,
+      nonobject and live pointers without changing storage. LLVM folds the
+      exported symbol into .text.context_scope_drop (nm confirms a global
+      12-byte function alias). match.py with render_context_begin_update
+      cannot find the alias because objdump labels the shared body
+      context_scope_drop; comparison using that label exits 1, showing
+      push fp/lr, mov fp/sp, pop fp/pc versus bx lr. This frame preserves
+      r0 and has no context accesses. Intentional identical-body folding;
+      the exported hook remains available. No device execution performed.
