@@ -372,22 +372,20 @@ pub unsafe extern "C" fn region_ref_is_empty(
     region_ref_unlock(elem);
     is_empty as u32
 }
-/// Calls the adjacent region-reference equality predicate @ 0x08280578.
-/// On-device this remains a direct call to the retail body until that
-/// function is ported; the host model below reproduces its lock/read/unlock
-/// sequence so this wrapper has executable host coverage.
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn region_ref_equal(lhs: *const u8, rhs: *const u8) -> u32 {
-    let equal: unsafe extern "C" fn(*const u8, *const u8) -> u32 =
-        core::mem::transmute(0x0828_0578usize);
-    equal(lhs, rhs)
-}
-
-/// Host model of `region_ref_equal`; target pointer fields remain word-indexed.
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn region_ref_equal(lhs: *const u8, rhs: *const u8) -> u32 {
+/// region_ref_equal — original: `FUN_08280578` @ 0x08280578 (64 bytes;
+/// next real function boundary: 0x082805b8).
+///
+/// Raw ARM decoding verifies two unconditional BL callers, no predicated
+/// BL callers or tail branches, and two outgoing BLs (lock and unlock).
+/// Locks only lhs, compares the region words at +0x4, and compares the
+/// payload words at +0x8 only if the regions match. Always unlocks lhs;
+/// mutex statuses are ignored and the saved comparison returns canonical 0/1.
+///
+/// Deliberate deviation: existing word-index pointer helpers widen fields
+/// on hosts while preserving the target layout. No algorithmic deviations.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn region_ref_equal(lhs: *const u8, rhs: *const u8) -> u32 {
     region_ref_lock(lhs);
     let equal = ptr_field(rhs, ELEM_REGION_INDEX) == ptr_field(lhs, ELEM_REGION_INDEX)
         && ptr_field(rhs, ELEM_PAYLOAD_INDEX) == ptr_field(lhs, ELEM_PAYLOAD_INDEX);
@@ -404,9 +402,7 @@ unsafe fn region_ref_equal(lhs: *const u8, rhs: *const u8) -> u32 {
 /// adjacent region-reference equality predicate: both reference words
 /// (`elem +0x4`, `elem +0x8`) must match to return zero.
 ///
-/// Deliberate deviation: 0x08280578 is not yet a Rust export, so device
-/// builds call its retail address directly; hosts use the equivalent
-/// lock/read/unlock model above. Both variants return canonical 0/1 values.
+/// Calls the ported equality predicate on both device and host; no deviations.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn region_ref_not_equal(lhs: *const u8, rhs: *const u8) -> u32 {
@@ -854,6 +850,59 @@ mod tests {
             std::vec![(true, 0x8200), (false, 0x8200)],
             "a nonzero flag bypasses the field reads, not synchronization"
         );
+        restore_mutex();
+    }
+
+    // ---- region_ref_equal -----------------------------------------
+
+    #[test]
+    fn equality_compares_null_references_and_payload_without_mutex_traffic() {
+        let _guard = mock_mutex();
+        let mut lhs = [0usize; 5];
+        let mut rhs = [0usize; 5];
+        unsafe {
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 1);
+            write_payload(rhs.as_mut_ptr().cast(), 0x5000usize as *mut u8);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 0);
+            write_payload(lhs.as_mut_ptr().cast(), 0x5000usize as *mut u8);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 1);
+            // Unequal regions must short-circuit before reading rhs's absent payload.
+            let rhs_region_only = [0usize, 0x4000];
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs_region_only.as_ptr().cast()), 0);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), lhs.as_ptr().cast()), 1);
+        }
+        assert_eq!(events(), std::vec![]);
+        restore_mutex();
+    }
+
+    #[test]
+    fn equality_brackets_matches_and_mismatches_with_only_the_left_mutex() {
+        let _guard = mock_mutex();
+        let mut lhs = [0usize; 5];
+        let mut rhs = [0usize; 5];
+        let mut left_region = [0usize; 3];
+        let mut right_region = [0usize; 3];
+        unsafe {
+            write_region(left_region.as_mut_ptr().cast(), core::ptr::null_mut(), 0x8400usize as *mut u8);
+            write_region(right_region.as_mut_ptr().cast(), core::ptr::null_mut(), 0x8500usize as *mut u8);
+            write_elem(lhs.as_mut_ptr().cast(), left_region.as_mut_ptr().cast());
+            write_elem(rhs.as_mut_ptr().cast(), left_region.as_mut_ptr().cast());
+            write_payload(lhs.as_mut_ptr().cast(), 0x5000usize as *mut u8);
+            write_payload(rhs.as_mut_ptr().cast(), 0x5000usize as *mut u8);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 1);
+            write_payload(rhs.as_mut_ptr().cast(), 0x5004usize as *mut u8);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 0);
+            write_elem(rhs.as_mut_ptr().cast(), right_region.as_mut_ptr().cast());
+            write_payload(rhs.as_mut_ptr().cast(), 0x5000usize as *mut u8);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), rhs.as_ptr().cast()), 0);
+            assert_eq!(region_ref_equal(lhs.as_ptr().cast(), lhs.as_ptr().cast()), 1);
+        }
+        assert_eq!(events(), std::vec![
+            (true, 0x8400), (false, 0x8400),
+            (true, 0x8400), (false, 0x8400),
+            (true, 0x8400), (false, 0x8400),
+            (true, 0x8400), (false, 0x8400),
+        ]);
         restore_mutex();
     }
 
