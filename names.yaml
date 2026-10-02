@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082988ec
+    ghidra: FUN_082988ec
+    name: collection_find_byte_tag
+    size: 68
+    sig: "u8 *collection_find_byte_tag(ByteTagCollectionOwner *owner, u32 tag)"
+    module: app/collection_find_byte_tag
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      param_2/r1/r7: tag
+      iVar3/r6: captured_count
+      iVar2/r4: index
+      iVar1/r0: element
+      owner_plus_0x54: collection
+      owner_plus_0x58: count
+      element_plus_0x3a: byte_tag
+      FUN_083d6ad4: vtable_slot_40_result_word_at_alt
+    notes: >-
+      Raw extent is 68 bytes, 0x082988ec..0x08298930 exclusive; the next
+      real function starts with push at 0x08298930. Whole-image A32 decoding
+      finds two inbound plain BLs at 0x081241b8 and 0x081241d4, no predicated
+      inbound BLs. One outbound plain BL at 0x0829890c targets the existing
+      verified port at 0x083d6ad4; no predicated outbound BLs. Capture signed
+      count at +0x58, search collection +0x54 in ascending index order, return
+      first element with byte +0x3a equal to the full-width u32 query, else
+      NULL. Host repr(C) widens the vtable pointer only. ARM match preserves
+      offsets, captured count, one accessor call, byte comparison and early
+      return; LLVM uses a prechecked positive count and equality loop bound.
   - address: 0x08299c6c
     ghidra: FUN_08299c6c
     name: selected_entries_position_status
