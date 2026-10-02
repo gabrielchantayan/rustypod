@@ -198988,3 +198988,31 @@ functions:
       ARM build-std release succeeds. match.py exits 1 with a structural diff:
       LLVM uses explicit branches and a frame, but retains signed bounds,
       count +4, vtable +0x40, one BLX, and the returned-slot dereference.
+
+  - address: 0x082980cc
+    ghidra: FUN_082980cc
+    name: object_word_at_e8_or_zero
+    size: 16
+    sig: "i32 object_word_at_e8_or_zero(const OpaqueObject *object)"
+    module: app/object_word_at_e8_or_zero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xe8": sentinel_word
+      iVar1/r0: sentinel_word
+    notes: >-
+      Raw osos.dec verifies the 16-byte extent: ldr r0,[r0,#0xe8];
+      cmn r0,#1; moveq r0,#0; bx lr at 0x082980cc..0x082980d8.
+      The independently called next function begins at 0x082980dc.
+      Complete aligned ARM BL decoding finds exactly two plain inbound
+      calls at 0x08111f18 and 0x0822f5fc, zero predicated inbound calls,
+      and zero outgoing calls. Callers consume the value or compare it
+      with zero; concrete object and field semantics remain unrecovered.
+      The aligned signed field read maps only -1 to zero, preserving every
+      other bit pattern. No deliberate behavioral deviations or callee seams.
+      Host edge tests cover sentinel, zero, positive and negative extremes,
+      adjacent-field discrimination, and absence of writes. Full host tests
+      and ARM build-std release pass. Standalone smoke confirms six boundary
+      values. match.py exits 1 with a structural diff: LLVM adds a frame and
+      uses subtraction plus movne rather than cmn plus moveq; the +0xe8
+      aligned load and exact sentinel normalization are retained.
