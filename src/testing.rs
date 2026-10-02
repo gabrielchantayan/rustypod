@@ -1265,6 +1265,8 @@ pub mod hints {
     // block carries the chain head as a raw u32 word); mappings never
     // unmap, so no other user may share this hint.
     pub const RESOURCE_CHAIN_ON_CURRENT_TASK: usize = 0x7600_0000;
+    // Dedicated to app/tagged_string_resolve's target-width provider fixture.
+    pub const TAGGED_STRING_RESOLVE: usize = 0x6df9_0000;
     // 0x7800_0000: dedicated to heap/releasable_buffer's raw-u32 data
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const RELEASABLE_BUFFER: usize = 0x7800_0000;

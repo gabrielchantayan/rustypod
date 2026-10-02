@@ -198661,3 +198661,47 @@ functions:
       LLVM uses BLX through literal 0x083c1730, preserves offsets +0x94/+0xa4,
       compares node to header and conditionally adds 0x14, omitting the original
       redundant boolean and stack copy while adding a frame and result init.
+
+  - address: 0x08299da8
+    ghidra: FUN_08299da8
+    name: tagged_string_resolve
+    size: 44
+    sig: "const u8 *tagged_string_resolve(const TaggedStringRecord *record)"
+    module: app/tagged_string_resolve
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      record_byte_0: tag
+      record_plus_4: inline_string
+      record_word_0x48: resource_id
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw firmware establishes 44 bytes at 0x08299da8..0x08299dd4,
+      where the next function begins with push {r4,lr}. Independent full
+      binary scan finds two inbound plain BL sites, 0x08299d98 and
+      0x08299de0, and zero predicated BL sites. The body contains one plain
+      BL to task_ctx_field_0x30, no predicated BL, a BEQ tail branch to
+      string_object_c_str, and a B tail branch to resource_chain_find_string.
+      Tag byte 1 selects the StringObject embedded at +4; every other tag
+      resolves the ID word at +0x48 in the current task's provider chain.
+      The inline NULL payload returns the shared empty string; missing
+      resources return NULL. Callers compare resolved UTF-8 strings.
+      Ghidra inlines both tail targets; its apparent local chain walk is
+      not additional code within this function. All three callees already
+      have ported registry identities and are reused without new seams.
+      Deliberate deviations use repr(C) fields that widen pointers on hosts
+      while preserving ARM offsets, and inherit the accessor's modeled static
+      empty string. Host suite passes 13384 tests, including inline NULL and
+      non-NULL payloads, non-inline tags 0/2/255, full-width resource IDs,
+      missing resources and empty chains. ARM release build passes.
+      Standalone runtime smoke verifies inline text, empty inline payload,
+      and an absent resource using the real Rust functions. Normal non-test
+      host library build is blocked by six unrelated missing cfg-gated
+      functions in prepare_entry_metadata, shared_payload_select_kind, and
+      calendar_schedule; the standalone smoke links a cfg(test) rlib instead.
+      match.py exits 1 with a structural diff: LLVM retains the tag test,
+      inline +4 and resource +0x48 accesses and both tail calls, adds a frame,
+      and inlines task_ctx_field_0x30's existing dispatch-slot read plus +0x30
+      context-word load. The export remains a distinct symbol.
