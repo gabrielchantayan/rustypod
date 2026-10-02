@@ -43471,6 +43471,37 @@ functions:
       FUN_0828d110 is an existing verified-address volatile seam: device
       builds call the retail address while host tests use a recorder.
 
+  - address: 0x0828c5e8
+    ghidra: FUN_0828c5e8
+    name: display_save_pending_state
+    size: 24
+    sig: "void display_save_pending_state(Display *display)"
+    module: drivers/display
+    status: ported
+    vars:
+      param_1/r0: display
+      FUN_081d8870: display_get
+      FUN_081d91f0: pending_state_stack_push
+    notes: >-
+      Raw words establish 0x0828c5e8..0x0828c600, six instructions ending
+      in b 0x081d91f0; the next function begins with push {r0-r6,lr}.
+      Two inbound plain BL calls at 0x0817ae10 and 0x0819a66c, zero
+      predicated inbound BL calls. Outbound calls are one BLEQ to
+      display_get(1), no plain BLs, and the tail B. Null selects the
+      secondary singleton; non-null preserves the supplied display.
+      Ghidra incorrectly expands the tail callee into this wrapper.
+      The unported 0x081d91f0 locks the display mutex, saves panel-specific
+      pending bytes into a 16-entry stack unless depth equals 16, increments
+      depth, and unlocks. No existing names entry was present for this callee.
+      Deviations: verified-address volatile push seam and existing crate
+      singleton getter; the getter's incomplete constructor dependency means
+      this wrapper is not hook-ready without that hook installed.
+      Host tests cover supplied internal display, null secondary selection,
+      panel-specific saved bytes, and full-stack retention with a callee model.
+      ARM build succeeds. match.py preserves the null test, conditional getter
+      call, and tail BX through the seam; LLVM replaces BLEQ with a branch
+      around the call and adds a frame pointer and seam literal.
+
   - address: 0x0828c600
     ghidra: FUN_0828c600
     name: coordinate_owner_set_origin
