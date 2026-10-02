@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod record_cache_set_flag;
+pub mod record_cache_status;
 pub mod clock_saved_selection_index;
 pub mod clock_remove_selection;
 pub mod root_query_is_zero;
