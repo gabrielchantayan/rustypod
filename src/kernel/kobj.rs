@@ -896,6 +896,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn stream_buffer_mailbox_post_reloads_global_slot_and_wakes_only_at_zero() {
+        use crate::app::stream_buffer_mailbox_post::{
+            stream_buffer_mailbox_post, STREAM_BUFFER_MAILBOX,
+        };
+        let _guard = mock_hooks();
+        unsafe {
+            let saved = STREAM_BUFFER_MAILBOX;
+            let mut first = block(0u32.wrapping_sub(2), 0x6666_0001);
+            let mut second = block(u32::MAX, 0x6666_0002);
+            STREAM_BUFFER_MAILBOX = &mut first;
+            stream_buffer_mailbox_post();
+            assert_eq!(first.state as i32, -1);
+            assert!(drain().is_empty());
+            stream_buffer_mailbox_post();
+            assert_eq!(first.state, 0);
+            assert_eq!(drain(), vec![Call::Wake(0x6666_0001)]);
+            STREAM_BUFFER_MAILBOX = &mut second;
+            stream_buffer_mailbox_post();
+            assert_eq!(second.state, 0);
+            assert_eq!(drain(), vec![Call::Wake(0x6666_0002)]);
+            stream_buffer_mailbox_post();
+            assert_eq!(second.state, 1);
+            assert_eq!(second.id, 0x6666_0002);
+            assert_eq!(STREAM_BUFFER_MAILBOX, &mut second as *mut Mailbox);
+            assert!(drain().is_empty());
+            STREAM_BUFFER_MAILBOX = saved;
+        }
+    }
+
+    #[test]
     fn mailbox_slot_post_dispatch_uses_deferred_only_for_mode_one() {
         let _kobj_guard = mock_hooks();
         let _rom_guard = task_lock::tests::OPS_LOCK.lock().unwrap();
