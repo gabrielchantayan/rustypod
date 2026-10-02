@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284348
+    ghidra: FUN_08284348
+    name: record_cache_status
+    size: 64
+    sig: "uint32_t record_cache_status(const OpaqueRecordSource *source)"
+    module: app/record_cache_status
+    status: ported
+    vars: {param_1: source, iVar1: selected_record_present, uVar2: status}
+    notes: >-
+      Raw ARM establishes extent 0x08284348..0x08284388 before the independent
+      STRB/BX flag setter. Two inbound plain BLs at 0x081a1ad8 and 0x081a1f4c,
+      zero predicated BLs; one outbound plain BL at 0x08284364 to 0x081c3894.
+      Return 1 for null provider, 2 for absent selected record, otherwise 3
+      for zero byte at source +0x18 and 4 for any nonzero byte. Selector is
+      loaded with LDRH at +0x1a; the predicate sign-extends it to i32.
+      Raw predicate reads provider +0x1b0 and tails to 0x081c8a20, which
+      normalizes list_find_by_id16 at 0x081c8a84. Selectors 0 and -1 accept
+      any nonempty list; other negative selectors cannot match unsigned IDs.
+      ARM retains the fixed-address predicate; host uses its verified
+      equivalent with native IdNode pointers. Existing OpaqueRecordSource
+      keeps target-width provider and exact field offsets. Host tests cover
+      null and empty providers, tail matches, signed selector boundaries,
+      wildcard fallback, flag extremes, precedence, and unchanged fields.
+      Full host suite passes (13487 tests); ARM release build passes.
+      Executable smoke confirms null-provider precedence. match.py reports
+      21 versus 16 instructions: same loads and status paths, BLX via literal
+      0x081c3894 instead of direct BL, additional frame and explicit branches.
   - address: 0x08284388
     ghidra: FUN_08284388
     name: record_cache_set_flag
