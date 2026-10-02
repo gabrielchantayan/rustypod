@@ -201046,3 +201046,46 @@ functions:
       Exact-read guard, signed count guard, record stores, backward
       cursor loop and ADS arithmetic semantics are retained.
       No on-device execution claimed.
+  - address: 0x08281378
+    ghidra: FUN_08281378
+    name: texture_initialize
+    size: 200
+    sig: "Texture *texture_initialize(Texture *texture, u16 width, u16 height, u8 pixel_format, const u8 *pixels)"
+    module: ui/texture_initialize
+    status: ported
+    renames:
+      param_1/r0: texture
+      param_2/r1: width
+      param_3/r2: height
+      param_4/r3: pixel_format
+      param_5/stack: pixels
+      FUN_082d1460: video_engine_dispatch_opaque_two_words
+      FUN_082d0ce0: video_engine_set_control_value
+      FUN_082d2314: video_engine_set_property
+      FUN_082d223c: video_engine_set_frame_property
+      FUN_08281208: resident_texture_define_image
+    notes: >-
+      Raw osos.dec A32 words establish 176 executable bytes at
+      0x08281378..0x08281424 plus 24 bytes of literals through 0x0828143c;
+      the next independently linked function starts at 0x08281440.
+      Complete aligned BL decoding finds two plain inbound calls at
+      0x082727b4 and 0x082727d8, no predicated inbound calls, eight plain
+      outbound calls, and no predicated outbound calls. Initializes format
+      at +4, u16 width/height at +6/+8, and zeros +10/+11 while preserving
+      name at +0 and padding at +5. Registers (1,texture), binds its name
+      to 0xde1, sets properties 0x2801/0x2800 to 0x2600 and
+      0x2802/0x2803 to 0x812f, then sets (0x2300,0x2200,0x1e01),
+      reloads descriptor fields for the resident image helper and returns
+      the input pointer. Reuses existing Rust video wrappers and the
+      TEXTURE_DEFINE_IMAGE seam. Its two extra dimension arguments are
+      ignored by raw 0x08281208, which never reads incoming stack slots.
+      Host regression covers zero/max dimensions, unsupported format,
+      preserved name/padding/neighbors and pointer identity with no engine.
+      Host suite passes 13496 tests; ARM release build passes.
+      Executable source smoke with stand-in resident dispatchers observes
+      all four property updates, image 65535x0 format 255 with NULL pixels,
+      cleared flags, preserved name/padding and identical return pointer.
+      match.py exits 1 with a structural diff: LLVM synthesizes literal
+      constants, uses a frame and indirect BLX for the existing image seam,
+      and passes two unused stack words; store/call ordering is retained.
+      No on-device execution claimed.
