@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827c094
+    ghidra: FUN_0827c094
+    name: member_base_construct
+    size: 24
+    sig: "u32 *member_base_construct(u32 *this)"
+    module: cxx/member_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_0827c0a8: member_base_vtable
+      return/r0: this
+    notes: >-
+      Raw words e59f100c e5801000 e3a01000 e5801004 e12fff1e
+      establish 20 code bytes, followed by literal 0x089a8268 at
+      0x0827c0a8. True extent is 24 bytes; next real entry 0x0827c0ac
+      begins e92d4070. Whole-image aligned A32 decoding finds two
+      incoming plain BLs at 0x0827c358 and 0x0827c4ec, no predicated
+      incoming BLs, and zero outgoing plain or predicated BLs.
+      Install the vtable, clear word one, preserve r0 and return this.
+      Both callers replace the vtable and store their saved second
+      argument at word two. Ghidra's void return is incorrect.
+      No behavioral deviations; aligned volatile u32 accesses preserve
+      target field widths and store order. Owner-member directly calls
+      this port on target and host; obsolete base seam/model removed.
+      Host tests cover poisoned fields, high bits, repeated construction,
+      exact extent, sentinels and return identity. Full host suite and
+      ARM release build pass. Standalone actual-source smoke verifies
+      base and owner-member construction together. Required match.py
+      exits 1: same literal, ordered stores and preserved r0; LLVM adds
+      frame setup and POP return instead of BX lr. No device run performed.
   - address: 0x0827c2a4
     ghidra: FUN_0827c2a4
     name: vtable_slot_1c_then_context_dispatch
@@ -63,24 +93,24 @@ functions:
       param_1/r0: this
       param_2/r1: owner
       puVar1: object
-      FUN_0827c094: unported_member_base_construct
+      FUN_0827c094: member_base_construct
       DAT_0827c500: owner_member_vtable
     notes: >-
       Raw bytes establish 28 code bytes plus the literal 0x089a8354 at
       0x0827c500; next real entry is 0x0827c504. One outgoing plain BL
       at 0x0827c4ec to 0x0827c094, zero predicated BLs. Whole-image word
       decoding finds two incoming plain BLs at 0x0827c6b4 and 0x0827c868,
-      zero predicated incoming BLs. The verified unported base stores
+      zero predicated incoming BLs. The verified ported base stores
       vtable 0x089a8268, clears word +4, and preserves r0. This constructor
       replaces the vtable, stores the undereferenced owner word at +8,
-      and returns this; Ghidra's void result is incorrect. No existing
-      names entry identifies the base; retain a typed retail-address call.
+      and returns this; Ghidra's void result is incorrect. The base now
+      calls member_base_construct directly on target and host.
       No target behavioral deviations. Host tests cover zero, high-bit,
       and maximum owner values, exact three-word extent, and return address.
       Host suite passes 13534 tests; ARM release build succeeds. Standalone
       host smoke confirms sentinel preservation and owner edge values.
       match.py exits 1: 11 Rust listing instructions versus 7 original;
-      extra frame setup and literals, BLX instead of BL, same saved-owner
+      extra frame setup and literals, formerly BLX instead of BL, same saved-owner
       and ordered stores. Existing owner-linked caller now uses this port.
       No device execution performed.
   - address: 0x0827c688
