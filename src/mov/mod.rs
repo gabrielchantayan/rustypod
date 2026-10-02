@@ -28,3 +28,4 @@ pub mod mov_parser_slot_14_is_set;
 pub mod atom_range_parse;
 pub mod atom_header_read_width;
 pub mod stream_position_report;
+pub mod sample_cache_entries;
