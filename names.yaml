@@ -199304,3 +199304,43 @@ functions:
       result, and single getter call remain. R_ARM_CALL at offset +8 resolves
       to shared_context; the displayed self-call is an archive relocation
       placeholder, not recursion.
+
+
+  # --- shared-context board resource class (sysinfo) ---
+  - address: 0x0829604c
+    ghidra: FUN_0829604c
+    name: board_version_resource_class
+    size: 56
+    sig: "u32 board_version_resource_class(void)"
+    module: sysinfo
+    status: ported
+    vars:
+      iVar2/r0: context
+      uVar1/r0: board_code
+      uVar3/r0: resource_class
+    renames:
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw A32 words establish the true 56-byte extent 0x0829604c..0x08296084,
+      with the final pop at 0x08296080 and the next real function's push at
+      0x08296084. Independent raw BL decoding finds two unconditional inbound
+      calls at 0x081042b0 and 0x081045fc, zero predicated inbound calls, and
+      one unconditional outbound call at 0x08296050 to shared_context
+      (0x08369bec), already ported in ui/object_state. Load the aligned u32
+      at context +0x84, shift right 16, and map board codes 11 to 1, 19 to 3,
+      20 to 2, and all others to 0; the low halfword is ignored. Both callers
+      pass this class to resource selection at 0x082a1df8 alongside the
+      board_version_is_11_19_or_20 predicate. Individual board-code meanings
+      remain unknown. Reuses the existing Rust getter and serialized host
+      fixture; no new seam, NULL guard, or target behavioral deviation.
+      Host regression exhausts all 65536 high halfwords with four low-bit
+      patterns, checks source preservation, and observes replacement of the
+      shared context. All 13413 host tests pass; ARM release build succeeds.
+      Standalone execution of the exact port body confirms mapped codes,
+      adjacent unmapped codes, ignored low bits, and context replacement.
+      match.py exits 1 with a structural diff: LLVM emits 19 instructions
+      versus the original 14, adds a frame pointer, reorders comparisons,
+      and uses branches instead of some predicated returns. The getter call,
+      aligned +0x84 load, high-halfword extraction, and 0/1/3/2 mapping remain.
+      The call relocation at +8 resolves to shared_context; the displayed
+      self-call is an archive relocation placeholder, not recursion.
