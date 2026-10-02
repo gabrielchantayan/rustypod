@@ -257,6 +257,67 @@ pub unsafe extern "C" fn iram_copy_end_offset() -> u32 {
     cache.read_volatile()
 }
 
+/// board_version_is_11_19_or_20 — retailOS `FUN_082964dc` at `0x082964dc`.
+///
+/// True size: 40 bytes, ending at `0x08296500` with pop {r4,pc}; the next
+/// function starts at `0x08296504`. Raw A32 decoding verifies two inbound
+/// plain BLs (`0x081042b8`, `0x08104604`), zero predicated inbound BLs,
+/// and one outbound plain BL to shared_context (`0x08369bec`).
+///
+/// Read the aligned board-version word at shared-context +0x84, shift right
+/// by 16, and return exactly 1 for codes 11, 19, or 20, otherwise 0. The
+/// low halfword is ignored. Both callers pass this predicate to the same
+/// resource-selection routine at `0x082a1df8`; the code meanings are unknown.
+///
+/// Deviations: reuse the existing Rust shared_context port and its host
+/// backing storage. No target behavioral deviations or added NULL guard.
+///
+/// # Safety
+/// The shared context must be non-NULL and contain a readable, word-aligned
+/// u32 at +0x84. Access to the shared-context slot is externally serialized.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn board_version_is_11_19_or_20() -> u32 {
+    let code = shared_context().add(0x84).cast::<u32>().read_volatile() >> 16;
+    matches!(code, 11 | 19 | 20) as u32
+}
+
+#[cfg(test)]
+mod board_version_code_tests {
+    use super::*;
+
+    struct ContextReset;
+
+    impl Drop for ContextReset {
+        fn drop(&mut self) {
+            unsafe {
+                crate::ui::object_state::host_install_shared_context(core::ptr::null_mut());
+            }
+        }
+    }
+
+    #[test]
+    fn classifies_every_high_halfword_independently_of_low_halfword() {
+        let _guard = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK
+            .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = ContextReset;
+        let mut context = [0xa5a5_a5a5u32; 0x88 / 4];
+        unsafe {
+            crate::ui::object_state::host_install_shared_context(context.as_mut_ptr().cast());
+            for high in 0..=u16::MAX as u32 {
+                for low in [0, 1, 0x8000, 0xffff] {
+                    context[0x84 / 4] = (high << 16) | low;
+                    let expected = if high == 11 || high == 19 || high == 20 { 1 } else { 0 };
+                    assert_eq!(board_version_is_11_19_or_20(), expected,
+                        "board word {:#010x}", context[0x84 / 4]);
+                    assert_eq!(context[0x84 / 4], (high << 16) | low);
+                    assert_eq!(context[0x80 / 4], 0xa5a5_a5a5);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod iram_copy_end_offset_tests {
     use super::*;
