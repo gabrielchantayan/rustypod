@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod object_string_map_find_value;
 pub mod range_context_has_handler;
 pub mod pop_queued_entry;
 pub mod resource_record_auxiliary_flag;
