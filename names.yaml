@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829b86c
+    ghidra: FUN_0829b86c
+    name: range_context_has_handler
+    size: 16
+    sig: "u32 range_context_has_handler(const u32 *context)"
+    module: app/range_context_has_handler
+    status: ported
+    renames:
+      param_1/r0: context
+      context_plus_0x30: handler_word
+      return/r0: has_handler
+    notes: >-
+      Raw words e5900030 e3500000 13a00001 e12fff1e establish the true
+      16-byte extent 0x0829b86c..0x0829b87c; the next independent body
+      begins with push {r4,r5,lr}. Loads the aligned target-width word
+      at context+0x30 and returns exactly zero for zero, one otherwise.
+      Whole-image aligned A32 decoding finds two plain incoming BLs at
+      0x08140550 and 0x08284720, zero predicated incoming BLs, and no
+      outgoing BLs. Caller 0x0814053c gates range-result collection and
+      dispatches through the same handler word; caller 0x082846bc checks
+      presence after resolving a candidate. No handler dereference or
+      null-context validation is added. Deliberate deviations: none;
+      word index 12 preserves target layout on 64-bit hosts. The existing
+      range_result_collect port now calls this helper instead of inlining
+      its check. Host tests cover every single-bit handler value, zero,
+      all ones, unrelated neighboring words, and unchanged context memory.
+      Full x86_64 host suite and ARM release build pass. Standalone
+      actual-source smoke returns 0, 1, 1, 1 for handler words zero,
+      one, 0x80000000, and 0xffffffff. match.py exits 1 with six Rust
+      instructions versus four original instructions: the load, compare,
+      and conditional normalization match; LLVM adds a frame-pointer
+      prologue and replaces bx lr with a restoring pop {fp,pc}.
+      The exported symbol remains a real function. No device execution.
   - address: 0x0829ba00
     ghidra: thunk_FUN_082773e0
     name: string_object_copy_construct_veneer
