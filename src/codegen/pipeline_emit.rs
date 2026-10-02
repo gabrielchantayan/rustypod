@@ -126,6 +126,39 @@ pub unsafe extern "C" fn cg_emit_load_word_at_offset(
     value_reg
 }
 
+/// cg_emit_load_halfword_at_offset — original: `FUN_0826f450` @ 0x0826f450.
+/// True extent: 136 bytes (34 ARM words), ending at the separate push
+/// prologue at 0x0826f4d8; no literals. Raw whole-image BL decoding finds
+/// two unconditional callers (0x0824b67c, 0x0824b6cc), zero predicated
+/// callers, and six outgoing unconditional BLs to the existing factories.
+///
+/// Creates three general registers, then appends LDI offset, ADD base +
+/// offset, and LDH through the computed address, returning the loaded-value
+/// register. Opcode 39 is the halfword load in the memory-opcode run
+/// documented in `ir`. The caller loads adjacent halfwords at offsets 0/2.
+/// Deliberate deviations: read the immutable block->proc once, rather than
+/// three times; host fields and immediates use the existing native-word IR
+/// representation. On target, both are 32 bits. No memory is loaded here:
+/// this constructs IR, preserving even zero offsets and opaque base handles.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_load_halfword_at_offset(
+    block: *mut CgBlock,
+    base: *mut CgVirtualReg,
+    offset: usize,
+) -> *mut CgVirtualReg {
+    const HALFWORD_LOAD: u32 = 39;
+    let proc = block_proc(block);
+    let offset_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let address_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let value_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, offset_reg, offset);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, address_reg, base, offset_reg);
+    cg_create_inst_load(block, HALFWORD_LOAD, value_reg, address_reg);
+    value_reg
+}
+
 /// cg_emit_store_word_at_offset — original: `FUN_08260678` @ 0x08260678
 /// (124 bytes: 31 instruction words 0x08260678-0x082606f0, no literal
 /// pool; the last word is a tail `b` to `cg_create_inst_store`, and the
@@ -680,6 +713,51 @@ mod tests {
         }
         assert!(inst.is_null(), "the block holds exactly three instructions");
         out
+    }
+
+    #[test]
+    fn halfword_load_ir_executes_offsets_wraparound_and_unsigned_values() {
+        // Execute the produced IR with 32-bit target address arithmetic;
+        // neighboring bytes distinguish LDH from byte/word or signed loads.
+        for (base_value, offset, expected) in [
+            (0x1000u32, 0u32, 0x8001u32),
+            (0x1000, 2, 0xfffe),
+            (0x1002, u32::MAX - 1, 0x8001),
+            (0xffff_ffff, 0x1001, 0x8001),
+        ] {
+            let mut f = Fixture::new();
+            let block = f.block_ptr();
+            let base = unsafe { cg_virtual_reg_create(block_proc(block), CG_REG_TYPE_GENERAL) };
+            let result = unsafe { cg_emit_load_halfword_at_offset(block, base, offset as usize) };
+            let memory = [0x01u8, 0x80, 0xfe, 0xff, 0x55, 0x66];
+            let mut values = std::collections::BTreeMap::new();
+            values.insert(base as usize, base_value);
+            unsafe {
+                let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+                while !inst.is_null() {
+                    match inst_opcode(inst) {
+                        40 => {
+                            values.insert(field(inst, CG_INST_LOAD_IMMED_DEST),
+                                          field(inst, CG_INST_LOAD_IMMED_VALUE) as u32);
+                        }
+                        1 => {
+                            let sum = values[&field(inst, CG_INST_BINARY_SOURCE0)]
+                                .wrapping_add(values[&field(inst, CG_INST_BINARY_SOURCE1)]);
+                            values.insert(field(inst, CG_INST_BINARY_DEST), sum);
+                        }
+                        39 => {
+                            let address = values[&field(inst, CG_INST_LOAD_ADDRESS)];
+                            let index = address.wrapping_sub(0x1000) as usize;
+                            let value = u16::from_le_bytes([memory[index], memory[index + 1]]);
+                            values.insert(field(inst, CG_INST_LOAD_DEST), u32::from(value));
+                        }
+                        opcode => panic!("unexpected opcode {opcode}"),
+                    }
+                    inst = field(inst, CG_INST_NEXT) as *mut u8;
+                }
+            }
+            assert_eq!(values[&(result as usize)], expected);
+        }
     }
 
     #[test]
