@@ -198626,3 +198626,38 @@ functions:
       1: LLVM adds push {fp, lr}, mov fp, sp, and pop {fp, lr}; the two
       original loads and final bx r1 are otherwise retained, including
       slot +0x18 and untouched r0.
+
+  - address: 0x0829af28
+    ghidra: FUN_0829af28
+    name: object_string_map_find_value
+    size: 64
+    sig: "uint32_t object_string_map_find_value(const uint32_t *object, const uint32_t *key)"
+    module: app/object_string_map_find_value
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: key
+      local_10: node
+      local_c: dead_iterator_copy
+    notes: >-
+      Raw osos.dec confirms 16 ARM words at 0x0829af28..0x0829af68,
+      ending with pop {r2,r3,r4,pc}; the next function starts at 0x0829af68.
+      Independently decoded inbound BL sites are 0x081347e4 and 0x08134810,
+      both plain unconditional BL, with zero predicated BL sites. The body
+      contains one plain BL to 0x083c1730 and zero predicated BL instructions.
+      That unregistered helper searches a string-keyed red-black tree and
+      writes one iterator node word; raw code confirms its three meaningful
+      arguments are result, tree, and key. Ghidra's extra wrapper arguments
+      are saved register artifacts, not inputs. The tree is at object +0x94;
+      header is the u32 pointer at object +0xa4. Return zero when node equals
+      header, otherwise node +0x14 (past the 0x10-byte header and string key).
+      No callee Rust identity was invented: target calls fixed 0x083c1730,
+      hosts install a typed lookup seam. Deliberate deviations omit the dead
+      stack copy and unused saved registers, initialize the result word,
+      and retain wrapping u32 address arithmetic on hosts. Host tests cover
+      empty and missing keys, present values, sentinel equality, and wrapping.
+      Host suite and ARM release build pass. Standalone source smoke returns
+      found=0x08002014 and missing=0. match.py exits 1 with a structural diff:
+      LLVM uses BLX through literal 0x083c1730, preserves offsets +0x94/+0xa4,
+      compares node to header and conditionally adds 0x14, omitting the original
+      redundant boolean and stack copy while adding a frame and result init.
