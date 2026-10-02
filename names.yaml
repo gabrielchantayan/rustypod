@@ -199569,3 +199569,43 @@ functions:
       (12 original instructions versus 13 Rust instructions): the bit test
       and -1 return remain, while LLVM uses conditional BX for rejection
       and a literal-address tail BX to 0x082933e0 instead of BL and pop.
+
+  - address: 0x082938f8
+    ghidra: FUN_082938f8
+    name: registered_entry_drain
+    size: 176
+    sig: "i32 registered_entry_drain(void *controller, u32 key)"
+    module: app/registered_entry_drain
+    status: ported
+    renames:
+      param_1/r4: controller
+      param_2/r8: key
+      iVar4/r5: descriptor
+      uVar5/r7: count
+      DAT_082939a4: registration_table
+    notes: >-
+      Raw firmware establishes 172 code bytes ending with pop at 0x082939a0,
+      followed by literal 0x089d04c4 at 0x082939a4; the independent next entry
+      starts at 0x082939a8. Whole-image aligned BL decoding finds one plain
+      inbound BL at 0x08293234 and one BLNE at 0x0829472c. Three outbound BLs
+      are plain, with no predicated outbound calls: 0x08107b20, the ported
+      four_slot_key_index, and the ported mailbox_slot_post. No names entry
+      identifies 0x08107b20; raw words e3a00001 e12fff1e prove it returns one
+      without reading any argument. Retain its typed target-address call rather
+      than inventing its identity. Increment controller word 12 with unsigned
+      wrapping, reset to zero when the result is at least four, and inspect
+      buffer word 3+cursor. Restore the old cursor and return zero if absent.
+      Otherwise clear the buffer pointer, visit count word 7+cursor descriptors
+      at 12-byte strides with context word 13, key, and mode ten, stopping on
+      zero. Post the keyed record's +4 mailbox-slot pointer and return one,
+      even with zero descriptors or an early stop; retain the count. Host
+      effects are injected into the same algorithm, with target word spacing
+      independent of host pointer width. Cancellation completion now calls
+      this port directly, replacing its old raw-address seam and ignoring the
+      spurious third argument inferred by Ghidra. Host suite and ARM release
+      build pass. Exact-source standalone smoke proves wrap, detachment, two
+      descriptor visits, notification, and the subsequent empty return; no
+      device execution. match.py exits one with a structural diff (43 versus
+      42 instructions): LLVM uses BLX for the retail stub, a countdown loop,
+      and a frame pointer; cursor rollback, twelve-byte strides, early stop,
+      keyed lookup, mailbox post, and return values remain intact.
