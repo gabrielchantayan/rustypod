@@ -276,6 +276,7 @@ pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
 pub mod datetime_adjust;
 pub mod notes_view_reset_resources;
+pub mod notes_view_refresh_resources;
 pub mod notes_view_initialize;
 pub mod demo_mode_slot_18c_dispatch;
 pub mod notes_value_capture_demo_mode;
