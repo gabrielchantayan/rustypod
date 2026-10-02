@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08293264
+    ghidra: FUN_08293264
+    name: usb_endpoint_packet_size
+    size: 56
+    sig: "void usb_endpoint_packet_size(u32 receiver, u8 *descriptors, u32 length, u32 packet_size)"
+    module: drivers/usb_endpoint_packet_size
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: descriptors
+      param_3/r2: length
+      param_4/r3: packet_size
+      bVar1/r0: record_length
+      ip: packet_size_high_byte
+    notes: >-
+      Raw A32 confirms the 56-byte extent 0x08293264..0x0829329c,
+      ending in bx lr before the next function's ldr r3,[pc,#116].
+      Whole-image aligned decoding finds two incoming plain BLs at
+      0x08105114 and 0x08160abc, zero predicated BLs, and no outgoing
+      calls. No new callee seams. Callers supply USB descriptor chains
+      of 0x4c and 0x17 bytes and packet sizes 0xc0, 0x40 or 0x200.
+      Ignore receiver; traverse records by their first-byte length until
+      the remaining u32 count reaches zero. Type 5 endpoint records get
+      the low 16 packet-size bits stored little-endian at offsets 4 and 5.
+      No behavioral deviations or added malformed-input validation.
+      Volatile byte accesses preserve type-read, low/high stores and
+      subsequent length-read ordering. Host tests cover mixed descriptor
+      types, unaligned buffers, 255-byte records, truncation, empty null
+      chains, untouched trailing records and sentinels. All 13427 host
+      tests and the ARM release build pass. Direct executable smoke
+      verifies a 512-byte endpoint size without changing the interface.
+      match.py reports 15 Rust versus 14 original instructions: LLVM
+      adds an early empty-chain return and frame save, shifts by 8 rather
+      than left 16 then right 24, and combines subtraction with the loop
+      test. Conditional byte stores and descriptor traversal are preserved.
   - address: 0x08294a08
     ghidra: FUN_08294a08
     name: usb_high_speed_query
