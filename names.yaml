@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082980ac
+    ghidra: FUN_082980ac
+    name: object_word_at_f0_or_zero
+    size: 16
+    sig: "i32 object_word_at_f0_or_zero(const u8 *object)"
+    module: app/object_word_at_f0_or_zero
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0xf0": sentinel_word
+      iVar1/r0: sentinel_word
+    notes: >-
+      Raw A32 words e59000f0 e3700001 03a00000 e12fff1e establish
+      the true extent 0x082980ac..0x082980bc exclusive. The next real
+      function is the independently called object_word_at_f4_or_zero.
+      Whole-image aligned branch decoding verifies two unconditional
+      inbound BLs at 0x08111fb8 and 0x0822f20c, zero predicated inbound
+      BLs, and no outgoing calls. Read the signed word at +0xf0 and
+      map only -1 to zero; preserve all other bits. Caller 0x08111a1c
+      returns the value through its dispatch path; caller 0x0822f1f4
+      selects empty/nonempty podcast highlight text. Ghidra also lists
+      overlapping function 0x0822e230, not a third physical BL. Concrete
+      object identity and field units remain unrecovered. No callee
+      seams or behavioral deviations; fixed-width aligned reads retain
+      target layout on hosts. Full x86_64 host suite, actual-source
+      mutation smoke, and ARM release build pass. match.py exits 1:
+      LLVM adds a frame and uses mvn/subs/movne instead of cmn/moveq;
+      the +0xf0 load and exact -1 normalization remain intact. The
+      exported symbol remains a real function.
   - address: 0x082980bc
     ghidra: FUN_082980bc
     name: object_word_at_f4_or_zero
