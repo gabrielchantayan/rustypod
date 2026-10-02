@@ -145,6 +145,7 @@ pub mod tdat_element_teardown;
 pub mod tdat_node_find;
 pub mod tdat_node_lookup;
 pub mod element_reference;
+pub mod element_reference_teardown;
 pub mod operation_destroy;
 pub mod element_reference_item;
 pub mod element_reference_item_count;
