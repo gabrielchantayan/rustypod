@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284044
+    ghidra: FUN_08284044
+    name: ui_element_reference_teardown
+    size: 56
+    sig: "void ui_element_reference_teardown(UiElementReference *reference)"
+    module: ui/element_reference_teardown
+    status: ported
+    vars: {param_1/r4: reference, "reference+0x0": vtable, "vtable+0xc": resolve_slot, "reference+0x4": subject}
+    notes: >-
+      Raw extent 0x08284044..0x0828407c is 56 bytes, ending with pop at
+      0x08284078 before the next independent push. Whole-image ARM-word
+      decoding verifies one plain inbound BL at 0x08179a20 and one BLNE at
+      0x0816f06c. Body has one plain BL, zero predicated BLs and one indirect
+      BLX. Dispatch reference vtable slot +0x0c; zero preserves subject.
+      On any nonzero result reload subject at +4, call stock 0x080491dc
+      with second argument zero, then clear subject after that call returns.
+      The callee recursively tears down an element hierarchy; its precise
+      class identity remains unresolved. Neither assigned address nor callee
+      had a canonical entry, so retain the raw callee as a fixed-address seam
+      rather than invent a class identity. No target deviations. Host virtual
+      slot uses a native function pointer; object fields stay u32 words.
+      Tests cover failed resolution, post-resolve subject replacement,
+      nonzero result extremes, zero subject, teardown-before-clear ordering
+      and unchanged neighboring fields. Executable smoke exercises failed
+      resolve with an invalid subject and confirms teardown is skipped.
   - address: 0x08284348
     ghidra: FUN_08284348
     name: record_cache_status
