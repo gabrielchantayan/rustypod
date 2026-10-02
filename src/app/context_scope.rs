@@ -1,7 +1,7 @@
 //! The application framework's 20-byte **context scope** — the stack-local
 //! RAII record 110 functions build on entry and tear down on exit.
 //!
-//! Six functions live here, all decoded from the raw words in
+//! Seven functions live here, all decoded from the raw words in
 //! `work/firmware/osos.dec` (load base 0x08000000) rather than from Ghidra:
 //!
 //! | address | bytes | `bl` | `b` | role |
@@ -12,6 +12,7 @@
 //! | 0x08283f3c | 52 code + 4 literal | 1 | 1 | [`context_scope_capture`] — the shared capture body |
 //! | 0x08284188 | 4 | 120 | 0 | [`context_scope_drop`] — the trivial destructor |
 //! | 0x0828418c | 36 | 37 | 0 | [`context_scope_assign`] — the assignment operator |
+//! | 0x082841b0 | 24 | 2 | 0 | [`context_scope_subject_equal`] — subject equality |
 //! ## What the record is
 //!
 //! Every one of the 110 constructor sites has the same shape: reserve a
@@ -152,6 +153,57 @@ pub(crate) unsafe fn app_root_object() -> *mut u8 {
 #[inline(always)]
 unsafe fn field(object: *const u8, offset: usize) -> u32 {
     object.add(offset).cast::<u32>().read()
+}
+
+/// Subject equality — original: `FUN_082841b0` @ `0x082841b0`.
+///
+/// True extent: 24 bytes through `bx lr` at `0x082841c4`; the next function
+/// starts with `push {r4,lr}` at `0x082841c8`. Full-image ARM-word decoding
+/// verifies two plain inbound BLs (0x0812c818, 0x081978d8), zero predicated
+/// inbound BLs, and zero outbound BLs.
+///
+/// Load each scope's subject word at +0x04 and return exactly 0 or 1 for
+/// equality. Descriptor, captured context, owner id, and flag are ignored;
+/// subject values are compared without dereferencing them.
+/// Deliberate deviations: none; word fields retain their four-byte stride.
+///
+/// # Safety
+/// Both pointers must be word aligned and readable through byte +0x07.
+/// Neither pointer may be NULL; the subject words themselves may be zero.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_subject_equal(left: *const u8, right: *const u8) -> bool {
+    field(left, WORD_SUBJECT * 4) == field(right, WORD_SUBJECT * 4)
+}
+
+#[cfg(test)]
+mod subject_equality_tests {
+    use super::context_scope_subject_equal;
+
+    #[test]
+    fn compares_subject_bits_only_without_dereferencing_them() {
+        let values = [0, 1, 0x8000_0000, u32::MAX];
+        for left_subject in values {
+            for right_subject in values {
+                let left = [0x089a_6600u32, left_subject, 0, 1, 0];
+                let right = [0xffff_ffffu32, right_subject, 7, 8, 0xff];
+                assert_eq!(
+                    unsafe { context_scope_subject_equal(left.as_ptr().cast(), right.as_ptr().cast()) },
+                    left_subject == right_subject,
+                );
+                assert_eq!(left, [0x089a_6600, left_subject, 0, 1, 0]);
+                assert_eq!(right, [0xffff_ffff, right_subject, 7, 8, 0xff]);
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_aliasing_and_needs_no_fields_after_subject() {
+        let scope = [0u32, u32::MAX];
+        assert!(unsafe { context_scope_subject_equal(scope.as_ptr().cast(), scope.as_ptr().cast()) });
+        let other = [1u32, u32::MAX];
+        assert!(unsafe { context_scope_subject_equal(scope.as_ptr().cast(), other.as_ptr().cast()) });
+    }
 }
 /// service_context_get — original: `FUN_080c6348` @ 0x080c6348 (**32 bytes**,
 /// exactly eight ARM instructions through `pop {r4, pc}`; the next function
