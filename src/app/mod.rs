@@ -755,3 +755,4 @@ pub mod indexed_string_c_str;
 pub mod buffer_pool_owner_destruct;
 pub mod buffer_pool_owner_construct;
 pub mod wait_until_idle;
+pub mod input_record_pool;
