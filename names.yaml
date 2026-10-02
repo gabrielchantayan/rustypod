@@ -124760,14 +124760,14 @@ functions:
       0x08213534, 0x082630c8, and 0x08264048; there are zero predicated
       forms. The separate unconditional tail branch at 0x08277720 is not a
       call site. The routine wraps the dispatch-depth decrement. Only on zero
-      does it repeatedly call the unported real entry 0x0829cfc8 with
-      state+4, then call unported real entries 0x080aa3a8 and 0x080b28bc for
+      does it repeatedly call the Rust pop_queued_entry port with
+      state+4, then call the primary Rust port and raw 0x080b28bc for
       each returned entry; it then walks state+0 callback nodes, invoking each
       nonzero +0x0c callback with (context+0x90, 0). It conditionally releases
       the already ported counted mutex after either path. The helper names only
       describe their observed calling roles; their object-level identities are
-      not inferred. Target builds invoke the three verified raw addresses;
-      host tests use a replaceable seam because target-width callback words
+      not inferred. Target builds use Rust pop and primary callback ports;
+      host tests retain replaceable seams because target-width callback words
       cannot contain host function pointers. Tests cover multi-entry drain
       ordering, zero callback suppression, mode-0 argument delivery, and the
       zero-depth underflow that suppresses drain and callback traversal.
@@ -198238,3 +198238,31 @@ functions:
       match.py reports 13 Rust versus 9 original instructions: LLVM adds
       a frame and early conditional return, preserving conditional second
       loads and exact boolean results. Exit 1 denotes this structural diff.
+  - address: 0x0829cfc8
+    ghidra: FUN_0829cfc8
+    name: pop_queued_entry
+    size: 48
+    sig: "u8 *pop_queued_entry(u8 *queue)"
+    module: app/pop_queued_entry
+    status: ported
+    renames:
+      param_1/r0: queue
+      r5: queue
+      r4: popped_entry
+      iVar1: active_count
+      iVar2: popped_entry
+    notes: >-
+      Raw A32 words verify extent 0x0829cfc8..0x0829cff8, ending in
+      pop {r4,r5,pc} before the active_slot_count function. Independent
+      whole-image decoding finds two inbound plain BL calls at 0x080d213c
+      and 0x080d2168, zero predicated BL calls, and one outgoing plain BL
+      at 0x0829cfd4 to the existing active_slot_count port at 0x0829cff8.
+      Clears only the last contiguous active slot's byte at +16, returning
+      its address with 20-byte stride; empty prefix returns NULL unchanged.
+      Host tests cover every prefix length, gaps, payload preservation and
+      reverse draining. Full host suite passes 13364 tests; ARM release
+      build and standalone runtime smoke pass. match.py exits 1 with 14
+      Rust instructions versus 12 original: an LLVM frame and early branch
+      replace predication, preserving scaled address arithmetic and byte
+      clearing. ARM relocation proves the BL targets active_slot_count.
+      Opaque byte layout preserves target stride on hosts; no semantic deviation.
