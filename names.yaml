@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08280040
+    ghidra: FUN_08280040
+    name: link_record_construct
+    size: 184
+    sig: "LinkRecord *link_record_construct(LinkRecord *this, u32 start_index, u32 end_index, u32 enabled, u32 kind, u32 alternate, u32 secondary_flags, const StringObject *destination, const StringObject *anchor)"
+    module: app/link_record_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: start_index
+      param_3/r2: end_index
+      param_4/r3: enabled
+      param_5/stack_0: kind
+      param_6/stack_4: alternate
+      param_7/stack_8: secondary_flags
+      param_8/stack_c: destination
+      param_9/stack_10: anchor
+      FUN_08277440: string_default_construct
+      FUN_082a50b0: string_object_c_str
+      FUN_08276474: string_object_assign_payload
+    notes: >-
+      Raw osos.dec establishes 184 code bytes at 0x08280040..0x082800f8
+      exclusive, with the next real function's push at 0x082800f8. Whole-image
+      aligned ARM BL decoding finds two plain inbound calls at 0x08118aac and
+      0x08118d24, zero predicated inbound calls; the body has six plain BLs
+      and zero predicated BLs. Stores the index pair, constructs StringObjects
+      at +8/+0x10, packs flags at +0x18, writes secondary flags at +0x19,
+      preserves bytes +0x1a/+0x1b and clears words +0x1c/+0x20. Result bit 0
+      gates independent non-NULL source copies, destination before anchor.
+      Names follow the caller's link/scheme/anchor processing; auxiliary words
+      remain opaque. Directly reuses all three canonical Rust callees and
+      their existing allocation boundary; no new seam. repr(C) pointer fields
+      widen on hosts. Host suite passes 13506 tests; throwaway runtime smoke
+      observes indices 12/34, flags 85/09/a5/a5, empty strings and zero auxiliary
+      words. ARM release build passes. match.py exits 1 with 42 versus 46
+      instructions: six calls and source guards retained, redundant packed
+      flag operations folded, frame and independent stores reordered.
   - address: 0x08284034
     ghidra: FUN_08284034
     name: context_scope_mark_subject
