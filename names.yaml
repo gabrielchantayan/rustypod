@@ -48943,10 +48943,10 @@ functions:
       config word. Callees: draw_state_construct, string_default_construct
       x2, pair_header_base_construct, observable_array_construct and
       timer_schedule_shim are already ported and called directly; the
-      grand-base ctor 0x0826f26c and the resolver 0x08290f6c ride the
-      new STRING_VIEW_OPS seam (firmware transmute on target, panic on
-      host, event_list.rs pattern); the fully decoded 12-byte
-      three-word clear 0x081e170c rides the same seam with a
+      grand-base ctor 0x0826f26c rides the STRING_VIEW_OPS firmware seam;
+      resolver adapter 0x08290f6c is now ported and is the default
+      resolve_resources implementation, with lookup seam at 0x08290d7c;
+      the fully decoded 12-byte three-word clear 0x081e170c rides the seam with a
       behaviour-identical default rather than a stub. Deviations: the
       port keeps `view` in hand instead of the original's r0 byte
       arithmetic (sub r0,r0,#0x10c / #0x124 / sub r4,r0,#0x1e0), which
@@ -199882,3 +199882,36 @@ functions:
       nine original instructions versus eleven Rust instructions; all eight
       byte accesses match, with only the added frame-pointer prologue and
       pop return replacing bx lr. No device execution performed.
+
+  - address: 0x08290f6c
+    ghidra: FUN_08290f6c
+    name: string_view_resolve_resources
+    size: 80
+    sig: "void string_view_resolve_resources(StringView *view, const StringViewSpec *spec, uint32_t ignored_flags)"
+    module: ui/string_view
+    status: ported
+    renames:
+      param_1: view
+      param_2: spec
+      param_3: ignored_flags
+      iVar1: first
+      iVar2: second
+    notes: >-
+      Raw osos.dec establishes 80 bytes ending at 0x08290fbc, where the
+      next function begins. One outgoing plain BL to 0x08290d7c; incoming
+      one plain BL at 0x08291c98 and one BLNE at 0x08291634.
+      Resolve string/style ID spec+0x58 and typeface ID spec+0x5c with a
+      null provider. View+0x48 bit 27 selects (signed spec+0x60,
+      signed spec+0x61); otherwise selects (0, signed spec+0x60).
+      Forward spec+0x64 unchanged. The callee consumes seven arguments;
+      Ghidra's additional arguments are the saved r0/r1/r2 words.
+      The third input is ignored. Deliberate deviation: typed replaceable
+      resource-lookup seam at 0x08290d7c, firmware dispatch on target and
+      explicit unavailable dependency on host. Existing constructor
+      dispatch now defaults to this port. Host edge tests exercise both
+      flag branches and signed-byte boundaries. No device execution.
+      Host suite and ARM release build passed. A throwaway smoke harness
+      exercised both branches, signed bytes, IDs and all option bits.
+      match.py printed a structural diff (exit 1): LLVM narrows the flag
+      test to byte +0x4b bit 3, preserves signed spec loads and seven
+      arguments, and uses BLX through the seam instead of the fixed BL.
