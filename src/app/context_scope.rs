@@ -1,7 +1,7 @@
 //! The application framework's 20-byte **context scope** — the stack-local
 //! RAII record 110 functions build on entry and tear down on exit.
 //!
-//! Seven functions live here, all decoded from the raw words in
+//! Eight functions live here, all decoded from the raw words in
 //! `work/firmware/osos.dec` (load base 0x08000000) rather than from Ghidra:
 //!
 //! | address | bytes | `bl` | `b` | role |
@@ -13,6 +13,7 @@
 //! | 0x08284188 | 4 | 120 | 0 | [`context_scope_drop`] — the trivial destructor |
 //! | 0x0828418c | 36 | 37 | 0 | [`context_scope_assign`] — the assignment operator |
 //! | 0x082841b0 | 24 | 2 | 0 | [`context_scope_subject_equal`] — subject equality |
+//! | 0x08284034 | 16 | 2 | 0 | [`context_scope_mark_subject`] — set subject byte +0x618 |
 //! ## What the record is
 //!
 //! Every one of the 110 constructor sites has the same shape: reserve a
@@ -100,6 +101,59 @@ pub const CONTEXT_SCOPE_SIZE: usize = 20;
 
 /// Word index of the optional subject the scope holds (+0x04).
 const WORD_SUBJECT: usize = 1;
+
+/// Set the scope subject's byte at +0x618 to one.
+///
+/// Original: `FUN_08284034` at **0x08284034**, **16 bytes**, ending at
+/// 0x08284044's independent push. Raw words: e5900004 e3a01001 e5c01618
+/// e12fff1e. Whole-image aligned ARM decoding finds two plain inbound BLs
+/// (0x08219998, 0x0821d308), zero predicated BLs, and no outgoing calls.
+/// Loads the target-width subject pointer from scope word 1 and writes one
+/// byte, without checking NULL or inspecting the prior flag.
+/// Deliberate deviations: none; the wider meaning of the byte is unidentified.
+///
+/// # Safety
+/// `scope` must be word-aligned and readable through word 1; its u32 subject
+/// address must identify writable memory through byte +0x618.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn context_scope_mark_subject(scope: *mut u8) {
+    let subject = unsafe { scope.cast::<u32>().add(WORD_SUBJECT).read() } as usize as *mut u8;
+    unsafe { subject.add(0x618).write(1) };
+}
+
+#[cfg(test)]
+mod mark_subject_tests {
+    use super::context_scope_mark_subject;
+
+    #[test]
+    fn overwrites_only_the_selected_subject_byte_and_preserves_scope() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::CONTEXT_SCOPE_MARK_SUBJECT, 0x1000,
+        ) else {
+            assert!(crate::testing::note_missing_u32_fixture("context_scope_mark_subject"));
+            return;
+        };
+        unsafe {
+            for subject_offset in [0usize, 0x100] {
+                for previous in [0u8, 1, 0x80, 0xff] {
+                    slab.write_bytes(0xa5, 0x1000);
+                    slab.add(subject_offset + 0x618).write(previous);
+                    let mut scope = [0xdeadbeef, slab.add(subject_offset) as usize as u32,
+                        0x12345678, 0x87654321, 0xffffffff];
+                    let original_scope = scope;
+                    context_scope_mark_subject(scope.as_mut_ptr().cast());
+                    assert_eq!(scope, original_scope);
+                    for offset in 0..0x1000 {
+                        assert_eq!(slab.add(offset).read(),
+                            if offset == subject_offset + 0x618 { 1 } else { 0xa5 },
+                            "unexpected write at {offset:#x}");
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Word index of the captured application context (+0x08).
 const WORD_CONTEXT: usize = 2;
