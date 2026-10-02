@@ -2021,6 +2021,30 @@ pub unsafe extern "C" fn string_object_copy_construct(
     this
 }
 
+/// string_object_copy_construct_veneer — original:
+/// `thunk_FUN_082773e0` @ 0x0829ba00 (4 bytes).
+///
+/// Raw word 0xeaff6e76 is `b 0x082773e0`: forwards both object pointers
+/// and returns the copy constructor's result without modifying either argument.
+/// The next body at 0x0829ba04 is `ldrb r0,[r0,#4]; bx lr`.
+/// Whole-image A32 decoding verifies two inbound plain BLs (0x081b2404,
+/// 0x0829d754), zero predicated BLs, and no BLs inside this veneer.
+///
+/// Deliberate deviations: calls the existing Rust constructor, whose modeled
+/// vtable and host-width `repr(C)` fields replace the firmware representation.
+/// A dedicated text section keeps this hook entry distinct from other veneers.
+/// Codegen review: LLVM adds a frame-pointer push/setup/pop before the tail
+/// branch; its R_ARM_JUMP24 relocation resolves to the existing constructor.
+#[cfg_attr(target_os = "none", link_section = ".text.string_object_copy_construct_veneer")]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_copy_construct_veneer(
+    this: *mut StringObject,
+    source: *const StringObject,
+) -> *mut StringObject {
+    string_object_copy_construct(this, source)
+}
+
 /// Caller tag the original passes to `free_wrapper` (`mov r1, #0x34` @
 /// 0x08275d88). Telemetry only (see `BlockHeader::link_or_tag`).
 pub const TAG_STRING_OBJECT_PAYLOAD: usize = 0x34;
@@ -7141,6 +7165,45 @@ pub(crate) mod tests {
             unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() }
                 && unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() },
             "self-construction dispatches nothing at all"
+        );
+    }
+
+    #[test]
+    fn copy_construct_veneer_self_preserves_even_a_null_payload() {
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        assert_eq!(unsafe { string_object_copy_construct_veneer(this, this) }, this);
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(object.payload.is_null());
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty() });
+        assert!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_CLEAR_CALLS)).is_empty() });
+    }
+
+    #[test]
+    fn copy_construct_veneer_shared_payload_is_duplicated_not_treated_as_self() {
+        let payload = *b"shared\0";
+        let mut destination = [0xa5u8; 16];
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: payload.as_ptr() as *mut u8,
+        };
+        let mut object = StringObject {
+            vtable: core::ptr::null(),
+            payload: source.payload,
+        };
+        let this = core::ptr::addr_of_mut!(object);
+        let _bench = assign_cstr_bench(destination.as_mut_ptr());
+        assert_eq!(unsafe { string_object_copy_construct_veneer(this, &source) }, this);
+        assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert_eq!(&destination[..payload.len()], &payload);
+        assert_eq!(source.payload, payload.as_ptr() as *mut u8);
+        assert_eq!(
+            unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).clone() },
+            std::vec![(this as usize, payload.len(), 0u32)]
         );
     }
 

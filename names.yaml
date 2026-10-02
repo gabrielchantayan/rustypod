@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829ba00
+    ghidra: thunk_FUN_082773e0
+    name: string_object_copy_construct_veneer
+    size: 4
+    sig: "StringObject *string_object_copy_construct_veneer(StringObject *this, const StringObject *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw osos.dec word 0xeaff6e76 at 0x0829ba00 decodes to the unconditional
+      tail branch b 0x082773e0. True extent is four bytes; the next body at
+      0x0829ba04 is ldrb r0,[r0,#4]; bx lr. Whole-image A32 word decoding
+      finds two plain inbound BLs at 0x081b2404 and 0x0829d754, no predicated
+      inbound BLs, and no internal BLs. Forwards both pointers and the return
+      value to the existing ported string_object_copy_construct; no new seam.
+      Host tests exercise self-construction with a null payload and distinct
+      objects sharing a payload. Deliberate deviations inherit the callee's
+      modeled static vtable and host-width repr(C) layout. Dedicated target
+      text section preserves the exported veneer for its own hook address.
   - address: 0x0829bda8
     ghidra: FUN_0829bda8
     name: day_and_seconds_ranges_overlap
