@@ -55,7 +55,7 @@ pub unsafe extern "C" fn object_word_payload_resolve(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::{
@@ -63,7 +63,7 @@ mod tests {
     };
     use parking_lot::Mutex;
 
-    static PROCESSOR_TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static PROCESSOR_TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: u32 = 0;
     static mut SEEN_OBJECT: *mut u32 = core::ptr::null_mut();
     static mut SEEN_WORDS: [u32; 4] = [0; 4];

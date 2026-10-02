@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829b654
+    ghidra: FUN_0829b654
+    name: object_payload_time_text
+    size: 48
+    sig: "const u8 *object_payload_time_text(u32 *object)"
+    module: util/object_payload_time_text
+    status: ported
+    renames:
+      param_1/r0: object
+      auStack_14: resolved
+      auStack_24: copied
+      auStack_18: seconds
+      return/r0: text
+    notes: >-
+      Raw ARM establishes 48 bytes through the return at 0x0829b680,
+      before the next independent function at 0x0829b684. Three plain
+      outgoing BLs, zero predicated BLs; two plain inbound BLs at
+      0x0812714c and 0x08127e34, zero predicated inbound BLs.
+      Resolve four payload words, copy them, and format the final word
+      through 0x081404b4, returning its text pointer unchanged. Reuse
+      the ported resolver and paired copy. Deliberate deviation: keep
+      the unported time formatter as a verified firmware-address seam.
+      Ghidra's void return is wrong; raw code preserves formatter r0.
+      Host boundary tests use the actual resolver with absent selection.
+      Host suite and ARM release build pass. match.py exits 1 with
+      17 instructions versus 12: two direct calls and a formatter BLX
+      preserve composition and last-word selection; LLVM changes stack
+      placement, adds frame setup and reads the formatter dispatch.
+      No device execution performed.
+      Actual-source host smoke exercises the exported entry with final
+      word 0xffffffff and verifies its formatter's live text pointer.
   - address: 0x0829b804
     ghidra: FUN_0829b804
     name: object_word_payload_process
