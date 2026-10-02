@@ -198361,3 +198361,36 @@ functions:
       conversion tests and executable smoke pass. ARM build passes;
       match.py shows child-count inlining, byte-load funnels inherited from
       that port, a larger frame, and a tail branch through convert_integer.
+
+  # --- Exact two-word equality ---
+  - address: 0x0829bea4
+    ghidra: FUN_0829bea4
+    name: two_word_equal
+    size: 36
+    sig: "u32 two_word_equal(const u32 *left, const u32 *right)"
+    module: cxx/two_word_equal
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      iVar1/r2: left_first_word
+      iVar2/r3: right_first_word
+      return/r0: equal
+    notes: >-
+      Raw osos.dec verifies nine ARM instructions at 0x0829bea4..0x0829bec8:
+      two first-word loads, compare, two conditional second-word loads at +4,
+      conditional compare, normalized zero/one result, and bx lr. The next
+      real function starts with ldrb r2,[r0,#0xec] at 0x0829bec8.
+      Independent aligned ARM B/BL decoding finds two inbound plain BL sites
+      at 0x0827506c and 0x08275560, zero predicated BL sites, zero tail
+      branches, zero aligned data references, and zero outbound calls.
+      Callers compare two-word font handles with a zero pair constructed by
+      two_word_clear at 0x081598a4. Compare exact bits without masking tags
+      or dereferencing embedded addresses; unequal first words skip both
+      second-word reads. No deliberate semantic deviations or new seams.
+      Host tests cover zero pairs, tags, high bits, aliasing, symmetry, and
+      unequal first words with no second-word storage. Full host suite and
+      ARM release build pass; executable smoke checks 1296 pair comparisons.
+      match.py reports 14 Rust instructions versus nine stock instructions:
+      frame push/pop, bne instead of predication, and sub/clz/lsr for equality.
+      The conditional second-word path and normalized result are preserved.
