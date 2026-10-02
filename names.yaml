@@ -200663,3 +200663,29 @@ functions:
       ARM release build passes. match.py shows 47 Rust instructions
       versus 36 stock: inlined getters/wrappers, larger frame and BX
       tail address materialization preserve the decision structure.
+  - address: 0x08285160
+    ghidra: FUN_08285160
+    name: clock_saved_selection_index
+    size: 8
+    sig: "i32 clock_saved_selection_index(const u32 *clock)"
+    module: app/clock_saved_selection_index
+    status: ported
+    renames: {param_1: clock, return: saved_selection_index}
+    notes: >-
+      Raw osos.dec words e5900040 e12fff1e decode as ldr r0,[r0,#0x40]
+      and bx lr. The next real entry at 0x08285168 starts with e92d4010
+      (push {r4,lr}), establishing the eight-byte extent without literals.
+      Whole-image aligned A32 branch decoding finds two inbound plain BLs,
+      at 0x08274c88 and 0x08274d98, no predicated BLs, no direct B callers,
+      and no outgoing calls. Returns the saved clock-selection index at
+      word 16 unchanged; callers pass it to the selection operation at
+      0x08284b40. Reset at 0x08285168 stores -1 in this field. No callee
+      seam, NULL guard, or range check is introduced. Aligned u32 word
+      indexing preserves the +0x40 target offset on 64-bit hosts. Host
+      tests cover the reset sentinel, zero, signed extremes, neighboring
+      fields, shifted receiver bases, and absence of mutation.
+      Required host suite and ARM release build pass. Direct host smoke
+      preserves -1, zero, 23, and both signed extremes. match.py reports
+      the same ldr r0,[r0,#64], with an LLVM frame-pointer push/mov/pop
+      instead of stock bx lr (four versus two instructions); no extra
+      calls or semantic deviation. No on-device execution claimed.
