@@ -200689,3 +200689,40 @@ functions:
       the same ldr r0,[r0,#64], with an LLVM frame-pointer push/mov/pop
       instead of stock bx lr (four versus two instructions); no extra
       calls or semantic deviation. No on-device execution claimed.
+  - address: 0x08284b40
+    ghidra: FUN_08284b40
+    name: clock_remove_selection
+    size: 76
+    sig: "void clock_remove_selection(u32 *clock, i32 index)"
+    module: app/clock_remove_selection
+    status: ported
+    renames: {param_1: clock, param_2: index, piVar1: count}
+    notes: >-
+      Raw words establish 68 instruction bytes through BX r3 at 0x08284b80,
+      followed by literals 0x00006182 and 0x564d6178. The next real function
+      starts at 0x08284b8c with SUB ip,r1,#0x4000: true extent 76 bytes.
+      Full-image aligned A32 decoding finds two inbound plain BL sites at
+      0x08274c98 and 0x08274da4, zero predicated BL sites. The body has two
+      plain BLs at 0x08284b5c (0x083cff30) and 0x08284b64 (0x08284c2c),
+      zero predicated BLs, and a virtual tail BX through slot +0x58.
+      CMP r1,#0; LDRGE count; CMPGE count,index; POPLE rejects negatives
+      and count <= index using signed comparisons, unlike the Ghidra C.
+      Erases index from the array at +0x28 through verified unported entry
+      0x083cff30, then calls the existing controller_mark_pending_and_dispatch
+      port, reloads the controller vtable, and sends VMax with code 0x6182.
+      No concrete virtual callee identity is asserted. Erase result is ignored.
+      Deliberate host deviation: native vtable pointer and function slots,
+      with remaining fields addressed by target word indices; callback seams
+      model unported erase and pending dispatch. Target retains the verified
+      retail erase address instead of substituting a similar array erase port.
+      Host tests cover signed count/index extremes, negative NULL receiver,
+      rejected-object immutability, count reduction, ordered pending/notification,
+      ignored erase failure result, and dispatcher replacement of the vtable.
+      Required host suite and ARM release build pass. Standalone host smoke
+      observes count 3 to 2, pending byte set, and VMax notification, then
+      rejects index equal to count and a negative NULL receiver.
+      match.py exits 1 with a structural diff: 26 versus 17 instructions,
+      including literals, early negative BX, signed BLE, BLX to verified
+      erase address, BL to existing pending port, and final virtual BX.
+      LLVM materializes 0x6182 with MOV/ORR and uses a larger frame.
+      No on-device execution claimed.
