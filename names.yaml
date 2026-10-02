@@ -201895,3 +201895,36 @@ functions:
       exits 1: LLVM adds a frame and uses literal-loaded BLX/BX instead of
       direct BL/B, preserving the +0xa8 adjustment, return rebase, tail call,
       and all three literal values.
+
+  - address: 0x0826f450
+    ghidra: FUN_0826f450
+    name: cg_emit_load_halfword_at_offset
+    size: 136
+    sig: "cg_virtual_reg_t *cg_emit_load_halfword_at_offset(cg_block_t *block, cg_virtual_reg_t *base, U32 offset)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r0: block
+      param_2/r1: base
+      param_3/r2: offset
+      r7: offset_reg
+      r8: address_reg
+      r9: value_reg
+    notes: >-
+      Raw osos.dec establishes extent 0x0826f450..0x0826f4d8, ending
+      before the next distinct push prologue, with no literal pool.
+      Whole-image aligned A32 decoding finds two incoming unconditional BLs
+      at 0x0824b67c and 0x0824b6cc, zero predicated BLs. Six outgoing
+      unconditional BLs: three cg_virtual_reg_create calls, followed by
+      cg_create_inst_load_immed, cg_create_inst_binary, cg_create_inst_load.
+      All four callee identities already exist in names.yaml and Rust.
+      Creates three general registers, emits LDI offset, ADD base plus offset,
+      then LDH (opcode 39), and returns the loaded-value register. Caller
+      FUN_0824af94 uses offsets 0 and 2 to load adjacent halfwords.
+      Deliberately caches immutable block->proc once instead of reloading;
+      uses the existing native-word host IR layout, which is 32-bit on target.
+      Host interpreter tests cover zero/two offsets, negative displacement,
+      address wraparound, and unsigned high-bit halfword values. Host suite
+      and ARM release build pass. match.py exits 1: LLVM emits 38 rather
+      than 34 instructions, adding frame setup while preserving six calls,
+      opcode sequence 40/1/39, stack-passed ADD source, and result register.
