@@ -790,6 +790,7 @@ pub mod vtable_two_pair_base_construct;
 pub mod vtable_two_pair_metadata_construct;
 pub mod vtable_two_pair_derived_construct;
 pub mod opaque_vtable_string_owner_construct;
+pub mod opaque_vtable_string_owner_has_text;
 pub mod vtable_flag_construct;
 pub mod vtable_flag_payload_construct;
 pub mod opaque_vtable_payload_construct;
