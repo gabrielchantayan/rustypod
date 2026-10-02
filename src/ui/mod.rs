@@ -73,6 +73,7 @@ pub mod styled_text_view;
 pub mod text_line_offset_slot;
 pub mod text_line_offset_read_be;
 pub mod string_view;
+pub mod string_view_color;
 pub mod resource_ref_clear;
 pub mod string_view_array;
 pub mod vtable_slot_20;
