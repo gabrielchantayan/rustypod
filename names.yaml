@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284034
+    ghidra: FUN_08284034
+    name: context_scope_mark_subject
+    size: 16
+    sig: "void context_scope_mark_subject(u8 *scope)"
+    module: app/context_scope
+    status: ported
+    renames:
+      param_1/r0: scope
+      "scope+0x04": subject
+      "subject+0x618": unidentified subject flag byte
+    notes: >-
+      Raw words e5900004 e3a01001 e5c01618 e12fff1e establish the complete
+      16-byte extent through bx lr at 0x08284040, before the independent push
+      at 0x08284044. Whole-image ARM decoding finds two plain inbound BLs at
+      0x08219998 and 0x0821d308, zero predicated BLs, and no outgoing calls.
+      Loads scope word 1 and stores byte 1 at subject+0x618 without checks.
+      No deliberate behavioral deviations or invented flag identity.
+      Host tests cover prior values 0, 1, 0x80 and 0xff, distinct subject
+      addresses, unchanged scope words and every surrounding byte.
+      The controller dispatch caller now calls this Rust port directly.
+      ARM release build succeeds. match.py shows the identical ldr/mov/strb
+      body with LLVM's frame-pointer push/mov/pop replacing the leaf return
+      (six instructions versus four). Standalone host smoke also confirms
+      the flag store and preserved adjacent bytes.
+
   - address: 0x08284044
     ghidra: FUN_08284044
     name: ui_element_reference_teardown
@@ -22251,7 +22277,7 @@ functions:
       FUN_083d604c: handle_deref_or_null (already ported)
       "implementation vtable+0x23c": unidentified context-scope virtual dispatch
       FUN_0839cd98: refcounted_body_release (already ported)
-      FUN_08284034: unported scope-subject marker (direct volatile seam)
+      FUN_08284034: context_scope_mark_subject (ported direct call)
       FUN_08284188: context_scope_drop (already ported empty destructor)
     notes: >-
       Raw ARM confirms Ghidra's complete 80-byte extent: push {lr} opens at
@@ -22262,16 +22288,14 @@ functions:
       0x08238c3c; there are no predicated or direct-tail callers. The body
       acquires controller+0xb4, dereferences the temporary handle, invokes the
       implementation vtable's unidentified slot 143 (+0x23c) on a 20-byte
-      context-scope record, releases the handle, calls unported 0x08284034 to
-      set subject+0x618, and calls the already ported empty scope destructor.
-      The only new seam is 0x08284034: target builds call that firmware address
-      and host tests install its observed byte-store behavior. The virtual target
-      is intentionally not invented. Host test uses the unique
-      CONTROLLER_CONTEXT_SCOPE_DISPATCH u32 slab to prove dispatch, reference
-      release, and final subject-byte marking. match.py against this worktree
-      archive reports the same acquire/handle/vtable-slot/release/marker order;
-      LLVM uses a larger frame and an indirect volatile seam for the unported
-      marker, so an instruction-exact match is not expected.
+      context-scope record, releases the handle, calls context_scope_mark_subject
+      to set subject+0x618, and calls the ported empty scope destructor.
+      All direct callees now use Rust ports; the virtual target remains
+      unidentified. Host tests use the CONTROLLER_CONTEXT_SCOPE_DISPATCH
+      u32 slab to prove dispatch, balanced references, and subject-byte marking.
+      The original match review found matching acquire/handle/vtable/release/
+      marker order with a larger LLVM frame; the former marker seam has since
+      been replaced with a direct call to its Rust port.
 
   - address: 0x082199bc
     ghidra: FUN_082199bc

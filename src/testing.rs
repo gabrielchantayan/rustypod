@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const ELEMENT_REFERENCE_TEARDOWN: usize = 0xd712_0000;
+    pub const CONTEXT_SCOPE_MARK_SUBJECT: usize = 0xd713_0000;
     pub const RECORD_CACHE_STATUS: usize = 0x5295_0000;
     pub const COORDINATE_OWNER_SWAP_SURFACE: usize = 0x5294_0000;
     pub const COORDINATE_OWNER_FLUSH_PENDING: usize = 0x5293_0000;
