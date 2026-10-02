@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082988e4
+    ghidra: FUN_082988e4
+    name: collection_byte_tag_count
+    size: 8
+    sig: "i32 collection_byte_tag_count(const ByteTagCollectionOwner *owner)"
+    module: app/collection_byte_tag_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      owner_plus_0x58: count
+      return/r0: signed_count
+    notes: >-
+      Raw words e5900058 and e12fff1e load count at +0x58 and return.
+      True extent is 0x082988e4..0x082988ec exclusive; the next function
+      begins with e92d41f0 (push). Whole-image A32 decoding finds two
+      inbound plain BLs at 0x081b2758 and 0x0829d610, no predicated
+      inbound BLs, and no outbound BLs. Both callers use the result
+      as a signed indexed-loop bound. Reuse ByteTagCollectionOwner from
+      collection_find_byte_tag; its repr(C) pointer widens on hosts but
+      ARM preserves the +0x58 count offset. Return all bits unchanged,
+      without clamping, dispatch or NULL checks. Host signed-bound tests,
+      standalone mutation smoke and release ARM build pass. ARM match
+      retains the single ldr at +0x58; LLVM adds a frame-pointer prologue
+      and returns via pop instead of bx lr. No callee seams introduced.
   - address: 0x082988ec
     ghidra: FUN_082988ec
     name: collection_find_byte_tag
