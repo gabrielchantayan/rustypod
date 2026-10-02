@@ -198596,3 +198596,33 @@ functions:
       constant division uses multiply-high sequences, accessor uses BLX,
       rect_width inlines, and rect_offset remains a call. The special weekday
       branch, signed row/column arithmetic, and final edge writes remain.
+
+  - address: 0x0829b0d8
+    ghidra: FUN_0829b0d8
+    name: work_source_query_readiness
+    size: 12
+    sig: "uint32_t work_source_query_readiness(WorkSource *source)"
+    module: cxx/work_source_query
+    status: ported
+    renames:
+      param_1: source
+    notes: >-
+      Raw words e5901000 e5911018 e12fff11 establish the 12-byte extent
+      0x0829b0d8..0x0829b0e4. The next independent function starts with
+      mov r0, #0x8a00 and returns with bx lr. Independent aligned A32
+      decoding of osos.dec finds two plain inbound BLs at 0x08148598
+      and 0x081a7818, zero predicated inbound BLs, and zero body BLs.
+      Load the first-word vtable, load its slot +0x18, and tail-dispatch
+      with the original source pointer; preserve the complete u32 result.
+      Both callers test zero/nonzero readiness. No virtual callee identity
+      is inferred and no fixed-address callee seam is introduced. Reuses
+      the existing record-work-pump source layouts; that port now invokes
+      this Rust wrapper instead of duplicating its dispatch. Host pointers
+      widen structurally, and Rust expresses the tail branch as a final
+      call. Tests cover zero, one, the high bit, all bits set, vtable
+      replacement, and stateful exhaustion. All 13379 host tests pass;
+      ARM release build passes. Standalone host execution of the actual
+      source yields readiness [2, 1, 0] and remaining zero. match.py exits
+      1: LLVM adds push {fp, lr}, mov fp, sp, and pop {fp, lr}; the two
+      original loads and final bx r1 are otherwise retained, including
+      slot +0x18 and untouched r0.

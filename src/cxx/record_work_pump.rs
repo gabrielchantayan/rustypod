@@ -138,22 +138,17 @@ unsafe fn work_record_pump_ops() -> WorkRecordPumpOps {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn source_has_work(record: *mut WorkRecordTarget) -> u32 {
-    const HAS_WORK_VTABLE_WORD: usize = 6;
-    let source = core::ptr::addr_of_mut!((*record).work_source);
-    let vtable_address = core::ptr::read_volatile(core::ptr::addr_of!((*source).vtable));
-    let entry_address = core::ptr::read_volatile(
-        (vtable_address as usize as *const u32).add(HAS_WORK_VTABLE_WORD),
-    );
-    let has_work: WorkSourceHasWork = core::mem::transmute(entry_address as usize);
-    has_work(source)
+    super::work_source_query::work_source_query_readiness(
+        core::ptr::addr_of_mut!((*record).work_source),
+    )
 }
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
 unsafe fn source_has_work(record: *mut HostWorkRecord) -> u32 {
-    let source = core::ptr::addr_of_mut!((*record).work_source);
-    let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*source).vtable));
-    ((*vtable).has_work)(source)
+    super::work_source_query::work_source_query_readiness(
+        core::ptr::addr_of_mut!((*record).work_source),
+    )
 }
 
 /// pump_record_work_queue — original: `FUN_08148578` @ `0x08148578`
