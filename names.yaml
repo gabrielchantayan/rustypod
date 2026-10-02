@@ -201395,3 +201395,35 @@ functions:
       ARM code executed twice under Unicorn with actual string_object_destroy
       and release-payload code on NULL payloads; call addresses, vtables,
       untouched header and returned base verified. No on-device run claimed.
+
+  - address: 0x0827f6cc
+    ghidra: FUN_0827f6cc
+    name: volume_limit_state_set
+    size: 32
+    sig: "u32 volume_limit_state_set(u32 *object, u32 state)"
+    module: app/volume_limit_state_set
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_2/r1: state
+      "object+0xb4": volume_limit_state
+    notes: >-
+      Raw words establish the 32-byte extent through pop {r4,pc} at
+      0x0827f6e8; the next real function begins at 0x0827f6ec. Whole-image
+      decoding verifies one inbound plain BL at 0x0820e8e4 and one inbound
+      BLEQ at 0x08202e4c. The body has zero plain BLs and one BLEQ to
+      0x0827f748. Stores state at +0xb4, invokes that resident routine only
+      for state 1 with (object, 1), then reloads and returns the field,
+      not the callee result. Neither address has an existing registry entry.
+      The callee's second argument is verified by raw r1-to-r6 preservation,
+      not Ghidra's incomplete call expression. Its semantic identity remains
+      unverified, so target Rust calls its exact address through a narrow
+      typed seam. Host tests cover arbitrary non-trigger states, surrounding
+      word preservation, store-before-action and post-action reload.
+      No deliberate behavior deviation.
+      ARM release build and full host suite pass. Exported-function host smoke
+      verifies non-trigger states, store-before-action and reloaded state rather
+      than the resident return value. match.py reports 13 Rust instructions
+      versus eight stock: LLVM uses a conditional skip and literal-address BLX
+      instead of BLEQ, plus a frame-pointer prologue. Store, condition, exact
+      callee address, second argument 1 and post-call reload are preserved.

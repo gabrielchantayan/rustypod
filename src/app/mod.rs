@@ -776,3 +776,4 @@ pub mod input_record_pool;
 pub mod notes_value_demo_mode_dispatch;
 pub mod owner_component_feedback_gate;
 pub mod fixed_string_object_assign;
+pub mod volume_limit_state_set;
