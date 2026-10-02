@@ -282,6 +282,36 @@ pub unsafe extern "C" fn board_version_is_11_19_or_20() -> u32 {
     matches!(code, 11 | 19 | 20) as u32
 }
 
+/// board_version_resource_class — retailOS `FUN_0829604c` at `0x0829604c`.
+///
+/// True size: 56 bytes; the final pop is at `0x08296080`, and the next
+/// real function begins at `0x08296084`. Raw A32 decoding verifies two
+/// inbound plain BLs (`0x081042b0`, `0x081045fc`), no predicated inbound
+/// BLs, and one outbound plain BL at `0x08296050` to shared_context.
+///
+/// Read the aligned board-version word at shared-context +0x84 and map its
+/// high halfword: 11 -> 1, 19 -> 3, 20 -> 2, everything else -> 0. Ignore
+/// the low halfword. Both callers pass the class to resource selection at
+/// `0x082a1df8`; the individual board-code meanings remain unknown.
+///
+/// Deviations: reuse the existing Rust shared_context port and serialized
+/// host backing storage. No target behavioral deviations or added NULL guard.
+///
+/// # Safety
+/// The shared context must be non-NULL and contain a readable, word-aligned
+/// u32 at +0x84. Access to the shared-context slot is externally serialized.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn board_version_resource_class() -> u32 {
+    let code = shared_context().add(0x84).cast::<u32>().read_volatile() >> 16;
+    match code {
+        11 => 1,
+        19 => 3,
+        20 => 2,
+        _ => 0,
+    }
+}
+
 #[cfg(test)]
 mod board_version_code_tests {
     use super::*;
@@ -314,6 +344,35 @@ mod board_version_code_tests {
                     assert_eq!(context[0x80 / 4], 0xa5a5_a5a5);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn resource_class_maps_every_code_and_ignores_low_bits() {
+        let _guard = crate::ui::object_state::SHARED_CONTEXT_TEST_LOCK
+            .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _reset = ContextReset;
+        let mut context = [0xa5a5_a5a5u32; 0x88 / 4];
+        unsafe {
+            crate::ui::object_state::host_install_shared_context(context.as_mut_ptr().cast());
+            for high in 0..=u16::MAX as u32 {
+                for low in [0, 1, 0x8000, 0xffff] {
+                    let word = (high << 16) | low;
+                    context[0x84 / 4] = word;
+                    let expected = if high == 11 { 1 } else if high == 19 { 3 }
+                        else if high == 20 { 2 } else { 0 };
+                    assert_eq!(board_version_resource_class(), expected,
+                        "board word {:#010x}", word);
+                    assert_eq!(context[0x84 / 4], word);
+                    assert_eq!(context[0x80 / 4], 0xa5a5_a5a5);
+                }
+            }
+            let mut replacement = [0u32; 0x88 / 4];
+            replacement[0x84 / 4] = 19 << 16;
+            crate::ui::object_state::host_install_shared_context(replacement.as_mut_ptr().cast());
+            assert_eq!(board_version_resource_class(), 3);
+            crate::ui::object_state::host_install_shared_context(context.as_mut_ptr().cast());
+            assert_eq!(board_version_resource_class(), 0);
         }
     }
 }
