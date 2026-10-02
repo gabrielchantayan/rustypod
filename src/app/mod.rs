@@ -651,6 +651,7 @@ pub mod registered_entry_cancel;
 pub mod registered_entry_activate;
 pub mod registered_entry_channel_post;
 pub mod usb_transfer_schedule;
+pub mod usb_in_transfer;
 pub mod collection_item_find_by_pair;
 pub mod collection_item_find_by_key;
 pub mod four_slot_buffer_pool;

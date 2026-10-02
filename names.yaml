@@ -199496,3 +199496,44 @@ functions:
       structural diff: LLVM emits 14 instructions versus eight, adds a
       frame pointer and function-pointer load, then BLX and tail BX instead
       of direct BL/B. The 0x100 and 0xf8 lengths and +0x100 offset remain.
+
+  - address: 0x08294984
+    ghidra: FUN_08294984
+    name: usb_in_transfer
+    size: 48
+    sig: "int usb_in_transfer(void *request, uint32_t endpoint, const void *buffer, uint32_t length, uint32_t *completed, uint32_t asynchronous)"
+    module: app/usb_in_transfer
+    status: ported
+    renames:
+      param_1: request
+      param_2: endpoint
+      param_3: buffer
+      param_4: length
+      param_5: completed
+      param_6: asynchronous
+    notes: >-
+      Raw osos.dec establishes twelve A32 words at 0x08294984..0x082949b4;
+      the next function begins with ldr r0,[pc,#16] at 0x082949b4.
+      Whole-image aligned A32 BL decoding finds two plain inbound calls at
+      0x08160e4c and 0x081e1d44, zero predicated inbound calls, one plain
+      outgoing BL at 0x082949ac to 0x082933e0, and zero predicated outgoing
+      calls. Rejects endpoint words lacking bit 0x80 with -1, otherwise
+      preserves all six arguments and returns the transfer engine status.
+      Both callers use endpoint 0x83 and inspect the result; 0x081e1c1c
+      sends framed buffer data, and 0x08160e24 returns completed bytes on
+      success. The engine resolves endpoint & 0x7f, submits through the
+      request channel at +0x34, and either waits and accumulates completed
+      bytes or returns a slot index for asynchronous operation.
+      No canonical entry or existing Rust port names 0x082933e0; it remains
+      an exact target-address call rather than an invented callee identity.
+      Deliberate deviations: correct Ghidra's void return from mvneq r0,#0
+      and caller status checks; use a host operation seam for the retail
+      engine; omit the incidental stack-argument loads on rejection.
+      Host tests cover all direction-clear low bytes with high-bit variants,
+      null request/buffer, maximal length/mode, and unchanged output storage.
+      Host cargo test and ARM release build pass. Exact-source host smoke
+      exercises rejection and acceptance, preserving engine status -257 and
+      output effects. No device execution. match.py prints a structural diff
+      (12 original instructions versus 13 Rust instructions): the bit test
+      and -1 return remain, while LLVM uses conditional BX for rejection
+      and a literal-address tail BX to 0x082933e0 instead of BL and pop.
