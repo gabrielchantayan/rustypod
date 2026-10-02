@@ -200935,3 +200935,42 @@ functions:
       folded alias heading, so the verified canonical body was compared:
       four instructions versus two, retaining ldr r0,[r0,#4] and adding
       frame-pointer push/mov/pop instead of bx lr. No added calls.
+  - address: 0x08283ff8
+    ghidra: FUN_08283ff8
+    name: context_scope_apply_subject
+    size: 60
+    sig: "i32 context_scope_apply_subject(u8 *scope)"
+    module: app/context_scope_apply_subject
+    status: ported
+    renames:
+      param_1: scope
+      iVar1: operation_result
+      return: subject_available
+    notes: >-
+      Raw ARM has 15 instructions from 0x08283ff8 through pop at 0x08284030;
+      the independent subject flag setter begins at 0x08284034. Whole-image
+      aligned A32 BL decoding finds two plain inbound calls at 0x08044e60
+      and 0x08238b98, no predicated inbound calls. Outgoing calls are one
+      virtual BLX through scope vtable +0x0c, one plain BL to unnamed,
+      unported 0x08048204, and one BLEQ to ported plst_element_notify_teardown
+      at 0x08061378. Return zero if the virtual predicate returns zero.
+      Otherwise apply the subject operation to scope word 1, reload word 1
+      and notify teardown only when the operation returns zero, then return
+      one irrespective of the operation result. No concrete virtual target
+      or identity for 0x08048204 is invented. That verified retail callee
+      calls 0x0805cde4 with subject word 16, calls 0x080487ac and saves its
+      result, then calls 0x0806c16c and returns the saved result.
+      Deliberate deviations follow existing context scope operation seams:
+      volatile replaceable boundaries, raw retail address for the unported
+      operation, existing Rust teardown port, and host panic defaults for
+      firmware-only boundaries. u32 fields preserve target offsets.
+      Host regression exercises zero, positive, negative and INT_MIN
+      predicate/operation results, suppressed calls, exact return normalization,
+      callback order and subject replacement requiring a post-operation reload.
+      Required host suite passes 13492 tests and ARM release build passes.
+      Standalone host smoke observes predicate -1, operation zero, changed
+      subject 0x87654000, ordered teardown and return one. match.py exits 1:
+      24 versus 15 instructions, with a larger frame and volatile ops loads,
+      indirect BLX boundaries and explicit branches instead of predicated
+      teardown; both zero gates and the second subject load remain.
+      No on-device execution claimed.
