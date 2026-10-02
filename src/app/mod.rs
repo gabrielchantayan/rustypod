@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod clock_saved_selection_index;
+pub mod clock_remove_selection;
 pub mod root_query_is_zero;
 pub mod selected_resource_prepare;
 pub mod string_resource_c_str;
