@@ -199426,3 +199426,37 @@ functions:
       initial predicate check, but retains the wait/recheck loop and tail
       unlock. Archive relocations resolve both BLs to mutex_lock and
       condvar_wait_forever and the final B to mutex_unlock.
+
+  - address: 0x08295c80
+    ghidra: FUN_08295c80
+    name: app_motor_clear_buffers
+    size: 32
+    sig: "void app_motor_clear_buffers(void *this)"
+    module: app/app_motor
+    status: ported
+    renames:
+      param_1/r4: this
+      thunk_EXT_FUN_2200027c: memzero_aligned
+    notes: >-
+      Raw osos.dec establishes eight A32 words at 0x08295c80..0x08295ca0;
+      the next real function begins at 0x08295ca0 with ldr r1,[r0,#0x2ac].
+      Whole-image decoding finds two inbound plain BL sites at 0x082969b4
+      and 0x08296dbc and no predicated BL callers. The body contains one
+      plain BL, no predicated BL, and one tail B, both to 0x08037db8.
+      The veneer words e51ff004/2200027c identify the IRAM-relocated
+      memzero_aligned at 0x0800027c, already ported. Clears 0x100 bytes
+      at this followed by 0xf8 bytes at this+0x100, preserving AppMotor
+      synchronization/state from +0x1f8 onward. Constructor 0x08296cc8
+      identifies the class with eAppMotor; manifest loader 0x08296894
+      also clears these buffers. Both raw callers discard r0. Deliberate
+      deviations: void signature discards the incidental retail end pointer,
+      existing Rust aligned-zero target replaces its IRAM veneer, and a
+      volatile function-pointer load prevents AEABI builtin substitution.
+      Host tests cover high-bit/full-byte poison, exact clear boundaries,
+      surrounding-storage/state preservation, and repeated clears.
+      Host suite passes all 13416 tests; ARM release build passes.
+      Standalone exact-source smoke clears 504 bytes and preserves prefix
+      and trailing state; no device execution. match.py exits 1 with a
+      structural diff: LLVM emits 14 instructions versus eight, adds a
+      frame pointer and function-pointer load, then BLX and tail BX instead
+      of direct BL/B. The 0x100 and 0xf8 lengths and +0x100 offset remain.

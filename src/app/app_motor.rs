@@ -59,6 +59,34 @@ pub static mut APP_MOTOR_CTOR: Constructor = zeroing_app_motor_ctor;
 /// A no-op is the deliberate, observable shutdown-chain-safe deviation.
 unsafe extern "C" fn app_motor_destructor(_object: *mut c_void) {}
 
+/// Clear AppMotor's two leading buffers — `FUN_08295c80` @ 0x08295c80.
+///
+/// True extent: 32 bytes, ending at the next function at 0x08295ca0.
+/// Raw-word verification: two inbound plain BL sites (0x082969b4 and
+/// 0x08296dbc), no predicated callers; one outbound plain BL, no predicated
+/// BL, and one tail B, both to 0x08037db8 -> 0x2200027c, the IRAM copy
+/// of `memzero_aligned` @ 0x0800027c.
+///
+/// Clears 0x100 bytes at `this`, then 0xf8 bytes at `this + 0x100`.
+/// The embedded synchronization/state fields starting at +0x1f8 survive.
+/// Deliberate deviations: calls the existing Rust target through a volatile
+/// function pointer to prevent LLVM builtin substitution; expresses the tail
+/// branch as a return-position call. The void signature discards retail's
+/// incidental end-pointer return (the existing zero port returns its input);
+/// neither binary-verified caller consumes that result.
+///
+/// # Safety
+/// `this` must be word-aligned and writable for at least 0x1f8 bytes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn app_motor_clear_buffers(this: *mut u8) {
+    let zero = core::ptr::read_volatile(
+        &(crate::libc::memzero::memzero_aligned as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
+    );
+    zero(this, 0x100);
+    zero(this.add(0x100), 0xf8);
+}
+
 /// app_motor_get — original: `FUN_08295be0` @ 0x08295be0 (88 bytes:
 /// 56 bytes of code plus a 4-word literal pool; 27 unconditional plain
 /// `bl` call sites, no predicated forms or tail branches, binary-verified).
@@ -203,6 +231,23 @@ mod tests {
             APP_MOTOR_GUARD = 0;
         }
         drop(guard);
+    }
+
+    #[test]
+    fn clear_buffers_preserves_surrounding_storage_and_state() {
+        for poison in [0x01u8, 0x80, 0xff] {
+            let mut words = [u32::from_ne_bytes([poison; 4]); (APP_MOTOR_SIZE + 8) / 4];
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), APP_MOTOR_SIZE + 8)
+            };
+            unsafe { app_motor_clear_buffers(bytes.as_mut_ptr().add(4)); }
+            assert_eq!(&bytes[..4], &[poison; 4]);
+            assert_eq!(&bytes[4..4 + 0x1f8], &[0; 0x1f8]);
+            assert!(bytes[4 + 0x1f8..].iter().all(|&byte| byte == poison));
+            unsafe { app_motor_clear_buffers(bytes.as_mut_ptr().add(4)); }
+            assert_eq!(&bytes[4..4 + 0x1f8], &[0; 0x1f8]);
+            assert!(bytes[4 + 0x1f8..].iter().all(|&byte| byte == poison));
+        }
     }
 
     #[test]
