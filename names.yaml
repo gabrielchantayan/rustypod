@@ -198850,3 +198850,32 @@ functions:
       source initialization, retains the flag branch, bounds copy, offset
       call and fixed draw arguments, and emits BLX through literal retail
       addresses rather than ADS direct BL for the two unported callees.
+
+  - address: 0x08298ac0
+    ghidra: FUN_08298ac0
+    name: opaque_collection_count_at_88
+    size: 8
+    sig: "u32 opaque_collection_count_at_88(const u8 *object)"
+    module: cxx/opaque_collection_count_at_88
+    status: ported
+    renames:
+      param_1/r0: object
+      "object+0x88/r0": entry_count
+    notes: >-
+      Raw osos.dec words 0xe5900088 and 0xe12fff1e establish the true
+      eight-byte extent 0x08298ac0..0x08298ac7: ldr r0,[r0,#0x88]; bx lr.
+      The next real function begins at 0x08298ac8 with ldr r2,[r1,#0xb4]
+      and is independently called at 0x08124270. Whole-image aligned A32
+      BL-immediate decoding finds exactly two inbound plain BL sites,
+      0x081b2704 and 0x0829d5b0, zero predicated inbound BL forms, and
+      zero internal calls. Both callers use the returned word as a signed
+      collection-entry loop bound; the concrete entry category is unrecovered.
+      Rust preserves every count bit with an unchecked aligned u32 read at
+      the verified byte offset, without a NULL guard or normalization.
+      Deliberate deviations: none behaviorally. match.py exits 1 and confirms
+      the same ldr r0,[r0,#136], with LLVM frame setup and pop replacing
+      the frameless bx lr. Host tests cover zero, signed boundaries, full-width
+      values, neighboring words, source preservation, and an interior object.
+      All 13392 host tests and the ARM build-std release build pass. A standalone
+      host smoke observes counts 0, 3, 0x80000000, and 0xffffffff, with signed
+      caller loop iterations 0, 3, 0, and 0 respectively.
