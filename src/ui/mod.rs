@@ -62,6 +62,7 @@ pub mod object_resource_table_counted_string;
 pub mod object_resource_vector20_counted_string;
 pub mod object_resource_vector24_counted_string;
 pub mod rect;
+pub mod calendar_day_rect;
 pub mod indexed_rect;
 pub mod noop_f7f4;
 pub mod operation_unavailable;

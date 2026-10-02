@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const CALENDAR_DAY_RECT: usize = 0x527d_0000;
     pub const PLIST_INDEXED_I32: usize = 0x521f_0000;
     pub const STRING_RECORD_FIND_KEY_PAIR: usize = 0x519c_0000;
     pub const OPAQUE_BYTE_RANGE_PENULTIMATE: usize = 0x519e_0000;
