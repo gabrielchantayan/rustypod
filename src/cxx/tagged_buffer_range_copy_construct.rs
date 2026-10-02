@@ -4,50 +4,18 @@
 //! Raw `osos.dec` decoding establishes the following `push {r4,r5,r6,lr}` at
 //! `0x083e8e7c` as the next function boundary. It finds two inbound plain
 //! direct `bl` calls (`0x083e435c`, `0x083e4438`) and no predicated inbound
-//! calls. The body has no plain `bl` and one predicated `blne` to unported
-//! `FUN_0827c18c` at `0x0827c18c`.
+//! calls. The body has no plain `bl` and one predicated `blne` to
+//! `tagged_buffer_copy_construct` at `0x0827c18c`.
 //!
 //! The function walks 0x10-byte elements over `[first, last)`. A non-NULL
 //! output cursor is copy-constructed from each source element, then both
 //! cursors advance by 0x10; it returns the advanced output cursor. Loop
 //! termination is cursor equality, not ordering.
 //!
-//! Deliberate deviation: `FUN_0827c18c` has no `names.yaml` entry, so this
-//! port inlines its raw, 68-byte observed operation rather than inventing an
-//! unverified seam: set destination state to empty, clear target words +8/+c,
-//! release it (therefore no-op), then copy source byte +0 and words +8/+c.
-//! Target pointer fields remain 32-bit words on hosts.
+//! Deliberate deviation: the direct ARM call uses the Rust copy-constructor
+//! port. Target pointer fields remain 32-bit words on hosts.
 
-use crate::cxx::tagged_buffer_release::{
-    tagged_buffer_release, TAGGED_BUFFER_EMPTY, TAGGED_BUFFER_ALLOCATION_WORD,
-};
-
-const TAGGED_BUFFER_TRAILING_WORD: usize = 3;
-
-unsafe fn tagged_buffer_copy_construct(destination: *mut u8, source: *const u8) {
-    destination.write_volatile(TAGGED_BUFFER_EMPTY);
-    let destination_words = destination.cast::<u32>();
-    destination_words
-        .add(TAGGED_BUFFER_ALLOCATION_WORD)
-        .write_volatile(0);
-    destination_words
-        .add(TAGGED_BUFFER_TRAILING_WORD)
-        .write_volatile(0);
-    tagged_buffer_release(destination);
-
-    destination.write_volatile(source.read_volatile());
-    destination_words
-        .add(TAGGED_BUFFER_ALLOCATION_WORD)
-        .write_volatile(
-            source
-                .cast::<u32>()
-                .add(TAGGED_BUFFER_ALLOCATION_WORD)
-                .read_volatile(),
-        );
-    destination_words
-        .add(TAGGED_BUFFER_TRAILING_WORD)
-        .write_volatile(source.cast::<u32>().add(TAGGED_BUFFER_TRAILING_WORD).read_volatile());
-}
+use crate::cxx::tagged_buffer_copy_construct::tagged_buffer_copy_construct;
 
 /// Copy-constructs target-layout tagged buffers from `[first, last)` to `output`.
 ///
