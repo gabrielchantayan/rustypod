@@ -65,13 +65,7 @@ mod tests {
 
     #[test]
     fn preserves_base_fields_and_initializes_owner_member_at_target_offsets() {
-        let _lock = super::super::owner_member_construct::tests::LOCK.lock();
-        let saved = unsafe { super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT };
-        unsafe {
-            OWNER_LINKED_BASE_CONSTRUCT = base;
-            super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT =
-                super::super::owner_member_construct::tests::base;
-        }
+        unsafe { OWNER_LINKED_BASE_CONSTRUCT = base };
         for value in [0, 1, 0x8000_0000, u32::MAX] {
             for base_value in [0, 0xa5a5_a5a5, u32::MAX] {
                 let mut storage = [0xdead_beef; 41];
@@ -97,7 +91,6 @@ mod tests {
         }
         unsafe {
             OWNER_LINKED_BASE_CONSTRUCT = missing_base;
-            super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT = saved;
         }
     }
 }

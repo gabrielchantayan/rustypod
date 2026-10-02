@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod owner_linked_member_construct;
+pub mod member_base_construct;
 pub mod owner_member_construct;
 pub mod vtable_slot_1c_then_context_dispatch;
 pub mod named_object_value_dispatch;
