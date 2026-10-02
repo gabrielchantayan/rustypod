@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827fa90
+    ghidra: FUN_0827fa90
+    name: fixed_string_object_assign
+    size: 80
+    sig: "void fixed_string_object_assign(const void *unused_context, StringObject *destination)"
+    module: app/fixed_string_object_assign
+    status: ported
+    renames:
+      param_1/r0: unused_context
+      param_2/r1: destination
+      auStack_40: buffer
+      local_18: suffix_words
+      DAT_0827fad8: suffix_address
+      DAT_0827fadc: prefix_address
+      FUN_08030ff4: strcpy
+      FUN_080311b4: strcat
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      Raw osos.dec establishes 72 code bytes through the return at
+      0x0827fad4 plus eight literal bytes; next function starts at 0x0827fae0.
+      Aligned-word decoding finds three outgoing plain BLs and zero
+      predicated BLs, two incoming plain BLs at 0x0827f78c and 0x0827fb28,
+      and zero predicated incoming BLs. Copies four suffix words from
+      0x083eadc4, strcpy's the prefix from 0x083ead98 into a 40-byte buffer,
+      appends the suffix, then assigns destination. Context is unused.
+      Literal bytes resemble A32 instructions, not a readable path; no
+      textual identity is inferred. Target preserves both absolute addresses.
+      Hosts use exact raw bytes: prefix 01 00; suffix words e0411002
+      e0800141 e5951008 e5952000. Tests cover embedded NUL termination,
+      exact copied content, canaries, unused NULL/invalid context, and
+      allocation failure. Full host suite and release ARM build pass.
+      match.py exits 1 with a structural diff: four-word stack copy,
+      copy/append/assign order and 56-byte locals retained; volatile
+      function pointers keep libc calls out of line as BLX, avoiding
+      buffer initialization. Existing StringObject assignment supplies
+      allocation/clear behavior. No device execution performed.
   - address: 0x08280040
     ghidra: FUN_08280040
     name: link_record_construct
