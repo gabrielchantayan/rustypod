@@ -17,10 +17,11 @@
 //!
 //! Deliberate deviations: the three unported calls are named, typed veneers on
 //! firmware and replaceable host seams; direct calls use the already ported
-//! range-state constructor and four-word clear.
+//! handler-presence predicate, range-state constructor and four-word clear.
 use core::mem::MaybeUninit;
 
 use crate::cxx::four_word_clear::four_word_clear;
+use crate::app::range_context_has_handler::range_context_has_handler;
 use crate::util::range_state::{range_state_construct, RangeState};
 
 /// ABI of retail constraint evaluation at `0x0829b1e8`.
@@ -102,7 +103,7 @@ retail_range_result_append:
 #[cfg_attr(target_os = "none", link_section = ".text.range_result_collect")]
 #[inline(never)]
 pub unsafe extern "C" fn range_result_collect(context: *const u32, range: *const u32, output: *mut u32) -> u32 {
-    if context.add(12).read() == 0 {
+    if range_context_has_handler(context) == 0 {
         return 0;
     }
 
