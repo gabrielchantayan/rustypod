@@ -1550,6 +1550,79 @@ pub unsafe extern "C" fn video_engine_disable_status(status: *mut u8) {
     video_engine_set_property(0x0de1, 0x2800, 0x2600);
 }
 
+/// Partial retailOS layout; pointer fields retain their target offsets on ARM.
+/// Host pointers widen naturally rather than using target byte offsets.
+#[repr(C)]
+pub struct VideoStatusGroup {
+    pub prefix: [u32; 21],
+    pub primary: *mut u8,
+    pub gap_to_secondary: [u32; 15],
+    pub secondary: *mut u8,
+    pub gap_to_tertiary: [u32; 15],
+    pub tertiary: *mut u8,
+    pub auxiliary: *mut u8,
+}
+
+#[cfg(not(target_arch = "arm"))]
+static mut MOCK_ENABLE_STATUS: Option<unsafe extern "C" fn(*mut u8)> = None;
+
+/// Host-only resident-entry seam for the unported status enable routine.
+#[cfg(not(target_arch = "arm"))]
+pub unsafe fn set_mock_enable_status(enable: Option<unsafe extern "C" fn(*mut u8)>) {
+    *addr_of_mut!(MOCK_ENABLE_STATUS) = enable;
+}
+
+#[inline]
+unsafe fn enable_status_resident(status: *mut u8) {
+    #[cfg(target_arch = "arm")]
+    core::mem::transmute::<usize, unsafe extern "C" fn(*mut u8)>(0x0828_1030)(status);
+    #[cfg(not(target_arch = "arm"))]
+    (*addr_of!(MOCK_ENABLE_STATUS)).expect("status enable resident seam must be installed")(status);
+}
+
+/// `video_engine_set_group_enabled` — `FUN_0827b9d8` @ 0x0827b9d8.
+/// True extent: 116 bytes, ending at the next prologue at 0x0827ba4c.
+/// Raw words contain two plain BLs, four BLNEs, and two BNE tail calls;
+/// inbound references are two plain BLs and one plain tail B.
+///
+/// Zero disables; any nonzero value enables. Visits the required primary
+/// status at +0x54, then non-NULL statuses at +0x94, +0xd4 and +0xd8.
+/// Each pointer is loaded after the preceding call, preserving callback
+/// mutations and aliasing. No pointer validation is added.
+///
+/// Deliberate deviations: disable calls the existing Rust port; enable
+/// transfers to verified resident entry 0x08281030 (host-only test seam).
+/// Rust expresses the final conditional tail branch as an ordinary call.
+///
+/// # Safety
+/// `group` must point to the target layout above; primary must be valid even
+/// when NULL optional fields are skipped. All visited statuses and resident
+/// callee dependencies must be valid. Callbacks may mutate later fields.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_group_enabled(
+    group: *mut VideoStatusGroup,
+    enabled: u32,
+) {
+    if enabled != 0 {
+        enable_status_resident((*group).primary);
+        let secondary = (*group).secondary;
+        if !secondary.is_null() { enable_status_resident(secondary); }
+        let tertiary = (*group).tertiary;
+        if !tertiary.is_null() { enable_status_resident(tertiary); }
+        let auxiliary = (*group).auxiliary;
+        if !auxiliary.is_null() { enable_status_resident(auxiliary); }
+    } else {
+        video_engine_disable_status((*group).primary);
+        let secondary = (*group).secondary;
+        if !secondary.is_null() { video_engine_disable_status(secondary); }
+        let tertiary = (*group).tertiary;
+        if !tertiary.is_null() { video_engine_disable_status(tertiary); }
+        let auxiliary = (*group).auxiliary;
+        if !auxiliary.is_null() { video_engine_disable_status(auxiliary); }
+    }
+}
+
 /// Firmware entry of the video configuration selector (`FUN_0827cef4`,
 /// unported). It updates the engine's active configuration kind.
 #[cfg(target_os = "none")]
@@ -3379,6 +3452,56 @@ mod tests {
             set_mock_dispatch(None);
         }
     }
+
+    unsafe extern "C" fn enable_status_fixture(status: *mut u8) {
+        // Behavioral reference for the resident routine's verified byte guard.
+        if status.add(11).read() == 0 { status.add(11).write(1); }
+    }
+
+    #[test]
+    fn group_status_transitions_cover_optional_fields_aliases_and_nonzero_flags() {
+        let _guard = LOCK.lock();
+        unsafe {
+            set_mock_enable_status(Some(enable_status_fixture));
+            set_mock_notify_status_change(Some(record_status_notify));
+            set_mock_instance(ptr::null_mut());
+            for mask in 0..8 {
+                let mut statuses = [[0u8; 12]; 4];
+                for (index, status) in statuses.iter_mut().enumerate() {
+                    status[11] = if index == 0 { 0 } else { 0x80 };
+                }
+                let mut group = VideoStatusGroup {
+                    prefix: [0; 21],
+                    primary: statuses[0].as_mut_ptr(),
+                    gap_to_secondary: [0; 15],
+                    secondary: if mask & 1 != 0 { statuses[1].as_mut_ptr() } else { ptr::null_mut() },
+                    gap_to_tertiary: [0; 15],
+                    tertiary: if mask & 2 != 0 { statuses[2].as_mut_ptr() } else { ptr::null_mut() },
+                    auxiliary: if mask & 4 != 0 { statuses[3].as_mut_ptr() } else { ptr::null_mut() },
+                };
+                video_engine_set_group_enabled(&mut group, u32::MAX);
+                assert_eq!(statuses[0][11], 1);
+                // Resident enable does not normalize already-nonzero bytes.
+                assert_eq!([statuses[1][11], statuses[2][11], statuses[3][11]], [0x80; 3]);
+                video_engine_set_group_enabled(&mut group, 0);
+                assert_eq!(statuses[0][11], 0);
+                for index in 1..4 {
+                    assert_eq!(statuses[index][11], if mask & (1 << (index - 1)) != 0 { 0 } else { 0x80 });
+                }
+                statuses[0][11] = 0xff;
+                group.secondary = group.primary;
+                group.tertiary = group.primary;
+                group.auxiliary = group.primary;
+                *addr_of_mut!(STATUS_NOTIFY) = None;
+                video_engine_set_group_enabled(&mut group, 0);
+                assert_eq!(statuses[0][11], 0);
+                assert_eq!(STATUS_NOTIFY, Some((group.primary, 0)));
+            }
+            set_mock_enable_status(None);
+            set_mock_notify_status_change(None);
+        }
+    }
+
 
     static mut CONFIGURATION_SELECTOR: Option<u32> = None;
     static mut CONFIGURATION_POINTER: Option<*const u32> = None;
