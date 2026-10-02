@@ -201670,3 +201670,34 @@ functions:
       both raw stock and emitted release wrapper words, verifying slot,
       mode, and preserved fp/sp/lr at dispatch. It does not execute the
       downstream kernel or claim a device run.
+
+  # --- sparse fixed-point record defaults ---
+  - address: 0x0827d6b4
+    ghidra: FUN_0827d6b4
+    name: fixed_point_record_init
+    size: 48
+    sig: "u32 *fixed_point_record_init(u32 *record)"
+    module: util/fixed_point_record_init
+    status: ported
+    renames:
+      param_1/r0: record
+      r1: zero
+      r2: fixed_point_unity
+    notes: >-
+      Raw osos.dec contains twelve ARM words from 0x0827d6b4 through
+      bx lr at 0x0827d6e0; the next real function starts with push at
+      0x0827d6e4. Whole-image aligned ARM BL decoding independently finds
+      two plain incoming calls, at 0x0827bcc0 and 0x0827bcd4, zero
+      predicated incoming calls, and zero outgoing calls. Clears words
+      0, 1, 3, and 4, sets words 5 through 8 to 0x10000, and clears only
+      byte 36. Preserves word 2 and bytes 37 onward. The enclosing
+      constructor at 0x0827bc9c initializes two embedded records and uses
+      the unchanged r0 return after each call; Ghidra incorrectly says
+      void. Finer field identities remain unknown; no callee seam is
+      needed. Host regression covers full-width replacement, untouched
+      holes and neighboring bytes, pointer identity, and reinitialization.
+      Host suite and ARM release build pass. Native standalone smoke
+      verifies defaults, preserved hole/tail/neighbors, and pointer return.
+      match.py exits 1: LLVM emits 14 instructions versus 12, adding a
+      frame and reordering the same nine stores without extra calls.
+      Deliberate deviations: none; ordinary memory, not MMIO, is required.
