@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829d820
+    ghidra: FUN_0829d820
+    name: day_and_seconds_compare
+    size: 56
+    sig: "i32 day_and_seconds_compare(const DayAndSeconds *left, const DayAndSeconds *right)"
+    module: time/day_and_seconds_compare
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r4: saved_left
+      r5: saved_right
+      return/r0: ordering
+    notes: >-
+      Raw ARM establishes 56 bytes at 0x0829d820..0x0829d858, ending with
+      pop {r4,r5,pc}; the next independently called zero-pair predicate
+      begins at 0x0829d858. Two outgoing plain BLs target equality at
+      0x0829d8e0 and the already ported day_and_seconds_is_before at
+      0x0829d974; no predicated outgoing BLs. Whole-image aligned branch
+      decoding finds two plain incoming BLs at 0x0829b3bc and 0x0829b484,
+      no predicated incoming BLs. Compare DayAndSeconds records unsigned,
+      day first and seconds second, returning -1, 0, or +1. Reuse the
+      existing repr(C) layout and strict-before port. Deliberately inline
+      the raw-verified equality helper rather than add a new seam.
+      Boundary cross-product tests include distinct equal records,
+      aliasing, day precedence and unsigned high-bit words. Host suite
+      and ARM release build pass. match.py exits 1: 18 Rust instructions
+      versus 14 original retain the equality gate and strict-before call,
+      with equality inlined and an LLVM frame on the non-equal path.
+      ARM relocation verifies the remaining BL targets
+      day_and_seconds_is_before. No device execution performed.
   - address: 0x0829e1d8
     ghidra: FUN_0829e1d8
     name: current_record_status
