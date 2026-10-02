@@ -9,25 +9,18 @@
 //! member constructor's result minus 0x90. Ghidra incorrectly declares the
 //! member constructor void and omits the live r1 owner argument at the call.
 //!
-//! Deliberate deviations: none on target. Unported constructors are typed
-//! calls to verified retail addresses, not invented class identities. Host
-//! builds expose constructor seams and retain target-width word offsets.
+//! Deliberate deviations: none on target. The unported base is a typed call
+//! to its verified retail address; the owner member uses the Rust port.
+//! Host builds expose the base seam and retain target-width word offsets.
 
 pub type BaseConstruct = unsafe extern "C" fn(*mut u32, u32) -> *mut u32;
-pub type MemberConstruct = unsafe extern "C" fn(*mut u32, *mut u32) -> *mut u32;
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_base(_: *mut u32, _: u32) -> *mut u32 {
     panic!("install owner-linked base constructor host seam")
 }
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_member(_: *mut u32, _: *mut u32) -> *mut u32 {
-    panic!("install owner-linked member constructor host seam")
-}
-#[cfg(not(target_os = "none"))]
 pub static mut OWNER_LINKED_BASE_CONSTRUCT: BaseConstruct = missing_base;
-#[cfg(not(target_os = "none"))]
-pub static mut OWNER_LINKED_MEMBER_CONSTRUCT: MemberConstruct = missing_member;
 
 /// # Safety
 /// Storage and constructor results must be aligned, writable objects with at
@@ -38,20 +31,21 @@ pub unsafe extern "C" fn owner_linked_member_construct(
     this: *mut u32, value: u32, base_value: u32,
 ) -> *mut u32 {
     #[cfg(target_os = "none")]
-    let (base, member): (BaseConstruct, MemberConstruct) = unsafe {
-        (core::mem::transmute(0x0827_c534usize), core::mem::transmute(0x0827_c4e4usize))
+    let base: BaseConstruct = unsafe {
+        core::mem::transmute(0x0827_c534usize)
     };
     #[cfg(not(target_os = "none"))]
-    let (base, member) = unsafe {
-        (core::ptr::addr_of!(OWNER_LINKED_BASE_CONSTRUCT).read_volatile(),
-         core::ptr::addr_of!(OWNER_LINKED_MEMBER_CONSTRUCT).read_volatile())
+    let base = unsafe {
+        core::ptr::addr_of!(OWNER_LINKED_BASE_CONSTRUCT).read_volatile()
     };
     let object = unsafe { base(this, base_value) };
     unsafe {
         object.write_volatile(0x089a_83e0);
         object.add(35).write_volatile(0);
         object.add(34).write_volatile(value);
-        member(object.add(36), object).wrapping_sub(36)
+        super::owner_member_construct::owner_member_construct(
+            object.add(36), object as usize as u32,
+        ).wrapping_sub(36)
     }
 }
 
@@ -68,21 +62,15 @@ mod tests {
         }
         object
     }
-    // Raw 0x0827c094/0x0827c4e4 effects, with owner represented as a word.
-    unsafe extern "C" fn member(this: *mut u32, owner: *mut u32) -> *mut u32 {
-        unsafe {
-            this.write(0x089a_8354);
-            this.add(1).write(0);
-            this.add(2).write(owner as usize as u32);
-        }
-        this
-    }
 
     #[test]
     fn preserves_base_fields_and_initializes_owner_member_at_target_offsets() {
+        let _lock = super::super::owner_member_construct::tests::LOCK.lock();
+        let saved = unsafe { super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT };
         unsafe {
             OWNER_LINKED_BASE_CONSTRUCT = base;
-            OWNER_LINKED_MEMBER_CONSTRUCT = member;
+            super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT =
+                super::super::owner_member_construct::tests::base;
         }
         for value in [0, 1, 0x8000_0000, u32::MAX] {
             for base_value in [0, 0xa5a5_a5a5, u32::MAX] {
@@ -109,7 +97,7 @@ mod tests {
         }
         unsafe {
             OWNER_LINKED_BASE_CONSTRUCT = missing_base;
-            OWNER_LINKED_MEMBER_CONSTRUCT = missing_member;
+            super::super::owner_member_construct::OWNER_MEMBER_BASE_CONSTRUCT = saved;
         }
     }
 }
