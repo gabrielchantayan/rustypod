@@ -198459,3 +198459,49 @@ functions:
       match.py reports 14 Rust instructions versus nine stock instructions:
       frame push/pop, bne instead of predication, and sub/clz/lsr for equality.
       The conditional second-word path and normalized result are preserved.
+
+  - address: 0x0829b904
+    ghidra: FUN_0829b904
+    name: calendar_day_rect
+    size: 196
+    sig: "void calendar_day_rect(const u32 *view, i32 day, Rect *out)"
+    module: ui/calendar_day_rect
+    status: ported
+    vars:
+      param_1: view
+      param_2: day
+      param_3: out
+      "view+0x80": bounds
+      "view+0xec": date_owner
+      "owner+0xe8": date
+      "view+0xf8": row_origin_offset
+      "view+0x100": week_start
+      FUN_082a2320: rect_width
+      FUN_0826c574: rect_offset
+      FUN_080d6d68: month_first_weekday_unported
+      FUN_08031568: __rt_sdiv
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec establishes 0x0829b904..0x0829b9c8, 196 bytes,
+      ending in pop before the next independent function's push. Independent
+      aligned A32 decoding counts six plain body BLs and one BLNE; two plain
+      inbound BLs at 0x08140c7c and 0x08141478, zero predicated inbound BLs.
+      The date accessor at 0x080d6d68 decomposes the date, sets day-of-month
+      to one, recomputes weekday, and maps zero to seven; it is not in the
+      names ledger and remains an unported firmware seam with u32 argument
+      and result. Divide rectangle width by seven, center the signed leftover,
+      normalize the first weekday relative to week_start using unsigned
+      remainder unless their wrapping difference is exactly seven, then
+      place one-based day in seven-column rows spaced 34 pixels apart.
+      Cells are column_width+1 wide and 35 high. All coordinate arithmetic
+      wraps; signed divisions truncate toward zero. Deliberate deviation:
+      constant divisions replace ADS quotient/remainder calls. Host tests
+      cover row transitions, the special difference-seven branch, negative
+      widths and days, unsigned weekday underflow, and coordinate overflow.
+      Full host suite and ARM release build pass. Exported-wrapper executable
+      smoke with only the unported accessor substituted yields {39,3,74,18}
+      for width 101, first weekday 7, week start 1, day 2, row offset 5.
+      match.py reports 64 Rust instructions against 49 stock instructions;
+      constant division uses multiply-high sequences, accessor uses BLX,
+      rect_width inlines, and rect_offset remains a call. The special weekday
+      branch, signed row/column arithmetic, and final edge writes remain.
