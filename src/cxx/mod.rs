@@ -479,6 +479,7 @@ pub mod opaque_record_word_at_0c;
 pub mod opaque_record_word_at_10;
 pub mod opaque_collection_count;
 pub mod opaque_collection_secondary_count;
+pub mod opaque_collection_count_at_88;
 pub mod opaque_pair_equal;
 pub mod opaque_context_initialize;
 pub mod opaque_context_activate;
