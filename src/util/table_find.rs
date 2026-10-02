@@ -3,6 +3,8 @@
 //!
 //! - [`table6_find_by_key`] — a six-slot request registry keyed by an
 //!   object handle (`FUN_081c93fc` @ 0x081c93fc).
+//! - [`table6_request_state`] — the state byte for a registered request
+//!   (`FUN_0829dd30` @ 0x0829dd30).
 //! - [`registry_find_for_slot`] — the 275-entry id registry with a
 //!   per-slot availability mask (`FUN_08138bd0` @ 0x08138bd0).
 //!
@@ -125,6 +127,29 @@ pub unsafe extern "C" fn table6_find_by_key(
     core::ptr::null_mut()
 }
 
+/// table6_request_state — original: `FUN_0829dd30` @ 0x0829dd30.
+/// True extent: 24 bytes, ending before the next function at 0x0829dd48.
+/// Verified raw-image calls: 2 plain BL callers, 0 predicated BL callers;
+/// one outgoing plain BL to table6_find_by_key (0x081c93fc).
+///
+/// Finds the first matching key in the six-slot request table and returns
+/// its unsigned state byte at +4; a missing key returns zero. All byte
+/// values are preserved, not just the usual idle/running/done states.
+/// Deviation: LLVM may inline the existing lookup and unroll its scan.
+///
+/// # Safety
+/// `table` must point to a readable handle to six initialized RequestSlots.
+/// The caller must synchronize access with registry writers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn table6_request_state(
+    table: *const *mut RequestSlot,
+    key: u32,
+) -> u8 {
+    let slot = table6_find_by_key(table, key);
+    if slot.is_null() { 0 } else { (*slot).state }
+}
+
 /// One 12-byte id-registry record (see the module header).
 #[repr(C)]
 pub struct SlotRecord {
@@ -225,6 +250,39 @@ mod tests {
     fn find(base: *mut RequestSlot, key: u32) -> *mut RequestSlot {
         let handle = base;
         unsafe { table6_find_by_key(&handle as *const *mut RequestSlot, key) }
+    }
+
+    #[test]
+    fn request_state_preserves_every_byte_at_every_slot() {
+        let mut slots =
+            [slot(10, 0), slot(20, 0), slot(30, 0), slot(40, 0), slot(50, 0), slot(60, 0)];
+        let handle = slots.as_mut_ptr();
+        for index in 0..TABLE_SLOTS {
+            for state in 0..=u8::MAX {
+                slots[index].state = state;
+                slots[index].reserved = [0xff; 3];
+                assert_eq!(
+                    unsafe { table6_request_state(&handle, slots[index].key) },
+                    state,
+                    "slot {index}, state {state}",
+                );
+            }
+        }
+        assert_eq!(unsafe { table6_request_state(&handle, u32::MAX) }, 0);
+    }
+
+    #[test]
+    fn request_state_uses_first_match_including_zero_key_and_idle_state() {
+        let mut slots =
+            [slot(0, 0x80), slot(7, 0), slot(7, 2), slot(0, 1), slot(5, 1), slot(6, 2)];
+        let handle = slots.as_mut_ptr();
+        assert_eq!(unsafe { table6_request_state(&handle, 0) }, 0x80);
+        assert_eq!(unsafe { table6_request_state(&handle, 7) }, 0);
+        slots[1].state = 1;
+        assert_eq!(unsafe { table6_request_state(&handle, 7) }, 1);
+        slots[1].state = 2;
+        assert_eq!(unsafe { table6_request_state(&handle, 7) }, 2);
+        assert_eq!(unsafe { table6_request_state(&handle, 8) }, 0);
     }
 
     #[test]
