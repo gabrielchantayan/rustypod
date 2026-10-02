@@ -198768,3 +198768,39 @@ functions:
       Standalone runtime smoke executes the actual Rust accessor and its
       existing callees with a high-bit index, verifying text pointer identity
       and the shared empty byte after changing the payload to NULL.
+
+  - address: 0x082996f0
+    ghidra: FUN_082996f0
+    name: owner_collection_item_count
+    size: 16
+    sig: "u32 owner_collection_item_count(const u32 *owner)"
+    module: app/owner_collection_item_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0xbc": collection
+      FUN_08299d78: opaque_collection_item_count
+      return/r0: item_count
+    notes: >-
+      Raw words e59000bc e3500000 1a00019e e12fff1e establish the
+      16-byte extent 0x082996f0..0x08299700; the next real function
+      begins at 0x08299700 with push {r4,lr}. Whole-image aligned
+      A32 BL decoding finds two incoming plain calls at 0x081273c4
+      and 0x082346c4, zero predicated calls. There are no outbound
+      BLs; bne at 0x082996f8 tail-calls 0x08299d78, independently
+      verified as ldr r0,[r0,#8]; bx lr and already ported as
+      opaque_collection_item_count. Load the target-width pointer
+      at owner+0xbc; return zero for NULL, otherwise return the
+      collection count unchanged. Caller 0x08127354 adds three
+      to the returned count. No deliberate behavioral deviation;
+      reuse the existing count port, with aligned word-indexed owner
+      access preserving four-byte target fields on hosts. Host tests
+      cover absent and present collections, zero, one, ordinary,
+      high-bit and maximum counts, and unchanged owner/collection words.
+      Full x86_64 host suite passes (13388 tests); ARM release build
+      passes. Standalone runtime smoke verifies absent, high-bit count,
+      empty and detached collection paths. match.py exits 1 with a
+      structural diff: LLVM adds frame-pointer push/mov/pop, branches
+      around an explicit zero return, and retains the non-NULL tail
+      branch. R_ARM_JUMP24 verifies that branch targets the existing
+      opaque_collection_item_count symbol; it is not a recursive call.
