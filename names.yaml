@@ -200618,3 +200618,48 @@ functions:
       differences: LLVM uses CLZ for the zero-to-one mapping, materializes
       status constants and inlines timer_restart while preserving its state
       store and arm dispatch. No exact instruction match is claimed.
+
+  - address: 0x082897c0
+    ghidra: FUN_082897c0
+    name: owner_component_feedback_gate
+    size: 144
+    sig: "u32 owner_component_feedback_gate(FeedbackGateContext *context)"
+    module: app/owner_component_feedback_gate
+    status: ported
+    renames:
+      param_1: context
+      context_plus_0x28: owner
+      owner_plus_0x4d3: owner_byte_at_4d3
+      FUN_08100b74: instance_of_class_6600
+      FUN_080fffdc: class_6600_byte_at_100
+      FUN_0825b680: lazy_singleton_0x40
+      FUN_08116904: component_virtual_slot_ac
+      FUN_081159bc: component_vtable_slot_180_tail_dispatch
+      FUN_08116914: component_virtual_slot_b8
+      FUN_08294d98: input_feedback_controller_get
+      FUN_08294ba0: feedback_permission_firmware_entry
+    notes: >-
+      Raw osos.dec establishes 144 bytes at 0x082897c0..0x08289850,
+      ending with pop at 0x0828984c before the next independent prologue.
+      Two incoming plain BLs at 0x082896b0 and 0x08289728; zero predicated
+      incoming BLs. Eight outgoing plain BLs, zero predicated BLs, one
+      virtual BLX and a conditional tail B to 0x08294ba0. Ghidra folds
+      the tail callee into this function; it is not part of this extent.
+      Rejects nonzero owner byte +0x4d3 and class-6600 byte +0x100,
+      requires singleton slot +0x10 nonzero, then accepts component
+      !slot_ac || slot_b4 || slot_b8 with retail short-circuit order.
+      NULL feedback controller returns one; otherwise preserves the
+      raw feedback permission result. No NULL guards added. Callee
+      identities beyond these observed offsets remain unresolved.
+      Inline verified byte getter and component AC/B8 tail wrappers;
+      reuse ported class getter, byte getter, singleton getter, B4
+      wrapper and feedback getter. Unported feedback tail callee uses
+      its verified ARM address 0x08294ba0. Native host pointer and
+      vtable entries widen; target context offset is statically checked.
+      Host suite: 13476 passed. Exhaustive predicate combinations test
+      short-circuit order, NULL feedback and full-width nonzero results.
+      Throwaway exported-function smoke rejects all 255 nonzero owner
+      bytes before NULL component dispatch; no on-device run claimed.
+      ARM release build passes. match.py shows 47 Rust instructions
+      versus 36 stock: inlined getters/wrappers, larger frame and BX
+      tail address materialization preserve the decision structure.
