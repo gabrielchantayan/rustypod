@@ -149,6 +149,24 @@ pub unsafe extern "C" fn configure_display_pending_nibbles(
     set_display_pending_nibbles(display, retained_selector, retained_nibbles);
 }
 
+/// configure_display_pending_fourth_nibble — original `FUN_0828d6ac` at
+/// `0x0828d6ac`: 32 bytes, next function `0x0828d6cc`. Raw words verify
+/// zero plain BL callers and two BLEQ callers (`0x0817f4a8`, `0x0817f584`);
+/// the body contains one unconditional BL.
+///
+/// Updates the fourth pending nibble, retaining the selector and first three.
+/// `-1` retains the fourth; `0..=15` updates it; other inputs reject before
+/// mutation. NULL uses the secondary display. No behavioral deviations:
+/// Rust supplies ABI stack arguments rather than explicit register saves.
+///
+/// # Safety
+/// `display` must be a live [`Display`] when non-null.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn configure_display_pending_fourth_nibble(display: *mut Display, fourth: i32) {
+    configure_display_pending_nibbles(display, -1, -1, -1, -1, fourth);
+}
+
 /// ABI shared by the three unported display routines reached from
 /// `apply_display_transition`. Their broader identities are deliberately not
 /// inferred; each verified address takes a display and one word and returns a
@@ -401,6 +419,47 @@ mod tests {
             assert_eq!(FORWARDED, Some((display, 1, [1, 2, 3, 4])));
         }
         restore_recorder(guard);
+    }
+
+    #[test]
+    fn fourth_nibble_boundaries_and_rejection_preserve_other_state() {
+        let guard = install_recorder();
+        let mut storage = std::mem::MaybeUninit::<Display>::zeroed();
+        let display = storage.as_mut_ptr();
+        unsafe {
+            for fourth in [i32::MIN, -2, -1, 0, 15, 16, i32::MAX] {
+                DISPLAY_PENDING_STATE.selector = 1;
+                DISPLAY_PENDING_NIBBLES = [2, 7, 11, 9];
+                FORWARDED = None;
+                configure_display_pending_fourth_nibble(display, fourth);
+                assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
+                let expected = if (0..=15).contains(&fourth) { fourth as u8 } else { 9 };
+                assert_eq!(DISPLAY_PENDING_NIBBLES, [2, 7, 11, expected]);
+                if !(-1..=15).contains(&fourth) {
+                    assert_eq!(FORWARDED, None);
+                }
+            }
+        }
+        restore_recorder(guard);
+    }
+
+    #[test]
+    fn fourth_nibble_null_display_uses_secondary() {
+        let display_guard = crate::drivers::display::DISPLAY_TEST_LOCK.lock();
+        let guard = install_recorder();
+        unsafe {
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 1;
+            DISPLAY_PENDING_STATE.selector = 1;
+            DISPLAY_PENDING_NIBBLES = [2, 7, 11, 9];
+            configure_display_pending_fourth_nibble(ptr::null_mut(), 15);
+            assert_eq!(DISPLAY_PENDING_NIBBLES, [2, 7, 11, 15]);
+            assert_eq!(FORWARDED, Some((
+                ptr::addr_of_mut!(crate::drivers::display::SECONDARY_DISPLAY), 1, [2, 7, 11, 15],
+            )));
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 0;
+        }
+        restore_recorder(guard);
+        drop(display_guard);
     }
 
     #[test]
