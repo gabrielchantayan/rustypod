@@ -198804,3 +198804,49 @@ functions:
       around an explicit zero return, and retains the non-NULL tail
       branch. R_ARM_JUMP24 verifies that branch targets the existing
       opaque_collection_item_count symbol; it is not a recursive call.
+
+  - address: 0x082994a4
+    ghidra: FUN_082994a4
+    name: bitmap_draw_offset_at
+    size: 116
+    sig: "void bitmap_draw_offset_at(u8 *wrapper, u8 *ctx, const Point *offset)"
+    module: drivers/bitmap
+    status: ported
+    renames:
+      param_1/r0: wrapper
+      param_2/r1: ctx
+      param_3/r2: offset
+      local_20: source_bounds
+      local_30: destination_bounds
+      FUN_082993b4: bitmap_ensure_loaded
+      FUN_082a1dbc: bitmap_object_read_bounds
+      FUN_0826c574: rect_offset
+      FUN_08262bdc: bitmap_draw_helper
+    notes: >-
+      Raw ARM establishes 29 words, 116 bytes, from 0x082994a4 through
+      pop at 0x08299514; the next function starts at 0x08299518 with
+      push and a new stack frame. Whole-image aligned A32 BL decoding
+      finds two incoming plain calls at 0x0819e848 and 0x0826d074,
+      zero predicated calls, and four outgoing plain calls to the loader,
+      bounds getter, rectangle offsetter, and draw helper. Load lazily;
+      a zero loaded byte returns without reading offset or ctx. Otherwise
+      copy all four source bounds, translate the copy by offset.x and
+      offset.y with wrapping signed-word arithmetic, reload the wrapper's
+      object pointer, and draw with opacity 255 and reserved word zero.
+      Source origins are retained rather than normalized. Reuses the existing
+      bitmap module and native-pointer repr(C) layouts for host fixtures,
+      preserving target fields at +0x08/+0xc4 and inner pointer at +0x1c.
+      Deliberate deviation: target calls the verified retail loader and
+      draw helper by their raw addresses, avoiding the existing Rust
+      loader/parser and draw hook stub defaults. Host execution uses the
+      existing loader and draw hook seam; bounds and offset are direct
+      Rust ports on both platforms. Full x86_64 host suite and ARM
+      build-std release build pass. Tests cover zero/mixed/extreme offsets,
+      wrapping on both axes, nonzero loaded flags, source preservation,
+      and an unresolved wrapper with null offset and object. Standalone
+      linked host smoke exercised both unresolved and loaded paths:
+      [10,20,30,50] translated by (-7,41) gives [51,13,71,43].
+      match.py exits 1 with a structural diff: LLVM adds frame setup and
+      source initialization, retains the flag branch, bounds copy, offset
+      call and fixed draw arguments, and emits BLX through literal retail
+      addresses rather than ADS direct BL for the two unported callees.

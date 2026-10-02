@@ -339,6 +339,64 @@ pub unsafe extern "C" fn bitmap_draw_in_rect(
         (hooks().draw)(ctx, object, rect_a, rect_b, alpha, 0);
     }
 }
+/// bitmap_draw_offset_at — original: `FUN_082994a4` @ 0x082994a4.
+/// True extent: 116 bytes, ending before the next entry at 0x08299518.
+/// Raw whole-image A32 scan: two incoming plain BL calls (0x0819e848,
+/// 0x0826d074), zero predicated BLs; four outgoing plain BLs.
+///
+/// Load the bitmap lazily, returning if its loaded byte remains zero. Copy
+/// its source bounds, translate the copy by offset.x/offset.y with wrapping
+/// arithmetic, and draw source into destination with opacity 0xff and
+/// reserved word zero. Nonzero source origins are preserved, not normalized.
+///
+/// Deliberate deviations: native-pointer host fixtures use BitmapWrapper and
+/// ParsedBitmap layouts. On target, the verified stock loader and draw helper
+/// remain direct address calls: the existing Rust loader's parser and draw
+/// hooks have stub defaults and cannot faithfully render firmware resources.
+/// Hosts reuse the existing loader and BitmapHooks::draw test seam. The bounds
+/// getter and rect_offset are direct Rust ports on both platforms.
+///
+/// # Safety
+/// wrapper must be a valid mutable bitmap wrapper; a loaded bitmap must have
+/// valid parsed-object/inner bounds pointers. ctx must satisfy the retail draw
+/// helper's contract. offset must contain two aligned signed words on the
+/// loaded path; the unresolved path does not access it or ctx.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn bitmap_draw_offset_at(
+    wrapper: *mut u8,
+    ctx: *mut u8,
+    offset: *const Point,
+) {
+    #[cfg(target_os = "none")]
+    {
+        let load: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x082993b4usize);
+        load(wrapper);
+    }
+    #[cfg(not(target_os = "none"))]
+    bitmap_ensure_loaded(wrapper);
+
+    let wrapper = wrapper_mut(wrapper);
+    if core::ptr::addr_of!((*wrapper).loaded).read_volatile() == 0 {
+        return;
+    }
+    let object = core::ptr::addr_of!((*wrapper).object).read_volatile();
+    let mut source = Rect::default();
+    bitmap_object_read_bounds(object, core::ptr::addr_of_mut!(source).cast());
+    let mut destination = source;
+    let offset = offset.read();
+    rect_offset(&mut destination, offset.x, offset.y);
+    // Reload the object field after the bounds/offset calls, as retail does.
+    let object = core::ptr::addr_of!((*wrapper).object).read_volatile();
+    #[cfg(target_os = "none")]
+    let draw: unsafe extern "C" fn(*mut u8, *mut u8, *const u32, *const u32, u32, u32) =
+        core::mem::transmute(0x08262bdcusize);
+    #[cfg(not(target_os = "none"))]
+    let draw = hooks().draw;
+    draw(ctx, object, core::ptr::addr_of!(source).cast(),
+         core::ptr::addr_of!(destination).cast(), 0xff, 0);
+}
+
 /// bitmap_draw_bottom_left_at — original: `FUN_082995a0` @ 0x082995a0
 /// (136 bytes; **5 plain `bl` and 1 predicated `blne` call sites**, no tail
 /// branches, binary-scanned from osos.dec).
@@ -959,6 +1017,47 @@ mod tests {
         };
 
         assert_eq!(DRAWS.load(Ordering::SeqCst), 0, "unresolved bitmap is not drawn");
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn bitmap_offset_preserves_origins_and_wraps_each_axis() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        let mut parsed = ParsedBitmapFixture::new();
+        let bounds = [i32::MAX as u32, i32::MIN as u32, 17, (-29i32) as u32];
+        let mut inner = BitmapInner::new(bounds);
+        parsed.set_inner_object(inner.ptr());
+        wrapper.set_loaded(0x80);
+        wrapper.set_object(parsed.ptr());
+        for offset in [Point { x: 0, y: 0 }, Point { x: -7, y: 41 },
+                       Point { x: i32::MIN, y: i32::MAX }] {
+            unsafe { bitmap_draw_offset_at(wrapper.ptr(), core::ptr::null_mut(), &offset) };
+            let expected = [
+                bounds[0].wrapping_add(offset.y as u32),
+                bounds[1].wrapping_add(offset.x as u32),
+                bounds[2].wrapping_add(offset.y as u32),
+                bounds[3].wrapping_add(offset.x as u32),
+            ];
+            assert_eq!(core::array::from_fn::<_, 4, _>(
+                |i| LAST_DRAW_RECT_B_WORDS[i].load(Ordering::SeqCst)), expected);
+            assert_eq!(inner.bounds(), bounds, "translation must not mutate source bounds");
+            assert_eq!(core::array::from_fn::<_, 4, _>(
+                |i| LAST_DRAW_RECT_A_WORDS[i].load(Ordering::SeqCst)), bounds);
+        }
+        restore_hooks(guard);
+    }
+
+    #[test]
+    fn bitmap_offset_unresolved_does_not_read_offset_or_object() {
+        let guard = with_recording_hooks();
+        let mut wrapper = Wrapper::new();
+        unsafe {
+            bitmap_draw_offset_at(wrapper.ptr(), core::ptr::null_mut(), core::ptr::null());
+        }
+        assert_eq!(wrapper.0.loaded, 0);
+        assert!(wrapper.0.object.is_null());
+        assert_eq!(DRAWS.load(Ordering::SeqCst), 0);
         restore_hooks(guard);
     }
 
