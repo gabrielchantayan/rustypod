@@ -72,6 +72,10 @@ unsafe fn render_context_suspend_ops() -> RenderContextSuspendOps {
     ptr::read_volatile(ptr::addr_of!(RENDER_CONTEXT_SUSPEND_OPS))
 }
 
+pub(crate) unsafe fn render_context_ensure_presentation(context: *mut u8) {
+    (render_context_suspend_ops().ensure_presentation)(context);
+}
+
 /// The retailOS 32-bit object layout observed by this function.
 #[repr(C)]
 struct RenderContext {
@@ -132,7 +136,7 @@ pub unsafe extern "C" fn render_context_set_suspended(context: *mut u8, suspende
     }
 
     if presentation == 0 && rect_is_empty(ptr::addr_of!((*context_fields).bounds)) == 0 {
-        (render_context_suspend_ops().ensure_presentation)(context);
+        render_context_ensure_presentation(context);
     }
 
     let owner = ptr::addr_of!((*context_fields).owner).read();
@@ -242,11 +246,31 @@ mod tests {
             assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 1);
 
             reset_context(context);
+            ENSURE_CALLS.store(0, Ordering::SeqCst);
+            let resized = Rect { top: -7, left: 3, bottom: 13, right: 33 };
+            crate::ui::render_context_resize::render_context_resize(storage, &resized);
+            assert_eq!(ptr::addr_of!((*context).bounds).read(),
+                Rect { top: 0, left: 0, bottom: 20, right: 30 });
+            assert_eq!(storage.add(0xb4).cast::<Rect>().read(),
+                Rect { top: 0, left: 0, bottom: 20, right: 30 });
+            assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 1);
+
+            reset_context(context);
             ptr::addr_of_mut!((*resource).vtable).write(&RESOURCE_VTABLE);
             ptr::addr_of_mut!((*context).presentation).write(resource as usize as u32);
             assert_eq!(render_context_set_suspended(storage, 0x100), 0);
             assert_eq!(ptr::addr_of!((*context).suspend_state).read(), 0);
             assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), 1);
+            ptr::addr_of_mut!((*context).presentation_resource).write(resource as usize as u32);
+            ptr::addr_of_mut!((*context).presentation).write(resource as usize as u32);
+            let before_release = RELEASE_LOG.load(Ordering::SeqCst);
+            crate::ui::render_context_resize::render_context_resize(storage,
+                &Rect { top: 9, left: 5, bottom: 9, right: 15 });
+            assert_eq!(RELEASE_LOG.load(Ordering::SeqCst), before_release + 1);
+            assert_eq!(ptr::addr_of!((*context).presentation_resource).read(), 0);
+            assert_eq!(ptr::addr_of!((*context).presentation).read(), 0);
+            assert_eq!(ENSURE_CALLS.load(Ordering::SeqCst), 1);
+
 
             crate::ui::render_context_release_presentation::PRESENTATION_CLEANUP = old_cleanup;
             RENDER_CONTEXT_SUSPEND_OPS = old_ops;

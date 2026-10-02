@@ -46,6 +46,7 @@ pub mod render_context;
 pub mod render_context_transform;
 pub mod render_context_invalidate;
 pub mod render_context_suspend;
+pub mod render_context_resize;
 pub mod render_context_release_resource;
 pub mod render_context_release_presentation;
 pub mod render_owner_clip;
