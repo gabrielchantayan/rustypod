@@ -39,9 +39,8 @@
 //! - `pool_alloc_v0` / `pool_alloc_v1` — originals @ 0x0826f73c and
 //!   0x0826f780 (28 bytes each). Thin veneers over `pool_alloc` passing
 //!   variant 0 / 1 as the stack argument. Variant 0 routes to the
-//!   move-preserving heap entry @ 0x0819d2f0 (heap core last-arg 1 =
-//!   copy contents when the block moves; inert here because the core's
-//!   move hint pointer is always 0), variant 1 to the plain tagged entry
+//!   OOM-report-suppressing heap entry @ 0x0819d2f0 (heap core seventh
+//!   argument = 1), variant 1 to the plain tagged entry
 //!   @ 0x0819d67c (the same entry `malloc_wrapper` uses).
 //! - `pool_free` — original: `FUN_0826f758` @ 0x0826f758 (40 bytes).
 //!   Guards (ready flag, NULL), reloads the delta word, strips the
@@ -450,15 +449,21 @@ pub unsafe extern "C" fn pool_seed_regions(pool: *mut PoolControl, size: usize) 
     0
 }
 
-/// pool_alloc — original: `FUN_0826f6a0` @ 0x0826f6a0 (152 bytes).
+/// pool_alloc — original: `FUN_0826f6a0` @ 0x0826f6a0.
 ///
-/// Allocates `size` bytes aligned to `align_class`'s alignment (see the
-/// table in the module header). `uncached == 1` flushes the block's cache
-/// lines and returns the uncached-alias (bit 31) pointer. `variant`
-/// selects the heap entry: 0 = move-preserving @ 0x0819d2f0, anything
-/// else = plain @ 0x0819d67c. Returns NULL when the pool is not ready or
-/// the heap is exhausted (and, as an original quirk, when the alignment
-/// delta would be 0 — dead with this table).
+/// Raw ARM extent: 156 bytes through the next function at 0x0826f73c:
+/// 152 instruction bytes plus the table-address literal at 0x0826f738.
+/// Verified calls: two inbound plain BL sites, zero predicated BL sites;
+/// three outbound plain BL instructions (the two heap entries and cache flush).
+/// Allocates `size + pad` from the embedded heap with tag 0x2b, aligns the
+/// result using the class mask, and stores the raw-to-aligned delta at ptr-4.
+/// `uncached == 1` flushes the header/body before marking bit 31 and storing
+/// through that alias. Variant zero suppresses heap OOM reporting; any other
+/// value selects the plain heap entry. Unready, exhausted, or zero-delta
+/// allocations return NULL. The original performs no class bounds check.
+///
+/// Deliberate deviations: existing POOL_OPS dispatch permits host fixtures;
+/// only hosts strip bit 31 for the header store because they lack the alias.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn pool_alloc(
@@ -485,15 +490,17 @@ pub unsafe extern "C" fn pool_alloc(
     }
     let mut ptr = (raw as usize).wrapping_add(class.pad) & class.mask;
     if uncached == 1 {
-        (op!(dcache_flush))((ptr - 4) as *mut u8, size + 4);
+        (op!(dcache_flush))(ptr.wrapping_sub(4) as *mut u8, size.wrapping_add(4));
         ptr |= UNCACHED_MARK;
     }
     let delta = (ptr & !UNCACHED_MARK).wrapping_sub(raw as usize);
     if delta != 0 {
-        // Original stores through the (possibly marked) uncached alias —
-        // the same DRAM cell; host tests cannot dereference bit-31
-        // addresses, so the store uses the unmarked address.
-        (((ptr & !UNCACHED_MARK) - 4) as *mut u32).write(delta as u32);
+        // Target must store after the flush through the uncached alias.
+        #[cfg(target_os = "none")]
+        let header = ptr.wrapping_sub(4);
+        #[cfg(not(target_os = "none"))]
+        let header = (ptr & !UNCACHED_MARK).wrapping_sub(4);
+        (header as *mut u32).write(delta as u32);
         return ptr as *mut u8;
     }
     core::ptr::null_mut()
@@ -1010,6 +1017,26 @@ mod tests {
                     "delta word at ptr-4"
                 );
                 assert_eq!(FLUSH_CALLS, 0, "no flush without uncached");
+            }
+        }
+    }
+
+    #[test]
+    fn alloc_zero_size_roundtrips_every_word_aligned_class_residue() {
+        let _lock = mock_pool();
+        unsafe {
+            let pool = ready_pool();
+            for (class, align) in [(0usize, 4usize), (1, 16), (2, 32), (3, 1024)] {
+                for residue in (0..align).step_by(4) {
+                    BUMP = residue;
+                    let raw = arena_ptr().add(residue) as usize;
+                    let ptr = pool_alloc(pool, 0, class, 0, 7) as usize;
+                    let expected = (raw + align) & !(align - 1);
+                    assert_eq!(ptr, expected);
+                    let delta = ((ptr - 4) as *const u32).read() as usize;
+                    assert_eq!(delta, expected - raw);
+                    assert_eq!(ptr - delta, raw);
+                }
             }
         }
     }

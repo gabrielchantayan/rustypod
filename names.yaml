@@ -22021,6 +22021,36 @@ functions:
       references. The port routes the two heap calls through POOL_OPS so host
       tests can observe them; target defaults are the already-ported direct
       operator_new/operator_delete implementations.
+  - address: 0x0826f6a0
+    ghidra: FUN_0826f6a0
+    name: pool_alloc
+    size: 156
+    sig: "void *pool_alloc(PoolControl *pool, size_t size, size_t align_class, size_t uncached, size_t variant)"
+    module: heap/pool
+    status: ported
+    renames:
+      param_1/r0: pool
+      param_2/r1: size
+      param_3/r2: align_class
+      param_4/r3: uncached
+      param_5/stack: variant
+      FUN_0819d2f0: heap_alloc_tag1
+      FUN_0819d67c: heap_alloc
+      FUN_08044c10: dcache_clean_invalidate
+    notes: >-
+      Raw A32 extent is 156 bytes to the next function at 0x0826f73c:
+      152 instruction bytes plus the literal at 0x0826f738 (0x089cb1bc).
+      Whole-image BL-word decoding finds two inbound plain BL calls at
+      0x0826f750 and 0x0826f794, zero predicated calls. Three outbound plain
+      BL instructions invoke the two heap entries and cache flush. Ready
+      byte +0x414 gates allocation from heap +0x7c with tag 0x2b and size
+      plus padding. Variant zero selects OOM-report suppression, not copy.
+      The table aligns the raw pointer; uncached exactly one flushes ptr-4
+      for size+4 bytes before setting bit 31. Nonzero raw-to-aligned delta
+      is stored at returned ptr-4 through that alias. Unready, exhausted,
+      and zero-delta cases return NULL. Existing POOL_OPS permits host
+      fixtures; only hosts strip bit 31 for the header store. Target now
+      preserves the original uncached-alias store after flushing.
   - address: 0x0826f580
     name: aligned_pool
     size: 612
