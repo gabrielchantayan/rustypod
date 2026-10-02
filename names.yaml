@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829169c
+    ghidra: FUN_0829169c
+    name: flagged_owned_array_clear
+    size: 76
+    sig: "void flagged_owned_array_clear(u8 *owner)"
+    module: app/flagged_owned_array_clear
+    status: ported
+    renames:
+      param_1/r5: owner
+      r4: index
+      r6: count_snapshot
+      FUN_082a4cf8: array_element_at
+      FUN_082aad24: operator_delete
+      FUN_08271c84: observable_array_clear
+    notes: >-
+      Raw A32 establishes nineteen words, 76 bytes at 0x0829169c..0x082916e4;
+      the next function's push begins at 0x082916e8. Ghidra reports only
+      72 bytes and incorrectly truncates the deletion loop because it treats
+      operator_delete as non-returning. Two outbound plain BLs at 0x082916c4
+      and 0x082916cc, no predicated outbound BLs, and a final tail B to
+      observable_array_clear. Whole-image raw decoding finds one inbound
+      plain BL at 0x08291ce8 and one BLNE at 0x082907e8. If flag word +0x48
+      bit 27 is clear, return without accessing the array. Otherwise snapshot
+      signed count +0x1e4, delete each pointer word indexed in the embedded
+      array +0x1e0, then clear it even for nonpositive counts. No destructors,
+      slot zeroing, or additional NULL guards. All callees already ported;
+      the clear ARM global_asm export is declared with its existing ABI.
+      Host-only operations accommodate native pointer widths. Tests cover
+      disabled ownership, negative/zero/positive counts, NULL and duplicate
+      values, ordering, and callback mutation of the snapshotted count.
+      ARM build passes. match.py's default 72-byte reference omits the final
+      branch; Rust retains the flag gate, signed empty-count gate,
+      accessor/load/delete loop, snapshot bound, and final clear tail branch.
+      LLVM uses a bne loop after the signed entry check and a larger register
+      save set. No firmware callee identity was invented.
   - address: 0x08293264
     ghidra: FUN_08293264
     name: usb_endpoint_packet_size
