@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0828bcd0
+    ghidra: FUN_0828bcd0
+    name: notes_view_initialize
+    size: 216
+    sig: "void notes_view_initialize(NotesView *view)"
+    module: app/notes_view_initialize
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      view+0x58: path
+      view+0xd4: cached_path_index
+      view+0xdc: selected_path
+      view+0xe0: selection_state
+      view+0x4ec: source
+      view+0x53c: snapshot
+      view+0x5a4: request_handle
+      view+0x5ac: request
+    notes: >-
+      Raw words establish 200 code bytes through the return at 0x0828bd94,
+      followed by 16 bytes of literals through 0x0828bda4; the next real
+      function starts at 0x0828bda8. Two inbound plain BLs at 0x08117644 and
+      0x0828b394, zero predicated inbound BLs; 12 plain outbound BLs and no
+      predicated outbound BLs. Ghidra's 0x0811762c caller is an interior label.
+      Invalidates the path cache, assigns Notes, clears the primary string,
+      selects the embedded path, resets byte-source flags, clears global byte
+      0x089cffac, calls retail 0x082725ec with index 3/value 1, snapshots global
+      word 0x089ca674, and registers the request through retail 0x0818a630 only
+      when handle_deref_or_null returns NULL. Existing string and handle ports
+      are reused; repr(C) fields preserve target offsets on widened hosts.
+      Host boundaries require installation; ARM uses verified retail addresses.
+      Host edge tests and allocator-backed repeated-initialization smoke pass.
+      match.py reports 67 Rust instructions versus 50 original, retaining the
+      string lifecycle, reset/snapshot ordering and conditional registration.
   - address: 0x0829134c
     ghidra: FUN_0829134c
     name: string_resource_c_str
