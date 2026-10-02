@@ -199385,3 +199385,44 @@ functions:
       loop instead of BLNE. Node+8 load, head advance/reload, loop, and
       tail clear match; R_ARM_CALL at +0x20 resolves to operator_delete,
       not the apparent self-call printed for the archive placeholder.
+
+  - address: 0x08295fa0
+    ghidra: FUN_08295fa0
+    name: wait_until_idle
+    size: 60
+    sig: "void wait_until_idle(IdleWaitOwner *owner)"
+    module: app/wait_until_idle
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner_plus_0x22d: busy
+      owner_plus_0x230/r5: mutex
+      owner_plus_0x238: condvar
+      FUN_0807f5c4: mutex_lock
+      FUN_080ed9dc: condvar_wait_forever
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw osos.dec establishes fifteen A32 words at 0x08295fa0..0x08295fdc;
+      the next real function begins with push at 0x08295fdc. Whole-image
+      word decoding finds two inbound plain BL sites, 0x081003dc and
+      0x0810078c, and zero predicated BL sites. The body has two plain
+      BL instructions, zero predicated BL instructions, and a tail B
+      to mutex_unlock at 0x0807f6a0. Lock owner+0x230, wait on owner+0x238
+      while byte owner+0x22d is nonzero, then unlock. Both callers wait
+      after requesting state changes; the containing class identity is
+      unknown. All three callees reuse existing ported entries; no new
+      seam. Deliberate deviations: repr(C) synchronization fields widen
+      for host pointers while preserving ARM offsets, volatile busy reads
+      preserve external updates, and the final tail branch is expressed
+      as a return-position call. Host regression uses the real condition
+      variable port and existing kernel mocks to cover initially idle,
+      one wake, repeated spurious wakes, busy values 0x80 and 0xff,
+      null and zero-handle mutex guards, empty waiter queues on return,
+      and opaque-prefix preservation. Required host suite and ARM release
+      build pass. Standalone smoke executes the exact port with simulated
+      locking and three wakes, then confirms an idle repeat skips waiting;
+      no device execution was performed. match.py exits 1: LLVM emits
+      eighteen instructions versus fifteen, adds a frame pointer and an
+      initial predicate check, but retains the wait/recheck loop and tail
+      unlock. Archive relocations resolve both BLs to mutex_lock and
+      condvar_wait_forever and the final B to mutex_unlock.

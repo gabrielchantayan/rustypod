@@ -749,3 +749,4 @@ pub mod intrusive_queue_append;
 pub mod indexed_string_c_str;
 pub mod buffer_pool_owner_destruct;
 pub mod buffer_pool_owner_construct;
+pub mod wait_until_idle;

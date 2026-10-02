@@ -556,6 +556,8 @@ mod tests {
         pop_on_wait: bool,
         wait_condvar: *mut CondVar,
         blocks: Vec<*mut u32>,
+        idle_owner: *mut crate::app::wait_until_idle::IdleWaitOwner,
+        idle_wakes_remaining: usize,
     }
     unsafe impl Send for MockState {}
 
@@ -759,6 +761,12 @@ mod tests {
         let s = g.as_mut().unwrap();
         s.events.push(format!("csem_wake:{id:x}"));
         s.wakes.push(node as usize);
+        if !s.idle_owner.is_null() {
+            s.idle_wakes_remaining -= 1;
+            if s.idle_wakes_remaining == 0 {
+                core::ptr::addr_of_mut!((*s.idle_owner).busy).write(0);
+            }
+        }
     }
 
     unsafe fn install_direct_kernel_mocks() -> DirectKernelGuard {
@@ -1113,6 +1121,43 @@ mod tests {
             let popped = state().as_mut().unwrap().wakes.clone();
             assert_eq!(popped.len(), 1);
             assert!(!popped.contains(&0));
+        }
+    }
+
+    #[test]
+    fn idle_wait_rechecks_busy_after_spurious_wakes_and_preserves_owner() {
+        use crate::app::wait_until_idle::{wait_until_idle, IdleWaitOwner};
+
+        for (busy, wakes) in [(0, 0), (1, 1), (0x80, 3), (0xff, 2)] {
+            let _condvar_guard = install(MockState::default());
+            let _kernel_guard = unsafe { install_direct_kernel_mocks() };
+            let mut owner: IdleWaitOwner = unsafe { core::mem::zeroed() };
+            owner.opaque.fill(0xa5);
+            owner.padding = [0x12, 0x34];
+            owner.busy = busy;
+            let mut lock_word = 0u32;
+            let mut zero_handle = 0u32;
+            owner.condvar.lock_obj = &mut lock_word;
+            // Exercise both null-cell and zero-handle mutex guards.
+            if busy & 1 != 0 {
+                owner.mutex.sem_cell = &mut zero_handle;
+            }
+            {
+                let mut mock = state();
+                let mock = mock.as_mut().unwrap();
+                mock.wait_condvar = &mut owner.condvar;
+                mock.idle_owner = &mut owner;
+                mock.idle_wakes_remaining = wakes;
+            }
+            unsafe { wait_until_idle(&mut owner) };
+            assert_eq!(owner.busy, 0);
+            assert_eq!(state().as_ref().unwrap().wakes.len(), wakes);
+            assert_eq!(state().as_ref().unwrap().idle_wakes_remaining, 0);
+            assert!(owner.condvar.waiters.head.is_null());
+            assert!(owner.condvar.waiters.tail.is_null());
+            assert_eq!(owner.opaque, [0xa5; 0x22d]);
+            assert_eq!(owner.padding, [0x12, 0x34]);
+            assert_eq!(zero_handle, 0);
         }
     }
 
