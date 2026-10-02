@@ -199223,3 +199223,41 @@ functions:
       emits BLX for resident seams, reorders independent initial
       stores, and eliminates the aligned-buffer rebase because the
       existing port always returns its input.
+
+  - address: 0x08296504
+    ghidra: FUN_08296504
+    name: locked_word_pair_reset
+    size: 44
+    sig: "void locked_word_pair_reset(LockedWordPairOwner *owner)"
+    module: app/locked_word_pair_reset
+    status: ported
+    vars:
+      param_1/r0: owner
+      r4: saved_owner
+      r5: embedded_mutex
+    renames:
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      owner_plus_0x29c: first
+      owner_plus_0x2a0: second
+      owner_plus_0x2a4: mutex
+    notes: >-
+      Raw osos.dec words establish the 44-byte extent 0x08296504..0x08296530,
+      where the next real function starts with push. Two inbound plain BLs
+      at 0x082960fc and 0x08296344; zero predicated inbound BLs. One outbound
+      plain BL at 0x08296514 targets mutex_lock 0x0807f5c4; the final B at
+      0x0829652c targets mutex_unlock 0x0807f6a0. Lock owner+0x2a4, clear
+      aligned words +0x29c and +0x2a0, then release. Initialization and cleanup
+      callers both use this reset; the words' higher-level meaning remains
+      unassigned. Reuses both registered Rust mutex ports, with no new seam.
+      Deliberate deviations: return-position Rust call for the tail branch,
+      native-width host mutex pointer after the unchanged target-word prefix.
+      Host tests verify producer updates during acquisition are cleared before
+      release, neighboring words and semaphore state survive, NULL and zero
+      handles skip kernel operations, and repeated resets remain zero.
+      All 13411 host tests pass; ARM release build succeeds. Standalone
+      test-enabled host library smoke resets the pair and preserves prefix
+      and mutex padding. match.py exits 1: LLVM adds a frame-pointer instruction
+      (12 versus 11 instructions), retaining the lock BL, exact field offsets,
+      two zero stores and unlock tail B; archive branch operands are unresolved
+      relocation placeholders, not recursive calls.

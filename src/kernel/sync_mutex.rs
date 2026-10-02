@@ -739,6 +739,83 @@ mod tests {
         guard
     }
 
+    static mut WORD_PAIR_OWNER: *mut crate::app::locked_word_pair_reset::LockedWordPairOwner =
+        core::ptr::null_mut();
+
+    unsafe extern "C" fn word_pair_wait(handle: u32) {
+        let owner = WORD_PAIR_OWNER;
+        assert_eq!(((*owner).first, (*owner).second), (u32::MAX, 0x80000000));
+        // A producer completes while acquiring the semaphore.
+        (*owner).first = 17;
+        (*owner).second = 29;
+        record(Call::Wait(handle));
+    }
+
+    unsafe extern "C" fn word_pair_signal(handle: u32) {
+        let owner = WORD_PAIR_OWNER;
+        assert_eq!(((*owner).first, (*owner).second), (0, 0));
+        record(Call::Signal(handle));
+    }
+
+    #[test]
+    fn locked_word_pair_reset_clears_only_pair_inside_critical_section() {
+        use crate::app::locked_word_pair_reset::{locked_word_pair_reset, LockedWordPairOwner};
+        let _guard = mock_kernel();
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                unsafe {
+                    ROM_KERNEL = MOCK_KERNEL;
+                    WORD_PAIR_OWNER = core::ptr::null_mut();
+                }
+            }
+        }
+        let _reset = Reset;
+        let mut cell = 0x42;
+        let mut owner = LockedWordPairOwner {
+            prefix: [0xa5a5a5a5; 0x29c / 4],
+            first: u32::MAX,
+            second: 0x80000000,
+            mutex: Mutex { sem_cell: &mut cell, unused: 0x12345678 },
+        };
+        unsafe {
+            WORD_PAIR_OWNER = &mut owner;
+            ROM_KERNEL.sema_wait = word_pair_wait;
+            ROM_KERNEL.sema_signal = word_pair_signal;
+            locked_word_pair_reset(&mut owner);
+        }
+        assert_eq!(calls(), vec![Call::Wait(0x42), Call::Signal(0x42)]);
+        assert_eq!(owner.prefix, [0xa5a5a5a5; 0x29c / 4]);
+        assert_eq!((owner.first, owner.second), (0, 0));
+        assert_eq!(owner.mutex.sem_cell, &mut cell as *mut u32);
+        assert_eq!(owner.mutex.unused, 0x12345678);
+        assert_eq!(cell, 0x42);
+    }
+
+    #[test]
+    fn locked_word_pair_reset_handles_null_and_zero_semaphore_cells() {
+        use crate::app::locked_word_pair_reset::{locked_word_pair_reset, LockedWordPairOwner};
+        let _guard = mock_kernel();
+        let mut cell = 0u32;
+        for sem_cell in [core::ptr::null_mut(), &mut cell as *mut u32] {
+            let mut owner = LockedWordPairOwner {
+                prefix: [0x12345678; 0x29c / 4],
+                first: 1,
+                second: u32::MAX,
+                mutex: Mutex { sem_cell, unused: 99 },
+            };
+            unsafe { locked_word_pair_reset(&mut owner); }
+            assert_eq!((owner.first, owner.second), (0, 0));
+            assert_eq!(owner.prefix, [0x12345678; 0x29c / 4]);
+            assert_eq!(owner.mutex.sem_cell, sem_cell);
+            assert_eq!(owner.mutex.unused, 99);
+            unsafe { locked_word_pair_reset(&mut owner); }
+            assert_eq!((owner.first, owner.second), (0, 0));
+        }
+        assert_eq!(calls(), vec![]);
+        assert_eq!(cell, 0);
+    }
+
     #[test]
     fn counted_container_empty_handles_counts_and_wrapping_hold_count() {
         use crate::cxx::counted_container_is_empty::{CountedContainer, counted_container_is_empty};
