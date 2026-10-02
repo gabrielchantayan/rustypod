@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827eb30
+    ghidra: FUN_0827eb30
+    name: passkey_digit_complete
+    size: 196
+    sig: "u32 passkey_digit_complete(u32 *owner)"
+    module: app/passkey_digit_complete
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x68": state_result
+      "owner+0x6c": input_passkey
+      "owner+0x74": stored_passkey
+      "owner+0x7c": confirmation_passkey
+      "owner+0x8c": selected_digit_index
+      "owner+0x98": next_state
+      FUN_0827f484: controller_string_state_reconcile
+      FUN_082aad4c: string_object_equals
+      FUN_0827ef04: opaque_state_recovery
+      FUN_082774a8: string_object_assign
+      FUN_0827639c: string_object_assign_cstr
+      FUN_0827f098: refresh_passkey_mask_indicators
+    notes: >-
+      Raw ARM establishes 192 code bytes and a four-byte literal at 0x0827ebf0;
+      the next function starts at 0x0827ebf4. Seven outgoing plain BLs, no
+      predicated BLs; two incoming plain BLs at 0x0813f92c and 0x0813ff44,
+      no predicated incoming BLs. Increment signed digit indices below four.
+      At four, state one reconciles; otherwise confirmation mismatch resets
+      the index and assigns the runtime shared payload to input, returning four
+      without refresh. Confirmation match recovers, copies to stored passkey,
+      sets both states to two, assigns shared payload to confirmation and resets.
+      Active non-mismatch paths refresh indicators and reload state afterward.
+      No target behavioral deviations. Recovery retains verified address/ABI
+      0x0827ef04; shared payload is loaded from runtime address 0x089cc12c.
+      All 13516 host tests and the ARM release build pass. Actual-source smoke
+      verifies index 2 to 3, four real mask dispatches, refreshed state return,
+      and unchanged owner at index four. match.py exits one: 57 Rust versus
+      48 stock instructions, preserving branches, call order and state stores;
+      LLVM adds a frame, uses BLX for recovery and directly loads 0x089cc12c.
+      No device execution performed.
+      Host callee-effects model avoids native pointers at target string offsets.
   - address: 0x0827f1a0
     ghidra: FUN_0827f1a0
     name: selected_decimal_digit_index
