@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod object_word_at_f4_or_zero;
 pub mod relocated_record_table;
 pub mod collection_find_byte_tag;
 pub mod collection_byte_tag_count;
