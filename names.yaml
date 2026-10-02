@@ -199982,3 +199982,51 @@ functions:
       match.py exits 1: LLVM uses a countdown and postincremented key
       pointer, preserving eight-byte stride, first match and fallback.
       The firmware table remains in place; no device execution performed.
+
+  - address: 0x0828dcd0
+    ghidra: FUN_0828dcd0
+    name: render_context_resize
+    size: 208
+    module: ui/render_context_resize
+    sig: "void render_context_resize(u8 *context, const Rect *bounds)"
+    status: ported
+    vars:
+      param_1: context
+      param_2: bounds
+      param_3: spurious_register_argument
+      context_plus_0x20: local_bounds
+      context_plus_0x48: presentation_resource
+      context_plus_0x54: presentation
+      context_plus_0x60: rendering_enabled
+      context_plus_0xb4: mirrored_bounds
+      FUN_08030f44: heap_panic
+      FUN_0826c2e8: rect_move_to_origin
+      FUN_0828d4e0: render_context_release_resource
+      FUN_0828cd54: render_context_release_presentation
+      FUN_082a22d8: rect_is_empty
+      FUN_0828c700: render_context_ensure_presentation
+    notes: >-
+      Raw A32 words establish 208 bytes at 0x0828dcd0..0x0828dd9f;
+      the next real function starts at 0x0828dda0. Independent whole-image
+      BL decoding finds two plain inbound calls at 0x0817f65c and
+      0x0826dd44, zero predicated inbound calls. Body has two plain BLs,
+      three predicated BLs and a conditional tail B to 0x0828c700.
+      Disabled contexts return without reading bounds. Signed inverted
+      edges panic. Equal wrapping dimensions with an existing presentation
+      preserve all state, including the old origin. Otherwise copy bounds,
+      move to origin, mirror at +0xb4, release resource then presentation,
+      and ensure presentation only for nonempty normalized bounds.
+      Existing Rust geometry and release ports are reused; the verified
+      resident setup target uses the existing suspend module seam.
+      Ghidra incorrectly inlines the tail target and invents a third
+      argument; raw callers supply only context and bounds. Deliberate
+      deviation: ignored incidental r0 exit values are not exposed;
+      target pointer slots remain u32 on hosts. Host edge tests cover
+      disabled NULL input, origin-only no-op, zero extents, signed wrapping,
+      resource releases and nonempty setup. Host suite: 13443 passed.
+      ARM release build passed. Actual-source standalone smoke verifies
+      normalized zero-height bounds and mirror with no presentation.
+      match.py exits 1: 69 Rust versus 52 original instructions; LLVM
+      expands predicates to branches, inlines emptiness, preserves release
+      order and uses the shared setup seam for the tail dispatch. No
+      device execution performed.
