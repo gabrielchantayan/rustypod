@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829bda8
+    ghidra: FUN_0829bda8
+    name: day_and_seconds_ranges_overlap
+    size: 52
+    sig: "u32 day_and_seconds_ranges_overlap(const DayAndSecondsRange *left, const DayAndSecondsRange *right)"
+    module: time/day_and_seconds_ranges_overlap
+    status: ported
+    renames:
+      param_1/r0: left
+      param_2/r1: right
+      r4: saved_left
+      r5: saved_right
+      return/r0: overlaps
+    notes: >-
+      Raw extent 0x0829bda8..0x0829bddc is 52 bytes, ending in BNE
+      0x0829d904. The next independent function loads literal 0x8c80,
+      returns at 0x0829bde0, and has its pool at 0x0829bde4; another
+      function starts with push at 0x0829bde8. Ghidra's 116-byte extent
+      includes these entries and an unrelated BL at 0x0829bdf8.
+      Exact body decoding finds one plain outgoing BL at 0x0829bdb4
+      to the already ported strict-before comparator 0x0829d974, zero
+      predicated BLs, BEQ tail call 0x0829bdc8 to 0x0829d974 and BNE
+      tail call 0x0829bdd8 to 0x0829d904. Whole-image aligned decoding
+      finds two plain incoming BLs at 0x0829b434 and 0x0829b5c4,
+      zero predicated incoming BLs and no incoming immediate B.
+      Caller 0x0829b3d0 compares the object's four-word range at +0x1c
+      with a stack range; 0x0829b548 compares a candidate output range.
+      Unsigned day/seconds lexicographic comparison selects left.end >
+      right.start when left.start < right.start, otherwise left.start <
+      right.end. Strict touching endpoints return zero. No validation
+      of empty or reversed ranges is added. Deliberate deviations:
+      repr(C) DayAndSecondsRange contains two existing DayAndSeconds
+      records; raw-verified greater-than at 0x0829d904 is represented by
+      swapping arguments to the existing strict-before Rust port, without
+      adding another port or seam. Tests cover unsigned boundary products,
+      reversed and empty ranges, containment, touching and aliasing.
+      Full x86_64 host suite and ARM release build pass. Standalone
+      actual-source smoke observes touching=0, partial overlap=1 and
+      containment=1. match.py exits 1: 12 Rust instructions versus its
+      overextended 29 original instructions. ARM relocations verify one
+      BL and one tail B to day_and_seconds_is_before; conditional register
+      selection preserves both retail branches with an LLVM frame.
+      No device execution performed.
   - address: 0x0829c2a4
     ghidra: FUN_0829c2a4
     name: plist_dict_i64
