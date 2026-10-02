@@ -201213,3 +201213,36 @@ functions:
       the unreachable NULL panic check after non-NULL writes; initialization,
       release, allocation and cache publication retain stock behavior.
       No on-device execution claimed.
+
+  - address: 0x082801bc
+    ghidra: FUN_082801bc
+    name: user_record_construct
+    size: 60
+    sig: "UserRecord *user_record_construct(UserRecord *record)"
+    module: app/user_record_construct
+    status: ported
+    vars: {param_1: record, DAT_082801f4: USER_RECORD_VTABLE}
+    notes: >-
+      Raw ARM extent 0x082801bc..0x082801f8 includes 56 instruction bytes
+      and the vtable literal 0x089a6044 at 0x082801f4. Next real entry is
+      0x082801f8. Two inbound plain BLs at 0x081364bc and 0x08136760;
+      zero predicated BL callers. Two outbound plain BLs at 0x082801d8
+      and 0x082801e4 reach verified veneers 0x08037db8 -> 0x2200027c
+      (memzero_aligned) and 0x08037dc8 -> 0x220002d4 (memzero), the IRAM
+      mirrors of osos 0x0800027c and 0x080002d4. Installs vtable, clears
+      payload at +4, ten-byte calendar records at +8 and +18, and user ID
+      at +28. Returns this; bytes +30..+32 remain untouched. Users
+      serialization and the raw allocator caller identify the record role;
+      exact class name and date meanings remain unknown. Ghidra's reported
+      caller 0x082ca58c is not an inbound BL in raw firmware. Uses existing
+      Rust zero-fill ports directly, ignoring their return-value deviation.
+      Target pointer words stay u32 on hosts. Tests cover dirty storage,
+      repeated initialization, returned pointer, padding and neighbor guards.
+      Host suite passes 13503 tests; ARM release build and executable host
+      smoke pass. match.py exits 1 with 45 Rust versus 14 stock instructions:
+      LLVM inlines the existing zero-fill helpers, retaining general
+      alignment branches for the second date and emitting __aeabi_memclr
+      for its byte-alignment prologue. Valid word-aligned objects take the
+      +18 misalignment-two path. Vtable, field offsets, ten-byte lengths,
+      final halfword store, return value and untouched padding are preserved.
+      No on-device execution claimed.
