@@ -199261,3 +199261,46 @@ functions:
       (12 versus 11 instructions), retaining the lock BL, exact field offsets,
       two zero stores and unlock tail B; archive branch operands are unresolved
       relocation placeholders, not recursive calls.
+
+  # --- shared-context board-code predicate (sysinfo) ---
+  - address: 0x082964dc
+    ghidra: FUN_082964dc
+    name: board_version_is_11_19_or_20
+    size: 40
+    sig: "u32 board_version_is_11_19_or_20(void)"
+    module: sysinfo
+    status: ported
+    vars:
+      iVar1/r0: context
+      uVar2/r0: board_code_then_predicate
+      bVar3: code_is_11
+      bVar4: code_is_19
+      bVar5: code_is_not_20
+    renames:
+      FUN_08369bec: shared_context
+    notes: >-
+      Raw words establish the true 40-byte extent 0x082964dc..0x08296504:
+      push {r4,lr}; bl 0x08369bec; ldr r0,[r0,#0x84]; lsr r0,r0,#16;
+      cmp r0,#11; cmpne r0,#19; cmpne r0,#20; moveq r0,#1;
+      movne r0,#0; pop {r4,pc}. The next real function starts at 0x08296504
+      with push {r4,r5,r6,lr}. Full raw A32 BL decoding finds two inbound
+      plain BLs at 0x081042b8 and 0x08104604, zero predicated inbound BLs,
+      and one outbound plain BL at 0x082964e0 to the already-ported
+      shared_context getter. Read the aligned context word +0x84 and return
+      exactly 1 when its high halfword is 11, 19, or 20; return 0 otherwise,
+      independently of the low halfword. Both callers pass this result to
+      the resource-selection routine at 0x082a1df8; the individual board-code
+      meanings remain unknown. Reuses ui/object_state::shared_context and
+      its serialized host fixture, with no new seam or NULL guard. Target
+      deviation: none. Host tests exhaust all 65536 high halfwords with four
+      low-halfword patterns and verify the source word is not modified.
+      All 13412 host tests pass; ARM release build succeeds. Standalone
+      host execution of the port body verifies accepted and neighboring codes,
+      ignored low bits, source preservation, and replacement of the context.
+      match.py exits 1: LLVM emits 14 rather than 10 instructions, adding a
+      frame pointer and replacing conditional compares with an unsigned
+      code <= 20 bound and membership mask 0x180800 (bits 11, 19, and 20).
+      The context +0x84 word load, high-halfword extraction, normalized 0/1
+      result, and single getter call remain. R_ARM_CALL at offset +8 resolves
+      to shared_context; the displayed self-call is an archive relocation
+      placeholder, not recursion.
