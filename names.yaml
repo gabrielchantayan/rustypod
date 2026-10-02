@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08299c6c
+    ghidra: FUN_08299c6c
+    name: selected_entries_position_status
+    size: 172
+    sig: "u32 selected_entries_position_status(u32 *owner, u32 position)"
+    module: app/selected_entries_position_status
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: position
+      owner_plus_0x10c: position_membership_cache
+      owner_plus_0xbc: entry_collection
+      local_20: first_index
+      local_24: last_index
+      local_28: query_position
+      return/r0: membership_status
+    notes: >-
+      Raw extent is 172 bytes, 0x08299c6c..0x08299d18, including literal
+      0x36a1 at 0x08299d14; next real function begins at 0x08299d18.
+      Five outbound unconditional BLs and no predicated BLs. Two inbound
+      unconditional BLs at 0x08127bc4 and 0x08127f1c, no predicated BLs.
+      Cache state 1 returns 0x36a1; state 2 returns zero. Other states scan
+      selected-or-all entries with signed inclusive indices, stopping at
+      the first position membership hit, then cache 1 or 2 under the
+      original position. Ghidra misses the cache setter's third argument
+      and invents a u64 return. Reuse existing range and item ports;
+      unported cache getter/setter at 0x081dc544/0x081dc578 and entry
+      membership at 0x08284748 use verified target-address seams.
+      Host tests cover interval boundaries, keyed hit/miss caching, query
+      mutation, empty-list underflow and first-hit termination. All 13386
+      host tests and ARM release build pass. Actual-source smoke verifies
+      membership and cache persistence after entry mutation. match.py exits
+      1: 56 versus 42 instructions preserve branches, signed loop and five
+      calls, using BLX for three seams. No device execution performed.
   - address: 0x0829b654
     ghidra: FUN_0829b654
     name: object_payload_time_text
