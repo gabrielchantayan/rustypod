@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08294a08
+    ghidra: FUN_08294a08
+    name: usb_high_speed_query
+    size: 68
+    sig: "i32 usb_high_speed_query(u32 receiver, u32 query, u8 *buffer, i32 capacity, u32 *result_length)"
+    module: drivers/usb_high_speed_query
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: query
+      param_3/r2: buffer
+      param_4/r3: capacity
+      param_5/stack: result_length
+    notes: >-
+      Raw A32 establishes extent 0x08294a08..0x08294a4c exclusive;
+      the next function starts with ldr r2,[pc,#56]; mov r1,0.
+      Whole-image aligned BL decoding verifies two plain incoming calls
+      at 0x08160b4c and 0x08160ca8, no predicated incoming calls,
+      and one outgoing plain BL at 0x08294a2c to the already ported
+      usb_high_speed_mode_active at 0x08107f04. No new firmware seam.
+      Receiver is ignored. Query 1 with nonnull buffer and signed capacity
+      at least 1 stores the normalized USB high-speed byte, then length 1,
+      and returns 0. Other requests return -1 without MMIO or output stores.
+      The fifth argument is mandatory on success even though Ghidra omits
+      it in caller 0x08160ad4; raw ldr r5,[sp,#16] proves its ABI location.
+      No behavioral deviations. Volatile stores preserve overlapping
+      byte-before-length ordering. Host tests cover invalid selectors,
+      signed capacity boundaries, null buffers, single-byte writes and
+      overlapping outputs. A standalone smoke exercises the real entry
+      with link statuses 0,1,2,4,6 and 0xffffffff through the existing
+      callee's host MMIO stand-in. Shared MMIO tests use one mutex.
+      Host suite and ARM release build pass. match.py reports 18 Rust
+      instructions versus 17 original: LLVM moves validation ahead of
+      the frame, preserves the signed capacity check and one BL, then
+      emits byte and length stores in retail order. Its relocatable
+      BL destination is resolved by the archive relocation.
   - address: 0x08297588
     ghidra: FUN_08297588
     name: linked_buffer_cursor_advance
