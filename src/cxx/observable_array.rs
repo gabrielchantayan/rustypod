@@ -436,6 +436,42 @@ pub unsafe extern "C" fn observable_array_copy_construct(
     array
 }
 
+/// An opaque polymorphic header followed by an owned observable-array member.
+/// The header's concrete class identity is not established.
+#[repr(C)]
+pub struct ObservableArrayOwner {
+    pub vtable: u32,
+    pub array: ObservableArray,
+}
+
+/// observable_array_owner_copy_construct — `FUN_0827dff0` @ 0x0827dff0.
+/// True size: 28 bytes (24 instruction bytes and the vtable literal at
+/// 0x0827e008); next function starts at 0x0827e00c. Whole-image A32 decoding
+/// verifies two plain incoming BLs and zero predicated BLs. The body has one
+/// plain BL to the existing observable-array copy constructor.
+///
+/// Copy-constructs the member at destination +4 from `source`, subtracts four
+/// from the callee's returned pointer, plants owner vtable 0x089a6208 there,
+/// and returns that adjusted pointer. Ghidra loses both r1 and the r0 return.
+/// Deliberate deviations: none; the opaque class is named only by its role.
+///
+/// # Safety
+/// `destination` must be writable, aligned storage for an ObservableArrayOwner;
+/// `source` and the growth boundary must satisfy observable_array_copy_construct.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_owner_copy_construct(
+    destination: *mut ObservableArrayOwner,
+    source: *const ObservableArray,
+) -> *mut ObservableArrayOwner {
+    let array = observable_array_copy_construct(
+        core::ptr::addr_of_mut!((*destination).array), source,
+    );
+    let owner = array.cast::<u32>().sub(1).cast::<ObservableArrayOwner>();
+    core::ptr::addr_of_mut!((*owner).vtable).write_volatile(0x089a_6208);
+    owner
+}
+
 /// observable_array_clear — original: `FUN_08271c84` @ `0x08271c84`
 /// (20 bytes; **19 `bl` and 57 tail `b` call sites**, all unconditional,
 /// binary-scanned by decoding every B/BL word in `osos.dec`).
@@ -1331,8 +1367,44 @@ mod tests {
                     );
                 }
             }
+
+            // Exercise the owner wrapper through the real member constructor,
+            // including empty arrays, with independent outer-object guards.
+            let mut owner_words = [0xa5a5_a5a5u32; 7];
+            let owner = unsafe {
+                owner_words.as_mut_ptr().add(1).cast::<ObservableArrayOwner>()
+            };
+            unsafe {
+                for index in 0..WORDS_PER_BUFFER {
+                    destination_words.add(index).write_volatile(0x5a5a_5a5a);
+                }
+            }
+            let returned = unsafe { observable_array_owner_copy_construct(owner, &source) };
+            assert_eq!(returned, owner);
+            assert_eq!(owner_words, [
+                0xa5a5_a5a5, 0x089a_6208, OBSERVABLE_ARRAY_VTABLE,
+                count, destination_storage, 0, 0xa5a5_a5a5,
+            ]);
+            assert_eq!(unsafe { COPY_GROW_RECEIVER }, unsafe {
+                core::ptr::addr_of_mut!((*owner).array)
+            });
+            for index in 0..WORDS_PER_BUFFER {
+                let expected = if index < count as usize {
+                    0x1000_0000 + index as u32
+                } else {
+                    0x5a5a_5a5a
+                };
+                assert_eq!(unsafe { destination_words.add(index).read_volatile() }, expected);
+                assert_eq!(unsafe { source_words.add(index).read_volatile() },
+                    0x1000_0000 + index as u32);
+            }
+            assert_eq!(source.base.vtable, 0xfeed_face);
+            assert_eq!(source.len, count);
+            assert_eq!(source.storage, source_storage);
+            assert_eq!(source.observers, 0xc001_c0de);
         }
     }
+
 
     #[test]
     fn the_root_constructor_plants_one_word_and_returns_this() {
