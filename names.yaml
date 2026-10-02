@@ -41184,6 +41184,37 @@ functions:
       proves the +0xdc target field reaches its own vtable's checked-cast
       slot for 0x4a80, and proves a target accepting 0x4a00 returns NULL.
 
+  - address: 0x0828b3a8
+    ghidra: FUN_0828b3a8
+    name: notes_value_capture_demo_mode
+    size: 64
+    sig: "void notes_value_capture_demo_mode(void *owner)"
+    module: app/notes_value_capture_demo_mode
+    status: ported
+    renames:
+      param_1/r0: owner
+      iVar2/r4: value
+      iVar3/r0: notes
+      FUN_081883fc: demo_mode_instance
+      FUN_0828b854: field_dc_as_class_4b00
+      "vtable + 0x168": query
+    notes: >-
+      Raw words establish a 64-byte extent ending at the next prologue
+      at 0x0828b3e8, not Ghidra's 72 bytes. Independent aligned-word
+      scan finds zero plain and two predicated inbound BLs (BLEQ at
+      0x0828a504 and 0x0828ac10), two plain outbound BLs, no predicated
+      outbound BLs, and one BLX through TCDemoMode vtable slot +0x168.
+      Query the singleton slot; sentinel 0xffffffff skips the owner
+      entirely. Otherwise checked-cast owner word +0xdc to class 0x4b00
+      and, when non-null, store the queried word at +0x7c. The original
+      conditional tail B targets 0x08178d98, whose exact words are
+      e580107c e12fff1e (str r1,[r0,#0x7c]; bx lr). Deliberate deviation:
+      inline that verified setter instead of adding an unported seam.
+      Slot +0x168 identity remains unresolved; no semantic identity is
+      invented. Host tests cover sentinel short-circuit with a null
+      owner, null field, rejected class, non-sentinel word boundaries,
+      and adjacent-word preservation.
+
   - address: 0x0828b854
     ghidra: FUN_0828b854
     name: field_dc_as_class_4b00
