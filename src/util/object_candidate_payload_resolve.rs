@@ -82,9 +82,9 @@ pub static mut OBJECT_CANDIDATE_IS_VALID: ObjectCandidateIsValid = DEFAULT_IS_VA
 /// fallback validation.
 ///
 /// Deliberate deviations: the four unported callees are explicit target-address
-/// seams, while the existing 0x0829b804 processor seam is reused. This retains
-/// stock target dispatch and permits host behavioral tests without inventing
-/// callee implementations.
+/// seams, while the existing processor dispatch defaults to the Rust port of
+/// 0x0829b804. Firmware dependency dispatch remains explicit, and host tests
+/// can substitute behavioral models without inventing callee implementations.
 ///
 /// # Safety
 /// `object` must be valid for eleven aligned `u32` words, and `input` and

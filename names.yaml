@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829b804
+    ghidra: FUN_0829b804
+    name: object_word_payload_process
+    size: 80
+    sig: "void object_word_payload_process(u32 *object, u32 *words)"
+    module: util/object_word_payload_process
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: words
+      object_plus_0x2c: selection
+      FUN_0829b764: selected_value_pair_adjust
+    notes: >-
+      Raw ARM establishes 80 bytes at 0x0829b804..0x0829b854, ending
+      with pop at 0x0829b850 before the next independently entered copy
+      function. Two outgoing plain BLs target the already identified
+      selected_value_pair_adjust at 0x0829b764; zero predicated BLs.
+      Full-image decoding finds two inbound plain BLs at 0x0829b454 and
+      0x0829b4b0, zero predicated inbound BLs. A zero selection word at
+      object+0x2c leaves words untouched; otherwise both pairs are adjusted
+      in place with multiplier -1, reloading selection between calls even
+      when it becomes zero. Deliberate deviation: explicit firmware seam
+      retains the unported adjuster's behavior without guessing its tail.
+      Existing processor dispatch now defaults to this port. Host tests
+      cover absent selection, in-place pair mutation and selection reload.
+      ARM match.py exits 1: 24 versus 20 instructions retain both calls
+      as BLX through the seam, the guard, reload and -1 stack argument.
   - address: 0x0829b86c
     ghidra: FUN_0829b86c
     name: range_context_has_handler
