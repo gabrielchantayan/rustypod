@@ -201550,3 +201550,49 @@ functions:
       45 fixture words unchanged. match.py reports seven Rust instructions
       versus five stock instructions: identical ordered stores, with an LLVM
       frame-pointer prologue and pop {fp,pc} instead of bx lr.
+
+  - address: 0x0827e8f4
+    ghidra: FUN_0827e8f4
+    name: kind_0x1f_message_post
+    size: 68
+    sig: "u32 kind_0x1f_message_post(u32 first_payload, u32 second_payload, u32 byte_payload, u32 fourth_payload, u32 fifth_payload)"
+    module: app/kind_0x1f_message_post
+    status: ported
+    renames:
+      param_1/r0/r6: first_payload
+      param_2/r1/r7: second_payload
+      param_3/r2/r8: byte_payload
+      param_4/r3/r4: fourth_payload
+      param_5/stack/r5: fifth_payload
+      uVar3/r0: storage
+      piVar4/r0: message
+      FUN_082669e4: message_kind_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_0827ea20: kind_0x1f_message_construct
+      FUN_08110e4c: message_dispatch
+    notes: >-
+      Raw osos.dec confirms the true 68-byte extent 0x0827e8f4..0x0827e938;
+      the next real function starts at 0x0827e938 with push {r4,r5,r6,lr}.
+      Independent whole-image aligned A32 branch decoding finds two incoming
+      unconditional BLs at 0x082869c4 and 0x082888e4, zero predicated BL
+      callers, and no incoming tail B. The body contains three plain BLs
+      at 0x0827e90c, 0x0827e914, and 0x0827e928, zero predicated BLs, and
+      a tail B at 0x0827e934 to 0x08110e4c. Allocate 28 bytes through the
+      existing message-kind arena and fixed-block allocator, construct a
+      kind-0x1f message from five opaque payloads, then dispatch with NULL
+      explicit target and return its status. The third payload is byte-wide;
+      the adjacent three bytes retain their previous contents. Ghidra merges
+      the tail dispatcher's body into this wrapper; that iteration belongs
+      to 0x08110e4c, not this function. Reuses all three existing Rust callee
+      ports and the established retail dispatcher seam; no invented callee
+      identity or new firmware seam. No deliberate behavioral deviations.
+      Host edge tests exercise zero, all-ones, and mixed payloads with real
+      construction, byte-tail and guard preservation, and dispatch status.
+      All 13517 host tests pass. An isolated throwaway smoke calls the exported
+      wrapper through the real arena accessor, allocator and constructor,
+      substituting only unported host boundaries and allocation storage.
+      ARM release build passes. match.py exits 1 with a structural diff:
+      17 stock instructions versus 24 Rust instructions including a literal;
+      three direct BLs remain, with the same 28-byte request and constructor
+      argument ordering. LLVM uses separate stack-word stores instead of STRD
+      and an indirect BX tail dispatch through the existing volatile seam.
