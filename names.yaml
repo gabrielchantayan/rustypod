@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827f1a0
+    ghidra: FUN_0827f1a0
+    name: selected_decimal_digit_index
+    size: 8
+    sig: "u32 selected_decimal_digit_index(const u32 *owner)"
+    module: app/selected_decimal_digit_index
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x8c": selected_digit_index
+      return/r0: selected_digit_index
+    notes: >-
+      Raw words e590008c and e12fff1e establish LDR r0,[r0,#140]; BX lr,
+      with the next real function starting at 0x0827f1a8. Whole-image aligned
+      A32 decoding verifies two incoming plain BLs at 0x0813ff88 and
+      0x0820e938, zero predicated incoming BLs, and no outgoing BLs.
+      Unlock and volume-limit callers test zero for completion; existing
+      decimal digit editing ports use +0x8c as their selected index.
+      Return all 32 bits unchanged without normalization or NULL checks.
+      Opaque owner uses four-byte word indices to preserve target offsets
+      on hosts. No behavioral deviations or new callee seams. Host suite
+      passes 13511 tests; ARM release build passes. Actual-source smoke
+      confirms zero, valid and high-bit indices with unchanged owner.
+      match.py exits 1: identical +0x8c load, additional LLVM frame setup
+      and POP return, four instructions versus two. No device run performed.
   - address: 0x0827f8c8
     ghidra: FUN_0827f8c8
     name: fixed_string_object_assign_unterminated_suffix
