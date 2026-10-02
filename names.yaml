@@ -7288,6 +7288,43 @@ functions:
       sites (0x0828171c, 0x0828184c, 0x08281934), zero predicated inbound BL
       call sites, two plain outgoing BL calls (0x08281624 and 0x08281640),
       and no predicated outgoing calls. No deliberate deviations.
+  - address: 0x082906b4
+    ghidra: FUN_082906b4
+    name: task_base_start
+    size: 72
+    sig: "void task_base_start(TaskBase *this)"
+    module: cxx/task_base_start
+    status: ported
+    renames:
+      param_1/r0: this
+      this+0x04: handle
+      this+0x08: name
+      this+0x10: scheduler
+      this+0x14: priority
+      this+0x18: active
+      this+0x1c: timeout
+      this+0x20: flag
+      DAT_082906fc: published_task (0x089cc920)
+      DAT_08290700: task_entry (opaque code address 0x082857cc)
+      FUN_082a50b0: string_object_c_str
+      FUN_080e9cbc: unported task creator (return-bearing fixed-address seam)
+    notes: >-
+      Raw osos.dec establishes 72 code bytes at 0x082906b4..0x082906fb,
+      followed by literals 0x089cc920 and 0x082857cc; the next real function
+      starts at 0x08290704. Full-image A32 decoding finds two plain inbound
+      BL sites, 0x08112c50 and 0x0819bed8, and zero predicated inbound BLs.
+      The body has two plain outgoing BLs at 0x082906d0 and 0x082906f0,
+      zero predicated BLs. Clears flag, publishes this, obtains name, calls
+      the creator with name/entry/zero/scheduler/priority/active/timeout,
+      and stores its returned handle. No repeat-start or failure guard.
+      Host repr(C) widens the embedded StringObject; target field offsets
+      remain unchanged. Publication is modeled on host, and the unported
+      creator uses a return-bearing host seam rather than the existing
+      void-return initializer seams. Reuses the ported name accessor and
+      its modeled empty string. Task entry identity remains opaque.
+      Standalone host smoke observed handle 0x76543210 and cleared flag.
+      ARM match review preserves field offsets, argument layout and store
+      ordering; LLVM adds a frame and uses BLX for the fixed-address call.
   - address: 0x08290704
     ghidra: FUN_08290704
     name: task_base_construct
