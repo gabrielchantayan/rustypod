@@ -201800,3 +201800,37 @@ functions:
       retaining the virtual check, conditional comparison, +0x68 store,
       +0x54 list, and exact event key. R_ARM_CALL resolves to the existing
       tdat_element_set_flag_20_bit_2; the export is a distinct real symbol.
+
+  # --- tagged record copy constructor ---
+  - address: 0x0826fc44
+    ghidra: FUN_0826fc44
+    name: tagged_record_copy_construct
+    size: 32
+    sig: "TaggedRecord *tagged_record_copy_construct(TaggedRecord *destination, const TaggedRecord *source)"
+    module: cxx/tagged_record
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      DAT_0826fc60: TAGGED_RECORD_DESCRIPTOR
+      r0 return: destination
+    notes: >-
+      Raw extent is 0x0826fc44..0x0826fc64: seven ARM instructions
+      followed by literal 0x089a5b04 at 0x0826fc60. The independently
+      called empty destructor starts at 0x0826fc64. Whole-image aligned
+      ARM BL decoding finds exactly two unconditional incoming calls at
+      0x082c85e8 and 0x082c86a0, zero predicated incoming calls, and no
+      outgoing calls. Both allocating callers retain r0 as the constructed
+      record pointer; Ghidra's void return is incorrect. Installs the fixed
+      opaque descriptor before reading source+4, copies that payload word,
+      then reads and copies only source+8's flag byte. Destination bytes
+      9..11 remain untouched. Reuses TaggedRecord's target-width repr(C)
+      fields and canonical descriptor; no callee seam or invented descriptor
+      identity. Volatile accesses preserve ordered partial-overlap behavior.
+      Deliberate deviations: none. Host tests cover zero and maximum
+      payload/flag values, descriptor replacement, preserved source,
+      padding and guards, pointer return, self-copy, and partial overlap.
+      All 13526 host tests pass; ARM release build passes. Native standalone
+      smoke verifies descriptor, payload, flag, padding, guard and return.
+      match.py exits 1 with the same ordered loads and stores and exact
+      literal; LLVM adds a frame and replaces bx lr with pop to pc.
