@@ -41228,6 +41228,33 @@ functions:
       up.
     renames: {}
 
+  - address: 0x0827f11c
+    ghidra: FUN_0827f11c
+    name: passkey_selection_reset
+    size: 16
+    sig: "void *passkey_selection_reset(uint32_t *owner)"
+    module: ui/passkey_selection_reset
+    status: ported
+    vars:
+      param_1: "owner"
+    notes: >-
+      True extent 0x0827f11c..0x0827f12b; next real function at
+      0x0827f12c. Raw words e3a01000 e58010a0 e580108c e12fff1e
+      decode as mov r1,#0; str r1,[r0,#0xa0]; str r1,[r0,#0x8c];
+      bx lr. Whole-image aligned A32 scan verifies two incoming plain BLs
+      at 0x0813f524 and 0x0813f858, zero predicated incoming BLs, and
+      zero outgoing plain or predicated BLs. Resets the passkey view's
+      string selection mode and selected digit index before layout changes;
+      existing digit-editing ports select the alternate string only when
+      +0xa0 equals one. Preserves all other fields and the owner in r0.
+      No behavioral deviations. Four-byte word addressing avoids host
+      pointer-width layout changes; volatile stores preserve retail order.
+      Host tests cover primary, alternate, unknown and high-bit modes,
+      extreme indices, idempotence, surrounding words, and pointer return.
+      match.py shows identical mov and ordered stores, with only LLVM's
+      frame-pointer push/mov/pop replacing the leaf bx lr.
+    renames: {}
+
   - address: 0x0827f12c
     ghidra: FUN_0827f12c
     name: selected_decimal_digit_decrement

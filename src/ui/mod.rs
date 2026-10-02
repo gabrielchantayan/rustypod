@@ -183,6 +183,7 @@ pub mod input_report_action_flags;
 pub mod passkey_mask_indicators;
 pub mod passkey_mask_indicator_countdown;
 pub mod passkey_mask_indicator_cycle;
+pub mod passkey_selection_reset;
 pub mod mode_state;
 pub mod view_base;
 pub mod view_resource_provider_assign;
