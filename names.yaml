@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829879c
+    ghidra: FUN_0829879c
+    name: relocated_record_table
+    size: 24
+    sig: "u32 relocated_record_table(const u32 *owner)"
+    module: app/relocated_record_table
+    status: ported
+    renames:
+      param_1/r0: owner
+      r1: table_offset
+      "owner+0x58": data_base
+      "owner+0x64": table_offset
+      return/r0: record_table_address
+    notes: >-
+      Raw A32 words e5901064 e3510000 15900058 10800001 03a00000
+      e12fff1e establish 24 bytes, 0x0829879c..0x082987b4 exclusive.
+      Next real function is the separately ported parser_stack_item.
+      Independent whole-image branch decoding finds two plain inbound BLs
+      at 0x08298750 and 0x0829876c, zero predicated inbound BLs, and no
+      outbound calls. Caller 0x082986bc indexes the result as an 8- or
+      20-byte record table. Zero offset at +0x64 returns zero; otherwise
+      add base at +0x58 modulo 2^32. Concrete owner type is not recovered.
+      No deliberate behavioral deviations or new seams. Fixed-width word
+      indices preserve host layout. Host suite passes 13397 tests; ARM
+      release build and actual-source standalone smoke pass. match.py
+      exits 1: LLVM adds a frame and moves moveq before the conditional
+      load/add, preserving field offsets, conditional reads and wrapping sum.
   - address: 0x082988e4
     ghidra: FUN_082988e4
     name: collection_byte_tag_count
