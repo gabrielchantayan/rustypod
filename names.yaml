@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827c2a4
+    ghidra: FUN_0827c2a4
+    name: vtable_slot_1c_then_context_dispatch
+    size: 48
+    sig: "u32 vtable_slot_1c_then_context_dispatch(void *receiver, u32 operation, u32 first_word, u32 second_word)"
+    module: cxx/vtable_slot_1c_then_context_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: operation
+      param_3/r2: first_word
+      param_4/r3: second_word
+      iVar1: context
+    notes: >-
+      Raw firmware establishes 48 bytes through the tail B at 0x0827c2d0;
+      next real function starts at 0x0827c2d4. Ghidra's 80-byte extent and
+      inlined call to 0x08215bf4 are incorrect for this entry. Zero outgoing
+      plain or predicated BLs, one indirect BLX via vtable +0x1c, and a tail
+      B to 0x0827c668. Two incoming plain BLs at 0x08159a8c and 0x08159b34,
+      zero predicated incoming BLs, independently decoded across raw words.
+      Preserve r1-r3 across virtual acquisition; tail-dispatch its returned
+      object with those three words and preserve the operation's r0 result.
+      Unmapped retail boundary 0x0827c668 loads object words +0x88/+0x8c
+      and calls 0x08215bf4; retain its exact typed address rather than invent
+      a callee identity or port a second function. Host uses pointer-width
+      vtable entries and an injectable boundary; target has no behavioral
+      deviations. Tests cover receiver invalidation during acquisition,
+      distinct context mutation, argument extremes, wrapping results and
+      sentinel preservation. Host cargo test suite and ARM release build pass.
+      Standalone host smoke confirms context mutation and wraparound result
+      0x80000000. Required match.py reports a structural diff (exit 1);
+      its default 80-byte Ghidra extent includes unrelated instructions.
+      Repeating with verified size 48 shows the same slot-7 BLX, restored
+      r1-r3 and terminal dispatch to 0x0827c668; LLVM adds a frame pointer
+      and uses a literal-loaded BX instead of the original direct B.
+      No device execution performed.
   - address: 0x0827c4e4
     ghidra: FUN_0827c4e4
     name: owner_member_construct
