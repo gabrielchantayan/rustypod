@@ -45,11 +45,11 @@
 //!
 //! # Deliberate deviations
 //!
-//! The raw callback words and the unported queued-entry helpers
-//! (`FUN_0829cfc8` and `FUN_080b28bc`) are called at their verified device
-//! addresses. The primary callback pass is now a Rust port; target builds call
-//! its raw callback words directly. Host builds expose replaceable seams because
-//! target-width callback words cannot contain 64-bit host function pointers.
+//! The raw callback words and the unported secondary queued-entry helper
+//! (`FUN_080b28bc`) are called at their verified device addresses. Queue pop
+//! and the primary callback pass use Rust ports. Host builds expose replaceable
+//! seams because target-width callback words cannot contain host function
+//! pointers; the queue-pop seam remains available for dispatch-order fixtures.
 //! The surrounding context remains a target-width layout on both platforms;
 //! host tests use a low-4-GiB slab.
 
@@ -169,10 +169,6 @@ unsafe extern "C" fn missing_context_callback(_callback_word: u32, _argument: u3
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_entry_flag_clear(_state_plus_4: *mut u8) {}
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_queued_entry_pop(_queue: *mut u8) -> *mut u8 {
-    core::ptr::null_mut()
-}
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_queued_entry_primary_callback(
     _callback_word: u32,
     _callback_argument: u32,
@@ -191,7 +187,7 @@ unsafe extern "C" fn missing_queued_entry_callbacks(
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_CONTEXT_CALLBACK_DISPATCH_OPS: ContextCallbackDispatchOps = ContextCallbackDispatchOps {
     invoke_callback: missing_context_callback,
-    pop_queued_entry: missing_queued_entry_pop,
+    pop_queued_entry: crate::pop_queued_entry::pop_queued_entry,
     invoke_queued_entry_callback: missing_queued_entry_primary_callback,
     invoke_queued_entry_secondary_callbacks: missing_queued_entry_callbacks,
     clear_entry_flags: missing_entry_flag_clear,
@@ -231,11 +227,6 @@ unsafe fn clear_retail_context_entry_flags(state_plus_4: *mut u8) {
     clear(state_plus_4);
 }
 
-#[cfg(target_os = "none")]
-unsafe fn pop_retail_queued_entry(queue: *mut u8) -> *mut u8 {
-    let pop: unsafe extern "C" fn(*mut u8) -> *mut u8 = core::mem::transmute(0x0829_cfc8usize);
-    pop(queue)
-}
 
 
 #[cfg(target_os = "none")]
@@ -388,7 +379,7 @@ pub unsafe extern "C" fn context_dispatch_callbacks_and_finish(context: *mut Cal
         let queued_entries = addr_of_mut!((*state).queued_entries).cast::<u8>();
         loop {
             #[cfg(target_os = "none")]
-            let entry = pop_retail_queued_entry(queued_entries);
+            let entry = crate::pop_queued_entry::pop_queued_entry(queued_entries);
             #[cfg(not(target_os = "none"))]
             let entry = (ops.pop_queued_entry)(queued_entries);
             if entry.is_null() {
