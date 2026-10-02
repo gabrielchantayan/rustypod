@@ -203,6 +203,7 @@ pub mod text_layout_counted_apply;
 pub mod text_layout_render_counted;
 pub mod view_scroll_position;
 pub mod texture_upload;
+pub mod texture_define_image;
 pub mod texture_initialize;
 pub mod texture_activate;
 pub mod element_slot_reset;

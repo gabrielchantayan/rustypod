@@ -9,13 +9,11 @@
 //! frame unpack properties, then defines the image and returns the descriptor.
 //!
 //! Deliberate deviations: reuse existing Rust video-engine wrappers and the
-//! resident image-definition seam. That seam accepts two extra dimensions
-//! for the upload caller; raw 0x08281208 never reads incoming stack arguments,
-//! so passing the stored dimensions in those unused slots is harmless.
+//! Rust image-definition port. Raw 0x08281208 consumes only four arguments.
 //! The opaque registration word is a target-width address; host tests use a
 //! NULL engine rather than trying to dereference a truncated host pointer.
 
-use super::texture_upload::{Texture, TEXTURE_DEFINE_IMAGE};
+use super::texture_upload::Texture;
 use crate::util::video_engine::{
     video_engine_dispatch_opaque_two_words, video_engine_set_control_value,
     video_engine_set_property, video_engine_set_frame_property,
@@ -47,9 +45,12 @@ pub unsafe extern "C" fn texture_initialize(
     video_engine_set_property(0x0de1, 0x2802, 0x812f);
     video_engine_set_property(0x0de1, 0x2803, 0x812f);
     video_engine_set_frame_property(0x2300, 0x2200, 0x1e01);
-    let define_image = core::ptr::read_volatile(core::ptr::addr_of!(TEXTURE_DEFINE_IMAGE));
-    define_image((*texture).width, (*texture).height, (*texture).pixel_format,
-        pixels, (*texture).width as u32, (*texture).height as u32);
+    #[cfg(test)]
+    let define_image = core::ptr::addr_of!(super::texture_upload::TEXTURE_DEFINE_IMAGE).read();
+    #[cfg(not(test))]
+    let define_image = super::texture_define_image::texture_define_image;
+    define_image((*texture).width as u32, (*texture).height as u32,
+        (*texture).pixel_format as u32, pixels);
     texture
 }
 
