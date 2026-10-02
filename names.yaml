@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829134c
+    ghidra: FUN_0829134c
+    name: string_resource_c_str
+    size: 72
+    sig: "const char *string_resource_c_str(StringResourceObject *object)"
+    module: app/string_resource_c_str
+    status: ported
+    renames:
+      param_1/r0: object
+      DAT_08291390: ResourceKind::STRING
+      FUN_0827216c: resource_chain_find
+      FUN_082a50b0: string_object_c_str
+      FUN_082915d4: unported cache preparation at fixed retail address
+    notes: >-
+      Raw ARM establishes 68 code bytes at 0x0829134c..0x08291390
+      plus the 0x53747220 Str-kind literal. The next real function
+      starts at 0x08291394, giving a true total extent of 72 bytes.
+      Whole-image decoding finds two plain inbound BL calls at
+      0x08290de4 and 0x08291828, zero predicated BL calls. The body
+      contains one plain BL to 0x082915d4, zero predicated BL, one
+      indirect BLX through virtual slot +0x120, and two tail branches.
+      Zero virtual result selects resource_chain_find with provider
+      +0x38, kind Str and ID +0x44; a miss remains NULL. Any nonzero
+      result prepares the cache through the verified unported retail
+      address and calls string_object_c_str on the member at +0x10c.
+      Raw cache preparation checks byte +0x1f1, resolves the same
+      resource, assigns through 0x08276474 and sets the byte. It is
+      not separately ported or globally named. Ghidra incorrectly
+      inlines both tail-call targets. Host repr(C) pointer fields
+      widen consistently; only cache preparation uses a host seam.
+      The existing c_str port supplies a modeled static empty string.
+      Tests cover miss, hit, post-query ID reload, noncanonical
+      nonzero query, prepare-before-access, and NULL cached payload.
+      All 13434 host tests and ARM release build passed. match.py
+      confirms both paths, offsets and kind; LLVM changes frame
+      allocation and uses BLX for the fixed-address cache call.
+      A standalone real-source native consumer exercised NULL miss
+      and cached-string access. Full host non-test release is blocked
+      by six existing missing helpers in prepare_entry_metadata,
+      shared_payload_select_kind, and calendar_schedule, so that
+      consumer compiled the actual accessor and existing callee
+      sources in isolation instead.
   - address: 0x0829169c
     ghidra: FUN_0829169c
     name: flagged_owned_array_clear
