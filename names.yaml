@@ -155384,13 +155384,13 @@ functions:
       direct plain BL sites at 0x080f7614, 0x080f7638, and 0x080f7654, with
       zero predicated inbound BL sites. The body contains fifteen plain BL
       instructions and zero predicated BL instructions: four opaque hierarchy
-      constructors at 0x08280fc0, operator_new(0xdc), its opaque default
-      constructor at 0x0827bc9c, six animation_default_init calls at
+      constructors at 0x08280fc0, operator_new(0xdc), shared_object_default_construct
+      at 0x0827bc9c (now called directly in Rust), six animation_default_init calls at
       0x08166c5c, and three refcounted_base_init calls at 0x08138460.
       It installs the outer and inner vtables, retains supplied shared storage
       or constructs a 0xdc-byte default, initializes six embedded animation
       values, then initializes three derived refcounted values and returns the
-      enclosing object. The opaque constructors have no recovered semantic
+      enclosing object. The opaque hierarchy constructors have no recovered semantic
       identities, so target builds call their verified addresses and host
       builds use narrow seams; all identified callees call their existing Rust
       resulting nested layout. match.py prints a structural diff (62 Rust
@@ -187443,13 +187443,13 @@ functions:
       direct plain BL sites at 0x080f7614, 0x080f7638, and 0x080f7654, with
       zero predicated inbound BL sites. The body contains fifteen plain BL
       instructions and zero predicated BL instructions: four opaque hierarchy
-      constructors at 0x08280fc0, operator_new(0xdc), its opaque default
-      constructor at 0x0827bc9c, six animation_default_init calls at
+      constructors at 0x08280fc0, operator_new(0xdc), shared_object_default_construct
+      at 0x0827bc9c (now called directly in Rust), six animation_default_init calls at
       0x08166c5c, and three refcounted_base_init calls at 0x08138460.
       It installs the outer and inner vtables, retains supplied shared storage
       or constructs a 0xdc-byte default, initializes six embedded animation
       values, then initializes three derived refcounted values and returns the
-      enclosing object. The opaque constructors have no recovered semantic
+      enclosing object. The opaque hierarchy constructors have no recovered semantic
       identities, so target builds call their verified addresses and host
       builds use narrow seams; all identified callees call their existing Rust
       resulting nested layout. match.py prints a structural diff (62 Rust
@@ -202244,3 +202244,42 @@ functions:
       instructions: five BLs, setter tail B, +0x34/+0x48 loads and final
       +0xa8 BX are retained; register allocation, branch layout and
       frame-pointer setup differ. No device execution performed.
+  - address: 0x0827bc9c
+    ghidra: FUN_0827bc9c
+    name: shared_object_default_construct
+    size: 132
+    sig: "u32 *shared_object_default_construct(u32 *storage)"
+    module: app/shared_object_default_construct
+    status: ported
+    renames:
+      r0: storage
+      r4: zero
+      DAT_0827bd18: SHARED_OBJECT_VTABLE
+      DAT_0827bd1c: EMBEDDED_RECORD_VTABLE
+      FUN_08138460: refcounted_base_init
+      FUN_0827d6b4: fixed_point_record_init
+      FUN_081bb794: zero_three_words
+    notes: >-
+      Raw osos.dec verifies 124 instruction bytes through pop at 0x0827bd14,
+      followed by two literal words; the next real function starts with push
+      at 0x0827bd20, giving a 132-byte true extent. Whole-image aligned A32
+      decoding finds two incoming plain BLs at 0x08153184 and 0x0816e3a8,
+      five outgoing plain BLs, and no predicated BLs in either direction.
+      Constructs a caller-owned 0xdc-byte shared object and returns its
+      original pointer, contrary to Ghidra's void/no-argument signature.
+      Initializes the refcounted base, derived vtable 0x08987d60, selector
+      one, sparse fixed-point records at +0x58 and +0x98, three-word records
+      at +0x80 and +0xc0, embedded vtables 0x08a79784 at +0x64 and +0xa4,
+      embedded target-width pointers, and remaining zero control words.
+      Reuses all three existing Rust ports; removes the opaque constructor
+      seam from object_layout_construct. Host regression checks dirty and
+      zero storage, preserved holes and byte tails, adjacent canaries,
+      pointer identity, and repeated initialization. Full host suite and
+      ARM release build pass. Native extracted-real-source smoke verifies
+      defaults, pointers, holes, byte tail, neighbors, and return identity.
+      A whole-crate non-test host smoke build is blocked by six unrelated
+      missing host helpers in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule. match.py exits 1: LLVM emits 32 instructions
+      plus two literals versus 31 stock instructions, retains five BLs and
+      the same field writes, but changes frame, register use, and store order.
+      Deliberate deviations: none; host pointer stores truncate to u32.

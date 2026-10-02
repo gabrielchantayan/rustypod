@@ -46,6 +46,7 @@ pub mod input_sequence_item_clear_action;
 pub mod animation_property_pair_init;
 pub mod application_client_cleanup;
 pub mod object_layout_construct;
+pub mod shared_object_default_construct;
 pub mod swap_selector_one_two;
 pub mod opaque_object_apply_mode_five;
 pub mod chunked_interface_transfer;

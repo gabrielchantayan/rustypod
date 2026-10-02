@@ -17,13 +17,14 @@
 //!
 //! # Deliberate deviations
 //!
-//! The four hierarchy constructors and shared-object default constructor have
-//! no recovered semantic identities. Target builds call their verified retailOS
-//! addresses. Host builds expose narrow seams; the already ported animation and
-//! refcounted-base constructors are called directly.
+//! The four hierarchy constructors have no recovered semantic identities.
+//! Target builds call their verified retailOS addresses; host builds expose
+//! narrow seams. The shared-object, animation, and refcounted-base constructors
+//! are called directly through their Rust ports.
 
 use crate::app::animation::animation_default_init;
 use crate::app::fixed_value::refcounted_base_init;
+use crate::app::shared_object_default_construct::shared_object_default_construct;
 use crate::heap::veneers::operator_new;
 
 const OUTER_VTABLE: u32 = 0x0898_69b0;
@@ -49,18 +50,6 @@ pub static mut OUTER_BASE_CONSTRUCT: OpaqueConstruct = missing_outer_base_constr
 #[inline(always)]
 unsafe fn outer_base_construct(storage: *mut u32) -> *mut u32 { OUTER_BASE_CONSTRUCT(storage) }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn shared_object_default_construct(storage: *mut u32) -> *mut u32 {
-    core::mem::transmute::<usize, OpaqueConstruct>(0x0827_bc9c)(storage)
-}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_shared_object_default_construct(storage: *mut u32) -> *mut u32 { storage }
-#[cfg(not(target_os = "none"))]
-pub static mut SHARED_OBJECT_DEFAULT_CONSTRUCT: OpaqueConstruct = missing_shared_object_default_construct;
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn shared_object_default_construct(storage: *mut u32) -> *mut u32 { SHARED_OBJECT_DEFAULT_CONSTRUCT(storage) }
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -120,17 +109,12 @@ mod tests {
     static mut HIERARCHY_CALLS: usize = 0;
     static mut TERMINAL_HIERARCHY: *mut u32 = core::ptr::null_mut();
     static mut ALLOCATED_SHARED: *mut u32 = core::ptr::null_mut();
-    static mut DEFAULT_SHARED_CALL: *mut u32 = core::ptr::null_mut();
 
     unsafe extern "C" fn record_hierarchy(_storage: *mut u32) -> *mut u32 {
         HIERARCHY_CALLS += 1;
         TERMINAL_HIERARCHY
     }
     unsafe extern "C" fn record_allocate_shared(_size: usize) -> *mut u32 { ALLOCATED_SHARED }
-    unsafe extern "C" fn record_shared_default(storage: *mut u32) -> *mut u32 {
-        DEFAULT_SHARED_CALL = storage;
-        storage
-    }
 
     #[test]
     fn constructs_the_layout_and_allocates_only_for_a_null_shared_object() {
@@ -142,14 +126,11 @@ mod tests {
             HIERARCHY_CALLS = 0;
             TERMINAL_HIERARCHY = storage.as_mut_ptr().add(0x38);
             ALLOCATED_SHARED = shared_allocation.as_mut_ptr();
-            DEFAULT_SHARED_CALL = core::ptr::null_mut();
             OUTER_BASE_CONSTRUCT = record_hierarchy;
             ALLOCATE_SHARED_OBJECT = record_allocate_shared;
-            SHARED_OBJECT_DEFAULT_CONSTRUCT = record_shared_default;
             let result = object_layout_construct(storage.as_mut_ptr(), supplied_shared);
             assert_eq!(result, storage.as_mut_ptr());
             assert_eq!(HIERARCHY_CALLS, 4);
-            assert_eq!(DEFAULT_SHARED_CALL, core::ptr::null_mut());
             assert_eq!(storage[0], INNER_VTABLE);
             assert_eq!(storage[0x4a], supplied_shared as usize as u32);
             assert_eq!(storage[0x85], FIRST_VALUE_VTABLE);
@@ -158,11 +139,12 @@ mod tests {
             assert_eq!(storage[0x9c], 0);
             let result = object_layout_construct(storage.as_mut_ptr(), core::ptr::null_mut());
             assert_eq!(result, storage.as_mut_ptr());
-            assert_eq!(DEFAULT_SHARED_CALL, ALLOCATED_SHARED);
+            assert_eq!(shared_allocation[0], 0x0898_7d60);
+            assert_eq!(shared_allocation[2], 1);
+            assert_eq!(shared_allocation[0x36], 0);
             assert_eq!(storage[0x4a], ALLOCATED_SHARED as usize as u32);
             OUTER_BASE_CONSTRUCT = missing_outer_base_construct;
             ALLOCATE_SHARED_OBJECT = default_allocate_shared_object;
-            SHARED_OBJECT_DEFAULT_CONSTRUCT = missing_shared_object_default_construct;
         }
     }
 }
