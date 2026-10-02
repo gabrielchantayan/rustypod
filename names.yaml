@@ -47663,6 +47663,37 @@ functions:
       to it. Host builds exactly test the NULL-interface result; their
       non-NULL branch returns 0x200 because firmware u32 code pointers are
       not host-callable native pointers.
+  - address: 0x08296f18
+    ghidra: FUN_08296f18
+    name: owner_scaled_capacity_query
+    size: 76
+    sig: "u32 owner_scaled_capacity_query(RegistryNode *owner)"
+    module: app/owner_scaled_capacity_query
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner+0x14: count
+      FUN_08296efc: owner_capacity_query
+      FUN_08296ec0: facade_registry_walk
+      vtable+0x0c: scaled_capacity_query
+    notes: >-
+      Raw osos.dec verifies 19 ARM words at 0x08296f18..0x08296f60;
+      the next real prologue is at 0x08296f64. Two plain BL instructions
+      at 0x08296f30 and 0x08296f50, zero predicated BLs. Two direct plain
+      BL callers at 0x0808699c and 0x0809b624, zero predicated callers.
+      Nonzero count calls existing owner_capacity_query, reloads count,
+      and returns (count >> 1) * (capacity >> 9) modulo 2^32. Zero count
+      calls existing facade_registry_walk with selector 1, then tail-calls
+      selected facade vtable slot +0x0c with facade in r0. The concrete
+      virtual method identity remains unasserted. Host registry and vtable
+      pointers widen natively; firmware offsets remain exact. Existing
+      capacity-query host non-NULL fallback is inherited, not device
+      behavior. Four tests cover truncation, overflow, mutation during
+      capacity lookup, NULL-interface default, registry selection and
+      virtual receiver data. All 13409 host tests and ARM build passed.
+      match.py confirms both calls, count reload, shifts, multiply and
+      slot-three tail dispatch; LLVM changes frame setup and register
+      allocation, not the algorithm.
   - address: 0x0829b180
     ghidra: FUN_0829b180
     name: primary_string_record_c_str
