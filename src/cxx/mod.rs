@@ -784,6 +784,7 @@ pub mod vtable_word_callback;
 pub mod vtable_slot_10_optional_word;
 pub mod vtable_word_callback_repeat;
 pub mod two_string_record_assign;
+pub mod header_string_pair_destroy;
 pub mod guarded_vtable_slot_04_dispatch;
 pub mod guarded_vtable_slot_04_dispatch_08157448;
 pub mod guarded_vtable_slot_04_dispatch_083e7630;

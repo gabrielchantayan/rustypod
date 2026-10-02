@@ -201246,3 +201246,37 @@ functions:
       +18 misalignment-two path. Vtable, field offsets, ten-byte lengths,
       final halfword store, return value and untouched padding are preserved.
       No on-device execution claimed.
+  - address: 0x082800f8
+    ghidra: FUN_082800f8
+    name: header_string_pair_destroy
+    size: 28
+    sig: "HeaderStringPair *header_string_pair_destroy(HeaderStringPair *this)"
+    module: cxx/header_string_pair_destroy
+    status: ported
+    renames:
+      param_1: this
+      iVar1: destroyed_string
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes the seven-word extent 0x082800f8..0x08280113;
+      the next real function at 0x08280114 is ldr r0,[r0]; bx lr. Two
+      outbound unconditional BLs at 0x08280100 and 0x08280108 both target
+      the verified, already ported string_object_destroy at 0x08277484;
+      zero predicated outbound BLs. Independent whole-image A32 word decoding
+      finds two inbound plain BLs at 0x0839c72c and 0x0839c77c and zero
+      predicated inbound BLs. Destroys embedded strings at +0x10 then +0x08,
+      preserving two opaque header words and returning the record base by
+      subtracting eight from each helper result. The helper returns its input;
+      the Rust port uses that verified contract to return the saved base.
+      No invented callee seam, NULL-this guard or object deallocation. The
+      record's class identity is unknown. Deliberate deviation: repr(C) fields
+      permit native host pointer widening instead of target byte-offset access.
+      Host tests exercise all four NULL/live payload combinations, reverse
+      release order, tag 0x34, header preservation, vtable reset and repeated
+      teardown without double-free. Full host tests and ARM release build pass.
+      match.py reports nine Rust instructions versus seven stock: LLVM saves
+      the base in r4 and uses independent member addresses rather than chaining
+      helper returns, preserving both direct BLs and destruction order. Linked
+      ARM code executed twice under Unicorn with actual string_object_destroy
+      and release-payload code on NULL payloads; call addresses, vtables,
+      untouched header and returned base verified. No on-device run claimed.
