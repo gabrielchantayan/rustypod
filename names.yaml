@@ -199727,3 +199727,48 @@ functions:
       and eliminated no-op guard release. Guard, unsigned threshold, reset,
       clock sampling, step and conditional divisor transition remain intact.
       No device execution performed.
+
+  - address: 0x08292af0
+    ghidra: FUN_08292af0
+    name: input_record_pool_get
+    size: 100
+    sig: "FixedBlockPool *input_record_pool_get(void)"
+    module: app/input_record_pool
+    status: ported
+    renames:
+      DAT_08292b40: runtime_pool_state (0x089ca7fc)
+      DAT_08292b44: input_record_pool_guard (0x089ca844)
+      DAT_08292b48: input_record_pool (0x08a1b1f0)
+      DAT_08292b4c: dso_handle (0x089ca09c)
+      DAT_08292b50: opaque_shutdown_handler_word (0x082612d0)
+      FUN_0826c134: fixed_block_pool_init
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes 80 instruction bytes followed by five literal
+      words, with the next real function at 0x08292b54: true size 100 bytes.
+      Whole-image ARM word decoding finds two inbound plain BL calls at
+      0x08110808 and 0x08292b98, zero predicated inbound BL calls. The body
+      has four plain BL calls and zero predicated BL calls. Constructs eight
+      24-byte blocks using the already-ported fixed_block_pool_init. The
+      caller at 0x08110804 allocates a 24-byte record; the adjacent constructor
+      at 0x08292b54 builds that record. Tests guard bit zero, acquires if clear,
+      registers the constructor return and releases; every path returns the
+      fixed pool, even when acquire refuses or registration fails. Production
+      retains firmware guard/object addresses; native-pointer context isolates
+      host tests. Handler word 0x082612d0 is preserved without inventing a
+      destructor: raw instruction e7960100 loads through r6/r0 inside
+      FUN_08261190, followed by a stack store at sp+0x2d4 and uses of r4/r5/r7.
+      No no-op substitute or claim that this interior handler is safe to run.
+      LLVM may inline registration and eliminate the empty guard release.
+      Host suite passed 13431 tests; ARM release build passed. match.py
+      printed an expected structural diff and exited one: 20 original
+      instructions versus 34 Rust entries including literals, inlined node
+      registration and eliminated empty release. Guard gating, block geometry,
+      fixed return address and opaque handler word remain intact. Standalone
+      fixed-address smoke exercised the public accessor with guard values
+      1, 2, 0x80000000 and 0xffffffff; all returned 0x08a1b1f0 without changing
+      the guard. That isolated harness used the actual guard implementation
+      and fail-fast cold-path dependencies; cold initialization and shutdown
+      were not executed in that smoke. No device execution performed.
