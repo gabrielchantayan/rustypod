@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod owner_linked_member_construct;
 pub mod owner_member_construct;
+pub mod vtable_slot_1c_then_context_dispatch;
 pub mod named_object_value_dispatch;
 pub use named_object_value_dispatch::*;
 pub mod work_source_query;
