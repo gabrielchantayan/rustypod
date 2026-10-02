@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829c2a4
+    ghidra: FUN_0829c2a4
+    name: plist_dict_i64
+    size: 44
+    sig: "i64 plist_dict_i64(const u8 *dictionary, const u8 *key, i64 fallback)"
+    module: util/plist_dict_i64
+    status: ported
+    vars:
+      param_1/r0: dictionary
+      param_2/r1: key (retail string handle)
+      param_3/r2: fallback low word
+      param_4/r3: fallback high word
+      FUN_0829c09c: dictionary key-to-pair-index lookup (unported retail seam)
+      FUN_0829c2d0: indexed signed-64 plist accessor (unported retail seam)
+    notes: >-
+      Raw extent 0x0829c2a4..0x0829c2d0 is 44 bytes including the final
+      e1a00000 NOP; the next independent entry starts with e92d41f0.
+      Whole-image aligned ARM decoding finds two plain incoming BLs at
+      0x080ab2bc and 0x080ab360, zero predicated incoming BLs, one plain
+      outgoing BL at 0x0829c2b4 to 0x0829c09c and no predicated outgoing
+      BLs. Save dictionary and both fallback words, look up the key,
+      move the resulting pair index into r1, restore dictionary and
+      fallback, pop the frame and fall through into 0x0829c2d0.
+      Raw lookup code returns UINT32_MAX on missing keys. Raw indexed
+      code selects dict child 2*index+1, preserves its original unsigned
+      inclusive bounds comparisons, returns fallback on rejection and
+      otherwise tail-calls 0x0802fb9c with the value text and zero arguments.
+      Ghidra incorrectly expands downstream parsing into this wrapper.
+      Neither direct helper has a names.yaml entry or existing Rust port;
+      retain fixed-address target calls and typed host seams.
+      Rust replaces NOP/fall-through with a tail call, without introducing
+      bounds checks or changing parser behavior. Host suite: 13365 passed.
+      ARM release build passes. Throwaway actual-source host smoke with
+      dictionary models verifies zero, signed extrema, positive/negative
+      full-width values, missing keys and empty dictionaries with full-width
+      fallbacks. No permanent forwarding-only tests were added. No device
+      execution or host execution of the retail helpers is claimed.
+      match.py exits 1 with 15 Rust instructions versus 11 original:
+      literal 0x0829c09c, BLX lookup, add 0x234 to obtain 0x0829c2d0,
+      register argument restoration and BX tail call preserve composition.
   - address: 0x0829d818
     ghidra: FUN_0829d818
     name: address_book_availability_word
