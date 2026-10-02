@@ -43507,6 +43507,31 @@ functions:
       cover active old-bounds invalidation, inactive/contextless skips,
       flag stores, the -1 suppression branch, and a live refresh.
 
+  - address: 0x0828c684
+    ghidra: FUN_0828c684
+    name: coordinate_owner_swap_surface
+    size: 124
+    sig: "void coordinate_owner_swap_surface(CoordinateOwner *owner)"
+    module: ui/coordinate_owner_swap_surface
+    status: ported
+    vars: {param_1: owner, iVar3: previous_surface, FUN_082a2330: rect_height, FUN_081066e8: surface_state_wait_ready}
+    notes: >-
+      Raw bytes establish extent 0x0828c684..0x0828c700, with one plain BL
+      to rect_height, one BLNE to 0x081066e8, and a tail B to the memcpy
+      veneer 0x08037db0 (ldr pc literal 0x22000020, the osos IRAM mirror).
+      Both surfaces at +0x54/+0x58 and child +0x78 must be nonzero. Selects
+      the second surface only when current +0x5c equals the first, otherwise
+      selects the first; stores corresponding +0x48/+0x4c state at +0x50.
+      Nonzero byte +0xf8 waits on that state through a verified-address seam:
+      0x081066e8 locks +0x40, waits at +0x48 until byte +0x3d is nonzero,
+      then unlocks. Ghidra omits its live r0 argument. Copies previous
+      surface +4 pixels to the reloaded selected surface +4 pixels, for
+      first-surface stride +8 times rect_height at +0x98, wrapping u32.
+      Existing Rust rect_height and __rt_memcpy replace retail entries;
+      only the unported wait uses volatile dispatch. Host fixtures preserve
+      target-width pointers and exercise swaps, prerequisites, wait ordering,
+      changed stride, third-surface selection, and zero height.
+
   - address: 0x0828cb64
     ghidra: FUN_0828cb64
     name: render_context_transform_rect

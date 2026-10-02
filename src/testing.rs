@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const COORDINATE_OWNER_SWAP_SURFACE: usize = 0x5294_0000;
     pub const COORDINATE_OWNER_FLUSH_PENDING: usize = 0x5293_0000;
     // Dedicated linked-buffer cursor fixture; mapping is never unmapped.
     pub const LINKED_BUFFER_CURSOR_ADVANCE: usize = 0x5292_0000;
