@@ -198334,3 +198334,30 @@ functions:
       NULL, empty, overlong decoded NUL and unsupported leading sequences
       return zero; supported multibyte text and a nonzero prefix before a
       decoder-zero sequence return one. No semantic deviations or new seams.
+
+  - address: 0x0829c188
+    ghidra: FUN_0829c188
+    name: plist_indexed_i32
+    size: 124
+    sig: "i32 plist_indexed_i32(const u32 *view, u32 index, i32 fallback)"
+    module: util/plist_indexed_i32
+    status: ported
+    vars:
+      param_1: view
+      param_2: index
+      param_3: fallback
+    notes: >-
+      Raw extent 0x0829c188..0x0829c204, where the next push begins.
+      Two incoming plain BLs at 0x080ab200 and 0x080ab410; zero predicated
+      incoming BLs. Two outgoing plain BLs at 0x0829c1ac and 0x0829c1cc
+      to plist_node_child_count, zero predicated outgoing BLs, and a tail
+      branch to 0x0802f87c with NULL endptr and base zero. NULL node or
+      inactive view returns fallback. Unsigned count comparisons accept
+      equality; kind 2 maps index to wrapping 2*index+1 before the second
+      check. Reads child text at +0x10 in 40-byte records. ARM keeps the
+      literal retail conversion wrapper because Rust strtol clamps and
+      omits errno; host uses strtoul cast to i32 (return bits preserved,
+      retail errno and locale side effects not modeled). Host boundary and
+      conversion tests and executable smoke pass. ARM build passes;
+      match.py shows child-count inlining, byte-load funnels inherited from
+      that port, a larger frame, and a tail branch through convert_integer.

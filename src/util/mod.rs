@@ -1,5 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
 pub mod plist_dict_i64;
+pub mod plist_indexed_i32;
 pub mod secondary_collection_count;
 pub mod long_filename_byte_is_rejected;
 pub mod payload_word_exchange;
