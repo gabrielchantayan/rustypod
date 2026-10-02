@@ -7820,6 +7820,40 @@ functions:
       a target literal veneer because the relocated payload cannot encode the
       original PC-relative branch; target assembly preserves r0-r3, and the
       host seam verifies r0-r2 forwarding and r0 return propagation.
+  - address: 0x0827b9d8
+    ghidra: FUN_0827b9d8
+    name: video_engine_set_group_enabled
+    size: 116
+    sig: "void video_engine_set_group_enabled(VideoStatusGroup *group, u32 enabled)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: group
+      param_2/r1: enabled
+      "group+0x54": primary
+      "group+0x94": secondary
+      "group+0xd4": tertiary
+      "group+0xd8": auxiliary
+      FUN_08281030: resident_status_enable
+      FUN_08281080: video_engine_disable_status
+    notes: >-
+      Raw osos.dec verifies 116 bytes at 0x0827b9d8..0x0827ba48;
+      the next real function starts with push at 0x0827ba4c.
+      Independent aligned word decoding finds two plain outbound BLs,
+      four BLNEs and two conditional BNE tail calls; inbound references
+      are plain BLs at 0x08152920 and 0x08152934 and a tail B at
+      0x081675dc. Zero disables and any nonzero flag enables the required
+      primary status, then each non-NULL optional status in field order.
+      Pointers are reloaded after calls to preserve callback mutation.
+      Ghidra incorrectly absorbs the tail callees into this wrapper.
+      Disable reuses the existing port; enable calls verified resident
+      entry 0x08281030 with a host behavioral seam, without porting a
+      second function. repr(C) widens host pointers while keeping ARM
+      offsets 0x54, 0x94, 0xd4 and 0xd8. Host tests cover all optional
+      masks, noncanonical nonzero bytes and flags, and aliased statuses.
+      ARM build and match.py confirm field offsets, guards, ordering and
+      final tail calls; LLVM adds a frame, resident BLX calls and Rust
+      symbol relocations. No target behavioral deviation.
   - address: 0x08281080
     ghidra: FUN_08281080
     name: video_engine_disable_status
