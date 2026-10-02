@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0828a8d0
+    ghidra: FUN_0828a8d0
+    name: notes_view_refresh_resources
+    size: 168
+    sig: "uint32_t notes_view_refresh_resources(NotesResourceReceiver *receiver)"
+    module: app/notes_view_refresh_resources
+    status: ported
+    renames:
+      param_1/r0/r4: receiver
+      vtable+0x58: resource_dispatch
+      DAT_0828a960/r5: resource_kind_vmax
+      DAT_0828a968/r6: resource_kind_string
+      DAT_0828a95c: resource_4182
+      DAT_0828a964: resource_4184
+      DAT_0828a96c: resource_4188
+      DAT_0828a970: resource_418a
+      DAT_0828a974: resource_41a0
+      return/r0: final_dispatch_result
+    notes: >-
+      Raw extent is 168 bytes: 140 code bytes plus 28 literal bytes,
+      ending at the next function's push at 0x0828a978. Whole-image A32
+      decoding finds two plain inbound BLs at 0x081176b8 and 0x0828ae38,
+      zero predicated inbound BLs and zero outbound direct BLs. Four plain
+      indirect BLX calls precede a BX tail dispatch at 0x0828a958.
+      Ghidra caller views overlap shared code; they add no raw BL sites.
+      Notes startup and selection refresh dispatch VMax/0x4182, Str /0x4184,
+      VMax/0x4188, Str /0x418a and Str /0x41a0, reloading the receiver's
+      vtable slot +0x58 before every call. Preserve final r0 despite
+      Ghidra's void return. Virtual callees remain unidentified; no new
+      fixed-address seam. Deliberate deviation: repr(C) host pointer cells
+      widen while ARM dispatch remains at +0x58. Tests cover order,
+      full-width final result and alternating vtable replacement. All
+      13474 host tests and ARM release build pass. Actual-source smoke
+      observes all five pairs and return 0x87654321. match.py exits 1:
+      35 original versus 43 Rust listed instructions; frame and constants
+      differ, but five reloads, four BLX calls and final BX are preserved.
   - address: 0x0828ace0
     ghidra: FUN_0828ace0
     name: selected_resource_prepare
