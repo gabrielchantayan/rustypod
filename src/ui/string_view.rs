@@ -180,8 +180,7 @@ const _: [u8; 0x1e0] = [0; core::mem::offset_of!(StringView, observers)];
 const _: [u8; 0x1f0] = [0; core::mem::offset_of!(StringView, resources_resolved)];
 const _: [u8; 0x1f4] = [0; core::mem::offset_of!(StringView, timer)];
 
-/// Indirect dispatch for this constructor's three unported callees
-/// (the `StyledTextViewOps` precedent in `ui/styled_text_view.rs`).
+/// Indirect dispatch for the constructor's dependencies.
 #[derive(Clone, Copy)]
 pub struct StringViewOps {
     /// Base-class constructor @ 0x0826f26c `(view, resources,
@@ -201,13 +200,8 @@ pub struct StringViewOps {
     /// decoded 12-byte leaf (no literal pool, no callees), so the
     /// default below reproduces it exactly rather than stubbing it.
     pub clear_resource_ref: unsafe extern "C" fn(resource_ref: *mut u32) -> *mut u32,
-    /// Resource resolve @ 0x08290f6c `(view, spec, flags)`: picks the
-    /// spec-tail bytes by view flag 0x8000000 and tails into the
-    /// resolver @ 0x08290d7c, which fills `resource_ref` from the
-    /// `'Str '`/`'StSt'`/`'Type'` resource chains and sets
-    /// `resources_resolved`. `flags` is forwarded verbatim into
-    /// 0x08290d7c's tenth slot; this call site always passes 0. Not
-    /// yet ported.
+    /// Ported spec-tail adapter; the third ABI word is ignored, not
+    /// forwarded to the seven-argument resource resolver.
     pub resolve_resources: unsafe extern "C" fn(
         view: *mut StringView,
         spec: *const StringViewSpec,
@@ -245,24 +239,75 @@ unsafe extern "C" fn missing_construct_base(
     panic!("string_view_construct requires base view ctor 0x0826f26c")
 }
 
+/// Resource lookup/update @ 0x08290d7c. Its first stacked arguments
+/// are the two sign-extended spec bytes, followed by the option word.
+pub type StringViewResourceResolver = unsafe extern "C" fn(
+    *mut StringView, *mut ResourceProvider, u32, u32, i32, i32, u32,
+);
+
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_resolve_resources(
-    view: *mut StringView,
-    spec: *const StringViewSpec,
-    flags: u32,
+unsafe extern "C" fn firmware_resolve_resource_ids(
+    view: *mut StringView, resources: *mut ResourceProvider,
+    string_id: u32, typeface_id: u32, first: i32, second: i32, options: u32,
 ) {
-    let resolve: unsafe extern "C" fn(*mut StringView, *const StringViewSpec, u32) =
-        unsafe { core::mem::transmute(0x0829_0f6cusize) };
-    unsafe { resolve(view, spec, flags) }
+    let resolve: StringViewResourceResolver =
+        unsafe { core::mem::transmute(0x0829_0d7cusize) };
+    unsafe { resolve(view, resources, string_id, typeface_id, first, second, options) }
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_resolve_resources(
-    _view: *mut StringView,
-    _spec: *const StringViewSpec,
-    _flags: u32,
+unsafe extern "C" fn missing_resolve_resource_ids(
+    _view: *mut StringView, _resources: *mut ResourceProvider,
+    _string_id: u32, _typeface_id: u32, _first: i32, _second: i32, _options: u32,
 ) {
-    panic!("string_view_construct requires resource resolver 0x08290f6c")
+    panic!("string_view_resolve_resources requires resource lookup 0x08290d7c")
+}
+
+/// Firmware lookup on target; host tests replace it under
+/// `STRING_VIEW_OPS_TEST_LOCK`, just like the constructor's dispatch.
+#[cfg(target_os = "none")]
+pub static mut STRING_VIEW_RESOURCE_RESOLVER: StringViewResourceResolver =
+    firmware_resolve_resource_ids;
+#[cfg(not(target_os = "none"))]
+pub static mut STRING_VIEW_RESOURCE_RESOLVER: StringViewResourceResolver =
+    missing_resolve_resource_ids;
+
+/// string_view_resolve_resources — `FUN_08290f6c` @ 0x08290f6c.
+/// True size: 80 bytes, next function at 0x08290fbc. Raw-word BL count:
+/// one outgoing plain BL to 0x08290d7c; incoming one plain BL at
+/// 0x08291c98 and one BLNE at 0x08291634.
+///
+/// Resolve spec string/typeface IDs with a null resource provider.
+/// If view+0x48 bit 27 is clear, pass (0, signed spec+0x60);
+/// otherwise pass (signed spec+0x60, signed spec+0x61). Forward
+/// spec+0x64 unchanged. The apparent third argument and extra stacked
+/// arguments in Ghidra are saved registers, not resolver inputs.
+/// Deliberate deviation: call the unported lookup through a replaceable
+/// typed seam instead of a fixed BL. Retain the ignored third ABI word
+/// for existing constructor callers; it has no observable effect.
+///
+/// # Safety
+/// `view` and `spec` must be aligned readable objects and accepted by
+/// the installed resolver, which may mutate the view.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_view_resolve_resources(
+    view: *mut StringView, spec: *const StringViewSpec, _flags: u32,
+) {
+    let flags = unsafe { view.cast::<u32>().add(0x48 / 4).read() };
+    let byte_60 = unsafe { core::ptr::addr_of!((*spec).byte_60).read() } as i8 as i32;
+    let (first, second) = if flags & 0x0800_0000 != 0 {
+        (byte_60, unsafe { core::ptr::addr_of!((*spec).byte_61).read() } as i8 as i32)
+    } else {
+        (0, byte_60)
+    };
+    let resolve = unsafe {
+        core::ptr::addr_of!(STRING_VIEW_RESOURCE_RESOLVER).read_volatile()
+    };
+    unsafe {
+        resolve(view, core::ptr::null_mut(), (*spec).string_id,
+            (*spec).typeface_id, first, second, (*spec).word_64);
+    }
 }
 
 /// Wired defaults (the `event_list.rs` split: firmware addresses on
@@ -274,10 +319,7 @@ pub const DEFAULT_STRING_VIEW_OPS: StringViewOps = StringViewOps {
     #[cfg(not(target_os = "none"))]
     construct_base: missing_construct_base,
     clear_resource_ref: resource_ref_clear,
-    #[cfg(target_os = "none")]
-    resolve_resources: firmware_resolve_resources,
-    #[cfg(not(target_os = "none"))]
-    resolve_resources: missing_resolve_resources,
+    resolve_resources: string_view_resolve_resources,
 };
 
 /// The active dispatch table. Written once at init on target; host
@@ -645,4 +687,62 @@ mod tests {
         assert_eq!(buffer, [0, 0, 0, 0xdead_beef]);
     }
 
+}
+
+#[cfg(test)]
+mod resolve_spec_tests {
+    use super::*;
+    use core::ptr;
+
+    unsafe extern "C" fn apply_selected_bytes(
+        view: *mut StringView, resources: *mut ResourceProvider,
+        _string_id: u32, _typeface_id: u32, first: i32, second: i32, _options: u32,
+    ) {
+        assert!(resources.is_null());
+        // The real lookup stores these at view+0xea/+0xeb. Record the
+        // full values as well so loss of ARM LDRSB sign extension fails.
+        (*view).resource_ref = [first as u32, second as u32, 0];
+        view.cast::<u8>().add(0xea).write(first as u8);
+        view.cast::<u8>().add(0xeb).write(second as u8);
+    }
+
+    struct Restore(StringViewResourceResolver);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe { ptr::addr_of_mut!(STRING_VIEW_RESOURCE_RESOLVER).write_volatile(self.0) }
+        }
+    }
+
+    #[test]
+    fn selects_signed_bytes_by_only_bit_27() {
+        let _lock = crate::testing::STRING_VIEW_OPS_TEST_LOCK.lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            let _restore = Restore(ptr::addr_of!(STRING_VIEW_RESOURCE_RESOLVER).read_volatile());
+            ptr::addr_of_mut!(STRING_VIEW_RESOURCE_RESOLVER).write_volatile(apply_selected_bytes);
+            let mut view: StringView = core::mem::zeroed();
+            let mut spec: StringViewSpec = core::mem::zeroed();
+            for flags in [0, 0xf7ff_ffff, 0x0800_0000, u32::MAX] {
+                ptr::addr_of_mut!(view).cast::<u32>().add(0x48 / 4).write(flags);
+                for a in [0u8, 127, 128, 255] {
+                    for b in [0u8, 127, 128, 255] {
+                        spec.byte_60 = a;
+                        spec.byte_61 = b;
+                        string_view_resolve_resources(&mut view, &spec, 0xdead_beef);
+                        let expected = if flags & 0x0800_0000 == 0 {
+                            [0, a as i8 as i32]
+                        } else {
+                            [a as i8 as i32, b as i8 as i32]
+                        };
+                        assert_eq!(&view.resource_ref[..2],
+                            &[expected[0] as u32, expected[1] as u32]);
+                        assert_eq!(ptr::addr_of!(view).cast::<u8>().add(0xea).read(),
+                            expected[0] as u8);
+                        assert_eq!(ptr::addr_of!(view).cast::<u8>().add(0xeb).read(),
+                            expected[1] as u8);
+                    }
+                }
+            }
+        }
+    }
 }
