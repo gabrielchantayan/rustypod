@@ -49383,6 +49383,38 @@ functions:
       calls the existing three ports directly; host tests inject all calls
       and a local table because retail RAM is unmapped.
 
+  - address: 0x08293d4c
+    ghidra: FUN_08293d4c
+    name: registered_entry_signal
+    size: 40
+    sig: "u32 registered_entry_signal(void *controller, u32 entry_id)"
+    module: app/registered_entry_signal
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: entry_id
+      r0: slot_index
+      FUN_08293048: four_slot_key_index
+      FUN_0808e2b0: mailbox_slot_signal
+    notes: >-
+      Raw ARM extent 0x08293d4c..0x08293d74 is 40 bytes: 36 instruction
+      bytes and the 0x089d04c4 table literal at 0x08293d70. The next
+      independent function begins with ldrb at 0x08293d74. Binary scanning
+      finds two inbound plain BL sites at 0x08105038 and 0x08294e00 and
+      zero predicated BL sites; the body has two plain BL instructions
+      at 0x08293d50 and 0x08293d64. Incoming controller and full-width
+      entry_id reach the existing four_slot_key_index port. The selected
+      24-byte record's +4 word points to a mailbox slot passed to the
+      existing mailbox_slot_signal port, and the result is zero. Missing
+      keys remain unchecked: index -1 addresses the preceding record.
+      Host tests use native-pointer repr(C) records and exercise actual
+      mailbox count changes at first, last, and preceding records.
+      Target records retain the exact six-word layout.
+      match.py confirms two calls, index-times-24 addressing, the pointer
+      load, and zero return. LLVM adds a frame pointer and folds table+4
+      into literal 0x089d04c8. Standalone host smoke executes the indexed
+      helper and real mailbox signal: count 7 becomes 6, waiter id unchanged.
+
   - address: 0x082931e4
     ghidra: FUN_082931e4
     name: registered_entry_cancel_complete
