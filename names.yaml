@@ -200061,3 +200061,40 @@ functions:
       push fp/lr, mov fp/sp, pop fp/pc versus bx lr. This frame preserves
       r0 and has no context accesses. Intentional identical-body folding;
       the exported hook remains available. No device execution performed.
+
+  - address: 0x0828da34
+    ghidra: FUN_0828da34
+    name: view_upload_pixels
+    size: 220
+    module: ui/view_upload_pixels
+    sig: "void view_upload_pixels(const PixelUploadView *view)"
+    status: ported
+    vars:
+      param_1/r5: view
+      puVar5/r4: pixels
+      iVar7/r7: height
+      iVar1/r0: stride
+      local_28: backing_bounds_top
+      local_24: backing_bounds_left
+    notes: >-
+      Raw ARM extent is 0x0828da34 through the pop at 0x0828db0c; the next
+      real function starts with push at 0x0828db10. Two outgoing plain BLs
+      call the existing rect_width and texture_upload_pixels ports; zero
+      predicated outgoing BLs. Whole-image word decoding finds zero plain
+      and two predicated incoming calls (BLNE at 0x081584e0 and 0x0826ea90).
+      Callers pass their render context after updating. Tests cover packed
+      RGB565 byte swapping, odd widths (pairs advance continuously across
+      rows), nonpositive spans, sentinel words, disabled upload, and NULL
+      backing/texture guards. Texture dimensions come from the view bounds,
+      not backing bounds. Native repr(C) pointers retain device offsets
+      while allowing real host pointers. Exposes void because both callers
+      discard restored r0/r1; active retail path restores backing top/left.
+      Full host suite: 13447 passed. Standalone actual-source smoke with
+      cfg(test) host support produced 3412cdab ff007f80 and preserved the
+      trailing word for a 3x2 backing, uploading dimensions 3x2. Normal
+      non-test host library compilation is blocked by six unrelated missing
+      helpers in prepare_entry_metadata and calendar_schedule. ARM release
+      build passed. match.py exits 1 with 55 original versus 54 Rust
+      instructions: identical guard offsets and signed paired-word loops;
+      LLVM inlines rect_width, eliminates the zero row adjustment, and
+      tail-calls texture_upload_pixels. No new seams or device execution.
