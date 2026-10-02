@@ -85047,6 +85047,34 @@ functions:
       is the crate-wide frame-pointer prologue (push {fp,lr} / mov fp,sp
       / pop {fp,pc}), the same shape context_scope_drop carries.
 
+  - address: 0x082841b0
+    ghidra: FUN_082841b0
+    name: context_scope_subject_equal
+    size: 24
+    sig: "bool context_scope_subject_equal(const void *left, const void *right)"
+    module: app/context_scope
+    status: ported
+    vars: {param_1: left, param_2: right}
+    notes: >-
+      Compare only the context-scope subject words at +0x04 without
+      dereferencing their values; return exactly zero or one. Descriptor,
+      captured context, owner id, and flag do not participate. Raw words
+      e5900004 e5911004 e1500001 13a00000 03a00001 e12fff1e establish
+      the 24-byte extent through 0x082841c4; the next real function starts
+      with push {r4,lr} at 0x082841c8. Full-image aligned ARM BL decoding
+      finds two plain inbound calls at 0x0812c818 and 0x081978d8, zero
+      predicated inbound calls, and no outbound calls. The latter caller
+      compares scopes embedded at object +0x04 before comparing other
+      fields. No new callee seams or deliberate behavioral deviations.
+      Host tests cover zero, high-bit and all-ones subjects, differing
+      ignored metadata, aliasing, and inputs ending immediately after
+      the subject word. Full host suite passes 13489 tests; ARM release
+      build succeeds. match.py finds the same two +0x04 word loads;
+      LLVM reverses their order, replaces cmp and conditional moves with
+      sub/clz/lsr for a normalized boolean, and adds the standard frame
+      prologue/epilogue. Standalone host smoke exercises the actual
+      predicate source for equality, inequality, and aliasing.
+
   - address: 0x08283168
     ghidra: FUN_08283168
     name: parse_result_init
