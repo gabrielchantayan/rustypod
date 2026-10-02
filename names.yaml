@@ -199849,3 +199849,36 @@ functions:
       the guard. That isolated harness used the actual guard implementation
       and fail-fast cold-path dependencies; cold initialization and shutdown
       were not executed in that smoke. No device execution performed.
+
+  - address: 0x08290fbc
+    ghidra: FUN_08290fbc
+    name: string_view_set_color
+    size: 36
+    sig: "u8 *string_view_set_color(u8 *view, const u8 *color)"
+    module: ui/string_view_color
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: color
+      r2: color_byte
+    notes: >-
+      Raw osos.dec words establish the 36-byte extent ending at 0x08290fdc
+      with bx lr; the next real function at 0x08290fe0 starts with push
+      {r4,r5,r6,lr}. Whole-image aligned ARM decoding finds two inbound
+      plain BL calls at 0x0816d398 and 0x0816d3a4, zero predicated inbound
+      BL calls and zero outgoing BL calls. The caller supplies black or
+      0xdd gray with a fourth byte of 0xff to two resource-selected views.
+      Existing string_view_construct identification places this color at
+      +0xf4 in the draw-state tail immediately before resource_ref +0xf8.
+      Interleaves four byte loads and stores; the first store writes back
+      r0 to view+0xf4, which is returned despite Ghidra declaring void.
+      Volatile byte accesses preserve forward-overlap propagation and
+      prevent widening. No semantic deviations or new callee seams.
+      Host tests cover unaligned buffers, black/gray/mixed color bytes,
+      surrounding-byte preservation, return pointer and overlapping source
+      displacements -3 through +3. Host suite and ARM release build passed.
+      Standalone smoke passed gray/alpha, untouched neighbors, return pointer
+      and forward overlap. match.py exited one with a structural diff:
+      nine original instructions versus eleven Rust instructions; all eight
+      byte accesses match, with only the added frame-pointer prologue and
+      pop return replacing bx lr. No device execution performed.
