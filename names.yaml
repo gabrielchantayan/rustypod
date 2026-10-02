@@ -201834,3 +201834,34 @@ functions:
       smoke verifies descriptor, payload, flag, padding, guard and return.
       match.py exits 1 with the same ordered loads and stores and exact
       literal; LLVM adds a frame and replaces bx lr with pop to pc.
+
+  - address: 0x0827c748
+    ghidra: FUN_0827c748
+    name: vtable_089a8414_destruct
+    size: 28
+    sig: "u32 *vtable_089a8414_destruct(u32 *object)"
+    module: cxx/vtable_089a8414_destruct
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: derived_vtable
+      r0_after_member: returned_member
+    notes: >-
+      Raw words establish a 28-byte A32 body at 0x0827c748..0x0827c763,
+      followed by literal 0x089a8414 at 0x0827c764 and the next real
+      function at 0x0827c768. One plain BL to 0x0827ca8c, zero predicated
+      BL, and a tail B to 0x0827c334. Two incoming plain BL sites at
+      0x08159c10 and 0x08159c18; no predicated incoming BL.
+      Installs the derived vtable, destroys the embedded member at +0xa8,
+      rebases the returned member pointer by -0xa8, then destroys the base.
+      Raw callee vtable resets establish opaque member/base destruction;
+      neither callee has a names.yaml registration. Ghidra expands the tail
+      base destructor into its transitive callee 0x0827c6c4; the port calls
+      the actual target 0x0827c334. Host-only replaceable seams and teardown
+      models exercise order, neighboring words, and relocated return values.
+      No target behavior deviations.
+      Host suite and ARM release build pass; standalone host smoke verifies
+      ordered teardown, vtable writes, guards, and pointer return. match.py
+      exits 1: LLVM adds a frame and uses literal-loaded BLX/BX instead of
+      direct BL/B, preserving the +0xa8 adjustment, return rebase, tail call,
+      and all three literal values.
