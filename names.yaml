@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827c688
+    ghidra: FUN_0827c688
+    name: owner_linked_member_construct
+    size: 60
+    sig: "u32 *owner_linked_member_construct(u32 *this, u32 value, u32 base_value)"
+    module: cxx/owner_linked_member_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: value
+      param_3/r2: base_value
+      FUN_0827c534: unported_base_construct
+      FUN_0827c4e4: unported_owner_member_construct
+      DAT_0827c6c0: owner_linked_vtable
+    notes: >-
+      Raw words establish 56 code bytes plus the 0x089a83e0 literal,
+      ending at the next real entry 0x0827c6c4. Two outgoing plain BLs
+      to 0x0827c534 and 0x0827c4e4; zero predicated BLs. Whole-image
+      decoding finds two incoming plain BLs at 0x0827c324 and 0x0827ca68,
+      zero predicated incoming BLs. Construct base(this, base_value),
+      replace its vtable, clear +0x8c, store value at +0x88, construct
+      member(base+0x90, base), and subtract 0x90 from its returned pointer.
+      Ghidra incorrectly declares the member constructor void and misses
+      its live owner argument. Raw 0x0827c094 preserves r0; 0x0827c4e4
+      installs vtable 0x089a8354 and owner at member+8. Neither direct
+      callee has an existing names entry; typed retail-address calls
+      preserve their behavior without porting additional functions.
+      No target behavioral deviations; host seams use target word indices.
+      Host suite passes 13532 tests; ARM release build succeeds. Exported
+      constructor host smoke passes with target-offset fixtures. match.py
+      exits 1: 19 Rust listing instructions versus 14 original, due to
+      frame setup, literal words and BLX retail-address calls instead of BL.
+      Verified identical constructor arguments, ordered field writes,
+      owner link and return subtraction. No device execution performed.
   - address: 0x0827cac8
     ghidra: FUN_0827cac8
     name: filter_preset_refresh
