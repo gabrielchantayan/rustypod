@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0827cac8
+    ghidra: FUN_0827cac8
+    name: filter_preset_refresh
+    size: 212
+    sig: "void filter_preset_refresh(u32 *owner)"
+    module: app/filter_preset_refresh
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+0x04": sample_rate
+      "owner+0x08": active
+      "owner+0xb4": preset
+      "owner+band*0x38+0x40": bypass
+      DAT_0827cb90: coefficients_44100
+      DAT_0827cb94: coefficients_48000
+      DAT_0827cb98: preset_coefficient_indices
+    notes: >-
+      Raw ARM words establish 200 code bytes plus 12 literal bytes through
+      0x0827cb9c, the next real function. Whole-image aligned BL decoding
+      finds two incoming plain calls at 0x0827cbe4 and 0x0827cc18, no
+      predicated incoming calls, and no outgoing calls. Callers set preset
+      (clamped to 0..22) or sample rate, then dispatch vtable slot 0x10.
+      Fixed table addresses are 0x088feb54, 0x088fef8c and 0x088ff3c4.
+      Copy five coefficient words to offsets 20,24,28,12,16 of each
+      56-byte record; index -1 changes only its bypass byte. Preserve
+      histories and padding. No callee seams or behavioral deviations.
+      Host suite passes 13526 tests; ARM release builds. Exported-ABI smoke
+      passes with mapped table fixtures. match.py exits 1: LLVM unrolls
+      three iterations (87 versus 50 instructions); gates, word permutation
+      and bypass behavior remain. No device execution performed.
   - address: 0x0827cb9c
     ghidra: FUN_0827cb9c
     name: indexed_record_payload_clear
