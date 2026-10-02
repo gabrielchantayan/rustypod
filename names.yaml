@@ -45103,6 +45103,35 @@ functions:
       flag preservation, non-boolean modes, and the shown-but-suppressed
       invalidation path.
 
+  - address: 0x0826ed80
+    ghidra: FUN_0826ed80
+    name: ui_element_dispatch_optional_link
+    size: 24
+    sig: "void ui_element_dispatch_optional_link(const OptionalLinkElement *element)"
+    module: ui/optional_link_dispatch
+    status: ported
+    renames:
+      param_1: element
+      "element+0x34": link
+      "link+0x00": vtable
+      "vtable+0x138": dispatch
+    notes: >-
+      Raw extent is 24 bytes, 0x0826ed80 through bx lr at 0x0826ed94;
+      the separately entered next function starts at 0x0826ed98.
+      Independent ARM-word decoding finds two unconditional inbound BL
+      instructions at 0x0815c858 and 0x081dd344, zero predicated BL
+      callers, and no BL in the body. Load element+0x34 into r0, test
+      NULL, then load its vtable and slot +0x138 and bxne through that
+      slot with the linked object as this. The virtual method identity
+      is unresolved; no fixed-address callee seam is invented. Both raw
+      callers discard the result, so Rust declares a void call. Host
+      pointers widen but a packed element retains offset +0x34 and the
+      vtable uses word indices. Tests cover the NULL branch and exactly
+      one dispatch to the selected link, preserving the element.
+      ARM release builds; match.py confirms the +0x34 and +0x138 loads,
+      NULL gate and tail bx, with an added frame and an early popeq
+      replacing the stock predicated loads. Host suite passes 13537 tests.
+
   - address: 0x0826ef88
     ghidra: FUN_0826ef88
     name: view_base_set_resource_provider
