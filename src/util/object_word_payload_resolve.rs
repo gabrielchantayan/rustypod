@@ -1,36 +1,12 @@
 //! Resolving an object's mutable four-word payload.
 
-/// Observed ABI of the unported payload processor at 0x0829b804.
+/// ABI of the ported four-word payload processor.
 pub type ObjectWordPayloadProcessor = unsafe extern "C" fn(*mut u32, *mut u32);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_object_word_payload_processor(
-    object: *mut u32,
-    words: *mut u32,
-) {
-    let processor: ObjectWordPayloadProcessor = unsafe { core::mem::transmute(0x0829_b804usize) };
-    unsafe { processor(object, words) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_object_word_payload_processor(
-    _object: *mut u32,
-    _words: *mut u32,
-) {
-    panic!("object_word_payload_resolve requires processor 0x0829b804")
-}
-
-#[cfg(target_os = "none")]
-const DEFAULT_OBJECT_WORD_PAYLOAD_PROCESSOR: ObjectWordPayloadProcessor =
-    firmware_object_word_payload_processor;
-#[cfg(not(target_os = "none"))]
-const DEFAULT_OBJECT_WORD_PAYLOAD_PROCESSOR: ObjectWordPayloadProcessor =
-    missing_object_word_payload_processor;
-
-/// The unported retailOS payload processor. Target builds call its original
-/// entry directly; host tests replace this seam with a behavioral model.
+/// Shared processor dispatch. Defaults to the Rust port; host tests may
+/// substitute a behavioral model.
 pub static mut OBJECT_WORD_PAYLOAD_PROCESSOR: ObjectWordPayloadProcessor =
-    DEFAULT_OBJECT_WORD_PAYLOAD_PROCESSOR;
+    crate::object_word_payload_process::object_word_payload_process;
 
 /// object_word_payload_resolve — original: `FUN_0829b490` @ **0x0829b490**
 /// (**48 bytes exactly**, `0x0829b490..0x0829b4c0`; the separately linked next
@@ -45,9 +21,8 @@ pub static mut OBJECT_WORD_PAYLOAD_PROCESSOR: ObjectWordPayloadProcessor =
 /// register set, so it returns `destination` even though Ghidra reports an
 /// eight-byte result.
 ///
-/// Deliberate deviations: the still-unported processor at 0x0829b804 is an
-/// explicit dispatch seam. Its target default reaches the retailOS entry;
-/// host tests install a model. The two retail copies use a stack temporary, so
+/// Deliberate deviations: processor dispatch defaults to the Rust port of
+/// 0x0829b804; host tests install a model. The two retail copies use a stack temporary, so
 /// this port likewise snapshots all input words before any destination store.
 ///
 /// # Safety
