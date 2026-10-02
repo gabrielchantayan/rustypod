@@ -186804,19 +186804,18 @@ functions:
       "stack+4": count
       r4: stack
       r5: index
-      FUN_082987b4: stack_item_lookup
+      FUN_082987b4: parser_stack_item (ported)
       "stack-vtable+0x2c": remove_at
     notes: >-
       Raw osos.dec words establish the exact 60-byte A32 body
       0x0811ddc0..0x0811ddfb; cmp r0,#0 at 0x0811ddfc begins the next real
       function. Independent whole-image ARM branch decoding finds three inbound
       plain BL sites (0x08117e80, 0x08119a24, and 0x08119a48) and zero
-      predicated inbound BL forms. The body calls unported 0x082987b4 with
+      predicated inbound BL forms. The body calls ported parser_stack_item with
       stack and count-1, then invokes stack-vtable+0x2c with the same values,
       returning the lookup result while discarding the removal return value.
-      Target Rust retains the verified call to 0x082987b4 and four-byte vtable
-      slot addressing; host tests use an injectable seam because the lookup
-      callee has no names.yaml entry and is not separately ported.
+      Rust calls the lookup directly; repr(C) retains four-byte target vtable
+      slots and count +4 while using native-width pointers in host fixtures.
 
   - address: 0x0811a200
     ghidra: FUN_0811a200
@@ -198931,3 +198930,34 @@ functions:
       All 13392 host tests and the ARM build-std release build pass. A standalone
       host smoke observes counts 0, 3, 0x80000000, and 0xffffffff, with signed
       caller loop iterations 0, 3, 0, and 0 respectively.
+
+  - address: 0x082987b4
+    ghidra: FUN_082987b4
+    name: parser_stack_item
+    size: 44
+    sig: "void *parser_stack_item(ParserStack *stack, i32 index)"
+    module: app/parser_stack_item
+    status: ported
+    renames:
+      param_1/r0: stack
+      param_2/r1: index
+      param_3/r2: count_or_slot_method (scratch, not an argument)
+      "stack+4": count
+      "stack-vtable+0x40": slot_at
+    notes: >-
+      Raw ARM establishes 0x082987b4..0x082987e0 as eleven instructions,
+      44 bytes; the next function starts with push {r4,r5,r6,lr}.
+      Independent aligned whole-image branch decoding finds two plain inbound
+      BL sites (0x081199fc, 0x0811ddd4) and zero predicated inbound BLs.
+      Body has no direct BLs and one register-indirect BLX. Negative index
+      returns null without reading stack. Otherwise signed count <= index
+      returns null; a valid index dispatches vtable slot 16 and dereferences
+      its returned pointer slot. The concrete method identity is not assumed.
+      Rust preserves unchecked slot dereference and signed bounds, with
+      native-width repr(C) host pointers instead of target-only byte offsets.
+      Parser stack pop now calls this Rust implementation directly.
+      Host suite passes 13395 tests. Standalone smoke exercises negative-index
+      early return, upper-bound rejection, and virtual-slot dereference.
+      ARM build-std release succeeds. match.py exits 1 with a structural diff:
+      LLVM uses explicit branches and a frame, but retains signed bounds,
+      count +4, vtable +0x40, one BLX, and the returned-slot dereference.

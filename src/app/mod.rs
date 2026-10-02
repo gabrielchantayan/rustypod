@@ -20,6 +20,7 @@ pub mod application_mode_transition;
 pub mod counted_string_template_initialize;
 pub mod input_sequence_find_item;
 pub mod parser_stack_pop;
+pub mod parser_stack_item;
 pub mod decode_result_with_fallback;
 pub mod parser_name_record_insert;
 pub mod input_sequence_item_clear_action;
