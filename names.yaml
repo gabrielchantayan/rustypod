@@ -201596,3 +201596,43 @@ functions:
       three direct BLs remain, with the same 28-byte request and constructor
       argument ordering. LLVM uses separate stack-word stores instead of STRD
       and an indirect BX tail dispatch through the existing volatile seam.
+
+  - address: 0x0827dff0
+    ghidra: FUN_0827dff0
+    name: observable_array_owner_copy_construct
+    size: 28
+    sig: "ObservableArrayOwner *observable_array_owner_copy_construct(ObservableArrayOwner *destination, const ObservableArray *source)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: destination
+      r1: source
+      iVar1/r0: constructed_member
+      DAT_0827e008: owner_vtable_089a6208
+      FUN_08271c98: observable_array_copy_construct
+    notes: >-
+      Raw words establish 24 instruction bytes plus the 0x089a6208 literal
+      at 0x0827e008, giving a true 28-byte extent. The next independent
+      function starts at 0x0827e00c with push {r3,r4,r5,lr}.
+      Whole-image aligned A32 decoding finds two plain incoming BLs at
+      0x081fa67c and 0x0820b7e4 and zero predicated incoming BLs. The body
+      has one plain BL at 0x0827dff8 to 0x08271c98 and no predicated BLs.
+      Copy-construct the observable-array member at destination +4 from
+      source in r1; STR r1,[r0,#-4]! plants the owner's vtable before the
+      returned member and returns the adjusted outer pointer. Ghidra drops
+      source and incorrectly declares a void return. Both callers consume
+      r0 after allocating 20 bytes. Concrete class identity remains unknown.
+      Reuses the existing port with no new seam or behavioral deviations.
+      repr(C) and u32 fields preserve the four-byte member offset on host.
+      Host tests cover zero, one and five elements, both vtables, outer
+      return, exact copied span, empty observers, source and guard integrity.
+      All 13517 host tests pass. An isolated throwaway host-harness smoke
+      exercises the empty case through the real member constructor.
+      Standalone host example compilation is blocked by unrelated non-test
+      host modules with missing boundary functions; no device run is claimed.
+      ARM release build passes. match.py exits 1 with a structural diff:
+      one constructor BL, member +4, and the same vtable literal remain;
+      LLVM proves the member constructor returns its input, so it retains
+      the outer pointer in r4 instead of subtracting four from returned r0.
+      It adds a frame and emits separate store/return instructions instead
+      of the stock pre-decrement STR. No intentional symbol folding.
