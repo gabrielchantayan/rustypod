@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08297588
+    ghidra: FUN_08297588
+    name: linked_buffer_cursor_advance
+    size: 40
+    sig: "void linked_buffer_cursor_advance(u32 *cursor)"
+    module: cxx/linked_buffer_cursor_advance
+    status: ported
+    renames:
+      param_1/r0: cursor
+      iVar1/r1: current_descriptor
+      "cursor+0x08": accumulated_offset
+      "cursor+0x0c": current_descriptor
+      "descriptor+0x04": successor
+      "descriptor+0x08": length
+    notes: >-
+      Raw A32 establishes the 40-byte extent 0x08297588..0x082975b0
+      exclusive, followed by a distinct mov r0,0; bx lr function.
+      Whole-image decoding finds one plain BL at 0x083d37e8 and one
+      predicated BLNE at 0x08297528; the body has no calls or seams.
+      Caller 0x082974cc obtains the current payload through the already
+      ported tagged_buffer_payload_address and optionally advances;
+      0x083d36e8 walks buffers to construct an element-address table.
+      Advance only with a nonzero successor, adding current length to
+      the accumulated offset modulo 2^32, then reloading the successor
+      after the offset store. Terminal descriptors preserve every field.
+      No behavioral deviations; aligned u32 words preserve target pointer
+      layout on hosts. Tests cover one-link advancement, zero length,
+      wrapping offsets, terminal preservation and overlapping reloads.
+      Host suite and ARM release build pass. match.py shows the same
+      conditional load/add/store/reload sequence, with LLVM frame
+      push/pop and commuted add operands instead of stock bx lr.
   - address: 0x082980ac
     ghidra: FUN_082980ac
     name: object_word_at_f0_or_zero

@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // Dedicated linked-buffer cursor fixture; mapping is never unmapped.
+    pub const LINKED_BUFFER_CURSOR_ADVANCE: usize = 0x5292_0000;
     pub const COLLECTION_FIND_BYTE_TAG: usize = 0x5291_0000;
     pub const OWNER_COLLECTION_ITEM_COUNT: usize = 0x5290_0000;
     pub const SELECTED_ENTRIES_POSITION_STATUS: usize = 0x528f_0000;
