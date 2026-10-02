@@ -35391,6 +35391,28 @@ functions:
       slot - preserved. Codegen deviation - LLVM fully unrolls the
       constant 6-iteration loop (29 instructions vs the original's 13).
 
+  - address: 0x0829dd30
+    ghidra: FUN_0829dd30
+    name: table6_request_state
+    size: 24
+    sig: "u8 table6_request_state(RequestSlot **table, u32 key)"
+    module: util/table_find
+    status: ported
+    vars: {param_1: table, param_2: key, iVar2: slot, uVar1: state}
+    notes: >-
+      Raw words establish the extent 0x0829dd30..0x0829dd48: push lr,
+      bl 0x081c93fc, cmp r0,0, ldrbne r0,[r0,4], moveq r0,0, pop pc.
+      The next function starts at 0x0829dd48 with cmp r1,6. Independent
+      raw-image scan finds 2 plain BL callers (0x08155a90 and
+      0x082026c0), no predicated BL callers, and one outgoing plain BL.
+      Ghidra's void argument list is incorrect; table and key pass
+      through to the already ported table6_find_by_key. Returns the first
+      matching slot's unsigned state byte, or zero on a miss. Zero keys,
+      duplicate-key precedence and all 256 state values are preserved.
+      match.py shows 33 Rust instructions versus 6 original: LLVM inlines
+      the existing lookup and unrolls its six-slot scan, retaining ordered
+      comparisons and byte loads at +4; the port also saves fp.
+
   - address: 0x080ed738
     ghidra: FUN_080ed738
     name: read_u16_le
