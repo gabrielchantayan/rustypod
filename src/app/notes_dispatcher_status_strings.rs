@@ -40,8 +40,12 @@ pub struct NotesDispatcherVtable {
 #[repr(C)]
 pub struct NotesDispatcher {
     pub vtable: *const NotesDispatcherVtable,
-    _before_mode: [u32; MODE_WORD_INDEX - 1],
+    pub before_target: [u32; 0xdc / 4 - 1],
+    pub target: *mut crate::cxx::optional_vtable_slot_18_result::OptionalVtableSlot18Target,
+    pub before_mode: [u32; (0x4e8 - 0xe0) / 4],
     pub mode: u32,
+    pub before_timer: [u32; (0x548 - 0x4ec) / 4],
+    pub timer: [u32; 12],
 }
 
 /// Dispatches the notes controller's primary and secondary status strings.
@@ -87,8 +91,12 @@ mod tests {
         };
         let mut dispatcher = NotesDispatcher {
             vtable: &vtable,
-            _before_mode: [0; MODE_WORD_INDEX - 1],
+            before_target: [0; 0xdc / 4 - 1],
+            target: core::ptr::null_mut(),
+            before_mode: [0; (0x4e8 - 0xe0) / 4],
             mode,
+            before_timer: [0; (0x548 - 0x4ec) / 4],
+            timer: [0; 12],
         };
         unsafe {
             CALL_COUNT = 0;
