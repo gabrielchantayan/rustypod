@@ -62,6 +62,7 @@ pub mod observable_array_destroy_elements_083d13bc;
 pub mod observable_array_destroy_cells_083d0b2c;
 pub mod observable_array_pre_destruct_check;
 pub mod observable_array_pre_destruct_check_destruct;
+pub mod composite_array_members_destruct;
 pub mod owned_string_owner_array_attached_release_destruct;
 pub mod observable_array_attached_release_destruct;
 pub mod observable_array_assert_empty_attached_destruct_083d0430;
