@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0829d818
+    ghidra: FUN_0829d818
+    name: address_book_availability_word
+    size: 8
+    sig: "u32 address_book_availability_word(const u32 *context)"
+    module: app/address_book_availability_word
+    status: ported
+    renames:
+      param_1/r0: context
+      return/r0: availability_word
+    notes: >-
+      Raw words e590005c e12fff1e establish the eight-byte extent
+      0x0829d818..0x0829d820 before the next function push {r4,r5,lr}.
+      Whole-image aligned ARM BL decoding finds two plain incoming calls
+      at 0x08125450 and 0x0820a6d4, zero predicated incoming calls and
+      zero outgoing calls of either kind. Return the aligned u32 at +0x5c
+      unchanged. FUN_08125444 gates GotoScreen AddressBook on nonzero;
+      FUN_0820a6b8 also tests zero/nonzero. Wider field semantics remain
+      unproven. No callee seams, normalization, validation or deliberate
+      behavioral deviations. Tests cover zero, non-boolean and high-bit
+      values, field selection, shifted base, minimum extent and input
+      preservation. Full host suite and ARM release build pass. Actual-source
+      runtime smoke returns 0, 2, 0x80000000 and 0xffffffff unchanged.
+      match.py exits 1: four Rust instructions versus two original retain
+      ldr r0,[r0,#92], adding LLVM frame setup and a pop return instead of
+      bx lr. No device execution performed.
   - address: 0x0829d820
     ghidra: FUN_0829d820
     name: day_and_seconds_compare
