@@ -199,9 +199,9 @@ const TAIL_WORD_1: usize = 0x1c4;
 const PLANES: usize = 0x1c8;
 
 // The 0x50-byte render descriptor the pass builds on its stack:
-// 0x0828302c initializes it (class word at +0x00, -1 at +0x08/+0x0c/
-// +0x28/+0x2c, zeros elsewhere), the pass fills the fields below from
-// the layer, and the copy handed to the driver carries them at the
+// 0x0828302c initializes selected fields (class word at +0x00, -1 at
+// +0x08/+0x0c/+0x28/+0x2c, selected zero fields), the pass fills them
+// from the layer, and the copy handed to the driver carries them at the
 // same offsets shifted by +0x04 (its +0x00 is the class word instead).
 const DESC_INIT_FIELD: usize = 0x04; // byte, left as the initializer set it
 const DESC_DISABLED: usize = 0x05; // byte <- layer +0x41
@@ -337,13 +337,10 @@ pub struct LayerDriverHooks {
     /// layer. Ported below as [`layer_render`]; the slot stays so tests
     /// can interpose a recording mock. Default: the port itself.
     pub render: unsafe extern "C" fn(layer: *mut u8) -> *mut u8,
-    /// `FUN_0828302c` @ 0x0828302c (1 `bl` call site, [`layer_render`]):
-    /// initializes the 0x50-byte render descriptor — class word at
-    /// +0x00, -1 at +0x08/+0x0c/+0x28/+0x2c, zeros elsewhere. Default:
-    /// no-op, which is behaviorally exact for [`layer_render`] — its
-    /// descriptor starts zeroed and the pass overwrites every word the
-    /// initializer would have armed, except the +0x04/+0x3c zero bytes
-    /// the zeroed block already has.
+    /// `FUN_0828302c` @ 0x0828302c (2 plain inbound BL sites):
+    /// initializes selected fields of the 0x50-byte render descriptor,
+    /// preserving padding and the tail at +0x30..+0x3b.
+    /// Default: [`layer_render_descriptor_init`].
     pub descriptor_init: unsafe extern "C" fn(desc: *mut u8),
     /// `FUN_08120ad4` @ 0x08120ad4 (1 `bl` call site, [`layer_render`]):
     /// maps the layer's pixel format (+0x0a) to the driver's plane-
@@ -367,7 +364,44 @@ unsafe extern "C" fn install_planes_stub(
 ) {
 }
 
-unsafe extern "C" fn descriptor_init_stub(_desc: *mut u8) {}
+/// Initialize a display-layer render descriptor.
+///
+/// Original `FUN_0828302c` @ `0x0828302c`: 88 executable bytes
+/// (`0x0828302c..0x08283084`), followed by the class literal at
+/// `0x08283084`; the next real function starts at `0x08283088`.
+/// Whole-image aligned ARM decoding verifies two plain inbound BLs
+/// (`0x0811f998`, `0x082af5a0`), zero predicated BLs and zero outgoing BLs.
+/// Store class identity 0x089a651c, clear bytes +4/+5/+0x3c, set buffer
+/// and display dimensions to -1, and clear geometry and four plane words.
+/// Preserve all other bytes, including padding and +0x30..+0x3b.
+/// No deliberate behavioral deviations; volatile stores retain retail
+/// write order and avoid replacing selected stores with a bulk clear.
+///
+/// # Safety
+/// `desc` must be word-aligned and writable for 0x50 bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn layer_render_descriptor_init(desc: *mut u8) {
+    let words = desc.cast::<u32>();
+    words.write_volatile(0x089a651c);
+    desc.add(4).write_volatile(0);
+    desc.add(5).write_volatile(0);
+    words.add(2).write_volatile(u32::MAX);
+    words.add(4).write_volatile(0);
+    words.add(3).write_volatile(u32::MAX);
+    words.add(5).write_volatile(0);
+    words.add(6).write_volatile(0);
+    words.add(7).write_volatile(0);
+    words.add(8).write_volatile(0);
+    words.add(9).write_volatile(0);
+    words.add(10).write_volatile(u32::MAX);
+    words.add(11).write_volatile(u32::MAX);
+    desc.add(0x3c).write_volatile(0);
+    words.add(19).write_volatile(0);
+    words.add(18).write_volatile(0);
+    words.add(17).write_volatile(0);
+    words.add(16).write_volatile(0);
+}
 
 unsafe extern "C" fn plane_format_code_stub(_layer: *mut u8, _out: *mut u8) {}
 
@@ -380,7 +414,7 @@ pub(crate) const DEFAULT_LAYER_DRIVER_HOOKS: LayerDriverHooks = LayerDriverHooks
     query_planes: layer_query_planes,
     install_planes: install_planes_stub,
     render: layer_render,
-    descriptor_init: descriptor_init_stub,
+    descriptor_init: layer_render_descriptor_init,
     plane_format_code: plane_format_code_stub,
     notify: notify_stub,
 };
@@ -1145,9 +1179,9 @@ impl RenderDescriptor {
 ///   literal.
 /// - The class word is the address of [`LAYER_RENDER_CLASS`], not the
 ///   literal 0x089a651c (runtime data).
-/// - `descriptor_init`, `plane_format_code` and `notify` dispatch
-///   through [`LAYER_DRIVER_HOOKS`] (unported originals; documented
-///   no-op defaults, the `install_planes` precedent).
+/// - The descriptor initializer dispatches through [`LAYER_DRIVER_HOOKS`]
+///   with the real port as default; `plane_format_code` and `notify`
+///   retain their documented unported no-op defaults.
 ///   [`layer_query_planes`] is called directly — through local slots
 ///   seeded from the plane block, because its native-width out-stores
 ///   would otherwise straddle the block's 4-byte slots on a 64-bit
@@ -3141,5 +3175,35 @@ mod tests {
         assert_eq!(layer.byte(ENABLE_CHANGED), 0, "and clears the flag");
 
         restore_render_mocks(guard);
+    }
+}
+
+#[cfg(test)]
+mod descriptor_init_tests {
+    use super::layer_render_descriptor_init;
+
+    #[test]
+    fn initializes_selected_fields_without_touching_tail_padding_or_neighbors() {
+        for seed in [0u8, 0x5a, 0xff] {
+            let mut storage = [u32::from_le_bytes([seed; 4]); 22];
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), 88)
+            };
+            let mut expected = [seed; 88];
+            expected[4..8].copy_from_slice(&0x089a651cu32.to_le_bytes());
+            for offset in [4, 5, 0x3c] {
+                expected[4 + offset] = 0;
+            }
+            for offset in [8, 12, 40, 44] {
+                expected[4 + offset..8 + offset].fill(0xff);
+            }
+            for offset in [16, 20, 24, 28, 32, 36, 64, 68, 72, 76] {
+                expected[4 + offset..8 + offset].fill(0);
+            }
+            unsafe { layer_render_descriptor_init(bytes.as_mut_ptr().add(4)); }
+            assert_eq!(bytes, expected, "seed {seed:#x}");
+            unsafe { layer_render_descriptor_init(bytes.as_mut_ptr().add(4)); }
+            assert_eq!(bytes, expected, "reinitialization must preserve untouched bytes");
+        }
     }
 }

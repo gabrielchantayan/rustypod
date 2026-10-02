@@ -200974,3 +200974,38 @@ functions:
       indirect BLX boundaries and explicit branches instead of predicated
       teardown; both zero gates and the second subject load remain.
       No on-device execution claimed.
+
+  - address: 0x0828302c
+    ghidra: FUN_0828302c
+    name: layer_render_descriptor_init
+    size: 88
+    sig: "void layer_render_descriptor_init(u8 *desc)"
+    module: drivers/display_layer
+    status: ported
+    vars: {param_1: desc}
+    notes: >-
+      Raw ARM verifies 22 executable instructions, ending with bx lr at
+      0x08283080, class literal 0x089a651c at 0x08283084, and the next
+      real function at 0x08283088. The extent including the literal is
+      92 bytes; executable size is 88. Whole-image aligned A32 decoding
+      finds two plain inbound BLs at 0x0811f998 and 0x082af5a0, zero
+      predicated inbound BLs and no outgoing calls. Initializes the
+      0x50-byte layer render descriptor: class word at +0, zero bytes
+      at +4/+5/+0x3c, -1 words at +8/+0xc/+0x28/+0x2c, zero words at
+      +0x10..+0x24 and +0x40..+0x4c. All other bytes are preserved,
+      notably +6/+7, +0x30..+0x3b and +0x3d..+0x3f. No callee seam
+      or invented class identity. Volatile aligned word stores retain
+      retail order; no deliberate behavioral deviations. Existing
+      LayerDriverHooks descriptor_init now defaults to this port;
+      obsolete no-op removed. The older layer_render notes describing
+      this initializer as an unported no-op are superseded here;
+      its separate descriptor-copy class-marker deviation is unchanged.
+      Host regression covers zero and nonzero initial contents,
+      preserved padding/tail/neighbor words and repeated initialization.
+      Host suite passes 13493 tests; ARM release build passes.
+      Isolated source smoke prints class 089a651c, flags a5a50000,
+      width ffffffff, preserved tail a5a5a5a5, format a5a5a500 and
+      four zero planes. match.py exits 1: all retail stores and their
+      order match, with LLVM frame push/pop instead of bx lr and an
+      explicit literal-pool word in its 25-instruction display.
+      No on-device execution claimed.
