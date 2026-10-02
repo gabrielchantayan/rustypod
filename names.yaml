@@ -202283,3 +202283,49 @@ functions:
       plus two literals versus 31 stock instructions, retains five BLs and
       the same field writes, but changes frame, register use, and store order.
       Deliberate deviations: none; host pointer stores truncate to u32.
+
+  - address: 0x0826e4f0
+    ghidra: FUN_0826e4f0
+    name: dispatch_registry_record
+    size: 208
+    module: app/dispatch_registry_record
+    sig: "uintptr_t dispatch_registry_record(void *target, void *owner, uint32_t *record, void *selector, uint32_t create_target)"
+    status: ported
+    renames:
+      param_1/r0: target
+      param_2/r1: owner
+      param_3/r2: record
+      param_4/r3: selector
+      param_5: create_target
+      FUN_08110c44: framework_base_current_task_initial_target
+      FUN_082aadd4: operator_new
+      FUN_08177e84: class_6800_new
+      FUN_080cb828: current_task_ctx_block
+      field_0x38: task_dispatch_registry
+      slot_0x48: find_key
+      slot_0x3c: entry_at
+    notes: >-
+      Raw osos.dec proves 208 bytes from 0x0826e4f0 through the pop at
+      0x0826e5bc; the next independent push starts at 0x0826e5c0.
+      Whole-image aligned A32 decoding finds two inbound plain BL sites
+      at 0x081579f8 and 0x08187218, zero predicated inbound BLs. The body
+      contains four plain BLs, zero predicated BLs, and four register BLXs.
+      Record word 3 equal to zero clears target; -1 preserves it without
+      selecting; otherwise selector(record) replaces target only if nonnull.
+      Fetches the framework initial target even when create_target replaces it
+      with class_6800_new(operator_new(28)). Searches current-task context
+      +0x38 through vtable +0x48 with record word 0 and key width four.
+      Index -1 returns zero. Other indices copy an owner/callback pair through
+      slot +0x3c into the saved owner/record stack words. Calls the replacement
+      callback with target, original owner, framework target, original record,
+      and selector, returning its result. Ghidra's void return and direct
+      execution of record are wrong; caller 0x081871a0 consumes the result.
+      Uses existing ports for all direct callees and migrates the target call
+      in dispatch_relative_record_list. Deliberate deviations: typed pointer
+      layouts expand on hosts, and a private environment-parameterized helper
+      allows algorithm tests without firmware execution. Host suite passes
+      13547 tests; ARM release build passes. Extracted-real-source public-entry
+      smoke observes callback hit 0xcafe and key miss zero. match.py exits 1,
+      showing 58 versus 52 instructions with four direct calls, four indirect
+      calls, identical slot offsets and branch behavior; differences are frame,
+      registers, stack placement, and duplicated return epilogue.

@@ -8,9 +8,8 @@
 //! and dispatch the record. Algorithm: use `owner + 0x38` when `target` is
 //! null, then walk `records`' signed-16-bit count of relative records. Each
 //! record's first word advances to the next record and its payload begins four
-//! bytes later. Deliberate deviations: the stock calls remain address-bound on
-//! target builds because only the task-target helpers are identified; host
-//! builds expose an operation seam for behavioral tests.
+//! bytes later. Deliberate deviations: target dispatch calls the Rust port;
+//! host builds expose an operation seam for behavioral tests.
 
 const OWNER_DEFAULT_TARGET_OFFSET: usize = 0x38;
 
@@ -33,7 +32,7 @@ unsafe fn retail_current_task_set(task: *mut u8) {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn retail_record_dispatch(target: *mut u8, owner: *mut u8, record: *mut u8, callback: *mut u8) {
-    unsafe { core::mem::transmute::<usize, RecordDispatch>(0x0826_e4f0)(target, owner, record, callback, 0) }
+    crate::app::dispatch_registry_record::dispatch_registry_record(target, owner, record, callback, 0);
 }
 
 #[cfg(not(target_os = "none"))]

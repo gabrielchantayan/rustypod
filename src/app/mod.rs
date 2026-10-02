@@ -524,6 +524,7 @@ pub mod object_flag_0x8_is_set;
 pub mod object_flag_0x100_is_set;
 pub mod object_owner_set;
 pub mod object_dispatch_entry;
+pub mod dispatch_registry_record;
 pub mod opaque_collection_item_count;
 pub mod owner_collection_item_count;
 pub mod opaque_impl_callback_validate;
