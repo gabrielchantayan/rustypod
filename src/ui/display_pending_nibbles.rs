@@ -149,6 +149,25 @@ pub unsafe extern "C" fn configure_display_pending_nibbles(
     set_display_pending_nibbles(display, retained_selector, retained_nibbles);
 }
 
+/// configure_display_pending_third_nibble — original `FUN_0828d690` at
+/// `0x0828d690`: 28 bytes, next real function `0x0828d6ac`. Raw ARM words
+/// verify two plain BL callers (`0x0817f4cc`, `0x0817f5b4`), no predicated
+/// callers, and one unconditional BL in the body to `0x0828d6cc`.
+///
+/// Updates only the third pending nibble, retaining the selector and other
+/// three nibbles. `-1` retains it; `0..=15` updates it; other inputs reject
+/// before mutation or display lookup. NULL selects the secondary display.
+/// No behavioral deviations: Rust supplies the ABI stack arguments and
+/// register preservation instead of explicit ADS register saves.
+///
+/// # Safety
+/// `display` must be a live [`Display`] when non-null.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn configure_display_pending_third_nibble(display: *mut Display, third: i32) {
+    configure_display_pending_nibbles(display, -1, -1, -1, third, -1);
+}
+
 /// configure_display_pending_fourth_nibble — original `FUN_0828d6ac` at
 /// `0x0828d6ac`: 32 bytes, next function `0x0828d6cc`. Raw words verify
 /// zero plain BL callers and two BLEQ callers (`0x0817f4a8`, `0x0817f584`);
@@ -419,6 +438,48 @@ mod tests {
             assert_eq!(FORWARDED, Some((display, 1, [1, 2, 3, 4])));
         }
         restore_recorder(guard);
+    }
+
+    #[test]
+    fn third_nibble_boundaries_and_rejection_preserve_other_state() {
+        let guard = install_recorder();
+        let mut storage = std::mem::MaybeUninit::<Display>::zeroed();
+        let display = storage.as_mut_ptr();
+        unsafe {
+            for third in [i32::MIN, -2, -1, 0, 1, 14, 15, 16, i32::MAX] {
+                DISPLAY_PENDING_STATE.selector = 1;
+                DISPLAY_PENDING_NIBBLES = [2, 7, 11, 9];
+                FORWARDED = None;
+                configure_display_pending_third_nibble(display, third);
+                assert_eq!(DISPLAY_PENDING_STATE.selector, 1);
+                let expected = if (0..=15).contains(&third) { third as u8 } else { 11 };
+                assert_eq!(DISPLAY_PENDING_NIBBLES, [2, 7, expected, 9]);
+                if !(-1..=15).contains(&third) {
+                    assert_eq!(FORWARDED, None);
+                }
+            }
+        }
+        restore_recorder(guard);
+    }
+
+    #[test]
+    fn third_nibble_null_display_rejects_invalid_input_and_uses_secondary() {
+        let display_guard = crate::drivers::display::DISPLAY_TEST_LOCK.lock();
+        let guard = install_recorder();
+        unsafe {
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 1;
+            DISPLAY_PENDING_STATE.selector = 0;
+            DISPLAY_PENDING_NIBBLES = [2, 7, 11, 9];
+            configure_display_pending_third_nibble(ptr::null_mut(), 16);
+            assert_eq!(DISPLAY_PENDING_STATE.selector, 0);
+            assert_eq!(DISPLAY_PENDING_NIBBLES, [2, 7, 11, 9]);
+            assert_eq!(FORWARDED, None);
+            configure_display_pending_third_nibble(ptr::null_mut(), 15);
+            assert_eq!(DISPLAY_PENDING_NIBBLES, [2, 7, 15, 9]);
+            crate::drivers::display::SECONDARY_DISPLAY_GUARD = 0;
+        }
+        restore_recorder(guard);
+        drop(display_guard);
     }
 
     #[test]
