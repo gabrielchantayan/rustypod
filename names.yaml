@@ -200277,3 +200277,44 @@ functions:
       instructions: identical guard offsets and signed paired-word loops;
       LLVM inlines rect_width, eliminates the zero row adjustment, and
       tail-calls texture_upload_pixels. No new seams or device execution.
+
+  - address: 0x0828cc4c
+    ghidra: FUN_0828cc4c
+    name: render_context_create_owned_image_surface
+    size: 100
+    module: drivers/surface_new
+    sig: "void render_context_create_owned_image_surface(u32 *render_context)"
+    status: ported
+    vars:
+      param_1/r4: render_context
+      uVar1: image_storage
+      iVar2: constructed_image_or_surface
+      FUN_082aadd4: operator_new
+      FUN_0810e9c0: pair_header_base_construct_with_pooled_owned_payload
+      FUN_0828d458: render_context_create_image_surface
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec verifies the 100-byte extent 0x0828cc4c..0x0828ccb0;
+      the next function begins with push at 0x0828ccb0. Whole-image ARM
+      word decoding finds two inbound plain BLs at 0x0817f664 and 0x0827787c,
+      zero predicated BLs. The body contains four plain outgoing BLs, zero
+      predicated BLs. Ghidra's additional caller at 0x08180a28 shares a
+      decompilation path rather than contributing a third raw BL site.
+      If context+0x54 is NULL, all fields remain unchanged. Otherwise allocate
+      184 bytes, reload the source pointer, and construct an owned image from
+      source+0x98 and its format halfword at +0x14 with zero tag/context/pool.
+      Store the image at context+0x58. A NULL image leaves context+0x4c alone;
+      otherwise create and store the surface there before asserting non-NULL.
+      All four direct callees use existing ports; no new seams. Target-width
+      pointer words retain retail offsets on hosts. No wrapper deviations;
+      downstream pooled-payload dispatch and the existing surface constructor
+      stub mean this wrapper is not independently hook-ready. Host suite and
+      ARM release build passed. Host edge tests preserve the entire context
+      for absent sources, with both empty and preexisting output slots.
+      Throwaway actual-source smoke with dependency stand-ins exercised source
+      replacement during allocation, successful image/surface stores, NULL
+      image preserving the old surface, and surface failure storing zero before
+      the nonreturning fatal boundary. No device execution. match.py exits 1:
+      25 original versus 31 Rust instructions, preserving guards and offsets;
+      LLVM adds a frame pointer and uses the allocation pointer for the image
+      after proving the existing constructor returns its input storage.
