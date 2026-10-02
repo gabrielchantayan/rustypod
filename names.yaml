@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0828ace0
+    ghidra: FUN_0828ace0
+    name: selected_resource_prepare
+    size: 140
+    sig: "uint32_t selected_resource_prepare(uint32_t *view, uint32_t selected)"
+    module: app/selected_resource_prepare
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      param_2/r1: selected
+      view+0xdc: selected_object
+      view+0x544: resolved_resource
+      view+0x5a8: preparation_enabled
+      vtable+0x58: dispatch
+      FUN_08119ed4: unported selected-object resolver at verified retail address
+    notes: >-
+      Raw A32 establishes 116 code bytes and 24 literal bytes, ending at
+      the next real function's push at 0x0828ad6c: true extent 140 bytes.
+      Two inbound plain BLs at 0x0828a620 and 0x0828b108, zero predicated
+      inbound BLs; one outbound plain BL at 0x0828ad00 and two virtual BLX
+      sites. Ghidra omits the resolver argument: MOVS r0,r1 passes selected.
+      Stores selected, gates on nonzero selected and byte +0x5a8, stores
+      resolver output, dispatches Draw/0x4197, rereads +0x544, and optionally
+      dispatches Str /0x41a1. Returns 0x41a6 on the latter path, else 0x41a7.
+      Host seams replace only retail and virtual boundaries; word indices
+      retain ARM offsets. Tests cover inactive paths and dispatch mutation
+      in both directions. Exported-path smoke observes both dispatches and
+      status 0x41a6. Host suite and ARM release build pass. match.py reports
+      structural differences (40 versus 29 listed instructions), preserving
+      gates, field stores, virtual calls and post-dispatch result reload.
   - address: 0x0828bcd0
     ghidra: FUN_0828bcd0
     name: notes_view_initialize
