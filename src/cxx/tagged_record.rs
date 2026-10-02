@@ -63,6 +63,42 @@ pub unsafe extern "C" fn tagged_record_init(
     this
 }
 
+/// tagged_record_copy_construct — retailOS `FUN_0826fc44` @ `0x0826fc44`.
+///
+/// True size: 32 bytes (`0x0826fc44..0x0826fc64`), seven ARM instructions
+/// plus the descriptor literal at `0x0826fc60`; the next real function is
+/// the empty destructor at `0x0826fc64`. Raw whole-image decoding verifies
+/// two incoming plain BLs (`0x082c85e8`, `0x082c86a0`), zero predicated BLs,
+/// and no outgoing calls.
+///
+/// Install the fixed descriptor, then copy the source payload word at +4
+/// and flag byte at +8, leaving destination padding untouched. Return the
+/// destination unchanged in r0, as required by both allocating callers.
+/// Volatile accesses retain the original store/read order for aliased inputs.
+/// The descriptor is opaque; no dispatch seam is needed. Deviations: none.
+///
+/// # Safety
+///
+/// Both pointers must be four-byte aligned and valid for their accessed
+/// fields; destination must be writable. Aliasing is allowed, but any source
+/// fields overlapped by destination stores must also be writable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_record_copy_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_record_copy_construct(
+    destination: *mut TaggedRecord,
+    source: *const TaggedRecord,
+) -> *mut TaggedRecord {
+    unsafe {
+        core::ptr::addr_of_mut!((*destination).descriptor).write_volatile(TAGGED_RECORD_DESCRIPTOR);
+        let payload = core::ptr::addr_of!((*source).payload).read_volatile();
+        core::ptr::addr_of_mut!((*destination).payload).write_volatile(payload);
+        let flag = core::ptr::addr_of!((*source).flag).read_volatile();
+        core::ptr::addr_of_mut!((*destination).flag).write_volatile(flag);
+    }
+    destination
+}
+
 
 /// tagged_record_payload_is_liti_class — original: `FUN_0826fc14` @
 /// 0x0826fc14 (24 bytes).
@@ -187,5 +223,37 @@ mod tests {
         assert_eq!(record.descriptor, TAGGED_RECORD_DESCRIPTOR);
         assert_eq!(record.payload, 0);
         assert_eq!(record.flag, 0);
+    }
+
+    #[test]
+    fn copy_construct_replaces_descriptor_and_preserves_padding_and_source() {
+        for (payload, flag) in [(0, 0), (u32::MAX, 0xff), (0x7654_3210, 0x89)] {
+            let source = [0x1122_3344u32, payload, 0xabcd_ef00 | flag];
+            let mut destination = [0xfeed_faceu32, 0xa5a5_a5a5, 0, 0xdead_beef, 0xcafe_babe];
+            let pointer = unsafe { destination.as_mut_ptr().add(1).cast::<TaggedRecord>() };
+            let returned = unsafe { tagged_record_copy_construct(pointer, source.as_ptr().cast()) };
+            assert_eq!(returned, pointer);
+            assert_eq!(destination, [
+                0xfeed_face, TAGGED_RECORD_DESCRIPTOR, payload, 0xdead_be00 | flag, 0xcafe_babe,
+            ]);
+            assert_eq!(source, [0x1122_3344, payload, 0xabcd_ef00 | flag]);
+        }
+    }
+
+    #[test]
+    fn copy_construct_supports_self_copy_and_ordered_partial_overlap() {
+        let mut words = [0x1122_3344u32, 0x5566_7788, 0xaabb_ccdd, 0xdead_beef];
+        let pointer = words.as_mut_ptr().cast::<TaggedRecord>();
+        assert_eq!(unsafe { tagged_record_copy_construct(pointer, pointer) }, pointer);
+        assert_eq!(words, [TAGGED_RECORD_DESCRIPTOR, 0x5566_7788, 0xaabb_ccdd, 0xdead_beef]);
+
+        // Destination descriptor overwrites source payload before it is read;
+        // destination payload then overwrites source flag before its byte read.
+        let destination = unsafe { words.as_mut_ptr().add(1).cast::<TaggedRecord>() };
+        unsafe { tagged_record_copy_construct(destination, pointer) };
+        assert_eq!(words, [
+            TAGGED_RECORD_DESCRIPTOR, TAGGED_RECORD_DESCRIPTOR,
+            TAGGED_RECORD_DESCRIPTOR, 0xdead_be04,
+        ]);
     }
 }
