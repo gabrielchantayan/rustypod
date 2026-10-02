@@ -31,6 +31,8 @@ unsafe fn usb_link_status_read() -> u32 {
 /// Host-side stand-in for the USB controller's link-status word.
 #[cfg(not(target_arch = "arm"))]
 pub(crate) mod host_usb_link_status {
+    #[cfg(test)]
+    pub static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     pub static mut WORD: u32 = 0;
 }
 
@@ -62,6 +64,7 @@ mod tests {
 
     #[test]
     fn exported_entry_reads_the_host_status_word_volatily() {
+        let _guard = host_usb_link_status::LOCK.lock();
         unsafe {
             core::ptr::addr_of_mut!(host_usb_link_status::WORD).write_volatile(1);
             assert_eq!(usb_high_speed_mode_active(), 1);
