@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08284910
+    ghidra: FUN_08284910
+    name: named_object_dispatch_value
+    size: 28
+    sig: "uint32_t named_object_dispatch_value(NamedObjectValueOwner *owner, uint32_t value)"
+    module: cxx/named_object_value_dispatch
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      local_8[0]: temporary_value
+      "owner+0x4c": value_interface
+      "vtable+0x1c": unresolved_value_dispatch_method
+    notes: >-
+      Raw osos.dec words establish the 28-byte extent 0x08284910..0x0828492c;
+      the next real function begins with push {r4,lr} at 0x0828492c, although
+      the Ghidra listing skips it. Independent ARM-word counting finds two
+      unconditional inbound BLs at 0x0816c8cc and 0x082847f4, no predicated
+      inbound BLs, no direct BLs in the body, and one unconditional BLX r2.
+      Copies value to a stack local and invokes the embedded interface's
+      unresolved vtable slot +0x1c with its address. No callee identity or
+      ownership operation is inferred. Preserves the raw r0 result despite
+      Ghidra's void prototype; known callers ignore it. Host repr(C) pointers
+      widen naturally. Host tests cover zero and full-width values, selectable
+      virtual methods, writable temporary storage, receiver state, and intact
+      owner prefix. ARM match differs only in frame setup and local placement.
   - address: 0x08284a88
     ghidra: FUN_08284a88
     name: composite_array_members_destruct
