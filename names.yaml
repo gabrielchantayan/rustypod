@@ -201009,3 +201009,40 @@ functions:
       order match, with LLVM frame push/pop instead of bx lr and an
       explicit literal-pool word in its 25-instruction display.
       No on-device execution claimed.
+  - address: 0x08282a90
+    ghidra: FUN_08282a90
+    name: stream_read_timed_records
+    size: 208
+    module: cxx/stream_read_timed_records
+    status: ported
+    signature: "u32 stream_read_timed_records(TimedBlockReader *reader, u8 *buffer, i32 length, i32 count)"
+    args:
+      param_1: reader
+      param_2: buffer
+      param_3: length
+      param_4: count
+    notes: >-
+      Raw A32 extent is 200 executable bytes plus the 8-byte double literal
+      1000.0 at 0x08282b58; next real function starts at 0x08282b60.
+      Whole-image aligned branch decoding verifies two plain inbound BLs
+      at 0x08282cf8 and 0x08282d80, no predicated inbound BLs.
+      Body has seven plain BLs, no predicated BLs, one virtual BLX.
+      Calls source at reader+4 through vtable+0x10 with buffer, length,
+      mode 2; an unequal read result returns 1 without emitting records.
+      Signed-positive count emits backward-growing 12-byte records at
+      reader+0x2c: buffer+index*stride, stride, and base_time plus
+      trunc(double(float(index*stride)/float(byte_rate))*8*1000).
+      Stride is +0x24, byte_rate +0x14, base_time +0x30.
+      Pointer-address and timestamp arithmetic wrap at 32 bits.
+      Verified existing callees: __i2f 0x083ec96c, __fdiv 0x083ec5fc,
+      __f2d 0x083ec450, __dscalb 0x083ed0dc, __dmul 0x083eba48,
+      __d2i 0x083eb7d0. Virtual read identity remains unresolved;
+      no invented callee seam. Host pointers widen structurally.
+      Host suite passes 13495 tests; ARM release build passes.
+      Executable source smoke reads 16 bytes and emits length-8 records
+      with times 17 and 25, decrementing the cursor by 24 bytes.
+      match.py exits 1: LLVM emits 168 displayed instructions versus
+      50 original, inlining integer float conversions and scaling.
+      Exact-read guard, signed count guard, record stores, backward
+      cursor loop and ADS arithmetic semantics are retained.
+      No on-device execution claimed.

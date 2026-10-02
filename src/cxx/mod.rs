@@ -5,6 +5,7 @@
 pub mod named_object_value_dispatch;
 pub use named_object_value_dispatch::*;
 pub mod work_source_query;
+pub mod stream_read_timed_records;
 pub mod codecvt_always_noconv_dispatch;
 pub mod codecvt_byte_out_dispatch;
 pub mod codecvt_out_dispatch;
