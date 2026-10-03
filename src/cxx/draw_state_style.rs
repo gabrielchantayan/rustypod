@@ -20,7 +20,8 @@
 //! entirely — only its callers appear — so the raw bytes above are the
 //! sole authority. The next function starts at 0x08262d78 (a sibling
 //! two-word setter: `str r1,[r0,#8]; str r2,[r0,#12]; bx lr`,
-//! unported), confirming the 8-byte extent. No DATA word in the image
+//! ported in draw_state_stroke_parameters), confirming the 8-byte extent.
+//! No DATA word in the image
 //! holds the address, so it is never dispatched virtually.
 //!
 //! # What the style byte is

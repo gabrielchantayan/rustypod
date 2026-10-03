@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08262d78
+    ghidra: FUN_08262d78
+    name: draw_state_set_stroke_parameters
+    size: 12
+    sig: "void draw_state_set_stroke_parameters(u32 *record, i32 stroke_width, u32 auxiliary)"
+    module: cxx/draw_state_stroke_parameters
+    status: ported
+    renames:
+      param_1/r0: record
+      param_2/r1: stroke_width
+      param_3/r2: auxiliary
+    notes: >-
+      Raw words e5801008, e580200c, e12fff1e store the two arguments at
+      +8 and +12 then return. True extent 0x08262d78..0x08262d84 ends
+      at the next distinct function's push; no literal pool or callee seam.
+      Whole-image decoding verifies two plain inbound BLs at 0x0816acbc
+      and 0x0816b508, zero predicated BLs, and no outbound calls.
+      Both callers set (1,1) before rectangle outlines. The existing
+      draw_state_stroke_rect adapter reads +8 as signed stroke width;
+      the semantic meaning of +12 remains unidentified and is preserved
+      as an auxiliary word. Aligned u32 stores retain the target layout
+      on hosts. No memory-behavior deviations; void ABI follows callers
+      and Ghidra, while original r0 remains unchanged. Host tests cover
+      replacement, zero, negative and extreme widths, independent high-bit
+      auxiliary values, and preservation of all surrounding record words.
+      Direct host smoke preserves neighboring state while storing (-7,
+      0x87654321). ARM match.py confirms identical two STR instructions;
+      LLVM adds a frame-pointer prologue and POP return instead of BX LR.
+
   - address: 0x08263168
     ghidra: FUN_08263168
     name: draw_state_counted_text_width
@@ -88072,7 +88101,8 @@ functions:
       Ghidra OMITS the function from its C listing entirely - only its
       callers appear - so the raw bytes are the sole authority. The next
       function starts at 0x08262d78 (a sibling two-word setter,
-      `str r1,[r0,#8]; str r2,[r0,#12]; bx lr`, unported), confirming
+      `str r1,[r0,#8]; str r2,[r0,#12]; bx lr`, now ported as
+      draw_state_set_stroke_parameters), confirming
       the 8-byte extent with no trailing literal word. Call count
       binary-verified by decoding every B/BL word in osos.dec: 36 `bl`
       + 2 `blne` = 38, exactly Ghidra's count. No DATA word in the
