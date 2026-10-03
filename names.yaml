@@ -204477,3 +204477,32 @@ functions:
       record and zero-end wrapping. match.py reports four stock versus
       six Rust instructions: both loads and subtraction match, with LLVM
       adding frame-pointer setup and replacing bx lr with pop {fp,pc}.
+  - address: 0x08267d84
+    ghidra: FUN_08267d84
+    name: comparison_context_destroy
+    size: 4
+    sig: "void *comparison_context_destroy(void *object)"
+    module: app/comparison_context_destroy
+    status: ported
+    renames:
+      param_1: object
+    notes: >-
+      Raw word e12fff1e is bx lr. True extent is 0x08267d84..0x08267d88
+      exclusive: the preceding constructor returns at 0x08267d80 and the
+      next real function opens with stmdb sp!, {r4-r10,lr} at 0x08267d88.
+      Whole-image aligned ARM decoding independently finds two plain inbound
+      BLs at 0x08267b40 and 0x08267b48, zero predicated inbound BLs, zero
+      internal BLs, and no aligned DATA words containing the address.
+      Both call sites clean up the 20-byte temporary constructed at
+      0x08267d6c and queried at 0x08267cf8, on failure and success.
+      Returns the object word unchanged without accessing object memory;
+      NULL, unaligned, and dangling words are accepted. The caller ignores
+      r0 but the raw instruction preserves it. No callee seams or deliberate
+      behavioral deviations. A distinct text section prevents identical
+      function folding with other empty return exports.
+      Host suite passes 13638 tests, including object-word edge cases and
+      preservation of all twenty context bytes plus surrounding canaries.
+      Direct host smoke verifies pointer passthrough, unchanged context,
+      dangling input, and NULL. ARM release build passes. match.py finds
+      one stock versus three Rust instructions: LLVM adds push {fp,lr},
+      mov fp,sp, and pop {fp,pc}; r0 and object memory remain untouched.
