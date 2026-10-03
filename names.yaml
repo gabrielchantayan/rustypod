@@ -110,6 +110,40 @@ functions:
       explicit host injection. Elide only the empty bx-lr base destructor.
       Host coverage exercises live and absent payloads and surrounding
       object preservation with native pointer fields behind the seam.
+  - address: 0x08261b70
+    ghidra: FUN_08261b70
+    name: construct_deque_context_and_mutex
+    size: 184
+    sig: "DequeContextMutex *construct_deque_context_and_mutex(DequeContextMutex *this, usize mutex_param_2, usize scope_word0, usize scope_word1)"
+    module: cxx/deque_context_mutex_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: mutex_param_2 (unread by the mutex constructor)
+      param_3/r2: scope_word0
+      param_4/r3: scope_word1
+      r5: owner derived from the returned context pointer
+      r4: deque at owner+0x38
+      stack_plus_0x24: temporary empty deque
+      FUN_08261e28: cxx_mutex_construct
+      FUN_0826291c: initialize_opaque_context
+      FUN_083df154: default empty deque initializer (canonical deque_construct reused)
+      FUN_083da2b4: deque_iter_assign_alias_a2b4 (empty iterator copies elided)
+      FUN_083ea324: append iterator range (provably empty, elided)
+      FUN_083df194: pop front (unreachable temporary cleanup, elided)
+      FUN_083d7600: container_is_empty (temporary count is zero)
+    notes: >-
+      Raw A32 pins the true 184-byte extent at 0x08261b70..0x08261c28,
+      ending in pop at 0x08261c24 before the independent destructor prologue.
+      Whole-image branch decoding finds two unconditional inbound BLs at
+      0x08261c58 and 0x08261c60, zero predicated BLs and zero inbound Bs;
+      the body has nine plain outbound BLs and zero predicated BLs.
+      Construct mutex at +0, opaque context at +0x1c, and deque at +0x38;
+      clear deque map capacity at +0x60 and return the owner. Child status
+      errors do not stop construction. Deliberately elide the all-NULL
+      temporary deque, equal iterator copies, empty range append and
+      unreachable pop loop; use the existing canonical deque initializer.
+      Host repr(C) deque pointers widen; child storage remains seven u32s.
   - address: 0x08261c28
     ghidra: FUN_08261c28
     name: destroy_deque_context_and_mutex
