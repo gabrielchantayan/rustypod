@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08262158
+    ghidra: FUN_08262158
+    name: wait_clock_gettime
+    size: 24
+    sig: "i32 wait_clock_gettime(i32 clock_selector, ClockTimespec *out)"
+    module: time/wait_clock_gettime
+    status: ported
+    vars:
+      param_1/r0: clock_selector
+      param_2/r1/r4: out
+      FUN_08261d58: pure selector normalization (0..3 unchanged, otherwise -1)
+      FUN_082c372c: clock_gettime (existing Rust port)
+    notes: >-
+      Raw bytes establish the six-word extent 0x08262158..0x08262170,
+      followed by an independent push at 0x08262170. Whole-image aligned-word
+      decoding finds two plain inbound BLs at 0x08262488 and 0x08262710,
+      no predicated inbound BLs. One internal plain BL to 0x08261d58,
+      no predicated BLs, then a tail B to 0x082c372c. Ghidra incorrectly
+      folds the tail target into this wrapper. Normalize the selector and
+      query the clock, preserving callback output, errno and result.
+      Deliberate deviation: inline the verified pure nine-word selector
+      conversion rather than adding a retail seam. match.py exit 1 shows
+      six instructions on both sides: LLVM's unsigned cmp/mvncs replaces
+      the normalization BL and the output-pointer save/restore, followed
+      by the clock_gettime tail branch; the zero placeholder is a relocation.
+      Host coverage includes all valid IDs, signed/range extremes, null
+      output, callback failure with partial output, and errno reset on success.
   - address: 0x08262d78
     ghidra: FUN_08262d78
     name: draw_state_set_stroke_parameters
