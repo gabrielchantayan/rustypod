@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08257288
+    ghidra: FUN_08257288
+    name: copy_64_bytes_and_terminate
+    size: 36
+    sig: "u32 *copy_64_bytes_and_terminate(u32 *destination, const u32 *source)"
+    module: util/copy_64_bytes_and_terminate
+    status: ported
+    renames:
+      param_1/r0: destination / returned pointer
+      param_2/r1: source
+      iVar1/r2: word index
+    notes: >-
+      Raw A32 establishes extent 0x08257288..0x082572ac, ending in bx lr
+      before the next function's push. Copies sixteen aligned u32 words
+      in ascending order, then clears only destination byte 64. Returns
+      the unchanged destination pointer, unlike Ghidra's void signature.
+      Whole-image word decoding verifies two plain inbound BLs at
+      0x0824f29c and 0x0824f310, zero predicated inbound BLs, and zero
+      outbound BLs. Both raw callers consume r0 as their next argument;
+      Ghidra caller addresses disagree with the raw image. No callee seams.
+      Volatile accesses preserve forward ordered overlap behavior and avoid
+      builtin substitution; no behavioral deviations. Host tests cover
+      embedded NULs, full-width words, single-byte termination, guards,
+      pointer return, exact aliasing and both overlap directions.
+      Host suite and ARM release build passed. Standalone host smoke passed.
+      match.py exit 1: LLVM unrolls sixteen ordered load/store pairs into a
+      37-instruction frame versus the original nine-instruction loop;
   - address: 0x08260448
     ghidra: FUN_08260448
     name: texture_wrap_mode

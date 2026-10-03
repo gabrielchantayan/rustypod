@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod copy_64_bytes_and_terminate;
 pub mod texture_wrap_mode;
 pub mod object_payload_time_text;
 pub mod plist_dict_i64;
