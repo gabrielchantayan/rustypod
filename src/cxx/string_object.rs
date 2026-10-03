@@ -2579,6 +2579,55 @@ pub unsafe extern "C" fn string_object_substring(
     string_object_assign_utf8_capped(out, start, max_codepoints);
 }
 
+/// Split a path's final anchor — original: `FUN_0826bee0` @ 0x0826bee0.
+/// True extent: 212 bytes, ending at 0x0826bfb4's next push prologue.
+/// Raw A32 decoding verifies two inbound plain BL sites, nine outbound
+/// plain BL instructions, and zero predicated BLs in either direction.
+///
+/// Scan codepoints backwards, stopping at '\\', '/' or ':'. At the first
+/// '#', assign the suffix after it to `anchor`, then the prefix to `path`,
+/// excluding one backslash immediately before '#'. Return one on a split;
+/// otherwise return zero without touching either output. Each assignment
+/// uses a separately constructed and destroyed substring temporary.
+///
+/// Deviations: call existing Rust ports directly and use their established
+/// virtual allocation/release boundaries. Host StringObject fields are
+/// pointer-sized; on ARM the temporary is the original two-word object.
+/// `source` must remain valid through both assignments, as in retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_split_path_anchor(
+    source: *const StringObject,
+    path: *mut StringObject,
+    anchor: *mut StringObject,
+) -> u32 {
+    let count = utf8_codepoint_count_safe((*source).payload) as i32;
+    let mut index = count.wrapping_sub(1);
+    while index >= 0 {
+        let codepoint = string_object_codepoint_at(source, index);
+        if codepoint == 0x5c || codepoint == 0x2f || codepoint == 0x3a {
+            break;
+        }
+        if codepoint == 0x23 {
+            let mut temporary = MaybeUninit::<StringObject>::uninit();
+            let temporary = temporary.as_mut_ptr();
+            string_object_substring(temporary, source, index.wrapping_add(1),
+                count.wrapping_sub(index).wrapping_sub(1));
+            string_object_assign(anchor, temporary);
+            string_object_destroy(temporary);
+            if index > 0 && string_object_codepoint_at(source, index - 1) == 0x5c {
+                index -= 1;
+            }
+            string_object_substring(temporary, source, 0, index);
+            string_object_assign(path, temporary);
+            string_object_destroy(temporary);
+            return 1;
+        }
+        index -= 1;
+    }
+    0
+}
+
 /// string_object_substring_from_range — original: `FUN_081187dc` @
 /// 0x081187dc (56 bytes, all code; the next `push` prologue starts at
 /// 0x08118814). The body has one plain internal `bl`
@@ -6231,6 +6280,70 @@ pub(crate) mod tests {
         else { core::ptr::copy_nonoverlapping(old, out, strlen_safe_plus1(old)); }
         (*this).payload = out;
         out
+    }
+
+    unsafe extern "C" fn anchor_test_clear(this: *mut StringObject) {
+        (*this).payload = core::ptr::null_mut();
+    }
+
+    #[test]
+    fn split_path_anchor_handles_boundaries_unicode_and_rightmost_hash() {
+        let _allocation = assign_cstr_bench(core::ptr::null_mut());
+        let _release = bench();
+        unsafe {
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).allocate_payload =
+                recording_path_chain_allocate;
+            (*core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS)).clear_payload =
+                anchor_test_clear;
+            for (text, expected_path, expected_anchor) in [
+                ("file#anchor", "file", "anchor"),
+                ("file#one#two", "file#one", "two"),
+                ("dir/file\\#anchor", "dir/file", "anchor"),
+                ("file\\\\#anchor", "file\\", "anchor"),
+                ("#anchor", "", "anchor"),
+                ("file#", "file", ""),
+                ("#", "", ""),
+                ("é/音#名€", "é/音", "名€"),
+                // Retail's decoder treats a four-byte lead as termination.
+                ("é/音#名😀", "é/音", "名"),
+                ("dir#old/file#new", "dir#old/file", "new"),
+            ] {
+                PATH_CHAIN_BUFFERS = [[0; 32]; 8];
+                PATH_CHAIN_ALLOCATION_INDEX = 0;
+                let mut bytes = std::vec::Vec::from(text.as_bytes());
+                bytes.push(0);
+                let source = StringObject { vtable: core::ptr::null(), payload: bytes.as_mut_ptr() };
+                let mut path = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+                let mut anchor = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+                assert_eq!(string_object_split_path_anchor(&source, &mut path, &mut anchor), 1);
+                for (object, expected) in [(&path, expected_path), (&anchor, expected_anchor)] {
+                    if expected.is_empty() {
+                        assert!(object.payload.is_null(), "{text}");
+                    } else {
+                        assert_eq!(std::ffi::CStr::from_ptr(object.payload.cast()).to_bytes(),
+                            expected.as_bytes(), "{text}");
+                    }
+                }
+                assert_eq!(&bytes[..bytes.len() - 1], text.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn split_path_anchor_leaves_outputs_unchanged_when_separator_blocks_hash() {
+        for text in ["", "plain", "a#b/c", "a#b\\c", "a#b:c", "a#/"] {
+            let mut bytes = std::vec::Vec::from(text.as_bytes());
+            bytes.push(0);
+            let source = StringObject { vtable: core::ptr::null(), payload: bytes.as_mut_ptr() };
+            let mut path = substring_garbage_out();
+            let mut anchor = substring_garbage_out();
+            let before = (path.vtable, path.payload, anchor.vtable, anchor.payload);
+            assert_eq!(unsafe { string_object_split_path_anchor(&source, &mut path, &mut anchor) }, 0);
+            assert_eq!((path.vtable, path.payload, anchor.vtable, anchor.payload), before);
+        }
+        let source = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        assert_eq!(unsafe { string_object_split_path_anchor(&source,
+            core::ptr::null_mut(), core::ptr::null_mut()) }, 0);
     }
 
     #[test]
