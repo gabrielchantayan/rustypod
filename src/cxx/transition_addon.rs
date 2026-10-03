@@ -276,10 +276,6 @@ pub struct TransitionAddonConstructOps {
     /// optionally re-queries the context through 0x081a8198, clamps against
     /// 0x40000, and returns a capacity-rounded quantum through 0x08036f14.
     pub transfer_quantum: unsafe extern "C" fn(this: *mut u8, arg: u32) -> u32,
-    /// `FUN_08277bd0`: the scale-class helper. Fully decoded and
-    /// self-contained: with a NULL context word at this+0x28 and
-    /// `arg - 1 < 16` (unsigned) it returns `arg`, otherwise 1.
-    pub scale_class: unsafe extern "C" fn(this: *mut u8, arg: u32) -> u32,
     /// `FUN_08278104`: the vector-like member constructor at this+0x40.
     /// Stores the owner pointer at member+0x00, zeroes the words at
     /// +0x04/+0x08/+0x0c/+0x10 (the begin/end/capacity triple is
@@ -352,13 +348,23 @@ unsafe extern "C" fn transfer_quantum_unported(_this: *mut u8, _arg: u32) -> u32
     0
 }
 
-/// The scale-class helper @ 0x08277bd0 is fully decoded and self-contained
-/// (six instructions, no calls): `ldr r0,[r0,#0x28]; cmp r0,#0; bne +0x1c`;
-/// on the NULL-context path `sub r0,r1,#1; cmp r0,#16; movcc r0,r1;
-/// bxcc lr`; the common tail is `mov r0,#1`. The default is the faithful
-/// body, not a stub.
-unsafe extern "C" fn scale_class_body(this: *mut u8, arg: u32) -> u32 {
-    if read_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET)) == 0
+/// scale_class — original FUN_08277bd0 @ 0x08277bd0.
+///
+/// True size: 36 bytes (nine ARM words), ending at the next function's
+/// push {r3,r4,r5,lr} @ 0x08277bf4. Raw branch decoding verifies two
+/// inbound plain BL calls (@ 0x08278e3c and 0x08278efc), zero predicated
+/// BL calls, and no outgoing calls.
+///
+/// Reads the context word at +0x28. With zero context, returns `arg` for
+/// 1..=16; otherwise returns 1. The unsigned wrapping subtraction rejects
+/// zero and every larger value. No deliberate behavioral deviations.
+///
+/// # Safety
+/// `this` must provide an aligned, initialized u32 at byte offset +0x28.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scale_class(this: *mut u8, arg: u32) -> u32 {
+    if core::ptr::read(this.add(TRANSITION_ADDON_CONTEXT_OFFSET).cast::<u32>()) == 0
         && arg.wrapping_sub(1) < 16
     {
         arg
@@ -519,7 +525,6 @@ pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
     TransitionAddonConstructOps {
         string_member_construct: string_member_construct_unported,
         transfer_quantum: transfer_quantum_unported,
-        scale_class: scale_class_body,
         vector_member_construct,
         register_with_owner: register_with_owner_unported,
     };
@@ -546,12 +551,6 @@ unsafe fn transfer_quantum_op() -> unsafe extern "C" fn(*mut u8, u32) -> u32 {
     ))
 }
 
-#[inline(always)]
-unsafe fn scale_class_op() -> unsafe extern "C" fn(*mut u8, u32) -> u32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(
-        TRANSITION_ADDON_CONSTRUCT_OPS.scale_class
-    ))
-}
 
 #[inline(always)]
 unsafe fn vector_member_construct_op() -> unsafe extern "C" fn(*mut u8, *mut u8) -> *mut u8 {
@@ -660,7 +659,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
     let quantum = transfer_quantum_op()(this, quantum_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET), quantum);
 
-    let scale = scale_class_op()(this, scale_arg);
+    let scale = scale_class(this, scale_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET), scale);
     write_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET), 0);
 
@@ -786,7 +785,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
     let quantum = transfer_quantum_op()(this, quantum_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET), quantum);
 
-    let scale = scale_class_op()(this, scale_arg);
+    let scale = scale_class(this, scale_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET), scale);
     write_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET), 0);
 
@@ -1003,7 +1002,6 @@ mod tests {
     enum ConstructCall {
         StringMember { member: usize, source: usize },
         Quantum { this: usize, arg: u32, context_at_call: u32 },
-        Scale { this: usize, arg: u32 },
         Walk { selector: u32 },
         Vector { member: usize, owner: usize },
         Register { this: usize },
@@ -1036,13 +1034,6 @@ mod tests {
         0x2222
     }
 
-    unsafe extern "C" fn recording_scale_class(this: *mut u8, arg: u32) -> u32 {
-        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::Scale {
-            this: this as usize,
-            arg,
-        });
-        0x3333
-    }
 
     unsafe extern "C" fn recording_vector_member_construct(
         member: *mut u8,
@@ -1118,7 +1109,6 @@ mod tests {
         construct_guard(TransitionAddonConstructOps {
             string_member_construct: recording_string_member_construct,
             transfer_quantum: recording_transfer_quantum,
-            scale_class: recording_scale_class,
             vector_member_construct: recording_vector_member_construct,
             register_with_owner: recording_register_with_owner,
         })
@@ -1170,10 +1160,6 @@ mod tests {
                     arg: 0xaaaa,
                     context_at_call: 0xdead_beef,
                 },
-                ConstructCall::Scale {
-                    this: derived as usize,
-                    arg: 7,
-                },
                 ConstructCall::Walk { selector: 1 },
                 ConstructCall::Vector {
                     member: unsafe { derived.add(TRANSITION_ADDON_VECTOR_OFFSET) } as usize,
@@ -1194,7 +1180,7 @@ mod tests {
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 0x3333);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(*derived.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
@@ -1203,21 +1189,23 @@ mod tests {
 
 
     #[test]
-    fn scale_class_default_matches_the_decoded_truth_table() {
-        let mut object = Object([0; 0x100]);
-        let this = object.0.as_mut_ptr();
-        unsafe {
-            write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), 0);
-            // NULL context: arg in 1..=16 passes through, everything else
-            // collapses to 1 (arg = 0 wraps the subtraction to 0xffff_ffff).
-            assert_eq!(scale_class_body(this, 1), 1);
-            assert_eq!(scale_class_body(this, 16), 16);
-            assert_eq!(scale_class_body(this, 17), 1);
-            assert_eq!(scale_class_body(this, 0), 1);
-            assert_eq!(scale_class_body(this, u32::MAX), 1);
-            // Live context: always 1.
-            write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), 0x1111);
-            assert_eq!(scale_class_body(this, 7), 1);
+    fn scale_class_checks_the_full_valid_range_and_unsigned_boundaries() {
+        let mut words = [0xa5a5_a5a5u32; 12];
+        let original = words;
+        let this = words.as_mut_ptr().cast::<u8>();
+        for context in [0, 1, 0x8000_0000, u32::MAX] {
+            words[TRANSITION_ADDON_CONTEXT_OFFSET / 4] = context;
+            for arg in (0..=17).chain([0x8000_0000, u32::MAX]) {
+                let expected = if context == 0 && (1..=16).contains(&arg) { arg } else { 1 };
+                assert_eq!(unsafe { scale_class(this, arg) }, expected,
+                    "context={context:#x}, arg={arg:#x}");
+            }
+            for index in 0..words.len() {
+                if index != TRANSITION_ADDON_CONTEXT_OFFSET / 4 {
+                    assert_eq!(words[index], original[index]);
+                }
+            }
+            assert_eq!(words[TRANSITION_ADDON_CONTEXT_OFFSET / 4], context);
         }
     }
 
@@ -1351,10 +1339,6 @@ mod tests {
                     arg: 0xaaaa,
                     context_at_call: 0xdead_beef,
                 },
-                ConstructCall::Scale {
-                    this: derived as usize,
-                    arg: 7,
-                },
                 ConstructCall::Walk { selector: 1 },
                 ConstructCall::Vector {
                     member: unsafe { derived.add(TRANSITION_ADDON_VECTOR_OFFSET) } as usize,
@@ -1383,7 +1367,7 @@ mod tests {
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 0x3333);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(*derived.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
