@@ -278,51 +278,98 @@ pub unsafe extern "C" fn root_context_f9c_bound_instance() -> *mut RootContextF9
     cache.read_volatile()
 }
 
-/// RetailOS entry address of the unported destructor body reached by the
-/// two stock tail veneers.
-pub const ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS: usize = 0x0825_a028;
-
-/// ABI of the unported destructor body at
-/// [`ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS`].
-pub type RootContextF9cBoundDestruct =
-    unsafe extern "C" fn(*mut RootContextF9cBound) -> *mut RootContextF9cBound;
+type WordKeySetEraseRange = unsafe extern "C" fn(
+    *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    *mut WordKeySet,
+    *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+);
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn retail_root_context_f9c_bound_destruct(
-    this: *mut RootContextF9cBound,
-) -> *mut RootContextF9cBound {
-    let destruct: RootContextF9cBoundDestruct =
-        core::mem::transmute(ROOT_CONTEXT_F9C_BOUND_DESTRUCT_TARGET_ADDRESS);
-    destruct(this)
+unsafe extern "C" fn word_key_set_erase_range(
+    out: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    tree: *mut WordKeySet,
+    first: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    last: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+) {
+    let erase: WordKeySetEraseRange = core::mem::transmute(0x083c_073cusize);
+    erase(out, tree, first, last);
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_root_context_f9c_bound_destruct(
-    _this: *mut RootContextF9cBound,
-) -> *mut RootContextF9cBound {
-    panic!("root_context_f9c_bound_destruct requires destructor body 0x0825a028")
+unsafe extern "C" fn word_key_set_erase_range(
+    _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    _: *mut WordKeySet,
+    _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+) {
+    panic!("word-key set range erase requires retailOS or injected host operation")
 }
 
-/// Active boundary for the unported destructor body.
-#[cfg(target_os = "none")]
-pub static mut ROOT_CONTEXT_F9C_BOUND_DESTRUCT: RootContextF9cBoundDestruct =
-    retail_root_context_f9c_bound_destruct;
+/// shared_interface_tree_mutex_destruct — `FUN_0825a028` @ `0x0825a028`.
+///
+/// True extent: 152 bytes, 148 code bytes plus the vtable literal at
+/// `0x0825a0bc`; the next real prologue is at `0x0825a0c0`. Four plain
+/// internal BLs, zero predicated BLs; two plain inbound BLs at `0x080fe3a0`
+/// and `0x0813eab0`, zero predicated inbound BLs.
+///
+/// Install the shared-interface base vtable, destroy the mutex at +0x20,
+/// and, if the tree header exists, erase [header->left, header) through the
+/// verified word-key set helper at 0x083c073c. Reload and recycle the header,
+/// then unlink each pool chunk before freeing its arena and chunk header.
+/// A null tree header skips all pool cleanup. Return this without clearing
+/// the dangling header, free-list or bump pointers.
+///
+/// Deliberate deviations: typed fields widen host pointers; iterator saves
+/// are Rust locals. Ghidra's extra arguments and u64 return are artifacts
+/// of saving/restoring r1-r3, not part of the destructor's ABI. The range
+/// helper remains an unported, verified retail seam; host tests inject it.
+///
+/// # Safety
+/// `this` must be a live object with a valid tree and uniquely owned pool.
+/// This is terminal cleanup; the object must not be reused or destroyed twice.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn shared_interface_tree_mutex_destruct(
+    this: *mut SharedInterfaceTreeMutex,
+) -> *mut SharedInterfaceTreeMutex {
+    shared_interface_tree_mutex_destruct_with(
+        this, word_key_set_erase_range, crate::heap::veneers::cxx_array_dealloc,
+    )
+}
 
-/// Active host boundary for the unported destructor body.
-#[cfg(not(target_os = "none"))]
-pub static mut ROOT_CONTEXT_F9C_BOUND_DESTRUCT: RootContextF9cBoundDestruct =
-    missing_root_context_f9c_bound_destruct;
-
-#[inline(always)]
-unsafe fn root_context_f9c_bound_destruct_target() -> RootContextF9cBoundDestruct {
-    core::ptr::read_volatile(core::ptr::addr_of!(ROOT_CONTEXT_F9C_BOUND_DESTRUCT))
+unsafe fn shared_interface_tree_mutex_destruct_with(
+    this: *mut SharedInterfaceTreeMutex,
+    erase: WordKeySetEraseRange,
+    dealloc: unsafe extern "C" fn(*mut u8, usize, usize),
+) -> *mut SharedInterfaceTreeMutex {
+    (*this).vtable = SHARED_INTERFACE_BASE_VTABLE;
+    crate::cxx::mutex_destroy::cxx_mutex_destroy((*this).mutex.as_mut_ptr());
+    let tree = core::ptr::addr_of_mut!((*this).tree);
+    let mut last = (*tree).header;
+    if !last.is_null() {
+        let mut first = (*last).left;
+        let mut out = core::mem::MaybeUninit::uninit();
+        erase(out.as_mut_ptr(), tree, &mut first, &mut last);
+        let pool = tree.cast::<WordKeySetNodePool>();
+        let header = (*tree).header;
+        (*header).right = (*pool).free_list;
+        (*pool).free_list = header;
+        while !(*pool).chunk_head.is_null() {
+            let chunk = (*pool).chunk_head;
+            (*pool).chunk_head = (*chunk).prev;
+            dealloc((*chunk).arena, (*chunk).capacity as usize, 0);
+            dealloc(chunk.cast(), 1, 0);
+        }
+    }
+    this
 }
 
 /// root_context_f9c_bound_destruct — original: `thunk_FUN_0825a028` @
 /// `0x08168ae4` (4 bytes; **12** verified direct `bl` callers).
 ///
 /// Raw ARM is exactly `b 0x0813eabc`; that first tail veneer is exactly
-/// `b 0x0825a028`, the unported destructor body. The separately linked next
+/// `b 0x0825a028`, the ported destructor body. The separately linked next
 /// function starts at `0x08168ae8`, proving that the extent is the one branch
 /// word Ghidra reports. The preceding `0x08168acc` deleting destructor
 /// NULL-checks this same object, calls the first veneer, and branches to
@@ -338,15 +385,12 @@ unsafe fn root_context_f9c_bound_destruct_target() -> RootContextF9cBoundDestruc
 ///
 /// # Deliberate deviation
 ///
-/// The two stock tail branches become a volatile injectable call boundary.
-/// `FUN_0825a028` is unported: device builds call its fixed retailOS address,
-/// while host tests install a recorder. The wrapper deliberately retains no
-/// NULL guard; the target owns that behavior.
+/// The two stock tail branches call the ported destructor directly, retaining
+/// no NULL guard; the target owns that behavior.
 ///
 /// # Safety
 ///
-/// `this` must satisfy the unported destructor body's requirements. It is
-/// forwarded even when NULL, exactly as the ARM veneer does.
+/// `this` must satisfy the ported destructor body's requirements.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(
@@ -356,7 +400,7 @@ unsafe fn root_context_f9c_bound_destruct_target() -> RootContextF9cBoundDestruc
 pub unsafe extern "C" fn root_context_f9c_bound_destruct(
     this: *mut RootContextF9cBound,
 ) -> *mut RootContextF9cBound {
-    root_context_f9c_bound_destruct_target()(this)
+    shared_interface_tree_mutex_destruct(this)
 }
 
 /// root_context_f9c_bound_destruct_first_veneer — original:
@@ -366,22 +410,19 @@ pub unsafe extern "C" fn root_context_f9c_bound_destruct(
 /// Raw ARM is the single `b 0x0825a028` word `0xea046d59`; the separately
 /// linked next function begins with `push {r4, r5, r6, lr}` at `0x0813eac0`,
 /// establishing the true four-byte extent. The algorithm tail-forwards
-/// `this` to the unported destructor body and propagates its return unchanged.
+/// `this` to the ported destructor body and propagates its return unchanged.
 /// The five inbound calls at `0x0812fa24`, `0x081425f8`, `0x08142614`,
 /// `0x081b58b4`, and `0x081b5d8c` are all unconditional `bl`; no predicated
 /// `bl` forms target this veneer.
 ///
 /// # Deliberate deviation
 ///
-/// The ARM tail branch becomes the same volatile injectable boundary used by
-/// [`root_context_f9c_bound_destruct`]. Device builds call the verified fixed
-/// retailOS target; host tests install a recorder. This wrapper deliberately
-/// has no NULL guard, matching the branch-only original.
+/// The ARM tail branch calls the ported destructor directly. This wrapper
+/// deliberately has no NULL guard, matching the branch-only original.
 ///
 /// # Safety
 ///
-/// `this` must satisfy the unported destructor body's requirements. It is
-/// forwarded even when NULL.
+/// `this` must satisfy the ported destructor body's requirements.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 #[cfg_attr(
@@ -391,7 +432,7 @@ pub unsafe extern "C" fn root_context_f9c_bound_destruct(
 pub unsafe extern "C" fn root_context_f9c_bound_destruct_first_veneer(
     this: *mut RootContextF9cBound,
 ) -> *mut RootContextF9cBound {
-    root_context_f9c_bound_destruct_target()(this)
+    shared_interface_tree_mutex_destruct(this)
 }
 
 
@@ -410,10 +451,6 @@ mod tests {
     use crate::heap::types::{HeapDescriptor, HeapDescriptorDescriptor};
     use crate::heap::veneers::HEAP_OPS;
 
-    static DESTRUCT_LOCK: Mutex<()> = Mutex::new(());
-    static mut DESTRUCT_CALLS: u32 = 0;
-    static mut DESTRUCT_INPUTS: [*mut RootContextF9cBound; 2] = [ptr::null_mut(); 2];
-    static mut DESTRUCT_RETURN: *mut RootContextF9cBound = ptr::null_mut();
 
     static INSTANCE_LOCK: Mutex<()> = Mutex::new(());
     static mut INSTANCE_CONSTRUCT_CALLS: u32 = 0;
@@ -440,29 +477,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn recording_destruct(
-        this: *mut RootContextF9cBound,
-    ) -> *mut RootContextF9cBound {
-        let call = DESTRUCT_CALLS as usize;
-        DESTRUCT_INPUTS[call] = this;
-        DESTRUCT_CALLS += 1;
-        DESTRUCT_RETURN
-    }
-
-    struct DestructRestore {
-        destruct: RootContextF9cBoundDestruct,
-    }
-
-    impl Drop for DestructRestore {
-        fn drop(&mut self) {
-            unsafe {
-                ROOT_CONTEXT_F9C_BOUND_DESTRUCT = self.destruct;
-                DESTRUCT_CALLS = 0;
-                DESTRUCT_INPUTS = [ptr::null_mut(); 2];
-                DESTRUCT_RETURN = ptr::null_mut();
-            }
-        }
-    }
 
     const TREE_ARENA_SIZE: usize = 0x2000;
 
@@ -656,36 +670,103 @@ mod tests {
         drop(restore);
     }
 
+    unsafe extern "C" fn forbidden_erase(
+        _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+        _: *mut WordKeySet,
+        _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+        _: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    ) { panic!("null header must skip erase") }
+
+    unsafe extern "C" fn forbidden_dealloc(_: *mut u8, _: usize, _: usize) {
+        panic!("null header must preserve chunks")
+    }
+
     #[test]
-    fn destruct_veneers_forward_null_and_non_null_without_rewriting_the_target_result() {
-        let _guard = DESTRUCT_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    fn destruct_null_header_preserves_pool_and_other_members() {
         let mut input = object(0x2222_2222, 0x33, [0x44; 3]);
-        let mut returned = object(0x6666_6666, 0x77, [0x88; 3]);
-        let restore = unsafe {
-            let restore = DestructRestore {
-                destruct: ROOT_CONTEXT_F9C_BOUND_DESTRUCT,
-            };
-            ROOT_CONTEXT_F9C_BOUND_DESTRUCT = recording_destruct;
-            DESTRUCT_RETURN = ptr::addr_of_mut!(returned);
-            restore
-        };
+        input.tree._opaque.fill(0x55);
+        input.tree.node_count = 19;
+        let before = input.tree._opaque;
+        let original = ptr::addr_of_mut!(input);
+        assert_eq!(unsafe {
+            shared_interface_tree_mutex_destruct_with(original, forbidden_erase, forbidden_dealloc)
+        }, original);
+        assert_eq!(input.vtable, SHARED_INTERFACE_BASE_VTABLE);
+        assert_eq!(input.tree._opaque, before);
+        assert_eq!(input.tree.node_count, 19);
+        assert_eq!(input.mode, 0x33);
+        assert_eq!(input.trailing, [0x44; 3]);
+    }
 
-        unsafe {
-            assert_eq!(
-                root_context_f9c_bound_destruct_first_veneer(ptr::null_mut()),
-                ptr::addr_of_mut!(returned)
-            );
-            assert_eq!(DESTRUCT_CALLS, 1);
-            assert!(DESTRUCT_INPUTS[0].is_null(), "the veneer has no NULL guard");
+    std::thread_local! {
+        static RELEASED: std::cell::RefCell<std::vec::Vec<(usize, usize, usize)>> =
+            std::cell::RefCell::new(std::vec::Vec::new());
+    }
 
-            assert_eq!(
-                root_context_f9c_bound_destruct(ptr::addr_of_mut!(input)),
-                ptr::addr_of_mut!(returned)
-            );
-            assert_eq!(DESTRUCT_CALLS, 2);
-            assert_eq!(DESTRUCT_INPUTS[1], ptr::addr_of_mut!(input));
+    unsafe extern "C" fn record_release(p: *mut u8, count: usize, elem: usize) {
+        RELEASED.with(|calls| calls.borrow_mut().push((p as usize, count, elem)));
+    }
+
+    unsafe extern "C" fn erase_and_replace_header(
+        out: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+        tree: *mut WordKeySet,
+        first: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+        last: *mut *mut crate::cxx::word_key_set::WordKeySetNode,
+    ) {
+        let old = (*tree).header;
+        assert_eq!(*first, (*old).left);
+        assert_eq!(*last, old);
+        let replacement = (*old).parent;
+        (*tree).header = replacement;
+        (*tree).node_count = 0;
+        // Iterator/output writes must not replace the reloaded tree header.
+        *last = old;
+        *out = old;
+    }
+
+    #[test]
+    fn destruct_reloads_header_recycles_it_and_releases_chunks_in_order() {
+        use crate::cxx::word_key_set::{WordKeySetNode, WordKeySetPoolChunk};
+        for count in 0..=2 {
+            let mut input = object(0x2222_2222, 0x33, [0x44; 3]);
+            let mut nodes: [WordKeySetNode; 3] = unsafe { core::mem::zeroed() };
+            nodes[0].left = ptr::addr_of_mut!(nodes[2]);
+            nodes[0].parent = ptr::addr_of_mut!(nodes[1]);
+            input.tree.header = ptr::addr_of_mut!(nodes[0]);
+            input.tree.node_count = 1;
+            let mut arenas = [[0u8; 40]; 2];
+            let mut chunks: [WordKeySetPoolChunk; 2] = unsafe { core::mem::zeroed() };
+            for i in 0..count {
+                chunks[i].prev = if i == 0 { ptr::null_mut() } else { ptr::addr_of_mut!(chunks[i - 1]) };
+                chunks[i].capacity = (i + 1) as u32;
+                chunks[i].arena = arenas[i].as_mut_ptr();
+            }
+            let pool = ptr::addr_of_mut!(input.tree).cast::<WordKeySetNodePool>();
+            unsafe {
+                (*pool).chunk_head = if count == 0 { ptr::null_mut() } else { ptr::addr_of_mut!(chunks[count - 1]) };
+                (*pool).free_list = ptr::addr_of_mut!(nodes[2]);
+                (*pool).bump = arenas[0].as_mut_ptr();
+                (*pool).bump_end = arenas[0].as_mut_ptr().add(40);
+            }
+            RELEASED.with(|calls| calls.borrow_mut().clear());
+            let original = ptr::addr_of_mut!(input);
+            assert_eq!(unsafe {
+                shared_interface_tree_mutex_destruct_with(original, erase_and_replace_header, record_release)
+            }, original);
+            assert_eq!(input.vtable, SHARED_INTERFACE_BASE_VTABLE);
+            assert_eq!(input.tree.header, ptr::addr_of_mut!(nodes[1]));
+            assert_eq!(input.tree.node_count, 0);
+            unsafe {
+                assert_eq!((*pool).free_list, ptr::addr_of_mut!(nodes[1]));
+                assert_eq!(nodes[1].right, ptr::addr_of!(nodes[2]).cast_mut());
+                assert!((*pool).chunk_head.is_null());
+                assert_eq!((*pool).bump, arenas[0].as_mut_ptr());
+            }
+            let expected: std::vec::Vec<_> = (0..count).rev().flat_map(|i| [
+                (arenas[i].as_mut_ptr() as usize, i + 1, 0),
+                (ptr::addr_of_mut!(chunks[i]) as usize, 1, 0),
+            ]).collect();
+            RELEASED.with(|calls| assert_eq!(*calls.borrow(), expected));
         }
-
-        drop(restore);
     }
 }

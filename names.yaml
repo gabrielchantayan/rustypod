@@ -118565,7 +118565,7 @@ functions:
     status: ported
     renames:
       param_1/r0: this (root-context +0xf9c bound object; forwarded without a NULL guard)
-      FUN_0825a028: root_context_f9c_bound_destruct_target (unported)
+      FUN_0825a028: shared_interface_tree_mutex_destruct
     notes: >-
       Raw ARM establishes Ghidra's four-byte extent exactly: 0xea046d59 at
       0x0813eabc is `b 0x0825a028`, and the separately linked next function
@@ -118573,10 +118573,9 @@ functions:
       this and the final target return unchanged. Full-image ARM B/BL decode
       finds exactly five inbound direct calls, all unconditional bl:
       0x0812fa24, 0x081425f8, 0x08142614, 0x081b58b4, and 0x081b5d8c.
-      There are no predicated bl forms targeting this veneer. Device builds
-      retain the unported target as a fixed-address volatile seam; host tests
-      replace it with a recorder and prove NULL forwarding plus return
-      propagation.
+      There are no predicated bl forms targeting this veneer. Calls the ported
+      shared_interface_tree_mutex_destruct directly; the obsolete injectable
+      body boundary and recorder-only tests have been removed.
   - address: 0x08168ae4
     ghidra: thunk_FUN_0825a028
     name: root_context_f9c_bound_destruct
@@ -118587,13 +118586,13 @@ functions:
     renames:
       param_1/r0: this (root-context +0xf9c bound object; forwarded without a NULL guard)
       thunk_FUN_0813eabc: root_context_f9c_bound_destruct_first_veneer
-      FUN_0825a028: root_context_f9c_bound_destruct_target (unported)
+      FUN_0825a028: shared_interface_tree_mutex_destruct
     notes: >-
       Raw ARM confirms Ghidra's 4-byte extent: 0x08168ae4 is the lone
       `b 0x0813eabc`; the next separately linked body starts at 0x08168ae8.
       That first veneer is itself the lone `b 0x0825a028`, so this port
-      forwards this and the final target return unchanged through a volatile
-      seam. The preceding 0x08168acc deleting-destructor path tests this for
+      forwards this and the final target return unchanged directly to the
+      ported body. The preceding 0x08168acc deleting-destructor path tests this for
       NULL, calls 0x0813eabc, then tail-branches to operator_delete
       (0x082aad24), identifying this as the non-deleting counterpart for the
       adjacent root_context_f9c_bound constructor. Full-image ARM B/BL decode
@@ -118602,9 +118601,8 @@ functions:
       0x081f8aa0, 0x081f8b78, 0x081f8e90, 0x081f8ed8, 0x081f8fe4,
       0x08210b4c, and 0x08211870. There are no predicated forms and aligned
       whole-image word scans find no DATA reference to either veneer or the
-      unported body. Device builds call the fixed 0x0825a028 address; host
-      tests replace that boundary with a recorder and prove both NULL
-      forwarding and return propagation.
+      body. Both Rust veneers now call shared_interface_tree_mutex_destruct
+      directly, with no NULL guard or obsolete fixed-address body seam.
   - address: 0x08139dec
     ghidra: FUN_08139dec
     name: iap_incoming_client_base_construct
@@ -205278,3 +205276,51 @@ functions:
       Standalone public-API smoke with host boundary adapters observes
       results zero/34/34 and complete ordered cleanup. Actual firmware parser
       and device execution were not exercised.
+
+  - address: 0x0825a028
+    ghidra: FUN_0825a028
+    name: shared_interface_tree_mutex_destruct
+    size: 152
+    sig: "SharedInterfaceTreeMutex *shared_interface_tree_mutex_destruct(SharedInterfaceTreeMutex *this)"
+    module: app/root_context_f9c_bound
+    status: ported
+    vars:
+      param_1/r0: this
+      puVar3/r4: tree
+      puVar4/r5: chunk
+      local_18: last
+      local_14: first
+      uStack_10: erased_iterator
+    renames:
+      FUN_08261e54: cxx_mutex_destroy
+      FUN_083c073c: word_key_set_erase_range (verified retail seam)
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw extent is 0x0825a028..0x0825a0bf: 148 code bytes and the vtable
+      literal 0x089a75c8 at 0x0825a0bc. Next real prologue starts at
+      0x0825a0c0. Four internal unconditional BLs at 0x0825a034,
+      0x0825a068, 0x0825a094 and 0x0825a0a4; no predicated BLs. Independent
+      whole-image word decoding finds two plain inbound BLs at 0x080fe3a0
+      and 0x0813eab0, no predicated inbound BLs. Ghidra's extra arguments
+      and u64 return misinterpret the r1-r3 save/restore slots.
+      Installs the shared-interface base vtable, destroys the embedded mutex,
+      and, when the word-key tree header is non-null, erases
+      [header->left, header), reloads the header and prepends it to the free
+      list. Unlinks each growth chunk before deallocating its arena with
+      (capacity, 0), then its header with (1, 0). Null header skips all pool
+      cleanup. Returns this; header, recycle and bump pointers remain
+      dangling after terminal cleanup, faithfully. Host pointer fields widen
+      through the existing repr(C) types; stack iterators become locals.
+      Callee 0x083c073c is confirmed as the word-key tree range erase by raw
+      header/iterator accesses and Ghidra's algorithm; absent from names.yaml
+      and Rust, it remains a fixed retail seam, not a new port.
+      match.py reports 37 stock code instructions versus 42 Rust instructions
+      including two literals. The same header guard, erase, header reload,
+      recycle and chunk unlink/free loop remain. LLVM adds its frame-pointer
+      prologue and BLX retail call; array deallocation folds to operator_delete
+      and drops the proven-dead count/element registers. Both existing
+      destructor veneers call this port directly. All 13673 host tests pass,
+      including null-header pool preservation, header replacement/reload and
+      zero/one/two-chunk ordered release. ARM release build passes. A temporary
+      public-API smoke exercised the body and both veneers on null headers.
+      Device execution and the retail range-erase body were not exercised.
