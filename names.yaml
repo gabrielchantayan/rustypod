@@ -204566,3 +204566,45 @@ functions:
       performs an unsigned three-element range check, and conditionally
       computes selector minus 0x8a07; out-of-range words still return zero.
       Frame setup replaces the original predicated early returns.
+
+  - address: 0x08267780
+    ghidra: FUN_08267780
+    name: buffered_read_context_construct
+    size: 32
+    sig: "void *buffered_read_context_construct(void *context, u32 source, u32 open_mode, u32 maximum_length)"
+    module: cxx/buffered_read_context_construct
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: source
+      param_3/r2: open_mode
+      param_4/r3: maximum_length
+      "[context + 0x00]": source
+      "[context + 0x04]": open_mode_byte
+      "[context + 0x08]": maximum_length
+      "[context + 0x0c]": allocation
+      "[context + 0x10]": length
+      "[context + 0x14]": state
+    notes: >-
+      Raw osos.dec establishes the true 32-byte extent
+      0x08267780..0x082677a0 exclusive: eight A32 words end in bx lr;
+      the independently called buffered_read_context_destroy begins with
+      push {r4,lr} at 0x082677a0. Whole-image aligned raw BL decoding
+      finds two incoming plain calls at 0x08267ac4 and 0x08267d14,
+      zero incoming predicated calls, and zero outgoing calls. Stores
+      source, the low byte of open_mode, zero allocation, maximum_length,
+      zero length, and zero state in that order. Padding remains untouched.
+      The consumer at 0x08267668 opens the source using the mode byte,
+      checks read length against maximum_length, and fills allocation,
+      length, and state. Raw r0 remains context, correcting Ghidra's void
+      return annotation. No callees or new seams. Deliberate deviations:
+      target-width words remain u32 on hosts and volatile accesses preserve
+      store widths and order, matching the existing destructor convention.
+      Host tests cover every mode byte with nonzero upper bits, zero and
+      maximal input words, padding and neighboring storage preservation,
+      return identity, and reinitialization of stale result fields.
+      Full host test suite and ARM release build pass. Standalone actual-source
+      smoke verifies input words, byte truncation, result clearing, padding,
+      bounds, and return identity. match.py exits 1: the six stores and zero
+      materialization match stock order; LLVM adds push {fp,lr} and mov fp,sp,
+      and replaces bx lr with pop {fp,pc} (ten versus eight instructions).
