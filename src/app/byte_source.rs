@@ -78,10 +78,69 @@ pub unsafe extern "C" fn byte_source_at(source: *const ByteSource, index: usize)
     unsafe { (*source).inline_bytes.as_ptr().add(index).read() }
 }
 
+/// Clears a byte source's embedded bytes and status flags.
+///
+/// Original: `FUN_0827259c` @ `0x0827259c`, true size 36 bytes, ending
+/// with `bx lr` at `0x082725bc` before `byte_source_at` at `0x082725c0`.
+/// Full-image aligned A32 word decoding verifies two inbound plain BLs
+/// (`0x0827265c`, `0x0828bd3c`), zero predicated BLs, and zero outbound BLs.
+/// Writes zero to offsets 5 and 6, then loops over offsets 0 through 4.
+/// Byte 7 and both external-store pointers remain unchanged.
+///
+/// Deviation: volatile byte stores prevent builtin substitution and preserve
+/// retail store order; LLVM may unroll the fixed five-byte loop.
+///
+/// # Safety
+///
+/// `source` must point to seven writable bytes. No alignment beyond byte
+/// alignment is required; NULL is not accepted. A complete ByteSource is
+/// not required because the function never accesses its pointer fields.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn byte_source_clear(source: *mut u8) {
+    unsafe {
+        source.add(5).write_volatile(0);
+        source.add(6).write_volatile(0);
+        for index in 0..5 {
+            source.add(index).write_volatile(0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::ptr;
+
+    #[test]
+    fn clear_changes_exactly_seven_bytes_at_every_alignment() {
+        for offset in 1..=4 {
+            for fill in [0, 0x5a, 0xff] {
+                let mut bytes = [0xa5; 16];
+                bytes[offset..offset + 7].fill(fill);
+                unsafe { byte_source_clear(bytes.as_mut_ptr().add(offset)) };
+                let mut expected = [0xa5; 16];
+                expected[offset..offset + 7].fill(0);
+                assert_eq!(bytes, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn clear_preserves_padding_and_external_stores() {
+        let fallback = [0x31; 5];
+        let overrides = [0x42; 5];
+        let mut source = source([0xff; 5], fallback.as_ptr(), overrides.as_ptr());
+        source.padding = 0x9b;
+        unsafe { byte_source_clear(core::ptr::addr_of_mut!(source).cast()) };
+        assert_eq!(source.inline_bytes, [0; 5]);
+        assert_eq!((source.status, source.dirty, source.padding), (0, 0, 0x9b));
+        assert_eq!(source.fallback_bytes, fallback.as_ptr());
+        assert_eq!(source.override_bytes, overrides.as_ptr());
+        assert_eq!(unsafe { byte_source_at(&source, 2) }, 0x42);
+        assert_eq!(fallback, [0x31; 5]);
+        assert_eq!(overrides, [0x42; 5]);
+    }
 
     fn source(inline_bytes: [u8; 5], fallback_bytes: *const u8, override_bytes: *const u8) -> ByteSource {
         ByteSource {

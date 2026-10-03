@@ -8271,6 +8271,34 @@ functions:
       64-bit right shift. Division by zero retains the existing
       __aeabi_ldivmod port's documented zero-quotient deviation from the ADS
       divide-by-zero handler; no additional deviation is introduced.
+  - address: 0x0827259c
+    ghidra: FUN_0827259c
+    name: byte_source_clear
+    size: 36
+    sig: "void byte_source_clear(u8 *source)"
+    module: app/byte_source
+    status: ported
+    renames:
+      param_1/r0: source
+      r1: index
+      r2: zero
+    notes: >-
+      Raw osos.dec words establish the nine-instruction A32 extent
+      0x0827259c..0x082725bf, with bx lr at 0x082725bc and the independently
+      entered byte_source_at beginning at 0x082725c0. Clears status byte 5
+      and dirty byte 6 before looping over inline bytes 0 through 4; leaves
+      padding byte 7 and the external-store pointer words untouched.
+      Full-image aligned word decoding finds two inbound plain BLs at
+      0x0827265c and 0x0828bd3c, zero predicated inbound BLs, and no outbound
+      BLs. Ghidra's third caller is not a raw BL reference. Volatile stores
+      preserve byte access and ordering without LLVM builtin substitution;
+      fixed-loop unrolling is intentional. Existing pointer-pair initializer
+      and Notes-view initializer now share this port. Host tests cover
+      byte alignment, zero and nonzero contents, exact write boundaries,
+      and preservation of padding and external pointers.
+      Standalone host smoke verifies reset followed by external fallback
+      and cleared inline lookup. ARM match confirms all seven byte stores
+      in retail order, with LLVM loop unrolling and a frame prologue/epilogue.
   - address: 0x082725ec
     ghidra: FUN_082725ec
     name: byte_source_propagate_unresolved
@@ -126425,9 +126453,8 @@ functions:
       supplied target words, calls FUN_0827259c to clear bytes 0..6, and
       returns r0 unchanged. A whole-image A32 decode finds three inbound
       plain unconditional bl calls at 0x0828a120, 0x0828a134, and
-      0x0828bfc8, with no predicated bl calls. FUN_0827259c has no names.yaml
-      entry; its identity is therefore not asserted beyond its verified
-      seven-byte clear behavior.
+      0x0828bfc8, with no predicated bl calls. The seven-byte clear uses the
+      shared byte_source_clear port at 0x0827259c.
 
   - address: 0x08272800
     ghidra: FUN_08272800
