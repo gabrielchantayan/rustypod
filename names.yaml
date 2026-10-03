@@ -129683,6 +129683,35 @@ functions:
       allocation, dispatch, store, and reload; expected differences are
       the seam blx, extra frame/save register, and LLVM's split
       fast-path return.
+  # --- draw-state horizontal text alignment ---
+  - address: 0x08262d38
+    ghidra: FUN_08262d38
+    name: draw_state_align_position
+    size: 56
+    sig: "void draw_state_align_position(uint32_t *write_position, int32_t available_width, int32_t text_width, uint32_t alignment)"
+    module: cxx/draw_state_align_position
+    status: ported
+    renames:
+      param_1/r0: write_position
+      param_2/r1: available_width
+      param_3/r2: text_width
+      param_4/r3: alignment
+      iVar1: adjusted_position
+    notes: >-
+      Raw osos.dec confirms 56 bytes ending in BX LR at 0x08262d6c;
+      the next real entry at 0x08262d70 stores the style byte and returns.
+      Independently decoded ARM BL immediates find exactly two unconditional
+      inbound calls at 0x082639f0 and 0x08263a5c, no predicated BL sites,
+      and no outgoing calls. Both callers are text-layout paths in
+      0x08263910 and adjust the first draw-state word before rendering text.
+      Mode 1 adds half the wrapping signed width difference, truncated toward
+      zero; mode 2 adds the full difference. All other modes avoid memory
+      access. Position addition wraps at 32 bits. No dependencies or seams
+      are needed. No deliberate behavioral deviations; LLVM may replace
+      ARM predication with branches. Host tests cover negative odd centering,
+      signed subtraction overflow, position wrap, adjacent-word preservation,
+      and ignored modes with NULL pointers.
+
 
   # --- draw-state text-range renderer adapter ---
   - address: 0x08262cbc
