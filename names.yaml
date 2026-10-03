@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826c938
+    ghidra: FUN_0826c938
+    name: numeric_pair_table_construct
+    size: 92
+    sig: "NumericPairTable *numeric_pair_table_construct(NumericPairTable *this, const StringObject *path)"
+    module: app/numeric_pair_table
+    status: ported
+    renames:
+      param_1: this
+      param_2: path
+      param_3/param_4: unused incoming words saved in temporary path storage
+      FUN_08277304: string_object_construct_from_cstr
+      thunk_EXT_FUN_2200027c: memzero_aligned
+      FUN_082792b4: path_object_copy_construct
+      FUN_0826c714: load_numeric_pairs_from_path
+      FUN_08277484: string_object_destroy
+      DAT_0826c990: empty_title
+    notes: >-
+      Raw osos.dec establishes 88 bytes of A32 code and the four-byte
+      empty-string literal at 0x0826c990, true extent 92 bytes through
+      0x0826c993; next real entry is push at 0x0826c994. Five outbound
+      plain BLs, zero predicated BLs. Whole-image word decoding finds
+      two inbound plain BLs at 0x081a29f8 and 0x081a2c78, zero predicated.
+      Mark valid at +0, construct empty title at +4, clear count at +0xfac
+      and 4000 bytes of 1000 u16 pairs at +12. Copy-construct a temporary
+      path, pass it to the unported parser at 0x0826c714, destroy the
+      temporary, return this. Parser opens the path, reads the title and
+      space-separated decimal pairs, and clears valid on open/format
+      failure. Callers allocate 0xfb0 bytes and inspect the valid byte.
+      The zero-fill veneer at 0x08037db8 targets 0x2200027c, the IRAM
+      mirror of ported memzero_aligned at 0x0800027c. Deviations are native
+      pointer field layout on hosts, modeled string vtable, ported zero-fill
+      through a volatile function pointer, and an injectable parser slot
+      whose target default calls 0x0826c714. These boundaries produce BLX
+      instead of direct BL; the constructor retains the count store at
+      +0xfac, 4000-byte clear at +12, copy/load/destroy order and this return.
+      Final match.py prints a structural diff (exit 1): 31 Rust instructions
+      versus 22 original code instructions, including the LLVM frame and
+      indirect-call loads. Host parser default panics rather than pretending
+      to load a file; tests inject parser outcomes and exercise real string
+      lifecycle and zero-fill, dirty storage, untouched padding, failure and
+      full capacity. Standalone host smoke exercised the exported constructor
+      with an injected unavailable-file outcome and verified cleared pairs,
+      preserved failure status, empty title and original-storage return.
   - address: 0x0826dd8c
     ghidra: FUN_0826dd8c
     name: view_base_set_position_offsets
