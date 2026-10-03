@@ -6,6 +6,7 @@
 //! (`app/resource_chain.rs`):
 //!
 //! - [`capture_context_fields`] — `FUN_0826fda0` @ 0x0826fda0.
+//! - [`scoped_context_construct_from_object`] — `FUN_08270320` @ 0x08270320.
 //! - [`scoped_context_construct`] — `FUN_08270394` @ 0x08270394.
 //! - [`scoped_context_construct_from_source`] — `FUN_082703d0` @ 0x082703d0.
 //! - [`scoped_context_destroy`] — `FUN_08270414` @ 0x08270414.
@@ -67,7 +68,7 @@
 //! | 0x08270414 | **175** | trivial destructor — **ported here** |
 //! | 0x08270418 | 15 | field copy: `dst[+4..+0x14] = src[+4..+0x14]`, vtable untouched |
 //! | 0x082703d0 | 7 | ctor that adopts another token's owner through 0x0826fd24 — **ported here** |
-//! | 0x08270320 | 2 | a third ctor variant |
+//! | 0x08270320 | 2 | ctor from a flag-gated object payload — **ported here** |
 //!
 //! `0x08270414` really is this class's destructor and not a generic
 //! shared no-op: of its 175 call sites, 166 sit within 0x300 bytes of a
@@ -208,9 +209,9 @@ pub static SCOPED_CONTEXT_VTABLE: ScopedContextVtable = ScopedContextVtable {
 pub struct ScopedContext {
     /// +0x00 — the class vtable (original literal 0x089a5b30).
     pub vtable: *const ScopedContextVtable,
-    /// +0x04 — cleared by every constructor. Its low byte lets
-    /// `FUN_0826fd24` decide whether a *source* token's owner may be
-    /// adopted; the full word also forces
+    /// +0x04 — cleared by sibling constructors; the object constructor stores
+    /// the source target address here. Its low byte lets `FUN_0826fd24`
+    /// decide whether a source token's owner may be adopted; the full word forces
     /// [`scoped_context_is_valid`] to accept the token when nonzero.
     pub owner_valid: u32,
     /// +0x08 — the object this token speaks for; NULL is the common case.
@@ -371,6 +372,49 @@ pub unsafe extern "C" fn capture_context_fields(token: *mut ScopedContext, owner
 /// ported callee; the slot stays replaceable for constructor-test isolation.
 pub static mut CAPTURE_CONTEXT_FIELDS: unsafe extern "C" fn(*mut ScopedContext, *mut u8) =
     capture_context_fields;
+
+/// scoped_context_construct_from_object — original: `FUN_08270320` @
+/// `0x08270320` (116 bytes: 108 code + 8 literal bytes; next function
+/// `0x08270394`). Raw decoding verifies 2 incoming plain BL, 0 predicated;
+/// body has 3 plain BL (two payload reads and capture), 0 predicated.
+///
+/// Stores source at +4, clears owner and derived fields, and skips lookups
+/// for NULL source. Zero/suppressed payload records only root+0x30;
+/// otherwise rereads payload and captures owner and derived fields.
+/// Clears mode before lookups, writes mode last, and returns this.
+///
+/// Deviations: existing modeled vtable and native-pointer root slots, as
+/// sibling constructors. Source address remains u32, requiring below-4-GiB
+/// host fixtures. Calls the verified capture port directly; no new seams or
+/// NULL guards.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_construct_from_object(
+    this: *mut ScopedContext,
+    source: *const u8,
+    mode: u8,
+) -> *mut ScopedContext {
+    (*this).vtable = &SCOPED_CONTEXT_VTABLE;
+    (*this).owner_valid = source as usize as u32;
+    (*this).owner = ptr::null_mut();
+    (*this).service_context = ptr::null_mut();
+    (*this).registry_token = ptr::null_mut();
+    (*this).mode = 0;
+    if !source.is_null() {
+        if crate::ui::object_payload::object_payload_if_available(source) == 0 {
+            let root = app_root_object();
+            (*this).service_context =
+                (root as *const *mut u8).add(ROOT_SERVICE_CONTEXT_SLOT).read();
+        } else {
+            // Keep the stock reload and second BL; a normal read lets LLVM CSE it.
+            let source = ptr::addr_of!((*this).owner_valid).read_volatile() as usize as *const u8;
+            let owner = crate::ui::object_payload::object_payload_if_available(source);
+            capture_context_fields(this, owner as usize as *mut u8);
+        }
+    }
+    (*this).mode = mode;
+    this
+}
 
 /// scoped_context_construct — original: `FUN_08270394` @ 0x08270394
 /// (60 bytes: 56 code + the 4-byte vtable literal @ 0x082703cc, which
@@ -1834,6 +1878,69 @@ mod tests {
         let mut registry = vec![ptr::null_mut(); REGISTRY_TOKEN_SLOT + 1];
         registry[REGISTRY_TOKEN_SLOT] = token_word;
         registry
+    }
+
+    #[test]
+    fn object_constructor_null_source_skips_invalid_root() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _restore = SlotGuard;
+        let mut token = poisoned_token();
+        unsafe {
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(1usize as *mut u8);
+            assert_eq!(scoped_context_construct_from_object(&mut token, ptr::null(), 0xff), &mut token as *mut _);
+        }
+        assert_eq!(token.vtable, &SCOPED_CONTEXT_VTABLE as *const _);
+        assert_eq!(token.owner_valid, 0);
+        assert!(token.owner.is_null());
+        assert!(token.service_context.is_null());
+        assert!(token.registry_token.is_null());
+        assert_eq!(token.mode, 0xff);
+    }
+
+    #[test]
+    fn object_constructor_payload_gate_and_registry_capture() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _restore = SlotGuard;
+        let Some(source) = (unsafe {
+            crate::testing::try_map_u32_slab(
+                crate::testing::hints::SCOPED_CONTEXT_OBJECT_CONSTRUCT, 0x1000,
+            )
+        }) else { return };
+        let mut registry = registry_with_token(0x4242_4242usize as *mut u8);
+        let mut service_context = vec![ptr::null_mut(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        let mut root = vec![ptr::null_mut(); ROOT_SERVICE_CONTEXT_SLOT + 1];
+        root[ROOT_SERVICE_CONTEXT_SLOT] = service_context.as_mut_ptr() as *mut u8;
+        unsafe {
+            ptr::addr_of_mut!(APP_ROOT_OBJECT).write_volatile(root.as_mut_ptr() as *mut u8);
+            source.write_bytes(0, 0x1000);
+        }
+        for (flags, payload, has_registry, expected_owner, expected_registry) in [
+            (1u8, 0x1234_5678u32, false, 0usize, 0usize),
+            (0, 0, false, 0, 0),
+            (0xfe, 0x1234_5678, true, 0x1234_5678, 0x4242_4242),
+            (0, 0x7654_3210, false, 0x7654_3210, 0),
+        ] {
+            // No-payload paths must not touch even an invalid registry.
+            service_context[SERVICE_CONTEXT_REGISTRY_SLOT] = if has_registry {
+                registry.as_mut_ptr() as *mut u8
+            } else if expected_owner == 0 {
+                1usize as *mut u8
+            } else {
+                ptr::null_mut()
+            };
+            let mut token = poisoned_token();
+            unsafe {
+                source.add(0x1d).write(flags);
+                source.add(0x20).cast::<u32>().write(payload);
+                assert_eq!(scoped_context_construct_from_object(&mut token, source, 0x81), &mut token as *mut _);
+            }
+            assert_eq!(token.vtable, &SCOPED_CONTEXT_VTABLE as *const _);
+            assert_eq!(token.owner_valid, source as usize as u32);
+            assert_eq!(token.owner as usize, expected_owner);
+            assert_eq!(token.service_context, service_context.as_mut_ptr() as *mut u8);
+            assert_eq!(token.registry_token as usize, expected_registry);
+            assert_eq!(token.mode, 0x81);
+        }
     }
 
     #[test]

@@ -85444,6 +85444,41 @@ functions:
       owner-NULL path makes zero root accesses, captures all three
       non-NULL fields, and yields NULL for a NULL registry.
 
+  - address: 0x08270320
+    ghidra: FUN_08270320
+    name: scoped_context_construct_from_object
+    size: 116
+    sig: "ScopedContext *scoped_context_construct_from_object(ScopedContext *this, const void *source, u8 mode)"
+    module: app/scoped_context
+    renames:
+      param_1: this
+      param_2: source
+      param_3: mode
+      iVar1: payload_address
+      uVar2: owner
+      DAT_0827038c: SCOPED_CONTEXT_VTABLE_ADDRESS
+      DAT_08270390: APP_ROOT_OBJECT
+      FUN_08054454: object_payload_if_available
+      FUN_0826fda0: capture_context_fields
+    status: ported
+    notes: >-
+      Raw extent is 116 bytes: 108 instruction bytes through return at
+      0x08270388, vtable/root literals at 0x0827038c/0x08270390, then
+      independently called constructor at 0x08270394. Whole-image ARM
+      decoding verifies 2 plain incoming BL at 0x08179384 and 0x0817ac6c,
+      no predicated BL. Body has 3 plain BL, no predicated: payload accessor
+      twice and capture_context_fields. Stores source at +4, clears owner
+      and derived fields. NULL source skips lookups; zero/suppressed payload
+      records only root+0x30 without reading registry. Otherwise reloads
+      source from +4, rereads payload, and captures it. Mode is cleared
+      before lookups and written last; returns this. Reuses modeled vtable
+      and native-pointer root slots. Source address stays u32, requiring
+      below-4-GiB host fixtures. No added guards or seams. Tests cover NULL
+      source with invalid root, unavailable/zero payload with invalid
+      registry, and available payload with present/NULL registry.
+      Source-word reload is volatile to prevent LLVM CSE eliminating the
+      second payload call and preserve all three original direct BLs.
+
   - address: 0x08270394
     ghidra: FUN_08270394
     name: scoped_context_construct
