@@ -206102,3 +206102,33 @@ functions:
       edges, both virtual slots and the fatal NULL gate; release is BLX through
       literal 0x082617ec instead of immediate BL. Relocatable calls to the
       mode-one port and heap_panic appear unresolved in match.py's listing.
+
+  - address: 0x08260534
+    ghidra: FUN_08260534
+    name: word_log2_floor
+    size: 36
+    sig: "u32 word_log2_floor(u32 value)"
+    module: util/word_log2_floor
+    status: ported
+    vars:
+      param_1: value
+      iVar1: result
+      uVar2: mask
+    notes: >-
+      Raw osos.dec establishes nine A32 words from 0x08260534 through bx lr
+      at 0x08260554; the next independent alignment leaf starts at 0x08260558.
+      Full-image aligned B/BL decoding finds two inbound plain BL sites at
+      0x082507dc and 0x082507ec, zero predicated BL sites and no tail-B callers.
+      The body is a leaf with no BL instructions. Grow a low-bit mask from
+      one until it covers value, counting growth steps: floor(log2(value))
+      for nonzero words, zero for zero and one. The raw caller passes shifted
+      texture dimensions and takes the smaller result for mipmap generation.
+      Ghidra reports additional callers not present in the raw immediate-call
+      scan; the raw bytes govern the count. No callee seams or deliberate
+      algorithm deviations. Host tests cover every power-of-two boundary,
+      all 16-bit values, mixed high bits, and u32::MAX.
+      Actual-source smoke confirms zero, one, power boundaries and high-bit
+      inputs. All 13714 host tests and the ARM release build pass. match.py
+      exits 1 with a structural diff: LLVM adds a value<2 fast path, retains
+      mask growth and the conditional back edge, and emits 18 instructions
+      instead of nine; no helper calls or symbol folding.

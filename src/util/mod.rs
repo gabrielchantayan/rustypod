@@ -153,6 +153,7 @@ pub mod bucket_chain_destroy_node8;
 pub mod bucket_chain_insert;
 pub mod hash_table_slot_find;
 pub mod highest_set_bit;
+pub mod word_log2_floor;
 pub mod inner_state;
 pub mod fixed_scale_parameters;
 pub mod interp_stack_pop_release;
