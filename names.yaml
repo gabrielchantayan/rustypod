@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826b784
+    ghidra: FUN_0826b784
+    name: collection_append
+    size: 16
+    sig: "void collection_append(uint32_t *owner, void *item)"
+    module: ui/collection_append
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: item
+      r2: last_index
+      "owner+4": collection
+      "collection+4": count
+      FUN_0826b818: shared_insertion_and_key_range_body
+    notes: >-
+      Raw words e5902004 e5922004 e2422001 ea000020 establish exactly
+      16 bytes at 0x0826b784..0x0826b794; the next real function begins
+      with push at 0x0826b794. Whole-image aligned ARM branch decoding
+      verifies two inbound plain BL callers (0x0812d614, 0x0826bb60),
+      zero predicated BL callers, and zero outbound BL instructions.
+      Load the u32 collection pointer at owner+4, load its count at +4,
+      subtract one with ARM wrapping arithmetic, and tail-branch to
+      0x0826b818 with owner and item unchanged. That shared body maps
+      UINT32_MAX to position zero and the last index to INT32_MAX,
+      inserts via collection virtual slot +0x20, then updates owner byte
+      key bounds +8/+9 from the returned object. Ghidra incorrectly
+      includes the tail target's body in this function's decompiled C.
+      Neither assigned entry nor shared target had an existing names.yaml
+      entry or Rust seam. Deliberate deviation: preserve the shared retail
+      body through an address-bound volatile seam; host default panics
+      rather than faking insertion. Tests cover empty, singleton, ordinary,
+      signed-boundary and maximum-u32 counts with target-width pointers.
+      Host suite and ARM release build pass. Standalone actual-source
+      smoke verifies empty and singleton last indices and subtraction at
+      UINT32_MAX. match.py exits 1: four original instructions versus ten
+      Rust listing lines; both pointer/count loads and decrement remain,
+      with LLVM frame setup and indirect terminal BX through the seam.
   - address: 0x0826bdd8
     ghidra: FUN_0826bdd8
     name: string_object_matches_either_runtime_label
