@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod image_format_selected_product_sum;
 pub mod embedded_vector_cursor_advance;
 pub mod backlight_timer_refresh;
 pub mod restore_display_layout;

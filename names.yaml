@@ -208494,3 +208494,35 @@ functions:
       across the second call. Both BL relocations resolve to the correct
       vector_size_elem4_alias_76e8; conditional increment, unsigned
       comparisons, reset and boolean return preserve the original flow.
+
+  - address: 0x0821af14
+    ghidra: FUN_0821af14
+    name: image_format_selected_product_sum
+    size: 96
+    sig: "u32 image_format_selected_product_sum(const ImageFormatSelection *owner)"
+    module: app/image_format_selected_product_sum
+    status: ported
+    vars: {param_1: owner, iVar1: slots, uVar4: index, iVar5: sum, iVar3: descriptor}
+    notes: >-
+      Raw A32 words establish 0x0821af14..0x0821af74, followed by an
+      independent selector function. Two outgoing plain BL instructions,
+      zero predicated BLs: 0x081f0258 fetches the context's optional table
+      (context +0x30, nonzero base +0x1c), and 0x083d76e8 is the existing
+      vector_size_elem4_alias_76e8. Callers 0x0821abd4 and 0x0821ac10
+      consume the sum. Context is at owner +4; selected-index vector at
+      +0x0c. A missing table returns zero without touching vector elements.
+      Otherwise sum descriptor +4 times +12 at table + index *36,
+      preserving unsigned loop comparison and wrapping index arithmetic,
+      multiplication and addition. Product field meanings are unproven.
+      Native-pointer repr(C) owner fields support hosts; ARM offsets are
+      asserted. No deliberate behavioral deviations. Host tests cover
+      absent table with unusable vector, empty vector, sparse and duplicate
+      indices, non-product neighboring fields, product/sum overflow and
+      wrapping index-to-address multiplication. Host suite and ARM release
+      build pass. Isolated runtime smoke of the actual port and existing
+      vector helper returns zero for absent and empty cases. match.py
+      exits 1 with a structural diff: 116 bytes including a literal;
+      LLVM uses BLX to the verified getter and hoists the pure vector-size
+      query into a countdown loop because this function never modifies
+      the vector. Descriptor stride, field loads, MLA and null return
+      remain equivalent. No firmware-device execution performed.
