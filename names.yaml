@@ -204881,3 +204881,29 @@ functions:
       zero and returns the buffer. A supplied zero-capacity buffer is used
       initially and deleted on retry. Deviations: existing Rust vsnprintf
       and tag-3 heap dispatch replace direct firmware calls; their existing
+
+  - address: 0x08266b84
+    ghidra: FUN_08266b84
+    name: stream_handle_read
+    size: 60
+    sig: "i32 stream_handle_read(AdsStream **handle, u8 *dest, i32 size, i32 nitems)"
+    module: stdio/stream_handle_read
+    status: ported
+    vars:
+      param_1/r4: handle
+      param_2/r0: dest
+      param_3/r2: size
+      param_4/r3: nitems
+      r5: bytes_read
+    notes: >-
+      Raw words at 0x08266b84..0x08266bc0 establish 60 bytes before the
+      next real push prologue. Two unconditional BLs (stream_read_chars
+      at 0x08036a10, stream_test_error_flag at 0x080333f8) and one
+      predicated BLEQ (stream_clear_error at 0x080333c8). Reads the
+      wrapping 32-bit size*nitems byte count, returns bytes rather than
+      items, and does not retry a short read. Clears EOF/sticky indicators
+      only when error bit 0x80 is absent; preserves all flags on error.
+      Reloads the handle's stream pointer after reading and before clear.
+      Caller FUN_083d954c uses size 1 and consumes the byte count.
+      Deviations: reuses existing Rust callees and host-widened stream
+      pointer fields; LLVM may inline flag accessors instead of BL calls.
