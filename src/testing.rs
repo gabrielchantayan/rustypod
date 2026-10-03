@@ -1215,6 +1215,8 @@ pub mod hints {
     // owner and backing-storage fixture; mappings never unmap, so no other
     // user may share this hint.
     pub const BYTE_VECTOR_OWNER_PUSH_BACK: usize = 0x6da0_0000;
+    // Dedicated owner+8 byte-vector append fixture; mappings never unmap.
+    pub const BYTE_VECTOR_OWNER8_PUSH_BACK: usize = 0x6db0_0000;
     // 0x7200_0000: dedicated to crypto/bio_copy_next_retry's raw-u32 BIO
     // chain fixture; mappings never unmap, so no other user may share this
     // hint.
