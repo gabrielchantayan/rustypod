@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod backlight_timer_refresh;
 pub mod restore_display_layout;
 pub mod restore_internal_display_layers;
 pub mod media_player_context_construct;
