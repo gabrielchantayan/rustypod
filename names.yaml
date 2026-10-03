@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08273a54
+    ghidra: FUN_08273a54
+    name: fixed_surface_resample
+    size: 132
+    sig: "void fixed_surface_resample(Surface565 *surface)"
+    module: ui/fixed_surface_resample
+    status: ported
+    renames:
+      param_1/r0: surface
+      local_14: upper_y
+      local_10: lower_y
+      FUN_082577bc: f32_to_fixed16_trunc
+      FUN_08274004: preceding_row_resample
+      FUN_08274108: nearest_row_resample
+    notes: >-
+      Raw A32 extent 0x08273a54..0x08273ad8: 116 executable bytes plus
+      four literal words, followed by the next function's push.
+      Six unconditional outbound BLs, zero predicated: four to the
+      existing float conversion, two to unported raster routines.
+      Whole-image scan finds BLEQ at 0x081529a8 and BL at 0x08167490.
+      Both callers pass only the surface descriptor; Ghidra's other
+      arguments are saved-register values overwritten before use.
+      Descriptor contains a u32 pixel address and u16 width/height.
+      Inclusive columns 9..145; first y pair 32.3..42.7, second
+      168.19..162.456, converted from exact original f32 literals.
+      Callee names describe preceding-row blending and nearest-row
+      selection, not an inferred higher-level visual effect.
+      Fixed-address target seams retain 0x08274004 and 0x08274108;
+      host users must install implementations. No clipping added.
+      Pixel-model host regression covers widths 146 and 320,
+      nonuniform colors and untouched border columns. Full host
+      suite passes (13610 tests); ARM release build passes.
+      Actual-source executable smoke with a finite-float conversion
+      model verifies exact coordinates and pass ordering.
+      match.py exits 1: four conversion BL relocations, four original
+      literals and stack fifth arguments remain; raster calls use
+      volatile seam loads and BLX. LLVM changes stack/register
+      allocation. No deliberate behavioral deviation.
   - address: 0x08275cd4
     ghidra: FUN_08275cd4
     name: framework_sentinel_state_construct
