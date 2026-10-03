@@ -343,8 +343,8 @@ pub unsafe extern "C" fn draw_state_construct_with_bound_surface(
 ///
 /// Deliberate deviations: the existing [`DRAW_STATE_CONSTRUCT_OPS`] embedded
 /// pair seam is shared rather than duplicated; its device default is the
-/// faithful two-word initializer. The unported two-word leaf @ 0x082724b4 is
-/// expanded here, retaining each pair's load/store order. The already-ported
+/// faithful two-word initializer. The ported two-word leaf @ 0x082724b4
+/// retains each pair's load/store order. The already-ported
 /// [`crate::cxx::color_copy::color_copy`] retains the original byte-wise
 /// unaligned colour copies. The four-word clip is loaded completely before
 /// its first store, as the original `ldm`/`stm` pair does.
@@ -365,8 +365,7 @@ pub unsafe extern "C" fn draw_state_copy_construct(
 
     copy_word_at(this, source, 0);
     copy_word_at(this, source, 1);
-    copy_word_at(this, source, 2);
-    copy_word_at(this, source, 3);
+    crate::cxx::two_word_copy::two_word_copy(this.add(8).cast(), source.add(8).cast());
 
     this.add(DRAW_STATE_STYLE_OFFSET)
         .write_volatile(source.add(DRAW_STATE_STYLE_OFFSET).read_volatile());
@@ -391,8 +390,7 @@ pub unsafe extern "C" fn draw_state_copy_construct(
                 .read_volatile(),
         );
 
-    copy_word_at(this, source, 11);
-    copy_word_at(this, source, 12);
+    crate::cxx::two_word_copy::two_word_copy(this.add(44).cast(), source.add(44).cast());
 
     let clip0 = (source.add(13 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
     let clip1 = (source.add(14 * core::mem::size_of::<u32>()) as *const u32).read_volatile();
