@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod pending_navigation_dispatch;
+pub use pending_navigation_dispatch::*;
 pub mod image_lookup_cache;
 pub mod app_screen_dispatch_resource_updates;
 pub mod contextual_menu_dispatch;

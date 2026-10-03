@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082171e4
+    ghidra: FUN_082171e4
+    name: dispatch_pending_navigation
+    size: 188
+    sig: "void dispatch_pending_navigation(PendingNavigationController *controller)"
+    module: app/pending_navigation_dispatch
+    status: ported
+    vars: {param_1: controller, "controller+0xbf": pending_navigation}
+    renames:
+      FUN_08259594: media_player_interface_get
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      "vtable+0x11c": display
+    notes: >-
+      Raw osos.dec proves 188 bytes through the next push at 0x082172a0:
+      156 instruction bytes and 32 bytes of padded strings. Two inbound plain
+      BLs at 0x08217108 and 0x082173d4, four outbound plain BLs, no predicated
+      BLs, one virtual BLX and one virtual tail BX. Modes 1/2 construct and
+      display PopNowPlaying/PopToMainMenu then release the temporary COW string.
+      Modes 3/4 invoke unresolved media-player interface slots +0xc0/+0xc4
+      with argument 3. All other bytes clear +0xbf; recognized modes persist.
+      Deliberate deviations: unused register inputs and allocator-tag residue
+      omitted, host pointers native-width. Existing singleton constructor caveat
+      applies. match.py preserves dispatch, string lifetime and player tail BX.
+      LLVM combines the getter calls and uses register-indexed slot lookup.
   - address: 0x08220560
     ghidra: FUN_08220560
     name: object_reset_then_destruct
