@@ -637,6 +637,69 @@ pub unsafe extern "C" fn platform_file_set_length(
     result
 }
 
+/// platform_file_collect_extents — original: `FUN_08277bf4` @ 0x08277bf4.
+/// True extent: 128 bytes, ending before the independent function at
+/// 0x08277c74. Full-image ARM decoding finds two plain BL callers at
+/// 0x0813a5cc and 0x0813acb0, zero predicated BL callers. The body has
+/// six plain BLs, zero predicated BLs, and one virtual BLX.
+///
+/// Under the owner's counted mutex, return 2 for a nonzero state byte,
+/// or the open status for directory index -1 without touching the output.
+/// Otherwise resolve selector-1 facade and invoke its +0x9c vtable slot
+/// with (facade, directory entry, extent vector), returning its status.
+/// Callers consume pairs of starting sector and sector count. Every exit
+/// releases the acquired lock, including virtual-call errors.
+///
+/// Deliberate deviations: native-width host fields and direct owner locking
+/// follow `platform_file_set_length`; target uses the existing guard and
+/// predicate ports. Incoming r2 is unused; r3 only seeds the overwritten
+/// guard stack word, so neither is an argument in the Rust signature.
+///
+/// # Safety
+/// `handle` must be a live platform file with an initialized owner mutex.
+/// An open entry must resolve a facade with callable slot +0x9c, and
+/// `extents` must satisfy that method's vector-output contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn platform_file_collect_extents(
+    handle: *mut core::ffi::c_void,
+    extents: *mut core::ffi::c_void,
+) -> i32 {
+    let file = handle.cast::<FtPlatformFile>();
+    #[cfg(target_os = "none")]
+    let mut lock = core::ptr::null_mut();
+    #[cfg(target_os = "none")]
+    counted_mutex_guard_acquire(core::ptr::addr_of_mut!(lock), file.cast());
+    #[cfg(not(target_os = "none"))]
+    let lock = core::ptr::addr_of_mut!((*(*file).synchronization_owner).length_query_lock);
+    #[cfg(not(target_os = "none"))]
+    mutex_lock_counted(lock);
+
+    #[cfg(target_os = "none")]
+    let state = crate::cxx::object_state::object_byte_at_8(file.cast());
+    #[cfg(not(target_os = "none"))]
+    let state = (*file).length_query_state;
+    #[cfg(target_os = "none")]
+    let has_entry = state == 0 &&
+        crate::codegen::file_directory_entry::file_has_directory_entry(file.cast()) != 0;
+    #[cfg(not(target_os = "none"))]
+    let has_entry = state == 0 && (*file).directory_entry_index != -1;
+
+    let result = if state != 0 {
+        2
+    } else if !has_entry {
+        (*file).open_status
+    } else {
+        let facade = crate::app::facade_for_selector::facade_for_selector(file.cast(), 1);
+        let call: unsafe extern "C" fn(
+            *mut crate::app::path_probe::FacadeObject, i32, *mut core::ffi::c_void,
+        ) -> i32 = core::mem::transmute((*facade).vtable.cast::<usize>().add(0x9c / 4).read());
+        call(facade, (*file).directory_entry_index, extents)
+    };
+    mutex_unlock_counted(lock);
+    result
+}
+
 /// ft_platform_stream_close (the firmware's `FT_Stream_CloseFunc`) —
 /// original: `FUN_082d3d40` @ 0x082d3d40 (60 bytes; no direct `bl` call
 /// site — planted in `stream->close` by [`ft_platform_stream_open`] @
@@ -1552,6 +1615,73 @@ mod set_length_tests {
                 assert_eq!(platform_file_set_length((&mut file as *mut FtPlatformFile).cast(), length), status);
                 assert_eq!(facade.resulting_length, length);
                 assert_eq!(file.cached_entry_length, length);
+                assert_eq!(owner.length_query_lock.hold_count, 0);
+            }
+        }
+    }
+
+    unsafe extern "C" fn collect_extents(
+        facade: *mut FacadeObject, entry: i32, output: *mut core::ffi::c_void,
+    ) -> i32 {
+        let facade = &mut *facade.cast::<ResizeFacade>();
+        let file = &*facade.file;
+        assert_eq!(entry, file.directory_entry_index);
+        assert_eq!((*file.synchronization_owner).length_query_lock.hold_count, 1);
+        if facade.status == 0 {
+            output.cast::<[u32; 2]>().write([entry as u32, 8]);
+        }
+        facade.status
+    }
+
+    #[test]
+    fn extent_query_errors_preserve_output_and_release_lock() {
+        unsafe {
+            let mut owner: FtPlatformFileSynchronizationOwner = core::mem::zeroed();
+            let mut file: FtPlatformFile = core::mem::zeroed();
+            file.synchronization_owner = &mut owner;
+            for (state, entry, open, expected) in [
+                (0x80, 7, -37, 2), (1, -1, 0, 2),
+                (0, -1, -37, -37), (0, -1, 0, 0),
+            ] {
+                file.length_query_state = state;
+                file.directory_entry_index = entry;
+                file.open_status = open;
+                let mut output = [0xdeadbeef_u32, 0x12345678];
+                assert_eq!(platform_file_collect_extents(
+                    (&mut file as *mut FtPlatformFile).cast(),
+                    (&mut output as *mut [u32; 2]).cast(),
+                ), expected);
+                assert_eq!(output, [0xdeadbeef, 0x12345678]);
+                assert_eq!(owner.length_query_lock.hold_count, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn extent_query_dispatches_non_sentinel_entries_and_propagates_errors() {
+        let _guard = FACADE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let _restore = Restore(FACADE_REGISTRY_WALK);
+            FACADE_REGISTRY_WALK = resolve;
+            let mut owner: FtPlatformFileSynchronizationOwner = core::mem::zeroed();
+            let mut file: FtPlatformFile = core::mem::zeroed();
+            file.synchronization_owner = &mut owner;
+            let mut vtable = [0usize; 0x9c / 4 + 1];
+            vtable[0x9c / 4] = collect_extents as *const () as usize;
+            let mut facade = ResizeFacade {
+                base: FacadeObject { vtable: vtable.as_ptr().cast() },
+                file: &mut file, resulting_length: 0, status: 0,
+            };
+            ACTIVE = (&mut facade as *mut ResizeFacade).cast();
+            for (entry, status) in [(0, 0), (-2, 0), (i32::MAX, 0), (7, -5)] {
+                file.directory_entry_index = entry;
+                facade.status = status;
+                let mut output = [19, 23];
+                assert_eq!(platform_file_collect_extents(
+                    (&mut file as *mut FtPlatformFile).cast(),
+                    (&mut output as *mut [u32; 2]).cast(),
+                ), status);
+                assert_eq!(output, if status == 0 { [entry as u32, 8] } else { [19, 23] });
                 assert_eq!(owner.length_query_lock.hold_count, 0);
             }
         }

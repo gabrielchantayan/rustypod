@@ -203030,3 +203030,46 @@ functions:
       actual two names are unresolved. No semantic identities for these
       names are inferred from the photo-import callers. Honest deferral:
       no Rust body, new seam, mock-based parity claim, or status ported.
+
+  - address: 0x08277bf4
+    ghidra: FUN_08277bf4
+    name: platform_file_collect_extents
+    size: 128
+    sig: "i32 platform_file_collect_extents(void *handle, void *extents)"
+    module: ft/system
+    status: ported
+    renames:
+      param_1: handle
+      param_2: extents
+      local_10: counted_lock
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_0829d0b4: object_byte_at_8
+      FUN_082a548c: file_has_directory_entry
+      FUN_0818a0bc: facade_for_selector
+      FUN_0809449c: mutex_unlock_counted
+      vtable_0x9c: collect_extents
+    notes: >-
+      Raw ARM proves 128 bytes from 0x08277bf4 through the pop at
+      0x08277c70; the independent next function starts at 0x08277c74.
+      Whole-image ARM-word decoding finds two plain BL callers at
+      0x0813a5cc and 0x0813acb0, zero predicated BL callers. Body contains
+      six plain BLs, zero predicated BLs, and one BLX through facade slot
+      +0x9c. Under the owner's counted mutex, nonzero byte +8 returns 2;
+      directory-entry index -1 returns open status +0x1c without touching
+      the output; otherwise selector-1 facade receives the entry index
+      and extent-vector output. Caller 0x0813abf8 iterates 8-byte records
+      as starting sector and sector count; caller 0x0813a500 requires one
+      record and consumes its starting sector. Every exit unlocks.
+      Ghidra r2 is unused and incoming r3 only seeds the overwritten
+      stack guard word. All direct callees reuse registered Rust ports.
+      Host uses native-width file fields and direct owner locking,
+      matching existing platform-file queries. The vtable has at least
+      40 words on this path; raw native-word access avoids the narrower
+      FacadeVtable view used by other consumers. Host tests cover state
+      precedence, untouched output on closed entries, zero and negative
+      non-sentinel indices, virtual errors, and lock lifetime. Standalone
+      host smoke confirms closed-entry and state-error behavior. ARM
+      build succeeds; match.py reports 33 Rust instructions versus 32
+      original, retaining the predicates, +0x18/+0x1c loads, selector 1,
+      +0x9c dispatch, and unlock, with a shared epilogue and different
+      register allocation. No device execution claimed.
