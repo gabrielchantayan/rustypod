@@ -124,7 +124,7 @@ pub unsafe extern "C" fn buffered_stream_flush_pending(state: *mut BufferedStrea
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
@@ -133,7 +133,7 @@ mod tests {
     use parking_lot::Mutex;
     use std::sync::LazyLock;
 
-    static LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static LOCK: Mutex<()> = Mutex::new(());
     static BACKING: LazyLock<Option<usize>> = LazyLock::new(|| {
         try_map_u32_slab(hints::BUFFERED_STREAM_FLUSH_PENDING, 0x1000).map(|p| p as usize)
     });
