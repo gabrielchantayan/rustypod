@@ -101,7 +101,7 @@ pub unsafe extern "C" fn object_owner_set(object: *mut OwnedObject, owner: *mut 
 /// Deviations: virtual tables use native-width entries on hosts; the object's
 /// pointer words remain u32. Volatile accesses preserve callback-visible
 /// ordering. The delete uses the existing Rust tag-3 veneer.
-/// Host suite: 13731 passed. ARM release build passed. match.py reports
+/// Host suite: 13734 passed. ARM release build passed. match.py reports
 /// 22 versus 19 instructions: frame-pointer setup and explicit conditional
 /// branches replace predication; resource reloads, clearing, delete and
 /// pointer return retain the original order. Standalone production-entry

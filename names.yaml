@@ -206490,3 +206490,36 @@ functions:
       around the ADD before tail B. Objdump confirms R_ARM_JUMP24 targets
       copy_four_words_staggered, not recursion; the wrapper is a distinct
       exported symbol. No algorithmic deviations.
+
+  - address: 0x08256b50
+    ghidra: FUN_08256b50
+    name: object_resources_destroy
+    size: 76
+    sig: "void *object_resources_destroy(void *object)"
+    module: app/object_owner_set
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      param_1+0x70: allocation
+      param_1+0x7c: first_resource
+      param_1+0x80: second_resource
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec words establish the exact 76-byte A32 body at
+      0x08256b50..0x08256b9c; the next independently linked function begins
+      at 0x08256b9c with PUSH {r4-r8,lr}. The body has one plain direct BL to
+      operator_delete_tag3 @ 0x082aad14, zero predicated direct BLs, and two
+      predicated BLXNE virtual calls through slot 1. Whole-image aligned ARM
+      branch decoding finds two plain inbound BLs at 0x082567bc and
+      0x0825692c, with zero predicated inbound BLs. It conditionally releases
+      the resources at +0x7c and +0x80, clears both words after callbacks,
+      frees the +0x70 allocation with tag 3, and returns object; the allocation
+      word is deliberately retained. Target pointers remain u32 words; host
+      virtual tables use native-width entries. Volatile accesses preserve the
+      callback-visible load/store order. Host tests cover null resources,
+      callback replacement of the second resource and allocation, result
+      identity, and untouched words. All 13734 host tests pass. ARM release
+      build passes. match.py reports 22 versus 19 instructions: LLVM uses
+      explicit conditional branches and frame setup in place of ARM
+      predication, while preserving the dispatch, clearing, delete, and return
+      ordering.
