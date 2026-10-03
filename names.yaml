@@ -48595,6 +48595,43 @@ functions:
       osos.dec finds 10 static bl call sites, all unconditional. The two
       unported direct callees use their existing volatile seams: fixed raw
       firmware addresses on target and test-installed host callbacks.
+  - address: 0x0825d3d0
+    ghidra: FUN_0825d3d0
+    name: xml_peek_second_skip_whitespace
+    size: 84
+    sig: "unsigned int xml_peek_second_skip_whitespace(void **reader_slot)"
+    module: util/xml_peek_second_skip_whitespace
+    status: ported
+    renames:
+      param_1/r0/r4: reader_slot
+      r6: position
+      r5/r0: codepoint
+      FUN_0825d4e0: xml_reader_position_before_current (ported)
+      FUN_0825d354: xml_skip_whitespace (ported)
+      FUN_0825d318: xml_decode_skip_whitespace (ported)
+      FUN_0825d580: xml_reader_restore_position (ported)
+    notes: >-
+      Raw extent is 0x0825d3d0..0x0825d423, followed by the distinct
+      push prologue at 0x0825d424. Independent whole-image A32 decoding
+      finds two plain inbound BL calls at 0x0825cf94 and 0x0825d154,
+      zero predicated inbound calls, five plain outbound BL instructions,
+      and zero predicated outbound calls. Saves the position before the
+      active codepoint, invokes the resetting whitespace skipper twice,
+      discards both results, then returns the non-resetting skipper's
+      result after restoring the saved sign-extended position with origin
+      zero. Reloads the reader from the slot for restoration; seek errors
+      do not replace the codepoint, including EOF 0xffffffff. Caller
+      0x0825cf50 uses this lookahead to recognize <![ and ]]>. All four
+      direct callees reuse existing Rust ports; no new seams or algorithmic
+      deviations. Host tests cover XML whitespace, non-XML space, truncated
+      input, signed positions and rewind state. Runtime smoke returns '['
+      and rewinds the stream. ARM release emits 23 instructions versus
+      the original 21, preserving all five calls, reader reload, signed
+      r2:r3 position, stack origin zero and return preservation; differences
+      are frame setup and register allocation. match.py exits 1 for this
+      expected structural diff, with unresolved archive relocations shown
+      as zero-address BL operands.
+
   - address: 0x0825d384
     ghidra: FUN_0825d384
     name: xml_peek_skip_whitespace
