@@ -466,6 +466,7 @@ pub mod xml_reader_position_before_current;
 pub mod xml_input_is_exhausted;
 pub mod xml_is_whitespace;
 pub mod xml_skip_whitespace;
+pub mod xml_skip_comment_or_declaration;
 
 pub mod context_namespace_provider_at;
 pub mod input_dispatch;
