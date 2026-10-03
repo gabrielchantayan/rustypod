@@ -212,6 +212,39 @@ pub unsafe extern "C" fn cg_emit_store_word_at_offset(
     cg_create_inst_store(block, CG_INST_OPCODE_STW, value, address_reg)
 }
 
+/// cg_emit_pipeline_store_word_at_offset — original: `FUN_0826b11c`
+/// @ 0x0826b11c (124 bytes, 31 ARM words; next function starts at
+/// 0x0826b198). Raw decoding verifies four unconditional BL instructions,
+/// zero predicated BLs, and a tail B to `cg_create_inst_store`.
+/// Two incoming unconditional BLs at 0x0824a2dc and 0x0824a308 use
+/// offsets 0 and 8; there are no incoming predicated BLs.
+///
+/// Creates two general-purpose registers, then emits LDI offset,
+/// ADD address = base + offset, and STW value through address, returning
+/// the store record. This is a duplicate of the earlier word-store helper.
+///
+/// # Deviations
+///
+/// Reads the owning procedure once rather than reloading it before the
+/// second allocation; allocation does not change that field. LLVM may
+/// fold this identical body with `cg_emit_store_word_at_offset`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cg_emit_pipeline_store_word_at_offset(
+    block: *mut CgBlock,
+    base: *mut CgVirtualReg,
+    offset: usize,
+    value: *mut CgVirtualReg,
+) -> *mut CgInst {
+    let proc = block_proc(block);
+    let offset_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+    let address_reg = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+
+    cg_create_inst_load_immed(block, CG_INST_OPCODE_LDI, offset_reg, offset);
+    cg_create_inst_binary(block, CG_INST_OPCODE_ADD, address_reg, base, offset_reg);
+    cg_create_inst_store(block, CG_INST_OPCODE_STW, value, address_reg)
+}
+
 /// cg_emit_load_matrix4x4_word — original: `FUN_082469b8` @ 0x082469b8
 /// (144 bytes: 36 instruction words 0x082469b8-0x08246a44, no literal
 /// pool — the next function starts at 0x08246a48 with its own
@@ -715,6 +748,56 @@ mod tests {
         out
     }
 
+
+    #[test]
+    fn pipeline_store_executes_target_wraparound_and_full_word_values() {
+        for (base_value, offset, value) in [
+            (0x1000u32, 0u32, 0u32),
+            (0x1000, 8, 0xffff_ffff),
+            (0xffff_fffc, 8, 0x8000_0001),
+            (4, 0xffff_fffc, 0x1234_5678),
+        ] {
+            let mut f = Fixture::new();
+            let block = f.block_ptr();
+            unsafe {
+                let proc = block_proc(block);
+                let base = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+                let source = cg_virtual_reg_create(proc, CG_REG_TYPE_GENERAL);
+                let store = cg_emit_pipeline_store_word_at_offset(
+                    block, base, offset as usize, source,
+                );
+                let mut values = std::collections::BTreeMap::new();
+                values.insert(base as usize, base_value);
+                values.insert(source as usize, value);
+                let mut memory = std::collections::BTreeMap::new();
+                let mut inst = f.block[CG_BLOCK_INSTS] as *mut u8;
+                while !inst.is_null() {
+                    match inst_opcode(inst) {
+                        40 => {
+                            values.insert(field(inst, CG_INST_LOAD_IMMED_DEST),
+                                          field(inst, CG_INST_LOAD_IMMED_VALUE) as u32);
+                        }
+                        1 => {
+                            let sum = values[&field(inst, CG_INST_BINARY_SOURCE0)]
+                                .wrapping_add(values[&field(inst, CG_INST_BINARY_SOURCE1)]);
+                            values.insert(field(inst, CG_INST_BINARY_DEST), sum);
+                        }
+                        44 => {
+                            assert_eq!(inst, store as *mut u8);
+                            memory.insert(values[&field(inst, CG_INST_STORE_ADDRESS)],
+                                          values[&field(inst, CG_INST_STORE_VALUE)]);
+                        }
+                        opcode => panic!("unexpected opcode {opcode}"),
+                    }
+                    inst = field(inst, CG_INST_NEXT) as *mut u8;
+                }
+                assert_eq!(memory, std::collections::BTreeMap::from([
+                    (base_value.wrapping_add(offset), value),
+                ]));
+                assert_eq!(f.proc[CG_PROC_NUM_REGISTERS], 4);
+            }
+        }
+    }
     #[test]
     fn halfword_load_ir_executes_offsets_wraparound_and_unsigned_values() {
         // Execute the produced IR with 32-bit target address arithmetic;

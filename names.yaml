@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826b11c
+    ghidra: FUN_0826b11c
+    name: cg_emit_pipeline_store_word_at_offset
+    size: 124
+    sig: "cg_inst_t *cg_emit_pipeline_store_word_at_offset(cg_block_t *block, cg_virtual_reg_t *base, size_t offset, cg_virtual_reg_t *value)"
+    module: codegen/pipeline_emit
+    status: ported
+    renames:
+      param_1/r4: block
+      param_2/r8: base
+      param_3/r9: offset
+      param_4/r5: value
+      r6: offset_reg
+      r7: address_reg
+    notes: >-
+      Raw ARM establishes 124 bytes through the tail branch at 0x0826b194;
+      next real function begins with push at 0x0826b198. Whole-image BL
+      decoding finds two unconditional callers at 0x0824a2dc and 0x0824a308,
+      zero predicated callers. Four outbound plain BLs, zero predicated BLs,
+      then tail B to the ported cg_create_inst_store at 0x082c196c.
+      Ghidra incorrectly inlines the store factory and invents extra arguments.
+      Allocate two general-purpose registers, emit LDI offset, ADD base and
+      offset, then STW value through the computed address; return the store.
+      Existing verified Rust factories supply all callees; no new seam.
+      Deviation: cache block->proc. Identical-body folding with the earlier
+      cg_emit_store_word_at_offset is intentional if LLVM chooses it.
+      Host tests execute emitted IR with 32-bit wrapping addresses and
+      zero/full-width values, and validate the terminal store return.
+      All 13594 host tests and ARM release build pass. match.py exits 1:
+      34 Rust instructions versus 31 original, retaining four BLs and tail B;
+      LLVM adds a frame pointer, caches proc and changes register allocation.
+
   - address: 0x0826b784
     ghidra: FUN_0826b784
     name: collection_append
