@@ -203475,3 +203475,41 @@ functions:
       NULL branch, 12-byte allocation and Menu literal remain; LLVM adds
       a frame pointer and uses a separate NULL-return epilogue. No device
       execution claimed.
+
+  - address: 0x08276a5c
+    ghidra: FUN_08276a5c
+    name: string_object_insert_utf8_capped
+    size: 68
+    sig: "void string_object_insert_utf8_capped(StringObject *this, int index, const unsigned char *source, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r6: this
+      param_2/r1/r4: index
+      param_3/r2/r5: source
+      param_4/r3/r1: max_codepoints
+      r3_at_tail: source_byte_count
+    notes: >-
+      Raw ARM words establish 0x08276a5c..0x08276aa0 as 68 code bytes;
+      next real entry starts with push at 0x08276aa0. Whole-image aligned
+      BL decoding finds two plain incoming calls at 0x080c7388 and
+      0x08223224, zero predicated calls. Body has one plain BL to private
+      capped width helper 0x08275e44 and one tail B to the ported
+      string_object_insert_bytes at 0x08275f48. Ghidra incorrectly folds
+      the tail target into this function. NULL source, nonpositive cap
+      and negative character index return before source/object access.
+      Sum decoded UTF-8 widths for at most the cap or until raw NUL,
+      then insert that many leading raw source bytes. Unsupported leads
+      consume three bytes but contribute width(0) == 1; overlong sequences
+      also use decoded width rather than consumed bytes. Deliberate
+      deviation: inline private helper using ported utf8_next_codepoint
+      and utf8_codepoint_byte_width, with u32 wrapping accumulation.
+      Reuse existing insertion core and virtual allocation seam; no new
+      seam or guessed callee identity. Host tests cover multibyte caps,
+      early NUL, unsupported/overlong leads, empty source, guards,
+      allocation failure and relocated payload tails. Isolated throwaway
+      host smoke verifies an in-place splice. Host suite passed 13590
+      tests; ARM release build succeeded. match.py exits 1 with 17 original
+      versus 35 Rust instructions: helper loop inlined, decoder/width
+      calls and final insertion-core call retained; LLVM adds a frame
+      and uses BL rather than tail B. No device execution claimed.
