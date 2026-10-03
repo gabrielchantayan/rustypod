@@ -203694,3 +203694,34 @@ functions:
       argument and constructor with predicated moves, merges the allocation
       sites into one BL, and tail-dispatches with BX to the exact resident
       addresses. Extra frame setup is intentional compiler codegen.
+
+  - address: 0x0827606c
+    ghidra: FUN_0827606c
+    name: string_object_resize_payload
+    size: 48
+    sig: "char *string_object_resize_payload(StringObject *this, size_t requested_size)"
+    module: cxx/string_object
+    status: ported
+    args:
+      this: "r0; string object with vtable at +0 and payload at +4"
+      requested_size: "r1; zero infers the inclusive C-string length"
+    notes: >-
+      Raw extent 0x0827606c..0x0827609c ends with bx ip; the next real
+      function begins with cmp r0,#0. Whole-image ARM word decoding finds
+      two plain incoming BLs at 0x0828fe20 and 0x0829a050, no predicated
+      incoming BLs. Body has no plain BL and one bleq at 0x0827607c to
+      the ported strlen_safe_plus1 at 0x08275e20. Zero request loads the
+      current payload and measures its size including NUL (NULL yields 1);
+      nonzero request never reads it. Tail-dispatches virtual slot +8 with
+      (this, size, 1), preserving the virtual method's return including NULL.
+      Caller 0x0828fe20 uses zero after writing a terminating NUL. Reuses
+      the existing Rust implementation and registered module. Host pointers
+      and vtable slots widen together via repr(C); ARM offsets remain +4/+8.
+      Deliberate codegen deviation: volatile function-pointer read retains
+      the inclusive-length call as BLX rather than inlining its byte loop.
+      match.py exits 1 with 12 original versus 18 Rust entries (including
+      a literal); the zero-only helper call, flag 1, slot +8 and tail BX
+      are preserved, with LLVM frame and register allocation differences.
+      Host suite passes 13598 tests; ARM release build succeeds. Tests cover
+      empty/nonempty/NULL payloads, explicit size bypassing an invalid payload,
+      exact capacity, one-byte overflow, and unchanged payload on failure.
