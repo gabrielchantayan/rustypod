@@ -2,6 +2,7 @@
 pub mod context_indexed_word_store;
 pub mod video_engine_output_rect;
 pub mod video_engine_scissor_rect;
+pub mod video_engine_indexed_vector;
 pub mod copy_64_bytes_and_terminate;
 pub mod texture_wrap_mode;
 pub mod object_payload_time_text;

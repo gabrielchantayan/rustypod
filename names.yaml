@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08252080
+    ghidra: FUN_08252080
+    name: video_engine_set_indexed_vector
+    size: 68
+    sig: "void video_engine_set_indexed_vector(u32 *engine, u32 id, u32 first, u32 second, u32 third, u32 fourth)"
+    module: util/video_engine_indexed_vector
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: id
+      param_3/r2: first
+      param_4/r3: second
+      param_5/stack: third
+      param_6/stack: fourth
+      FUN_0824f388: latch_first_error
+      FUN_0824c774: deque_iter_assign_alias_c774
+    notes: >-
+      Raw aligned ARM establishes 68 bytes through the 0x501 literal at
+      0x082520c0; next real function starts with push at 0x082520c4.
+      Whole-image decoding verifies two plain inbound BLs at 0x08252078
+      and 0x082d1c38, zero predicated inbound BLs. Body has two plain
+      outbound BLs at 0x082520a0 and 0x082520b8, zero predicated BLs.
+      IDs 0x84c0 and 0x84c1 select four-word fields at +0x22c and +0x23c.
+      Unsigned wrapping subtraction rejects every other ID and latches
+      error 0x501 without changing vectors. Reuses both existing Rust
+      callees; no new firmware seam. Values remain opaque u32 bit patterns.
+      Deliberately omits incidental register restoration and exposes the
+      public wrapper's void setter ABI, not Ghidra's artificial u64 return.
+      Host tests cover both slots, full-width values, untouched neighbors,
+      invalid and wrapping IDs, first-error precedence and a one-word
+      invalid-path object. All 13766 host tests and ARM release build pass.
+      Isolated native smoke using the actual setter and existing callee
+      source verifies both vectors and rejection. A full native non-test
+      rlib smoke build is blocked by six unrelated missing host helpers in
+      prepare_entry_metadata, shared_payload_select_kind and calendar_schedule.
+      match.py exits 1 with a structural diff: 21 Rust versus 16 stock
+      instructions, same unsigned range check, stride and four-word staging.
+      LLVM tail-branches to latch_first_error on rejection and calls
+      deque_iter_assign_alias_c774 on success, verified by archive relocations.
+      No device execution performed.
   - address: 0x08242cb0
     ghidra: FUN_08242cb0
     name: vertex_attributes_lerp
