@@ -202389,3 +202389,32 @@ functions:
       Host edge tests cover zero, high-bit and all-ones addresses, unrelated
       fields, unchanged storage, replacement, and clearing. Standalone
       real-source smoke observes 0x00000000, 0x08000000, and 0xffffffff.
+
+  - address: 0x0827b3e0
+    ghidra: FUN_0827b3e0
+    name: mov_sample_cache_set_loaded
+    size: 8
+    module: mov/sample_cache_set_loaded
+    sig: "void mov_sample_cache_set_loaded(uint8_t *cache, uint32_t loaded)"
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: loaded
+      field_0x18: loaded_state
+    notes: >-
+      Raw osos.dec words e5c01018 and e12fff1e prove strb r1,[r0,#0x18]
+      followed by bx lr. True extent is eight bytes, before the independent
+      cursor accessor at 0x0827b3e8. Whole-image aligned A32 decoding finds
+      two inbound plain BLs at 0x081c5c24 and 0x081c7934, zero predicated
+      inbound BLs, and zero outbound plain or predicated BLs. Stores only
+      the low byte of r1 without boolean normalization or touching adjacent
+      fields. The seek path clears the loaded state before resetting the
+      cursor; the loading path sets it after populating sample entries.
+      Status query 0x0827b3f8 distinguishes zero from nonzero values.
+      No callee seams are needed. Deliberate deviations: none; byte-pointer
+      indexing preserves target offsets on hosts and u32 models r1 truncation.
+      Host tests cover all four base alignments, nonboolean bytes, upper-bit
+      truncation, adjacent-field preservation, replacement and clearing.
+      Real-source smoke confirms 1, 0x80, 0x12345678, 0x100 and zero.
+      match.py shows the same byte store with LLVM's frame-pointer push,
+      frame setup and pop return replacing the original bx lr.
