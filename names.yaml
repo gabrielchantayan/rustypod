@@ -203357,3 +203357,47 @@ functions:
       fixes made. match.py with corrected size 200 exits 1 with expected
       structural differences, retaining signed loop, 36/44-byte allocations,
       virtual slot +0x4c, and all three resident target literals.
+
+  - address: 0x08277264
+    ghidra: FUN_08277264
+    name: string_object_remove_trailing_classified_codepoints
+    size: 160
+    sig: "int32_t string_object_remove_trailing_classified_codepoints(StringObject *this)"
+    status: ported
+    module: cxx/string_object_remove_trailing_classified_codepoints.rs
+    renames:
+      param_1/r6: this
+      local_18: cursor
+      iVar4/r5: codepoint_count
+      iVar3/r4: removed
+      uVar2: codepoint
+      DAT_08277300: suffix_class_table_address
+      FUN_08276214: utf8_next_codepoint
+      FUN_08276288: utf8_prev_codepoint
+      FUN_08277044: string_object_truncate_codepoints
+    notes: >-
+      Raw osos.dec establishes 156 code bytes at 0x08277264..0x08277300
+      plus the four-byte literal 0x083ecfdd; next real function begins at
+      0x08277304, giving a 160-byte total extent. Whole-image A32 decoding
+      finds two inbound plain BLs at 0x0827e684 and 0x0827e6ac, no inbound
+      predicated BLs. The body has two plain BLs to the ported forward and
+      reverse UTF-8 decoders, and one BLGT to the ported truncation helper.
+      Counts non-NUL payload codepoints forward, then reverse-counts values
+      below 256 whose table byte has mask 6 set, or U+3000. Truncates only
+      for a positive removed count and returns that count; NULL payload
+      returns zero. No new callee seam. The table's static bytes are not a
+      conventional whitespace set (space and b match, tab does not); no
+      guessed whitespace identity or replacement table is introduced.
+      Deliberate host deviation: an exact raw-image mask-6 bitmap substitutes
+      for the resident table; target reads its actual address with volatile
+      byte loads, preserving any runtime table changes. Host tests cover
+      NULL, empty, unchanged, all-selected, leading-only, mixed suffixes,
+      raw non-whitespace classes, U+3000, and multibyte retained boundaries.
+      All 13583 host tests pass; ARM release build succeeds. match.py exits
+      1 with expected register/prologue and branch-layout differences; both
+      decoder loops, mask-6 lookup, U+3000 check, conditional truncation,
+      returned count, and table-address literal remain present. Full host
+      non-test build is blocked by six existing missing metadata/payload/
+      calendar functions. An isolated non-test smoke compiled the production
+      suffix/truncation modules with the actual object layouts and decoder
+      definitions: A + U+3000 + space becomes A, returning two.
