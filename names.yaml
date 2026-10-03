@@ -8303,6 +8303,38 @@ functions:
       64-bit right shift. Division by zero retains the existing
       __aeabi_ldivmod port's documented zero-quotient deviation from the ADS
       divide-by-zero handler; no additional deviation is introduced.
+  - address: 0x082724b4
+    ghidra: FUN_082724b4
+    name: two_word_copy
+    size: 20
+    sig: "void two_word_copy(u32 *destination, const u32 *source)"
+    module: cxx/two_word_copy
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      r2: first_word
+      r1_after_load: second_word
+    notes: >-
+      Raw osos.dec words e5912000 e5802000 e5911004 e5801004 e12fff1e
+      establish five A32 instructions at 0x082724b4..0x082724c7, ending
+      with bx lr before the independently called function at 0x082724c8.
+      Full-image aligned A32 decoding finds two plain inbound BLs at
+      0x08264614 and 0x08264660, zero predicated inbound BLs, and zero
+      outbound plain or predicated BLs. Both callers are in
+      draw_state_copy_construct and copy members at offsets 8 and 44.
+      Copies source word zero to destination word zero before loading
+      source word one and storing destination word one. r0 is unchanged;
+      callers do not consume a return value. Volatile aligned u32 accesses
+      preserve forward-overlap propagation and prevent bulk-copy lowering.
+      No deliberate behavioral deviations. Host tests cover full-width
+      word patterns, surrounding guards, source preservation, self-copy,
+      and overlapping copies in both directions. The existing caller now
+      uses this port rather than its inline expansions.
+      ARM release match.py comparison retains the exact four load/store
+      instructions and operand registers; LLVM adds a frame-pointer
+      push/mov prologue and pop return in place of bx lr (seven versus
+      five instructions).
   - address: 0x082724c8
     ghidra: FUN_082724c8
     name: byte_source_set_status
@@ -87310,7 +87342,7 @@ functions:
       r5: source (preserved across member and colour copy calls)
       FUN_081598a4: embedded_pair_construct
       FUN_082720e8: color_copy
-      FUN_082724b4: unnamed two-word copy leaf
+      FUN_082724b4: two_word_copy
     notes: >-
       Whole 148-byte function binary-verified: 0x082645e8 begins `push
       {r4,r5,r6,lr}` and 0x0826467c begins the distinct default-surface
@@ -87325,9 +87357,9 @@ functions:
       minus 0x20, then copies the scalar words, two two-word members, style
       byte, two unaligned RGBA colours, and four-word clip rectangle from
       source. The clip's four source words are all loaded before any clip
-      destination store, exactly matching `ldm` then `stm`. The 12-byte
-      unported helper at 0x082724b4 is only a raw-decoded two-word copy
-      leaf, so it is expanded inline without assigning it an identity; the
+      destination store, exactly matching `ldm` then `stm`. The 20-byte
+      helper at 0x082724b4 is ported as two_word_copy and called for both
+      members, preserving the ordered aligned word accesses; the
       independently ported color_copy preserves the unaligned byte-copy
       calls. Deliberate deviation: the existing DRAW_STATE_CONSTRUCT_OPS
       embedded-pair seam is shared instead of duplicated. Its device
