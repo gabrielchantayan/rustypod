@@ -80,6 +80,8 @@ pub mod unpack_tagged_operand;
 /// pipeline generators share; it lives in their address block, not the
 /// IR library's, but it is IR construction all the same.
 pub mod pipeline_emit;
+/// `cg_emit_matrix_transform` @ 0x08246fac — dimension-selected transform emission.
+pub mod matrix_transform_dispatch;
 /// `cg_rbsp_read_bits` @ 0x082d0630 — the H.264 decoder's `u(n)`
 /// fixed-width RBSP bit reader. Not IR either, but it sits inside the
 /// JIT's address block (0x082dxxxx) and is ported under the same
