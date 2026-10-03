@@ -204244,3 +204244,41 @@ functions:
       combines adjacent destination loads with LDMIB and lowers the
       reused memmove to __aeabi_memmove. Both virtual calls, field
       reloads, MUL, final clear and destination return remain present.
+  - address: 0x0826832c
+    ghidra: FUN_0826832c
+    name: two_byte_ranges_destruct
+    size: 76
+    sig: "u32 *two_byte_ranges_destruct(u32 *owner)"
+    module: cxx/two_byte_ranges_destruct
+    status: ported
+    renames:
+      param_1/r0: owner
+      r4: leading_range
+      iVar1: trailing_range
+      iVar2/r2: begin
+      iVar3/r0: cursor
+      DAT_08268374: destructor_vtable
+      FUN_083e12a0: cxx_trivial_range_destroy_and_deallocate
+      FUN_08266f2c: cxx_array_dealloc
+    notes: >-
+      Raw ARM extent is 0x0826832c..0x08268377: 72 instruction bytes and
+      a four-byte vtable literal 0x089a8110 at 0x08268374. The next real
+      function begins at 0x08268378 with a character-to-hex conversion.
+      Independent whole-image A32 word decoding finds two plain internal
+      BLs (0x08268338 to 0x083e12a0, 0x08268368 to 0x08266f2c), no
+      predicated internal BLs, and two plain inbound BLs at 0x08267ca4 and
+      0x08267cc0, with no predicated inbound BLs. The caller destroys a
+      stack-allocated 32-byte object on both success and failure paths.
+      Installs the destructor vtable, releases the trivial byte range at
+      owner+20 through the existing range destructor, then releases the
+      range at owner+8 through cxx_array_dealloc(begin, capacity-begin, 0).
+      Preserves the range words and owner+4 payload, returns the original
+      owner, and does not delete the owner itself. Explicit u32 words retain
+      the target layout and wrapping arithmetic. No deliberate deviations.
+      Host tests cover two populated ranges and reverse release order,
+      preserved fields, null ranges, and an allocated empty trailing range.
+      Host suite passes 13627 tests; ARM release build passes. match.py
+      prints a structural diff: 18 stock instructions versus 12 Rust
+      instructions including the literal. LLVM removes the empty range
+      walk and unused deallocation arguments, retaining both calls, the
+      vtable store, leading allocation load, and original-owner return.
