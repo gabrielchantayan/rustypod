@@ -202627,3 +202627,46 @@ functions:
       match.py reports 39 Rust versus 40 original instructions: equivalent
       gates, field offsets and BLX slot, with LLVM frame setup and shared
       unlock epilogue replacing three original return paths.
+  - address: 0x08278938
+    ghidra: FUN_08278938
+    name: platform_file_flush
+    size: 100
+    sig: "u32 platform_file_flush(void *file)"
+    status: ported
+    module: cxx/platform_file_flush
+    renames:
+      param_1: file
+      local_10: owner_lock
+      uVar2: buffered_status
+      uVar4: combined_status
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_082a548c: file_has_directory_entry
+      FUN_0818a0bc: facade_for_selector
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM extent is 0x08278938 through 0x08278998 inclusive; next real
+      function starts at 0x0827899c. Independent whole-image BL decoding
+      finds one unconditional caller at 0x081f53d0 and one BLNE caller at
+      0x0805ae60, no other plain or predicated BLs. Body contains five
+      unconditional BLs and one BLX r2. Acquire the owner counted mutex;
+      return cached +0x1c status for directory-entry index -1, otherwise
+      flush the embedded +0x40 collection via verified stock helper
+      0x082780cc, select facade 1, reload entry index and dispatch its
+      unknown vtable slot +0x2c. OR both statuses without short-circuiting,
+      then unlock on either path. Ghidra r1/r2/r3 arguments are phantom.
+      The buffer helper iterates four-byte pointer entries between +8 and
+      +0xc and ORs 0x08277d1c results; the latter writes dirty buffered
+      ranges and clears their dirty byte. No callee identity is invented
+      for the facade slot. Target uses the real unported buffer helper at
+      its retail address; host boundary panics rather than faking I/O.
+      Existing mutex and facade ports retain their own integration seams.
+      Host tests exercise closed-state precedence after acquisition,
+      error-bit aggregation without skipping dispatch, index reload after
+      flushing, unchanged cached status and release ordering. Host smoke
+      executes the exported closed path with native owner-pointer storage
+      and raw scalar offsets; no on-device I/O execution is claimed.
+      Verification: 13562 host tests pass; ARM release build passes.
+      match.py reports 32 Rust listing rows versus 25 original instructions:
+      same branch, +0x40 buffer call, +0x18 index reload, +0x2c virtual slot,
+      OR and unlock epilogue. LLVM adds a frame and literal-pool BLX to
+      the fixed buffer helper, replacing the stock direct BL.
