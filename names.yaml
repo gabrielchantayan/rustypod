@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0824e0c0
+    ghidra: FUN_0824e0c0
+    name: video_engine_set_output_transform_fields
+    size: 44
+    sig: "void video_engine_set_output_transform_fields(void *engine, u32 horizontal_scale, u32 vertical_scale, u32 x_offset, u32 y_offset)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: horizontal_scale
+      param_3/r2: vertical_scale
+      param_4/r3: x_offset
+      param_5/stack: y_offset
+    notes: >-
+      Raw A32 establishes 0x0824e0c0..0x0824e0ec (44 bytes), ending in
+      pop {r1,r2,r3,ip,pc} before the next function's push {r4,lr}.
+      One plain inbound BL at 0x0824cf48, one predicated BLNE at
+      0x082d0e18, and no outbound BLs. Stores horizontal scale at +0x8a4,
+      x offset at +0x8ac, vertical scale at +0x8a8, and y offset at +0x8b0.
+      Raw code contradicts Ghidra's swapped last two arguments and the
+      former host seam. All words remain opaque; scale/offset names follow
+      the existing wrapper convention. Volatile aligned stores preserve order.
+      Rust omits stack staging and caller-saved register restoration; the
+      incidental r0 value engine+0x8a4 is not consumed by either caller.
+      No callee seams. Host tests cover zero, high-bit and full-width words,
+      repeated updates, and every untouched word. Both host and target
+      wrappers call this port rather than the resident firmware entry.
   - address: 0x08257288
     ghidra: FUN_08257288
     name: copy_64_bytes_and_terminate
@@ -151779,13 +151806,12 @@ functions:
       0x08142c94, 0x0816e944, and 0x0825bee8; no predicated BL targets this
       entry. The wrapper saves four transform words, gets the video-engine
       singleton, returns silently when it is NULL, and otherwise passes the
-      engine plus all four words to FUN_0824e0c0. That verified 40-byte helper
-      writes engine words +0x8a4, +0x8ac, +0x8a8, and +0x8b0 in the order r1,
-      r4, r2, r3. The output-transform name is inferred from the four fields
-      and their 1.0 (0x10000) setup values. Deliberate deviation:
-      FUN_0824e0c0 remains resident on target; host builds reproduce only its
-      verified stores. Tests cover NULL-session no-op, word preservation, and
-      the helper's non-register field order.
+      engine plus all four words to video_engine_set_output_transform_fields.
+      Raw A32 verifies that the 44-byte helper writes +0x8a4, +0x8ac,
+      +0x8a8, and +0x8b0 from r1, r3, r2, and the fifth stack argument.
+      The output-transform name is inferred from the four fields and their
+      1.0 (0x10000) setup values. Host and target now use the same Rust
+      helper. Tests cover NULL-session no-op and exact word positions.
   - address: 0x082cb038
     ghidra: FUN_082cb038
     name: video_engine_install
@@ -183838,13 +183864,12 @@ functions:
       0x08142c94, 0x0816e944, and 0x0825bee8; no predicated BL targets this
       entry. The wrapper saves four transform words, gets the video-engine
       singleton, returns silently when it is NULL, and otherwise passes the
-      engine plus all four words to FUN_0824e0c0. That verified 40-byte helper
-      writes engine words +0x8a4, +0x8ac, +0x8a8, and +0x8b0 in the order r1,
-      r4, r2, r3. The output-transform name is inferred from the four fields
-      and their 1.0 (0x10000) setup values. Deliberate deviation:
-      FUN_0824e0c0 remains resident on target; host builds reproduce only its
-      verified stores. Tests cover NULL-session no-op, word preservation, and
-      the helper's non-register field order.
+      engine plus all four words to video_engine_set_output_transform_fields.
+      Raw A32 verifies that the 44-byte helper writes +0x8a4, +0x8ac,
+      +0x8a8, and +0x8b0 from r1, r3, r2, and the fifth stack argument.
+      The output-transform name is inferred from the four fields and their
+      1.0 (0x10000) setup values. Host and target now use the same Rust
+      helper. Tests cover NULL-session no-op and exact word positions.
   - address: 0x082cb038
     ghidra: FUN_082cb038
     name: video_engine_install

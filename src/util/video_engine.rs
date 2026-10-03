@@ -410,30 +410,41 @@ pub extern "C" fn video_engine_mode_selector_index(mode_selector: u32) -> i32 {
     }
 }
 
-/// Firmware entry of the output-transform setter (`FUN_0824e0c0`, unported).
+/// video_engine_set_output_transform_fields — retailOS `FUN_0824e0c0`
+/// @ **0x0824e0c0** (44 bytes, ending at the next function, 0x0824e0ec).
 ///
-/// The raw helper stores its four input words at engine offsets +0x8a4,
-/// +0x8ac, +0x8a8, and +0x8b0, in that register-order permutation.
-#[cfg(target_os = "none")]
-const VIDEO_ENGINE_SET_OUTPUT_TRANSFORM_ADDR: usize = 0x0824_e0c0;
-
-/// ABI of the resident output-transform setter.
-type VideoEngineSetOutputTransform = unsafe extern "C" fn(*mut u8, u32, u32, u32, u32);
-
-/// Applies four output-transform words with the original helper's field order.
-fn set_output_transform(engine: *mut u8, horizontal_scale: u32, vertical_scale: u32, x_offset: u32, y_offset: u32) {
-    #[cfg(target_os = "none")]
+/// Stores four opaque transform words: horizontal scale at +0x8a4,
+/// x offset at +0x8ac, vertical scale at +0x8a8, then y offset at +0x8b0.
+/// Raw A32 decoding verifies one plain inbound BL (0x0824cf48), one
+/// predicated BLNE (0x082d0e18), and no outbound BLs.
+///
+/// # Deliberate deviations
+///
+/// Rust omits the original stack staging and unused caller-saved register
+/// restoration. Volatile aligned word stores retain the original write order.
+/// The original leaves r0 pointing at +0x8a4; callers do not consume it and
+/// the void ABI does not expose that incidental register value.
+/// ARM release comparison: LLVM emits eight instructions rather than eleven,
+/// retaining all four stores in order and loading the fifth argument from the
+/// stack. Host suite (13,720 tests), ARM build, and standalone smoke passed.
+///
+/// # Safety
+///
+/// `engine` must be word-aligned and writable through offset +0x8b3.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_set_output_transform_fields(
+    engine: *mut u8,
+    horizontal_scale: u32,
+    vertical_scale: u32,
+    x_offset: u32,
+    y_offset: u32,
+) {
     unsafe {
-        let set_transform: VideoEngineSetOutputTransform =
-            core::mem::transmute(VIDEO_ENGINE_SET_OUTPUT_TRANSFORM_ADDR);
-        set_transform(engine, horizontal_scale, vertical_scale, x_offset, y_offset);
-    }
-    #[cfg(not(target_os = "none"))]
-    unsafe {
-        (engine.add(0x8a4).cast::<u32>()).write(horizontal_scale);
-        (engine.add(0x8ac).cast::<u32>()).write(y_offset);
-        (engine.add(0x8a8).cast::<u32>()).write(vertical_scale);
-        (engine.add(0x8b0).cast::<u32>()).write(x_offset);
+        engine.add(0x8a4).cast::<u32>().write_volatile(horizontal_scale);
+        engine.add(0x8ac).cast::<u32>().write_volatile(x_offset);
+        engine.add(0x8a8).cast::<u32>().write_volatile(vertical_scale);
+        engine.add(0x8b0).cast::<u32>().write_volatile(y_offset);
     }
 }
 
@@ -451,9 +462,8 @@ fn set_output_transform(engine: *mut u8, horizontal_scale: u32, vertical_scale: 
 ///
 /// # Deliberate deviation
 ///
-/// `FUN_0824e0c0` is not independently ported. Target builds transfer to
-/// its resident firmware entry; host builds reproduce its verified four-word
-/// stores so the wrapper's observable contract is testable.
+/// The four-word helper is ported as
+/// [`video_engine_set_output_transform_fields`] on both host and target.
 ///
 /// # Safety
 ///
@@ -469,7 +479,9 @@ pub unsafe extern "C" fn video_engine_set_output_transform(
 ) {
     let engine = video_engine_get();
     if !engine.is_null() {
-        set_output_transform(engine, horizontal_scale, vertical_scale, x_offset, y_offset);
+        unsafe {
+            video_engine_set_output_transform_fields(engine, horizontal_scale, vertical_scale, x_offset, y_offset);
+        }
     }
 }
 
@@ -2493,7 +2505,7 @@ mod tests {
     }
 
     #[test]
-    fn output_transform_preserves_words_and_helper_store_order() {
+    fn output_transform_preserves_words_and_field_positions() {
         let _guard = LOCK.lock();
         let mut engine = [0xaaaa_aaaau32; 0x8b4 / 4];
         unsafe {
@@ -2504,9 +2516,32 @@ mod tests {
 
         assert_eq!(engine[0x8a4 / 4], 0x0001_0000);
         assert_eq!(engine[0x8a8 / 4], 0x1234_5678);
-        assert_eq!(engine[0x8ac / 4], u32::MAX);
-        assert_eq!(engine[0x8b0 / 4], 0);
+        assert_eq!(engine[0x8ac / 4], 0);
+        assert_eq!(engine[0x8b0 / 4], u32::MAX);
         assert_eq!(engine[0x8a0 / 4], 0xaaaa_aaaa);
+    }
+
+    #[test]
+    fn output_transform_fields_preserve_full_words_and_all_surrounding_storage() {
+        let cases = [
+            [0, 0, 0, 0],
+            [u32::MAX, 0x8000_0000, 0x1234_5678, 0x0001_0000],
+            [0x1357_9bdf, 0x2468_ace0, u32::MAX, 0],
+        ];
+        let mut engine = [0xaaaa_aaaau32; 0x8b8 / 4];
+        for [horizontal_scale, vertical_scale, x_offset, y_offset] in cases {
+            let mut expected = engine;
+            expected[0x8a4 / 4] = horizontal_scale;
+            expected[0x8a8 / 4] = vertical_scale;
+            expected[0x8ac / 4] = x_offset;
+            expected[0x8b0 / 4] = y_offset;
+            unsafe {
+                video_engine_set_output_transform_fields(
+                    engine.as_mut_ptr().cast(), horizontal_scale, vertical_scale, x_offset, y_offset,
+                );
+            }
+            assert_eq!(engine, expected);
+        }
     }
 
     // --- video_engine_set_type_continuation (FUN_082d1f6c) ---
