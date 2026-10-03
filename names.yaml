@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08254f34
+    ghidra: FUN_08254f34
+    name: matrix_state_apply_frustum
+    size: 116
+    sig: "void matrix_state_apply_frustum(MatrixState *state, i32 left, i32 right, i32 bottom, i32 top, i32 near, i32 far)"
+    module: util/matrix_state_apply_frustum
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: left
+      param_3/r2: right
+      param_4/r3: bottom
+      param_5/stack+0: top
+      param_6/stack+4: near
+      param_7/stack+8: far
+      auStack_4c: matrix
+      FUN_08257140: retail_frustum_constructor
+      FUN_0824d548: matrix_state_apply_transform
+      FUN_0824f388: latch_first_error
+    notes: >-
+      Raw A32 words establish 116 bytes through the error-code literal at
+      0x08254fa4; next real entry is 0x08254fa8. Two inbound unconditional
+      BLs at 0x08254f2c and 0x082d1430, no predicated BLs; three outgoing
+      unconditional BLs, no predicated BLs. Rejects equal horizontal or
+      vertical bounds and nonpositive near/far distances, latching 0x501.
+      Reversed bounds and equal positive near/far distances are accepted.
+      Builds a 0x44-byte Q16.16 perspective matrix via the stock constructor
+      at 0x08257140 and applies it through the existing transform port.
+      Constructor retained via relocation-safe ARM literal veneer; the host
+      public valid path explicitly panics because this stock helper is unported.
+      Host tests cover signed-boundary validation and first-error precedence
+      with untouched trailing state words. No firmware behavioral deviations.
   - address: 0x08256650
     ghidra: FUN_08256650
     name: masked_u32_rectangle_fill
