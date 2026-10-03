@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08260448
+    ghidra: FUN_08260448
+    name: texture_wrap_mode
+    size: 32
+    sig: "i32 texture_wrap_mode(u32 mode)"
+    module: util/texture_wrap_mode
+    status: ported
+    renames:
+      param_1/r0: mode
+    notes: >-
+      Raw A32 establishes the 32-byte extent before the next leaf at
+      0x08260468. Maps GL_REPEAT (0x2901) to 1, GL_CLAMP_TO_EDGE
+      (0x812f) to 0, and all other full-width values to -1. The
+      video-engine property dispatcher calls this for texture-wrap S/T
+      keys 0x2802/0x2803 and stores valid results at frame-slot
+      +0x107/+0x108. Complete-image word decoding verifies two inbound
+      plain BL sites at 0x082505e8 and 0x08250600, zero predicated BL
+      sites, and no outbound BL calls. No callee seams or behavioral
+      deviations; Rust uses a match instead of subtract/predicated
+      returns. Host tests exhaust the u16 domain and reject high-bit
+      aliases of accepted enums.
+      Host suite: 13716 passed. ARM release build passed. match.py
+      reports an expected structural diff (exit 1): LLVM materializes
+      both enum constants and uses conditional assignments in a
+      12-instruction frame versus the original eight-instruction leaf;
+      both retain the same two comparisons and three return values,
+      with no calls.
   - address: 0x0826106c
     ghidra: FUN_0826106c
     name: selector_item_middle_records_variant_construct
