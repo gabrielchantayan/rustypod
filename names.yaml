@@ -206622,3 +206622,45 @@ functions:
       versus ADS comparisons and two direct writer sites. Archive ARM
       relocations confirm both calls to each existing packer. No device
       execution performed.
+  - address: 0x08246fac
+    ghidra: FUN_08246fac
+    name: cg_emit_matrix_transform
+    size: 120
+    sig: "void cg_emit_matrix_transform(u8 *ctx, CgBlock *block, CgVirtualReg *source, CgVirtualReg *destination, u32 offset, CgVirtualReg *matrix, u32 source_type, u32 components)"
+    module: codegen/matrix_transform_dispatch
+    status: ported
+    renames:
+      param_1/r0: ctx
+      param_2/r1: block
+      param_3/r2: source
+      param_4/r3: destination
+      param_5: offset
+      param_6: matrix
+      param_7: source_type
+      param_8/r5: components
+      FUN_08247024: retail_cg_emit_matrix_transform2
+      FUN_082471ac: retail_cg_emit_matrix_transform3
+      FUN_082473c4: retail_cg_emit_matrix_transform4
+    notes: >-
+      Raw A32 extent is 120 bytes, 0x08246fac..0x08247024, ending in
+      pop at 0x08247020 before the next independent push prologue.
+      Whole-image aligned branch decoding verifies two incoming plain
+      BLs at 0x082466cc and 0x08246710, zero predicated incoming BLs.
+      Body contains three plain BLs and zero predicated BLs. Dispatch
+      components 2, 3, 4 to verified seven-argument matrix-transform
+      emission helpers at 0x08247024, 0x082471ac, 0x082473c4 respectively;
+      unsupported dimensions emit nothing and dereference no arguments.
+      Source type is the GL scalar-type selector passed to 0x08246a48,
+      not a stride. The two/three-component generators add translation;
+      the four-component generator multiplies all four matrix columns.
+      Callees have no existing names entry and remain literal retailOS
+      veneers, with explicit host callback installation. No algorithm
+      deviations. Host edge test covers unsupported boundaries and signed
+      extremes with null inputs and unchanged guards. All 13739 host tests
+      pass; ARM release build passes. Actual-source standalone smoke
+      verifies selection and all seven arguments for dimensions 2/3/4,
+      followed by unsupported no-emission behavior. match.py exits 1:
+      17 Rust instructions versus 30 stock, range guard and three-entry
+      jump table with indirect tail branch instead of three framed BLs.
+      Archive relocations verify ordered references to all three veneers.
+      No device execution performed.
