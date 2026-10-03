@@ -81134,6 +81134,39 @@ functions:
       outside the field. match.py structural: identical
       load/bic/orr/store sequence; LLVM adds only its frame-pointer
       push/pop.
+  - address: 0x0826caf8
+    ghidra: FUN_0826caf8
+    name: view_set_transition_active
+    size: 104
+    sig: "void view_set_transition_active(ViewBase *view, u32 request)"
+    module: ui/view_transition_active
+    vars:
+      param_1: view
+      param_2: request
+      uVar1: active
+      UNRECOVERED_JUMPTABLE: shown_changed
+    status: ported
+    notes: >-
+      Raw ARM establishes 104 bytes through BX r2 at 0x0826cb5c;
+      the next real function begins at 0x0826cb60. Whole-image ARM
+      branch-word decoding finds two plain inbound BLs at 0x081574d8
+      and 0x08157588, zero predicated inbound BLs, two plain outbound
+      BLs to the already ported view_set_transition_mode at 0x0826ddd4,
+      and zero predicated outbound BLs. Nonzero request changes mode
+      0x1000 to 0x800 and notifies vtable slot +0xa8 with 1; zero request
+      changes mode 0x800 to 0x1000 and notifies with 0. Other modes
+      return without reading the vtable. Mode update precedes notification;
+      unrelated flags and callback mutations survive. Reuses ViewBase
+      and ViewTransitionVtable. Host slots use native pointer width,
+      while object pointer words retain target width. Host tests cover
+      all modes, noncanonical nonzero requests, unrelated flag patterns,
+      null vtables on no-op paths, and callback mutations. Full host
+      suite passes 13567 tests; ARM release build succeeds. Runtime smoke
+      verifies activation, deactivation, and repeated no-op. match.py
+      reports 23 Rust versus 26 stock instructions: LLVM combines the
+      two setter call sites into one using conditional mode selection,
+      preserving flag gating, mode update, and indirect tail BX at +0xa8.
+
   # --- Silver UI framework: view transition-mode setter ---
   - address: 0x0826ddd4
     ghidra: FUN_0826ddd4

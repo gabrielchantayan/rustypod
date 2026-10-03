@@ -43,6 +43,7 @@ pub mod hints {
     pub const VIEW_INTERACTION_SYNC: usize = 0xd714_0000;
     pub const VIEW_INTERACTION_ACTIVE: usize = 0xd717_0000;
     pub const VIEW_TRANSITION_SYNC: usize = 0xd715_0000;
+    pub const VIEW_TRANSITION_ACTIVE: usize = 0xd718_0000;
     pub const ELEMENT_REFERENCE_TEARDOWN: usize = 0xd712_0000;
     pub const CONTEXT_SCOPE_MARK_SUBJECT: usize = 0xd713_0000;
     pub const RECORD_CACHE_STATUS: usize = 0x5295_0000;
