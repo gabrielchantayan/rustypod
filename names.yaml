@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826106c
+    ghidra: FUN_0826106c
+    name: selector_item_middle_records_variant_construct
+    size: 212
+    sig: "void *selector_item_middle_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_middle_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this / returned object
+      param_2/r1: variant
+      FUN_08218b10: selector_item_base_construct
+      DAT_0826111c: derived vtable 0x089a3758
+    notes: >-
+      Raw words establish 168 code bytes plus eleven literal words, true
+      extent 212 bytes through 0x08261140, the next push {r4,lr} boundary.
+      Whole-image A32 decoding verifies two plain inbound BLs at 0x0819fa68
+      and 0x0819fa80, zero predicated inbound BLs; one plain outbound BL
+      at 0x08261094 to the registered ported selector_item_base_construct
+      at 0x08218b10, zero predicated outbound BLs. Callers allocate 0x180
+      bytes and index returned byte +0xb4. Zero full-width variant selects
+      item 8 / descriptor 0x8007; nonzero selects item 9 / descriptor 0x8008.
+      Base arguments are kind 9, context 44 and low variant byte as flag.
+      Replace vtable with 0x089a3758 and install records 1/2 with selectors
+      0x801d/0x801e, tags 9/10 and opaque implementation words
+      0x08ae5444/0x08ae5474; records 5..8 receive selectors 0x8021..0x8024
+      and tags 13..16, preserving base-zero implementation words. Other
+      records retain base values. Return retained r0 despite Ghidra void
+      declaration. No new seams or deliberate behavioral deviations.
+      Host tests cover full-width variants, flag bits, all sparse records,
+      preserved padding and bounds; all 13712 host tests pass. ARM release
+      build passes. Standalone actual-source smoke executes this port, real
+      selector base and real zero fill for variants 0, 1 and 0x100; embedded
+      pair-header boundary is modeled, not allocation. match.py prints a
+      structural diff: LLVM synthesizes constants, reorders independent
+      stores and uses a larger prologue; offsets, variant selection and one
+      base BL remain. Archive relocation at +0x44 confirms the base target,
+      not the apparent self-call shown for the unresolved archive BL.
   - address: 0x08261548
     ghidra: FUN_08261548
     name: selector_item_high_records_variant_construct
