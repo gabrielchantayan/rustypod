@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08219d64
+    ghidra: FUN_08219d64
+    name: contextual_menu_dispatch
+    size: 80
+    sig: "u32 contextual_menu_dispatch(ContextualMenuTarget *owner)"
+    module: app/contextual_menu_dispatch
+    status: ported
+    renames:
+      param_1/r4: owner
+      piVar1/r0: demo
+      iVar2/r0: value
+      uVar3/r0: resolved
+      FUN_081883fc: demo_mode_instance
+      "demo vtable+0x168": query (identity unestablished)
+      "owner vtable+0x130": slot_130 (identity unestablished)
+      "owner vtable+0x148": slot_148 (identity unestablished)
+    notes: >-
+      Raw A32 establishes 80 bytes through BX r2 at 0x08219db0;
+      the next independent prologue starts at 0x08219db4. Whole-image
+      decoding finds zero plain and two predicated inbound BLs at
+      0x08219160 and 0x082381c0. One plain outbound BL to ported
+      demo_mode_instance, two virtual BLXs and final virtual BX.
+      HandleShowContextualMenu callers establish the handler role.
+      Query demo slot +0x168; sentinel 0xffffffff returns zero without
+      touching owner. Otherwise resolve through owner +0x130, reload
+      its vtable, dispatch +0x148 and return the final r0 (not void).
+      Host entries widen by word index; LLVM controls registers/frame.
+      All 13817 host tests and ARM release build pass. Standalone source
+      smoke returns 0x92345679. match.py exit-1 diff: 20 versus 22
+      instructions; larger frame and branch replace predicated return,
+      both BLXs, vtable reload and final BX remain. No new callee seam.
   - address: 0x08219db4
     ghidra: FUN_08219db4
     name: app_screen_dispatch_resource_updates
