@@ -207819,3 +207819,50 @@ functions:
       repeated cursor transitions, NUL, a surrogate, inclusive endpoints,
       an out-of-range 0xffff code unit, and aliased outputs. Actual-source
       host smoke observed U+0041 mapped to 0x61 and cursor decremented by two.
+
+  - address: 0x08233128
+    ghidra: FUN_08233128
+    name: text_history_next
+    size: 224
+    sig: "void text_history_next(u8 *history, u16 *code_unit, u8 *mapped_byte)"
+    module: ui/text_history_next
+    status: ported
+    renames:
+      param_1/r4: history
+      param_2/r5: code_unit
+      param_3/r6: mapped_byte
+      uVar3/r0: decoded
+      pbVar4/r0: ligature_expansion
+      puVar5/r0: advanced_history_cursor
+      DAT_082331f8: oe_ligature_lowercase_codepoint
+      DAT_082331fc: uppercase_oe_expansion
+      DAT_08233200: uppercase_ae_expansion
+      DAT_08233204: text lookup globals at 0x089d01f0
+      FUN_08276214: utf8_next_codepoint
+      FUN_0829f1f4: range_byte_lookup
+    notes: >-
+      Raw osos.dec A32 words establish 208 instruction bytes through the
+      pop at 0x082331f4 and 16 literal bytes through 0x08233207, giving a
+      true extent of 224 bytes before the independently entered backward
+      traversal at 0x08233208. Two plain outgoing BLs at 0x0823314c and
+      0x082331ec target the existing UTF-8 decoder and range-byte lookup
+      ports; zero predicated BLs. Caller 0x0813305c uses forward and backward
+      history traversal to match mapped text. If the next buffered halfword
+      is zero, decode via the u32 source slot at history +4, write the decoded
+      output, then append its halfword and zero or expand U+0152/U+0153 to OE
+      and U+00C6/U+00E6 to AE followed by zero. Advance the u32 history cursor
+      at +0x408 by two, output its halfword, and map that unsigned code unit
+      through the descriptor at 0x089d01f8. Ghidra omits the second lookup
+      argument; raw r1 holds the emitted code unit. No bounds, NUL, or
+      surrogate checks. Deliberate deviations are host-only native-width
+      decoder cursor adaptation and a separately installed descriptor fixture
+      to avoid sharing mutable host state with backward traversal tests.
+      Host coverage includes all four ligatures, buffered decoding bypass,
+      ASCII, U+0080, adjacent U+0154, surrogate, out-of-range U+FFFF, malformed
+      four-byte lead, NUL, and aliased outputs. Full host suite passed 13792
+      tests; ARM release build passed. match.py reported 50 versus 52
+      instructions with preserved decode/buffer/advance/lookup structure;
+      LLVM shares the termination stores and uses immediate expansion bytes.
+      Actual-source smoke emitted OE, A, NUL from UTF-8 lowercase oe plus A,
+      with mapped bytes o, e, a, zero; source advanced four bytes and history
+      advanced eight bytes.

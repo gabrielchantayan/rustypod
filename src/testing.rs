@@ -3130,6 +3130,8 @@ pub mod hints {
     pub const RANGE_BYTE_LOOKUP: usize = 0x6f20_0000;
     // Dedicated UTF-16 history and range-table fixture.
     pub const TEXT_HISTORY_PREVIOUS: usize = 0x6f21_0000;
+    // Dedicated forward UTF-16 history, UTF-8 input, and range table.
+    pub const TEXT_HISTORY_NEXT: usize = 0x6f22_0000;
     // 0x8230_0000: dedicated to util/object_record_at's target-width object
     // and eight-byte record-table fixture; mappings never unmap.
     pub const OBJECT_RECORD_AT: usize = 0x8230_0000;
