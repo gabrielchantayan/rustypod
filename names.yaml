@@ -81443,6 +81443,42 @@ functions:
       instruction-identical; the diff is only the crate's
       frame-pointer prologue (push {fp,lr} / pop {fp,pc} for bx lr).
 
+  - address: 0x0826d80c
+    ghidra: FUN_0826d80c
+    name: view_base_set_flag_8
+    size: 40
+    sig: "ViewBase *view_base_set_flag_8(ViewBase *view, u32 enabled)"
+    module: ui/view_base
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: enabled
+      uVar1/r2: flags
+      r3: current_bit
+    notes: >-
+      Raw words verify the 40-byte extent at 0x0826d80c..0x0826d834:
+      ldr r2,[r0,#0x48] through bx lr at 0x0826d830; the next independent
+      word-44 setter begins at 0x0826d834. Whole-image ARM branch decoding
+      finds two incoming plain BLs at 0x08157eac and 0x08157ef4, zero
+      predicated BLs, zero tail branches, and zero data-word references.
+      The body has no calls. Normalize flags bit 3 to 0/1 and compare
+      with the entire enabled word; on mismatch clear bit 3 for zero,
+      otherwise set it, preserving every other bit. Noncanonical nonzero
+      inputs still store even when bit 3 is already set. Both direct
+      callers belong to the container child-propagation function at
+      0x08157ea0; the bit's higher-level meaning remains unresolved.
+      No callee seams or guessed identities. Volatile aligned field
+      accesses preserve the conditional store; returning view preserves
+      unchanged r0 on both exits. Host tests cover both bit states,
+      unrelated flags, zero/one/noncanonical inputs, repeated updates,
+      neighboring-field canaries, and pointer identity. An optimized
+      standalone host smoke run exercised a set/re-set/clear/re-clear/set
+      sequence from the actual source. All 13561 host tests passed and
+      the ARM release build succeeded. match.py verifies the same +0x48
+      load/store and full-word comparison, with LLVM's frame-pointer
+      prologue, folded bit extraction, early conditional pop, and
+      unconditional bic plus conditional orr replacing ADS predication.
+
   - address: 0x0826d850
     ghidra: FUN_0826d850
     name: view_base_set_geometry
