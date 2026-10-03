@@ -203143,3 +203143,35 @@ functions:
       replaces the early-return branch with conditional selection, retaining
       the aligned +0x28 load, zero-context condition, wrapping subtraction,
       and unsigned range check. No device execution claimed.
+
+  - address: 0x0826be18
+    ghidra: FUN_0826be18
+    name: string_object_next_path_component
+    size: 200
+    sig: "void string_object_next_path_component(StringObject *out, const StringObject *source, uint32_t *cursor, uint8_t *exhausted)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1: out
+      param_2: source
+      param_3: cursor
+      param_4: exhausted
+      uVar5: index
+      iVar3: codepoint
+      iVar4: next_codepoint
+    notes: >-
+      Raw A32 establishes 200 code bytes at 0x0826be18..0x0826bedf;
+      the next real function starts with push at 0x0826bee0. Whole-image
+      decoding verifies two plain inbound BLs, zero predicated inbound BLs,
+      seven plain outbound BLs, and zero predicated outbound BLs. Construct
+      out, count source codepoints, clear exhausted, and scan from unsigned
+      cursor. Unescaped slash, backslash, or colon ends the component and
+      stores index+1 in cursor. Hash followed by slash, backslash, or hash
+      copies both codepoints unchanged; hash before colon does not escape
+      colon. Exhaustion sets exhausted=1 and leaves cursor unchanged. All
+      four callees are existing Rust ports; no deliberate deviations.
+      Host tests cover delimiters, empty components, all escape pairs,
+      trailing hash, UTF-8 indexing, NULL payload, and unsigned out-of-range
+      cursors. ARM release builds; match.py reports 67 Rust instructions
+      versus 50 original, preserving construction, counting, lookahead,
+      append calls, unsigned loop bounds, and distinct termination writes.

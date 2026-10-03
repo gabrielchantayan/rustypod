@@ -1440,6 +1440,49 @@ pub unsafe extern "C" fn string_object_append_code_unit_returning_this(
     this
 }
 
+/// Extract one path component — retailOS `FUN_0826be18` @ 0x0826be18.
+/// True extent: 200 code bytes, ending at the next prologue @ 0x0826bee0.
+/// Raw A32 verifies seven plain outbound BLs, zero predicated BLs, and two
+/// plain inbound BLs. Construct out, then scan source by codepoint from cursor.
+/// Slash, backslash and colon terminate a component and advance cursor past
+/// the delimiter. `#/`, `#\` and `##` are copied as pairs, not unescaped.
+/// Exhaustion sets exhausted to one without updating cursor; an unmatched
+/// trailing hash is copied. No deliberate deviations; all callees are ports.
+///
+/// # Safety
+/// out must be writable, distinct from source, and not own a live payload.
+/// source and its NUL-terminated payload must be readable; cursor and exhausted
+/// must be valid writable pointers, disjoint from the objects and payloads.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_next_path_component(
+    out: *mut StringObject, source: *const StringObject,
+    cursor: *mut u32, exhausted: *mut u8,
+) {
+    let out = string_default_construct(out);
+    let count = utf8_codepoint_count_safe((*source).payload) as u32;
+    exhausted.write(0);
+    let mut index = cursor.read();
+    while index < count {
+        let codepoint = string_object_codepoint_at(source, index as i32);
+        if codepoint == 0x23 {
+            let next = string_object_codepoint_at(source, index.wrapping_add(1) as i32);
+            if next == 0x5c || next == 0x2f || next == 0x23 {
+                string_object_append_code_unit_returning_this(out, codepoint);
+                string_object_append_code_unit_returning_this(out, next);
+                index = index.wrapping_add(2);
+                continue;
+            }
+        } else if codepoint == 0x5c || codepoint == 0x2f || codepoint == 0x3a {
+            cursor.write(index.wrapping_add(1));
+            return;
+        }
+        string_object_append_code_unit_returning_this(out, codepoint);
+        index = index.wrapping_add(1);
+    }
+    exhausted.write(1);
+}
+
 /// string_object_insert_cstr — original: `FUN_08276a18` @ 0x08276a18
 /// (68 bytes, all code — no literal-pool word; 61 `bl` call sites,
 /// binary-scanned).
@@ -6725,6 +6768,44 @@ pub(crate) mod tests {
             assert_eq!(out[1 + suffix.len()], 0xa5);
             assert_eq!(unsafe { (*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).len() }, 1);
         }
+    }
+
+    #[test]
+    fn next_path_component_preserves_escapes_and_cursor_at_exhaustion() {
+        for (text, start, expected, next_cursor, end) in [
+            (&b"a/b\0"[..], 0, &b"a\0"[..], 2, 0),
+            (&b"a\\b\0"[..], 0, &b"a\0"[..], 2, 0),
+            (&b"a:b\0"[..], 0, &b"a\0"[..], 2, 0),
+            (&b"/x\0"[..], 0, &b"\0"[..], 1, 0),
+            (&b"a//b\0"[..], 2, &b"\0"[..], 3, 0),
+            (&b"#/#\\##:z\0"[..], 0, &b"#/#\\##\0"[..], 7, 0),
+            (&b"#:z\0"[..], 0, &b"#\0"[..], 2, 0),
+            (&b"#x#\0"[..], 0, &b"#x#\0"[..], 0, 1),
+            (&b"a/b\0"[..], 2, &b"b\0"[..], 2, 1),
+            (&b"\xc3\xa9/\0"[..], 0, &b"\xc3\xa9\0"[..], 2, 0),
+            (&b"x\0"[..], 1, &b"\0"[..], 1, 1),
+            (&b"x\0"[..], u32::MAX, &b"\0"[..], u32::MAX, 1),
+            (&b"\0"[..], 0, &b"\0"[..], 0, 1),
+        ] {
+            let source = StringObject { vtable: core::ptr::null(), payload: text.as_ptr() as *mut u8 };
+            let mut storage = [0xa5u8; 64];
+            let mut out = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+            let mut cursor = start;
+            let mut exhausted = 0xa5;
+            let _bench = insert_bench(storage.as_mut_ptr());
+            unsafe {
+                string_object_next_path_component(&mut out, &source, &mut cursor, &mut exhausted);
+                assert_eq!(core::slice::from_raw_parts(string_object_c_str(&out), expected.len()), expected);
+            }
+            assert_eq!((cursor, exhausted), (next_cursor, end));
+        }
+        let source = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        let mut out = StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() };
+        let mut cursor = 0;
+        let mut exhausted = 0;
+        unsafe { string_object_next_path_component(&mut out, &source, &mut cursor, &mut exhausted); }
+        assert!(out.payload.is_null());
+        assert_eq!((cursor, exhausted), (0, 1));
     }
 
     #[test]
