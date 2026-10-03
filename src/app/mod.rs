@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod now_playing_highlight_display;
 pub mod music_menu_playlist_select;
 pub mod query_context_controller;
 pub mod fixed4_weighted_difference;
