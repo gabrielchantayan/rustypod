@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08277eb0
+    ghidra: FUN_08277eb0
+    name: buffered_stream_destroy
+    size: 68
+    sig: "OwnedBufferedStreamState *buffered_stream_destroy(OwnedBufferedStreamState *state)"
+    module: app/buffered_stream_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      state_plus_0x10: flush_context
+      state_plus_0x14: buffer_owner
+      FUN_08277d1c: buffered_stream_flush_pending
+      FUN_081a8204: aligned_buffer_reset
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes seventeen A32 words, 68 bytes through
+      pop {r4,pc} at 0x08277ef0; the next function begins at 0x08277ef4.
+      Whole-image raw BL decoding finds two incoming plain calls at
+      0x08277fec and 0x082781ac, zero predicated calls. The body has three
+      outgoing plain BLs at 0x08277ec8, 0x08277ed8, and 0x08277edc, and
+      zero predicated BLs. With a nonzero owner, flush pending data, reload
+      the owner, reset its tag-3 allocation and tag-2-delete the owner if
+      still present, then clear context and owner. Without an owner, leave
+      all state untouched. Return this. Ghidra incorrectly marks delete
+      noreturn. All callees are existing ports; no new seam. Target pointer
+      fields remain u32 on hosts. ARM match has the same branches, three
+      calls, reload, ordered stores and return, with one extra frame-pointer
+      instruction and a larger save set; no algorithmic deviation.
   - address: 0x0826c938
     ghidra: FUN_0826c938
     name: numeric_pair_table_construct
