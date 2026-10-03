@@ -203923,3 +203923,35 @@ functions:
       Host fixtures model empty, fully filtered and mixed accepted sources,
       preserving existing output and source data. Host-only callee injection
       is the deliberate deviation; no target validation or allocation is added.
+  - address: 0x08269d30
+    ghidra: FUN_08269d30
+    name: record_collection_get
+    size: 36
+    sig: "uint64_t record_collection_get(const uint32_t *collection, uint32_t index)"
+    module: app/record_collection_get
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r1: index
+      uVar1: low
+      uVar3: high
+      puVar2: record
+    notes: >-
+      Raw nine-word extent 0x08269d30..0x08269d54 ends after BX LR;
+      next real function starts with PUSH at 0x08269d54. Independently
+      scanned ARM words find two incoming plain BLs at 0x08269900 and
+      0x08269a40, zero incoming predicated BLs, and zero outgoing BLs.
+      Reads count at +0x14 and returns the eight-byte record from table
+      pointer +0x10 when index <= count minus one, otherwise zero in r0/r1.
+      Count subtraction and index/address arithmetic deliberately wrap at
+      32 bits: zero count is not an empty-collection check. Both callers
+      store the returned register pair as a 64-bit key for tree operations.
+      No callee seams needed. Two aligned u32 reads replace LDRD without
+      requiring host u64 alignment or widening the target pointer fields.
+      Host suite passes 13609 tests; edge coverage includes first/last,
+      zero-valued record, invalid indices with NULL table, singleton,
+      zero-count underflow, multiplication wrap and negative-eight address
+      wrap. ARM release build succeeds. match.py exits 1: nine original
+      versus fifteen Rust instructions; LLVM uses a bounds branch, two
+      word loads and a frame instead of predicated LDRD. The unsigned
+      wrapping check, word offsets, index scaling and r0/r1 return agree.

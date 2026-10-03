@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const RECORD_COLLECTION_GET: usize = 0xd71c_0000;
     // Dedicated target-width owner/collection fixture; never unmapped.
     pub const UI_COLLECTION_APPEND: usize = 0xd71a_0000;
     pub const RELATIVE_RECORD_COLLECTION_CONSTRUCT: usize = 0xd718_0000;

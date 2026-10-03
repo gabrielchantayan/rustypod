@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod record_collection_get;
 pub mod record_collection_collect_all;
 pub mod selected_record_dispatch;
 pub mod descriptor_object_create;
