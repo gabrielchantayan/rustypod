@@ -205592,3 +205592,43 @@ functions:
       return tests. ARM release build passes. Actual-source host smoke
       exercises cold construction with an adjusted result, repeated
       retrieval and the exported getter's cached path. No device run.
+
+  - address: 0x08261ca0
+    ghidra: FUN_08261ca0
+    name: opaque_context_array_destroy
+    size: 64
+    sig: "void *opaque_context_array_destroy(void *this)"
+    status: identified
+    renames:
+      param_1/r4: this
+      FUN_0803170c: cxx_vec_delete
+      FUN_08262944: destroy_opaque_context
+      FUN_08261e54: cxx_mutex_destroy
+    notes: >-
+      Deferred: cannot establish a faithful destructor callback from the
+      supplied raw firmware. True extent is 0x08261ca0..0x08261cdf:
+      60 instruction bytes plus the literal at 0x08261cdc; the next real
+      function is bx lr at 0x08261ce0. Whole-image aligned A32 B/BL
+      decoding finds two plain inbound BL calls (0x081e6c2c and
+      0x082578b4), zero predicated inbound BL calls, no inbound tail B
+      and no aligned data references. Outbound calls are three plain BL
+      instructions (0x08261cbc and 0x08261cc4 to 0x08261c28;
+      0x08261ccc to 0x08262944), one BLNE at 0x08261cb4 to
+      0x0803170c, and a tail B at 0x08261cd8 to 0x08261e54.
+      Algorithm: conditionally delete the array at this+0x100, destroy
+      child contexts at this+0x9c then this+0x38 through 0x08261c28,
+      destroy the opaque context at this+0x1c, then destroy the base
+      mutex and return this. Blocking evidence: literal word 0x08261cdc
+      is 0x08256e40. The verified cxx_vec_delete helper forwards this
+      callback through 0x082ab254 to the finalizer at 0x080336d8;
+      the finalizer sets r0 to the element and invokes r7 directly at
+      0x08033700. But 0x08256e40 is instruction 0xe1831821
+      (orr r1,r3,r1,lsr #16) inside the arithmetic function whose
+      independent push prologue is at 0x08256d98. Execution from that
+      interior address reaches add sp,sp,#20 at 0x08256e74 and
+      pop {r4-r11,pc} at 0x08256e78 without establishing its frame.
+      No canonical names entry identifies 0x08256e40; Ghidra leaves
+      DAT_08261cdc unresolved. Need a verified callable destructor
+      or evidence explaining this interior callback and its stack ABI.
+      No callee identity or replacement behavior invented; no Rust port,
+      behavioral tests, ARM build, or match.py claim for this deferral.
