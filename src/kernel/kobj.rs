@@ -357,6 +357,40 @@ pub unsafe extern "C" fn mailbox_slot_delete(slot: *mut *mut Mailbox) {
 pub unsafe extern "C" fn mailbox_slot_post(slot: *mut *mut Mailbox) {
     csem_post(*slot as *mut CountingSem);
 }
+
+/// Global notification post — original: `FUN_08228400` @ `0x08228400`.
+///
+/// True extent: 24 bytes (`0x08228400..0x08228418`), comprising five
+/// instructions and the slot-address literal `0x08a09d78`. Raw-word scanning
+/// finds two inbound plain BL calls and zero predicated BL calls; the body
+/// has one plain BL to `0x080d7110`, whose raw `eafedc64` is a branch alias
+/// of the already-ported `mailbox_slot_post` at `0x0808e2a8`.
+/// Ignores the caller's context, posts the current mailbox in that global
+/// slot unconditionally, and returns zero even when posting wakes a waiter.
+/// Deliberate deviations: call the existing Rust port directly rather than
+/// retaining the alias; host tests substitute local slot storage for retail
+/// RAM while exercising the same posting operation.
+///
+/// # Safety
+/// Retail RAM at `0x08a09d78` must contain a valid initialized mailbox pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn global_notification_post(_context: *mut core::ffi::c_void) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        global_notification_post_slot(0x08a0_9d78 as *mut *mut Mailbox)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        panic!("global_notification_post requires retailOS RAM on host")
+    }
+}
+
+#[inline(always)]
+unsafe fn global_notification_post_slot(slot: *mut *mut Mailbox) -> u32 {
+    mailbox_slot_post(slot);
+    0
+}
 /// mailbox_slot_post_deferred — original: `FUN_080c6928` @ 0x080c6928
 /// (8 bytes; 1 plain `bl`, 2 predicated `bl` call sites).
 ///
@@ -791,6 +825,29 @@ pub(crate) mod tests {
     /// A mailbox block seeded with a token count and a waiter id.
     fn block(state: u32, id: u32) -> Mailbox {
         Mailbox { state, id }
+    }
+
+    #[test]
+    fn global_notification_posts_across_count_boundaries_and_slot_replacement() {
+        let _guard = mock_hooks();
+        unsafe {
+            for initial in [0, 1, 0x7fff_ffff, 0x8000_0000, u32::MAX - 1, u32::MAX] {
+                let mut cell = block(initial, 0x2468);
+                let mut slot: *mut Mailbox = &mut cell;
+                assert_eq!(global_notification_post_slot(&mut slot), 0);
+                assert_eq!(cell.state, initial.wrapping_add(1));
+                assert_eq!(cell.id, 0x2468);
+                assert_eq!(slot, &mut cell as *mut Mailbox);
+                let expected = if initial == u32::MAX { vec![Call::Wake(0x2468)] } else { vec![] };
+                assert_eq!(drain(), expected);
+                let mut replacement = block(0, 0x1357);
+                slot = &mut replacement;
+                assert_eq!(global_notification_post_slot(&mut slot), 0);
+                assert_eq!(replacement.state, 1);
+                assert_eq!(cell.state, initial.wrapping_add(1));
+                assert!(drain().is_empty());
+            }
+        }
     }
 
     #[test]

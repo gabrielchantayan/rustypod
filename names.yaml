@@ -208213,3 +208213,34 @@ functions:
       removes the redundant NULL release guard after prior unchecked
       dereferences, and implements the saved zero predicate with CLZ/LSR.
       The six virtual slots and their arguments remain in stock order.
+
+  - address: 0x08228400
+    ghidra: FUN_08228400
+    name: global_notification_post
+    size: 24
+    sig: "u32 global_notification_post(void *context)"
+    module: kernel/kobj
+    vars: {param_1: context}
+    status: ported
+    renames:
+      param_1/r0: ignored context
+      DAT_08228414: global notification mailbox slot
+      thunk_FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw words establish 0x08228400..0x08228418: 20 code bytes and
+      the 0x08a09d78 literal, followed by the next push prologue.
+      Two inbound plain BLs at 0x081c8480 and 0x08206b88, zero
+      predicated BLs. Body has one plain BL and zero predicated BLs.
+      Callee 0x080d7110 is raw eafedc64, a branch to the existing
+      mailbox_slot_post at 0x0808e2a8; no new seam or alias is needed.
+      Incoming context is ignored. Posts the global slot unconditionally
+      and returns zero. Host tests substitute local slot storage and
+      exercise the real semaphore port across signed/count wrap boundaries,
+      waiter wakeup, and slot replacement. Host suite and ARM release
+      build pass. match.py reports five original versus seven Rust entries:
+      LLVM adds a frame-pointer move and includes the literal in its symbol.
+      R_ARM_CALL resolves to mailbox_slot_post; the same literal and zero
+      result remain. A bounded machine-code smoke interprets both wrappers
+      with a nonzero simulated callee result and observes exactly one post
+      of 0x08a09d78 followed by zero return. Host wrapper deliberately panics
+      outside tests because retail RAM is unavailable.
