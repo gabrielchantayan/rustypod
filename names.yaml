@@ -207928,3 +207928,42 @@ functions:
       Actual-source smoke emitted OE, A, NUL from UTF-8 lowercase oe plus A,
       with mapped bytes o, e, a, zero; source advanced four bytes and history
       advanced eight bytes.
+  - address: 0x08231854
+    ghidra: FUN_08231854
+    name: media_player_context_construct
+    size: 76
+    sig: "MediaPlayerContext *media_player_context_construct(MediaPlayerContext *this)"
+    module: app/media_player_context_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      r4: record
+      DAT_0823189c: media_player_context_vtable_address
+      FUN_08270394: scoped_context_construct
+      FUN_08277440: string_default_construct
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw A32 words establish 72 instruction bytes through the return at
+      0x08231898 and a four-byte vtable literal at 0x0823189c, for a true
+      76-byte extent before the next function at 0x082318a0. Three plain
+      outgoing BLs at 0x08231868, 0x08231870, and 0x08231878; zero predicated
+      BLs. Ghidra's assignment count of two misses the media-player getter.
+      Plants vtable 0x089a1394, constructs a NULL-owner zero-mode ScopedContext
+      at +8 and an empty StringObject at +0x20, stores the media player at +4,
+      clears +0x28 through +0x34, and returns this. Callers 0x0817a2cc,
+      0x0817b2f8, and 0x08189764 allocate 0x3c bytes and store the record in
+      media-player word +0x948. The +0x38 word and context padding remain
+      untouched. The enclosing class identity and cleared-word meanings are
+      unrecovered. Uses existing Rust callees without duplicate seams.
+      Deliberate deviations: repr(C) native-width host pointers and inherited
+      singleton/capture seams; outer vtable remains its raw firmware address.
+      Existing media_player_get singleton limitations mean this is not
+      independently hook-ready. Host coverage poisons storage with zero,
+      0xa5, and 0xff and checks initialized members and untouched tail/padding.
+      Full host suite and ARM release build passed. match.py shows 18 stock
+      instructions versus 30 Rust entries: LLVM inlines scoped-context
+      construction, retains its volatile capture-slot BLX and the two direct
+      calls to string_default_construct and media_player_get. Relocations
+      confirm callee identities; record offsets and stores are preserved.
+      Standalone actual-source host smoke passed with vtable 0x089a1394,
+      NULL context/string payloads, four zero words, and tail 0xa5a5a5a5.
