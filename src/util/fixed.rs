@@ -666,6 +666,30 @@ pub unsafe extern "C" fn fixed16_clamp_unit4(destination: *mut i32, source: *con
     destination.add(3).write(clamped3);
 }
 
+/// fixed16_clamp_unit4_in_place — original: `FUN_0824863c` @ 0x0824863c
+/// (92 bytes).
+///
+/// Raw ARM establishes `0x0824863c..0x08248698`; the latter starts the
+/// separately entered four-word copy helper. For each of four aligned signed
+/// Q16.16 components, load, clamp to `[0, 0x10000]` using the ported
+/// `signed_clamp_i32` @ 0x080f0f84, and store before loading the next word.
+/// Whole-image A32 decoding finds two inbound plain BLs at 0x08252420 and
+/// 0x08253034, zero predicated BLs. The body has four outbound plain BLs,
+/// zero predicated BLs. No deliberate deviations.
+///
+/// # Safety
+///
+/// `components` must permit four aligned `i32` reads and writes.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.fixed16_clamp_unit4_in_place")]
+pub unsafe extern "C" fn fixed16_clamp_unit4_in_place(components: *mut i32) {
+    components.write(crate::util::signed_clamp_i32::signed_clamp_i32(components.read(), 0, 0x10000));
+    components.add(1).write(crate::util::signed_clamp_i32::signed_clamp_i32(components.add(1).read(), 0, 0x10000));
+    components.add(2).write(crate::util::signed_clamp_i32::signed_clamp_i32(components.add(2).read(), 0, 0x10000));
+    components.add(3).write(crate::util::signed_clamp_i32::signed_clamp_i32(components.add(3).read(), 0, 0x10000));
+}
+
 /// fixed28_lerp — original: `FUN_08242d60` @ 0x08242d60 (48 bytes).
 ///
 /// Linearly interpolates signed 32-bit `start` toward `end` by Q4.28
@@ -726,6 +750,24 @@ mod tests {
 
     /// One Q16.16 unit.
     const ONE: i32 = 0x0001_0000;
+
+    #[test]
+    fn in_place_unit_clamp_signed_edges_and_word_bounds() {
+        let values = [i32::MIN, -ONE, -1, 0, 1, ONE / 2, ONE - 1, ONE, ONE + 1, i32::MAX];
+        for &value in &values {
+            for lane in 0..4 {
+                let mut words = [0x12345678, 1, ONE / 2, ONE - 1, ONE, 0x76543210];
+                words[1 + lane] = value;
+                let mut expected = words;
+                expected[1 + lane] = if value < 0 { 0 } else if value > ONE { ONE } else { value };
+                unsafe { fixed16_clamp_unit4_in_place(words.as_mut_ptr().add(1)); }
+                assert_eq!(words, expected, "value={value}, lane={lane}");
+            }
+        }
+        let mut mixed = [i32::MIN, -1, ONE + 1, i32::MAX];
+        unsafe { fixed16_clamp_unit4_in_place(mixed.as_mut_ptr()); }
+        assert_eq!(mixed, [0, 0, ONE, ONE]);
+    }
 
     #[test]
     fn fixed16_mul_identity_and_sign() {

@@ -206553,3 +206553,33 @@ functions:
       setup/teardown around the ADD before tail B. Objdump verifies the
       exported symbol and R_ARM_JUMP24 relocation to copy_four_words_staggered.
       No algorithm or memory deviations.
+
+  - address: 0x0824863c
+    ghidra: FUN_0824863c
+    name: fixed16_clamp_unit4_in_place
+    size: 92
+    sig: "void fixed16_clamp_unit4_in_place(i32 *components)"
+    module: util/fixed
+    status: ported
+    renames:
+      param_1/r0/r4: components
+      FUN_080f0f84: signed_clamp_i32
+    notes: >-
+      Raw osos.dec establishes the 92-byte extent 0x0824863c..0x08248698,
+      ending in pop {r4,pc} before the separately entered four-word copy
+      helper. Whole-image A32 decoding finds two inbound plain BL calls at
+      0x08252420 and 0x08253034, zero predicated BL calls. Four outbound
+      plain BLs at 0x08248650, 0x08248664, 0x08248678 and 0x0824868c all
+      target the already ported signed_clamp_i32 at 0x080f0f84. Load each
+      of four signed Q16.16 components, clamp to the inclusive interval
+      [0,0x10000], and store before loading the next component. No new
+      seams, modules or deliberate behavioral deviations. Host tests cover
+      signed extremes, inclusive endpoints, adjacent out-of-range values,
+      independent lanes and untouched surrounding words; all 13736 pass.
+      ARM release build passes. Actual-source executable smoke observes
+      [0,32768,65536,65536] and unchanged guards. match.py exits 1 with a
+      structural diff: 24 Rust instructions versus 23 stock, added frame
+      setup and different argument scheduling; all four ordered loads,
+      clamps and stores remain. Archive relocations confirm four R_ARM_CALL
+      references to signed_clamp_i32, not the apparent unresolved self-calls.
+      No device execution performed.
