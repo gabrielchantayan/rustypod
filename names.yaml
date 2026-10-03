@@ -48559,7 +48559,7 @@ functions:
       param_1/r0/r4: reader_slot
       r6: position
       r5/r0: codepoint
-      FUN_0825d4e0: xml_reader_position_before_current (unported seam)
+      FUN_0825d4e0: xml_reader_position_before_current (ported)
       FUN_0825d354: xml_skip_whitespace (ported)
       FUN_0825d318: xml_decode_skip_whitespace (ported)
       FUN_0825d580: xml_reader_restore_position (ported)
@@ -48574,9 +48574,8 @@ functions:
       function begins at 0x0825d3d0. Decoding every B/BL word in osos.dec
       finds 6 static bl call sites, all unconditional: 0x0825ca24,
       0x0825cf84, 0x0825cfcc, 0x0825cfdc, 0x0825d08c, and 0x0825d144.
-      Only the unported position helper retains a firmware-address seam.
-      Restoration calls the Rust port directly, with a host-only seam for
-      the unidentified virtual seek method.
+      Position adjustment and restoration call Rust ports directly, with
+      host-only seams for the unidentified virtual position and seek methods.
 
   - address: 0x0825d354
     ghidra: FUN_0825d354
@@ -48602,6 +48601,34 @@ functions:
       util/xml_decode_codepoint_and_reset.rs. The remaining direct callee
       uses a volatile seam: its fixed raw address on target and a
       test-installed host callback.
+  - address: 0x0825d4e0
+    ghidra: FUN_0825d4e0
+    name: xml_reader_position_before_current
+    size: 160
+    sig: "unsigned int xml_reader_position_before_current(struct XmlUtf8Decoder *reader)"
+    module: util/xml_reader_position_before_current
+    status: ported
+    renames:
+      param_1/r4: reader
+      iVar1/r0: position
+      iVar2/r1: state
+      uVar3/r1: codepoint
+      "*(reader.callback_table+0x0c)": virtual_position
+    notes: >-
+      Raw extent is 0x0825d4e0..0x0825d57f, ending at the distinct function
+      entry 0x0825d580. Independent ARM word decoding finds two plain BL
+      references at 0x0825d390 and 0x0825d3dc, zero predicated BL references.
+      The body has zero direct BL calls and one indirect BLX through vtable
+      +0x0c; no static callee identity is inferred. Calls that method first,
+      then uses the post-call state: 1/2/4 subtract one, 3/5 subtract two,
+      6 subtracts three, unknown states leave the position unchanged.
+      State 100 subtracts the codepoint width: unsigned below 0x80 gives one,
+      then signed below 0x800 gives two, below 0x10000 gives three, below
+      0x110000 gives four, otherwise zero. High-bit codepoints subtract two;
+      surrogate values subtract three without validation. Arithmetic wraps.
+      Target dispatch uses the real four-byte vtable word; host dispatch uses
+      the existing volatile callback convention. No reset or NULL guard.
+      The existing peek caller now calls this port rather than the raw seam.
   - address: 0x0825d580
     ghidra: FUN_0825d580
     name: xml_reader_restore_position
