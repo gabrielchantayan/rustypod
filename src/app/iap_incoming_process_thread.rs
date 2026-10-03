@@ -219,6 +219,70 @@ pub struct IapThreadRegistrationDeadline {
     pub nanos: i32,
 }
 
+/// registration_set_deadline — original `FUN_08257ca0` @ 0x08257ca0.
+///
+/// True extent: 20 bytes, ending at 0x08257cb4, where registration_poll
+/// begins. Whole-image A32 decoding verifies two plain inbound BL sites
+/// (0x081d6e20 and 0x081d6ea4), zero predicated BLs, and zero internal BLs.
+/// Copies the seconds word to registration+0x1c, then loads and copies the
+/// nanoseconds word to registration+0x20. Preserve this interleaving even
+/// when the source overlaps the destination. No deliberate deviations;
+/// volatile word accesses prevent reordering the alias-sensitive sequence.
+///
+/// # Safety
+///
+/// `registration` addresses aligned writable words at +0x1c and +0x20;
+/// `deadline` addresses two aligned readable words. They may overlap.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registration_set_deadline(
+    registration: *mut u8,
+    deadline: *const IapThreadRegistrationDeadline,
+) {
+    let source = deadline.cast::<u32>();
+    let destination = registration.add(0x1c).cast::<u32>();
+    let seconds = core::ptr::read_volatile(source);
+    core::ptr::write_volatile(destination, seconds);
+    let nanos = core::ptr::read_volatile(source.add(1));
+    core::ptr::write_volatile(destination.add(1), nanos);
+}
+
+#[cfg(test)]
+mod deadline_setter_tests {
+    use super::{registration_set_deadline, IapThreadRegistrationDeadline};
+
+    #[test]
+    fn copies_all_bits_without_touching_surrounding_words() {
+        for (seconds, nanos) in [(0, 0), (-1, i32::MIN), (i32::MAX, -1),
+                                (17, 1_000_000_000)] {
+            let mut object = [0xa5a5_a5a5u32; 10];
+            let deadline = IapThreadRegistrationDeadline { seconds, nanos };
+            unsafe { registration_set_deadline(object.as_mut_ptr().cast(), &deadline); }
+            let mut expected = [0xa5a5_a5a5u32; 10];
+            expected[7] = seconds as u32;
+            expected[8] = nanos as u32;
+            assert_eq!(object, expected);
+        }
+    }
+
+    #[test]
+    fn overlapping_source_observes_first_store_before_second_load() {
+        for source_index in 6..=8 {
+            let mut object = [10u32, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+            let mut expected = object;
+            expected[7] = expected[source_index];
+            expected[8] = expected[source_index + 1];
+            unsafe {
+                let base = object.as_mut_ptr();
+                registration_set_deadline(
+                    base.cast(), base.add(source_index).cast(),
+                );
+            }
+            assert_eq!(object, expected);
+        }
+    }
+}
+
 /// Indirect dispatch for the unported registry body @ 0x081d6dbc. The
 /// wrapper itself is ported; this preserves a hook-ready target path while
 /// allowing host tests to inspect the ephemeral deadline object.

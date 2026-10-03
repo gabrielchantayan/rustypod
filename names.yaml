@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08257ca0
+    ghidra: FUN_08257ca0
+    name: registration_set_deadline
+    size: 20
+    sig: "void registration_set_deadline(void *registration, const IapThreadRegistrationDeadline *deadline)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0: registration
+      param_2/r1: deadline
+      registration_plus_0x1c: deadline seconds
+      registration_plus_0x20: deadline nanoseconds
+      r2: seconds word
+    notes: >-
+      Raw words e5912000 e5a0201c e5911004 e5801004 e12fff1e establish
+      the exact 20-byte extent 0x08257ca0..0x08257cb4; the next real
+      function is registration_poll, an add-16 plus tail branch veneer.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x081d6e20 and 0x081d6ea4, zero predicated inbound BLs, and zero
+      internal BLs. The callers create or update an iAP wait registration
+      with the existing seconds/nanoseconds deadline pair. Copy seconds
+      to +0x1c before loading nanoseconds and copying them to +0x20.
+      Volatile aligned word accesses preserve this alias-sensitive ordering,
+      including a source starting at registration+0x18 whose second word
+      is overwritten by the first store. No deliberate deviations or new
+      callee seams. Host tests cover zero, signed extremes, nonnormalized
+      nanoseconds, surrounding-word preservation, and three overlapping
+      layouts. Host executable smoke exercises the actual Rust body.
   - address: 0x08257cb4
     ghidra: FUN_08257cb4
     name: registration_poll
