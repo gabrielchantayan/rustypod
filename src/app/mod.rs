@@ -9,6 +9,7 @@ pub use object_mark_initialized::*;
 pub mod now_playing_highlight_display;
 pub mod podcast_highlight_display;
 pub mod video_highlight_display;
+pub mod photo_highlight_display;
 pub mod gmt_offset_highlight_display;
 pub mod music_menu_playlist_select;
 pub mod rentals_select;

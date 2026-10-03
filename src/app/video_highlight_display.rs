@@ -37,7 +37,7 @@ const _: [u8; 0xb0] = [0; core::mem::offset_of!(VideoHighlightController, highli
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x11c] = [0; core::mem::offset_of!(VideoHighlightVtable, display)];
 
-unsafe extern "C" fn artwork_slot_activate(cache: *mut u8, slot: u32) {
+pub(crate) unsafe extern "C" fn artwork_slot_activate(cache: *mut u8, slot: u32) {
     #[cfg(target_os = "none")]
     {
         let f: unsafe extern "C" fn(*mut u8, u32) = unsafe { core::mem::transmute(0x081b6dd8usize) };
