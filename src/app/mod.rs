@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod descriptor_object_create;
 pub mod buffered_stream_destroy;
 pub mod filter_preset_refresh;
 pub mod stream_buffer_mailbox_post;
