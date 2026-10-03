@@ -206314,3 +206314,35 @@ functions:
       1 with the expected structural diff: two initializers become direct
       stores, two calls remain, the callback literal and subtraction of 60
       are retained, and LLVM adds its balanced frame.
+
+  - address: 0x0824c7c0
+    ghidra: FUN_0824c7c0
+    name: vertex_update_clip_flags
+    size: 136
+    sig: "void vertex_update_clip_flags(u32 *vertex)"
+    module: ui/vertex_update_clip_flags
+    status: ported
+    renames:
+      param_1/r0: vertex
+      iVar2/r1: w
+      iVar1/r2: negative_w
+    notes: >-
+      Raw ARM extent is 0x0824c7c0..0x0824c848, ending with pop pc at
+      0x0824c844; the next function starts at 0x0824c848. Independent
+      full-image aligned A32 decoding finds two inbound plain BL calls
+      at 0x0824fd58 and 0x0824ff14, no predicated BL calls and no outgoing
+      BL calls. Caller 0x0824fc08 classifies generated polygon vertices
+      before clipping against six homogeneous planes. Signed x/y/z at
+      +0x10/+0x14/+0x18 are compared strictly against wrapping -w and w
+      at +0x1c. The six outside predicates replace bits 2..7 at +0x90;
+      every other flag bit and every other record word remain untouched.
+      No semantic deviations or new callee seams. Word-indexed accesses
+      retain ARM layout on hosts. Tests cover independent plane combinations,
+      equality boundaries, previous flags, zero and negative w, signed
+      extrema including wrapping negation of i32::MIN, and surrounding
+      canaries. All 13724 host tests and ARM release build pass. Actual-source
+      smoke verifies outside-to-inside reclassification and preserved flags.
+      match.py exits 1: LLVM emits 25 instructions versus 34, using direct
+      predicated ORs instead of shifted Boolean temporaries and a different
+      balanced frame; all six signed comparisons, RSB negation, mask 0xfc,
+      and the sole store at +0x90 are retained. Exported symbol is present.
