@@ -5,6 +5,7 @@
 pub mod framework_sentinel_state_construct;
 pub mod selector_item_extended_variant_construct;
 pub mod selector_item_variant_construct;
+pub mod selector_item_tail_variant_construct;
 pub mod string_object_remove_trailing_classified_codepoints;
 pub mod relative_record_collection_construct;
 pub mod opaque_state_construct;

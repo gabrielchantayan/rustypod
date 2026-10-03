@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0825dfa8
+    ghidra: FUN_0825dfa8
+    name: selector_item_tail_variant_construct
+    size: 212
+    sig: "void *selector_item_tail_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_tail_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: variant
+      puVar2/r0: object
+      uVar3/r1: item_id
+      uVar1/r2: descriptor_or_selector
+    notes: >-
+      Raw extent 0x0825dfa8..0x0825e07c is 212 bytes, comprising 168 code
+      bytes and eleven literal words. Next function starts with sub
+      r0,r0,#0x1500. Whole-image A32 decoding independently finds two plain
+      inbound BLs at 0x0819fb28 and 0x0819fb40, no predicated inbound BLs;
+      one plain outbound BL at 0x0825dfd0 to the registered, ported
+      selector_item_base_construct at 0x08218b10, no predicated outbound BLs.
+      Callers allocate 0x180 bytes and index the returned item byte +0xb4.
+      Zero full-width variant selects item 17 / descriptor 0x8014; nonzero
+      selects item 18 / descriptor 0x8015. Base receives kind 9, context 55
+      and low variant byte as enable_flag. Replace vtable with 0x089a3414;
+      install records 0x801d/9, 0x801e/10 and 0x8025/17 through 0x8028/20.
+      First two implementations are opaque stored words 0x08ae5444 and
+      0x08ae5474, not new seams. Remaining implementations stay base-zeroed.
+      Return object pointer retained in r0, correcting Ghidra's void return.
+      No deliberate behavioral deviations; class identity remains unknown.
+      All 13642 host tests and ARM release build pass. Standalone actual-source
+      host smoke with existing test-configured dependencies verifies variants
+      0, 1, 0x100 and 0xffffffff, returned pointer, final record and bounds.
+      match.py exits 1: 42 original instructions versus 57 Rust listing lines;
+      LLVM reorders independent stores, synthesizes constants and adds a frame
+      pointer. One base BL, full-width selection and all field offsets remain.
   - address: 0x08267f78
     ghidra: FUN_08267f78
     name: string_pair_vector_last
