@@ -87031,6 +87031,43 @@ functions:
       string payload release and returned pointer.
 
 
+  - address: 0x08231744
+    ghidra: FUN_08231744
+    name: scoped_context_dispatch_and_store_secondary_result
+    size: 96
+    sig: "void scoped_context_dispatch_and_store_secondary_result(SecondaryContextResultObject *object, u32 argument, u32 value)"
+    module: app/scoped_context_dispatch_and_store_secondary_result
+    vars: {param_1: object, param_2: argument, param_3: value, auStack_28: context}
+    renames:
+      FUN_08270394: scoped_context_construct
+      FUN_082a4460: vtable_slot_08_optional_payload_word
+      FUN_08270414: scoped_context_destroy
+    status: ported
+    notes: >-
+      Raw words establish the 96-byte extent from push at 0x08231744 through
+      pop at 0x082317a0, with the next real prologue at 0x082317a4. Three
+      unconditional outgoing BLs, zero predicated outgoing BLs, and one
+      indirect BLX through receiver vtable +0x170. Whole-image decoding finds
+      zero plain inbound BLs and two BLNEs at 0x0817dd00 and 0x0817e068.
+      Ghidra omits the callers' third argument, supplied in r2. Constructs
+      a zero-mode ScopedContext, dispatches the receiver at object+4 with
+      argument and context, conditionally stores the payload word at +0x30,
+      unconditionally stores value at +0x34, then destroys context. Reuses
+      all three canonical ported callees; no invented virtual target.
+      Deliberate deviations are host pointer widening and a host-only query
+      adapter preserving predicate identity and post-predicate payload reload;
+      the unused query-result stack spill is omitted. Host tests cover rejected
+      and NULL payloads, payload words zero and UINT_MAX, reload ordering,
+      publication ordering, and preservation of neighboring fields.
+      ARM release build succeeds. match.py prints a structural diff (exit 1):
+      receiver dispatch +0x170, query destination +0x30, and value store +0x34
+      are preserved. LLVM inlines construction, retains its capture callback,
+      and eliminates the empty destructor; the query remains a real BL.
+      Full host suite passes (13798 tests). Standalone host smoke confirms
+      rejected-result preservation and unconditional publication using a
+      test-configured library, since unrelated non-test host modules currently
+      fail compilation.
+
   - address: 0x082317a4
     ghidra: FUN_082317a4
     name: scoped_context_dispatch_and_store_result

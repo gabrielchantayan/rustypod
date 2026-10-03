@@ -1823,6 +1823,7 @@ pub mod hints {
     // share this hint.
     pub const SERVICE_CONTEXT_SELECTION_CONSTRUCT: usize = 0xbe00_0000;
     pub const SCOPED_CONTEXT_OBJECT_CONSTRUCT: usize = 0x517b_0000;
+    pub const SECONDARY_CONTEXT_RESULT: usize = 0x2317_0000;
     // 0xa600_0000: dedicated to cxx/streambuf_slot_peek_equal's raw-u32
     // context, slot, and stream-buffer fixtures; mappings never unmap, so no
     // other user may share this hint.
