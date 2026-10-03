@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826a4d4
+    ghidra: FUN_0826a4d4
+    name: selected_record_dispatch
+    size: 96
+    sig: "void selected_record_dispatch(u32 *owner, u32 *record)"
+    module: app/selected_record_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_2/r1/r5: record
+      local_20/uStack_1c: before_identifier
+      local_28/uStack_24: after_identifier
+      auStack_18: discarded_callback_result
+    notes: >-
+      Raw extent [0x0826a4d4,0x0826a534) is 96 executable bytes ending
+      in pop {r4,r5,pc}; next function has push {r4-r9,lr} and an inbound
+      branch from 0x08268a2c. Three outbound plain BLs at 0x0826a504,
+      0x0826a514 and 0x0826a528, zero predicated BLs. Two inbound plain
+      BLs at 0x08269e7c and 0x08269f28, zero predicated BLs. Ghidra's
+      fragmented caller boundaries do not change the verified call count.
+      Increment owner +0x18 modulo 2^32, snapshot record +8/+12, invoke
+      ported callback_result_build with owner +0x48 and discarded result,
+      dispatch through owner +4 with record and owner +0x50, then reread
+      record +8/+12 and append to owner +0x3c. Unregistered resident
+      0x082686e0 dispatches collection elements via virtual slot +0x20;
+      0x083e7140 appends a two-word vector element. Preserve these exact
+      addresses without inventing class identities or porting extra functions.
+      Deviations: existing Rust result builder, injectable host operations,
+      fixed-width target pointer words. Host regression covers counter wrap,
+      callback mutation of collection and identifier, fresh post-dispatch
+      snapshot and preservation of unrelated owner words. All 13600 host
+      tests and ARM release build pass. Standalone actual-source smoke
+      exercises the exported host entry with installed resident operations.
+      match.py exits 1 with structural diff: 32 listing lines versus 24
+      original instructions; one relocatable BL and two resident BLX calls,
+      LLVM frame pointer, scalar pair loads and two address literals. All
+      member offsets, wrapping increment and call/snapshot order remain.
   - address: 0x0826ac0c
     ghidra: FUN_0826ac0c
     name: selector_item_extended_variant_construct
