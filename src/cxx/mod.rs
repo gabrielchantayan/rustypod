@@ -13,6 +13,7 @@ pub mod selector_item_extended_variant_construct;
 pub mod selector_item_variant_construct;
 pub mod selector_item_tail_variant_construct;
 pub mod selector_item_sparse_variant_construct;
+pub mod selector_item_three_records_variant_construct;
 pub mod selector_item_last_records_variant_construct;
 pub mod string_object_remove_trailing_classified_codepoints;
 pub mod relative_record_collection_construct;
