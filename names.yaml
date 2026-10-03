@@ -48322,6 +48322,31 @@ functions:
       unknown table, a Rust implementation or host behavior model would
       fabricate observable output; this wrapper remains deliberately
       unported until that table is recovered.
+  - address: 0x08275e44
+    ghidra: FUN_08275e44
+    name: utf8_byte_len_bounded_plus1
+    size: 80
+    sig: "unsigned int utf8_byte_len_bounded_plus1(const char *text, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    vars: {param_1: text, param_2: max_codepoints, local_14: cursor, iStack_10: remaining, iVar2: byte_count, iVar1: byte_width}
+    notes: >-
+      Raw osos.dec establishes the all-code extent 0x08275e44..0x08275e94,
+      ending at the next distinct push prologue. Independent ARM-word scanning
+      finds two inbound plain BLs at 0x08276504 and 0x08276a84, zero predicated
+      BLs; the body contains two plain BLs to the existing utf8_next_codepoint
+      and utf8_codepoint_byte_width ports, zero predicated. NULL text or a
+      nonpositive signed cap returns one. Otherwise walk until the codepoint
+      cap or a raw NUL, summing decoded widths plus one NUL with u32 wrapping.
+      Overlong encodings use decoded width; unsupported leads consume three
+      bytes and contribute width(0) equals one without terminating the loop.
+      No deliberate deviations. Both capped assignment and insertion now call
+      this port directly instead of duplicating its loop. Host tests cover
+      signed bounds, exact unterminated spans, raw NUL, multibyte widths,
+      overlong/unsupported leads, malformed continuation bytes and surrogates.
+      match.py shows 27 LLVM instructions versus 20 original instructions:
+      different prologue and loop scheduling, preserving both BLs, raw-byte
+      termination, signed limit and final plus-one.
   - address: 0x08275e94
     ghidra: FUN_08275e94
     name: utf8_decode_codepoint_at_index
@@ -48556,10 +48581,10 @@ functions:
       __rt_memcpy @ 0x08037db0, then stores NUL. In particular, the
       decoder's four-byte/malformed-lead result is zero after consuming
       three bytes but is sized as width(0) == 1, so this assignment
-      retains only that lead byte before its NUL. The Rust port inlines
-      that private helper with the already ported decoder and width
-      classifier, calls the existing STRING_OBJECT_ASSIGN_CSTR_OPS
-      boundary for the ROM +0x8/+0xc virtual identities, and calls the
+      retains only that lead byte before its NUL. The Rust port calls the
+      ported utf8_byte_len_bounded_plus1 helper directly, uses the existing
+      STRING_OBJECT_ASSIGN_CSTR_OPS boundary for the ROM +0x8/+0xc virtual
+      identities, and calls the
       ported __rt_memcpy directly. Host tests cover NULL/nonpositive
       clear dispatch, empty-source allocation, multibyte caps, allocation
       failure, and the malformed-width quirk. match.py structural review

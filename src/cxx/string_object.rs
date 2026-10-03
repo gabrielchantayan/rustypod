@@ -1672,9 +1672,8 @@ pub unsafe extern "C" fn string_object_insert_cstr(
 /// leads consume three bytes but contribute width(0) == 1; overlong
 /// sequences likewise use decoded width, not bytes consumed.
 ///
-/// Deviation: inline private helper 0x08275e44 using the existing decoder
-/// and width classifier, without introducing a firmware-address seam.
-/// Allocation retains insert_bytes' existing virtual-method boundary.
+/// No behavioral deviations: the width helper and insert_bytes are ported
+/// and called directly. Allocation retains the existing virtual boundary.
 ///
 /// # Safety
 /// Source must be readable through each decoded sequence and remain valid
@@ -1685,15 +1684,7 @@ pub unsafe extern "C" fn string_object_insert_utf8_capped(
     this: *mut StringObject, index: i32, source: *const u8, max_codepoints: i32,
 ) {
     if source.is_null() || max_codepoints <= 0 || index < 0 { return; }
-    let mut cursor = source;
-    let mut remaining = max_codepoints;
-    let mut byte_count = 0u32;
-    while remaining > 0 && cursor.read() != 0 {
-        byte_count = byte_count.wrapping_add(utf8_codepoint_byte_width(
-            utf8_next_codepoint(&mut cursor),
-        ));
-        remaining -= 1;
-    }
+    let byte_count = utf8_byte_len_bounded_plus1(source, max_codepoints).wrapping_sub(1);
     string_object_insert_bytes(this, index, source, byte_count);
 }
 
@@ -2696,8 +2687,7 @@ pub unsafe extern "C" fn string_object_codepoint_at(this: *const StringObject, i
 /// with only `this`. Otherwise the stock helper @ 0x08275e44 walks while the
 /// bound remains positive and the current raw byte is nonzero, decodes each
 /// sequence, sums `utf8_codepoint_byte_width`, and adds one byte for the NUL.
-/// This port performs that private helper's loop inline with its already
-/// ported decoder and width classifier, then invokes slot +0x8 as
+/// This port calls that helper directly, then invokes slot +0x8 as
 /// `(this, byte_count, 0)`. A NULL allocation result returns untouched;
 /// otherwise the ROM `__rt_memcpy` copy receives exactly `byte_count - 1`
 /// leading raw bytes and this function writes the final NUL.
@@ -2721,17 +2711,8 @@ pub unsafe extern "C" fn string_object_assign_utf8_capped(
         return;
     }
 
-    let mut cursor = text;
-    let mut remaining = max_codepoints;
-    let mut byte_count = 0usize;
-    while remaining > 0 && cursor.read() != 0 {
-        byte_count = byte_count.wrapping_add(utf8_codepoint_byte_width(
-            utf8_next_codepoint(&mut cursor),
-        ) as usize);
-        remaining -= 1;
-    }
-
-    let requested_size = byte_count.wrapping_add(1);
+    let requested_size = utf8_byte_len_bounded_plus1(text, max_codepoints) as usize;
+    let byte_count = requested_size.wrapping_sub(1);
     let destination = assign_cstr_allocate_op()(this, requested_size, 0);
     if destination.is_null() {
         return;
@@ -4017,6 +3998,41 @@ pub unsafe extern "C" fn utf8_next_codepoint(cursor: *mut *const u8) -> u32 {
 
     0
 }
+/// Bounded decoded UTF-8 byte length including NUL — original:
+/// `FUN_08275e44` @ 0x08275e44, 80 bytes (0x08275e44..0x08275e94,
+/// next distinct push prologue). Raw ARM words verify two inbound plain
+/// BLs (0x08276504, 0x08276a84), two outbound plain BLs to the decoder
+/// and width classifier, and zero predicated BLs.
+///
+/// Walk at most `max_codepoints` sequences while the current raw byte is
+/// nonzero; sum their decoded encoded widths and add one for NUL, with
+/// 32-bit wrapping arithmetic. NULL or a nonpositive limit returns one.
+/// Overlong encodings count by decoded width, not consumed bytes.
+/// Unsupported leads decode to zero but do not stop this raw-NUL loop.
+/// No deliberate deviations; both existing Rust callees are used directly.
+///
+/// # Safety
+/// For a non-NULL text and positive limit, each visited sequence must be
+/// readable under utf8_next_codepoint's contract, including malformed input.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn utf8_byte_len_bounded_plus1(
+    text: *const u8, max_codepoints: i32,
+) -> u32 {
+    let mut cursor = text;
+    let mut remaining = max_codepoints;
+    let mut byte_count = 0u32;
+    if !cursor.is_null() {
+        while remaining > 0 && cursor.read() != 0 {
+            byte_count = byte_count.wrapping_add(utf8_codepoint_byte_width(
+                utf8_next_codepoint(&mut cursor),
+            ));
+            remaining -= 1;
+        }
+    }
+    byte_count.wrapping_add(1)
+}
+
 /// Decodes one retail UTF-8-like codepoint and stores its low sixteen bits as
 /// little-endian bytes — original: `FUN_08053b5c` @ 0x08053b5c (32 bytes,
 /// 0x08053b5c..0x08053b7c; all code, followed by the distinct
@@ -10148,6 +10164,44 @@ pub(crate) mod tests {
             4,
             "the terminator is not counted as UTF-8 data and ends the loop"
         );
+    }
+
+    #[test]
+    fn utf8_byte_len_bounded_plus1_honors_signed_limit_without_reading() {
+        for limit in [i32::MIN, -1, 0, 1, i32::MAX] {
+            assert_eq!(unsafe { utf8_byte_len_bounded_plus1(core::ptr::null(), limit) }, 1);
+        }
+        for limit in [i32::MIN, -1, 0] {
+            assert_eq!(unsafe {
+                utf8_byte_len_bounded_plus1(core::ptr::NonNull::<u8>::dangling().as_ptr(), limit)
+            }, 1);
+        }
+    }
+
+    #[test]
+    fn utf8_byte_len_bounded_plus1_counts_widths_and_stops_at_raw_nul() {
+        let text = b"a\xc2\x80\xe0\xa0\x80\0ignored";
+        for (limit, expected) in [(0, 1), (1, 2), (2, 4), (3, 7), (i32::MAX, 7)] {
+            assert_eq!(unsafe { utf8_byte_len_bounded_plus1(text.as_ptr(), limit) }, expected);
+        }
+        assert_eq!(unsafe { utf8_byte_len_bounded_plus1(b"\0".as_ptr(), 10) }, 1);
+        // An exact, unterminated span is safe when the codepoint cap is reached.
+        assert_eq!(unsafe { utf8_byte_len_bounded_plus1(b"ab".as_ptr(), 2) }, 3);
+    }
+
+    #[test]
+    fn utf8_byte_len_bounded_plus1_preserves_malformed_decoder_semantics() {
+        for (text, limit, expected) in [
+            (&b"\xc0\x80x\0"[..], 2, 3), // decoded zero is not a terminator
+            (&b"\xe0\x80\x81x\0"[..], 2, 3), // overlong ASCII uses width one
+            (&b"\xf0\x9f\x92x\0"[..], 2, 3), // unsupported lead advances three
+            (&b"\x80\xaa\xbbx\0"[..], 2, 3),
+            (&b"\xc3\xff\0"[..], 1, 3), // continuation payload masked
+            (&b"\xed\xa0\x80\0"[..], 1, 4), // surrogate retained
+            (&b"\xc2\0x\0"[..], 2, 4), // embedded continuation NUL is consumed
+        ] {
+            assert_eq!(unsafe { utf8_byte_len_bounded_plus1(text.as_ptr(), limit) }, expected);
+        }
     }
 
     // ---- utf8_codepoint_byte_width ----------------------------------
