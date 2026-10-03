@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082398c8
+    ghidra: FUN_082398c8
+    name: view_event_clear_screen_indices
+    size: 48
+    sig: "u32 view_event_clear_screen_indices(u8 *view, u32 event)"
+    module: app/view_event_clear_screen_indices
+    status: ported
+    vars:
+      param_1/r0: view
+      param_2/r1: event (preserved but unused by the completion target)
+      FUN_08173848: app_screen_get (existing Rust singleton port)
+      FUN_081778f0: screen_indices_clear (unported firmware seam)
+      tail_08260880: view_event_complete_thunk (ported completion veneer)
+    notes: >-
+      Raw ARM words establish 0x082398c8..0x082398f8, exactly 48 bytes;
+      the next real entry is add r0,r0,#0xd0; bx lr. Full aligned raw
+      BL decoding finds two plain inbound calls at 0x083b2f2c and
+      0x083b34d4, no predicated calls. The body contains two plain BLs
+      and one tail B. Ghidra incorrectly folds the completion target
+      into this body. Any nonzero view byte +0xe4 triggers screen_get
+      followed by 0x081778f0, which clears the index vector at +0x840
+      via the identified vector_clear_elem4 and invalidates byte +0x84c.
+      Then the ported view_event_complete stops the optional timer,
+      commits staged flags, and returns handled (1). Tests cover zero,
+      one, high-bit and all-bit flags with and without a timer, cache
+      invalidation before completion, and preservation of the flag.
+      Deviations: omit the completion branch veneer and unused r1
+      forwarding; retain the unported clear helper behind a firmware
+      seam. match.py exit 1 shows conditional clear, two BLX seam calls,
+      and completion BL plus constant handled return rather than tail B.
   - address: 0x082502bc
     ghidra: FUN_082502bc
     name: video_engine_read_vector_property
