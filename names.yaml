@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826bee0
+    ghidra: FUN_0826bee0
+    name: string_object_split_path_anchor
+    size: 212
+    sig: "uint32_t string_object_split_path_anchor(const StringObject *source, StringObject *path, StringObject *anchor)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r6: source
+      param_2/r7: path
+      param_3/r8: anchor
+      iVar2/r5: codepoint_count
+      iVar4/r4: hash_index
+      uStack_20: temporary
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082a52c8: string_object_codepoint_at
+      FUN_082a5118: string_object_substring
+      FUN_082774a8: string_object_assign
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes 212 code bytes at 0x0826bee0..0x0826bfb4
+      exclusive, followed by a distinct push prologue. Whole-image A32 BL
+      decoding verifies two plain inbound sites at 0x08118b00 and 0x0828afd0,
+      zero predicated inbound sites, nine plain outbound instructions, and
+      zero predicated outbound instructions. Scan backwards by retail UTF-8
+      codepoint index until a backslash, slash, or colon; split at the first
+      hash encountered, assigning the suffix first and prefix second through
+      separately constructed and destroyed substring temporaries. Remove one
+      backslash immediately before the hash. Return one after splitting,
+      otherwise zero without changing outputs. The third argument is anchor;
+      Ghidra's fourth argument is spurious saved-register stack storage.
+      Existing Rust ports supply all five callees; no new seam. Deliberate
+      deviations are their existing allocation/release boundaries and host
+      pointer-sized StringObject fields. Host tests cover empty and NULL
+      payloads, leading/trailing hashes, rightmost-hash selection, separator
+      barriers, escaped hash, multibyte text, unchanged source/outputs, and
+      retail's four-byte-lead termination behavior. match.py prints a
+      structural diff: LLVM uses a frame pointer and different register
+      allocation while retaining the reverse scan and two substring,
+      assignment, and destruction sequences; unresolved archive BL
+      relocations print as zero-address calls rather than stock addresses.
   - address: 0x08277eb0
     ghidra: FUN_08277eb0
     name: buffered_stream_destroy
