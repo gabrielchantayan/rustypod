@@ -206276,3 +206276,41 @@ functions:
       match.py exits 1: LLVM adds balanced push/mov/pop frame setup
       before the tail B. Objdump verifies R_ARM_JUMP24 relocation to
       copy_four_words_staggered, not recursion; no symbol folding.
+
+  - address: 0x0824cc94
+    ghidra: FUN_0824cc94
+    name: deque_layout_construct
+    size: 56
+    sig: "u32 *deque_layout_construct(u32 *storage)"
+    module: cxx/deque_layout_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      iVar1: constructed subobject pointer
+      DAT_0824ccc8: raw array initializer word 0x0823d814
+      FUN_0824c6c4: three_word_clear_eleventh
+      FUN_082ab234: cpp_array_construct
+    notes: >-
+      Raw osos.dec establishes 52 code bytes ending with pop at 0x0824ccc4
+      plus the four-byte literal at 0x0824ccc8; the next real function is
+      deque_layout_copy_construct at 0x0824cccc, giving a 56-byte extent.
+      Independent whole-image aligned A32 BL decoding finds two inbound
+      plain calls at 0x08240b78 and 0x08240b80, four outbound plain calls
+      (0x0824c758 twice, 0x0824c6c4, 0x082ab234), and no predicated forms.
+      Initializes four-word records at +0 and +0x10 to (0,0,0,0x10000),
+      clears +0x30 through +0x38, then passes +0x3c, raw callback 0x0823d814,
+      element size 16 and count 3 to the existing array adapter. Returns
+      the actual helper result minus 0x3c, not unconditionally storage.
+      Direct stores leave +0x20 through +0x2c and +0x6c onward untouched.
+      The callback word decodes as mid-function code, not a verified ABI
+      entry; it is preserved without inventing a callee identity or seam.
+      Deliberately inline the deterministic stores of unported 0x0824c758;
+      reuse the existing clear and array ports, with volatile ordered stores
+      and target u32 word offsets. Host tests cover three prior fill patterns,
+      untouched fields and surrounding canaries, and a displaced helper result.
+      Host suite and ARM release build pass. Standalone actual-source smoke
+      verifies initialization and pointer return using an identity host array
+      seam; it does not execute the firmware array initializer. match.py exits
+      1 with the expected structural diff: two initializers become direct
+      stores, two calls remain, the callback literal and subtraction of 60
+      are retained, and LLVM adds its balanced frame.
