@@ -2304,6 +2304,142 @@ pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistN
     node
 }
 
+/// plist_node_assign — retailOS `FUN_0825c824` @ 0x0825c824.
+///
+/// True extent 0x0825c824..0x0825c870: 76 bytes, ending at the return
+/// immediately before the next UTF-8 encoder. Whole-image raw ARM decoding
+/// verifies two incoming plain BLs, zero predicated BLs, and four outgoing
+/// plain BLs (two string assignments and two vector assignments).
+///
+/// Assigns tag, attributes, value, and children in that order, then shallow
+/// copies the companion pointer and kind byte and returns destination.
+/// Deliberate deviations: the unported attribute/child vector assignments
+/// remain fixed-firmware seams at 0x083e3724/0x083e3410. Native-width repr(C)
+/// fields preserve target offsets while allowing host string fixtures.
+/// LLVM emits BLX for the two fixed vector addresses rather than stock BL;
+/// the two COW calls remain BL relocations. ARM emulation verifies self-
+/// assignment against the original, executing the actual firmware vectors.
+///
+/// # Safety
+/// Both nodes and their owned fields must be valid for COW/vector assignment.
+/// The companion is copied without acquiring ownership, just as in retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_node_assign(
+    destination: *mut PlistNode,
+    source: *const PlistNode,
+) -> *mut PlistNode {
+    type AttributeAssign = unsafe extern "C" fn(
+        *mut PlistNodeAttributeVector, *const PlistNodeAttributeVector,
+    ) -> *mut PlistNodeAttributeVector;
+    type ChildAssign = unsafe extern "C" fn(
+        *mut PlistNodeChildVector, *const PlistNodeChildVector,
+    ) -> *mut PlistNodeChildVector;
+    let attributes: AttributeAssign = unsafe { core::mem::transmute(0x083e_3724usize) };
+    let children: ChildAssign = unsafe { core::mem::transmute(0x083e_3410usize) };
+    unsafe { plist_node_assign_with(destination, source, attributes, children) }
+}
+
+#[inline(always)]
+unsafe fn plist_node_assign_with(
+    destination: *mut PlistNode,
+    source: *const PlistNode,
+    attributes: unsafe extern "C" fn(
+        *mut PlistNodeAttributeVector, *const PlistNodeAttributeVector,
+    ) -> *mut PlistNodeAttributeVector,
+    children: unsafe extern "C" fn(
+        *mut PlistNodeChildVector, *const PlistNodeChildVector,
+    ) -> *mut PlistNodeChildVector,
+) -> *mut PlistNode {
+    unsafe {
+        crate::cxx::string::cxx_string_assign(
+            core::ptr::addr_of_mut!((*destination).tag), core::ptr::addr_of!((*source).tag),
+        );
+        attributes(
+            core::ptr::addr_of_mut!((*destination).attributes),
+            core::ptr::addr_of!((*source).attributes),
+        );
+        crate::cxx::string::cxx_string_assign(
+            core::ptr::addr_of_mut!((*destination).value), core::ptr::addr_of!((*source).value),
+        );
+        children(
+            core::ptr::addr_of_mut!((*destination).children),
+            core::ptr::addr_of!((*source).children),
+        );
+        (*destination).companion = (*source).companion;
+        (*destination).kind = (*source).kind;
+    }
+    destination
+}
+
+#[cfg(test)]
+#[test]
+fn plist_node_assignment_shares_strings_and_preserves_self_assignment() {
+    // Empty vectors require no allocation or destruction. This fixture isolates
+    // real COW ownership and the shallow companion semantics from firmware.
+    unsafe extern "C" fn attributes(
+        dst: *mut PlistNodeAttributeVector, src: *const PlistNodeAttributeVector,
+    ) -> *mut PlistNodeAttributeVector {
+        unsafe {
+            assert!((*dst).begin.is_null() && (*dst).end.is_null() && (*dst).capacity.is_null());
+            assert!((*src).begin.is_null() && (*src).end.is_null() && (*src).capacity.is_null());
+        }
+        dst
+    }
+    unsafe extern "C" fn children(
+        dst: *mut PlistNodeChildVector, src: *const PlistNodeChildVector,
+    ) -> *mut PlistNodeChildVector {
+        unsafe {
+            assert!((*dst).begin.is_null() && (*dst).end.is_null() && (*dst).capacity.is_null());
+            assert!((*src).begin.is_null() && (*src).end.is_null() && (*src).capacity.is_null());
+        }
+        dst
+    }
+    let mut tag = PlistNodeCtorStringStorage {
+        rep: crate::cxx::string::StringRep { refcount: 0, capacity: 7, length: 7 },
+        data: *b"element\0",
+    };
+    let mut value = PlistNodeCtorStringStorage {
+        rep: crate::cxx::string::StringRep { refcount: 0, capacity: 7, length: 7 },
+        data: *b"content\0",
+    };
+    let mut source = poisoned_plist_node();
+    let mut destination = poisoned_plist_node();
+    let empty = crate::cxx::string::empty_rep_data();
+    unsafe {
+        plist_node_ctor(&mut source, &empty);
+        plist_node_ctor(&mut destination, &empty);
+        source.tag = tag.data();
+        source.value = value.data();
+        let mut companion = poisoned_plist_node();
+        source.companion = &mut companion;
+        source.kind = 0xff;
+        let dst = &mut destination as *mut PlistNode;
+        assert_eq!(plist_node_assign_with(dst, &source, attributes, children), dst);
+        assert_eq!(destination.tag, source.tag);
+        assert_eq!(destination.value, source.value);
+        assert_eq!(tag.rep.refcount, 1);
+        assert_eq!(value.rep.refcount, 1);
+        assert_eq!(destination.companion, &mut companion as *mut PlistNode);
+        assert_eq!(destination.kind, 0xff);
+        plist_node_assign_with(dst, dst, attributes, children);
+        assert_eq!(tag.rep.refcount, 1);
+        assert_eq!(value.rep.refcount, 1);
+        // Dropping the source strings to empty must release exactly one share.
+        source.tag = empty;
+        source.value = empty;
+        source.companion = core::ptr::null_mut();
+        source.kind = 0;
+        plist_node_assign_with(dst, &source, attributes, children);
+        assert_eq!(tag.rep.refcount, 0);
+        assert_eq!(value.rep.refcount, 0);
+        assert_eq!(destination.tag, empty);
+        assert_eq!(destination.value, empty);
+        assert!(destination.companion.is_null());
+        assert_eq!(destination.kind, 0);
+    }
+}
+
 /// nibble_stream_current — original: `FUN_082a1be0` @ 0x082a1be0
 /// (28 bytes, binary-verified against osos.dec: seven instructions
 /// `ldr r1,[r0]; ldrb r0,[r0,#4]; ldrb r1,[r1]; cmp r0,#0; moveq
