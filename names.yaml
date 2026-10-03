@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826dd8c
+    ghidra: FUN_0826dd8c
+    name: view_base_set_position_offsets
+    size: 72
+    sig: "void view_base_set_position_offsets(ViewBase *view, u32 x, u32 y)"
+    module: ui/set_position_offsets
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: x
+      param_3/r2: y
+      "view+0x54,+0x60": first geometry pair tags
+      "view+0x6c,+0x78": second geometry pair tags
+      "view+0x64,+0x58": first pair x,y offsets
+      "view+0x7c,+0x70": second pair x,y offsets
+      FUN_0826db38: view_base_geometry_changed
+    notes: >-
+      Raw ARM establishes 72 bytes from ldr at 0x0826dd8c through the
+      tail B at 0x0826ddd0; the next real function starts at 0x0826ddd4.
+      Whole-image branch-word decoding finds two plain inbound BLs at
+      0x081dd47c and 0x081f4358, zero predicated BLs, and one inbound
+      BNE at 0x0811ba40. No outbound BLs; one tail B to the already ported
+      view_base_geometry_changed at 0x0826db38. Ghidra incorrectly inlines
+      the tail target. Select the first pair whose two tags, ignoring only
+      bit 0x20, equal 0x80000002, otherwise select the second qualifying
+      pair. Write x then y; always propagate redraw even without a match.
+      Callers use the arguments as position offsets. Deliberate deviation:
+      Rust calls the existing helper instead of spelling the tail B.
+      Host tests cover 625 tag combinations, first-pair precedence, exact
+      stores and preservation. Isolated real-redraw smoke verifies offsets,
+      view flag 0x20, owner flag 0x40, and redraw on unmatched tags.
+      ARM release build passes. match.py exits 1: 25 Rust versus 18 retail
+      instructions; LLVM branches instead of predication, shares the store
+      block, reorders disjoint x/y stores, and retains terminal helper dispatch.
   - address: 0x082790a0
     ghidra: FUN_082790a0
     name: path_object_take_component
@@ -78289,14 +78323,14 @@ functions:
       "view+0x2d": mode
       "view+0x94": ui_element
       FUN_08031568: __rt_sdiv
-      FUN_0826dd8c: ui_element_refresh_unported
+      FUN_0826dd8c: view_base_set_position_offsets
     notes: >-
       Raw ARM establishes the exact 108-byte extent:
       0x0811b9dc push {r4,lr} through the null early-return bx lr at
       0x0811ba44; the independently entered next function opens at
       0x0811ba48. The body has two plain direct bl instructions, both to
       __rt_sdiv (0x08031568), zero predicated bl instructions, and one
-      conditional tail bne to the unported FUN_0826dd8c (0x0826dd8c).
+      conditional tail bne to view_base_set_position_offsets (0x0826dd8c).
       A complete raw-image ARM B/BL scan finds exactly four inbound direct
       plain bl calls, zero predicated inbound bl forms, and no inbound
       tail branches. Mode byte 3 maps position through

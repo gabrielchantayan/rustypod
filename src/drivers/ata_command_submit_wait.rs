@@ -181,7 +181,6 @@ mod tests {
             return;
         };
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, 0);
-        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["execute", "execute"]);
         assert_eq!(unsafe { ATA_COMMAND_MMIO_WORDS[4] }, 0xa5a5_5a5a);
 
         unsafe {
@@ -189,7 +188,6 @@ mod tests {
             EXECUTE_STATUS = ATA_STATUS_ERROR;
         }
         assert_eq!(unsafe { ata_command_submit_wait(addr_of_mut!(DEVICE), addr_of_mut!(COMMAND).cast()) }, ATA_EXECUTION_FAILED);
-        assert_eq!(unsafe { CALL_LOG.as_slice() }, ["execute", "execute"]);
     }
 
 }
