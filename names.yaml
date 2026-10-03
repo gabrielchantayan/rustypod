@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08261d30
+    ghidra: FUN_08261d30
+    name: cxx_mutexattr_destroy
+    size: 20
+    sig: "usize *cxx_mutexattr_destroy(usize *attr)"
+    module: cxx/mutex_attr_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: attr (saved and returned)
+      FUN_082e8474: pthread_mutexattr_destroy (verified firmware seam)
+    notes: >-
+      Raw A32 words establish 0x08261d30..0x08261d44, ending in pop
+      before the next independent mov r1,0. Whole-image aligned-word
+      decoding finds two unconditional inbound BLs at 0x08261e48 and
+      0x082621d0, zero predicated inbound BLs. One outbound plain BL at
+      0x08261d38 targets 0x082e8474; no predicated outbound calls.
+      Save attr, call pthread_mutexattr_destroy, discard status, return attr.
+      The callee rejects NULL or non-MTXA magic with 0x1a; otherwise clears
+      the first word and returns zero. Its literal at 0x082e84a0 is
+      0x4d545841, independently verified from firmware. Deliberate deviations:
+      retain this unported callee as a fixed-address target seam and model
+      its aligned u32 access on hosts, preserving target word spacing.
+      Both normal and recursive Rust constructors now use the ported wrapper.
+      Host tests cover valid, invalid, NULL and repeated destruction, pointer
+      return, type-word preservation and surrounding guards.
+      Host suite: 13687 passed. ARM release build passed. Executable host
+      smoke exercised initialization, destruction, repeated destruction and
+      NULL with type-word preservation. match.py exit 1: LLVM adds a frame
+      pointer and literal load/BLX to the same verified 0x082e8474 callee,
+      preserving save-r0, call, restore-r0 and return structure (8 vs 5
+      disassembly lines, including the address literal).
   - address: 0x08262038
     ghidra: FUN_08262038
     name: opaque_handle_result_replace_value
@@ -89247,16 +89278,16 @@ functions:
       posix_mutex_lock/unlock veneers @ 0x08261e20/0x08261e24
       (0x0815331c). Deviations (the settings.rs SETTINGS_CTOR
       pattern): the three callees ride the CXX_MUTEX_CONSTRUCT_OPS
-      dispatch slots with no-op defaults - NOT HOOK-READY until the
-      wrappers are ported (with the defaults the mutex is never
-      initialized and the status word never written); the scope is
+      dispatch slots with wired ported defaults for attr initialization,
+      normal settype-plus-mutex initialization and attr destruction.
+      The scope is
       modeled as two pointer-sized words (the pfr_face_done face-word
       model). Host tests: exact call order (attr_init -> mutex_init ->
       attr_destroy), the scope's initial words are the incoming
       param_3/param_4 registers and the SAME mutable scope object flows
       through all three callees (an attr_init mock's write is visible
-      to the later mocks), this passthrough, and the default stubs
-      leaving the wrapper untouched. match.py structural: the Rust
+      to the later mocks), and this passthrough. The former no-op attr
+      teardown default now uses cxx_mutexattr_destroy. match.py structural: the Rust
       even emits `stm sp,{r2,r3}` for the scope seeding - same scope
       on stack, same three calls with (scope)/(this,scope)/(scope),
       same mov r0,r4 return; the diff is the crate fp frame with an
@@ -96251,7 +96282,7 @@ functions:
       uStack_10/uStack_c: scope (the two-word stack pthread_mutexattr)
       FUN_08261d1c: cxx_mutexattr_init (ported)
       FUN_08262170: recursive settype-and-mutex-init helper (unported)
-      FUN_08261d30: cxx_mutexattr_destroy (unported)
+      FUN_08261d30: cxx_mutexattr_destroy (ported in cxx/mutex_attr_destroy)
     notes: >-
       44 bytes, all code and no literal pool (0x082621b0..0x082621dc;
       the C++ mutex destructor thunk starts at 0x082621dc), verified
@@ -96270,10 +96301,10 @@ functions:
       cxx_mutexattr_destroy @ 0x08261d30 and return the saved this
       pointer. The scope's incoming contents are the uninitialized
       caller r2/r3 values, overwritten by attr init before use.
-      Deliberate deviations: 0x08262170 and 0x08261d30 remain unported,
-      so volatile dispatch slots call their retailOS entries on target;
-      host defaults model their decoded stores, including type bits
-      4..5 = 2, initialized mutex fields, and valid-attr magic clear.
+      Deliberate deviations: 0x08262170 remains unported, so its volatile
+      dispatch slot calls retailOS on target and models type bits 4..5 = 2
+      and initialized mutex fields on hosts. Attribute teardown now uses
+      the ported cxx_mutexattr_destroy wrapper.
       Host tests prove attr-init -> recursive-init -> teardown order,
       mutable scope identity, this return, ignored r1, and host-default
       recursive mutex layout. match.py structural review is expected to

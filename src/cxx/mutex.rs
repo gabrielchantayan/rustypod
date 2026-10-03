@@ -57,16 +57,11 @@
 //! methods route the member through the posix_mutex_lock/unlock
 //! veneers @ 0x08261e20/0x08261e24 (0x0815331c).
 //!
-//! Deviations: the attr destroy wrapper @ 0x08261d30 is unported, so
-//! it rides the [`CXX_MUTEX_CONSTRUCT_OPS`] dispatch slot (the
-//! settings.rs `SETTINGS_CTOR` pattern) with a no-op default — **not
-//! hook-ready** until it is ported (with the default the scope attr is
-//! never torn down; the mutex itself IS initialized by the wired
-//! defaults). The attr init wrapper @ 0x08261d1c is ported
-//! ([`super::mutex_attr_init`]) and wired as the `attr_init` default,
-//! and the settype+init operation @ 0x08261de8 is ported
-//! ([`super::mutex_settype_init`]) and wired as the `mutex_init`
-//! default. The scope is
+//! Deviations: the three ported callees remain behind
+//! [`CXX_MUTEX_CONSTRUCT_OPS`] so host tests can replace them. Defaults use
+//! the attr init wrapper ([`super::mutex_attr_init`]), settype+init operation
+//! ([`super::mutex_settype_init`]), and attr destroy wrapper
+//! ([`super::mutex_attr_destroy`]). The scope is
 //! modeled as two pointer-sized words (the pfr_face_done face-word
 //! model): byte-exact on the 32-bit target, disjoint slots on a 64-bit
 //! host. `param_2` exists only to keep the register shape — the
@@ -85,9 +80,6 @@ unsafe extern "C" fn attr_init_port(scope: *mut usize) {
     super::mutex_attr_init::cxx_mutexattr_init(scope);
 }
 
-/// No-op default for the unported scope attr destroy wrapper @
-/// 0x08261d30.
-unsafe extern "C" fn attr_destroy_stub(_scope: *mut usize) {}
 
 /// Indirect dispatch for the three scoped-attribute callees of
 /// [`cxx_mutex_construct`] (the settings.rs `SETTINGS_CTOR` pattern).
@@ -107,13 +99,11 @@ pub struct CxxMutexConstructOps {
     pub attr_destroy: unsafe extern "C" fn(scope: *mut usize),
 }
 
-/// Wired defaults: the ported attr-init wrapper and the ported
-/// settype+init operation, plus one documented no-op (see the module
-/// header).
+/// Wired defaults use the three ported scoped-attribute operations.
 pub const DEFAULT_CXX_MUTEX_CONSTRUCT_OPS: CxxMutexConstructOps = CxxMutexConstructOps {
     attr_init: attr_init_port,
     mutex_init: super::mutex_settype_init::cxx_mutex_settype_init,
-    attr_destroy: attr_destroy_stub,
+    attr_destroy: super::mutex_attr_destroy::attr_destroy_port,
 };
 
 /// The active callee set. Host tests install recording mocks.

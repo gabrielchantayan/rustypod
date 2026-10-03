@@ -433,6 +433,7 @@ pub mod mutex_opaque_context_release_default;
 pub mod mutex_destroy;
 pub mod pthread_mutex_destroy;
 pub mod mutex_attr_init;
+pub mod mutex_attr_destroy;
 pub mod mutex_settype_init;
 pub mod recursive_mutex;
 pub mod observable_array;

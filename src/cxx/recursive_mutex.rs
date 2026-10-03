@@ -27,12 +27,9 @@
 //! pop  {r2,r3,r4,pc}
 //! ```
 //!
-//! Deliberate deviations: the two direct callees not yet ported,
-//! 0x08262170 and 0x08261d30, cross volatile dispatch slots. Their wired
-//! target defaults call the retailOS entries directly. Host defaults model
-//! their decoded observable stores: kind 2 in the attr's type field, mutex
-//! initialization, and clearing a valid attr magic respectively. This makes
-//! host tests deterministic while leaving a target hook faithful.
+//! Deliberate deviations: the unported 0x08262170 helper crosses a volatile
+//! dispatch slot, calling retailOS on target and modeling its decoded stores
+//! on hosts. Attribute teardown uses the ported mutexattr-destroy wrapper.
 
 use super::mutex_attr_init::cxx_mutexattr_init;
 #[cfg(not(target_os = "none"))]
@@ -48,9 +45,6 @@ use super::mutex_settype_init::{
 /// Load address of the unported recursive settype-and-init helper.
 #[cfg(target_os = "none")]
 const RECURSIVE_MUTEX_INIT_ADDRESS: usize = 0x08262170;
-/// Load address of the unported C++ mutexattr-destroy wrapper.
-#[cfg(target_os = "none")]
-const CXX_MUTEXATTR_DESTROY_ADDRESS: usize = 0x08261d30;
 
 /// `pthread_mutexattr_settype` kind 2: recursive ownership is permitted.
 pub const MUTEX_KIND_RECURSIVE: u32 = 2;
@@ -98,14 +92,6 @@ unsafe fn host_model_recursive_mutex_init(this: *mut u8, attr: *mut usize) {
     this.add(CXX_MUTEX_STATUS_OFFSET).cast::<u32>().write(0);
 }
 
-/// Host model of 0x08261d30's wrapped pthread_mutexattr_destroy: invalid
-/// attrs are unchanged; valid ones have only their magic cleared.
-#[cfg(not(target_os = "none"))]
-unsafe fn host_model_cxx_mutexattr_destroy(attr: *mut usize) {
-    if !attr.is_null() && attr.cast::<u32>().read() == MUTEXATTR_MAGIC {
-        attr.cast::<u32>().write(0);
-    }
-}
 
 /// Target firmware direct calls; host behavioral models above.
 unsafe extern "C" fn default_recursive_mutex_init(this: *mut u8, attr: *mut usize) {
@@ -121,19 +107,6 @@ unsafe extern "C" fn default_recursive_mutex_init(this: *mut u8, attr: *mut usiz
     }
 }
 
-/// Target firmware direct call; host behavioral model above.
-unsafe extern "C" fn default_cxx_mutexattr_destroy(attr: *mut usize) {
-    #[cfg(target_os = "none")]
-    {
-        let destroy: CxxMutexattrDestroy = core::mem::transmute(CXX_MUTEXATTR_DESTROY_ADDRESS);
-        destroy(attr);
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        host_model_cxx_mutexattr_destroy(attr);
-    }
-}
 
 /// Indirect direct-callee boundary of [`cxx_recursive_mutex_construct`].
 /// Host tests install recording mocks; later ports can replace each default.
@@ -145,12 +118,11 @@ pub struct CxxRecursiveMutexConstructOps {
     pub attr_destroy: CxxMutexattrDestroy,
 }
 
-/// Wired defaults preserve the retailOS direct calls on target and model them
-/// on host.
+/// Wired defaults use the firmware/model init seam and ported attr teardown.
 pub const DEFAULT_CXX_RECURSIVE_MUTEX_CONSTRUCT_OPS: CxxRecursiveMutexConstructOps =
     CxxRecursiveMutexConstructOps {
         recursive_mutex_init: default_recursive_mutex_init,
-        attr_destroy: default_cxx_mutexattr_destroy,
+        attr_destroy: super::mutex_attr_destroy::attr_destroy_port,
     };
 
 /// Active direct-callee set. Host tests replace it with recording mocks.
