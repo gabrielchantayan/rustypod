@@ -202987,3 +202987,46 @@ functions:
       versus 35 original instructions, preserving the node loop, capacity
       branch, conditional store, and stack node argument. Two literal
       words retain the exact resident targets. No device run is claimed.
+  - address: 0x0826bfb4
+    ghidra: FUN_0826bfb4
+    name: string_object_matches_either_runtime_name
+    size: 64
+    sig: "int string_object_matches_either_runtime_name(const StringObject *text)"
+    module: cxx/string_object
+    status: identified
+    vars:
+      param_1: text
+      r5: saved_text
+      r4: runtime_name_table
+      DAT_0826bff0: runtime_name_table_address
+      iVar1: first_compare_result
+      iVar2: second_compare_result
+    notes: >-
+      Raw osos.dec proves 60 code bytes at 0x0826bfb4-0x0826bfec,
+      followed by the literal 0x089cfe78 at 0x0826bff0. True extent is
+      64 bytes; the next real function, framework_string_pair_construct,
+      begins with push at 0x0826bff4. Independent whole-image ARM-word
+      decoding finds two incoming plain BLs at 0x08118228 and 0x08178a14,
+      zero predicated incoming BLs. The body contains two plain BLs at
+      0x0826bfc4 and 0x0826bfd8, both to the registered
+      string_object_utf8_strcasecmp_safe at 0x082a50a8, and zero predicated
+      BLs. Compares text against the pointer at runtime_name_table+4;
+      equality returns 1 without reading the second pointer. Otherwise
+      compares against runtime_name_table+8 and returns 1 for equality,
+      0 for inequality. No NULL guard on text. Raw callee words are
+      ldr r0,[r0,#4] followed by b 0x0827609c, confirming StringObject
+      payload semantics rather than Ghidra's inlined callee boundary.
+      BLOCKED: the registered Rust comparator's existing default
+      missing_utf8_strcasecmp_core returns arbitrary equality, so using
+      that seam would falsely accept every input. The actual core at
+      0x0827609c calls utf8_next_codepoint at 0x08276214 and the fold at
+      0x08276fbc. Raw fold words load the 256-byte map address 0x083ed1dd
+      from 0x08276fd0; its static first byte is 0xf0, so fold(0) is
+      nonzero and cannot implement the core's shared-terminator exit.
+      The runtime fold map or its relocation mechanism remains unknown,
+      as documented in the existing core entry. Independently, static
+      words at runtime_name_table+4 and +8 are 0x64654d00 and 0x694c6169,
+      not firmware string pointers; the runtime table initialization and
+      actual two names are unresolved. No semantic identities for these
+      names are inferred from the photo-import callers. Honest deferral:
+      no Rust body, new seam, mock-based parity claim, or status ported.
