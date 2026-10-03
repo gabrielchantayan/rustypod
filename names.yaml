@@ -206799,3 +206799,32 @@ functions:
       46 stock instructions: equivalent sign guard, rectangle stores,
       fixed-point shifts and two vector calls; refresh uses BLX and
       invalid input tail-calls the latch. No device execution performed.
+
+  - address: 0x08243338
+    ghidra: FUN_08243338
+    name: fixed4_weighted_difference
+    size: 124
+    sig: "void fixed4_weighted_difference(i32 *dst, const i32 *left, const i32 *right)"
+    module: app/fixed4_weighted_difference
+    status: ported
+    vars: {param_1: dst, param_2: left, param_3: right}
+    notes: >-
+      Raw A32 establishes the 124-byte extent 0x08243338..0x082433b4,
+      ending in pop with pc; the next function starts with its own push.
+      Six outgoing unconditional BLs call the already-ported fixed16_mul
+      at 0x080e9878; zero predicated BLs. Whole-image word decoding finds
+      two incoming plain BLs at 0x0824c054 and 0x0824c204, zero predicated.
+      Computes right.xyz*left.w - left.xyz*right.w, truncating each signed
+      Q16.16 product independently toward negative infinity, narrowing to
+      32 bits and subtracting with wrap. All source reads precede stores,
+      preserving exact and partial overlap. Callers normalize the resulting
+      vector and use it in fixed-point dot products. No behavioral deviations.
+      Host suite passes 13749 tests, including separate product truncation,
+      zero weights, signed extremes, wrapping and overlap with either input.
+      Direct public-entry smoke returns [1, -65534, 131073] in-place and
+      preserves the fourth word. ARM release build passes. match.py exits 1:
+      LLVM emits 38 versus 31 instructions, with different frame/spill and
+      store scheduling but the same six multiplies and three wrapping
+      subtractions. Archive relocations verify all six BLs target fixed16_mul;
+      match.py displays unresolved archive branch immediates as self-calls.
+      No device execution performed.
