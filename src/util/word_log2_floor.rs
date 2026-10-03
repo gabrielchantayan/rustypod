@@ -5,6 +5,14 @@
 //! decoding finds two inbound plain BLs (0x082507dc, 0x082507ec), zero
 //! predicated BLs, and no outbound BLs or direct tail-B callers.
 //!
+//! Also ports `FUN_0823664c` at 0x0823664c: the nine A32 words are
+//! byte-identical, with `bx lr` at 0x0823666c and the next real function's
+//! push at 0x08236670 (true size 36 bytes). Independent raw BL decoding
+//! finds two plain inbound calls at 0x08256bc8 and 0x08256bd4, zero
+//! predicated inbound calls, and no outbound calls. That caller stores
+//! the floor-log2 of each buffer dimension. Both stock entries share this
+//! already-registered Rust symbol deliberately; no duplicate seam is needed.
+//!
 //! Start with result zero and mask one. While the input has bits outside
 //! the mask, increment the result and grow the mask as `(mask << 1) | 1`.
 //! Returns floor(log2(value)) for nonzero words, and zero for zero.
@@ -56,6 +64,16 @@ mod tests {
         }
         for value in [0x5555_5555, 0xaaaa_aaaa, 0x8000_0001, 0x7fff_fffe] {
             assert_eq!(word_log2_floor(value), reference(value));
+        }
+    }
+
+    #[test]
+    fn highest_bit_dominates_every_single_lower_bit() {
+        for highest in 1..32 {
+            for lower in 0..highest {
+                let value = (1u32 << highest) | (1u32 << lower);
+                assert_eq!(word_log2_floor(value), highest, "value={value:#x}");
+            }
         }
     }
 }

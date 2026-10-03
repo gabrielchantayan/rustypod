@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0823664c
+    ghidra: FUN_0823664c
+    name: word_log2_floor
+    size: 36
+    sig: "u32 word_log2_floor(u32 value)"
+    module: util/word_log2_floor
+    status: ported
+    vars:
+      param_1/r0: value
+      iVar1/r0: result
+      uVar2/r1: mask
+    notes: >-
+      Raw A32 words establish the 36-byte extent 0x0823664c..0x08236670:
+      mov r2,r0; mov r0,0; mov r1,1; mov r3,1; bics r12,r2,r1;
+      addne r0,r0,1; orrne r1,r3,r1,lsl 1; bne 0x0823665c; bx lr.
+      The next independent function starts with push at 0x08236670.
+      Full-image aligned immediate BL decoding finds two plain inbound
+      sites at 0x08256bc8 and 0x08256bd4, zero predicated inbound sites,
+      and zero outbound BLs. The caller stores each buffer dimension's
+      floor-log2. Grow a low-bit mask from one until it covers value;
+      return the growth count, including zero for both zero and one.
+      The body is byte-identical to 0x08260534, already ported as
+      word_log2_floor; both firmware addresses deliberately use that
+      single registered Rust implementation, without a new callee seam
+      or algorithm deviation. Tests cover zero, all power boundaries,
+      all 16-bit values, mixed bits, every pair of distinct set bits,
+      and u32::MAX. Actual-source host smoke confirms zero, one,
+      power boundaries and high-bit inputs; 13782 host tests pass.
+      The ARM release build passes. match.py resolves word_log2_floor
+      and exits 1 with a reviewed structural diff: LLVM emits eighteen
+      instructions versus nine, adds a value-less-than-two fast path
+      and frame, and retains mask growth and the conditional back edge.
+      No helper calls; sharing the existing symbol is intentional.
+
   - address: 0x08237174
     ghidra: FUN_08237174
     name: object_deactivate
