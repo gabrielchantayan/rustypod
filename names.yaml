@@ -9290,6 +9290,28 @@ functions:
       non-head entry, and otherwise tail-dispatches the table miss handler.
       FUN_082432c8 and its operation tables remain unnamed, so the device
       port calls its verified retail address while host tests install seams.
+  - address: 0x08240a08
+    ghidra: FUN_08240a08
+    name: context_indexed_word_store
+    size: 12
+    sig: "u32 *context_indexed_word_store(u32 *context, u32 index, u32 value)"
+    module: util/context_indexed_word_store
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: index
+      param_3/r2: value
+      r0_return: indexed_base
+    notes: >-
+      Raw words e0800101 e5802038 e12fff1e establish the exact 12-byte
+      extent 0x08240a08..0x08240a14; the next function starts with a push.
+      Full-image A32 decoding finds two inbound plain BLs at 0x0825181c
+      and 0x082563dc, zero predicated inbound BLs, and no outbound calls.
+      Adds index shifted left by two to context and stores value at +0x38.
+      Returns the adjusted base left in r0 rather than trusting Ghidra's
+      void signature. Host arithmetic sign-extends the wrapped target byte
+      displacement; tests cover both caller slots, other valid indices,
+      negative displacements, shift aliases, and untouched surrounding words.
   - address: 0x08240a14
     ghidra: FUN_08240a14
     name: queue_refresh_and_match_kind_two
