@@ -204209,3 +204209,38 @@ functions:
       and includes the literal in its eleven-line listing versus eight
       stock instructions. All four stores, the literal vtable value,
       and unchanged r0 return agree; there are no introduced calls.
+
+  - address: 0x08271d88
+    ghidra: FUN_08271d88
+    name: virtual_array_assign
+    size: 92
+    sig: "VirtualArray *virtual_array_assign(VirtualArray *destination, const VirtualArray *source)"
+    module: app/virtual_array_assign
+    status: ported
+    vars:
+      param_1/r0: destination
+      param_2/r1: source
+      iVar1: element_width
+    notes: >-
+      Raw extent 0x08271d88..0x08271de4 ends at POP; next PUSH is a
+      separate function. Whole-image A32 scan verifies two incoming plain
+      BLs at 0x081376cc and 0x081376d8, zero predicated incoming BLs.
+      Body has one plain BL, zero predicated BLs and two indirect BLXs.
+      Calls virtual slot +0xbc with source count, reloads source count
+      into destination +4, reloads destination vtable and calls +0x18
+      for element width. Memmoves wrapping u32 width times count bytes
+      from source +8 to destination +8, clears destination +0x0c and
+      returns destination. Concrete virtual callee identities remain
+      unknown; roles describe observed data flow only. Direct target
+      0x08037e00 is E51FF004 plus 220000D4, an IRAM mirror veneer for
+      named and ported memmove at 0x080000d4, reused without a new seam.
+      repr(C) pointer fields and vtable slots widen only on hosts.
+      Tests cover overlap in both directions, equal data pointers,
+      zero count/width, wrapping multiplication, callback vtable
+      replacement and self-assignment count reload. Standalone host
+      smoke confirms an overlapping eight-byte copy and state reset.
+      Host suite and ARM release build pass. match.py exits 1 with
+      23 stock versus 24 Rust instructions: LLVM adds a frame pointer,
+      combines adjacent destination loads with LDMIB and lowers the
+      reused memmove to __aeabi_memmove. Both virtual calls, field
+      reloads, MUL, final clear and destination return remain present.
