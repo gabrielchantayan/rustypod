@@ -203288,3 +203288,43 @@ functions:
       1 with the expected structural diff: LLVM emits a frame, reverses
       independent stores, retains both byte stores and the descriptor
       word store, and returns the untouched r0. No device execution claimed.
+
+  - address: 0x0826bac4
+    ghidra: FUN_0826bac4
+    name: relative_record_collection_construct
+    size: 200
+    sig: "RelativeRecordCollection *relative_record_collection_construct(RelativeRecordCollection *storage, u32 context, const u32 *records)"
+    module: cxx/relative_record_collection_construct
+    status: ported
+    vars: {param_1/r0: storage, param_2/r1/r9: context, param_3/r2/r8: records, r7: collection, r4: relative_record, r6: index, r5: item, DAT_0826bb88: collection_vtable}
+    notes: >-
+      Raw A32 words establish 196 code bytes through the return at
+      0x0826bb84 plus literal 0x089a59a0 at 0x0826bb88: true extent
+      200 bytes, next real entry 0x0826bb8c. Ghidra's 56-byte boundary
+      at 0x0826bafc splits this constructor mid-body. Whole-image
+      aligned BL decoding finds two inbound plain calls at 0x0826b7c4
+      and 0x0826b804, zero predicated calls. Body contains eight plain
+      BL instructions, zero predicated BLs, and virtual BLX through
+      item vtable slot +0x4c. Initializes the existing framework root,
+      installs the collection descriptor, allocates and constructs a
+      16-byte observable array, and initializes lower/upper bytes to
+      127/0 without touching padding. Walks records using signed count
+      comparisons; payload flag 0x20 selects the resident 44-byte
+      contextual constructor at 0x081b9668 versus the 36-byte constructor
+      at 0x081861e4. Calls virtual initialization before resident append
+      at 0x0826b784, then advances by four plus the current relative
+      length. Count and length are reloaded after callbacks. Concrete
+      class identities of the collection and items remain unresolved.
+      Deliberate deviations: reuses ported framework_object_construct,
+      observable_array_construct, and operator_new; verified unported
+      operations execute at resident addresses via BLX. Tests cover
+      zero and negative counts, both flag branches, initialization before
+      append, padding, and callback mutations of count and relative length.
+      All 13580 host tests pass; ARM release build succeeds. Production
+      empty-entry smoke using the host allocator fixture verifies root,
+      array, bounds, padding, and return. Non-test host smoke compilation
+      is blocked by six existing missing functions in prepare_entry_metadata,
+      shared_payload_select_kind, and calendar_schedule; no unrelated
+      fixes made. match.py with corrected size 200 exits 1 with expected
+      structural differences, retaining signed loop, 36/44-byte allocations,
+      virtual slot +0x4c, and all three resident target literals.
