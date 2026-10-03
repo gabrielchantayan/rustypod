@@ -525,6 +525,7 @@ pub mod opaque_header_payload_construct;
 pub mod opaque_context_destroy;
 pub mod opaque_context_mutex_destroy;
 pub mod deque_context_mutex_destroy;
+pub mod embedded_cleanup_handle_destroy;
 pub mod tagged_allocation_release;
 pub mod tagged_context_dispatch;
 pub mod tagged_context_dequeue;

@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08257d08
+    ghidra: FUN_08257d08
+    name: destroy_embedded_cleanup_handle
+    size: 28
+    sig: "void *destroy_embedded_cleanup_handle(void *this)"
+    module: cxx/embedded_cleanup_handle_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      FUN_08261ff0: embedded cleanup handle destructor (retained retail seam)
+      FUN_08261de4: empty base destructor preserving r0
+    notes: >-
+      Raw A32 establishes extent 0x08257d08..0x08257d24; next function
+      stores a byte at this+0x3c and returns. Two outbound plain BLs,
+      zero predicated BLs. Executable inbound BL at 0x081d6744; whole-image
+      scanning also finds a predicated encoding at 0x089d8cc4, not a
+      verified executable caller.
+      ARM release match reviewed: fixed-address BLX replaces direct BL;
+      the empty base call disappears and the two subtractions combine
+      into 16, preserving the returned-pointer chain.
+      Destroy handle at this+0x10 via verified 0x08261ff0, subtract 12,
+      call empty 0x08261de4, subtract 4, and return. The handle destructor
+      passes its owner word and handle to 0x082625e0 and returns its input.
+      Retain that unported cleanup as a fixed-address firmware seam with
+      explicit host injection. Elide only the empty bx-lr base destructor.
+      Host coverage exercises live and absent payloads and surrounding
+      object preservation with native pointer fields behind the seam.
   - address: 0x08261c28
     ghidra: FUN_08261c28
     name: destroy_deque_context_and_mutex
