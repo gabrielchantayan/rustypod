@@ -203993,3 +203993,33 @@ functions:
       versus fifteen Rust instructions; LLVM uses a bounds branch, two
       word loads and a frame instead of predicated LDRD. The unsigned
       wrapping check, word offsets, index scaling and r0/r1 return agree.
+
+  - address: 0x08269c48
+    ghidra: FUN_08269c48
+    name: optional_vector_size_elem8
+    size: 16
+    sig: "i32 optional_vector_size_elem8(const OptionalVectorSizeElem8 *owner)"
+    module: cxx/templates
+    status: ported
+    vars:
+      param_1: owner
+      piVar1: vector
+    notes: >-
+      Raw words E590002C E3500000 1A05B78C E12FFF1E establish the
+      extent through 0x08269c58, where the next function starts with PUSH.
+      Two incoming plain BLs at 0x08268c9c and 0x0826a304, zero
+      predicated BLs, zero outgoing BLs. Loads the optional vector at
+      owner +0x2c; null returns zero, otherwise BNE tail-transfers to
+      0x083d7a88, already named and ported as vector_size_elem8.
+      Callers use the result as a count of eight-byte record keys.
+      Reuses that seam without introducing a callee alias. repr(C)
+      preserves target offset +0x2c while native host pointer alignment
+      may pad the owner prefix. Host fixtures sign-extend synthetic
+      target addresses for the existing seam's native-isize arithmetic.
+      Host suite passes 13610 tests, including null, empty, partial,
+      reversed, wrapping and signed-boundary spans. ARM release builds.
+      match.py exits 1: four stock instructions versus nine Rust;
+      LLVM adds a frame, reverses the null branch, and explicitly writes
+      zero on the null path. The pointer load, null check and tail
+      transfer remain equivalent; the non-null branch relocates to
+      vector_size_elem8.
