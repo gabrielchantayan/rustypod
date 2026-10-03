@@ -204282,3 +204282,42 @@ functions:
       instructions including the literal. LLVM removes the empty range
       walk and unused deallocation arguments, retaining both calls, the
       vtable store, leading allocation load, and original-owner return.
+  - address: 0x08271688
+    ghidra: FUN_08271688
+    name: string_member_record_assign
+    size: 120
+    sig: "StringMemberRecord *string_member_record_assign(StringMemberRecord *this, const StringMemberRecord *source)"
+    module: cxx/string_member_record_assign
+    status: ported
+    renames:
+      param_1: this
+      param_2: source
+      FUN_082774a8: string_object_assign
+    notes: >-
+      Raw ARM establishes 0x08271688..0x08271700 exclusive, ending with
+      pop {r4,r5,r6,pc}; the next function begins with cmp r1,#10.
+      Independent whole-image word decoding finds two unconditional inbound
+      BL sites at 0x08108b30 and 0x08108be4, no predicated inbound BLs,
+      and one internal unconditional BL at 0x082716d4 to the already-ported
+      string_object_assign at 0x082774a8, with no predicated internal BLs.
+      Assigns a 56-byte polymorphic record: copies seven scalar words at
+      +4..+28, assigns the embedded StringObject at +32, then copies the
+      +40 word, +44 byte, and +48/+52 words. Preserves the outer vtable,
+      embedded string vtable, and padding bytes +45..+47; returns this.
+      Callers allocate 0x38 bytes, construct at 0x08271598, and assign
+      an existing record before replacing +40 or submitting it virtually.
+      Class identity and scalar field meanings remain unrecovered. Host
+      repr(C) widens pointer fields, retaining explicit u32 scalar fields;
+      the existing StringObject allocation/clear seams are reused without
+      introducing a new seam. Tests cover scalar assignment with high-bit
+      values, untouched vtable/padding, and nonempty self-assignment.
+      Host suite passes 13629 tests; ARM release build passes. Standalone
+      host smoke under the supported test configuration exercises deep
+      string copying, self-assignment, and NULL-payload clearing through
+      the real existing assignment chain with isolated allocation/clear
+      boundaries. Non-test host builds have pre-existing missing cfg-gated
+      helpers in prepare_entry_metadata, shared_payload_select_kind, and
+      calendar_schedule; those unrelated modules are unchanged. match.py
+      reports 30 stock versus 31 Rust instructions, preserving all field
+      accesses and the single call; differences are frame-pointer setup,
+      saved-register choice, scheduling, and the archive's unresolved BL.
