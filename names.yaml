@@ -11494,6 +11494,32 @@ functions:
       helper is not ported and has no stronger established identity: target
       Rust calls its fixed address while host tests use an ABI seam. Target
       pointer fields deliberately remain u32 words on hosts.
+  - address: 0x082780cc
+    ghidra: FUN_082780cc
+    name: buffered_stream_collection_flush
+    size: 56
+    sig: "u32 buffered_stream_collection_flush(const BufferedStreamCollection *collection)"
+    module: app/buffered_stream_collection_flush
+    status: ported
+    renames:
+      param_1/r0/r6: collection
+      puVar2/r4: cursor
+      uVar3/r5: status
+      uVar1: stream_status
+      "[collection + 8]": begin
+      "[collection + 12]": end
+      FUN_08277d1c: buffered_stream_flush_pending
+    notes: >-
+      Raw osos.dec verifies 56 bytes ending at the separate prologue at
+      0x08278104. Whole-image A32 decoding finds two incoming plain BL calls,
+      at 0x082788ac and 0x08278964, and zero predicated BL callers. The body
+      has one plain BL to the existing pending-flush port at 0x08277d1c
+      and zero predicated BL calls. Walk the u32 state-pointer array at +8
+      until the end word at +12, OR-ing every flush status without stopping
+      on error and reloading end after each call. Callers pass their +0x40
+      collection during close and flush operations. Deliberate deviations:
+      reuse the existing Rust callee, retain four-byte pointer words on hosts,
+      and use volatile collection reads for callback-visible end changes.
   - address: 0x0827fdd0
     ghidra: FUN_0827fdd0
     name: kind_0x21_message_post
