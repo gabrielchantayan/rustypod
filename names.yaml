@@ -202484,3 +202484,36 @@ functions:
       Real-source smoke confirms 1, 0x80, 0x12345678, 0x100 and zero.
       match.py shows the same byte store with LLVM's frame-pointer push,
       frame setup and pop return replacing the original bx lr.
+
+  - address: 0x0826de1c
+    ghidra: FUN_0826de1c
+    name: view_base_refresh_key_resource
+    size: 80
+    module: ui/view_base
+    sig: "void view_base_refresh_key_resource(ViewBase *view)"
+    status: ported
+    renames:
+      param_1/r0: view
+      r1: resource_id_or_resource
+      r4: saved_view
+      DAT_0826de68: KEY_RESOURCE_KIND
+    notes: >-
+      Raw words prove 76 instruction bytes plus the KeyF literal 0x4b657946
+      at 0x0826de68, before the independent add r0,r0,#0x80 entry at
+      0x0826de6c. Full-image aligned ARM decoding finds two incoming plain
+      BLs (0x081da05c and 0x0829139c), zero incoming predicated BLs; the
+      body contains one plain BL to 0x08272360 and one BLNE to 0x08110690.
+      A zero view word at +0x44 returns immediately. Otherwise flag bit 0
+      requests task-local KeyF lookup using that word as ID in r1, which
+      Ghidra omits. Non-NULL results go to verified original 0x08110690,
+      which loads linkage at view +0x0c and conditionally stores the
+      resource at linkage +0x0c. Every nonzero-ID path finally dispatches
+      vtable +0xd4. Reuses ViewBase and its existing virtual dispatch.
+      Deliberate deviations: host lookup and attachment seams plus the
+      existing host callback; target calls the existing Rust lookup and
+      original firmware attachment. Tests cover zero ID, unrelated flag
+      bits, lookup miss, maximum ID, attachment ordering and callback
+      visibility of callee mutations. Real-lookup smoke observed empty-chain
+      fallback and final notification. All 13555 host tests and ARM release
+      build pass. match.py shows equivalent gating and tail BX; LLVM uses
+      frame setup and branch-plus-BLX instead of the original predicated BL.
