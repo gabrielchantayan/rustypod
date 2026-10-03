@@ -207546,3 +207546,46 @@ functions:
       ARM match.py reports an expected structural diff: the same constructor,
       virtual +0x11c dispatch, release, and constant-one result, with LLVM frame
       setup and a redundant initial NULL store replacing ADS stack-slot reuse.
+
+  - address: 0x0822f280
+    ghidra: FUN_0822f280
+    name: rentals_select
+    size: 220
+    sig: "u32 rentals_select(u8 *controller)"
+    module: app/rentals_select
+    status: ported
+    vars:
+      param_1: controller
+      iVar1: query_result
+      uStack_14: temporary_string
+      local_1c: decimal_one
+      uStack_18: unused_allocator_tag
+    renames:
+      FUN_0822d12c: controller_cached_query
+      FUN_08173848: app_screen_get
+      FUN_08174300: app_screen_set_layout_from_resource
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_08101d4c: string_table_set_decimal
+      FUN_083d8b04: cxx_string_release
+      vtable_plus_0x11c: display
+    notes: >-
+      Raw osos.dec establishes 220 bytes from 0x0822f280 to the next real
+      push at 0x0822f35c: 188 instruction bytes, four literals, and padded
+      RentalsSelected text. Eight outgoing plain BLs, zero predicated BLs,
+      and one virtual BLX at 0x0822f324. Whole-image aligned BL decoding
+      finds plain inbound 0x081e7520 and BLNE 0x0822dec4; Ghidra attributes
+      the latter to a larger dispatcher. Sets controller byte +0xb0 to 19;
+      cached query arguments are (0x80, 0x200004, 1, 1, 0, 1). Zero skips
+      all UI work. Nonzero loads screen layout 0x0dad0695, stores decimal
+      one in table 0x08a79c10 under the runtime key dereferenced at
+      0x089cfe5c, releases the key, displays RentalsSelected at vtable
+      +0x11c, and releases the command. Always returns one. Deliberate
+      deviations: omit unused COW constructor argument and use native-width
+      host vtable words at target word indices. Reuses existing Rust ports
+      and verified cached-query seam. Host edge tests cover zero, positive,
+      high-bit and maximal results, suppression, release/display ordering,
+      and adjacent-state preservation. Standalone API smoke exercises the
+      empty path without invoking UI dependencies. ARM match.py prints an
+      expected structural diff: the same query/zero branch, UI calls,
+      virtual +0x11c dispatch, releases, and constant return, with LLVM
+      frame setup and literal addressing instead of ADS stack-slot reuse.
