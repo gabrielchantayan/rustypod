@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod query_context_controller;
 pub mod fixed4_weighted_difference;
 pub mod message_envelope_construct;
 pub mod lazy_singleton_0x68_with_dependency;

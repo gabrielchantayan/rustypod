@@ -279,7 +279,7 @@ pub unsafe extern "C" fn kinded_controller_construct(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
@@ -310,7 +310,7 @@ mod tests {
 
     static SEAM_LOCK: Mutex<()> = Mutex::new(());
 
-    fn seam_lock() -> MutexGuard<'static, ()> {
+    pub(crate) fn seam_lock() -> MutexGuard<'static, ()> {
         SEAM_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
     }
 
