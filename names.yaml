@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08219db4
+    ghidra: FUN_08219db4
+    name: app_screen_dispatch_resource_updates
+    size: 156
+    sig: "u32 app_screen_dispatch_resource_updates(void)"
+    module: app/app_screen_dispatch_resource_updates
+    status: ported
+    renames:
+      piVar2/r0: screen
+      uVar1/r4: resource_category
+      FUN_08173848: app_screen_get
+      "vtable+0x58": resource_dispatch (identity unestablished)
+      DAT_08219e3c: resource_category_564d6178
+      DAT_08219e38: resource_7804
+      DAT_08219e40: resource_7806
+      DAT_08219e44: resource_7821
+      DAT_08219e48: resource_7843
+      DAT_08219e4c: resource_7842
+    notes: >-
+      Raw A32 proves 132 code bytes through BX at 0x08219e34 plus six
+      literal words before the next function at 0x08219e50: 156 bytes.
+      Whole-image decoding finds one inbound BL at 0x0821967c and one
+      BLNE at 0x082194a4; Ghidra duplicates the shared caller body.
+      Outgoing calls are five plain BLs to app_screen_get, no predicated
+      BLs, four virtual BLXs and a final BX through vtable slot +0x58.
+      Obtain the singleton separately for resources 0x7804, 0x7806,
+      0x7821, 0x7843, 0x7842, reloading its vtable each time; dispatch
+      with opaque category 0x564d6178. Input r0 is unused. Expose final
+      virtual r0 as u32 despite Ghidra declaring void. Host pointers
+      widen; a host-only getter seam tests singleton and vtable changes,
+      ordered state transitions and final return over boundary seeds.
+      Host suite passes 13816 tests; ARM release build passes; executable
+      host smoke yields 0xb0f114fe. match.py exits 1 with expected diff:
+      five getter relocations, four BLXs and final BX remain; LLVM uses
+      MOV/ORR resource constants and a larger frame. No virtual identity
+      is invented; reused singleton retains its NOT-HOOK-READY caveat.
   - address: 0x08219e50
     ghidra: FUN_08219e50
     name: class_1700_clear_when_configured
