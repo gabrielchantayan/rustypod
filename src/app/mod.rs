@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod condvar_backed_object_construct;
+pub use condvar_backed_object_construct::*;
 pub mod pending_navigation_dispatch;
 pub use pending_navigation_dispatch::*;
 pub mod image_lookup_cache;
