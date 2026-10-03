@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08263168
+    ghidra: FUN_08263168
+    name: draw_state_counted_text_width
+    size: 44
+    sig: "i32 draw_state_counted_text_width(u32 *state, const u8 *text, i32 count)"
+    module: cxx/draw_state_counted_text_width
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: text
+      param_3/r2: count
+      FUN_0807b1f4: counted_text_width_accumulator
+    notes: >-
+      Raw extent 0x08263168..0x08263194 ends at the distinct color setter.
+      Whole-image decoding finds two plain inbound BLs at 0x08263378 and
+      0x08263a24, zero predicated inbound BLs, and one plain outbound BL
+      at 0x0826318c to 0x0807b1f4. Neither address had an existing entry.
+      The adapter passes renderer word +0x1c, text, signed codepoint count,
+      embedded metric context +0x20, flag byte +0x28, and zero sixth argument.
+      The callee resolves metrics via 0x0809e224, decodes a positive signed
+      count via 0x0807a0c8, and sums advances via 0x08080f18 with flag bit 3.
+      Ghidra's void return is wrong: r0 passes through and the caller at
+      0x08263910 consumes it. No target behavioral deviations; the verified
+      firmware callee remains unported and hosts install a typed seam.
+      Host behavioral fixture covers counted multibyte prefixes, nonpositive
+      signed counts, high flag bytes, negative results, and unchanged state.
+      match.py shows matching field loads, embedded context address, stack
+      arguments and return, with LLVM using BLX to literal 0x0807b1f4.
+
   - address: 0x0826435c
     ghidra: FUN_0826435c
     name: coordinate_owner_mirror
