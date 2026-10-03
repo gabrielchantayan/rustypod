@@ -208720,3 +208720,50 @@ functions:
       constant synthesis, explicitly narrows the flag argument, and
       reorders independent stores while retaining one base-constructor BL
       and all destination widths and offsets. No firmware-device execution.
+
+  - address: 0x08217610
+    ghidra: FUN_08217610
+    name: handle_next_track
+    size: 148
+    sig: "u32 handle_next_track(u8 *this)"
+    module: app/next_track
+    status: ported
+    vars:
+      param_1: this
+      "this+0xb0": volume_controller
+      "this+0xc1": progress_transition_active
+      "this+0xc8": auxiliary_layout
+      FUN_08217348: timer_reset_4000_if_running
+      FUN_08216d70: stop_progress_layout_transition
+      FUN_081a221c: deactivate_layout_state
+      FUN_081f9d78: media_player_interface_slot_11c
+      FUN_08217318: timer_reset_4000
+      FUN_081fa04c: media_player_slot_b8_then_volume_controller_update
+      FUN_08259594: media_player_interface_get
+      FUN_08217004: rental_warning_navigation_helper
+    notes: >-
+      Raw A32 words confirm 148 bytes at 0x08217610..0x082176a4, followed
+      by push {r4,r5,r6,r7,r8,lr}. Independent raw BL decoding finds two
+      incoming calls: BLNE at 0x08217914 and BL at 0x08220044. Body has
+      five plain BLs, three predicated BLs, and two virtual BLX calls.
+      The event dispatcher associates this with NextTrack. Refresh the
+      running timer, stop a nonzero progress transition, and deactivate
+      the nonnull auxiliary layout only when controller slot 0x13c allows.
+      Reload the auxiliary pointer after virtual dispatch. Query player
+      slot 0x11c; nonzero resets the timer then dispatches player slot 0xb8
+      and updates the reloaded volume controller. Zero dispatches player
+      slot 0xc0 with selector 2; a zero result calls 0x08217004 with action 3.
+      Return 1 on all paths. Existing ports are reused; unregistered
+      0x08217004 is called at its exact firmware address, with no invented
+      implementation. Ghidra incorrectly absorbs unrelated code into the
+      0x081fa04c callee; the existing 36-byte port is authoritative.
+      Deliberate ABI cleanup removes the unused incoming volume argument
+      to 0x081f9d78, whose raw wrapper ignores it. Host tests cover 32
+      branch combinations and callback pointer reloads. Full host suite
+      passes 13820 tests; exported-handler standalone smoke passes the
+      nonzero query/reset/volume-reload path. ARM release build passes.
+      match.py exits 1: LLVM adds a frame pointer, expands some conditional
+      calls into branches, duplicates return epilogues, and calls the
+      firmware seam through a literal BLX. Virtual slot offsets, field
+      reloads, selectors, conditional paths and return value are retained.
+      No firmware-device execution.

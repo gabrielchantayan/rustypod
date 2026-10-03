@@ -758,6 +758,7 @@ pub mod progress_layout_transition;
 pub mod activity_media_player_cleanup;
 pub mod transition_container_construct;
 pub mod timer_reset;
+pub mod next_track;
 pub mod timer_step_value;
 pub mod two_value_wheel_node;
 pub mod tuning_timer;
