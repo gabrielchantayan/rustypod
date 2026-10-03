@@ -206583,3 +206583,42 @@ functions:
       clamps and stores remain. Archive relocations confirm four R_ARM_CALL
       references to signed_clamp_i32, not the apparent unresolved self-calls.
       No device execution performed.
+  - address: 0x082566e4
+    ghidra: FUN_082566e4
+    name: surface_fill_rgba8_masked
+    size: 184
+    sig: "void surface_fill_rgba8_masked(u8 *surface, const u8 *color, const u8 *mask, const i32 *rect)"
+    module: ui/surface_fill_rgba8_masked
+    status: ported
+    renames:
+      param_1/r0/r4: surface
+      param_2/r1/r5: color
+      param_3/r2: mask
+      param_4/r3/r7: rect
+      uVar2/r6: packed_mask
+      uVar3/r2: packed_color
+    notes: >-
+      Raw ARM extent is 184 bytes, 0x082566e4..0x0825679c, ending in
+      pop at 0x08256798 before the next real push prologue. Whole-image
+      aligned ARM branch decoding finds two incoming unconditional BLs
+      at 0x08253cf8 and 0x08253d7c, zero predicated incoming BLs, and
+      ten outgoing unconditional BLs. Read signed format byte at +0x64;
+      formats 4,5,6,7 use existing RGBA8888, RGB565, RGBA4444, RGB555A1
+      packers respectively. Convert mask before color, then read the
+      target-width buffer pointer at +0x68. Format 4 calls the verified
+      masked u32 surface filler at 0x08256650; others call the verified
+      masked u16 filler at 0x082565b4. Those unported helpers remain
+      retailOS address seams; raw instructions independently confirm
+      five arguments, rectangle x/y/width/height and full-mask band fill.
+      Unsupported formats read neither source nor buffer. No algorithm
+      deviations; host writer seams require explicit installation.
+      Host tests exercise final masked pixels for all four formats, zero
+      masks, partial masks, full-mask band precedence, empty rectangles,
+      and unsupported signed-byte formats with inaccessible inputs. Host
+      cargo test and ARM release build pass. Standalone actual-source smoke
+      observes RGB565 pixel 0x1234 becoming 0xfa34 under a red-channel mask.
+      match.py exits 1: LLVM uses a range guard and four-way jump table,
+      eight ordered packing calls and a shared indirect writer call,
+      versus ADS comparisons and two direct writer sites. Archive ARM
+      relocations confirm both calls to each existing packer. No device
+      execution performed.
