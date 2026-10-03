@@ -370,6 +370,7 @@ pub mod draw_state_get_background_color;
 pub mod draw_state_get_foreground_color;
 pub mod draw_state_surface;
 pub mod draw_state_clip;
+pub mod draw_state_origin;
 pub mod handler_list_construct;
 pub mod handle;
 pub mod refcounted_allocation_handle_release;
