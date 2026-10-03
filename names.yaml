@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08242d90
+    ghidra: FUN_08242d90
+    name: fixed_matrix_cursor_assign
+    size: 20
+    sig: "void fixed_matrix_cursor_assign(const FixedMatrixCursor *cursor, const FixedMatrix4x4 *source)"
+    module: util/fixed_matrix_cursor_assign
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: source
+      r2: matrix_base
+      r0_after_load: current_index_then_destination
+      FUN_082572c0: fixed_matrix_copy
+    notes: >-
+      Raw A32 extent is 20 bytes, 0x08242d90..0x08242da4, where the
+      next independent function begins with push {r0,r1,r4-r11,lr}.
+      Full-image word decoding finds exactly two unconditional inbound
+      BLs at 0x08242e5c and 0x0824f2a8, zero predicated inbound BLs,
+      zero outbound BLs, and one unconditional tail B to 0x082572c0.
+      Loads base at cursor +0 and index at +4, computes base + index*68
+      modulo 2^32, then invokes the already-ported fixed_matrix_copy.
+      Copies sixteen aligned Q16.16 words and the raw marker at +0x40;
+      padding +0x41..+0x43, cursor fields, and neighboring entries remain
+      unchanged. Reuses FixedMatrixCursor and fixed_matrix_cursor_current;
+      no new stock-address seam. Host tests cover first/later entries,
+      noncanonical marker, self-assignment, padding, and index overflow.
+      Standalone native smoke confirms selected-entry memory effects.
+      Required host suite passes 13756 tests and ARM release build passes.
+      match.py prints a structural diff (exit 1): LLVM emits a 28-byte
+      wrapper with a cursor-current BL and a final copy B instead of
+      inline address arithmetic. Archive relocations at +0xc and +0x18
+      verify fixed_matrix_cursor_current and fixed_matrix_copy respectively.
   - address: 0x08254760
     ghidra: FUN_08254760
     name: matrix_state_apply_axis_angle_rotation

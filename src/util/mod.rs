@@ -134,6 +134,7 @@ pub mod matrix_state_apply_transform;
 pub mod matrix_state_apply_frustum;
 pub mod matrix_state_apply_six_coordinate_transform;
 pub mod fixed_matrix_cursor;
+pub mod fixed_matrix_cursor_assign;
 pub mod fixed16_matrix_identity_init;
 pub mod field_access;
 pub mod four_word_record;
