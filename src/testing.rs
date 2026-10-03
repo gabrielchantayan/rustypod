@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const RECORD28_VECTOR_LAST: usize = 0x4273_0000;
     // Dedicated two-byte-range owner fixture; mappings never unmap.
     pub const TWO_BYTE_RANGES_DESTRUCT: usize = 0x4272_0000;
     pub const RECORD_COLLECTION_GET: usize = 0xd71c_0000;

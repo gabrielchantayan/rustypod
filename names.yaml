@@ -204350,3 +204350,33 @@ functions:
       reports 30 stock versus 31 Rust instructions, preserving all field
       accesses and the single call; differences are frame-pointer setup,
       saved-register choice, scheduling, and the archive's unresolved BL.
+  - address: 0x08267f88
+    ghidra: FUN_08267f88
+    name: record28_vector_last
+    size: 16
+    sig: "uint32_t *record28_vector_last(const uint32_t *owner)"
+    module: app/record28_vector_last
+    status: ported
+    renames:
+      param_1: owner
+    notes: >-
+      Raw words e5900004 e5900048 e240001c e12fff1e establish the
+      16-byte extent 0x08267f88..0x08267f98 exclusive; the next real
+      function begins with push {r4,r5,r6,r7,r8,r9,r10,lr}.
+      Whole-image aligned ARM word decoding finds two unconditional inbound
+      BL sites at 0x082233d0 and 0x08267e80, zero predicated inbound BLs,
+      and zero internal plain or predicated BLs. Loads the backing pointer
+      at owner +4, then its vector end word at +0x48, subtracts 28,
+      and returns the resulting address. The append caller at 0x08267d88
+      uses 28-byte elements with begin/end at backing +0x44/+0x48;
+      the property caller at 0x08223254 writes fields of the returned record.
+      Record kind remains unknown. No callee seams or deliberate deviations;
+      target pointers remain u32 words on hosts and subtraction wraps,
+      including empty-vector and zero-end cases, without validation.
+      Host edge tests cover one/multiple/empty records, underflow, high-bit
+      addresses, backing replacement, and preserved input words.
+      Host suite passes 13631 tests; ARM release build passes.
+      Standalone host smoke verifies write-through to the returned last
+      record and zero-end wrapping. match.py reports four stock versus
+      six Rust instructions: both loads and subtraction match, with LLVM
+      adding frame-pointer setup and replacing bx lr with pop {fp,pc}.
