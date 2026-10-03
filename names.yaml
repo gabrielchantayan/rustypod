@@ -203175,3 +203175,46 @@ functions:
       cursors. ARM release builds; match.py reports 67 Rust instructions
       versus 50 original, preserving construction, counting, lookahead,
       append calls, unsigned loop bounds, and distinct termination writes.
+
+  - address: 0x08277b64
+    ghidra: FUN_08277b64
+    name: transfer_quantum
+    size: 108
+    sig: "uint32_t transfer_quantum(void *this, uint32_t requested)"
+    module: cxx/transition_addon
+    status: ported
+    vars:
+      param_1: this
+      param_2: requested
+      param_3: unused_r2
+      param_4: unused_r3
+      local_18: padding
+      uVar3: capacity
+      FUN_081a8198: aligned_buffer_align_up_with_pad
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw A32 establishes the exact 108-byte extent 0x08277b64..0x08277bd0,
+      ending in pop before the independently entered scale_class leaf.
+      Whole-image aligned BL-immediate decoding finds two inbound plain BLs
+      at 0x08278e2c and 0x08278eec, no predicated inbound BLs, two outgoing
+      plain BLs at 0x08277b80 and 0x08277bc4, and no predicated outgoing BLs.
+      Align nonzero context at this+0x28 to 32 bytes and subtract padding
+      with u32 wraparound. Read capacity at this+0x24; if the remaining
+      request is smaller, clear context and return capacity. Otherwise clamp
+      to 0x40000 only when aligned context is zero, then return capacity
+      times the unsigned quotient. The clamp follows the minimum-capacity
+      check, so capacity above 0x40000 can yield zero on the clamp path.
+      Alignment may wrap context to zero. Zero capacity still reaches the
+      existing divider's SIGFPE path; no new validation or fallback.
+      Both callees are existing ports, called directly. Both transition-addon
+      constructors now call this port directly; the obsolete dispatch slot
+      and inert default are removed. Deliberate deviation: omit unused r2/r3
+      from Ghidra's inferred four-argument signature. Host tests cover
+      alignment, unsigned subtraction wrap, minimum-capacity precedence,
+      clamping, rounding, and preservation of neighboring words. The full
+      host suite passes 13578 tests; ARM release builds. Standalone host
+      smoke observes context 0xdeadbf00, quantum 0xaa00, and null-context
+      cap 0x40000. match.py reports 36 Rust versus 27 original instructions:
+      LLVM adds frame/padding initialization and hoists clamp selection,
+      preserving both calls, wrapping subtraction, unsigned capacity check,
+      context clearing, and quotient multiplication. No device run claimed.

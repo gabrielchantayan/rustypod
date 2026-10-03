@@ -254,11 +254,11 @@ pub unsafe extern "C" fn silver_controller_transition_addon_destroy(
 }
 
 /// Dispatch boundaries for helpers in
-/// [`silver_controller_transition_addon_construct`]. The owner-capacity
-/// query @ 0x08296efc is ported and wired directly; the other ported callees
-/// are the common interface-guard base constructor 0x0818a0c4
-/// ([`interface_guard_base_construct`]), the facade accessor 0x0818a0bc
-/// ([`facade_for_selector`]), and the alignment query 0x081a81bc (a
+/// [`silver_controller_transition_addon_construct`]. Ported helpers are
+/// wired directly: the owner-capacity query @ 0x08296efc, transfer quantum
+/// @ 0x08277b64, common interface-guard base constructor @ 0x0818a0c4
+/// ([`interface_guard_base_construct`]), facade accessor @ 0x0818a0bc
+/// ([`facade_for_selector`]), and alignment query @ 0x081a81bc (a
 /// byte-identical copy of [`deque_seg_capacity`], which the 0x083d9fc0
 /// ledger entry sanctions hooking any copy to).
 #[derive(Clone, Copy)]
@@ -271,11 +271,6 @@ pub struct TransitionAddonConstructOps {
         member: *mut u8,
         source: *const u8,
     ) -> *mut u8,
-    /// `FUN_08277b64`: the transfer-quantum helper. Reads the context word
-    /// at this+0x28 (already stored) and the capacity word at this+0x24,
-    /// optionally re-queries the context through 0x081a8198, clamps against
-    /// 0x40000, and returns a capacity-rounded quantum through 0x08036f14.
-    pub transfer_quantum: unsafe extern "C" fn(this: *mut u8, arg: u32) -> u32,
     /// `FUN_08278104`: the vector-like member constructor at this+0x40.
     /// Stores the owner pointer at member+0x00, zeroes the words at
     /// +0x04/+0x08/+0x0c/+0x10 (the begin/end/capacity triple is
@@ -340,12 +335,83 @@ pub unsafe extern "C" fn owner_capacity_query(this: *mut u8) -> u32 {
     }
 }
 
-/// Default for the unresolved transfer-quantum helper @ 0x08277b64: inert
-/// zero. The decoded body entangles two more unported callees (the
-/// align-up query 0x081a8198 and the divider 0x08036f14), so no faithful
-/// partial behavior is available.
-unsafe extern "C" fn transfer_quantum_unported(_this: *mut u8, _arg: u32) -> u32 {
-    0
+/// transfer_quantum — original `FUN_08277b64` @ 0x08277b64.
+///
+/// True extent: 108 bytes, 0x08277b64..0x08277bd0. Raw aligned ARM
+/// decoding verifies two inbound plain BL sites (0x08278e2c, 0x08278eec),
+/// two outgoing plain BLs, and no predicated BLs. Align a nonzero context
+/// address to 32 bytes and subtract its padding with u32 wraparound. If the
+/// remaining request is below capacity, clear context and return capacity.
+/// Otherwise cap at 0x40000 only when the aligned context is zero, then
+/// round down to a capacity multiple through the stock unsigned divider.
+/// Deliberate deviations: omit unused r2/r3 arguments inferred by Ghidra;
+/// use the existing Rust alignment and division ports directly.
+///
+/// # Safety
+/// `this` must contain writable, four-byte-aligned u32 fields at +0x24
+/// (capacity) and +0x28 (32-bit context address). Context is not dereferenced.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn transfer_quantum(this: *mut u8, mut requested: u32) -> u32 {
+    let context_slot = this.add(TRANSITION_ADDON_CONTEXT_OFFSET).cast::<u32>();
+    let context = context_slot.read();
+    if context != 0 {
+        let mut padding = 0;
+        let aligned = crate::heap::aligned_buffer::aligned_buffer_align_up_with_pad(
+            context as usize as *mut u8, &mut padding,
+        );
+        context_slot.write(aligned as usize as u32);
+        requested = requested.wrapping_sub(padding);
+    }
+    let capacity = this.add(TRANSITION_ADDON_CAPACITY_OFFSET).cast::<u32>().read();
+    if requested < capacity {
+        context_slot.write(0);
+        return capacity;
+    }
+    if requested > 0x40000 && context_slot.read() == 0 {
+        requested = 0x40000;
+    }
+    capacity.wrapping_mul(crate::runtime::rt_div::__rt_udiv(requested, capacity))
+}
+
+#[cfg(test)]
+mod transfer_quantum_tests {
+    use super::transfer_quantum;
+
+    #[test]
+    fn alignment_rounding_clamping_and_wrapping() {
+        for context in [0u32, 0x1000, 0x1001, 0x101f, 0xffff_ffff] {
+            for capacity in [1u32, 31, 32, 512, 0x40001, u32::MAX] {
+                for requested in [0u32, 1, 30, 31, 32, 511, 512, 513,
+                    0x3ffff, 0x40000, 0x40001, u32::MAX] {
+                    let mut object = [0x5555_5555u32; 11];
+                    object[9] = capacity;
+                    object[10] = context;
+                    let padding = (32 - (context & 31)) & 31;
+                    let remaining = requested.wrapping_sub(padding);
+                    let mut expected_context = context.wrapping_add(31) & !31;
+                    let expected = if remaining < capacity {
+                        expected_context = 0;
+                        capacity
+                    } else {
+                        let limited = if expected_context == 0 {
+                            remaining.min(0x40000)
+                        } else {
+                            remaining
+                        };
+                        limited - limited % capacity
+                    };
+                    let actual = unsafe {
+                        transfer_quantum(object.as_mut_ptr().cast(), requested)
+                    };
+                    assert_eq!((actual, object[10]), (expected, expected_context),
+                        "context={context:#x} capacity={capacity:#x} request={requested:#x}");
+                    assert_eq!(object[9], capacity);
+                    assert_eq!(&object[..9], &[0x5555_5555; 9]);
+                }
+            }
+        }
+    }
 }
 
 /// scale_class — original FUN_08277bd0 @ 0x08277bd0.
@@ -524,7 +590,6 @@ unsafe extern "C" fn register_with_owner_unported(_this: *mut u8) {}
 pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
     TransitionAddonConstructOps {
         string_member_construct: string_member_construct_unported,
-        transfer_quantum: transfer_quantum_unported,
         vector_member_construct,
         register_with_owner: register_with_owner_unported,
     };
@@ -544,12 +609,6 @@ unsafe fn string_member_construct_op() -> unsafe extern "C" fn(*mut u8, *const u
 }
 
 
-#[inline(always)]
-unsafe fn transfer_quantum_op() -> unsafe extern "C" fn(*mut u8, u32) -> u32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(
-        TRANSITION_ADDON_CONSTRUCT_OPS.transfer_quantum
-    ))
-}
 
 
 #[inline(always)]
@@ -656,7 +715,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
     write_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET), capacity);
 
     write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), context);
-    let quantum = transfer_quantum_op()(this, quantum_arg);
+    let quantum = transfer_quantum(this, quantum_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET), quantum);
 
     let scale = scale_class(this, scale_arg);
@@ -782,7 +841,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct_from_cstr(
     write_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET), capacity);
 
     write_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET), context);
-    let quantum = transfer_quantum_op()(this, quantum_arg);
+    let quantum = transfer_quantum(this, quantum_arg);
     write_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET), quantum);
 
     let scale = scale_class(this, scale_arg);
@@ -1001,7 +1060,6 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum ConstructCall {
         StringMember { member: usize, source: usize },
-        Quantum { this: usize, arg: u32, context_at_call: u32 },
         Walk { selector: u32 },
         Vector { member: usize, owner: usize },
         Register { this: usize },
@@ -1024,15 +1082,6 @@ mod tests {
     }
 
 
-    unsafe extern "C" fn recording_transfer_quantum(this: *mut u8, arg: u32) -> u32 {
-        (*core::ptr::addr_of_mut!(CONSTRUCT_CALLS)).push(ConstructCall::Quantum {
-            this: this as usize,
-            arg,
-            // The original stores the context word BEFORE this helper runs.
-            context_at_call: read_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET)),
-        });
-        0x2222
-    }
 
 
     unsafe extern "C" fn recording_vector_member_construct(
@@ -1108,7 +1157,6 @@ mod tests {
         }
         construct_guard(TransitionAddonConstructOps {
             string_member_construct: recording_string_member_construct,
-            transfer_quantum: recording_transfer_quantum,
             vector_member_construct: recording_vector_member_construct,
             register_with_owner: recording_register_with_owner,
         })
@@ -1155,11 +1203,6 @@ mod tests {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
                 },
-                ConstructCall::Quantum {
-                    this: derived as usize,
-                    arg: 0xaaaa,
-                    context_at_call: 0xdead_beef,
-                },
                 ConstructCall::Walk { selector: 1 },
                 ConstructCall::Vector {
                     member: unsafe { derived.add(TRANSITION_ADDON_VECTOR_OFFSET) } as usize,
@@ -1178,8 +1221,8 @@ mod tests {
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_bf00);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0xaa00);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(*derived.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
@@ -1334,11 +1377,6 @@ mod tests {
                     member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
                     source: source as usize,
                 },
-                ConstructCall::Quantum {
-                    this: derived as usize,
-                    arg: 0xaaaa,
-                    context_at_call: 0xdead_beef,
-                },
                 ConstructCall::Walk { selector: 1 },
                 ConstructCall::Vector {
                     member: unsafe { derived.add(TRANSITION_ADDON_VECTOR_OFFSET) } as usize,
@@ -1365,8 +1403,8 @@ mod tests {
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_beef);
-            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0x2222);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0xdead_bf00);
+            assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0xaa00);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 1);
             assert_eq!(read_u32_unaligned(derived.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
             assert_eq!(*derived.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
