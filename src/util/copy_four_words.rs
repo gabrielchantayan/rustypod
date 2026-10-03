@@ -27,6 +27,37 @@ pub unsafe extern "C" fn copy_four_words(source: *const u32, destination: *mut u
     destination.add(3).write(final_word);
     final_word
 }
+/// `copy_four_words_property_output` — retailOS `FUN_0823b4a4` at
+/// **0x0823b4a4** (36 bytes, `0x0823b4a4..0x0823b4c8`).
+///
+/// Raw A32 words decode to four alternating aligned LDR/STR pairs and BX LR;
+/// the next function begins with PUSH {r4,r5,lr}. Whole-image branch decoding
+/// verifies two plain inbound BLs (0x0824d2e4 and 0x08255560), zero predicated
+/// BLs, and zero outbound calls. Copy four property words from r0 to r1 in
+/// ascending order, returning the final word loaded into r0. Later reads
+/// observe earlier stores when the ranges overlap.
+///
+/// Deliberate deviations: none. A dedicated text section retains this hook
+/// symbol separately from byte-identical copy helpers.
+///
+/// # Safety
+/// `source` must allow four aligned u32 reads and `destination` four aligned
+/// u32 writes. The ranges may overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.copy_four_words_property_output")]
+#[inline(never)]
+pub unsafe extern "C" fn copy_four_words_property_output(
+    source: *const u32,
+    destination: *mut u32,
+) -> u32 {
+    destination.write(source.read());
+    destination.add(1).write(source.add(1).read());
+    destination.add(2).write(source.add(2).read());
+    let final_word = source.add(3).read();
+    destination.add(3).write(final_word);
+    final_word
+}
+
 /// copy_four_words_forward — original: `FUN_083da42c` @ **0x083da42c**
 /// (**36 bytes exactly**, `0x083da42c..0x083da450`; `0x083da450` opens the
 /// next separately linked function).
@@ -679,6 +710,28 @@ mod tests {
                 actual.as_mut_ptr().wrapping_add(destination),
                 "destination={destination}"
             );
+        }
+    }
+    #[test]
+    fn property_output_preserves_order_return_and_guards() {
+        let initial = [
+            0, 0xffff_ffff, 0x8000_0000, 0x1234_5678, 0x90ab_cdef,
+            0x5555_aaaa, 0xdead_beef, 7, 8, 9, 10, 11,
+        ];
+        for source in 0..=8 {
+            for destination in 0..=8 {
+                let mut expected = initial;
+                let mut actual = initial;
+                reference_four_word_copy(&mut expected, source, destination);
+                let returned = unsafe {
+                    super::copy_four_words_property_output(
+                        actual.as_ptr().add(source),
+                        actual.as_mut_ptr().add(destination),
+                    )
+                };
+                assert_eq!(actual, expected, "source={source}, destination={destination}");
+                assert_eq!(returned, expected[destination + 3]);
+            }
         }
     }
 }
