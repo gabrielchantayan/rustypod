@@ -29,3 +29,4 @@ pub mod atom_range_parse;
 pub mod atom_header_read_width;
 pub mod stream_position_report;
 pub mod sample_cache_entries;
+pub mod sample_cache_set_loaded;
