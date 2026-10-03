@@ -43,9 +43,32 @@ pub unsafe extern "C" fn negate_fixed16_vec3(dst: *mut i32, src: *const i32) {
     core::ptr::write_volatile(dst.add(2), z.wrapping_neg());
 }
 
+/// `scale_fixed16_vec3` — original: `FUN_0824c6f4` @ 0x0824c6f4 (64 bytes).
+///
+/// Scales each of three signed Q16.16 words in place by `scale`, retaining
+/// bits 16..47 of the signed 64-bit product (round down, wrap on overflow).
+/// Raw A32 extent is 0x0824c6f4..0x0824c734, ending in bx lr; the next
+/// function begins with ldr r2, [r1]. Whole-image aligned decoding verifies
+/// two plain inbound BLs (0x0824c074, 0x0824c224), zero predicated inbound
+/// BLs, and zero outgoing BLs. Volatile accesses retain the sequential
+/// load/multiply/store order. No deliberate behavioral deviations.
+///
+/// # Safety
+/// `vector` must point to three readable and writable aligned i32 words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.scale_fixed16_vec3")]
+pub unsafe extern "C" fn scale_fixed16_vec3(vector: *mut i32, scale: i32) {
+    for index in 0..3 {
+        let component = core::ptr::read_volatile(vector.add(index));
+        let product = (component as i64) * (scale as i64);
+        core::ptr::write_volatile(vector.add(index), (product >> 16) as i32);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_fixed16_vec3, negate_fixed16_vec3};
+    use super::{copy_fixed16_vec3, negate_fixed16_vec3, scale_fixed16_vec3};
 
     #[test]
     fn copies_all_three_fixed16_components() {
@@ -100,5 +123,37 @@ mod tests {
                 assert_eq!(words, expected, "src={src_start}, dst={dst_start}");
             }
         }
+    }
+
+    #[test]
+    fn scales_signed_fractional_and_overflowing_components() {
+        let values = [
+            i32::MIN, i32::MIN + 1, -0x18000, -0x10001, -0x8000, -1,
+            0, 1, 0x8000, 0x10000, 0x18000, i32::MAX,
+        ];
+        for scale in values {
+            for x in values {
+                let mut words = [123, x, x.wrapping_add(1), x.wrapping_neg(), 456];
+                let original = words;
+                unsafe { scale_fixed16_vec3(words.as_mut_ptr().add(1), scale) };
+                let mut expected = original;
+                for index in 1..=3 {
+                    // Independent floor division, rather than signed shifting.
+                    let product = (original[index] as i128) * (scale as i128);
+                    expected[index] = product.div_euclid(65536) as i32;
+                }
+                assert_eq!(words, expected, "x={x}, scale={scale}");
+            }
+        }
+    }
+
+    #[test]
+    fn negative_fraction_rounds_down_and_overflow_wraps() {
+        let mut vector = [-1, 1, i32::MIN];
+        unsafe { scale_fixed16_vec3(vector.as_mut_ptr(), 0x8000) };
+        assert_eq!(vector, [-1, 0, -0x4000_0000]);
+        let mut vector = [i32::MAX, i32::MIN, 0x10000];
+        unsafe { scale_fixed16_vec3(vector.as_mut_ptr(), 0x20000) };
+        assert_eq!(vector, [-2, 0, 0x20000]);
     }
 }

@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0824c6f4
+    ghidra: FUN_0824c6f4
+    name: scale_fixed16_vec3
+    size: 64
+    sig: "void scale_fixed16_vec3(i32 *vector, i32 scale)"
+    module: fp/fixed16_vec3
+    status: ported
+    renames:
+      param_1/r0: vector
+      param_2/r1: scale
+      r2: component / product low word
+      r3: product high word
+    notes: >-
+      Raw osos.dec establishes sixteen A32 instructions from 0x0824c6f4
+      through bx lr at 0x0824c730, giving 64 bytes. The next function at
+      0x0824c734 begins ldr r2,[r1] and has independent BL callers at
+      0x08240b90 and 0x08240b9c. Whole-image aligned decoding finds two
+      plain inbound BLs at 0x0824c074 and 0x0824c224, zero predicated
+      inbound BLs, and zero outgoing BLs. Both callers scale a stack
+      three-component vector before further fixed-point vector operations.
+      Multiply each signed Q16.16 component by the signed scale, retain
+      product bits 16..47, and store in place in forward order. Negative
+      fractions round down and overflow wraps; no behavioral deviations
+      or callee seams. Existing module registration remains unchanged.
+      Host tests cover signs, fractional rounding, zero, identity, signed
+      extremes, wrapping and untouched neighboring words; 13731 tests pass.
+      ARM release build passes. Actual-source host smoke verifies half and
+      double scaling. match.py exits 1: eighteen Rust instructions versus
+      sixteen stock, with added frame setup/return and equivalent shift/OR
+      encoding; all three ordered signed multiplies and stores remain.
+      No device execution performed.
   - address: 0x0824c798
     ghidra: FUN_0824c798
     name: graphics_buffer_release
