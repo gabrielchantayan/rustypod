@@ -208459,3 +208459,38 @@ functions:
       backedge. The count BL relocations target the existing Rust accessor;
       address literals retain the verified callee identities. No deliberate
       behavioral deviations.
+
+  - address: 0x0821afac
+    ghidra: FUN_0821afac
+    name: embedded_vector_cursor_advance
+    size: 64
+    sig: "u32 embedded_vector_cursor_advance(EmbeddedVectorCursor *owner)"
+    module: app/embedded_vector_cursor_advance
+    status: ported
+    vars: {param_1: owner, uVar1: count}
+    notes: >-
+      Raw ARM verifies 0x0821afac..0x0821afec, with the next function's
+      push at 0x0821afec. Two outgoing unconditional BL instructions call
+      the existing vector_size_elem4_alias_76e8 at 0x083d76e8; no
+      predicated BLs. Two incoming unconditional BLs from 0x0821acd8
+      and 0x0821bb08; no predicated incoming BLs. Increment the cursor at
+      +0x18 only if it is unsigned-below the four-byte-element vector
+      count from the head at +0x0c. Re-query the count, returning 1 when
+      the cursor remains below it, otherwise reset the cursor and return
+      0. Raw movls/movhi establishes a u32 return despite Ghidra's void
+      signature; both callers consume that return. Preserve unsigned
+      interpretation of negative arithmetic-shift counts for reversed
+      spans. Native-pointer repr(C) fields support host fixtures while
+      compile-time assertions enforce ARM offsets. No behavioral
+      deviations. Host tests cover empty, singleton, last, out-of-range,
+      maximum cursors and reversed non-element-aligned spans, including
+      prefix and vector-field preservation. All 13813 host tests pass;
+      ARM build succeeds. Isolated smoke using the actual port and exact
+      existing vector helper source yields (1,1), (1,2), (0,0), (1,1).
+      Whole-crate non-test host build is independently blocked by six
+      pre-existing missing host helper functions in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule. match.py exits 1:
+      LLVM emits 72 bytes, a larger frame and keeps the cursor in r6
+      across the second call. Both BL relocations resolve to the correct
+      vector_size_elem4_alias_76e8; conditional increment, unsigned
+      comparisons, reset and boolean return preserve the original flow.
