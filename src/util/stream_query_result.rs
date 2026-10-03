@@ -1,52 +1,56 @@
-//! Stream query result — `FUN_083d8e88` @ `0x083d8e88` and
-//! `FUN_083d986c` @ `0x083d986c`.
+//! Stream seek/tell adapters and two-word position results.
 //!
-//! Raw `osos.dec` words establish each 44-byte extent: `0x083d8e88..0x083d8eb0`
-//! and `0x083d986c..0x083d9894`. `0x083d8eb4` and `0x083d9898` begin the next
-//! separately linked functions with `push {r4,r5,r6,r7,r8,r9,sl,lr}`. Each
-//! body has one plain unconditional `bl`, to the unrecovered stream query at
-//! `0x08266bc0`, and no predicated `bl` instructions. Whole-image A32
-//! decoding finds two inbound plain calls to `0x083d986c`, at `0x083d99b4`
-//! and `0x083d9c18`, and no predicated calls. Each forwards three query
-//! arguments after adding 48 to the stream object's address, stores the
-//! returned word, and clears the result's second word.
+//! `stream_seek_position` — `FUN_08266bc0` @ 0x08266bc0, 40 bytes,
+//! ending before the next body at 0x08266be8 (`mov ip,r0`). Raw A32
+//! decoding verifies one plain BL (fseek @ 0x0802fef0), zero predicated
+//! BLs, and a conditional tail branch to ftell @ 0x0802ff38. Two inbound
+//! plain BLs occur at 0x083d8ea0 and 0x083d9884; no predicated BLs.
+//! Dereference the FILE slot, seek with the supplied offset and origin,
+//! reload the slot and tell on success; any nonzero seek result becomes -1.
+//! Deliberate deviation: use the existing Rust fseek/ftell ports, rather
+//! than Ghidra's erroneous inlining of ftell across the tail branch.
+//! LLVM inlines fseek's hook dispatch and ftell's position calculation:
+//! match.py reports 34 instructions versus the original ten. The nonzero
+//! status exit and success-only slot reload remain intact; no exact match
+//! or preserved tail-call shape is claimed.
 //!
-//! Deliberate deviation: ARM builds retain the eleven original instructions.
-//! Host builds use a seam for `0x08266bc0`, whose semantic identity has not
-//! been recovered; this permits testing the wrapper without inventing it.
+//! The existing result adapters at 0x083d8e88 and 0x083d986c each have
+//! 44-byte bodies and one plain BL, zero predicated BLs. They seek through
+//! the FILE slot at stream + 0x30, store the returned position bits, and
+//! clear the second result word. Their former raw-address assembly and
+//! unrecovered host seam are replaced with the recovered Rust callee.
 
-/// ABI of the unrecovered query at `0x08266bc0`.
-pub type StreamQuery = unsafe extern "C" fn(*mut u8, u32, u32) -> u32;
+use crate::stream_file::AdsFile;
 
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_stream_query(_stream_state: *mut u8, _arg2: u32, _arg3: u32) -> u32 {
-    0
+/// Seek through a FILE slot, then return its logical position, or -1.
+/// The slot must be aligned, readable, and contain a valid FILE pointer.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn stream_seek_position(
+    file_slot: *mut *mut AdsFile,
+    offset: i32,
+    origin: i32,
+) -> i32 {
+    if crate::stdio_init::fseek(file_slot.read_volatile(), offset, origin) != 0 {
+        return -1;
+    }
+    crate::ftell::ftell(file_slot.read_volatile())
 }
 
-/// Host boundary for the still-unported query at `0x08266bc0`.
-#[cfg(not(target_arch = "arm"))]
-pub static mut STREAM_QUERY: StreamQuery = missing_stream_query;
-
-#[cfg(test)]
-pub(crate) static STREAM_QUERY_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-
-/// Queries the stream subobject at offset 48 and forms its two-word result.
-#[cfg(not(target_arch = "arm"))]
+/// Seek the stream subobject at offset 48 and form its two-word result.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn stream_query_result(
     result: *mut u32,
     stream: *mut u8,
-    arg2: u32,
-    arg3: u32,
+    offset: u32,
+    origin: u32,
 ) {
-    let query = core::ptr::read_volatile(core::ptr::addr_of!(STREAM_QUERY));
-    result.write_volatile(query(stream.add(0x30), arg2, arg3));
+    result.write_volatile(stream_seek_position(stream.add(0x30).cast(), offset as i32, origin as i32) as u32);
     result.add(1).write_volatile(0);
 }
 
-/// Queries the stream subobject at offset 48 for a position result.
-#[cfg(not(target_arch = "arm"))]
+/// Seek to the supplied position and form its two-word result.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn stream_query_result_at_position(
@@ -55,115 +59,66 @@ pub unsafe extern "C" fn stream_query_result_at_position(
     position: u32,
     query_mode: u32,
 ) {
-    let query = core::ptr::read_volatile(core::ptr::addr_of!(STREAM_QUERY));
-    result.write_volatile(query(stream.add(0x30), position, query_mode));
+    result.write_volatile(stream_seek_position(stream.add(0x30).cast(), position as i32, query_mode as i32) as u32);
     result.add(1).write_volatile(0);
 }
 
-#[cfg(target_arch = "arm")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .section .text.stream_query_result, "ax", %progbits
-    .p2align 2
-    .globl stream_query_result
-    .type stream_query_result, %function
-stream_query_result:
-    push    {{r4, lr}}
-    mov     r4, r0
-    mov     r0, r1
-    mov     r1, r2
-    mov     r2, r3
-    add     r0, r0, #0x30
-    bl      0x08266bc0
-    str     r0, [r4]
-    mov     r0, #0
-    str     r0, [r4, #4]
-    pop     {{r4, pc}}
-    .size stream_query_result, . - stream_query_result
-"#
-);
-
-#[cfg(target_arch = "arm")]
-core::arch::global_asm!(
-    r#"
-    .syntax unified
-    .section .text.stream_query_result_at_position, "ax", %progbits
-    .p2align 2
-    .globl stream_query_result_at_position
-    .type stream_query_result_at_position, %function
-stream_query_result_at_position:
-    push    {{r4, lr}}
-    mov     r4, r0
-    mov     r0, r1
-    mov     r1, r2
-    mov     r2, r3
-    add     r0, r0, #0x30
-    bl      0x08266bc0
-    str     r0, [r4]
-    mov     r0, #0
-    str     r0, [r4, #4]
-    pop     {{r4, pc}}
-    .size stream_query_result_at_position, . - stream_query_result_at_position
-"#
-);
-
 #[cfg(test)]
 mod tests {
-    use super::{stream_query_result, stream_query_result_at_position, StreamQuery, STREAM_QUERY, STREAM_QUERY_TEST_LOCK};
-    use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+    use super::*;
+    use crate::stream_file::ADS_FILE_ZERO;
+    use crate::getc_core::MODE_READ;
+    use crate::semihost::tests::{mock_swi, restore_swi};
 
-    static OBSERVED_STREAM_STATE: AtomicUsize = AtomicUsize::new(0);
-    static OBSERVED_ARG2: AtomicU32 = AtomicU32::new(0);
-    static OBSERVED_ARG3: AtomicU32 = AtomicU32::new(0);
-
-    unsafe extern "C" fn recording_stream_query(stream_state: *mut u8, arg2: u32, arg3: u32) -> u32 {
-        OBSERVED_STREAM_STATE.store(stream_state as usize, Ordering::Relaxed);
-        OBSERVED_ARG2.store(arg2, Ordering::Relaxed);
-        OBSERVED_ARG3.store(arg3, Ordering::Relaxed);
-        0x81e2_4a09
+    #[repr(C)]
+    struct StreamObject {
+        prefix: [u32; 12],
+        file: *mut AdsFile,
     }
 
     #[test]
-    fn queries_offset_0x30_and_clears_result_tail() {
-        let _lock = STREAM_QUERY_TEST_LOCK.lock();
-        let saved_query: StreamQuery = unsafe { STREAM_QUERY };
-        unsafe { STREAM_QUERY = recording_stream_query };
-
-        let mut stream = [0u8; 0x34];
-        let mut result = [0xffff_ffff; 2];
-        unsafe { stream_query_result(result.as_mut_ptr(), stream.as_mut_ptr(), 0x1234_5678, 0x9abc_def0) };
-
-        assert_eq!(OBSERVED_STREAM_STATE.load(Ordering::Relaxed), unsafe { stream.as_mut_ptr().add(0x30) } as usize);
-        assert_eq!(OBSERVED_ARG2.load(Ordering::Relaxed), 0x1234_5678);
-        assert_eq!(OBSERVED_ARG3.load(Ordering::Relaxed), 0x9abc_def0);
-        assert_eq!(result, [0x81e2_4a09, 0]);
-
-        unsafe { STREAM_QUERY = saved_query };
-    }
-
-    #[test]
-    fn position_query_forwards_position_and_mode() {
-        let _lock = STREAM_QUERY_TEST_LOCK.lock();
-        let saved_query: StreamQuery = unsafe { STREAM_QUERY };
-        unsafe { STREAM_QUERY = recording_stream_query };
-
-        let mut stream = [0u8; 0x34];
-        let mut result = [0xffff_ffff; 2];
+    fn real_seek_tell_and_failure_result() {
+        let guard = mock_swi(&[0, 0, 0, 0]);
         unsafe {
-            stream_query_result_at_position(
-                result.as_mut_ptr(),
-                stream.as_mut_ptr(),
-                0x1357_9bdf,
-                2,
-            )
-        };
+            let saved = crate::stdio_init::STREAM_SEEK_CORE;
+            crate::stdio_init::STREAM_SEEK_CORE = crate::seek_core::fseek_core;
+            let mut file = ADS_FILE_ZERO;
+            file.stream.flags = MODE_READ;
+            file.stream.handle = 7;
+            let mut object = StreamObject { prefix: [0; 12], file: &mut file };
+            assert_eq!(stream_seek_position(&mut object.file, 123, 0), 123);
+            assert_eq!(stream_seek_position(&mut object.file, -23, 1), 100);
+            // Negative target and invalid origin must return -1, not core's 2.
+            assert_eq!(stream_seek_position(&mut object.file, -1, 0), -1);
+            assert_eq!(stream_seek_position(&mut object.file, 0, 99), -1);
+            assert_eq!(file.stream.alt_offset, 100);
+            crate::stdio_init::STREAM_SEEK_CORE = saved;
+        }
+        restore_swi();
+        drop(guard);
+    }
 
-        assert_eq!(OBSERVED_STREAM_STATE.load(Ordering::Relaxed), unsafe { stream.as_mut_ptr().add(0x30) } as usize);
-        assert_eq!(OBSERVED_ARG2.load(Ordering::Relaxed), 0x1357_9bdf);
-        assert_eq!(OBSERVED_ARG3.load(Ordering::Relaxed), 2);
-        assert_eq!(result, [0x81e2_4a09, 0]);
-
-        unsafe { STREAM_QUERY = saved_query };
+    #[test]
+    fn result_adapters_seek_and_clear_tail() {
+        let guard = mock_swi(&[0, 0]);
+        unsafe {
+            let saved = crate::stdio_init::STREAM_SEEK_CORE;
+            crate::stdio_init::STREAM_SEEK_CORE = crate::seek_core::fseek_core;
+            let mut file = ADS_FILE_ZERO;
+            file.stream.flags = MODE_READ;
+            file.stream.handle = 7;
+            let mut object = StreamObject { prefix: [0; 12], file: &mut file };
+            let stream = core::ptr::addr_of_mut!(object).cast();
+            let mut result = [u32::MAX; 2];
+            stream_query_result(result.as_mut_ptr(), stream, 250, 0);
+            assert_eq!(result, [250, 0]);
+            result[1] = 99;
+            stream_query_result_at_position(result.as_mut_ptr(), stream, (-251i32) as u32, 1);
+            assert_eq!(result, [u32::MAX, 0]);
+            assert_eq!(file.stream.alt_offset, 250);
+            crate::stdio_init::STREAM_SEEK_CORE = saved;
+        }
+        restore_swi();
+        drop(guard);
     }
 }
