@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08242cb0
+    ghidra: FUN_08242cb0
+    name: vertex_attributes_lerp
+    size: 176
+    sig: "void vertex_attributes_lerp(i32 *output, const i32 *start, const i32 *end, i32 factor_q4_28, u32 attribute_count)"
+    module: util/vertex_attributes_lerp
+    status: ported
+    renames:
+      param_1/r0/r5: output
+      param_2/r1/r6: start
+      param_3/r2/r7: end
+      param_4/r3/r9: factor_q4_28
+      param_5/stack/r8: attribute_count
+      uVar2/r4: attribute_index
+      uVar1/r0_after_bl: interpolated_component
+      FUN_08242d60: fixed28_lerp
+    notes: >-
+      Raw A32 words establish 176 bytes at 0x08242cb0..0x08242d60,
+      ending with pop at 0x08242d5c before the next independent push.
+      Whole-image decoding finds two unconditional inbound BLs at
+      0x082498cc and 0x0824ff0c, zero predicated inbound BLs, and five
+      unconditional outbound BLs to the already-ported fixed28_lerp at
+      0x08242cd8, 0x08242cf0, 0x08242d08, 0x08242d20, 0x08242d44;
+      zero predicated outbound BLs. Interpolates four homogeneous vertex
+      coordinates at +0x10..+0x1c, then attribute_count words at +0x6c.
+      Caller 0x08249850 additionally interpolates the first four words;
+      polygon clipper 0x0824fc08 uses the coordinate-only wrapper directly.
+      Ghidra truncates the latter call's arguments, but the raw callee
+      consumes r0-r3 and its fifth argument at entry sp. Signed Q4.28
+      factors, wrapped subtraction/addition and half-up rounding are
+      inherited from fixed28_lerp. Other fields remain untouched, including
+      the +0x90 clipping flags. Word pointers avoid inventing the complete
+      vertex type and preserve four-byte spacing on hosts; no behavioral
+      deviations or new firmware seams. Tests cover zero/one/eight trailing
+      attributes, signed extremes, extrapolation, rounding ties, untouched
+      fields, either-source aliasing and forward overlapping writes.
+      All 13761 host tests pass; ARM release build passes. Standalone native
+      smoke using actual source verifies coordinates, attributes and guards.
+      match.py exits 1 with a structural diff: 42 Rust instructions versus
+      44 stock, the same four fixed calls and fifth counted-loop call;
+      LLVM uses postincrement pointers and a decrementing count rather than
+      indexed addressing. Five archive R_ARM_CALL relocations verify the
+      targets are fixed28_lerp, despite unresolved BL labels in match.py.
+      No device execution performed.
   - address: 0x08242d90
     ghidra: FUN_08242d90
     name: fixed_matrix_cursor_assign
