@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08266b64
+    ghidra: FUN_08266b64
+    name: selector_layout_size
+    size: 32
+    sig: "u32 selector_layout_size(u32 selector)"
+    module: cxx/selector_layout_size
+    status: ported
+    renames:
+      param_1/r0: selector
+      uVar1/r0: layout_size
+    notes: >-
+      Raw ARM establishes the 32-byte extent ending at the next function's
+      push at 0x08266b84. Whole-image aligned A32 decoding finds two plain
+      inbound BLs at 0x083d97c0 and 0x083d9d7c, zero predicated inbound BLs,
+      and zero outbound BLs. Returns 4 for selector 0, 8 for 1 or 2, and
+      12 for every other full-width value. Both shared-record constructors
+      now call the Rust port directly; old target and host size seams are
+      removed. Deliberate deviations: none. Host edge tests cover valid
+      selectors, first invalid value, low-byte aliases, signed boundary
+      and u32::MAX. Executable C-ABI smoke verifies 65540 selector values.
+      Host suite and ARM release build pass. Reviewed match.py exits 1:
+      LLVM uses an unsigned selector <= 2 guard and a three-entry result
+      table instead of conditional moves, with a frame-pointer prologue;
+      all invalid selectors still return 12.
+
   - address: 0x0825d4c4
     ghidra: FUN_0825d4c4
     name: xml_collect_tag_name

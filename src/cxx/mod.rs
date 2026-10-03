@@ -544,6 +544,7 @@ pub mod shared_payload_nested_result_word;
 pub mod shared_handle_initialize;
 pub mod shared_cell_field_copy;
 pub mod shared_record_construct;
+pub mod selector_layout_size;
 pub mod shared_record_create;
 pub mod shared_reference_owner_destroy;
 pub mod slot_reset;
