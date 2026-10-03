@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08254798
+    ghidra: FUN_08254798
+    name: video_engine_set_scissor_rect
+    size: 64
+    sig: "void video_engine_set_scissor_rect(u32 *engine, i32 x, i32 y, i32 width, i32 height)"
+    module: util/video_engine_scissor_rect
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: x
+      param_3/r2: y
+      param_4/r3: width
+      param_5/stack: height
+      FUN_0824f388: latch_first_error
+      FUN_08252e24: firmware_refresh_frame_rectangle
+    notes: >-
+      Raw aligned A32 words establish 64 bytes at 0x08254798..0x082547d8:
+      60 instruction bytes and the 0x501 literal at 0x082547d4, followed
+      by the next function's push. Whole-image decoding finds one plain
+      inbound BL at 0x08251e64 and one BLNE at 0x082d20d8; two plain
+      outbound BLs, zero predicated outbound BLs. Reject negative width
+      or height with first-error latch 0x501 and no geometry changes;
+      otherwise store x/y/width/height at +0x118..+0x124 and refresh the
+      frame rectangle. Negative origins and zero dimensions are accepted;
+      scissor-enable byte +0x130 remains untouched. Both raw callers ignore
+      restored argument registers, so the signature is void rather than
+      Ghidra's incidental undefined8. Reuses the existing Rust error latch.
+      Complete names lookup found no entry for 0x08252e24; CodeGraph shows
+      the resident helper clips or copies frame bounds into +0x9b0 and
+      updates +0x9ac. Retained as a firmware call, not a second port.
+      Stack staging and argument-register restoration are omitted; no
+      target behavioral deviations. Private injected refresh follows the
+      output-rectangle port; valid public host calls explicitly panic.
+      Host tests cover signed boundaries, zero sizes, error precedence,
+      store-before-refresh ordering and preservation of unrelated fields.
   - address: 0x08254f34
     ghidra: FUN_08254f34
     name: matrix_state_apply_frustum
