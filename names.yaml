@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08237fc4
+    ghidra: FUN_08237fc4
+    name: selector_item_last_records_variant_construct
+    size: 192
+    sig: "void *selector_item_last_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_last_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this / returned object
+      param_2/r1: variant
+      FUN_08218b10: selector_item_base_construct
+      DAT_08238064: derived vtable 0x089a2b3c
+    notes: >-
+      Raw A32 words establish 152 instruction bytes plus ten literal words,
+      true extent 192 bytes through 0x08238084, where the next function starts
+      cmp r1,#0; bne 0x08260870; bx lr. Whole-image decoding verifies two
+      plain inbound BLs at 0x0819fac8 and 0x0819fae0, no predicated inbound
+      BLs; one plain outbound BL at 0x08237fec to ported
+      selector_item_base_construct, no predicated outbound BLs. Callers
+      allocate 0x180 bytes and index the returned item byte at +0xb4.
+      Zero full-width variant selects item 13 / descriptor 0x800c; nonzero
+      selects item 14 / descriptor 0x800d. Base receives kind 9, context 55,
+      low variant byte as flag. Install vtable 0x089a2b3c and selector records
+      9, 10, 12, 19 and 20 at target word/byte offsets; only records 9 and 10
+      replace implementation words. Opaque implementation literals create
+      no new seams. No behavioral deviations; correct Ghidra's void return
+      to the retained base result. Host suite passes 13776 tests; standalone
+      caller smoke registers items 13 and 14. ARM build passes; match.py
+      shows reordered equivalent stores and constants, with one base call
+      confirmed by R_ARM_CALL relocation rather than archive self-recursion.
   - address: 0x0823831c
     ghidra: FUN_0823831c
     name: view_event_apply_localized_flags_forward
