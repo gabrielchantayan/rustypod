@@ -208155,3 +208155,29 @@ functions:
       A standalone actual-source host smoke with substituted host callbacks
       confirms replacement deactivation, stale-object preservation, and
       NULL removal. No device execution was performed.
+
+  - address: 0x08229c94
+    ghidra: FUN_08229c94
+    name: app_screen_dispatch_94_then_90
+    size: 52
+    sig: "u32 app_screen_dispatch_94_then_90(void)"
+    module: app/app_screen_dispatch_94_then_90
+    status: ported
+    vars:
+      piVar1/r4: screen
+      FUN_08173848: app_screen_get
+      FUN_08030f44: heap_panic
+      "vtable+0x94": first_virtual_dispatch
+      "vtable+0x90": final_virtual_dispatch
+    notes: >-
+      Raw ARM extent 0x08229c94..0x08229cc8 is 52 bytes; the next
+      real function starts with push at 0x08229cc8. Full-image BL decoding
+      finds zero plain and two predicated inbound calls: BLNE 0x08229ae4
+      and BLEQ 0x08229c74. Body: BL app_screen_get, BLEQ heap_panic,
+      BLX slot +0x94, reload vtable, tail BX slot +0x90 on the same screen.
+      Virtual identities remain unresolved. Rust exposes the final r0 word
+      as u32 despite Ghidra's void declaration; repr(C) pointers widen on
+      hosts. Reuses the singleton port with its documented constructor caveat.
+      Host tests cover unchanged/replaced vtables and wrapping state values;
+      all 13802 host tests and ARM release build pass. match.py shows 13
+      original versus 17 Rust entries, preserving NULL gating, ordered slots,
