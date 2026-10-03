@@ -134,6 +134,7 @@ pub mod always_one;
 pub mod mode_one_handler_pair;
 pub mod opaque_tail_dispatch;
 pub mod artwork_slot_available;
+pub mod music_highlight_display;
 pub mod showcase_initialization_complete;
 pub mod artwork_cache_prepare;
 pub mod device_property_read_integer;
