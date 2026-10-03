@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0823831c
+    ghidra: FUN_0823831c
+    name: view_event_apply_localized_flags_forward
+    size: 4
+    sig: "u32 view_event_apply_localized_flags_forward(u8 *this, void *event)"
+    module: app/view_event
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: event
+      FUN_0826087c: view_event_apply_localized_flags
+    notes: >-
+      Raw word ea00a156 is b 0x0826087c, whose raw word eafee287
+      reaches the existing localized-flag body at 0x082192a0. Next real
+      entry 0x08238320 starts stmdb sp!,{r4,r5,lr}, proving four bytes.
+      Whole-image aligned ARM decoding finds two plain BL callers at
+      0x083b2fd4 and 0x083b4094, zero predicated BL callers, and no
+      outbound BLs. Both callers preserve event in r1 and pass view in r0.
+      Ghidra incorrectly attributes the reached four-argument body to
+      this entry. Reuses the existing Rust implementation without new
+      seams; ARM emits an exact direct tail branch, hosts an equivalent
+      Rust call. No semantic deviations. Host regression covers both
+      localized keys present, low-byte truncation, neighboring-byte
+      preservation, NULL-event preservation and the handled verdict.
   - address: 0x0822fb28
     ghidra: FUN_0822fb28
     name: music_menu_playlist_select
