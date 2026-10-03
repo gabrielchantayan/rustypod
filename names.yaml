@@ -208388,3 +208388,46 @@ functions:
       0, 1, 127, 128 and 255, verifying call order, settings pointer,
       stored value and unconditional return even with a nonzero setter
       result. No target semantic deviations.
+
+  - address: 0x0821b220
+    ghidra: FUN_0821b220
+    name: image_format_slots_collect_unexcluded
+    size: 108
+    sig: "u32 image_format_slots_collect_unexcluded(u32 *owner, u32 *output)"
+    module: app/image_format_slots_collect_unexcluded
+    status: ported
+    renames:
+      param_1/r8: owner
+      param_2/r6: output
+      uVar1/r9: slots
+      uVar2/r7: slot_index
+      uVar5/r4: visited
+      iVar6/r5: written
+    notes: >-
+      Raw osos.dec confirms the body at 0x0821b220..0x0821b28b,
+      returning at 0x0821b288; the next function starts at 0x0821b28c
+      with ldrb r3,[r0,#0x1c]. Independent aligned A32 BL decoding
+      finds two inbound unconditional calls at 0x0821b088 and 0x0821b788,
+      no predicated inbound calls, and five outbound unconditional calls
+      with no predicated outbound calls. Fetch descriptor slots through
+      the owner's target-width context pointer at +4 using 0x081f0258,
+      reset the shared cursor using 0x081d5fd4, then advance using
+      0x081d5f54 once for each populated descriptor. Raw instructions
+      establish that the iterator returns its index in r0 despite Ghidra's
+      void signature. Query exclusion membership using 0x0821ae60 and
+      append only indices whose query returns zero. Reuse the ported
+      image_format_descriptor_slot_count at 0x081d5f90, re-reading the
+      count each iteration. Preserve order and final cursor state without
+      NULL, capacity, or extent checks. The four unported dependencies
+      have no existing address entries in names.yaml and remain verified
+      retail-address seams; host operations supply behavioral equivalents.
+      Tests exercise zero count and cursor reset, sparse slots including
+      index 17, duplicate exclusions, complete exclusion with NULL output,
+      empty exclusions, and output boundary sentinels. Full host suite and
+      ARM release build pass. A standalone host smoke emits indices 2 and
+      16, excludes 7, preserves tail sentinels, and leaves cursor 16.
+      match.py exits 1 with a reviewed structural diff: LLVM adds a frame,
+      uses BLX for fixed-address seams, and shares the count-check loop
+      backedge. The count BL relocations target the existing Rust accessor;
+      address literals retain the verified callee identities. No deliberate
+      behavioral deviations.
