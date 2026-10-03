@@ -205486,3 +205486,36 @@ functions:
       ARM release build passes. Standalone actual-source host smoke observes
       the installed vtable, kind 0xfe, preserved destination padding and
       payload words 0x80000000/0xffffffff. No device execution.
+
+  - address: 0x08261ec4
+    ghidra: FUN_08261ec4
+    name: timespec_copy
+    size: 20
+    sig: "i32 *timespec_copy(i32 *dst, const i32 *src)"
+    module: time/timespec_copy
+    status: ported
+    vars:
+      param_1/r0: dst (returned unchanged)
+      param_2/r1: src
+      r2: seconds
+    notes: >-
+      Raw extent 0x08261ec4..0x08261ed8 is five ARM instructions, with
+      bx lr at 0x08261ed4 and the next real function starting at
+      0x08261ed8. Complete aligned A32 BL decoding finds two plain inbound
+      calls at 0x08262724 and 0x08262778, zero predicated inbound calls,
+      and zero internal calls. These sites in the timed-wait body
+      FUN_0826269c (merged into FUN_08261f94 by Ghidra) copy the seconds
+      and nanoseconds pair between waiter +0x14 and caller record +0x08.
+      Loads and stores the first word before loading and storing the
+      second; forward word overlap therefore propagates the first word.
+      Returns unchanged r0, which Ghidra's void signature omits.
+      Deliberate deviation: volatile aligned i32 accesses preserve the
+      exact interleaving even for self-assignment and overlapping storage.
+      No normalization or new callee seam. match.py exits 1: all four
+      load/store instructions match exactly; LLVM adds push/mov for a
+      frame and replaces bx lr with pop. All 13685 host tests pass,
+      including four new tests for bit patterns, unnormalized nanoseconds,
+      neighbor preservation, returned destination, self-copy and both
+      overlap directions. ARM release build passes. Actual-source host
+      smoke observes forward overlap producing [11, 11, 11, 44] and the
+      returned destination. No device execution.
