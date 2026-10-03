@@ -1668,6 +1668,30 @@ pub unsafe extern "C" fn string_object_construct_from_cstr(
     this
 }
 
+/// Construct a StringObject from capped UTF-8 — original: FUN_08277388 @
+/// 0x08277388 (44 bytes: 40 code + vtable literal 0x089a6044 at
+/// 0x082773b0; next function starts at 0x082773b4). Raw ARM decoding
+/// verifies 2 incoming plain BLs (0x08187a24, 0x081e249c), zero predicated,
+/// and one outgoing plain BL to string_object_assign_utf8_capped.
+///
+/// Plant the class vtable and NULL payload in raw storage, assign at most
+/// max_codepoints UTF-8 sequences using the unchanged source/count, and
+/// return this even when allocation fails. Ghidra omits r1/r2.
+/// Deviation: use the existing modeled vtable and virtual-method boundary
+/// rather than the firmware vtable address; preserve assignment's malformed
+/// UTF-8 width behavior. This must be writable object storage and source
+/// must meet string_object_assign_utf8_capped's readable-source contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_construct_from_utf8_capped(
+    this: *mut StringObject, source: *const u8, max_codepoints: i32,
+) -> *mut StringObject {
+    (*this).vtable = &STRING_OBJECT_VTABLE;
+    (*this).payload = core::ptr::null_mut();
+    string_object_assign_utf8_capped(this, source, max_codepoints);
+    this
+}
+
 /// string_object_construct_from_utf16 — original: FUN_082773b4 @
 /// 0x082773b4 (40 code bytes plus vtable literal 0x089a6044 at 0x082773dc).
 /// Initialize raw storage with the class vtable and NULL payload, call the
@@ -5379,6 +5403,46 @@ pub(crate) mod tests {
         StringObject {
             vtable: 0xdead_beef as *const StringObjectVtable,
             payload: 0xcafe_f00d as *mut u8,
+        }
+    }
+
+    #[test]
+    fn construct_from_utf8_capped_preserves_boundaries_and_malformed_width() {
+        for (source, count, expected) in [
+            (&b"A\xc2\xa9\xe2\x82\xacZ\0"[..], 2, &b"A\xc2\xa9\0"[..]),
+            (&b"\0"[..], i32::MAX, &b"\0"[..]),
+            (&b"\xf0\x90\x80\x80Z\0"[..], 1, &b"\xf0\0"[..]),
+        ] {
+            let mut object = substring_garbage_out();
+            let mut destination = [0xa5u8; 16];
+            let _bench = assign_cstr_bench(destination.as_mut_ptr());
+            let this = core::ptr::addr_of_mut!(object);
+            assert_eq!(unsafe {
+                string_object_construct_from_utf8_capped(this, source.as_ptr(), count)
+            }, this);
+            assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(object.payload.is_null());
+            assert_eq!(&destination[..expected.len()], expected);
+            assert!(destination[expected.len()..].iter().all(|&byte| byte == 0xa5));
+        }
+    }
+
+    #[test]
+    fn construct_from_utf8_capped_initializes_garbage_on_clear_or_allocation_failure() {
+        for (source, count) in [
+            (core::ptr::null(), 1),
+            (b"A\0".as_ptr(), 0),
+            (b"A\0".as_ptr(), i32::MIN),
+            (b"A\0".as_ptr(), 1),
+        ] {
+            let mut object = substring_garbage_out();
+            let _bench = assign_cstr_bench(core::ptr::null_mut());
+            let this = core::ptr::addr_of_mut!(object);
+            assert_eq!(unsafe {
+                string_object_construct_from_utf8_capped(this, source, count)
+            }, this);
+            assert_eq!(object.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert!(object.payload.is_null());
         }
     }
 

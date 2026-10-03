@@ -48355,6 +48355,35 @@ functions:
       match.py structural: NULL/empty branch, inclusive-size request,
       NULL-result return, source copy, and +0xc fallback are retained.
 
+  - address: 0x08277388
+    ghidra: FUN_08277388
+    name: string_object_construct_from_utf8_capped
+    size: 44
+    sig: "StringObject *string_object_construct_from_utf8_capped(StringObject *this, const char *source, int max_codepoints)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: source
+      param_3/r2: max_codepoints
+    notes: >-
+      Raw osos.dec decodes 40 code bytes from 0x08277388 through
+      0x082773ac, followed by the 0x089a6044 vtable literal at
+      0x082773b0; string_object_construct_from_utf16 begins at
+      0x082773b4. Decoding every ARM B/BL instruction finds exactly 2
+      incoming direct call sites, both unconditional and zero predicated:
+      0x08187a24 and 0x081e249c. The constructor plants the StringObject
+      vtable, clears the payload word, calls string_object_assign_utf8_capped
+      @ 0x082764d8 with the unchanged source and max_codepoints r1/r2
+      arguments, then returns this. Ghidra loses those arguments and reports
+      only the object pointer. Rust uses the existing modeled static vtable
+      and assignment virtual-method boundary instead of the firmware vtable
+      address; it deliberately retains capped assignment's malformed UTF-8
+      behavior. Host tests cover multibyte caps, empty input, malformed
+      four-byte-width behavior, NULL/nonpositive clear paths, and allocation
+      failure. match.py reports the expected LLVM prologue/store-order
+      differences but preserves the constructor stores, call, and return.
+
   - address: 0x082764d8
     ghidra: FUN_082764d8
     name: string_object_assign_utf8_capped
