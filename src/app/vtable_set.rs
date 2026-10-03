@@ -4102,6 +4102,28 @@ pub unsafe extern "C" fn iterator_state_cleanup(state: *mut u32) -> *mut u32 {
     state
 }
 
+/// file_record_iterator_destruct — original: `FUN_0821c4ec` @ 0x0821c4ec
+/// (20 bytes exactly, 0x0821c4ec..0x0821c500; five A32 instructions,
+/// no literals; two plain BL callers at 0x0811cd44 and 0x0811d1f4,
+/// zero predicated BL callers, independently decoded from osos.dec).
+///
+/// Destroys the five-word iterator state at +0x04 through the already
+/// ported [`iterator_state_cleanup`], then subtracts one target-width word
+/// from its returned pointer to return the enclosing file-record iterator.
+/// The leading registry word is untouched. The next real function starts
+/// with `push {r4-r10, lr}` at 0x0821c500. Deliberate deviations: none;
+/// u32 word indexing preserves the four-byte adjustment on host and target.
+///
+/// # Safety
+///
+/// `iter` must address six writable target-width words. Its embedded state
+/// must satisfy [`iterator_state_cleanup`]'s owner/list requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn file_record_iterator_destruct(iter: *mut u32) -> *mut u32 {
+    iterator_state_cleanup(iter.add(1)).sub(1)
+}
+
 /// The iterator-state cleanup behind the `bl 0x08155ec0` sites at
 /// 0x0811d070 (inner, on sp+0x08) and 0x0811d08c (outer, on sp+0x28)
 /// inside [`vtable_file_record_teardown`]. The ported
@@ -5373,6 +5395,50 @@ pub(crate) mod tests {
                 0,
                 "the successor's own link is never rewritten"
             );
+        }
+    }
+
+    #[test]
+    fn file_record_iterator_destruct_preserves_detached_state_and_registry() {
+        let mut iter = [0x1234_5678, 0, 0xa5a5_a5a5, (-5i32) as u32, 7, 0];
+        let original = iter;
+        unsafe {
+            let base = iter.as_mut_ptr();
+            assert_eq!(file_record_iterator_destruct(base), base);
+        }
+        assert_eq!(iter, original);
+    }
+
+    #[test]
+    fn file_record_iterator_destruct_unlinks_embedded_state_and_invalidates_it() {
+        let Some(slab) = try_release_slab() else {
+            assert!(crate::testing::note_missing_u32_fixture("vtable_set iterator_release"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock();
+        unsafe {
+            for position in [0u32, u32::MAX, (-2i32) as u32] {
+                core::ptr::write_bytes(slab, 0, 0x200);
+                let iter = slab.add(RELEASE_STATE).cast::<u32>();
+                let state = iter.add(1);
+                let successor = slab.add(RELEASE_NODE_A);
+                let words = [0x1234_5678, slab as u32, 17, position, 19, successor as u32];
+                core::ptr::copy_nonoverlapping(words.as_ptr(), iter, words.len());
+                release_head(slab).write(state as u32);
+
+                assert_eq!(file_record_iterator_destruct(iter), iter);
+                assert_eq!(release_head(slab).read(), successor as u32);
+                assert_eq!(
+                    core::slice::from_raw_parts(iter, 6),
+                    &[words[0], words[1], words[2], u32::MAX, words[4], words[5]],
+                );
+                assert_eq!(release_next(slab, RELEASE_NODE_A).read(), 0);
+
+                // A second destruction sees -1, not the detached -5 sentinel:
+                // the absent-target unlink must leave the successor intact.
+                assert_eq!(file_record_iterator_destruct(iter), iter);
+                assert_eq!(release_head(slab).read(), successor as u32);
+            }
         }
     }
 

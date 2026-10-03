@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821c4ec
+    ghidra: FUN_0821c4ec
+    name: file_record_iterator_destruct
+    size: 20
+    sig: "*mut u32 file_record_iterator_destruct(iter: *mut u32)"
+    module: app/vtable_set
+    status: ported
+    vars:
+      param_1/r0: iter
+      "iter+0x04": embedded_iterator_state
+    renames:
+      FUN_08155ec0: iterator_state_cleanup
+    notes: >-
+      Raw words e92d4010 e2800004 ebfce671 e2400004 e8bd8010 establish
+      the exact 20-byte extent through the next function at 0x0821c500.
+      Full-image A32 decoding finds two plain BL callers at 0x0811cd44
+      and 0x0811d1f4, zero predicated callers, and one in-body BL to
+      iterator_state_cleanup at 0x08155ec0, already ported and called
+      directly. Adds four bytes to reach the embedded five-word state,
+      calls cleanup, subtracts four from its returned pointer, and
+      returns the enclosing six-word file-record iterator. Its leading
+      registry word is untouched. No new seam or semantic deviation.
+      Tests cover detached -5 with an invalid owner, live and invalid
+      positions, real observer unlink, repeated destruction, preservation
+      of surrounding words, and the returned pointer. All 13807 host tests
+      and the ARM release build pass. match.py exits 1: LLVM preserves
+      the enclosing pointer in r4 instead of subtracting four from the
+      known cleanup result and adds a frame-pointer prologue. R_ARM_CALL
+      confirms the BL targets iterator_state_cleanup. An isolated smoke
+      compiled the verbatim three production functions and exercised
+      unlink and sentinel paths; ordinary non-test host compilation is
+      blocked by six unrelated missing cfg-gated callees.
+
   - address: 0x0821c500
     ghidra: FUN_0821c500
     name: restore_internal_display_layers
