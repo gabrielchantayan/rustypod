@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826bdd8
+    ghidra: FUN_0826bdd8
+    name: string_object_matches_either_runtime_label
+    size: 64
+    sig: "uint32_t string_object_matches_either_runtime_label(const StringObject *text)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: text, iVar1: first_comparison, iVar2: runtime_label_table, DAT_0826be14: RUNTIME_LABEL_TABLE_ADDRESS}
+    notes: >-
+      Honest deferral: no Rust implementation or hook. Raw osos.dec establishes
+      60 code bytes at 0x0826bdd8-0x0826be13 plus the four-byte literal
+      0x089cfe78 at 0x0826be14; the next real function begins with
+      push {r3-r9,sl,fp,lr} at 0x0826be18. True extent is 64 bytes,
+      not Ghidra's 60. Whole-image aligned ARM-word scan finds two plain
+      BL callers, 0x08178a58 and 0x0828b9f0, and zero predicated BL
+      callers. The body contains two unconditional BL instructions,
+      0x0826bde8 and 0x0826bdfc, both targeting 0x082a50a8
+      (string_object_utf8_strcasecmp_safe). Load the first C-string pointer
+      from runtime table 0x089cfe78 + 12, compare against text, and return
+      1 immediately on equality. Otherwise load the second pointer at
+      table + 16 and return 1 on equality, 0 on inequality. Preserve the
+      original StringObject pointer for the second comparison; no NULL
+      guard on the object. Callers consume this as a Boolean predicate;
+      0x0828b968 uses it before the separate "Notes" comparison, but that
+      does not identify either runtime label.
+      Blocking evidence: static image words at 0x089cfe84 and 0x089cfe88
+      are 0x6e437473 and 0x5f726c74, ASCII fragments rather than usable
+      target pointers. Runtime initialization or relocation of this table
+      is unresolved. The existing Rust comparison thunk also dispatches
+      through STRING_OBJECT_UTF8_STRCASECMP_CORE whose default
+      missing_utf8_strcasecmp_core returns 0 for every input; reusing it
+      would make this predicate always true. Its actual firmware core
+      0x0827609c calls unicode_casefold_byte at 0x08276fbc, whose literal
+      at 0x08276fd0 is 0x083ed1dd. Raw bytes there begin
+      f0 a0 e1 03 02 a0 e3 00, so fold(0) is 0xf0 instead of a shared
+      string terminator. Both callees remain identified in names.yaml.
+      Need verified runtime label pointers and folding-table initialization
+      (or a faithful comparison core) before implementing and testing this
+      predicate; do not substitute guessed labels or an always-equal seam.
   - address: 0x0826bee0
     ghidra: FUN_0826bee0
     name: string_object_split_path_anchor
