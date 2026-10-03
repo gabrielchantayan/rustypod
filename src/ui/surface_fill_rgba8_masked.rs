@@ -4,12 +4,12 @@
 //! Raw whole-image ARM decoding: 2 plain incoming BLs, 0 predicated;
 //! 10 plain outgoing BLs, 0 predicated. Read format at +0x64, pack mask
 //! before color using the existing format packers, then dispatch with the
-//! buffer at +0x68 and rectangle to the retailOS 16/32-bit masked filler.
+//! buffer at +0x68 and rectangle to the 16/32-bit masked filler.
 //! Unsupported formats do nothing. Full masks retain the callees' band-fill
 //! behavior (surface +0x90/+0x94/+0x98), rather than imposing the rectangle.
 //!
-//! Deliberate deviations: none on device. Host callers must install writer
-//! seams; no fake fallback. Buffer fields remain 32-bit on every host.
+//! Deliberate deviations: the u32 writer uses the Rust port. Host callers
+//! must install the unported u16 writer. Buffer fields remain 32-bit.
 
 use crate::ui::{rgb565_pack::rgb8_to_rgb565, rgb555a1_pack::rgba8_to_rgb555a1,
     rgba4444_pack::rgba8_to_rgba4444, rgba8888_pack::rgba8_to_rgba8888};
@@ -20,9 +20,9 @@ pub type MaskedSurfaceFill = unsafe extern "C" fn(*mut u8, *mut u8, u32, u32, *c
 unsafe extern "C" fn retail_fill16(surface: *mut u8, buffer: *mut u8, color: u32, mask: u32, rect: *const i32) {
     core::mem::transmute::<usize, MaskedSurfaceFill>(0x0825_65b4)(surface, buffer, color, mask, rect);
 }
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_fill32(surface: *mut u8, buffer: *mut u8, color: u32, mask: u32, rect: *const i32) {
-    core::mem::transmute::<usize, MaskedSurfaceFill>(0x0825_6650)(surface, buffer, color, mask, rect);
+unsafe extern "C" fn fill32(surface: *mut u8, buffer: *mut u8, color: u32, mask: u32, rect: *const i32) {
+    crate::util::masked_u32_rectangle_fill::masked_u32_rectangle_fill(
+        surface.cast(), buffer.cast(), color, mask, rect.cast());
 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_writer(_: *mut u8, _: *mut u8, _: u32, _: u32, _: *const i32) {
@@ -32,11 +32,11 @@ unsafe extern "C" fn missing_writer(_: *mut u8, _: *mut u8, _: u32, _: u32, _: *
 #[cfg(target_os = "none")]
 pub static mut SURFACE_MASKED_FILL16: MaskedSurfaceFill = retail_fill16;
 #[cfg(target_os = "none")]
-pub static mut SURFACE_MASKED_FILL32: MaskedSurfaceFill = retail_fill32;
+pub static mut SURFACE_MASKED_FILL32: MaskedSurfaceFill = fill32;
 #[cfg(not(target_os = "none"))]
 pub static mut SURFACE_MASKED_FILL16: MaskedSurfaceFill = missing_writer;
 #[cfg(not(target_os = "none"))]
-pub static mut SURFACE_MASKED_FILL32: MaskedSurfaceFill = missing_writer;
+pub static mut SURFACE_MASKED_FILL32: MaskedSurfaceFill = fill32;
 
 /// # Safety
 /// Surface has the retailOS layout through +0x9b. Supported formats require
@@ -67,9 +67,9 @@ mod tests {
     use super::*;
 
     // Executable callee model: asserts final pixels, not forwarded arguments.
-    unsafe fn model(surface: *mut u8, buffer: *mut u8, color: u32, mask: u32, rect: *const i32, wide: bool) {
+    unsafe fn model16_pixels(surface: *mut u8, buffer: *mut u8, color: u32, mask: u32, rect: *const i32) {
         let stride = surface.add(0x94).cast::<u32>().read() as usize;
-        let full = mask == if wide { u32::MAX } else { 0xffff };
+        let full = mask == 0xffff;
         let (x, y, width, height) = if full {
             (0, surface.add(0x90).cast::<u32>().read() as usize, stride,
                 surface.add(0x98).cast::<u32>().read() as usize)
@@ -80,18 +80,12 @@ mod tests {
         for row in y..y + height {
             for col in x..x + width {
                 let index = row * stride + col;
-                if wide {
-                    let p = buffer.cast::<u32>().add(index);
-                    p.write((p.read() & !mask) | (color & mask));
-                } else {
-                    let p = buffer.cast::<u16>().add(index);
-                    p.write((p.read() & !(mask as u16)) | ((color & mask) as u16));
-                }
+                let p = buffer.cast::<u16>().add(index);
+                p.write((p.read() & !(mask as u16)) | ((color & mask) as u16));
             }
         }
     }
-    unsafe extern "C" fn model16(s: *mut u8, b: *mut u8, c: u32, m: u32, r: *const i32) { model(s, b, c, m, r, false); }
-    unsafe extern "C" fn model32(s: *mut u8, b: *mut u8, c: u32, m: u32, r: *const i32) { model(s, b, c, m, r, true); }
+    unsafe extern "C" fn model16(s: *mut u8, b: *mut u8, c: u32, m: u32, r: *const i32) { model16_pixels(s, b, c, m, r); }
 
     fn reference_pack(format: u8, bytes: [u8; 4]) -> u32 {
         let [r, g, b, a] = bytes.map(u32::from);
@@ -111,7 +105,7 @@ mod tests {
             let old16 = SURFACE_MASKED_FILL16;
             let old32 = SURFACE_MASKED_FILL32;
             SURFACE_MASKED_FILL16 = model16;
-            SURFACE_MASKED_FILL32 = model32;
+            SURFACE_MASKED_FILL32 = fill32;
             let buffer = slab.add(256);
             slab.add(0x68).cast::<u32>().write(buffer as usize as u32);
             slab.add(0x90).cast::<u32>().write(1);
