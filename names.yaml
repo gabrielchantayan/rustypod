@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821bd10
+    ghidra: FUN_0821bd10
+    name: setting_dispatcher_reset
+    size: 64
+    sig: "void *setting_dispatcher_reset(void *dispatcher)"
+    module: drivers/setting_dispatcher
+    status: ported
+    vars: {param_1: dispatcher}
+    renames:
+      DAT_0821bd4c: live_selection_sentinel_word_088ff4d8
+    notes: >-
+      Raw words establish 60 instruction bytes through bx lr at 0x0821bd48,
+      followed by the sentinel-address literal at 0x0821bd4c. The next real
+      function starts at 0x0821bd50, giving a true extent of 64 bytes.
+      Two incoming unconditional BLs at 0x0821bdc4 and 0x0821c1ac; zero
+      predicated incoming BLs and zero outgoing calls. Resets halfword
+      indices at +0x1c8/+0x1ca to 0xffff, copies the live word at 0x088ff4d8
+      to +0x1cc, clears bytes +0x1bc/+0x1bd/+0x1d0/+0x1d1 and words
+      +0x1c0/+0x1c4, and preserves r0. Host builds substitute a private
+      sentinel word; target uses the original address, widths, and access
+      order. Tests check repeated resets, changing sentinel bit patterns,
+      pointer pass-through, and preservation of every other buffer byte.
+      match.py reports 15 original versus 19 Rust entries: LLVM adds a frame,
+      changes index addressing, and includes the pool word. No calls added.
   - address: 0x0821c4ec
     ghidra: FUN_0821c4ec
     name: file_record_iterator_destruct

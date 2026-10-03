@@ -114,6 +114,80 @@ pub unsafe extern "C" fn setting_dispatcher_get() -> *mut u8 {
     dispatcher
 }
 
+/// setting_dispatcher_reset — original: `FUN_0821bd10` @ `0x0821bd10`.
+///
+/// True extent: 64 bytes (60 instruction bytes through `bx lr` at
+/// `0x0821bd48`, then the literal `0x088ff4d8` at `0x0821bd4c`).
+/// The next function starts at `0x0821bd50`. Raw ARM decoding verifies two
+/// incoming plain BLs (`0x0821bdc4`, `0x0821c1ac`), zero predicated BLs,
+/// and zero outgoing calls.
+///
+/// Reset two selection indices to 0xffff, copy the live sentinel word into
+/// the current-selection field, and clear four flags and two state words.
+/// All other bytes remain untouched; r0 passes through unchanged.
+///
+/// Deliberate deviation: hosts use a private sentinel word instead of
+/// dereferencing firmware RAM. Target accesses retain the original widths
+/// and order, including the sentinel load after the index writes.
+///
+/// # Safety
+/// `dispatcher` must reference writable, four-byte-aligned storage through
+/// offset 0x1d1. On target, the firmware sentinel word must be readable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn setting_dispatcher_reset(dispatcher: *mut u8) -> *mut u8 {
+    dispatcher.add(0x1c8).cast::<u16>().write_volatile(0xffff);
+    dispatcher.add(0x1ca).cast::<u16>().write_volatile(0xffff);
+    #[cfg(target_os = "none")]
+    let sentinel = (0x088f_f4d8 as *const u32).read_volatile();
+    #[cfg(not(target_os = "none"))]
+    let sentinel = core::ptr::addr_of!(HOST_SELECTION_SENTINEL).read_volatile();
+    dispatcher.add(0x1cc).cast::<u32>().write_volatile(sentinel);
+    dispatcher.add(0x1bc).write_volatile(0);
+    dispatcher.add(0x1bd).write_volatile(0);
+    dispatcher.add(0x1d0).write_volatile(0);
+    dispatcher.add(0x1d1).write_volatile(0);
+    dispatcher.add(0x1c0).cast::<u32>().write_volatile(0);
+    dispatcher.add(0x1c4).cast::<u32>().write_volatile(0);
+    dispatcher
+}
+
+#[cfg(not(target_os = "none"))]
+static mut HOST_SELECTION_SENTINEL: u32 = 0;
+
+#[cfg(test)]
+mod reset_tests {
+    extern crate std;
+
+    use super::*;
+
+    #[test]
+    fn resets_only_state_and_reloads_live_sentinel() {
+        // Word backing guarantees target-compatible alignment; extra words
+        // surround the object so the whole-buffer comparison catches overruns.
+        let mut storage = [0xa5a5_a5a5u32; 120];
+        let base = storage.as_mut_ptr().cast::<u8>();
+        let object = unsafe { base.add(4) };
+        let mut expected = [0xa5u8; 480];
+        for sentinel in [0u32, 0xffff_ffff, 0x1234_5678, 0x8000_0001] {
+            unsafe {
+                core::ptr::addr_of_mut!(HOST_SELECTION_SENTINEL).write(sentinel);
+                // Re-dirty every field to prove repeat calls really reset it.
+                core::ptr::write_bytes(base, 0xa5, expected.len());
+                expected.fill(0xa5);
+                for offset in [0x1bc, 0x1bd, 0x1d0, 0x1d1] {
+                    expected[4 + offset] = 0;
+                }
+                expected[4 + 0x1c0..4 + 0x1c8].fill(0);
+                expected[4 + 0x1c8..4 + 0x1cc].fill(0xff);
+                expected[4 + 0x1cc..4 + 0x1d0].copy_from_slice(&sentinel.to_ne_bytes());
+                assert_eq!(setting_dispatcher_reset(object), object);
+                assert_eq!(core::slice::from_raw_parts(base, expected.len()), &expected);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
