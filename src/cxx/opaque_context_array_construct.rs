@@ -154,4 +154,24 @@ mod tests {
             assert_eq!(ARRAY_CALL.1, -1);
         }
     }
+
+    #[test]
+    fn enclosing_owner_preserves_guards_and_signed_member_count() {
+        let _lock = LOCK.lock();
+        for count in [0, 1, 30, -1, i32::MIN, i32::MAX] {
+            let mut storage = [0xa5a5_a5a5u32; 0x110 / 4 + 2];
+            let this = unsafe { storage.as_mut_ptr().add(1).cast::<u8>() };
+            let returned = unsafe {
+                super::super::opaque_context_array_owner_construct::opaque_context_array_owner_construct(this, count)
+            };
+            assert_eq!(returned, this);
+            let object = &storage[1..1 + 0x110 / 4];
+            assert_eq!(object[0], 0x089a_758c);
+            assert_eq!(object[0x104 / 4], 0);
+            assert_eq!(object[0x108 / 4], count as u32);
+            assert_eq!(object[0x10c / 4], 0);
+            assert_eq!(storage[0], 0xa5a5_a5a5);
+            assert_eq!(storage[storage.len() - 1], 0xa5a5_a5a5);
+        }
+    }
 }

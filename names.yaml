@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0825788c
+    ghidra: FUN_0825788c
+    name: opaque_context_array_owner_construct
+    size: 28
+    sig: "void *opaque_context_array_owner_construct(void *this, i32 element_count)"
+    module: cxx/opaque_context_array_owner_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      r1: element_count
+      r2/DAT_082578a4: owner vtable 0x089a758c
+      FUN_08261c48: opaque_context_array_construct
+    notes: >-
+      Raw A32 words establish 24 instruction bytes at 0x0825788c..0x082578a4
+      plus the four-byte vtable literal, giving a 28-byte extent before the
+      next constructor at 0x082578a8. Whole-image decoding finds two plain
+      inbound BLs at 0x081d72d4 and 0x081d8178, zero predicated BLs; one
+      outbound plain BL at 0x08257898 targets the existing Rust member
+      constructor at 0x08261c48. Store vtable 0x089a758c, advance this by
+      four bytes, construct the embedded context array with the incoming
+      signed element count, subtract four from its returned pointer.
+      Both callers pass count 30 and overwrite the vtable for a derived
+      owner. No new callee seams or deliberate behavioral deviations.
+      Host edge tests cover zero, positive and signed-extreme counts,
+      target word spacing, returned enclosing pointer and outer guards.
+      Host suite and ARM release build pass. Executable actual-source smoke
+      with a stateful member boundary verifies vtable-before-call, count -7
+      and enclosing-pointer return; this does not execute retail allocation.
+      match.py exits 1: LLVM adds a frame pointer and saves the owner in r4,
+      preserving the literal vtable and postincrement store plus one BL.
+      It replaces subtract-four after the member call with the saved owner,
+      valid because the existing member port returns its input unchanged.
   - address: 0x08257ca0
     ghidra: FUN_08257ca0
     name: registration_set_deadline
