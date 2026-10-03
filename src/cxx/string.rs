@@ -717,23 +717,55 @@ pub unsafe extern "C" fn cxx_string_pair_range_destroy(
         first = first.add(1);
     }
 }
+/// cxx_string_pair_entry_assign — retailOS `FUN_08257fc8` @ `0x08257fc8`.
+///
+/// **44 bytes**, true extent `0x08257fc8..0x08257ff4`, bounded by the next
+/// independent function's push. Whole-image A32 decoding verifies two incoming
+/// plain BLs (0x083e2fd4, 0x083e9e84), zero predicated BLs, and two outgoing
+/// plain BLs to [`cxx_string_assign`] @ 0x083d8d1c.
+///
+/// Assigns the first and second COW strings in order, copies the trailing
+/// word at target +0x08, and returns destination. Existing destination strings
+/// are released; leaked sources are deep-copied. No deliberate deviations.
+/// `repr(C)` fields preserve the target offsets while accommodating host pointers.
+///
+/// # Safety
+///
+/// Both entries must contain valid COW strings; destination must be writable.
+/// Source and destination may be the same entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cxx_string_pair_entry_assign(
+    destination: *mut CxxStringPairRangeEntry,
+    source: *const CxxStringPairRangeEntry,
+) -> *mut CxxStringPairRangeEntry {
+    cxx_string_assign(
+        core::ptr::addr_of_mut!((*destination).first),
+        core::ptr::addr_of!((*source).first),
+    );
+    cxx_string_assign(
+        core::ptr::addr_of_mut!((*destination).second),
+        core::ptr::addr_of!((*source).second),
+    );
+    (*destination).trailing = (*source).trailing;
+    destination
+}
+
 /// cxx_string_pair_entry_range_copy — retailOS `FUN_083e9e68` @ `0x083e9e68`
 /// (56 bytes; true extent `0x083e9e68..0x083e9ea0`; one direct, unconditional
 /// `bl` caller at `0x081df32c`, one direct predicated `blne` caller at
 /// `0x081df468`).
 ///
 /// Raw ARM walks the half-open range `[first, last)` of 12-byte entries,
-/// invokes the two-string COW copy constructor for each entry, and returns the
-/// advanced output cursor. It has one unconditional body `bl` to
-/// `0x08257fc8`. That callee is byte-identical to
-/// [`cxx_string_pair_entry_copy_ctor_base`] at `0x08257f80`, so this port
-/// deliberately uses the established seam rather than adding a duplicate
-/// export. There are no guards beyond pointer equality.
+/// assigns the two COW strings and trailing word for each entry, and returns
+/// the advanced output cursor. Its one unconditional body BL targets
+/// [`cxx_string_pair_entry_assign`] @ `0x08257fc8`, not the copy constructor
+/// at `0x08257f80`. No deliberate deviations or guards beyond pointer equality.
 ///
 /// # Safety
 ///
 /// `first..last` must be a valid range of 12-byte target-layout entries and
-/// `output` must provide one writable entry for each source entry.
+/// `output` must provide one writable, initialized entry for each source entry.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn cxx_string_pair_entry_range_copy(
@@ -742,7 +774,7 @@ pub unsafe extern "C" fn cxx_string_pair_entry_range_copy(
     mut output: *mut CxxStringPairRangeEntry,
 ) -> *mut CxxStringPairRangeEntry {
     while first != last {
-        cxx_string_pair_entry_copy_ctor_base(output, first);
+        cxx_string_pair_entry_assign(output, first);
         first = first.add(1);
         output = output.add(1);
     }
@@ -2923,13 +2955,13 @@ mod tests {
             ];
             let mut destination = [
                 CxxStringPairRangeEntry {
-                    first: core::ptr::null_mut(),
-                    second: core::ptr::null_mut(),
+                    first: empty_rep_data(),
+                    second: empty_rep_data(),
                     trailing: 0,
                 },
                 CxxStringPairRangeEntry {
-                    first: core::ptr::null_mut(),
-                    second: core::ptr::null_mut(),
+                    first: empty_rep_data(),
+                    second: empty_rep_data(),
                     trailing: 0,
                 },
             ];
@@ -2957,6 +2989,68 @@ mod tests {
             assert_eq!((*data_rep(source_second)).refcount, 2);
         }
     }
+    #[test]
+    fn pair_entry_assign_releases_old_strings_and_preserves_self_assignment() {
+        let _guard = arena();
+        unsafe {
+            let mut source = CxxStringPairRangeEntry {
+                first: core::ptr::null_mut(), second: core::ptr::null_mut(),
+                trailing: 0xdead_beef,
+            };
+            let mut destination = CxxStringPairRangeEntry {
+                first: core::ptr::null_mut(), second: core::ptr::null_mut(), trailing: 0,
+            };
+            build(&mut source.first, b"first");
+            build(&mut source.second, b"second");
+            build(&mut destination.first, b"old first");
+            build(&mut destination.second, b"old second");
+            let old = [data_rep(destination.first).cast(), data_rep(destination.second).cast()];
+            let destination_ptr = core::ptr::addr_of_mut!(destination);
+            assert_eq!(cxx_string_pair_entry_assign(destination_ptr, &source), destination_ptr);
+            assert_eq!(freed(), &old);
+            assert_eq!(destination.first, source.first);
+            assert_eq!(destination.second, source.second);
+            assert_eq!(destination.trailing, source.trailing);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_eq!((*data_rep(source.second)).refcount, 1);
+            assert_eq!(cxx_string_pair_entry_assign(destination_ptr, destination_ptr), destination_ptr);
+            assert_eq!(freed(), &old);
+            assert_eq!((*data_rep(source.first)).refcount, 1);
+            assert_eq!((*data_rep(source.second)).refcount, 1);
+            assert_eq!(destination.trailing, 0xdead_beef);
+        }
+    }
+
+    #[test]
+    fn pair_entry_assign_deep_copies_leaked_source_and_handles_empty_member() {
+        let _guard = arena();
+        unsafe {
+            let mut source = CxxStringPairRangeEntry {
+                first: core::ptr::null_mut(), second: empty_rep_data(), trailing: u32::MAX,
+            };
+            build(&mut source.first, b"leaked");
+            (*data_rep(source.first)).refcount = -1;
+            let mut destination = CxxStringPairRangeEntry {
+                first: empty_rep_data(), second: core::ptr::null_mut(), trailing: 0,
+            };
+            build(&mut destination.second, b"discard");
+            let old_second = data_rep(destination.second).cast();
+            cxx_string_pair_entry_assign(&mut destination, &source);
+            assert_ne!(destination.first, source.first);
+            assert_eq!(core::slice::from_raw_parts(destination.first, 7), b"leaked\0");
+            assert_eq!((*data_rep(destination.first)).refcount, 0);
+            assert_eq!((*data_rep(source.first)).refcount, -1);
+            assert_eq!(destination.second, empty_rep_data());
+            assert_eq!(destination.trailing, u32::MAX);
+            assert_eq!(freed(), &[old_second]);
+            let source_ptr = core::ptr::addr_of_mut!(source);
+            cxx_string_pair_entry_assign(source_ptr, source_ptr);
+            assert_eq!((*data_rep(source.first)).refcount, -1);
+            assert_eq!(core::slice::from_raw_parts(source.first, 7), b"leaked\0");
+            assert_eq!(source.trailing, u32::MAX);
+        }
+    }
+
 
 
     #[test]
