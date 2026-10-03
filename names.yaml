@@ -49007,9 +49007,9 @@ functions:
       0x08277e2c) and the registration step 0x08278250 (result
       discarded). Every intermediate object address derives from the
       previous callee's RETURN (`sub r4,r0,#12` / `sub r4,r0,#64`),
-      never from the entry this. Deviations: the seven unresolved
-      callees cross TRANSITION_ADDON_CONSTRUCT_OPS slots - scale_class's
-      default is the faithful decoded body, the base/string/vector
+      never from the entry this. The scale_class helper is now ported
+      and called directly by both overloads, without a dispatch slot.
+      Other construction defaults retain their existing behavior: base/string/vector
       defaults reproduce their decoded stores (interface-resolution
       result modeled as zero; the string default is the
       empty-construction prefix per the STRING_OBJECT_COPY_CONSTRUCT
@@ -203114,3 +203114,32 @@ functions:
       original, retaining the predicates, +0x18/+0x1c loads, selector 1,
       +0x9c dispatch, and unlock, with a shared epilogue and different
       register allocation. No device execution claimed.
+
+  - address: 0x08277bd0
+    ghidra: FUN_08277bd0
+    name: scale_class
+    size: 36
+    sig: "u32 scale_class(u8 *this, u32 arg)"
+    module: cxx/transition_addon
+    status: ported
+    renames:
+      param_1: this
+      param_2: arg
+    notes: >-
+      Nine raw ARM words end at bx lr @ 0x08277bf0; the next real
+      function starts with push {r3,r4,r5,lr} @ 0x08277bf4.
+      Whole-image branch decoding verifies two plain BL callers at
+      0x08278e3c and 0x08278efc, zero predicated BL callers, no tail
+      branches, and no outgoing calls. Returns arg in 1..=16 when
+      the context word at +0x28 is zero, otherwise 1; wrapping unsigned
+      subtraction rejects zero and large arguments. Uses an aligned
+      u32 read and leaves the object untouched. Both constructor
+      overloads now call the exported port directly; obsolete scale
+      dispatch and recording mocks are removed. No behavioral deviations.
+      Host suite passes all 13576 tests; standalone source smoke confirms
+      zero, valid interior, upper bound, overflow, and live-context cases
+      without object writes. ARM release build succeeds. match.py reports
+      11 Rust instructions versus nine original: LLVM adds a frame and
+      replaces the early-return branch with conditional selection, retaining
+      the aligned +0x28 load, zero-context condition, wrapping subtraction,
+      and unsigned range check. No device execution claimed.
