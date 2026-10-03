@@ -81076,6 +81076,38 @@ functions:
       outside the field. match.py structural: identical
       load/bic/orr/store sequence; LLVM adds only its frame-pointer
       push/pop.
+  # --- Silver UI framework: explicit interaction activation ---
+  - address: 0x0826d5a4
+    ghidra: FUN_0826d5a4
+    name: view_set_interaction_active
+    size: 104
+    sig: "void view_set_interaction_active(ViewBase *view, u32 request)"
+    module: ui/view_interaction_active
+    vars:
+      param_1: view
+      param_2: request
+      uVar1: active
+      UNRECOVERED_JUMPTABLE: interaction_changed
+    status: ported
+    notes: >-
+      Raw osos.dec establishes a 104-byte extent ending in bx r2 at
+      0x0826d608; the next function begins at 0x0826d60c. Independent
+      ARM-word decoding finds two plain BL callers at 0x0815786c and
+      0x0815791c, zero predicated BL callers, and two internal plain BL
+      instructions to the already ported view_set_interaction_mode at
+      0x0826db24. Nonzero requests transition interaction mode 0x400 to
+      0x200 and notify vtable slot +0xc8 with 1; zero requests transition
+      0x200 to 0x400 and notify with 0. All other modes return unchanged.
+      The setter preserves surrounding flags and runs before notification;
+      callback mutations survive. Host vtables deliberately use native-width
+      slots through the existing ViewInteractionVtable; ARM layout is unchanged.
+      Tests cover every field mode, noncanonical nonzero requests, inert
+      null-vtable paths, repeated requests, flag preservation, notification
+      ordering, and callback mutation.
+      match.py reports 23 Rust instructions versus 26 stock instructions:
+      LLVM merges the two setter-call paths into one BL, preserves the
+      conditional early return and indirect tail BX, and adds a frame pointer.
+      The BL relocation resolves to view_set_interaction_mode.
   # --- Silver UI framework: view interaction-mode setter ---
   - address: 0x0826db24
     ghidra: FUN_0826db24
