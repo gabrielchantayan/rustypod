@@ -49,9 +49,38 @@ unsafe fn construct(
     envelope
 }
 
+/// Return the nested-message word of a kind-zero UI message envelope.
+///
+/// Original: FUN_08257904 @ 0x08257904, true size 8 bytes, ending at
+/// constructor boundary 0x0825790c. Two plain inbound BL sites
+/// (0x081d6b04, 0x081d7e9c), zero predicated; no outgoing calls.
+/// Raw body: `ldr r0,[r0,#8]; bx lr`. Reads the complete aligned +8 word
+/// without inspecting the kind or dereferencing the nested message.
+/// Deliberate deviations: returns a fixed-width u32 even on hosts; a
+/// dedicated text section prevents folding with message_payload_word.
+///
+/// # Safety
+/// `envelope` must point to three readable, aligned u32 words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.message_envelope_nested_word")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn message_envelope_nested_word(envelope: *const u32) -> u32 {
+    envelope.add(2).read()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_word_preserves_null_and_all_pointer_bits_without_tag_dispatch() {
+        for payload in [0u32, 1, 0x0800_0000, 0x089a_75b8, 0x8000_0000, u32::MAX] {
+            for kind_word in [0u32, 1, 0xa5a5_a500, u32::MAX] {
+                let words = [0x089a_75a8, kind_word, payload];
+                assert_eq!(unsafe { message_envelope_nested_word(words.as_ptr()) }, payload);
+            }
+        }
+    }
 
     unsafe extern "C" fn failed_allocation(_: usize) -> *mut u8 {
         core::ptr::null_mut()

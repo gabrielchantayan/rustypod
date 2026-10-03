@@ -205894,3 +205894,28 @@ functions:
       constructor result, and original-envelope return. ARM release builds;
       match.py exits 1 with a structural diff: added FP frame, reordered
       initial independent stores, BLX resident call, and preserved algorithm.
+
+  - address: 0x08257904
+    ghidra: FUN_08257904
+    name: message_envelope_nested_word
+    size: 8
+    sig: "u32 message_envelope_nested_word(envelope: *const u32) -> u32"
+    module: app/message_envelope_construct
+    status: ported
+    vars: {param_1: envelope}
+    notes: >-
+      Raw words e5900008 e12fff1e decode to ldr r0,[r0,#8]; bx lr.
+      True extent ends at the constructor prologue at 0x0825790c.
+      Whole-image aligned ARM BL decoding verifies two plain inbound calls
+      at 0x081d6b04 and 0x081d7e9c, zero predicated calls; no outgoing calls.
+      Returns the nested-message pointer word from the kind-zero UI message
+      envelope without testing its kind or dereferencing its payload.
+      Constructor 0x0825790c stores the nested constructor result at +8;
+      both callers select the kind-zero path before using this accessor.
+      No callee seam. Deliberate deviations: fixed-width u32 on hosts and
+      a dedicated text section to prevent folding with the identical
+      message_payload_word getter at 0x082a18d4. Host regression covers
+      zero, full-width pointer bits, and independence from the kind word.
+      Isolated actual-source smoke preserves a nested pointer word and null.
+      All 13705 host tests pass; ARM release build passes. match.py exits 1:
+      the +8 word load matches; LLVM adds an FP frame and returns via pop.
