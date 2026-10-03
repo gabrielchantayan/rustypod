@@ -146,6 +146,32 @@ mod tests {
                 assert_eq!(out, ClockTimespec { seconds: -7, nanoseconds: 999_999_999 });
             }
             assert_eq!(CALLS.load(Ordering::Relaxed), 8);
+            // Exercise the wait/timer wrapper in this same fixture: a separate
+            // test would race the shared firmware callback table and finish seam.
+            let query = super::super::wait_clock_gettime::wait_clock_gettime;
+            for id in [i32::MIN, -256, -1, 4, 255, 256, i32::MAX] {
+                out = sentinel;
+                assert_eq!(query(id, &mut out), -1);
+                assert_eq!(ERROR.load(Ordering::Relaxed), 26);
+                assert_eq!(out, sentinel);
+            }
+            for id in [0, 3, -1, 4] {
+                assert_eq!(query(id, ptr::null_mut()), -1);
+                assert_eq!(ERROR.load(Ordering::Relaxed), 26);
+            }
+            assert_eq!(CALLS.load(Ordering::Relaxed), 8);
+            for id in 0..4 {
+                CLOCK_DISPATCH[id as usize].gettime = failure;
+                out = sentinel;
+                assert_eq!(query(id, &mut out), -1);
+                assert_eq!(ERROR.load(Ordering::Relaxed), -123);
+                assert_eq!(out, ClockTimespec { seconds: 42, nanoseconds: 20 });
+                CLOCK_DISPATCH[id as usize].gettime = success;
+                assert_eq!(query(id, &mut out), 0);
+                assert_eq!(ERROR.load(Ordering::Relaxed), 0);
+                assert_eq!(out, ClockTimespec { seconds: -7, nanoseconds: 999_999_999 });
+            }
+            assert_eq!(CALLS.load(Ordering::Relaxed), 16);
             CLOCK_DISPATCH = saved_table;
             CLOCK_QUERY_FINISH = saved_finish;
         }
