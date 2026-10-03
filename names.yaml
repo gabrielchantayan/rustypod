@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826e1e0
+    ghidra: FUN_0826e1e0
+    name: view_base_apply_spec_geometry
+    size: 76
+    sig: "void view_base_apply_spec_geometry(ViewBase *view, const ViewSpec *spec)"
+    module: ui/apply_spec_geometry
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      param_2/r1/r5: spec
+      DAT_0826e228: SPEC_FLAGS_MASK
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_0826db38: view_base_geometry_changed
+    notes: >-
+      Raw A32 establishes 72 code bytes ending in the tail branch at
+      0x0826e224, followed by mask 0x1eff8000 at 0x0826e228. Next real
+      function starts with push at 0x0826e22c, so total extent is 76 bytes.
+      Whole-image word decoding finds two inbound plain BLs at 0x08157dd8
+      and 0x08291620, zero predicated inbound BLs, one outbound plain BL
+      at 0x0826e1fc, and zero predicated outbound BLs. NULL spec is a no-op;
+      otherwise copy 48 geometry bytes, replace masked flags, and tail-call
+      the already ported geometry-changed helper. Ghidra incorrectly inlines
+      the tail target. Both callees are registered ports. Deliberate deviation:
+      reuse the existing volatile geometry-changed dispatch, defaulting to
+      the real port; return void rather than incidental r0 contents. Host
+      tests cover NULL and every flag bit in both directions, exact copy and
+      adjacent fields. All 13552 host tests and ARM release build pass.
+      Isolated real-redraw smoke copies 48 bytes and produces flags 0x8060.
+      match.py exits 1: same NULL guard, copy, mask merge and terminal dispatch;
+      LLVM adds a frame and uses indirect BX through the existing seam.
   - address: 0x0827c094
     ghidra: FUN_0827c094
     name: member_base_construct
