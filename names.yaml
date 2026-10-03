@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0825d4c4
+    ghidra: FUN_0825d4c4
+    name: xml_collect_tag_name
+    size: 28
+    sig: "void xml_collect_tag_name(char **output, struct XmlInput **input_slot)"
+    module: util/xml_collect_until_delimiter
+    status: ported
+    renames:
+      param_1/r0: output
+      param_2/r1: input_slot
+      FUN_0825d424: xml_collect_until_delimiter
+    notes: >-
+      Raw ARM verifies seven words at 0x0825d4c4..0x0825d4df, followed
+      by a distinct push prologue at 0x0825d4e0. Whole-image A32 BL
+      decoding finds two plain inbound calls at 0x0825cb3c and
+      0x0825ced0, zero predicated inbound calls, and one plain outbound
+      call at 0x0825d4d8 to the existing XML delimiter collector.
+      Collects a tag or processing-instruction name with delimiters
+      greater-than and slash, and whitespace termination enabled.
+      No wrapper deviations; inherits the collector's splice deviation.
+      Host tests cover both immediate delimiters and exhausted input.
+      match.py confirms delimiter constants and fifth argument; LLVM
+      uses a frame pointer and eight-byte outgoing argument area.
   - address: 0x08266c18
     ghidra: FUN_08266c18
     name: standard_file_construct

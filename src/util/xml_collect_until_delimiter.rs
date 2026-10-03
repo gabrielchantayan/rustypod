@@ -60,6 +60,28 @@ pub unsafe extern "C" fn xml_collect_until_delimiter(
     }
 }
 
+/// `xml_collect_tag_name` — original: `FUN_0825d4c4` @ `0x0825d4c4`.
+///
+/// Exactly 28 bytes (`0x0825d4c4..0x0825d4df`); the next function's
+/// prologue starts at `0x0825d4e0`. Two verified inbound plain BL calls
+/// (`0x0825cb3c`, `0x0825ced0`), zero predicated BL calls; one outbound
+/// plain BL to `xml_collect_until_delimiter` at `0x0825d424`.
+/// Constructs and collects a tag/processing-instruction name, stopping
+/// before `>` or `/`, or at whitespace after a retained byte.
+/// No wrapper deviations; inherits the collector's documented splice deviation.
+///
+/// # Safety
+/// `output` and `input_slot` must satisfy `xml_collect_until_delimiter`'s
+/// string and reader object requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn xml_collect_tag_name(
+    output: *mut *mut u8,
+    input_slot: *mut *mut XmlInput,
+) {
+    unsafe { xml_collect_until_delimiter(output, input_slot, b'>' as u32, b'/' as u32, 1); }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -137,6 +159,40 @@ mod tests {
         let mut output = ptr::null_mut();
         unsafe { xml_collect_until_delimiter(&mut output, &mut slot, b'>' as u32, 0, 0); }
         assert!(!output.is_null());
+        assert_eq!(unsafe { INDEX }, 0);
+        restore();
+    }
+
+    #[test]
+    fn tag_name_delimiters_preserve_decoder_state_and_empty_string() {
+        let _guard = XML_CODEPOINT_DECODER_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        for delimiter in [b'>', b'/'] {
+            install(&[delimiter.into()], 1);
+            let mut input = XmlUtf8Decoder { callback_table: 0, state: 0, codepoint: 0x1234 };
+            let mut slot = ptr::addr_of_mut!(input).cast::<XmlInput>();
+            let mut output = ptr::null_mut();
+            unsafe { xml_collect_tag_name(&mut output, &mut slot); }
+            assert_eq!(unsafe { output.sub(4).cast::<u32>().read() }, 0);
+            assert_eq!(unsafe { output.read() }, 0);
+            assert_eq!(input.state, 0);
+            assert_eq!(input.codepoint, 0x1234);
+            assert_eq!(unsafe { INDEX }, 1);
+        }
+        restore();
+    }
+
+    #[test]
+    fn tag_name_exhaustion_does_not_decode_or_reset() {
+        let _guard = XML_CODEPOINT_DECODER_OPS_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        install(&[], 0);
+        let mut input = XmlUtf8Decoder { callback_table: 0, state: 9, codepoint: 0x5678 };
+        let mut slot = ptr::addr_of_mut!(input).cast::<XmlInput>();
+        let mut output = ptr::null_mut();
+        unsafe { xml_collect_tag_name(&mut output, &mut slot); }
+        assert_eq!(unsafe { output.sub(4).cast::<u32>().read() }, 0);
+        assert_eq!(unsafe { output.read() }, 0);
+        assert_eq!(input.state, 9);
+        assert_eq!(input.codepoint, 0x5678);
         assert_eq!(unsafe { INDEX }, 0);
         restore();
     }
