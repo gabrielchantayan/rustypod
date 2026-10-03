@@ -17,4 +17,5 @@ pub mod stdio_init;
 pub mod standard_file_construct;
 pub mod stream_file;
 pub mod stream_flags;
+pub mod stream_handle_read;
 pub mod trace_printf;
