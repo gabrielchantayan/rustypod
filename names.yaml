@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082693ac
+    ghidra: FUN_082693ac
+    name: serialized_record_construct
+    size: 20
+    sig: "uint32_t *serialized_record_construct(uint32_t *storage, uint32_t context)"
+    module: app/serialized_record_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: context
+      DAT_082693bc: serialized_record_vtable
+    notes: >-
+      Raw words e5801004 e59f1004 e5801000 e12fff1e followed by literal
+      089a8140 establish 16 executable bytes plus four literal bytes.
+      The next independent NULL-check/delete-tail body begins at 0x082693c0
+      (cmp r0,0; bne 0x082aad24; bx lr), not Ghidra's next listed
+      function at 0x082693cc. Whole-image aligned A32 scan verifies two
+      inbound plain BLs at 0x08268af4 and 0x08268b3c, zero predicated
+      BLs and no outbound calls. Store context at +4, install 0x089a8140
+      at +0 and return the original r0 unchanged; Ghidra's void return
+      contradicts raw code and caller use. Both callers allocate 0x1c
+      bytes for serialized record kinds 1 and 3; kind 1 subsequently
+      replaces the vtable. Concrete class identity remains unestablished.
+      No callee seams or behavioral deviations. Target-width u32 fields
+      preserve four-byte offsets on hosts; payload words stay untouched.
+      Host tests cover null and full-width context words, reconstruction,
+      return identity and adjacent/payload preservation. All 13613 host
+      tests pass; ARM release build passes. Actual-source executable smoke
+      verifies prefix initialization and preservation of five payload words.
+      match.py exits 1 with reviewed structural diff: LLVM adds a frame,
+      uses r2 for the same literal and reverses the two disjoint stores;
+      the original storage pointer remains in r0 and no calls are added.
   - address: 0x08273a54
     ghidra: FUN_08273a54
     name: fixed_surface_resample
