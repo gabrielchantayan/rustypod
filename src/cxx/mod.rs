@@ -858,3 +858,4 @@ pub mod platform_file_close;
 pub mod two_byte_ranges_destruct;
 pub mod byte_vector_owner8_push_back;
 pub mod buffered_read_context_construct;
+pub mod opaque_context_submit;

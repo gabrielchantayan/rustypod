@@ -206159,3 +206159,38 @@ functions:
       exits 1 with a structural diff: LLVM adds a value<2 fast path, retains
       mask growth and the conditional back edge, and emits 18 instructions
       instead of nine; no helper calls or symbol folding.
+
+  - address: 0x08257818
+    ghidra: FUN_08257818
+    name: opaque_context_submit
+    size: 20
+    sig: "u32 opaque_context_submit(u8 *owner, u32 payload, u32 flag, u32 mode)"
+    module: cxx/opaque_context_submit
+    status: ported
+    vars:
+      param_1: owner
+      param_2: payload
+      param_3: flag
+      param_4: mode
+    notes: >-
+      Raw A32 establishes 20 bytes, 0x08257818..0x0825782c exclusive.
+      The independent dispatch loop starts with a push at 0x0825782c;
+      Ghidra's 88-byte extent incorrectly includes that loop. Full-image
+      decoding finds two incoming plain BLs at 0x081d6f3c and 0x081d7fb8,
+      zero predicated incoming BLs. Body: zero BLs, two conditional tail B.
+      Add four to owner, XOR the full flag word with one, dispatch to
+      0x08261b14 for mode zero or 0x082619a0 for any nonzero mode.
+      Both raw-verified unported boundaries take context, payload, flag,
+      request a record from context+0x38 with mode zero/one respectively,
+      return 0x14 on exhaustion, and tail into shared enqueue body 0x082619e4.
+      Neither boundary has an existing names entry or Rust port.
+      Preserve status and all flag bits, without Ghidra's byte truncation.
+      Deliberate deviation: fixed-address calls may compile to indirect BLX
+      instead of conditional immediate tail branches. Host tests cover zero
+      and nonzero modes, high flag bits, and returned error statuses.
+      All 13717 host tests and ARM release build pass. Actual-source smoke
+      verifies +4 context, both branches, full-word XOR and error propagation.
+      Required match.py exits 1: its original extent still includes unrelated
+      loop instructions. LLVM preserves mode comparison, +4 adjustment and
+      XOR, selects 0x082619a0 or that address+0x174 (0x08261b14), then tail
+      dispatches with BX IP; no symbol folding.
