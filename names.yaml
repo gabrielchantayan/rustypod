@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082790a0
+    ghidra: FUN_082790a0
+    name: path_object_take_component
+    size: 204
+    sig: "void path_object_take_component(StringObject *out, StringObject *remaining, unsigned int escaping)"
+    module: app/path_object_take_component
+    status: ported
+    renames:
+      param_1/r6: out
+      param_2/r7: remaining
+      param_3/r5: escaping
+      r4/iVar2: component_codepoints
+      local_20: cursor
+      iStack_1c: temporary_prefix
+      FUN_082a50b0: string_object_c_str
+      FUN_08276214: utf8_next_codepoint
+      FUN_08276288: utf8_prev_codepoint
+      FUN_08276900: string_object_erase
+      FUN_082a52a0: string_object_prefix
+      FUN_0827929c: path_object_construct_from_string_object
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM extent is 204 bytes, 0x082790a0..0x0827916c exclusive;
+      the next real entry starts with push. Ten outbound plain BLs, zero
+      predicated BLs; two inbound plain BLs at 0x08149e84 and 0x081bf2d0.
+      Constructs the first decoded component and consumes one separator.
+      The retained cursor can land inside a shifted multibyte sequence:
+      input é\\/中/z yields component é/ and remainder /z, not é/中 and z.
+      All seven callee identities reuse existing ports; no new seams.
+      Deliberate deviations: host repr(C) pointers widen; MaybeUninit models
+      the stack temporary. Existing virtual allocation/release boundaries
+      remain required. Host tests cover separators, escaping and UTF-8 shifts.
+      ARM build passes. match.py reports 64 Rust versus 51 retail instructions;
+      decoder loop and prefix/copy/destroy/erase ordering survive. LLVM removes
+      the unused reverse decode before termination and adds a larger frame.
+      Optional backslash escaping mutates the source and retains the cursor.
   - address: 0x0826e1e0
     ghidra: FUN_0826e1e0
     name: view_base_apply_spec_geometry
