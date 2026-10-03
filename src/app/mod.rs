@@ -828,3 +828,4 @@ pub mod indexed_record_payload_clear;
 pub mod numeric_pair_table;
 pub mod record28_vector_last;
 pub mod view_event_clear_screen_indices;
+pub mod app_screen_dispatch_94_then_90;
