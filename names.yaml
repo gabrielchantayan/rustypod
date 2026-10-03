@@ -206937,3 +206937,33 @@ functions:
       and empty allocations. match.py reports six original versus seven
       Rust instructions: load/call/return preserved, with additional sl/fp
       saves and a frame-pointer setup. Export is target-only and inline(never).
+
+  - address: 0x08242ef4
+    ghidra: FUN_08242ef4
+    name: record68_array_construct
+    size: 44
+    sig: "u32 *record68_array_construct(u32 *array, u32 capacity)"
+    module: cxx/record68_array_construct
+    status: ported
+    renames:
+      param_1: array
+      param_2: capacity
+      uVar1: allocation
+      FUN_082ab288: cpp_array_allocate_without_header
+      DAT_08242f1c: opaque_element_initializer
+    notes: >-
+      Raw ARM establishes 0x08242ef4..0x08242f20: 40 executable bytes and
+      the 0x0824c3d4 literal at 0x08242f1c, followed by the separately
+      ported first_word_owner_destroy. Whole-image aligned BL decoding
+      finds two plain incoming calls at 0x08255e7c and 0x08255e88 and zero
+      predicated calls; the body has one plain BL to 0x082ab288. The raw
+      caller constructs adjacent three-word owners with capacities 16
+      and 2, using the returned pointer plus 12 for the next owner.
+      Writes used count zero and capacity before allocating 0x44-byte
+      elements, then stores the returned allocation word and returns
+      the original object pointer. Uses the existing allocator port;
+      0x0824c3d4 remains an opaque initializer word, not an invented seam.
+      No deliberate behavioral deviations. Host layout uses u32 words
+      so adjacent fields remain four bytes apart. Tests cover zero and
+      maximal capacity, null allocation, header visibility during allocation,
+      return identity, and adjacent-word preservation.
