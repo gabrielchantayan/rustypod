@@ -203897,3 +203897,29 @@ functions:
       Host suite passes 13598 tests; ARM release build succeeds. Tests cover
       empty/nonempty/NULL payloads, explicit size bypassing an invalid payload,
       exact capacity, one-byte overflow, and unchanged payload on failure.
+  - address: 0x0826a2c0
+    ghidra: FUN_0826a2c0
+    name: record_collection_collect_all
+    size: 24
+    sig: "uint32_t record_collection_collect_all(void *context, void *source)"
+    module: app/record_collection_collect_all
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: source
+      FUN_0826a2d8: unresolved_record_collection_operation
+    notes: >-
+      Raw six-word extent 0x0826a2c0..0x0826a2d8 ends at the next real
+      push prologue. Whole-image ARM decoding finds two incoming plain BLs
+      at 0x08269ea0 and 0x0826a264, zero predicated BLs; one outgoing plain
+      BL at 0x0826a2d0 to 0x0826a2d8, zero predicated BLs. Sets r2, r3 and
+      stack argument five to zero, selecting the callee's entire-source
+      record collection path without a completion output. Returns callee r0
+      unchanged, which the caller at 0x0826a268 stores and subsequently tests;
+      Ghidra's void signature is incorrect. The unported callee traverses
+      eight-byte record pairs, filters them and appends accepted pairs and
+      flags to context collections. No existing names entry or Rust seam
+      covers that address; target dispatch retains the verified stock address.
+      Host fixtures model empty, fully filtered and mixed accepted sources,
+      preserving existing output and source data. Host-only callee injection
+      is the deliberate deviation; no target validation or allocation is added.
