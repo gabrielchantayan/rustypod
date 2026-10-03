@@ -467,3 +467,4 @@ pub mod context_namespace_provider_at;
 pub mod input_dispatch;
 pub mod resource_selector_record;
 pub mod opaque_constant_zero;
+pub mod utf8_validate_c_string_permissive;
