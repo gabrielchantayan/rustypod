@@ -205020,3 +205020,34 @@ functions:
       Caller FUN_083d954c uses size 1 and consumes the byte count.
       Deviations: reuses existing Rust callees and host-widened stream
       pointer fields; LLVM may inline flag accessors instead of BL calls.
+
+  - address: 0x0825c824
+    ghidra: FUN_0825c824
+    name: plist_node_assign
+    size: 76
+    sig: "PlistNode *plist_node_assign(PlistNode *destination, const PlistNode *source)"
+    status: ported
+    module: fp/fp_misc.rs
+    vars: {param_1: destination, param_2: source, r4: destination, r5: source}
+    renames:
+      FUN_083d8d1c: cxx_string_assign
+      FUN_083e3724: plist_node_attribute_vector_assign
+      FUN_083e3410: plist_node_child_vector_assign
+    notes: >-
+      Raw A32 words establish the 76-byte extent 0x0825c824..0x0825c870,
+      bounded by the next independent UTF-8 encoder. Whole-image decoding
+      finds two incoming plain BLs at 0x083e3308 and 0x083e9d24, zero
+      predicated BLs, and four outgoing plain BLs with no predicated forms.
+      Assigns COW tag at +0, attribute vector at +4, COW value at +0x10,
+      and child vector at +0x14, then shallow-copies the companion word
+      at +0x20 and kind byte at +0x24 and returns destination. Vector
+      assignments remain unported fixed-firmware seams at 0x083e3724
+      and 0x083e3410; their raw prologues confirm r0/r1 and self guards.
+      Deliberate deviation: repr(C) fields widen on the host while preserving
+      exact ARM offsets. Host tests exercise real COW sharing, self-assignment,
+      release-to-empty, and shallow companion replacement with empty vectors.
+      Structural match retains all four calls and scalar accesses; LLVM uses
+      BLX for fixed vector addresses and BL relocations for COW assignments.
+      An ARM emulator smoke executes both original and linked Rust self-
+      assignment with actual firmware vector helpers and verifies unchanged
+      node bytes, return pointer, and COW reference count.
