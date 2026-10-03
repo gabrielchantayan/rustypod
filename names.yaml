@@ -204643,3 +204643,40 @@ functions:
       bounds, and return identity. match.py exits 1: the six stores and zero
       materialization match stock order; LLVM adds push {fp,lr} and mov fp,sp,
       and replaces bx lr with pop {fp,pc} (ten versus eight instructions).
+
+  - address: 0x0826709c
+    ghidra: FUN_0826709c
+    name: opaque_refcounted_object_destroy
+    size: 36
+    sig: "void *opaque_refcounted_object_destroy(void *object)"
+    status: identified
+    vars:
+      param_1/r0/r4: object
+      object_plus_0x18: tag3_allocation
+      object_plus_0x08: embedded_allocation_owner
+    notes: >-
+      Deferred: no faithful callable element-destructor identity is established.
+      Raw osos.dec at load base 0x08000000 proves the nine-word extent
+      0x0826709c..0x082670c0 exclusive, not Ghidra's 64 bytes: the next
+      independently entered body starts with push {r4,lr} at 0x082670c0.
+      Two outbound plain BLs at 0x082670a8 and 0x082670b0, zero predicated
+      BLs; whole-image raw aligned BL decoding finds two inbound plain BLs
+      at 0x082a8a88 and 0x082a8c4c, zero predicated BLs.
+      Deletes the word at object+0x18 through canonical operator_delete_tag3
+      at 0x082aad14, calls 0x083b6bd0 on object+8, subtracts eight from its
+      returned r0, then tail-branches to 0x083b6c00. Raw 0x083b6bd0 deletes
+      its first word through operator_delete_tag3 and returns its input.
+      Raw 0x083b6c00 passes the object's first word and literal 0x083cddb4
+      to canonical cxx_vec_delete at 0x0803170c, then returns the object.
+      Blocking evidence: 0x083cddb4 is e58d6008 (str r6,[sp,#8]) inside
+      the routine beginning 0x083cdd24, followed by e5870000 at 0x083cddb8
+      (str r0,[r7]). Its required r6/r7 and stack frame are established
+      only by the enclosing routine's prologue and tree traversal; neither
+      array deletion nor this destructor establishes them for callback entry.
+      names.yaml contains no identity for 0x083b6bd0, 0x083b6c00, or
+      0x083cddb4. The existing vector_default_slot module independently
+      documents this same non-entry callback but replaces it with a no-op;
+      that substitution cannot prove array-element destruction parity here.
+      No Rust implementation, guessed callback, or new seam is introduced.
+      Required prerequisite is a verified callable destructor contract for
+      the raw literal 0x083cddb4, or evidence correcting that literal/path.
