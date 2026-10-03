@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08256650
+    ghidra: FUN_08256650
+    name: masked_u32_rectangle_fill
+    size: 140
+    sig: "void masked_u32_rectangle_fill(const u32 *context, u32 *pixels, u32 value, u32 mask, const u32 *rectangle)"
+    module: util/masked_u32_rectangle_fill
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: pixels
+      param_3/r2: value
+      param_4/r3: mask
+      param_5/stack: rectangle
+      "context+0x90": full_fill_row_offset
+      "context+0x94": row_stride
+      "context+0x98": full_fill_row_count
+      "rectangle+0x00": column
+      "rectangle+0x04": first_row
+      "rectangle+0x08": rectangle_width
+      "rectangle+0x0c": rectangle_height
+    notes: >-
+      Raw osos.dec establishes 140 bytes at 0x08256650..0x082566dc;
+      the next independent function stores r1 at context+0xa4 and returns.
+      Whole-image A32 decoding finds two incoming plain BLs, at 0x08256794
+      and 0x082568e0, no predicated incoming BLs, and no outgoing BLs.
+      Full mask tail-branches with BEQ to 0x08038994, verified from raw words
+      as a 12-word unrolled fill with computed 0..11-word tail. Rust deliberately
+      inlines a scalar volatile word fill, requiring valid accessible geometry
+      and a full-fill count fitting i32. Other masks apply old & ~mask | value
+      & mask per rectangle pixel, retaining the per-row width reload and stride.
+      The existing RGBA8 caller now uses this port rather than a retail address.
+      All 13741 host tests and the ARM release build pass. Standalone smoke
+      verifies partial mask 0xaa34cc78 and full band 4..12 with guards preserved.
+      match.py exits 1: 44 Rust instructions versus 35 stock instructions;
+      masked row loops remain, full-fill tail branch becomes a scalar store loop.
   - address: 0x0824c6f4
     ghidra: FUN_0824c6f4
     name: scale_fixed16_vec3
@@ -206607,8 +206642,8 @@ functions:
       packers respectively. Convert mask before color, then read the
       target-width buffer pointer at +0x68. Format 4 calls the verified
       masked u32 surface filler at 0x08256650; others call the verified
-      masked u16 filler at 0x082565b4. Those unported helpers remain
-      retailOS address seams; raw instructions independently confirm
+      masked u16 filler at 0x082565b4. The u32 writer now uses its Rust port;
+      the u16 writer remains a retailOS address seam. Raw instructions confirm
       five arguments, rectangle x/y/width/height and full-mask band fill.
       Unsupported formats read neither source nor buffer. No algorithm
       deviations; host writer seams require explicit installation.
