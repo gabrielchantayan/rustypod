@@ -206999,3 +206999,36 @@ functions:
       exits 1 with seven Rust versus four original instructions: LLVM adds
       an fp/lr frame and splits STM into STR/STMIB/STR, preserving the same
       destinations and stack argument. No device execution performed.
+
+  - address: 0x08253de4
+    ghidra: FUN_08253de4
+    name: video_engine_noop
+    size: 4
+    sig: "u8 *video_engine_noop(u8 *engine)"
+    module: util/video_engine
+    status: ported
+    renames: {param_1: engine}
+    notes: >-
+      Raw word e12fff1e is bx lr, preserving incoming r0 without any
+      memory access. The next real function begins with e92d41f0 at
+      0x08253de8; true extent is four bytes. Whole-image aligned A32
+      decoding verifies two incoming plain BLs at 0x082cada4 and
+      0x082cb158, no predicated incoming BLs, and no outgoing BLs.
+      No aligned words referencing this address or its Thumb-tagged
+      form were found. Both raw callers first call the already-named
+      video_engine_get at 0x08252bec. Ghidra's apparent direct caller
+      at 0x08142a34 actually tail-branches to 0x082cb14c and its void
+      signature omits r0 preservation. No destructor or more specific
+      lifecycle semantics are established; no new callee seam is needed.
+      No deliberate behavioral deviations. Host tests cover null,
+      unaligned and non-dereferenceable pointer values, full-width
+      pointer identity, and live storage preservation.
+      Verification: all 13757 host tests passed; ARM release build passed.
+      Actual-source runtime smoke preserved pointer identity and storage.
+      LLVM intentionally folds the global video_engine_noop export into
+      .text.context_scope_drop (12 bytes): push {fp,lr}, mov fp,sp,
+      pop {fp,pc}. This adds ordinary frame stack traffic while preserving
+      r0 and object memory. Requested match.py invocation cannot locate
+      the alias label; comparison against context_scope_drop prints this
+      three-versus-one-instruction structural diff and exits 1.
+      No device execution performed.

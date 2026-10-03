@@ -92,6 +92,48 @@ fn instance() -> *mut u8 {
 pub unsafe extern "C" fn video_engine_get() -> *mut u8 {
     instance()
 }
+
+/// Video-engine no-op — `FUN_08253de4` @ 0x08253de4, true size 4 bytes.
+///
+/// Raw word e12fff1e is `bx lr`; the next real function starts with
+/// e92d41f0 at 0x08253de8. Whole-image aligned A32 decoding verifies two
+/// inbound plain BLs (0x082cada4, 0x082cb158), no predicated inbound BLs,
+/// and no outbound BLs. No aligned address-word references were found.
+/// Both callers first obtain the video-engine singleton at 0x08252bec.
+/// Returns its incoming pointer unchanged without accessing memory; no
+/// destructor or other lifecycle meaning is established. Ghidra's void
+/// signature hides r0 preservation. No deliberate behavioral deviations.
+/// ARM LLVM folds this export onto the 12-byte `context_scope_drop`
+/// body: push {fp,lr}; mov fp,sp; pop {fp,pc}. The symbol remains global
+/// and preserves r0; the ordinary frame adds stack traffic versus bx lr.
+/// match.py cannot find alias labels, so compare the shared body instead.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn video_engine_noop(engine: *mut u8) -> *mut u8 {
+    engine
+}
+
+#[cfg(test)]
+mod noop_tests {
+    use super::video_engine_noop;
+
+    #[test]
+    fn preserves_null_and_non_dereferenceable_pointer_values() {
+        for word in [0usize, 1, 3, 0x0800_0000, 0x8000_0000, 0xffff_ffff, usize::MAX] {
+            let engine = word as *mut u8;
+            assert_eq!(video_engine_noop(engine), engine);
+        }
+    }
+
+    #[test]
+    fn preserves_live_object_and_surrounding_bytes() {
+        let mut storage = [0xa5, 0, 0xff, 0x5a, 0x81];
+        let before = storage;
+        let engine = unsafe { storage.as_mut_ptr().add(1) };
+        assert_eq!(video_engine_noop(engine), engine);
+        assert_eq!(storage, before);
+    }
+}
 // video_engine_get_veneer — original: `thunk_FUN_08252bec` @ `0x082cafbc`
 // (4 bytes; **2** direct plain inbound `bl` calls, no predicated `bl` calls).
 //
