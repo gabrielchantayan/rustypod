@@ -204082,3 +204082,36 @@ functions:
       zero on the null path. The pointer load, null check and tail
       transfer remain equivalent; the non-null branch relocates to
       vector_size_elem8.
+  - address: 0x08269010
+    ghidra: FUN_08269010
+    name: flagged_record_construct
+    size: 36
+    sig: "u32 *flagged_record_construct(u32 *storage, u32 source)"
+    module: app/flagged_record_construct
+    status: ported
+    vars:
+      param_1/r0: storage
+      param_2/r1: source
+      DAT_08269030: base_vtable
+    notes: >-
+      Raw words establish 32 bytes of code plus the vtable literal
+      0x089a8130 at 0x08269030; the next real function starts at
+      0x08269034 with CMP r0,0 and a conditional delete tail branch.
+      Whole-image aligned A32 decoding finds two incoming plain BLs
+      at 0x08269204 and 0x082699dc, zero predicated BLs, and zero
+      outgoing BLs. Installs the vtable, sets byte +4 to one, writes
+      source at +12, clears word +8, and preserves r0 as the return
+      pointer despite Ghidra's void declaration. Both raw callers use
+      r0 to replace the vtable after allocating derived records of
+      0x18 and 0x14 bytes. Bytes +5..+7 and derived fields remain
+      untouched. Concrete class identity and flag meaning are unknown;
+      source remains an opaque target-width word with no dereference.
+      No callee seams or deliberate behavioral deviations. Host tests
+      cover zero and maximal source words, return identity, padding,
+      derived-field preservation, and reconstruction of dirty state.
+      The host suite and ARM release build pass. A standalone host
+      executable confirms the mutated prefix and return identity.
+      match.py exits 1: LLVM adds a frame, reorders independent stores,
+      and includes the literal in its eleven-line listing versus eight
+      stock instructions. All four stores, the literal vtable value,
+      and unchanged r0 return agree; there are no introduced calls.
