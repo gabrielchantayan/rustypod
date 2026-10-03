@@ -49864,6 +49864,43 @@ functions:
       The photo-import call-site cluster on the thunk ("jpg"..."pict")
       pins the intended semantics as a case-insensitive compare.
 
+  - address: 0x082760f4
+    ghidra: FUN_082760f4
+    name: utf8_casefold_compare_bounded
+    size: 112
+    sig: "int utf8_casefold_compare_bounded(const char *a, const char *b, unsigned int codepoint_limit)"
+    module: cxx/string_object
+    status: identified
+    vars: {param_1: a, param_2: b, param_3: codepoint_limit, local_14: a_cursor, local_18: b_cursor, iVar1: folded_codepoint_a, iVar2: folded_codepoint_b, iVar3: matched_codepoints, DAT_08276164: EMPTY_CSTR_ADDRESS}
+    notes: >-
+      BLOCKED: raw osos.dec verifies 112 bytes of code from 0x082760f4
+      through the return at 0x08276160, followed by the four-byte literal
+      0x083e2e3a at 0x08276164; the next real function starts at 0x08276168.
+      The full extent including its pool is 116 bytes. Independent ARM-word
+      scanning finds two inbound unconditional BL sites, 0x08178000 and
+      0x082a4ff8, and no predicated inbound BL. The body has FOUR
+      unconditional BL instructions, not two: UTF-8 decoding at 0x0827613c
+      and 0x0827614c targets the ported utf8_next_codepoint at 0x08276214;
+      folding at 0x08276140 and 0x08276150 targets unicode_casefold_byte
+      at 0x08276fbc. A zero limit returns zero without reading either
+      string. Otherwise NULL arguments use the shared empty string,
+      both cursors decode and fold one codepoint per iteration, and the
+      first unequal folded pair returns its wrapping 32-bit difference.
+      Equal folded zero values terminate; equal nonzero values increment
+      the count and stop when it equals the limit. Callers use this for
+      token comparison and case-insensitive substring search.
+      Faithful behavior requires the unresolved runtime fold table:
+      0x08276fbc passes codepoints >= 0x100 through, but smaller values
+      index the byte table whose literal at 0x08276fd0 is 0x083ed1dd.
+      Raw bytes at that table address begin f0 a0 e1 03 02 a0 e3 00;
+      static fold(0) = 0xf0, fold('A') = 0x2c, and fold('a') = 0.
+      Existing comparison-core metadata and Rust seam document that this
+      is instruction/data content, not a recovered runtime case table.
+      The runtime table contents and initialization/relocation mechanism
+      remain unknown. No Rust implementation, fake fold seam, or host
+      behavior model is added; static-byte or ASCII-only substitution
+      would invent observable behavior.
+
   - address: 0x082a50a0
     ghidra: FUN_082a50a0
     name: string_object_len_plus1
