@@ -7,22 +7,20 @@
 //! position and returns the raw helper's codepoint. Raw ARM has 6 verified
 //! static `bl` call sites, all unconditional.
 //!
-//! `FUN_0825d4e0` (position adjustment) and `FUN_0825d580` (reader reset and
-//! seek) remain unported. Target builds reach their fixed firmware addresses
-//! through volatile dispatch seams; host tests install callbacks. This is the
-//! sole deliberate deviation.
+//! `FUN_0825d4e0` (position adjustment) remains unported and uses a volatile
+//! firmware-address seam with host callbacks. Restoration calls the Rust port
+//! directly; its unidentified virtual seek method uses a host-only seam.
 
 use super::xml_decode_codepoint_and_reset::XmlUtf8Decoder;
 use super::xml_decode_skip_whitespace::xml_decode_skip_whitespace;
 use super::xml_skip_whitespace::xml_skip_whitespace;
+use super::xml_reader_restore_position::xml_reader_restore_position;
 
-/// The two direct retailOS callees needed by [`xml_peek_skip_whitespace`].
+/// The remaining unported retailOS position helper.
 #[derive(Clone, Copy)]
 pub struct XmlPeekOps {
     /// `FUN_0825d4e0`: reports the input position before the active codepoint.
     pub position_before_current: unsafe extern "C" fn(*mut XmlUtf8Decoder) -> u32,
-    /// `FUN_0825d580`: clears decoder state and restores a signed input position.
-    pub restore_position: unsafe extern "C" fn(*mut XmlUtf8Decoder, u32, u32, u32, u32),
 }
 
 #[cfg(target_os = "none")]
@@ -37,43 +35,18 @@ unsafe extern "C" fn missing_position_before_current(_reader: *mut XmlUtf8Decode
     panic!("xml_peek_skip_whitespace requires a position seam on host")
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_restore_position(
-    reader: *mut XmlUtf8Decoder,
-    origin: u32,
-    position: u32,
-    position_sign: u32,
-    trailing_zero: u32,
-) {
-    let restore_position: unsafe extern "C" fn(*mut XmlUtf8Decoder, u32, u32, u32, u32) =
-        unsafe { core::mem::transmute(0x0825_d580usize) };
-    unsafe { restore_position(reader, origin, position, position_sign, trailing_zero) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_restore_position(
-    _reader: *mut XmlUtf8Decoder,
-    _origin: u32,
-    _position: u32,
-    _position_sign: u32,
-    _trailing_zero: u32,
-) {
-    panic!("xml_peek_skip_whitespace requires a restore seam on host")
-}
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_XML_PEEK_OPS: XmlPeekOps = XmlPeekOps {
     position_before_current: firmware_position_before_current,
-    restore_position: firmware_restore_position,
 };
 
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_XML_PEEK_OPS: XmlPeekOps = XmlPeekOps {
     position_before_current: missing_position_before_current,
-    restore_position: missing_restore_position,
 };
 
-/// Volatile seams for the unported reader position helpers.
+/// Volatile seam for the unported reader position helper.
 pub static mut XML_PEEK_OPS: XmlPeekOps = DEFAULT_XML_PEEK_OPS;
 
 #[inline(always)]
@@ -85,8 +58,8 @@ unsafe fn ops() -> XmlPeekOps {
 /// (76 bytes; 6 binary-verified unconditional `bl` call sites).
 ///
 /// The first whitespace helper's result is deliberately discarded. The
-/// position is sign-extended exactly as `asr r1, r6, #31` does, and the reset
-/// helper receives the literal zero values in its second and fifth arguments.
+/// position is sign-extended from the original r2:r3 pair. The stack origin
+/// word is zero; r1 is only ABI padding, not an argument to the restore helper.
 /// Like the ARM, this function dereferences `reader_slot` without a NULL guard.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -95,8 +68,7 @@ pub unsafe extern "C" fn xml_peek_skip_whitespace(reader_slot: *mut *mut u8) -> 
     let position = unsafe { (ops().position_before_current)(reader) };
     unsafe { xml_skip_whitespace(reader_slot) };
     let codepoint = unsafe { xml_decode_skip_whitespace(reader_slot) };
-    let position_sign = ((position as i32) >> 31) as u32;
-    unsafe { (ops().restore_position)(reader, 0, position, position_sign, 0) };
+    unsafe { xml_reader_restore_position(reader, (position as i32) as i64, 0) };
     codepoint
 }
 
@@ -109,6 +81,9 @@ mod tests {
         XmlCodepointDecoderOps, DEFAULT_XML_CODEPOINT_DECODER_OPS,
         XML_CODEPOINT_DECODER_OPS, XML_CODEPOINT_DECODER_OPS_LOCK,
     };
+    use super::super::xml_reader_restore_position::{
+        XmlReaderSeekOps, XML_READER_SEEK_OPS, DEFAULT_XML_READER_SEEK_OPS,
+    };
     use core::ptr;
     use std::sync::MutexGuard;
 
@@ -116,7 +91,7 @@ mod tests {
     static mut DECODE_INDEX: usize = 0;
     static mut POSITION: u32 = 0;
     static mut POSITION_CALLS: usize = 0;
-    static mut RESTORE_CALL: Option<(*mut XmlUtf8Decoder, u32, u32, u32, u32)> = None;
+    static mut RESTORE_CALL: Option<(*mut XmlUtf8Decoder, i64, u32)> = None;
 
     unsafe extern "C" fn queued_next_codepoint(_reader: *mut XmlUtf8Decoder) -> u32 {
         let index = unsafe { ptr::addr_of!(DECODE_INDEX).read_volatile() };
@@ -132,23 +107,16 @@ mod tests {
         unsafe { ptr::addr_of!(POSITION).read_volatile() }
     }
 
-    unsafe extern "C" fn restore_position(
+    unsafe extern "C" fn seek(
         reader: *mut XmlUtf8Decoder,
+        position: i64,
         origin: u32,
-        position: u32,
-        position_sign: u32,
-        trailing_zero: u32,
-    ) {
+    ) -> u32 {
         unsafe {
-            (*reader).state = 0;
-            ptr::addr_of_mut!(RESTORE_CALL).write_volatile(Some((
-                reader,
-                origin,
-                position,
-                position_sign,
-                trailing_zero,
-            )));
+            assert_eq!((*reader).state, 0);
+            ptr::addr_of_mut!(RESTORE_CALL).write_volatile(Some((reader, position, origin)));
         }
+        0
     }
 
     fn install(decoded: &[u32], position: u32) -> MutexGuard<'static, ()> {
@@ -162,7 +130,9 @@ mod tests {
             };
             XML_PEEK_OPS = XmlPeekOps {
                 position_before_current,
-                restore_position,
+            };
+            XML_READER_SEEK_OPS = XmlReaderSeekOps {
+                seek,
             };
             ptr::addr_of_mut!(DECODED).write_volatile(queued);
             ptr::addr_of_mut!(DECODE_INDEX).write_volatile(0);
@@ -177,6 +147,7 @@ mod tests {
         unsafe {
             XML_CODEPOINT_DECODER_OPS = DEFAULT_XML_CODEPOINT_DECODER_OPS;
             XML_PEEK_OPS = DEFAULT_XML_PEEK_OPS;
+            XML_READER_SEEK_OPS = DEFAULT_XML_READER_SEEK_OPS;
             ptr::addr_of_mut!(DECODED).write_volatile([0; 3]);
             ptr::addr_of_mut!(DECODE_INDEX).write_volatile(0);
             ptr::addr_of_mut!(POSITION).write_volatile(0);
@@ -203,9 +174,7 @@ mod tests {
                 ptr::addr_of!(RESTORE_CALL).read_volatile(),
                 Some((
                     ptr::addr_of_mut!(decoder),
-                    0,
-                    0xffff_fffc,
-                    u32::MAX,
+                    -4,
                     0,
                 )),
             );
@@ -229,7 +198,7 @@ mod tests {
             assert_eq!(ptr::addr_of!(DECODE_INDEX).read_volatile(), 2);
             assert_eq!(
                 ptr::addr_of!(RESTORE_CALL).read_volatile(),
-                Some((ptr::addr_of_mut!(decoder), 0, 0x1234_5678, 0, 0)),
+                Some((ptr::addr_of_mut!(decoder), 0x1234_5678, 0)),
             );
             assert_eq!(decoder.state, 0);
         }
