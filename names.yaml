@@ -203550,3 +203550,45 @@ functions:
       versus 35 Rust instructions: helper loop inlined, decoder/width
       calls and final insertion-core call retained; LLVM adds a frame
       and uses BL rather than tail B. No device execution claimed.
+  - address: 0x0826b318
+    ghidra: FUN_0826b318
+    name: descriptor_object_create
+    size: 76
+    module: app/descriptor_object_create
+    sig: "void *descriptor_object_create(const uint16_t *descriptor, uint32_t context, uint32_t eager)"
+    status: ported
+    confidence: high
+    vars:
+      param_1/r0/r4: descriptor
+      param_2/r1/r6: context
+      param_3/r2/r5: eager
+      FUN_082aadd4: operator_new
+    notes: >-
+      Raw A32 words establish the true 76-byte extent 0x0826b318..0x0826b363;
+      next function starts at 0x0826b364 with push {r4,lr}. Ghidra's 220-byte
+      extent includes neighboring functions, while its C folds constructors. Two plain
+      outbound BL sites at 0x0826b338 and 0x0826b350 both call the existing
+      tag-2 operator_new port; zero predicated BL sites. Whole-image aligned
+      decoding finds two plain inbound BL sites at 0x0829de9c and 0x0829deb4,
+      both in the lazy descriptor owner accessor, and no predicated inbound BL.
+      Reads only the leading unsigned halfword before allocation: exact kind 6
+      allocates 164 bytes and tail-branches to 0x082903c4 with eager unchanged;
+      every other kind allocates 108 bytes and tail-branches to 0x0811dd2c with
+      context unchanged. Raw constructor code verifies the former initializes
+      an embedded object and optionally calls 0x082a6e84; the latter retains
+      descriptor/context and copies descriptor fields. Neither constructor has
+      an existing names.yaml entry or Rust seam; both remain resident calls
+      without claiming a more specific class identity. Constructor return is
+      preserved, including a value different from the allocation. No NULL
+      guard or flag booleanization added. Deliberate deviation: Rust expresses
+      constructor branches as calls and reuses the ported allocator.
+      Host tests exhaust all 65536 kinds and full-width argument boundaries;
+      temporary host smoke exercises the real factory across six boundary
+      kinds, both sizes, both constructors, and adjusted constructor returns.
+      Host suite passed 13594 tests including the temporary smoke; ARM release
+      build succeeded. Required match.py invocation exits 1 using the stale
+      220-byte extent; rerunning with --size 76 compares 19 original instructions
+      against 21 Rust entries (including two literal words). LLVM selects size,
+      argument and constructor with predicated moves, merges the allocation
+      sites into one BL, and tail-dispatches with BX to the exact resident
+      addresses. Extra frame setup is intentional compiler codegen.
