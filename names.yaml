@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821c500
+    ghidra: FUN_0821c500
+    name: restore_internal_display_layers
+    size: 196
+    sig: "void restore_internal_display_layers(void *unused_context, u32 enable_base)"
+    module: app/restore_internal_display_layers
+    status: ported
+    vars:
+      param_1/r0: unused_context
+      param_2/r8: enable_base
+      r9: base_layer
+      r4: layer_1
+      r5: layer_2
+      r6: layer_3
+      r7: overlay_layer_5
+    renames:
+      FUN_081f77a4: volume_controller_get
+      FUN_081fa044: volume_controller_byte_at_90
+      FUN_081d8870: display_get
+      FUN_081d9064: display_get_layer
+      FUN_08120890: layer_set_pixel_alpha_blend
+      FUN_0811fd98: layer_set_alpha
+      FUN_08120908: layer_enable
+      FUN_081d8af8: firmware_display_refresh (existing verified firmware seam)
+    notes: >-
+      Raw A32 establishes 196 bytes through the independent cmp r1,0 at
+      0x0821c5c4, with no literal pool. Full-image decoding finds two plain
+      inbound BLs at 0x0821d168 and 0x0821df6c, no predicated inbound BLs;
+      18 plain outbound BLs, one BLNE, and tail B to 0x081d8af8. Ghidra
+      incorrectly absorbs that tail callee. Context is unused. Nonzero
+      volume-controller byte +0x90 inhibits display work. Otherwise acquire
+      layers 0,1,2,3,5 through separate display_get(0) calls, select pixel
+      alpha for layer 0, set layer 5 alpha to 255, enable layers 1,2,3,
+      optionally enable layer 0 for any nonzero second argument, reacquire
+      display 0 and refresh. Raw callers pass zero and one respectively.
+      Reuses existing Rust callees and verified firmware refresh seam.
+      Existing singleton/display initialization limitations remain; not
+      independently hook-ready. Host tests cover inhibition 0,1,2,255,
+      enable values 0,1,0x80000000,0xffffffff and complete layer buffers.
+      Host suite, ARM release build and actual-source executable smoke pass.
+      Reviewed match.py diff (exit 1): 49 original instructions versus 146
+      generated entries; acquisition and inhibition preserved, setters and
+      mutex-protected enables inlined, including format-3 surface unbinding.
+      Firmware refresh remains a raw-address call rather than a direct B.
   - address: 0x0822e160
     ghidra: FUN_0822e160
     name: show_music_highlight

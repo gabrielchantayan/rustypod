@@ -23,7 +23,7 @@ pub struct DisplayLayoutContext {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0xc8] = [0; core::mem::offset_of!(DisplayLayoutContext, layout)];
 
-unsafe extern "C" fn firmware_display_refresh(display: *mut Display) {
+pub(crate) unsafe extern "C" fn firmware_display_refresh(display: *mut Display) {
     #[cfg(target_os = "none")]
     {
         let refresh: unsafe extern "C" fn(*mut Display) = unsafe { core::mem::transmute(0x081d8af8usize) };
