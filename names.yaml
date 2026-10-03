@@ -203401,3 +203401,40 @@ functions:
       calendar functions. An isolated non-test smoke compiled the production
       suffix/truncation modules with the actual object layouts and decoder
       definitions: A + U+3000 + space becomes A, returning two.
+
+  - address: 0x08276c1c
+    ghidra: thunk_FUN_08276c70
+    name: utf8_validate_c_string_permissive
+    size: 104
+    sig: "u32 utf8_validate_c_string_permissive(const u8 *text)"
+    module: util/utf8_validate_c_string_permissive
+    status: ported
+    renames:
+      param_1/r0: text
+      bVar3/r1: lead
+      bVar1/r2: second
+      bVar2/r3: third
+    notes: >-
+      Raw entry word 0xea000013 branches to 0x08276c70, which branches back
+      into 0x08276c20. This is one 104-byte routine through 0x08276c84
+      exclusive, not an isolated four-byte veneer; the next real function
+      starts with push {r3-r11,lr}. Whole-image aligned A32 decoding finds
+      two unconditional inbound BLs at 0x08119af8 and 0x0812e11c, zero
+      predicated inbound BLs, and zero plain or predicated outbound BLs.
+      No names.yaml entry exists for either entry address; no callee seam
+      is introduced. Callers reject note/tag data on a zero result.
+      Scan a non-NULL C string, accepting ASCII; c0-df requires one 80-bf
+      continuation and e0-ef requires two. Other high-bit leads consume
+      two following bytes without checking them, including embedded NULs.
+      Overlong and surrogate encodings remain accepted. Return one only
+      upon reaching a NUL lead, zero on a checked malformed continuation.
+      Rust incorporates the shared entry and loop; no behavioral deviation.
+      Volatile byte loads preserve unconditional consumed-window reads.
+      Host suite passes all 13587 tests, including exhaustive continuation
+      values and unsupported-lead/NUL edge cases. ARM release build passes.
+      Standalone production smoke confirms ASCII, malformed continuation,
+      surrogate acceptance, and scanning beyond skipped NULs. Required
+      match.py exits 1 because Ghidra reports only the branch; --size 104
+      reviews the full routine. LLVM uses signed continuation comparisons
+      and a different prologue/branch layout; all scan paths, byte loads,
+      zero/one results, and absence of BLs are preserved.
