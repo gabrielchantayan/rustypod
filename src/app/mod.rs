@@ -810,3 +810,4 @@ pub mod kind_0x1f_message_post;
 pub mod indexed_record_payload_clear;
 pub mod numeric_pair_table;
 pub mod record28_vector_last;
+pub mod view_event_clear_screen_indices;
