@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08220560
+    ghidra: FUN_08220560
+    name: object_reset_then_destruct
+    size: 32
+    sig: "void *object_reset_then_destruct(void *object)"
+    status: identified
+    vars: {param_1/r0/r4: object}
+    notes: >-
+      Deferred: unresolved cleanup identities and pointer-return contracts.
+      Raw extent is 0x08220560..0x08220580 exclusive, not Ghidra's 164
+      bytes. Next independent entry tests r0 for NULL at 0x08220580.
+      Words: e92d4010 e1a04000 ebffffea e1a00004 eb002c3d e1a00004
+      e8bd4010 ea002d5d. Independent whole-image A32 BL scan finds two
+      plain inbound calls at 0x08142f6c and 0x0817dbe8, no predicated
+      inbound calls; two plain outbound BLs, no predicated outbound BLs.
+      First BL to 0x08220518 resets words +0x89c/+0x8a0 to 0xffffffff,
+      byte +0x8a4 and word +0x8a8 to zero. Second BL to 0x0822b66c
+      reaches an identified, unported cleanup wrapper. Its actual tail
+      is 0x08214410, not 0x081f02c0 as existing duplicate entries claim.
+      Final B to 0x0822baf8 installs vtables and destroys members, using
+      returned pointers for adjustments -0x2cc, -0x2f8 and -0x38 before
+      tail 0x082145c4. No registered identity exists for 0x08220518 or
+      0x0822baf8. Callers consume final r0: 0x08142f74 subtracts 0xe0;
+      0x0817dbec subtracts 0x14. No guessed seam or object-return shortcut
+      added. No evidence of undecrypted-region dependence claimed.
+      Verified raw objdump output and BL words; no Rust port/build/match.
   - address: 0x08223c88
     ghidra: FUN_08223c88
     name: image_lookup_cache_refresh
