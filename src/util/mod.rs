@@ -17,6 +17,7 @@ pub mod assign_active_entry_labels;
 pub mod always_succeeds;
 pub mod battery_adc_code_to_millivolts;
 pub mod ascii_to_uppercase;
+pub mod ascii_hex_digit_value;
 pub mod ascii_string_to_uppercase;
 pub mod ascii_uppercase_record_copy;
 pub mod ascii_uppercase_copy_n;
