@@ -206332,16 +206332,41 @@ functions:
       Direct stores leave +0x20 through +0x2c and +0x6c onward untouched.
       The callback word decodes as mid-function code, not a verified ABI
       entry; it is preserved without inventing a callee identity or seam.
-      Deliberately inline the deterministic stores of unported 0x0824c758;
-      reuse the existing clear and array ports, with volatile ordered stores
+      Calls the fixed_point_record_construct port at 0x0824c758 twice;
+      reuses the existing clear and array ports, with volatile ordered stores
       and target u32 word offsets. Host tests cover three prior fill patterns,
       untouched fields and surrounding canaries, and a displaced helper result.
       Host suite and ARM release build pass. Standalone actual-source smoke
       verifies initialization and pointer return using an identity host array
       seam; it does not execute the firmware array initializer. match.py exits
-      1 with the expected structural diff: two initializers become direct
-      stores, two calls remain, the callback literal and subtraction of 60
-      are retained, and LLVM adds its balanced frame.
+      1 historically showed inlined initializer stores. The initializer is
+      now a separately exported non-inlined port, restoring both call seams.
+      The callback literal and subtraction of 60 remain unchanged.
+
+  - address: 0x0824c758
+    ghidra: FUN_0824c758
+    name: fixed_point_record_construct
+    size: 28
+    sig: "u32 *fixed_point_record_construct(u32 *record)"
+    module: cxx/fixed_point_record_construct
+    status: ported
+    renames:
+      param_1/r0: record
+    notes: >-
+      Raw ARM establishes seven instructions at 0x0824c758..0x0824c774,
+      ending with bx lr at 0x0824c770 before the next four-word copy member.
+      Independent whole-image aligned A32 BL decoding finds two inbound plain
+      calls at 0x0824cc98 and 0x0824cca0, zero predicated calls and no body
+      calls. Clears words 2, 1 and 0, then writes fixed-point unity 0x10000
+      to word 3; r0 passes through as the returned pointer despite Ghidra's
+      void signature. Volatile stores preserve write order; u32 indexing
+      preserves target layout on hosts. No other semantic deviations.
+      Host tests cover prior contents, reinitialization, canaries and return
+      identity. All 13727 host tests and the ARM release build pass.
+      Actual-source host smoke verifies chained construction, reinitialization
+      and untouched neighboring words. match.py exits 1: the seven retail
+      instructions become nine, with identical ordered stores and constants,
+      plus LLVM's frame push/setup and pop replacing bx lr.
 
   - address: 0x0824c7c0
     ghidra: FUN_0824c7c0
