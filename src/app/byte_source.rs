@@ -78,6 +78,37 @@ pub unsafe extern "C" fn byte_source_at(source: *const ByteSource, index: usize)
     unsafe { (*source).inline_bytes.as_ptr().add(index).read() }
 }
 
+/// Sets the byte-source status, optionally marking a changed source dirty.
+///
+/// Original: `FUN_082724c8` @ `0x082724c8`, true size 32 bytes, through
+/// `bx lr` at `0x082724e4`; the next function begins at `0x082724e8`.
+/// Full-image aligned A32 decoding verifies two inbound plain BLs
+/// (`0x081031f8`, `0x081190bc`), zero predicated BLs, and zero outbound BLs.
+/// Compares byte 5 with the full 32-bit status. On inequality, writes 1
+/// to byte 6 only when mark_dirty is nonzero, then stores status's low byte
+/// at byte 5. Equality leaves both bytes unchanged; dirty is never cleared.
+///
+/// Deviation: volatile byte accesses preserve retail access and store order;
+/// no behavioral deviation. The full-width comparison precedes truncation.
+///
+/// # Safety
+///
+/// `source` must point to seven readable/writable bytes, with no concurrent
+/// access. Byte alignment suffices; no complete ByteSource is required.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn byte_source_set_status(source: *mut u8, status: u32, mark_dirty: u32) {
+    unsafe {
+        if u32::from(source.add(5).read_volatile()) == status {
+            return;
+        }
+        if mark_dirty != 0 {
+            source.add(6).write_volatile(1);
+        }
+        source.add(5).write_volatile(status as u8);
+    }
+}
+
 /// Clears a byte source's embedded bytes and status flags.
 ///
 /// Original: `FUN_0827259c` @ `0x0827259c`, true size 36 bytes, ending
@@ -111,6 +142,49 @@ pub unsafe extern "C" fn byte_source_clear(source: *mut u8) {
 mod tests {
     use super::*;
     use core::ptr;
+
+    #[test]
+    fn set_status_preserves_unchanged_and_unmarked_dirty_state() {
+        for offset in 1..=4 {
+            for old_status in [0u8, 0x5a, 0xff] {
+                for status in [0, 0x5a, 0xff, 0x100, 0x15a, u32::MAX] {
+                    for dirty in [0u8, 1, 0x9b] {
+                        for mark_dirty in [0, 1, 0x100, u32::MAX] {
+                            let mut bytes = [0xa5; 16];
+                            bytes[offset + 5] = old_status;
+                            bytes[offset + 6] = dirty;
+                            let mut expected = bytes;
+                            if u32::from(old_status) != status {
+                                expected[offset + 5] = status as u8;
+                                if mark_dirty != 0 {
+                                    expected[offset + 6] = 1;
+                                }
+                            }
+                            unsafe {
+                                byte_source_set_status(bytes.as_mut_ptr().add(offset), status, mark_dirty);
+                            }
+                            assert_eq!(bytes, expected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn set_status_only_marks_dirty_on_a_full_width_change() {
+        let mut bytes = [0u8; 7];
+        unsafe {
+            byte_source_set_status(bytes.as_mut_ptr(), 0, 1);
+            assert_eq!((bytes[5], bytes[6]), (0, 0));
+            byte_source_set_status(bytes.as_mut_ptr(), 0x100, 1);
+            assert_eq!((bytes[5], bytes[6]), (0, 1));
+            byte_source_set_status(bytes.as_mut_ptr(), 7, 0);
+            assert_eq!((bytes[5], bytes[6]), (7, 1));
+            byte_source_set_status(bytes.as_mut_ptr(), 7, 1);
+            assert_eq!((bytes[5], bytes[6]), (7, 1));
+        }
+    }
 
     #[test]
     fn clear_changes_exactly_seven_bytes_at_every_alignment() {
