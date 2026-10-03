@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const STRING_PAIR_VECTOR_LAST: usize = 0x4274_0000;
+    pub const OBJECT_RESOURCES_DESTROY: usize = 0x426f_0000;
     pub const RECORD28_VECTOR_LAST: usize = 0x4273_0000;
     // Dedicated two-byte-range owner fixture; mappings never unmap.
     pub const TWO_BYTE_RANGES_DESTRUCT: usize = 0x4272_0000;
