@@ -12,14 +12,15 @@
 //! Registers the resource request only when the two-level handle is empty.
 //!
 //! Deviations: widened host pointers use named repr(C) fields rather than
-//! target byte offsets. Existing StringObject and handle ports are reused.
-//! The two unported helpers retain their verified retail addresses on ARM;
-//! host callers must supply those boundaries. Global pointers are injectable
-//! on hosts; ARM always uses the original global addresses. The host-only
-//! path boundary permits fixtures without invoking the device allocator.
+//! target byte offsets. Existing StringObject, byte-source clear, and handle
+//! ports are reused. The two unported helpers retain their verified retail
+//! addresses on ARM; host callers must supply those boundaries. Global
+//! pointers are injectable on hosts; ARM always uses the original global
+//! addresses. The host-only path boundary permits fixtures without invoking
+//! the device allocator.
 
 use core::ptr;
-use crate::app::byte_source::ByteSource;
+use crate::app::byte_source::{ByteSource, byte_source_clear};
 use crate::cxx::path_escape_record::{EscapedPathStringRecord, path_escape_record_assign};
 use crate::cxx::string_object::{StringObject, PrimaryStringRecord,
     string_object_construct_from_cstr, string_default_construct,
@@ -122,9 +123,7 @@ pub unsafe extern "C" fn notes_view_initialize(view: *mut NotesView) {
     (*view).path_flag = 0;
     (*view).selected_path = ptr::addr_of_mut!((*view).path);
     (*view).selection_state = 0;
-    (*view).source.status = 0;
-    (*view).source.dirty = 0;
-    for byte in &mut (*view).source.inline_bytes { *byte = 0; }
+    byte_source_clear(ptr::addr_of_mut!((*view).source).cast());
     ptr::write_volatile(flag, 0);
     propagate(ptr::addr_of_mut!((*view).source), 3, 1);
     (*view).snapshot = ptr::read_volatile(word);

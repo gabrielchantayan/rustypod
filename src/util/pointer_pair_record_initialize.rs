@@ -11,6 +11,8 @@
 //! not recoverable from the assigned function, so the fields stay opaque u32
 //! target words rather than host pointers.
 
+use crate::app::byte_source::byte_source_clear;
+
 /// The 16-byte target layout initialized by [`pointer_pair_record_initialize`].
 #[repr(C)]
 pub struct PointerPairRecord {
@@ -18,15 +20,6 @@ pub struct PointerPairRecord {
     pub byte_07: u8,
     pub first: u32,
     pub second: u32,
-}
-
-#[inline(never)]
-unsafe fn clear_record_prefix(record: *mut PointerPairRecord) {
-    unsafe {
-        for offset in 0..7 {
-            (record.cast::<u8>().add(offset)).write_volatile(0);
-        }
-    }
 }
 
 /// Initializes an opaque record containing two target-width pointer-like words.
@@ -47,7 +40,7 @@ pub unsafe extern "C" fn pointer_pair_record_initialize(
         core::ptr::addr_of_mut!((*record).cleared_prefix[6]).write_volatile(0);
         core::ptr::addr_of_mut!((*record).first).write_volatile(first);
         core::ptr::addr_of_mut!((*record).second).write_volatile(second);
-        clear_record_prefix(record);
+        byte_source_clear(record.cast());
     }
     record
 }
