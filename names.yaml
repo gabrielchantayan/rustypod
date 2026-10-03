@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08268378
+    ghidra: FUN_08268378
+    name: ascii_hex_digit_value
+    size: 56
+    sig: "uint32_t ascii_hex_digit_value(uint32_t value)"
+    module: util/ascii_hex_digit_value
+    status: ported
+    renames:
+      param_1/r0: value
+      r1: range_offset
+    notes: >-
+      Raw A32 words establish 56 executable bytes at 0x08268378..0x082683b0,
+      ending in bx lr at 0x082683ac. The next independent body is bx lr
+      at 0x082683b0, followed by a separate initializer at 0x082683b4.
+      Whole-image aligned BL decoding verifies two unconditional inbound
+      calls at 0x08267f34 and 0x08267f40, zero predicated inbound BLs,
+      and zero outbound BLs of either kind. Unsigned wrapping subtraction
+      recognizes 0..9, A..F and a..f and returns 0..15; every other full-width
+      u32 is preserved. Caller 0x08267e8c combines low | (high << 4) into
+      output bytes. No callees, seams or deliberate behavioral deviations.
+      Host tests cover every byte, range boundaries, nonzero upper bits
+      and unsigned wraparound. Host suite and ARM release build pass.
+      Actual-source executable smoke decodes 09aF7C to 09 af 7c and verifies
+      invalid/full-width pass-through. match.py exits 1 with a reviewed
+      14-instruction versus 14-instruction diff: LLVM adds a frame, uses
+      equivalent exclusive range bounds and folds letter conversion into
+      (value + 9) & 31. Decimal conversion and unchanged-r0 returns remain;
+      no calls are introduced.
   - address: 0x082693ac
     ghidra: FUN_082693ac
     name: serialized_record_construct
