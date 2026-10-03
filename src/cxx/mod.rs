@@ -861,3 +861,4 @@ pub mod two_byte_ranges_destruct;
 pub mod byte_vector_owner8_push_back;
 pub mod buffered_read_context_construct;
 pub mod opaque_context_submit;
+pub mod fixed_point_record_copy;

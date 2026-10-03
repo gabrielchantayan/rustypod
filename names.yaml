@@ -206399,3 +206399,32 @@ functions:
       predicated ORs instead of shifted Boolean temporaries and a different
       balanced frame; all six signed comparisons, RSB negation, mask 0xfc,
       and the sole store at +0x90 are retained. Exported symbol is present.
+
+  - address: 0x0824c734
+    ghidra: FUN_0824c734
+    name: fixed_point_record_copy
+    size: 36
+    sig: "u32 *fixed_point_record_copy(u32 *dst, const u32 *src)"
+    module: cxx/fixed_point_record_copy
+    status: ported
+    vars: {param_1: dst, param_2: src}
+    notes: >-
+      Raw osos.dec establishes 0x0824c734..0x0824c758: four alternating
+      aligned LDR/STR pairs at offsets 0, 4, 8, 12 and BX LR at 0x0824c754.
+      The next real function is fixed_point_record_construct at 0x0824c758.
+      Whole-image aligned A32 BL decoding finds two inbound unconditional
+      plain BL calls at 0x08240b90 and 0x08240b9c, zero predicated BLs,
+      and no outbound calls. Returns dst untouched in r0; the caller uses
+      that return to copy the adjacent 16-byte subobject. The neighboring
+      constructor establishes homogeneous fixed-point unity in word 3.
+      Byte identity with deque iterator copies does not establish deque
+      field semantics here. Volatile u32 accesses preserve forward
+      overlapping-copy propagation and alternating load/store order;
+      no NULL guard or snapshot-copy deviation. A distinct text section
+      preserves an independently addressable export. Host tests cover
+      exact bounds, bit patterns, self-copy and both overlap directions.
+      All 13729 host tests and ARM release build pass. Standalone source
+      smoke observes forward propagation and unchanged destination return.
+      match.py prints a structural diff (exit 1): all eight LDR/STR
+      instructions match; LLVM adds PUSH/MOV frame setup and uses POP
+      instead of BX LR, producing 11 instructions versus retail's nine.
