@@ -203257,3 +203257,34 @@ functions:
       LLVM adds frame/padding initialization and hoists clamp selection,
       preserving both calls, wrapping subtraction, unsigned capacity check,
       context clearing, and quotient multiplication. No device run claimed.
+
+  - address: 0x08277980
+    ghidra: FUN_08277980
+    name: opaque_state_construct
+    size: 28
+    sig: "void *opaque_state_construct(void *storage, uint32_t mode)"
+    module: cxx/opaque_state_construct
+    status: ported
+    vars:
+      param_1: storage
+      param_2: mode
+      DAT_08277998: OPAQUE_STATE_DESCRIPTOR
+    notes: >-
+      Raw ARM words establish six instructions at 0x08277980..0x08277994
+      and literal 0x089a605c at 0x08277998; next real function begins at
+      0x0827799c. True extent is 28 bytes, not Ghidra's 24 code bytes.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x08148fe4 and 0x08295074, zero predicated incoming BLs, and zero
+      outgoing plain or predicated BLs. Installs the descriptor at +0,
+      clears byte +4, stores the low byte of mode at +5, and returns
+      storage unchanged in r0. Derived callers pass 1 and 0 and replace
+      the descriptor. Concrete class and byte meanings remain unresolved.
+      No callees or seams; no behavioral deviations. Host tests cover all
+      byte modes, high-bit truncation, pointer return, and preservation
+      of surrounding bytes.
+      Full host suite passes 13579 tests; ARM release build succeeds.
+      Direct host smoke observes descriptor 0x089a605c, tail 0xccccff00
+      for mode 0x123456ff, and unchanged return pointer. match.py exits
+      1 with the expected structural diff: LLVM emits a frame, reverses
+      independent stores, retains both byte stores and the descriptor
+      word store, and returns the untouched r0. No device execution claimed.
