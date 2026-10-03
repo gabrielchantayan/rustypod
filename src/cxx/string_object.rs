@@ -1550,6 +1550,42 @@ pub unsafe extern "C" fn string_object_insert_cstr(
     string_object_insert_bytes(this, index, source, source_len as u32);
 }
 
+/// string_object_insert_utf8_capped — original: FUN_08276a5c @ 0x08276a5c.
+/// True extent 0x08276a5c..0x08276aa0: 68 bytes, all code; two plain
+/// incoming BLs (0x080c7388, 0x08223224), zero predicated BLs. The body
+/// has one BL to the private width helper and a tail B to insert_bytes.
+///
+/// Ignore NULL source, nonpositive cap, or negative character index.
+/// Decode at most max_codepoints sequences until a raw NUL, sum their
+/// encoded widths, then insert that many leading raw bytes. Unsupported
+/// leads consume three bytes but contribute width(0) == 1; overlong
+/// sequences likewise use decoded width, not bytes consumed.
+///
+/// Deviation: inline private helper 0x08275e44 using the existing decoder
+/// and width classifier, without introducing a firmware-address seam.
+/// Allocation retains insert_bytes' existing virtual-method boundary.
+///
+/// # Safety
+/// Source must be readable through each decoded sequence and remain valid
+/// across allocation; this and source satisfy insert_bytes' contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_insert_utf8_capped(
+    this: *mut StringObject, index: i32, source: *const u8, max_codepoints: i32,
+) {
+    if source.is_null() || max_codepoints <= 0 || index < 0 { return; }
+    let mut cursor = source;
+    let mut remaining = max_codepoints;
+    let mut byte_count = 0u32;
+    while remaining > 0 && cursor.read() != 0 {
+        byte_count = byte_count.wrapping_add(utf8_codepoint_byte_width(
+            utf8_next_codepoint(&mut cursor),
+        ));
+        remaining -= 1;
+    }
+    string_object_insert_bytes(this, index, source, byte_count);
+}
+
 /// string_object_assign — original: `FUN_082774a8` @ 0x082774a8
 /// (32 bytes, 217 `bl` call sites — the most-called function of the class).
 ///
@@ -6941,6 +6977,48 @@ pub(crate) mod tests {
         unsafe { string_object_insert_cstr(&mut object, 2, source.as_ptr().add(4)) };
         assert_eq!(&out[..13], b"A\xc2\xa9h\xc3\xa9llo\xe2\x82\xac\0");
         assert_eq!(unsafe { string_object_codepoint_count(&object) }, 8);
+    }
+
+    #[test]
+    fn capped_utf8_insertion_preserves_tail_and_decoded_width_quirks() {
+        for (source, cap, inserted) in [
+            (&b"h\xc3\xa9Z\0\0\0\0\0"[..], 2, &b"h\xc3\xa9"[..]),
+            (&b"h\xc3\xa9Z\0\0\0\0\0"[..], 9, &b"h\xc3\xa9Z"[..]),
+            (&b"\xf0\x9f\x98X\0\0\0\0"[..], 1, &b"\xf0"[..]),
+            (&b"\xc0\x81X\0\0\0\0\0"[..], 1, &b"\xc0"[..]),
+        ] {
+            let mut old = *b"A\xc2\xa9Z\0\0\0\0";
+            let mut out = [0xa5; 32];
+            let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+            let _bench = insert_bench(out.as_mut_ptr());
+            unsafe { string_object_insert_utf8_capped(&mut object, 2, source.as_ptr(), cap) };
+            let mut expected = b"A\xc2\xa9".to_vec();
+            expected.extend_from_slice(inserted);
+            expected.extend_from_slice(b"Z\0");
+            assert_eq!(&out[..expected.len()], expected.as_slice());
+            assert_eq!(out[expected.len()], 0xa5);
+        }
+    }
+
+    #[test]
+    fn capped_utf8_insertion_guards_empty_source_and_allocation_failure() {
+        let mut old = *b"abc\0";
+        let mut object = StringObject { vtable: core::ptr::null(), payload: old.as_mut_ptr() };
+        let _bench = insert_bench(core::ptr::null_mut());
+        unsafe {
+            string_object_insert_utf8_capped(core::ptr::null_mut(), 0, core::ptr::null(), 1);
+            for cap in [0, -1, i32::MIN] {
+                string_object_insert_utf8_capped(core::ptr::null_mut(), 0, 1usize as *const u8, cap);
+            }
+            string_object_insert_utf8_capped(core::ptr::null_mut(), -1, 1usize as *const u8, 1);
+            string_object_insert_utf8_capped(core::ptr::null_mut(), 0, b"\0".as_ptr(), 1);
+            assert!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).is_empty());
+            string_object_insert_utf8_capped(&mut object, 99, b"\xc2\xa9\0\0\0\0".as_ptr(), 1);
+            assert_eq!((*core::ptr::addr_of!(ASSIGN_CSTR_ALLOCATE_CALLS)).as_slice(),
+                &[(&mut object as *mut _ as usize, 32, 1)]);
+        }
+        assert_eq!(object.payload, old.as_mut_ptr());
+        assert_eq!(&old, b"abc\0");
     }
 
     #[test]
