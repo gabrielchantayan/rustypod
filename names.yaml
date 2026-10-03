@@ -48575,6 +48575,35 @@ functions:
       stores only +0, +1, +3, +4; destination[2] is untouched instead
       of receiving a third continuation byte. The function returns void.
 
+  - address: 0x0825c9c4
+    ghidra: FUN_0825c9c4
+    name: xml_skip_comment_or_declaration
+    size: 156
+    sig: "unsigned int xml_skip_comment_or_declaration(struct XmlMarkupParser *parser, void *context)"
+    module: util/xml_skip_comment_or_declaration
+    status: ported
+    renames:
+      param_1/r0/r4: parser
+      param_2/r1/r5: context
+      param_1+0: parser.input
+      param_1+4: parser.reader
+      FUN_0825ca60: declaration scanner (unported firmware seam)
+    notes: >-
+      Raw extent is 0x0825c9c4..0x0825ca5f, 156 bytes rather than Ghidra's
+      212. The conditional path restores its frame and LR before tail-branching
+      to the independent prologue at 0x0825ca60. That 56-byte helper scans to
+      greater-than or exhaustion and remains a fixed firmware seam, not a port.
+      Two inbound plain BLs at 0x0825cb2c and 0x0825cfb0, zero predicated;
+      nine outbound plain BLs, zero predicated. Consumes exclamation mark and
+      next codepoint; D delegates with the original context. Otherwise consumes
+      another opener without validation, checks exhaustion before scanning,
+      and recognizes hyphen, raw-decoded hyphen, whitespace-peeked greater-than.
+      Consumes the second hyphen and closing whitespace/greater-than, returning
+      0x22; exhaustion returns 0x38. Existing Rust decoder, exhaustion, and
+      position helpers are reused. Host tests model cached ASCII decoding and
+      seek/restore for empty comments, malformed delimiters, closing whitespace,
+      and truncation without consuming trailing text.
+
   - address: 0x0825d2fc
     ghidra: FUN_0825d2fc
     name: xml_codepoint_is_whitespace
