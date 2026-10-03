@@ -85605,6 +85605,37 @@ functions:
       0xff, copies while the destination vtable remains unchanged, and
       that source == destination is safe.
 
+  - address: 0x08270444
+    ghidra: FUN_08270444
+    name: six_halfword_defaults_initialize
+    size: 36
+    sig: "u16 *six_halfword_defaults_initialize(u16 *record)"
+    module: app/six_halfword_defaults_initialize
+    renames:
+      param_1/r0: record
+    status: ported
+    notes: >-
+      Raw ARM words establish the exact extent 0x08270444..0x08270468:
+      mvn r1,#0 followed by five strh stores at offsets 0,2,4,6,8,
+      mov r1,#0x80, strh at offset 10, and bx lr. The next real
+      function begins at 0x08270468 with stmdb sp!,{r4,r5,r6,lr}.
+      Independently decoding all aligned ARM BL words in osos.dec
+      finds two plain BL callers (0x0827104c and 0x08271054), zero
+      predicated BL callers, and no outbound calls. The caller uses
+      unchanged r0 to advance from its +0x3c record to its +0x50
+      record, then subtracts 0x50 to recover the containing object.
+      Unlike Ghidra's void signature, Rust returns the input pointer
+      to preserve this required ABI behavior. Five halfwords become
+      0xffff and the sixth becomes 0x0080; field meanings are unknown.
+      No callee seams or algorithmic deviations. Host tests cover
+      both halfword alignments modulo four, zero and nonzero prior
+      contents, untouched neighboring halfwords and the caller's
+      two-record pointer chain with an untouched intervening gap.
+      match.py finds the exported symbol with 11 ARM instructions versus
+      the original nine: LLVM adds a frame and reverses the first five
+      independent halfword stores. Values, offsets, the final 0x0080
+      store and unchanged r0 are preserved; there are still no calls.
+
   - address: 0x0812c75c
     ghidra: FUN_0812c75c
     name: copy_service_context_selection
