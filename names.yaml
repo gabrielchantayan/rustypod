@@ -207785,3 +207785,37 @@ functions:
       LLVM expands virtual BLs into BLX, inlines the guarded length loop,
       adds a frame, and retains final virtual tail BX. Target field loads
       and the bitwise conditional fatal path agree with the original.
+  - address: 0x08233208
+    ghidra: FUN_08233208
+    name: text_history_previous
+    size: 56
+    sig: "void text_history_previous(u8 *history, u16 *code_unit, u8 *mapped_byte)"
+    module: ui/text_history_previous
+    status: ported
+    renames:
+      param_1/r0: history
+      param_2/r1: code_unit
+      param_3/r2: mapped_byte
+      "history+0x408/r2": cursor
+      uVar1/r0: character
+      DAT_0823323c: text lookup globals at 0x089d01f0
+      FUN_0829f1f4: range_byte_lookup
+    notes: >-
+      Raw osos.dec words establish 52 instruction bytes at
+      0x08233208..0x0823323b plus the four-byte literal 0x089d01f0 at
+      0x0823323c; true extent is 56 bytes before the independently entered
+      constructor at 0x08233240. One outgoing plain BL at 0x08233230 calls
+      the existing range_byte_lookup port at 0x0829f1f4; no predicated
+      outgoing BLs. Full-image aligned A32 word decoding finds two incoming
+      plain BLs at 0x081330f0 and 0x08133150, zero predicated incoming BLs.
+      Caller 0x0813305c walks backward through buffered UTF-16 text while
+      matching mapped bytes. Decrements the u32 cursor at history +0x408
+      by two, stores it, reads the unsigned halfword, writes code_unit,
+      loads the descriptor pointer from 0x089d01f8, performs the inclusive
+      range lookup, and writes mapped_byte last. No NUL, surrogate, or
+      bounds guards. Target pointer fields remain four bytes on host.
+      Deliberate deviation: host uses an explicitly installed descriptor
+      pointer instead of the firmware global. Edge coverage exercises
+      repeated cursor transitions, NUL, a surrogate, inclusive endpoints,
+      an out-of-range 0xffff code unit, and aliased outputs. Actual-source
+      host smoke observed U+0041 mapped to 0x61 and cursor decremented by two.
