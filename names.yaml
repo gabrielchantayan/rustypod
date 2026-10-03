@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822e83c
+    ghidra: FUN_0822e83c
+    name: show_video_highlight
+    size: 208
+    sig: "u32 show_video_highlight(VideoHighlightController *controller)"
+    module: app/video_highlight_display
+    status: ported
+    vars:
+      param_1/r4: controller
+      r5: artwork_cache
+      controller+0xb0: highlight
+      DAT_0822e8cc: video_object_slot_089ca674
+      object+0x424: video_count
+      stack+4: temporary_message
+    renames:
+      FUN_081b803c: singleton_class_7f80
+      FUN_081b6d88: artwork_slot_available
+      FUN_081b6dd8: artwork_slot_activate (verified unported firmware seam)
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 extent is 0x0822e83c..0x0822e90c, 144 instruction bytes,
+      four-byte global literal and 60 padded string bytes. Five plain
+      outbound BLs, zero predicated outbound BLs, one virtual BLX.
+      Inbound BLNE at 0x0822d3ec and plain BL at 0x082308fc.
+      Sets highlight to 2; zero object word +0x424 displays EmptyVideosHilited;
+      otherwise missing slot-1 artwork displays NoArtVideosHilited, or
+      activates slot 1 and displays MediaContentHilited. Releases temporary
+      COW string and returns 1. Omits unused input registers and allocator-tag
+      residue; host-only dependencies and native-width vtable preserve ABI
+      semantics. Host suite passes 13796 tests; ARM release build passes.
+      match.py exits 1 with a reviewed structural diff retaining all three
+      branches, +0xb0 store, +0x424 load, slot-1 query and activation,
+      display, cleanup and return; absolute activation uses BLX, not BL.
   - address: 0x0822ef20
     ghidra: FUN_0822ef20
     name: show_gmt_offset_highlight
