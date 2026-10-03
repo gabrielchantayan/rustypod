@@ -208073,3 +208073,42 @@ functions:
       confirm callee identities; record offsets and stores are preserved.
       Standalone actual-source host smoke passed with vtable 0x089a1394,
       NULL context/string payloads, four zero words, and tail 0xa5a5a5a5.
+  - address: 0x0821f460
+    ghidra: FUN_0821f460
+    name: restore_display_layout
+    size: 60
+    sig: "void restore_display_layout(DisplayLayoutContext *context)"
+    module: app/restore_display_layout
+    status: ported
+    renames:
+      param_1/r4: context
+      "context+0xc8": layout
+      FUN_081d8870: display_get
+      FUN_081d9064: display_get_layer
+      FUN_08120908: layer_enable
+      FUN_081d8af8: firmware_display_refresh
+      FUN_081a221c: deactivate_layout_state
+    notes: >-
+      Raw words establish 0x0821f460..0x0821f49c, 60 bytes without a literal
+      pool; the next independent function is bx lr at 0x0821f49c, followed
+      by push at 0x0821f4a0. Five outgoing unconditional BLs, zero
+      predicated BLs, and a BNE tail transfer to deactivate_layout_state.
+      Whole-image ARM branch decoding finds two incoming unconditional
+      BLs at 0x0821d574 and 0x0821dfd4, zero predicated incoming BLs.
+      Enables internal-display layer 5, reacquires display 0, refreshes
+      through the unported 0x081d8af8 seam, then loads context+0xc8 and
+      deactivates a non-NULL layout. Ghidra incorrectly incorporates the
+      tail callee's implementation. Existing Rust callees are reused.
+      Native-width host pointers deliberately replace target pointer width;
+      repr(C) and a target offset assertion preserve +0xc8 on ARM.
+      Host edge cases cover refresh replacing, adding, and removing the
+      layout so a stale pre-refresh pointer cannot be used.
+      Verification: 13800 host tests passed and ARM release build passed.
+      match.py reports 15 stock instructions versus 44 Rust entries
+      (including pools): LLVM inlines layer_enable with its mutex/dirty
+      state logic. Relocations confirm display_get twice, display_get_layer,
+      and the final deactivate_layout_state tail jump. The refresh BLX
+      uses literal 0x081d8af8; the +0xc8 load remains after it.
+      A standalone actual-source host smoke with substituted host callbacks
+      confirms replacement deactivation, stale-object preservation, and
+      NULL removal. No device execution was performed.
