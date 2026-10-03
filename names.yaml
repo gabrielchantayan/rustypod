@@ -205129,3 +205129,46 @@ functions:
       remain in order with the same endpoints, plus LLVM frame and volatile
       palette-pointer loads; arithmetic is scheduled differently. No device
       execution was performed.
+
+  - address: 0x0826343c
+    ghidra: FUN_0826343c
+    name: draw_state_reversed_two_color_border
+    size: 164
+    sig: "void draw_state_reversed_two_color_border(u8 *draw_state, const Rect *rect)"
+    module: cxx/draw_state_reversed_two_color_border
+    status: ported
+    renames:
+      param_1/r0: draw_state
+      param_2/r1: rect (top, left, bottom, right)
+      r7: left
+      r8: top
+      r5: right_inclusive
+      r6: bottom_inclusive
+      FUN_082720e8: color_copy
+      FUN_0826412c: draw_state_line
+      DAT_082634d8: top_left_color_address
+      DAT_082634dc: right_bottom_color_address
+    notes: >-
+      Raw A32 establishes 156 bytes of code through 0x082634d8 and two
+      literal words before the next real prologue at 0x082634e0: true
+      extent 164 bytes. Whole-image BL decoding finds one plain inbound
+      call at 0x0808da50 and one predicated inbound call at 0x0826d9a4;
+      six plain outgoing calls and zero predicated outgoing calls.
+      Captures all rectangle coordinates before writes, converts bottom
+      and right to inclusive endpoints with wrapping subtraction, copies
+      live color 0x089cc8c0 to foreground +0x11, draws top then left,
+      copies live color 0x089cc8cc, draws right from top+1 then bottom
+      from left+1. Empty/inverted rectangles are not suppressed; final
+      foreground and current point remain the second color and endpoint.
+      Reuses the verified color_copy and draw_state_line ports. Deliberate
+      deviation: existing volatile TWO_COLOR_BORDER_PALETTE data seam is
+      read in reverse order, preserving live global addresses on target
+      and allowing host fixtures without another seam. Host regression
+      covers ordinary, one-pixel, empty/inverted, wrapping and aliased
+      rectangles, corner order, final state and untouched bytes. Standalone
+      host raster smoke exercises the actual ports and verifies exact
+      pixels, corner ownership and untouched interior/exterior. All 13669
+      host tests and the ARM release build pass. match.py reports 39 stock
+      versus 44 Rust instructions, retaining six calls and endpoint order;
+      differences are LLVM frame setup, scheduling and volatile palette
+      pointer loads. No device execution was performed.
