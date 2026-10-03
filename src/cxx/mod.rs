@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod draw_state_align_position;
 pub mod framework_sentinel_state_construct;
+pub mod selector_item_high_records_variant_construct;
 pub mod selector_item_extended_variant_construct;
 pub mod selector_item_variant_construct;
 pub mod selector_item_tail_variant_construct;

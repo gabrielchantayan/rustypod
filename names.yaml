@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08261548
+    ghidra: FUN_08261548
+    name: selector_item_high_records_variant_construct
+    size: 212
+    sig: "void *selector_item_high_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_high_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this / returned object
+      param_2/r1: variant
+      FUN_08218b10: selector_item_base_construct
+      DAT_082615f8: derived vtable 0x089a3770
+    notes: >-
+      Raw A32 words establish 168 instruction bytes plus eleven literal words,
+      true extent 212 bytes through 0x0826161c, where a byte-swap function
+      starts with lsl r2, r1, #8. Whole-image decoding finds two plain inbound
+      BLs at 0x0819fa98 and 0x0819fab0, no predicated inbound BLs; one plain
+      outbound BL at 0x08261570 to ported selector_item_base_construct at
+      0x08218b10, no predicated outbound BLs. Callers allocate 0x180 bytes and
+      index returned item byte +0xb4. Zero full-width variant selects item 10
+      / descriptor 0x8009; nonzero selects item 11 / descriptor 0x800a. Base
+      receives kind 9, context 44, low variant byte as flag. Replace vtable
+      with 0x089a3770, records 1/2 with selectors 0x801d/0x801e, tags 9/10,
+      opaque implementation words 0x08ae5444/0x08ae5474; records 9..12 with
+      selectors 0x8025..0x8028 and tags 17..20. Preserve other base records.
+      Return retained r0 despite Ghidra void declaration. No new seams or
+      deliberate behavioral deviations. Edge tests cover full-width variants,
+      low-byte flags, sparse holes, implementation words and object bounds.
+      All 13709 host tests and ARM release build pass. Standalone actual-source
+      smoke executes the port, real selector base and real zero fill for 0,
+      1 and 0x100; embedded pair-header boundary is modeled, not allocation.
+      match.py exits 1: LLVM adds a frame pointer, builds selector immediates,
+      narrows flags before BL and reorders independent stores; offsets, values,
+      full-width selection and r0 return agree. Archive relocation verifies
   - address: 0x0825788c
     ghidra: FUN_0825788c
     name: opaque_context_array_owner_construct
