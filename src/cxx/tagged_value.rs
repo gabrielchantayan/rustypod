@@ -116,6 +116,43 @@ pub unsafe extern "C" fn tagged_value_default_construct(this: *mut TaggedValue) 
     this
 }
 
+/// Copy-constructs a tagged value — original: `FUN_08258d00` @
+/// `0x08258d00` (40 bytes: 36 code bytes plus the vtable literal).
+///
+/// Raw words end in `bx lr` at 0x08258d20 and literal 0x089a76fc at
+/// 0x08258d24; the next real constructor starts at 0x08258d28. A full-image
+/// A32 decode finds two plain inbound BLs (0x0813e310, 0x0813e3c0), zero
+/// predicated inbound BLs, and zero plain or predicated body BLs.
+///
+/// Installs the class vtable, copies the kind byte, then loads auxiliary
+/// before payload and stores payload before auxiliary. Destination padding
+/// is untouched; source vtable and padding are not copied. Returns `this`.
+/// Deliberate deviation: volatile accesses retain the raw operation order,
+/// including self-copy and overlapping storage; the vtable stays an opaque
+/// target-width word, matching the existing tagged-value representation.
+///
+/// # Safety
+///
+/// `this` must point to writable, four-byte-aligned 16-byte storage and
+/// `source` to readable, four-byte-aligned 16-byte storage. Pointers may
+/// overlap; neither pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_value_copy_construct")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_value_copy_construct(
+    this: *mut TaggedValue,
+    source: *const TaggedValue,
+) -> *mut TaggedValue {
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).vtable), TAGGED_VALUE_VTABLE);
+    let kind = core::ptr::read_volatile(core::ptr::addr_of!((*source).kind));
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).kind), kind);
+    let auxiliary = core::ptr::read_volatile(core::ptr::addr_of!((*source).auxiliary));
+    let payload = core::ptr::read_volatile(core::ptr::addr_of!((*source).payload));
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).payload), payload);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).auxiliary), auxiliary);
+    this
+}
+
 /// Assigns the non-vtable state of a tagged value — original:
 /// `FUN_08258d60` @ `0x08258d60` (28 bytes).
 ///
@@ -424,6 +461,42 @@ mod tests {
             assert_eq!(second.auxiliary, 0x8765_4321);
         }
     }
+    #[test]
+    fn copy_constructor_preserves_padding_and_copies_all_kind_bits() {
+        for kind in 0..=u8::MAX {
+            let source = [0x1234_5678u32, 0xaabb_cc00 | u32::from(kind), 0, u32::MAX];
+            let mut destination = [0xdead_beef, 0x9876_54ff, u32::MAX, 0];
+            let this = destination.as_mut_ptr().cast::<TaggedValue>();
+            unsafe {
+                assert_eq!(tagged_value_copy_construct(this, source.as_ptr().cast()), this);
+            }
+            assert_eq!(destination, [TAGGED_VALUE_VTABLE, 0x9876_5400 | u32::from(kind), 0, u32::MAX]);
+            assert_eq!(source, [0x1234_5678, 0xaabb_cc00 | u32::from(kind), 0, u32::MAX]);
+        }
+    }
+
+    #[test]
+    fn copy_constructor_matches_raw_store_order_for_aliasing() {
+        for (destination_word, source_word) in [(0usize, 0usize), (0, 1), (1, 0), (0, 2), (2, 0)] {
+            let initial = [0x1020_3040u32, 0x5060_7080, 0x90a0_b0c0, 0xd0e0_f001, 0x2345_6789, 0xabcd_ef12];
+            let mut expected = initial;
+            expected[destination_word] = TAGGED_VALUE_VTABLE;
+            let kind = expected[source_word + 1] & 0xff;
+            expected[destination_word + 1] = (expected[destination_word + 1] & !0xff) | kind;
+            let auxiliary = expected[source_word + 3];
+            let payload = expected[source_word + 2];
+            expected[destination_word + 2] = payload;
+            expected[destination_word + 3] = auxiliary;
+            let mut actual = initial;
+            unsafe {
+                let this = actual.as_mut_ptr().add(destination_word).cast::<TaggedValue>();
+                let source = actual.as_ptr().add(source_word).cast::<TaggedValue>();
+                assert_eq!(tagged_value_copy_construct(this, source), this);
+            }
+            assert_eq!(actual, expected, "destination {destination_word}, source {source_word}");
+        }
+    }
+
     #[test]
     fn default_constructor_sets_only_vtable_and_kind_and_returns_this() {
         let mut destination = [0xdead_beef, 0xa4b3_c2d1, 0x1122_3344, 0x5566_7788];
