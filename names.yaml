@@ -80561,6 +80561,35 @@ functions:
       preserve target member semantics despite widened host pointers. match.py
       reports the expanded base construction and LLVM's memclr helper in place
       of the retail single base BL and nine scalar stores.
+  - address: 0x082681d8
+    ghidra: FUN_082681d8
+    name: byte_vector_owner8_push_back
+    size: 56
+    sig: "void byte_vector_owner8_push_back(void *owner, u32 value)"
+    module: cxx/byte_vector_owner8_push_back
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      "owner+8/r0": byte_vector
+      FUN_083e40bc: owner8_byte_vector_insert
+    notes: >-
+      Raw A32 verifies the 56-byte extent 0x082681d8..0x08268210 exclusive,
+      followed by a separately linked append wrapper. One plain inbound BL
+      at 0x0820ffd8 and one BLNE at 0x08210028; one plain internal BL to
+      0x083e40bc and zero predicated internal BLs. The owner embeds a three-word
+      byte vector at +8. When end differs from capacity, increment end before
+      conditionally storing the low byte at the old non-NULL end. When full,
+      pass (vector, end, &saved_u32) to verified byte insertion 0x083e40bc,
+      whose raw prologue consumes r0/r1/r2 and whose byte loads confirm the
+      element width. No mappings existed for either address before this port.
+      Allocation and relocation remain retailOS through a replaceable seam;
+      u32 descriptor fields retain target layout on hosts. Host tests cover
+      low-byte truncation, exact capacity, growth with prefix preservation,
+      empty growth, neighboring guards, and NULL-end increment without store.
+      match.py confirms the compare, increment-before-store, NULL guard, and
+      three-argument insertion path; LLVM adds frame setup and a volatile
+      indirect BLX in place of the direct retail BL.
   - address: 0x08268210
     ghidra: FUN_08268210
     name: byte_vector_owner_push_back
