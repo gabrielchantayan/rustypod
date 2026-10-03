@@ -4083,3 +4083,57 @@ mod type_continuation_slot_tests {
         }
     }
 }
+
+/// video_engine_store_four_words — retailOS `FUN_08254490` @ 0x08254490.
+///
+/// True extent: 16 bytes, ending at the independent mov/tail-branch function
+/// at 0x082544a0. Raw words: e59dc000 e2800f87 e880100e e12fff1e.
+/// One incoming plain BL (0x08254488), one BLNE (0x082d0f50);
+/// no outgoing plain or predicated BLs.
+///
+/// Stores the three register arguments and fifth, stack-passed argument
+/// unchanged at engine offsets 0x21c, 0x220, 0x224, and 0x228. The public
+/// caller obtains the video-engine singleton; component meanings are opaque.
+/// Returns the first destination address, preserving the final r0 value.
+/// Deliberate deviations: none; word indexing retains four-byte spacing on
+/// hosts as well as ARM. No NULL guard or value conversion is added.
+///
+/// # Safety
+/// `engine` must be word-aligned and writable through byte offset 0x22b.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn video_engine_store_four_words(
+    engine: *mut u32, first: u32, second: u32, third: u32, fourth: u32,
+) -> *mut u32 {
+    let destination = engine.add(0x21c / 4);
+    destination.write(first);
+    destination.add(1).write(second);
+    destination.add(2).write(third);
+    destination.add(3).write(fourth);
+    destination
+}
+
+#[cfg(test)]
+mod store_four_words_tests {
+    use super::video_engine_store_four_words;
+
+    #[test]
+    fn replaces_all_four_words_without_touching_surrounding_state() {
+        let mut engine = [0xa5a5_5a5a; 0x230 / 4];
+        for values in [
+            [0, 0, 0, 0],
+            [u32::MAX, 0x8000_0000, 0x7fff_ffff, 1],
+            [0x0123_4567, 0x89ab_cdef, 0xfedc_ba98, 0x7654_3210],
+        ] {
+            let mut expected = engine;
+            expected[0x21c / 4..0x22c / 4].copy_from_slice(&values);
+            let base = engine.as_mut_ptr();
+            let result = unsafe {
+                video_engine_store_four_words(base, values[0], values[1],
+                                              values[2], values[3])
+            };
+            assert_eq!(result, unsafe { base.add(0x21c / 4) });
+            assert_eq!(engine, expected);
+        }
+    }
+}

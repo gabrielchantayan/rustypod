@@ -206967,3 +206967,35 @@ functions:
       so adjacent fields remain four bytes apart. Tests cover zero and
       maximal capacity, null allocation, header visibility during allocation,
       return identity, and adjacent-word preservation.
+
+  - address: 0x08254490
+    ghidra: FUN_08254490
+    name: video_engine_store_four_words
+    size: 16
+    sig: "u32 *video_engine_store_four_words(u32 *engine, u32 first, u32 second, u32 third, u32 fourth)"
+    module: util/video_engine
+    status: ported
+    renames: {param_1: engine, param_2: first, param_3: second, param_4: third, param_5: fourth}
+    notes: >-
+      Raw A32 words e59dc000 e2800f87 e880100e e12fff1e establish the
+      exact extent 0x08254490..0x082544a0; the next mov r2,0 and tail
+      branch begin an independent function. Whole-image aligned word
+      decoding finds one incoming plain BL at 0x08254488 and one BLNE
+      at 0x082d0f50; no outgoing plain or predicated BLs. Stores four
+      unchanged argument words at engine offsets 0x21c through 0x228.
+      The conditional caller obtains the already-identified video-engine
+      singleton at 0x08252bec and forwards all four words, despite the
+      incomplete Ghidra caller signature. Component meanings remain opaque;
+      no invented callee seam or value conversion. Returns engine+0x21c
+      to preserve final r0. No deliberate behavioral deviations; u32 word
+      indexing preserves four-byte spacing on hosts. Tests cover zero,
+      signed-bit extremes, distinct patterns, repeated replacement,
+      destination return and preservation of every surrounding word.
+      Host suite passed 13755 tests; ARM release build passed. Isolated
+      actual-source smoke passed all four stores, boundary preservation
+      and return identity. Whole-crate non-test host smoke build encountered
+      six unrelated missing-function errors in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; unchanged. match.py
+      exits 1 with seven Rust versus four original instructions: LLVM adds
+      an fp/lr frame and splits STM into STR/STMIB/STR, preserving the same
+      destinations and stack argument. No device execution performed.
