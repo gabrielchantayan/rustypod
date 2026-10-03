@@ -208678,3 +208678,45 @@ functions:
       query into a countdown loop because this function never modifies
       the vector. Descriptor stride, field loads, MLA and null return
       remain equivalent. No firmware-device execution performed.
+
+  - address: 0x08218d78
+    ghidra: FUN_08218d78
+    name: selector_item_three_records_variant_construct
+    size: 140
+    sig: "void *selector_item_three_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_three_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: variant
+      puVar2/r0: object
+      FUN_08218b10: selector_item_base_construct
+      DAT_08218de8: zero-variant descriptor 0x8001
+      DAT_08218dec: nonzero-variant descriptor 0x8004
+      DAT_08218df0: derived vtable 0x08993c78
+      DAT_08218df4: selector 0x801d
+      DAT_08218df8: opaque implementation address 0x08ae5444
+      DAT_08218dfc: selector 0x8027
+      DAT_08218e00: selector 0x8028
+    notes: >-
+      Raw A32 words establish 112 instruction bytes plus seven literal words,
+      true extent 140 bytes at 0x08218d78..0x08218e04. The next function
+      loads r1 from byte +0xb4 and tail-branches to 0x0839cd5c. Independent
+      raw BL decoding finds two plain inbound BLs at 0x0819fa08 and
+      0x0819fa20, no predicated inbound BLs; one plain outbound BL at
+      0x08218da0 to registered, ported selector_item_base_construct at
+      0x08218b10, no predicated outbound BLs. Callers allocate 0x180 bytes
+      and index returned byte +0xb4. Zero full-width variant selects item 2
+      / descriptor 0x8001; every nonzero u32 selects item 5 / descriptor
+      0x8004. Base arguments are kind 9, context 24 and low variant byte
+      as flag. Replace vtable and install selector records 0x801d/9 with
+      implementation 0x08ae5444, 0x8027/19 and 0x8028/20 with base-zeroed
+      implementations. Preserve other records and byte-store neighbors.
+      Return r0 as observed in raw code and callers, correcting Ghidra's
+      void declaration. No deliberate behavioral deviations. Host suite
+      and ARM release build pass; standalone host smoke using existing
+      dependency seams passes zero, one, high-byte-only and all-bits
+      variants. match.py exits 1 with a structural diff: LLVM uses immediate
+      constant synthesis, explicitly narrows the flag argument, and
+      reorders independent stores while retaining one base-constructor BL
+      and all destination widths and offsets. No firmware-device execution.
