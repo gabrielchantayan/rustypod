@@ -205990,3 +205990,44 @@ functions:
       192-byte extent includes the shared helper. Rust preserves the queue
       offset, wait/selector arguments, NULL-to-20 branch and helper arguments;
       LLVM emits the helper transfer as bx ip with literal 0x082619e4.
+
+  - address: 0x0825782c
+    ghidra: FUN_0825782c
+    name: opaque_context_dispatch_forever
+    size: 96
+    sig: "noreturn opaque_context_dispatch_forever(DispatchOwner *owner, u32 unused, void *initial_record, void *initial_payload)"
+    module: cxx/opaque_context_dispatch_forever
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      param_2/r1: unused
+      param_3/r2/sp: acquisition_record
+      param_4/r3/sp+4: payload
+      r5: saved_payload
+      owner+0x04: opaque_context
+      FUN_08261ad0: opaque_context_take_mode_one
+      FUN_082617ec: opaque_context_record_release (unported verified seam)
+      FUN_08030f44: heap_panic
+      owner_vtable+0x00: dispatch
+      payload_vtable+0x04: finalize
+    notes: >-
+      Raw A32 establishes the 96-byte extent 0x0825782c..0x0825788c exclusive;
+      0x0825788c begins a separate constructor. Full-image immediate BL decoding
+      finds two incoming plain calls at 0x0839e864 and 0x0839e9d0, zero predicated
+      calls. Body has two plain BLs, one BLEQ fatal call, two virtual BLXs.
+      Retry acquisition on every nonzero status. On success require non-NULL
+      payload, dispatch owner slot zero, release the acquisition record, then
+      finalize the saved payload using its freshly loaded vtable slot one.
+      Release status is ignored. Repeat forever; there is no return epilogue.
+      Preserve initial r2/r3 spill values and ignore r1. Reuses the existing
+      mode-one Rust port; release remains a raw-verified fixed-address seam at
+      0x082617ec, whose NULL record returns zero. Host pointer fields widen
+      structurally, and test-only acquisition/fatal paths permit finite loop
+      observation. Tests cover retries, multiple payloads, NULL record, release
+      errors, vtable replacement and fatal NULL payload. Actual-source smoke
+      observes retry, dispatch, release(error=0x99), finalize in that order.
+      All 13710 host tests and the ARM release build pass. Required match.py
+      exits 1 with a structural diff: LLVM retains retry and infinite back
+      edges, both virtual slots and the fatal NULL gate; release is BLX through
+      literal 0x082617ec instead of immediate BL. Relocatable calls to the
+      mode-one port and heap_panic appear unresolved in match.py's listing.
