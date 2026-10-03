@@ -3376,6 +3376,14 @@ pub struct EmbeddedVectorSizeElem8 {
     pub vector: VectorBounds,
 }
 
+/// Owner with an optional eight-byte-element vector at target offset +0x2c.
+/// Pointer alignment and width follow the host ABI in host tests.
+#[repr(C)]
+pub struct OptionalVectorSizeElem8 {
+    pub prefix: [u32; 11],
+    pub vector: *const VectorBounds,
+}
+
 /// vector_is_empty — original: `FUN_083d7810` @ 0x083d7810
 /// (24 bytes; `ipod-decomp/decomp/c/037/083d7810_FUN_083d7810.c`).
 ///
@@ -3811,6 +3819,32 @@ pub unsafe extern "C" fn embedded_vector_size_elem8(
     owner: *const EmbeddedVectorSizeElem8,
 ) -> i32 {
     vector_size_elem8(core::ptr::addr_of!((*owner).vector))
+}
+
+/// optional_vector_size_elem8 — original: `FUN_08269c48` @ 0x08269c48.
+/// True extent: 16 bytes, ending at the next function at 0x08269c58.
+/// Verified raw ARM inbound calls: two plain BLs (0x08268c9c, 0x0826a304),
+/// zero predicated BLs. The body has no BL and one BNE tail transfer.
+///
+/// Loads the vector pointer at owner +0x2c; null returns zero, otherwise
+/// tail-calls [`vector_size_elem8`] (stock copy at 0x083d7a88), computing
+/// the wrapping 32-bit end-minus-begin span with arithmetic shift by three.
+/// Deliberate deviations: host pointer fields use native width/alignment;
+/// LLVM may frame the tail transfer rather than retaining stock's leaf BNE.
+///
+/// # Safety
+/// `owner` must be readable; its vector must be null or readable bounds.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn optional_vector_size_elem8(
+    owner: *const OptionalVectorSizeElem8,
+) -> i32 {
+    let vector = (*owner).vector;
+    if vector.is_null() {
+        0
+    } else {
+        vector_size_elem8(vector)
+    }
 }
 
 
@@ -9601,6 +9635,35 @@ mod tests {
             };
             // ARM `asr #3` rounds a negative partial span down.
             assert_eq!(embedded_vector_size_elem8(&reversed), -2);
+        }
+    }
+
+    #[test]
+    fn optional_vector_size_elem8_preserves_arm_span_arithmetic() {
+        let mut owner = OptionalVectorSizeElem8 {
+            prefix: [0xffff_ffff; 11],
+            vector: core::ptr::null(),
+        };
+        unsafe {
+            assert_eq!(optional_vector_size_elem8(&owner), 0);
+            for (begin, end, expected) in [
+                (0x1000u32, 0x1000u32, 0),
+                (0x1000, 0x1007, 0),
+                (0x1000, 0x1008, 1),
+                (0x1000, 0x1017, 2),
+                (0x100f, 0x1000, -2),
+                (0xffff_fff8, 0x10, 3),
+                (0, 0x8000_0000, -268435456),
+            ] {
+                // Sign-extend target addresses for the existing seam's
+                // native-isize host span arithmetic; no payload is read.
+                let bounds = VectorBounds {
+                    begin: begin as i32 as isize as *mut u8,
+                    end: end as i32 as isize as *mut u8,
+                };
+                owner.vector = &bounds;
+                assert_eq!(optional_vector_size_elem8(&owner), expected);
+            }
         }
     }
 
