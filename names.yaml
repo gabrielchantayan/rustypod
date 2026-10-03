@@ -205656,3 +205656,49 @@ functions:
       or evidence explaining this interior callback and its stack ABI.
       No callee identity or replacement behavior invented; no Rust port,
       behavioral tests, ARM build, or match.py claim for this deferral.
+
+  - address: 0x08257f34
+    ghidra: FUN_08257f34
+    name: lazy_singleton_0x68_with_dependency_get
+    size: 76
+    sig: "void *lazy_singleton_0x68_with_dependency_get(void)"
+    module: app/lazy_singleton_0x68_with_dependency
+    status: ported
+    renames:
+      piVar1: singleton_cache
+      uVar2: singleton_allocation
+      uVar3: dependency
+      iVar4: constructed_singleton
+      DAT_08257f78: singleton_cache_address
+      DAT_08257f7c: dependency_allocation_size
+      FUN_082aadd4: operator_new
+      FUN_0825a5c4: dependency_construct_resident
+      FUN_0825b318: singleton_construct_resident
+    notes: >-
+      Raw osos.dec verifies 68 A32 instruction bytes ending with pop
+      at 0x08257f74, then cache literal 0x089d02a0 and size literal
+      0x898 at 0x08257f78/7c; next real function pushes at 0x08257f80,
+      establishing the true 76-byte extent. Whole-image aligned BL
+      decoding finds two inbound plain calls at 0x0811c8fc and
+      0x0825804c, zero predicated inbound calls. The body has four
+      unconditional BL instructions, zero predicated calls: operator_new
+      twice, dependency constructor 0x0825a5c4, singleton constructor
+      0x0825b318. Cache hit returns the reloaded word. Cache miss allocates
+      0x68 bytes first, then 0x898 bytes, constructs the dependency and
+      forwards its returned pointer as r1 to the singleton constructor.
+      The singleton constructor return overwrites the cache, which is
+      reloaded before return. NULL is not remembered; no NULL guards or
+      synchronization added. Constructor prologues verify one and two
+      meaningful arguments respectively; no concrete class name inferred.
+      The first caller stores the result and invokes vtable slot zero;
+      the second checks boot-time singleton readiness. Deliberate deviations:
+      existing operator_new port called directly, resident constructors
+      called at exact ARM addresses through typed BLX seams, volatile
+      cache access, separate host cache and host-only closure injection.
+      Host tests cover cached public entry, ordered allocations, adjusted
+      constructor returns, cache overwrite, NULL forwarding and retry.
+      Host suite passes 13695 tests and ARM release builds. match.py exits
+      1 with an expected structural diff: LLVM adds an fp frame, inverts
+      the fast-path branch, synthesizes 0x898 with mov/orr, and uses BLX
+      for resident constructors; allocation order, dependency forwarding,
+      cache store and final reload are preserved.
