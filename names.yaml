@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826ac0c
+    ghidra: FUN_0826ac0c
+    name: selector_item_extended_variant_construct
+    size: 232
+    sig: "void *selector_item_extended_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_extended_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: variant
+      puVar2/r0: object
+      uVar3/r1: item_id
+      uVar1/r2: descriptor_or_selector
+    notes: >-
+      Raw extent 0x0826ac0c..0x0826acf4 is 232 bytes: 184 code bytes
+      and twelve literal words, followed by push {r4-r11,lr} at the next
+      real function boundary. Whole-image A32 decoding verifies two plain
+      inbound BLs at 0x0819fb88 and 0x0819fba0, zero predicated inbound
+      BLs; one plain outbound BL at 0x0826ac34 to the registered, ported
+      selector_item_base_construct at 0x08218b10, zero predicated outbound
+      BLs. Callers allocate 0x180 bytes and index returned item byte +0xb4.
+      Zero full-width variant selects item 21 / descriptor 0x800e; any
+      nonzero variant selects item 22 / descriptor 0x800f. Base arguments
+      are kind 9, context 55, and low variant byte as enable_flag. Replace
+      vtable with 0x089a37b0 and install records 0x801d/9, 0x801e/10,
+      0x8020/12, 0x8021/13, 0x8022/14, 0x8023/15 and 0x8024/16.
+      First two implementations are opaque stored addresses 0x08ae5444
+      and 0x08ae5474, not new seams; the remaining implementations retain
+      base zero initialization. Return the object pointer retained in r0,
+      correcting Ghidra's void signature. No deliberate behavioral deviations.
+      Host tests cover full-width selection versus low-byte flags, preserved
+      flag bits, all selector records and object bounds; all 13598 tests
+      pass. ARM release build passes. Standalone test-configured actual-source
+      smoke verifies variants 0, 1 and 0x100, pointer return and final record.
+      Non-test host linkage encounters six unrelated missing helper errors
+      in prepare_entry_metadata, shared_payload_select_kind and calendar_schedule.
+      match.py prints a structural diff (exit 1): 62 Rust listing lines
+      versus 46 original instructions, one BL retained, reordered disjoint
+      stores, synthesized constants and LLVM frame setup. Archive BL target
+      is unresolved in the listing, not recursion.
+
   - address: 0x0826b05c
     ghidra: FUN_0826b05c
     name: selector_item_variant_construct
