@@ -36,6 +36,7 @@ pub mod hash_glyph_cells_to_rgb565;
 pub mod rgba4444_pack;
 pub mod rgba8888_pack;
 pub mod rgb555a1_pack;
+pub mod surface_fill_rgba8_masked;
 pub mod content_bounds;
 pub mod horizontal_adjustment_available;
 pub mod vertical_adjustment_available;

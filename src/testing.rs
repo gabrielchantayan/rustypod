@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const SURFACE_FILL_RGBA8_MASKED: usize = 0x4275_0000;
     pub const STRING_PAIR_VECTOR_LAST: usize = 0x4274_0000;
     pub const OBJECT_RESOURCES_DESTROY: usize = 0x426f_0000;
     pub const RECORD28_VECTOR_LAST: usize = 0x4273_0000;
