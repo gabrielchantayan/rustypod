@@ -474,7 +474,7 @@ pub mod nested_object_value_at_14;
 pub mod mode;
 pub mod object_flags;
 pub mod pfr_extra_items_skip;
-mod object_state;
+pub mod object_state;
 pub mod opaque_type_tag_is_allowed;
 pub mod secondary_standard_stream_subobject;
 pub mod opaque_tagged_object_word_at_20;

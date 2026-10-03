@@ -202551,3 +202551,45 @@ functions:
       fallback and final notification. All 13555 host tests and ARM release
       build pass. match.py shows equivalent gating and tail BX; LLVM uses
       frame setup and branch-plus-BLX instead of the original predicated BL.
+
+  - address: 0x08278d24
+    ghidra: FUN_08278d24
+    name: platform_file_set_length
+    size: 160
+    module: ft/system
+    sig: "i32 platform_file_set_length(void *handle, u32 length)"
+    status: ported
+    renames:
+      param_1/r4: file
+      param_2/r5: length
+      local_10: counted_lock
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_0829d0b4: object_byte_at_8
+      FUN_082a548c: file_has_directory_entry
+      FUN_0818a0bc: facade_for_selector
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM establishes 160 instruction bytes through 0x08278dc0,
+      followed by the independent function push at 0x08278dc4.
+      Full-image aligned BL decoding finds two unconditional callers at
+      0x0804ff24 and 0x0813ad6c, zero predicated callers. Body contains
+      seven unconditional BL instructions and one virtual BLX.
+      Under the counted owner mutex, returns 2 for nonzero state at +0x08,
+      open status at +0x1c for entry index -1, or 21 for nonzero +0x14.
+      Otherwise stores length at +0x20 and invokes selector-1 facade
+      vtable slot +0x28 with entry index and the reloaded stored length.
+      The request remains cached even on virtual failure; every exit
+      unlocks. Ghidra's r2/r3 parameters are phantom; saved incoming r3
+      is overwritten by guard acquisition. All direct callees reuse
+      existing ports; object_state is exposed for direct reuse.
+      Host follows FtPlatformFile native-pointer layout and locks the
+      named owner mutex directly; target offsets remain exact.
+      Tests cover state/entry/mode precedence, missing-entry success,
+      zero and maximum lengths, negative non-sentinel entry indices,
+      virtual failures, cached request persistence and lock balance.
+      Smoke exercises closed and mode-blocked setters then the real
+      cached-length query, observing statuses -37, 21, 0 and zero holds.
+      All 13559 host tests pass; ARM release build passes.
+      match.py reports 39 Rust versus 40 original instructions: equivalent
+      gates, field offsets and BLX slot, with LLVM frame setup and shared
+      unlock epilogue replacing three original return paths.

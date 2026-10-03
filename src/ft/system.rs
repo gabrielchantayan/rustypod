@@ -572,6 +572,71 @@ pub unsafe extern "C" fn ft_platform_file_tell(
     result
 }
 
+/// platform_file_set_length — original: `FUN_08278d24` @ 0x08278d24.
+/// True extent: 160 bytes, before the independent push at 0x08278dc4.
+/// Full-image ARM word decoding finds two plain BL callers (0x0804ff24,
+/// 0x0813ad6c), zero predicated BL callers. Body: seven plain BLs and one BLX.
+///
+/// Under the owner's counted mutex, reject nonzero state with 2, return
+/// open status for directory index -1, or reject the byte at +0x14 with 21.
+/// Otherwise store the requested length at +0x20, obtain selector-1 facade,
+/// and return its vtable +0x28 result for (facade, entry index, stored length).
+/// Every exit unlocks; failed virtual calls still leave the cached length set.
+///
+/// Deliberate deviations: host uses native-width named fields and locks the
+/// owner directly, as in `ft_platform_file_tell`; target calls existing byte
+/// and entry predicates and scope-guard acquisition. Ghidra's r2/r3 arguments
+/// are phantom: incoming r3 only seeds a stack slot overwritten by acquisition.
+/// The +0x14 byte remains an opaque mode gate, not an invented flag meaning.
+///
+/// # Safety
+/// `handle` must be a live platform file with a valid synchronization owner;
+/// an eligible file must resolve a facade with a callable vtable slot +0x28.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn platform_file_set_length(
+    handle: *mut core::ffi::c_void,
+    length: u32,
+) -> i32 {
+    let file = handle.cast::<FtPlatformFile>();
+    #[cfg(target_os = "none")]
+    let mut lock = core::ptr::null_mut();
+    #[cfg(target_os = "none")]
+    counted_mutex_guard_acquire(core::ptr::addr_of_mut!(lock), file.cast());
+    #[cfg(not(target_os = "none"))]
+    let lock = core::ptr::addr_of_mut!((*(*file).synchronization_owner).length_query_lock);
+    #[cfg(not(target_os = "none"))]
+    mutex_lock_counted(lock);
+
+    #[cfg(target_os = "none")]
+    let state = crate::cxx::object_state::object_byte_at_8(file.cast());
+    #[cfg(not(target_os = "none"))]
+    let state = (*file).length_query_state;
+    #[cfg(target_os = "none")]
+    let has_entry = state == 0 &&
+        crate::codegen::file_directory_entry::file_has_directory_entry(file.cast()) != 0;
+    // Preserve short-circuiting: the firmware does not probe an entry on state error.
+    #[cfg(not(target_os = "none"))]
+    let has_entry = state == 0 && (*file).directory_entry_index != -1;
+
+    let result = if state != 0 {
+        2
+    } else if !has_entry {
+        (*file).open_status
+    } else if (*file)._unknown_09[0x14 - 0x09] != 0 {
+        21
+    } else {
+        (*file).cached_entry_length = length;
+        let facade = crate::app::facade_for_selector::facade_for_selector(file.cast(), 1);
+        let call: unsafe extern "C" fn(
+            *mut crate::app::path_probe::FacadeObject, i32, u32,
+        ) -> i32 = core::mem::transmute((*(*facade).vtable).slots[0x28 / 4]);
+        call(facade, (*file).directory_entry_index, (*file).cached_entry_length)
+    };
+    mutex_unlock_counted(lock);
+    result
+}
+
 /// ft_platform_stream_close (the firmware's `FT_Stream_CloseFunc`) —
 /// original: `FUN_082d3d40` @ 0x082d3d40 (60 bytes; no direct `bl` call
 /// site — planted in `stream->close` by [`ft_platform_stream_open`] @
@@ -1399,6 +1464,96 @@ mod tests {
             assert_eq!(stream.size, 0);
             assert!(stream.base.is_null());
             assert!(stream.close.is_some(), "close stays: a second close is a safe no-op");
+        }
+    }
+}
+
+#[cfg(test)]
+mod set_length_tests {
+    use super::*;
+    use crate::app::facade_for_selector::{FACADE_REGISTRY_WALK, tests::FACADE_TEST_LOCK};
+    use crate::app::facade_registry_walk::{RegistryFacade, RegistryNode, RegistryWalk};
+    use crate::app::path_probe::{FacadeObject, FacadeVtable};
+
+    #[repr(C)]
+    struct ResizeFacade {
+        base: FacadeObject,
+        file: *mut FtPlatformFile,
+        resulting_length: u32,
+        status: i32,
+    }
+
+    unsafe extern "C" fn resize(facade: *mut FacadeObject, entry: i32, length: u32) -> i32 {
+        let facade = &mut *facade.cast::<ResizeFacade>();
+        let file = &*facade.file;
+        assert_eq!(entry, file.directory_entry_index);
+        assert_eq!(length, file.cached_entry_length);
+        assert_eq!((*file.synchronization_owner).length_query_lock.hold_count, 1);
+        facade.resulting_length = length;
+        facade.status
+    }
+
+    static mut ACTIVE: *mut RegistryFacade = core::ptr::null_mut();
+    unsafe extern "C" fn resolve(_: *mut RegistryNode, _: u32) -> *mut RegistryFacade {
+        ACTIVE
+    }
+
+    struct Restore(RegistryWalk);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe { FACADE_REGISTRY_WALK = self.0; ACTIVE = core::ptr::null_mut(); }
+        }
+    }
+
+    #[test]
+    fn state_entry_and_mode_precedence_preserves_length_and_unlocks() {
+        unsafe {
+            let mut owner: FtPlatformFileSynchronizationOwner = core::mem::zeroed();
+            let mut file: FtPlatformFile = core::mem::zeroed();
+            file.synchronization_owner = &mut owner;
+            for (state, entry, mode, open, expected) in [
+                (0x80, -1, 0xff, -37, 2),
+                (0, -1, 0xff, -37, -37),
+                (0, -1, 0, 0, 0),
+                (0, 0, 0x80, 0, 21),
+                (0, -2, 1, 0, 21),
+            ] {
+                file.length_query_state = state;
+                file.directory_entry_index = entry;
+                file._unknown_09[11] = mode;
+                file.open_status = open;
+                file.cached_entry_length = 123;
+                assert_eq!(platform_file_set_length((&mut file as *mut FtPlatformFile).cast(), 456), expected);
+                assert_eq!(file.cached_entry_length, 123);
+                assert_eq!(owner.length_query_lock.hold_count, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn resize_zero_max_and_failed_operation_keep_cached_request_and_unlock() {
+        let _guard = FACADE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let _restore = Restore(FACADE_REGISTRY_WALK);
+            FACADE_REGISTRY_WALK = resolve;
+            let mut owner: FtPlatformFileSynchronizationOwner = core::mem::zeroed();
+            let mut file: FtPlatformFile = core::mem::zeroed();
+            file.synchronization_owner = &mut owner;
+            let mut vtable: FacadeVtable = core::mem::zeroed();
+            vtable.slots[10] = resize as *const () as usize;
+            let mut facade = ResizeFacade {
+                base: FacadeObject { vtable: &vtable },
+                file: &mut file, resulting_length: 17, status: 0,
+            };
+            ACTIVE = (&mut facade as *mut ResizeFacade).cast();
+            for (entry, length, status) in [(0, 0, 0), (-2, u32::MAX, -5), (7, 4096, 21)] {
+                file.directory_entry_index = entry;
+                facade.status = status;
+                assert_eq!(platform_file_set_length((&mut file as *mut FtPlatformFile).cast(), length), status);
+                assert_eq!(facade.resulting_length, length);
+                assert_eq!(file.cached_entry_length, length);
+                assert_eq!(owner.length_query_lock.hold_count, 0);
+            }
         }
     }
 }
