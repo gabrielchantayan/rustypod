@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08262038
+    ghidra: FUN_08262038
+    name: opaque_handle_result_replace_value
+    size: 56
+    sig: "void opaque_handle_result_replace_value(u32 *const *wrapper, u32 value)"
+    module: cxx/opaque_handle_result
+    status: ported
+    vars:
+      param_1/r0/r4: wrapper
+      param_2/r1/r5: value
+      sp+4: preserved_first_result
+      sp: replacement_second_result
+      FUN_082e8248: opaque_handle_result_query
+      FUN_082e8534: retail_handle_result_set
+    notes: >-
+      Raw A32 words establish 0x08262038..0x08262070, ending with pop
+      at 0x0826206c before the next independent push. Whole-image word
+      decoding verifies two plain inbound BLs at 0x081939a8 and 0x081939d0,
+      zero predicated inbound BLs; outbound calls are plain BL at
+      0x08262050 to 0x082e8248 and BLEQ at 0x08262068 to 0x082e8534.
+      Query both handle results; on success preserve the first and set
+      the second to the supplied value, ignoring setter status. Raw callers
+      pass only two arguments; Ghidra's r2/r3 arguments are scratch saves.
+      Reuse the existing query port. The verified setter validates mode/value,
+      updates +0x214/+0x220 and +0x200 flags, then notifies the backing object;
+      retain it as a firmware seam rather than port another function.
+      Deliberate deviations initialize otherwise unspecified scratch words
+      and use native host wrapper pointers with word-indexed handle fields.
+      Host tests exercise query rejection and mode/value boundaries using a
+      setter state model; an executable smoke proves replacement and rejection.
+      match.py exit 1: LLVM uses 24 instructions, explicit scratch initialization,
+      a conditional branch and BLX through literal 0x082e8534; query BL relocation
+      is unresolved in the archive. It caches the unchanged handle pointer.
   - address: 0x08262158
     ghidra: FUN_08262158
     name: wait_clock_gettime
