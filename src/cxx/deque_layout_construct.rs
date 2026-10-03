@@ -1,5 +1,6 @@
 //! Default construction of the deque-related layout used by polygon processing.
 
+use super::fixed_point_record_construct::fixed_point_record_construct;
 use super::three_word_clear_eleventh::three_word_clear_eleventh;
 use crate::runtime::cpp_array_construct::cpp_array_construct;
 
@@ -16,8 +17,8 @@ use crate::runtime::cpp_array_construct::cpp_array_construct;
 /// adapter's actual result minus 0x3c, not necessarily the incoming pointer.
 /// Words +0x20..+0x2c and +0x6c onward are untouched by the direct stores.
 ///
-/// Deliberate deviations: inline the deterministic stores of 0x0824c758
-/// rather than port a second function; use volatile stores to retain order.
+/// Deliberate deviations: use volatile stores in the fixed-point record port
+/// to retain the original write order.
 /// Preserve the raw callback word 0x0823d814 without assigning it a callee
 /// identity: raw decoding shows mid-function instructions, not an ABI entry.
 /// Use u32 word offsets so host pointer width cannot alter the target layout.
@@ -29,13 +30,8 @@ use crate::runtime::cpp_array_construct::cpp_array_construct;
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn deque_layout_construct(storage: *mut u32) -> *mut u32 {
-    for offset in [0, 4] {
-        let record = storage.add(offset);
-        record.add(2).write_volatile(0);
-        record.add(1).write_volatile(0);
-        record.write_volatile(0);
-        record.add(3).write_volatile(0x10000);
-    }
+    fixed_point_record_construct(storage);
+    fixed_point_record_construct(storage.add(4));
     let cleared = three_word_clear_eleventh(storage.add(12));
     cpp_array_construct(cleared.add(3), 0x0823_d814, 0x10, 3).wrapping_sub(15)
 }
