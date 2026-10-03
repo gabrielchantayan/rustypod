@@ -205172,3 +205172,50 @@ functions:
       versus 44 Rust instructions, retaining six calls and endpoint order;
       differences are LLVM frame setup, scheduling and volatile palette
       pointer loads. No device execution was performed.
+
+  - address: 0x0825c1d0
+    ghidra: FUN_0825c1d0
+    name: plist_file_load
+    size: 148
+    sig: "u32 plist_file_load(u8 *node, const StringObject *path, u32 option)"
+    module: app/plist_file_load
+    status: ported
+    renames:
+      param_1/r6: node
+      param_2/r7: path
+      param_3/r5: option
+      local_5c: reader
+      auStack_48: file_store
+      FUN_0825c984: construct_reader
+      FUN_0825c378: parse_reader
+      FUN_08149d60: vtable_file_store_destruct
+      thunk_FUN_08277484: string_object_destroy_veneer
+      FUN_08048000: gateway_request_blocking
+      FUN_08047f40: gateway_request_timed
+    notes: >-
+      Raw osos.dec establishes 140 executable bytes from 0x0825c1d0 through
+      the return at 0x0825c258, followed by vtable literals 0x089a8064 and
+      0x089a8080 at 0x0825c25c/0x0825c260. Next real function starts with
+      push at 0x0825c264: true extent 148 bytes, not Ghidra's 140.
+      Independent whole-image ARM BL decoding finds two plain inbound sites,
+      0x0815a86c and 0x081c8308, and zero predicated inbound sites. Body has
+      six plain BLs and zero predicated BLs. The MockupMode.xml caller and
+      plist-node constructor caller identify an XML/plist file loader.
+      Acquire gateway payload 45 with flag zero, construct a 72-byte reader
+      using mode one, caller option and capacity 0x8000, parse into node,
+      map zero to zero and every nonzero result to 34. Install 0x089a8064,
+      destroy the file-store subobject at reader+20, install 0x089a8080 at
+      returned-store-20, destroy the string at returned-store-8, and release
+      payload 45 with timeout 1000 on both result paths. Constructor
+      0x0825c984 and parser 0x0825c378 remain fixed-address retail boundaries;
+      existing gateway and destructor ports are reused, including the
+      verified veneer at 0x082792fc. Deliberate deviation: injectable ops
+      snapshot changes direct BLs to BLX, increases the frame, and LLVM
+      schedules error normalization after cleanup. match.py reports 35 stock
+      versus 45 Rust instructions, preserving six calls, arguments, vtable
+      writes and destructor-return pointer arithmetic. Host regression
+      verifies resource teardown on zero, one, 34, sign-bit and UINT_MAX
+      parser results. All 13670 host tests and ARM release build pass.
+      Standalone public-API smoke with host boundary adapters observes
+      results zero/34/34 and complete ordered cleanup. Actual firmware parser
+      and device execution were not exercised.
