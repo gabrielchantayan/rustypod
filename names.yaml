@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822f1f4
+    ghidra: FUN_0822f1f4
+    name: show_podcast_highlight
+    size: 140
+    sig: "u32 show_podcast_highlight(PodcastHighlightController *controller)"
+    module: app/podcast_highlight_display
+    status: ported
+    vars:
+      param_1/r4: controller
+      controller+0xb0: highlight
+      DAT_0822f24c: podcast_object_slot_089ca674
+      uStack_c: temporary_message
+    renames:
+      FUN_082980ac: object_word_at_f0_or_zero
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 establishes 0x0822f1f4..0x0822f280: 88 code bytes,
+      four-byte global-slot literal and 48 bytes of padded strings before
+      the next push entry. Three plain outbound BLs, no predicated outbound
+      BLs, one virtual BLX. Inbound plain BL at 0x0823090c and BLNE at
+      0x0822d414; Ghidra's overlapping caller attribution is not physical
+      call-site evidence. Load object from 0x089ca674, set highlight to 3,
+      select EmptyPodcastsHilited for accessor zero (including -1 sentinel),
+      otherwise NoArtPodcastsHilited, display temporary COW string, release,
+      return 1. Omit unused input registers and allocator-tag residue;
+      host global and native-width vtable preserve target layout semantics.
+      ARM build passes. match.py structural diff retains all three BLs,
+      virtual BLX, byte store, selection and cleanup with a different frame.
   - address: 0x0823664c
     ghidra: FUN_0823664c
     name: word_log2_floor
