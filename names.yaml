@@ -8303,6 +8303,40 @@ functions:
       64-bit right shift. Division by zero retains the existing
       __aeabi_ldivmod port's documented zero-quotient deviation from the ADS
       divide-by-zero handler; no additional deviation is introduced.
+  - address: 0x082724c8
+    ghidra: FUN_082724c8
+    name: byte_source_set_status
+    size: 32
+    sig: "void byte_source_set_status(u8 *source, u32 status, u32 mark_dirty)"
+    module: app/byte_source
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: status
+      param_3/r2: mark_dirty
+      r3: previous_status
+    notes: >-
+      Raw osos.dec establishes eight A32 instructions at
+      0x082724c8..0x082724e7, ending with bx lr at 0x082724e4 before
+      the independently entered status reader at 0x082724e8. Full-image
+      aligned word decoding finds two inbound plain BLs (0x081031f8,
+      0x081190bc), zero predicated inbound BLs, and no outbound BLs.
+      Compares source byte 5 against the full u32 status before truncating.
+      Equality returns without writes. Inequality writes dirty byte 6 to
+      one only for nonzero mark_dirty, then writes the low status byte to
+      offset 5; existing dirty values are never cleared. The first caller
+      updates the byte-source subobject at +0x54 without marking dirty;
+      the metadata caller updates the same subobject with dirty enabled.
+      Reuses the registered app/byte_source module. Volatile byte accesses
+      preserve retail store order with no behavioral deviation. Host tests
+      cover all byte alignments, unchanged and changed status, noncanonical
+      dirty values, full-width status and mark_dirty inputs, truncation,
+      exact write boundaries, and successive updates. Standalone host smoke
+      confirms unchanged status skips dirty marking, a high-bit-only status
+      change marks dirty, and an unmarked update preserves dirty and neighbors.
+      ARM match shows the same byte load, full-width equality gate,
+      conditional dirty store, and status store. LLVM adds a frame
+      prologue/epilogue and reverses equality comparison operands.
   - address: 0x0827259c
     ghidra: FUN_0827259c
     name: byte_source_clear
