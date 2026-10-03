@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08257cb4
+    ghidra: FUN_08257cb4
+    name: registration_poll
+    size: 8
+    sig: "uint32_t registration_poll(void *slot_object)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0: slot_object
+      slot_object+0x10: embedded condition wait object
+      branch_08261f78: zero-timeout condition wait (retained retail callee)
+    notes: >-
+      Raw osos.dec words e2800010 ea0028ae establish the true extent
+      0x08257cb4..0x08257cbc: add r0,r0,#16; b 0x08261f78. The next
+      function starts with add r1,r0,#28 and has its own tail branch.
+      Ghidra reports 36 bytes and decompiles through the callee; neither
+      the extent nor its void return is faithful to these words.
+      Whole-image aligned A32 BL decoding finds exactly two plain incoming
+      calls at 0x081d6734 and 0x081d72a4, zero predicated forms; this body
+      has zero BL instructions and one unconditional tail B.
+      The verified callee at 0x08261f78 stacks a zero seconds/nanoseconds
+      pair, calls 0x08261f28, and returns its status unchanged. That helper
+      calls 0x08261f94, which tail-branches to the timed-wait body
+      0x0826269c. No standalone names entry exists for 0x08261f78.
+      Rust preserves the fixed target byte offset and returned status;
+      both existing poll/release defaults now call this Rust veneer and
+      explicitly discard status as their retail callers do. Deliberate
+      deviation: fixed-address dispatch to the unported condition wait
+      on target; host execution requires explicit injection, never an
+      inert fallback. Host absent-waiter coverage checks EINVAL with a
+      null owner, poisoned surrounding fields and arbitrary state words.
+      All 13699 host tests pass; ARM release build passes. Actual-source
+      host smoke with injected stateful dependency observes status 0x1a,
+      zero and 0xffffffff with preserved prefix/suffix. This verifies the
+      veneer, not execution of the retail wait machinery on hardware.
+      match.py exits 1; its default 36-byte extent includes neighboring
+      functions. Repeating with verified --size 8 shows the same add-16
+      and tail-dispatch semantics, with LLVM's frame setup/teardown and
+      literal-loaded bx replacing the direct B to 0x08261f78.
   - address: 0x08257d08
     ghidra: FUN_08257d08
     name: destroy_embedded_cleanup_handle

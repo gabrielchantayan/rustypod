@@ -644,12 +644,11 @@ pub unsafe extern "C" fn iap_incoming_process_thread_submit_message(
     0
 }
 
-/// Indirect dispatch for the one unported callee (see the function's
-/// deviation note). Host tests install a recording model; a later port
-/// of 0x08257cb4 replaces the default without touching this caller.
+/// Injectable registration poll dependency. The default calls the Rust
+/// veneer; hosts must implement its retained retail condition-wait callee.
 #[derive(Clone, Copy)]
 pub struct IapThreadSlotPollOps {
-    /// Callee 0x08257cb4 `(slot_object)`: a 4-instruction veneer
+    /// Callee 0x08257cb4 `(slot_object)`: a two-instruction veneer
     /// (`add r0, r0, #16; b 0x8261f78`) that runs a **zero-timeout**
     /// condition wait on the registration object's condvar at +0x10 —
     /// 0x8261f78 stacks a zeroed `{sec, nsec}` and calls 0x8261f28 ->
@@ -660,19 +659,99 @@ pub struct IapThreadSlotPollOps {
     pub poll_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
 }
 
-/// Target default: the ROM poll veneer.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_poll_slot_object(slot_object: *mut u8) {
-    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_7cb4usize);
-    f(slot_object)
+/// Host implementation of the retained retail zero-timeout condition wait.
+#[cfg(not(target_os = "none"))]
+pub static mut REGISTRATION_CONDVAR_POLL_OP: Option<
+    unsafe extern "C" fn(*mut u8) -> u32,
+> = None;
+
+/// registration_poll — `FUN_08257cb4` @ 0x08257cb4.
+/// True size: 8 bytes, ending at the next veneer @ 0x08257cbc.
+/// Whole-image A32 decoding verifies two inbound plain BLs (0x081d6734,
+/// 0x081d72a4), zero predicated BLs; body has no BL, only a tail B.
+///
+/// Add 16 to the registration pointer and tail-call the zero-timeout
+/// condition wait @ 0x08261f78, preserving its r0 status. That callee stacks
+/// {0,0}, calls 0x08261f28, then 0x08261f94 -> 0x0826269c.
+/// Ghidra's 36-byte extent and void signature are incorrect.
+/// Deviation: retain the verified unported callee via fixed-address target
+/// dispatch and explicit host injection; no host fallback or added checks.
+///
+/// # Safety
+/// `slot_object+0x10` must satisfy the retail condition-wait object contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registration_poll(slot_object: *mut u8) -> u32 {
+    #[cfg(target_os = "none")]
+    let poll: unsafe extern "C" fn(*mut u8) -> u32 =
+        core::mem::transmute(0x0826_1f78usize);
+    #[cfg(not(target_os = "none"))]
+    let poll = core::ptr::read_volatile(
+        core::ptr::addr_of!(REGISTRATION_CONDVAR_POLL_OP))
+        .expect("retail condition wait requires a host implementation");
+    poll(slot_object.wrapping_add(0x10))
 }
 
-/// Host default: inert — the tests install their own model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_poll_slot_object(_slot_object: *mut u8) {}
+unsafe extern "C" fn firmware_poll_slot_object(slot_object: *mut u8) {
+    let _ = registration_poll(slot_object);
+}
 
-/// Wired default: the ROM address on target, a documented inert stub
-/// on host.
+#[cfg(test)]
+mod registration_poll_tests {
+    use super::*;
+
+    static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    // The retail timed-wait body returns EINVAL (0x1a) for an absent
+    // waiter. Keep native pointers inside the seam, not in offset arithmetic.
+    #[repr(C)]
+    struct Condvar { owner: *mut u32, waiter: *mut u8, state: u32 }
+    #[repr(C)]
+    struct Registration { prefix: [u32; 4], condvar: Condvar, suffix: u32 }
+
+    unsafe extern "C" fn absent_waiter_poll(condvar: *mut u8) -> u32 {
+        let condvar = &*condvar.cast::<Condvar>();
+        assert!(condvar.waiter.is_null());
+        // Absent-waiter validation precedes locking/dereferencing the owner.
+        0x1a
+    }
+
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe { REGISTRATION_CONDVAR_POLL_OP = None; }
+        }
+    }
+
+    #[test]
+    fn absent_waiter_rejects_without_touching_owner_or_registration() {
+        let _lock = LOCK.lock();
+        let _restore = Restore;
+        unsafe { REGISTRATION_CONDVAR_POLL_OP = Some(absent_waiter_poll); }
+        for state in [0, 1, u32::MAX] {
+            let mut registration = Registration {
+                prefix: [0xa5a5a5a5; 4],
+                condvar: Condvar {
+                    owner: core::ptr::null_mut(),
+                    waiter: core::ptr::null_mut(),
+                    state,
+                },
+                suffix: 0xdeadbeef,
+            };
+            unsafe {
+                assert_eq!(registration_poll(
+                    core::ptr::addr_of_mut!(registration).cast()), 0x1a);
+            }
+            assert_eq!(registration.prefix, [0xa5a5a5a5; 4]);
+            assert!(registration.condvar.owner.is_null());
+            assert!(registration.condvar.waiter.is_null());
+            assert_eq!(registration.condvar.state, state);
+            assert_eq!(registration.suffix, 0xdeadbeef);
+        }
+    }
+}
+
+/// Wired default: the Rust poll veneer.
 pub const DEFAULT_IAP_THREAD_SLOT_POLL_OPS: IapThreadSlotPollOps =
     IapThreadSlotPollOps {
         poll_slot_object: firmware_poll_slot_object,
@@ -738,10 +817,9 @@ fn iap_thread_slot_poll_ops() -> IapThreadSlotPollOps {
 ///
 /// # Deviations
 ///
-/// - The poll callee 0x08257cb4 is unported and dispatches through
-///   [`IAP_THREAD_SLOT_POLL_OPS`] (the `app/pending_event_take`
-///   pattern): target builds transmute the ROM address, the host
-///   default is inert and every test installs a recording model.
+/// - The poll callee dispatches through [`IAP_THREAD_SLOT_POLL_OPS`];
+///   its default calls [`registration_poll`]. Host tests replace the
+///   dependency with their recording model.
 /// - Lock/unlock call the canonical ported
 ///   [`posix_mutex_lock`]/[`posix_mutex_unlock`] directly — the
 ///   original calls the 4-byte alias veneers 0x08261e20/0x08261e24,
@@ -925,14 +1003,6 @@ pub struct IapThreadSlotReleaseOps {
     pub delete_slot_object: unsafe extern "C" fn(slot_object: *mut u8),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_poll_slot_object(slot_object: *mut u8) {
-    let f: unsafe extern "C" fn(*mut u8) = core::mem::transmute(0x0825_7cb4usize);
-    f(slot_object);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_release_poll_slot_object(_slot_object: *mut u8) {}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_destroy_slot_object(slot_object: *mut u8) {
@@ -953,7 +1023,7 @@ unsafe extern "C" fn firmware_delete_slot_object(_slot_object: *mut u8) {}
 
 pub const DEFAULT_IAP_THREAD_SLOT_RELEASE_OPS: IapThreadSlotReleaseOps =
     IapThreadSlotReleaseOps {
-        poll_slot_object: firmware_release_poll_slot_object,
+        poll_slot_object: firmware_poll_slot_object,
         destroy_slot_object: firmware_destroy_slot_object,
         delete_slot_object: firmware_delete_slot_object,
     };
@@ -980,7 +1050,7 @@ fn iap_thread_slot_release_ops() -> IapThreadSlotReleaseOps {
 ///
 /// Deliberate deviations: the original calls lock/unlock alias veneers
 /// 0x08261e20/0x08261e24 directly; this uses their canonical ports.
-/// Poll (0x08257cb4) and destruction (0x08257d08) remain indirect seams.
+/// Poll uses the Rust registration veneer; destruction remains a retail seam.
 /// The target delete seam routes to the ported `operator_delete`; its host
 /// default is inert because fixture addresses are not allocations.
 ///
