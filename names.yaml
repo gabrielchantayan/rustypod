@@ -205419,3 +205419,37 @@ functions:
       ARM release build passes. Standalone public-API host smoke using the
       real node and mutex ports observes the circular sentinel, final
       vtable, status two and preserved derived fields. No device execution.
+
+  - address: 0x08258d00
+    ghidra: FUN_08258d00
+    name: tagged_value_copy_construct
+    size: 40
+    sig: "TaggedValue *tagged_value_copy_construct(TaggedValue *this, const TaggedValue *source)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      DAT_08258d24: TAGGED_VALUE_VTABLE (0x089a76fc)
+      r2: vtable, kind, auxiliary
+    notes: >-
+      Raw extent is 0x08258d00..0x08258d28: nine instructions (36 bytes)
+      followed by vtable literal 0x089a76fc at 0x08258d24. Next real
+      constructor starts at 0x08258d28. Full-image aligned A32 BL decoding
+      finds two plain inbound calls at 0x0813e310 and 0x0813e3c0, zero
+      predicated inbound calls, and zero plain or predicated body calls.
+      Both callers copy their default tagged value on an out-of-range
+      source index. Installs the class vtable, copies kind at +4 without
+      touching padding +5..+7, loads auxiliary at +12 before payload at +8,
+      then stores payload before auxiliary. Returns this in unchanged r0;
+      Ghidra's void signature omits that return. Reuses the existing 16-byte
+      repr(C) TaggedValue and opaque u32 vtable constant; no new callee seam.
+      Deliberate deviation: volatile accesses preserve raw memory ordering
+      even for self-copy and overlapping storage. match.py exits 1 with only
+      the LLVM frame push/mov/pop replacing bx lr and a displayed literal;
+      all eight load/store instructions match the original exactly.
+      All 13679 host tests pass, including all kind-byte values, source and
+      destination padding preservation, self-copy and word-offset overlaps.
+      ARM release build passes. Standalone actual-source host smoke observes
+      the installed vtable, kind 0xfe, preserved destination padding and
+      payload words 0x80000000/0xffffffff. No device execution.
