@@ -16,6 +16,52 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08219e50
+    ghidra: FUN_08219e50
+    name: class_1700_clear_when_configured
+    size: 132
+    sig: "u32 class_1700_clear_when_configured(void *owner, i32 mode)"
+    module: app/class_1700_clear_when_configured
+    status: ported
+    vars:
+      param_1: unused_owner
+      param_2: mode
+      iVar2: configuration_present_or_object
+      piVar3: dispatch_object
+      uStack_c: temporary_key
+    renames:
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_08101edc: string_table_has_string
+      FUN_083d8b04: cxx_string_release
+      FUN_081883fc: demo_mode_instance
+      FUN_08030f44: heap_panic
+      FUN_08275b9c: object_cast_to_class
+      DAT_08219ecc: runtime_key_owner_089cfe4c
+      DAT_08219ed0: string_table_08a79c10
+    notes: >-
+      Raw A32 proves 124 code bytes through pop at 0x08219ec8, plus two
+      literals, before the next real function at 0x08219ed4: 132 bytes.
+      Five plain outgoing BLs, one BLEQ to heap_panic, one BLX and one
+      BLXNE. Incoming calls: BL at 0x082609a0 and BLEQ at 0x083a1f0c.
+      For mode zero, constructs the key loaded from 0x089cfe54, tests
+      nonempty string membership in table 0x08a79c10, and releases the
+      temporary before any virtual dispatch. A hit invokes TCDemoMode
+      slot +0xe4, fatally rejects NULL, casts to class 0x1700, and invokes
+      slot +0x174 with zero only on a successful cast. Always returns 1.
+      Virtual method meanings are unresolved; no identity is guessed.
+      Deviations: omit unused r0/r2/r3 and the COW constructor's unused
+      third argument; host vtables use native-width target word indices
+      and host operations replace runtime globals. All direct callees
+      reuse their existing Rust ports.
+      Verification: 13815 host tests pass; ARM release builds. Reviewed
+      match.py exit-1 diff: LLVM adds a frame, replaces conditional
+      instructions with branches, and loads the key pointer directly at
+      0x089cfe54; both virtual slot offsets, zero argument, release-before-
+      dispatch ordering and fatal NULL path agree. An isolated source
+      smoke run exercises the exported nonzero-mode path at signed extremes;
+      full non-test host builds are blocked by six unrelated missing
+      functions in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule.
   - address: 0x08225148
     ghidra: FUN_08225148
     name: payload_record_construct
