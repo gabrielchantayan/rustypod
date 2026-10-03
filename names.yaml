@@ -205919,3 +205919,42 @@ functions:
       Isolated actual-source smoke preserves a nested pointer word and null.
       All 13705 host tests pass; ARM release build passes. match.py exits 1:
       the +8 word load matches; LLVM adds an FP frame and returns via pop.
+
+  - address: 0x08261998
+    ghidra: FUN_08261998
+    name: dispatch_item_submit
+    size: 76
+    sig: "u32 dispatch_item_submit(void *manager, void *payload)"
+    module: cxx/dispatch_item_submit
+    status: ported
+    vars:
+      param_1/r0/r4: manager
+      param_2/r1/r5: payload
+      r6: zero_mode
+      return_r0: submission_status
+      FUN_08261890: tagged_context_dequeue
+      manager+0x38: free_item_queue_owner
+      branch_082619e4: shared_submission_helper
+    notes: >-
+      Raw A32 words establish a 76-byte wrapper at 0x08261998..0x082619e4,
+      not Ghidra's 192 bytes. The next push at 0x082619e4 starts a separately
+      entered 116-byte shared helper ending at the next prologue, 0x08261a58;
+      it also has an independent conditional tail caller at 0x08261b4c.
+      Wrapper outgoing calls: one plain BL to tagged_context_dequeue and zero
+      predicated BL. Whole-image decoding finds two inbound plain BL at
+      0x081e6af4 and 0x081e6bf8, zero predicated BL, and four plain tail B at
+      0x0818a3b0, 0x0818a3e4, 0x0818a418, and 0x0818a454.
+      Waits on manager+0x38 with wait=1 and selector=NULL. A NULL item returns
+      0x14; otherwise transfers (manager,item,payload,0) to the shared helper.
+      That helper initializes an item under the manager mutex, enqueues it at
+      manager+0x9c, conditionally waits for completion, and unlocks. It is not
+      ported here and has no existing names.yaml entry. Deviation: fixed-address
+      target call to the binary-verified shared helper, replaceable host seams
+      for dequeue/helper; target dequeue reuses the existing Rust port.
+      Host tests cover exhaustion without submission and success/error status
+      propagation. All 13707 host tests pass; ARM release build passes.
+      Actual-source executable smoke observes exhausted=20, submitted=0x27,
+      and item_payload=0xabcd1234. Required match.py exits 1 because its default
+      192-byte extent includes the shared helper. Rust preserves the queue
+      offset, wait/selector arguments, NULL-to-20 branch and helper arguments;
+      LLVM emits the helper transfer as bx ip with literal 0x082619e4.
