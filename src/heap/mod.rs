@@ -31,6 +31,7 @@ pub mod gateway_service34;
 pub mod pool_parent_reserved;
 pub mod pool_deque_begin_cursor;
 pub mod first_event_dispatch;
+pub mod first_word_owner_destroy;
 pub mod fixed_block_pool;
 pub mod free_path;
 pub mod init;

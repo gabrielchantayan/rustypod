@@ -206828,3 +206828,35 @@ functions:
       subtractions. Archive relocations verify all six BLs target fixed16_mul;
       match.py displays unresolved archive branch immediates as self-calls.
       No device execution performed.
+
+  - address: 0x08242f20
+    ghidra: FUN_08242f20
+    name: first_word_owner_destroy
+    size: 24
+    sig: "FirstWordOwner *first_word_owner_destroy(FirstWordOwner *owner)"
+    module: heap/first_word_owner_destroy
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec words e92d4010 e1a04000 e5900000 eb019f78 e1a00004
+      e8bd8010 establish the complete 24-byte extent 0x08242f20..0x08242f38.
+      The next real function starts with mov r3,r0 at 0x08242f38. A whole-image
+      aligned A32 BL decode finds two inbound plain calls at 0x08256560 and
+      0x08256568, zero predicated calls. The body contains one plain BL to
+      the already ported operator_delete_tag3 at 0x082aad14 and no predicated
+      BLs. Releases the allocation in the first word and returns the owner;
+      neither clears the pointer nor deletes the owner. The raw caller at
+      0x0825642c destroys embedded owners at +0x10 and +0x04, using each
+      returned pointer to walk backward through the enclosing object.
+      No owner NULL guard is added; a NULL allocation is handled by the
+      existing tag-3 delete. No new callee seam. Deliberate deviation: the
+      repr(C) pointer field widens on hosts, retaining offset zero and the
+      four-byte target layout. Host tests cover empty and populated owners,
+      retained dangling pointers, adjacent-word preservation, and return
+      identity. Full host suite and ARM release build passed. A removed
+      smoke test exercised the backward caller walk with the real delete
+      and empty allocations. match.py reports six original versus seven
+      Rust instructions: load/call/return preserved, with additional sl/fp
+      saves and a frame-pointer setup. Export is target-only and inline(never).
