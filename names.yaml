@@ -53903,6 +53903,29 @@ functions:
       trailing target word and places this exported duplicate in a distinct
       target text section so LLVM does not coalesce the two call targets.
 
+  - address: 0x08257fc8
+    ghidra: FUN_08257fc8
+    name: cxx_string_pair_entry_assign
+    size: 44
+    sig: "CxxStringPairRangeEntry *cxx_string_pair_entry_assign(CxxStringPairRangeEntry *destination, const CxxStringPairRangeEntry *source)"
+    module: cxx/string
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: source, r4: destination, r5: source}
+    renames: {FUN_083d8d1c: cxx_string_assign}
+    notes: >-
+      Raw ARM establishes the exact 44-byte extent 0x08257fc8..0x08257ff4;
+      the next independent function begins with push {r4,lr} at 0x08257ff4.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x083e2fd4
+      and 0x083e9e84, zero predicated BLs, and two outgoing plain BLs to
+      cxx_string_assign at 0x083d8d1c. Assigns the two initialized COW string
+      fields at +0x00 then +0x04, copies the unexamined +0x08 word, and
+      returns destination. This is assignment, not the copy constructor at
+      0x08257f80: old destination references are released and leaked source
+      strings are deep-copied. The range-copy caller now invokes this port.
+      Host tests cover replacement ownership, shared and leaked self-assignment,
+      leaked-source deep copying, empty members, and trailing-word preservation.
+      No deliberate deviations.
+
   - address: 0x0825c91c
     ghidra: FUN_0825c91c
     name: cxx_string_pair_assign
@@ -54031,10 +54054,11 @@ functions:
       entry, and returns the advanced output cursor. Whole-image A32
       immediate decoding finds one direct plain bl caller at 0x081df32c and
       one predicated blne caller at 0x081df468. The body has one unconditional
-      bl to 0x08257fc8. That callee is byte-identical to the existing
-      cxx_string_pair_entry_copy_ctor_base seam at 0x08257f80, so the Rust
-      port deliberately uses that seam rather than adding an otherwise
-      duplicate target export.
+      bl to cxx_string_pair_entry_assign at 0x08257fc8. Raw bytes prove this
+      assigns initialized strings through cxx_string_assign, unlike the copy
+      constructor at 0x08257f80. The Rust caller uses the assignment port;
+      destination entries must already contain valid COW strings.
+      No deliberate deviations.
 
   - address: 0x083d6f20
     ghidra: FUN_083d6f20
