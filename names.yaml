@@ -207234,3 +207234,59 @@ functions:
       LLVM adds PUSH {fp,lr}, MOV fp,sp and replaces BX LR with POP {fp,pc}.
       The exported symbol is present separately from identical helpers.
       No device execution performed.
+
+  - address: 0x08239d34
+    ghidra: FUN_08239d34
+    name: query_context_controller_construct
+    size: 120
+    sig: "void *query_context_controller_construct(void *object)"
+    module: app/query_context_controller
+    status: ported
+    renames:
+      param_1/r0: object
+      uStack_10: temporary_query_handle
+      puVar2/r4: constructed_object
+      DAT_08239da8: controller_vtable (0x089a2ce8)
+      FUN_082aadd4: operator_new
+      FUN_0813e474: query_object_construct
+      FUN_0839ed38: refcounted_ptr_construct
+      FUN_08260a50: kinded_controller_construct
+      FUN_0816cd44: refcounted_ptr_release
+      FUN_082840e8: context_scope_init
+    notes: >-
+      Raw osos.dec A32 words establish the true 120-byte extent
+      0x08239d34..0x08239dac: 116 bytes of code ending with pop
+      {r1-r5,pc} at 0x08239da4, plus the referenced vtable literal
+      0x089a2ce8 at 0x08239da8. The next real function starts with
+      cmp r0,#0 at 0x08239dac. Whole-image aligned BL-immediate decoding
+      finds two inbound plain unconditional calls at 0x082379dc and
+      0x08239920, zero predicated inbound calls; the constructor itself
+      contains six plain unconditional BLs and zero predicated BLs.
+      The allocation wrapper at 0x08237398 tail-branches to the
+      0x082379d8 wrapper which calls this constructor. Allocates a
+      72-byte query object, constructs it with id/mode zero, creates
+      a mutex-free temporary refcounted handle, constructs the kinded
+      base with kind 20 and flag/extra_byte/extra_word zero, releases
+      the temporary, plants the leaf vtable and initializes the embedded
+      null-subject context scope at object+0xd0. Returns the base
+      constructor's object, not necessarily incoming r0; Ghidra's
+      undefined8 return and apparent extra input arguments are wrong.
+      Reuses every existing callee port and the shared fp_misc query
+      constructor seam; no new firmware-address seam. Deliberate
+      deviations: temporary slot initialized instead of retaining the
+      unused saved incoming r3, existing target-word vtable and host-wide
+      StringObject conventions retained, existing query seam uses BLX.
+      Host tests exercise NULL/non-NULL query implementations and normal/
+      redirected base returns, actual shared reference ownership after
+      temporary release, controller tail, context scope and untouched
+      input/padding. All 13768 host tests passed; ARM release build passed.
+      Standalone actual-source host smoke observed kind 20, both vtables
+      and retained refcount 1 using installed allocation/base boundaries.
+      Host non-test library compilation is blocked by unrelated missing
+      cfg-gated helpers, so smoke compiled the source with cfg(test).
+      match.py exit 1 reports 37 versus 29 instructions: all six call
+      stages remain, query dispatch is BLX, LLVM adds an fp frame,
+      preserves stack zero arguments, combines object+0xd0 formation
+      with the leaf vtable store, and eliminates return-pointer subtraction
+      because the ported scope initializer always returns its input.
+      No device execution performed.
