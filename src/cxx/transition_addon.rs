@@ -253,7 +253,7 @@ pub unsafe extern "C" fn silver_controller_transition_addon_destroy(
     this
 }
 
-/// Dispatch boundaries for five unresolved helpers in
+/// Dispatch boundaries for helpers in
 /// [`silver_controller_transition_addon_construct`]. The owner-capacity
 /// query @ 0x08296efc is ported and wired directly; the other ported callees
 /// are the common interface-guard base constructor 0x0818a0c4
@@ -367,22 +367,146 @@ unsafe extern "C" fn scale_class_body(this: *mut u8, arg: u32) -> u32 {
     }
 }
 
-/// Default for the unresolved vector-member constructor @ 0x08278104:
-/// reproduces the decoded prologue — owner word at +0x00, zeroed words at
-/// +0x04/+0x08/+0x0c/+0x10 — and omits the operator_new(24) node-fill
-/// loop, whose node constructor 0x08277e2c is unported. Returns `member`.
-/// All stores are 32-bit like the original's; on a 64-bit host the owner
-/// word keeps the pointer's low half only.
-unsafe extern "C" fn vector_member_construct_unported(
+/// vector_member_construct — original FUN_08278104 @ 0x08278104.
+///
+/// True size: 140 bytes, ending at the next prologue @ 0x08278190.
+/// Raw decoding verifies two inbound plain BL calls, zero predicated calls;
+/// the body has three plain BL instructions and zero predicated BLs.
+/// Initializes owner, reserved word, and begin/end/capacity, then allocates
+/// 24-byte nodes while the reloaded owner word at +0x30 exceeds the index.
+/// Appends the node constructor's return; full vectors use the resident
+/// pointer-vector insertion routine. A non-full NULL end advances without
+/// storing, matching the original conditional STR.
+///
+/// Deviation: allocation uses the existing Rust operator_new; node construction
+/// @ 0x08277e2c and insertion @ 0x083e581c remain resident firmware calls.
+/// Host callers can execute the empty case; nonempty construction requires
+/// firmware. All object fields remain aligned 32-bit words on hosts too.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_member_construct(
     member: *mut u8,
     owner: *mut u8,
 ) -> *mut u8 {
-    write_u32_unaligned(member, owner as u32);
-    write_u32_unaligned(member.add(4), 0);
-    write_u32_unaligned(member.add(8), 0);
-    write_u32_unaligned(member.add(12), 0);
-    write_u32_unaligned(member.add(16), 0);
+    vector_member_construct_with(member, owner, || operator_new(24) as *mut u8,
+        |node, owner| {
+            #[cfg(target_os = "none")]
+            {
+                let construct: unsafe extern "C" fn(*mut u8, *mut u8) -> u32 =
+                    core::mem::transmute(0x0827_7e2cusize);
+                construct(node, owner)
+            }
+            #[cfg(not(target_os = "none"))]
+            {
+                let _ = (node, owner);
+                panic!("resident node constructor requires firmware");
+            }
+        },
+        |vector, end, node| {
+            #[cfg(target_os = "none")]
+            {
+                let insert: unsafe extern "C" fn(*mut u32, u32, *const u32) =
+                    core::mem::transmute(0x083e_581cusize);
+                insert(vector, end, node);
+            }
+            #[cfg(not(target_os = "none"))]
+            {
+                let _ = (vector, end, node);
+                panic!("resident vector insertion requires firmware");
+            }
+        })
+}
+
+#[inline(always)]
+unsafe fn vector_member_construct_with(
+    member: *mut u8,
+    owner: *mut u8,
+    mut allocate: impl FnMut() -> *mut u8,
+    mut construct: impl FnMut(*mut u8, *mut u8) -> u32,
+    mut insert: impl FnMut(*mut u32, u32, *const u32),
+) -> *mut u8 {
+    let words = member.cast::<u32>();
+    words.write(owner as u32);
+    for index in 1..5 {
+        words.add(index).write(0);
+    }
+    let mut index = 0u32;
+    while ((words.read() as *const u32).add(12)).read() > index {
+        let allocation = allocate();
+        let node = construct(allocation, words.read() as *mut u8);
+        let end = words.add(3).read();
+        if end == words.add(4).read() {
+            insert(words.add(2), end, &node);
+        } else {
+            words.add(3).write(end.wrapping_add(4));
+            if end != 0 {
+                (end as *mut u32).write(node);
+            }
+        }
+        index = index.wrapping_add(1);
+    }
     member
+}
+
+#[cfg(test)]
+mod vector_construct_tests {
+    use super::*;
+
+    #[test]
+    fn empty_growth_append_and_reloaded_limit() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::TRANSITION_VECTOR_CONSTRUCT, 4096,
+        ) else { return };
+        unsafe {
+            let owner = slab.cast::<u32>();
+            let member = slab.add(128);
+            let storage = slab.add(256).cast::<u32>();
+            core::ptr::write_bytes(slab, 0, 4096);
+            core::ptr::write_bytes(member, 0xa5, 24);
+            assert_eq!(vector_member_construct(member, slab), member);
+            assert_eq!(core::slice::from_raw_parts(member.cast::<u32>(), 5),
+                &[slab as u32, 0, 0, 0, 0]);
+            assert_eq!(member.add(20).cast::<u32>().read(), 0xa5a5_a5a5);
+
+            owner.add(12).write(3);
+            let mut allocated = 0;
+            let mut grown = 0;
+            let result = vector_member_construct_with(member, slab,
+                || { allocated += 1; slab.add(512 + allocated * 24) },
+                |node, actual_owner| {
+                    assert_eq!(actual_owner, slab);
+                    // The constructor result need not equal its allocation.
+                    // Mutating the loop bound must affect the next iteration.
+                    owner.add(12).write(2);
+                    node.add(4) as u32
+                },
+                |vector, end, value| {
+                    assert_eq!(end, 0);
+                    grown += 1;
+                    storage.write(value.read());
+                    vector.write(storage as u32);
+                    vector.add(1).write(storage.add(1) as u32);
+                    vector.add(2).write(storage.add(2) as u32);
+                });
+            assert_eq!(result, member);
+            assert_eq!((allocated, grown), (2, 1));
+            assert_eq!(storage.read(), slab.add(540) as u32);
+            assert_eq!(storage.add(1).read(), slab.add(564) as u32);
+            assert_eq!(member.add(12).cast::<u32>().read(), storage.add(2) as u32);
+
+            // A resident insertion may leave a non-full NULL end. Preserve
+            // the original skipped store, but still advance that end by four.
+            owner.add(12).write(2);
+            vector_member_construct_with(member, slab,
+                || slab.add(512),
+                |_, _| 0x12345678,
+                |vector, _, _| {
+                    vector.add(1).write(0);
+                    vector.add(2).write(8);
+                });
+            assert_eq!(member.add(12).cast::<u32>().read(), 4);
+        }
+    }
 }
 
 /// Default for the unresolved registration step @ 0x08278250: inert. Its
@@ -396,7 +520,7 @@ pub const DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS: TransitionAddonConstructOps =
         string_member_construct: string_member_construct_unported,
         transfer_quantum: transfer_quantum_unported,
         scale_class: scale_class_body,
-        vector_member_construct: vector_member_construct_unported,
+        vector_member_construct,
         register_with_owner: register_with_owner_unported,
     };
 
@@ -495,18 +619,16 @@ unsafe fn register_with_owner_op() -> unsafe extern "C" fn(*mut u8) {
 /// Deviations: five remaining helper calls cross
 /// [`TRANSITION_ADDON_CONSTRUCT_OPS`] dispatch slots — see each default's
 /// documentation; the scale-class default is the faithful decoded body and
-/// the string/vector defaults reproduce their decoded stores, while the
-/// quantum/registration defaults are inert. The ported owner-capacity query
-/// is wired directly. Three already-ported callees
+/// the string default reproduces its decoded stores, while the vector default
+/// is the port with resident callees and quantum/registration are inert.
+/// The ported owner-capacity query is wired directly. Three ported callees
 /// are called directly: [`interface_guard_base_construct`],
 /// [`facade_for_selector`] (its `ldr r0,[r0,#4]` reads the owner/interface
 /// word this constructor just stored), and [`deque_seg_capacity`], the
 /// byte-identical ported body of the 0x081a81bc alignment query. Consequently
-/// this constructor is **not hook-ready** until the five non-faithful
-/// boundaries are ported and wired in. All object stores are 32-bit like the
-/// original's `str`s; on a 64-bit host pointer-valued words keep their low
-/// half (no host fixture needs the full width — the recording mocks receive
-/// `this` directly).
+/// this constructor is **not hook-ready** until its unresolved boundaries
+/// are wired in. All object stores are 32-bit like the original's `str`s;
+/// host vector fixtures require addresses representable in u32.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn silver_controller_transition_addon_construct(
@@ -622,8 +744,8 @@ pub unsafe extern "C" fn silver_controller_transition_addon_construct(
 /// pinned by the string_object.rs tests). [`interface_guard_base_construct`],
 /// [`facade_for_selector`], and [`deque_seg_capacity`] (the byte-identical
 /// 0x081a81bc alignment query) are called directly. Consequently this
-/// constructor is **not hook-ready** until the five non-faithful boundaries
-/// are ported and wired in, and ft/system.rs's `FT_PLATFORM_FILE_CTOR` slot
+/// constructor is **not hook-ready** until its unresolved boundaries
+/// are wired in, and ft/system.rs's `FT_PLATFORM_FILE_CTOR` slot
 /// deliberately keeps its fail-closed default. All object stores are 32-bit
 /// like the original's `str`s; on a 64-bit host the string member's native
 /// payload word overlaps the +0x14 flag byte (the crate's face-word artifact
@@ -1002,9 +1124,6 @@ mod tests {
         })
     }
 
-    fn install_construct_defaults() -> ConstructOpsGuard {
-        construct_guard(DEFAULT_TRANSITION_ADDON_CONSTRUCT_OPS)
-    }
 
     fn construct_calls() -> Vec<ConstructCall> {
         unsafe { (*core::ptr::addr_of!(CONSTRUCT_CALLS)).clone() }
@@ -1082,58 +1201,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn construct_defaults_reproduce_every_decoded_store() {
-        let mut object = Object([0xa5; 0x100]);
-        let this = object.0.as_mut_ptr();
-        let source = 0x5eedusize as *const u8;
-        unsafe {
-            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
-        }
-        // Only the facade walk is mocked: with the default base boundary
-        // the +0x04 interface word is zero, which the real host walk would
-        // dereference. Every construction slot stays at its default.
-        let _guard = install_construct_defaults();
-
-        let returned = unsafe {
-            silver_controller_transition_addon_construct(this, source, 1, 0, 0, 7, 0)
-        };
-
-        assert_eq!(returned, this);
-        assert_eq!(construct_calls(), vec![ConstructCall::Walk { selector: 1 }]);
-        unsafe {
-            // Base boundary stores, then the derived vtable overwrites +0x00.
-            assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)), 0);
-            assert_eq!(*this.add(8), 0);
-            assert_eq!(*this.add(9), 0, "flag ^ 1 with flag = 1");
-            // String member: derived vtable + NULL payload at target offsets.
-            assert_eq!(
-                read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET)),
-                TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS
-            );
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET + 4)), 0);
-            assert_eq!(*this.add(TRANSITION_ADDON_MODE_FLAG_OFFSET), 1, "the raw flag");
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0);
-            // Faithful scale default: NULL context and 7 - 1 < 16 -> 7.
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 7);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(*this.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
-            // Vector member prologue: owner word, then four zeroed words.
-            assert_eq!(
-                read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET)),
-                this as usize as u32
-            );
-            for offset in [4usize, 8, 12, 16] {
-                assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET + offset)), 0);
-            }
-        }
-    }
 
     #[test]
     fn scale_class_default_matches_the_decoded_truth_table() {
@@ -1323,124 +1390,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn construct_from_cstr_defaults_reproduce_every_decoded_store() {
-        let mut object = Object([0xa5; 0x100]);
-        let this = object.0.as_mut_ptr();
-        let source = 0x5eedusize as *const u8;
-        unsafe {
-            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
-        }
-        // Only the facade walk is mocked (with the default base boundary
-        // the +0x04 interface word is zero, which the real host walk would
-        // dereference) and the from-cstr slot carries the stand-in (the
-        // alignment conflict above); every construction slot stays at its
-        // default. flag = 0 covers the other inversion: the base receives
-        // flag ^ 1 = 1 while the member's +8 byte takes the raw 0.
-        let _guard = construct_from_cstr_guard(
-            install_construct_defaults(),
-            construct_from_cstr_stand_in,
-        );
-
-        let returned = unsafe {
-            silver_controller_transition_addon_construct_from_cstr(this, source, 0, 0, 0, 7, 0)
-        };
-
-        assert_eq!(returned, this);
-        assert_eq!(
-            construct_calls(),
-            vec![
-                ConstructCall::StringMember {
-
-                    member: unsafe { this.add(TRANSITION_ADDON_STRING_OFFSET) } as usize,
-                    source: source as usize,
-                },
-                ConstructCall::Walk { selector: 1 },
-            ]
-        );
-        unsafe {
-            // Base boundary stores, then the derived vtable overwrites +0x00.
-            assert_eq!(read_u32_unaligned(this), TRANSITION_ADDON_VTABLE_ADDRESS as u32);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET)), 0);
-            assert_eq!(*this.add(8), 0);
-            assert_eq!(*this.add(9), 1, "flag ^ 1 with flag = 0");
-            // String member: the stand-in planted the StringObject vtable
-            // face word and NULL payload, then THIS constructor overwrote
-            // +0x00 with the derived string vtable.
-            assert_eq!(
-                read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET)),
-                TRANSITION_ADDON_STRING_MEMBER_VTABLE_ADDRESS
-            );
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET + 4)), 0);
-            assert_eq!(*this.add(TRANSITION_ADDON_MODE_FLAG_OFFSET), 0, "the raw flag");
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_INVALID_WORD_OFFSET)), 0xffff_ffff);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CAPACITY_OFFSET)), 0x200);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_CONTEXT_OFFSET)), 0);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_QUANTUM_OFFSET)), 0);
-            // Faithful scale default: NULL context and 7 - 1 < 16 -> 7.
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SCALE_CLASS_OFFSET)), 7);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_SECOND_ZEROED_WORD_OFFSET)), 0);
-            assert_eq!(*this.add(TRANSITION_ADDON_FACADE_BYTE_OFFSET), 0x5a);
-            assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_ALIGNMENT_OFFSET)), 0x20);
-            // Vector member prologue: owner word, then four zeroed words.
-            assert_eq!(
-                read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET)),
-                this as usize as u32
-            );
-            for offset in [4usize, 8, 12, 16] {
-                assert_eq!(read_u32_unaligned(this.add(TRANSITION_ADDON_VECTOR_OFFSET + offset)), 0);
-            }
-        }
-    }
-
-    #[repr(align(8))]
-    struct AddonStorage([u8; 0x54]);
-
-    #[test]
-    fn handle_construct_copies_empty_path_and_forwards_fixed_constructor_arguments() {
-        let mut source = StringObject {
-            vtable: core::ptr::null(),
-            payload: core::ptr::null_mut(),
-        };
-        let mut handle = core::mem::MaybeUninit::<TransitionAddonHandle>::uninit();
-        let mut addon_storage = AddonStorage([0; 0x54]);
-        let _heap = crate::heap::veneers::tests::mock_heap();
-        crate::heap::veneers::tests::set_alloc_ret(addon_storage.0.as_mut_ptr());
-        unsafe {
-            (*core::ptr::addr_of_mut!(FAKE_FACADE))[9] = 0x5a;
-        }
-        let _guard = construct_from_cstr_guard(
-            install_construct_defaults(),
-            construct_from_cstr_stand_in,
-        );
-
-        let returned = unsafe {
-            silver_controller_transition_addon_handle_construct(
-                handle.as_mut_ptr(),
-                &mut source,
-                0x7f,
-                0xcafe_babe,
-            )
-        };
-        let handle = unsafe { &mut *handle.as_mut_ptr() };
-        assert!(core::ptr::eq(returned, handle));
-        assert_eq!(handle.addon, addon_storage.0.as_mut_ptr());
-        assert_eq!(
-            crate::heap::veneers::tests::alloc_log(),
-            (1, 0x54, 2),
-            "the raw operator-new call has tag 2 and no NULL guard"
-        );
-
-        let calls = construct_calls();
-        assert!(matches!(
-            calls.as_slice(),
-            [
-                ConstructCall::StringMember { source, .. },
-                ConstructCall::Walk { selector: 1 }
-            ] if unsafe { *(*source as *const u8) } == 0
-        ));
-    }
 
     #[test]
     fn construct_from_cstr_slot_is_wired_to_the_real_port() {

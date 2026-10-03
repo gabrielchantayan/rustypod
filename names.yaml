@@ -202810,3 +202810,49 @@ functions:
       explicit early branches replace predication, the frame is delayed
       until the resolver call, and the final clear remains a tail branch.
       No device execution is claimed.
+
+  - address: 0x08278104
+    ghidra: FUN_08278104
+    name: vector_member_construct
+    size: 140
+    module: cxx/transition_addon
+    sig: "uint8_t *vector_member_construct(uint8_t *member, uint8_t *owner)"
+    status: ported
+    args:
+      r0: member
+      r1: owner
+    vars:
+      param_1: member
+      param_2: owner
+      uVar3: node_index
+      local_10: constructed_node
+      FUN_082aadd4: operator_new
+      FUN_08277e2c: resident_owner_node_construct
+      FUN_083e581c: resident_pointer_vector_insert
+    notes: >-
+      Raw A32 words prove the exact 140-byte extent through 0x0827818c;
+      the next real function starts with push at 0x08278190. Whole-image
+      decoding finds two incoming unconditional BLs at 0x08278e6c and
+      0x08278f2c, zero predicated incoming BLs. The body has three plain
+      BL instructions, to 0x082aadd4, 0x08277e2c, and 0x083e581c, and
+      zero predicated BLs. Ghidra's extra register arguments are unused.
+      Stores owner and clears four words, then repeatedly allocates 24-byte
+      owner nodes and appends the constructor return to the embedded
+      begin/end/capacity triple at member+8. Reloads owner and owner+0x30
+      after every iteration. Full storage invokes the verified resident
+      vector insertion routine; non-full storage advances end by four and
+      skips its store when the old end is NULL. Reuses the Rust tag-2
+      operator_new and replaces the existing partial constructor default.
+      Deliberate deviations: two unported callees execute at their verified
+      resident firmware addresses through BLX; nonempty host construction
+      cannot execute those firmware calls. Host fixtures retain u32 words.
+      Tests cover empty initialization and neighboring guards, initial
+      growth, subsequent append, constructor-return identity, changing
+      loop limits, and the non-full NULL-end conditional store. Removed
+      obsolete store-copy and forwarding tests dependent on the old stub.
+      All 13564 host tests pass; ARM release build passes. A standalone
+      host smoke executes the production empty constructor and verifies
+      owner, zeroed words, and return. match.py reports 44 instructions
+      versus 35 original instructions, preserving the node loop, capacity
+      branch, conditional store, and stack node argument. Two literal
+      words retain the exact resident targets. No device run is claimed.
