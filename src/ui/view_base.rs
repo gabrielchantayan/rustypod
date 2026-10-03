@@ -460,6 +460,78 @@ unsafe fn view_base_dispatch_word_44_changed(view: *mut ViewBase) {
     changed(view);
 }
 
+/// Host lookup and attachment seams for `view_base_refresh_key_resource`.
+/// The attachment target is verified `FUN_08110690`: when the linkage
+/// pointer at +0x0c is nonzero, it stores the resource at linkage +0x0c.
+#[cfg(not(target_os = "none"))]
+pub static mut VIEW_BASE_KEY_RESOURCE_LOOKUP: unsafe extern "C" fn(
+    crate::app::resource_chain::ResourceKind, u32,
+) -> *mut u8 = crate::app::resource_chain::resource_chain_find_on_current_task;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_key_resource_attach(_view: *mut ViewBase, _resource: *mut u8) {
+    panic!("view_base_refresh_key_resource requires firmware attachment 0x08110690")
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut VIEW_BASE_KEY_RESOURCE_ATTACH: unsafe extern "C" fn(*mut ViewBase, *mut u8) =
+    missing_key_resource_attach;
+
+/// Refresh a view's `'KeyF'` resource — `FUN_0826de1c`, load address
+/// **0x0826de1c**, true size **80 bytes** (76 instruction bytes plus the
+/// literal at 0x0826de68; next function starts at 0x0826de6c).
+///
+/// Whole-image aligned ARM decoding verifies two incoming plain BLs
+/// (0x081da05c and 0x0829139c), zero incoming predicated BLs. The body has
+/// one plain BL (lookup) and one BLNE (attachment), followed by BX r1
+/// through vtable +0xd4. If word_44 is zero, do nothing. Otherwise, flag
+/// bit 0 requests task-local `'KeyF'` lookup with word_44 as the ID;
+/// attach a non-NULL result through verified firmware entry 0x08110690.
+/// Notify slot +0xd4 regardless of flags or lookup success.
+///
+/// Deliberate deviations: host builds substitute lookup/attachment seams
+/// and the existing host vtable callback; target calls the ported lookup,
+/// the original attachment entry, and the object's actual vtable.
+///
+/// # Safety
+/// `view` must be a valid writable ViewBase with a valid runtime vtable
+/// and linkage object accepted by the firmware attachment entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn view_base_refresh_key_resource(view: *mut ViewBase) {
+    use crate::app::resource_chain::ResourceKind;
+    let id = unsafe { core::ptr::addr_of!((*view).word_44).read_volatile() };
+    if id == 0 {
+        return;
+    }
+    let flags = unsafe { core::ptr::addr_of!((*view).flags).read_volatile() };
+    if flags & 1 != 0 {
+        #[cfg(target_os = "none")]
+        let resource = unsafe {
+            crate::app::resource_chain::resource_chain_find_on_current_task(
+                ResourceKind(0x4b65_7946), id,
+            )
+        };
+        #[cfg(not(target_os = "none"))]
+        let resource = unsafe {
+            core::ptr::addr_of!(VIEW_BASE_KEY_RESOURCE_LOOKUP).read_volatile()(
+                ResourceKind(0x4b65_7946), id,
+            )
+        };
+        if !resource.is_null() {
+            #[cfg(target_os = "none")]
+            let attach: unsafe extern "C" fn(*mut ViewBase, *mut u8) =
+                unsafe { core::mem::transmute(0x0811_0690usize) };
+            #[cfg(not(target_os = "none"))]
+            let attach = unsafe {
+                core::ptr::addr_of!(VIEW_BASE_KEY_RESOURCE_ATTACH).read_volatile()
+            };
+            unsafe { attach(view, resource) };
+        }
+    }
+    unsafe { view_base_dispatch_word_44_changed(view) };
+}
+
 /// view_base_set_word_44 — original: `FUN_0826d834` @ `0x0826d834`
 /// (24 bytes, `0x0826d834..0x0826d84c`; the distinct sibling
 /// `FUN_0826d850` starts with `push {r4,r5,r6,lr}` at `0x0826d850`).
@@ -1401,6 +1473,91 @@ mod tests {
             assert_eq!(*(&raw const RESOURCE_CALLS), ["attach"]);
             assert_eq!((*(&raw const RESOURCE_ATTACH_ARGS)).0, ptr::null_mut());
             assert_eq!((*(&raw const RESOURCE_ATTACH_ARGS)).1, view);
+        }
+    }
+}
+
+#[cfg(test)]
+mod key_resource_tests {
+    extern crate std;
+    use super::*;
+    use crate::app::resource_chain::ResourceKind;
+    use core::ptr;
+    use std::vec::Vec;
+
+    static mut EVENTS: Vec<(u32, u32)> = Vec::new();
+    static mut FOUND: bool = false;
+
+    unsafe extern "C" fn lookup(kind: ResourceKind, id: u32) -> *mut u8 {
+        assert_eq!(kind, ResourceKind(0x4b65_7946));
+        unsafe { (&mut *(&raw mut EVENTS)).push((1, id)) };
+        if unsafe { *(&raw const FOUND) } { 0x1234usize as *mut u8 } else { ptr::null_mut() }
+    }
+
+    unsafe extern "C" fn attach(view: *mut ViewBase, resource: *mut u8) {
+        assert_eq!(resource as usize, 0x1234);
+        unsafe {
+            (&mut *(&raw mut EVENTS)).push((2, (*view).word_44));
+            // A real callee may mutate flags; the subsequent callback must
+            // see those changes, not a copied view or cached state.
+            (*view).flags = 0x8000_0000;
+        }
+    }
+
+    unsafe extern "C" fn changed(view: *mut ViewBase) {
+        unsafe { (&mut *(&raw mut EVENTS)).push((3, (*view).flags)) };
+    }
+
+    struct Restore {
+        lookup: unsafe extern "C" fn(ResourceKind, u32) -> *mut u8,
+        attach: unsafe extern "C" fn(*mut ViewBase, *mut u8),
+        changed: ViewBaseWord44Changed,
+    }
+
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe {
+                *(&raw mut VIEW_BASE_KEY_RESOURCE_LOOKUP) = self.lookup;
+                *(&raw mut VIEW_BASE_KEY_RESOURCE_ATTACH) = self.attach;
+                *(&raw mut VIEW_BASE_WORD_44_CHANGED) = self.changed;
+            }
+        }
+    }
+
+    #[test]
+    fn key_resource_refresh_gates_lookup_and_notifies_after_attachment() {
+        let _guard = VIEW_BASE_RESOURCE_OPS_TEST_LOCK.lock();
+        let _restore = unsafe {
+            Restore {
+                lookup: *(&raw const VIEW_BASE_KEY_RESOURCE_LOOKUP),
+                attach: *(&raw const VIEW_BASE_KEY_RESOURCE_ATTACH),
+                changed: *(&raw const VIEW_BASE_WORD_44_CHANGED),
+            }
+        };
+        unsafe {
+            *(&raw mut VIEW_BASE_KEY_RESOURCE_LOOKUP) = lookup;
+            *(&raw mut VIEW_BASE_KEY_RESOURCE_ATTACH) = attach;
+            *(&raw mut VIEW_BASE_WORD_44_CHANGED) = changed;
+        }
+        for (id, flags, found, expected) in [
+            (0, 1, true, std::vec![]),
+            (7, 0x8000_0002, true, std::vec![(3, 0x8000_0002)]),
+            (7, 1, false, std::vec![(1, 7), (3, 1)]),
+            (u32::MAX, 0x8000_0001, true,
+                std::vec![(1, u32::MAX), (2, u32::MAX), (3, 0x8000_0000)]),
+        ] {
+            let mut view: ViewBase = unsafe { core::mem::zeroed() };
+            view.word_44 = id;
+            view.flags = flags;
+            view.word_4c = 0xa5a5_a5a5;
+            unsafe {
+                (&mut *(&raw mut EVENTS)).clear();
+                *(&raw mut FOUND) = found;
+                view_base_refresh_key_resource(&mut view);
+                assert_eq!(&*(&raw const EVENTS), &expected);
+            }
+            assert_eq!(view.word_44, id);
+            assert_eq!(view.word_4c, 0xa5a5_a5a5);
         }
     }
 }
