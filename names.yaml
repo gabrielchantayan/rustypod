@@ -122132,6 +122132,32 @@ functions:
       helper. Host tests cover floor rounding, every attainable four-byte
       component sum, and dst aliasing each source.
 
+  # --- Fixed thirteen-byte copy helper (util/copy_thirteen_bytes) ---
+  - address: 0x082231ac
+    ghidra: FUN_082231ac
+    name: copy_thirteen_bytes
+    size: 20
+    sig: "u8 *copy_thirteen_bytes(u8 *dst, const u8 *src)"
+    module: util/copy_thirteen_bytes
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: src
+      r2: first_word
+      r3: second_word
+      r12: third_word
+    notes: >-
+      Raw osos.dec verifies five ARM instructions (20 bytes), ending in
+      bx lr at 0x082231bc; the next real function opens at 0x082231c0.
+      Loads three aligned words together before storing them, then reads
+      and writes byte 12 and returns dst unchanged in r0. No outgoing calls
+      or callee seams. Full-image ARM BL decoding finds exactly two inbound
+      unconditional calls at 0x080fa494 and 0x080fe098, zero predicated BLs.
+      Both callers consume the returned destination despite Ghidra's void
+      signature. Host tests cover disjoint, self, both overlap directions,
+      untouched bytes and the final-byte read after word stores.
+      Deliberate deviations: none.
+
   # --- Fixed fourteen-byte copy helper (util/copy_fourteen_bytes) ---
   - address: 0x082231c0
     ghidra: FUN_082231c0

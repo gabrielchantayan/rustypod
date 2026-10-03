@@ -61,6 +61,7 @@ pub mod context_field;
 pub mod context_finalize_if_present;
 pub mod copy_four_bytes;
 pub mod copy_fourteen_bytes;
+pub mod copy_thirteen_bytes;
 pub mod copy_two_u32_pairs;
 pub mod copy_text_padded_with_spaces;
 pub mod copy_range_if_destination;
