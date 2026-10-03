@@ -207623,3 +207623,40 @@ functions:
       expected structural diff: the same query/zero branch, UI calls,
       virtual +0x11c dispatch, releases, and constant return, with LLVM
       frame setup and literal addressing instead of ADS stack-slot reuse.
+
+  - address: 0x08234f2c
+    ghidra: FUN_08234f2c
+    name: selector_item_split_records_variant_construct
+    size: 172
+    sig: "void *selector_item_split_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_split_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this / returned object
+      param_2/r1: variant
+      FUN_08218b10: selector_item_base_construct
+      DAT_08234fbc: derived vtable 0x089a236c
+    notes: >-
+      Raw words establish 136 code bytes plus nine literal words, true extent
+      0x08234f2c..0x08234fd8; next function starts with push {r4,lr}.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x0819fa38
+      and 0x0819fa50, zero predicated inbound BLs; one plain outbound BL at
+      0x08234f54 to registered ported selector_item_base_construct at
+      0x08218b10, zero predicated outbound BLs. Callers allocate 0x180 bytes
+      and index returned byte +0xb4. Zero full-width variant selects item 6 /
+      descriptor 0x8005; nonzero selects item 7 / descriptor 0x8006. Base
+      receives kind 9, context 44, low variant byte as flag. Install vtable
+      0x089a236c, records 1/2 with selectors 0x801d/0x801e, tags 9/10 and
+      opaque implementation words 0x08ae5444/0x08ae5474; records 11/12 receive
+      selectors 0x8027/0x8028 and tags 19/20, retaining zero implementations.
+      No new seams or behavioral deviations. Return retained r0 despite
+      Ghidra void declaration. Host regression covers full-width variant
+      selection, flag preservation, complete sparse record table, byte-store
+      widths and object bounds. Host suite passes 13784 tests; ARM release
+      build passes. Actual-source smoke executes this port, real selector base
+      and real zero-fill for 0, 1, 0x100 and UINT32_MAX; embedded pair-header
+      boundary is modeled, not allocation. match.py exits 1 with reviewed
+      structural diff: LLVM synthesizes constants, reorders independent stores
+      and enlarges the prologue; field offsets, full-width selection and one
+      base BL remain. Archive relocation confirms R_ARM_CALL to
+      selector_item_base_construct, not apparent recursion in match.py.
