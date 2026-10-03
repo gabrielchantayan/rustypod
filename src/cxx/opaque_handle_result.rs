@@ -52,6 +52,53 @@ pub unsafe extern "C" fn opaque_handle_result_query(
     0
 }
 
+type HandleResultSet = unsafe extern "C" fn(*mut u32, u32, *const u32) -> u32;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_handle_result_set(_: *mut u32, _: u32, _: *const u32) -> u32 {
+    panic!("install opaque-handle result setter host seam")
+}
+
+/// Host replacement for the verified retail setter at 0x082e8534.
+#[cfg(not(target_os = "none"))]
+pub static mut OPAQUE_HANDLE_RESULT_SET: HandleResultSet = missing_handle_result_set;
+
+/// Replaces the second result while preserving the queried first result.
+///
+/// Original `FUN_08262038` @ **0x08262038**, **56 bytes** through the pop
+/// at 0x0826206c; the next function starts at 0x08262070. Verified outbound
+/// calls: one plain BL to 0x082e8248 and one BLEQ to 0x082e8534. Two plain
+/// inbound BLs (0x081939a8, 0x081939d0), zero predicated inbound calls.
+///
+/// Query the wrapper's handle into two stack words. On success, replace the
+/// second word with `value`, reload the handle, and invoke the retail setter
+/// with the preserved first word. Ignore both statuses; query failure skips
+/// the setter. The setter validates mode/value, writes +0x214/+0x220, marks
+/// +0x200 bits 0 and 1, and notifies the handle's backing object.
+///
+/// Deliberate deviations: initialize scratch words rather than copying the
+/// caller's unspecified r2/r3; successful queries overwrite both before use.
+/// Host wrapper pointers use native width; handle fields retain word indices.
+/// The unported setter remains a direct firmware call, not a partial port.
+///
+/// # Safety
+/// `wrapper` must point to a readable handle pointer. The handle must satisfy
+/// the query's layout contract and, on success, the retail setter's contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn opaque_handle_result_replace_value(wrapper: *const *mut u32, value: u32) {
+    let mut first = 0;
+    let mut second = 0;
+    if opaque_handle_result_query(wrapper.read(), &mut first, &mut second) == 0 {
+        second = value;
+        #[cfg(target_os = "none")]
+        let set: HandleResultSet = core::mem::transmute(0x082e8534usize);
+        #[cfg(not(target_os = "none"))]
+        let set = core::ptr::read_volatile(core::ptr::addr_of!(OPAQUE_HANDLE_RESULT_SET));
+        set(wrapper.read(), first, &second);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +148,66 @@ mod tests {
 
         assert_eq!(unsafe { opaque_handle_result_query(handle.as_ptr(), &mut first, &mut second) }, 0);
         assert_eq!((first, second), (0x1234_5678, 0x9abc_def0));
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::*;
+    use parking_lot::Mutex;
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    // Behavioral model of the setter's observable validation/state update.
+    // Notification is firmware-owned and is not executed by host tests.
+    unsafe extern "C" fn set_result(handle: *mut u32, mode: u32, value: *const u32) -> u32 {
+        let status = crate::mode_position_validate::mode_position_validate(mode, value.cast());
+        if status != 0 { return status; }
+        handle.add(FIRST_RESULT_WORD).write(mode);
+        handle.add(0x200 / 4).write(handle.add(0x200 / 4).read() | 3);
+        handle.add(SECOND_RESULT_WORD).write(value.read());
+        0
+    }
+
+    #[test]
+    fn query_rejection_leaves_state_untouched_and_never_sets() {
+        let _lock = LOCK.lock();
+        unsafe { OPAQUE_HANDLE_RESULT_SET = missing_handle_result_set; }
+        let mut handle = [0u32; SECOND_RESULT_WORD + 1];
+        for (magic, count) in [(0, 1), (RHTP_HANDLE_MAGIC, 0), (RHTP_HANDLE_MAGIC, u32::MAX)] {
+            handle[0] = magic;
+            handle[RESULT_COUNT_WORD] = count;
+            let before = handle;
+            let wrapper = handle.as_mut_ptr();
+            unsafe { opaque_handle_result_replace_value(&wrapper, 12); }
+            assert_eq!(handle, before);
+        }
+        let wrapper = core::ptr::null_mut();
+        unsafe { opaque_handle_result_replace_value(&wrapper, 12); }
+    }
+
+    #[test]
+    fn replacement_preserves_mode_and_obeys_setter_boundaries() {
+        let _lock = LOCK.lock();
+        unsafe { OPAQUE_HANDLE_RESULT_SET = set_result; }
+        for mode in [0, 1, 2, 3, u32::MAX] {
+            for value in [i32::MIN, -63, -62, 0, 12, 63, 64, i32::MAX] {
+                let mut handle = [0u32; SECOND_RESULT_WORD + 1];
+                handle[0] = RHTP_HANDLE_MAGIC;
+                handle[RESULT_COUNT_WORD] = 1;
+                handle[FIRST_RESULT_WORD] = mode;
+                handle[SECOND_RESULT_WORD] = 42;
+                handle[0x200 / 4] = 0x80;
+                let mut expected = handle;
+                if mode == 2 && (-62..=63).contains(&value) {
+                    expected[SECOND_RESULT_WORD] = value as u32;
+                    expected[0x200 / 4] = 0x83;
+                }
+                let wrapper = handle.as_mut_ptr();
+                unsafe { opaque_handle_result_replace_value(&wrapper, value as u32); }
+                assert_eq!(handle, expected, "mode {mode}, value {value}");
+            }
+        }
+        unsafe { OPAQUE_HANDLE_RESULT_SET = missing_handle_result_set; }
     }
 }
