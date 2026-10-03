@@ -207407,3 +207407,41 @@ functions:
       direct tail branch; hosts use a Rust forwarding call. No semantic
       deviations. Host coverage checks NULL events and either missing
       localized key, low-byte stores, preserved bytes, and handled verdict.
+
+  - address: 0x0822fae8
+    ghidra: FUN_0822fae8
+    name: show_now_playing_highlight
+    size: 64
+    sig: "u32 show_now_playing_highlight(NowPlayingHighlightController *controller)"
+    module: app/now_playing_highlight_display
+    status: ported
+    vars: {param_1: controller, uStack_c: message}
+    renames:
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      DAT_0822fb24: layout_source_address
+      vtable_plus_0x11c: display
+    notes: >-
+      Raw osos.dec establishes a 64-byte extent from push {r2,r3,r4,lr}
+      at 0x0822fae8 through the source-address literal 0x088ffd30 at
+      0x0822fb24; the next independent function starts with push {r4,lr}
+      at 0x0822fb28. Ghidra's 60 bytes omit the literal. Aligned raw-word
+      BL decoding finds two unconditional outgoing BLs (0x0822fafc to
+      cxx_string_from_cstr at 0x083d8b5c; 0x0822fb18 to cxx_string_release
+      at 0x083d8b04), no predicated outgoing BLs, and one virtual BLX at
+      0x0822fb10 through vtable slot +0x11c. Inbound BLs are NE at
+      0x0822d4b0 and EQ at 0x08230b58, with no unconditional inbound BLs.
+      Callers associate this operation with HandleNowPlayingHilited and
+      controller byte +0xb0 equal to 6. It constructs a temporary COW
+      string from fixed address 0x088ffd30, displays it, releases it,
+      and returns 1 regardless of the virtual method's result. Source bytes
+      are 88 86 e9 90 98 00, preserved without guessing a textual label.
+      Deliberate deviations: omit dead incoming r1/r2/r3 and the constructor's
+      unused allocator-tag stack address. Hosts substitute the verified source
+      bytes and native-width structural vtable fields; target retains the fixed
+      address and slot offset. Host tests cover immediate destruction and
+      retained COW ownership. A standalone real-allocation smoke verifies
+      retained bytes survive the temporary release and final release frees once.
+      ARM match.py reports an expected structural diff: the same constructor,
+      virtual +0x11c dispatch, release, and constant-one result, with LLVM frame
+      setup and a redundant initial NULL store replacing ADS stack-slot reuse.
