@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod image_lookup_cache;
 pub mod app_screen_dispatch_resource_updates;
 pub mod contextual_menu_dispatch;
 pub mod class_1700_clear_when_configured;

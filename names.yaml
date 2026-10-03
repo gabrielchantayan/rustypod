@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08223c88
+    ghidra: FUN_08223c88
+    name: image_lookup_cache_refresh
+    size: 200
+    sig: "u32 image_lookup_cache_refresh(ImageLookupCache *cache, u32 key, u32 kind, u32 context)"
+    module: app/image_lookup_cache
+    status: ported
+    vars:
+      param_1/r4: cache
+      param_2/r6: key
+      param_3/r7: kind
+      param_4: context
+      piVar2/r8: provider
+      iVar1: lookup_result
+    renames:
+      FUN_083d64c4: handle_deref_or_null
+      FUN_08105b28: image_format_for_kind_kind4_override
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      "provider vtable+0x20": lookup (static identity unresolved)
+    notes: >-
+      Raw extent is 0x08223c88..0x08223d50 exclusive: 196 code bytes
+      and the vtable literal 0x089a6044 at 0x08223d4c. Independent A32
+      scan finds inbound plain BLs at 0x082238f8 and 0x08223b74, no
+      predicated inbound BLs; outbound three plain BLs, one BLNE and
+      one virtual BLX. Cache hit compares both key and kind. Miss calls
+      provider slot +0x20 with key, mapped format, path/index/count output
+      pointers and a pointer to the local fourth argument. Nonzero result
+      caches inputs and returns 1. Failure clears key and string, resets
+      index to -1 and count to zero, leaves kind unchanged, returns 0.
+      Deliberate deviations: native-width repr(C) host pointers, expanded
+      NULL string assignment through actual virtual +0xc to avoid the
+      existing unwired clear seam, omitted impossible stack self-alias.
+      Verification: all 13818 host tests pass and ARM release build passes.
+      Isolated executable smoke exercises a hit with an invalid provider.
+      match.py exits 1: 49 original versus 58 Rust entries; frame and
+      clear BLX differ, cache branches, provider slot and outputs agree.
+      Non-test host build is blocked by six existing missing cfg-gated
+      callees in prepare_entry_metadata, shared_payload_select_kind and calendar_schedule.
   - address: 0x08219d64
     ghidra: FUN_08219d64
     name: contextual_menu_dispatch
