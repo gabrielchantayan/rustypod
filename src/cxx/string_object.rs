@@ -688,6 +688,101 @@ pub unsafe extern "C" fn string_object_ensure_capacity(
     (*this).payload
 }
 
+/// Resize the payload, inferring its inclusive C-string size when size is zero.
+///
+/// Original: `FUN_0827606c` @ 0x0827606c, 48 bytes through `bx ip`
+/// at 0x08276098; the next function starts at 0x0827609c. Raw decoding
+/// finds zero plain outbound BLs and one predicated BL (`bleq` to
+/// `strlen_safe_plus1`), plus a virtual tail dispatch. Two inbound BLs
+/// (0x0828fe20, 0x0829a050) are plain; none are predicated.
+///
+/// Zero size measures the current payload including NUL (NULL yields one).
+/// Nonzero size bypasses the payload read. Always dispatches slot +8 as
+/// `(this, size, 1)` and preserves its returned pointer, including NULL.
+/// Deliberate deviations: pointer-width vtable words support host fixtures.
+/// LLVM inlines the inclusive-length helper into the zero-size path (21
+/// instructions versus 12 stock), retaining the slot +8 tail dispatch,
+/// flag 1, NULL handling and return value. Extra frame setup is compiler
+/// codegen rather than a semantic change.
+///
+/// # Safety
+/// `this` and its vtable must be valid, slot 2 must have the allocation
+/// signature below, and a non-NULL payload must be NUL-terminated when
+/// size is zero. The virtual method must accept the requested size.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_resize_payload(
+    this: *mut StringObject,
+    requested_size: usize,
+) -> *mut u8 {
+    let size = if requested_size == 0 {
+        strlen_safe_plus1((*this).payload)
+    } else {
+        requested_size
+    };
+    let resize: unsafe extern "C" fn(*mut StringObject, usize, u32) -> *mut u8 =
+        core::mem::transmute((*(*this).vtable).slots[2]);
+    resize(this, size, 1)
+}
+
+#[cfg(test)]
+mod resize_payload_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Fixture {
+        string: StringObject,
+        storage: [u8; 16],
+    }
+
+    unsafe extern "C" fn resize(
+        this: *mut StringObject, size: usize, preserve: u32,
+    ) -> *mut u8 {
+        let fixture = &mut *this.cast::<Fixture>();
+        if size > fixture.storage.len() { return core::ptr::null_mut(); }
+        if preserve == 0 { fixture.storage.fill(0); }
+        fixture.storage[size - 1] = 0;
+        fixture.string.payload = fixture.storage.as_mut_ptr();
+        fixture.string.payload
+    }
+
+    #[test]
+    fn inferred_size_preserves_bytes_through_first_nul() {
+        let vtable = StringObjectVtable { slots: [0, 0, resize as *const () as usize, 0, 0, 0] };
+        for initial in [*b"abc\0xxxxxxxxxxxx", *b"\0xxxxxxxxxxxxxxx"] {
+            let mut fixture = Fixture {
+                string: StringObject { vtable: &vtable, payload: core::ptr::null_mut() },
+                storage: initial,
+            };
+            fixture.string.payload = fixture.storage.as_mut_ptr();
+            let result = unsafe { string_object_resize_payload(&mut fixture.string, 0) };
+            assert_eq!(result, fixture.storage.as_mut_ptr());
+            assert_eq!(fixture.storage, initial);
+        }
+    }
+
+    #[test]
+    fn null_payload_infers_one_and_explicit_size_does_not_read_payload() {
+        let vtable = StringObjectVtable { slots: [0, 0, resize as *const () as usize, 0, 0, 0] };
+        let mut fixture = Fixture {
+            string: StringObject { vtable: &vtable, payload: core::ptr::null_mut() },
+            storage: [b'x'; 16],
+        };
+        unsafe { string_object_resize_payload(&mut fixture.string, 0); }
+        assert_eq!(fixture.storage[0], 0);
+        assert_eq!(fixture.storage[1], b'x');
+        fixture.storage.fill(b'y');
+        fixture.string.payload = core::ptr::without_provenance_mut(1);
+        let result = unsafe { string_object_resize_payload(&mut fixture.string, 4) };
+        assert_eq!(result, fixture.storage.as_mut_ptr());
+        assert_eq!(&fixture.storage[..5], b"yyy\0y");
+        let payload = fixture.string.payload;
+        assert!(unsafe { string_object_resize_payload(&mut fixture.string, usize::MAX) }.is_null());
+        assert_eq!(fixture.string.payload, payload);
+        assert_eq!(&fixture.storage[..5], b"yyy\0y");
+    }
+}
+
 
 /// string_object_assign_cstr — original: `FUN_0827639c` @ 0x0827639c
 /// (100 bytes).
