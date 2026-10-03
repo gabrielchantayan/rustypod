@@ -207130,3 +207130,35 @@ functions:
       the alias label; comparison against context_scope_drop prints this
       three-versus-one-instruction structural diff and exits 1.
       No device execution performed.
+  - address: 0x0823b4a4
+    ghidra: FUN_0823b4a4
+    name: copy_four_words_property_output
+    size: 36
+    sig: "u32 copy_four_words_property_output(const u32 *source, u32 *destination)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: source
+      param_2/r1: destination
+      r2: copied_word
+      r0/return: final_word
+    notes: >-
+      Raw osos.dec words establish 36 bytes at 0x0823b4a4..0x0823b4c8:
+      four alternating aligned LDR/STR pairs and BX LR, followed by the
+      next independent PUSH {r4,r5,lr}. Whole-image A32 branch decoding
+      verifies two plain inbound BLs at 0x0824d2e4 and 0x08255560, zero
+      predicated BLs, zero inbound B branches and zero outbound calls.
+      Copies four property words from r0 to r1 in ascending order;
+      the last load replaces r0, preserving the fourth copied word as
+      the return value omitted by Ghidra. Overlap observes prior stores.
+      No callee seams or behavioral deviations. Reuses the existing
+      registered copy_four_words module with a dedicated text section.
+      Host reference tests exercise all 81 source/destination placements,
+      including aliasing, overlap in both directions, disjoint ranges,
+      full-width values, final-word return and untouched surrounding words.
+      All 13764 host tests and the ARM release build passed. Standalone
+      actual-source smoke confirmed forward-overlap propagation and return.
+      match.py exit 1 shows all eight LDR/STR instructions preserved;
+      LLVM adds PUSH {fp,lr}, MOV fp,sp and replaces BX LR with POP {fp,pc}.
+      The exported symbol is present separately from identical helpers.
+      No device execution performed.
