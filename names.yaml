@@ -202771,3 +202771,42 @@ functions:
       this port instead of the obsolete empty cleanup. Host tests cover
       sentinel and non-sentinel indices, byte flags, callback ordering,
       cached status and repeated close. No device I/O execution claimed.
+
+  - address: 0x0826cb78
+    ghidra: FUN_0826cb78
+    name: ui_element_set_render_state_byte
+    size: 40
+    sig: "void ui_element_set_render_state_byte(u8 *element, u32 state)"
+    status: ported
+    module: ui/set_render_state_byte
+    renames:
+      param_1: element
+      param_2: state
+      "element+0x94": render_state_byte
+      "element+0x3c": direct_render_context
+      FUN_082a2670: ui_element_resolve_render_context
+      FUN_0828d57c: coordinate_owner_clear_words
+    notes: >-
+      Raw words establish the 40-byte extent ending at 0x0826cba0,
+      an independently referenced BX LR function (BL at 0x0815c074,
+      B at 0x082889d4). Whole-image decoding finds two incoming plain
+      BL calls at 0x08185568 and 0x08185574 and zero predicated BL calls.
+      The body has one plain BL to 0x082a2670, zero predicated BLs,
+      and a tail B to 0x0828d57c, not the inlined body Ghidra presents.
+      Compares the stored byte against the full u32 argument, writes its
+      low byte on difference, then clears and dispatches the resolved
+      context word vector only when the direct context field is non-null.
+      The higher-level meaning of the state byte remains unestablished.
+      Reuses both existing Rust ports; no new firmware seam. Rust replaces
+      the tail branch with a call and uses the existing resolver's widened
+      native pointer field on hosts, aligned u32 context reads on ARM.
+      Tests cover unchanged and changed states, null direct context with
+      an invalid parent, high-bit arguments with equal low bytes, preserved
+      storage and capacity, and untouched neighboring element bytes.
+      Verification: all 13566 host tests pass; ARM release build passes.
+      Host smoke observes clear-before-virtual-dispatch and preserves
+      callback repopulation for a high-bit-only state change. match.py
+      reports 13 Rust instructions versus 10 original instructions:
+      explicit early branches replace predication, the frame is delayed
+      until the resolver call, and the final clear remains a tail branch.
+      No device execution is claimed.

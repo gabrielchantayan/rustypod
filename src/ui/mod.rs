@@ -18,6 +18,7 @@ pub mod coordinate_origin;
 pub mod coordinate_owner_swap_surface;
 pub mod coordinate_owner_initial_dispatch;
 pub mod coordinate_owner_clear_words;
+pub mod set_render_state_byte;
 pub mod display_pending_nibbles;
 pub mod display_pending_selector;
 pub mod tracked_object_register;
