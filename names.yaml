@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826435c
+    ghidra: FUN_0826435c
+    name: coordinate_owner_mirror
+    size: 88
+    sig: "u64 coordinate_owner_mirror(const CoordinateMirrorOwner *owner, const i32 *rectangle, u32 axis)"
+    module: ui/coordinate_owner_mirror
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: rectangle
+      r2: axis
+      local_18: translated_rectangle
+      FUN_080f2b4c: bitmap_mirror
+    notes: >-
+      Raw ARM establishes the 88-byte extent ending at the distinct entry
+      0x082643b4. Whole-image decoding finds two inbound plain BLs at
+      0x08198df8 and 0x08198e14, no predicated inbound BLs, one outbound
+      plain BL at 0x082643ac to 0x080f2b4c, and no predicated outbound BLs.
+      Adds row offset at owner+0x30 to endpoints 0 and 2 and column offset
+      at owner+0x2c to endpoints 1 and 3, wrapping modulo 2^32. Calls the
+      unported bitmap mirror with the descriptor at the backing pointer
+      (owner+0x1c) plus four bytes, translated rectangle, and unchanged r2.
+      The pop restores translated endpoints 0 and 1 into r0/r1; the port
+      preserves these as a packed u64 return. Ghidra omits the axis argument.
+      No existing names entry was found for either address before adding
+      the verified-address seam. Deliberate deviations: host C-layout pointer
+      fields expand; target offsets remain exact. Host seam requires explicit
+      installation. Edge tests cover empty/reversed rectangles and signed
+      wraparound. Host suite passes 13666 tests; ARM release build passes.
+      Executable C-ABI smoke verifies translated coordinates, full-width axis,
+      backing descriptor mutation, packed return, and unchanged input.
+      match.py exits 1 with a reviewed structural diff: LLVM uses a frame
+      pointer, hoists loads, retains return words in r4/r5, and emits BLX
+      through a literal containing 0x080f2b4c rather than a direct BL.
+
   - address: 0x08266b64
     ghidra: FUN_08266b64
     name: selector_layout_size
