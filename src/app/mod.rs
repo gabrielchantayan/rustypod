@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod plist_file_load;
 pub mod comparison_context_destroy;
 pub use comparison_context_destroy::*;
 pub mod string_pair_vector_last;
