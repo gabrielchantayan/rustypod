@@ -206699,3 +206699,47 @@ functions:
       jump table with indirect tail branch instead of three framed BLs.
       Archive relocations verify ordered references to all three veneers.
       No device execution performed.
+
+  - address: 0x082551b4
+    ghidra: FUN_082551b4
+    name: video_engine_set_output_rect
+    size: 188
+    sig: "void video_engine_set_output_rect(u32 *engine, i32 x, i32 y, i32 width, i32 height)"
+    module: util/video_engine_output_rect
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: x
+      param_3/r2: y
+      param_4/r3: width
+      param_5/stack: height
+      local_30: fixed_point_vector
+      FUN_08252e24: firmware_refresh_frame_rectangle
+    notes: >-
+      Raw extent 0x082551b4..0x08255270 is 188 bytes: 184 bytes of
+      instructions and the 0x501 error literal at 0x0825526c; the next
+      function begins with push at 0x08255270. Whole-image aligned A32
+      decoding finds one plain inbound BL at 0x08251e4c and one BLNE at
+      0x082d249c. Body has four plain BLs, zero predicated BLs: error
+      latch, two three-word vector copies, and frame-rectangle refresh.
+      Negative width or height latches 0x501 without touching geometry.
+      Otherwise writes x/y/width/height at +0x108, computes center and
+      half-size Q16.16 vectors at +0x134/+0x140 with integer halving
+      before conversion and wrapping arithmetic, preserving +0x13c and
+      +0x148 third components. Existing Rust latch_first_error and
+      copy_fixed16_vec3 ports are reused. No names entry exists for
+      0x08252e24; raw code and CodeGraph show that it reads the frame
+      pointer at +0xae0, copies or clips its rectangle into +0x9b0,
+      and updates the comparison flag at +0x9ac. It remains a literal
+      firmware call, not an additional port. Stack rectangle staging
+      is eliminated; no target behavioral deviations. Host valid calls
+      use a private injected refresh in tests; the public host path
+      explicitly panics if firmware refresh would be needed.
+      All 13744 host tests pass, including negative dimensions,
+      first-error preservation, zero/odd dimensions, signed origins,
+      fixed-point overflow and third-component preservation. Public
+      entry smoke verifies rejection with only one writable error word.
+      ARM release build passes. match.py exits 1 with 48 Rust versus
+      46 stock instructions: equivalent sign guard, rectangle stores,
+      fixed-point shifts and two vector calls; refresh uses BLX and
+      invalid input tail-calls the latch. No device execution performed.
