@@ -40,7 +40,7 @@ pub static mut MUSIC_MENU_PLAYLIST_SELECTION_OPS: SelectionOps = SelectionOps {
 };
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn controller_cached_query(
+pub(crate) unsafe extern "C" fn controller_cached_query(
     controller: *mut u8, first: u32, second: u32, reset: u32,
     result_kind: u32, filter: u32, option: u32,
 ) -> u32 {
@@ -49,7 +49,7 @@ unsafe extern "C" fn controller_cached_query(
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn controller_cached_query(
+pub(crate) unsafe extern "C" fn controller_cached_query(
     _: *mut u8, _: u32, _: u32, _: u32, _: u32, _: u32, _: u32,
 ) -> u32 {
     panic!("retail controller cache requires host dependency injection")
