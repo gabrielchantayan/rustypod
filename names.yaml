@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08261c28
+    ghidra: FUN_08261c28
+    name: destroy_deque_context_and_mutex
+    size: 32
+    sig: "void *destroy_deque_context_and_mutex(void *this)"
+    module: cxx/deque_context_mutex_destroy
+    status: ported
+    renames:
+      param_1/r0: this (adjusted through callee returns)
+      FUN_083df2d4: clear four-byte-element deque (verified retail seam)
+      FUN_08262944: destroy_opaque_context
+      FUN_08261e54: cxx_mutex_destroy
+    notes: >-
+      Raw A32 words establish the 32-byte extent 0x08261c28..0x08261c48;
+      the next function starts with push {r3,r4,r5,lr}. Whole-image branch
+      decoding finds two inbound plain BLs at 0x08261cbc and 0x08261cc4,
+      zero predicated BLs and no inbound B. Two outbound plain BLs target
+      0x083df2d4 and 0x08262944; the final B targets 0x08261e54, not the
+      pthread destroy incorrectly implied by Ghidra C. Clear deque at
+      this+0x38, subtract 0x1c from its result, destroy opaque context,
+      subtract 0x1c from that result, destroy mutex and return this.
+      The unported deque clear is retained at its verified firmware address;
+      hosts require an injected implementation. Existing context and mutex
+      ports are reused. Host tests cover partial teardown with busy/invalid
+      mutexes and return-pointer chaining. ARM structural diff reviewed.
   - address: 0x08261d30
     ghidra: FUN_08261d30
     name: cxx_mutexattr_destroy
