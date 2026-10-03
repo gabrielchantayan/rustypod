@@ -202706,3 +202706,36 @@ functions:
       same branch, +0x40 buffer call, +0x18 index reload, +0x2c virtual slot,
       OR and unlock epilogue. LLVM adds a frame and literal-pool BLX to
       the fixed buffer helper, replacing the stock direct BL.
+
+  - address: 0x08278894
+    ghidra: FUN_08278894
+    name: platform_file_close
+    size: 164
+    sig: "u32 platform_file_close(u8 *file)"
+    status: ported
+    module: cxx/platform_file_close
+    renames:
+      param_1: file
+      local_10: owner_lock
+      uVar3: close_status
+      FUN_0818a144: counted_mutex_guard_acquire
+      FUN_082780cc: flush_buffer_collection
+      FUN_082a548c: file_has_directory_entry
+      FUN_0818a0bc: facade_for_selector
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM establishes 164 bytes through 0x08278934, with next function
+      at 0x08278938. Whole-image word decoding finds two unconditional BL
+      callers at 0x081e1e98 and 0x08278f74, zero predicated BLs.
+      Acquires the interface counted mutex and processes the +0x40 buffer
+      collection even when already closed; ignores its result. For index -1
+      returns cached +0x1c status. Otherwise selects facade 0 and calls slot
+      +0x18 with the +0x18 index; preserves that return across an optional
+      selector-1 slot +0x30 call when byte +0x14 is zero. Resets entry/status
+      to -1/8 and unlocks on both paths. Ghidra r1/r2/r3 arguments are
+      phantom. Reuses existing verified 0x082780cc firmware boundary;
+      no identity is assigned to virtual callbacks. Native-width vtable
+      indexing preserves target slot layout. Destructor default now calls
+      this port instead of the obsolete empty cleanup. Host tests cover
+      sentinel and non-sentinel indices, byte flags, callback ordering,
+      cached status and repeated close. No device I/O execution claimed.

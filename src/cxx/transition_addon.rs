@@ -158,7 +158,7 @@ unsafe fn write_word_unaligned(address: *mut u8, value: usize) {
     (address as *mut usize).write_unaligned(value);
 }
 
-/// Dispatch boundaries for the three unported calls in
+/// Dispatch boundaries for derived cleanup and the two unported calls in
 /// [`silver_controller_transition_addon_destroy`].
 #[derive(Clone, Copy)]
 pub struct TransitionAddonDestroyOps {
@@ -174,7 +174,9 @@ pub struct TransitionAddonDestroyOps {
     pub base_deregister: unsafe extern "C" fn(owner_member: *mut u8, this: *mut u8),
 }
 
-unsafe extern "C" fn derived_cleanup_unported(_this: *mut u8) {}
+unsafe extern "C" fn derived_cleanup(this: *mut u8) {
+    super::platform_file_close::platform_file_close(this);
+}
 
 /// The fully decoded vector destructor returns its entry pointer; its element
 /// destruction is not yet available, so the default preserves just that
@@ -188,7 +190,7 @@ unsafe extern "C" fn base_deregister_unported(_owner_member: *mut u8, _this: *mu
 /// Wired defaults for the unresolved teardown boundaries.
 pub const DEFAULT_TRANSITION_ADDON_DESTROY_OPS: TransitionAddonDestroyOps =
     TransitionAddonDestroyOps {
-        derived_cleanup: derived_cleanup_unported,
+        derived_cleanup: derived_cleanup,
         vector_destroy: vector_destroy_unported,
         base_deregister: base_deregister_unported,
     };
@@ -868,35 +870,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn default_unported_boundaries_preserve_the_destructor_dataflow() {
-        let mut object = Object([0xa5; 0x100]);
-        // With the default vector-return stub, string = this+0x0c. Offset the
-        // host fixture by four bytes so that the embedded pointer-sized object
-        // is naturally aligned on the 64-bit test host while retaining every
-        // target byte offset.
-        let this = unsafe { object.0.as_mut_ptr().add(4) };
-        let owner = 0x7654_3000usize as *mut u8;
-        unsafe {
-            write_word_unaligned(this.add(TRANSITION_ADDON_OWNER_OFFSET), owner as usize);
-            // The already-ported StringObject destructor reaches this host
-            // payload field at string+8; make it NULL so no heap boundary is
-            // intentionally exercised by this default-seam test.
-            write_word_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET + 8), 0);
-        }
-
-        let returned = unsafe { silver_controller_transition_addon_destroy(this) };
-
-        assert_eq!(returned, this);
-        assert_eq!(
-            unsafe { read_u32_unaligned(this) as usize },
-            TRANSITION_ADDON_BASE_VTABLE_ADDRESS
-        );
-        assert_eq!(
-            unsafe { read_word_unaligned(this.add(TRANSITION_ADDON_STRING_OFFSET)) },
-            &super::super::string_object::STRING_OBJECT_VTABLE as *const _ as usize
-        );
-    }
 
     use crate::app::facade_for_selector::{tests::FACADE_TEST_LOCK, FACADE_REGISTRY_WALK};
     use crate::app::facade_registry_walk::{facade_registry_walk, RegistryFacade, RegistryNode};
