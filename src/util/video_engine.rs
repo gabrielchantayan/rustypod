@@ -4005,3 +4005,46 @@ mod default_frame_tests {
         }
     }
 }
+
+/// video_engine_type_continuation_slot — retailOS `FUN_0825e234` @
+/// `0x0825e234` (52 bytes, ending before the independent function at
+/// `0x0825e268`). Raw-image decoding finds two inbound plain BL sites,
+/// `0x082535ac` and `0x08253654`, no predicated inbound BLs, and no outbound
+/// BLs. Ghidra incorrectly attributes these calls to larger public wrappers.
+///
+/// Maps continuation selectors 0x8a0a, 0x8a0b, and 0x8a0c to slots 3, 4,
+/// and 5 respectively; every other 32-bit selector returns zero. The video
+/// engine dispatchers use zero as the unsupported-selector sentinel.
+/// Deliberate deviation: Rust expresses the predicated equality checks as
+/// a match; selector width and results are unchanged.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn video_engine_type_continuation_slot(type_selector: u32) -> u32 {
+    match type_selector {
+        0x8a0a => 3,
+        0x8a0b => 4,
+        0x8a0c => 5,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod type_continuation_slot_tests {
+    use super::video_engine_type_continuation_slot;
+
+    #[test]
+    fn maps_only_the_three_complete_selector_words() {
+        for selector in 0..=u16::MAX as u32 {
+            let expected = if (0x8a0a..=0x8a0c).contains(&selector) {
+                selector - 0x8a07
+            } else {
+                0
+            };
+            assert_eq!(video_engine_type_continuation_slot(selector), expected);
+        }
+        for selector in [0x0001_8a0a, 0xffff_8a0b, 0x8000_8a0c,
+                         0x8000_0000, u32::MAX] {
+            assert_eq!(video_engine_type_continuation_slot(selector), 0);
+        }
+    }
+}

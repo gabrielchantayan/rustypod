@@ -204534,3 +204534,35 @@ functions:
       dangling input, and NULL. ARM release build passes. match.py finds
       one stock versus three Rust instructions: LLVM adds push {fp,lr},
       mov fp,sp, and pop {fp,pc}; r0 and object memory remain untouched.
+
+  - address: 0x0825e234
+    ghidra: FUN_0825e234
+    name: video_engine_type_continuation_slot
+    size: 52
+    sig: "u32 video_engine_type_continuation_slot(u32 type_selector)"
+    module: util/video_engine
+    status: ported
+    renames:
+      param_1/r0: type_selector
+      r0: continuation_slot
+      r12: selector_difference
+    notes: >-
+      Raw A32 words establish the complete 52-byte leaf at
+      0x0825e234..0x0825e268 exclusive, ending in bx lr at 0x0825e264;
+      the next independently entered function starts with cmp r1,#0 at
+      0x0825e268. Complete aligned raw-image BL decoding finds two plain
+      inbound calls at 0x082535ac and 0x08253654, zero predicated inbound
+      calls, and zero outbound calls. Ghidra incorrectly includes the
+      actual calling dispatchers in public wrapper extents. Selectors
+      0x8a0a, 0x8a0b, and 0x8a0c map to continuation slots 3, 4, and 5;
+      all other full-width words return zero, the dispatchers' unsupported
+      selector sentinel. No callee seams or behavioral deviations. Rust
+      uses a match instead of predicated equality checks. Host tests cover
+      every 16-bit selector and high-bit aliases; all 13641 host tests pass.
+      Standalone actual-source smoke verifies recognized selectors,
+      neighboring invalid selectors, and a high-bit alias. ARM release
+      build passes. match.py exits 1 with a structural diff: 13 stock
+      instructions versus nine Rust instructions. LLVM subtracts 0x8a0a,
+      performs an unsigned three-element range check, and conditionally
+      computes selector minus 0x8a07; out-of-range words still return zero.
+      Frame setup replaces the original predicated early returns.
