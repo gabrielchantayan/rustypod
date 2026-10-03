@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822e718
+    ghidra: FUN_0822e718
+    name: show_photo_highlight
+    size: 144
+    sig: "u32 show_photo_highlight(VideoHighlightController *controller)"
+    module: app/photo_highlight_display
+    status: ported
+    vars:
+      param_1/r4: controller
+      controller+0xb0: highlight
+      stack+4: temporary_message
+      r0_after_query: photo_query_result
+    renames:
+      FUN_081cbbb0: photo_browse_slideshow_get
+      FUN_081cc7bc: photo_highlight_query_result (verified unported firmware seam)
+      FUN_081b803c: singleton_class_7f80
+      FUN_081b6dd8: artwork_slot_activate (existing verified firmware seam)
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 establishes 144 bytes through the next push at 0x0822e7a8:
+      108 instruction bytes ending at pop 0x0822e780 and 36 padded string
+      bytes. Six plain outbound BLs, zero predicated outbound BLs, one
+      virtual BLX. Full-image decoding finds inbound BLNE at 0x0822d488
+      and plain BL at 0x0823092c. Sets highlight to 5 before singleton/query;
+      query receives argument zero. Zero displays EmptyPhotosHilited;
+      any nonzero result activates artwork slot 3 and displays PhotosHilited.
+      Releases temporary COW string and returns 1. Deliberately omits unused
+      input registers and allocator-tag residue, reuses native-width host
+      controller layout with checked target offsets. Query identity is not
+      guessed; it remains a raw-address seam. Existing singleton replacement
+      still requires its real constructor before this is hook-ready.
+      Host suite passes 13798 tests; ARM release build passes.
   - address: 0x0822e83c
     ghidra: FUN_0822e83c
     name: show_video_highlight
