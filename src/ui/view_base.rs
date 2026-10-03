@@ -532,6 +532,39 @@ pub unsafe extern "C" fn view_base_refresh_key_resource(view: *mut ViewBase) {
     unsafe { view_base_dispatch_word_44_changed(view) };
 }
 
+/// Sets view flag bit 3 — `FUN_0826d80c` @ `0x0826d80c`, 40 bytes.
+///
+/// Raw extent ends before the independent setter at `0x0826d834`.
+/// Whole-image ARM decoding verifies two incoming plain BLs
+/// (`0x08157eac`, `0x08157ef4`), zero predicated BLs, tail branches,
+/// or data-word references. The body contains no BL.
+///
+/// Compare the current bit, normalized to 0/1, with the full `enabled`
+/// word. If different, clear the bit for zero or set it for any nonzero
+/// value, preserving all other flags. In particular, values above one
+/// still store when the bit is already set. The callers propagate this
+/// flag through container children; its higher-level meaning is unresolved.
+///
+/// Deviations: none in memory behavior. Volatile accesses retain the
+/// original conditional store, and the returned pointer preserves r0.
+///
+/// # Safety
+///
+/// `view` must point to a live, aligned, writable [`ViewBase`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn view_base_set_flag_8(
+    view: *mut ViewBase,
+    enabled: u32,
+) -> *mut ViewBase {
+    let flags = core::ptr::addr_of!((*view).flags).read_volatile();
+    if (flags & 8) >> 3 != enabled {
+        let updated = if enabled == 0 { flags & !8 } else { flags | 8 };
+        core::ptr::addr_of_mut!((*view).flags).write_volatile(updated);
+    }
+    view
+}
+
 /// view_base_set_word_44 — original: `FUN_0826d834` @ `0x0826d834`
 /// (24 bytes, `0x0826d834..0x0826d84c`; the distinct sibling
 /// `FUN_0826d850` starts with `push {r4,r5,r6,lr}` at `0x0826d850`).
@@ -806,6 +839,27 @@ mod tests {
     use core::ptr;
     use parking_lot::MutexGuard;
     use std::vec::Vec;
+
+    #[test]
+    fn flag_8_transitions_preserve_other_bits_and_neighbor_fields() {
+        let mut view: ViewBase = unsafe { core::mem::zeroed() };
+        view.word_44 = 0x1234_5678;
+        view.word_4c = 0x8765_4321;
+        for initial in [0, 8, 0xffff_fff7, u32::MAX, 0xa5a5_5a5a] {
+            for enabled in [0, 1, 2, 8, 0x8000_0000, u32::MAX] {
+                view.flags = initial;
+                let expected = (initial & !8) | if enabled == 0 { 0 } else { 8 };
+                let address = &mut view as *mut ViewBase;
+                assert_eq!(unsafe { view_base_set_flag_8(address, enabled) }, address);
+                assert_eq!(view.flags, expected);
+                assert_eq!(view.word_44, 0x1234_5678);
+                assert_eq!(view.word_4c, 0x8765_4321);
+                // Apply twice to cover unchanged normalized and noncanonical inputs.
+                unsafe { view_base_set_flag_8(address, enabled) };
+                assert_eq!(view.flags, expected);
+            }
+        }
+    }
 
     const SLAB_LEN: usize = 0x1000;
     const VIEW_OFFSET: usize = 0x000;
