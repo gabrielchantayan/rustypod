@@ -207320,3 +207320,29 @@ functions:
       with the leaf vtable store, and eliminates return-pointer subtraction
       because the ported scope initializer always returns its input.
       No device execution performed.
+
+  - address: 0x08239888
+    ghidra: FUN_08239888
+    name: view_event_apply_localized_flags_thunk
+    size: 4
+    sig: "u32 view_event_apply_localized_flags_thunk(u8 *this, void *event)"
+    module: app/view_event
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: event
+      FUN_0826087c: view_event_apply_localized_flags
+    notes: >-
+      Raw word ea009bfb is b 0x0826087c, whose raw word eafee287
+      branches to the already-ported localized-flag body at 0x082192a0.
+      The next real function at 0x0823988c is ldrb r0,[r0,#0xe4]
+      followed by bx lr, establishing the assigned veneer's four-byte
+      extent. Whole-image aligned ARM BL decoding finds two plain BL
+      callers at 0x082373ec and 0x083b32a8 and zero predicated BL callers.
+      Both callers pass the view in r0 and event in r1; Ghidra's apparent
+      four-argument body belongs to the reached implementation, not this
+      entry. Reuses the existing localized-flag Rust port without new seams.
+      ARM uses the existing global_asm veneer convention for an exact
+      direct tail branch; hosts use a Rust forwarding call. No semantic
+      deviations. Host coverage checks NULL events and either missing
+      localized key, low-byte stores, preserved bytes, and handled verdict.

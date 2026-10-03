@@ -365,6 +365,53 @@ pub unsafe extern "C" fn view_event_apply_localized_flags(
     unsafe { view_event_apply_mapped_staged_flags(this) }
 }
 
+/// view_event_apply_localized_flags_thunk — original: `FUN_08239888` @
+/// **0x08239888** (4 bytes: `ea009bfb`, `b 0x0826087c`).
+///
+/// The next function starts at 0x0823988c with `ldrb r0,[r0,#0xe4]`,
+/// followed by `bx lr`; it is not part of this veneer. Decoding all aligned
+/// ARM BL words in osos.dec finds two plain BL callers (0x082373ec and
+/// 0x083b32a8) and zero predicated BL callers.
+///
+/// Forwards the view and event unchanged to [`view_event_apply_localized_flags`]:
+/// a non-NULL event updates the two present localized flags, then mapped staged
+/// flags are applied and the handled verdict is returned. The target itself
+/// branches to 0x082192a0; Ghidra incorrectly attributes that body here.
+/// Deliberate deviations: none. ARM emits the original direct tail branch;
+/// hosts use the equivalent forwarding call for behavioral coverage.
+///
+/// # Safety
+///
+/// The pointer contracts are identical to [`view_event_apply_localized_flags`].
+#[cfg(not(target_arch = "arm"))]
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_event_apply_localized_flags_thunk(
+    this: *mut u8,
+    event: *mut u8,
+) -> u32 {
+    unsafe { view_event_apply_localized_flags(this, event) }
+}
+
+#[cfg(target_arch = "arm")]
+unsafe extern "C" {
+    pub fn view_event_apply_localized_flags_thunk(this: *mut u8, event: *mut u8) -> u32;
+}
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(
+    r#"
+    .syntax unified
+    .text
+    .p2align 2
+    .globl view_event_apply_localized_flags_thunk
+    .type view_event_apply_localized_flags_thunk, %function
+view_event_apply_localized_flags_thunk:
+    b       view_event_apply_localized_flags
+    .size view_event_apply_localized_flags_thunk, . - view_event_apply_localized_flags_thunk
+"#
+);
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -760,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn localized_flags_only_parse_present_keys_then_apply_mapped_flags() {
+    fn localized_flags_thunk_only_parses_present_keys_then_applies_mapped_flags() {
         let _view_lock = VIEW_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let _string_table_lock = STRING_TABLE_OPS_TEST_LOCK
             .lock()
@@ -776,7 +823,7 @@ mod tests {
             (*addr_of_mut!(CALLS)).clear();
             (*addr_of_mut!(SEEN)).clear();
             assert_eq!(
-                view_event_apply_localized_flags(view.0.as_mut_ptr(), 1usize as *mut u8),
+                view_event_apply_localized_flags_thunk(view.0.as_mut_ptr(), 1usize as *mut u8),
                 EVENT_HANDLED
             );
             assert_eq!(view.0[VIEW_LOCALIZED_FLAG_A], 0x34, "low byte of parsed value");
@@ -792,14 +839,43 @@ mod tests {
     }
 
     #[test]
-    fn localized_flags_skip_configuration_for_a_null_event() {
+    fn localized_flags_thunk_preserves_missing_first_flag_and_updates_second() {
+        let _view_lock = VIEW_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _string_table_lock = STRING_TABLE_OPS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let Some(table) = localized_table_fixture() else {
+            assert!(note_missing_u32_fixture("app::view_event::localized_flags_thunk"));
+            return;
+        };
+        let _restore = unsafe { install_localized_seams(table) };
+        let mut view = LocalizedView([0xa5; VIEW_LOCALIZED_FLAG_B + 1]);
+        unsafe {
+            *addr_of_mut!(LOCALIZED_FIND_RESULTS) = [
+                table.add(LOCALIZED_HEADER_CURRENT) as usize as u32,
+                table.add(LOCALIZED_HEADER_FALLBACK) as usize as u32,
+                table.add(LOCALIZED_NODE) as usize as u32,
+            ];
+            assert_eq!(
+                view_event_apply_localized_flags_thunk(view.0.as_mut_ptr(), 1usize as *mut u8),
+                EVENT_HANDLED
+            );
+            assert_eq!(view.0[VIEW_LOCALIZED_FLAG_A], 0xa5);
+            assert_eq!(view.0[VIEW_LOCALIZED_FLAG_B], 0x34);
+            assert!(view.0[..VIEW_LOCALIZED_FLAG_A].iter().all(|byte| *byte == 0xa5));
+            assert_eq!(*addr_of!(LOCALIZED_PARSE_CALLS), 1);
+        }
+    }
+
+    #[test]
+    fn localized_flags_thunk_skips_configuration_for_a_null_event() {
         let guard = mock(0);
         let mut view = LocalizedView([0; VIEW_LOCALIZED_FLAG_B + 1]);
         view.0[VIEW_LOCALIZED_FLAG_A] = 0x5a;
         view.0[VIEW_LOCALIZED_FLAG_B] = 0xa5;
         unsafe {
             assert_eq!(
-                view_event_apply_localized_flags(view.0.as_mut_ptr(), core::ptr::null_mut()),
+                view_event_apply_localized_flags_thunk(view.0.as_mut_ptr(), core::ptr::null_mut()),
                 EVENT_HANDLED
             );
             assert_eq!(view.0[VIEW_LOCALIZED_FLAG_A], 0x5a);
