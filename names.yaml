@@ -207746,3 +207746,42 @@ functions:
       dereference, and tail-dispatches the retained helper through BX.
       Archive relocations verify demo_mode_instance, demo_mode_keyed_object
       and both object_cast_to_class calls; child offset and class ids agree.
+
+  - address: 0x0823332c
+    ghidra: FUN_0823332c
+    name: xml_write_tag
+    size: 128
+    sig: "u32 xml_write_tag(XmlTagWriter *writer, u32 mode)"
+    module: util/xml_write_tag
+    status: ported
+    vars:
+      param_1: writer
+      param_2: mode
+      iVar1: write_result
+      puVar2: prefix
+      FUN_0820c1b4: output vtable slot +0x08 dispatch
+      FUN_08275e20: strlen_safe_plus1
+      FUN_082a50b0: string_object_c_str
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec verifies 128 code bytes at 0x0823332c..0x082333ab,
+      followed by 12 bytes of literals ("</", "<", ">"); the next real
+      function starts at 0x082333b8. Exactly two inbound plain BLs at
+      0x08233280 and 0x082332a4, zero predicated. Outbound: four plain BLs,
+      one BLNE to heap_panic, one BNE tail dispatch. Emits an opening tag
+      for nonzero mode or closing tag for zero. Every write reloads output
+      at +8 and its vtable slot +8; verified veneer 0x0820c1b4 simply
+      forwards receiver, bytes and length. Name StringObject pointer is
+      +16; raw payload at +4 is measured with strlen_safe_plus1 minus one,
+      then string_object_c_str supplies the bytes. Zero results stop
+      immediately; otherwise the final delimiter write result passes through.
+      After the name write, a nonzero (mode & result) and pending word at
+      +20 invoke heap_panic. This is bitwise, not boolean conjunction.
+      Callers separately set flags at +12 after success. Deviations:
+      native repr(C) pointers widen on host; literals use Rust statics;
+      virtual dispatch replaces the veneer without inventing a seam.
+      Host edge tests and full suite pass; ARM release builds. Native
+      actual-source smoke prints <track></track>. match.py exits 1:
+      LLVM expands virtual BLs into BLX, inlines the guarded length loop,
+      adds a frame, and retains final virtual tail BX. Target field loads
+      and the bitwise conditional fatal path agree with the original.
