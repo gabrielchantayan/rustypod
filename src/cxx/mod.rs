@@ -531,6 +531,7 @@ pub mod tagged_allocation_release;
 pub mod tagged_context_dispatch;
 pub mod tagged_context_dequeue;
 pub mod tagged_context_enqueue;
+pub mod dispatch_item_submit;
 pub mod parse_result_code;
 pub mod pair_header;
 pub mod release;
