@@ -89,6 +89,58 @@ const _: [u8; 0x44] = [0; core::mem::offset_of!(SharedInterfaceTreeMutex, mode)]
 /// The root-context binding reuses the complete shared-interface base object.
 pub type RootContextF9cBound = SharedInterfaceTreeMutex;
 
+/// query_tree_mutex_construct — retailOS `FUN_082597c0` @ `0x082597c0`.
+///
+/// True extent: 136 bytes (`0x082597c0..0x08259848`), comprising 128 code
+/// bytes and literals at `0x08259840/44`; the next function starts with
+/// `cmp r0,#0`. Raw-word decoding verifies two outgoing unconditional BLs
+/// (node allocation and mutex construction), zero predicated BLs, and two
+/// incoming unconditional BLs at `0x0813e484/0x0813e588`.
+///
+/// Installs the shared-interface base vtable, clears the embedded word-key
+/// set, allocates its circular empty-tree sentinel, initializes the mutex,
+/// writes status byte +0x3c = 2 and final vtable 0x089a7920, and returns this.
+/// Bytes +0x1e/+0x1f, +0x3d..+0x3f and the derived fields from +0x40 are
+/// untouched. Query constructors at 0x0813e474/0x0813e57c extend this base.
+///
+/// Deliberate deviations: reuse the host-widened repr(C) object and tree
+/// layouts; target offsets are asserted above. Dead mutex scope seeds are
+/// zeroed, as in the sibling constructor. Ghidra's void return is corrected:
+/// raw code subtracts 0x20 from the mutex constructor return into r0.
+///
+/// # Safety
+/// `this` must point to aligned writable storage for SharedInterfaceTreeMutex;
+/// the runtime heap and mutex initialization must be available.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_tree_mutex_construct(
+    this: *mut SharedInterfaceTreeMutex,
+) -> *mut SharedInterfaceTreeMutex {
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*this).vtable), SHARED_INTERFACE_BASE_VTABLE,
+    );
+    let tree = core::ptr::addr_of_mut!((*this).tree);
+    let pool = tree.cast::<WordKeySetNodePool>();
+    (*pool).chunk_head = core::ptr::null_mut();
+    (*tree).header = core::ptr::null_mut();
+    (*tree).node_count = 0;
+    (*tree).multi_insert = 0;
+    (*tree).comparator = 0;
+    (*pool).bump_end = core::ptr::null_mut();
+    (*pool).bump = core::ptr::null_mut();
+    (*pool).free_list = core::ptr::null_mut();
+    let header = word_key_set_allocate_node(tree);
+    (*tree).header = header;
+    (*header).parent = core::ptr::null_mut();
+    (*header).left = header;
+    (*header).right = header;
+    let mutex = core::ptr::addr_of_mut!((*this).mutex).cast::<u8>();
+    cxx_mutex_construct(mutex, 0, 0, 0);
+    mutex.add(MUTEX_STATUS_OFFSET).write(2);
+    core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).vtable), 0x089a_7920);
+    this
+}
+
 /// shared_interface_tree_mutex_construct — original: `FUN_0813e9ec` @
 /// `0x0813e9ec` (184 bytes including its three literal-pool words; ten
 /// verified direct `bl` callers, all unconditional).
@@ -538,6 +590,46 @@ mod tests {
         object.mode = mode;
         object.trailing = trailing;
         object
+    }
+
+    #[test]
+    fn query_base_resets_dirty_tree_and_preserves_derived_storage() {
+        let _heap = tree_heap();
+        for fill in [0x55, 0xff] {
+            let mut base = object(0xdead_beef, fill, [fill; 3]);
+            unsafe {
+                // Poison the entire tree, including host padding: construction
+                // must clear stale pool links before invoking the real allocator.
+                ptr::write_bytes(ptr::addr_of_mut!(base.tree).cast::<u8>(), fill,
+                    core::mem::size_of::<WordKeySet>());
+                base.mutex.fill(fill);
+                let result = query_tree_mutex_construct(ptr::addr_of_mut!(base));
+                assert_eq!(result, ptr::addr_of_mut!(base));
+                assert_eq!(base.vtable, 0x089a_7920);
+                assert_eq!(base.tree.node_count, 0);
+                assert_eq!(base.tree.multi_insert, 0);
+                assert_eq!(base.tree.comparator, 0);
+                let header = base.tree.header;
+                assert!(!header.is_null());
+                assert_eq!((*header).color, 0);
+                assert!((*header).parent.is_null());
+                assert_eq!((*header).left, header);
+                assert_eq!((*header).right, header);
+                let pool = &*ptr::addr_of!(base.tree).cast::<WordKeySetNodePool>();
+                assert!(pool.free_list.is_null());
+                assert_eq!((*pool.chunk_head).capacity, 32);
+                assert_eq!(pool.bump, (*pool.chunk_head).arena.add(
+                    core::mem::size_of::<crate::cxx::word_key_set::WordKeySetNode>()));
+                assert_eq!(base.mutex[MUTEX_STATUS_OFFSET], 2);
+                assert_eq!(&base.mutex[0x1d..], &[fill; 3]);
+                assert_eq!(base.kind_resource, 0xdead_beef);
+                assert_eq!(base.mode, fill);
+                assert_eq!(base.trailing, [fill; 3]);
+                let padding = ptr::addr_of!(base.tree.comparator).cast::<u8>().add(1);
+                assert_eq!(padding.read(), fill);
+                assert_eq!(padding.add(1).read(), fill);
+            }
+        }
     }
 
     #[test]

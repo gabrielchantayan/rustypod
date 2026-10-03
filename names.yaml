@@ -205380,3 +205380,42 @@ functions:
       zero/one/two-chunk ordered release. ARM release build passes. A temporary
       public-API smoke exercised the body and both veneers on null headers.
       Device execution and the retail range-erase body were not exercised.
+
+  - address: 0x082597c0
+    ghidra: FUN_082597c0
+    name: query_tree_mutex_construct
+    size: 136
+    sig: "SharedInterfaceTreeMutex *query_tree_mutex_construct(SharedInterfaceTreeMutex *this)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r6: this
+      r4: tree
+      iVar1: header_or_mutex
+      FUN_083c00dc: word_key_set_allocate_node
+      FUN_08261e28: cxx_mutex_construct
+      DAT_08259840: SHARED_INTERFACE_BASE_VTABLE
+      DAT_08259844: query tree/mutex vtable (0x089a7920)
+    notes: >-
+      Raw extent 0x082597c0..0x08259848 is 136 bytes: 128 code bytes and
+      two literal words at 0x08259840/44. Next function begins cmp r0,#0.
+      Independently decoded two plain outgoing BLs at 0x08259804/24,
+      zero predicated outgoing BLs, and two plain inbound BLs at
+      0x0813e484/0x0813e588, zero predicated inbound BLs. These query
+      constructors extend the tree/mutex base. Install vtable 0x089a75c8,
+      clear the word-key set, allocate and circularly link its sentinel,
+      initialize mutex at +0x20, set byte +0x3c to two and install final
+      vtable 0x089a7920. Return this: Ghidra's void return is incorrect;
+      sub r0,r0,#0x20 consumes the mutex constructor's returned pointer.
+      Reuses both ported callees and the existing repr(C) object layout.
+      Deliberate deviations: pointer fields widen on host; dead mutex scope
+      seeds become zero. LLVM combines byte zeroes into strh, removes the
+      stack zero temporary and redundant header reloads, derives the final
+      vtable by adding 0x358, and schedules its store before the status byte.
+      match.py reports 32 stock instructions versus 29 Rust lines including
+      a literal, retaining both BLs and the initialization algorithm.
+      All 13677 host tests pass; dirty-tree regression verifies sentinel,
+      pool allocation, reset flags, preserved padding and derived storage.
+      ARM release build passes. Standalone public-API host smoke using the
+      real node and mutex ports observes the circular sentinel, final
+      vtable, status two and preserved derived fields. No device execution.
