@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822e160
+    ghidra: FUN_0822e160
+    name: show_music_highlight
+    size: 208
+    sig: "u32 show_music_highlight(VideoHighlightController *controller)"
+    module: app/music_highlight_display
+    status: ported
+    vars:
+      param_1/r4: controller
+      r5: artwork_cache
+      controller+0xb0: highlight
+      DAT_0822e1f0: music_object_slot_089ca674
+      object+0x3f8: music_count
+      stack+4: temporary_message
+    renames:
+      FUN_081b803c: singleton_class_7f80
+      FUN_081b6d88: artwork_slot_available
+      FUN_081b6dd8: artwork_slot_activate (existing verified firmware seam)
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw osos.dec establishes 0x0822e160..0x0822e230: 144 instruction
+      bytes ending at pop 0x0822e1ec, a four-byte global pointer literal,
+      and 60 padded string bytes before the next independent dispatcher.
+      Full-image A32 decoding finds two inbound plain BLs at 0x0822d768
+      and 0x082308ec, no predicated inbound BLs, five outbound plain BLs,
+      no predicated outbound BLs, and one virtual BLX. Sets highlight to 1
+      before singleton acquisition; zero object word +0x3f8 displays
+      EmptyMusicHilited, otherwise missing slot-0 artwork displays
+      NoArtMusicHilited, or activates slot 0 and displays MediaContentHilited.
+      Displays and releases a temporary COW string, returning 1.
+      Deliberately omits unused input registers and allocator-tag residue,
+      reuses checked target offsets with native-width host vtables.
+      Activation remains the existing verified unported seam; the singleton
+      replacement requires its real constructor before device hooking.
+      Host suite passes 13800 tests, including six branch/count cases with
+      state ordering, neighboring-state preservation, and retained COW lifetime.
+      ARM release build passes. Reviewed match.py structural diff (exit 1):
+      36 original instructions versus 44 generated entries, preserving
+      +0xb0 store before singleton acquisition, +0x3f8 load, all three
+      branches, slot-0 query and activation, virtual display, cleanup,
+      and return 1. Absolute-address activation becomes BLX rather than BL.
   - address: 0x0822e718
     ghidra: FUN_0822e718
     name: show_photo_highlight
