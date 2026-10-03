@@ -1,6 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
 pub mod view_upload_pixels;
+pub mod apply_spec_geometry;
 pub mod q16_quad_to_bytes;
 pub mod optional_byte_record_equal;
 pub mod optional_byte_word_record_equal;
