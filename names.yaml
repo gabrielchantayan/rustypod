@@ -208181,3 +208181,35 @@ functions:
       Host tests cover unchanged/replaced vtables and wrapping state values;
       all 13802 host tests and ARM release build pass. match.py shows 13
       original versus 17 Rust entries, preserving NULL gating, ordered slots,
+
+  - address: 0x08229824
+    ghidra: FUN_08229824
+    name: query_filter_is_empty
+    size: 148
+    sig: "u32 query_filter_is_empty(void)"
+    module: util/query_filter_is_empty
+    status: ported
+    renames:
+      piVar1: query
+      iVar2: query_result
+      FUN_082597a0: query_object_create
+      DAT_082298b4: filter_field
+    notes: >-
+      Raw extent 0x08229824..0x082298b8 is 148 bytes: 144 instruction
+      bytes and the 0x00200004 literal. Next real entry is the push at
+      0x082298b8. Full-image decoding finds two inbound plain BLs at
+      0x08229a8c and 0x08229c44, zero predicated BLs and zero B tails.
+      Body has one plain BL to the already ported query_object_create,
+      zero predicated BLs, five plain BLXs and one BLXNE. Creates mode
+      zero, invokes unresolved runtime vtable slots +0x38 and +0xec,
+      invokes +0x5c with (0x80, 0x00200004), invokes +0x100 with zero,
+      saves whether +0x108 returns zero, then releases through +0x1c.
+      Incoming r0 is overwritten without reading; Rust takes no arguments.
+      Native-width host vtables use target word indices. Tests cover zero,
+      positive, high-bit and all-ones results, vtable replacement, and
+      result mutation during release. All 13803 host tests and the ARM
+      release build pass. match.py reports 36 original versus 37 Rust
+      instructions; LLVM keeps the object in r4, synthesizes the literal,
+      removes the redundant NULL release guard after prior unchecked
+      dereferences, and implements the saved zero predicate with CLZ/LSR.
+      The six virtual slots and their arguments remain in stock order.
