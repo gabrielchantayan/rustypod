@@ -241,6 +241,7 @@ pub mod context_callback_dispatch;
 pub mod element_callback_scope_register;
 pub mod context_select_item_and_dispatch;
 pub mod scoped_context_dispatch_and_store_result;
+pub mod scoped_context_dispatch_and_store_secondary_result;
 pub mod media_item_matches_context;
 pub mod default_selector_dispatch;
 pub mod context;
