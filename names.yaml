@@ -9087,6 +9087,30 @@ functions:
       FUN_081d6380 has no recovered semantic identity, so target builds call
       its verified address and host tests reuse the existing narrow
       constructor seam.
+  - address: 0x08243844
+    ghidra: FUN_08243844
+    name: code_cache_insert_record
+    size: 172
+    sig: "u32 *code_cache_insert_record(u32 *cache, u32 kind, u32 value, u32 code_size)"
+    module: util/code_cache_insert_record
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1: kind
+      param_3/r2: value
+      param_4/r3: code_size
+      puVar1/r6: predicate
+      puVar5/r5: record
+    notes: >-
+      Raw A32 words establish 172 bytes from 0x08243844 to the next
+      function push at 0x082438f0. Two inbound plain BL calls at 0x0824371c
+      and 0x082438fc; no predicated inbound BL. Outbound: plain BL at
+      0x0824385c to predicate_for_kind, BLCS at 0x08243884 to the unnamed
+      retail compactor 0x082433b4, and virtual BLX at 0x082438e0 through
+      predicate vtable slot zero. Wrapping cursor+size >= capacity or used
+      records >= capacity triggers compaction. Prepend a 204-byte record,
+      clear flags, initialize payload, then store kind's low byte. Host-only
+      dependency seams; target reuses the ported selector and retail compactor.
   - address: 0x08243778
     ghidra: FUN_08243778
     name: queue_match_and_promote

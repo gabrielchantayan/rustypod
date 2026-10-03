@@ -192,6 +192,7 @@ pub mod predicate_list_find;
 pub mod pair_chain_find;
 pub mod pair_chain_find_header16;
 pub mod predicate_for_kind;
+pub mod code_cache_insert_record;
 pub mod lazy_slot_table_entry;
 pub mod least_common_multiple;
 pub mod mapped_subobject_for_slot;
