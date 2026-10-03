@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822fb28
+    ghidra: FUN_0822fb28
+    name: music_menu_playlist_select
+    size: 228
+    sig: "u32 music_menu_playlist_select(u8 *controller)"
+    module: app/music_menu_playlist_select
+    status: ported
+    vars:
+      param_1/r0: controller
+      local_c: query
+      auStack_10: command_string
+      FUN_082597a0: query_object_create
+      FUN_0822d12c: controller_cached_query (unported firmware seam)
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      FUN_083e75d0: query_object_release_slot
+      vtable_plus_0x38: unresolved_query_method
+      vtable_plus_0xf0: unresolved_query_method
+      vtable_plus_0x11c: display_command
+    notes: >-
+      Raw A32 establishes 168 instruction bytes through pop at 0x0822fbcc,
+      followed by literal 0x00200004 and two padded command strings; the next
+      real entry is push at 0x0822fc0c, making the full extent 228 bytes.
+      Body: five plain BLs, zero predicated BLs, three virtual BLXs. Raw
+      aligned-word decoding finds inbound BLNE at 0x0822dc94 and plain BL at
+      0x08231c54. Sets controller byte +0xb0 to 1, creates a mode-zero query,
+      invokes unresolved query slots +0x38 and +0xf0, then requests the cached
+      query with (controller,0x20005d,0x200004,1,1,0,0). Zero displays
+      EmptyMusicPlaylistHilited; any nonzero result displays
+      MusicMenuPlaylistSelected. Releases the temporary COW string then query
+      and returns 1. Raw cache helper compares keys at +0xb4 through +0xbf
+      and returns +0xc0; its seven-argument ABI is independently verified.
+      Deviations: omit unused r2 residue at the two-argument COW constructor;
+      native-width host vtable words preserve target word indices. Tests
+      cover zero, one, high-bit and all-bit counts, adjacent-byte preservation
+      and cleanup order. Public-entry smoke covers both command branches.
+      ARM build passes. match.py exit 1 shows 50 versus 42 instructions with
   - address: 0x082398c8
     ghidra: FUN_082398c8
     name: view_event_clear_screen_indices
