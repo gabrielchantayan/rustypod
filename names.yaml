@@ -81017,6 +81017,40 @@ functions:
       0x224, 0x225, 0x228, 0x22c from spec 0x5c/0x5d/0x60/0x64), same
       vtable literal; the diff is ops-table blx for bl, the folded
       colour word, and the crate's frame-pointer prologue.
+  # --- Silver UI framework: conditional lifecycle-mode synchronization ---
+  - address: 0x0826daa8
+    ghidra: FUN_0826daa8
+    name: view_sync_lifecycle_mode
+    size: 104
+    sig: "void view_sync_lifecycle_mode(ViewBase *view, u32 request)"
+    module: ui/view_lifecycle_sync
+    vars:
+      param_1: view
+      param_2: request
+    status: ported
+    notes: >-
+      Raw words establish extent 0x0826daa8..0x0826db10 (104 bytes),
+      ending in bx r2 at 0x0826db0c; Ghidra's 60-byte extent truncates
+      the zero-request path and mistakes popne at 0x0826dac4 for an
+      entry. Two plain BL callers at 0x08157a60 and 0x08157b10, zero
+      predicated BL callers, independently decoded from osos.dec.
+      Contains two plain BL instructions to the existing
+      view_set_lifecycle_mode at 0x0826db10. Nonzero request changes
+      lifecycle mode 0x4000 to 0x2000 and dispatches vtable slot +0xbc
+      with 1; zero changes 0x2000 to 0x4000 and dispatches with 0.
+      Other modes return without mutation or dispatch. Notification
+      runs after the update and preserves callback mutations.
+      Deliberate deviation: host fixtures use native-width vtable slots,
+      while ViewBase stores the target-width vtable address and the
+      target slot offset remains +0xbc. Host tests cover every mode,
+      zero and arbitrary nonzero requests, preservation of surrounding
+      bits, notification order and count, callback mutations, and null
+      vtables on non-transition paths.
+      Full-extent match.py (--size 104) confirms the same mask,
+      conditional transitions, setter call, and indirect tail bx at
+      slot +0xbc. LLVM shares the two setter paths and adds a
+      frame-pointer prologue (24 instructions versus 26). The default
+      comparison uses Ghidra's truncated 60-byte extent.
   # --- Silver UI framework: view lifecycle-mode setter ---
   - address: 0x0826db10
     ghidra: FUN_0826db10
