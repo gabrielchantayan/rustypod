@@ -11727,6 +11727,32 @@ functions:
       has no established semantic identity, so target builds use its verified
       +0x40 slot and host builds use a typed seam. No NULL or bounds check
       exists.
+  - address: 0x08266bc0
+    ghidra: FUN_08266bc0
+    name: stream_seek_position
+    size: 40
+    sig: "i32 stream_seek_position(AdsFile **file_slot, i32 offset, i32 origin)"
+    module: util/stream_query_result
+    status: ported
+    renames:
+      param_1/r0: file_slot
+      param_2/r1: offset
+      param_3/r2: origin
+      r4: saved_file_slot
+      FUN_0802fef0: fseek
+      FUN_0802ff38: ftell
+    notes: >-
+      Raw words verify 0x08266bc0..0x08266be7, followed by the distinct
+      body at 0x08266be8 (mov ip,r0). One plain BL to fseek, zero
+      predicated BLs; beq at 0x08266bdc tail-calls ftell. Whole-image
+      A32 scan finds two inbound plain BLs at 0x083d8ea0 and 0x083d9884,
+      zero predicated BLs. Dereferences the FILE slot, seeks with offset
+      and origin, reloads the slot and tells on zero seek status; any
+      nonzero status returns -1. Ghidra incorrectly inlines ftell past
+      the tail branch and invents an errno call in this body. Deliberate
+      deviation: calls the existing Rust fseek/ftell implementations.
+      Host tests exercise absolute/relative seeks, negative targets,
+      invalid origins, and both real two-word result adapters.
   - address: 0x083d8e88
     ghidra: FUN_083d8e88
     name: stream_query_result
@@ -11739,8 +11765,8 @@ functions:
       param_2/r1: stream
       param_3/r2: arg2
       param_4/r3: arg3
-      FUN_08266bc0: stream_query_unported
-      "[stream + 0x30]": stream_query_state
+      FUN_08266bc0: stream_seek_position
+      "[stream + 0x30]": file_slot
       "[result + 0x0]": query_value
       "[result + 0x4]": reserved_zero
     notes: >-
@@ -11750,11 +11776,10 @@ functions:
       BL, to 0x08266bc0, and zero predicated BL instructions. Whole-image A32
       decoding finds three inbound direct plain BL calls at 0x083d9014,
       0x083d92b4, and 0x083d93e8; no predicated BL calls target this address.
-      It invokes the unrecovered query with stream + 0x30 and unchanged arg2
-      and arg3, stores its return word, then clears result + 4. Deliberate
-      deviation: target builds preserve all eleven raw ARM instructions while
-      host builds use a query seam, since no semantic identity for 0x08266bc0
-      has been established.
+      It invokes stream_seek_position with the FILE slot at stream + 0x30,
+      offset and origin, stores the returned bits, then clears result + 4.
+      Deliberate deviation: Rust now calls the recovered callee directly
+      on both targets, removing the raw-address assembly and host seam.
   - address: 0x083d986c
     ghidra: FUN_083d986c
     name: stream_query_result_at_position
@@ -11767,8 +11792,8 @@ functions:
       param_2/r1: stream
       param_3/r2: position
       param_4/r3: query_mode
-      FUN_08266bc0: stream_query_unported
-      "[stream + 0x30]": stream_query_state
+      FUN_08266bc0: stream_seek_position
+      "[stream + 0x30]": file_slot
       "[result + 0x0]": query_value
       "[result + 0x4]": reserved_zero
     notes: >-
@@ -11777,12 +11802,11 @@ functions:
       with push {r4,r5,r6,r7,r8,r9,sl,lr}. The body has one plain
       unconditional BL, to 0x08266bc0, and zero predicated BL instructions.
       Raw caller words at 0x083d99f8 and 0x083d9bf0 are the two direct plain
-      BL calls; no predicated BL calls target this address. It invokes the
-      unrecovered query with stream + 0x30 and unchanged position and
-      query_mode, stores its return word, then clears result + 4. Deliberate
-      deviation: target builds preserve all eleven raw ARM instructions while
-      host builds use a query seam, since no semantic identity for 0x08266bc0
-      has been established.
+      BL calls; no predicated BL calls target this address. It invokes
+      stream_seek_position with the FILE slot at stream + 0x30 and unchanged
+      position and origin, stores the returned bits, then clears result + 4.
+      Deliberate deviation: Rust calls the recovered callee directly on
+      both targets, removing the raw-address assembly and host seam.
   - address: 0x0813a318
     ghidra: FUN_0813a318
     name: filesystem_kind_is_hfsplus
