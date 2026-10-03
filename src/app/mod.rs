@@ -18,6 +18,7 @@ pub mod music_menu_playlist_select;
 pub mod rentals_select;
 pub mod query_context_controller;
 pub mod fixed4_weighted_difference;
+pub mod payload_record_construct;
 pub mod message_envelope_construct;
 pub mod lazy_singleton_0x68_with_dependency;
 pub mod lazy_singleton_0x4a8;
