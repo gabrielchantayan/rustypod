@@ -700,10 +700,9 @@ pub unsafe extern "C" fn string_object_ensure_capacity(
 /// Nonzero size bypasses the payload read. Always dispatches slot +8 as
 /// `(this, size, 1)` and preserves its returned pointer, including NULL.
 /// Deliberate deviations: pointer-width vtable words support host fixtures.
-/// LLVM inlines the inclusive-length helper into the zero-size path (21
-/// instructions versus 12 stock), retaining the slot +8 tail dispatch,
-/// flag 1, NULL handling and return value. Extra frame setup is compiler
-/// codegen rather than a semantic change.
+/// The inclusive-length helper is called through the established volatile
+/// function-pointer pattern to retain a call instead of embedding its loop.
+/// Extra frame setup is compiler codegen rather than a semantic change.
 ///
 /// # Safety
 /// `this` and its vtable must be valid, slot 2 must have the allocation
@@ -716,7 +715,9 @@ pub unsafe extern "C" fn string_object_resize_payload(
     requested_size: usize,
 ) -> *mut u8 {
     let size = if requested_size == 0 {
-        strlen_safe_plus1((*this).payload)
+        let inclusive_length: unsafe extern "C" fn(*const u8) -> usize =
+            core::ptr::read_volatile(&(strlen_safe_plus1 as unsafe extern "C" fn(*const u8) -> usize));
+        inclusive_length((*this).payload)
     } else {
         requested_size
     };
@@ -780,6 +781,21 @@ mod resize_payload_tests {
         assert!(unsafe { string_object_resize_payload(&mut fixture.string, usize::MAX) }.is_null());
         assert_eq!(fixture.string.payload, payload);
         assert_eq!(&fixture.storage[..5], b"yyy\0y");
+    }
+
+    #[test]
+    fn exact_capacity_succeeds_and_one_more_preserves_payload_on_failure() {
+        let vtable = StringObjectVtable { slots: [0, 0, resize as *const () as usize, 0, 0, 0] };
+        let mut fixture = Fixture {
+            string: StringObject { vtable: &vtable, payload: core::ptr::null_mut() },
+            storage: [b'z'; 16],
+        };
+        let result = unsafe { string_object_resize_payload(&mut fixture.string, 16) };
+        assert_eq!(result, fixture.storage.as_mut_ptr());
+        assert_eq!(fixture.storage, *b"zzzzzzzzzzzzzzz\0");
+        assert!(unsafe { string_object_resize_payload(&mut fixture.string, 17) }.is_null());
+        assert_eq!(fixture.string.payload, result);
+        assert_eq!(fixture.storage, *b"zzzzzzzzzzzzzzz\0");
     }
 }
 
