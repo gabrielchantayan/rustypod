@@ -207660,3 +207660,44 @@ functions:
       and enlarges the prologue; field offsets, full-width selection and one
       base BL remain. Archive relocation confirms R_ARM_CALL to
       selector_item_base_construct, not apparent recursion in match.py.
+
+  - address: 0x08234b08
+    ghidra: FUN_08234b08
+    name: selector_item_scattered_records_variant_construct
+    size: 200
+    sig: "void *selector_item_scattered_records_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_scattered_records_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this / returned object
+      param_2/r1: variant
+      FUN_08218b10: selector_item_base_construct
+      DAT_08234bb0: derived vtable 0x089a2354
+      DAT_08234bb8: opaque implementation word 0x08ae5444
+    notes: >-
+      Raw A32 words establish 160 instruction bytes and ten literal words,
+      true extent 200 bytes ending at the next push entry 0x08234bd0.
+      Independent full-image aligned BL decoding finds two plain inbound
+      BLs at 0x0819fb58 and 0x0819fb70, zero predicated inbound BLs; one
+      plain outbound BL at 0x08234b30 to registered, ported
+      selector_item_base_construct at 0x08218b10, zero predicated outbound
+      BLs. Callers allocate 0x180 bytes and index returned byte +0xb4.
+      Zero full-width variant selects item 19 / descriptor 0x8016; any
+      nonzero variant selects item 20 / descriptor 0x8017. Base arguments
+      are kind 9, context 44 and low variant byte as flag. Install vtable
+      0x089a2354, record 1 selector 0x801d / tag 9 / implementation
+      0x08ae5444, record 4 selector 0x8020 / tag 12, and records 9..12
+      selectors 0x8025..0x8028 / tags 17..20. Other records retain base
+      values; implementation words for records 4 and 9..12 remain zero.
+      Return retained r0 despite Ghidra void declaration. No new seams
+      or deliberate behavioral deviations; class identity remains unknown.
+      Host regression covers full-width variants, low-byte flags, preserved
+      flag bits, complete sparse table, byte-store widths and object bounds.
+      All 13785 host tests and ARM release build pass. Actual-source native
+      smoke executes this port, real selector base and real zero-fill for
+      0, 1, 0x100 and UINT32_MAX; embedded pair-header boundary is modeled,
+      not allocation. match.py exits 1 with reviewed structural diff:
+      LLVM adds a frame pointer, synthesizes selector constants, narrows
+      flags before BL and reorders independent stores; offsets, values,
+      full-width selection and retained r0 agree. Archive relocation
+      confirms the sole R_ARM_CALL targets selector_item_base_construct.
