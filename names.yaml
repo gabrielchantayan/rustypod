@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08266c18
+    ghidra: FUN_08266c18
+    name: standard_file_construct
+    size: 88
+    sig: "AdsFile **standard_file_construct(AdsFile **slot, u32 selector)"
+    module: stdio/standard_file_construct
+    status: ported
+    vars: {param_1/r0/r4: slot, param_2/r1: selector, iVar1/r0: file}
+    renames: {FUN_08266abc: cxx_new_handler_dispatch}
+    notes: >-
+      Raw extent 0x08266c18..0x08266c70 is 88 bytes: 72 executable
+      bytes and four literal words, followed by the next function's push.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x083d980c and 0x083d9dc8 and no predicated inbound BLs. The body
+      has zero plain BLs and one BLEQ at 0x08266c54 to the registered
+      cxx_new_handler_dispatch at 0x08266abc. Selectors 0/1/2 store
+      stdin/stdout/stderr; every other full-width value stores NULL,
+      reports code 10 with descriptor 0x0897af88, and returns the slot
+      if the report returns. Both callers construct this member inside
+      a standard-stream wrapper and use the returned member address.
+      Deviations: reuse stream_file's modeled static FILE objects instead
+      of literal firmware objects 0x08b2f820/64/a8; native pointer width
+      on hosts, four bytes on target; zero unused r2/r3 diagnostic words.
+      Reuses the existing C++ dispatch and its documented builder seam.
+      Host suite passes all 13650 tests; ARM release build passes.
+      Actual-library executable smoke (test-configured dependencies) verifies
+      selectors 0/1/2/3/0x80000000/0xffffffff and returned slot identity.
+      Non-test host compilation is blocked by six unrelated missing helper
+      definitions in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. Reviewed match.py exits 1: LLVM uses an unsigned
+      three-entry pointer table for valid selectors and inlines the existing
+      diagnostic dispatch on the NULL path, including its volatile handler
+      and builder loads. The descriptor, code, store-before-report and
+      returned slot remain intact; no original direct BL boundary survives.
   - address: 0x0825db58
     ghidra: FUN_0825db58
     name: selector_item_sparse_variant_construct

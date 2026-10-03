@@ -297,13 +297,13 @@ pub unsafe extern "C" fn operator_new_checked(size: usize) -> *mut u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
     /// Serializes tests that swap the handler global / ops table.
-    static LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static LOCK: Mutex<()> = Mutex::new(());
 
     // Call log.
     static mut HANDLER_CALLS: usize = 0;
