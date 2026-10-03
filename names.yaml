@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08237174
+    ghidra: FUN_08237174
+    name: object_deactivate
+    size: 52
+    sig: "u32 object_deactivate(u8 *object)"
+    module: app/object_deactivate
+    status: ported
+    renames:
+      param_1/r0: object
+      object+0x70: initialized byte
+      vtable+0xd4: deactivation dispatch
+      FUN_081c83b4: record_manager_get (existing canonical name)
+      FUN_081c88b8: process secondary records (retail call)
+      FUN_08153d78: release global object (retail call)
+    notes: >-
+      Raw words establish the true 52-byte extent 0x08237174..0x082371a8;
+      the next real function is the bx lr entry at 0x082371a8. Independent
+      aligned A32 branch decoding finds two unconditional inbound BLs at
+      0x0823714c and 0x08237374, zero predicated inbound BLs, three plain
+      outbound BLs, zero predicated outbound BLs, and one BLX r3.
+      Clear byte +0x70 before vtable slot +0xd4 receives (object, INT_MAX, 0).
+      Fetch the manager at 0x081c83b4, pass its result to 0x081c88b8
+      (processes secondary records at manager+0xa0c via 0x081d9810),
+      then call 0x08153d78 (destroy/free global at 0x08a0e13c if nonnull).
+      Ignore all operation results and return zero. Both callers perform
+      cleanup; 0x08237360 is a destructor. No existing names entries for
+      the assigned function or the two unported cleanup callees.
+      Firmware uses verified retail addresses, including the original
+      manager getter: its existing Rust replacement has a zeroing
+      constructor and inert destructor, unsuitable for faithful cleanup.
+      Host-only operations replace target-width virtual dispatch and retail
+      calls. Tests cover every input flag, clear-before-dispatch ordering,
+      preservation of callback changes and unrelated bytes, and completion
+      despite nonzero callee results. ARM release build passes; match.py
+      reports the same store, vtable loads, arguments, four calls, and zero
+      return, with literal-address BLX replacing the three direct BLs and
+      a different frame prologue. No firmware behavioral deviations.
+
   - address: 0x082371ac
     ghidra: FUN_082371ac
     name: object_mark_initialized
