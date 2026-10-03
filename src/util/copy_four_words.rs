@@ -180,6 +180,59 @@ pub unsafe extern "C" fn copy_four_words_staggered(
     destination
 }
 
+/// copy_four_words_staggered_property — retailOS `thunk_FUN_08248704`
+/// at **0x08256c50**, **4 bytes**, `0x08256c50..0x08256c54`.
+///
+/// The sole raw word is `0xeaffc6ab`: an unconditional tail branch to
+/// [`copy_four_words_staggered`] at 0x08248704. The next real function at
+/// 0x08256c54 adjusts r0 by 16 before branching to the same helper.
+/// Full-image ARM decoding finds two inbound plain BL calls (0x0824d47c,
+/// 0x0824d4b0), zero predicated BL calls, and no outgoing BL calls.
+/// Copy four aligned words in load/store order 0, 2, 1, 3 and return the
+/// unchanged destination pointer, including for overlapping ranges.
+///
+/// Deliberate deviations: LLVM adds a balanced frame-pointer prologue and
+/// epilogue before the tail branch; argument and return semantics are unchanged.
+///
+/// # Safety
+/// `source` must allow four aligned u32 reads and `destination` four aligned
+/// u32 writes. The ranges may overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn copy_four_words_staggered_property(
+    destination: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    copy_four_words_staggered(destination, source)
+}
+
+#[cfg(test)]
+mod staggered_property_tests {
+    use super::copy_four_words_staggered_property;
+
+    #[test]
+    fn preserves_order_for_every_overlap_and_disjoint_range() {
+        for source in 0..=8 {
+            for destination in 0..=8 {
+                let mut actual = core::array::from_fn::<_, 12, _>(
+                    |i| 0x1234_0000 + i as u32,
+                );
+                let mut expected = actual;
+                for word in [0, 2, 1, 3] {
+                    expected[destination + word] = expected[source + word];
+                }
+                let base = actual.as_mut_ptr();
+                let dst = unsafe { base.add(destination) };
+                let returned = unsafe {
+                    copy_four_words_staggered_property(dst, base.add(source))
+                };
+                assert_eq!(returned, dst);
+                assert_eq!(actual, expected, "src={source}, dst={destination}");
+            }
+        }
+    }
+}
+
 
 /// copy_four_words_paired — original: `FUN_08158c94` @ **0x08158c94**
 /// (**28 bytes exactly**, `0x08158c94..0x08158cac`; the separately linked
