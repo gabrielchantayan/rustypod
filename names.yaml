@@ -206523,3 +206523,33 @@ functions:
       explicit conditional branches and frame setup in place of ARM
       predication, while preserving the dispatch, clearing, delete, and return
       ordering.
+
+  - address: 0x0824c39c
+    ghidra: FUN_0824c39c
+    name: copy_four_words_staggered_member_10
+    size: 8
+    sig: "u32 *copy_four_words_staggered_member_10(u32 *object, const u32 *source)"
+    module: util/copy_four_words
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: source
+    notes: >-
+      Raw words 0xe2800010 and 0xeafff0d7 establish the eight-byte extent
+      0x0824c39c..0x0824c3a4: ADD r0,r0,#16 and tail B to 0x08248704,
+      already ported as copy_four_words_staggered. The next real function
+      at 0x0824c3a4 stores r1 at object+0x64 and returns via BX LR.
+      Whole-image aligned ARM decoding finds two inbound plain BL calls
+      at 0x08254614 and 0x08256300, zero predicated BL calls, and zero
+      outgoing BL calls. Copy into object words 4..8 in load/store order
+      0,2,1,3, preserving overlap effects and returning object+16 in r0;
+      Ghidra incorrectly infers void. Reuse the existing helper without a
+      new seam or module. Host regression covers 117 placements including
+      self-copy, both overlap directions, disjoint ranges, full-width bit
+      patterns, returned member pointer and untouched surroundings.
+      All 13735 host tests and ARM release build pass. Actual-source smoke
+      observes staggered overlap propagation [3,3,5,5] and adjusted return.
+      match.py exits 1 with a structural diff: LLVM adds balanced frame
+      setup/teardown around the ADD before tail B. Objdump verifies the
+      exported symbol and R_ARM_JUMP24 relocation to copy_four_words_staggered.
+      No algorithm or memory deviations.

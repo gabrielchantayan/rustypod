@@ -206,6 +206,33 @@ pub unsafe extern "C" fn copy_four_words_staggered_property(
     copy_four_words_staggered(destination, source)
 }
 
+/// copy_four_words_staggered_member_10 — retailOS `FUN_0824c39c` at
+/// **0x0824c39c**, **8 bytes**, `0x0824c39c..0x0824c3a4`.
+///
+/// Raw words `0xe2800010, 0xeafff0d7` add 16 bytes to r0 and tail-branch
+/// to [`copy_four_words_staggered`] at 0x08248704. The next real function
+/// starts at 0x0824c3a4 with `str r1,[r0,#0x64]; bx lr`.
+/// Full-image ARM decoding finds two inbound plain BL calls (0x08254614,
+/// 0x08256300), zero predicated BL calls, and zero outgoing BL calls.
+/// Copy four aligned words into object words 4..8 in load/store order
+/// 0, 2, 1, 3, observing earlier stores on overlap; return object + 16.
+///
+/// Deliberate deviations: LLVM adds balanced frame-pointer setup/teardown
+/// before the tail branch; algorithm and ABI are unchanged. Ghidra's void
+/// return is corrected to preserve the adjusted destination returned in r0.
+///
+/// # Safety
+/// `object` must allow pointer arithmetic through word 8 and aligned writes
+/// to words 4..8; `source` must allow four aligned u32 reads. Ranges may overlap.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn copy_four_words_staggered_member_10(
+    object: *mut u32,
+    source: *const u32,
+) -> *mut u32 {
+    copy_four_words_staggered(object.add(4), source)
+}
+
 /// copy_four_words_staggered_member_20 — retailOS `FUN_0824c484` at
 /// **0x0824c484**, **8 bytes**, `0x0824c484..0x0824c48c`.
 ///
@@ -231,6 +258,35 @@ pub unsafe extern "C" fn copy_four_words_staggered_member_20(
     source: *const u32,
 ) -> *mut u32 {
     copy_four_words_staggered(object.add(8), source)
+}
+
+#[cfg(test)]
+mod staggered_member_10_tests {
+    use super::copy_four_words_staggered_member_10;
+
+    #[test]
+    fn member_copy_preserves_overlap_order_return_and_surroundings() {
+        for object in 0..=8 {
+            for source in 0..=12 {
+                let mut actual = core::array::from_fn::<_, 16, _>(
+                    |i| [0, u32::MAX, 0x8000_0000, 0x1234_5678][i % 4] ^ i as u32,
+                );
+                let mut expected = actual;
+                let destination = object + 4;
+                for word in [0, 2, 1, 3] {
+                    expected[destination + word] = expected[source + word];
+                }
+                let base = actual.as_mut_ptr();
+                let returned = unsafe {
+                    copy_four_words_staggered_member_10(
+                        base.add(object), base.add(source),
+                    )
+                };
+                assert_eq!(returned, unsafe { base.add(destination) });
+                assert_eq!(actual, expected, "object={object}, src={source}");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
