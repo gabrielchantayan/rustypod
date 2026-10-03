@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082502bc
+    ghidra: FUN_082502bc
+    name: video_engine_read_vector_property
+    size: 160
+    sig: "u32 video_engine_read_vector_property(u32 *engine, u32 selector, u32 property_id, u32 *output)"
+    module: util/video_engine_read_vector_property
+    status: ported
+    renames:
+      param_1/r0: engine
+      param_2/r1: selector
+      param_3/r2: property_id
+      param_4/r3: output
+      FUN_08256d74: copy_four_words_forward_property
+      FUN_0824f388: latch_first_error
+    notes: >-
+      Raw aligned A32 establishes 156 instruction bytes plus the 0x1202
+      literal at 0x08250358, for a true 160-byte extent ending at the next
+      independent push prologue at 0x0825035c. Whole-image BL decoding finds
+      two inbound plain BL sites at 0x08250270 and 0x08250298, zero predicated
+      BLs, and two outbound plain BLs to the existing error-latch and ordered
+      four-word-copy ports. Selectors 0x404 and 0x405 accept properties 0x1200,
+      0x1201, 0x1202, and 0x1600, copying four words from engine offsets
+      0x838, 0x848, 0x858, and 0x868 respectively; 0x1601 copies only the word
+      at 0x878. Success returns 1 without clearing existing error state.
+      Rejection leaves output untouched, latches first error 0x500, and
+      returns 0. Raw caller at 0x08250228 supplies all four arguments and
+      converts one or four temporary output words; Ghidra conflates this
+      body into its 0x082d1640 reference and loses arguments. Word indices
+      preserve target offsets on hosts, and the existing copy seam preserves
+      forward overlap propagation. Deliberate deviations: none. Host tests
+      cover all accepted properties and selectors, exact write widths,
+      invalid selectors and signed-boundary IDs, sticky errors, and overlap.
   - address: 0x08252080
     ghidra: FUN_08252080
     name: video_engine_set_indexed_vector

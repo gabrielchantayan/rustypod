@@ -111,6 +111,7 @@ pub mod empty_destructor_0802769c;
 pub mod error_latch;
 pub mod entry_table_finalize_and_append;
 pub mod video_engine_property_slot;
+pub mod video_engine_read_vector_property;
 pub mod cursor_read_be_bytes;
 pub mod dispatch_if_optional_link_valid;
 pub mod dispatch_relative_record_list;
