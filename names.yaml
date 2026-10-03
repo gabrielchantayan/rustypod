@@ -45784,6 +45784,28 @@ functions:
       cover all four field values, neighbouring-bit independence, and
       read extent.
 
+  - address: 0x08264564
+    ghidra: FUN_08264564
+    name: draw_state_set_origin
+    size: 12
+    sig: "void draw_state_set_origin(DrawState *record, i32 left, i32 top)"
+    module: cxx/draw_state_origin
+    status: ported
+    vars: {param_1: record, param_2: left, param_3: top}
+    notes: >-
+      Raw words e580102c e5802030 e12fff1e store left/top at +0x2c/+0x30
+      and return. True extent ends at the next function's push at
+      0x08264570. Independently scanned raw ARM words find two plain BL
+      callers at 0x0826e2d4 and 0x0826ebc0, zero predicated BL callers,
+      and no outgoing calls. Both callers pass transformed rectangle
+      left/top before clipping; Ghidra incorrectly drops the third
+      argument in their listings. No normalization, arithmetic, or NULL
+      guard. The preserved r0 is unused by callers and not returned by
+      the Rust void signature. The ported ARM setup caller uses this
+      setter; its packed host model retains unaligned field writes.
+      Host tests cover signed extremes, zero, overwrite, and preservation
+      of every neighboring word.
+
   - address: 0x0826eb5c
     ghidra: FUN_0826eb5c
     name: draw_state_configure_for_element

@@ -237,9 +237,7 @@ pub unsafe extern "C" fn draw_state_configure_for_element(element: *mut u8, draw
         clip = ptr::addr_of!((*target_element).bounds).read();
         render_transform()(render_context, &mut clip);
 
-        let fields = draw_state.cast::<TargetDrawState>();
-        ptr::addr_of_mut!((*fields).origin_left).write(clip.left);
-        ptr::addr_of_mut!((*fields).origin_top).write(clip.top);
+        crate::cxx::draw_state_origin::draw_state_set_origin(draw_state, clip.left, clip.top);
 
         let clip_source = if ptr::addr_of!((*owner.cast::<TargetRenderOwner>()).uses_context_clip).read() != 0 {
             let context = render_context.cast::<TargetRenderContext>();
