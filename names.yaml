@@ -48528,20 +48528,21 @@ functions:
       FUN_0825d4e0: xml_reader_position_before_current (unported seam)
       FUN_0825d354: xml_skip_whitespace (ported)
       FUN_0825d318: xml_decode_skip_whitespace (ported)
-      FUN_0825d580: xml_reader_restore_position (unported seam)
+      FUN_0825d580: xml_reader_restore_position (ported)
     notes: >-
       Raw ARM is exactly 0x0825d384..0x0825d3cf: it saves the input position
       adjusted to precede the decoder's active codepoint, calls the reset
       whitespace helper and discards its result, then calls the raw
       whitespace helper and returns that codepoint after restoring the saved
-      signed position. The restore call receives r1=0, r2=position,
-      r3=position>>31, and stack argument zero; its raw callee clears decoder
+      signed position. The restore call receives r2=position,
+      r3=position>>31, and stack origin zero; r1 is ABI padding. It clears decoder
       state before invoking the reader's vtable +0x10 method. The following
       function begins at 0x0825d3d0. Decoding every B/BL word in osos.dec
       finds 6 static bl call sites, all unconditional: 0x0825ca24,
       0x0825cf84, 0x0825cfcc, 0x0825cfdc, 0x0825d08c, and 0x0825d144.
-      The two unported direct callees use volatile seams: their fixed raw
-      firmware addresses on target and test-installed host callbacks.
+      Only the unported position helper retains a firmware-address seam.
+      Restoration calls the Rust port directly, with a host-only seam for
+      the unidentified virtual seek method.
 
   - address: 0x0825d354
     ghidra: FUN_0825d354
@@ -48567,6 +48568,29 @@ functions:
       util/xml_decode_codepoint_and_reset.rs. The remaining direct callee
       uses a volatile seam: its fixed raw address on target and a
       test-installed host callback.
+  - address: 0x0825d580
+    ghidra: FUN_0825d580
+    name: xml_reader_restore_position
+    size: 44
+    sig: "unsigned int xml_reader_restore_position(struct XmlUtf8Decoder *reader, long long position, unsigned int origin)"
+    module: util/xml_reader_restore_position
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_1+4: reader.state
+      r2/r3: position
+      stack_arg_0: origin
+      "*(reader.callback_table+0x10)": virtual_seek
+    notes: >-
+      Raw extent is 0x0825d580..0x0825d5ab, ending before the real prologue
+      at 0x0825d5ac. Clears state at +4, then invokes vtable +0x10 with
+      reader, the r2:r3 signed 64-bit position, and the stack origin word.
+      Incoming r1 is overwritten and is ABI padding, not an origin argument.
+      The virtual method's r0 result is returned unchanged. Binary word
+      decoding finds two unconditional BL references at 0x0825d3c4 and
+      0x0825d418, no predicated BL references, and one in-body indirect BLX.
+      The virtual method has no verified static identity; host builds use
+      a volatile callback seam. LLVM emits a semantically equivalent tail BX.
   - address: 0x0825d5ac
     ghidra: FUN_0825d5ac
     name: xml_input_is_exhausted
