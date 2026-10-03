@@ -52427,6 +52427,43 @@ functions:
       integration with real GPIO reads. LLVM removes the failure branch
       because gpio_pin_read always returns zero; the BL and level mapping
       remain. Hardware execution was not tested.
+  # --- Pin-descriptor interrupt enable ---
+  - address: 0x08274374
+    ghidra: FUN_08274374
+    name: gpio_pin_interrupt_set
+    size: 28
+    sig: "u32 gpio_pin_interrupt_set(const u8 *pin_id, u32 enable)"
+    module: drivers/gpio_pin_interrupt_set
+    status: ported
+    renames:
+      param_1/r0: pin_id
+      param_2/r1: enable
+      FUN_0836b5fc: retail_gpio_interrupt_clear
+      FUN_0836b634: retail_gpio_interrupt_arm
+    notes: >-
+      Raw osos.dec verifies seven ARM words at 0x08274374..0x0827438f.
+      Ghidra's 44-byte extent incorrectly absorbs the independent function
+      at 0x08274390, entered by a plain tail branch at 0x0811f7dc.
+      A full aligned raw branch scan finds two inbound plain BLs at
+      0x0811f7d0 and 0x0813b114, zero inbound predicated BLs, and zero
+      outbound plain or predicated BLs. Outbound BEQ and BNE tail-call
+      0x0836b5fc and 0x0836b634 respectively. Reads the first pin-descriptor
+      byte; sentinel 200 returns 200 without dispatch. Zero enable clears
+      the pin bit in the 0x39a000c0 bank; every nonzero value is normalized
+      to one and sets that bit in banks 0x39a000e0, 0x39a000c0, 0x39a000a0.
+      Raw callee decoding establishes reversed byte bit order and word
+      index 6 - (pin >> 5); both callees return zero. Neither target has
+      an existing names.yaml entry or Rust port; ARM uses absolute literal
+      veneers, host uses installed callback seams. Only this wrapper is
+      ported. Host tests cover sentinel precedence, every valid pin below
+      224 except the sentinel, nonzero normalization, clearing, and unrelated
+      bank/word preservation using decoded callee register models.
+      Host suite passed 13606 tests; ARM release build and executable host
+      smoke passed. Match review confirms byte load, sentinel return,
+      zero/nonzero split, normalization, and tail dispatch; LLVM adds a
+      frame and uses unconditional branches to veneers. Hardware execution
+      was not tested.
+
   # --- GPIO pin level predicate ---
   - address: 0x082743a0
     ghidra: FUN_082743a0
