@@ -3,7 +3,7 @@
 //! starts at 0x0811ba48. Raw decoding finds four inbound plain `bl` call
 //! sites, zero predicated inbound `bl` forms, and no inbound tail branches.
 //! The body has two direct `bl` calls to `__rt_sdiv` and tail-branches to the
-//! unported `FUN_0826dd8c`.
+//! ported `view_base_set_position_offsets`.
 //!
 //! # Algorithm
 //!
@@ -11,14 +11,13 @@
 //! to 3 uses `(position - 76000) * 20 / 1000 + 18`; every other mode uses
 //! `(position - 88000) * 14 / 1000 + 20`. It reads the UI element pointer at
 //! +0x94 and, only when non-null, tail-dispatches the marker and the element's
-//! word +0x80 to `FUN_0826dd8c`.
+//! word +0x80 to `view_base_set_position_offsets`.
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_0826dd8c` is not named or ported. Target builds call its verified
-//! retail address; host tests use a recording seam. The original tail branch
-//! is therefore an ordinary call, while arguments and the NULL early return
-//! are preserved.
+//! The original tail branch becomes a Rust call to the ported geometry-offset
+//! setter. Host tests replace that dispatch to isolate the class arithmetic;
+//! arguments and the NULL early return are preserved.
 
 use core::ptr;
 
@@ -31,21 +30,13 @@ const ELEMENT_POSITION_OFFSET: usize = 0x80;
 
 type ElementRefresh = unsafe extern "C" fn(u32, i32, u32);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_element_refresh(element: u32, marker: i32, position: u32) {
-    let refresh: ElementRefresh = core::mem::transmute(0x0826_dd8cusize);
-    refresh(element, marker, position);
+unsafe extern "C" fn ported_element_refresh(element: u32, marker: i32, position: u32) {
+    crate::ui::set_position_offsets::view_base_set_position_offsets(
+        element as usize as *mut crate::ui::view_base::ViewBase, marker as u32, position,
+    );
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_element_refresh(_: u32, _: i32, _: u32) {}
-
-static mut ELEMENT_REFRESH: ElementRefresh = {
-    #[cfg(target_os = "none")]
-    { retail_element_refresh }
-    #[cfg(not(target_os = "none"))]
-    { missing_element_refresh }
-};
+static mut ELEMENT_REFRESH: ElementRefresh = ported_element_refresh;
 
 /// Refreshes the class-0x6280 UI element from its selected position.
 ///
@@ -97,7 +88,7 @@ mod tests {
             ELEMENT_REFRESH = record_refresh;
             class_6280_refresh_ui(view.as_mut_ptr());
             assert_eq!(OBSERVED, (element as usize as u32, 38, 0xdead_beef));
-            ELEMENT_REFRESH = missing_element_refresh;
+            ELEMENT_REFRESH = ported_element_refresh;
         }
     }
 
@@ -112,7 +103,7 @@ mod tests {
             ELEMENT_REFRESH = record_refresh;
             class_6280_refresh_ui(view.as_mut_ptr());
             assert_eq!(OBSERVED, (1, 2, 3));
-            ELEMENT_REFRESH = missing_element_refresh;
+            ELEMENT_REFRESH = ported_element_refresh;
         }
     }
 }

@@ -201,6 +201,7 @@ pub mod range_release;
 pub mod container_view;
 pub mod set_geometry;
 pub mod geometry_changed;
+pub mod set_position_offsets;
 pub mod set_x_extent;
 pub mod set_y_extent;
 pub mod layout_apply_pending_offsets;
