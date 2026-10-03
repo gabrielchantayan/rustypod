@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08275cd4
+    ghidra: FUN_08275cd4
+    name: framework_sentinel_state_construct
+    size: 40
+    sig: "FrameworkSentinelState *framework_sentinel_state_construct(FrameworkSentinelState *storage)"
+    module: cxx/framework_sentinel_state_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      puVar1/r0: this
+      DAT_08275cf8: FRAMEWORK_SENTINEL_STATE_VTABLE
+      FUN_08275bb8: framework_object_construct
+    notes: >-
+      Raw extent [0x08275cd4,0x08275cfc): 36 instruction bytes plus
+      vtable literal 0x089a5ffc at 0x08275cf8, true size 40 rather than
+      Ghidra's 36. Next function is a destructor veneer at 0x08275cfc.
+      Whole-image ARM scan: two incoming plain BLs at 0x081440e4 and
+      0x0816bfec, zero predicated BLs; one outgoing plain BL at
+      0x08275cd8 to already-ported framework_object_construct
+      (0x08275bb8), zero predicated BLs. Uses the returned root pointer
+      for every store and returns it unchanged: install vtable,
+      write all-ones sentinel at +4, clear only byte +8. Bytes +9..+11
+      and derived state are untouched. Both callers install derived
+      vtables; higher-level sentinel/flag roles remain unestablished.
+      Deviations: none; fixed-width fields and volatile stores preserve
+      layout and write order. Host regressions cover dirty storage,
+      surrounding words, padding and reconstruction. Host suite and ARM
+      release build pass. Standalone actual-source smoke passes with a
+      minimal binary-verified root constructor model. match.py exits 1:
+      LLVM adds a frame-pointer move and uses fp rather than r4; the
+      root BL relocation, returned-r0 stores, sentinel, byte clear and
+      0x089a5ffc literal retain the original structure.
   - address: 0x0826a4d4
     ghidra: FUN_0826a4d4
     name: selected_record_dispatch
