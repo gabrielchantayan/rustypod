@@ -207701,3 +207701,48 @@ functions:
       flags before BL and reorders independent stores; offsets, values,
       full-width selection and retained r0 agree. Archive relocation
       confirms the sole R_ARM_CALL targets selector_item_base_construct.
+
+  - address: 0x082339f0
+    ghidra: FUN_082339f0
+    name: keyed_child_refresh
+    size: 112
+    status: ported
+    signature: "void keyed_child_refresh(RefreshOwner *owner)"
+    source: src/app/keyed_child_refresh.rs
+    vars:
+      param_1/r0: owner
+      r4: container
+      DAT_08233a58: ZERO_SELECTION_KEY
+      DAT_08233a5c: NONZERO_SELECTION_KEY
+      FUN_081883fc: demo_mode_instance
+      FUN_08187ad0: demo_mode_keyed_object
+      FUN_08275b9c: object_cast_to_class
+      FUN_0812eaf4: current_value_virtual_dispatch
+    notes: >-
+      Raw extent 0x082339f0..0x08233a60: 104 instruction bytes and eight
+      literal bytes, followed by a real push prologue. Independent aligned
+      ARM-word scan finds two inbound plain BLs at 0x082339a0 and
+      0x08233ac4, no predicated BLs. Body has five plain BLs, no predicated
+      BLs, one BLX and a conditional tail B. Query owner slot +0xc4;
+      zero selects keyed resource 0x0dad0343, any nonzero selects
+      0x0dad0345. Resolve via the existing TCDemoMode ports and cast to
+      class 0x1580; dereference child +0x34 without a container null guard.
+      Null child returns, otherwise cast to 0x3b80 and dispatch only when
+      child and container are nonnull. Verified unregistered helper
+      0x0812eaf4 reads word +0x58, sign-extends its low halfword, loads
+      vtable slot +0x164 and tail-dispatches with receiver and signed value.
+      Target retains that helper at its raw verified address; no callee
+      class identity is invented. Both inbound callers step a value by
+      +1 or -1 before refreshing. Deviations: native-pointer repr(C)
+      models expand host fields while preserving target word indices;
+      host-only operations replace firmware calls, and Rust expresses
+      the conditional tail B as a final void call.
+      Full host suite and ARM release build pass. Native actual-source
+      smoke covers zero, one, 0x100, UINT32_MAX and absent child;
+      regression also covers rejected child casts. match.py exits 1 with
+      reviewed structural differences: LLVM merges singleton calls,
+      computes the second key by adding two, adds a frame pointer,
+      removes the redundant container check after its unconditional
+      dereference, and tail-dispatches the retained helper through BX.
+      Archive relocations verify demo_mode_instance, demo_mode_keyed_object
+      and both object_cast_to_class calls; child offset and class ids agree.
