@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod graphics_buffer_release;
 pub mod vertex_update_clip_flags;
 pub mod view_upload_pixels;
 pub mod apply_spec_geometry;

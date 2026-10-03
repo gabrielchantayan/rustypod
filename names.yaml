@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0824c798
+    ghidra: FUN_0824c798
+    name: graphics_buffer_release
+    size: 40
+    sig: "void graphics_buffer_release(u32 *buffer)"
+    module: ui/graphics_buffer_release
+    status: ported
+    renames:
+      param_1/r0/r4: buffer
+      buffer_word_0: owned_data
+      buffer_word_1: byte_length
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec establishes ten ARM words at 0x0824c798..0x0824c7bf,
+      ending in pop {r4,pc}; next function begins at 0x0824c7c0.
+      Whole-image aligned ARM decoding finds two incoming plain BLs at
+      0x0824ce9c and 0x08250020, zero predicated BLs; one outbound plain
+      BL calls the ported free at 0x0802edc8. Raw callers replace and
+      delete graphics buffers: word 0 is owned data, word 1 byte length.
+      Zero data leaves the record unchanged; otherwise free before clearing
+      both words, preserving usage at +8. No behavioral deviations or new
+      firmware seams. Target fields remain u32 words on hosts. A private
+      generic release boundary isolates ordering tests from shared heap state.
+      Host suite: 13726 passed; ARM release build passed. Production-entry
+      smoke with an instrumented allocator verifies clearing and NULL-path
+      preservation, not device heap execution. match.py exits 1: LLVM adds
+      a frame and inlines free into volatile heap-table loads and BLX,
+      preserving the NULL check, release-before-clear and both word stores.
   - address: 0x0824e0c0
     ghidra: FUN_0824e0c0
     name: video_engine_set_output_transform_fields
