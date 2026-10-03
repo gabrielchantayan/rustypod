@@ -205086,3 +205086,46 @@ functions:
       An ARM emulator smoke executes both original and linked Rust self-
       assignment with actual firmware vector helpers and verifies unchanged
       node bytes, return pointer, and COW reference count.
+
+  - address: 0x0826386c
+    ghidra: FUN_0826386c
+    name: draw_state_two_color_border
+    size: 164
+    sig: "void draw_state_two_color_border(u8 *draw_state, const Rect *rect)"
+    module: cxx/draw_state_two_color_border
+    status: ported
+    renames:
+      param_1/r0: draw_state
+      param_2/r1: rect (top, left, bottom, right)
+      r7: left
+      r8: top
+      r5: right_inclusive
+      r6: bottom_inclusive
+      FUN_082720e8: color_copy
+      FUN_0826412c: draw_state_line
+      DAT_08263908: top_left_color_address
+      DAT_0826390c: right_bottom_color_address
+    notes: >-
+      Raw A32 decoding verifies 156 bytes of code ending at 0x08263908,
+      followed by two literal words; the next real function prologue is
+      at 0x08263910, making the true extent 164 bytes. Whole-image BL
+      decoding finds two plain inbound calls at 0x0808da48 and 0x0826d9d0,
+      zero predicated inbound forms, six plain outgoing calls and zero
+      predicated outgoing forms. Loads all four rect coordinates before
+      drawing, subtracts one from right/bottom with wrapping arithmetic,
+      copies runtime color 0x089cc8cc into foreground +0x11, draws top and
+      left, copies runtime color 0x089cc8c0, then draws right from top+1
+      and bottom from left+1. No empty/inverted-rect guard; current point
+      and foreground remain at the last endpoint and second color.
+      Reuses both existing Rust callees without new callee seams. Deliberate
+      deviation: volatile palette-address data seam allows host live colors
+      while target defaults retain the verified literal addresses; raw-file
+      bytes at runtime-global addresses are not treated as palette values.
+      Host regression covers normal, one-pixel, empty/inverted, wrapping,
+      aliased rect/state, final point/color, and untouched record/guard bytes.
+      Host raster smoke verifies exact border pixels, corner ownership and
+      untouched interior/exterior. Full host tests and ARM release build pass.
+      match.py reports 39 original versus 44 Rust instructions: six calls
+      remain in order with the same endpoints, plus LLVM frame and volatile
+      palette-pointer loads; arithmetic is scheduled differently. No device
+      execution was performed.
