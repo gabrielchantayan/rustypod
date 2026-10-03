@@ -76702,6 +76702,34 @@ functions:
       frame; same straight-line no-branch getter shape as the
       original.
 
+  - address: 0x0825e3e8
+    ghidra: FUN_0825e3e8
+    name: nibble_stream_advance
+    size: 36
+    sig: "void nibble_stream_advance(u8 *state)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: state
+      bVar1: low_half
+    notes: >-
+      Raw osos.dec verifies nine ARM instructions through bx lr at
+      0x0825e408; the next function starts at 0x0825e40c, with no literal
+      pool. Full-image ARM-word scanning finds two plain BL references
+      at 0x0825338c and 0x082533c0, zero predicated BL references, and
+      no outgoing calls. Both callers consume palette indices via
+      nibble_stream_current in FUN_08253158's 4bpp loops. A zero flag
+      becomes one without reading the cursor; any nonzero flag increments
+      the cursor word by one byte with wrapping arithmetic and becomes
+      zero. Packed data is not dereferenced. Deliberate deviation: reuse
+      nibble_stream_current's native-width unaligned pointer record on
+      hosts, with the flag immediately after the pointer (+4 on ARM),
+      and native-word wrapping (32-bit wrapping on ARM). Host tests cover
+      all 256 flag values, address wraparound, an unaligned record,
+      untouched neighboring bytes, and paired traversal across three bytes.
+      The firmware target uses aligned word loads/stores; only host builds
+      use unaligned pointer access, avoiding bytewise ARM reconstruction.
+
   - address: 0x082a1be0
     ghidra: FUN_082a1be0
     name: nibble_stream_current
@@ -76727,7 +76755,7 @@ functions:
       low-half flag byte }; the body answers *cursor >> 4 when the
       flag is 0, *cursor & 0xf otherwise - high nibble first, then
       the low nibble of the same byte. The paired advance routine @
-      0x0825e3e8 (eleven instructions, binary-verified) toggles the
+      0x0825e3e8 (nine instructions, binary-verified) toggles the
       flag and steps the cursor only after the low nibble was
       consumed, so the pair walks a byte array as a big-endian-nibble
       stream. Both callers sit in FUN_08253158's 4-bit-per-pixel
