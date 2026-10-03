@@ -208321,3 +208321,46 @@ functions:
       with a nonzero simulated callee result and observes exactly one post
       of 0x08a09d78 followed by zero return. Host wrapper deliberately panics
       outside tests because retail RAM is unavailable.
+
+  - address: 0x08227ed8
+    ghidra: FUN_08227ed8
+    name: backlight_timer_refresh
+    size: 36
+    sig: "u32 backlight_timer_refresh(BacklightTimerContext *context)"
+    module: app/backlight_timer_refresh
+    vars:
+      param_1: context
+      uVar1: timer
+    status: ported
+    renames:
+      FUN_08172124: instance_of_class_6000
+      FUN_08171bdc: unsigned timer byte getter at singleton +0x34
+      FUN_081eda94: settings timer setter and virtual notification
+    notes: >-
+      Raw osos.dec words establish the complete 36-byte extent
+      0x08227ed8..0x08227efc, followed immediately by the next push
+      prologue. Independently scanning every aligned ARM BL word finds
+      one unconditional caller at 0x08227f04 and one BLNE caller at
+      0x082278cc; the body itself contains three unconditional BLs.
+      The ShowSetting_BacklightTimer caller establishes the purpose.
+      Resolve the ported class-0x6000 singleton, call the unsigned byte
+      getter at 0x08171bdc (raw ldrb r0,[r0,#0x34]; bx lr), and pass
+      its zero-extended value to 0x081eda94 with context's +0xb0 object.
+      The latter stores at +0x2c and tail-dispatches vtable +0x58 with
+      r1=0x2a2a2a2a and r2=0x891a. Return 1 regardless of setter result.
+      Neither unported callee has an existing names.yaml mapping;
+      target calls retain the verified addresses and ABIs rather than
+      inventing identities or porting additional functions. Host-only
+      operations inject those external callees. repr(C) context fields
+      retain the target +0xb0 pointer layout without truncating host
+      pointers. Host tests cover all 256 byte values, stale-value
+      replacement, notification observing the new state and unchanged
+      surrounding words. Full host suite and ARM release build pass.
+      match.py reports nine original instructions versus fourteen Rust
+      entries (twelve instructions plus two address literals): LLVM adds
+      a frame pointer and uses BLX for fixed-address calls. The registry
+      BL relocation resolves to instance_of_class_6000. A bounded ARM
+      instruction smoke exercises both original and Rust bodies for
+      0, 1, 127, 128 and 255, verifying call order, settings pointer,
+      stored value and unconditional return even with a nonzero setter
+      result. No target semantic deviations.
