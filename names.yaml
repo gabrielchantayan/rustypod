@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08254760
+    ghidra: FUN_08254760
+    name: matrix_state_apply_axis_angle_rotation
+    size: 56
+    sig: "void matrix_state_apply_axis_angle_rotation(MatrixState *state, i32 angle, i32 axis_x, i32 axis_y, i32 axis_z)"
+    module: util/matrix_state_apply_axis_angle_rotation
+    status: identified
+    renames:
+      param_1/r0: state
+      param_2/r1: angle
+      param_3/r2: axis_x
+      param_4/r3: axis_y
+      param_5/stack+0: axis_z
+      auStack_4c: matrix
+      FUN_08256eac: retail_axis_angle_matrix_constructor
+      FUN_0824d548: matrix_state_apply_transform
+    notes: >-
+      Raw A32 words establish 56 instruction bytes at
+      0x08254760..0x08254798; pop {r4, pc} at 0x08254794 is followed by
+      the next function's push at 0x08254798, with no literal pool.
+      Two outgoing unconditional BLs at 0x08254780 (0x08256eac) and
+      0x0825478c (0x0824d548), zero predicated outgoing BLs.
+      Whole-image word decoding finds one unconditional incoming BL at
+      0x08254758 and one BLNE at 0x082d1ff4; raw caller decoding confirms
+      all five arguments, unlike Ghidra's truncated caller signatures.
+      Saves state, reserves 72 stack bytes, stages axis_z at sp, and
+      constructs a 68-byte Q16.16 Rodrigues rotation matrix at sp+4 from
+      angle and axis_x/axis_y/axis_z, then applies it through the existing
+      matrix_state_apply_transform port. No argument validation in this
+      wrapper. Ghidra conflates 0x0824d548 with later code; its true
+      28-byte body multiplies the active matrix and tail-calls refresh.
+      Not ported: the constructor unconditionally calls fixed16_rsqrt
+      at 0x08256efc after summing the three fixed-point axis squares.
+      Raw rsqrt instructions at 0x08076178..0x08076188 load a seed-table
+      pointer from 0x080761fc and index a u16 seed; that literal is
+      0x083f18b2. All 16 seed-table bytes at 0x083f18b2..0x083f18c2 are
+      zero in osos.dec, inside the verified all-zero undecrypted region
+      0x083ee1c1..0x083f25ec. Existing fixed16_rsqrt entry records the
+      same blocker. General axes require these unavailable seeds;
+      zero/unit-length special cases do not establish general parity.
+      Honest deferral: recover the seed table before implementing this
+      wrapper; no Rust module, guessed seeds, or new firmware seam added.
   - address: 0x08254798
     ghidra: FUN_08254798
     name: video_engine_set_scissor_rect
