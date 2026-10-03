@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const RELATIVE_RECORD_COLLECTION_CONSTRUCT: usize = 0xd718_0000;
+    pub const MENU_RESOURCE_COLLECTION_CREATE: usize = 0xd719_0000;
     pub const TRANSITION_VECTOR_CONSTRUCT: usize = 0x4271_0000;
     pub const VIEW_LIFECYCLE_SYNC: usize = 0xd716_0000;
     pub const VIEW_INTERACTION_SYNC: usize = 0xd714_0000;

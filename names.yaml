@@ -203438,3 +203438,40 @@ functions:
       reviews the full routine. LLVM uses signed continuation comparisons
       and a different prologue/branch layout; all scan paths, byte loads,
       zero/one results, and absence of BLs are preserved.
+
+  - address: 0x0826b794
+    ghidra: FUN_0826b794
+    name: menu_resource_collection_create
+    size: 68
+    sig: "RelativeRecordCollection *menu_resource_collection_create(ResourceProvider *resources, u32 id)"
+    module: app/menu_resource_collection_create
+    status: ported
+    vars:
+      param_1/r0/r6: resources
+      param_2/r1: id
+      r4: records
+      r5: collection
+      DAT_0826b7d4: MENU (0x4d656e75)
+      FUN_0827216c: resource_chain_find
+      FUN_082aadd4: operator_new
+      FUN_0826bac4: relative_record_collection_construct
+    notes: >-
+      Raw A32 decoding verifies 64 code bytes through pop at 0x0826b7d0
+      plus the Menu literal at 0x0826b7d4: true extent 68 bytes, next
+      real entry 0x0826b7d8. Whole-image aligned BL decoding finds two
+      inbound plain calls at 0x0828917c and 0x082891cc, zero predicated
+      calls. Body has three plain BLs and zero predicated BLs. Looks up
+      the Menu resource by id in the supplied provider chain; a NULL
+      result returns NULL without allocation. Otherwise allocates 12
+      bytes and constructs the relative-record collection, preserving
+      the original provider pointer as its u32 context word. No allocation
+      failure guard is added. All three callees already have Rust ports;
+      no new seams or inferred callee identities. Deliberate deviation:
+      existing Rust calls replace direct retail BLs. Host tests exercise
+      NULL head, misses, accepted NULL, child-provider lookup, maximum id,
+      zero/negative record counts, collection bounds, preserved padding,
+      and the real empty observable array. ARM release build succeeds.
+      match.py exits 1 with an expected structural diff: three BLs, the
+      NULL branch, 12-byte allocation and Menu literal remain; LLVM adds
+      a frame pointer and uses a separate NULL-return epilogue. No device
+      execution claimed.
