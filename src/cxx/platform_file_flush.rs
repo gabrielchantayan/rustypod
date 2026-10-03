@@ -18,7 +18,7 @@ use crate::codegen::file_directory_entry::file_has_directory_entry;
 use crate::kernel::sync_mutex::{counted_mutex_guard_acquire, mutex_unlock_counted};
 
 #[inline(always)]
-unsafe fn flush_buffer_collection(collection: *mut u8) -> u32 {
+pub(super) unsafe fn flush_buffer_collection(collection: *mut u8) -> u32 {
     #[cfg(target_os = "none")]
     {
         let flush: unsafe extern "C" fn(*mut u8) -> u32 =
