@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0826b05c
+    ghidra: FUN_0826b05c
+    name: selector_item_variant_construct
+    size: 192
+    sig: "void *selector_item_variant_construct(void *this, u32 variant)"
+    module: cxx/selector_item_variant_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: variant
+      puVar2/r0: object
+    notes: >-
+      Raw extent 0x0826b05c..0x0826b11c is 192 bytes: 152 bytes of code
+      and ten literal words, followed by the next function's push.
+      Whole-image A32 decoding verifies two plain inbound BLs at
+      0x0819fbb8 and 0x0819fbd0, zero predicated BLs; one plain outbound
+      BL at 0x0826b084 to ported selector_item_base_construct, zero
+      predicated outbound BLs. Callers allocate 0x180 bytes and index
+      the returned item byte at +0xb4. Zero variant selects item 23 and
+      descriptor 0x8010; any nonzero full-width variant selects item 24
+      and descriptor 0x8011. Base arguments: kind 9, context 55, low
+      variant byte as enable_flag. Replace vtable with 0x089a37c8 and
+      install selector records 0x801d/9, 0x801e/10, 0x8020/12,
+      0x8025/17 and 0x8026/18. First two implementation words are opaque
+      literals 0x08ae5444 and 0x08ae5474; later implementation words
+      retain base zero initialization. Preserve the constructed pointer
+      in r0, unlike Ghidra's void signature. No new seams or deliberate
+      behavioral deviations. Host tests cover full-width selection
+      versus low-byte flags, preserved bits, all selector slots and bounds.
+      ARM release build passes. match.py exits 1 with a structural diff:
+      one BL retained, stores reordered, constants synthesized, frame
+      pointer added; 52 listed Rust instructions versus 38 original.
+
   - address: 0x0826b11c
     ghidra: FUN_0826b11c
     name: cg_emit_pipeline_store_word_at_offset
