@@ -27,6 +27,7 @@ pub mod color;
 pub mod rgb565_pack;
 pub mod rgb565_palette_blend;
 pub mod rgb565_weighted_blend;
+pub mod fixed_surface_resample;
 pub mod rgb565_opacity_blend;
 pub mod hash_glyph_cells_to_rgb565;
 pub mod rgba4444_pack;
