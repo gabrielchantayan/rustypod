@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0822ef20
+    ghidra: FUN_0822ef20
+    name: show_gmt_offset_highlight
+    size: 72
+    sig: "u32 show_gmt_offset_highlight(PodcastHighlightController *controller)"
+    module: app/gmt_offset_highlight_display
+    status: ported
+    vars:
+      param_1/r4: controller
+      controller+0xb0: highlight
+      uStack_c: temporary_message
+      DAT_0822ef64: gmt_offset_message
+    renames:
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 establishes 0x0822ef20..0x0822ef68: 68 code bytes and
+      four-byte literal, before the next independent push. Two plain
+      outbound BLs at 0x0822ef3c and 0x0822ef58, zero predicated outbound
+      BLs, one virtual BLX at 0x0822ef50. Full-image aligned BL decoding
+      finds inbound BLNE at 0x0822d43c and plain BL at 0x0823091c.
+      Sets highlight to 4, constructs a COW string from literal address
+      0x088ffd48, displays through vtable +0x11c, releases and returns 1.
+      Ground-truth source bytes spell GMT + %d 小時 %d 分鐘; no formatting
+      occurs despite percent sequences. Reuses existing highlight controller
+      layout and verified COW-string ports. Deliberately omits unused input
+      registers and allocator-tag residue; host pointers are native-width
+      with target offsets checked in the shared module.
+      Host suite and ARM release build pass. match.py structural diff
+      retains the +0xb0 byte store, both COW-string BLs, virtual BLX through
+      +0x11c, cleanup and constant return, with a different stack frame.
   - address: 0x0822f1f4
     ghidra: FUN_0822f1f4
     name: show_podcast_highlight
