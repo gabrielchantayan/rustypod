@@ -362,6 +362,7 @@ pub mod draw_state_color;
 pub mod draw_state_fill;
 pub mod draw_state_line;
 pub mod draw_state_two_color_border;
+pub mod draw_state_reversed_two_color_border;
 pub mod draw_line_engine;
 pub mod draw_horizontal_line;
 pub mod draw_state_stroke;
