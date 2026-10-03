@@ -22882,9 +22882,10 @@ functions:
       then vtable[0] releases the tag-3-allocated text. 10 call sites:
       operator_new_checked 0x08266c70 (code 3) + the std::ios/exception
       reporters (codes 4, 8, 9, 0xe..0x11, 0x14). Deviation: the
-      builder subsystem (RWSTDERR catalog 0x08266d28 + growable
-      vasprintf 0x08266ca0 over string table DAT_082a7cf0) is NOT
-      ported — it sits behind CXX_NEW_HANDLER_OPS.format_message whose
+      builder subsystem (RWSTDERR catalog 0x08266d28 over string table
+      DAT_082a7cf0) is not ported; its growable formatting helper
+      0x08266ca0 is now format_message_buffer in printf/printf_api.
+      The builder sits behind CXX_NEW_HANDLER_OPS.format_message whose
       default stub yields NULL text (unobservable on stock); vtable[0]
       is modeled as operator_delete_tag3, inferred from the builder's
       0x082aad74/0x082aad14 alloc/free pair (the vtable lives in
@@ -204719,3 +204720,32 @@ functions:
       No Rust implementation, guessed callback, or new seam is introduced.
       Required prerequisite is a verified callable destructor contract for
       the raw literal 0x083cddb4, or evidence correcting that literal/path.
+
+  - address: 0x08266ca0
+    ghidra: FUN_08266ca0
+    name: format_message_buffer
+    size: 136
+    module: printf/printf_api
+    sig: "char *format_message_buffer(char *buffer, int32_t capacity, const char *format, const uint32_t *args)"
+    status: ported
+    vars:
+      param_1/r0/r6: buffer
+      param_2/r1/r5: capacity
+      param_3/r2/r7: format
+      param_4/r3/r8: args
+      r4: retry_capacity
+      FUN_082aad74: operator_new_tag3
+      FUN_08032f94: vsnprintf
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw ARM establishes 34 words at 0x08266ca0..0x08266d28, immediately
+      followed by the independent push prologue at 0x08266d28. Three
+      internal unconditional BLs, zero predicated BLs; two unconditional
+      inbound BLs at 0x08266eec and 0x082a7c78. Zero capacity starts at 64,
+      then deletes and reallocates on overflow: count greater than signed
+      capacity selects count+1; equality doubles capacity. Reuses the
+      original args pointer each attempt. Nonzero capacity returns NULL
+      on overflow without deleting the buffer. Negative count clears byte
+      zero and returns the buffer. A supplied zero-capacity buffer is used
+      initially and deleted on retry. Deviations: existing Rust vsnprintf
+      and tag-3 heap dispatch replace direct firmware calls; their existing

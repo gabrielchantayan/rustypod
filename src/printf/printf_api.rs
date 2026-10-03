@@ -152,6 +152,59 @@ unsafe extern "C" fn file_flush(_file: *mut File) -> i32 {
     0
 }
 
+/// Format into a fixed buffer, or allocate and grow a tag-3 buffer.
+///
+/// Original: `FUN_08266ca0` @ 0x08266ca0, 136 bytes, ending immediately
+/// before the independently linked prologue @ 0x08266d28. Raw words contain
+/// three unconditional BL instructions and zero predicated BL instructions;
+/// two unconditional inbound BL sites call this function.
+///
+/// Zero capacity selects 64 bytes initially and permits retry: a count above
+/// capacity grows to count+1, while equality doubles capacity. Each retry
+/// deletes the previous buffer and reuses the original va_list. Nonzero
+/// capacity forbids retry and returns NULL on truncation. A negative count
+/// clears byte zero and returns the buffer. A non-NULL initial buffer is used
+/// even with zero capacity, and is deleted if retry is necessary.
+///
+/// Deviations: calls use the existing Rust vsnprintf and tag-3 heap ports
+/// (including their existing dispatch tables). Signed 32-bit comparisons and
+/// wrapping growth match ARM; no allocation-failure guard is added.
+///
+/// # Safety
+/// `fmt` and `ap` must satisfy vsnprintf's contract. A supplied buffer must
+/// hold capacity bytes (64 when capacity is zero); in the zero-capacity mode
+/// it must be eligible for tag-3 deletion. Allocation must succeed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn format_message_buffer(
+    mut buffer: *mut u8, capacity: i32, fmt: *const u8, ap: VaList,
+) -> *mut u8 {
+    use crate::heap::veneers::{operator_new_tag3, operator_delete_tag3};
+    let mut size = if capacity == 0 { 64 } else { capacity };
+    if buffer.is_null() {
+        buffer = operator_new_tag3(size as u32 as usize);
+    }
+    loop {
+        let count = vsnprintf(buffer, size as u32 as usize, fmt, ap);
+        if count < 0 {
+            *buffer = 0;
+            return buffer;
+        }
+        if size < count {
+            size = count.wrapping_add(1);
+        } else if size == count {
+            size = size.wrapping_shl(1);
+        } else {
+            return buffer;
+        }
+        if capacity != 0 {
+            return core::ptr::null_mut();
+        }
+        operator_delete_tag3(buffer);
+        buffer = operator_new_tag3(size as u32 as usize);
+    }
+}
+
 /// `vsprintf` — original: `FUN_0802f654` @ 0x0802f654 (60 bytes).
 ///
 /// Formats into `dest` with the unbounded [`mem_putc`] sink, then
@@ -361,6 +414,68 @@ mod tests {
         PRINTF_ENGINE = engine;
         body();
         PRINTF_ENGINE = printf_engine_stub;
+    }
+
+    #[test]
+    fn message_buffer_fixed_capacity_boundaries_and_error() {
+        let _engine = engine_lock();
+        let mut buffer = [0xa5; 8];
+        unsafe {
+            with_engine(echo_engine, || {
+                for (text, capacity, succeeds, expected) in [
+                    (&b"\0"[..], 1, true, &b"\0"[..]),
+                    (&b"abc\0"[..], 4, true, &b"abc\0"[..]),
+                    (&b"abcd\0"[..], 4, false, &b"abc\0"[..]),
+                    (&b"abcdef\0"[..], 4, false, &b"abc\0"[..]),
+                ] {
+                    buffer.fill(0xa5);
+                    let result = format_message_buffer(buffer.as_mut_ptr(), capacity, text.as_ptr(), core::ptr::null());
+                    assert_eq!(result, if succeeds { buffer.as_mut_ptr() } else { core::ptr::null_mut() });
+                    assert_eq!(&buffer[..expected.len()], expected);
+                    assert_eq!(buffer[capacity as usize], 0xa5);
+                }
+            });
+            unsafe extern "C" fn failed(_: *const u8, _: PutcFn, _: *mut c_void, _: VaList) -> i32 { -1 }
+            buffer.fill(0xa5);
+            with_engine(failed, || {
+                assert_eq!(format_message_buffer(buffer.as_mut_ptr(), 8, core::ptr::null(), core::ptr::null()), buffer.as_mut_ptr());
+                assert_eq!(buffer, [0, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5, 0xa5]);
+            });
+        }
+    }
+
+    #[test]
+    fn message_buffer_growth_and_supplied_zero_capacity_ownership() {
+        use crate::heap::veneers::tests::{mock_heap, set_alloc_ret, alloc_log, free_log};
+        let _engine = engine_lock();
+        let _heap = mock_heap();
+        let mut buffer = [0xa5; 256];
+        unsafe {
+            set_alloc_ret(buffer.as_mut_ptr());
+            with_engine(echo_engine, || {
+                let mut allocations = 0;
+                let mut frees = 0;
+                for (length, final_size, retries) in [(0, 64, 0), (63, 64, 0), (64, 128, 1), (65, 66, 1), (200, 201, 1)] {
+                    let mut text = std::vec![b'x'; length + 1];
+                    text[length] = 0;
+                    buffer.fill(0xa5);
+                    assert_eq!(format_message_buffer(core::ptr::null_mut(), 0, text.as_ptr(), core::ptr::null()), buffer.as_mut_ptr());
+                    assert_eq!(&buffer[..length + 1], &text);
+                    assert_eq!(buffer[length + 1], 0xa5);
+                    allocations += retries + 1;
+                    frees += retries;
+                    assert_eq!(alloc_log(), (allocations, final_size, 3));
+                    assert_eq!(free_log().0, frees);
+                }
+                let text = [b'y'; 65];
+                let mut terminated = text;
+                terminated[64] = 0;
+                assert_eq!(format_message_buffer(buffer.as_mut_ptr(), 0, terminated.as_ptr(), core::ptr::null()), buffer.as_mut_ptr());
+                assert_eq!(alloc_log(), (allocations + 1, 128, 3));
+                assert_eq!(free_log(), (frees + 1, buffer.as_mut_ptr(), 3));
+                assert_eq!(&buffer[..65], &terminated);
+            });
+        }
     }
 
     #[test]
