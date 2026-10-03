@@ -205821,3 +205821,42 @@ functions:
       the fast-path branch, synthesizes 0x898 with mov/orr, and uses BLX
       for resident constructors; allocation order, dependency forwarding,
       cache store and final reload are preserved.
+
+  - address: 0x0825790c
+    ghidra: FUN_0825790c
+    name: message_envelope_construct
+    size: 76
+    sig: "u32 *message_envelope_construct(u32 *envelope, u32 code, u32 data, u32 length)"
+    module: app/message_envelope_construct
+    status: ported
+    renames:
+      param_1/r0: envelope
+      param_2/r1: code
+      param_3/r2: data
+      param_4/r3: length
+      FUN_082aadd4: operator_new
+      FUN_08257bcc: nested_message_construct (resident ABI seam)
+      DAT_08257954: message_envelope_vtable
+    notes: >-
+      Raw A32 bytes establish 72 instruction bytes followed by the vtable
+      literal 0x089a75a8 at 0x08257954; next real function starts with
+      cmp r0,#0 at 0x08257958, giving the true 76-byte extent. The body
+      contains two plain unconditional BL instructions and zero predicated
+      BL instructions. Whole-image aligned BL decoding finds two inbound
+      unconditional calls at 0x081d6f08 and 0x081d7f68, zero predicated.
+      Initializes the 12-byte kind-zero UI message envelope: clears only
+      byte +4, installs the vtable at +0, allocates 16 bytes via the ported
+      tag-2 operator_new, invokes the nested-message constructor with
+      (allocation, code, data, length), stores its returned pointer at +8,
+      and returns the original envelope. The resident constructor raw
+      words install vtable 0x089a75b8 and store code and length at +4/+8;
+      nonzero length allocates and copies data into the pointer at +12.
+      Neither assigned address nor resident constructor has another
+      canonical registry entry. Deliberate deviations: existing heap port,
+      typed resident seam at 0x08257bcc, explicit host seam installation,
+      fixed-width pointer words on hosts. No NULL guard or padding clear.
+      Host regression covers padding and neighboring storage preservation.
+      Public-entry smoke verifies allocation size/tag, argument order,
+      constructor result, and original-envelope return. ARM release builds;
+      match.py exits 1 with a structural diff: added FP frame, reordered
+      initial independent stores, BLX resident call, and preserved algorithm.
