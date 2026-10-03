@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082371ac
+    ghidra: FUN_082371ac
+    name: object_mark_initialized
+    size: 52
+    sig: "u32 object_mark_initialized(u8 *object)"
+    module: app/object_mark_initialized
+    status: ported
+    renames:
+      param_1/r0: object
+      bVar2/r5: failure verdict (always zero in this firmware)
+      object+0x70: initialization byte
+    notes: >-
+      Raw A32 words establish the true 52-byte extent ending at the next
+      push entry 0x082371e0. Whole-image aligned BL decoding finds one plain
+      inbound call at 0x08237338 and one predicated BLEQ at 0x08237258.
+      Outbound calls: one plain BL at 0x082371c4 to 0x08153d70, zero
+      predicated BLs. The callee is exactly the eight bytes e3a00000
+      e12fff1e (mov r0,#0; bx lr), ending at the next push at 0x08153d78.
+      Neither assigned entry nor callee has an existing names.yaml entry.
+      Read byte +0x70; on zero, the helper succeeds and the byte becomes one;
+      preserve every nonzero value and always return zero. The constructor
+      at 0x0823731c clears the byte before calling; 0x082371e0 conditionally
+      calls when it is zero. Both discard the return. Ghidra's caller
+      attribution to 0x08167280 does not describe the actual BL instruction.
+      Deliberate structural deviation: fold the proven constant-zero helper,
+      removing its call and unreachable failure branch without inventing a
+      callee identity or adding a seam. No observable behavioral deviations.
+      Host tests cover all 256 flag values, surrounding-byte preservation,
+      zero return and repeated initialization; full suite passes 13780 tests.
+      Constructor/gated-caller smoke returns zero, leaves flag one and
+      preserves neighboring byte 0xa5. ARM release build succeeds; match.py
+      shows eight instructions retaining LDRB/CMP/conditional STRB at +0x70
+      and zero return, with the verified constant callee folded away.
   - address: 0x08237fc4
     ghidra: FUN_08237fc4
     name: selector_item_last_records_variant_construct
