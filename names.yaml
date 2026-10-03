@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08267f78
+    ghidra: FUN_08267f78
+    name: string_pair_vector_last
+    size: 16
+    sig: "uint32_t *string_pair_vector_last(const uint32_t *owner)"
+    module: app/string_pair_vector_last
+    status: ported
+    renames:
+      param_1/r0: owner
+      first_load/r0: backing
+      second_load/r0: end
+    notes: >-
+      Raw words e5900004 e590003c e2400010 e12fff1e establish the
+      16-byte extent 0x08267f78..0x08267f88 exclusive. The next real
+      function is an independently called getter beginning at 0x08267f88.
+      Whole-image aligned A32 decoding finds two plain unconditional inbound
+      BLs at 0x082233ac and 0x082681cc, zero predicated inbound BLs,
+      and zero plain or predicated calls inside this leaf. Load the backing
+      pointer at owner +4, load the pair-vector end word at backing +0x3c,
+      subtract 16 with u32 wrapping, and return the address. Caller
+      0x082680d8 uses 16-byte records with StringObjects at +0/+8 and
+      begin/end words at backing +0x38/+0x3c; caller 0x08223254 assigns
+      the second string at returned +8. No callees or new seams. No deliberate
+      behavioral deviations; target-width fields remain four bytes on hosts
+      and no empty-vector or null checks are added. Host tests cover one,
+      multiple and empty records, underflow, high-bit addresses, changed
+      backing identity and untouched words. All 13634 host tests and the ARM
+      release build pass. Actual-source executable smoke verifies the second
+      string slot and zero-end wraparound. Reviewed match.py diff exits 1:
+      six Rust instructions versus four original, with the same two loads
+      and subtraction, added LLVM frame setup and pop return replacing bx lr.
   - address: 0x08268378
     ghidra: FUN_08268378
     name: ascii_hex_digit_value

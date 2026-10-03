@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod string_pair_vector_last;
+pub use string_pair_vector_last::*;
 pub mod six_halfword_defaults_initialize;
 pub mod virtual_array_assign;
 pub mod flagged_record_construct;
