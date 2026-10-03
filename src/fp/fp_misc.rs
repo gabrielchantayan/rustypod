@@ -2319,7 +2319,7 @@ pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistN
 /// into the packed bytes, +0x04 low-half flag byte } — and the body
 /// answers `*cursor >> 4` when the flag is 0, `*cursor & 0xf`
 /// otherwise: a high nibble first, then the low nibble of the same
-/// byte. The paired advance routine @ 0x0825e3e8 (eleven
+/// byte. The paired advance routine @ 0x0825e3e8 (nine
 /// instructions, binary-verified) toggles the flag and steps the
 /// cursor only after the low nibble was consumed (`flag ? (cursor++,
 /// flag = 0) : (flag = 1)`), so together the pair walks a byte
@@ -2358,6 +2358,48 @@ pub unsafe extern "C" fn nibble_stream_current(state: *const u8) -> u8 {
     let low_half = *state.add(core::mem::size_of::<*const u8>());
     let packed = *cursor;
     if low_half == 0 { packed >> 4 } else { packed & 0xf }
+}
+
+/// nibble_stream_advance — original: `FUN_0825e3e8` @ 0x0825e3e8.
+///
+/// True extent: 36 bytes, nine ARM instructions through `bx lr` at
+/// 0x0825e408; the next function starts at 0x0825e40c. Raw-word scanning
+/// finds two plain BL references (0x0825338c, 0x082533c0), zero predicated
+/// BL references, and no outgoing calls.
+///
+/// After consuming a high nibble (flag zero), set the flag to one without
+/// reading or changing the cursor. After consuming a low nibble (any
+/// nonzero flag), increment the cursor by one byte and clear the flag.
+///
+/// Deliberate deviation: match `nibble_stream_current`'s native-width,
+/// potentially unaligned pointer record on hosts; the flag follows the
+/// pointer, at +4 on ARM. Cursor arithmetic wraps at native word width
+/// (32 bits on target), without dereferencing the packed data.
+///
+/// # Safety
+///
+/// `state` must address a writable record containing a native-width cursor
+/// followed by one flag byte, with word alignment on the firmware target.
+/// The cursor need not address readable memory.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn nibble_stream_advance(state: *mut u8) {
+    let flag = state.add(core::mem::size_of::<*const u8>());
+    if *flag == 0 {
+        *flag = 1;
+    } else {
+        #[cfg(target_os = "none")]
+        let cursor = (state as *const *const u8).read();
+        #[cfg(not(target_os = "none"))]
+        let cursor = core::ptr::read_unaligned(state as *const *const u8);
+        #[cfg(target_os = "none")]
+        (state as *mut *const u8).write(cursor.wrapping_add(1));
+        #[cfg(not(target_os = "none"))]
+        core::ptr::write_unaligned(
+            state as *mut *const u8, cursor.wrapping_add(1),
+        );
+        *flag = 0;
+    }
 }
 
 /// cond_wait_attr_clock — original: `FUN_082a1bfc` @ 0x082a1bfc
@@ -5977,6 +6019,47 @@ mod tests {
         state[word] = low_half;
         state[2 * word] = packed;
         state
+    }
+
+    #[test]
+    fn nibble_stream_advance_normalizes_every_flag_and_preserves_neighbors() {
+        let word = core::mem::size_of::<*const u8>();
+        for low_half in 0u8..=255 {
+            let mut storage = std::vec![0xa5u8; word + 6];
+            let state = unsafe { storage.as_mut_ptr().add(1) };
+            let cursor = usize::MAX as *const u8;
+            unsafe {
+                core::ptr::write_unaligned(state as *mut *const u8, cursor);
+                *state.add(word) = low_half;
+                nibble_stream_advance(state);
+                let next = core::ptr::read_unaligned(state as *const *const u8);
+                assert_eq!(next as usize, if low_half == 0 { usize::MAX } else { 0 });
+                assert_eq!(*state.add(word), if low_half == 0 { 1 } else { 0 });
+            }
+            assert_eq!(storage[0], 0xa5);
+            assert_eq!(&storage[word + 2..], &[0xa5; 4]);
+        }
+    }
+
+    #[test]
+    fn nibble_stream_advance_walks_high_then_low_nibbles_across_bytes() {
+        let packed = [0xab, 0x01, 0xf0];
+        let word = core::mem::size_of::<*const u8>();
+        let mut state = std::vec![0xa5u8; word + 4];
+        unsafe {
+            core::ptr::write_unaligned(state.as_mut_ptr() as *mut *const u8, packed.as_ptr());
+        }
+        state[word] = 0;
+        for (index, expected) in [0xa, 0xb, 0, 1, 0xf, 0].into_iter().enumerate() {
+            unsafe {
+                assert_eq!(nibble_stream_current(state.as_ptr()), expected);
+                nibble_stream_advance(state.as_mut_ptr());
+                let cursor = core::ptr::read_unaligned(state.as_ptr() as *const *const u8);
+                assert_eq!(cursor, packed.as_ptr().add((index + 1) / 2));
+            }
+            assert_eq!(state[word], ((index + 1) % 2) as u8);
+            assert_eq!(&state[word + 1..], &[0xa5; 3]);
+        }
     }
 
     #[test]
