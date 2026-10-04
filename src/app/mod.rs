@@ -316,6 +316,7 @@ pub mod volume_limit_state_refresh_if_pending;
 pub mod volume_limit_entry_reset;
 pub mod volume_controller_adjust;
 pub mod media_player_set_volume;
+pub mod volume_controller_adjust_position;
 pub mod linked_list_snapshot_create;
 pub mod media_player_reset_default_resource;
 pub mod global_adjustment_notification_post;
