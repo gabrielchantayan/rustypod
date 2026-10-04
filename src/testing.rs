@@ -1146,6 +1146,9 @@ pub mod hints {
     // user may share it.
     pub const OWNED_PAIR_DESTROY_AND_DEALLOCATE: usize = 0x6dc0_0000;
 
+    // Dedicated to the 0x081d8764 owned-pair owner destructor.
+    pub const OWNED_PAIR_OWNER_DESTRUCT: usize = 0x6dd1_0000;
+
     // 0x7e00_0000: dedicated to class-0x7f80 artwork-slot fixtures;
     // fixture mappings never unmap, so no other user may share this hint.
     pub const ARTWORK_SLOT_AVAILABILITY: usize = 0x7e00_0000;
