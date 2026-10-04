@@ -212096,3 +212096,44 @@ functions:
       frame pointer and changes saved registers. Three R_ARM_CALL
       relocations verify the same lock/copy/unlock targets; +0x1c and
       final return one remain intact. No on-device execution claimed.
+
+  - address: 0x081f7078
+    ghidra: FUN_081f7078
+    name: calendar_week_index
+    size: 32
+    sig: "u32 calendar_week_index(const u32 *day, const u32 *week_origin)"
+    module: time/calendar_week_index
+    status: ported
+    vars:
+      param_1: day
+      param_2: week_origin
+      iVar1: elapsed_weeks
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec words e92d4010 e5900000 e5911000 e0400001 e3a01007
+      ebf8ffa0 e2800001 e8bd8010 establish the exact 32-byte extent
+      [0x081f7078, 0x081f7098); the next function begins with e92d403e.
+      Independent whole-image aligned A32 BL decoding finds two inbound
+      unconditional calls at 0x081f7034 and 0x081f706c, zero predicated
+      inbound calls. The body has one unconditional BL at 0x081f708c to
+      the already ported __rt_udiv at 0x08036f14, zero predicated calls.
+      Loads the first day-number word of each record, subtracts the origin
+      with u32 wrapping, divides unsigned by seven, and adds one. Calendar
+      callers store the selected day's week index at +0x34 and the last
+      day of the year's week index at +0x38. Ghidra's signed int types
+      obscure unsigned division; reversed dates intentionally yield large
+      unsigned indices. No behavioral deviations or new callee seams.
+      Aligned u32 pointers preserve four-byte target words on hosts.
+      Host tests cover week boundaries, year-length spans, reversed dates,
+      subtraction wrap, the high bit, maximum differences, and aliasing.
+      Optimized standalone smoke using the production week-index and divider
+      sources observed indices 1, 1, 2, 53, 613566757, and 613566743
+      for days 100, 106, 107, 465, 99, and 0xffffffff relative to day 100.
+      The smoke trapped the unreachable division-by-zero raise path rather
+      than emulating it. No on-device execution claimed.
+      Host suite passed (13971 tests); ARM build-std release build passed.
+      match.py reported a structural diff (exit 1): eight original versus
+      nine Rust instructions. LLVM adds a frame-pointer setup, swaps the
+      two independent loads, and saves fp instead of r4. Subtraction,
+      divisor seven, divider call, and increment remain intact; the
+      R_ARM_CALL relocation at +0x18 names __rt_udiv.
