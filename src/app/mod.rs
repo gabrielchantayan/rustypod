@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod controller_scale_or_offset;
+pub use controller_scale_or_offset::*;
 pub mod context_operation_begin;
 pub mod context_range_release;
 pub mod member_range_progress;
