@@ -606,6 +606,7 @@ pub mod object_offset_48;
 pub mod object_flag_nibble;
 pub mod object_flag_0x8_is_set;
 pub mod object_flag_0x100_is_set;
+pub mod object_linked_value_flagged;
 pub mod object_owner_set;
 pub mod object_dispatch_entry;
 pub mod dispatch_registry_record;
