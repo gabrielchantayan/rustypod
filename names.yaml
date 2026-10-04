@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821523c
+    ghidra: FUN_0821523c
+    name: image_path_cache_refresh
+    size: 200
+    sig: "u32 image_path_cache_refresh(ImagePathCache *cache, u32 key, u32 kind)"
+    module: app/image_lookup_cache
+    status: ported
+    vars:
+      param_1/r4: cache
+      param_2/r6: key
+      param_3/r7: kind
+      piVar2/r8: provider
+      "cache+0x24": option
+    renames:
+      FUN_083d64c4: handle_deref_or_null
+      FUN_08105b28: image_format_for_kind_kind4_override
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      "provider vtable+0x20": lookup (static identity unresolved)
+    notes: >-
+      Raw extent 0x0821523c..0x08215304 exclusive is 196 code bytes plus
+      vtable literal 0x089a6044 at 0x08215300. Next entry starts with cmp.
+      Whole-image A32 scan finds two inbound plain BLs at 0x08214fa4 and
+      0x08215128, zero predicated inbound; three plain outbound BLs,
+      one BLNE and one indirect BLX. Key/kind hit returns one without
+      provider access. Miss dispatches slot +0x20 with mapped format and
+      path/index/count/byte output pointers. Success caches key/kind;
+      failure clears key/path/count/byte, sets index to -1, preserves kind.
+      Ghidra's fourth input and u64 return are artifacts. Deviations:
+      native-width repr(C) host pointers, expanded virtual NULL-string
+      clear, omitted impossible stack self-alias. All 13853 host tests
+      pass; ARM release build passes. Standalone actual-function host
+      smoke proves hit bypass with invalid provider and preserved outputs.
+      match.py exits 1: 49 original versus 58 Rust entries; frame and
+      expanded clear differ, provider slot/output offsets and branches agree.
   - address: 0x0820fa58
     ghidra: FUN_0820fa58
     name: configured_range_view_construct
