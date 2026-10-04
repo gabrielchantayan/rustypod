@@ -2975,6 +2975,8 @@ pub mod hints {
     // array and storage fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const SLOT_ARRAY_OWNER_GET: usize = 0x7900_0000;
+    // Dedicated raw-u32 slot array and storage for owner presence tests.
+    pub const SLOT_ARRAY_OWNER_HAS_VALUE: usize = 0x7901_0000;
     // 0x7fa0_0000: dedicated to ui/selection_clear_and_stop_timer's raw-u32
     // controller, embedded BitSet, and timer fixture; mappings never unmap.
     pub const SELECTION_CLEAR_AND_STOP_TIMER: usize = 0x7fa0_0000;
