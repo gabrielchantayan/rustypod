@@ -780,6 +780,41 @@ mod tests {
         guard
     }
 
+    #[test]
+    fn callback_entry_base_teardown_preserves_state_and_handles_dead_cells() {
+        use crate::app::callback_queue_entry_destruct::{
+            CallbackQueueEntryBase, callback_queue_entry_base_destruct,
+        };
+        let _guard = mock_kernel();
+        for handle in [0, 0x42] {
+            let mut cell = handle;
+            let mut base = CallbackQueueEntryBase {
+                vtable: 0x1234, state_words: [1, 2, 3, 4],
+                mutex: Mutex { sem_cell: &mut cell, unused: 0xa5a5 },
+                trailing_words: [5, 6, 7, 8, 9],
+            };
+            CALLS.lock().expect("call trace lock").clear();
+            let cell_address = &mut cell as *mut u32 as usize;
+            unsafe { assert_eq!(callback_queue_entry_base_destruct(&mut base), &mut base as *mut _); }
+            let expected = if handle == 0 {
+                vec![]
+            } else {
+                vec![Call::Wait(handle), Call::Signal(handle),
+                    Call::Delete(1, cell_address), Call::Free(cell_address)]
+            };
+            assert_eq!(calls(), expected);
+            assert_eq!(cell, 0);
+            assert!(base.mutex.sem_cell.is_null());
+            assert_eq!(base.mutex.unused, 0xa5a5);
+            assert_eq!(base.vtable, 0x0899_1994);
+            assert_eq!(base.state_words, [1, 2, 3, 4]);
+            assert_eq!(base.trailing_words, [5, 6, 7, 8, 9]);
+            CALLS.lock().expect("call trace lock").clear();
+            unsafe { callback_queue_entry_base_destruct(&mut base); }
+            assert_eq!(calls(), vec![]);
+        }
+    }
+
     static mut WORD_PAIR_OWNER: *mut crate::app::locked_word_pair_reset::LockedWordPairOwner =
         core::ptr::null_mut();
 
