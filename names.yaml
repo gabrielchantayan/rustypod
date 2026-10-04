@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f4078
+    ghidra: FUN_081f4078
+    name: triple_base_state_reset
+    size: 32
+    sig: "BaseVtableState *triple_base_state_reset(BaseVtableState *storage)"
+    module: app/triple_base_state_reset
+    status: ported
+    renames:
+      param_1/r0: storage
+      storage_plus_0x20: last_record
+      storage_plus_0x10: middle_record
+      storage_plus_0x00: first_record
+    notes: >-
+      Raw osos.dec establishes eight A32 instructions, 32 bytes from
+      0x081f4078 through the tail B at 0x081f4094. The next independent
+      leaf starts at 0x081f4098; Ghidra's 36 bytes include its first CMP.
+      Whole-image branch decoding finds two inbound unconditional BLs
+      at 0x08153df8 and 0x08206e2c, zero predicated inbound BLs. Outbound
+      unconditional BLs at 0x081f4080 and 0x081f4088 target 0x0820c814
+      and 0x0818dce4; zero predicated BLs; final B targets 0x0816745c.
+      All three raw veneers branch to 0x081215ec, which installs vtable
+      0x08982fc4, clears state and writes two all-ones sentinels while
+      preserving r0. Reset three adjacent 16-byte records last to first
+      and return the original pointer, as both raw callers require.
+      Deliberate deviation reuses ported base_vtable_state_init at
+      0x081215c8, whose stores and return exactly match 0x081215ec.
+      No new firmware seams or unverified class identity. Host tests
+      cover dirty/zero/all-ones storage, distinct live states, surrounding
+      guards and pointer return. All 13980 host tests and ARM release
+      build passed; optimized production-source executable smoke passed.
+      Reviewed match.py exit-one diff: it includes the next CMP; Rust
+      adds a frame pointer and saves the original pointer. ARM relocations
+      confirm two BLs and one tail B to base_vtable_state_init. No device run.
   - address: 0x08207560
     ghidra: FUN_08207560
     name: linked_entry_process
