@@ -232,6 +232,7 @@ pub mod buffered_stream_collection_flush;
 pub mod buffered_stream_close;
 pub mod six_slot_cleanup;
 pub mod byte_source;
+pub mod encoded_pair_decode;
 pub mod buffer_transition_controller;
 pub mod tracked_operation_dispatch;
 pub mod byte_flag_at_d_is_one;
