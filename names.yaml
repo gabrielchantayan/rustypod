@@ -213462,3 +213462,47 @@ functions:
       exits 1 with six instructions on both sides: LLVM replaces the register
       copy and bx lr with a frame prologue/epilogue, retaining the +0x30 word
       load, zero comparison, and predicated +0x1c addition. No device execution.
+
+  - address: 0x082006dc
+    ghidra: FUN_082006dc
+    name: media_player_slot_5c_selector_update
+    size: 180
+    sig: "u32 media_player_slot_5c_selector_update(void *this, u32 selector, i32 register_callback, i32 callback_kind)"
+    module: app/media_player_slot_5c_selector_update
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: selector
+      param_3/r2: register_callback
+      param_4/r3: callback_kind
+      FUN_08259594: media_player_interface_get
+      FUN_081fe954: slot_table_register
+      FUN_081fea54: slot_table_clear
+      "vtable+0x60": unresolved_selector_query
+      "vtable+0x5c": unresolved_selector_set
+    notes: >-
+      Raw ARM proves 180 bytes through the return at 0x0820078c, before the
+      next prologue at 0x08200790. Whole-image aligned word decoding finds
+      two incoming unconditional BLs at 0x081fe76c and 0x081ff424, zero
+      predicated callers. Three outgoing unconditional direct BLs, zero
+      predicated BLs, one BLX and one BLXNE. Reject unsigned 4..252 with
+      error 4 before interface access. Normalize 2/3 to 1 and 253/254 to
+      255; accepted values above 255 remain untruncated. Query +0x60 even
+      when clearing or unchanged. Clear slot 14 for zero registration flag;
+      otherwise register callback_kind/previous_value/0. Ignore slot errors.
+      Reload vtable and dispatch +0x5c only when normalized selector differs
+      from previous value. Return zero. Virtual target identities unresolved.
+      Deliberate deviations: existing singleton getter including its
+      NOT-HOOK-READY constructor caveat, crate-owned slot storage rather
+      than retail RAM, native-width host vtable words at target word indices.
+      Host tests cover every rejected selector, normalization boundaries,
+      high unsigned words, negative registration flag and kind, unchanged
+      selectors, busy callback preservation, clear and invalid-kind errors,
+      callback-before-dispatch order and query-driven vtable replacement.
+      Host suite passes 14031 tests; ARM release build passes. Standalone
+      native smoke saved old value 42, normalized 254 to 255, cleared the
+      callback and normalized 3 to 1. match.py exits 1: 47 Rust versus 45
+      retail instructions, preserving three direct and two virtual calls,
+      normalization, unsigned early return and conditional update. LLVM
+      uses a wrapping range comparison, branches instead of BLXNE, removes
+      unread this argument and changes the frame. No device execution.
