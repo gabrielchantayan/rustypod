@@ -20,8 +20,10 @@
 //!
 //! ```c
 //! if (state_flags_contain(self, 0x1) && self->+0x18 <= self->+0x50) {
-//!     if (state_flags_set(self, 0x100000) == 0)   // first time only
+//!     if (!state_flags_contain(self, 0x100000)) {
 //!         notify(self->parent, 7, self);
+//!         self->flags |= 0x100000; // reload after notification
+//!     }
 //!     return 1;
 //! }
 //! ```

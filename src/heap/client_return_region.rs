@@ -10,9 +10,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! The four non-mutex callees are not ported. Target builds call their resident
-//! addresses; host tests supply them through [`CLIENT_RETURN_REGION_OPS`]. This
-//! introduces indirect `blx` calls in place of retail direct `bl` calls.
+//! Three non-mutex callees remain resident target calls; host tests supply
+//! them through [`CLIENT_RETURN_REGION_OPS`]. Completion now calls the Rust
+//! `client_capacity_notify` on target; host protocol tests retain a recorder.
 
 use crate::heap::block_region::REGION_MUTEX_OPS;
 use crate::heap::client_erase::CLIENT_MUTEX_OFFSET;
@@ -20,7 +20,6 @@ use crate::heap::client_erase::CLIENT_MUTEX_OFFSET;
 const RETAIL_HANDLE_RELEASE: usize = 0x0828_03a8;
 const RETAIL_HAND_BACK_BLOCK: usize = 0x081f_c124;
 const RETAIL_NOTIFY_DRAINED: usize = 0x081f_bf1c;
-const RETAIL_NOTIFY_COMPLETE: usize = 0x081f_c230;
 const RETURNED_HANDLE_CELL_INDEX: usize = 1;
 const CELL_BLOCK_INDEX: usize = 3;
 
@@ -88,8 +87,7 @@ unsafe fn notify_drained(client: *mut u8) {
 unsafe fn notify_drained(client: *mut u8) { (op!(notify_drained))(client, 1); }
 #[cfg(target_os = "none")]
 unsafe fn notify_complete(client: *mut u8) {
-    let notify: NotifyComplete = core::mem::transmute(RETAIL_NOTIFY_COMPLETE);
-    notify(client);
+    crate::util::client_capacity_notify::client_capacity_notify(client);
 }
 #[cfg(not(target_os = "none"))]
 unsafe fn notify_complete(client: *mut u8) { (op!(notify_complete))(client); }

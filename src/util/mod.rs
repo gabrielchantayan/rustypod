@@ -327,6 +327,7 @@ pub mod selector_slot_address;
 pub mod scheduler_label_lookup;
 pub mod scheduler_handle_label_lookup;
 pub mod client_completion_notify;
+pub mod client_capacity_notify;
 pub mod state_flags;
 pub mod selected_or_all_entry_range;
 pub mod selection_record_matches_target;
