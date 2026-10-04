@@ -74,7 +74,11 @@ mod tests {
             ptr::write_volatile(ptr::addr_of_mut!(SERVICE_MANAGER_INSTANCE), ptr::null_mut());
             assert_eq!(selected_service_handler_is_ready(), 0);
             HOST_SELECTED_CONTEXT = ptr::addr_of!(context);
-            assert_eq!(selected_service_handler_is_ready(), 0);
+            for selector in [i32::MIN, -1, 0, 2, 3, i32::MAX] {
+                context.selector = selector;
+                assert_eq!(selected_service_handler_is_ready(), 0,
+                    "zero handler must reject selector={selector} before manager access");
+            }
             context.handler = 1;
             for selector in [3, 4, i32::MAX] {
                 context.selector = selector;
