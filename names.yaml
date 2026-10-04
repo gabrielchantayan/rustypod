@@ -212856,3 +212856,43 @@ functions:
       constructor; a volatile aligned flag-word read preserves the raw
       access width after invalidation. Host smoke uses the shared walker
       with a native-pointer tree backend, not attached-device execution.
+
+  - address: 0x08203270
+    ghidra: FUN_08203270
+    name: two_pair_string_pair_owner_construct
+    size: 48
+    sig: "uint32_t *two_pair_string_pair_owner_construct(uint32_t *owner, const uint32_t *first_pair, const uint32_t *second_pair)"
+    module: app/two_pair_string_pair_owner_construct
+    status: ported
+    renames:
+      r0: owner
+      r1: first_pair
+      r2: second_pair
+      FUN_0811050c: vtable_two_pair_base_construct
+      FUN_082aadd4: operator_new
+      FUN_0819b5e4: resident_string_pair_construct
+      DAT_0820329c: derived_vtable_address
+    notes: >-
+      Raw A32 words establish 44 code bytes and the vtable literal
+      0x0899156c at 0x0820329c; the next real function opens with push
+      at 0x082032a0, so the true extent is 48 bytes. Whole-image BL
+      decoding finds two plain inbound calls at 0x081dcc5c and
+      0x081dcc8c, zero predicated. Three outbound plain BL instructions,
+      zero predicated: base construction, tag-2 allocation of 16 bytes,
+      and 0x0819b5e4. The latter raw body calls string_default_construct
+      twice at offsets zero and eight, returning the allocation unchanged.
+      Ghidra omits the owner and both entry pair-source arguments. The
+      port preserves the existing base constructor's ordered alias-sensitive
+      copies, replaces the vtable, stores the nested constructor return at
+      +20, and returns owner. Names are structural, not a claimed class
+      identity. Deviations: existing Rust base and heap ports replace direct
+      firmware calls; the unported string-pair constructor uses its verified
+      resident address with a host injection seam. Pointer fields remain u32
+      on hosts; no NULL guard is added. Alias and neighbor tests passed with
+      all 14007 host tests; ARM release build passed. Isolated public-entry
+      smoke passed using a standard host allocator adapter and reference
+      string initialization; ordinary host-library smoke was blocked by six
+      unrelated missing host functions. match.py exits 1: the same base call,
+      derived-vtable store, size-16 allocation, nested construction, +20 store
+      and owner return remain; LLVM uses a frame pointer and BLX for the
+      exact-address resident call. No attached-device execution was performed.
