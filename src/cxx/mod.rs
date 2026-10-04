@@ -249,6 +249,7 @@ pub mod deque_iterator_current_or_zero;
 pub mod deque_front_advance_release;
 pub mod deque_front_dispatch;
 pub mod deque_drain_release;
+pub mod deque_prepend_dispatch;
 pub mod vector4_resize_fill;
 pub mod app_block_manager_node_pool_acquire;
 pub mod two_word_list_node_pool_acquire;
