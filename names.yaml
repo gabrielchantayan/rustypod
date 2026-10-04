@@ -214339,3 +214339,28 @@ functions:
       unsigned byte load, and normalized boolean result remain. Standalone
       actual-source host smoke verifies 0, 1, 2, 127, 128, 254, and 255.
       No device run.
+
+  - address: 0x081eda94
+    ghidra: FUN_081eda94
+    name: class_8900_state_2c_set_and_read
+    size: 32
+    sig: "u32 class_8900_state_2c_set_and_read(Class8900 *this, u32 state)"
+    module: app/class_8900_state_2c_set_and_read
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: state
+      DAT_081edaac: RESOURCE_ID_891A
+      DAT_081edab0: RESOURCE_KIND_WILDCARD
+    notes: >-
+      Raw words establish 24 instruction bytes plus two literal words,
+      true extent 32 bytes ending at the next function at 0x081edab4.
+      Whole-image A32 decode finds two inbound plain BLs at 0x08212604
+      and 0x08227ef0, zero predicated BLs, and no outgoing BLs. Stores
+      the full input at +0x2c, then BX-dispatches virtual slot +0x58
+      with (this, 0x2a2a2a2a, 0x891a), preserving its r0 result.
+      State domain and resource identity remain unestablished. Reuses
+      Class8900 and ResourceProviderVTable; native pointers widen on hosts.
+      Rust expresses the tail branch as call-and-return. Host edge tests,
+      full host suite, ARM release build, and actual-source executable
+      smoke pass. match.py exit-one diff retains store +0x2c and BX slot
