@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820c86c
+    ghidra: FUN_0820c86c
+    name: mov_chain_table_find_tag
+    size: 52
+    sig: "i32 mov_chain_table_find_tag(const MovChainTable *table, u32 *out, u32 tag)"
+    module: mov/chain_table_find_tag
+    status: ported
+    args:
+      r0: table
+      r1: out
+      r2: tag
+    vars:
+      param_1/r0: table
+      param_2/r1: out
+      param_3/r2: tag
+      uVar1/r3: index
+      r12: entry_tag
+    notes: >-
+      Raw A32 establishes the exact 52-byte extent 0x0820c86c..0x0820c8a0;
+      the next real entry begins with cmp r1,#128. Whole-image immediate
+      branch decoding finds two inbound plain BLs at 0x0820c99c and
+      0x0820ce20, no predicated inbound BLs, and no outbound BLs of either
+      kind. Scans 128 entries of 20 bytes for the first tag byte at +8
+      equal to the full u32 query. Success stores the index and returns
+      zero; failure returns two without touching output. Queries above
+      255 cannot match. Callers search tag zero to allocate and tag two
+      to retrieve a value. Reuses the established MovChainTable layout
+      and status constants; no callees or host seams, no deviations.
+      Host tests cover every slot, byte-tag boundaries, first duplicate,
+      output aliasing, absent tags, full-width queries and unchanged
+      failure output. Standalone smoke executes the actual Rust port:
+      last-slot hit 127, full-width miss preserving output, duplicate
+      first hit 3. Host suite and ARM release build pass. match.py exits
+      1 with 13 original versus 15 Rust instructions: same bounded byte
+      scan, full-width compare and success-only output store; LLVM uses
+      postincrement addressing, explicit branches and a frame pointer.
+      No device execution.
   - address: 0x0820cd78
     ghidra: FUN_0820cd78
     name: slot_pool_available_count
