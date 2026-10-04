@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820b884
+    ghidra: FUN_0820b884
+    name: embedded_observable_array_owner_construct
+    size: 44
+    sig: "EmbeddedObservableArrayOwner *embedded_observable_array_owner_construct(EmbeddedObservableArrayOwner *this, const void *src_pair_at_4, const void *src_pair_at_12)"
+    module: cxx/embedded_observable_array_owner_construct
+    status: ported
+    renames:
+      puVar1: constructed_base
+      iVar2: constructed_array
+      DAT_0820b8ac: derived_vtable
+      FUN_081fadc4: vtable_two_pair_metadata_construct
+      FUN_081ee300: clear_three_words
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw A32 words establish 40 executable bytes plus vtable literal
+      0x08992200 at 0x0820b8ac, before the next function at 0x0820b8b0.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x081dcddc and 0x081dce90, no predicated inbound calls, and three
+      plain outbound calls with no predicated calls. Preserves both source
+      pair arguments, constructs the metadata base with r3 zero, replaces
+      its vtable, clears words at +0x48/+0x4c/+0x50, constructs the embedded
+      observable array at +0x54, and returns its receiver minus 0x54.
+      Deliberate deviation: inline the five-word clear-three-words callee
+      at 0x081ee300, whose bx lr preserves r0; reuse both existing Rust ports.
   - address: 0x0820b8b0
     ghidra: FUN_0820b8b0
     name: embedded_observable_array_owner_destruct
