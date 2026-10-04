@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ef074
+    ghidra: FUN_081ef074
+    name: slot_array_owner_has_value
+    size: 20
+    sig: "u32 slot_array_owner_has_value(const SlotArrayOwner *owner, i32 index)"
+    module: cxx/slot_array_owner_has_value
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      iVar1/r0: slot_value
+      FUN_081ef308: slot_array_owner_get
+    notes: >-
+      Raw words establish [0x081ef074,0x081ef088), 20 bytes, ending with
+      pop pc before the next function prologue. Whole-image BL decoding
+      finds two inbound plain calls at 0x081ee60c and 0x081ee964, zero
+      predicated calls; one outbound plain BL at 0x081ef078 to the existing
+      checked getter. Forward owner and signed index, return exactly 0 or 1
+      according to whether the target slot word is nonzero. No behavioral
+      deviations. Host suite: 14042 passed; ARM release build passed.
+      Standalone smoke observed [0,1,0,0] for empty/nonzero/negative/boundary.
+      match.py exit-one diff preserves BL, CMP and MOVNE; LLVM adds a frame
   - address: 0x081ef088
     ghidra: FUN_081ef088
     name: slot_array_owner_close_request
