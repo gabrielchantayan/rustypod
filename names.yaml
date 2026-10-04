@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f20f0
+    ghidra: FUN_081f20f0
+    name: iap_sample_rate_supported
+    size: 176
+    sig: "u32 iap_sample_rate_supported(i32 rate_hz)"
+    module: app/iap_sample_rate_supported
+    status: ported
+    renames:
+      param_1/r0/r2: rate_hz
+      uVar1/r1: sample_rate_capabilities
+      DAT_081f2198: shared iAP session state at 0x089cca2c
+      DAT_081f219c: sample rate 22050 Hz
+    notes: >-
+      Raw ARM establishes 168 instruction bytes and eight literal bytes,
+      ending at the independent push prologue at 0x081f21a0. Whole-image
+      decoding finds two plain inbound BLs at 0x081f20ac and 0x081f2270,
+      zero predicated inbound BLs and zero plain or predicated body BLs.
+      Read shared session word +0x10 before rate validation; map 8000,
+      11025, 12000, 16000, 22050, 24000, 32000, 44100 and 48000 Hz to
+      bits 0 through 8 and return canonical zero or one. Unknown signed
+      rates return zero. No callees or new seams. Deliberate deviations
+      reuse the existing host session binding, use a volatile aligned
+      word read and express the comparison tree as a match. All 14000
+      host tests and ARM release build passed. Public-entry smoke verifies
+      selected rates, rejection and live mask reload. Reviewed match.py
+      exit-one diff: LLVM adds a frame and rearranges comparisons, retaining
+      all nine rates, mask bits, capability load and boolean return.
   - address: 0x081f21a0
     ghidra: FUN_081f21a0
     name: iap_session_state_reset

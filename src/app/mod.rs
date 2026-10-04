@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod iap_session_state_reset;
+pub mod iap_sample_rate_supported;
 pub mod packed_selector_class;
 pub use packed_selector_class::*;
 pub mod filename_record_select;
