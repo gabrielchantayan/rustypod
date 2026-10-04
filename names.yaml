@@ -210690,3 +210690,36 @@ functions:
       unused owner forwarding, changes register allocation/frame setup,
       and replaces predication with branches; direct calls await archive
       relocation. No device execution.
+  - address: 0x0820b8d0
+    ghidra: FUN_0820b8d0
+    name: type_three_payload_construct
+    size: 28
+    sig: "void *type_three_payload_construct(void *this, u32 payload)"
+    module: cxx/type_three_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_0820b8ec: type_three_payload_vtable
+    notes: >-
+      Raw ARM confirms 28 instruction bytes through the return at 0x0820b8e8,
+      plus the literal 0x08992230 at 0x0820b8ec; the next real function starts
+      at 0x0820b8f0, giving a 32-byte extent including literal data.
+      Independent raw A32 decoding finds two incoming plain BL calls at
+      0x081fc010 and 0x08214278 and zero incoming predicated BL calls.
+      One outgoing plain BL at 0x0820b8dc targets the already ported
+      vtable_tagged_payload_construct at 0x081fc9c0 with tag 3 and payload.
+      Replace the shared vtable with 0x08992230 and return this unchanged.
+      The allocating caller reserves 12 bytes and dispatches virtually;
+      the derived constructor at 0x08214270 replaces the vtable again and
+      appends a word at +12. The concrete C++ class identity is unresolved.
+      Deliberate deviations reuse the existing Rust base constructor and
+      its volatile ordered stores, allowing LLVM frame/register differences.
+      Tests cover zero, high-bit and all-one payloads, pointer return,
+      untouched padding and neighboring words. No device execution.
+      Full host suite passed (13914 tests); ARM release build and standalone
+      constructor smoke passed. match.py reports seven original instructions
+      versus nine Rust listing entries, including the literal: the tag,
+      base call, derived vtable store and returned pointer are preserved.
+      LLVM adds a frame pointer; archive relocation R_ARM_CALL verifies
+      the BL targets vtable_tagged_payload_construct.
