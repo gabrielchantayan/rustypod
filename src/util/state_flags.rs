@@ -1,6 +1,6 @@
-//! The three accessors for the **state-flag word at +0x44** of the
-//! 0x081fbxxx state-machine class — `FUN_081fc3f4` @ 0x081fc3f4,
-//! `FUN_081fc524` @ 0x081fc524, and `FUN_081fc6f0` @ 0x081fc6f0.
+//! Accessors for the **state-flag word at +0x44** of the
+//! 0x081fbxxx state-machine class — including `FUN_081fc8b4`
+//! @ 0x081fc8b4, which tests that neither bit of 0x50000 is set.
 //!
 //! Every user of that class reaches its flag word through these accessors
 //! (plus open-coded `|=` / `&= ~` in the class's own methods), and all
@@ -71,6 +71,24 @@ pub unsafe extern "C" fn state_flags_contain(object: *mut u8, mask: u32) -> u32 
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn state_flags_overlap(object: *mut u8, mask: u32) -> u32 {
     u32::from(flags(object) & mask != 0)
+}
+
+/// state_flags_clear_0x50000 — original: `FUN_081fc8b4` @ 0x081fc8b4.
+/// True extent: 32 bytes, 0x081fc8b4..0x081fc8d4; two verified inbound
+/// plain BL sites, no predicated BL sites. One outgoing plain BL.
+///
+/// Calls state_flags_overlap with mask 0x50000 and inverts its normalized
+/// result: returns 1 iff both bits 0x10000 and 0x40000 are absent.
+/// The original sets r2 to 1 before calling the two-argument accessor and
+/// uses it as the initial result afterward; that unused argument/register
+/// dependency is deliberately omitted. No behavioral deviations.
+///
+/// # Safety
+/// `object + 0x44` must address a readable, aligned u32 state word.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn state_flags_clear_0x50000(object: *mut u8) -> u32 {
+    u32::from(state_flags_overlap(object, 0x50000) == 0)
 }
 
 /// state_flags_set — original: `FUN_081fc524` @ 0x081fc524 (24 bytes;
@@ -158,6 +176,17 @@ mod tests {
         let mut object = Object::with_flags(0xffff_ffff);
         assert_eq!(unsafe { state_flags_overlap(object.ptr(), 0) }, 0);
         assert_eq!(object.flags(), 0xffff_ffff);
+    }
+
+    #[test]
+    fn clear_0x50000_rejects_either_bit_and_preserves_the_object() {
+        for value in [0, 0x10000, 0x40000, 0x50000, !0x50000, u32::MAX] {
+            let mut object = Object::with_flags(value);
+            let before = object.0;
+            assert_eq!(unsafe { state_flags_clear_0x50000(object.ptr()) },
+                if value & 0x50000 == 0 { 1 } else { 0 }, "{value:#x}");
+            assert_eq!(object.0, before);
+        }
     }
 
     #[test]

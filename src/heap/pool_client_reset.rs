@@ -4,24 +4,20 @@
 //! (152 bytes, `0x08223630..0x082236c8`; 10 plain unconditional `bl`
 //! instructions and no predicated `bl` instructions, raw-binary verified).
 //! It locks the embedded recursive mutex, commits an attached client, and,
-//! when its caller requests it, polls the client's 0x50000-byte condition.
-//! The first unsuccessful poll waits on the mailbox at +0x48 using the +0x44
+//! when its caller requests it, checks that client state bits 0x50000 are clear.
+//! The first unsuccessful check waits on the mailbox at +0x48 using the +0x44
 //! timeout; any later unsuccessful poll stops. It then clears the pending byte
 //! (+0x4c) and timeout (+0x44), and tail-unlocks the mutex.
 //!
-//! # Deliberate deviations
-//!
-//! `FUN_081fc8b4` has no established semantic identity. Its verified
-//! `(client) -> i32` boundary is therefore an ops slot named for its observed
-//! 0x50000-byte polling behavior; the default preserves the stock no-client
-//! outcome. The mutex, handle accessor, commit, and queue wait use their real
-//! ports.
+//! The mutex, handle accessor, commit, state-flag predicate, and queue wait
+//! use their real ports.
 
 use crate::cxx::handle::handle_deref_or_null;
 use crate::heap::client_commit::client_commit;
 use crate::heap::queue_wait::queue_wait;
 use crate::kernel::kobj::Mailbox;
 use crate::heap::block_region::REGION_MUTEX_OPS;
+use crate::util::state_flags::state_flags_clear_0x50000;
 
 /// Target layout of the derived pool-client state used at `0x08223630`.
 /// Host pointers are wider, so field access rather than byte offsets keeps
@@ -46,27 +42,6 @@ pub struct PoolClientResetState {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x4c] = [0; core::mem::offset_of!(PoolClientResetState, pending)];
 
-/// Boundary for `FUN_081fc8b4`, which invokes `FUN_081fc6f0(client,
-/// 0x50000, 1)` and returns its inverted success predicate.
-#[derive(Clone, Copy)]
-pub struct PoolClientResetOps {
-    pub poll_0x50000: unsafe extern "C" fn(client: *mut u8) -> i32,
-}
-
-unsafe extern "C" fn no_client_poll_0x50000(_client: *mut u8) -> i32 {
-    1
-}
-
-pub const DEFAULT_POOL_CLIENT_RESET_OPS: PoolClientResetOps = PoolClientResetOps {
-    poll_0x50000: no_client_poll_0x50000,
-};
-
-pub static mut POOL_CLIENT_RESET_OPS: PoolClientResetOps = DEFAULT_POOL_CLIENT_RESET_OPS;
-
-#[inline(always)]
-unsafe fn poll_0x50000(client: *mut u8) -> i32 {
-    core::ptr::read_volatile(core::ptr::addr_of!(POOL_CLIENT_RESET_OPS.poll_0x50000))(client)
-}
 
 /// `pool_client_reset` — original: `FUN_08223630` @ `0x08223630`.
 #[cfg_attr(target_os = "none", no_mangle)]
@@ -83,9 +58,9 @@ pub unsafe extern "C" fn pool_client_reset(state: *mut PoolClientResetState, wai
             let mut waited = false;
             while wait != 0 {
                 let client = handle_deref_or_null(core::ptr::addr_of!((*state).client_ref));
-                if poll_0x50000(client) != 0 || waited {
+                if state_flags_clear_0x50000(client) != 0 || waited {
                     let client = handle_deref_or_null(core::ptr::addr_of!((*state).client_ref));
-                    let _ = poll_0x50000(client);
+                    let _ = state_flags_clear_0x50000(client);
                     break;
                 }
                 waited = true;
@@ -114,33 +89,22 @@ mod tests {
 
     static LOCK: Mutex<()> = Mutex::new(());
     static mut EVENTS: Vec<&'static str> = Vec::new();
-    static mut POLLS: usize = 0;
-    static mut POLL_RESULTS: [i32; 3] = [0, 1, 1];
 
     unsafe fn event(value: &'static str) { (*addr_of_mut!(EVENTS)).push(value); }
     unsafe extern "C" fn lock(_mutex: *mut u8) -> u32 { event("lock"); 0 }
     unsafe extern "C" fn unlock(_mutex: *mut u8) -> u32 { event("unlock"); 0 }
     unsafe extern "C" fn commit(_client: *mut u8, _flag: u32) -> i32 { event("commit"); 1 }
-    unsafe extern "C" fn poll(_client: *mut u8) -> i32 {
-        event("poll");
-        let index = *addr_of!(POLLS);
-        *addr_of_mut!(POLLS) = index + 1;
-        (*addr_of!(POLL_RESULTS))[index]
-    }
     unsafe extern "C" fn wait(_sem: *mut CountingSem, _timeout: u32) -> u32 { event("wait"); 0 }
 
     unsafe fn install() {
         (*addr_of_mut!(EVENTS)).clear();
-        *addr_of_mut!(POLLS) = 0;
         addr_of_mut!(REGION_MUTEX_OPS).write(RegionMutexOps { lock, unlock });
         addr_of_mut!(CLIENT_COMMIT_OPS).write(ClientCommitOps { commit_body: commit });
-        addr_of_mut!(POOL_CLIENT_RESET_OPS).write(PoolClientResetOps { poll_0x50000: poll });
         addr_of_mut!(QUEUE_WAIT_SEM).write(wait);
     }
     unsafe fn restore() {
         addr_of_mut!(REGION_MUTEX_OPS).write(DEFAULT_REGION_MUTEX_OPS);
         addr_of_mut!(CLIENT_COMMIT_OPS).write(DEFAULT_CLIENT_COMMIT_OPS);
-        addr_of_mut!(POOL_CLIENT_RESET_OPS).write(DEFAULT_POOL_CLIENT_RESET_OPS);
         addr_of_mut!(QUEUE_WAIT_SEM).write(crate::kernel::csem::csem_wait);
     }
     fn state() -> PoolClientResetState {
@@ -157,12 +121,13 @@ mod tests {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             install();
-            let mut target = 0u8;
-            let client_cell = addr_of_mut!(target);
+            let mut target = [0u32; 0x60 / 4];
+            target[0x44 / 4] = 0x10000;
+            let client_cell = target.as_mut_ptr().cast::<u8>();
             let mut state = state();
             state.client_ref = addr_of!(client_cell);
             pool_client_reset(addr_of_mut!(state), 1);
-            assert_eq!((*addr_of!(EVENTS)).as_slice(), ["lock", "lock", "commit", "unlock", "poll", "wait", "poll", "poll", "unlock"]);
+            assert_eq!((*addr_of!(EVENTS)).as_slice(), ["lock", "lock", "commit", "unlock", "wait", "unlock"]);
             assert_eq!(state.pending, 0);
             assert_eq!(state.timeout, 0);
             restore();
@@ -174,8 +139,8 @@ mod tests {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
             install();
-            let mut target = 0u8;
-            let client_cell = addr_of_mut!(target);
+            let mut target = [0u32; 0x60 / 4];
+            let client_cell = target.as_mut_ptr().cast::<u8>();
             let mut state = state();
             state.client_ref = addr_of!(client_cell);
             pool_client_reset(addr_of_mut!(state), 0);
