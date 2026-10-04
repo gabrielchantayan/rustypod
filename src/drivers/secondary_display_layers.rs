@@ -64,16 +64,31 @@ const _: [u8; 0x28] = [0; core::mem::offset_of!(SecondaryDisplayLayerSetup, surf
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x2c] = [0; core::mem::offset_of!(SecondaryDisplayLayerSetup, surface_height)];
 
-/// Reproduces the separately linked `FUN_082059ac` inline, avoiding a second
-/// exported port for a helper used only to prepare this routine's descriptors.
-#[inline(always)]
-unsafe fn copy_layer_format(input: *const LayerFormatInput, setup: *const SecondaryDisplayLayerSetup, config: *mut u8) {
-    let pixel_format = core::ptr::addr_of!((*input).pixel_format).read_volatile();
-    let width = core::ptr::addr_of!((*setup).surface_width).read_volatile();
-    let height = core::ptr::addr_of!((*setup).surface_height).read_volatile();
-
-    config.write_volatile(pixel_format);
+/// secondary_display_layer_configure — original: `FUN_082059ac` @
+/// `0x082059ac` (124 bytes, ending at the independent `bx lr` at 0x08205a28).
+/// Raw A32 decoding finds two inbound plain BLs (0x08205930, 0x08205940),
+/// no predicated inbound BLs, and no outbound BLs.
+///
+/// Set descriptor kind 3 and copy input+8's pixel format. Formats 0, 2,
+/// and 3 update respectively three, two, or four bytes at descriptor+0x30;
+/// other formats leave those bytes unchanged. Copy owner width/height to
+/// both geometry pairs, then clear the four observed words.
+///
+/// Deliberate deviation: typed owner pointer fields expand on 64-bit hosts;
+/// target offsets remain +0x28/+0x2c. Volatile accesses preserve the raw
+/// load/store order, including the repeated format and geometry reads.
+///
+/// # Safety
+/// `setup` and `input` must be live, and `config` must be four-byte aligned
+/// and writable through +0x33. No NULL checks; buffers must not alias.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn secondary_display_layer_configure(
+    setup: *const SecondaryDisplayLayerSetup, input: *const LayerFormatInput, config: *mut u8,
+) {
     config.add(1).write_volatile(3);
+    config.write_volatile(core::ptr::addr_of!((*input).pixel_format).read_volatile());
+    let pixel_format = core::ptr::addr_of!((*input).pixel_format).read_volatile();
     match pixel_format {
         0 => {
             config.add(0x30).write_volatile(0x10);
@@ -84,10 +99,10 @@ unsafe fn copy_layer_format(input: *const LayerFormatInput, setup: *const Second
         3 => (config.add(0x30) as *mut u32).write_volatile(0),
         _ => {}
     }
-    (config.add(0x10) as *mut u32).write_volatile(height);
-    (config.add(0x0c) as *mut u32).write_volatile(width);
-    (config.add(0x18) as *mut u32).write_volatile(height);
-    (config.add(0x14) as *mut u32).write_volatile(width);
+    (config.add(0x10) as *mut u32).write_volatile(core::ptr::addr_of!((*setup).surface_height).read_volatile());
+    (config.add(0x0c) as *mut u32).write_volatile(core::ptr::addr_of!((*setup).surface_width).read_volatile());
+    (config.add(0x18) as *mut u32).write_volatile(core::ptr::addr_of!((*setup).surface_height).read_volatile());
+    (config.add(0x14) as *mut u32).write_volatile(core::ptr::addr_of!((*setup).surface_width).read_volatile());
     (config.add(0x28) as *mut u32).write_volatile(0);
     (config.add(0x24) as *mut u32).write_volatile(0);
     (config.add(4) as *mut u32).write_volatile(0);
@@ -121,8 +136,8 @@ pub unsafe extern "C" fn configure_secondary_display_layers(setup: *mut Secondar
     let layer5_config = layer5_config.as_mut_ptr().cast::<u8>();
     surface_config_init(layer0_config);
     surface_config_init(layer5_config);
-    copy_layer_format((*setup).layer0_input, setup, layer0_config);
-    copy_layer_format((*setup).layer5_input, setup, layer5_config);
+    secondary_display_layer_configure(setup, (*setup).layer0_input, layer0_config);
+    secondary_display_layer_configure(setup, (*setup).layer5_input, layer5_config);
     layer_apply_config(layer0, layer0_config);
     layer_apply_config(layer5, layer5_config);
     display_set_clear_color(display, 0x0010_8080);
@@ -165,6 +180,37 @@ mod tests {
 
     unsafe fn word(bytes: *const u8, offset: usize) -> u32 {
         (bytes.add(offset) as *const u32).read_volatile()
+    }
+
+    #[test]
+    fn descriptor_formats_preserve_unwritten_bytes_and_copy_full_width_geometry() {
+        for format in 0..=255u8 {
+            for (width, height) in [(0, 0), (320, 240), (u32::MAX, 0x8000_0000)] {
+                let input = LayerFormatInput { reserved_0_7: [0xa5; 8], pixel_format: format };
+                let setup = SecondaryDisplayLayerSetup {
+                    reserved_0_17: [0; 0x18], layer5_input: core::ptr::null(),
+                    layer0_input: core::ptr::null(), layer0: core::ptr::null_mut(),
+                    layer5: core::ptr::null_mut(), surface_width: width, surface_height: height,
+                };
+                let mut actual = [0xa5a5_a5a5u32; 16];
+                let mut expected = [0xa5u8; 64];
+                expected[0] = format;
+                expected[1] = 3;
+                let color: &[u8] = match format {
+                    0 => &[0x10, 0, 0], 2 => &[0x1f, 0], 3 => &[0, 0, 0, 0], _ => &[],
+                };
+                expected[0x30..0x30 + color.len()].copy_from_slice(color);
+                for (offset, value) in [(0x10, height), (0x0c, width),
+                    (0x18, height), (0x14, width), (0x28, 0), (0x24, 0), (4, 0), (8, 0)] {
+                    expected[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                }
+                unsafe {
+                    secondary_display_layer_configure(&setup, &input, actual.as_mut_ptr().cast());
+                    let bytes = core::slice::from_raw_parts(actual.as_ptr().cast::<u8>(), 64);
+                    assert_eq!(bytes, expected, "format {format}, dimensions {width}/{height}");
+                }
+            }
+        }
     }
 
     #[test]
