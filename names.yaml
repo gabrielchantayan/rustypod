@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08220518
+    ghidra: FUN_08220518
+    name: object_reset_sentinel_state
+    size: 28
+    sig: "void object_reset_sentinel_state(void *object)"
+    module: app/object_reset_sentinel_state
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: sentinel_then_zero
+    notes: >-
+      Raw words e3e01000 e580189c e58018a0 e3a01000 e5c018a4 e58018a8
+      e12fff1e establish extent 0x08220518..0x08220534 exclusive; the next
+      entry is an independent branch veneer to 0x0822b5e0. Whole-image
+      A32 BL decoding finds two plain inbound calls at 0x082203f4 and
+      0x08220568, zero predicated inbound calls and zero outbound calls.
+      Actual callers retain the object in r4 for cleanup; Ghidra's claimed
+      caller at 0x0817bd1c is a separate add-and-tail-branch thunk.
+      Write UINT32_MAX to words +0x89c/+0x8a0, zero byte +0x8a4 and word
+      +0x8a8. Field identities are otherwise unestablished. Volatile stores
+      retain order and leave +0x8a5..+0x8a7 untouched. No callee seams.
+      Void ABI does not expose incidental r0 passthrough. Host edge tests
+      and optimized standalone smoke pass; ARM release build succeeds.
+      match.py reports identical six body instructions, with LLVM adding
+      a frame prologue and replacing bx lr with frame-restoring pop.
   - address: 0x08215820
     ghidra: FUN_08215820
     name: container_front_word_or_minus_one
