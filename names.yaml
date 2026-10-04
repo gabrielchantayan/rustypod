@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f50b4
+    ghidra: FUN_081f50b4
+    name: linked_node_construct
+    size: 128
+    sig: "u32 *linked_node_construct(u32 *node)"
+    module: app/linked_node_construct
+    status: ported
+    renames:
+      param_1/r0: node
+      DAT_081f512c: linked_node_vtable
+      DAT_081f5130: default_rate
+    notes: >-
+      Raw ARM establishes 120 instruction bytes through bx lr at
+      0x081f5128 plus literals 0x089901fc and 44100 at 0x081f512c
+      and 0x081f5130. Next real function starts at 0x081f5134:
+      true extent 128 bytes, not Ghidra's 120. Independent whole-image
+      decoding finds two inbound plain BLs at 0x0803c290 and 0x0805bb54,
+      zero predicated inbound BLs and zero outbound BLs. Install the
+      vtable and default words/flag bytes, preserving padding at
+      +0x0d..+0x0f, +0x3f and +0x4d onward. Owner +0x34 and next
+      +0x40 match the existing linked_node_status_set layout. Concrete
+      class identity and other field meanings remain unresolved.
+      Return node unchanged: raw r0 is never modified and callers
+      forward it into cxa_atexit. No callees or new seams required.
+      Deliberate deviations use target-width word indices, explicit
+      pointer return correcting Ghidra's void signature, and volatile
+      stores retaining original widths/order without validation.
+      All 13975 host tests passed, including dirty-storage padding,
+      neighboring sentinels, pointer return and reconstruction cases.
+      Production-source executable smoke passed. ARM release build passed.
+      Reviewed match.py exit-one structural diff: 30 original instructions
+      versus 35 Rust listing entries including a literal. LLVM adds a
+      frame pointer and synthesizes constants; all store widths, offsets,
+      ordering, values and unchanged r0 return remain intact. No device run.
   - address: 0x08207674
     ghidra: FUN_08207674
     name: named_object_prefix_construct
