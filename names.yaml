@@ -210386,3 +210386,32 @@ functions:
       LLVM peels the first advance and removes the dead stack-local cursor
       invalidation; payload load, tag 27, loop condition and final destructor
       remain structurally equivalent. No device execution was performed.
+  - address: 0x0820be94
+    ghidra: FUN_0820be94
+    name: opaque_record_word_at_0c
+    size: 8
+    sig: "u32 opaque_record_word_at_0c(const OpaqueRecordWordAt0c *record)"
+    module: cxx/opaque_record_word_at_0c
+    status: ported
+    vars: {"param_1/r0": record, "r0 (return)": value}
+    notes: >-
+      Raw osos.dec words e590000c and e12fff1e establish ldr r0,[r0,#0xc]
+      followed by bx lr. The next real function starts at 0x0820be9c with
+      stmdb sp!,{r4,r5,r6,lr}, proving the true 8-byte extent. Independent
+      whole-image ARM BL decoding finds two plain unconditional inbound
+      calls at 0x08280a00 and 0x08280bf0, zero predicated inbound calls,
+      and no calls in the body. Both callers supply object+0x3c and pass
+      the returned word to 0x081c02c0. No concrete field identity is
+      inferred and no callee seam is needed. Returns the unchecked word
+      at record+0x0c; repr(C) with three u32 prefix words preserves target
+      spacing on hosts. No deliberate deviations. Host tests cover an
+      embedded record, zero, signed-boundary and full-width values,
+      distinct adjacent words, and unchanged storage.
+      The already ported 0x0829ed44 has identical raw bytes, so both entries
+      intentionally share the existing opaque_record_word_at_0c symbol and
+      module registration rather than duplicating the implementation.
+      Host suite: 13903 passed. ARM release build passed. Standalone runtime
+      smoke returned zero, 0x80000000, and 0xffffffff from raw word fixtures.
+      match.py verifies the same ldr r0,[r0,#12]; LLVM adds a frame-pointer
+      prologue and returns via pop {fp,pc} instead of bx lr (four instructions
+      versus two). No device execution was performed.
