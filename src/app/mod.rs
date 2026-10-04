@@ -11,6 +11,8 @@ pub mod channel_slot_publish;
 pub mod string_array_pair_owner_construct;
 pub mod identity_noop_with_options;
 pub use identity_noop_with_options::*;
+pub mod member_pointer_identity;
+pub use member_pointer_identity::*;
 pub mod slot_pool_available_count;
 pub mod view_event_bind_state;
 pub use view_event_bind_state::*;

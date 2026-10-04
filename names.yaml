@@ -211566,3 +211566,34 @@ functions:
       maximum, NULL interface, and disabled flags with an invalid vtable.
       All 13946 host tests passed; ARM release build and standalone
       production-entry smoke passed. No device execution was performed.
+
+  - address: 0x0820a004
+    ghidra: FUN_0820a004
+    name: member_pointer_identity
+    size: 4
+    sig: "void *member_pointer_identity(void *member)"
+    module: app/member_pointer_identity
+    status: ported
+    renames:
+      r0: member
+    notes: >-
+      Raw osos.dec word e12fff1e is bx lr, establishing the four-byte
+      extent [0x0820a004,0x0820a008). The next real entry starts with
+      e59f0040, a literal load for an independent guarded initializer.
+      Independent whole-image aligned A32 decoding finds two plain inbound
+      BLs at 0x081e5cf8 and 0x08206c54, zero predicated BLs, zero outbound
+      calls, and no aligned data words referencing this entry. Both callers
+      pass an embedded-member pointer (object+0x13c6 or object+0x61a) and
+      subtract that offset from the returned r0 to recover the object.
+      Ghidra's void/no-argument prototype loses this required pointer return.
+      No constructor or destructor class identity is inferred. Return the
+      pointer unchanged without dereferencing it; no behavioral deviations
+      and no callee seams. Host regressions cover NULL, non-dereferenceable
+      pointer bits, both caller offsets, and unchanged member storage.
+      Host suite (cargo test --target x86_64-unknown-linux-gnu), standalone
+      production-entry smoke, and ARM release build passed. Initial LLVM
+      folding retained an nm alias but hid this name from match.py; a
+      dedicated .text.member_pointer_identity section preserves independent
+      visibility. Final match.py exit 1 reports push {fp,lr}, mov fp,sp,
+      pop {fp,pc} versus bx lr: r0 is unchanged, with no memory access
+      through the member pointer. No device execution was performed.
