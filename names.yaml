@@ -214042,3 +214042,42 @@ functions:
       constructor call, bounds loads and byte-store offset; LLVM expands
       memzero into alignment/tail handling and AEABI clear calls, producing
       62 instructions versus the original 25. No new firmware seams.
+
+  - address: 0x081dc0b8
+    ghidra: FUN_081dc0b8
+    name: timer_backed_view_construct
+    size: 228
+    sig: "u8 *timer_backed_view_construct(u8 *view, ResourceProvider *resources, u8 *controller, u8 *parent, const ViewSpec *spec)"
+    module: ui/timer_backed_view
+    status: ported
+    vars:
+      piVar1: view
+      iVar2: constructed_subobject
+      iVar3: constructed_view
+      in_stack_00000000: spec
+      DAT_081dc194: primary_vtable
+      DAT_081dc198: element_constructor_address
+    notes: >-
+      Raw A32 extent is 228 bytes: 220 instruction bytes ending at
+      0x081dc190 plus literals 0x0898e3b0 and 0x082675d8; next real
+      function starts at 0x081dc19c. Whole-image decoding verifies two
+      plain inbound BL calls at 0x081dae00 and 0x0820ee4c, six plain
+      outbound BL calls, and no predicated BL calls in either set.
+      Both callers allocate 0x1f8 bytes. Chain view_base_construct,
+      install primary vtable and secondary vtable at +0xa4, construct
+      pair-header member at +0xac and two eight-byte elements at +0x1c8.
+      Thread the array result back by 0x1c8, initialize sparse state,
+      fill TBM cache slot zero, construct timer at +0x16c with the view
+      as config, and dispatch the view word to the task observable.
+      All direct callees reuse existing ports. The element constructor
+      remains opaque firmware address data, not a new invented seam.
+      Deliberate deviation: independent byte and word stores are grouped
+      before any subsequent call; aligned target words preserve host
+      layout. Poisoned-buffer tests cover flags, sentinel values, untouched
+      members, padding and bounds. Standalone actual-source constructor
+      smoke with callee stand-ins exercises threaded return, embedded
+      members, timer-visible state and guards; no device execution.
+      Host suite and ARM release build passed. match.py reports a
+      structural diff, 65 versus 55 instructions: LLVM retains the array
+      result as its addressing base, groups sparse stores and inlines
+      timer_schedule_shim into the existing timer operation dispatch.
