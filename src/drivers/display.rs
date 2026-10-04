@@ -1062,6 +1062,81 @@ pub unsafe extern "C" fn display_set_pending_command(
     core::ptr::addr_of_mut!((*display).pending_command_dirty).write_volatile(1);
 }
 
+/// display_set_pending_nibbles — original `FUN_081d8d0c` @ `0x081d8d0c`.
+/// True size: 72 bytes, ending in `bx lr` at 0x081d8d50; the next function
+/// starts with `push {r4, lr}` at 0x081d8d54. Raw A32 decoding verifies two
+/// plain inbound BLs (0x08205854, 0x0820598c), zero predicated BLs, one tail
+/// B (0x0828d768), and zero outbound BLs.
+///
+/// Stores the selector at +0x56, optionally copies four low nibbles to
+/// +0x57..+0x5a, then sets the pending dirty byte at +0x24. NULL nibbles
+/// retains the four previous values. Reads and writes remain sequential,
+/// including when the input aliases the display. Deliberate deviations:
+/// none; repr(C) field addressing accommodates host pointer width.
+///
+/// # Safety
+/// `display` must be writable and valid. Non-null `nibbles` must permit four
+/// byte reads, including after any preceding stores when the regions alias.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_pending_nibbles(
+    display: *mut Display,
+    selector: u8,
+    nibbles: *const u8,
+) {
+    let state = core::ptr::addr_of_mut!((*display).reserved_56_8f).cast::<u8>();
+    state.write_volatile(selector);
+    if !nibbles.is_null() {
+        for index in 0..4 {
+            let value = nibbles.add(index).read_volatile() & 0x0f;
+            state.add(index + 1).write_volatile(value);
+        }
+    }
+    core::ptr::addr_of_mut!((*display).pending_command_dirty).write_volatile(1);
+}
+
+#[cfg(test)]
+mod pending_nibble_tests {
+    use super::*;
+
+    #[test]
+    fn masks_every_byte_and_preserves_adjacent_state() {
+        for value in 0..=255u8 {
+            let mut display: Display = unsafe { core::mem::zeroed() };
+            display.reserved_56_8f = [0xa5; 0x3a];
+            display.pending_command = 0x67;
+            display.pending_command_parameter = 0x89;
+            let input = [value, value.wrapping_add(1), !value, value ^ 0x55];
+            unsafe { display_set_pending_nibbles(&mut display, value, input.as_ptr()); }
+            assert_eq!(display.reserved_56_8f[0], value);
+            assert_eq!(&display.reserved_56_8f[1..5], &input.map(|byte| byte & 15));
+            assert_eq!(&display.reserved_56_8f[5..], &[0xa5; 0x35]);
+            assert_eq!(display.pending_command_dirty, 1);
+            assert_eq!((display.pending_command, display.pending_command_parameter), (0x67, 0x89));
+        }
+    }
+
+    #[test]
+    fn null_input_retains_nibbles_but_sets_selector_and_dirty() {
+        let mut display: Display = unsafe { core::mem::zeroed() };
+        display.reserved_56_8f = [0xfe; 0x3a];
+        unsafe { display_set_pending_nibbles(&mut display, 0xff, core::ptr::null()); }
+        assert_eq!(display.reserved_56_8f[0], 0xff);
+        assert_eq!(&display.reserved_56_8f[1..], &[0xfe; 0x39]);
+        assert_eq!(display.pending_command_dirty, 1);
+    }
+
+    #[test]
+    fn overlapping_input_observes_selector_and_each_preceding_store() {
+        let mut display: Display = unsafe { core::mem::zeroed() };
+        display.reserved_56_8f = [0xa5; 0x3a];
+        let input = core::ptr::addr_of!(display.reserved_56_8f).cast::<u8>();
+        unsafe { display_set_pending_nibbles(&mut display, 0xc7, input); }
+        assert_eq!(&display.reserved_56_8f[..6], &[0xc7, 7, 7, 7, 7, 0xa5]);
+        assert_eq!(display.pending_command_dirty, 1);
+    }
+}
+
 
 /// display_set_clear_color — original: `FUN_081d8cfc` @ 0x081d8cfc
 /// (16 bytes exactly, 0x081d8cfc..0x081d8d0c; the next function opens at
