@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821432c
+    ghidra: FUN_0821432c
+    name: object_top_byte_flags_contains
+    size: 28
+    sig: "u32 object_top_byte_flags_contains(const u32 *object, u32 mask)"
+    module: util/object_top_byte_flags_contains
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: mask
+    notes: >-
+      Raw osos.dec words decode as ldr r0,[r0]; and r0,r0,r1;
+      and r0,r0,#0xff000000; cmp r0,r1; movne r0,#0;
+      moveq r0,#1; bx lr. The next real function starts with push
+      at 0x08214348, establishing the true 28-byte extent.
+      Whole-image A32 decoding finds two unconditional inbound BLs
+      at 0x0818b7ac and 0x0818b894, zero predicated inbound BLs,
+      and no outbound calls. Both callers request 0x08000000 from
+      the object stored in their word 7; the flag's meaning remains
+      unresolved. Returns exactly 0 or 1; zero masks succeed and
+      any low-24-bit mask bit fails even when present in the object.
+      Rust preserves the unchecked aligned first-word read with no
+      deliberate behavioral deviations and introduces no callee seams.
+      Host edge tests and a direct smoke harness pass; the ARM release
+      build succeeds. match.py shows the same load and two masks;
+      LLVM replaces conditional moves with sub/clz/lsr to produce
+      the same canonical boolean, and adds a frame prologue/epilogue.
   - address: 0x0821523c
     ghidra: FUN_0821523c
     name: image_path_cache_refresh
