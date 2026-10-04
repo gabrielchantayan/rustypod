@@ -47721,6 +47721,45 @@ functions:
       occur. The record class and trailer field identity remain unidentified,
       so the port names only this verified read role. No deliberate deviations.
 
+  - address: 0x081eb090
+    ghidra: FUN_081eb090
+    name: indexed_task_string_resolve
+    size: 52
+    sig: "const char *indexed_task_string_resolve(const void *receiver, u32 index)"
+    module: app/indexed_task_string_resolve
+    status: ported
+    vars:
+      param_1/r0: ignored_receiver
+      param_2/r1: index
+      r4: index
+      DAT_081eb0bc: fallback_string_object (0x089ca8a0)
+      DAT_081eb0c0: indexed_string_records (0x089cc500)
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw ARM proves 44 code bytes plus 8 literal bytes, extent
+      0x081eb090..0x081eb0c4, where the next function starts with push
+      {r4,lr}. Full-image word decoding finds two inbound plain BLs at
+      0x081ebbb0 and 0x081ed344, zero predicated BLs. The body has one
+      plain BL to task_ctx_field_0x30, zero predicated BLs, an unsigned
+      BCS tail branch to string_object_c_str for index >= 23, and a
+      B tail branch to resource_chain_find_string otherwise. Receiver
+      is ignored. Valid indices select the first aligned u32 of an
+      eight-byte runtime record, then resolve its string resource id
+      through the current task. Missing resources retain NULL; fallback
+      NULL payload uses the existing shared empty C string. Static image
+      bytes at both data addresses are unrelated text (fallback +4 is
+      0x4e00746e), so identities and ids remain unresolved; target code
+      preserves the runtime addresses rather than freezing those bytes.
+      Host tests substitute valid runtime tables/objects and cover first
+      and last indices, stride, missing/NULL chain, unsigned bounds, and
+      fallback payload/NULL payload without task access. No new callee seam.
+      ARM release build succeeds. match.py reports the expected structural
+      diff: unsigned <= 22 is equivalent to < 23, getter is inlined through
+      its existing context dispatch slot, record stride stays eight bytes,
+      both fixed addresses survive, and both exits remain tail branches.
+
   - address: 0x081eb0c4
     ghidra: FUN_081eb0c4
     name: singleton_class_8900
