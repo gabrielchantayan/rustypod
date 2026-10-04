@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fb58c
+    ghidra: FUN_081fb58c
+    name: object_linked_value_flagged
+    size: 60
+    sig: "u32 object_linked_value_flagged(const u32 *object, u32 value)"
+    module: app/object_linked_value_flagged
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: value
+      object_plus_0x1c: linked_record
+      linked_record_plus_4: linked_value
+      object_plus_0x14: flags
+    notes: >-
+      Raw words establish [0x081fb58c, 0x081fb5c8), 60 bytes, ending at
+      the independent ported object_flag_0x100_is_set accessor. Independent
+      whole-image BL decoding finds two plain inbound calls at 0x081fb8c8
+      and 0x081fb8e4, zero predicated inbound calls, and zero plain or
+      predicated outbound BLs. Compare the word at linked record +4 with
+      value, using the u32 pointer at object +0x1c. Mismatch returns zero;
+      otherwise either flag 0x100 or 0x200 at object +0x14 returns one.
+      Event 0x206 checks controller slots +0x48 and +0x5c. Concrete object
+      type and broader flag meanings remain unidentified. No callee seam
+      or deliberate behavioral deviations; word indices preserve target
+      pointer width. All 13956 host tests and ARM release build passed.
+      Direct executable smoke verifies both flags and high-bit mismatch.
+      Reviewed match.py exit-one diff: 15 original versus 12 Rust
+      instructions; added frame, conditional early return and byte load
+      at +0x15 masked with three preserve comparison and normalization.
+      No device execution.
   - address: 0x08209f48
     ghidra: FUN_08209f48
     name: stream_create_for_filename
