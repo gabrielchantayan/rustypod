@@ -16,6 +16,51 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081dccc0
+    ghidra: FUN_081dccc0
+    name: text_key_selection_update
+    size: 56
+    sig: "void text_key_selection_update(TextKeySelectionOwner *owner, u32 has_text, u32 key)"
+    module: app/text_key_selection_update
+    status: ported
+    vars:
+      param_1/r4: owner
+      param_2/r1: has_text
+      param_3/r2: key
+      iVar1/r0: selected_value
+      owner_0x70: source
+      owner_0x74: destination
+      destination_0x2c: value
+    notes: >-
+      Raw ARM words establish [0x081dccc0,0x081dccf8), 56 bytes rather
+      than Ghidra's 64; the next independent push starts at 0x081dccf8.
+      Whole-image word decoding finds two incoming plain BLs at
+      0x081dc6bc and 0x081dcaf4, zero predicated incoming BLs, one outgoing
+      plain BL at 0x081dccd8 to 0x082a6790, zero predicated outgoing BLs,
+      and a conditional tail branch at 0x081dccf0 to 0x08140370.
+      Callers pass opaque_vtable_string_owner_has_text's predicate and
+      the embedded string's derived key. Skip all accesses for a zero
+      predicate; otherwise look up the key through owner+0x70 and preserve
+      the selection on a zero result. Load destination at owner+0x74 only
+      after successful lookup, then store the complete result at +0x2c.
+      Neither callee has an existing canonical entry. The typed retail
+      boundary at 0x082a6790 passes a four-byte key to virtual slot +0x44
+      of the source's embedded object at +0x4c and returns the found entry's
+      first word or zero. Inline the raw-verified str r1,[r0,#0x2c]; bx lr
+      setter at 0x08140370 rather than introducing a second port.
+      Native-pointer repr(C) fields preserve ARM offsets on target and
+      avoid host-width byte-offset assumptions. No behavioral deviations.
+      Host suite passed 14046 tests; ARM release build passed. Standalone
+      smoke observed no-text NULL untouched, lookup miss preserving 73,
+      and lookup hit storing 0x80000001. Edge tests cover a NULL destination
+      on miss, nonboolean predicates, full-width values, unchanged neighboring
+      words, and replacement of the destination during lookup.
+      match.py was run with its default size and the verified --size 56;
+      both printed structural diffs (exit 1). Codegen retains predicate
+      short circuit, fixed-address lookup via BLX, result comparison and
+      post-call conditional destination load/store. LLVM adds a frame and
+      inlines the original tail setter; default-size comparison includes
+      two instructions belonging to the next function.
   - address: 0x081ef074
     ghidra: FUN_081ef074
     name: slot_array_owner_has_value
