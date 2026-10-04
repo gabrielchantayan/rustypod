@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod indexed_record_defaults;
 pub mod xml_write_tag;
 pub mod context_indexed_word_store;
 pub mod video_engine_output_rect;
