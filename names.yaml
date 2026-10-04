@@ -212729,3 +212729,31 @@ functions:
       match.py exited 1 with 29 original versus 34 Rust instructions: frame
       and immediate materialization differ; field offsets, unsigned load,
       both direct calls, repeated virtual loads and final BX survive.
+  - address: 0x081f198c
+    ghidra: FUN_081f198c
+    name: linked_node_prepend
+    size: 32
+    sig: "void linked_node_prepend(u32 *owner, u32 *node)"
+    module: app/linked_node_prepend
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: node
+      iVar1/r2: old_head
+    notes: >-
+      Raw A32 verifies eight instructions through bx lr at 0x081f19a8;
+      the next independent function starts at 0x081f19ac. Two plain inbound
+      BL sites at 0x081d633c and 0x0820c138, zero predicated inbound BLs,
+      and zero body BLs. Clear node word 1 before loading owner word 2;
+      link the old nonzero head, publish the node as head, and set owner
+      word 3 only if the loaded head was zero. The CDATA parsing caller
+      inserts a successfully allocated node. No callees or new seams.
+      Deliberate deviations: u32 word indices preserve four-byte target
+      layout; volatile accesses preserve ordering for overlapping objects.
+      Host regression covers empty and populated lists, stale links,
+      payload preservation and overlap. All 14001 host tests and ARM
+      release build passed. Public-entry smoke verified empty-to-singleton
+      and singleton-to-two-node transitions. Reviewed match.py exit-one
+      diff: LLVM emits 11 instructions versus eight, adding a frame and
+      splitting head publication into predicated stores; field offsets,
+      initial clear, head load and conditional tail update are retained.
