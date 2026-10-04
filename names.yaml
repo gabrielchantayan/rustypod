@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f18c0
+    ghidra: FUN_081f18c0
+    name: object_list_pop_front
+    size: 44
+    sig: "ObjectListNode *object_list_pop_front(ObjectList *list)"
+    module: cxx/object_list_pop_front
+    status: ported
+    renames:
+      param_1/r0/r2: list
+      iVar1/r1/r0: removed_head
+      iVar2/r1: next
+    notes: >-
+      Raw A32 words establish extent 0x081f18c0..0x081f18ec, ending at
+      the next independent stmdb sp!,{r4,lr} prologue. Whole-image word
+      decoding finds two plain inbound BLs at 0x081f1974 and 0x081f1a08,
+      zero predicated inbound BLs and zero outbound BLs of either kind.
+      Reads head at object +8; empty returns null without touching even
+      a stale tail. Otherwise replaces head with removed node word +4
+      and clears tail +12 only when next is zero. Returns the old head
+      without clearing its link or touching either vtable or owner word.
+      Callers extract a virtual result or virtually destroy returned nodes.
+      No callees, new seams, or deliberate behavioral deviations.
+      Target pointer fields use aligned u32 words on both ARM and host.
+      Host reference tests cover empty, stale-tail empty, singleton,
+      multi-node removal and repeated drain while preserving node links.
+      All 14004 host tests and the ARM release build passed. Standalone
+      public-entry smoke exercised two-node drain, retained links and an
+      empty stale tail. Reviewed match.py exit-one structural diff:
+      LLVM adds a frame and changes registers but retains both null tests,
+      node +4 load, head +8 store and conditional tail +12 clear, with
+      no calls.
   - address: 0x081f20f0
     ghidra: FUN_081f20f0
     name: iap_sample_rate_supported
