@@ -214818,3 +214818,37 @@ functions:
       and safe repeat. match.py exits 1: LLVM adds a frame pointer and
       saves sl/fp, preserving the vtable store, single call, and owner
       return. R_ARM_CALL explicitly resolves to the existing pair port.
+
+  - address: 0x081d8748
+    ghidra: FUN_081d8748
+    name: owned_pair_owner_construct
+    size: 28
+    sig: "uint32_t *owned_pair_owner_construct(uint32_t *owner, uint32_t context)"
+    module: cxx/owned_pair_owner_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: context
+      DAT_081d8760: base_vtable
+    notes: >-
+      Raw osos.dec establishes [0x081d8748,0x081d8764): 24 executable
+      bytes plus the 0x0898e0a8 literal at 0x081d8760. The next real
+      function is the already ported owned_pair_owner_destruct. Whole-image
+      aligned A32 BL decoding finds two incoming plain calls at 0x081f4de4
+      and 0x081f4dfc, zero incoming predicated calls, and zero outgoing
+      calls of either kind. Install the base vtable, store context at
+      +0x0c, clear the auxiliary word at +0x04, and preserve the pair
+      word at +0x08. Return the unchanged owner pointer in r0; Ghidra's
+      void signature is incorrect. Caller 0x081f4dd8 constructs embedded
+      owners at +0x18 and +0x2c before replacing their vtables. Concrete
+      class identity is unknown. No new seams or behavioral deviations;
+      u32 word accesses preserve target field offsets on 64-bit hosts.
+      Host regressions cover full-width and zero contexts, untouched pair
+      and neighboring words, return identity, and reconstruction.
+      Full host suite and ARM release build pass. An actual-source host
+      smoke constructs both embedded owners at the caller's word offsets
+      and verifies returned pointers and preserved adjacent words.
+      match.py exits 1: LLVM adds a frame pointer, moves the context store
+      before the independent vtable/zero stores, and combines those two
+      stores into STM. The vtable literal, field offsets, unchanged r0,
+      and absence of outgoing calls agree; no identical-body fold observed.
