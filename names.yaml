@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082158c0
+    ghidra: FUN_082158c0
+    name: container_status_flags
+    size: 44
+    sig: "u32 container_status_flags(const BlockDeque *deque)"
+    module: cxx/container_status_flags
+    status: ported
+    renames:
+      r0: deque_then_front_object_then_result
+      r4: result
+      FUN_082156b8: deque_front_object_or_null (stock lookup binding)
+      "vtable+0x18": status_query (virtual slot 6; concrete identity unknown)
+    notes: >-
+      Raw A32 establishes 44 bytes through pop at 0x082158e8, before the
+      independent push at 0x082158ec. Two inbound plain BL sites at
+      0x0818ba0c and 0x0818ba24, zero predicated inbound BLs; one outgoing
+      plain BL at 0x082158c8 and one BLX r1 at 0x082158dc. The lookup at
+      0x082156b8 accepts a deque in r0, checks count through the named
+      container_is_empty alias 0x083d7610, copies the begin iterator through
+      named deque_iter_assign_alias_a34c at 0x083da34c, then dereferences
+      its cursor. Empty or NULL front returns zero; otherwise dispatch slot
+      +0x18 with the object receiver and return all status bits. Callers
+      extract bits 4 and 2. Deviations: retain the stock lookup on target;
+      native-pointer host lookup model and typed vtable slots widen safely.
+      Verification: all 13830 host tests pass and the ARM release build
+      succeeds. Isolated executable smoke exercises receiver mutation,
+      an empty deque, and a NULL front. match.py exits 1 with 11 original
+      versus 13 Rust entries: lookup BL becomes absolute BLX, the virtual
+      BLX becomes a tail BX, and LLVM adds a frame and address literal.
+      NULL branching, receiver register and target slot +0x18 agree.
   - address: 0x082171e4
     ghidra: FUN_082171e4
     name: dispatch_pending_navigation
