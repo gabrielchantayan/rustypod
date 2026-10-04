@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d8e04
+    ghidra: FUN_081d8e04
+    name: all_layer_requests_clear
+    size: 44
+    sig: "u32 all_layer_requests_clear(const Display *display)"
+    module: drivers/display
+    status: ported
+    vars:
+      param_1/r0: display
+      iVar1/r1: layer_index
+      display_plus_0x18: per_layer_bytes
+      return/r0: all_requests_clear
+    notes: >-
+      Raw A32 words establish [0x081d8e04,0x081d8e30), 44 bytes.
+      Next method begins strb r1,[r0,#0x9b]; preceding method returns
+      at 0x081d8e00. Two incoming plain BLs at 0x081d8990 and
+      0x081d9014, zero predicated BLs, zero outgoing calls. Sequentially
+      checks six request bytes at +0x18..+0x1d; returns zero on the
+      first nonzero byte, otherwise one. No behavioral deviations.
+      Existing Display repr(C) fields preserve native host pointers;
+      volatile byte reads preserve access width and early termination.
+      Both existing callers now use this port instead of inline scans.
+      Tests cover every nonzero byte value in every slot, clearing
+      transitions, and unrelated nonzero state. All 14071 host tests
+      pass; ARM release build passes. Extracted-function executable
+      smoke observes 1,0,1 for clear,last-slot-active,clear-again.
+      match.py exit-one diff reviewed: LLVM unrolls the six byte loads
+      with conditional early exits and adds a frame; final CLZ/LSR maps
+      zero to one. Symbol remains a separate call target. No device run.
+
   - address: 0x081ed5e4
     ghidra: FUN_081ed5e4
     name: tv_signal_resource_refresh
@@ -105088,10 +105118,10 @@ functions:
       they are all zero it tail-calls 0x081d9270 iff +0x98 is set.
       New Display fields name +0x50 layer_activity_blocker and +0x98
       layers_active; repr(C) preserves target offsets while keeping the
-      pointer field native-width on hosts. Deliberate deviations: the
-      44-byte scan helper 0x081d8e04 is inlined, while the two unported
-      activity routines dispatch through narrow volatile DisplayHooks slots;
-      their defaults preserve +0x98 but omit panel-driver and layer work.
+      pointer field native-width on hosts. The six-byte scan now calls
+      all_layer_requests_clear; stop uses the complete layer_activity_stop
+      port, while start retains the verified retail routine through the
+      fixed-address DisplayHooks default.
       Host tests cover NULL-driver and non-secondary gates, nonzero enable
       normalization and idempotent start, last-disable stop only after all
       six bytes clear, and blocker-deferred teardown. match.py structural
@@ -214530,7 +214560,7 @@ functions:
       display activity for any non-NULL blocker, or stops active activity
       for a NULL blocker when all six +0x18 request bytes are zero.
       The NULL path has no display-id or driver guard. Deliberate
-      deviations: inline the raw-verified six-byte predicate at
+      deviations: call the complete all_layer_requests_clear predicate at
       0x081d8e04, reuse the complete layer_activity_stop port, and express
       tail unlock as a return-position call. Native-width Display fields
       preserve host pointers. The existing start seam now calls verified

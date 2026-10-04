@@ -588,6 +588,33 @@ pub unsafe extern "C" fn internal_display_request_clear(color: u32) {
 }
 
 
+/// all_layer_requests_clear — original: `FUN_081d8e04` @ `0x081d8e04`.
+/// True extent 44 bytes, [0x081d8e04, 0x081d8e30); the next method starts
+/// with `strb r1,[r0,#0x9b]`. Raw A32 decoding verifies two incoming plain
+/// BLs (0x081d8990, 0x081d9014), zero predicated BLs, and no outgoing calls.
+///
+/// Scan the six per-layer request bytes at target offsets +0x18..+0x1d
+/// in order; return zero at the first nonzero byte, otherwise one.
+/// No behavioral deviations. Native-width repr(C) fields preserve host
+/// pointers; volatile byte reads preserve the original access width/order.
+///
+/// # Safety
+/// `display` must address a live Display with readable request bytes.
+/// No NULL guard, matching retailOS.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn all_layer_requests_clear(display: *const Display) -> u32 {
+    let requests = core::ptr::addr_of!((*display).per_layer_bytes).cast::<u8>();
+    let mut index = 0;
+    while index < LAYER_SLOT_COUNT {
+        if requests.add(index).read_volatile() != 0 {
+            return 0;
+        }
+        index += 1;
+    }
+    1
+}
+
 /// display_set_layer_enabled — original: `FUN_081d892c` @ 0x081d892c
 /// (124 bytes, 0x081d892c..0x081d89a8; Ghidra's 164-byte extent swallows the
 /// sibling `FUN_081d89a8` whose `push {r4,r5,r6,lr}` opens at 0x081d89a8).
@@ -602,8 +629,8 @@ pub unsafe extern "C" fn internal_display_request_clear(color: u32) {
 /// is non-NULL; otherwise it scans all six bytes and stops activity through
 /// 0x081d9270 only when every byte is clear and +0x98 is set.
 ///
-/// Deliberate deviation: the six-byte scan inlines the unported 44-byte
-/// `FUN_081d8e04`; the unported start routine retains its complete retail
+/// The six-byte scan calls [`all_layer_requests_clear`]; the unported start
+/// routine retains its complete retail
 /// implementation through the fixed-address [`DisplayHooks`] default.
 /// The stop path calls the complete [`layer_activity_stop`] port.
 ///
@@ -643,13 +670,8 @@ pub unsafe extern "C" fn display_set_layer_enabled(
         return;
     }
 
-    let bytes = core::ptr::addr_of!((*display).per_layer_bytes).cast::<u8>();
-    let mut index = 0;
-    while index < LAYER_SLOT_COUNT {
-        if bytes.add(index).read_volatile() != 0 {
-            return;
-        }
-        index += 1;
+    if all_layer_requests_clear(display) == 0 {
+        return;
     }
 
     if core::ptr::addr_of!((*display).layers_active).read_volatile() != 0 {
@@ -769,9 +791,9 @@ pub unsafe extern "C" fn layer_activity_stop(display: *mut Display) {
 /// requests. Clearing it stops active activity only if all six request
 /// bytes are zero, without a display-id or driver-NULL guard.
 ///
-/// Deliberate deviations: expand the verified six-byte zero predicate at
-/// 0x081d8e04; call the existing complete stop port and retain the retail
-/// 0x081d914c start boundary. The tail unlock is a return-position call.
+/// Deliberate deviations: call the complete predicate and stop ports and
+/// retain the retail 0x081d914c start boundary. The tail unlock is a
+/// return-position call.
 /// Native-width repr(C) fields preserve host pointers.
 ///
 /// # Safety
@@ -793,12 +815,7 @@ pub unsafe extern "C" fn display_set_activity_blocker(
             layer_activity_start_hook()(display);
         }
     } else {
-        let requests = core::ptr::addr_of!((*display).per_layer_bytes).cast::<u8>();
-        let mut index = 0;
-        while index < LAYER_SLOT_COUNT && requests.add(index).read_volatile() == 0 {
-            index += 1;
-        }
-        if index == LAYER_SLOT_COUNT
+        if all_layer_requests_clear(display) != 0
             && core::ptr::addr_of!((*display).layers_active).read_volatile() != 0
         {
             layer_activity_stop(display);
@@ -1292,6 +1309,30 @@ mod tests {
         PANEL_PARAMETER_CALLS += 1;
         LAST_PANEL_PARAMETER_DRIVER = driver;
         PANEL_PARAMETER_STATUS
+    }
+
+    #[test]
+    fn layer_request_predicate_checks_every_byte_and_ignores_other_state() {
+        let mut d = display(0xff, core::ptr::null_mut());
+        d.layers = [core::ptr::dangling_mut(); LAYER_SLOT_COUNT];
+        d.clear_pending = 0xff;
+        d.reserved_1f = 0xff;
+        d.layers_active = 0xff;
+        assert_eq!(unsafe { all_layer_requests_clear(&d) }, 1);
+        for index in 0..LAYER_SLOT_COUNT {
+            for value in 1..=u8::MAX {
+                d.per_layer_bytes[index] = value;
+                assert_eq!(unsafe { all_layer_requests_clear(&d) }, 0);
+                assert_eq!(d.per_layer_bytes[index], value);
+                d.per_layer_bytes[index] = 0;
+                assert_eq!(unsafe { all_layer_requests_clear(&d) }, 1);
+            }
+        }
+        d.per_layer_bytes = [0xff; 6];
+        for index in 0..LAYER_SLOT_COUNT {
+            d.per_layer_bytes[index] = 0;
+            assert_eq!(unsafe { all_layer_requests_clear(&d) }, (index == 5) as u32);
+        }
     }
 
     #[test]
