@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod image_format_state_initialize;
 pub mod object_reset_sentinel_state;
 pub use object_reset_sentinel_state::*;
 pub mod condvar_backed_object_construct;

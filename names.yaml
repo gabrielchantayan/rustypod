@@ -209134,3 +209134,45 @@ functions:
       intact. match.py reports 22 Rust instructions versus 20 original:
       both BLs, sentinel load, flag-gated getter, stack changed argument,
       and constant-one return remain; frame/register allocation differs.
+
+  - address: 0x082201f8
+    ghidra: FUN_082201f8
+    name: image_format_state_initialize
+    size: 164
+    sig: "u32 image_format_state_initialize(u8 *state, u32 owner)"
+    module: app/image_format_state_initialize
+    status: ported
+    renames:
+      param_1/r5: state
+      param_2/r6: owner
+      auStack_2a4: descriptor_slots
+      auStack_2c4: descriptor
+      iVar2/r4: result
+      FUN_0822aa58: initialize_descriptor_state_unported
+    notes: >-
+      Raw extent is 0x082201f8..0x0822029c, 164 bytes, ending with
+      pop {r4,r5,r6,pc} before the next function's mov ip,r0.
+      Eight unconditional outbound BLs and one BLNE; whole-image A32
+      decoding finds two unconditional inbound BLs at 0x08142b64 and
+      0x0817db60 and zero predicated inbound BLs. Builds descriptor slots
+      for kinds 15 and 16 in a 660-byte word-aligned temporary. Calls the
+      three-argument initializer at 0x0822aa58 with position 2; raw callee
+      overwrites its saved r3 before use, disproving Ghidra's fourth argument.
+      This unported initializer remains a fixed-address ARM seam with an
+      explicitly installed host seam. On initialization success validates
+      position 2 with mode_selected_position_validate. Only validation
+      success resets state+0x89c and state+0x8a0 to -1 and calls the ported
+      object_set_word_0x20 veneer with owner. Returns zero on initialization
+      failure, otherwise the exact validation result. Reuses all existing
+      descriptor ports and the verified empty destructor; LLVM may eliminate
+      that empty drop. Unwritten temporary words deliberately stay uninitialized.
+      Host tests cover both failure transitions, successful cache/owner
+      updates, nonboolean return preservation, and populated descriptor slots.
+      Required host suite and ARM release build passed. Standalone real-source
+      executable smoke exercised populated slots and both failure paths with
+      the real validator; unrelated host-release cfg omissions prevent a full
+      host staticlib build. match.py shows 47 Rust instructions versus 41
+      original, preserving descriptor calls, initializer, validation gate,
+      sentinel stores and owner setter. The initializer uses BLX to its fixed
+      address; the empty drop disappears. LLVM proves the real validator
+      returns only zero/one and materializes one on the successful path.
