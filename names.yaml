@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08207560
+    ghidra: FUN_08207560
+    name: linked_entry_process
+    size: 140
+    sig: "i32 linked_entry_process(EntryOwner *owner, void *output, LinkedEntryNode *node)"
+    module: app/linked_entry_process
+    status: ported
+    renames:
+      param_1/r6: owner
+      param_2/r8: output
+      param_3/r4: node
+      local_20: entry.record
+      local_1c: entry.container
+      uVar3/r7: entries
+      iVar2/r5: result
+    notes: >-
+      Raw ARM establishes 140 bytes through pop at 0x082075e8; the next
+      real function starts with push at 0x082075ec. Whole-image word decoding
+      finds two plain inbound BLs at 0x082073c0 and 0x082074fc, zero
+      predicated inbound BLs. Outbound plain BLs at 0x082075b0 to
+      0x0814c598 and 0x082075cc to 0x082073d8; zero predicated BLs.
+      One indirect BLX at 0x08207598 invokes node vtable slot +8.
+      Cache owner word 0's word 1 before checking for an empty chain.
+      Initialize the two-pointer entry once, resolve each node index,
+      process the resolved entry, and reload next only after processing.
+      Resolver or processor errors propagate; virtual nonzero stops with
+      zero status. Caller 0x08207368 builds output and 0x082074c0 extends
+      it recursively. No canonical names exist for either direct callee;
+      keep address-backed seams with observed signatures. Concrete class
+      and virtual method identities remain unresolved. Deliberate deviations
+      use repr(C) native host pointers, expanding host layouts while asserting
+      target offsets, and typed calls with only evidenced virtual receiver
+      argument. Host tests cover empty chain, virtual stop, signed resolver
+      error, processor error, shared entry mutation and rewritten next links.
+      Host suite and ARM release build passed. Production-source host smoke
+      visits two nodes and produces 22 with status zero. Reviewed match.py
+      exit-one structural diff: 35 original instructions versus 43 Rust
+      listing entries; LLVM adds a frame pointer and uses literal-backed BLX
+      for direct firmware targets. Two zero-initialized entry words, cached
+      entries pointer, virtual slot +8, error exits and post-call next reload
+      remain intact. No device execution.
   - address: 0x081f50b4
     ghidra: FUN_081f50b4
     name: linked_node_construct
