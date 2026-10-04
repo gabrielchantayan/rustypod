@@ -9,8 +9,8 @@
 //! unconditional (`0x08211e40` and `0x08211e54`), and zero predicated `bl`
 //! instructions; the next separately linked function begins at `0x08211e60`.
 //!
-//! Deliberate deviation: the two unported processors are fixed-address calls on
-//! ARM and replaceable host seams for behavior tests.
+//! Deliberate deviation: the unported within-limit processor is a fixed-address
+//! call on ARM. Host dependency seams isolate this wrapper's boundary tests.
 
 pub type CollectionItemProcessor = unsafe extern "C" fn(*mut u8, u32, *mut u32, u32);
 
@@ -43,9 +43,8 @@ unsafe fn process_within_limit(context: *mut u8, item_present: u32, processed_co
 
 #[cfg(target_arch = "arm")]
 #[inline(always)]
-unsafe fn process_at_limit(context: *mut u8, item_present: u32, processed_count: *mut u32, limit: u32) {
-    let processor: CollectionItemProcessor = core::mem::transmute(0x0821_1d34usize);
-    processor(context, item_present, processed_count, limit)
+unsafe fn process_at_limit(context: *mut u8, item_present: u32, _processed_count: *mut u32, _limit: u32) {
+    super::collection_entries_retire::collection_entries_retire(context, item_present as usize as *mut super::collection_entries_retire::EntryGroup)
 }
 
 #[cfg(not(target_arch = "arm"))]

@@ -196,6 +196,7 @@ pub mod collection_release_first_indexed_value;
 pub mod class_8900_work_queue;
 pub mod collection_cursor_set_index;
 pub mod collection_item_process_if_limit;
+pub mod collection_entries_retire;
 pub mod class_8900_queued_work_construct;
 pub mod clamped_mode_position;
 pub mod clamped_mode_position_adjust;
