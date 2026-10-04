@@ -1,7 +1,7 @@
 //! `synchronized_list_append` — retailOS `FUN_0839e71c` @ `0x0839e71c`
 //! (72 bytes, `0x0839e71c..0x0839e763`). The next independently entered
 //! function begins at `0x0839e764`. Raw ARM decoding verifies two inbound
-//! plain `bl` call sites (0x08211bd0 and 0x08211d20), zero predicated inbound
+//! plain `bl` call sites (0x08211bc8 and 0x08211d20), zero predicated inbound
 //! `bl` forms, four outbound plain `bl` instructions, and no predicated
 //! outbound `bl` forms; the final mutex release is a tail `b`.
 //!
@@ -17,6 +17,8 @@
 //! an address which need not meet the host `Mutex` alignment. Target pointer
 //! fields stay as `u32` word indices; this avoids host pointer-width offsets.
 
+#[cfg(test)]
+pub(crate) static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 use crate::heap::veneers::operator_new;
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
@@ -140,7 +142,7 @@ mod tests {
 
     use super::{synchronized_list_append, SynchronizedListOps, SYNCHRONIZED_LIST_OPS};
     use crate::testing::{hints, try_map_u32_slab};
-    use parking_lot::Mutex;
+    use super::TEST_LOCK;
     use std::sync::LazyLock;
 
     const WORDS: usize = 16;
@@ -149,7 +151,6 @@ mod tests {
         try_map_u32_slab(hints::SYNCHRONIZED_LIST_APPEND, WORDS * core::mem::size_of::<u32>())
             .map(|pointer| pointer as usize)
     });
-    static LOCK: Mutex<()> = Mutex::new(());
     static mut NODE_PTR: *mut u32 = core::ptr::null_mut();
     static mut CLEANUP_OWNER: *mut u32 = core::ptr::null_mut();
 
@@ -185,7 +186,7 @@ mod tests {
 
     #[test]
     fn allocates_initializes_appends_and_cleans_up() {
-        let _lock = LOCK.lock();
+        let _lock = TEST_LOCK.lock();
         let Some(base) = (*SLAB).map(|address| address as *mut u32) else { return };
         unsafe {
             base.write(0);
@@ -208,7 +209,7 @@ mod tests {
 
     #[test]
     fn appends_after_the_existing_tail() {
-        let _lock = LOCK.lock();
+        let _lock = TEST_LOCK.lock();
         let Some(base) = (*SLAB).map(|address| address as *mut u32) else { return };
         unsafe {
             let old_tail = base.add(6);
