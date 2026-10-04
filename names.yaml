@@ -211323,3 +211323,35 @@ functions:
       in both bodies: LLVM uses a frame pointer and tail-branches to the
       accessor rather than preserving r4 around a BL. R_ARM_JUMP24 verifies
       that tail target is flagged_pair_payload_if_set. No device execution.
+
+  - address: 0x0820a60c
+    ghidra: thunk_FUN_0822ba50
+    name: mode_selected_position_set_forward
+    size: 4
+    sig: "u32 mode_selected_position_set_forward(void *state, u32 mode, u32 position)"
+    module: app/mode_selected_position_set
+    status: ported
+    renames:
+      r0: state
+      r1: mode
+      r2: position
+      FUN_0822ba50: mode_selected_position_set
+    notes: >-
+      Raw osos.dec word ea00850f establishes the exact four-byte veneer
+      [0x0820a60c,0x0820a610): unconditional B to 0x0822ba50. The next
+      independently linked function begins at 0x0820a610 with ldr r1,[pc],
+      then branches to 0x0822ba68 using its own literal. Independent aligned
+      whole-image A32 decoding finds two inbound plain BL callers at
+      0x08100840 and 0x08174450, zero predicated BL callers, and no outbound
+      BLs. Both callers supply state, mode one, and a stored position in r2.
+      Forward all arguments and the result to the existing ported dispatcher;
+      do not duplicate Ghidra's incorrectly expanded lock-and-update body.
+      Deliberate deviation: call the existing Rust port instead of the fixed
+      retail address. Host regression exercises wrapping delta, zero delta,
+      full-width absolute position and mode, both flag paths with unrelated
+      flag bits set, unchanged-position results, and inactive-backend isolation
+      using a stateful downstream model. Host suite, standalone production-entry
+      executable smoke, and ARM release build passed. match.py exit 1 shows
+      LLVM's push/mov/pop frame bookkeeping before the tail B; the verified
+      R_ARM_JUMP24 relocation targets mode_selected_position_set, not itself.
+      No new seams, no device execution, and no observed symbol folding.
