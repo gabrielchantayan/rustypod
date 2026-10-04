@@ -211088,3 +211088,49 @@ functions:
       passed. match.py shows LLVM's additional frame-pointer save and setup;
       relocation confirms R_ARM_CALL vtable_flag_payload_construct, followed
       by the original vtable store and pointer return. No device execution.
+
+  - address: 0x081fd05c
+    ghidra: FUN_081fd05c
+    name: image_format_descriptor_owner_construct
+    size: 100
+    sig: "ImageFormatDescriptorOwner *image_format_descriptor_owner_construct(ImageFormatDescriptorOwner *owner)"
+    module: app/image_format_descriptor_owner_construct
+    status: ported
+    renames:
+      param_1/r4: owner
+      DAT_081fd0bc: owner_vtable (0x08990e7c)
+      owner+0x004: mutex
+      owner+0x00c: mutex_link
+      owner+0x010: state
+      owner+0x01c: descriptors
+      owner+0x2b0: handle
+      owner+0x2b4: selection
+      owner+0x2b8: cursor
+      owner+0x2bc: flag
+      FUN_080744a4: mutex_create
+      FUN_081d5ff8: image_format_descriptor_slots_initialize
+      FUN_0839ef84: refcounted_ptr_construct_secondary
+    notes: >-
+      Raw A32 establishes 100 occupied bytes, 0x081fd05c..0x081fd0c0:
+      96 instruction bytes ending in pop at 0x081fd0b8, then literal
+      0x08990e7c at 0x081fd0bc. The next real function starts at
+      0x081fd0c0 with push {r4,lr}. Independent whole-image BL decoding
+      finds two inbound unconditional calls at 0x08208618 and 0x0822c1c0,
+      zero predicated calls; three outbound unconditional calls at
+      0x081fd070, 0x081fd088 and 0x081fd098, zero predicated calls.
+      Installs the owner vtable, creates its mutex, clears three state words,
+      initializes the embedded descriptor records, constructs a NULL handle
+      with implementation=0 and want_mutex=0, sets selection=-1, clears cursor
+      and flag, and publishes a self-link to the mutex. Returns the input
+      owner: the raw code subtracts 0x2b0 from the returned handle-slot pointer,
+      contrary to Ghidra's void signature. All callees reuse canonical ports;
+      no new seam. Native repr(C) pointer fields widen only on hosts.
+      Host suite and ARM release build passed. Dirty-object regression covers
+      metadata reset, all record sentinels, preserved payload and tail padding
+      under the existing shared kernel-test lock. Standalone test-configured
+      host executable smoke passed; ordinary non-test host library compilation
+      is blocked by six pre-existing missing host callees in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule. match.py prints a
+      structural diff: LLVM adds a frame pointer, retains the three calls and
+      target field offsets, and uses the saved owner instead of recovering it
+      from identity-returning callees. No behavioral deviation or device execution.
