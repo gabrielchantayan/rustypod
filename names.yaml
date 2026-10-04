@@ -215103,3 +215103,32 @@ functions:
       confirms cached success bypasses dispatch. Tests cover zero products,
       wrapping products, alignment, allocation failure and retry. match.py
       exits 1: 28 Rust versus 26 retail instructions; dispatch and call order
+
+  - address: 0x081d70d4
+    ghidra: FUN_081d70d4
+    name: iap_incoming_process_thread_find_slot
+    size: 44
+    sig: "u32 iap_incoming_process_thread_find_slot(const u8 *thread, u32 object)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0: thread
+      param_2/r1: object
+      uVar1/r2: index
+      uVar2/r3: result
+    notes: >-
+      Raw A32 extent 0x081d70d4..0x081d7100 is 44 bytes; the next
+      function starts with push {r0, r1, r2, r4, r5, r6, r7, lr}.
+      Two plain incoming BLs at 0x081d6de0 and 0x081d6fa8, zero
+      predicated incoming BLs, and zero outbound BLs. Scan all 29
+      eight-byte registration slots at thread+0x154, comparing only
+      their object words; return the last matching index or UINT32_MAX.
+      Zero selects the last free slot. Callers hold the registry mutex.
+      Reuses existing table constants and module; no callee seam or
+      behavioral deviations. Host tests cover every position, duplicate
+      precedence, context-only matches, zero/free slots and full tables.
+      All 14096 host tests pass; ARM release build succeeds. Actual-source
+      smoke returns slot 27 for two free slots and UINT32_MAX for absence.
+      match.py exits 1: LLVM fully unrolls the 29 comparisons, producing
+      91 instructions versus retail's 11-instruction loop. All object-word
+      offsets 0x154..0x234 and ascending last-match precedence are preserved.

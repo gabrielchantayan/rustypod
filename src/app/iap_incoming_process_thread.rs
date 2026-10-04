@@ -210,6 +210,96 @@ pub const SLOT_COUNT: u32 = 29;
 /// Bytes per registration slot (original `add r0, r5, r6, lsl #3`).
 pub const SLOT_STRIDE: usize = 8;
 
+/// Find the last registration slot whose object word equals `object`.
+///
+/// Original `FUN_081d70d4` @ 0x081d70d4, true size 44 bytes:
+/// 0x081d70d4..0x081d7100, followed by a new function's push.
+/// Raw A32 words verify two plain incoming BLs (0x081d6de0 and
+/// 0x081d6fa8), zero predicated incoming BLs, and zero outbound BLs.
+/// Scan all 29 eight-byte entries at thread+0x154 in ascending order,
+/// updating the result on every match. Return u32::MAX if absent;
+/// object zero finds the last free slot. Context words are ignored.
+/// No deliberate behavioral deviations; word indices preserve the
+/// firmware layout even on hosts with eight-byte pointers.
+///
+/// # Safety
+/// `thread` must be word-aligned and readable through byte 0x237.
+/// The caller must synchronize access to the registration table.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_find_slot(
+    thread: *const u8,
+    object: u32,
+) -> u32 {
+    let slots = thread.cast::<u32>().add(SLOT_TABLE_OFFSET / 4);
+    let mut result = u32::MAX;
+    let mut index = 0;
+    while index < SLOT_COUNT {
+        if slots.add(index as usize * (SLOT_STRIDE / 4)).read() == object {
+            result = index;
+        }
+        index += 1;
+    }
+    result
+}
+
+#[cfg(test)]
+mod find_slot_tests {
+    use super::*;
+
+    const WORD_COUNT: usize = (SLOT_TABLE_OFFSET + SLOT_COUNT as usize * SLOT_STRIDE) / 4;
+
+    #[test]
+    fn absent_and_context_only_matches() {
+        let mut thread = [0x1234u32; WORD_COUNT];
+        for index in 0..SLOT_COUNT as usize {
+            thread[SLOT_TABLE_OFFSET / 4 + index * 2 + 1] = 0x87654321;
+        }
+        let before = thread;
+        assert_eq!(unsafe {
+            iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), 0x87654321)
+        }, u32::MAX);
+        assert_eq!(thread, before);
+    }
+
+    #[test]
+    fn every_position_and_duplicate_precedence() {
+        let mut thread = [0u32; WORD_COUNT];
+        for index in 0..SLOT_COUNT as usize {
+            thread[SLOT_TABLE_OFFSET / 4 + index * 2] = 0x80000000 + index as u32;
+        }
+        for index in 0..SLOT_COUNT {
+            assert_eq!(unsafe {
+                iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), 0x80000000 + index)
+            }, index);
+        }
+        for index in [0, 7, 28] {
+            thread[SLOT_TABLE_OFFSET / 4 + index * 2] = u32::MAX;
+        }
+        assert_eq!(unsafe {
+            iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), u32::MAX)
+        }, 28);
+    }
+
+    #[test]
+    fn last_free_slot_and_full_table() {
+        let mut thread = [0u32; WORD_COUNT];
+        assert_eq!(unsafe {
+            iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), 0)
+        }, 28);
+        thread[SLOT_TABLE_OFFSET / 4 + 28 * 2] = 1;
+        assert_eq!(unsafe {
+            iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), 0)
+        }, 27);
+        for index in 0..SLOT_COUNT as usize {
+            thread[SLOT_TABLE_OFFSET / 4 + index * 2] = 1;
+        }
+        assert_eq!(unsafe {
+            iap_incoming_process_thread_find_slot(thread.as_ptr().cast(), 0)
+        }, u32::MAX);
+    }
+}
+
 /// A relative registration timeout converted to the 32-bit `{ seconds,
 /// nanos }` pair the registration object keeps at +0x1c. This is the
 /// wrapper's exact eight-byte stack object.
