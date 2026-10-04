@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08215820
+    ghidra: FUN_08215820
+    name: container_front_word_or_minus_one
+    size: 28
+    sig: "u32 container_front_word_or_minus_one(const BlockDeque *deque)"
+    module: cxx/container_front_word_or_minus_one
+    status: ported
+    renames:
+      param_1/r0: deque_then_front_object
+      uVar2/r4: front_word_or_minus_one
+      iVar1: front_object
+      FUN_082156b8: stock_deque_front_object_lookup
+    notes: >-
+      Raw words e92d4010 e3e04000 ebffffa2 e3500000 15904008 e1a00004
+      e8bd8010 establish 28 bytes ending before the independent push at
+      0x0821583c. Whole-image A32 BL decoding finds two inbound plain BLs
+      at 0x082334ec and 0x08235a14, zero predicated inbound BLs. Body has
+      one plain BL at 0x08215828 to 0x082156b8, no predicated BL or BLX.
+      The lookup checks deque count, copies its begin iterator, dereferences
+      the copied cursor and returns the front object pointer. Return the
+      object's aligned u32 at +8, or UINT32_MAX if empty or NULL. Both
+      callers compare the result to -1; no stronger field identity is
+      established. Deliberate deviation: retain the stock lookup binding,
+      following container_status_flags, because the existing named
+      deque_iterator_current_or_zero port returns the cursor itself and
+      omits the raw ldr r4,[r0] at 0x082156e0. Do not substitute that body.
+      Host lookup uses native cursor pointers; the object's three-u32
+      layout keeps the queried field at +8 on both hosts and target.
+      All 13835 host tests pass, ARM release build succeeds, and an
+      optimized standalone smoke exercises high-bit and zero values,
+      NULL front and empty invalid cursor. match.py exits 1 with seven
+      original versus nine Rust entries: LLVM adds a frame and literal,
+      changes the stock BL to absolute BLX, and selects MVN after lookup.
+      The NULL comparison, conditional +8 load and all result bits agree;
+      the emitted address literal is exactly 0x082156b8.
+
   - address: 0x082158b0
     ghidra: FUN_082158b0
     name: container_is_nonempty
