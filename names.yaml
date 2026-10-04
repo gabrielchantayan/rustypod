@@ -209829,3 +209829,56 @@ functions:
       queues 0x12345678 exactly once and observes state 1. match.py exits
       1: 11 original versus 14 Rust instructions, same state gate, value
       load, append BL and post-call byte store, with LLVM frame overhead.
+  - address: 0x08211310
+    ghidra: FUN_08211310
+    name: image_region_render_request
+    size: 120
+    sig: "u32 image_region_render_request(const u32 *record, void *request)"
+    module: app/image_region_render_request
+    status: ported
+    vars:
+      param_1/r4: record
+      param_2/r5: request
+      record_plus_0x04: source_handle
+      record_plus_0x08: signed_format
+      record_plus_0x0c: top
+      record_plus_0x10: left
+      record_plus_0x14: bottom
+      record_plus_0x18: right
+      local_34: render_descriptor
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x08211310..0x08211388:
+      pop {r4,r5,pc} at 0x08211384 precedes the next real prologue.
+      Whole-image A32 BL decoding finds two inbound plain calls at
+      0x081141f4 and 0x0811421c, zero predicated calls. The body contains
+      three outbound plain BLs to 0x081b5414, 0x08105b58 and 0x0826b2a8,
+      zero predicated BLs. Zero source handle returns zero without reading
+      geometry or touching the request. Otherwise resolve the handle,
+      sign-extend the format halfword, build its 32-byte image descriptor,
+      replace height/width with wrapping bottom-top/right-left and
+      top/left with the record origin, submit the descriptor, return one.
+      Reuses image_format_descriptor and render_request_from_descriptor.
+      No names entry exists for 0x081b5414; raw words establish its ABI as
+      u32 resolver(u32 handle), not Ghidra's void declaration. It reads
+      handle+4, returns that word when nonzero, otherwise reads handle+0
+      and branches to 0x082142ec when nonzero. Target dispatch remains
+      at the verified retail address; host seam does not invent its body.
+      Deliberate deviations: inherited image descriptor zero filling,
+      and zeroing the unobserved reserved descriptor word at +4.
+      Host edge tests cover absent source with a two-word record,
+      empty/reversed/extreme wrapping bounds, signed format halfwords,
+      ignored upper halfword bits, and a nonzero handle returning one.
+      Standalone smoke exercises the exported port through both real
+      Rust callees, observing source 0x12345678, bounds {30,40,5,7},
+      and result one. The parallel full suite terminated with SIGSEGV;
+      serial execution passes. Non-test whole-crate host compilation is
+      blocked by six existing missing host helpers, so the smoke compiles
+      the actual relevant source modules in isolation.
+      Final serial host suite: 13877 passed; ARM release build succeeds.
+      match.py exits 1 with a structural diff: 30 original versus 34 Rust
+      instructions including the resolver literal. Same source-null gate,
+      signed halfword load, two wrapping differences, origin stores and
+      boolean result. LLVM uses a literal-address BLX for the resolver,
+      groups geometry loads with LDM and adds its frame prologue.
+      Object relocation labels in match.py are unresolved; the two Rust
+      BL targets are image_format_descriptor and render_request_from_descriptor.
