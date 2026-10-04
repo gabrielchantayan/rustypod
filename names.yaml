@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fd61c
+    ghidra: FUN_081fd61c
+    name: indexed_record_defaults
+    size: 68
+    sig: "uint32_t indexed_record_defaults(uint32_t unused, uint32_t index, uint32_t *dst)"
+    module: util/indexed_record_defaults
+    status: ported
+    renames:
+      param_1: unused
+      param_2: index
+      param_3: dst
+      puVar1: source
+      DAT_081fd65c: default_record_table
+    notes: >-
+      Raw extent 0x081fd61c..0x081fd660 is 68 bytes: 64 executable bytes
+      and table-address literal 0x089cb240. Next function is bx lr.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x0803c2c8 and 0x0805bb90, no predicated inbound BLs, no outbound calls.
+      Ignore r0; select table + index*20 modulo 2^32; copy five words to
+      dst+4,+8,+16,+24,+20 in order, clear byte +12, return zero.
+      Preserve all other bytes. No callee seams or inferred table contents.
+      Volatile accesses deliberately preserve access width and ordering.
+      Host tests cover both caller indices, full-width data, arithmetic
+      wrapping, byte-only clear, surrounding sentinels and return value.
+      Standalone executable smoke verifies the actual production entry.
+      Host suite and ARM release build pass. Reviewed match.py exit 1:
+      LLVM adds frame setup/teardown and combines address calculation with
+      the first load; all five ordered word transfers and byte clear remain.
   - address: 0x0820b884
     ghidra: FUN_0820b884
     name: embedded_observable_array_owner_construct
