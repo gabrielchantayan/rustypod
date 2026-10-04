@@ -781,6 +781,7 @@ pub mod stream_parse_error_result;
 pub mod string_owner_init;
 pub mod stream_window_set_position;
 pub mod stream_window_dispatch_request;
+pub mod stream_window_request;
 pub mod u16_be_vtable_dispatch;
 pub mod u16_le_vtable_read_mode;
 pub mod utf8_clear_tail_character;
