@@ -11869,6 +11869,34 @@ functions:
       direct Rust offsets replace register rebasing while preserving the
       same writes and return value. Host tests cover exact member bounds,
       guard bytes, and repeated initialization.
+  - address: 0x081d9688
+    ghidra: FUN_081d9688
+    name: selector_pair_write_u64
+    size: 8
+    sig: "u32 *selector_pair_write_u64(u32 *selector, u64 value)"
+    module: app/selector_pair_write_u64
+    status: ported
+    renames:
+      param_1/r0: selector
+      param_2/r1: abi_alignment_padding
+      param_3/r2: value_low
+      param_4/r3: value_high
+    notes: >-
+      Raw osos.dec words 0xe1c020f0 and 0xe12fff1e establish the exact
+      8-byte extent 0x081d9688..0x081d968f: strd r2,[r0]; bx lr.
+      The next real function starts at 0x081d9690 with stmia r0,{r1,r2}.
+      Decoding all aligned A32 BL immediates independently finds two
+      unconditional inbound calls, at 0x081c834c and 0x081c88e8, and zero
+      predicated calls. There are no outbound calls or callee seams.
+      Both callers store a stack selector pair for registration_handle_init.
+      The port writes the low and high words at offsets zero and four.
+      Deliberate deviations correct Ghidra's void return to the preserved
+      destination pointer and represent r2:r3 as a u64 argument, with r1
+      skipped by AAPCS doubleword alignment. Host tests exercise zero,
+      all-one and asymmetric values, repeated writes, return identity,
+      and surrounding guard words.
+      ARM match.py emits stm r0,{r2,r3} plus a frame-pointer prologue and
+      epilogue rather than STRD and BX; the two stores and preserved r0 match.
   - address: 0x081d9690
     ghidra: FUN_081d9690
     name: selector_pair_write
