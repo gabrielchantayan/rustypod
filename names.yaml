@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fc9e4
+    ghidra: FUN_081fc9e4
+    name: type_two_payload_construct
+    size: 32
+    sig: "void *type_two_payload_construct(void *this, u32 payload)"
+    module: cxx/type_two_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_081fca00: type_two_payload_vtable
+    notes: >-
+      Raw ARM establishes 28 instruction bytes through 0x081fc9fc plus
+      the vtable literal at 0x081fca00, giving a true 32-byte extent ending
+      at the next real function 0x081fca04. Independent whole-image BL
+      decoding finds two plain inbound calls at 0x0818a398 and 0x081fbfa0,
+      zero predicated inbound calls, and one plain outbound call at
+      0x081fc9f0 to the already ported vtable_tagged_payload_construct
+      at 0x081fc9c0. Initialize tag 2 and the full-width payload, replace
+      the shared vtable with 0x08990e6c, and return this unchanged in r0.
+      Both callers allocate twelve bytes. The concrete class is unresolved.
+      Deliberate deviations reuse the existing Rust base constructor and
+      volatile ordered stores without validation or padding initialization.
+      Host coverage checks payload boundaries, pointer return, padding and
+      neighboring words; executable smoke confirms the actual entry.
+      ARM release build passed. match.py reports seven original instructions
+      versus nine Rust listing entries including the literal; LLVM adds a
+      frame pointer while preserving tag, base call and derived vtable store.
   - address: 0x0820a49c
     ghidra: thunk_FUN_0822aecc
     name: mode_selected_position_forward
