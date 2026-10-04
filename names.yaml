@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fcc64
+    ghidra: FUN_081fcc64
+    name: bounded_position_update
+    size: 220
+    sig: "uint32_t bounded_position_update(int32_t *state, uint32_t absolute, int32_t request, int32_t *difference)"
+    module: app/bounded_position_update
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: absolute
+      param_3/r2: request
+      param_4/r3: difference
+      iVar4/ip: delta
+      state_2b4: position
+      state_2b8: bound
+    notes: >-
+      Raw osos.dec establishes [0x081fcc64, 0x081fcd40), 220 bytes;
+      the next function starts with push {r4,r5,r6,r7,r8,lr}.
+      Independent whole-image A32 BL decoding finds two plain inbound
+      calls at 0x082085cc and 0x0822c148, zero predicated inbound calls,
+      and no outbound BLs. Decompiled inlined callers are not additional
+      raw BL sites. Relative mode rejects negative old position, performs
+      wrapping addition, clamps negative results to zero, otherwise clamps
+      against a nonzero signed bound to bound-1, and reports zero delta.
+      Absolute mode rejects negative request; bound zero stores the request
+      and reports zero delta. Nonzero bound clamps request to bound-1 and
+      reports wrapping new-minus-old only for nonnegative old position.
+      Preserve negative bounds, including INT_MIN wrapping to INT_MAX,
+      and leave state/output untouched on rejection. Callers use the delta
+      for absolute backend adjustment and original request for relative
+      backend adjustment. No callees or new seams. Deliberate deviation:
+      structured branches replace ARM predication; aligned i32 word indices
+      preserve +0x2b4/+0x2b8 on hosts. Host tests cover signed extrema,
+      noncanonical absolute flags, zero/negative bounds, overflow, rejection
+      without output access, output aliasing, and untouched surrounding state.
+      Full host suite and ARM release build pass. Optimized standalone smoke
+      exercises absolute clamp/delta, relative clamp, and rejection.
+      match.py exits 1 with 55 stock versus 38 Rust instructions: LLVM
+      consolidates absolute clamp/delta branches and adds a frame pointer.
+      Signed rejection, wrapping addition, both field offsets, conditional
+      clamps, success-only output store, and leaf structure remain intact.
+      No device execution claimed.
   - address: 0x0820a61c
     ghidra: FUN_0820a61c
     name: validated_singleton_0x89c_destruct
