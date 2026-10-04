@@ -15,6 +15,7 @@ pub use view_event_bind_state::*;
 pub mod selected_buffer_offset_byte;
 pub use selected_buffer_offset_byte::*;
 pub mod image_format_state_initialize;
+pub mod image_format_descriptor_owner_construct;
 pub mod object_reset_sentinel_state;
 pub use object_reset_sentinel_state::*;
 pub mod condvar_backed_object_construct;

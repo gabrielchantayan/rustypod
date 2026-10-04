@@ -620,6 +620,47 @@ mod tests {
     /// Serializes tests that swap the global ops table / mock state.
     static OPS_LOCK: StdMutex<()> = StdMutex::new(());
 
+    #[test]
+    fn descriptor_owner_construct_resets_metadata_preserves_records_and_padding() {
+        use crate::app::image_format_descriptor_owner_construct::{
+            image_format_descriptor_owner_construct, ImageFormatDescriptorOwner,
+        };
+        let _guard = mock_kernel();
+        for fill in [0xa5u8, 0xff, 0] {
+            let mut storage = core::mem::MaybeUninit::<ImageFormatDescriptorOwner>::uninit();
+            let owner = storage.as_mut_ptr();
+            unsafe {
+                core::ptr::write_bytes(owner.cast::<u8>(), fill, core::mem::size_of::<ImageFormatDescriptorOwner>());
+                let returned = image_format_descriptor_owner_construct(owner);
+                assert_eq!(returned, owner);
+                assert_eq!((*owner).vtable, 0x0899_0e7c);
+                assert!(!(*owner).mutex.sem_cell.is_null());
+                assert_eq!((*owner).mutex.unused, 0);
+                assert_eq!((*owner).mutex_link, core::ptr::addr_of_mut!((*owner).mutex));
+                assert_eq!((*owner).state, [0; 3]);
+                assert!((*owner).handle.is_null());
+                assert_eq!((*owner).selection, u32::MAX);
+                assert_eq!((*owner).cursor, 0);
+                assert_eq!((*owner).flag, 0);
+                for word in 0..165 {
+                    let expected = match word {
+                        0 => 0x0898_dfe4,
+                        164 => 0,
+                        163 => u32::MAX,
+                        n if n >= 9 && n < 171 && (n - 9) % 9 == 0 => u32::MAX,
+                        _ => u32::from_ne_bytes([fill; 4]),
+                    };
+                    assert_eq!((*owner).descriptors[word], expected, "descriptor word {word}");
+                }
+                let flag_end = core::ptr::addr_of!((*owner).flag) as usize + 1;
+                let object_end = owner as usize + core::mem::size_of::<ImageFormatDescriptorOwner>();
+                for address in flag_end..object_end {
+                    assert_eq!(*(address as *const u8), fill, "tail padding");
+                }
+            }
+        }
+    }
+
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Call {
         Define(u32, usize),
