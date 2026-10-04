@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const CODEPOINT_GROUP_MAP: usize = 0x427b_0000;
     pub const INDEXED_RECORD_DEFAULTS: usize = 0x089c_0000;
     pub const TAGGED_BUFFER_PAYLOAD_SIZE: usize = 0x427a_0000;
     pub const IMAGE_FORMAT_SELECTED_PRODUCT_SUM: usize = 0x4279_0000;
