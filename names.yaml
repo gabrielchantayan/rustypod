@@ -210415,3 +210415,33 @@ functions:
       match.py verifies the same ldr r0,[r0,#12]; LLVM adds a frame-pointer
       prologue and returns via pop {fp,pc} instead of bx lr (four instructions
       versus two). No device execution was performed.
+
+  - address: 0x0820be7c
+    ghidra: FUN_0820be7c
+    name: opaque_record_member_at_04
+    size: 8
+    sig: "const u8 *opaque_record_member_at_04(const u8 *record)"
+    module: cxx/opaque_record_member_at_04
+    status: ported
+    vars: {"param_1/r0": record, "r0 (return)": member}
+    notes: >-
+      Raw osos.dec words e2800004 and e12fff1e establish add r0,r0,#4;
+      bx lr. The next real function starts at 0x0820be84 with ldr
+      r0,[r0,#0x10]; bx lr, proving the true 8-byte extent. Independent
+      whole-image ARM BL decoding finds two plain unconditional inbound
+      calls at 0x082809c4 and 0x08280ce0, zero predicated inbound calls,
+      and no outgoing calls. Both callers pass an embedded record at
+      object+0x3c. The first forwards the result to 0x08162668; the second
+      reads the word at result+4. No concrete member type or callee identity
+      is inferred and no callee seam is introduced. Returns record+4
+      without accessing memory or validating null, alignment, or bounds.
+      Byte-pointer wrapping arithmetic retains the target's four-byte
+      offset on hosts; the deliberate host deviation is wrapping at host
+      pointer width instead of ARM's 32 bits. Host tests cover the embedded
+      record, four-byte spacing, null, unaligned and non-dereferenceable
+      inputs, and address wraparound. Host suite: 13905 passed. ARM release
+      build passed. Standalone smoke verified member offset 4, null to 4,
+      and maximum host address to 3. match.py confirms add r0,r0,#4;
+      LLVM adds push {fp,lr}; mov fp,sp and returns via pop {fp,pc}
+      rather than bx lr (four instructions versus two). No device execution
+      was performed.
