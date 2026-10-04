@@ -209224,7 +209224,7 @@ functions:
       DAT_082153e0: SHARED_STRING_STATE_VTABLE_ADDRESS
       FUN_083b5090: shared_cell_construct
       FUN_08277440: string_default_construct
-      FUN_08215364: reset_shared_member_to_empty
+      FUN_08215364: shared_string_state_clear_shared
     notes: >-
       Raw osos.dec establishes 80 instruction bytes plus the four-byte
       vtable literal 0x089931e0, ending at the next real function
@@ -209236,19 +209236,17 @@ functions:
       default-constructs StringObject at +0x14, clears +0x1c/+0x20
       and only the byte at +0x24, preserving +4 and the final three bytes.
       Returns this. The class and opaque field identities remain unknown.
-      Reuses existing Rust shared-cell and string constructors. Omits
-      the final helper at 0x08215364: its empty temporary construction,
-      assignment to the already-empty member, and empty release have no
-      observable effect here. No new callee seam or second port is added.
+      Reuses existing Rust shared-cell and string constructors and now calls
+      the separately ported shared_string_state_clear_shared at 0x08215364
+      for the final empty-member reset.
       repr(C) fields preserve target offsets while host pointers widen.
       Host tests cover poisoned prior member storage and untouched holes.
-      Required host suite passes 13846 tests; ARM release build passes.
-      Standalone smoke using the actual constructor and extracted existing
-      callee bodies confirms poisoned member initialization, preserved holes,
-      return identity, and no allocation. match.py reports a structural diff:
-      both real constructor BL relocations remain, stores have exact target
-      offsets including STRB at +0x24, and the redundant reset BL is omitted
-      as documented. Rust emits 76 instruction bytes plus a four-byte literal.
+      Required host suite passes 13851 tests; ARM release build passes.
+      Earlier standalone smoke using the actual constructor and extracted
+      existing callee bodies confirmed poisoned member initialization,
+      preserved holes, return identity, and no allocation. The earlier
+      match.py comparison preceded restoration of the final reset call;
+      its instruction count no longer describes the current constructor.
   - address: 0x0820fd6c
     ghidra: FUN_0820fd6c
     name: parse_wide_time_seconds
@@ -209290,3 +209288,42 @@ functions:
       cursor comparisons, 3600/60 weighting, and conditional negation.
       LLVM hoists the immutable range end and schedules field weighting
       earlier; the original reloads that end between calls.
+  - address: 0x08215364
+    ghidra: FUN_08215364
+    name: shared_string_state_clear_shared
+    size: 44
+    sig: "void shared_string_state_clear_shared(SharedStringState *this)"
+    module: app/shared_string_state_clear_shared
+    status: ported
+    renames:
+      param_1/r4: this
+      uStack_10: empty
+      uVar1: source
+      FUN_083b5090: shared_cell_construct
+      FUN_083b50e4: shared_cell_assign
+      FUN_083b524c: shared_cell_release
+    notes: >-
+      Raw A32 words establish 44 bytes from 0x08215364 through the POP at
+      0x0821538c; the next real function begins at 0x08215390.
+      Whole-image decoding finds two incoming unconditional BLs at
+      0x082153d4 and 0x08215410, with zero predicated incoming BLs.
+      The body has three unconditional BLs to the existing shared-cell
+      construct, assign, and release ports, with zero predicated BLs.
+      Constructs an empty temporary handle, assigns it to member +8,
+      releasing the previous cell, then releases the temporary.
+      Only r0 is an input; Ghidra's extra arguments arise from saved r3
+      stack storage, which the constructor overwrites before reading.
+      No semantic deviations. Reuses SharedStringState's repr(C) layout;
+      host pointer fields widen without overlapping adjacent fields.
+      The already-ported constructor now calls this helper rather than
+      omitting its redundant empty-member reset. Host tests exercise empty,
+      nonfinal, zero and minimum signed refcounts, neighboring-field
+      preservation, final virtual destruction and destructor slot clearing.
+      The full host suite passes 13851 tests and the ARM release build passes.
+      Standalone smoke of extracted actual reset and helper bodies proves
+      a 3-to-2 shared drop, slot clearing, prefix preservation and repeated
+      empty reset without allocation or deletion. No device execution.
+      match.py prints a structural diff: LLVM emits 15 versus 11 instructions
+      due to frame setup, retaining member offset +8 and all three calls.
+      Object relocations verify shared_cell_construct, shared_cell_assign
+      and shared_cell_release as the three real BL targets.
