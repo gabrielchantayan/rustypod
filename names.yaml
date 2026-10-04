@@ -210203,3 +210203,58 @@ functions:
       indexed addressing, initial byte read, conditional replacement, output
       store, and byte publication agree. LLVM uses a frame pointer and one
       literal plus conditional addition of 0x4000 instead of two literals.
+
+  - address: 0x08210528
+    ghidra: FUN_08210528
+    name: string_pair_session_reset
+    size: 136
+    sig: "void string_pair_session_reset(StringPairSession *this)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1/r4: this
+      r5: zero
+      DAT_082105ac: empty_string
+      "this+0x08": owned
+      "this+0x0c": primary
+      "this+0x14": pending
+      "this+0x18": active
+      "this+0x1c/0x20/0x24": counters
+      "this+0x50": first
+      "this+0x58": second
+      "this+0x60": enabled
+      "this+0x64/0x68/0x6c": tail_counters
+      FUN_0827639c: string_object_assign_cstr
+      FUN_08277440: string_default_construct
+      FUN_082774a8: string_object_assign
+      FUN_08277484: string_object_destroy
+      "owned vtable+4": opaque_owned_destructor
+    notes: >-
+      Raw osos.dec establishes 132 instruction bytes through pop at
+      0x082105a8 and a four-byte empty-string literal at 0x082105ac.
+      Next real entry is push at 0x082105b0: total extent 136 bytes.
+      Independent whole-image A32 decoding finds two inbound plain BLs,
+      at 0x08210834 and 0x08210870, zero predicated inbound BLs.
+      Five outbound BLs are unconditional: two assign_cstr calls, default
+      construction, copy assignment, and destruction. One indirect BLX
+      invokes the owned object's second vtable slot; its identity is
+      intentionally unresolved. Reset flags and counters, clear both
+      strings, assign a temporary empty string to primary, destroy the
+      temporary, release a non-NULL owner before clearing its slot, and
+      finally clear pending. Constructor and destructor callers both
+      use this reset. Ghidra's r2/r3 arguments are merely saved registers,
+      overwritten by temporary default construction. Named repr(C) fields
+      preserve ARM offsets while accommodating host pointers. ARM retains
+      stock assignment callees because existing Rust assignment virtual
+      defaults are incomplete; host tests use their existing boundaries.
+      Host regression covers populated and repeated empty reset, destructor
+      observation before ownership/pending clearing, and opaque preservation.
+      All 13897 host tests and the ARM release build pass. match.py exits
+      1: 33 stock instructions versus 43 Rust lines including three
+      literals. Field offsets, assignment sequence, conditional ownership
+      dispatch, and final pending clear agree. LLVM reorders independent
+      stores, uses a frame pointer, and materializes retained stock calls
+      as BLX rather than BL. Standalone host smoke is blocked by unrelated
+      non-test compile errors in prepare_entry_metadata,
+      shared_payload_select_kind, and calendar_schedule; no device or
+      emulator execution was performed.
