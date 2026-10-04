@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820a4a0
+    ghidra: FUN_0820a4a0
+    name: context_handle_process_forward
+    size: 28
+    sig: "u32 context_handle_process_forward(u8 *context, u8 *output, u8 *unused_2, u8 *unused_3, u8 *changed)"
+    module: app/context_handle_process_forward
+    status: ported
+    vars: {param_1: context, param_2: output, param_3: unused_2, param_4: unused_3, param_5: changed}
+    notes: >-
+      Raw ARM words establish [0x0820a4a0, 0x0820a4bc), 28 bytes;
+      the next entry is a separate branch veneer to 0x0822b060, followed
+      by a new push prologue at 0x0820a4c0. One plain outbound BL at
+      0x0820a4b4 targets the already ported context_handle_process at
+      0x0822af94; no predicated outbound BLs. Independent whole-image
+      decoding finds two plain inbound BLs at 0x08101360 and 0x081751e8,
+      no predicated inbound BLs. Preserves all five arguments and the
+      callee's u32 return, unlike Ghidra's void/no-argument signature.
+      Deliberate deviation: calls the existing Rust port directly. LLVM
+      emits a tail branch with R_ARM_JUMP24 context_handle_process rather
+      than the original stack shuffle and BL; fifth-argument storage and
+      return semantics are preserved. Host coverage includes failure status,
+      output effects, NULL changed, and both empty-handle selection gates.
   - address: 0x081fcc64
     ghidra: FUN_081fcc64
     name: bounded_position_update

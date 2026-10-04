@@ -163,4 +163,38 @@ mod tests {
         }, 1);
         assert_eq!(output, 0x8123_4567);
     }
+
+    #[test]
+    fn forward_preserves_failure_status_and_output_with_optional_changed() {
+        use crate::app::context_handle_process_forward::context_handle_process_forward;
+
+        let _lock = LOCK.lock();
+        let _seams = unsafe { install() };
+        unsafe { core::ptr::addr_of_mut!(CONTEXT_HANDLE_PROCESS).write_volatile(write_result) };
+        // Exercise both reasons the real constructor selects an empty handle.
+        for (ready, selected) in [(0, 0), (0, 1), (1, 0)] {
+            let mut context = [0u64; 0xc0];
+            let state = context.as_mut_ptr().cast::<u8>();
+            unsafe {
+                state.add(0x14).cast::<u32>().write(ready);
+                state.add(0x24).write(selected);
+            }
+            for report_change in [false, true] {
+                let mut output = 0u32;
+                let mut changed = 0xa5u8;
+                let status = unsafe {
+                    context_handle_process_forward(
+                        state,
+                        core::ptr::addr_of_mut!(output).cast(),
+                        usize::MAX as *mut u8,
+                        core::ptr::null_mut(),
+                        if report_change { &mut changed } else { core::ptr::null_mut() },
+                    )
+                };
+                assert_eq!(status, 0xffff_fffe);
+                assert_eq!(output, 0x8123_4567);
+                assert_eq!(changed, if report_change { 1 } else { 0xa5 });
+            }
+        }
+    }
 }
