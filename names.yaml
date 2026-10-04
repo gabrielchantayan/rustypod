@@ -210158,3 +210158,48 @@ functions:
       offsets, optional store, byte publication and signed selector wrap
       match. LLVM uses a smaller frame, individual stack loads instead of
       LDM, and equivalent signed >1 rather than >=2. No calls introduced.
+
+  - address: 0x0820c3f0
+    ghidra: FUN_0820c3f0
+    name: channel_slot_acquire
+    size: 88
+    sig: "u32 channel_slot_acquire(u32 *base, u32 channel, u32 *output, u32 preserve)"
+    module: app/channel_slot_acquire
+    status: ported
+    args:
+      r0: base
+      r1: channel
+      r2: output
+      r3: preserve
+    vars:
+      r12: selected
+      lr: initial_state
+      iVar2: selected
+      iVar1: record
+    notes: >-
+      Raw osos.dec establishes 88 bytes through the next independent
+      function at 0x0820c448: 80 instruction bytes ending at 0x0820c43c,
+      then buffer-address literals 0x08ae07a8 and 0x08adc7a8. Independent
+      whole-image A32 decoding finds two inbound unconditional BLs at
+      0x081af964 and 0x081af9ec, zero predicated inbound BLs, and zero
+      outgoing plain or predicated BLs. No callee seams are required.
+      Both callers obtain base through 0x0820c338 and select channel zero,
+      passing preserve zero or one before publication via the existing
+      channel_slot_publish port at 0x0820c448. Read selector at base plus
+      channel times 4; record is base plus channel times 56 plus selector
+      times 28. Read initial state byte at +8 even though unused. For zero
+      preserve, store 0x08adc7a8 at +12 if selected is zero, otherwise
+      0x08ae07a8. Copy +12 to output, then set byte state +8 to 2 and return
+      zero without advancing the selector. No deliberate deviations:
+      aligned word indices retain target layout and volatile accesses
+      retain the initial byte read and output-before-state ordering,
+      including aliases. Concrete owner and buffer contents remain unknown.
+      Host tests cover both slots, three channels, zero and nonzero preserve,
+      untouched neighboring bytes, output aliasing state, and output aliasing
+      selector. All 13896 host tests and ARM release build pass. Standalone
+      smoke observes reset slot-zero address 0x08adc7a8, preserved slot-one
+      address 0x12345678, state 2, and unchanged selectors. match.py exits 1
+      with 20 original instructions versus 21 Rust lines including a literal;
+      indexed addressing, initial byte read, conditional replacement, output
+      store, and byte publication agree. LLVM uses a frame pointer and one
+      literal plus conditional addition of 0x4000 instead of two literals.

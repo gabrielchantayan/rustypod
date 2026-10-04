@@ -869,3 +869,4 @@ pub mod shared_string_state_clear_shared;
 pub mod flagged_pair_shuffle;
 pub mod component_selection_set;
 pub mod collection_nested_process;
+pub mod channel_slot_acquire;
