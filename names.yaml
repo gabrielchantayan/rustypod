@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820b2c4
+    ghidra: FUN_0820b2c4
+    name: codepoint_group_map_populate
+    size: 120
+    sig: "void codepoint_group_map_populate(uint32_t *map, uint32_t first_group, const uint32_t *groups)"
+    module: cxx/codepoint_group_map
+    status: ported
+    vars: {param_1: map, param_2: first_group, param_3: groups, iVar2: string_index, local_20: cursor, iVar1: codepoint}
+    notes: >-
+      Raw ARM establishes 116 instruction bytes plus the 0x1ff literal at
+      0x0820b338, before the next real function at 0x0820b33c: 120 bytes.
+      One unconditional outbound BL at 0x0820b2f4 targets the already-ported
+      utf8_next_codepoint at 0x08276214; zero predicated BLs, not Ghidra's
+      reported two sites. Caller 0x0820b234 supplies group bases 0x41 and
+      0x30. Walk the target-width NULL-terminated array through *groups,
+      decode each string until a zero result, and store the wrapping group
+      label in map+12+codepoint. Later groups win; unmapped bytes remain.
+      Initialize words +0/+4/+8 to zero, 511, and map+12 after traversal.
+      No deliberate deviations. Host test covers empty arrays/strings,
+      overlap precedence, byte wrapping, U+FFFF, malformed/four-byte leads,
+      overlong decoded NUL, and full-table preservation. All 13923 host
+      tests and ARM release build pass. Isolated actual-source executable
+      smoke uses an exact copy of the existing decoder; whole-crate native
+      non-test build is blocked by unrelated missing host-only callees.
+      match.py exits 1: LLVM peels the first decoder call, leaving two
+      static BL sites to that decoder, adds frame bookkeeping and combines
+      final header stores; traversal, byte writes and header values agree.
   - address: 0x081fd61c
     ghidra: FUN_081fd61c
     name: indexed_record_defaults
