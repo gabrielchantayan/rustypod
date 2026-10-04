@@ -86,6 +86,31 @@ pub unsafe extern "C" fn mode_selected_position_set(
     mode_selected_position_set_path(flag_set)(selected_state, mode, position)
 }
 
+/// `mode_selected_position_set_forward` — original: `thunk_FUN_0822ba50`
+/// at load address `0x0820a60c`; true size **4 bytes**.
+///
+/// Raw word `0xea00850f` tail-branches to `0x0822ba50`; the next real
+/// function begins at `0x0820a610` with `ldr r1,[pc]`. Full-image aligned
+/// A32 decoding finds two inbound plain BLs (`0x08100840`, `0x08174450`),
+/// zero predicated BLs, and no outbound BLs. Forward state, mode, position,
+/// and the result unchanged to the mode-selected position dispatcher.
+///
+/// Deliberate deviation: branch to the existing Rust port rather than the
+/// fixed retail address. LLVM may fold equivalent veneer bodies.
+///
+/// # Safety
+///
+/// Same requirements as [`mode_selected_position_set`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mode_selected_position_set_forward(
+    state: *mut u8,
+    mode: u32,
+    position: u32,
+) -> u32 {
+    mode_selected_position_set(state, mode, position)
+}
+
 // `mode_selected_position_set_veneer` — original: `thunk_FUN_0822ba50` @
 // `0x08220538` (**4 bytes**, `0x08220538..0x0822053c`; the separately linked
 // next function starts with `push {r4,lr}` at `0x0822053c`).
@@ -188,6 +213,41 @@ mod tests {
         reset
     }
 
+
+    // A stateful downstream model: mode zero applies a wrapping delta;
+    // other modes replace the selected backend position.
+    unsafe extern "C" fn update_position(state: *mut u8, mode: u32, position: u32) -> u32 {
+        let slot = state.cast::<u32>();
+        let old = slot.read();
+        let new = if mode == 0 { old.wrapping_add(position) } else { position };
+        slot.write(new);
+        u32::from(old != new)
+    }
+
+    #[test]
+    fn forward_preserves_backend_selection_and_position_transitions() {
+        let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
+        let mut state = State([0; STATE_BYTES]);
+        unsafe {
+            let _reset = install();
+            MODE_SELECTED_POSITION_SET_CLEAR = update_position;
+            MODE_SELECTED_POSITION_SET_SET = update_position;
+            let clear = state.0.as_mut_ptr().add(CLEAR_STATE_OFFSET).cast::<u32>();
+            let set = state.0.as_mut_ptr().add(SET_STATE_OFFSET).cast::<u32>();
+            clear.write(u32::MAX);
+            set.write(17);
+            state.0[MODE_FLAGS_OFFSET] = 0xfe;
+            assert_eq!(mode_selected_position_set_forward(state.0.as_mut_ptr(), 0, 1), 1);
+            assert_eq!(clear.read(), 0);
+            assert_eq!(set.read(), 17);
+            assert_eq!(mode_selected_position_set_forward(state.0.as_mut_ptr(), 0, 0), 0);
+            state.0[MODE_FLAGS_OFFSET] = 0xff;
+            assert_eq!(mode_selected_position_set_forward(state.0.as_mut_ptr(), u32::MAX, u32::MAX), 1);
+            assert_eq!(set.read(), u32::MAX);
+            assert_eq!(clear.read(), 0);
+            assert_eq!(mode_selected_position_set_forward(state.0.as_mut_ptr(), 1, u32::MAX), 0);
+        }
+    }
     #[test]
     fn clear_flag_forwards_unchanged_arguments_to_clear_state() {
         let _guard = MODE_SELECTED_POSITION_SET_TEST_LOCK.lock();
