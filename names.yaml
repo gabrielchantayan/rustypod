@@ -211018,3 +211018,34 @@ functions:
       destructor call/recovery and adds a frame pointer; relocations prove
       the remaining calls target refcounted_body_release_slot1_copy and
       mutex_delete in that order. No behavioral deviations or device execution.
+
+  # --- Observed vtable 0x0899219c prefix constructor ---
+  - address: 0x0820b20c
+    ghidra: FUN_0820b20c
+    name: vtable_0899219c_construct
+    size: 20
+    sig: "void *vtable_0899219c_construct(void *this, u32 payload)"
+    module: cxx/vtable_0899219c_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      FUN_081b6968: vtable_flag_payload_construct
+      DAT_0820b220: derived_vtable (0x0899219c)
+    notes: >-
+      Raw words e52de004 ebfeadd4 e59f1004 e5801000 e49df004 establish
+      20 instruction bytes through 0x0820b21c. The literal 0x0899219c at
+      0x0820b220 extends the occupied range to 24 bytes; the next real
+      function starts at 0x0820b224 with cmp r0,#0. Independent whole-image
+      ARM decoding finds two inbound plain BL calls at 0x08148638 and
+      0x08177f1c, no predicated BL callers. The body has one plain BL at
+      0x0820b210 to canonical ported vtable_flag_payload_construct and no
+      predicated BL. Forward this and payload, replace the returned object's
+      vtable word, and return that pointer. No new seam or behavioral deviation;
+      the existing callee's base-constructor seam remains unchanged. Class
+      identity is unresolved. Host tests cover zero, high-bit and maximum
+      payloads, flag clearing, padding and adjacent-word preservation. All
+      13927 host tests, ARM release build and executable constructor smoke
+      passed. match.py shows LLVM's additional frame-pointer save and setup;
+      relocation confirms R_ARM_CALL vtable_flag_payload_construct, followed
+      by the original vtable store and pointer return. No device execution.
