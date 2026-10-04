@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f3ff4
+    ghidra: FUN_081f3ff4
+    name: filename_record_select
+    size: 100
+    sig: "u32 filename_record_select(void *records, const char *filename, void **out)"
+    module: app/filename_record_select
+    status: ported
+    renames:
+      param_1/r0/r5: records
+      param_2/r1: filename
+      param_3/r2/r4: out
+      local_10: kind
+      param_4/r3: unused_stack_storage_not_argument
+      FUN_08091f84: filename_classification_seam
+    notes: >-
+      Raw A32 establishes [0x081f3ff4, 0x081f4058), 100 bytes ending
+      before the next independent push prologue. Whole-image word decoding
+      finds zero plain inbound BLs and two predicated BLNEs at 0x081e319c
+      and 0x082060c0; one plain outbound BL at 0x081f4008 to verified
+      unported filename classifier 0x08091f84, zero predicated outbound BLs.
+      Both callers pass records at object +0x20, filename at +0x58 and
+      output at +0x1c. Classification failure preserves out and returns one;
+      kinds zero through two store records plus kind times 16 and return
+      zero; all other kinds clear out and return one. Reuse existing
+      filename classifier ABI. Deliberate deviations use a byte local
+      instead of saved incoming r3 and structured selection. All 13984
+      host tests and ARM release build passed; executable production-source
+      smoke covers all 256 kinds and classifier-error preservation.
+      Reviewed match.py exit-one diff: 25 original versus 28 Rust listing
+      entries, added frame, classifier BLX literal and shifted offset;
+      failure exits and conditional clearing remain intact. No device run.
   - address: 0x081f4058
     ghidra: FUN_081f4058
     name: triple_vtable_state_construct
