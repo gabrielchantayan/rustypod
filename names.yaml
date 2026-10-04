@@ -212757,3 +212757,30 @@ functions:
       diff: LLVM emits 11 instructions versus eight, adding a frame and
       splitting head publication into predicated stores; field offsets,
       initial clear, head load and conditional tail update are retained.
+  - address: 0x081f1984
+    ghidra: FUN_081f1984
+    name: linked_owner_head
+    size: 8
+    sig: "u32 linked_owner_head(const u32 *owner)"
+    module: app/linked_owner_head
+    status: ported
+    renames:
+      param_1/r0: owner
+      "owner+8": head
+    notes: >-
+      Raw words e5900008 e12fff1e are ldr r0,[r0,#8]; bx lr.
+      True extent is 0x081f1984..0x081f198b; the independently ported
+      linked_node_prepend starts at 0x081f198c and updates this head field.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x08235870
+      and 0x082359a0, zero predicated inbound BLs and zero body calls.
+      Both callers obtain the owner through opaque_object_implementation
+      and use its head as an object for virtual dispatch; concrete type
+      remains unrecovered. Return word 2 unchanged, including zero.
+      Deliberate deviation: u32 represents the opaque target address and
+      preserves four-byte field spacing on hosts. No owner null guard,
+      allocation, head dereference or new callee seam.
+      All 14003 host tests and the ARM release build passed. Public-entry
+      smoke observed zero, 0x08123450, 0xffffffff and a reset to zero.
+      match.py exits 1: LLVM emits four instructions rather than two,
+      adding push/mov frame setup and returning with pop instead of bx;
+      the single ldr r0,[r0,#8] and its return value are preserved.
