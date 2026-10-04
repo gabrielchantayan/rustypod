@@ -212628,3 +212628,41 @@ functions:
       dispatch, store widths, repeated geometry loads and zero-store order
       survive; LLVM uses branches instead of predicated format stores and
       adds a frame. No device execution.
+
+  - address: 0x08203dac
+    ghidra: FUN_08203dac
+    name: indexed_record_selection_set
+    size: 132
+    sig: "void indexed_record_selection_set(IndexedRecordSelection *receiver, u32 index)"
+    module: app/indexed_record_selection_set
+    status: ported
+    renames:
+      param_1/r0/r4: receiver
+      param_2/r1: index
+      receiver_plus_0x24: selected_index
+      receiver_plus_0x28: previous_index
+      receiver_plus_0x44: subscription_receiver
+      FUN_080ffae8: indexed_record_lookup
+      FUN_0816f75c: event_subscription_rtc_sync
+      vtable_plus_0x58: dispatch
+    notes: >-
+      Raw words establish 116 instruction bytes plus four literal words,
+      0x08203dac..0x08203e30, where the next independently entered function
+      begins. Two unconditional direct BLs target existing Rust ports at
+      0x080ffae8 and 0x0816f75c; no predicated BLs. Two indirect BLX calls
+      and a final BX dispatch use vtable slot +0x58, reloaded each time.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x0819afc8 and 0x0819b0b0, with no predicated inbound BLs. Store index
+      at +0x24 and +0x28 before lookup, zero-extend the record halfword at
+      +0x0a into subscription/RTC synchronization through receiver +0x44,
+      then dispatch category 0x53747220 and resources 0x8e8c..0x8e8e.
+      No null guards or callee identity guesses. repr(C) pointer fields widen
+      on hosts; compile-time assertions verify all relevant target offsets.
+      Host regression covers unsigned halfword boundaries, index extremes,
+      mutation ordering, untouched fields and reentrant vtable replacement.
+      Host suite and ARM release build passed. Isolated production algorithm
+      smoke observed index 204, rank 65535 and all three ordered resources;
+      firmware-global lookup/sync were injected, not executed on a device.
+      match.py exited 1 with 29 original versus 34 Rust instructions: frame
+      and immediate materialization differ; field offsets, unsigned load,
+      both direct calls, repeated virtual loads and final BX survive.
