@@ -214116,3 +214116,46 @@ functions:
       device execution. match.py reports 37 versus 28 instructions, with
       timer_schedule_shim inlined into the existing timer operations dispatch;
       sparse stores, zero-extending halfword load and delay reload remain.
+  - address: 0x081ee728
+    ghidra: FUN_081ee728
+    name: path_list_node_construct
+    size: 40
+    sig: "PathListNode *path_list_node_construct(PathListNode *this, const StringObject *source, uint8_t entry_kind, PathListNode *next)"
+    module: app/path_list_node_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      param_3/r2: entry_kind
+      param_4/r3: next
+      puVar1: constructed_node
+      DAT_081ee74c: PATH_OBJECT_VTABLE_ADDRESS
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw A32 words verify 36 bytes of code at 0x081ee728..0x081ee74b,
+      followed by the 0x089a60d8 vtable literal at 0x081ee74c; the next
+      real function begins at 0x081ee750, giving a 40-byte extent.
+      Whole-image aligned word decoding finds two plain inbound BLs at
+      0x081ee874 and 0x081ee898 and no predicated inbound BLs. The body
+      contains one plain BL at 0x081ee734 to the already-ported
+      string_object_copy_construct at 0x082773e0, no predicated BLs.
+      The caller allocates 16-byte nodes and appends them to a path list.
+      Copy-constructs the leading StringObject, plants the existing path
+      vtable identity, writes the entry-kind byte at +8 and next pointer
+      at +12, leaves +9..+11 untouched, and returns the base ctor result.
+      The base self-construction guard preserves the existing payload.
+      Deviations: named repr(C) fields account for wider host pointers;
+      direct Rust base call and existing ROM path-vtable identity reuse,
+      without a new seam. Host edge tests cover self-construction payload
+      preservation, zero/high-bit/max entry kinds, padding preservation,
+      and self/null next links. No device execution performed.
+      Full host suite passed (14053 tests); ARM release build passed.
+      match.py exits 1 with a structural diff: LLVM adds an fp setup and
+      reorders the independent derived-field stores, preserving the byte
+      store at +8, pointer store at +12, vtable literal, and base call.
+      Object relocation verifies R_ARM_CALL string_object_copy_construct.
+      Standalone actual-source self-copy smoke verified payload, padding,
+      vtable, kind, link and return; only the self-copy base path was exercised.
+      A separate non-test host library build is blocked by six existing
+      missing host helpers in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule; no unrelated changes made to those modules.
