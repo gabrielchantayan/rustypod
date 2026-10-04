@@ -12762,6 +12762,32 @@ functions:
       target-width vtable dispatch is retained on target; host builds use a
       widened callback seam because host pointers cannot occupy the
       firmware's four-byte +0x48 field. No target behavioral deviations.
+  - address: 0x081f0684
+    ghidra: FUN_081f0684
+    name: context_lifecycle_slot_0x34_dispatch
+    size: 52
+    sig: "void context_lifecycle_slot_0x34_dispatch(u8 *context)"
+    module: app/context_lifecycle_slot_0x34
+    status: ported
+    renames:
+      param_1/r0/r5: context
+      context_plus_0x48/r0: lifecycle_object
+      context_plus_0x50/r4: lifecycle_guard
+      lifecycle_object_vtable_plus_0x34/r1: lifecycle_slot_0x34
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 words establish the 52-byte extent [0x081f0684,0x081f06b8);
+      the next push starts an independent function. Lock context+0x50,
+      conditionally invoke the object's vtable slot +0x34 with the object
+      at context+0x48 as r0, then tail-branch to mutex_unlock. Whole-image
+      decoding finds two inbound plain BLs (0x0814ac7c,0x0814afb8), no
+      predicated inbound BLs, one outbound plain BL, no predicated
+      outbound BLs, and one BLXNE. Ghidra incorrectly expands the unlock
+      tail into semaphore signal dispatch; the raw B targets 0x0807f6a0.
+      Existing ported mutex functions are reused. Rust expresses the tail
+      branch as a return-position call; hosts widen pointer words but
+      preserve the vtable word index. No target behavioral deviations.
   - address: 0x082ab20c
     ghidra: FUN_082ab20c
     name: pair_header_element_array_copy_construct
