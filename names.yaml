@@ -213854,3 +213854,37 @@ functions:
       original vtable literal. An isolated source smoke exercises the export
       with existing host seams and verifies a changed assigned value,
       derived fields, base flag, and return identity; no device run performed.
+
+  - address: 0x081dceb8
+    ghidra: FUN_081dceb8
+    name: work_record_apply_adjustment
+    size: 36
+    sig: "void work_record_apply_adjustment(u8 *record)"
+    module: app/work_record_apply_adjustment
+    status: ported
+    renames:
+      param_1: record
+      FUN_08140344: apply_base_day_seconds_adjustment
+    notes: >-
+      Raw words establish extent 0x081dceb8..0x081dcedc, next function
+      starts with push {r4,r5,r6,lr}. One outgoing plain BL at 0x081dcecc
+      targets 0x08140344, zero predicated outgoing BL. Whole-image aligned
+      BL decoding finds zero incoming plain BL and two incoming predicated
+      BL at 0x081dcb10 and 0x081dcc08. Passes target word +0x74, signed
+      day delta +0x7c and seconds-delta pointer +0x80 to the retail callee,
+      then writes 1 to byte +0x86 regardless of its previous value.
+      Callee raw code copies base pair +0x1c/+0x20 to +0x24/+0x28 and
+      tail-branches to 0x081b4d60; constants 86400, -86400 and -675
+      identify day/seconds normalization. Neither assigned nor callee
+      address previously had a names entry. Class identity remains unknown.
+      Deliberate deviation is a host-only callback for the unported callee;
+      target uses its verified retail address and retains 32-bit fields.
+      Tests cover post-call marking, neighboring flag preservation, repeated
+      updates, day carry/borrow and wrapping day values via a provider model.
+      Verification: all 14044 host tests pass and ARM release build passes.
+      match.py prints a structural diff: nine original instructions versus
+      twelve Rust listing rows, with the same loads, callback-before-mark
+      ordering and byte store. LLVM uses BLX through literal 0x08140344
+      instead of direct BL and adds a frame pointer. Standalone export smoke
+      confirms provider mutation survives, marking occurs after the callback
+      and adjacent flags remain intact. No device execution performed.

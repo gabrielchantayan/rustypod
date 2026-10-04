@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod work_record_apply_adjustment;
 pub mod active_datetime_field_selector;
 pub use active_datetime_field_selector::*;
 pub mod controller_scale_or_offset;
