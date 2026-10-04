@@ -186,14 +186,14 @@ unsafe fn apply_settings_value(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use core::ptr;
     use std::sync::{Mutex, MutexGuard};
 
     /// Serializes the tests that mutate the global slot table.
-    static SLOTS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static SLOTS_LOCK: Mutex<()> = Mutex::new(());
 
     /// Marks `index` registered with recognizable contents and hands
     /// back the guard.
