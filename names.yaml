@@ -209025,3 +209025,42 @@ functions:
       ARM release build passes. match.py exits 1 with expected frame-pointer
       prologue and literal BLX instead of direct BL; returned-r0 vtable store,
       return, base address and vtable value are retained. No device execution.
+
+  - address: 0x08215664
+    ghidra: FUN_08215664
+    name: deque_drain_release
+    size: 84
+    sig: "void deque_drain_release(BlockDeque *deque)"
+    module: cxx/deque_drain_release
+    status: ported
+    renames:
+      param_1/r5: deque
+      piVar1/r4: front_object
+      uVar2: status_flags
+      FUN_083d7610: container_is_empty_alias_7610
+      FUN_082156f0: deque_front_remove
+      "vtable+0x18": status_query
+      "vtable+0x04": conditional_release
+    notes: >-
+      Raw A32 establishes 84 bytes ending at 0x082156b8's independent
+      push. Two outgoing plain BLs, zero predicated BLs, one BLX and
+      one BLXNE. Whole-image branch decoding finds two inbound plain BLs
+      at 0x0818bc5c and 0x08215974, zero predicated inbound BLs.
+      Drain until count is zero; remove front before querying virtual
+      status slot +0x18, then release through freshly loaded slot +0x04
+      iff status bit zero is set. Status dispatch precedes the NULL guard.
+      Concrete virtual identities remain unknown. The named removal
+      callee at 0x082156f0 dereferences the copied cursor at 0x08215718;
+      the existing Rust deque_front_remove returns the cursor itself.
+      Deliberately retain stock removal rather than inherit that mismatch.
+      Hosts model contiguous native pointer removal; target segmented deque
+      mechanics remain stock. Typed native-width vtable cells preserve slot
+      indices; count uses the repr(C) field, not a host byte offset.
+      Host suite and ARM release build pass. Optimized executable smoke
+      drains four objects with four queries and two releases, then verifies
+      empty reentry. Edge tests cover high bits and status-induced vtable
+      replacement. match.py exits 1: 21 original versus 27 Rust entries.
+      LLVM inlines emptiness, uses absolute BLX with literal 0x082156f0,
+      retains both virtual offsets and loop, and eliminates the late NULL
+      comparison after the unconditional object dereference. No new seam
+      identity or additional function port is introduced.
