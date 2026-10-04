@@ -209211,3 +209211,41 @@ functions:
       sentinel stores and owner setter. The initializer uses BLX to its fixed
       address; the empty drop disappears. LLVM proves the real validator
       returns only zero/one and materializes one on the successful path.
+
+  - address: 0x08215390
+    ghidra: FUN_08215390
+    name: shared_string_state_construct
+    size: 84
+    sig: "SharedStringState *shared_string_state_construct(SharedStringState *this)"
+    module: app/shared_string_state_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      DAT_082153e0: SHARED_STRING_STATE_VTABLE_ADDRESS
+      FUN_083b5090: shared_cell_construct
+      FUN_08277440: string_default_construct
+      FUN_08215364: reset_shared_member_to_empty
+    notes: >-
+      Raw osos.dec establishes 80 instruction bytes plus the four-byte
+      vtable literal 0x089931e0, ending at the next real function
+      0x082153e4. Whole-image aligned A32 decoding finds two incoming
+      plain BLs at 0x0821517c and 0x08215328, zero predicated incoming
+      BLs, three outgoing plain BLs and zero predicated outgoing BLs.
+      Callers allocate 0x28 bytes. Installs the vtable, constructs an empty
+      shared-cell member at +8, clears +0x0c, sets +0x10 to -1,
+      default-constructs StringObject at +0x14, clears +0x1c/+0x20
+      and only the byte at +0x24, preserving +4 and the final three bytes.
+      Returns this. The class and opaque field identities remain unknown.
+      Reuses existing Rust shared-cell and string constructors. Omits
+      the final helper at 0x08215364: its empty temporary construction,
+      assignment to the already-empty member, and empty release have no
+      observable effect here. No new callee seam or second port is added.
+      repr(C) fields preserve target offsets while host pointers widen.
+      Host tests cover poisoned prior member storage and untouched holes.
+      Required host suite passes 13846 tests; ARM release build passes.
+      Standalone smoke using the actual constructor and extracted existing
+      callee bodies confirms poisoned member initialization, preserved holes,
+      return identity, and no allocation. match.py reports a structural diff:
+      both real constructor BL relocations remain, stores have exact target
+      offsets including STRB at +0x24, and the redundant reset BL is omitted
+      as documented. Rust emits 76 instruction bytes plus a four-byte literal.
