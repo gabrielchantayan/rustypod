@@ -14,10 +14,11 @@
 //! `0x0898ce24`, and the remaining two words are compared against the supplied
 //! key. Matching nodes are erased while iteration continues at the successor.
 //!
-//! Deliberate deviations: the unported pair predicate and list erase remain
-//! fixed-address volatile seams on target and host-replaceable recorders.
+//! Deliberate deviations: list erase remains a fixed-address volatile seam on
+//! target and a host-replaceable recorder; the pair predicate is ported Rust.
 
 use crate::cxx::templates::not_equal_deref;
+use super::listener_payload_pair_matches::listener_payload_pair_matches;
 
 const LIST_OFFSET: usize = 0x18;
 const LIST_SENTINEL_OFFSET: usize = 0x10;
@@ -26,30 +27,18 @@ const LIST_HEAD_OFFSET: usize = 0x28;
 const NODE_PAYLOAD_WORD_OFFSET: usize = 2;
 const LISTENER_KEY_TAG: u32 = 0x0898_ce24;
 
-type PairMatches = unsafe extern "C" fn(*const *const u32, *const u32) -> u32;
 type ListErase = unsafe extern "C" fn(*mut u32, *mut u8, *const u32);
 
 #[derive(Clone, Copy)]
 pub struct RegisteredListenerRemoveOps {
-    pub pair_matches: PairMatches,
     pub erase: ListErase,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_pair_matches(key: *const *const u32, candidate: *const u32) -> u32 {
-    let predicate: PairMatches = unsafe { core::mem::transmute(0x0820_12c4usize) };
-    unsafe { predicate(key, candidate) }
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_list_erase(out: *mut u32, list: *mut u8, cursor: *const u32) {
     let erase: ListErase = unsafe { core::mem::transmute(0x083d_c3fcusize) };
     unsafe { erase(out, list, cursor) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_pair_matches(_key: *const *const u32, _candidate: *const u32) -> u32 {
-    panic!("registered_listener_remove_by_pair requires pair predicate 0x082012c4")
 }
 
 #[cfg(not(target_os = "none"))]
@@ -59,12 +48,10 @@ unsafe extern "C" fn missing_list_erase(_out: *mut u32, _list: *mut u8, _cursor:
 
 #[cfg(target_os = "none")]
 pub const DEFAULT_REGISTERED_LISTENER_REMOVE_OPS: RegisteredListenerRemoveOps = RegisteredListenerRemoveOps {
-    pair_matches: firmware_pair_matches,
     erase: firmware_list_erase,
 };
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_REGISTERED_LISTENER_REMOVE_OPS: RegisteredListenerRemoveOps = RegisteredListenerRemoveOps {
-    pair_matches: missing_pair_matches,
     erase: missing_list_erase,
 };
 
@@ -102,7 +89,7 @@ pub unsafe extern "C" fn registered_listener_remove_by_pair(
 
     while unsafe { not_equal_deref(&cursor, &sentinel) } != 0 {
         let current = cursor;
-        if unsafe { (ops.pair_matches)(&key_pointer, (current as usize as *const u32).add(NODE_PAYLOAD_WORD_OFFSET)) } != 0 {
+        if unsafe { listener_payload_pair_matches(&key_pointer, (current as usize as *const u32).add(NODE_PAYLOAD_WORD_OFFSET)) } != 0 {
             unsafe { (ops.erase)(&mut cursor, list, &current) };
         } else {
             cursor = unsafe { (current as usize as *const u32).read() };
@@ -121,16 +108,8 @@ mod tests {
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
 
-    static mut PREDICATE_CALLS: usize = 0;
     static mut ERASE_CALLS: usize = 0;
 
-    unsafe extern "C" fn record_pair_matches(key: *const *const u32, candidate: *const u32) -> u32 {
-        unsafe {
-            PREDICATE_CALLS += 1;
-            let key = *key;
-            u32::from(key.add(1).read() == candidate.add(1).read() && key.add(2).read() == candidate.add(2).read())
-        }
-    }
 
     unsafe extern "C" fn record_erase(out: *mut u32, _list: *mut u8, cursor: *const u32) {
         unsafe {
@@ -148,11 +127,9 @@ mod tests {
 
     fn install_recorders() -> OpsReset {
         unsafe {
-            PREDICATE_CALLS = 0;
             ERASE_CALLS = 0;
             let previous = ptr::read_volatile(ptr::addr_of!(REGISTERED_LISTENER_REMOVE_OPS));
             ptr::write_volatile(ptr::addr_of_mut!(REGISTERED_LISTENER_REMOVE_OPS), RegisteredListenerRemoveOps {
-                pair_matches: record_pair_matches,
                 erase: record_erase,
             });
             OpsReset(previous)
@@ -172,7 +149,7 @@ mod tests {
             ptr::write_bytes(slab, 0, 0x1000);
             let owner = slab;
             registered_listener_remove_by_pair(owner, 7, 9);
-            assert_eq!((PREDICATE_CALLS, ERASE_CALLS), (0, 0));
+            assert_eq!(ERASE_CALLS, 0);
 
             let sentinel = slab.add(0x100).cast::<u32>();
             let first = slab.add(0x140).cast::<u32>();
@@ -195,7 +172,6 @@ mod tests {
             owner.add(LIST_ACTIVE_OFFSET).cast::<u32>().write(1);
 
             registered_listener_remove_by_pair(owner, 7, 9);
-            assert_eq!(PREDICATE_CALLS, 3);
             assert_eq!(ERASE_CALLS, 2);
         }
     }

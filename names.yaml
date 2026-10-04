@@ -161640,10 +161640,10 @@ functions:
       traverses the circular list rooted at owner+0x28 and removes every
       node whose payload words +0xc/+0x10 match (key_second, key_first);
       the tag word at +0x08 is the fixed 0x0898ce24 pointer. The predicate
-      and erase callees are identified from their raw bodies but unported,
-      so target builds retain fixed-address volatile seams and host tests
-      install recorders. Deliberate deviations: the seam indirection replaces
-      the original direct bl/blne calls; otherwise target-width pointer words,
+      is now ported as listener_payload_pair_matches and called directly.
+      Only list erase retains the fixed-address volatile target seam and
+      host recorder. Deliberate deviations: erase seam indirection replaces
+      the original direct blne call; otherwise target-width pointer words,
       key order, sentinel comparison, and successor-after-erase iteration
       are preserved. match.py exits 1 with the expected structural diff:
       crate frame and volatile seam blx calls replace the direct calls.
@@ -193698,10 +193698,10 @@ functions:
       traverses the circular list rooted at owner+0x28 and removes every
       node whose payload words +0xc/+0x10 match (key_second, key_first);
       the tag word at +0x08 is the fixed 0x0898ce24 pointer. The predicate
-      and erase callees are identified from their raw bodies but unported,
-      so target builds retain fixed-address volatile seams and host tests
-      install recorders. Deliberate deviations: the seam indirection replaces
-      the original direct bl/blne calls; otherwise target-width pointer words,
+      is now ported as listener_payload_pair_matches and called directly.
+      Only list erase retains the fixed-address volatile target seam and
+      host recorder. Deliberate deviations: erase seam indirection replaces
+      the original direct blne call; otherwise target-width pointer words,
       key order, sentinel comparison, and successor-after-erase iteration
       are preserved. match.py exits 1 with the expected structural diff:
       crate frame and volatile seam blx calls replace the direct calls.
@@ -213346,3 +213346,33 @@ functions:
       child BL becomes BLX, adjacent byte stores combine, and LLVM removes
       rebasing because existing base/member ports return their inputs.
       No device execution.
+
+  - address: 0x082012c4
+    ghidra: FUN_082012c4
+    name: listener_payload_pair_matches
+    size: 52
+    sig: "u32 listener_payload_pair_matches(const u32 *const *key, const u32 *candidate)"
+    module: app/listener_payload_pair_matches
+    status: ported
+    renames:
+      param_1/r0: key
+      param_2/r1: candidate
+      iVar1: payload
+      bVar2: first_word_matches
+    notes: >-
+      Raw osos.dec verifies 13 ARM words, 52 bytes, ending before the real
+      virtual-dispatch function at 0x082012f8 (ldr r0,[r0,#0x1c], then
+      loads vtable slot +0x2c and bx r3). Zero outgoing plain or predicated
+      BL instructions. Two incoming plain BL sites at 0x0811f010 and
+      0x0811f200 in the reference assembly. Dereferences key and returns 0
+      for a null payload; otherwise compares u32 words +4 and +8, skipping
+      +8 after a +4 mismatch. Ignores tag word +0. Callers supply a stack
+      key and a list-node payload at +8. No deliberate semantic deviations.
+      Native outer pointers on hosts; payload offsets remain aligned
+      four-byte word indices. Existing remove-by-pair caller now uses this
+      port without a predicate seam. Host suite: 14027 passed. ARM release
+      build passed. Native smoke returned 1 for equal pairs with different
+      tags and 0 for a null payload with null candidate. match.py exit 1:
+      17 Rust instructions versus 13 original; LLVM branches and clz replace
+      predication, preserves null guard and short-circuit pair comparison,
+      and adds a frame. No device execution.
