@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ee900
+    ghidra: FUN_081ee900
+    name: string_chain_clear
+    size: 60
+    sig: "StringChain *string_chain_clear(StringChain *owner)"
+    module: cxx/string_chain_clear
+    status: ported
+    vars:
+      param_1/r4: owner
+      r0: head
+      r1: successor
+      owner_plus_0x04: scratch
+      node_plus_0x0c: next
+      FUN_08277484: string_object_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x081ee900,0x081ee93c), 60 bytes, with the
+      next independent push at 0x081ee93c. Two outbound plain BLs at
+      0x081ee918 and 0x081ee91c call the existing ported string destructor
+      and operator delete; zero predicated BLs. Whole-image raw decoding
+      finds two inbound plain BLs at 0x081ef450 and 0x083d5418, zero
+      predicated inbound BLs. Save head->next in owner+4, destroy the
+      leading StringObject, delete its returned pointer, advance head
+      from scratch, and repeat. Return owner. Empty input preserves
+      scratch; draining leaves both pointers NULL. Ghidra's noreturn
+      delete annotation incorrectly hides the loop. Omit the unreachable
+      BEQ at 0x081ee914, whose flags still reflect nonzero head. repr(C)
+      pointers widen on host; host-only lifecycle seams test successor
+      invalidation and ordered disposal. Live-heap smoke drained four
+      nodes using real StringObject destruction and Box deallocation.
   - address: 0x081dccc0
     ghidra: FUN_081dccc0
     name: text_key_selection_update
