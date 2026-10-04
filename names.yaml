@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820b8b0
+    ghidra: FUN_0820b8b0
+    name: embedded_observable_array_owner_destruct
+    size: 32
+    sig: "EmbeddedObservableArrayOwner *embedded_observable_array_owner_destruct(EmbeddedObservableArrayOwner *this)"
+    module: cxx/embedded_observable_array_owner_destruct
+    status: ported
+    renames:
+      param_1: this
+      iVar1: destroyed_array
+      DAT_0820b8cc: derived_vtable
+      FUN_08271d2c: observable_array_destruct
+      FUN_081fae30: vtable_08990af8_destruct
+    notes: >-
+      Raw osos.dec verifies seven executable A32 words at 0x0820b8b0..0x0820b8c8
+      and vtable literal 0x08992200 at 0x0820b8cc; the next real function
+      starts at 0x0820b8d0. True extent is 32 bytes, not Ghidra's 28.
+      Independent whole-image BL decoding finds two plain inbound sites at
+      0x081dcdf8 and 0x081dceac and zero predicated inbound sites. The body
+      has one plain BL to observable_array_destruct, no predicated BLs, and
+      a tail B to ported vtable_08990af8_destruct at 0x081fae30.
+      Installs the derived vtable, destroys the embedded observable array at
+      +0x54, subtracts 0x54 from its returned pointer, and returns the base
+      destructor result. Ghidra incorrectly folds the base cleanup into this
+      body. The repr(C) layout preserves the target offsets on hosts.
+      Deliberate deviations: behavior-based class name and a direct returning
+      Rust call for the tail branch. Host regression covers zero, one, and
+      maximum embedded lengths, both final vtables, receiver return, and
+      preserved surrounding state.
   - address: 0x081ff128
     ghidra: FUN_081ff128
     name: member_payload_cache_poll
