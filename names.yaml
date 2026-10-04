@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fcfc8
+    ghidra: FUN_081fcfc8
+    name: signed_backend_adjust
+    size: 64
+    sig: "uint32_t signed_backend_adjust(const BackendAdjustmentState *state, int32_t adjustment)"
+    module: app/signed_backend_adjust
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: adjustment
+      uVar2/r2: result
+      state_10: backend
+      FUN_081f134c: backend_adjust
+    notes: >-
+      Raw words establish the 64-byte extent [0x081fcfc8, 0x081fd008);
+      the next function starts with push at 0x081fd008. Independent
+      whole-image A32 decoding finds two inbound plain BLs at 0x082085fc
+      and 0x0822c1ac, zero predicated inbound BLs, one outbound plain BL
+      at 0x081fcff4 to 0x081f134c, and zero predicated outbound BLs.
+      Missing backend at state +0x10 succeeds. Otherwise dispatch direction
+      zero for negative adjustment, one for nonnegative, wrapping unsigned
+      magnitude (including 0x80000000 for INT_MIN), and 0xffffffff.
+      Normalize every nonzero helper result to one. Raw helper code proves
+      four input registers despite Ghidra's one-argument signature: it
+      forwards direction and magnitude to backend +0x48 vtable slot +0x1c
+      with an output-byte pointer and the fourth argument on the stack.
+      No invented callee identity or target behavioral deviations; unported
+      helper remains at its verified firmware address. Host repr(C) fixture
+      widens only the pointer, retaining +0x10, and substitutes that helper.
+      Host edge tests compare bounded position changes against signed i64
+      arithmetic for INT_MIN, INT_MAX, zero, both signs and unsigned bounds,
+      including high-bit nonzero success values and absent backends.
+      Host test suite and ARM release build passed; executable production-entry
+      smoke verified both directions, INT_MIN magnitude, 0xffffffff and
+      nonzero normalization. match.py exited 1 with a reviewed structural
+      diff: LLVM moves the null fast return before its prologue, uses
+      inverted-sign-bit extraction, and BLX through literal 0x081f134c
+      instead of direct BL. Arguments and result normalization are preserved.
+      No device execution.
   - address: 0x0820b074
     ghidra: FUN_0820b074
     name: encoded_pair_decode
