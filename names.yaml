@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08210f64
+    ghidra: FUN_08210f64
+    name: identity_noop_with_options
+    size: 4
+    sig: "u32 identity_noop_with_options(u32 value, u32 option, u32 flags)"
+    module: app/identity_noop_with_options
+    status: ported
+    args:
+      r0: value
+      r1: option
+      r2: flags
+    vars:
+      incoming_r0: value
+    notes: >-
+      Raw e12fff1e is bx lr; true extent 0x08210f64..0x08210f68.
+      Next function starts with e92d4070 (push {r4,r5,r6,lr}).
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x0817c93c and 0x081df054, zero predicated inbound calls and zero
+      outgoing calls. No aligned entry-pointer data references were found.
+      Callers supply the result of 0x081ba040 with (0,0) or (3,8), then
+      discard r0. Preserves r0 and ignores r1/r2 without dereferencing them.
+      No unsupported destructor identity or callee seam. Explicit return
+      preserves raw behavior despite Ghidra reporting void. Host edge tests
+      cover zero, high-bit, all-ones and independent ignored options.
+      Host suite passes 13887 tests; ARM release build-std build passes.
+      Standalone smoke confirms zero, high-bit and all-ones preservation.
+      match.py exits one: bx lr versus LLVM push {fp,lr}, mov fp,sp,
+      pop {fp,pc}. Deliberate frame codegen difference preserves r0.
+      No device execution.
   - address: 0x0820c818
     ghidra: FUN_0820c818
     name: mov_chain_table_advance
