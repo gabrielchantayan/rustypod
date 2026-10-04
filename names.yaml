@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082202ec
+    ghidra: FUN_082202ec
+    name: indexed_mode_position_adjust
+    size: 112
+    sig: "u32 indexed_mode_position_adjust(void *state, i32 index)"
+    module: app/indexed_mode_position_adjust
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: index
+      state+0x8a4: indexed_position_flags
+      state+0x8a8: resolver_object_word
+      local_10: resolved_position
+      FUN_082109b4: unported indexed-position resolver
+    notes: >-
+      Raw A32 establishes extent 0x082202ec..0x0822035c exclusive, ending
+      in pop {r3,r4,r5,pc}; the next entry resets +0x8a4/+0x8a8.
+      Independent whole-image decoding finds two plain inbound BLs at
+      0x0817ad30 and 0x0817bed8, no predicated inbound BLs; three plain
+      outbound BLs at 0x08220318, 0x08220330 and 0x0822034c, no predicated
+      outbound BLs. Reject negative indices and clear bit zero at +0x8a4.
+      Call unported resolver 0x082109b4 with the u32 object word at +0x8a8,
+      output address and index. Its raw body checks virtual slot zero on
+      object+8 and on success writes the result of 0x081a8c3c; the class
+      identity remains unknown. Reject failure and UINT32_MAX. Compare
+      against mode_selected_position and dispatch mode_selected_position_set
+      with mode zero and wrapping position minus active position. Return
+      one after dispatch regardless of its result. Ghidra's extra arguments
+      are omitted: incoming r2 is overwritten and r3 is never read. Local
+      output initialization is harmless because it is read only on success.
+      ARM uses the verified fixed-address resolver; host substitutes that
+      boundary. Tests cover disabled flags, failure, sentinel, equality,
+      both backends, wrapping differences and ignored setter failure.
+      Full host suite passes (13842 tests), ARM release builds, and standalone
+      host smoke proves negative-index and disabled-state exits.
+      match.py reports 28 retail versus 40 Rust instructions: early exits,
+      resolver failure/sentinel checks, equality check, wrapping subtraction,
+      both canonical backend calls and return-one path are retained. LLVM
+      uses BLX through a literal for the fixed resolver, adds output
+      initialization and a frame, and leaves backend BL relocations for linking.
   - address: 0x08220518
     ghidra: FUN_08220518
     name: object_reset_sentinel_state
