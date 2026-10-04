@@ -569,6 +569,7 @@ pub mod path_object_take_component;
 pub mod indexed_timestamp_bounds;
 pub mod timestamp_index_seek;
 pub mod signed_backend_adjust;
+pub mod optional_backend_request;
 pub mod format_duration;
 pub mod indexed_timestamp_window_bounds;
 pub mod indexed_payload_lookup;
