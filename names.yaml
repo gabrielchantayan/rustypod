@@ -211248,3 +211248,42 @@ functions:
       pointer, initializes stack storage, and peels the first step of each loop;
       relocations verify direct canonical calls, both traversals and cleanups,
       mode 0 then 1 and the selected-index store after setting. No device run.
+  - address: 0x081fcf98
+    ghidra: FUN_081fcf98
+    name: optional_backend_request
+    size: 48
+    sig: "uint32_t optional_backend_request(const BackendAdjustmentState *state, uint32_t request, uint32_t mode)"
+    module: app/optional_backend_request
+    status: ported
+    renames:
+      param_1/r0: state
+      r1: request
+      r2: mode
+      state_10: backend
+      uVar2/r3: result
+      FUN_081f1244: backend_request
+    notes: >-
+      Raw extent [0x081fcf98, 0x081fcfc8) is 48 bytes; next real
+      function starts with push. Whole-image aligned A32 decoding finds
+      two inbound plain BLs at 0x082085ec and 0x0822c19c, zero predicated
+      inbound BLs, one outbound plain BL at 0x081fcfb4 to 0x081f1244,
+      and zero predicated outbound BLs. Missing backend at +0x10 succeeds.
+      Otherwise forward r1/r2 and supply 0xffffffff in r3 and on stack;
+      normalize any nonzero result to one. Both raw callers establish
+      three wrapper inputs despite Ghidra's one-argument signature.
+      Raw helper forwards request, an output-byte pointer, mode and the
+      two sentinel arguments through backend +0x48 vtable slot +0x18,
+      increments +0x60 and conditionally notifies via 0x081f0888.
+      Unported helper remains at its verified firmware address; no
+      unsupported operation identity or target behavioral deviations.
+      Reuse the adjacent port's repr(C) state, with backend at +0x10;
+      host pointer widens and helper is substituted. Host behavioral
+      tests cover absent backend, bounded requests, mode rejection,
+      zero and high-bit results, and state changes despite zero result.
+      All 13932 host tests and ARM release build passed. Production-entry
+      executable smoke verified five arguments, high-bit normalization
+      and absent backend. Reviewed match.py exit 1: LLVM hoists the null
+      fast return before its prologue, allocates an aligned stack frame
+      and uses BLX through literal 0x081f1244 instead of direct BL.
+      r1/r2 forwarding, r3/stack sentinels and normalization are preserved.
+      No device execution.
