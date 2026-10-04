@@ -209723,3 +209723,55 @@ functions:
       25 instructions: same virtual slot and result conditions, merged
       destruction arms, extra frame pointer; structural diff exit 1.
       No device execution.
+  - address: 0x08211d34
+    ghidra: FUN_08211d34
+    name: collection_entries_retire
+    size: 152
+    sig: "void collection_entries_retire(u8 *context, EntryGroup *group)"
+    status: ported
+    module: app/collection_entries_retire
+    args:
+      r0: context
+      r1: group
+    vars:
+      param_1/r4: context
+      param_2/r1: group
+      local_1c: entry
+      uStack_18: cursor
+      iStack_20: empty_handle
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+      FUN_08211bac: activate_entry
+      FUN_0839f2bc: refcounted_ptr_construct_tertiary_variant
+      FUN_0839f324: refcounted_ptr_copy_assign_retain_count
+      FUN_0839d498: refcounted_body_release_retain_count
+    notes: >-
+      Raw osos.dec establishes the exact 152-byte extent ending at the
+      next real prologue at 0x08211dcc. Whole-image ARM branch decoding
+      finds two inbound plain BLs at 0x08211e54 and 0x08212030, zero
+      predicated BLs; the body has seven plain BLs and zero predicated
+      BLs. Walks the collection at group+8. If entry+8 and context+0x72
+      are both zero, calls the unported activation helper at 0x08211bac
+      with context AND entry: raw r1 preserves the entry, unlike Ghidra's
+      one-argument rendering. That helper checks entry+9 == 2, invokes
+      0x0839e71c(context+0x50, entry+0xc), and writes entry+9 = 1.
+      Otherwise constructs an empty handle, copy-assigns it to entry+4,
+      releases the temporary, and writes entry+9 = 2. Reuses the ported
+      cursor and refcount helpers; only activation remains a fixed-address
+      target seam. Named pointer fields widen on hosts, with target offset
+      assertions. Saved-register return artifacts are omitted: both raw
+      callers ignore them. The existing ARM within/at-limit wrapper now
+      calls this Rust implementation on its at-limit path; its host seam
+      remains for isolated wrapper tests. Host suite passes 13870 tests.
+      Edge coverage includes empty collections, nonzero retirement flags,
+      forced retirement, activation changing the context flag mid-walk,
+      and release preserving a still-retained body. Standalone host smoke
+      executes the actual iterator and refcount algorithms: handle NULL,
+      body count 1, entry state 2; unexecuted allocator/mutex/disposal
+      boundaries panic in that harness. ARM release builds. match.py
+      reports 38 original versus 50 Rust instructions (structural diff,
+      exit 1): same conditional flag reads, iteration, handle clearing and
+      state write; activation becomes literal-loaded BLX, invalidate is
+      optimized away as a dead local store, and LLVM uses a larger frame.
+      No device execution.
