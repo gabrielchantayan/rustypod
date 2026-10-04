@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod tv_signal_resource_refresh;
+pub use tv_signal_resource_refresh::*;
 pub mod record_stream_transferred_count;
 pub mod path_list_node_construct;
 pub mod text_key_selection_update;

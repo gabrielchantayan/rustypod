@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ed5e4
+    ghidra: FUN_081ed5e4
+    name: tv_signal_resource_refresh
+    size: 88
+    sig: "void tv_signal_resource_refresh(TvSignalReceiver *receiver)"
+    module: app/tv_signal_resource_refresh
+    status: ported
+    vars:
+      param_1/r0: receiver
+      local_c: tv_signal_resource_id
+      receiver_plus_0x378: provider
+      vtable_plus_0x58: dispatch_resource
+      FUN_08272230: resource_chain_write
+    notes: >-
+      Raw extent 88 bytes: 72 code, 16 literals; next function 0x081ed63c.
+      Two incoming plain BLs (0x081e9500, 0x08212cbc), zero predicated.
+      One outbound BL to resource_chain_write, one receiver +0x58 BLX.
+      TVSignal event callers. Writes stack word 0x60bf by address to
+      provider +0x378, prID/0x60f0, flags 4; then reloads receiver vtable
+      and dispatches Str/0x892e. Ignores both results; no null guards.
+      repr(C) widens host pointers; inline scratch permits low-address
+      fixtures. Host suite 14069 passed; ARM release passed. Regression
+      covers decline, zero readback, non-one accept, vtable replacement.
+      Isolated low-stack executable smoke passed. No device execution.
+
   - address: 0x081d9498
     ghidra: FUN_081d9498
     name: record_stream_transferred_count
