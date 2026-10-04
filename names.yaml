@@ -16,6 +16,62 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ff128
+    ghidra: FUN_081ff128
+    name: member_payload_cache_poll
+    size: 316
+    sig: "uint32_t member_payload_cache_poll(void *this)"
+    module: app/member_payload_cache_poll
+    status: ported
+    renames:
+      param_1: this
+      uVar10: slot_index
+      uVar11: changed_mask
+      DAT_081ff258: channel_masks
+      DAT_081ff25c: payload_cache_state
+      DAT_081ff260: payload_member_table
+      FUN_081ff034: pending_payload_mask_dispatch
+      FUN_08036f14: __rt_udiv
+      FUN_08030f44: heap_panic
+      FUN_08030f64: memcmp
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw words override Ghidra's 8-byte extent: executable instructions span
+      0x081ff128..0x081ff258 (304 bytes), followed by three literals through
+      0x081ff264, where the next real push prologue starts. Independent
+      whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x081fdf68 and 0x081fdfa0, zero predicated inbound BLs. Body calls are
+      four plain BLs (udiv, memcmp, memcpy veneer, mask dispatcher), one BLNE
+      to heap_panic, and one dynamic BLX. The existing 0x08003798 veneer
+      enters the separate r7-context continuation at 0x081ff130; it remains
+      unchanged. Polls seventeen ARM C++ member pointers, decoding signed
+      this adjustment and virtual entry bit, with a 24-byte output record
+      containing length-plus-one, slot index, and at most 22 payload bytes.
+      Seeds the change mask from channel_masks[active_channel+3]; slot nine
+      is skipped on non-300th ticks when the state initialization byte is
+      nonzero. Failed queries leave caches untouched. Successful queries
+      require the recorded length, compare and copy changed payloads, and
+      OR the slot bit. A nonzero mask calls the unported dispatcher at the
+      verified address 0x081ff034 and returns its r0 status; zero returns zero.
+      State, masks, and member globals remain at 0x089cca68, 0x08ac8d74,
+      and 0x08ac8ca4 on target. Dispatcher semantics are established from
+      its raw mask loops and send-status return, but its implementation
+      remains retail code. Host records use native-width pointer fields
+      with repr(C); bindings replace globals and dispatcher only.
+      Deliberate deviations are zero-initializing output storage and using
+      unsigned remainder arithmetic instead of ADS udiv. Host behavioral
+      tests cover changed and unchanged data, zero-length payloads, query
+      failure, pending-mask preservation, channel selection, slot-nine
+      throttling, and signed-adjusted virtual dispatch. Full host suite
+      passes (13911 tests); ARM release builds. Exported-path smoke updates
+      all seventeen maximum-length payloads, preserves sentinels, and
+      returns zero on the unchanged second poll. Default match.py sees
+      only Ghidra's two instructions; rerun with --size 304 confirms the
+      seventeen-slot loop, member BLX, length assertion, compare/copy, bit
+      accumulation, throttle and conditional dispatch. LLVM uses multiply/
+      rotate divisibility testing and an absolute-address BLX dispatcher;
+      structural differences are intentional, not an exact assembly match.
+
   - address: 0x0820be04
     ghidra: FUN_0820be04
     name: observable_array_pair_owner_construct
