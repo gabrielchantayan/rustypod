@@ -212936,3 +212936,38 @@ functions:
       derived-vtable store, size-16 allocation, nested construction, +20 store
       and owner return remain; LLVM uses a frame pointer and BLX for the
       exact-address resident call. No attached-device execution was performed.
+
+  - address: 0x081f0fb8
+    ghidra: FUN_081f0fb8
+    name: member_range_progress
+    size: 108
+    sig: "uint32_t member_range_progress(void *this)"
+    module: app/member_range_progress
+    status: ported
+    renames:
+      param_1/r0: this
+      uVar1/r5: before
+      uVar2/r0: after
+    notes: >-
+      Raw osos.dec establishes 108 bytes through the pop at 0x081f1020;
+      the next real entry is the push at 0x081f1024. Whole-image A32
+      decoding finds two incoming plain BLs at 0x081f04e4 and 0x081f05ec,
+      zero predicated BLs. The body has three plain BLs: measurements at
+      0x081f0fd0 and 0x081f0ffc target 0x081a8514, and range clearing at
+      0x081f1014 targets list_range_clear at 0x083dbc04. It also has one
+      virtual BLX at 0x081f0ff4 and zero predicated BLs. Ghidra's clear
+      call placement at 0x081f0fd8 is incorrect. Absent member +0x48 returns
+      zero before any measurement. Otherwise snapshot the measurement of
+      embedded +0xc4. Zero mode +0x30 clears embedded range +0x14 and
+      returns one regardless of measurement; nonzero mode invokes member
+      vtable slot +0x10 with flag one, measures again, and returns the
+      strict unsigned greater-than comparison (wraparound is not progress).
+      No identity exists for 0x081a8514 in names.yaml; preserve its observed
+      one-pointer, u32-return ABI as resident fixed-address dispatch rather
+      than inventing a name. Deliberate deviations: its two BLs become BLX;
+      clearing uses the existing Rust port. Target object and vtable fields
+      stay u32. Host behavior tests cover absence, clearing, equality,
+      decrease, sign-bit crossing, and wraparound. All 14011 host tests and
+      ARM release build passed. match.py exits 1 with the expected frame,
+      register and BLX differences; all branches, offsets, virtual flag and
+      unsigned comparison remain. No attached-device execution performed.
