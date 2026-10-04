@@ -212561,3 +212561,43 @@ functions:
       registration, release, and fixed-object return survive. LLVM uses the
       guard address minus eight for the object and BLX for the preserved stock
       initializer and volatile registration/release bindings; frame differs.
+
+  - address: 0x082059ac
+    ghidra: FUN_082059ac
+    name: secondary_display_layer_configure
+    size: 124
+    sig: "void secondary_display_layer_configure(const SecondaryDisplayLayerSetup *setup, const LayerFormatInput *input, u8 *config)"
+    status: ported
+    module: drivers/secondary_display_layers.rs
+    args:
+      param_1: setup
+      param_2: input
+      param_3: config
+    locals:
+      cVar1: pixel_format
+    notes: >-
+      Raw osos.dec proves 31 ARM instructions through bx lr at 0x08205a24;
+      the next independent function is bx lr at 0x08205a28. True size 124.
+      Whole-image ARM BL decoding finds exactly two inbound unconditional
+      calls at 0x08205930 and 0x08205940, zero predicated inbound calls,
+      and zero outbound calls. Sets descriptor+1 to 3, copies input+8 to
+      descriptor+0, then rereads input+8. Format 0 writes bytes 10,00,00 at
+      +0x30; format 2 writes halfword 0x001f; format 3 writes word zero;
+      all other formats preserve the color bytes. Copies setup height+0x2c
+      and width+0x28 to descriptor+0x10/+0x0c and +0x18/+0x14, then clears
+      words +0x28,+0x24,+4,+8. Other bytes remain untouched. Replaces the
+      existing inline copy_layer_format helper and migrates both callers
+      to the exported setup,input,config ABI. Typed owner pointer fields
+      expand on hosts but preserve target offsets; volatile accesses retain
+      repeated reads and store order. Tests cover all 256 format bytes,
+      zero, ordinary and high-bit/full-width dimensions, partial color writes,
+      and all untouched descriptor bytes. Host suite passed 13992 tests;
+      ARM release build passed. Standalone production-source smoke observed
+      formats 0,2,3,255 with 320x240 geometry and preserved color tails.
+      Normal host example linking was blocked by six unrelated non-test host
+      missing-function errors in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule; temporary smoke scaffolding was removed.
+      match.py exited 1: 31 original versus 37 Rust instructions. Format
+      dispatch, store widths, repeated geometry loads and zero-store order
+      survive; LLVM uses branches instead of predicated format stores and
+      adds a frame. No device execution.
