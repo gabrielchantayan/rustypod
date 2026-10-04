@@ -213581,3 +213581,44 @@ functions:
       LLVM adds a frame pointer, substitutes movhi-zero for addls, and
       tail-branches to __rt_udiv (verified R_ARM_JUMP24 relocation) instead
       of BL followed by register shuffling and return. No device execution.
+
+  - address: 0x081df20c
+    ghidra: FUN_081df20c
+    name: pointer_command_submit
+    size: 60
+    sig: "void pointer_command_submit(u8 *context, u32 value)"
+    module: app/pointer_command_submit
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r5: value
+      puVar3/r1: command
+      FUN_082aadd4: operator_new
+      FUN_0839e5f8: pointer_queue_enqueue
+      FUN_081ded74: initialize_once
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw words establish the exact 60-byte extent 0x081df20c..0x081df248,
+      followed by the next push prologue. Two inbound unconditional BLs
+      at 0x0817bce4 and 0x0817e0ec; zero predicated BLs. The body contains
+      three plain BLs and zero predicated BLs, then a tail B to the already
+      ported mailbox_slot_post. Ghidra incorrectly merges that tail callee
+      and loses the enqueue payload argument. Allocate 12 bytes with tag-2
+      operator_new, store zero and the caller's full u32 value in the first
+      two words, preserve the third word, enqueue the pointer, initialize
+      once, then post the mailbox slot at context+0x20. No invented seams;
+      all four callees are existing ports. The higher-level command kind
+      remains unnamed. Context retains the target ABI and is not a native
+      64-bit host object. Deliberate deviation: Rust expresses the final
+      tail transfer as a call; LLVM emits the same tail branch. Host tests
+      exercise the real allocator port with substituted storage for zero,
+      one, the high bit, and all bits set, verifying unused-word preservation.
+      All 14035 host tests and the ARM release build pass. match.py prints
+      a structural diff (15 original versus 16 Rust instructions): LLVM
+      adds a frame pointer and swaps saved registers; the same three BLs,
+      two-word STM, +32 mailbox address, and final B remain. Relocations
+      verify all four callees. A bounded ARM instruction smoke executes
+      both bodies with intercepted external callees and caller-scratch
+      clobbering, proving matching command bytes, call order and arguments,
+      preserved third word, and restored stack for the four boundary values.
+      No device execution.
