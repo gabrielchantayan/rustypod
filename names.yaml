@@ -212784,3 +212784,44 @@ functions:
       match.py exits 1: LLVM emits four instructions rather than two,
       adding push/mov frame setup and returning with pop instead of bx;
       the single ldr r0,[r0,#8] and its return value are preserved.
+  - address: 0x0820358c
+    ghidra: FUN_0820358c
+    name: collect_eligible_descendants
+    size: 164
+    sig: "void collect_eligible_descendants(void *receiver, void *container, void *output)"
+    module: ui/collect_eligible_descendants
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: container
+      param_3/r2: output
+      auStack_28: cursor
+      local_14: child
+      iVar2/r4: nested_container
+    notes: >-
+      Raw ARM establishes 164 bytes through the distinct prologue at
+      0x08203630, with no literals. Whole-image decoding finds one plain
+      inbound BL at 0x08203698 and one recursive BLNE at 0x08203608.
+      Body has six plain BLs, one BLNE and one virtual BLX. Ghidra's
+      caller at 0x0820330c overlaps the later caller; its apparent extra
+      call is not another raw instruction. Iterate children at +0xa8,
+      starting at -2; cast each child to class 0x1100, invalidate it,
+      then inspect +0x48 bit zero. Append flagged children by reference
+      through output vtable slot +0x1c; otherwise recurse on a nonnull
+      cast, retaining output. Ghidra omits the third recursive argument.
+      Existing iterator, checked-cast and invalidation ports are called
+      directly; no new callee seams. A monomorphized backend enables
+      host tree fixtures without pointer truncation. Receiver is unused.
+      Host tests cover depth-first order, eligible-container pruning,
+      uncast leaves, invalidation changing eligibility, callback mutation
+      and empty-iterator cleanup. All 14005 host tests and ARM release
+      build passed. Standalone tree smoke selected [3, 2], invalidated
+      [1, 3, 2], and cleaned [1, 0]. match.py exits 1: exported wrapper
+      forwards container and output to the private recursive worker.
+      Worker disassembly preserves direct iterator/cast/invalidation
+      calls, conditional recursion, flag test, slot +0x1c dispatch and
+      final cleanup. Iterator storage stays at a stable stack address.
+      Uninitialized iterator storage avoids redundant zeroing before its
+      constructor; a volatile aligned flag-word read preserves the raw
+      access width after invalidation. Host smoke uses the shared walker
+      with a native-pointer tree backend, not attached-device execution.
