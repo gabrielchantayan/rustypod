@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820768c
+    ghidra: FUN_0820768c
+    name: type_one_payload_construct
+    size: 32
+    sig: "void *type_one_payload_construct(void *this, u32 payload)"
+    module: cxx/type_one_payload_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      DAT_082076a8: type_one_payload_vtable
+    notes: >-
+      Raw ARM establishes 28 instruction bytes through 0x082076a4 plus the
+      vtable literal at 0x082076a8, giving a true 32-byte extent ending at
+      the next real function 0x082076ac. Whole-image BL decoding finds two
+      plain inbound calls at 0x0818a3cc and 0x081f0134, no predicated inbound
+      calls, and one plain outbound call at 0x08207698 to the already ported
+      vtable_tagged_payload_construct at 0x081fc9c0. Initialize tag 1 and
+      the full-width payload, replace the shared vtable with 0x089919c0,
+      and return this unchanged in r0. The manager allocates twelve bytes;
+      the derived caller installs another vtable and stores a word at +12.
+      Concrete class identity is unresolved. Deliberate deviations reuse
+      the existing Rust base constructor and volatile ordered stores with
+      no validation or padding initialization. The manager now calls this
+      port directly instead of the placeholder constructor seam. All 13970
+      host tests passed; executable smoke verified the production source.
+      ARM release build passed. Reviewed match.py exit-one structural diff:
+      LLVM adds a frame pointer, preserving tag, base call, derived vtable
+      store and pointer return. No device execution.
   - address: 0x081f71ec
     ghidra: FUN_081f71ec
     name: range_state_copy_construct

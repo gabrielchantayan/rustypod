@@ -8,32 +8,25 @@
 //!
 //! # Deliberate deviations
 //!
-//! The node constructor @ 0x0820768c and queue operation @ 0x08261998 remain
-//! unported. They are explicit, target-addressed seams rather than guessed
-//! identities. Rust makes the tail transfer a normal call; allocation uses the
-//! existing `operator_new` port instead of branching to its retailOS address.
+//! The queue operation @ 0x08261998 remains an explicit target-addressed seam.
+//! Rust makes the tail transfer a normal call; allocation and the type-one
+//! payload constructor use their existing Rust ports.
 
 use crate::heap::veneers::{heap_panic, operator_new};
+use crate::cxx::type_one_payload_construct::type_one_payload_construct;
 
 /// Target-addressed boundaries required by `manager_event_notify`.
 #[derive(Clone, Copy)]
 pub struct ManagerNotificationOps {
-    /// Event-node constructor @ 0x0820768c `(storage, event)`.
-    pub construct_event_node: unsafe extern "C" fn(storage: *mut u8, event: u32) -> *mut u8,
     /// Queue operation @ 0x08261998 `(manager + 0x3c, node)`.
     pub enqueue_event_node: unsafe extern "C" fn(queue: *mut u8, node: *mut u8) -> i32,
 }
 
-unsafe extern "C" fn missing_event_node_constructor(storage: *mut u8, _event: u32) -> *mut u8 {
-    storage
-}
 
 unsafe extern "C" fn missing_event_enqueue(_queue: *mut u8, _node: *mut u8) -> i32 { 0x14 }
 
-/// Wired defaults preserve the failure code returned by the unported queue
-/// boundary while keeping the constructor storage identity intact.
+/// Wired default preserves the unported queue boundary's failure code.
 pub const DEFAULT_MANAGER_NOTIFICATION_OPS: ManagerNotificationOps = ManagerNotificationOps {
-    construct_event_node: missing_event_node_constructor,
     enqueue_event_node: missing_event_enqueue,
 };
 
@@ -55,7 +48,7 @@ fn notification_ops() -> ManagerNotificationOps {
 #[inline(never)]
 pub unsafe extern "C" fn manager_event_notify(manager: *mut u8, event: u32) -> i32 {
     let storage = operator_new(12);
-    let node = (notification_ops().construct_event_node)(storage, event);
+    let node = type_one_payload_construct(storage, event);
     if node.is_null() {
         heap_panic();
     }
@@ -71,18 +64,13 @@ mod tests {
     use parking_lot::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut NODE: [u8; 12] = [0; 12];
-    static mut CONSTRUCT_EVENT: u32 = 0;
+    static mut NODE: [u32; 3] = [0; 3];
     static mut ENQUEUED_QUEUE: *mut u8 = core::ptr::null_mut();
     static mut ENQUEUED_NODE: *mut u8 = core::ptr::null_mut();
 
     unsafe extern "C" fn alloc(_heap: *mut crate::heap::types::HeapDescriptorDescriptor, size: usize, tag: usize) -> *mut u8 {
         assert_eq!((size, tag), (12, 2));
         core::ptr::addr_of_mut!(NODE).cast()
-    }
-    unsafe extern "C" fn construct(node: *mut u8, event: u32) -> *mut u8 {
-        CONSTRUCT_EVENT = event;
-        node
     }
     unsafe extern "C" fn enqueue(queue: *mut u8, node: *mut u8) -> i32 {
         ENQUEUED_QUEUE = queue;
@@ -99,10 +87,10 @@ mod tests {
             let mut heap = DEFAULT_HEAP_OPS;
             heap.alloc = alloc;
             HEAP_OPS = heap;
-            MANAGER_NOTIFICATION_OPS = ManagerNotificationOps { construct_event_node: construct, enqueue_event_node: enqueue };
+            MANAGER_NOTIFICATION_OPS = ManagerNotificationOps { enqueue_event_node: enqueue };
             let mut manager = [0_u8; 0x3c];
             assert_eq!(manager_event_notify(manager.as_mut_ptr(), 10), 7);
-            assert_eq!(CONSTRUCT_EVENT, 10);
+            assert_eq!(NODE, [crate::cxx::type_one_payload_construct::TYPE_ONE_PAYLOAD_VTABLE_ADDRESS, 1, 10]);
             assert_eq!(ENQUEUED_QUEUE, manager.as_mut_ptr().add(0x3c));
             assert_eq!(ENQUEUED_NODE, core::ptr::addr_of_mut!(NODE).cast());
             HEAP_OPS = old_heap;
