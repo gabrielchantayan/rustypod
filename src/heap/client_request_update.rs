@@ -57,7 +57,7 @@ mod tests {
     use parking_lot::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut NODE: [u8; 12] = [0; 12];
+    static mut NODE: [u32; 3] = [0; 3];
     static mut EVENT: u32 = 0;
     static mut QUEUE: *mut u8 = core::ptr::null_mut();
 
@@ -70,13 +70,10 @@ mod tests {
         core::ptr::addr_of_mut!(NODE).cast()
     }
 
-    unsafe extern "C" fn construct(node: *mut u8, event: u32) -> *mut u8 {
-        EVENT = event;
-        node
-    }
 
-    unsafe extern "C" fn enqueue(queue: *mut u8, _node: *mut u8) -> i32 {
+    unsafe extern "C" fn enqueue(queue: *mut u8, node: *mut u8) -> i32 {
         QUEUE = queue;
+        EVENT = node.add(8).cast::<u32>().read();
         0
     }
 
@@ -90,7 +87,6 @@ mod tests {
             heap.alloc = alloc;
             HEAP_OPS = heap;
             MANAGER_NOTIFICATION_OPS = ManagerNotificationOps {
-                construct_event_node: construct,
                 enqueue_event_node: enqueue,
             };
 
