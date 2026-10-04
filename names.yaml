@@ -213711,3 +213711,40 @@ functions:
       disjoint mutex storage and neighboring guards. An isolated host
       runtime smoke invokes the full constructor with semaphore definition
       installed, verifying semaphore 77, empty state and return-this.
+
+  - address: 0x081dd648
+    ghidra: FUN_081dd648
+    name: ui_three_state_select_bounds
+    size: 144
+    sig: "u32 ui_three_state_select_bounds(ThreeStateBoundsOwner *owner, i32 requested_state)"
+    module: ui/three_state_bounds_select
+    status: ported
+    vars:
+      param_1: owner
+      param_2: requested_state
+      iVar1: normalized_state_or_selected_source
+      local_18: bounds
+      FUN_0826ec9c: ui_element_invalidate
+    notes: >-
+      Raw ARM extent 0x081dd648..0x081dd6d8 is exactly 144 bytes,
+      ending with pop {r4,pc}; the next function begins with cmp.
+      Whole-image aligned BL decoding finds two plain incoming calls
+      (0x081ddb84 and 0x081ddb9c), zero predicated BL calls. The body
+      has one direct BL to the existing ui_element_invalidate port and
+      one virtual BLX through the recipient's vtable slot +0x68.
+      Negative requests normalize to 2; requests above 2 normalize to 0.
+      An unchanged state returns 0 without child access. Otherwise store
+      state at +0x138, select the source at +0x140/+0x144/+0x148, copy
+      its four bounds words at +0x80, dispatch recipient +0x13c with
+      that stack copy and mode 0, invalidate owner, and return 1.
+      Saved r2/r3 arguments are overwritten on every reachable changed
+      path, so the semantic signature has only two arguments. Native
+      repr(C) pointers widen trailing fields and vtable slots on hosts;
+      target offsets are unchanged. Host tests cover signed extremes,
+      every valid selection, store-before-callback, isolated bounds copy,
+      and unchanged-state null child pointers. All 14040 host tests pass;
+      ARM release build passes. match.py reports 35 versus 36 instructions:
+      LLVM indexes the source array instead of branching per state and
+      retains the virtual call, direct invalidation call, and early return.
+      An isolated runtime smoke observed bounds [10,20,30,40], negative
+      selection of state 2, and repeated selection returning 0.
