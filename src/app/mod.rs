@@ -541,6 +541,7 @@ pub mod lazy_handle_manager_release;
 pub mod lazy_static_object;
 pub mod lazy_static_object_08a762a0;
 pub mod lazy_static_object_081491a8;
+pub mod static_buffer_pool;
 pub mod guarded_static_object;
 pub mod mecca_io_task;
 pub mod guarded_global_state;
