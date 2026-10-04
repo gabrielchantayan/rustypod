@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d9498
+    ghidra: FUN_081d9498
+    name: record_stream_transferred_count
+    size: 8
+    sig: "u32 record_stream_transferred_count(const u32 *stream)"
+    module: app/record_stream_transferred_count
+    status: ported
+    vars:
+      param_1/r0: stream
+      stream_plus_0x04: accumulated_transfer_count
+      return/r0: transferred_count
+    notes: >-
+      Raw words e5900004/e12fff1e establish [0x081d9498,0x081d94a0),
+      eight bytes. Preceding method returns at 0x081d9494; next constructor
+      starts with push at 0x081d94a0. Whole-image A32 decoding finds two
+      inbound plain BLs at 0x08160964 and 0x081609dc, zero predicated BLs,
+      and no outgoing calls. Constructor initializes word +4 to zero;
+      methods at 0x081d9408 and 0x081d9450 accumulate transfer results.
+      Caller 0x08160888 compares count with record length and subtracts it
+      for remaining length. Returns only r0, not Ghidra's suggested pair.
+      No seams or behavioral deviations; target-width word indexing.
+      Host edge tests and full suite pass; ARM release build passes.
+      Executable smoke reports length 16, transferred 16, remaining zero.
+      Explicit text section prevents LLVM folding into another accessor.
+      Reviewed match.py exit-one diff: same ldr r0,[r0,#4], with added
+      frame-pointer push/mov/pop replacing bx lr. No device execution.
+
   - address: 0x081d9760
     ghidra: FUN_081d9760
     name: slot_completion_poll
