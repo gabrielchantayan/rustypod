@@ -209609,3 +209609,46 @@ functions:
       with equivalent signed branches, field offsets and message constant.
       Relocations verify three calls and the message-post tail jump.
       No device execution.
+
+  - address: 0x08212b40
+    ghidra: FUN_08212b40
+    name: view_event_bind_state
+    size: 136
+    sig: "uint32_t view_event_bind_state(void *view, uint32_t event)"
+    module: app/view_event_bind_state
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: event
+      uVar1: singleton_state_base
+      piVar2: related_object
+      iVar3: related_query_result
+      FUN_08127954: singleton_state_base_get
+      FUN_0810de48: view_event_apply_mapped_staged_flags
+    notes: >-
+      Raw osos.dec confirms a 136-byte extent ending before the real
+      function prologue at 0x08212bc8. Binary-wide ARM branch decoding
+      finds two inbound plain BLs at 0x083afc1c and 0x083b2220, no
+      predicated BLs, and two plain tail branches at 0x082182d4 and
+      0x08228b20. The body has one plain BL, no predicated BLs, four
+      register BLX sites and a tail B to 0x0810de48, not a second BL.
+      Binds the singleton base using view vtable +0xc0, obtains the
+      related object through +0xc4, and queries that object's +0xa4.
+      A nonzero query with event zero invokes view +0xb8 with 0x10;
+      with event nonzero and byte +0xb4 nonzero it returns handled
+      without applying flags. Otherwise applies mapped staged flags
+      and returns 1. Reloads vtables after callbacks. Virtual-method
+      identities are not established beyond these observed operations.
+      Reuses existing Rust singleton and mapped-flag ports, with no
+      new seams. The latter omits the original dead forwarded r1.
+      Host vtable entries widen to native pointer words; target entries
+      retain four-byte spacing. Host tests cover zero and high-bit
+      query/event values, all flag truth cases, dispatch order, flag
+      preservation and callback-driven vtable replacement. Full host
+      suite passes 13865 tests. Standalone host smoke exercises early
+      return, notification 0x10 and resumed flag application with the
+      unported flag-application boundary replaced. ARM release builds;
+      match.py reports 35 versus 34 instructions, equivalent virtual
+      offsets and branch conditions, reordered arms, a frame pointer
+      and a normal completion call instead of the original tail B.
+      No device execution.

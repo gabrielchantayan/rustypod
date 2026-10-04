@@ -61,13 +61,13 @@ pub unsafe extern "C" fn singleton_state_get() -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
-    static ACCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static ACCESS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct SingletonStateBaseReset;
 
