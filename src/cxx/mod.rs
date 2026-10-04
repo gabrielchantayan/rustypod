@@ -891,3 +891,4 @@ pub mod fixed_point_record_copy;
 pub mod selector_item_scattered_records_variant_construct;
 pub mod container_status_flags;
 pub mod queued_owner_destroy;
+pub mod queued_owner_construct;
