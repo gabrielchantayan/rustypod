@@ -211622,3 +211622,33 @@ functions:
       visibility. Final match.py exit 1 reports push {fp,lr}, mov fp,sp,
       pop {fp,pc} versus bx lr: r0 is unchanged, with no memory access
       through the member pointer. No device execution was performed.
+
+  - address: 0x081fc4f4
+    ghidra: FUN_081fc4f4
+    name: client_notify_kind_seven
+    size: 20
+    sig: "void client_notify_kind_seven(u8 *client)"
+    module: heap/client_notify_kind_seven
+    status: ported
+    renames:
+      param_1: client
+      r1: notification_kind
+      r2: count
+    notes: >-
+      Raw words e3a01000 e5801050 e590201c e3a01007 eafffeac establish
+      extent [0x081fc4f4,0x081fc508), ending before push {r4,lr}.
+      Two inbound plain BLs at 0x082077fc and 0x082078f4, no predicated
+      BLs, and no outbound BLs. Clears client word 20 (+0x50), snapshots
+      word 7 (+0x1c), and tail-branches to resident 0x081fbfbc with kind 7.
+      That unmapped helper allocates and dispatches an event; no stronger
+      identity for kind 7 is inferred. Ghidra incorrectly incorporates the
+      helper and shared dispatch blocks and invents extra arguments.
+      Target uses the verified resident helper address; host uses an
+      injectable notification boundary. Volatile aligned word operations
+      preserve the original clear-before-load order. Host regressions cover
+      zero and full-width counts, already-cleared limits, store ordering,
+      consumer mutation, and preservation of neighbouring words.
+      Full host suite and standalone production-entry smoke passed; ARM
+      release build passed. Final match.py exit 1 shows LLVM's frame and
+      literal-loaded BX in place of direct B, preserving field operations,
+      their order, kind 7, and destination. No device execution performed.

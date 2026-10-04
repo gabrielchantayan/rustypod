@@ -18,6 +18,7 @@ pub mod client_erase;
 pub mod client_return_region;
 pub mod client_reserve;
 pub mod client_request_update;
+pub mod client_notify_kind_seven;
 pub mod client_populate;
 pub mod client_take_region;
 pub mod client_register;
