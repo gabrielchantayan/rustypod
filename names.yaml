@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f1244
+    ghidra: FUN_081f1244
+    name: context_lifecycle_request
+    size: 124
+    sig: "u32 context_lifecycle_request(u8 *context, u32 request, u32 mode, u32 lower, u32 upper)"
+    module: app/context_lifecycle_request
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      param_2/r1: request
+      param_3/r2/lr: mode
+      param_4/r3: lower
+      param_5/stack_0: upper
+      piVar1: lifecycle_object
+      local_10: output_byte_storage
+      iVar2/r5: result
+      context_plus_0x60: request_count
+      context_plus_0x70: disabled
+      FUN_081f0888: context_lifecycle_rearm
+    notes: >-
+      Raw osos.dec establishes 124 bytes [0x081f1244, 0x081f12c0), ending
+      at the next independent push. Whole-image aligned A32 decoding verifies
+      two plain inbound BLs at 0x081f0874 and 0x081fcfb4, no predicated
+      inbound BLs; zero plain outbound BLs, one BLNE at 0x081f12b4 to
+      context_lifecycle_rearm and one indirect BLX at 0x081f129c. Return zero
+      if disabled byte +0x70 is nonzero or lifecycle object +0x48 is null.
+      Otherwise wrapping-increment word +0x60 and invoke vtable slot +0x18
+      with object, request, initialized output-byte pointer, mode, lower and
+      upper. Rearm only when both output byte and result are nonzero; preserve
+      the result. Ghidra's undefined8 return is spurious: r1 is restored by
+      pop, not an independent return value. The virtual method's concrete
+      identity remains unresolved; no invented direct-callee seam. Reuse
+      ported context_lifecycle_rearm and migrate optional_backend_request
+      from its old address-backed seam. Target has no semantic deviations;
+      hosts widen native object/vtable pointers while retaining context
+      offsets and a word-sized zero-initialized output buffer. Host tests
+      cover disabled and absent-object gating, counter overflow, inclusive
+      request bounds, result preservation and both notification conditions.
+      Host suite and ARM release build passed. Production-source executable
+      smoke verified selection, notification, counter wrap, rejection and
+      disabled gating. Reviewed match.py exit-one diff: 31 original versus
+      38 Rust instructions, larger frame and reordered local flag/result
+      tests, retaining offsets, argument stack order, virtual BLX and the
+      conditional direct rearm call. No attached-device execution.
   - address: 0x081f18c0
     ghidra: FUN_081f18c0
     name: object_list_pop_front
@@ -212132,7 +212176,7 @@ functions:
       r2: mode
       state_10: backend
       uVar2/r3: result
-      FUN_081f1244: backend_request
+      FUN_081f1244: context_lifecycle_request
     notes: >-
       Raw extent [0x081fcf98, 0x081fcfc8) is 48 bytes; next real
       function starts with push. Whole-image aligned A32 decoding finds
@@ -212145,19 +212189,15 @@ functions:
       Raw helper forwards request, an output-byte pointer, mode and the
       two sentinel arguments through backend +0x48 vtable slot +0x18,
       increments +0x60 and conditionally notifies via 0x081f0888.
-      Unported helper remains at its verified firmware address; no
-      unsupported operation identity or target behavioral deviations.
-      Reuse the adjacent port's repr(C) state, with backend at +0x10;
-      host pointer widens and helper is substituted. Host behavioral
-      tests cover absent backend, bounded requests, mode rejection,
-      zero and high-bit results, and state changes despite zero result.
-      All 13932 host tests and ARM release build passed. Production-entry
-      executable smoke verified five arguments, high-bit normalization
-      and absent backend. Reviewed match.py exit 1: LLVM hoists the null
-      fast return before its prologue, allocates an aligned stack frame
-      and uses BLX through literal 0x081f1244 instead of direct BL.
-      r1/r2 forwarding, r3/stack sentinels and normalization are preserved.
-      No device execution.
+      Calls ported context_lifecycle_request directly; no unsupported
+      operation identity or target behavioral deviations. Reuse the adjacent
+      port repr(C) state, with backend at +0x10; host pointer widens.
+      Host wrapper tests cover absent backend and absent lifecycle object;
+      lifecycle request tests cover request bounds, counter overflow,
+      result preservation and notification conditions. Host suite and ARM
+      release build passed after the direct-call migration. Original
+      wrapper codegen review predates migration; its address-backed BLX
+      seam has been removed. No device execution.
 
   # --- Virtual indexed flagged-pair payload accessor ---
   - address: 0x081fcef0
