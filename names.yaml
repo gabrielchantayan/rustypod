@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820a49c
+    ghidra: thunk_FUN_0822aecc
+    name: mode_selected_position_forward
+    size: 4
+    sig: "u32 mode_selected_position_forward(const void *state)"
+    module: app/mode_selected_position
+    status: ported
+    vars: {param_1: state}
+    notes: >-
+      Raw word 0xea00828a tail-branches to the already ported
+      mode_selected_position at 0x0822aecc. True extent is
+      [0x0820a49c, 0x0820a4a0); the next separately entered function
+      starts at 0x0820a4a0. Independent whole-image ARM decoding finds
+      two plain inbound BLs at 0x08101604 and 0x08177960, zero predicated
+      inbound BLs, and no outbound BLs. Returns the word at state+0x2ec
+      when bit zero of state+0x5f8 is set, otherwise state+0x5e4.
+      No guards or state changes. Deliberate deviation: calls the
+      existing Rust accessor directly. match.py reports LLVM's frame
+      setup/teardown before a tail branch; objdump verifies its
+      R_ARM_JUMP24 relocation targets mode_selected_position.
+      Host tests cover all 256 flag bytes, full-width positions,
+      and unchanged state; executable smoke covers both selections.
   - address: 0x0820a4a0
     ghidra: FUN_0820a4a0
     name: context_handle_process_forward

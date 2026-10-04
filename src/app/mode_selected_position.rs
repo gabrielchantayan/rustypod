@@ -35,6 +35,29 @@ pub unsafe extern "C" fn mode_selected_position(state: *const u8) -> u32 {
     }
 }
 
+/// `mode_selected_position_forward` — retail `thunk_FUN_0822aecc` at
+/// load address `0x0820a49c`; true size **4 bytes**, ending at the next
+/// separately entered function, `0x0820a4a0`.
+///
+/// Raw word `0xea00828a` is an unconditional tail branch to `0x0822aecc`.
+/// Independent whole-image ARM decoding finds two plain inbound BLs,
+/// at `0x08101604` and `0x08177960`, and zero predicated inbound BLs.
+/// There are no outbound BLs: the sole instruction forwards the state
+/// pointer and returns the canonical accessor's full-width position.
+///
+/// Algorithm: select `state+0x2ec` when bit zero of `state+0x5f8` is set,
+/// otherwise select `state+0x5e4`. Deliberate deviation: call the existing
+/// Rust accessor rather than branching to the retail address.
+///
+/// # Safety
+///
+/// Same requirements as [`mode_selected_position`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mode_selected_position_forward(state: *const u8) -> u32 {
+    mode_selected_position(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -49,6 +72,32 @@ mod tests {
 
     unsafe fn write_word(state: &mut State, offset: usize, value: u32) {
         state.0.as_mut_ptr().add(offset).cast::<u32>().write(value);
+    }
+
+    #[test]
+    fn forward_ignores_other_flags_and_preserves_position_bits_and_state() {
+        for (mode_position, default_position) in [
+            (0, u32::MAX),
+            (u32::MAX, 0),
+            (0x8000_0000, 0x7fff_ffff),
+        ] {
+            let mut state = State([0xa5; STATE_BYTES]);
+            unsafe {
+                write_word(&mut state, MODE_POSITION_OFFSET, mode_position);
+                write_word(&mut state, DEFAULT_POSITION_OFFSET, default_position);
+            }
+            for flags in 0..=u8::MAX {
+                state.0[FLAGS_OFFSET] = flags;
+                let before = state.0;
+                let expected = if flags & 1 == 0 { default_position } else { mode_position };
+                assert_eq!(
+                    unsafe { mode_selected_position_forward(state.0.as_ptr()) },
+                    expected,
+                    "flags={flags:#04x}",
+                );
+                assert_eq!(state.0, before);
+            }
+        }
     }
 
     #[test]
