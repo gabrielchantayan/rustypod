@@ -9,12 +9,12 @@
 //! and accumulate descriptor words +4 times +12 with 32-bit wrapping MLA.
 //! Descriptor stride is 36 bytes. Field meanings beyond this product are
 //! unproven. No deliberate behavioral deviations; native-pointer repr(C)
-//! fields support hosts, with ARM layout asserted. The unported getter stays
-//! a retail-address seam, matching image_format_slots_collect_unexcluded.
+//! fields support hosts, with ARM layout asserted. The descriptor-table getter
+//! is the shared Rust port used by image_format_slots_collect_unexcluded.
 
 use crate::cxx::templates::{vector_size_elem4_alias_76e8, VectorBounds};
+use super::image_format_context_slots_get::image_format_context_slots_get;
 
-type SlotsGet = unsafe extern "C" fn(*mut u32) -> *mut u32;
 
 #[repr(C)]
 pub struct ImageFormatSelection {
@@ -30,26 +30,15 @@ const _: () = {
     assert!(core::mem::offset_of!(ImageFormatSelection, selected) == 12);
 };
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_get(_: *mut u32) -> *mut u32 {
-    panic!("install image-format product sum host getter")
-}
-#[cfg(not(target_os = "none"))]
-pub static mut SELECTED_PRODUCT_SLOTS_GET: SlotsGet = missing_get;
 
 /// # Safety
 /// `owner` and its context must be valid and aligned. For a present table,
 /// the vector must contain readable u32 indices and each wrapping target
 /// address `table + index * 36` must have readable words at +4 and +12.
-/// Host callers must install the descriptor-table getter.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn image_format_selected_product_sum(owner: *const ImageFormatSelection) -> u32 {
-    #[cfg(target_os = "none")]
-    let get = core::mem::transmute::<usize, SlotsGet>(0x081f_0258);
-    #[cfg(not(target_os = "none"))]
-    let get = core::ptr::addr_of!(SELECTED_PRODUCT_SLOTS_GET).read();
-    let slots = get((*owner).context);
+    let slots = image_format_context_slots_get((*owner).context) as usize as *mut u32;
     if slots.is_null() { return 0; }
     let vector = core::ptr::addr_of!((*owner).selected);
     let mut index = 0u32;
@@ -68,10 +57,6 @@ pub unsafe extern "C" fn image_format_selected_product_sum(owner: *const ImageFo
 mod tests {
     use super::*;
 
-    unsafe extern "C" fn get(context: *mut u32) -> *mut u32 {
-        let base = context.add(12).read();
-        if base == 0 { core::ptr::null_mut() } else { (base as usize as *mut u32).add(7) }
-    }
 
     #[test]
     fn absent_empty_sparse_duplicate_and_overflow_match_word_reference() {
@@ -82,7 +67,6 @@ mod tests {
             return;
         };
         unsafe {
-            SELECTED_PRODUCT_SLOTS_GET = get;
             slab.write_bytes(0, 0x1000);
             let context = slab.cast::<u32>();
             let slots = slab.add(0x100).cast::<u32>();

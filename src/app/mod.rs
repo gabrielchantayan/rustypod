@@ -53,6 +53,7 @@ pub mod contextual_menu_dispatch;
 pub mod class_1700_clear_when_configured;
 pub mod image_format_selected_product_sum;
 pub mod embedded_vector_cursor_advance;
+pub mod image_format_context_slots_get;
 pub mod backlight_timer_refresh;
 pub mod restore_display_layout;
 pub mod restore_internal_display_layers;
