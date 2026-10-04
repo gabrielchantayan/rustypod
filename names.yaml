@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ef088
+    ghidra: FUN_081ef088
+    name: slot_array_owner_close_request
+    size: 28
+    sig: "void slot_array_owner_close_request(const SlotArrayOwner *owner, OwnerWriteRequest **request_slot)"
+    module: cxx/slot_array_owner_close_request
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: request_slot
+      iVar1/r4: request
+      request_0x34/r1: slot_index
+      request_0x28: status
+      FUN_081ef3a0: owner_release_slot (retail lock-bracketed release boundary)
+    notes: >-
+      Raw A32 words establish [0x081ef088,0x081ef0a4), 28 bytes,
+      ending with pop {r4,pc} before the next independent push.
+      Whole-image decoding finds two inbound plain BLs at 0x081eea90 and
+      0x081eeb08, zero predicated inbound BLs; one outbound plain BL at
+      0x081ef094 to 0x081ef3a0, zero predicated outbound BLs.
+      Cache the request pointer, pass its signed slot index at +0x34 to
+      the owner-release operation, then unconditionally clear status at
+      +0x28 on the original request. Dispatcher operation 2 closes directly;
+      operations 6 and 7 save and restore status around this close.
+      No bounds checks or null guards are added. Reuse OwnerWriteRequest
+      and SlotArrayOwner; owner must include retail lock storage at +0x14.
+      No existing name entry for 0x081ef3a0: retain a typed fixed-address
+      device boundary, not a guessed Rust callee. Raw callee words show
+      calls to 0x0807f5c4 and slot_array_remove_at_release at 0x083d4f2c,
+      followed by a tail branch to 0x0807f6a0. Volatile fields preserve
+      ordering and native pointer slots permit host fixtures. Host edge
+      tests exercise negative/extreme indices and reentrant slot replacement,
+      ensuring release precedes status clearing and the cached pointer wins.
+      Host suite and ARM release build pass; standalone executable smoke
+      confirms release-before-clear and adjacent-field preservation.
+      Reviewed match.py exit-one structural diff: seven original versus
+      ten Rust instructions including the literal 0x081ef3a0. Same request
+      loads at +0x34, status store at +0x28, and post-call zeroing.
+      LLVM adds a frame pointer and uses literal-loaded BLX instead of BL.
+      No device execution.
   - address: 0x081dd80c
     ghidra: FUN_081dd80c
     name: active_datetime_field_selector
