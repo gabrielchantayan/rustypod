@@ -178,6 +178,7 @@ pub mod context_dispatch_and_register_if_idle;
 pub mod context_lifecycle_rearm;
 pub mod context_lifecycle_request;
 pub mod context_lifecycle_slot_0x2c;
+pub mod context_lifecycle_slot_0x34;
 pub mod application_string_registry;
 pub mod static_string_lookup;
 pub mod identifier_value_lookup;
