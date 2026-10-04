@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081fd610
+    ghidra: FUN_081fd610
+    name: extended_basic_layout_name
+    size: 12
+    sig: "const uint8_t *extended_basic_layout_name(void)"
+    module: util/extended_basic_layout_name
+    status: ported
+    vars: {DAT_081fd618: extended_basic_layout_name_address}
+    notes: >-
+      Raw words e59f0000 e12fff1e 089cb23c establish eight executable
+      bytes plus a four-byte literal before the real function at 0x081fd61c:
+      true extent is 12 bytes, not Ghidra's eight. Returns 0x089cb23c,
+      whose raw firmware bytes are Extended_Basic_Layout followed by NUL;
+      does not read that string. Whole-image aligned A32 decoding finds
+      two plain inbound BLs at 0x0803c2bc and 0x0805bb84, zero predicated
+      inbound BLs, and zero outbound calls. Both direct callers forward r0
+      to indexed_record_defaults, which ignores that argument. Retains the
+      existing registered Rust implementation and its host regression for
+      the exact target address without mapping target memory. No behavioral
+      deviations or callee seams. All 13924 host tests and ARM release build
+      pass; standalone production-entry smoke returns 0x089cb23c. Reviewed
+      match.py exit 1: LLVM adds frame push/mov/pop around the same literal
   - address: 0x0820b2c4
     ghidra: FUN_0820b2c4
     name: codepoint_group_map_populate

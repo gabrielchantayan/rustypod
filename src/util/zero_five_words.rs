@@ -1,8 +1,8 @@
 //! Zeroes a five-word record.
 //!
 //! `zero_five_words` — original: `FUN_081fd5f4` @ **0x081fd5f4** (28 bytes
-//! exactly, `0x081fd5f4..0x081fd60f`; `ldr pc, [pc, #-4]` at `0x081fd610`
-//! begins the following veneer). Raw A32 decoding finds **3 direct inbound
+//! exactly, `0x081fd5f4..0x081fd60f`; `ldr r0, [pc]` at `0x081fd610`
+//! begins the following name-address getter). Raw A32 decoding finds **3 direct inbound
 //! plain `bl` call sites**, all unconditional: 0x081d612c, 0x081f1adc, and
 //! 0x08267c40. There are no predicated `bl` forms. The seven-instruction body
 //! loads zero into r2, writes it to five consecutive aligned words at `dst`,
