@@ -213788,3 +213788,47 @@ functions:
       retains the virtual call, direct invalidation call, and early return.
       An isolated runtime smoke observed bounds [10,20,30,40], negative
       selection of state 2, and repeated selection returning 0.
+
+  - address: 0x081dcf7c
+    ghidra: FUN_081dcf7c
+    name: flagged_work_record_construct
+    size: 120
+    sig: "u8 *flagged_work_record_construct(u8 *this, u32 first, u32 base_arg, u32 second, u32 first_flag, u32 second_flag, u32 value, u32 context)"
+    module: app/flagged_work_record_construct
+    status: ported
+    renames:
+      param_1: this
+      param_2: first
+      param_3: base_arg
+      param_4: second
+      param_5: first_flag
+      param_6: second_flag
+      param_7: value
+      param_8: context
+      FUN_081de250: flagged_base_construct
+      FUN_081b4e24: store_u32_pair
+      FUN_081484e0: work_record_assign_value
+      DAT_081dcff0: derived_vtable
+    notes: >-
+      Raw A32 extent is 0x081dcf7c..0x081dcff3: 116 instruction bytes
+      plus vtable literal 0x0898e618, before the next real function at
+      0x081dcff4. Whole-image aligned BL decoding independently finds two
+      inbound plain calls at 0x081dd1a4 and 0x081e86f0, zero predicated
+      calls. The body has three plain BL calls, zero predicated BL calls.
+      Constructs the flagged base with (base_arg, 1, context), uses its
+      returned pointer, installs the derived vtable, stores first/second
+      at +0x70/+0x78, zeroes the pair at +0x7c/+0x80, stores the low
+      flag bytes at +0x84/+0x85, clears +0x86/+0x87, assigns value using
+      the existing work-record port, and returns the constructed pointer.
+      Both callers derive further objects and replace the vtable; the
+      exact derived class identity remains unknown. Deliberate deviations
+      are semantic Rust callee reuse and aligned word indexing instead of
+      register writeback; flag ABI words are truncated only when stored.
+      Host tests verify returned-storage selection, full-width word edges,
+      flag truncation, pair clearing, and preservation of every other word.
+      All 14042 host tests pass; ARM release build passes. match.py reports
+      a structural diff (29 original instructions, 30 Rust listing rows);
+      relocation inspection confirms all three semantic BL targets and the
+      original vtable literal. An isolated source smoke exercises the export
+      with existing host seams and verifies a changed assigned value,
+      derived fields, base flag, and return identity; no device run performed.
