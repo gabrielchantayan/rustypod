@@ -149,6 +149,7 @@ pub mod parser_name_record_insert;
 pub mod input_sequence_item_clear_action;
 pub mod animation_property_pair_init;
 pub mod application_client_cleanup;
+pub mod language_screen_refresh;
 pub mod object_layout_construct;
 pub mod shared_object_default_construct;
 pub mod swap_selector_one_two;

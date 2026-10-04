@@ -214750,3 +214750,39 @@ functions:
       fixture bytes and returned r0 in 1792 stock/Rust cases across every
       selector byte, NULL, disjoint input, dirty-byte alias, and overlap;
       all agree.
+
+  - address: 0x081ebf1c
+    ghidra: FUN_081ebf1c
+    name: language_screen_refresh
+    size: 60
+    sig: "uint32_t language_screen_refresh(void *screen)"
+    module: app/language_screen_refresh
+    status: ported
+    notes: >-
+      Raw words establish extent 0x081ebf1c..0x081ebf58: 56 instruction
+      bytes followed by the global-slot literal 0x089ca674 at 0x081ebf54;
+      the next function begins with push {r4,lr} at 0x081ebf58.
+      Whole-image aligned A32 decoding verifies two inbound plain BLs
+      at 0x080fead0 and 0x0821c2f8, no predicated inbound BLs, four
+      outbound plain BLs, no predicated outbound BLs, and a bx r1 tail
+      dispatch. Refreshes the global context through 0x08112f18, calls
+      0x081eb0f4 and 0x081eb204 with the original screen pointer, then
+      obtains TMediaNowPlayingCntlr through the existing ported
+      instance_of_class_3280 and dispatches its vtable +0xd4 slot.
+      Both group helper results are discarded, including zero. The
+      language-navigation identity comes from FUN_0821c2d4's subsequent
+      GotoScreen_Language call; FUN_080fea98 also invokes it during setup.
+      Deliberate deviations: unported helper dependencies call verified
+      retail addresses on ARM and are injected on hosts; host vtables
+      use native pointer widths. Preserves the final virtual method's
+      r0 result rather than Ghidra's void annotation. Host suite passes
+      14082 tests, including missing-view results, generation wraparound,
+      repeated refreshes and arbitrary result bits. ARM release build
+      passes. match.py exits 1: 14 stock instructions versus 21 Rust
+      lines including literal words; ARM uses BLX for absolute helpers,
+      retains their order, the singleton call and exact +0xd4 tail BX.
+      Standalone host executable confirms final state and r0 0x80000010
+      with both group helpers returning zero. No device execution.
+    renames:
+      param_1: screen
+      piVar1: controller
