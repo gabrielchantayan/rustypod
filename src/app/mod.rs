@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod media_player_index_select;
 pub mod service_context_initialize;
 pub mod channel_slot_publish;
 pub mod string_array_pair_owner_construct;
