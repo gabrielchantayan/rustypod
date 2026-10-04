@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f08f8
+    ghidra: FUN_081f08f8
+    name: context_operation_begin
+    size: 100
+    sig: "void context_operation_begin(OperationContext *context)"
+    module: app/context_operation_begin
+    status: ported
+    renames:
+      param_1/r0: context
+      piVar1: associated
+      local_10: first
+      local_14: second
+      uVar2: default_value
+      FUN_082234d4: operation_begin_unported
+    notes: >-
+      Raw words establish [0x081f08f8,0x081f095c), 100 bytes including
+      the 10000 literal at 0x081f0958; instructions occupy 96 bytes.
+      Next real prologue is at 0x081f095c. One plain outbound BL at
+      0x081f0950 to 0x082234d4, zero predicated BLs, one indirect BLX
+      at 0x081f0934. Whole-image decoding finds two plain inbound BLs
+      at 0x081f07f0 and 0x081f1044, zero predicated inbound BLs.
+      Null associated object at +0x48 selects default 10000 and zero
+      arguments. Otherwise vtable slot +0x3c fills two zero-initialized
+      words and default becomes zero. Call embedded operation at +0x74
+      with wait zero; discard result. Raw callee verifies five arguments,
+      a locked already-started guard and started flag at +0x4c.
+      Ghidra's r1/r2/r3 input parameters are not consumed. No target
+      behavioral deviations; host pointers and vtable words widen.
+      Unported callee stays at its verified firmware address.
+      Host edge tests and standalone null-object smoke pass; full host
+      suite and release ARM build pass. match.py reports 30 Rust versus
+      24 original instructions: frame/branch layout differs and the direct
+      BL becomes an absolute-address BLX. Verified +0x48 object load,
+      +0x3c dispatch, zero output seeds, default 10000, +0x74 operation,
+      five-argument call and ignored result are preserved.
   - address: 0x081f0dcc
     ghidra: FUN_081f0dcc
     name: context_range_release

@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod context_operation_begin;
 pub mod context_range_release;
 pub mod member_range_progress;
 pub mod linked_node_prepend;
