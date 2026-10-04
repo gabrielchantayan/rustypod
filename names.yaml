@@ -212519,3 +212519,45 @@ functions:
       completion BLX seam, inverted equivalent budget comparison and LLVM's
       merged fatal path. The context word read is effectively aligned at
       0x089ccbcc even though LLVM bases its load on the retry-table literal.
+
+  - address: 0x08205eb0
+    ghidra: FUN_08205eb0
+    name: static_buffer_pool_get
+    size: 88
+    sig: "u32 *static_buffer_pool_get(void)"
+    status: ported
+    module: app/static_buffer_pool.rs
+    args: {}
+    locals:
+      DAT_08205ef8: pool_object
+      DAT_08205efc: embedded_guard
+      DAT_08205f00: dso_handle
+      DAT_08205f04: stock_shutdown_handler_word
+      FUN_08205f08: stock_pool_initializer
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw ARM proves 72 code bytes followed by four literals, with the next
+      real function at 0x08205f08: true size 88. Four outbound plain BLs and
+      zero predicated BLs; two inbound plain BLs at 0x08104df0 and 0x08105060.
+      Fixed object 0x08a09fec contains guard at +8 (0x08a09ff4). Tests bit zero,
+      acquires the entire word, invokes stock initializer 0x08205f08, registers
+      its unchanged r0 with handler word 0x081fb080 and DSO 0x089ca09c, releases,
+      and returns the fixed object. The initializer sets up ten 192-byte buffer
+      slots at 0x08ae5734 and clears object+4. Callers allocate/free five entries.
+      No class or handler identity is invented. Target retains the original
+      globals and initializer/handler addresses; host uses word-indexed storage
+      and explicit dependency bindings, with unavailable stock calls failing
+      loudly rather than silently approximating them. Tests cover recursive
+      access after guard publication, constructor-result registration versus
+      fixed-object return, ignored registration failure, repeated access,
+      nonzero guards with bit zero clear, and neighboring-word preservation.
+      Host suite and ARM release build passed. Standalone production-source
+      smoke exercised first initialization, repeated access, and refused
+      nonzero guard. No device execution. match.py exited 1 with a structural
+      diff: 18 original instructions versus 30 listed Rust lines including six
+      literal words. The bit-zero fast path, full-word acquisition, initializer,
+      registration, release, and fixed-object return survive. LLVM uses the
+      guard address minus eight for the object and BLX for the preserved stock
+      initializer and volatile registration/release bindings; frame differs.
