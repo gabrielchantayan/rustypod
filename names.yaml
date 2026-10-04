@@ -213542,3 +213542,42 @@ functions:
       normalization, unsigned early return and conditional update. LLVM
       uses a wrapping range comparison, branches instead of BLXNE, removes
       unread this argument and changes the frame. No device execution.
+  - address: 0x082004b4
+    ghidra: FUN_082004b4
+    name: controller_scale_or_offset
+    size: 60
+    sig: "u32 controller_scale_or_offset(const u32 *controller, u32 value)"
+    module: app/controller_scale_or_offset
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: value
+      controller_plus_0x2d4/r3: scale
+      controller_plus_0x2d8/r0: threshold
+      iVar1/r2: transformed_value
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw osos.dec A32 words establish the exact 60-byte extent
+      [0x082004b4,0x082004f0), ending in pop {r4,pc}; the next independent
+      function begins with push {r4,lr}. One outgoing plain BL at
+      0x082004e0 targets the existing ported __rt_udiv, no predicated BLs.
+      Independent whole-image aligned BL decoding finds two incoming plain
+      BLs at 0x081ffc48 and 0x08200c18, no predicated forms. Read the aligned
+      scale word at +0x2d4; scale other than 255 yields the unsigned quotient
+      of the wrapping low-word product value*scale divided by 255. Scale
+      255 reads +0x2d8 and yields zero if that unsigned threshold exceeds
+      value, otherwise threshold+value with u32 wrapping (not subtraction).
+      Callers forward the result to the singleton object's vtable +0x24;
+      the controller's higher-level identity remains unresolved. Word indices
+      preserve target offsets on hosts; no new dependency seams or behavioral
+      deviations. Host tests cover unsigned thresholds, equality, wrapping
+      sums, zero scale, scales above 255 and low-product overflow. All 14034
+      host tests and the ARM release build pass. Native executable smoke
+      using the cfg(test) crate and real divider observed results 254, 0,
+      14, 4294967294 and 16843008. A non-test native release smoke build was
+      blocked by six unrelated missing functions in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; no unrelated fixes.
+      match.py structural diff: 15 retail versus 14 Rust instructions;
+      LLVM adds a frame pointer, substitutes movhi-zero for addls, and
+      tail-branches to __rt_udiv (verified R_ARM_JUMP24 relocation) instead
+      of BL followed by register shuffling and return. No device execution.
