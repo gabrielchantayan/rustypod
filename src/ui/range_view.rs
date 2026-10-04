@@ -105,6 +105,82 @@ pub unsafe extern "C" fn range_view_construct(
     view
 }
 
+/// Specification for the configured range-view layer. The ten-word tail
+/// occupies +0x68..+0x8f; the constructor deliberately ignores word +0x88.
+#[repr(C)]
+pub struct ConfiguredRangeViewSpec {
+    pub range: RangeViewSpec,
+    pub configuration: [u32; 10],
+}
+
+#[repr(C)]
+pub struct RangeConfigurationSlot {
+    pub configuration: u32,
+    pub state: u32,
+}
+
+/// Eight configuration/state pairs and one final configuration word.
+#[repr(C)]
+pub struct ConfiguredRangeView {
+    pub range: RangeView,
+    pub state: u32,
+    pub slots: [RangeConfigurationSlot; 8],
+    pub final_configuration: u32,
+}
+
+const _: [u8; 0x90] = [0; core::mem::size_of::<ConfiguredRangeViewSpec>()];
+const _: [u8; 0xfc] = [0; core::mem::size_of::<ConfiguredRangeView>()];
+const _: [u8; 0xb8] = [0; core::mem::offset_of!(ConfiguredRangeView, slots)];
+
+/// configured_range_view_construct — original: FUN_0820fa58 @ 0x0820fa58.
+/// True extent 144 bytes: 140 code bytes through the pop at 0x0820fae0,
+/// then vtable literal 0x08992750 at 0x0820fae4. The next real function
+/// starts at 0x0820fae8. Raw word decoding finds two incoming plain BLs
+/// (0x081e0114, 0x0821355c), zero predicated BLs, and one outgoing plain
+/// BL to range_view_construct at 0x0820fa64.
+///
+/// Forward all five arguments to the range base, replace its vtable, clear
+/// +0xb4, and copy spec +0x6c/+0x68/+0x70..+0x84 to the eight alternating
+/// configuration words at +0xb8..+0xf0. Copy +0x8c to +0xf8, then clear
+/// each paired state word. Spec +0x88 is unused; no range clamping occurs.
+///
+/// Deliberate deviations: restore the arguments and pointer return lost by
+/// Ghidra. Keep the original view pointer across the base call, whose return
+/// is verified identical. Store the vtable as a target u32, without host
+/// dispatch. Unknown configuration meanings remain positional, not guessed.
+///
+/// # Safety
+/// Both pointers must reference aligned, valid objects of their stated types;
+/// VIEW_BASE_OPS must accept the forwarded base-construction arguments.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn configured_range_view_construct(
+    view: *mut ConfiguredRangeView,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ConfiguredRangeViewSpec,
+) -> *mut ConfiguredRangeView {
+    range_view_construct(
+        core::ptr::addr_of_mut!((*view).range), resources, controller, parent,
+        core::ptr::addr_of!((*spec).range),
+    );
+    core::ptr::addr_of_mut!((*view).range.base.vtable).write_volatile(0x0899_2750);
+    core::ptr::addr_of_mut!((*view).state).write_volatile(0);
+    for (slot, source) in [1usize, 0, 2, 3, 4, 5, 6, 7].into_iter().enumerate() {
+        core::ptr::addr_of_mut!((*view).slots[slot].configuration)
+            .write_volatile((*spec).configuration[source]);
+    }
+    // The first paired clear precedes the last configuration store in stock.
+    core::ptr::addr_of_mut!((*view).slots[0].state).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).final_configuration)
+        .write_volatile((*spec).configuration[9]);
+    for slot in 1..8 {
+        core::ptr::addr_of_mut!((*view).slots[slot].state).write_volatile(0);
+    }
+    view
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -215,6 +291,41 @@ mod tests {
                 INITIALIZE_ARGS,
                 (this as usize, ptr::addr_of_mut!(controller) as usize, ptr::addr_of!(range_spec.base) as usize)
             );
+        }
+    }
+
+    #[test]
+    fn configured_tail_swaps_first_words_skips_reserved_and_clears_dirty_state() {
+        let _lock = OPS_LOCK.lock();
+        let _ops = unsafe { OpsGuard::install() };
+        for configuration in [
+            [0, u32::MAX, 2, 3, 4, 5, 6, 7, 0x8888_8888, 9],
+            [u32::MAX, 0, 0x8000_0000, 0, u32::MAX, 5, 6, 7, 0, u32::MAX],
+        ] {
+            let specification = ConfiguredRangeViewSpec {
+                range: spec(0, u32::MAX, 9, 3),
+                configuration,
+            };
+            // All fields are integers/byte arrays, so poison is a valid value.
+            let mut storage = core::mem::MaybeUninit::<ConfiguredRangeView>::uninit();
+            unsafe {
+                ptr::write_bytes(storage.as_mut_ptr().cast::<u8>(), 0xa5, 0xfc);
+                let view = storage.as_mut_ptr();
+                let returned = configured_range_view_construct(
+                    view, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), &specification,
+                );
+                assert_eq!(returned, view);
+                assert_eq!((*view).range.base.vtable, 0x0899_2750);
+                assert_eq!((*view).range.current_value, u32::MAX);
+                assert_eq!(((*view).range.minimum, (*view).range.maximum), (9, 3));
+                assert_eq!((*view).state, 0);
+                let words = core::slice::from_raw_parts(view.cast::<u32>().add(0xb4 / 4), 18);
+                assert_eq!(words, &[
+                    0, configuration[1], 0, configuration[0], 0, configuration[2], 0,
+                    configuration[3], 0, configuration[4], 0, configuration[5], 0,
+                    configuration[6], 0, configuration[7], 0, configuration[9],
+                ]);
+            }
         }
     }
 
