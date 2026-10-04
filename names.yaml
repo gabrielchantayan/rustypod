@@ -209064,3 +209064,33 @@ functions:
       retains both virtual offsets and loop, and eliminates the late NULL
       comparison after the unconditional object dereference. No new seam
       identity or additional function port is introduced.
+
+  - address: 0x0822039c
+    ghidra: FUN_0822039c
+    name: context_handle_request
+    size: 80
+    sig: "u32 context_handle_request(u8 *context, u8 *output, u32 position, u8 *changed, u32 selector)"
+    module: app/context_handle_request
+    status: ported
+    vars: {param_1: context, param_2: output, param_3: position, param_4: changed, param_5: selector}
+    notes: >-
+      Raw ARM establishes the 80-byte extent 0x0822039c..0x082203ec,
+      ending in pop at 0x082203e8 before the next push prologue.
+      Two plain outbound BLs at 0x082203c8 and 0x082203e0, zero
+      predicated BLs; two plain inbound callers at 0x08142524 and
+      0x0817a544, zero predicated callers. Replaces all-ones selector
+      with the word at context+0x89c. Flag bit zero at +0x8a4 replaces
+      position with mode_selected_position. Calls the existing
+      context_handle_process with changed as its fifth argument,
+      discards its status, and returns one. Position and selector
+      are ignored by that verified callee; no new seam is introduced.
+      No behavioral deviations. LLVM may remove ignored argument
+      preparation. Host tests exercise flag and selector boundaries,
+      cached sentinel values, processor output effects despite failure,
+      unchanged context, and an optional NULL changed output.
+      Host suite passes 13841 tests; ARM release build passes.
+      Standalone executable smoke covers eight flag/sentinel cases with
+      the real unready-context path, returning one and leaving output
+      intact. match.py reports 22 Rust instructions versus 20 original:
+      both BLs, sentinel load, flag-gated getter, stack changed argument,
+      and constant-one return remain; frame/register allocation differs.

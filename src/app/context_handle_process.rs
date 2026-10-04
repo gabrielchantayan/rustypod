@@ -118,4 +118,49 @@ mod tests {
             assert_eq!(PROCESS_ARGS.3, core::ptr::addr_of_mut!(changed));
         }
     }
+
+    unsafe extern "C" fn write_result(_context: *mut u8, handle: *mut *mut RefcountedBody, output: *mut u8, changed: *mut u8) -> u32 {
+        assert!(handle.read().is_null());
+        output.cast::<u32>().write(0x8123_4567);
+        if !changed.is_null() {
+            changed.write(1);
+        }
+        0xffff_fffe
+    }
+
+    #[test]
+    fn request_preserves_output_effects_and_discards_processor_failure() {
+        use crate::app::context_handle_request::context_handle_request;
+
+        let _lock = LOCK.lock();
+        let _seams = unsafe { install() };
+        unsafe { core::ptr::addr_of_mut!(CONTEXT_HANDLE_PROCESS).write_volatile(write_result) };
+        let mut context = [0u32; 0x8a8 / 4];
+        let state = context.as_mut_ptr().cast::<u8>();
+        for flags in [0, 1, 0xfe, 0xff] {
+            for selector in [0, 0x8000_0000, u32::MAX] {
+                for cached in [0, u32::MAX] {
+                    context[0x89c / 4] = cached;
+                    context[0x2ec / 4] = 0x8000_0000;
+                    context[0x5e4 / 4] = u32::MAX;
+                    unsafe { state.add(0x8a4).write(flags) };
+                    let before = context;
+                    let mut output = 0u32;
+                    let mut changed = 0u8;
+                    let result = unsafe {
+                        context_handle_request(state, core::ptr::addr_of_mut!(output).cast(), 0, &mut changed, selector)
+                    };
+                    assert_eq!(result, 1);
+                    assert_eq!(output, 0x8123_4567);
+                    assert_eq!(changed, 1);
+                    assert_eq!(context, before);
+                }
+            }
+        }
+        let mut output = 0u32;
+        assert_eq!(unsafe {
+            context_handle_request(state, core::ptr::addr_of_mut!(output).cast(), u32::MAX, core::ptr::null_mut(), u32::MAX)
+        }, 1);
+        assert_eq!(output, 0x8123_4567);
+    }
 }
