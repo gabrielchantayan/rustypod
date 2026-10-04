@@ -47721,6 +47721,49 @@ functions:
       occur. The record class and trailer field identity remain unidentified,
       so the port names only this verified read role. No deliberate deviations.
 
+  - address: 0x081eb044
+    ghidra: FUN_081eb044
+    name: indexed_task_bitmap_resolve
+    size: 56
+    sig: "void *indexed_task_bitmap_resolve(const void *receiver, u32 index)"
+    module: app/indexed_task_bitmap_resolve
+    status: ported
+    vars:
+      param_1/r0: ignored_receiver
+      param_2/r1: index
+      r4: index
+      DAT_081eb074: fallback_string_object (0x089ca8a0)
+      DAT_081eb078: indexed_resource_records (0x089cc500)
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827238c: resource_chain_find_bitmap
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw ARM proves 48 code bytes plus 8 literal bytes, extent
+      0x081eb044..0x081eb07c; the next real function starts with cmp r1,
+      #0x8900. Whole-image word decoding finds two inbound plain BLs at
+      0x081ebbc8 and 0x081ed35c, zero predicated BLs. Body has one plain
+      BL to task_ctx_field_0x30, zero predicated BLs, an unsigned BCS tail
+      branch to string_object_c_str for index >= 23, and a B tail branch
+      to resource_chain_find_bitmap otherwise. Receiver is ignored. Valid
+      indices select the second aligned u32 of an eight-byte runtime
+      record, then resolve its BMap id through the current task. Missing
+      resources return NULL. Out-of-range indices return the fixed string
+      object's payload pointer, or its shared empty C string for NULL
+      payload; this unusual fallback is preserved without reinterpreting it
+      as a bitmap. Runtime table IDs and fallback identity remain unknown.
+      No new callee seam. Host tests substitute valid runtime data and
+      cover first/last records, second-word stride, missing/NULL provider,
+      unsigned bounds, and fallback payload/NULL payload without task access.
+      Deliberate deviations inherit the existing callees' native host
+      pointer layout and shared-empty-string modeling.
+      Host suite passes (14094 tests); ARM release build succeeds. A standalone
+      host executable exercised fallback payload/empty payload, unsigned bounds
+      and NULL chain with substituted runtime data. match.py exits 1 with a
+      structural diff: unsigned <=22 replaces <23; existing context getter
+      inlines through its dispatch slot; table base becomes 0x089cc504 with
+      index shifted by three; both callee tail branches remain. LLVM adds
+      the standard frame. Literal relocations appear as zero in the archive.
+
   - address: 0x081eb090
     ghidra: FUN_081eb090
     name: indexed_task_string_resolve
