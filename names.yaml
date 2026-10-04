@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820be04
+    ghidra: FUN_0820be04
+    name: observable_array_pair_owner_construct
+    size: 60
+    sig: "ObservableArrayPairOwner *observable_array_pair_owner_construct(ObservableArrayPairOwner *owner)"
+    module: cxx/observable_array_pair_owner_construct
+    status: ported
+    vars:
+      param_1: owner
+      iVar1: constructed_pair
+      iVar2: returned_owner
+      DAT_0820be38: OBSERVABLE_ARRAY_PAIR_OWNER_VTABLE
+      DAT_0820be3c: OBSERVABLE_ARRAY_PAIR_OWNER_TRAILING_VTABLE
+      FUN_081d5f14: observable_array_pair_construct
+      FUN_0820bdec: clear_four_owner_state_words
+    notes: >-
+      Raw ARM establishes 52 instruction bytes plus two literal words,
+      ending at the real next function boundary 0x0820be40: true size 60.
+      Full-image A32 decoding finds two inbound plain BLs at 0x0820bd5c
+      and 0x0820bdd4, zero predicated BLs; the body has two outbound plain
+      BLs and no predicated BLs. Both callers first allocate 0x48 bytes.
+      Writes vtable 0x0899227c at +0, constructs the already-ported
+      observable-array pair at +0x18, recovers the owner by subtracting
+      0x18 from that return, writes trailing vtable 0x089a6044 at +0x40,
+      clears +0x44, and clears +8/+12/+20/+16 in that order. Word +4
+      remains untouched. The application role and cleared state identities
+      remain unresolved. Deliberate deviation: inline the verified
+      four-store leaf at 0x0820bdec, which preserves the r2 return base.
+      Target-width repr(C) fields preserve the 72-byte layout on hosts.
+      Host suite: 13907 passed, zero failed. ARM release build passed.
+      Unicorn executed the raw firmware and linked ARM Rust, including
+      their actual constructor callees: identical return and all 80 guarded
+      fixture bytes for three dirty-state patterns. match.py exits 1:
+      LLVM retains the input in r4, folds the known pair-return identity,
+      adds a frame, and inlines the four-store leaf; store values, offsets
+      and order match. The single remaining BL targets the ported pair.
   - address: 0x08210234
     ghidra: FUN_08210234
     name: collection_payloads_construct
