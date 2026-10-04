@@ -211915,3 +211915,44 @@ functions:
       constructor prerequisite. Host tests pass; ARM build passes. match.py
       exit 1 preserves slot offsets, truncation and conditional notification;
       LLVM uses explicit branches rather than predication and a larger frame.
+
+  - address: 0x081f77fc
+    ghidra: FUN_081f77fc
+    name: volume_controller_adjust_position
+    size: 168
+    sig: "u32 volume_controller_adjust_position(PositionController *controller, i32 wheel_delta)"
+    module: app/volume_controller_adjust_position
+    status: ported
+    renames:
+      param_1: controller
+      param_2: wheel_delta
+      iVar1: doubled_delta
+      uVar3: current_position
+      iVar4: selected_position
+      FUN_08160148: lazy_singleton_0x8c
+      FUN_081f9770: unresolved_controller_adjustment_helper
+      "controller+0x84": cached_position_interface
+      "vtable+0x54": set_position
+      "vtable+0x5c": query_position
+      "vtable+0x64": query_limit
+    notes: >-
+      Raw words establish 168 bytes ending at the next prologue 0x081f78a4.
+      Whole-image A32 decoding finds two inbound plain BLs at 0x0810cadc and
+      0x08216ff4, zero predicated BLs. Body has three plain BLs, zero
+      predicated BLs, two virtual BLXs and a virtual BX tail. Double the
+      wheel delta modulo 2^32; lazily cache the 0x8c singleton; query slot
+      0x5c; clamp backwards to zero or forwards to slot 0x64's limit.
+      Unsigned wrapping limit-minus-delta comparison is preserved, including
+      underflow. Interior adjustments notify the unresolved helper 0x081f9770
+      with the doubled magnitude; final slot 0x54 receives position and 1,
+      preserving its r0 result. Virtual identities are observational only.
+      Target calls the existing singleton port and original helper address;
+      inherits the singleton's unported-constructor hook-readiness limitation.
+      Host typed pointers widen repr(C) layouts; target offsets are asserted.
+      Edge tests cover exact bounds, zero, subtraction underflow, signed
+      doubling overflow and cache reuse. Parallel full-suite run SIGSEGVed
+      during element_registry tests; serial full suite passed 13963 tests.
+      ARM release build and standalone behavior smoke passed. match.py exit
+      1: both bodies have 42 decoded entries, same cache/slot/bounds/tail
+      structure; LLVM merges helper paths, uses BLX to the literal helper
+      address, reverses branch layout and adds a frame pointer.
