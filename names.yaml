@@ -49877,11 +49877,11 @@ functions:
       before any state update. A NULL display becomes display_get(1); selector
       and value -1 retain the respective byte at 0x089cc8a0 or four-byte
       block 0x089cc8b8, while nonnegative inputs update it. It tail-calls
-      unported 0x081d8d0c with the retained selector and block. That target's
-      raw body writes selector to display+0x56, masks the four bytes into
-      +0x57..+0x5a, then raises display+0x24. 0x081d8d0c is absent from the
-      ledger, so target code uses a verified-address volatile seam and host
-      tests use a recorder; its broader identity is deliberately not inferred.
+      display_set_pending_nibbles with the retained selector and block. Its
+      Rust body writes selector to display+0x56, masks the four bytes into
+      +0x57..+0x5a, then raises display+0x24. The volatile seam defaults to
+      the Rust port on both target and host; tests may install a recorder.
+      Its broader identity is deliberately not inferred.
       The runtime RW globals are modeled as crate statics rather than their
       fixed RAM addresses. Host tests cover sentinel retention, boundary
       rejection without a call, and NULL secondary-display fallback.
@@ -214643,3 +214643,37 @@ functions:
       bounds, synthesizes event constants and uses BLX for the stock setter;
       unchanged early return, +0x34 store, +0x378 reload and both virtual
       notifications remain, including the terminal BX.
+
+  - address: 0x081d8d0c
+    ghidra: FUN_081d8d0c
+    name: display_set_pending_nibbles
+    size: 72
+    sig: "void display_set_pending_nibbles(Display *display, u8 selector, const u8 *nibbles)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: selector
+      param_3/r2: nibbles
+    notes: >-
+      Raw osos.dec confirms 72 instruction bytes through bx lr at
+      0x081d8d50; next real function starts with push at 0x081d8d54.
+      Independent aligned A32 scan finds two plain inbound BLs at
+      0x08205854 and 0x0820598c, zero predicated BLs, and one plain tail B
+      at 0x0828d768. Body has zero outbound BLs. Ghidra's additional caller
+      at 0x08147c50 is not supported by raw call decoding. Stores selector
+      at +0x56, optionally reads four bytes in sequence and masks each to
+      its low nibble at +0x57..+0x5a, then sets +0x24 to one. NULL input
+      retains existing nibbles; selector is not masked or validated.
+      Volatile byte accesses preserve store/read order for overlapping input.
+      Uses the existing repr(C) Display reserved field so host pointer width
+      does not change field addressing. No deliberate behavioral deviations.
+      Existing UI seam now defaults to this Rust port, removing the raw
+      firmware-address wrapper and empty host fallback. Host tests cover all
+      byte values, NULL retention, adjacent state, and propagating overlap.
+      ARM release build passes. match.py exits 1: 18 stock versus 20 Rust
+      instructions, differing only in frame-pointer prologue/epilogue and
+      relocated branch destination. ARM emulator smoke compares all 4096
+      fixture bytes and returned r0 in 1792 stock/Rust cases across every
+      selector byte, NULL, disjoint input, dirty-byte alias, and overlap;
+      all agree.

@@ -23,9 +23,9 @@
 //! # Deliberate deviations
 //!
 //! The global bytes at `0x089cc8a0` / `0x089cc8b8` are runtime RW state, so
-//! this port models them with crate statics. `FUN_081d8d0c` is absent from
-//! `names.yaml`; target builds call its verified address through a volatile
-//! seam, while host tests install a recorder. No broader identity is inferred
+//! this port models them with crate statics. The display update calls the
+//! Rust `display_set_pending_nibbles` port through the existing overridable
+//! seam; host tests may install a recorder. No broader identity is inferred
 //! for those five retained bytes.
 
 use core::ptr;
@@ -33,9 +33,9 @@ use core::ptr;
 #[cfg(test)]
 extern crate std;
 
-use crate::drivers::display::{display_get, Display, SECONDARY_DISPLAY_ID};
+use crate::drivers::display::{display_get, display_set_pending_nibbles, Display, SECONDARY_DISPLAY_ID};
 
-/// ABI of the unported `FUN_081d8d0c`, which commits one selector and four
+/// ABI of `display_set_pending_nibbles`, which commits one selector and four
 /// masked nibbles into a display's pending state.
 pub type DisplaySetPendingNibbles = unsafe extern "C" fn(*mut Display, u8, *const u8);
 
@@ -57,30 +57,9 @@ static mut DISPLAY_PENDING_STATE: DisplayPendingState = DisplayPendingState {
 /// corresponding byte.
 static mut DISPLAY_PENDING_NIBBLES: [u8; 4] = [0; 4];
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_display_set_pending_nibbles(
-    display: *mut Display,
-    selector: u8,
-    nibbles: *const u8,
-) {
-    let set: DisplaySetPendingNibbles = core::mem::transmute(0x081d_8d0cusize);
-    set(display, selector, nibbles);
-}
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_display_set_pending_nibbles(
-    _display: *mut Display,
-    _selector: u8,
-    _nibbles: *const u8,
-) {
-}
-
-/// The retained `FUN_081d8d0c` boundary. Volatile loading prevents LLVM from
-/// replacing the device call with a known builtin or folding away host seams.
-#[cfg(target_os = "none")]
-pub(crate) static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = firmware_display_set_pending_nibbles;
-#[cfg(not(target_os = "none"))]
-pub(crate) static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = missing_display_set_pending_nibbles;
+/// Overridable display update boundary, defaulting to the real Rust port.
+pub(crate) static mut DISPLAY_SET_PENDING_NIBBLES: DisplaySetPendingNibbles = display_set_pending_nibbles;
 
 #[cfg(test)]
 pub(crate) static DISPLAY_PENDING_NIBBLES_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -440,7 +419,7 @@ mod tests {
     }
 
     fn restore_recorder(guard: MutexGuard<'static, ()>) {
-        unsafe { DISPLAY_SET_PENDING_NIBBLES = missing_display_set_pending_nibbles };
+        unsafe { DISPLAY_SET_PENDING_NIBBLES = display_set_pending_nibbles };
         drop(guard);
     }
 
