@@ -945,3 +945,4 @@ pub mod path_traversal_construct;
 pub mod flagged_work_record_construct;
 pub mod class_8900_playback_preference_byte;
 pub mod class_8900_playback_duration_seconds;
+pub mod class_8900_playback_preference_3_is_one;
