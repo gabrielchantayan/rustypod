@@ -465,6 +465,7 @@ pub mod iap_packet_notification_broadcast;
 pub mod iap_packet_event_schedule;
 pub mod itunesdb_read_default_field;
 pub mod image_format;
+pub mod image_region_render_request;
 pub mod gl_pixel_format_to_layout_kind;
 pub mod layout_kind_to_gl_pixel_type;
 pub mod pixel_write_red_alpha;
