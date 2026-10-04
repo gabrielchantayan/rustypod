@@ -1095,6 +1095,128 @@ pub unsafe extern "C" fn display_set_pending_nibbles(
     core::ptr::addr_of_mut!((*display).pending_command_dirty).write_volatile(1);
 }
 
+/// display_set_transition_mode — `FUN_081d8ae8` @ `0x081d8ae8`.
+/// True extent: 16 bytes, ending before the push at 0x081d8af8.
+/// Raw A32 decoding finds two plain inbound BLs (0x08259a10, 0x0828d7c8),
+/// zero predicated BLs and zero outbound BLs; the final B enters 0x081d8d54.
+///
+/// Stores the low mode byte at +0x99 before testing the display id. Internal
+/// displays return 6. The shared tail compares the stored byte against the
+/// full mode word; only values above 255 can differ. On difference it
+/// rewrites +0x99..+0x9b and, if layers are active, calls retail 0x0816a580
+/// with the driver, full mode, and retained bytes +0x9a/+0x9b. A nonzero
+/// panel result maps to 7; all other secondary-display paths return 0.
+///
+/// Deliberate deviation: inline the shared tail (100 bytes at
+/// 0x081d8d54..0x081d8db8), not Ghidra's noncontiguous 116-byte body.
+/// Native-width repr(C) fields preserve the layout on host tests.
+///
+/// # Safety
+/// `display` must be live and writable; the active high-word path requires
+/// a live retail panel driver. There is no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn display_set_transition_mode(display: *mut Display, mode: u32) -> u32 {
+    display_set_transition_mode_with(display, mode, retail_panel_transition)
+}
+
+unsafe fn display_set_transition_mode_with(
+    display: *mut Display,
+    mode: u32,
+    panel_transition: unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32,
+) -> u32 {
+    let state = core::ptr::addr_of_mut!((*display).reserved_99_9d).cast::<u8>();
+    state.write_volatile(mode as u8);
+    let third = state.add(2).read_volatile();
+    let second = state.add(1).read_volatile();
+    if core::ptr::addr_of!((*display).display_id).read_volatile() == 0 {
+        return 6;
+    }
+    if state.read_volatile() as u32 != mode
+        || state.add(1).read_volatile() != second
+        || state.add(2).read_volatile() != third
+    {
+        state.write_volatile(mode as u8);
+        state.add(1).write_volatile(second);
+        state.add(2).write_volatile(third);
+        if core::ptr::addr_of!((*display).layers_active).read_volatile() != 0
+            && panel_transition(
+                core::ptr::addr_of!((*display).driver).read_volatile(),
+                mode, second as u32, third as u32,
+            ) != 0
+        {
+            return 7;
+        }
+    }
+    0
+}
+
+/// Verified four-register ABI; the broader panel routine remains unnamed.
+unsafe extern "C" fn retail_panel_transition(
+    driver: *mut u8, mode: u32, second: u32, third: u32,
+) -> u32 {
+    #[cfg(target_os = "none")]
+    {
+        let call: unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32 =
+            core::mem::transmute(0x0816_a580usize);
+        call(driver, mode, second, third)
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        let _ = (driver, mode, second, third);
+        panic!("display transition requires a retail panel-call fixture")
+    }
+}
+
+#[cfg(test)]
+mod transition_mode_tests {
+    use super::*;
+
+    unsafe extern "C" fn must_not_call(_: *mut u8, _: u32, _: u32, _: u32) -> u32 {
+        panic!("unchanged or inactive mode must not call panel")
+    }
+
+    unsafe extern "C" fn panel_result(driver: *mut u8, mode: u32, second: u32, third: u32) -> u32 {
+        assert_eq!((mode, second, third), (0x1234, 0x56, 2));
+        driver.read() as u32
+    }
+
+    #[test]
+    fn byte_modes_store_before_internal_rejection_and_never_apply() {
+        for id in [0, 1, 255] {
+            for mode in 0..=255 {
+                let mut display: Display = unsafe { core::mem::zeroed() };
+                display.display_id = id;
+                display.layers_active = 1;
+                display.reserved_99_9d = [0xa5, 0x56, 2, 0xab, 0xcd];
+                let result = unsafe { display_set_transition_mode_with(&mut display, mode, must_not_call) };
+                assert_eq!(result, if id == 0 { 6 } else { 0 });
+                assert_eq!(display.reserved_99_9d, [mode as u8, 0x56, 2, 0xab, 0xcd]);
+            }
+        }
+    }
+
+    #[test]
+    fn high_word_requires_secondary_active_display_and_maps_panel_errors() {
+        for id in [0, 1] {
+            for active in [0, 1, 255] {
+                for error in [0u8, 1, 255] {
+                    let mut display: Display = unsafe { core::mem::zeroed() };
+                    display.display_id = id;
+                    display.layers_active = active;
+                    let mut panel_status = error;
+                    display.driver = &mut panel_status;
+                    display.reserved_99_9d = [0, 0x56, 2, 0xab, 0xcd];
+                    let call = if id != 0 && active != 0 { panel_result } else { must_not_call };
+                    let result = unsafe { display_set_transition_mode_with(&mut display, 0x1234, call) };
+                    assert_eq!(result, if id == 0 { 6 } else if active != 0 && error != 0 { 7 } else { 0 });
+                    assert_eq!(display.reserved_99_9d, [0x34, 0x56, 2, 0xab, 0xcd]);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod pending_nibble_tests {
     use super::*;
