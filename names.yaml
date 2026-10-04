@@ -208844,3 +208844,36 @@ functions:
       firmware seam through a literal BLX. Virtual slot offsets, field
       reloads, selectors, conditional paths and return value are retained.
       No firmware-device execution.
+
+  - address: 0x08215c44
+    ghidra: FUN_08215c44
+    name: condvar_backed_object_construct
+    size: 24
+    sig: "u32 *condvar_backed_object_construct(u32 *storage)"
+    module: app/condvar_backed_object_construct
+    status: ported
+    renames:
+      r0: storage / returned object
+      r1: derived vtable
+      FUN_0813eb40: opaque base constructor (identity unrecovered)
+    notes: >-
+      Raw firmware establishes five instructions at 0x08215c44..0x08215c54
+      and vtable literal 0x08993268 at 0x08215c58. The next real function
+      starts at 0x08215c5c (cmp r1,0; bne 0x081342d8; bx lr), making the
+      true extent 24 bytes rather than Ghidra's 20 instruction bytes.
+      Whole-image raw A32 decoding finds two incoming plain BLs at
+      0x081d951c and 0x081f5068, zero predicated BLs; the body contains
+      one plain BL to 0x0813eb40 and no predicated BLs. Calls that base,
+      installs the derived vtable on its returned pointer, and returns it.
+      Both callers subsequently install their own derived vtables. Raw base
+      code stores vtable 0x08985108, clears word +4 and byte +8, initializes
+      the embedded condition variable at +12 via ported condvar_init
+      0x0807f680, and returns storage. Full names.yaml and Rust lookup found
+      no existing entry or port for the base; class identity is unrecovered.
+      Target calls its verified retailOS address directly, not an invented
+      implementation; hosts expose an explicit ABI seam with a failing
+      default. Host tests verify returned-base selection, initialized fields,
+      untouched storage and padding. Standalone constructor smoke passes.
+      ARM release build passes. match.py exits 1 with expected frame-pointer
+      prologue and literal BLX instead of direct BL; returned-r0 vtable store,
+      return, base address and vtable value are retained. No device execution.
