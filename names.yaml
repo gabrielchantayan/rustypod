@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0821554c
+    ghidra: FUN_0821554c
+    name: deque_prepend_dispatch
+    size: 124
+    sig: "u32 deque_prepend_dispatch(void *deque, FrontObject *candidate, u32 argument, u32 check_front)"
+    module: cxx/deque_prepend_dispatch
+    status: ported
+    renames:
+      param_1/r6: deque
+      param_2/r5: candidate
+      param_3/r7: argument
+      param_4/r4: check_front
+      iVar2/r4: result
+      piVar1: front_object
+    notes: >-
+      Raw A32 extent 0x0821554c..0x082155c7 ends before the independent push
+      at 0x082155c8. Two inbound plain BLs at 0x0818b9b4 and 0x0818bc20,
+      no predicated inbound BLs. Body has plain BLs at 0x08215560 and
+      0x0821559c, BLNE at 0x082155bc, and two BLX r2 calls.
+      Always look up the front, then reject NULL candidate with 9. A nonzero
+      check_front and non-NULL front invoke virtual slot 2; nonzero status
+      vetoes insertion. Prepend candidate, dispatch its slot 5 with argument,
+      remove front on any nonzero result, and return all status bits.
+      Verified stock seams are front-object lookup 0x082156b8, prepend
+      0x08215618 (decrement cursor by four, store candidate, increment count,
+      allocate through 0x083df300 when needed), and remove 0x082156f0.
+      Existing named Rust lookup/removal ports return the cursor instead of
+      the dereferenced object, so retain stock bindings without changing them.
+      Host seams model queue transitions with native-pointer vtables.
+      Host suite passes 13843 tests, including a 144-case transition matrix;
+      standalone exported-function smoke confirms full-width error rollback.
+      ARM release build succeeds. match.py reports 31 original versus 42
+      emitted instructions: typed stock bindings become BLX with literal
+      0x08215618 plus offsets 0xa0 and 0xd8 for lookup and removal. Virtual
+      offsets +8 and +20, NULL error 9, veto, and nonzero rollback agree.
   - address: 0x082202ec
     ghidra: FUN_082202ec
     name: indexed_mode_position_adjust
