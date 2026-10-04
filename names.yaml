@@ -214005,3 +214005,40 @@ functions:
       exit-one structural diff: 17 original instructions versus 20 Rust lines,
       including literal 0x080d9b74; same four call boundaries and field offsets,
       with LLVM frame pointer and fixed-address BLX. No device execution.
+
+  - address: 0x081dc578
+    ghidra: FUN_081dc578
+    name: position_cache_set
+    size: 104
+    sig: "void position_cache_set(u8 *cache, u32 key, u32 value)"
+    module: util/position_cache_set
+    status: ported
+    vars: {param_1/r0: cache, param_2/r1: key, param_3/r2: value}
+    renames:
+      FUN_08297638: half_open_word_range_contains
+      thunk_EXT_FUN_220002d4: memzero
+      FUN_081f7278: range_state_construct
+    notes: >-
+      Raw A32 words establish 100 instruction bytes through the return at
+      0x081dc5d8, followed by the 366-byte length literal at 0x081dc5dc.
+      The next independent function opens with push at 0x081dc5e0, making
+      the true extent 104 bytes. Whole-image raw BL decoding finds one
+      plain inbound call at 0x08299d08 and one BLNE at 0x0812733c; outbound
+      calls at 0x081dc58c, 0x081dc5a0 and 0x081dc5b0 are all plain BL.
+      On a half-open range miss, clear exactly 366 bytes at cache +13,
+      construct a resolution-one range state and copy words 7/8 as bounds.
+      Store value's low byte at cache +13 + wrapping(key - start).
+      Reuse existing range and memzero ports; the memzero veneer targets
+      0x220002d4, the IRAM mirror of 0x080002d4, not mask ROM. Migrate
+      selected_entries_position_status's target setter to the Rust port.
+      Host tests exercise start/interior/last-slot hits, high unsigned keys,
+      byte truncation, zero-key misses, precise clearing and preserved
+      header/guard bytes. Nonzero miss configuration remains the existing
+      range constructor's verified resident seam; it is not host-executed.
+      Standalone actual-source smoke proves last-slot hit and zero-key
+      miss behavior with intact guards. No device execution.
+      Full x86_64 host suite and ARM build-std release build passed.
+      match.py exit-one structural diff shows the same hit/miss gate,
+      constructor call, bounds loads and byte-store offset; LLVM expands
+      memzero into alignment/tail handling and AEABI clear calls, producing
+      62 instructions versus the original 25. No new firmware seams.

@@ -198,6 +198,7 @@ pub mod synchronized_list_append;
 pub mod linked_list_refresh_sort_ascending;
 pub mod list_find;
 pub mod half_open_word_range_contains;
+pub mod position_cache_set;
 pub mod predicate_list_find;
 pub mod pair_chain_find;
 pub mod pair_chain_find_header16;

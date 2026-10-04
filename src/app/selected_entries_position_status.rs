@@ -7,13 +7,14 @@
 //! Cache byte 1 means a hit, 2 means a miss; other values trigger an
 //! inclusive signed-index scan of the selected-or-all range. Stop on the
 //! first entry containing the position, cache 1 or 2, and return 0x36a1
-//! or zero. Deliberate deviations: reuse the existing range/item ports;
-//! unported cache and membership calls retain verified firmware addresses
-//! on target and explicit host seams. Only r0 is returned: Ghidra's u64
+//! or zero. Deliberate deviations: reuse the existing range/item/cache-set
+//! ports; unported cache-get and membership calls retain verified firmware
+//! addresses on target and explicit host seams. Only r0 is returned: Ghidra's u64
 //! return is spurious (the epilogue merely restores saved argument r1).
 
 use crate::app::opaque_collection_item_at::opaque_collection_item_at;
 use crate::util::selected_or_all_entry_range::selected_or_all_entry_range;
+use crate::util::position_cache_set::position_cache_set;
 
 type CacheGet = unsafe extern "C" fn(*mut u8, u32) -> u32;
 type CacheSet = unsafe extern "C" fn(*mut u8, u32, u32);
@@ -31,12 +32,10 @@ pub struct PositionStatusOps {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_get(_: *mut u8, _: u32) -> u32 { panic!("install position cache getter") }
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_set(_: *mut u8, _: u32, _: u32) { panic!("install position cache setter") }
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_contains(_: *mut u8, _: *mut u32) -> u32 { panic!("install entry membership query") }
 #[cfg(not(target_os = "none"))]
 pub static mut POSITION_STATUS_OPS: PositionStatusOps = PositionStatusOps {
-    cache_get: missing_get, cache_set: missing_set,
+    cache_get: missing_get, cache_set: position_cache_set,
     contains: missing_contains, item_at: opaque_collection_item_at,
 };
 
@@ -49,7 +48,7 @@ pub unsafe extern "C" fn selected_entries_position_status(owner: *mut u32, posit
     #[cfg(target_os = "none")]
     let (get, set, contains, item): (CacheGet, CacheSet, Contains, ItemAt) = (
         core::mem::transmute(0x081d_c544usize),
-        core::mem::transmute(0x081d_c578usize),
+        position_cache_set,
         core::mem::transmute(0x0828_4748usize),
         opaque_collection_item_at,
     );
@@ -141,7 +140,7 @@ mod tests {
             CACHE[6] = 0;
             assert_eq!(selected_entries_position_status(owner.as_mut_ptr(), 6), 0x36a1);
             assert_eq!(QUERIES, 11);
-            POSITION_STATUS_OPS = PositionStatusOps { cache_get: missing_get, cache_set: missing_set, contains: missing_contains, item_at: opaque_collection_item_at };
+            POSITION_STATUS_OPS = PositionStatusOps { cache_get: missing_get, cache_set: position_cache_set, contains: missing_contains, item_at: opaque_collection_item_at };
             ENTRY = [3, 5];
         }
     }
