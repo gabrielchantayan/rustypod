@@ -12,10 +12,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! `volume_controller_get` and its predicate at `0x081f78ec` are not ported:
-//! target builds call their fixed retailOS addresses and host tests install
-//! explicit operations. The established COW-string, layout-dispatch, and timer
-//! seams are retained directly.
+//! `volume_controller_get` remains a fixed-address target seam; its predicate
+//! calls the Rust extra-info poll. Host tests install explicit operations.
+//! The established COW-string, layout-dispatch, and timer seams are retained.
 
 use crate::app::controller_layout_dispatch::app_controller_dispatch_layout;
 use crate::cxx::string::{cxx_string_from_cstr, cxx_string_release};
@@ -24,7 +23,6 @@ use crate::drivers::timer::{timer_restart, timer_start_after};
 use core::ptr::addr_of;
 
 const RETAIL_VOLUME_CONTROLLER_GET: usize = 0x081f_77a4;
-const RETAIL_VOLUME_CONTROLLER_HAS_EXTRA_INFO: usize = 0x081f_78ec;
 const TIMER_POINTER_OFFSET: usize = 0xdc;
 const EXTRA_INFO_PENDING_OFFSET: usize = 0xe2;
 const EXTRA_INFO_DELAY_MS: u32 = 1000;
@@ -47,9 +45,7 @@ unsafe extern "C" fn retail_volume_controller_get() -> *mut u8 {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_volume_controller_has_extra_info(volume_controller: *mut u8) -> u32 {
-    let has_extra_info: VolumeControllerHasExtraInfo =
-        core::mem::transmute(RETAIL_VOLUME_CONTROLLER_HAS_EXTRA_INFO);
-    has_extra_info(volume_controller)
+    super::controller_extra_info_poll::controller_extra_info_poll(volume_controller.cast()) as u32
 }
 
 #[cfg(not(target_os = "none"))]

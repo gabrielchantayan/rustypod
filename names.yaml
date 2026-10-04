@@ -146886,7 +146886,7 @@ functions:
       "[controller + 0xdc]": timer
       "[controller + 0xe2]": extra_info_pending
       FUN_081f77a4: volume_controller_get (target seam, unported)
-      FUN_081f78ec: volume_controller_has_extra_info (target seam, unported)
+      FUN_081f78ec: controller_extra_info_poll (ported)
       FUN_083d8b5c: cxx_string_from_cstr
       FUN_0821754c: app_controller_dispatch_layout
       FUN_083d8b04: cxx_string_release
@@ -178944,7 +178944,7 @@ functions:
       "[controller + 0xdc]": timer
       "[controller + 0xe2]": extra_info_pending
       FUN_081f77a4: volume_controller_get (target seam, unported)
-      FUN_081f78ec: volume_controller_has_extra_info (target seam, unported)
+      FUN_081f78ec: controller_extra_info_poll (ported)
       FUN_083d8b5c: cxx_string_from_cstr
       FUN_0821754c: app_controller_dispatch_layout
       FUN_083d8b04: cxx_string_release
@@ -211884,3 +211884,34 @@ functions:
       pointer fields widen on hosts. No NULL guards or cleanup added.
       All 13958 host tests pass; ARM release build passes. Host standalone
       smoke exercises rejected modes. match.py exit 1 shows the same branch,
+
+  - address: 0x081f78ec
+    ghidra: FUN_081f78ec
+    name: controller_extra_info_poll
+    size: 128
+    sig: "u8 controller_extra_info_poll(ExtraInfoController *controller)"
+    module: app/controller_extra_info_poll
+    status: ported
+    renames:
+      param_1/r4: controller
+      param_1[7]: source
+      "controller+0xac": payload
+      "controller+0xc5": ready
+      FUN_08259594: media_player_interface_get
+      "source vtable+0xec": unresolved_source_query
+      "player vtable+0xdc": unresolved_payload_query
+      "controller vtable+0x58": unresolved_notification
+    notes: >-
+      Raw ARM proves 120 code bytes and two pool words (0x7f1b and
+      0x53747220), ending at the next prologue at 0x081f796c. One outgoing
+      plain BL, zero predicated BL, two BLX and one BLXNE. Two inbound plain
+      BLs at 0x0821e0d8 and 0x0821f280; zero predicated BLs. Returns 1 for
+      absent/inactive source; otherwise lazily queries player slot +0xdc
+      with payload +0xac and caches its low byte at +0xc5. A full nonzero
+      result notifies controller slot +0x58 with (this, 0x53747220, 0x7f1b),
+      then reloads the byte. Zero cache retries, including result 0x100.
+      repr(C) fields and native-width vtable entries widen on hosts only.
+      Reuses media_player_interface_get and inherits its not-hook-ready
+      constructor prerequisite. Host tests pass; ARM build passes. match.py
+      exit 1 preserves slot offsets, truncation and conditional notification;
+      LLVM uses explicit branches rather than predication and a larger frame.

@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod controller_extra_info_poll;
+pub use controller_extra_info_poll::*;
 pub mod position_resource_refresh;
 pub use position_resource_refresh::*;
 pub mod bounded_position_update;
