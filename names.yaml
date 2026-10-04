@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08210234
+    ghidra: FUN_08210234
+    name: collection_payloads_construct
+    size: 40
+    sig: "CollectionPayloads *collection_payloads_construct(CollectionPayloads *this)"
+    module: cxx/collection_payloads_construct
+    status: ported
+    vars:
+      puVar1: object
+      r0: this_and_base_constructor_result
+      DAT_08210258: COLLECTION_PAYLOADS_VTABLE
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw ARM verifies 36 code bytes plus the vtable literal 0x089a47e8
+      at 0x08210258, before the real destructor boundary 0x0821025c.
+      Whole-image A32 decoding finds two inbound plain BLs at 0x08119d30
+      and 0x081b1e24, zero predicated inbound BLs, one outbound plain BL
+      to the already-ported observable_array_construct, no predicated BLs.
+      Installs the derived vtable through the base constructor return,
+      writes byte +0x10 as one, clears word +0x14, and returns that pointer.
+      Callers supply 24-byte stack collections to the parser; the named
+      collection_payloads_destruct releases their item payloads. Extra flag
+      and state semantics remain unresolved. No deliberate deviations;
+      target-width layout and volatile stores preserve padding +0x11..+0x13.
+      Dirty-state and repeat-construction tests pass; host suite 13906 passed.
+      ARM release build passed. Native actual-source smoke preserves return
+      identity, padding and adjacent sentinels. match.py exits 1: LLVM adds
   - address: 0x0820c1b4
     ghidra: FUN_0820c1b4
     name: xml_writer_write_bytes
