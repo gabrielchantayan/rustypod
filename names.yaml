@@ -16,6 +16,56 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f0dcc
+    ghidra: FUN_081f0dcc
+    name: context_range_release
+    size: 172
+    sig: "void context_range_release(RangeReleaseContext *context, int32_t first, int32_t last, int32_t lower_seed)"
+    module: app/context_range_release
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: first
+      param_3/r2: last
+      param_4/r3: lower_seed
+      local_18: lower
+      local_1c: upper
+      piVar2/r6: payload
+      FUN_081fcef0: vtable_slot_10_flagged_payload
+      FUN_081fd008: indexed_flagged_record_invalidate_unported
+      FUN_083dbc44: red_black_tree_remove_node_wrapper
+    notes: >-
+      Raw A32 words establish [0x081f0dcc,0x081f0e78), 172 bytes; the
+      next body starts with mov r1,r0 and ends with bx lr at 0x081f0e8c.
+      Independent whole-image branch decoding finds zero plain inbound BLs
+      and two predicated inbound BLs at 0x081f1144 and 0x081f1214.
+      The body has plain BLs at 0x081f0e34 to 0x081fcef0 and 0x081f0e48
+      to 0x081fd008, a predicated BLEQ at 0x081f0e64 to 0x083dbc44,
+      and one indirect BLX through the associated object's vtable +0x0c.
+      Query inclusive signed bounds, initially lower_seed and last; reject
+      either -1 sentinel and intersect with first..last. For each present
+      flagged payload invalidate the indexed record, reload its node, and
+      remove from the context +0x14 tree only when node +0x40 is zero.
+      Preserve wrapping increment, including possible nontermination for
+      an INT_MAX upper bound. Reuse the existing Rust accessor. Verified
+      invalidation and deletion retain their firmware addresses; no helper
+      implementation or virtual method identity is invented. The deletion
+      wrapper copies incoming r3 to a stack output that 0x083ccd94 writes
+      without reading; r2 is overwritten, so explicit zero values are safe.
+      Host-only seams use native-width payload pointer slots; the context's
+      repr(C) prefix retains target +0x30 and embedded tree +0x14 offsets.
+      No target behavioral deviations or device execution.
+      All 14016 host tests passed; the ARM release build passed. Host tests
+      compare signed range intersections against an independent enumerated
+      reference, including reversed ranges, missing payloads, retained nodes,
+      and invalidation replacing a payload's node. A standalone executable
+      exercised the production entry and observed tree and node mutations.
+      match.py exit 1: 43 original versus 60 Rust instructions; LLVM uses
+      explicit branches instead of predication, a larger frame, and BLX
+      through the two verified address literals. R_ARM_CALL at +0xa0
+      resolves the lookup to vtable_slot_10_flagged_payload. Signed clamps,
+      the bounds BLX, post-invalidation node reload, +0x40 gate and inclusive
+      wrapping loop remain intact.
   - address: 0x081f0e90
     ghidra: FUN_081f0e90
     name: context_index_in_range
