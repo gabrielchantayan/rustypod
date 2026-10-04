@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod timer_backed_view;
 pub mod collect_eligible_descendants;
 pub mod event_forward_to_delegate;
 pub mod item_padded_size;
