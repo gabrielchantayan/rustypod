@@ -483,6 +483,7 @@ pub mod kinded_controller;
 pub mod image_format_descriptor_slot;
 pub mod image_format_descriptor_slot_count;
 pub mod image_format_descriptor_slots_initialize;
+pub mod image_format_descriptor_owner_destroy;
 pub mod photo_browse_slideshow_construct;
 pub mod photo_browse_slideshow_extended_construct;
 pub mod lock_service;

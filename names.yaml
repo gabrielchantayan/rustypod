@@ -210955,3 +210955,40 @@ functions:
       base call, derived vtable store and returned pointer are preserved.
       LLVM adds a frame pointer; archive relocation R_ARM_CALL verifies
       the BL targets vtable_tagged_payload_construct.
+
+  - address: 0x081fd0c0
+    ghidra: FUN_081fd0c0
+    name: image_format_descriptor_owner_destroy
+    size: 56
+    sig: "ImageFormatDescriptorOwner *image_format_descriptor_owner_destroy(ImageFormatDescriptorOwner *owner)"
+    module: app/image_format_descriptor_owner_destroy
+    status: ported
+    renames:
+      param_1/r0: owner
+      DAT_081fd0f4: image_format_descriptor_owner_vtable
+      FUN_0839d038: refcounted_body_release_slot1_copy
+      FUN_081d6030: empty_destructor_1d6030
+      FUN_0807f650: mutex_delete
+    notes: >-
+      Raw osos.dec establishes 0x081fd0c0..0x081fd0f8 (56 bytes): 52 bytes
+      of instructions plus the literal 0x08990e7c at 0x081fd0f4. The next
+      real function begins with push at 0x081fd0f8. Independent whole-image
+      A32 decoding finds two inbound unconditional BLs at 0x0822bb48 and
+      0x0822bb6c, zero predicated inbound BLs, and three outbound plain BLs
+      at 0x081fd0d4, 0x081fd0dc and 0x081fd0e8. Ghidra incorporates the
+      inbound sites into the larger destructors at 0x0820a61c/0x08220560.
+      Installs the owner vtable, releases its slot-1 refcounted body at
+      +0x2b0, invokes the empty descriptor-slots destructor at +0x1c,
+      subtracts 0x1c from its returned this, deletes the mutex at +4, and
+      returns the recovered owner. All callees reuse canonical ported
+      seams. The concrete class identity is unresolved; descriptor semantics
+      follow the existing image_format_descriptor_slots_initialize port.
+      repr(C) preserves target offsets with compile-time ARM assertions and
+      expands pointer fields on hosts. Tests cover NULL handles, shared
+      counts, signed wrapping decrement, enclosing pointer recovery and
+      preservation of descriptor storage, prefix and mutex unused word.
+      Full host suite passed (13925 tests), and ARM release build passed.
+      match.py structural diff reviewed: LLVM removes the identity empty
+      destructor call/recovery and adds a frame pointer; relocations prove
+      the remaining calls target refcounted_body_release_slot1_copy and
+      mutex_delete in that order. No behavioral deviations or device execution.
