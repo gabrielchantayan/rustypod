@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f047c
+    ghidra: FUN_081f047c
+    name: tree_payload_dispatch
+    size: 80
+    sig: "u32 tree_payload_dispatch(u32 *owner)"
+    module: app/tree_payload_dispatch
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      local_10: cursor
+      local_c: end_header
+      owner_plus_0x24: tree_header
+      node_plus_0x14: payload
+    notes: >-
+      Raw A32 establishes [0x081f047c,0x081f04cc), 80 bytes, with the
+      next independent push at 0x081f04cc. Whole-image decoding finds two
+      inbound plain BLs at 0x081f05d0 and 0x081f1590, zero predicated BLs.
+      Three outbound plain BLs target payload-vector virtual-slot-0x24
+      dispatch at 0x0811f150, red_black_tree_advance_cursor at 0x083b609c,
+      and equal_deref at 0x083cf968; no predicated outbound BLs.
+      Traverse from header+8, dispatch node+0x14 before advancing, reload
+      owner+0x24 for every end comparison, and return one. No erasure.
+      Reuse existing iterator/equality ports; retain verified unported
+      payload dispatch as a fixed-address seam. Links remain u32 on hosts.
+      Empty, singleton, in-order traversal, preserved links and callback
+      replacement of the end marker pass. All 14025 host tests and ARM
+      release build pass. Standalone production-source smoke returns one
+      and mutates singleton payload to 77. Reviewed match.py exit-one diff:
+      20 original versus 33 Rust instructions, larger frame, indirect BLX
+      seam, preserved payload offset, iterator call, end reload and loop.
   - address: 0x08202000
     ghidra: FUN_08202000
     name: record_selection_complete
