@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820868c
+    ghidra: FUN_0820868c
+    name: payload_cell_get
+    size: 112
+    sig: "void *payload_cell_get(const PayloadCellReceiver *receiver)"
+    module: cxx/shared_cell
+    status: ported
+    renames:
+      param_1: receiver
+      receiver_plus_0x04: backing
+      backing_plus_0x78: cell_slot
+      local_10: temporary
+      iVar2/r5: payload
+      FUN_081fc930: payload_list_owner_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 extent is 112 bytes, 0x0820868c..0x082086fc, ending with
+      pop at 0x082086f8 before the next function's push. Ghidra's 100-byte
+      extent omits the second delete and return. Whole-image branch decoding
+      verifies two inbound plain BLs at 0x0821ac6c and 0x0821ac80, zero
+      predicated inbound BLs; four outbound plain BLs at 0x08208698,
+      0x082086d4, 0x082086d8, and 0x082086ec, zero predicated outbound BLs.
+      Retain backing's +0x78 shared cell, save its payload, release the
+      temporary using the direct payload-owner destructor, return saved
+      payload. Raw 0x081f034c is an eight-byte add r1,r1,0x78 followed
+      by tail B to ported shared_cell_copy_construct at 0x083b51f4;
+      Rust uses that existing port directly, introducing no unresolved seam.
+      Release uses existing shared_cell_release_direct. Host repr(C)
+      fields widen pointers while target offsets remain +4 and +0x78.
+      Wrapping counts are preserved, including initial zero's final
+      teardown/delete and potentially dangling saved return. Tests cover
+      empty cells, ordinary and wrapping counts, NULL-payload final release,
+      and real payload-owner teardown followed by payload/cell deletes.
+      ARM release build and host suite pass. match.py with --size 112 shows
+      28 original versus 16 Rust instructions: the retain/release bodies
+      remain calls rather than duplicated inline code. Relocations verify
+      those calls target shared_cell_copy_construct and
+      shared_cell_release_direct; the saved payload survives the release.
+      Standalone host consumer smoke passes using the test-configured crate;
+      normal host library build is blocked by six unrelated missing cfg
+      helpers in prepare_entry_metadata, shared_payload_select_kind, and
+      calendar_schedule. No on-device execution claimed.
+
   - address: 0x081f9a3c
     ghidra: FUN_081f9a3c
     name: position_resource_refresh

@@ -741,6 +741,58 @@ pub unsafe extern "C" fn shared_cell_release_direct_secondary(slot: *mut *mut Sh
     slot.write(core::ptr::null_mut());
 }
 
+/// Accessed backing-object prefix; the shared-cell slot is target +0x78.
+/// Host fixtures widen pointers, not target byte offsets.
+#[repr(C)]
+pub struct PayloadCellBacking {
+    pub prefix: [u32; 30],
+    pub cell: *mut SharedCell,
+}
+
+/// Accessed receiver prefix: target +0x04 points to the backing object.
+#[repr(C)]
+pub struct PayloadCellReceiver {
+    pub vtable: usize,
+    pub backing: *mut PayloadCellBacking,
+}
+
+/// `payload_cell_get` — retailOS `FUN_0820868c` @ `0x0820868c`.
+///
+/// True extent: 112 bytes, through pop at 0x082086f8; the next function
+/// starts at 0x082086fc. Whole-image A32 decoding verifies two incoming
+/// plain BLs (0x0821ac6c, 0x0821ac80), zero predicated incoming BLs,
+/// four plain outgoing BLs, and zero predicated outgoing BLs.
+///
+/// Copy/retain the backing object's +0x78 cell into a temporary, save its
+/// payload (NULL for an empty cell), release the temporary with the direct
+/// payload-owner destructor, and return the saved payload. Refcounts wrap;
+/// an initial -1 becomes zero during retain and -1 again during release.
+/// An initial zero instead takes the final-release path, so the saved return
+/// may point to freed storage, faithfully matching firmware.
+///
+/// Deliberate deviations: raw 0x081f034c is an eight-byte add-0x78/tail-B
+/// adapter to ported 0x083b51f4; use that existing copy constructor directly,
+/// then the existing direct release port rather than duplicating its body.
+/// Host pointers widen via repr(C) semantic fields. No new callee seam.
+///
+/// # Safety
+/// Receiver and backing must be readable; their non-NULL cell must meet
+/// `shared_cell_copy_construct` and `shared_cell_release_direct` contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn payload_cell_get(receiver: *const PayloadCellReceiver) -> *mut u8 {
+    let backing = (*receiver).backing;
+    let mut temporary = core::ptr::null_mut();
+    shared_cell_copy_construct(&mut temporary, core::ptr::addr_of!((*backing).cell));
+    let payload = if temporary.is_null() {
+        core::ptr::null_mut()
+    } else {
+        (*temporary).value as *mut u8
+    };
+    shared_cell_release_direct(&mut temporary);
+    payload
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -840,6 +892,59 @@ mod tests {
     fn events() -> Vec<Event> {
         unsafe { (*core::ptr::addr_of!(EVENTS)).clone() }
     }
+    #[test]
+    fn payload_get_empty_and_wrapping_counts_preserve_backing() {
+        let _bench = bench();
+        let mut backing = PayloadCellBacking {
+            prefix: [0; 30], cell: core::ptr::null_mut(),
+        };
+        let receiver = PayloadCellReceiver { vtable: 0, backing: &mut backing };
+        assert!(unsafe { payload_cell_get(&receiver) }.is_null());
+        for count in [1, 2, -1, i32::MIN, i32::MAX] {
+            let mut cell = SharedCell { value: 0x1234_5678, refcount: count };
+            backing.cell = &mut cell;
+            assert_eq!(unsafe { payload_cell_get(&receiver) } as usize, cell.value);
+            assert_eq!(cell.refcount, count);
+            assert_eq!(backing.cell, core::ptr::addr_of_mut!(cell));
+        }
+        assert!(events().is_empty());
+    }
+
+    #[test]
+    fn payload_get_final_release_returns_saved_deleted_payload() {
+        let _bench = bench();
+        // Empty owner list avoids unresolved callbacks; payload is required
+        // but never dereferenced on this path. Mutex storage is included.
+        let mut owner = [0u32; 24];
+        owner[1] = 1;
+        let payload = owner.as_mut_ptr().cast::<u8>();
+        let mut cell = SharedCell { value: payload as usize, refcount: 0 };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        let mut backing = PayloadCellBacking { prefix: [0; 30], cell: cell_ptr };
+        let receiver = PayloadCellReceiver { vtable: 0, backing: &mut backing };
+        assert_eq!(unsafe { payload_cell_get(&receiver) }, payload);
+        assert_eq!(owner[1], 0);
+        assert_eq!(cell.refcount, 0);
+        assert_eq!(backing.cell, cell_ptr);
+        assert_eq!(events(), std::vec![
+            Event::HeapFree(payload as usize, 2),
+            Event::HeapFree(cell_ptr as usize, 2),
+        ]);
+    }
+
+    #[test]
+    fn payload_get_zero_count_frees_cell_but_preserves_backing_slot() {
+        let _bench = bench();
+        let mut cell = SharedCell { value: 0, refcount: 0 };
+        let cell_ptr = core::ptr::addr_of_mut!(cell);
+        let mut backing = PayloadCellBacking { prefix: [0; 30], cell: cell_ptr };
+        let receiver = PayloadCellReceiver { vtable: 0, backing: &mut backing };
+        assert!(unsafe { payload_cell_get(&receiver) }.is_null());
+        assert_eq!(cell.refcount, 0);
+        assert_eq!(backing.cell, cell_ptr);
+        assert_eq!(events(), std::vec![Event::HeapFree(cell_ptr as usize, 2)]);
+    }
+
 
     /// A NULL payload clears an existing slot, returns that same slot, and
     /// takes the early path before the allocator call.
