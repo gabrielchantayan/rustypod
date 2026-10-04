@@ -213888,3 +213888,45 @@ functions:
       instead of direct BL and adds a frame pointer. Standalone export smoke
       confirms provider mutation survives, marking occurs after the callback
       and adjacent flags remain intact. No device execution performed.
+  - address: 0x081eefec
+    ghidra: FUN_081eefec
+    name: slot_array_owner_read_request
+    size: 68
+    sig: "void slot_array_owner_read_request(const SlotArrayOwner *owner, OwnerWriteRequest **request_slot)"
+    module: cxx/slot_array_owner_read_request
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: request_slot
+      iVar3/r4: request
+      uVar1/r5: handle
+      request_0x20: destination (shared layout calls this source)
+      request_0x24: length
+      request_0x28: status
+      request_0x2c: transferred (shared layout calls this written)
+      request_0x34: slot_index
+      FUN_081ef308: slot_array_owner_get
+      FUN_080d9b74: destination_cache_maintenance (verified resident boundary)
+      FUN_08090780: cache_address_translate
+      FUN_082784b8: retail_file_read
+    notes: >-
+      Raw A32 words establish [0x081eefec,0x081ef030), 68 bytes, ending
+      with pop before the next independent push. Whole-image decoding finds
+      two inbound plain BLs at 0x081eeaa0 and 0x081eeadc, four outbound
+      plain BLs at 0x081eeff8, 0x081ef008, 0x081ef010 and 0x081ef024;
+      no predicated BLs in either direction. Dispatcher operations 3 and 6
+      execute this read. Resolve handle, maintain destination cache range,
+      translate destination, read bytes and store status unconditionally.
+      Reuse existing getter, translator, retail read wrapper and request layout.
+      No names entry or Rust port exists for 0x080d9b74; retain a typed
+      resident boundary, whose raw code maintains cache lines for addresses
+      in segment 0x180 or the entire cache at length >= 0x2800. Volatile
+      fields preserve reloads after maintenance and cache the original request
+      across reentrant slot replacement; no null or zero-length guards added.
+      Host tests cover invalid indices, zero length after reentrant mutation,
+      error status bit patterns and preserved partial transfers. Full host
+      suite and ARM release build passed. Standalone actual-source smoke
+      observed status -3, transferred 4, adjacent length 66. Reviewed match.py
+      exit-one structural diff: 17 original instructions versus 20 Rust lines,
+      including literal 0x080d9b74; same four call boundaries and field offsets,
+      with LLVM frame pointer and fixed-address BLX. No device execution.
