@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820c584
+    ghidra: FUN_0820c584
+    name: two_slot_mark_ready
+    size: 88
+    sig: "void two_slot_mark_ready(u32 *base, u32 lane, u32 notify)"
+    module: ui/two_slot_mark_ready
+    status: ported
+    args:
+      r0: base
+      r1: lane
+      r2: notify
+    vars:
+      r4: cursor_word
+      r5: saved_cursor
+      r6: base
+      r7: lane
+    notes: >-
+      Raw A32 verifies extent 0x0820c584..0x0820c5dc, with the next
+      independent push at 0x0820c5dc. Two outgoing unconditional BLs at
+      0x0820c5a0 and 0x0820c5a4, zero predicated BLs. Whole-image decoding
+      finds two unconditional inbound BLs at 0x08197290 and 0x081973c8,
+      zero predicated inbound BLs and no aligned entry-pointer references.
+      Both callers pass lane 0 and notify 1 after acquiring the object
+      through 0x0820c338. Save word base+lane*4+4 before notification.
+      Nonzero notify calls the verified 0x08037f88 veneer to 0x22005018
+      (existing ui_manager_instance port), then the 0x08038230 veneer to
+      0x2200530c. Raw 0x0800530c adds 16 to the manager and tail-branches
+      to 0x08005eb8; preserve that unported operation as a retailOS seam
+      rather than infer its virtual method identity. Set byte
+      base+lane*56+saved_cursor*28+8 to 1, store wrapping cursor+1,
+      reload, and clamp to zero on signed >=2. Volatile reads/writes
+      preserve access order across notification and the explicit reload.
+      Host tests cover both lanes and slots, untouched bytes, noncanonical
+      nonzero notify values, callback mutation of the cursor, and cursor 2.
+      Host notification explicitly fails outside retailOS; local test
+      injection verifies mutation order without a fake manager object.
   - address: 0x08210f64
     ghidra: FUN_08210f64
     name: identity_noop_with_options

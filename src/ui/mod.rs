@@ -53,6 +53,7 @@ pub mod flag_bit_2_at_4;
 pub mod nonzero_flags;
 pub mod startup_sequence;
 pub mod manager;
+pub mod two_slot_mark_ready;
 pub mod manager_pending_operation;
 pub mod table_slot_allocate;
 pub mod render_context;
