@@ -214476,3 +214476,47 @@ functions:
       non-test host E0425 errors in prepare_entry_metadata,
       shared_payload_select_kind, and calendar_schedule; the host
       test configuration exercises the complete stop path instead.
+
+  - address: 0x081d8fd4
+    ghidra: FUN_081d8fd4
+    name: display_set_activity_blocker
+    size: 100
+    sig: "void display_set_activity_blocker(Display *display, void *blocker)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r4: display
+      param_2/r5: blocker
+      display_plus_0x50: layer_activity_blocker
+      display_plus_0x90: display_id
+      display_plus_0x98: layers_active
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_081d8e04: all_layer_requests_clear
+      FUN_081d914c: retail_layer_activity_start
+      FUN_081d9270: layer_activity_stop
+    notes: >-
+      Raw A32 extent is [0x081d8fd4,0x081d9038), with the next function's
+      push at 0x081d9038. Whole-image decoding finds two plain inbound BL
+      sites at 0x080f55ec and 0x080f5608, no predicated inbound BL.
+      The body has two plain BL and two predicated BL (BLEQ start,
+      BLNE stop), plus a tail B to mutex_unlock. Locks display+0x28,
+      stores the blocker verbatim at +0x50, starts inactive secondary
+      display activity for any non-NULL blocker, or stops active activity
+      for a NULL blocker when all six +0x18 request bytes are zero.
+      The NULL path has no display-id or driver guard. Deliberate
+      deviations: inline the raw-verified six-byte predicate at
+      0x081d8e04, reuse the complete layer_activity_stop port, and express
+      tail unlock as a return-position call. Native-width Display fields
+      preserve host pointers. The existing start seam now calls verified
+      retail 0x081d914c on target instead of omitting pending panel work;
+      hosts must install a fixture. No new callee identity is guessed.
+      Host transition tests cover all six request positions, noncanonical
+      nonzero request/latch bytes, secondary versus other display ids,
+      and blocker storage. All 14069 host tests and ARM release build pass.
+      Standalone extracted-source smoke with boundary fixtures verifies
+      mutex ordering, start, deferred stop and final-slot stop.
+      match.py exits 1: LLVM unrolls the six-byte predicate, uses indirect
+      start dispatch through the existing seam, and adds frame setup;
+      +0x28 lock/unlock, +0x50 store, +0x90/+0x98 gates, conditional stop
+      and tail unlock remain visible.
