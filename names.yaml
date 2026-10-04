@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082070c8
+    ghidra: FUN_082070c8
+    name: pending_payload_reset
+    size: 88
+    sig: "void pending_payload_reset(void *owner)"
+    module: app/pending_payload_reset
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "owner+0x10": active_payload
+      "owner+0x14": mutex
+      "owner+0x28": flags
+      FUN_08206ff4: pending_payload_list_clear
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_081fbb24: callback_queue_instance_get
+      FUN_081fb524: callback_queue_remove_owner
+    notes: >-
+      Raw words establish 88 bytes ending at the independent prologue at
+      0x08207120, not Ghidra's 136 bytes. Two inbound plain BLs at 0x082073b0
+      and 0x082074b4, zero predicated inbound BLs; four plain outbound BLs,
+      zero predicated BLs, one BLXNE and a tail B to 0x081fb524. Clear pending
+      list under mutex, clear flag bit zero, dispatch optional active object's
+      vtable slot +4, zero active pointer, unlock and remove owner from queue.
+      Reuse both existing ports; unported queue operation retains its raw ABI.
+      Native host layouts deliberately widen pointers. Host tests cover release
+      order, flag preservation and repeated reset. ARM diff preserves all field
+      accesses and calls, adding a frame pointer and explicit conditional branch.
   - address: 0x081f3ff4
     ghidra: FUN_081f3ff4
     name: filename_record_select
