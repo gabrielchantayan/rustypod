@@ -213175,3 +213175,42 @@ functions:
       and previous-task marking with balanced holds. match.py exits 1:
       44 versus 32 instructions, inlined counted acquire, larger frame,
       resident BLX calls; conditional mark and append retained. No device run.
+
+  - address: 0x08202694
+    ghidra: FUN_08202694
+    name: request_dispatch
+    size: 192
+    sig: "void request_dispatch(RequestOwner *owner, u32 key, u32 payload)"
+    status: ported
+    module: app/request_dispatch.rs
+    renames:
+      param_1/r0: owner
+      param_2/r1: key
+      param_3/r2: payload
+      iVar4/r6: original_table_handle
+      puVar3/r4: counted_lock
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0829dd30: table6_request_state
+      FUN_081c93fc: table6_find_by_key
+      FUN_081d2184: registry_lookup_by_id
+      FUN_08275b9c: object_cast_to_class
+    notes: >-
+      Raw A32 establishes 192 bytes through the tail B at 0x08202750;
+      the next function starts at 0x08202754. Full-image aligned word scan
+      finds two inbound plain BLs at 0x081dec00 and 0x081ee1a4, eight
+      outgoing plain BLs, zero predicated BLs, and one virtual BLX.
+      Lock owner.data+0x40 and inspect the six-slot table at +0x3c.
+      Nonzero state skips dispatch. Otherwise mark a matching slot running
+      (1), release the lock, resolve key, cast to class 0x2480, and call
+      target vtable+0xa0 with owner and payload. Failed lookup or cast
+      leaves running state. Missing slots do not suppress dispatch.
+      After callback, reload owner.data for locking but retain the original
+      table handle for the done (2) store. All direct callees reuse existing
+      ports; no new seams. repr(C) widens host pointer fields. Host tests
+      cover nonzero states, failed resolution/cast, missing keys, and owner
+      replacement with completion in the old table and balanced new lock.
+      Native smoke retained state 0xff with balanced holds. ARM release
+      build passed; match.py exit 1 reports 101 versus 48 instructions:
+      counted acquisition inlined, six-slot scans unrolled, virtual BLX
+      and owner reload preserved. No device execution.
