@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08207674
+    ghidra: FUN_08207674
+    name: named_object_prefix_construct
+    size: 20
+    sig: "void *named_object_prefix_construct(void *this, u32 name)"
+    module: cxx/named_object_prefix_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+      DAT_08207684: named_object_prefix_vtable
+    notes: >-
+      Raw ARM has four instructions and the literal 0x089919a8 at
+      0x08207684, ending at the separately referenced bx lr function
+      0x08207688: true extent 20 bytes, not Ghidra's 16 instruction bytes.
+      Whole-image decoding finds two plain inbound BLs at 0x081e7404 and
+      0x081eff10, no predicated inbound BLs, and no outbound BLs.
+      Store the full-width name word at +4, then the vtable at +0, and
+      return this unchanged. Both derived callers replace the vtable
+      and initialize later words. Concrete class identity is unresolved.
+      Volatile stores preserve write order; explicit pointer return fixes
+      Ghidra's void signature. No validation or name dereference added.
+      Host tests and ARM release build passed. Reviewed match.py structural
+      diff: LLVM adds a frame pointer and loads the literal after the first
+      store, preserving both writes, their order, and the unchanged r0 return.
+      No device execution.
   - address: 0x0820768c
     ghidra: FUN_0820768c
     name: type_one_payload_construct
