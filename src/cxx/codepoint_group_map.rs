@@ -1,3 +1,5 @@
+//! Codepoint group-map population and its retailOS singleton accessor.
+
 use super::string_object::utf8_next_codepoint;
 
 /// Populate a codepoint-to-group byte map — original `FUN_0820b2c4` at
@@ -42,11 +44,130 @@ pub unsafe extern "C" fn codepoint_group_map_populate(
     map.add(2).write(map.cast::<u8>().add(12) as usize as u32);
 }
 
+#[repr(C)]
+struct GroupMapState {
+    ready: u8,
+    padding: [u8; 3],
+    guard: u32,
+}
+
+type MapConstructor = unsafe extern "C" fn(*mut u32) -> *mut u32;
+
+#[cfg(not(target_os = "none"))]
+static mut GROUP_MAP_CONTEXT: Option<(*mut GroupMapState, *mut u32, u32, u32, MapConstructor)> = None;
+
+/// Get the singleton codepoint group map — `FUN_0820b234` @ 0x0820b234.
+/// True size: 144 bytes (128 instruction bytes and 16 literal bytes), ending
+/// at the real function boundary 0x0820b2c4. Raw words establish five plain
+/// outbound BLs, zero predicated BLs, and two plain inbound BLs.
+///
+/// Test guard bit zero; an accepted ADS acquire constructs the fixed map at
+/// 0x08ad7e08 using the unported constructor at 0x0820b33c, then releases the
+/// guard. Independently, if the ready byte is clear, publish it BEFORE
+/// populating the letter and digit groups (bases 0x41 and 0x30 respectively).
+/// Always return the fixed map, ignoring the constructor's return.
+/// No target behavioral deviations. Host builds require an installed context
+/// in place of firmware RAM and the unavailable constructor.
+///
+/// # Safety
+/// Firmware state, map, group arrays and strings must be accessible; decoded
+/// codepoints must fit the allocated map. Calls must be externally serialized
+/// as in the original single-threaded ADS guard implementation.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn codepoint_group_map_get() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    let (state, map, letters, digits, construct) = (
+        0x089d01f0usize as *mut GroupMapState,
+        0x08ad7e08usize as *mut u32,
+        0x089d01fcu32, 0x089d0268u32,
+        core::mem::transmute::<usize, MapConstructor>(0x0820b33c),
+    );
+    #[cfg(not(target_os = "none"))]
+    let (state, map, letters, digits, construct) =
+        core::ptr::read(core::ptr::addr_of!(GROUP_MAP_CONTEXT))
+            .expect("codepoint_group_map_get requires firmware context");
+    let guard = core::ptr::addr_of_mut!((*state).guard);
+    if core::ptr::read_volatile(guard) & 1 == 0
+        && crate::runtime::cxa_guard::cxa_guard_acquire(guard) != 0 {
+        construct(map);
+        crate::runtime::cxa_guard::cxa_guard_release(guard);
+    }
+    if (*state).ready == 0 {
+        (*state).ready = 1;
+        codepoint_group_map_populate(map, 0x41, &letters);
+        codepoint_group_map_populate(map, 0x30, &digits);
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     extern crate std;
+    unsafe extern "C" fn modeled_constructor(map: *mut u32) -> *mut u32 {
+        let (state, _, _, _, _) = GROUP_MAP_CONTEXT.unwrap();
+        assert_eq!((*state).guard, 1);
+        map.cast::<u8>().write_bytes(0, 524);
+        // The accessor must ignore this return value.
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn singleton_initialization_precedence_and_independent_flags() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::CODEPOINT_GROUP_MAP_GET, 0x2000,
+        ) else {
+            assert!(crate::testing::note_missing_u32_fixture("codepoint_group_map_get"));
+            return;
+        };
+        unsafe {
+            let map = slab.cast::<u32>();
+            let mut state = GroupMapState { ready: 0, padding: [0; 3], guard: 0 };
+            let letters = slab.add(0x1000).cast::<u32>();
+            let digits = letters.add(3);
+            let text = slab.add(0x1100);
+            core::ptr::copy_nonoverlapping(b"Aa\0Bb\0A0\0".as_ptr(), text, 9);
+            letters.write(text as usize as u32);
+            letters.add(1).write(text.add(3) as usize as u32);
+            letters.add(2).write(0);
+            digits.write(text.add(6) as usize as u32);
+            digits.add(1).write(0);
+            GROUP_MAP_CONTEXT = Some((&mut state, map, letters as usize as u32,
+                digits as usize as u32, modeled_constructor));
+            slab.write_bytes(0xa5, 524);
+            assert_eq!(codepoint_group_map_get(), map);
+            assert_eq!((state.ready, state.guard), (1, 1));
+            let table = slab.add(12);
+            let mut expected = [0u8; 512];
+            for (cp, group) in [(65, 48), (97, 65), (66, 66), (98, 66), (48, 48)] {
+                expected[cp] = group;
+            }
+            assert_eq!(core::slice::from_raw_parts(table, 512), expected);
+            assert_eq!(core::slice::from_raw_parts(map, 3),
+                &[0, 511, table as usize as u32]);
+            table.add(65).write(0x7e);
+            assert_eq!(codepoint_group_map_get(), map);
+            assert_eq!(table.add(65).read(), 0x7e);
+            // Nonzero guard with bit zero clear refuses construction, but
+            // the independent ready byte still causes population.
+            state.guard = 2;
+            state.ready = 0;
+            table.add(500).write(0x7f);
+            codepoint_group_map_get();
+            assert_eq!((state.ready, state.guard), (1, 2));
+            assert_eq!(table.add(500).read(), 0x7f);
+            assert_eq!(table.add(65).read(), 48);
+            // Ready does not suppress a needed constructor; no population
+            // follows when ready was already set.
+            state.guard = 0;
+            codepoint_group_map_get();
+            assert_eq!((state.ready, state.guard), (1, 1));
+            assert_eq!(core::slice::from_raw_parts(slab, 524), [0u8; 524]);
+            GROUP_MAP_CONTEXT = None;
+        }
+    }
+
     #[test]
     fn preserves_unmapped_bytes_overwrites_groups_and_stops_on_decoded_zero() {
         let Some(slab) = crate::testing::try_map_u32_slab(
