@@ -4706,6 +4706,77 @@ pub unsafe extern "C" fn string_object_construct_from_linked_chain(
     }
 }
 
+/// Target-width layout of the state reset at 0x08210528. Opaque regions
+/// are deliberately preserved; host pointers expand through repr(C).
+#[repr(C)]
+pub struct StringPairSession {
+    pub header: [u32; 2],
+    pub owned: *mut OpaqueOwnedMember,
+    pub primary: StringObject,
+    pub pending: u32,
+    pub active: u8,
+    pub active_padding: [u8; 3],
+    pub counters: [u32; 3],
+    pub opaque: [u32; 10],
+    pub first: StringObject,
+    pub second: StringObject,
+    pub enabled: u8,
+    pub enabled_padding: [u8; 3],
+    pub tail_counters: [u32; 3],
+}
+
+/// string_pair_session_reset — FUN_08210528 @ 0x08210528.
+/// True extent: 136 bytes (132 code + empty-string literal); next entry
+/// 0x082105b0. Two inbound plain BLs, zero predicated; five outbound plain
+/// BLs, zero predicated, and one indirect BLX through owned->vtable +4.
+///
+/// Clear flags/counters, assign empty strings to +0x50/+0x58, construct
+/// a temporary empty string and copy-assign it to +0xc, destroy the
+/// temporary, destroy the non-NULL owned object, clear ownership, then
+/// clear +0x14. The ownership slot stays populated during its callback.
+/// Deviations: named repr(C) fields accommodate host pointer widths; the
+/// stack saves of unused r2/r3 are not arguments. ARM assignments retain
+/// stock callees because the existing Rust virtual defaults are incomplete;
+/// host builds use their existing injectable string boundaries.
+///
+/// # Safety
+/// this must be writable and its strings valid. A non-NULL owned object
+/// must supply a callable destructor in its second vtable slot.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_pair_session_reset(this: *mut StringPairSession) {
+    (*this).active = 0;
+    (*this).counters[0] = 0;
+    (*this).counters[1] = 0;
+    (*this).counters[2] = 0;
+    #[cfg(target_os = "none")]
+    let assign_cstr: unsafe extern "C" fn(*mut StringObject, *const u8) =
+        core::mem::transmute(0x0827639cusize);
+    #[cfg(not(target_os = "none"))]
+    let assign_cstr = string_object_assign_cstr;
+    assign_cstr(core::ptr::addr_of_mut!((*this).first), b"\0".as_ptr());
+    assign_cstr(core::ptr::addr_of_mut!((*this).second), b"\0".as_ptr());
+    (*this).enabled = 0;
+    (*this).tail_counters[2] = 0;
+    (*this).tail_counters[1] = 0;
+    (*this).tail_counters[0] = 0;
+    let mut temporary = core::mem::MaybeUninit::<StringObject>::uninit();
+    let empty = string_default_construct(temporary.as_mut_ptr());
+    #[cfg(target_os = "none")]
+    let assign: unsafe extern "C" fn(*mut StringObject, *const StringObject) -> *mut StringObject =
+        core::mem::transmute(0x082774a8usize);
+    #[cfg(not(target_os = "none"))]
+    let assign = string_object_assign;
+    assign(core::ptr::addr_of_mut!((*this).primary), empty);
+    string_object_destroy(empty);
+    let owned = (*this).owned;
+    if !owned.is_null() {
+        ((*(*owned).vtable).destroy)(owned);
+        (*this).owned = core::ptr::null_mut();
+    }
+    (*this).pending = 0;
+}
+
 ///
 
 #[cfg(test)]
@@ -4721,6 +4792,76 @@ pub(crate) mod tests {
     /// The dispatch slot is process-global, so sibling C++ module tests use
     /// this lock alongside this module's own destruction tests.
     pub(crate) static STRING_OBJECT_OPS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    unsafe extern "C" fn reset_clear(this: *mut StringObject) {
+        (*this).payload = core::ptr::null_mut();
+    }
+
+    #[repr(C)]
+    struct ResetOwned {
+        base: OpaqueOwnedMember,
+        session: *mut StringPairSession,
+        calls: u32,
+    }
+
+    unsafe extern "C" fn reset_owned_destroy(this: *mut OpaqueOwnedMember) {
+        let fixture = &mut *this.cast::<ResetOwned>();
+        let session = &*fixture.session;
+        assert_eq!(session.owned, this);
+        assert_eq!(session.pending, 0x12345678);
+        assert_eq!(session.counters, [0; 3]);
+        assert_eq!(session.tail_counters, [0; 3]);
+        assert!(session.primary.payload.is_null());
+        assert!(session.first.payload.is_null());
+        assert!(session.second.payload.is_null());
+        fixture.calls += 1;
+    }
+
+    #[test]
+    fn session_reset_clears_state_preserves_opaque_and_releases_owner_once() {
+        let _assign_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap();
+        let _release_lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        unsafe {
+            let old = STRING_OBJECT_ASSIGN_CSTR_OPS;
+            struct Restore(StringObjectAssignCstrOps);
+            impl Drop for Restore {
+                fn drop(&mut self) { unsafe { STRING_OBJECT_ASSIGN_CSTR_OPS = self.0; } }
+            }
+            let _restore = Restore(old);
+            STRING_OBJECT_ASSIGN_CSTR_OPS.clear_payload = reset_clear;
+            let string = || StringObject {
+                vtable: &STRING_OBJECT_VTABLE,
+                payload: core::ptr::dangling_mut::<u8>(),
+            };
+            let mut session = StringPairSession {
+                header: [0x11223344, 0x55667788], owned: core::ptr::null_mut(),
+                primary: string(), pending: 0x12345678,
+                active: 0xff, active_padding: [0xa5; 3], counters: [u32::MAX; 3],
+                opaque: [0xdeadbeef; 10], first: string(), second: string(),
+                enabled: 0xff, enabled_padding: [0x5a; 3], tail_counters: [u32::MAX; 3],
+            };
+            let vtable = OpaqueOwnedMemberVtable { first_slot: 0, destroy: reset_owned_destroy };
+            let mut owned = ResetOwned {
+                base: OpaqueOwnedMember { vtable: &vtable },
+                session: &mut session, calls: 0,
+            };
+            session.owned = &mut owned.base;
+            string_pair_session_reset(&mut session);
+            assert_eq!(owned.calls, 1);
+            assert!(session.owned.is_null());
+            assert_eq!(session.pending, 0);
+            assert_eq!((session.active, session.enabled), (0, 0));
+            assert_eq!(session.header, [0x11223344, 0x55667788]);
+            assert_eq!(session.opaque, [0xdeadbeef; 10]);
+            assert_eq!(session.active_padding, [0xa5; 3]);
+            assert_eq!(session.enabled_padding, [0x5a; 3]);
+            string_pair_session_reset(&mut session);
+            assert_eq!(owned.calls, 1);
+            assert!(session.primary.payload.is_null());
+            assert!(session.first.payload.is_null());
+            assert!(session.second.payload.is_null());
+        }
+    }
 
     static mut OWNED_MEMBER_DESTROY_CALLS: Vec<usize> = Vec::new();
 
