@@ -211501,3 +211501,40 @@ functions:
       LLVM's push/mov/pop frame bookkeeping before the tail B; the verified
       R_ARM_JUMP24 relocation targets mode_selected_position_set, not itself.
       No new seams, no device execution, and no observed symbol folding.
+
+  # --- Stream-window request wrapper ---
+  - address: 0x0820a460
+    ghidra: FUN_0820a460
+    name: stream_window_request
+    size: 60
+    sig: "u32 stream_window_request(StreamWindowRequestState *state, u32 request_arg_1, u32 maximum_window_length, u32 request_arg_3, u32 request_arg_4, u32 request_arg_5, u32 request_arg_6, u32 request_arg_7)"
+    module: app/stream_window_request
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: request_arg_1
+      param_3/r2: maximum_window_length
+      param_4/r3: request_arg_3
+      param_5/stack: request_arg_4
+      param_6/stack: request_arg_5
+      param_7/stack: request_arg_6
+      param_8/stack: request_arg_7
+    notes: >-
+      Raw osos.dec verifies the 60-byte extent [0x0820a460,0x0820a49c);
+      the next entry is a separately linked branch veneer at 0x0820a49c.
+      Independent whole-image aligned ARM B/BL decoding finds two plain
+      inbound BL callers at 0x08100818 and 0x08174554, zero predicated BL
+      callers, and zero inbound B tails. The body has one plain outbound BL
+      at 0x0820a490 to 0x0822adb0 and no predicated BL. It copies the four
+      incoming stack arguments into its outgoing frame and forwards all
+      eight arguments to the existing ported stream_window_dispatch_request.
+      The result remains in r0 through add sp and pop, correcting Ghidra's
+      void prototype; both known callers ignore it. No new callee seam.
+      No behavioral deviation: LLVM replaces the call/return with a tail
+      branch and uses a smaller frame. match.py exit 1 reports 12 Rust
+      instructions versus 15 original instructions; objdump verifies the
+      R_ARM_JUMP24 destination is stream_window_dispatch_request, not self.
+      Host tests exercise successful maximum update, refused full-width
+      maximum, NULL interface, and disabled flags with an invalid vtable.
+      All 13946 host tests passed; ARM release build and standalone
+      production-entry smoke passed. No device execution was performed.
