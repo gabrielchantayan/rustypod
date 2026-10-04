@@ -14,6 +14,7 @@ pub mod chain_table;
 pub mod chain_table_find_tag;
 pub mod chain_table_find_predecessor;
 pub mod chain_table_count_steps;
+pub mod chain_table_advance;
 pub mod esds_descriptor_size;
 pub mod fatal_mov_cleanup_no_op;
 pub mod fatal_mov_chunk_offsets_cleanup_no_op;
