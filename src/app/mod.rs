@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod packed_selector_class;
+pub use packed_selector_class::*;
 pub mod filename_record_select;
 pub mod linked_entry_process;
 pub use linked_entry_process::*;

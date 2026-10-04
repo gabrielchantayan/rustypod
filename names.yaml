@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f31a0
+    ghidra: FUN_081f31a0
+    name: packed_selector_class
+    size: 140
+    sig: "u32 packed_selector_class(u32 selector)"
+    module: app/packed_selector_class
+    status: ported
+    renames:
+      param_1/r0: selector
+      uVar2/r1: code
+      r2: tag
+      uVar1: class
+    notes: >-
+      Raw ARM words establish [0x081f31a0, 0x081f322c), ending before
+      the next independent push prologue. Whole-image BL decoding finds two
+      plain inbound calls at 0x081f361c and 0x081f3798, zero predicated
+      inbound calls, and zero outbound BLs. Mask selector with 0x00fe001f;
+      tag zero and codes 1,2,3 return 0,1,2; tag fourteen and codes
+      1,2,3,4,5,6 return 3,4,5,6,8,7. All other combinations return 9.
+      Callers store the class, distinguish classes below three, and reject
+      sentinel nine. Individual class meanings remain unproven; no seams
+      or behavioral deviations. Host tests exhaust all 4096 tag/code pairs
+      and exercise ignored bits. Standalone smoke exercises valid, invalid,
+      swapped classes seven/eight and high-bit inputs. ARM diff retains the
+      masks and decision tree with reordered comparisons and an added frame.
   - address: 0x082070c8
     ghidra: FUN_082070c8
     name: pending_payload_reset
