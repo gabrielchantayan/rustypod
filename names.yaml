@@ -213002,3 +213002,50 @@ functions:
       ARM release build passed. match.py exits 1 with the expected frame,
       register and BLX differences; all branches, offsets, virtual flag and
       unsigned comparison remain. No attached-device execution performed.
+
+  - address: 0x08202828
+    ghidra: FUN_08202828
+    name: queued_owner_destroy
+    size: 100
+    module: cxx/queued_owner_destroy
+    status: ported
+    sig: "QueuedOwnerObject *queued_owner_destroy(QueuedOwnerObject *object)"
+    renames:
+      param_1/r4: object
+      r5: original_owner_lock
+      r6: owner_container
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0829e208: counted_container_is_empty
+      FUN_081da620: resident container pop_back
+      FUN_081da690: resident container back
+      FUN_082905f8: resident queued item notification
+      FUN_0829076c: resident base destructor
+    notes: >-
+      Raw words establish 96 instruction bytes through the tail branch at
+      0x08202884, followed by vtable literal 0x08991094 at 0x08202888.
+      The next real function starts at 0x0820288c, giving a 100-byte extent.
+      Whole-image aligned BL decoding finds two unconditional inbound sites
+      at 0x081ee21c and 0x0820281c, zero predicated inbound sites, and six
+      unconditional outgoing BLs with zero predicated outgoing BLs.
+      Install the derived vtable, lock the owner at object+0x28 plus 0x40,
+      reload the owner, pop its container at +4, test emptiness, and only
+      when nonempty fetch the back item and notify that returned pointer.
+      Unlock the saved original owner lock, then tail-delegate to
+      0x0829076c. Ghidra incorrectly absorbs the base destructor and omits
+      the notification argument. Raw 0x081da620 decrements back/count,
+      0x081da690 returns the back word or zero, and 0x082905f8 conditionally
+      signals the returned item's mailbox at +0x24 based on word +4.
+      No assigned-address or unported-helper entries existed before this
+      port. Existing mutex and counted-container predicate ports are reused;
+      four remaining helpers dispatch to resident firmware addresses, with
+      replaceable host-only seams. repr(C) preserves target offsets and
+      widens pointer-containing fields on hosts. The final tail branch is
+      expressed as a Rust return. Host cases cover empty, last removal,
+      successor notification, large counts, balanced inner/outer counters
+      and base destruction. Full host suite: 14014 passed.
+      ARM release build passed. match.py exits 1 with the expected larger
+      frame, inlined counted-lock increment, and resident-call BLX/BX
+      differences. Emitted owner/container/lock offsets remain +0x28/+4/
+      +0x40; the conditional back/notification path and final base tail
+      dispatch are retained. No attached-device execution was performed.
