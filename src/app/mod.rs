@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod word_state_set_and_notify;
 pub mod tv_out_resource_refresh;
 pub use tv_out_resource_refresh::*;
 pub mod tv_signal_resource_refresh;

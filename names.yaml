@@ -214884,3 +214884,39 @@ functions:
       before the independent vtable/zero stores, and combines those two
       stores into STM. The vtable literal, field offsets, unchanged r0,
       and absence of outgoing calls agree; no identical-body fold observed.
+
+  - address: 0x081eb2a4
+    ghidra: FUN_081eb2a4
+    name: word_state_set_and_notify
+    size: 32
+    sig: "uint32_t word_state_set_and_notify(WordStateReceiver *receiver, uint32_t state)"
+    module: app/word_state_set_and_notify
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: state
+      DAT_081eb2bc: notification_resource
+      DAT_081eb2c0: notification_category
+    notes: >-
+      Raw extent [0x081eb2a4,0x081eb2c4) contains 24 instruction bytes
+      and eight literal-pool bytes; the next real function starts with
+      push at 0x081eb2c4. Whole-image aligned A32 decoding independently
+      finds two inbound unconditional BL calls at 0x0813f044 and
+      0x08227d8c, zero predicated BL calls, and no outgoing BL.
+      Store the full input word at receiver +0x40, then tail BX through
+      vtable +0x58 with receiver, category 0x2a2a2a2a, resource 0x8919.
+      The virtual method identity remains unresolved; no new fixed-address
+      seam is introduced. Both known callers ignore the result; preserve
+      the dispatched r0 word as an opaque u32. Host object and vtable
+      pointer fields widen structurally while target offsets stay exact.
+      Rust expresses the tail dispatch as a final call. Host regressions
+      cover zero, high-bit and maximum words, unchanged-value dispatch,
+      store-before-notify ordering, callee mutation, result preservation,
+      and untouched neighboring words. Actual-source host smoke confirms
+      two unchanged maximum-word notifications and preserved callee result.
+      Full x86_64 host suite and ARM release build succeed. match.py
+      exits 1 with a structural diff: LLVM adds a frame-pointer prologue
+      and epilogue and synthesizes 0x8919 with MOV/ORR instead of a
+      literal load. Target disassembly retains the +0x40 store, +0x58
+      virtual slot load, category literal, and final BX r3 tail dispatch.
+      The exported symbol is present; no identical-body fold is observed.
