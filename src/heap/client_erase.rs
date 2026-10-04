@@ -36,19 +36,14 @@
 //!   block_region.rs's `REGION_MUTEX_OPS` (one boundary for the one
 //!   original pair — the block_deque.rs precedent; the defaults are
 //!   the real ports, kernel/posix_mutex.rs).
-//! - **Unported client machinery** dispatches through
-//!   [`CLIENT_ERASE_OPS`] (house ops-slot pattern, indirect `blx` in
-//!   place of `bl`): the per-block hand-back @ 0x081fc124 and the two
-//!   tail notifications @ 0x081fbf1c / 0x081fc230. The defaults are
-//!   documented no-ops — the no-manager state, which is the contract
-//!   the old `stub_client_erase` default faked wholesale. Both
-//!   notifications return a 0/1 verdict the only callers discard, so
-//!   the slots return `()`.
+//! - [`CLIENT_ERASE_OPS`] retains replaceable protocol slots for host
+//!   tests. Hand-back @ 0x081fc124 and drained notification retain their
+//!   no-manager defaults. Completion @ 0x081fc230 now defaults to the
+//!   real `client_capacity_notify`; its 0/1 verdict is discarded.
 //! - **Shipped wiring**: the port is the default of
 //!   `POOL_BASE_OPS.client_erase` (heap/block_deque.rs), replacing the
-//!   no-op stub — with the no-op defaults above the replacement is
-//!   behavior-identical (a drained deque, nothing else), and the real
-//!   pop_front now runs where the stub did nothing.
+//!   no-op stub. The real pop_front drains the deque, and the completion
+//!   gate now preserves signed counter checks and the event-7 transition.
 //! - The loop bound is the count **snapshotted before the loop**
 //!   (`ldr r4, [r6, #0x20]` precedes the loop; `sub r4, r4, #1` counts
 //!   down) — not re-read off the deque, even though `deque_pop_front`
@@ -96,14 +91,15 @@ unsafe extern "C" fn stub_hand_back_block(_client: *mut u8, _block: *mut u32) {}
 /// Default notification stubs: see [`stub_hand_back_block`].
 unsafe extern "C" fn stub_notify_drained(_client: *mut u8, _flag: u32) {}
 
-unsafe extern "C" fn stub_notify_complete(_client: *mut u8) {}
+unsafe extern "C" fn notify_capacity_complete(client: *mut u8) {
+    crate::util::client_capacity_notify::client_capacity_notify(client);
+}
 
-/// Wired defaults (documented no-ops until the block-manager client
-/// machinery is ported).
+/// Hand-back and drained defaults remain no-ops; completion uses the port.
 pub(crate) const DEFAULT_CLIENT_ERASE_OPS: ClientEraseOps = ClientEraseOps {
     hand_back_block: stub_hand_back_block,
     notify_drained: stub_notify_drained,
-    notify_complete: stub_notify_complete,
+    notify_complete: notify_capacity_complete,
 };
 
 /// The active implementation table. Written once at init on target;
