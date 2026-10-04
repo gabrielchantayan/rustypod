@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081eb204
+    ghidra: FUN_081eb204
+    name: controller_apply_resource_flags
+    size: 160
+    sig: "UiElement *controller_apply_resource_flags(ResourceFlagController *controller)"
+    module: app/controller_apply_resource_flags
+    status: ported
+    renames:
+      param_1/r8: controller
+      iVar2/r7: resolved_element
+      iVar3/r0_after_cast: class_1700_validation
+      uVar5/r4: record_index
+      iVar4/r0: resource_id
+      iVar6/r5: record
+      DAT_081eb29c: resource_key_0dad017f
+      DAT_081eb2a0: resource_flag_records_08a79240
+      FUN_081883fc: demo_mode_instance
+      FUN_08275b9c: object_cast_to_class
+      FUN_081ecc5c: prepare_resource_flag_records
+      thunk_FUN_0819f604: resource_registry_set_enabled
+      FUN_081729bc: resource_store_set_selected_flag
+      "controller+0x378": store
+    notes: >-
+      Raw bytes establish [0x081eb204,0x081eb2a4): 152 instruction bytes
+      and eight literal bytes; the next function begins with str r1,[r0,#0x40].
+      Whole-image aligned ARM BL decoding finds one plain inbound call at
+      0x081ebf3c and one BLEQ at 0x081e7844. The body has five plain BL,
+      no predicated BL, one BLX and a tail B to ported ui_element_invalidate.
+      Resolve demo vtable+0xf8 key 0x0dad017f, reject NULL or a failed class
+      0x1700 cast, prepare the shared table and process twelve 20-byte records.
+      Skip zero resource ids; apply each enable byte through the verified
+      0x082879b0 veneer (raw B to 0x0819f604), reload that byte, and pass it
+      as r2 to 0x081729bc with store and selector. Ghidra omitted r2 and
+      inlined the invalidation tail. Return the original object, not its cast.
   - address: 0x081ebeec
     ghidra: FUN_081ebeec
     name: class_8900_prid_60ef_first_byte
