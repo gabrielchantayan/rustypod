@@ -1532,6 +1532,7 @@ pub mod hints {
     // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
     // root/context fixture; mappings never unmap, so no other user may share it.
     pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;
+    pub const QUERY_ROOT_CONTEXT_PAIR: usize = 0xc971_0000;
     // 0xd000_0000: dedicated to app/animation's destructor fixture;
     // mappings never unmap, so no other user may share this hint.
     pub const ANIMATION_DESTROY: usize = 0xd000_0000;
