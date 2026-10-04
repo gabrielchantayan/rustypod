@@ -490,3 +490,4 @@ pub mod resource_selector_record;
 pub mod opaque_constant_zero;
 pub mod utf8_validate_c_string_permissive;
 pub mod query_filter_is_empty;
+pub mod tagged_buffer_payload_size;

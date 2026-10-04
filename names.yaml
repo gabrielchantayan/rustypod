@@ -209495,3 +209495,37 @@ functions:
       with an extra frame-pointer setup. No device execution. Standalone host
       example is blocked by six existing non-test host compilation errors
       in prepare_entry_metadata, shared_payload_select_kind, calendar_schedule.
+
+  - address: 0x082142a8
+    ghidra: FUN_082142a8
+    name: tagged_buffer_payload_size
+    size: 48
+    sig: "u32 tagged_buffer_payload_size(const u32 *descriptor)"
+    module: util/tagged_buffer_payload_size
+    status: ported
+    renames:
+      param_1/r0: descriptor
+      uVar2/r3: length
+      r1: alignment
+      FUN_082142d8: alignment_padding
+    notes: >-
+      Raw A32 establishes the 48-byte extent 0x082142a8..0x082142d8,
+      ending with POP PC before the separately entered alignment_padding leaf.
+      Two inbound unconditional BLs at 0x081a89f0 and 0x081a8a04, zero
+      predicated inbound BLs. One outgoing unconditional BL at 0x082142c8
+      to the canonical alignment_padding port; zero predicated outgoing BLs.
+      BLS at 0x082142c0 is a return-epilogue branch, not a call.
+      Returns the low 24-bit length, subtracting alignment padding for the
+      target-width descriptor address plus 12 when bits 0x70000000 shifted
+      right 26 exceed four. Retains non-power-of-two mask arithmetic and
+      wrapping underflow; ignores other flags. No semantic deviations;
+      LLVM may change register allocation and frame layout. Host coverage
+      spans all eight alignment classes, aligned word-address residues,
+      zero/max lengths, padding underflow, ignored flags and read-only input.
+      Host suite passes 13859 tests; standalone execution verifies padding
+      underflow and the unadjusted class-four path. ARM release builds.
+      match.py reports 13 versus 12 instructions: equivalent flag extraction
+      and unsigned threshold, one helper call and subtraction, with length
+      preserved in callee-saved r4 instead of the original helper-preserved r3.
+      The object relocation supplies alignment_padding despite objdump's
+      unresolved BL placeholder. No device execution.
