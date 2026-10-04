@@ -209249,3 +209249,44 @@ functions:
       both real constructor BL relocations remain, stores have exact target
       offsets including STRB at +0x24, and the redundant reset BL is omitted
       as documented. Rust emits 76 instruction bytes plus a four-byte literal.
+  - address: 0x0820fd6c
+    ghidra: FUN_0820fd6c
+    name: parse_wide_time_seconds
+    size: 188
+    sig: "i32 parse_wide_time_seconds(const WideTimeRange *range)"
+    module: strto/wide_time_seconds
+    status: ported
+    renames:
+      param_1/r4: range
+      local_20: cursor
+      r6: sign
+      r5: hours
+      r7: minutes
+      r8: seconds
+    notes: >-
+      Raw ARM words span 0x0820fd6c through the return at 0x0820fe24;
+      the next real prologue is 0x0820fe28, confirming 188 bytes.
+      Independently decoded outgoing calls are three unconditional BLs at
+      0x0820fdc4, 0x0820fde4, and 0x0820fe04, all to the already-ported
+      parse_wide_decimal_counted at 0x0808ce8c; zero predicated BLs.
+      The reported two call sites are incoming BLs at 0x0820fc38 and
+      0x0820fc74 in FUN_0820fbc0, whose results feed two time-setting paths.
+      Reads the first u16 even for empty or reversed ranges, consumes an
+      optional ASCII sign locally, then checks only the start of each
+      two-unit decimal field against the unsigned end pointer. Missing
+      fields contribute zero; odd ranges read one unit beyond their end.
+      No digit validation, colon handling, or bounds clamping is added.
+      Returns sign times hours*3600 + minutes*60 + seconds with wrapping
+      32-bit arithmetic; ignores trailing units and leaves the range intact.
+      Uses a repr(C) native-pointer pair rather than host byte offsets,
+      preserving the original two-word ARM ABI. Host tests cover all
+      partial-field lengths, signs, ignored suffixes, unchecked u16 values,
+      signed result wrapping, and reversed ranges. Standalone smoke checks
+      positive and negative 12:34:56 results, odd-end read-ahead, and sign-only
+      input using the real existing decimal callee.
+      Required full host test suite and ARM build-std release build pass.
+      match.py reports the expected structural diff: LLVM emits 45 versus
+      47 ARM instructions, retaining three guarded two-unit calls, unsigned
+      cursor comparisons, 3600/60 weighting, and conditional negation.
+      LLVM hoists the immutable range end and schedules field weighting
+      earlier; the original reloads that end between calls.
