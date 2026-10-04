@@ -209919,3 +209919,48 @@ functions:
       groups geometry loads with LDM and adds its frame prologue.
       Object relocation labels in match.py are unresolved; the two Rust
       BL targets are image_format_descriptor and render_request_from_descriptor.
+
+  - address: 0x08210fc0
+    ghidra: FUN_08210fc0
+    name: collection_nested_process
+    size: 96
+    sig: "void collection_nested_process(void *context, Collection *collection)"
+    module: app/collection_nested_process
+    status: ported
+    vars:
+      param_1: context
+      param_2: collection
+      local_18: item
+      uStack_14: cursor.collection
+      uStack_10: cursor.index
+    notes: >-
+      Raw osos.dec A32 decoding verifies extent 0x08210fc0..0x08211020,
+      ending at the next function prologue. Body has four unconditional
+      plain BL instructions, zero predicated BL instructions, and one
+      virtual BLX. Whole-image decoding finds two plain BL callers at
+      0x08211c88 and 0x082120f0, no predicated BL callers. Walk the supplied
+      collection with the ported cursor family; pass each item's embedded
+      collection at byte +8 and the unchanged context to 0x08211460;
+      invoke the outer collection's vtable slot +0x30; invalidate the
+      cursor. Raw words of 0x08211460 verify the two-input ABI: it saves
+      r0 as context and r1 as the nested collection, using incoming r2/r3
+      stack slots only as overwritten cursor storage. Neither address
+      had a prior names entry. The nested processor remains an exact
+      fixed-address call, with a host operation seam; no unverified
+      broader callee identity or virtual-slot semantics are invented.
+      Deliberate deviations: omit Ghidra's spurious r2/r3 input parameters
+      and incidental r0 result, consistent with existing cursor ports.
+      LLVM eliminates final invalidation of the dead stack-local cursor;
+      this write is unobservable after return. Host tests exercise empty
+      collections, nonboolean success values, ordered processing before
+      the final virtual callback, and growth during traversal.
+      cargo test --target x86_64-unknown-linux-gnu passes; cargo build
+      -Z build-std=core --release passes. Standalone runtime smoke invokes
+      the actual port and cursor modules, observing one processed embedded
+      collection followed by the final virtual operation. match.py exits
+      1 with a structural diff: 24 stock versus 34 Rust instructions.
+      LLVM duplicates the initial advance, calls the fixed nested address
+      through a literal-loaded BLX, and removes dead cursor invalidation;
+      the item +8 calculation, nonzero loop gate, context preservation,
+      and final +0x30 dispatch are retained. BL labels in the archive diff
+      are unresolved relocations to cursor_init and cursor_advance.
