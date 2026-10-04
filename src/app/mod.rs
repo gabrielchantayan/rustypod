@@ -780,6 +780,7 @@ pub mod stream_context_reset_notify;
 pub mod stream_cache_mass_storage_manager;
 pub mod stream_ensure_available;
 pub mod stream_parse_error_result;
+pub mod stream_create_for_filename;
 pub mod string_owner_init;
 pub mod stream_window_set_position;
 pub mod stream_window_dispatch_request;
