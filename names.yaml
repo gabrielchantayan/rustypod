@@ -125131,6 +125131,33 @@ functions:
       host seams. Tests cover both flag paths, address adjustments, unchanged
       zero and all-one arguments, and forwarded return values.
 
+  # --- Extended PhotoBrowse slideshow base constructor ---
+  - address: 0x0822053c
+    ghidra: FUN_0822053c
+    name: photo_browse_slideshow_extended_construct
+    size: 36
+    sig: "void *photo_browse_slideshow_extended_construct(void *context, const void *descriptor)"
+    module: app/photo_browse_slideshow_extended_construct
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: descriptor
+      FUN_0822ba68: photo_browse_slideshow_construct
+    notes: >-
+      Raw osos.dec has nine ARM words from 0x0822053c through 0x0822055c;
+      the next real function starts with push at 0x08220560. Corrects
+      Ghidra's void/no-argument prototype: r0 and r1 pass to the existing
+      base constructor, and its returned r0 passes unchanged to the caller.
+      Writes all ones at object +0x89c and +0x8a0, zero byte at +0x8a4,
+      and zero word at +0x8a8. Field meanings remain unverified. Both
+      Coverflow and TPodMediaPlayer constructors embed this extended base.
+      Independent raw ARM immediate decoding finds two incoming plain BL
+      calls at 0x08142e38 and 0x0817da28, zero predicated BL; the body has
+      one plain BL at 0x08220540 to 0x0822ba68 and zero predicated BL.
+      No deliberate behavioral deviations; LLVM may reorder independent
+      stores. Host tests verify exact write widths, preservation of padding
+      and neighboring state, and repeated initialization.
+
   # --- PhotoBrowse slideshow constructor ---
   - address: 0x0822ba68
     ghidra: FUN_0822ba68
