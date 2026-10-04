@@ -209402,3 +209402,40 @@ functions:
       due to frame setup, retaining member offset +8 and all three calls.
       Object relocations verify shared_cell_construct, shared_cell_assign
       and shared_cell_release as the three real BL targets.
+
+  - address: 0x08214de0
+    ghidra: FUN_08214de0
+    name: flagged_pair_shuffle
+    size: 152
+    sig: "void flagged_pair_shuffle(void *owner, u32 start, u32 end)"
+    module: app/flagged_pair_shuffle
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: index
+      param_3/r7: end
+      r6: partner
+      uStack_28: temporary
+      FUN_081fca5c: flagged_pair_clear
+      FUN_081fca6c: flagged_pair_copy
+      FUN_080e7a38: ansi_rand
+      FUN_08036f14: __rt_udiv
+      FUN_083d6bc0: container_element_at_alias_6bc0
+    notes: >-
+      Raw A32 establishes 152 bytes through POP at 0x08214e74; the next
+      real function begins at 0x08214e78. Two inbound plain BLs at
+      0x08214988 and 0x08214a60, ten outbound plain BLs, no predicated BLs.
+      If byte owner+0x2f1 is nonzero, swaps flagged pairs from container
+      owner+0x2d8 for unsigned indices [start,end), using ansi_rand()%end
+      as partner. Partners may precede start. Reuses all existing ports,
+      preserving four virtual lookups and three ordered copies per swap.
+      Ghidra's fourth argument is only saved-register stack storage.
+      Rust uses its ABI remainder helper instead of ADS r1 division output;
+      uninitialized temporary padding is never read. Host container pointer
+      fields widen while fixed owner offsets and record words are preserved.
+      Host suite passes 13854 tests; targeted final test and standalone smoke
+      exercise real random updates, self-swaps, partial ranges, normalization,
+      disabled/empty/reversed ranges and untouched record padding. ARM release
+      builds. match.py reports 45 versus 38 instructions: extra frame setup,
+      equivalent remainder computation, four lookups and three copies.
+      No device execution.
