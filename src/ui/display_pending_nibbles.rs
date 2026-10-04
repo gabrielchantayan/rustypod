@@ -203,17 +203,11 @@ pub unsafe extern "C" fn configure_display_pending_fourth_nibble(display: *mut D
     configure_display_pending_nibbles(display, -1, -1, -1, -1, fourth);
 }
 
-/// ABI shared by the three unported display routines reached from
-/// `apply_display_transition`. Their broader identities are deliberately not
-/// inferred; each verified address takes a display and one word and returns a
-/// retailOS status.
+/// ABI shared by the display transition routines reached from
+/// `apply_display_transition`. The second and finish routines remain
+/// verified-address firmware calls; the first defaults to the Rust port.
 type DisplayTransitionCallee = unsafe extern "C" fn(*mut Display, u32) -> u32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_transition_first(display: *mut Display, value: u32) -> u32 {
-    let callee: DisplayTransitionCallee = core::mem::transmute(0x081d_8ae8usize);
-    callee(display, value)
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_transition_second(display: *mut Display, value: u32) -> u32 {
@@ -233,13 +227,11 @@ unsafe extern "C" fn missing_display_transition_callee(_display: *mut Display, _
 }
 
 #[cfg(target_os = "none")]
-static mut DISPLAY_TRANSITION_FIRST: DisplayTransitionCallee = firmware_transition_first;
-#[cfg(target_os = "none")]
 static mut DISPLAY_TRANSITION_SECOND: DisplayTransitionCallee = firmware_transition_second;
 #[cfg(target_os = "none")]
 static mut DISPLAY_TRANSITION_FINISH: DisplayTransitionCallee = firmware_transition_finish;
-#[cfg(not(target_os = "none"))]
-static mut DISPLAY_TRANSITION_FIRST: DisplayTransitionCallee = missing_display_transition_callee;
+static mut DISPLAY_TRANSITION_FIRST: DisplayTransitionCallee =
+    crate::drivers::display::display_set_transition_mode;
 #[cfg(not(target_os = "none"))]
 static mut DISPLAY_TRANSITION_SECOND: DisplayTransitionCallee = missing_display_transition_callee;
 #[cfg(not(target_os = "none"))]
@@ -259,9 +251,9 @@ static mut DISPLAY_TRANSITION_FINISH: DisplayTransitionCallee = missing_display_
 ///
 /// # Deliberate deviations
 ///
-/// The stock RW block is represented by [`DISPLAY_PENDING_STATE`]. The three
-/// unported callees remain verified-address volatile seams; host tests install
-/// recorders rather than assigning identities beyond their observed ABI.
+/// The stock RW block is represented by [`DISPLAY_PENDING_STATE`]. The first
+/// callee defaults to the Rust port; the other two remain verified-address
+/// volatile seams. Host tests can replace these calls with recorders.
 ///
 /// # Safety
 ///

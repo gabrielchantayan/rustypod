@@ -49923,6 +49923,41 @@ functions:
       The runtime RW globals are modeled as crate statics rather than their
       fixed RAM addresses. Host tests cover sentinel retention, boundary
       rejection without a call, and NULL secondary-display fallback.
+  - address: 0x081d8ae8
+    ghidra: FUN_081d8ae8
+    name: display_set_transition_mode
+    size: 16
+    sig: "u32 display_set_transition_mode(Display *display, u32 mode)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r0: display
+      param_2/r1: mode
+      r2: retained_second_byte
+      r3: retained_third_byte
+      FUN_0816a580: unnamed retail panel transition (four-register ABI)
+    notes: >-
+      Raw words e5c01099 e5d0309b e5d0209a ea000096 establish the true
+      16-byte extent before the independent push at 0x081d8af8. Whole-image
+      A32 decoding finds two plain inbound BLs at 0x08259a10 and 0x0828d7c8,
+      zero predicated BLs, and no outbound BLs. The final B enters the
+      shared 100-byte tail at 0x081d8d54..0x081d8db8, also used by the
+      wrapper at 0x081d8e30. Ghidra reports a noncontiguous 116-byte body;
+      match.py mistakenly includes 100 contiguous bytes of the next function.
+      Stores the low mode byte at +0x99 before returning 6 for display id
+      zero. Otherwise compares the stored byte to the full mode word and
+      retains +0x9a/+0x9b. A mismatch rewrites the three bytes and, when
+      layers are active, calls 0x0816a580(driver, mode, retained_second_byte,
+      retained_third_byte), mapping nonzero status to 7; other paths return
+      zero. The panel ABI is verified from raw register flow and callee
+      register saves; its broader identity remains unnamed. Deliberate
+      deviation: inline the shared tail rather than port another entry point.
+      repr(C) field access accommodates host pointer width. Host tests cover
+      every byte mode, internal rejection after mutation, inactive high-word
+      modes, and panel success/error mapping. The existing UI caller defaults
+      to the Rust port on both target and host. ARM codegen retains the byte
+      stores, full-word comparison, active gate, four call arguments and
+      return mapping; its panel call uses BLX through a literal address.
   - address: 0x0828d774
     ghidra: FUN_0828d774
     name: apply_display_transition
@@ -49937,7 +49972,7 @@ functions:
       param_4/r7: finish_mode
       DAT_0828d7ec: display_pending_state (0x089cc8a0)
       FUN_081d8870: display_get
-      FUN_081d8ae8: unported display transition first step
+      FUN_081d8ae8: display_set_transition_mode
       FUN_081d8db8: unported display transition second step
       FUN_081d8ed0: unported display transition finish
     notes: >-
@@ -49952,9 +49987,9 @@ functions:
       incoming display word returns unchanged before side effects. NULL
       defaults through display_get(1). The two values write bytes +2 and +1
       of the shared state block, respectively; the finish callee receives
-      whether finish_mode is zero and supplies the return status. The three
-      unported targets use verified-address volatile seams; no broader callee
-      identity is inferred. Host tests cover validation-before-mutation,
+      whether finish_mode is zero and supplies the return status. The first
+      transition defaults to display_set_transition_mode; the remaining two
+      targets use verified-address volatile seams. Host tests cover validation-before-mutation,
       call arguments, tail status, and NULL secondary fallback.
   - address: 0x0828d458
     ghidra: FUN_0828d458
