@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ec45c
+    ghidra: FUN_081ec45c
+    name: tv_out_resource_refresh
+    size: 52
+    sig: "void tv_out_resource_refresh(TvSignalReceiver *receiver)"
+    module: app/tv_out_resource_refresh
+    status: ported
+    vars:
+      param_1/r0: receiver
+      local_c: tv_out_resource_id
+      receiver_plus_0x378: provider
+      FUN_08272230: resource_chain_write
+    notes: >-
+      Raw extent [0x081ec45c,0x081ec490): 44 code bytes and 8 literal
+      bytes; next real function starts with push at 0x081ec490.
+      Two incoming plain BLs at 0x081e94d4 and 0x08212c94, zero
+      predicated BLs; one outgoing plain BL at 0x081ec480 to the
+      existing resource_chain_write port. Callers handle TVOut events.
+      Writes stack word 0x60bf by address to prID/0x60ef, flags 4,
+      through receiver provider +0x378; ignores result, no dispatch.
+      Shared repr(C) receiver preserves target offsets; host-only
+      scratch fixture avoids u32 pointer truncation. No ARM behavioral
+      deviations. Host suite and ARM release build pass. Regression
+      covers chain exhaustion, non-one acceptance and zero readback.
+      Isolated real-export low-stack smoke passes. match.py exit-one
+      diff preserves stack payload and BL; LLVM adds a frame and
   - address: 0x081d8e04
     ghidra: FUN_081d8e04
     name: all_layer_requests_clear
