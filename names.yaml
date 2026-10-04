@@ -210321,3 +210321,34 @@ functions:
       Rust null-handle paths for requested positions 0, 64, and UINT32_MAX,
       observing identical return -7 and unchanged position/opaque fields.
       No device execution was performed.
+  - address: 0x0821025c
+    ghidra: FUN_0821025c
+    name: collection_payloads_destruct
+    size: 80
+    sig: "void *collection_payloads_destruct(void *this)"
+    module: cxx/collection_payloads_destruct
+    status: ported
+    vars: {param_1/r0/r4: this, local_18: item, uStack_14/uStack_10: cursor, "[item + 0x2c]": payload}
+    notes: >-
+      Raw osos.dec establishes the 80-byte extent 0x0821025c..0x082102ac;
+      the next real function begins with ldrb r0,[r0,#0x18]. Whole-image
+      branch-word decoding finds two plain inbound BL sites (0x08119d94,
+      0x081b1f08), no predicated inbound BL sites, and five plain BL
+      instructions in the body with no predicated calls. Initializes the
+      collection cursor, frees each item's word at +0x2c using free_wrapper
+      with tag 27 (without a NULL guard or clearing the field), invalidates
+      the cursor, then invokes observable_array_attached_release_cleanup_destruct
+      at 0x083d0d78. All five callees already have Rust ports. Ghidra's r1-r3
+      parameters are stack slots created by saving registers, not arguments.
+      The final destructor's r0 object pointer passes through the return.
+      Deviations: existing Rust cursor and heap implementations replace direct
+      firmware calls; native-width cursor/item locals support host tests while
+      payload fields remain target-width words. Tests cover empty, singleton,
+      multi-item traversal, non-boolean success, NULL and high-bit payloads,
+      order, termination, and unchanged item storage.
+      Host suite: 13902 passed. Temporary end-to-end empty-collection smoke
+      verified cleanup, base-vtable installation and return identity. ARM
+      release build passed. match.py reports 30 versus 20 instructions:
+      LLVM peels the first advance and removes the dead stack-local cursor
+      invalidation; payload load, tag 27, loop condition and final destructor
+      remain structurally equivalent. No device execution was performed.

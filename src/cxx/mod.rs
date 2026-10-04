@@ -96,6 +96,7 @@ pub mod observable_array_assert_empty_attached_destruct_083d0430;
 pub mod observable_array_assert_empty_attached_destruct_083d0c54;
 pub mod observable_array_attached_release_pre_destruct_083d0334;
 pub mod observable_array_attached_release_cleanup_destruct;
+pub mod collection_payloads_destruct;
 pub mod observable_array_attached_release_destruct_083d1464;
 pub mod opaque_observable_array_attached_release_destruct;
 pub mod opaque_observable_array_pre_destruct;
