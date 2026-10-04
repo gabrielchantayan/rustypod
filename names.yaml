@@ -211287,3 +211287,39 @@ functions:
       and uses BLX through literal 0x081f1244 instead of direct BL.
       r1/r2 forwarding, r3/stack sentinels and normalization are preserved.
       No device execution.
+
+  # --- Virtual indexed flagged-pair payload accessor ---
+  - address: 0x081fcef0
+    ghidra: FUN_081fcef0
+    name: vtable_slot_10_flagged_payload
+    size: 44
+    sig: "void *vtable_slot_10_flagged_payload(void *object, uint32_t index)"
+    module: cxx/vtable_slot_10_flagged_payload
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: index
+      r2: virtual_method
+      r4: payload
+      FUN_081fca48: flagged_pair_payload_if_set
+    notes: >-
+      Raw osos.dec establishes the 44-byte extent [0x081fcef0,0x081fcf1c);
+      the next real function starts with push {r4-r8,lr}. Whole-image aligned
+      ARM branch decoding finds two plain inbound BL calls at 0x081f06c8
+      and 0x081f0e34, no predicated BL or direct B callers. The body has
+      one plain BL to the already-ported flagged_pair_payload_if_set at
+      0x081fca48, no predicated BL, and one indirect BLX through vtable
+      slot +0x10. Both raw callers establish the unchanged r1 index omitted
+      by Ghidra's assigned-function signature. Dispatch with object/index;
+      return NULL for a NULL virtual result, otherwise select the returned
+      record's +4 payload address only when byte +8 bit zero is set.
+      The virtual method identity and payload type remain opaque.
+      Host vtables use native-width entries at word index four; target
+      entries remain four bytes and flagged records retain their byte layout.
+      All 13934 host tests and the ARM release build passed. New tests cover
+      NULL virtual result, every flag byte, unchanged records, and boundary
+      indices. A production-entry executable smoke exercised odd and even
+      flags and missing records. match.py exit 1 showed eleven instructions
+      in both bodies: LLVM uses a frame pointer and tail-branches to the
+      accessor rather than preserving r4 around a BL. R_ARM_JUMP24 verifies
+      that tail target is flagged_pair_payload_if_set. No device execution.

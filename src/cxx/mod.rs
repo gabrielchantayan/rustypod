@@ -368,6 +368,7 @@ pub mod flagged_pair_copy;
 pub mod flagged_pair_clear;
 pub mod condition_queue_drain;
 pub mod flagged_pair_payload;
+pub mod vtable_slot_10_flagged_payload;
 pub mod four_word_clear;
 pub mod error_payload_from_result;
 pub mod tagged_value;
