@@ -816,6 +816,7 @@ pub mod controller_mark_pending_and_dispatch;
 pub mod opaque_record_vector_last_entry;
 pub mod selection_state_copy_item_at;
 pub mod owner_prefix_pending_handle_reset;
+pub mod owner_prefix_pending_handle_reset_locked;
 pub mod lock_state_byte;
 pub mod singleton_mode_dispatch_if_state_three_or_four;
 pub mod state_status_dispatch;

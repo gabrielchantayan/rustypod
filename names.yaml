@@ -209439,3 +209439,32 @@ functions:
       builds. match.py reports 45 versus 38 instructions: extra frame setup,
       equivalent remainder computation, four lookups and three copies.
       No device execution.
+
+  - address: 0x08214dbc
+    ghidra: FUN_08214dbc
+    name: owner_prefix_pending_handle_reset_locked
+    size: 36
+    sig: "u32 owner_prefix_pending_handle_reset_locked(u8 *state)"
+    module: app/owner_prefix_pending_handle_reset_locked
+    status: ported
+    renames:
+      param_1/r4: state
+      FUN_081fca10: mutex_handoff_lock
+      FUN_08214a84: owner_prefix_pending_handle_reset
+      FUN_081fca40: mutex_handoff_unlock
+    notes: >-
+      Raw A32 establishes the 36-byte extent 0x08214dbc..0x08214de0,
+      ending with POP at 0x08214ddc before the next PUSH prologue.
+      Three outgoing unconditional BLs, zero predicated BLs; two incoming
+      plain BLs at 0x0822b574 and 0x0822b784, zero predicated incoming BLs.
+      Acquires the state mutex handoff, resets the owner-prefix state and
+      pending shared-cell handle, releases the selected mutex, returns 1.
+      Reuses all three canonical Rust ports with no new seams or wrapper
+      deviations; their documented host and resident-call behavior remains.
+      Host tests exercise dirty and empty handles with embedded and external
+      mutex selections, callback result suppression and untouched neighbors.
+      Host suite passes 13855 tests. ARM release builds; match.py reports
+      ten versus nine instructions, retaining all three calls and return 1
+      with an extra frame-pointer setup. No device execution. Standalone host
+      example is blocked by six existing non-test host compilation errors
+      in prepare_entry_metadata, shared_payload_select_kind, calendar_schedule.
