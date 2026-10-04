@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820c2c0
+    ghidra: FUN_0820c2c0
+    name: service_context_initialize
+    size: 68
+    sig: "void service_context_initialize(void)"
+    module: app/service_context_initialize
+    status: ported
+    vars:
+      puVar1: service_context_state
+      uVar2: current_task_id
+      DAT_0820c2f8: SERVICE_CONTEXT_STATE
+      DAT_0820c2fc: APP_ROOT_OBJECT
+      DAT_0820c300: SERVICE_CONTEXT_CONDVAR
+    notes: >-
+      Raw A32 extent 0x0820c2c0..0x0820c303: 56 code bytes and 12 literal
+      bytes before the real push at 0x0820c304. Two outbound plain BLs,
+      zero predicated BLs; inbound plain BL at 0x08114c74 and BLEQ at
+      0x0820c320. Nonzero state+0xc returns immediately. Otherwise caches
+      root+0x30, initializes the condition variable via condvar_init
+      (0x0807f680), then stores kernel_running (0x0809444c) at state+0.
+      Zero context repeats initialization; no added locking or NULL guard.
+      Target globals retain 0x089cc374, 0x089ca674 and 0x08a78f8c;
+      hosts model state/condition and reuse the shared APP_ROOT_OBJECT.
+      All 13901 host tests pass; ARM release build passes. Exported-entry
+      smoke proves cold initialization, cached NULL-root skip and zero
+      context retry. match.py exits 1: LLVM inlines kernel_running,
+      adds a frame and addresses state+0xc directly; stores and order agree.
   - address: 0x0820c584
     ghidra: FUN_0820c584
     name: two_slot_mark_ready
