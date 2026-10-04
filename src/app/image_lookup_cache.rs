@@ -69,6 +69,67 @@ const _: () = {
     assert!(core::mem::offset_of!(ImageLookupCache, count) == 0x4c);
 };
 
+/// image_path_cache_refresh — original `FUN_0821523c` @ 0x0821523c.
+/// True size 200 bytes (196 code + vtable literal), next entry 0x08215304.
+/// Verified two inbound plain BLs, zero predicated; outbound three plain BLs,
+/// one BLNE and one virtual BLX. A matching key/kind bypasses the provider.
+/// Otherwise slot +0x20 fills path, index, count and a byte option; success
+/// caches the inputs. Failure clears key/path/outputs but preserves kind.
+/// Deviations: native-width repr(C) host pointers; NULL string assignment
+/// expands the existing helper's virtual clear, as above. Omit the impossible
+/// stack-temporary self-alias guard. Ghidra's fourth input/u64 result are
+/// artifacts: r3 is unused and restored r1 is not a second return value.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn image_path_cache_refresh(
+    cache: *mut ImagePathCache, key: u32, kind: u32,
+) -> u32 {
+    if (*cache).key == key && (*cache).kind == kind { return 1; }
+    let provider = handle_deref_or_null(core::ptr::addr_of!((*cache).provider));
+    let format = image_format_for_kind_kind4_override(kind);
+    let vtable = provider.cast::<*const usize>().read();
+    let lookup: unsafe extern "C" fn(*mut u8, u32, u32, *mut StringObject,
+        *mut u32, *mut u32, *mut u8) -> u32 =
+        core::mem::transmute(vtable.add(8).read());
+    if lookup(provider, key, format, core::ptr::addr_of_mut!((*cache).path),
+        core::ptr::addr_of_mut!((*cache).index), core::ptr::addr_of_mut!((*cache).count),
+        core::ptr::addr_of_mut!((*cache).option)) != 0 {
+        (*cache).key = key;
+        (*cache).kind = kind;
+        return 1;
+    }
+    (*cache).key = 0;
+    let mut empty = StringObject { vtable: &STRING_OBJECT_VTABLE, payload: core::ptr::null_mut() };
+    let path = core::ptr::addr_of_mut!((*cache).path);
+    let clear: unsafe extern "C" fn(*mut StringObject) =
+        core::mem::transmute((*(*path).vtable).slots[3]);
+    clear(path);
+    string_object_destroy(&mut empty);
+    (*cache).index = u32::MAX;
+    (*cache).count = 0;
+    (*cache).option = 0;
+    0
+}
+
+#[repr(C)]
+pub struct ImagePathCache {
+    pub opaque: [u32; 2],
+    pub provider: *const *mut u8,
+    pub key: u32,
+    pub kind: u32,
+    pub path: StringObject,
+    pub index: u32,
+    pub count: u32,
+    pub option: u8,
+}
+
+#[cfg(target_os = "none")]
+const _: () = {
+    assert!(core::mem::offset_of!(ImagePathCache, provider) == 8);
+    assert!(core::mem::offset_of!(ImagePathCache, path) == 0x14);
+    assert!(core::mem::offset_of!(ImagePathCache, option) == 0x24);
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +149,51 @@ mod tests {
         provider.succeed
     }
     unsafe extern "C" fn clear(path: *mut StringObject) { (*path).payload = core::ptr::null_mut(); }
+
+    unsafe extern "C" fn path_lookup(provider: *mut u8, key: u32, format: u32,
+        path: *mut StringObject, index: *mut u32, count: *mut u32, option: *mut u8) -> u32 {
+        let provider = &mut *provider.cast::<Provider>();
+        provider.calls += 1;
+        index.write(key ^ format);
+        count.write(27);
+        option.write(0x81);
+        (*path).payload = core::ptr::without_provenance_mut(1);
+        provider.succeed
+    }
+
+    #[test]
+    fn path_cache_hit_miss_failure_and_retry() {
+        let mut slots = [0usize; 9]; slots[8] = path_lookup as *const () as usize;
+        let mut provider = Provider { vtable: slots.as_ptr(), calls: 0, succeed: 9 };
+        let cell = (&mut provider as *mut Provider).cast::<u8>();
+        let path_vtable = StringObjectVtable { slots: [0, 0, 0, clear as *const () as usize, 0, 0] };
+        let mut cache = ImagePathCache { opaque: [0xa5a5a5a5; 2], provider: core::ptr::null(),
+            key: 0, kind: 4, path: StringObject { vtable: &path_vtable, payload: core::ptr::null_mut() },
+            index: 12, count: 13, option: 0x55 };
+        unsafe {
+            assert_eq!(image_path_cache_refresh(&mut cache, 0, 4), 1);
+            assert_eq!((cache.index, cache.count, cache.option), (12, 13, 0x55));
+            cache.provider = &cell;
+            assert_eq!(image_path_cache_refresh(&mut cache, 1, 4), 1);
+            assert_eq!((cache.key, cache.kind, cache.index, cache.count, cache.option),
+                (1, 4, 1 ^ 0x400, 27, 0x81));
+            cache.provider = core::ptr::null();
+            assert_eq!(image_path_cache_refresh(&mut cache, 1, 4), 1);
+            cache.provider = &cell;
+            assert_eq!(image_path_cache_refresh(&mut cache, 1, u32::MAX), 1);
+            assert_eq!(cache.index, 1 ^ u32::MAX);
+            provider.succeed = 0;
+            assert_eq!(image_path_cache_refresh(&mut cache, 2, 2), 0);
+            assert_eq!((cache.key, cache.kind, cache.index, cache.count, cache.option),
+                (0, u32::MAX, u32::MAX, 0, 0));
+            assert!(cache.path.payload.is_null());
+            provider.succeed = 1;
+            assert_eq!(image_path_cache_refresh(&mut cache, 2, 2), 1);
+            assert_eq!((cache.key, cache.kind, cache.count, cache.option), (2, 2, 27, 0x81));
+            assert_eq!(provider.calls, 4);
+            assert_eq!(cache.opaque, [0xa5a5a5a5; 2]);
+        }
+    }
 
     #[test]
     fn cache_transitions_and_failed_partial_output() {
