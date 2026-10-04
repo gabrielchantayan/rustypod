@@ -47676,6 +47676,44 @@ functions:
       caveat as the other four getters - the ctor is a dispatch slot
       with a zeroing stub.
 
+  - address: 0x081ec290
+    ghidra: FUN_081ec290
+    name: class_8900_prid_table_index
+    size: 92
+    sig: "u32 class_8900_prid_table_index(const Class8900 *this)"
+    module: app/class_8900_prid_table_index
+    status: ported
+    renames:
+      param_1/r0: this
+      piVar1: resource
+      uVar2: index
+      FUN_0827216c: resource_chain_find
+      DAT_081ec2e0: resource_id_6066
+      DAT_081ec2e4: resource_kind_prid
+      DAT_081ec2e8: runtime_record_table
+    notes: >-
+      Raw osos.dec words establish 80 bytes of ARM code followed by
+      three literals (0x6066, 0x70724944, 0x089cc3cc), for a true
+      92-byte extent ending at the next push prologue at 0x081ec2ec.
+      Independent whole-image BL decoding finds two plain incoming BLs
+      at 0x080feac4 and 0x081edc00 and zero predicated incoming BLs.
+      There is one outgoing plain BL at 0x081ec2a0 to the already ported
+      resource_chain_find at 0x0827216c. Ghidra additionally attributes
+      a caller in FUN_082a354c, but it is not another raw BL to this address.
+      Resolve ("prID", 0x6066) through the Class8900 store at +0x378.
+      A NULL answer returns 0xffffffff. Otherwise compare the answer's
+      first aligned word against word +8 of 21 twelve-byte records at
+      runtime address 0x089cc3cc, returning the first matching index
+      or 0xffffffff. The runtime table is retained, not replaced with
+      bytes guessed from the raw file at that address. Host fixtures
+      use the existing native-pointer receiver layout and a factored scan.
+      Tests cover all 21 indices, nonmatching words, first duplicate
+      precedence, ignored record fields, and NULL resource short-circuit.
+      Host suite passes (14079 tests); ARM release build succeeds.
+      match.py reports a structural diff: LLVM unrolls the bounded scan
+      into 21 ordered comparisons with early exits, retains the NULL
+      guard, provider call, aligned loads, and 0xffffffff fallback.
+
   - address: 0x081ec2ec
     ghidra: FUN_081ec2ec
     name: class_8900_prid_first_byte
