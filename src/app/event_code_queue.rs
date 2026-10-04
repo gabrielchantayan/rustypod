@@ -131,6 +131,45 @@ pub unsafe extern "C" fn event_code_queue_post(this: *mut EventCodeQueue, code: 
     mutex_unlock(mutex);
 }
 
+/// Constructs the deferred event-code queue base.
+///
+/// Original: `FUN_081de298` @ **0x081de298**, **192 bytes** through
+/// 0x081de358 (188 instruction bytes and the vtable literal at 0x081de354).
+/// Whole-image aligned A32 decoding verifies two incoming plain BLs at
+/// 0x08143f0c and 0x08144230, zero predicated BLs and zero tail branches.
+/// The original body contains eight plain BLs and no predicated BLs.
+///
+/// Install vtable 0x0898e9b0, clear word_30, initialize the ten-word deque
+/// head, create its mutex, and return this. Leave pad_04 untouched.
+/// Deliberate deviations: omit the all-NULL temporary deque, two iterator
+/// copies, empty range insertion and cleanup predicate. Raw deque constructor
+/// 0x083dfdac clears both iterators and count, so insertion at 0x083ea558
+/// returns immediately and the cleanup loop never pops. Spell the equivalent
+/// deque prefix initialization as target words: the existing DequeHead port
+/// widens pointers on hosts, while this object's existing queue is [u32; 10].
+/// Mutex creation uses the existing port and its installed ROM_KERNEL ops.
+/// match.py: 47 original instructions versus 15 Rust instructions; LLVM
+/// lowers the ten-word clear to __aeabi_memclr4, keeps mutex creation at
+/// target +0x34 and return-this, and removes the proven-empty work above.
+///
+/// # Safety
+/// `this` must be aligned writable storage for EventCodeQueue. ROM_KERNEL
+/// must satisfy mutex_create's dependency contract before use.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn event_code_queue_construct(this: *mut EventCodeQueue) -> *mut EventCodeQueue {
+    initialize_queue_prefix(this);
+    crate::kernel::sync_mutex::mutex_create(core::ptr::addr_of_mut!((*this).mutex));
+    this
+}
+
+#[inline(always)]
+unsafe fn initialize_queue_prefix(this: *mut EventCodeQueue) {
+    core::ptr::addr_of_mut!((*this).vtable).write(0x0898e9b0usize as *const u32);
+    core::ptr::addr_of_mut!((*this).word_30).write(0);
+    core::ptr::addr_of_mut!((*this).queue).write([0; 10]);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -309,5 +348,32 @@ mod tests {
         assert_eq!(events(), std::vec::Vec::<u32>::new());
         assert_eq!(object.queue, [0xdead_beef; 10]);
         unsafe { core::ptr::addr_of_mut!(ROM_KERNEL).write_volatile(saved_rom) };
+    }
+
+    #[test]
+    fn construction_clears_poisoned_queue_preserving_padding_mutex_and_neighbors() {
+        #[repr(C)]
+        struct Guarded { before: u32, object: EventCodeQueue, after: u32 }
+        for poison in [1, 0xdead_beef, u32::MAX] {
+            let mut guarded = Guarded {
+                before: 0x12345678,
+                object: EventCodeQueue {
+                    vtable: core::ptr::null(),
+                    pad_04: poison,
+                    queue: [poison; 10],
+                    word_30: poison,
+                    mutex: Mutex { sem_cell: 4usize as *mut u32, unused: poison },
+                },
+                after: 0x87654321,
+            };
+            unsafe { initialize_queue_prefix(&mut guarded.object) };
+            assert_eq!(guarded.object.vtable as usize, 0x0898e9b0);
+            assert_eq!(guarded.object.queue, [0; 10]);
+            assert_eq!(guarded.object.word_30, 0);
+            assert_eq!(guarded.object.pad_04, poison);
+            assert_eq!(guarded.object.mutex.sem_cell as usize, 4);
+            assert_eq!(guarded.object.mutex.unused, poison);
+            assert_eq!((guarded.before, guarded.after), (0x12345678, 0x87654321));
+        }
     }
 }
