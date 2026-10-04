@@ -720,6 +720,7 @@ pub mod range_result_collect;
 pub mod registration_handle_wrapper;
 pub mod registration_handle_current_value;
 pub mod record_manager;
+pub mod record_selection_complete;
 pub mod recording_buffer;
 pub mod recording_buffer_slot_table_reset;
 pub mod recording_controller;

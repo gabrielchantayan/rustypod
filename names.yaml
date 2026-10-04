@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08202000
+    ghidra: FUN_08202000
+    name: record_selection_complete
+    size: 144
+    sig: "u32 record_selection_complete(void *object, u32 status)"
+    module: app/record_selection_complete
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: status
+      object+4: selector
+      uVar1/r5: captured_context
+      uVar2/r6: record_manager
+    notes: >-
+      Raw A32 words establish 0x08202000..0x08202090 (144 bytes), with the
+      next independent push at 0x08202090. Two inbound unconditional BLs
+      at 0x08201f10 and 0x082022a0 pass statuses one and two; zero predicated
+      inbound BLs. Fifteen outbound unconditional BLs, zero predicated BLs,
+      and a final tail B to ui_manager_finish_pending_operation at 0x08038130.
+      Begin pending operation (1,1), capture current context, fetch record
+      manager, apply status to selected record via slot +0x5c and captured
+      context via slot +0x6c. Reload selector +4 between record operations.
+      Finalize object through 0x08202090 (virtual +0x20, +0x34, ready flag),
+      set manager state to six via 0x08038228 -> mirror 0x0800521c, initialize
+      stream and reinitialize with (stream,0,captured_context), then invoke
+      0x08038220 -> mirror 0x08004ee4 (+0x1c -> 0x080ea540), and finish (1,0).
+      Preserve retail getter paths because Rust singleton constructors are
+      incomplete. Host boundaries replace retail calls; no target changes.
+      Final r0 is preserved although both known callers discard it. Host
   - address: 0x081f08f8
     ghidra: FUN_081f08f8
     name: context_operation_begin
