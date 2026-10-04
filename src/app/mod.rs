@@ -354,6 +354,7 @@ pub mod volume_controller_adjust_position;
 pub mod linked_list_snapshot_create;
 pub mod media_player_reset_default_resource;
 pub mod global_adjustment_notification_post;
+pub mod controller_adjust_property_6056;
 pub mod volume_channel_set_level;
 pub mod volume_channel_set_balance;
 pub mod volume_controller_reschedule_timer;
