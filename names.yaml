@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820d6ac
+    ghidra: FUN_0820d6ac
+    name: ui_item_padded_size
+    size: 68
+    sig: "u32 *ui_item_padded_size(u32 *view, u32 context, u32 item, u32 *height, u32 *width)"
+    module: ui/item_padded_size
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: context
+      param_3/r2: item
+      param_4/r3: height
+      param_5/stack: width
+    notes: >-
+      Raw extent 0x0820d6ac..0x0820d6f0 is 68 bytes, ending at pop r0-r6/pc
+      before the next push. One outgoing plain BL, zero predicated BLs;
+      two incoming plain BLs at 0x0820dea4 and 0x0820df88, zero predicated.
+      Ghidra misses the stack rectangle seeded from r0-r3. The unported
+      helper at 0x0820d6f0 writes words 2/3; no existing name or Rust seam.
+      Height is word3-word1 plus twice view padding at +0xb8; width is
+      word2-word0. Preserve wrapping arithmetic and ordered aliased stores.
+      Return view in r0; original restored r1 is not a second C ABI return.
+      Host edge tests and suite, ARM build and standalone arithmetic smoke
+      pass. match.py shows 17 original versus 21 Rust instructions with
+      equivalent rectangle and stores, BLX via literal 0x0820d6f0 instead
+      of BL, and an explicit frame. No device execution performed.
   - address: 0x08213c00
     ghidra: FUN_08213c00
     name: selected_buffer_offset_byte
