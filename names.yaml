@@ -210258,3 +210258,39 @@ functions:
       non-test compile errors in prepare_entry_metadata,
       shared_payload_select_kind, and calendar_schedule; no device or
       emulator execution was performed.
+  - address: 0x082104e8
+    ghidra: FUN_082104e8
+    name: jpeg_stream_seek
+    size: 64
+    sig: i32 jpeg_stream_seek(JpegStream *stream, u32 position)
+    module: jpeg/stream_seek
+    status: ported
+    renames:
+      param_1/r4: stream
+      param_2/r5: position
+      stream_plus_0x04: error_status
+      stream_plus_0x08: file_handle
+      stream_plus_0x14: bytes_read
+      FUN_082787b8: ft_platform_file_seek
+    notes: >-
+      Raw osos.dec confirms 64 bytes through pop at 0x08210524; the next
+      real function starts with push at 0x08210528. Independent whole-image
+      A32 decoding finds two inbound plain BLs at 0x082106c4 and 0x0821074c,
+      zero predicated inbound BLs, and one outbound plain BL at 0x08210518
+      to the already-ported ft_platform_file_seek. JPEG marker callers use
+      this to skip segments. Null handle stores and returns -7 without
+      changing position. Otherwise passes (handle, 0, position, 0, 0), ignores
+      seek status, stores position at +0x14, and returns zero without clearing
+      the stream error. No deliberate deviations or new callee seam. Reuses
+      JpegStream's target-width fields. Host regressions cover null handle,
+      absolute start/interior/end seeks, out-of-range and UINT32_MAX rejection,
+      invalid file state, preserved stream errors and opaque words, and lock
+      release through the real file seek. All 13899 host tests pass; ARM
+      release build passes. match.py exits 1 with 16 original versus 22 Rust
+      instructions: LLVM adds a frame pointer and merges stores using a
+      selected field offset; the null branch, real seek call, zero origin/high
+      word, ignored status, position write, and return values agree. An
+      independent limited A32 interpreter executed the original and compiled
+      Rust null-handle paths for requested positions 0, 64, and UINT32_MAX,
+      observing identical return -7 and unchanged position/opaque fields.
+      No device execution was performed.
