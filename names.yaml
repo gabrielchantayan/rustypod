@@ -213086,3 +213086,42 @@ functions:
       differences. Emitted owner/container/lock offsets remain +0x28/+4/
       +0x40; the conditional back/notification path and final base tail
       dispatch are retained. No attached-device execution was performed.
+  - address: 0x0820278c
+    ghidra: FUN_0820278c
+    name: queued_owner_construct
+    size: 132
+    sig: "QueuedOwnerObject *queued_owner_construct(QueuedOwnerObject *storage, u32 priority, QueuedOwner *owner, const StringObject *name)"
+    module: cxx/queued_owner_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: priority
+      param_3/r2: owner
+      param_4/r3: name
+      puVar2/r4: object
+      iVar4/r6: queue
+      DAT_0820280c: QUEUED_OWNER_VTABLE_ADDRESS (0x08991094)
+      FUN_08290704: task_base_construct
+      FUN_08094404: mutex_lock_counted
+      FUN_0829e208: counted_container_is_empty
+      FUN_081da690: retail queue back (unported resident boundary)
+      FUN_08290690: retail mark previous task (unported resident boundary)
+      FUN_081da7a8: retail queue push-back (unported resident boundary)
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw A32 verifies 128 code bytes through 0x08202808, followed by
+      vtable literal 0x08991094 at 0x0820280c; next function starts at
+      0x08202810. Full-image word decoding counts two inbound plain BLs
+      at 0x081dec54 and 0x081ee1e0, seven outgoing plain BLs, and zero
+      predicated BLs in either direction. Construct the base with scheduler
+      0xc000, active 1, timeout 10; store owner and derived vtable; lock
+      owner+0x40, reload object owner, and query its queue at +4. If nonempty,
+      fetch its back and pass that returned r0 to 0x08290690, which sets
+      byte +0x21 only when word +4 is nonzero. Append the new task, unlock
+      the original owner, return object. Existing base, predicate and mutex
+      ports are reused; repr(C) widens host pointer layouts. Host-only seams
+      expose resident back/mark/push calls. Host suite: 14016 passed; ARM
+      release build passed. Native smoke verifies 0->1, 1->2, 3->4 queues
+      and previous-task marking with balanced holds. match.py exits 1:
+      44 versus 32 instructions, inlined counted acquire, larger frame,
+      resident BLX calls; conditional mark and append retained. No device run.
