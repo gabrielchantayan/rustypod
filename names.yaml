@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d9760
+    ghidra: FUN_081d9760
+    name: slot_completion_poll
+    size: 176
+    sig: "int slot_completion_poll(CompletionManager *manager, u32 index)"
+    module: app/slot_completion_poll
+    status: ported
+    vars:
+      param_1/r4: manager
+      param_2/r1: index
+      iVar2/r5: slot
+      iVar1/r0: poll_result
+      uVar3/r6: payload_first
+      uVar4/r7: payload_second
+      FUN_08228360: lock_service_lock
+      FUN_08228388: lock_service_unlock
+    notes: >-
+      Raw osos.dec establishes [0x081d9760,0x081d9810), 176 bytes;
+      next entry is push {r4,r5,r6,lr}. Whole-image decoding finds two
+      inbound plain BLs at 0x081af6c0 and 0x081c886c, zero predicated.
+      Four outbound plain BLs at 0x081d9778, 0x081d97b0, 0x081d97e0,
+      0x081d9804; zero predicated; two indirect BLX sites. Locks selected
+      twenty-byte slot, polls non-null state-one object via vtable +0x38
+      with this in r0, returns one if nonzero. Otherwise writes state two,
+      snapshots object words +8/+12, unlocks and reloads optional callback
+      and context at manager +0x294/+0x298 before notifying. Other paths
+      unlock and return zero. Reuses ported lock-service adapters. repr(C)
+      pointer fields widen on hosts; target layout is unchanged. Host tests
+      cover null objects, every inactive byte state, signed nonzero result,
+      completion without callback, notification and callback reentry.
+      Host cargo test suite and ARM build-std release build pass. Standalone
+      smoke reports slot 31 status zero, state two, one callback with payload
+      17/29; repeated polling does not notify again. match.py exits one with
+      a structural diff: same indexed addressing, virtual +0x38 dispatch,
+      state transition and post-unlock callback reload. No device execution.
   - address: 0x081ee900
     ghidra: FUN_081ee900
     name: string_chain_clear

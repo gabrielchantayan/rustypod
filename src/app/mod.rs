@@ -43,6 +43,7 @@ pub use identity_noop_with_options::*;
 pub mod member_pointer_identity;
 pub use member_pointer_identity::*;
 pub mod slot_pool_available_count;
+pub mod slot_completion_poll;
 pub mod view_event_bind_state;
 pub use view_event_bind_state::*;
 pub mod selected_buffer_offset_byte;
