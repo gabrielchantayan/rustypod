@@ -47054,6 +47054,37 @@ functions:
       The constructor has no recovered identity, so the Rust port uses a
       device-address seam with an explicit host-test replacement; its u32
       result preserves the target's 4-byte pointer field on 64-bit hosts.
+  - address: 0x0820ba88
+    ghidra: FUN_0820ba88
+    name: mode_two_attachment_destruct
+    size: 48
+    sig: "struct ModeTwoAttachmentOwner *mode_two_attachment_destruct(struct ModeTwoAttachmentOwner *owner)"
+    module: app/mode_two_attachment_destruct
+    status: ported
+    vars:
+      param_1: owner
+      DAT_0820bab4: MODE_TWO_ATTACHMENT_BASE_VTABLE
+    notes: >-
+      Raw extent is 48 bytes: eleven ARM instruction words (44 bytes)
+      followed by the vtable literal 0x08992240 at 0x0820bab4. The next
+      independent function starts at 0x0820bab8 with mov r0, #1; bx lr.
+      Full-image A32 decoding finds two incoming plain BLs at 0x081fd2f0
+      and 0x0820ba7c, no predicated BLs, and three tail Bs at 0x081f18b8,
+      0x08210dc0 and 0x08210f5c. The body has zero direct BLs and one
+      predicated indirect BLXNE. Installs the base vtable before dispatching
+      the non-null attachment at owner+8 through virtual slot +0x1c,
+      passing the attachment as r0; returns owner without clearing the
+      attachment or overwriting virtual-call mutations. The virtual
+      callee identity is unresolved, not assigned a guessed firmware
+      address. Host pointer fields and virtual slots are widened
+      structurally while ARM retains four-byte layout. Host tests cover
+      null attachments, repeated dispatch, vtable installation ordering,
+      and callback mutations. A standalone host smoke exercised virtual
+      mutation and the null path. ARM release build succeeded; match.py
+      printed the expected structural diff (exit 1): LLVM uses an early
+      null return and an unconditional BLX inside the non-null branch,
+      adds its frame, and preserves the vtable literal, +8 field, +0x1c
+      dispatch slot, and original-owner return.
   - address: 0x0820b230
     ghidra: thunk_FUN_0820b230
     name: command_dispatcher_get_veneer
