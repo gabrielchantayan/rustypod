@@ -242,6 +242,7 @@ pub mod beeper_construct;
 pub mod vtable_state_construct;
 pub mod base_vtable_state_init;
 pub mod triple_base_state_reset;
+pub mod triple_vtable_state_construct;
 pub mod buffered_stream_flush_pending;
 pub mod buffered_stream_collection_flush;
 pub mod buffered_stream_close;
