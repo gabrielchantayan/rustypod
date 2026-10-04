@@ -59,6 +59,9 @@ pub unsafe extern "C" fn context_lifecycle_rearm(context: *mut u8) {
 }
 
 #[cfg(test)]
+pub(super) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 extern crate std;
 
 #[cfg(test)]
@@ -66,7 +69,6 @@ mod tests {
     use super::*;
     use crate::app::framework_root::FRAMEWORK_ROOT;
     use core::ptr;
-    use std::sync::Mutex as StdMutex;
 
     #[repr(C)]
     struct Context {
@@ -74,7 +76,6 @@ mod tests {
         guard: Mutex,
     }
 
-    static TEST_LOCK: StdMutex<()> = StdMutex::new(());
     static mut OPERATION_ARGS: (usize, usize) = (0, 0);
 
     unsafe extern "C" fn record_operation(root: *mut u8, context: *mut u8) {
