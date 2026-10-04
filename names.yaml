@@ -211999,3 +211999,43 @@ functions:
       1: both bodies have 42 decoded entries, same cache/slot/bounds/tail
       structure; LLVM merges helper paths, uses BLX to the literal helper
       address, reverses branch layout and adds a frame pointer.
+
+  - address: 0x082081f8
+    ghidra: FUN_082081f8
+    name: locked_controller_records_copy
+    size: 44
+    sig: "u32 locked_controller_records_copy(ControllerRecordState *controller, const void *source)"
+    module: app/locked_controller_records_copy
+    status: ported
+    renames:
+      param_1/r4: controller
+      param_2/r5: source
+      controller_plus_0x1c: state
+      FUN_081fca10: mutex_handoff_lock
+      FUN_081d6034: copy_eighteen_records_and_tail
+      FUN_081fca40: mutex_handoff_unlock
+    notes: >-
+      Raw osos.dec A32 words establish [0x082081f8, 0x08208224),
+      44 bytes, ending with pop {r4,r5,r6,pc}; the next word is a
+      distinct push {r4,r5,r6,r7,r8,r9,r10,lr} prologue. Independent
+      whole-image BL decoding finds two inbound plain BLs at 0x0822ab14
+      and 0x0822b798, zero predicated inbound BLs. Three outbound plain
+      BLs at 0x08208204, 0x08208210, and 0x08208218 target the already
+      ported mutex_handoff_lock, copy_eighteen_records_and_tail, and
+      mutex_handoff_unlock; zero predicated outbound BLs. Acquires the
+      handoff, assigns state at +0x1c from source, releases the selected
+      mutex, and returns one. The copier preserves the leading state word
+      and assigns 18 36-byte records plus two trailing words, through
+      state+0x290. Both callers use controller base+0x330; the second
+      copies from its base+0x5fc. No invented or absolute-address seams.
+      Deliberate deviation uses named repr(C) fields so widened host
+      mutex pointers do not overlap the state, while ARM retains +0x1c.
+      Tests exercise embedded and separate selected mutexes, full copied
+      state, header and leading-word preservation, and self-assignment.
+      Host suite and ARM release build passed. Standalone optimized
+      production-source smoke observed return one, all 164 assigned
+      words, preserved leading word, and intact header. match.py exits
+      one with 11 original versus 12 Rust instructions: LLVM adds a
+      frame pointer and changes saved registers. Three R_ARM_CALL
+      relocations verify the same lock/copy/unlock targets; +0x1c and
+      final return one remain intact. No on-device execution claimed.
