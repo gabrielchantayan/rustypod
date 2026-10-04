@@ -10968,9 +10968,10 @@ functions:
     notes: >-
       Raw osos.dec establishes the 0x08223630..0x082236c8 extent. It has
       10 plain unconditional BL instructions and no predicated BL forms.
-      It locks +0x8, commits an attached client, optionally polls the
-      verified but still unnamed 0x081fc8b4 boundary around one
-      queue_wait(+0x48, +0x44), clears +0x4c/+0x44, then tail-unlocks.
+      It locks +0x8, commits an attached client, optionally checks
+      state_flags_clear_0x50000 around one queue_wait(+0x48, +0x44),
+      clears +0x4c/+0x44, then tail-unlocks. The former placeholder
+      polling seam is replaced with the verified state-flag port.
   - address: 0x0822b054
     ghidra: FUN_0822b054
     name: shared_cell_field_copy
@@ -43064,6 +43065,30 @@ functions:
       0x08207f60, and 0x08207f7c. No data word points at this address, so
       it is not a virtual dispatch target. Empty masks return 0. No
       deliberate deviations.
+
+  - address: 0x081fc8b4
+    ghidra: FUN_081fc8b4
+    name: state_flags_clear_0x50000
+    size: 32
+    sig: "u32 state_flags_clear_0x50000(u8 *object)"
+    module: util/state_flags
+    status: ported
+    renames:
+      param_1/r0: object
+      uVar2/r2: clear
+      iVar1/r0: overlap
+    notes: >-
+      Raw extent 0x081fc8b4..0x081fc8d4 ends at the next real
+      function's push {r4,r5,r6,lr}. Complete raw ARM BL decoding
+      finds two inbound plain BL sites, 0x08223698 and 0x082236b0,
+      and no predicated BL sites. The only outgoing call is the plain
+      BL at 0x081fc8c0 to state_flags_overlap at 0x081fc6f0.
+      MOV r1,#0x50000 selects state bits 0x10000 and 0x40000.
+      Returns 1 iff neither bit is set, without modifying the object.
+      The original MOV r2,#1 supplies the initial result across the
+      known callee; Ghidra incorrectly treats it as a third argument.
+      Rust omits that unused argument/register dependency and calls
+      the existing two-argument port. No behavioral deviations.
 
   - address: 0x08184b24
     ghidra: FUN_08184b24
