@@ -143,6 +143,44 @@ pub unsafe extern "C" fn strided_buffer_clear(table: *const StridedBuffer) {
     crate::libc::iram_veneers::iram_memzero_veneer(buffer, count.wrapping_mul(size) as usize);
 }
 
+/// strided_buffer_ensure_allocated — original: `FUN_081d8624` @
+/// `0x081d8624` (104 bytes, true extent `0x081d8624..0x081d868c`).
+/// Whole-image ARM decoding finds two incoming plain BLs at `0x081f4cb4`
+/// and `0x081f4d1c`, zero predicated BLs. Outbound: three plain BLs
+/// (operator_new, entry_size, aligned_buffer_init), zero predicated BLs,
+/// and one virtual BLX through the buffer's vtable slot +8.
+///
+/// Returns zero immediately when the entry buffer is already installed.
+/// Otherwise queries the entry count, allocates an eight-byte aligned-buffer
+/// owner, queries the stride, and initializes the owner with their wrapping
+/// u32 product. Stores the owner at +8 before copying its data word to +4.
+/// Returns 25 if that word is zero, retaining the owner even on failure.
+/// No deliberate deviations; all fixed callees use existing ports.
+///
+/// # Safety
+///
+/// `table` must be writable and its vtable/layout links valid for the
+/// recovered selectors. The tag-2 owner allocation must succeed: retailOS
+/// does not NULL-check it. Callbacks must preserve the object invariants.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strided_buffer_ensure_allocated(table: *mut StridedBuffer) -> u32 {
+    if (*table).entry_buffer != 0 {
+        return 0;
+    }
+    let vtable = (*table).opaque_00 as usize as *const StridedBufferVtable;
+    let count = ((*vtable).entry_count)(table);
+    let owner = crate::heap::veneers::operator_new(8);
+    let stride = strided_buffer_entry_size(table);
+    let owner = crate::heap::aligned_buffer::aligned_buffer_init(
+        owner, count.wrapping_mul(stride) as usize,
+    );
+    (*table).opaque_08 = owner as u32;
+    let data = owner.cast::<u32>().read_volatile();
+    (*table).entry_buffer = data;
+    if data == 0 { 25 } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -190,6 +228,86 @@ mod tests {
             });
         }
         Some((base.cast(), layout, buffer as u32))
+    }
+
+    static COUNT: AtomicU32 = AtomicU32::new(0);
+    static OWNER: AtomicUsize = AtomicUsize::new(0);
+    static DATA: AtomicUsize = AtomicUsize::new(0);
+    static REQUEST: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn allocation_entry_count(_: *const StridedBuffer) -> u32 {
+        COUNT.load(Ordering::SeqCst)
+    }
+
+    unsafe extern "C" fn allocate(
+        _: *mut crate::heap::types::HeapDescriptorDescriptor, size: usize, tag: usize,
+    ) -> *mut u8 {
+        if tag == 2 {
+            assert_eq!(size, 8);
+            OWNER.load(Ordering::SeqCst) as *mut u8
+        } else {
+            assert_eq!(tag, 3);
+            REQUEST.store(size, Ordering::SeqCst);
+            DATA.load(Ordering::SeqCst) as *mut u8
+        }
+    }
+
+    struct RestoreHeap(crate::heap::veneers::HeapVeneerOps);
+    impl Drop for RestoreHeap {
+        fn drop(&mut self) {
+            unsafe { core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write(self.0); }
+        }
+    }
+
+    #[test]
+    fn allocation_caches_success_wraps_sizes_and_retains_failed_owner() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let Some((table, _, _)) = fixture() else {
+            note_missing_u32_fixture("app::strided_buffer_entry");
+            return;
+        };
+        unsafe {
+            let _restore = RestoreHeap(core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read());
+            (*core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS)).alloc = allocate;
+            let vtable = (table as *mut u8).add(0x200).cast::<super::StridedBufferVtable>();
+            vtable.write(super::StridedBufferVtable { unresolved_00_04: [0; 2], entry_count: allocation_entry_count });
+            (*table).opaque_00 = vtable as u32;
+            let owner = (table as *mut u8).add(0x300);
+            OWNER.store(owner as usize, Ordering::SeqCst);
+            let raw = (table as *mut u8).add(0x501);
+            for (count, stride, data) in [
+                (3u32, 12u32, raw as usize),
+                (0, 17, raw as usize),
+                (0x8000_0001, 2, raw as usize),
+                (5, 8, 0),
+            ] {
+                (*table).entry_buffer = 0;
+                COUNT.store(count, Ordering::SeqCst);
+                ENTRY_SIZE.store(stride, Ordering::SeqCst);
+                DATA.store(data, Ordering::SeqCst);
+                let status = super::strided_buffer_ensure_allocated(table);
+                let expected = if data == 0 { 0 } else { (data as u32 + 31) & !31 };
+                assert_eq!(status, if data == 0 { 25 } else { 0 });
+                assert_eq!((*table).entry_buffer, expected);
+                assert_eq!((*table).opaque_08, owner as u32);
+                assert_eq!(owner.cast::<u32>().read(), expected);
+                assert_eq!(owner.cast::<u32>().add(1).read(), data as u32);
+                assert_eq!(REQUEST.load(Ordering::SeqCst), count.wrapping_mul(stride) as usize + 32);
+                if data != 0 {
+                    // Invalid dispatch links prove the cached path does not call selectors.
+                    let saved = (*table).opaque_00;
+                    (*table).opaque_00 = 0;
+                    assert_eq!(super::strided_buffer_ensure_allocated(table), 0);
+                    assert_eq!((*table).entry_buffer, expected);
+                    assert_eq!((*table).opaque_08, owner as u32);
+                    (*table).opaque_00 = saved;
+                }
+            }
+            DATA.store(raw as usize, Ordering::SeqCst);
+            assert_eq!(super::strided_buffer_ensure_allocated(table), 0);
+            assert_ne!((*table).entry_buffer, 0, "failure remains retryable");
+        }
     }
 
     #[test]
