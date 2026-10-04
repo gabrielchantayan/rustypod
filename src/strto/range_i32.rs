@@ -99,6 +99,39 @@ pub unsafe extern "C" fn parse_i32_utf16_range(range: *const u8) -> i32 {
     result
 }
 
+/// `parse_i32_utf16_trailing_sign` — original: `FUN_0820b430` @
+/// 0x0820b430, 68 bytes (next function at 0x0820b474). Raw ARM verifies
+/// two plain BL instructions and zero predicated BL instructions in the body;
+/// whole-image decoding finds two plain inbound BL sites, zero predicated.
+///
+/// Returns zero when the clamped signed UTF-16 element count is nonpositive.
+/// Otherwise parses the range through `parse_i32_utf16_range`, multiplying
+/// its result by -1 only when the final UTF-16 code unit is ASCII '-'.
+/// Negation wraps, including i32::MIN; a leading minus and a trailing minus
+/// therefore cancel. The context argument is unused in the original.
+///
+/// Deliberate deviations: no target semantic changes. Hosts use native-width
+/// `VectorBounds` pointers rather than firmware's two four-byte pointer words.
+///
+/// # Safety
+///
+/// `range` must be a readable, aligned `VectorBounds`. A positive count
+/// requires readable aligned UTF-16 storage through `end`, and the range
+/// must satisfy `parse_i32_utf16_range`'s conversion contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn parse_i32_utf16_trailing_sign(
+    _context: *mut u8,
+    range: *const crate::cxx::templates::VectorBounds,
+) -> i32 {
+    if crate::cxx::templates::vector_size_elem2_clamped(range) <= 0 {
+        return 0;
+    }
+    let negative = ((*range).end as *const u16).sub(1).read() == b'-' as u16;
+    let value = parse_i32_utf16_range(range.cast());
+    if negative { value.wrapping_neg() } else { value }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -220,6 +253,44 @@ mod tests {
                 assert_eq!(ALLOCATION_CALLS, 1);
                 assert_eq!(ALLOCATION_SIZE, input.len() + 1);
                 assert_eq!(RELEASED[1], COPY.as_mut_ptr() as usize);
+            }
+        }
+    }
+
+    #[test]
+    fn trailing_sign_skips_empty_inverted_and_sub_element_ranges() {
+        use crate::cxx::templates::VectorBounds;
+        for (begin, end) in [(0usize, 0usize), (4, 2), (2, 3)] {
+            let range = VectorBounds { begin: begin as *mut u8, end: end as *mut u8 };
+            assert_eq!(unsafe {
+                parse_i32_utf16_trailing_sign(core::ptr::null_mut(), &range)
+            }, 0);
+        }
+    }
+
+    #[test]
+    fn trailing_sign_negates_parsed_value_with_wrapping_arithmetic() {
+        use crate::cxx::templates::VectorBounds;
+        let (_range_lock, _string_lock, _ops) = install_fixtures();
+        for (input, expected) in [
+            (&b"123"[..], 123), (&b"123-"[..], -123),
+            (&b"-123"[..], -123), (&b"-123-"[..], 123),
+            (&b"2147483648-"[..], i32::MIN), (&b"4294967295-"[..], 1),
+            (&b"-"[..], 0), (&b"12-x"[..], 12),
+        ] {
+            let wide: std::vec::Vec<u16> = input.iter().map(|&c| c as u16).collect();
+            let range = VectorBounds {
+                begin: wide.as_ptr() as *mut u8,
+                end: unsafe { wide.as_ptr().add(wide.len()) } as *mut u8,
+            };
+            unsafe {
+                SOURCE.fill(0);
+                SOURCE[..input.len()].copy_from_slice(input);
+                RELEASE_CALLS = 0;
+                assert_eq!(
+                    parse_i32_utf16_trailing_sign(core::ptr::null_mut(), &range),
+                    expected,
+                );
             }
         }
     }

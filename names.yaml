@@ -124542,6 +124542,36 @@ functions:
       children, preservation of unrelated flag bits, query selector, cursor
       indices, and an empty collection.
 
+  - address: 0x0820b430
+    ghidra: FUN_0820b430
+    name: parse_i32_utf16_trailing_sign
+    size: 68
+    sig: "i32 parse_i32_utf16_trailing_sign(u8 *context, const VectorBounds *range)"
+    module: strto/range_i32
+    status: ported
+    vars: {param_1: context, param_2: range, iVar1: sign, iVar2: value}
+    notes: >-
+      Raw osos.dec establishes 0x0820b430..0x0820b474: pop at 0x0820b470
+      followed by the next function's push at 0x0820b474. Independent ARM
+      word decoding counts two unconditional body BLs, zero predicated;
+      inbound BLs are 0x0820b794 and 0x0820b824, both unconditional.
+      Ignores r0 context. Calls the already-ported vector_size_elem2_clamped
+      at 0x0829db9c; a signed nonpositive result returns zero without
+      reading UTF-16 storage or converting. Otherwise reads the halfword
+      at end-2 and uses sign -1 only for ASCII minus, calls the already-
+      ported parse_i32_utf16_range at 0x080f01c4, and wraps the product.
+      Caller 0x0820b7fc stores the result at context+100 for digit-led
+      tokens. No new dependency seam; the existing range converter seam
+      remains inside parse_i32_utf16_range. Hosts use native VectorBounds
+      pointer fields; target begin/end remain four bytes apart.
+      Host tests cover empty, inverted, sub-element spans, leading and
+      trailing signs, doubled minus, internal minus, and wrapping overflow.
+      Full host suite passes 13921 tests; ARM release build succeeds.
+      match.py reports 16 versus 17 instructions: same two calls and
+      nonpositive guard, saved trailing halfword, and conditional wrapping
+      negation instead of sign multiplication. LLVM moves the minus
+      comparison after parsing but retains the pre-call halfword load.
+
   # --- UTF-16 range signed-decimal parse wrapper ---
   - address: 0x080f01c4
     ghidra: FUN_080f01c4
