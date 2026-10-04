@@ -210552,3 +210552,54 @@ functions:
       and stacked fifth zero argument are preserved. Differences are
       LLVM's frame setup, register allocation, and scheduling; archive
       direct-call operands await linker relocation. No device run.
+
+  - address: 0x081ff6d0
+    ghidra: FUN_081ff6d0
+    name: settings_value_apply_with_rollback
+    size: 136
+    sig: "u32 settings_value_apply_with_rollback(void *owner, u32 requested, u32 enabled, i32 kind)"
+    status: ported
+    module: app/slot_table.rs
+    vars:
+      param_1: owner
+      param_2: requested
+      param_3: enabled
+      param_4: kind
+      piVar1: settings
+      iVar2: previous
+    renames:
+      FUN_08259928: settings_get
+      FUN_081fe954: slot_table_register
+      FUN_081fea54: slot_table_clear
+      "vtable+0x9c": unresolved_settings_value_get
+      "vtable+0x98": unresolved_settings_value_set
+    notes: >-
+      Raw ARM proves 34 instruction words through pop at 0x081ff754;
+      the next real function prologue begins at 0x081ff758. Whole-image
+      immediate-BL decoding finds two plain inbound sites at 0x081fe72c
+      and 0x081ff3e8, zero predicated BL sites. Outgoing calls comprise
+      three plain BL, zero predicated BL, one BLX and one BLXNE.
+      Snapshot settings virtual slot +0x9c, then register slot 11 with
+      kind and payload (previous, 0) when enabled is nonzero, otherwise
+      clear slot 11. If requested differs from previous, reload the
+      settings vtable and invoke +0x98 with requested. Always return zero,
+      ignoring registration failure and virtual setter return registers.
+      Callers decode command 11 or restore the saved slot-11 value;
+      the concrete virtual property identity remains unresolved.
+      Deliberate deviations inherit the existing crate settings cache
+      and registration table; host vtables use native pointer-width entries
+      at ARM word indices. The existing settings constructor lacks a
+      vtable by default, so this port requires a constructed singleton
+      and inherits the getter's not-hook-ready limitation.
+      Host regression covers occupied-slot preservation, equality with
+      clearing, nonboolean enable, negative and invalid kinds, extreme
+      values, and registration-before-setter ordering. Full host tests and
+      ARM release build passed. Standalone public-entry smoke with only
+      singleton lookup replaced registered snapshot 42 before setting 99,
+      then cleared on an equal-value disable without calling the setter.
+      match.py reports 34 stock instructions versus 36 Rust instructions:
+      both virtual offsets, snapshot, slot-11 branch, stacked zero payload,
+      conditional setter and zero result are preserved. LLVM removes the
+      unused owner forwarding, changes register allocation/frame setup,
+      and replaces predication with branches; direct calls await archive
+      relocation. No device execution.

@@ -135,6 +135,56 @@ pub unsafe extern "C" fn slot_table_register(
     0
 }
 
+/// Apply a settings value with optional slot-11 rollback registration.
+///
+/// Original: `FUN_081ff6d0` @ 0x081ff6d0; true extent 136 bytes, ending
+/// before the next prologue at 0x081ff758. Raw-word scan: two inbound plain
+/// BL calls, zero predicated BL calls; outgoing three plain BL, zero
+/// predicated BL, one BLX and one BLXNE.
+///
+/// Snapshot virtual slot +0x9c, register slot 11 with (kind, snapshot, 0)
+/// when enabled (otherwise clear it), then call virtual slot +0x98 only
+/// when the snapshot differs from the requested value. Ignore registrar
+/// and setter results and return zero. Reload the vtable after registration.
+///
+/// Deliberate deviations: reuse the crate settings singleton and slot table;
+/// host vtables use native-width entries at ARM word indices. The virtual
+/// property identity remains unresolved. The existing settings constructor
+/// is not hook-ready; callers must supply a fully constructed singleton.
+///
+/// # Safety
+/// The settings singleton must have callable slots +0x98 and +0x9c.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn settings_value_apply_with_rollback(
+    owner: *mut u8, requested: u32, enabled: u32, kind: i32,
+) -> u32 {
+    let settings = unsafe { crate::cxx::settings::settings_get() };
+    unsafe { apply_settings_value(owner, requested, enabled, kind, settings) }
+}
+
+#[inline(always)]
+unsafe fn apply_settings_value(
+    owner: *mut u8, requested: u32, enabled: u32, kind: i32, settings: *mut u8,
+) -> u32 {
+    let vtable = unsafe { settings.cast::<*const usize>().read() };
+    let get: unsafe extern "C" fn(*mut u8) -> u32 =
+        unsafe { core::mem::transmute(vtable.add(0x9c / 4).read()) };
+    let previous = unsafe { get(settings) };
+    if enabled == 0 {
+        unsafe { slot_table_clear(owner, 11) };
+    } else {
+        unsafe { slot_table_register(owner, 11, kind, previous, 0) };
+    }
+    if previous != requested {
+        let vtable = unsafe { settings.cast::<*const usize>().read() };
+        let set: unsafe extern "C" fn(*mut u8, u32) =
+            unsafe { core::mem::transmute(vtable.add(0x98 / 4).read()) };
+        unsafe { set(settings, requested) };
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -320,6 +370,58 @@ mod tests {
         let mut anything = [0u8; 4];
         assert_eq!(unsafe { slot_table_clear(anything.as_mut_ptr(), 2) }, 0);
         unsafe { assert_eq!((*slot(2)).occupied, 0) };
+        restore(guard);
+    }
+
+    #[repr(C)]
+    struct SettingsFixture {
+        vtable: *const usize,
+        value: u32,
+        writes: u32,
+        observed: [u32; 4],
+    }
+
+    unsafe extern "C" fn get_value(settings: *mut u8) -> u32 {
+        unsafe { (*settings.cast::<SettingsFixture>()).value }
+    }
+
+    unsafe extern "C" fn set_value(settings: *mut u8, value: u32) {
+        unsafe {
+            let settings = &mut *settings.cast::<SettingsFixture>();
+            let entry = &*slot(11);
+            settings.observed = [entry.occupied as u32, entry.kind as u32,
+                entry.value_a, entry.value_b];
+            settings.value = value;
+            settings.writes += 1;
+        }
+    }
+
+    #[test]
+    fn settings_snapshot_registration_precedes_change_and_preserves_occupied_slot() {
+        let guard = with_registered(11);
+        let mut vtable = [0usize; 40];
+        vtable[0x9c / 4] = get_value as *const () as usize;
+        vtable[0x98 / 4] = set_value as *const () as usize;
+        let mut settings = SettingsFixture { vtable: vtable.as_ptr(), value: 7,
+            writes: 0, observed: [0; 4] };
+        unsafe {
+            let object = (&mut settings as *mut SettingsFixture).cast();
+            assert_eq!(apply_settings_value(ptr::null_mut(), 8, 1, 0, object), 0);
+            assert_eq!(settings.observed, [1, 2, 0xaaaa_aaaa, 0xbbbb_bbbb]);
+            assert_eq!((settings.value, settings.writes), (8, 1));
+            assert_eq!(apply_settings_value(ptr::null_mut(), 8, 0, 0, object), 0);
+            assert_eq!((*slot(11)).occupied, 0);
+            assert_eq!((*slot(11)).kind, SLOT_KIND_FREE);
+            assert_eq!(settings.writes, 1, "equal value still clears, but does not set");
+            assert_eq!(apply_settings_value(ptr::null_mut(), u32::MAX, 2, -1, object), 0);
+            assert_eq!(settings.observed, [1, u32::MAX, 8, 0]);
+            assert_eq!((settings.value, settings.writes), (u32::MAX, 2));
+            assert_eq!(apply_settings_value(ptr::null_mut(), 0, 0, 0, object), 0);
+            assert_eq!(settings.observed, [0, SLOT_KIND_FREE as u32, 0, 0]);
+            assert_eq!(apply_settings_value(ptr::null_mut(), 1, 1, 3, object), 0);
+            assert_eq!(settings.observed, [0, SLOT_KIND_FREE as u32, 0, 0]);
+            assert_eq!(settings.value, 1, "invalid kind does not prevent the setting change");
+        }
         restore(guard);
     }
 }
