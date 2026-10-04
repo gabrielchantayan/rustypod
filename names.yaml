@@ -209752,14 +209752,14 @@ functions:
       finds two inbound plain BLs at 0x08211e54 and 0x08212030, zero
       predicated BLs; the body has seven plain BLs and zero predicated
       BLs. Walks the collection at group+8. If entry+8 and context+0x72
-      are both zero, calls the unported activation helper at 0x08211bac
+      are both zero, calls collection_entry_activate at 0x08211bac
       with context AND entry: raw r1 preserves the entry, unlike Ghidra's
       one-argument rendering. That helper checks entry+9 == 2, invokes
       0x0839e71c(context+0x50, entry+0xc), and writes entry+9 = 1.
       Otherwise constructs an empty handle, copy-assigns it to entry+4,
       releases the temporary, and writes entry+9 = 2. Reuses the ported
-      cursor and refcount helpers; only activation remains a fixed-address
-      target seam. Named pointer fields widen on hosts, with target offset
+      cursor, refcount and activation ports. Named pointer fields widen
+      on hosts, with target offset
       assertions. Saved-register return artifacts are omitted: both raw
       callers ignore them. The existing ARM within/at-limit wrapper now
       calls this Rust implementation on its at-limit path; its host seam
@@ -209775,3 +209775,31 @@ functions:
       state write; activation becomes literal-loaded BLX, invalidate is
       optimized away as a dead local store, and LLVM uses a larger frame.
       No device execution.
+  - address: 0x08211bac
+    ghidra: FUN_08211bac
+    name: collection_entry_activate
+    size: 44
+    sig: "void collection_entry_activate(u8 *context, RetirableEntry *entry)"
+    module: app/collection_entry_activate
+    status: ported
+    vars:
+      param_1/r0: context
+      param_2/r1/r4: entry
+      entry_plus_0x09: state
+      entry_plus_0x0c: value
+    renames:
+      FUN_0839e71c: synchronized_list_append
+    notes: >-
+      Raw A32 extent 0x08211bac..0x08211bd8 exclusive is 44 bytes; the
+      next independently entered prologue is targeted from 0x082117b0.
+      Two inbound plain BLs at 0x08211d08 and 0x08211da8, no predicated
+      BLs; one outbound plain BL at 0x08211bc8, no predicated BLs.
+      Only state 2 appends entry value to context+0x50, then sets state 1.
+      Reuses synchronized_list_append; the existing retirement caller now
+      calls this Rust port, removing its fixed-address activation seam.
+      Typed entry fields widen on hosts; target state/value offsets are
+      asserted. Incidental r0 contents are ignored by both raw callers.
+      All 13872 host tests pass; ARM release builds. Standalone host smoke
+      queues 0x12345678 exactly once and observes state 1. match.py exits
+      1: 11 original versus 14 Rust instructions, same state gate, value
+      load, append BL and post-call byte store, with LLVM frame overhead.

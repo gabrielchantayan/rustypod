@@ -6,12 +6,13 @@
 //! empty refcounted handle to entry +4, release the temporary, and set
 //! entry +9 to 2. The context flag is read afresh for each eligible entry.
 //! Deviations: typed pointer fields widen on hosts; unused saved-register
-//! return values are omitted (both raw callers ignore them). Only the
-//! unported activation helper uses a fixed-address call / host seam.
+//! return values are omitted (both raw callers ignore them). Activation
+//! reuses the Rust collection_entry_activate implementation.
 
 use crate::util::cursor::{Collection, Cursor, cursor_init, cursor_advance, cursor_invalidate};
 use crate::cxx::handle::{RefcountedBody, refcounted_ptr_construct_tertiary_variant,
     refcounted_ptr_copy_assign_retain_count, refcounted_body_release_retain_count};
+use super::collection_entry_activate::collection_entry_activate;
 
 #[repr(C)]
 pub struct EntryGroup {
@@ -25,6 +26,7 @@ pub struct RetirableEntry {
     pub handle: *mut RefcountedBody,
     pub retire_requested: u8,
     pub state: u8,
+    pub value: u32,
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -33,26 +35,9 @@ const _: () = {
     assert!(core::mem::offset_of!(RetirableEntry, handle) == 4);
     assert!(core::mem::offset_of!(RetirableEntry, retire_requested) == 8);
     assert!(core::mem::offset_of!(RetirableEntry, state) == 9);
+    assert!(core::mem::offset_of!(RetirableEntry, value) == 12);
 };
 
-pub type ActivateEntry = unsafe extern "C" fn(*mut u8, *mut RetirableEntry);
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_activate_entry(_: *mut u8, _: *mut RetirableEntry) {
-    panic!("entry activation requires a host implementation")
-}
-#[cfg(not(target_os = "none"))]
-pub static mut ACTIVATE_ENTRY: ActivateEntry = missing_activate_entry;
-
-#[inline(always)]
-unsafe fn activate_entry(context: *mut u8, entry: *mut RetirableEntry) {
-    #[cfg(target_os = "none")]
-    {
-        let activate: ActivateEntry = core::mem::transmute(0x0821_1bacusize);
-        activate(context, entry);
-    }
-    #[cfg(not(target_os = "none"))]
-    core::ptr::read_volatile(core::ptr::addr_of!(ACTIVATE_ENTRY))(context, entry);
-}
 
 /// # Safety
 /// `context` exposes a live flag at +0x72; `group` exposes a collection
@@ -66,7 +51,7 @@ pub unsafe extern "C" fn collection_entries_retire(context: *mut u8, group: *mut
     let mut entry: *mut RetirableEntry = core::ptr::null_mut();
     while cursor_advance(&mut cursor, core::ptr::addr_of_mut!(entry).cast()) != 0 {
         if (*entry).retire_requested == 0 && context.add(0x72).read() == 0 {
-            activate_entry(context, entry);
+            collection_entry_activate(context, entry);
         } else {
             let mut empty = core::ptr::null_mut();
             let source = refcounted_ptr_construct_tertiary_variant(&mut empty, 0, 0);
@@ -95,17 +80,10 @@ mod tests {
         out.cast::<*mut RetirableEntry>().write(core::ptr::addr_of_mut!((*fixture).entries[index as usize]));
         1
     }
-    unsafe extern "C" fn activate(context: *mut u8, entry: *mut RetirableEntry) {
-        (*entry).state = 1;
-        // Activation may change the context: subsequent entries must see it.
-        context.add(0x72).write(1);
-    }
     #[test]
     fn empty_mixed_and_forced_retirement() {
         let _lock = LOCK.lock();
         unsafe {
-            let old = ACTIVATE_ENTRY;
-            ACTIVATE_ENTRY = activate;
             let vtable = CollectionVtable { unresolved: [0; 15], item_at };
             for count in [0, 3] {
                 for forced in [0, 1] {
@@ -115,22 +93,21 @@ mod tests {
                     let mut fixture = Fixture {
                         group: EntryGroup { unresolved: [0; 2], entries: Collection { vtable: &vtable } },
                         entries: core::array::from_fn(|i| RetirableEntry {
-                            unresolved: 0xfeed, handle: &mut bodies[i], retire_requested: if i == 2 { 7 } else { 0 }, state: 9,
+                            unresolved: 0xfeed, handle: &mut bodies[i], retire_requested: if i == 2 { 7 } else { 0 }, state: 9, value: 0,
                         }), count,
                     };
                     let mut context = [0u8; 0x73];
                     context[0x72] = forced;
                     collection_entries_retire(context.as_mut_ptr(), &mut fixture.group);
                     for i in 0..3 {
-                        let retired = count != 0 && (forced != 0 || i != 0);
+                        let retired = count != 0 && (forced != 0 || i == 2);
                         assert_eq!(bodies[i].refcount, if retired { 1 } else { 2 });
                         assert_eq!(fixture.entries[i].handle.is_null(), retired);
-                        assert_eq!(fixture.entries[i].state, if retired { 2 } else if count != 0 { 1 } else { 9 });
+                        assert_eq!(fixture.entries[i].state, if retired { 2 } else { 9 });
                         assert_eq!(fixture.entries[i].unresolved, 0xfeed);
                     }
                 }
             }
-            ACTIVATE_ENTRY = old;
         }
     }
 }
