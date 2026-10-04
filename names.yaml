@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820c1b4
+    ghidra: FUN_0820c1b4
+    name: xml_writer_write_bytes
+    size: 16
+    sig: "u32 xml_writer_write_bytes(XmlTagWriter *writer, const u8 *bytes, u32 len)"
+    module: util/xml_write_tag
+    status: ported
+    vars:
+      param_1: writer
+      r0: output
+      r1: bytes
+      r2: len
+      r3: write_method
+    notes: >-
+      Raw words e5900008 e5903000 e5933008 e12fff13 establish the complete
+      16-byte thunk before the independent constructor at 0x0820c1c4.
+      Full-image A32 decoding finds two inbound plain BLs at 0x0823334c
+      and 0x0823337c, zero predicated BLs; xml_write_tag additionally
+      tail-branches with BNE at 0x082333a4. No outbound BLs, one tail BX.
+      Loads writer output at +8, its vtable at +0 and method at +8.
+      Forwards bytes and explicit length unchanged, returning the virtual
+      method result verbatim; no NULL, zero-length or NUL-byte guards.
+      XML caller proves the byte-write role, not a concrete callee identity.
+      Reuses TagOutput, TagOutputVtable and XmlTagWriter in util/xml_write_tag;
+      all three caller writes now use this exported non-inlined port.
+      Deliberate deviation: native repr(C) pointer and vtable fields widen
+      on hosts; the final C-ABI call expresses the original indirect BX.
+      Edge tests exercise binary subranges, rejected writes, zero lengths,
+      high-bit results and replacing the output object between writes.
+      Actual-source native smoke emits 41 00 ff 42, excludes the trailing
+      99 byte and preserves result 0x80000001 on a zero-length write.
+      Required host suite and ARM release build pass. match.py exits 1:
+      LLVM adds push/mov/pop frame bookkeeping but retains all three
+      original loads, the same offsets and the final indirect BX r3.
   - address: 0x0820c2c0
     ghidra: FUN_0820c2c0
     name: service_context_initialize
@@ -208933,9 +208967,9 @@ functions:
       +20 invoke heap_panic. This is bitwise, not boolean conjunction.
       Callers separately set flags at +12 after success. Deviations:
       native repr(C) pointers widen on host; literals use Rust statics;
-      virtual dispatch replaces the veneer without inventing a seam.
+      virtual writes reuse the ported xml_writer_write_bytes thunk.
       Host edge tests and full suite pass; ARM release builds. Native
-      actual-source smoke prints <track></track>. match.py exits 1:
+      actual-source smoke prints <track></track>. Pre-thunk-cutover match.py exits 1:
       LLVM expands virtual BLs into BLX, inlines the guarded length loop,
       adds a frame, and retains final virtual tail BX. Target field loads
       and the bitwise conditional fatal path agree with the original.

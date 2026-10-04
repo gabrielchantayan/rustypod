@@ -7,8 +7,8 @@
 //! After the name write, `(mode & result) != 0` and a nonzero pending word
 //! invoke heap_panic. No flag updates are performed here (the callers do them).
 //! Deviations: native repr(C) pointers widen on host; literal strings are Rust
-//! statics. The verified 0x0820c1b4 veneer is expressed as virtual dispatch,
-//! not a new fixed-address seam. Existing string and fatal ports are reused.
+//! statics. The verified 0x0820c1b4 thunk is ported below as xml_writer_write_bytes.
+//! Existing string and fatal ports are reused.
 
 use crate::cxx::string_object::{string_object_c_str, StringObject};
 use crate::libc::strlen_safe_plus1::strlen_safe_plus1;
@@ -44,8 +44,25 @@ const _: [u8; 16] = [0; core::mem::offset_of!(XmlTagWriter, name)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 20] = [0; core::mem::offset_of!(XmlTagWriter, pending)];
 
-#[inline(always)]
-unsafe fn write_bytes(writer: *mut XmlTagWriter, bytes: *const u8, len: u32) -> u32 {
+/// Writes an explicit byte range through the writer's current output object.
+///
+/// Original: `FUN_0820c1b4` @ `0x0820c1b4`, true size 16 bytes, ending
+/// before the independent constructor at `0x0820c1c4`. Raw words:
+/// `e5900008 e5903000 e5933008 e12fff13`. Two inbound plain BLs
+/// (`0x0823334c`, `0x0823337c`), zero predicated BLs; additionally a BNE
+/// tail caller at `0x082333a4`. No outbound BLs; one indirect tail BX.
+/// Loads output at writer +8 and its vtable slot +8, passing bytes and len
+/// unchanged and returning the method's result. No NULL or length guards.
+/// Deliberate deviation: repr(C) pointer fields and vtable entries widen on
+/// hosts. The virtual method's identity is not invented; its write role is
+/// established by the XML caller. Rust expresses BX as a final C-ABI call.
+///
+/// # Safety
+/// `writer`, its output and the output vtable must be valid and aligned.
+/// The method must accept `bytes` and `len` under its unchecked C ABI.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn xml_writer_write_bytes(writer: *mut XmlTagWriter, bytes: *const u8, len: u32) -> u32 {
     let output = (*writer).output;
     ((*(*output).vtable).write)(output, bytes, len)
 }
@@ -57,14 +74,14 @@ unsafe fn write_bytes(writer: *mut XmlTagWriter, bytes: *const u8, len: u32) -> 
 #[inline(never)]
 pub unsafe extern "C" fn xml_write_tag(writer: *mut XmlTagWriter, mode: u32) -> u32 {
     let prefix: &[u8] = if mode == 0 { b"</\0" } else { b"<\0" };
-    let result = write_bytes(writer, prefix.as_ptr(), if mode == 0 { 2 } else { 1 });
+    let result = xml_writer_write_bytes(writer, prefix.as_ptr(), if mode == 0 { 2 } else { 1 });
     if result == 0 { return result; }
     let len = (strlen_safe_plus1((*(*writer).name).payload) as u32).wrapping_sub(1);
     let name = string_object_c_str((*writer).name);
-    let result = write_bytes(writer, name, len);
+    let result = xml_writer_write_bytes(writer, name, len);
     if mode & result != 0 && (*writer).pending != 0 { heap_panic(); }
     if result == 0 { return result; }
-    write_bytes(writer, b">\0".as_ptr(), 1)
+    xml_writer_write_bytes(writer, b">\0".as_ptr(), 1)
 }
 
 #[cfg(test)]
@@ -138,5 +155,37 @@ mod tests {
         let mut name = *b"x\0";
         assert_eq!(emit(name.as_mut_ptr(), 1, 99, [1, 2, 8]), (8, b"<x>".to_vec(), 3));
         assert_eq!(emit(name.as_mut_ptr(), 2, 99, [1, 1, 6]), (6, b"<x>".to_vec(), 3));
+    }
+
+    #[test]
+    fn explicit_ranges_preserve_binary_bytes_and_reload_the_output() {
+        let table = TagOutputVtable { opaque_slots: [0; 2], write };
+        let mut first = Output {
+            base: TagOutput { vtable: &table }, bytes: Vec::new(), calls: 0,
+            results: [0x8000_0001, 0, 7],
+        };
+        let mut second = Output {
+            base: TagOutput { vtable: &table }, bytes: Vec::new(), calls: 0,
+            results: [u32::MAX, 1, 1],
+        };
+        let mut writer = XmlTagWriter {
+            opaque_words: [0; 2], output: &mut first.base, flags: 0xa5,
+            name: core::ptr::null(), pending: 99,
+        };
+        let bytes = [0x11, 0, 0xff, 0x22, 0x33];
+        unsafe {
+            assert_eq!(xml_writer_write_bytes(&mut writer, bytes.as_ptr().add(1), 3), 0x8000_0001);
+            assert_eq!(first.bytes, [0, 0xff, 0x22]);
+            assert_eq!(xml_writer_write_bytes(&mut writer, bytes.as_ptr(), 5), 0);
+            assert_eq!(first.bytes, [0, 0xff, 0x22]);
+            assert_eq!(xml_writer_write_bytes(&mut writer, bytes.as_ptr(), 0), 7);
+            assert_eq!(first.bytes, [0, 0xff, 0x22]);
+            writer.output = &mut second.base;
+            assert_eq!(xml_writer_write_bytes(&mut writer, bytes.as_ptr().add(4), 1), u32::MAX);
+        }
+        assert_eq!(second.bytes, [0x33]);
+        assert_eq!(first.bytes, [0, 0xff, 0x22]);
+        assert_eq!(writer.flags, 0xa5);
+        assert_eq!(writer.pending, 99);
     }
 }
