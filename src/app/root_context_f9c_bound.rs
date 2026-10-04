@@ -244,6 +244,55 @@ pub unsafe extern "C" fn root_context_f9c_bound_construct(
     bound
 }
 
+/// Initializes a query/root-context pair — `FUN_08208bf8` @ `0x08208bf8`.
+///
+/// True extent: 80 bytes, ending at the next push at `0x08208c48`.
+/// Four outbound plain BLs, zero predicated BLs; one executable inbound BL
+/// at `0x08208c8c`. An aligned-image scan also finds a BLHI-shaped word at
+/// `0x0889ad1c`, outside the recovered executable caller.
+/// Stores mode unconditionally. Mode 2 allocates two 72-byte objects,
+/// constructs the query with id/mode zero and the root binding with mode
+/// zero, stores their constructor results, and returns one. Other modes
+/// preserve both pointer fields and return zero.
+///
+/// Deviations: repr(C) native pointer fields widen on hosts; the existing
+/// query constructor seam and ported root-binding constructor replace BLs.
+/// No allocation-failure checks or cleanup are added.
+///
+/// # Safety
+/// `pair` must be writable; mode 2 requires the runtime heap, query
+/// constructor, and root-context globals used by the bound constructor.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_root_context_pair_initialize(
+    pair: *mut QueryRootContextPair,
+    mode: u32,
+) -> u32 {
+    (*pair).mode = mode;
+    if mode != 2 {
+        return 0;
+    }
+    (*pair).query = crate::fp::fp_misc::query_object_construct(
+        crate::heap::veneers::operator_new(0x48), 0, 0,
+    );
+    (*pair).bound = root_context_f9c_bound_construct(
+        crate::heap::veneers::operator_new(0x48).cast(), 0,
+    );
+    1
+}
+
+/// Target layout: vtable +0, mode +4, query +8, bound +12.
+#[repr(C)]
+pub struct QueryRootContextPair {
+    pub vtable: u32,
+    pub mode: u32,
+    pub query: *mut u8,
+    pub bound: *mut RootContextF9cBound,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 16] = [0; core::mem::size_of::<QueryRootContextPair>()];
+
 /// Literal-pool base at `0x08139de8`; the instance cache is its `+0x08`
 /// word (`0x089cca28`).
 pub static mut ROOT_CONTEXT_F9C_BOUND_INSTANCE: *mut RootContextF9cBound =
@@ -590,6 +639,77 @@ mod tests {
         object.mode = mode;
         object.trailing = trailing;
         object
+    }
+
+    #[test]
+    fn pair_rejected_modes_preserve_existing_objects() {
+        let mut pair = QueryRootContextPair {
+            vtable: 0x12345678, mode: 2,
+            query: core::ptr::dangling_mut(),
+            bound: core::ptr::dangling_mut(),
+        };
+        for mode in [0, 1, 3, u32::MAX, 0x80000000] {
+            unsafe {
+                assert_eq!(query_root_context_pair_initialize(&mut pair, mode), 0);
+            }
+            assert_eq!(pair.mode, mode);
+            assert_eq!(pair.vtable, 0x12345678);
+            assert_eq!(pair.query, core::ptr::dangling_mut());
+            assert_eq!(pair.bound, core::ptr::dangling_mut());
+        }
+    }
+
+    unsafe extern "C" fn pair_alloc(
+        heap: *mut HeapDescriptorDescriptor, size: usize, tag: usize,
+    ) -> *mut u8 {
+        // Native pointer-bearing constructors need their full host layout.
+        tree_arena_alloc(heap, size.max(core::mem::size_of::<RootContextF9cBound>()), tag)
+    }
+
+    unsafe extern "C" fn pair_query(storage: *mut u8, id: u32, mode: u32) -> *mut u8 {
+        assert_eq!((id, mode), (0, 0));
+        storage.write(0x5a);
+        // Constructor return, not allocation address, must be stored.
+        storage.add(1)
+    }
+
+    #[test]
+    fn pair_mode_two_constructs_and_replaces_both_objects() {
+        let _guard = APP_ROOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _heap = tree_heap();
+        let Some(slab) = try_map_u32_slab(hints::QUERY_ROOT_CONTEXT_PAIR, 0x3000) else {
+            assert!(note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        unsafe {
+            let root_restore = Restore { root: APP_ROOT_OBJECT };
+            APP_ROOT_OBJECT = slab;
+            let context = slab.add(0x1000);
+            slab.cast::<u32>().add(0x30 / 4).write(context as usize as u32);
+            context.cast::<u32>().add(0xf9c / 4).write(0x1234abcd);
+            context.cast::<u32>().add(0xf7c / 4).write(0x99887766);
+            (*core::ptr::addr_of_mut!(HEAP_OPS)).alloc = pair_alloc;
+            let seam = core::ptr::addr_of_mut!(crate::fp::fp_misc::QUERY_OBJECT_CONSTRUCT);
+            struct QueryRestore(*mut usize, usize);
+            impl Drop for QueryRestore {
+                fn drop(&mut self) { unsafe { self.0.write(self.1); } }
+            }
+            let _query_restore = QueryRestore(seam, seam.read());
+            seam.write(pair_query as usize);
+            let mut pair = QueryRootContextPair {
+                vtable: 0x87654321, mode: u32::MAX,
+                query: core::ptr::null_mut(), bound: core::ptr::null_mut(),
+            };
+            assert_eq!(query_root_context_pair_initialize(&mut pair, 2), 1);
+            assert_eq!(pair.mode, 2);
+            assert_eq!(pair.vtable, 0x87654321);
+            assert_eq!(pair.query.sub(1).read(), 0x5a);
+            assert_eq!((*pair.bound).vtable, ROOT_CONTEXT_F9C_BOUND_VTABLE);
+            assert_eq!((*pair.bound).kind_resource, 0x1234abcd);
+            assert_eq!((*pair.bound).mode, 0);
+            assert_eq!((*(*pair.bound).tree.header).left, (*pair.bound).tree.header);
+            drop(root_restore);
+        }
     }
 
     #[test]

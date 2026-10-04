@@ -211781,3 +211781,32 @@ functions:
       replacing cmp #3/bge, and a final tail B to the boolean lifecycle
       predicate replacing BL plus normalization; semantics are preserved.
       No device execution performed.
+
+  - address: 0x08208bf8
+    ghidra: FUN_08208bf8
+    name: query_root_context_pair_initialize
+    size: 80
+    sig: "u32 query_root_context_pair_initialize(QueryRootContextPair *pair, u32 mode)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1/r0: pair
+      param_2/r1: mode
+      r4: pair
+      r5: accepted
+      FUN_082aadd4: operator_new
+      FUN_0813e474: query_object_construct
+      FUN_08168a8c: root_context_f9c_bound_construct
+    notes: >-
+      Raw A32 establishes exactly 80 bytes from 0x08208bf8 to the next
+      function push at 0x08208c48. Four outbound unconditional BLs and zero
+      predicated BLs. One executable inbound BL at 0x08208c8c; the second
+      aligned-image match, BLHI-shaped word at 0x0889ad1c, is UTF-8 string
+      data (surrounding bytes include iTunes and Japanese text), not code.
+      Stores mode at +4; only mode 2 allocates two 0x48-byte objects and
+      stores query(id=0, mode=0) and root-context-f9c-bound(mode=0) results
+      at +8/+12. Returns mode == 2, preserving pointer fields otherwise.
+      Reuses the existing query seam and ported bound constructor; repr(C)
+      pointer fields widen on hosts. No NULL guards or cleanup added.
+      All 13958 host tests pass; ARM release build passes. Host standalone
+      smoke exercises rejected modes. match.py exit 1 shows the same branch,
