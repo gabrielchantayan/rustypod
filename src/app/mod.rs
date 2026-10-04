@@ -238,6 +238,7 @@ pub mod class_6280_set_position;
 pub mod class_6280_clear_pending_and_post_resource;
 pub mod class_6280_refresh_ui;
 pub mod class_8900_prid_first_byte;
+pub mod class_8900_prid_60ef_first_byte;
 pub mod class_8900_prid_table_index;
 pub mod class_8900_prid_60f3_first_byte;
 pub mod class_8900_prid_60f1_first_byte;

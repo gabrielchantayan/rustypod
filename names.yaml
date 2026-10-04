@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ebeec
+    ghidra: FUN_081ebeec
+    name: class_8900_prid_60ef_first_byte
+    size: 48
+    sig: "i32 class_8900_prid_60ef_first_byte(const Class8900 *this)"
+    module: app/class_8900_prid_60ef_first_byte
+    status: ported
+    renames:
+      param_1/r0: this
+      pcVar1/r0_after_bl: resource
+      iVar2/r4: signed_first_byte
+      receiver_plus_0x378: store
+      DAT_081ebf14: resource_id_60ef
+      DAT_081ebf18: resource_kind_prid
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      Raw osos.dec establishes 40 code bytes plus eight literal bytes,
+      true extent [0x081ebeec,0x081ebf1c); the next entry starts with
+      push {r4,lr}. Independent whole-image aligned ARM BL decoding finds
+      two plain inbound calls at 0x081035b0 and 0x081f75d0, zero predicated
+      inbound calls. One plain outbound BL at 0x081ebf00 reaches the
+      existing port resource_chain_find at 0x0827216c; no predicated BLs.
+      Query Class8900 store +0x378 for (prID,0x60ef), returning the first
+      byte sign-extended to i32 or zero for NULL. Both callers compare
+      against 1 and 2; further resource meaning remains unrecovered.
+      Reuse native-pointer receiver/provider layouts on hosts; no new
+      seams. Exhaustive host byte conversion and NULL-answer tests pass.
+      ARM match retains +0x378, kind/id, BL, NULL check and ldrsbne;
+      exit 1 is an expected structural diff (12 Rust instructions versus
+      ten stock). LLVM adds its fp frame and constructs the id in two
+      instructions. Host suite and ARM release build pass. Standalone
+      real-source native smoke returns -128 for 0x80 and zero for NULL store.
   - address: 0x081ec45c
     ghidra: FUN_081ec45c
     name: tv_out_resource_refresh
