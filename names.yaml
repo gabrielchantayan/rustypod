@@ -211134,3 +211134,47 @@ functions:
       structural diff: LLVM adds a frame pointer, retains the three calls and
       target field offsets, and uses the saved owner instead of recovering it
       from identity-returning callees. No behavioral deviation or device execution.
+
+  - address: 0x0820adac
+    ghidra: FUN_0820adac
+    name: ui_collection_selection_set
+    size: 192
+    sig: "void ui_collection_selection_set(owner: *mut u8, requested_index: i32)"
+    module: ui/collection_selection_set
+    status: ported
+    renames:
+      param_1/r5: owner
+      param_2/r6: requested_index
+      iVar2/r4: traversal_index
+      auStack_28: iterator_state
+      local_14: element
+      owner+0xa8: element_collection
+      owner+0x110: selected_index
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155ec0: iterator_state_cleanup
+      FUN_0826ed44: ui_element_set_flag_bit_3
+    notes: >-
+      Raw ARM extent is 192 bytes, 0x0820adac..0x0820ae6c, ending in
+      e8bd8070 before the next independent e92d4010 prologue. Independent
+      whole-image BL-word decoding finds two unconditional callers at
+      0x0820ae90 and 0x0820aed0, zero predicated callers; eight unconditional
+      in-body BL instructions and zero predicated BLs. Forward/backward
+      callers skip unavailable indices before requesting this transition.
+      Traverse collection at owner+0xa8 from -2, clear flag bit 3 on the
+      current indexed element, clean up, restart, set bit 3 on the requested
+      element, then store its index at +0x110 and clean up. Missing indices
+      are not clamped: absent new selection leaves the stored index unchanged
+      even if the old element was deselected. Same-index selection still
+      clears then sets. All four canonical ported callees are called directly;
+      no new seam or algorithmic deviation. Existing iterator bookkeeping
+      seams remain responsible for the opaque collection. Five-word iterator
+      and fetched pointer use u32 target-width storage. Host regression covers
+      empty, first/last, same, negative and out-of-range indices and preservation
+      of unrelated flags with real suppressed UI invalidation. All 13930 host
+      tests and ARM release build passed. Standalone test-configured executable
+      exercised 0-to-1 then absent selection: both flags end at 0x800 and stored
+      index remains 1. match.py exits 1 with structural diff: LLVM adds frame
+      pointer, initializes stack storage, and peels the first step of each loop;
+      relocations verify direct canonical calls, both traversals and cleanups,
+      mode 0 then 1 and the selected-index store after setting. No device run.
