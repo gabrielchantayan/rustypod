@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f0e90
+    ghidra: FUN_081f0e90
+    name: context_index_in_range
+    size: 52
+    sig: "u32 context_index_in_range(const u32 *context, u32 index)"
+    module: app/context_index_in_range
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: index
+      context_plus_0x30: associated_object_address
+      associated_object_plus_0x2b8: signed_index_bound
+      context_plus_0x38: inclusive_unsigned_lower
+      context_plus_0x3c: inclusive_unsigned_upper
+    notes: >-
+      Raw osos.dec A32 words establish 52 bytes [0x081f0e90, 0x081f0ec4),
+      followed by an independent push prologue. Whole-image aligned decoding
+      finds two plain inbound BLs at 0x081f0810 and 0x081fcba0, zero
+      predicated inbound BLs, and zero outbound BLs of either kind.
+      Return one only when index interpreted as i32 is less than the
+      associated object's signed word +0x2b8 and the same index interpreted
+      as u32 is inside context's inclusive +0x38..+0x3c range. Preserve
+      load short-circuit order and the target-width pointer at +0x30;
+      no NULL guards or signedness normalization. Caller 0x081f0754 checks
+      each index while attaching an associated object; caller 0x081fcb5c
+      rejects out-of-range lookup requests. No callees or new seams.
+      Structured Rust branches replace predicated returns; word-indexed
+      fields preserve firmware offsets on hosts. Host reference tests cover
+      inclusive endpoints, exclusive signed bound, inverted ranges, zero,
+      negative bounds, high-bit indices and read-only state preservation.
+      All 14014 host tests and ARM release build passed. Production-source
+      smoke returned [0, 1, 1, 0] for indices [1, 2, 7, 8] with range
+      2..7 and bound 8; index 0xffffffff passed with signed bound zero
+      and unsigned range 0x80000000..0xffffffff. Reviewed match.py exit-one
+      structural diff: identical field offsets, signed initial rejection,
+      unsigned lower/upper checks and boolean return; LLVM adds a frame
+      pointer and uses pop returns. No attached-device execution.
   - address: 0x08203250
     ghidra: FUN_08203250
     name: two_pair_string_pair_owner_get

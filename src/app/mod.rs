@@ -19,6 +19,8 @@ pub mod position_resource_refresh;
 pub use position_resource_refresh::*;
 pub mod bounded_position_update;
 pub use bounded_position_update::*;
+pub mod context_index_in_range;
+pub use context_index_in_range::*;
 pub mod member_payload_cache_poll;
 pub mod media_player_index_select;
 pub mod media_player_selector_update;
