@@ -210040,3 +210040,43 @@ functions:
       the item +8 calculation, nonzero loop gate, context preservation,
       and final +0x30 dispatch are retained. BL labels in the archive diff
       are unresolved relocations to cursor_init and cursor_advance.
+
+  - address: 0x082107f0
+    ghidra: FUN_082107f0
+    name: string_array_pair_owner_construct
+    size: 84
+    sig: "StringArrayPairOwner *string_array_pair_owner_construct(StringArrayPairOwner *owner)"
+    module: app/string_array_pair_owner_construct
+    status: ported
+    renames:
+      param_1/r0: owner
+      DAT_08210840: owner_vtable
+      FUN_08277440: string_default_construct
+      FUN_081d5f14: observable_array_pair_construct
+      FUN_08210528: resident_owner_reset
+    notes: >-
+      Raw osos.dec establishes 84 bytes from 0x082107f0 through the literal
+      at 0x08210840; the next function begins at 0x08210844. Ghidra's 80
+      excludes the literal 0x089928d4. Whole-image A32 decoding finds two
+      inbound plain BLs at 0x08210494 and 0x082104d0 and no predicated BLs.
+      The body has six plain BLs and no predicated BLs. Install the vtable,
+      clear owned member +8, construct strings at +0x0c, +0x50, +0x58 and
+      observable-array pairs at +0x28, +0x70 in stock order, then invoke
+      resident reset 0x08210528 and return the saved rebased owner. Both
+      member constructors are existing Rust ports. No prior names entry
+      exists for the reset: its raw body clears state, assigns empty strings,
+      releases the primary string payload and conditionally destroys the
+      owned member. Its saved r2/r3 are scratch storage, not input arguments;
+      the verified effective ABI is void reset(owner). Concrete owner class
+      identity remains unknown. Target reset calls the exact resident address;
+      host reset is injectable. Native host string pointers expand repr(C)
+      layout, with field offsets preserving member-return rebasing. Tests
+      cover zero, 0x55 and 0xff storage, all member initialization, untouched
+      opaque state, and reset mutations surviving return. Full host tests and
+      ARM release build pass. Standalone smoke invokes the exported constructor
+      with real Rust member constructors and a host reset handoff. match.py
+      exits 1: 20 stock versus 24 Rust instructions including two literals.
+      All member offsets, stores and call order remain; LLVM knows member
+      constructors return their input and eliminates the corresponding rebase
+      arithmetic. Resident reset uses literal-loaded BLX; archive BL labels
+      are unresolved member-constructor relocations. Frame layout differs.

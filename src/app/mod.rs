@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod string_array_pair_owner_construct;
 pub mod identity_noop_with_options;
 pub use identity_noop_with_options::*;
 pub mod slot_pool_available_count;
