@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod codepoint_group_map;
+pub mod vtable_slot_10_flagged_payload_address;
 pub mod embedded_observable_array_owner_construct;
 pub mod embedded_observable_array_owner_destruct;
 pub mod observable_array_pair_owner_construct;

@@ -25982,6 +25982,40 @@ functions:
       address directly; host tests use a volatile recorder solely to prove the
       passed field address, write effect, and preserved owner return.
 
+  - address: 0x081fcab0
+    ghidra: FUN_081fcab0
+    name: vtable_slot_10_flagged_payload_address
+    size: 52
+    sig: "u32 vtable_slot_10_flagged_payload_address(FlaggedPayloadReceiver *receiver, u32 selector)"
+    module: cxx/vtable_slot_10_flagged_payload_address
+    status: ported
+    renames:
+      param_1/r0: receiver
+      r1: selector
+      r2: virtual_query
+      r4: payload_address
+      FUN_081fca48: flagged_pair_payload_if_set
+    notes: >-
+      Raw ARM establishes 0x081fcab0..0x081fcae4, 52 bytes, ending in
+      pop {r4,pc}; the next instruction is an independent PUSH prologue.
+      The body contains one plain BL to the existing flagged_pair_payload_if_set
+      port and one unconditional indirect BLX through vtable slot +0x10,
+      with no predicated BL instructions. Whole-image aligned A32 decoding
+      finds two incoming plain BL sites, 0x081f0714 and 0x081fcbd8, and no
+      predicated BL sites. The virtual query receives receiver and the unchanged
+      selector in r1, as verified at the 0x081fcbd8 caller. Its concrete identity
+      remains unresolved. Return zero for a NULL record or a clear flag bit 0;
+      otherwise read the second record word and add 0x14 modulo 2^32.
+      A zero payload word returns 0x14, not zero. Host vtable pointers are
+      widened structurally; flagged-pair fields and result remain target-width.
+      Tests cover NULL query results, every flag byte, selector-dependent
+      records, zero payload words, wrapping boundaries, and record preservation.
+      match.py reports 14 Rust instructions versus 13 stock instructions:
+      LLVM adds a frame-pointer setup and wider register save, and moves the
+      zero-result initialization after the virtual call. The virtual slot,
+      two NULL guards, payload load and conditional +0x14 match structurally.
+      Object relocation verifies R_ARM_CALL flagged_pair_payload_if_set.
+
   - address: 0x081fcae4
     ghidra: FUN_081fcae4
     name: owner_state_reset
