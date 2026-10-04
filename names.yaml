@@ -214545,3 +214545,45 @@ functions:
       start dispatch through the existing seam, and adds frame setup;
       +0x28 lock/unlock, +0x50 store, +0x90/+0x98 gates, conditional stop
       and tail unlock remain visible.
+  - address: 0x081ecf98
+    ghidra: FUN_081ecf98
+    name: controller_adjust_property_6056
+    size: 168
+    sig: "void controller_adjust_property_6056(u32 *controller, i32 adjustment)"
+    module: app/controller_adjust_property_6056
+    status: ported
+    renames:
+      param_1/r0/r5: controller
+      param_2/r1/r6: adjustment
+      r0_after_read: old
+      r4: new
+      "[controller + 0x378]": class6000_store
+      "[controller + 0x34]": adjusted_value
+      "[vtable + 0x58]": notification_dispatch
+    notes: >-
+      Raw ARM confirms 168 instruction bytes from 0x081ecf98 through
+      0x081ed03c, then a 20-byte literal pool; next real function begins
+      at 0x081ed054 (188-byte total extent). Independent aligned-word
+      binary scan finds two inbound plain BLs at 0x080feb38 and 0x081f693c,
+      zero predicated BLs. Body contains three plain BLs to 0x08171fdc,
+      0x08113da8 and 0x08172004, zero predicated BLs, one virtual BLX
+      and one terminal virtual BX. Reads class-0x6000 property 0x6056,
+      treating the existing pointer-return seam's raw r0 bits as signed
+      integer without dereferencing. Applies signed directional bounds
+      at zero and 100 using ARM wrapping negation/addition. No change
+      returns without writes or notifications. Otherwise posts the original
+      adjustment via global_adjustment_notification_post, stores at +0x34,
+      reloads the store at +0x378, calls verified unported setter 0x08172004,
+      then dispatches slot +0x58 with (0x436e746c, 0x890d) and
+      (0x2a2a2a2a, 0x8918), reloading the vtable each time. No property
+      identity is invented. Deliberate deviations: host callback seams and
+      a Rust call in place of the terminal virtual tail branch. Host edge
+      tests cover directional saturation, unchanged early returns, invalid
+      initial values and i32 extremes. Standalone full-function smoke proves
+      callback ordering, pre-store posting and store reload after posting.
+      Required host suite and ARM release build pass. match.py exits 1 with
+      a structural diff: original 42 instructions, Rust 49 listing entries
+      including literals. LLVM adds a frame pointer, rearranges signed
+      bounds, synthesizes event constants and uses BLX for the stock setter;
+      unchanged early return, +0x34 store, +0x378 reload and both virtual
+      notifications remain, including the terminal BX.
