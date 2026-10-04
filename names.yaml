@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820cd78
+    ghidra: FUN_0820cd78
+    name: slot_pool_available_count
+    size: 112
+    sig: "int slot_pool_available_count(SlotPool *pool, int *count)"
+    module: app/slot_pool_available_count
+    status: ported
+    renames:
+      param_1/r4: pool
+      param_2/r5: count
+      uVar3/r0: slot_index
+      iVar2/r1: available
+      FUN_08228360: lock_service_lock
+      FUN_08228388: lock_service_unlock
+    notes: >-
+      Raw osos.dec establishes 112 bytes ending at the next real prologue
+      at 0x0820cde8. Two inbound plain BLs at 0x081e4488 and 0x081e4830;
+      two outbound plain BLs at 0x0820cd8c and 0x0820cdd0; no predicated
+      BLs in either count. Locks the mutex at +0xa00, counts state byte
+      +8 equal to exactly one across 128 twenty-byte slots, writes count,
+      then unlocks. State one is available: 0x0820cbac consumes it as three.
+      Reuses ported lock-service adapters. Host pointer fields widen under
+      repr(C); slot words stay 32-bit. LLVM removes unreachable adapter
+      error branches: match.py shows 28 original versus 21 Rust instructions.
+      Host suite passes 13872 tests; standalone smoke reports status 0 and
+      count 43. ARM release builds. No device execution.
   - address: 0x0820d6ac
     ghidra: FUN_0820d6ac
     name: ui_item_padded_size
