@@ -214954,3 +214954,40 @@ functions:
       literal load. Target disassembly retains the +0x40 store, +0x58
       virtual slot load, category literal, and final BX r3 tail dispatch.
       The exported symbol is present; no identical-body fold is observed.
+
+  - address: 0x081d86d0
+    ghidra: FUN_081d86d0
+    name: strided_buffer_clear
+    size: 52
+    sig: "void strided_buffer_clear(const StridedBuffer *table)"
+    module: app/strided_buffer_entry
+    status: ported
+    renames:
+      param_1/r4: table
+      r5: entry_count
+      r0_after_081d8614: entry_size
+      table+0x00: buffer_vtable
+      buffer_vtable+0x08: entry_count_method
+      table+0x04: entry_buffer
+    notes: >-
+      Raw ARM words establish extent 0x081d86d0..0x081d8704 (52 bytes),
+      ending with a tail B to 0x08037dc8 before the next function's push.
+      Whole-image immediate B/BL decoding finds exactly two incoming plain
+      BLs at 0x08209664 and 0x08209804, no predicated BLs or incoming B.
+      Outbound calls are BLX through buffer vtable +8, one plain BL to the
+      already-ported strided_buffer_entry_size at 0x081d8614, and a tail B
+      to the already-ported IRAM memzero veneer at 0x08037dc8. Its literal
+      is 0x220002d4, the IRAM mirror of memzero at 0x080002d4, not ROM.
+      Clears entry_count times entry_size bytes using a wrapping 32-bit
+      product, loading entry_buffer after both selectors. Both callers
+      initialize disk metadata in the cleared buffer and ignore r0.
+      No behavioral deviations or new fixed-callee seams. Host fields
+      retain four-byte target words; virtual slots widen by word index.
+      Regression covers zero factors, wrapping products, alignments 0..3,
+      block/tail lengths and unchanged surrounding bytes. Full host suite
+      passes (14090 tests), ARM release build succeeds, and an actual-source
+      standalone smoke clears 33 unaligned bytes with sentinels intact.
+      match.py exits 1 with the expected structural diff: 14 Rust versus
+      13 retail instructions, LLVM frame-pointer setup and register choice,
+      and unresolved archive BL/B relocations. Dispatch, multiply, late
+      buffer load and final tail branch remain in the original order.
