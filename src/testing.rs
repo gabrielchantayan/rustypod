@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const SLOT_ARRAY_OWNER_WRITE_REQUEST: usize = 0x4282_0000;
     pub const TREE_PAYLOAD_DISPATCH: usize = 0x4281_0000;
     pub const CONTEXT_INDEX_IN_RANGE: usize = 0x4280_0000;
     pub const LINKED_NODE_PREPEND: usize = 0x426d_0000;

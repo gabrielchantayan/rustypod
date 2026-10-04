@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ef0a4
+    ghidra: FUN_081ef0a4
+    name: slot_array_owner_write_request
+    size: 112
+    sig: "void slot_array_owner_write_request(const SlotArrayOwner *owner, OwnerWriteRequest **request_slot, u32 unused_r2, u32 initial_length)"
+    module: cxx/slot_array_owner_write_request
+    status: ported
+    vars: {param_1: owner, param_2: request_slot, param_3: unused_r2, param_4: initial_length, iVar4: request, uVar1: handle, local_18: queried_length}
+    renames:
+      FUN_081ef308: slot_array_owner_get
+      FUN_080c0154: source_cache_clean_range
+      FUN_08090780: cache_address_translate
+      FUN_0827899c: stream_write
+      FUN_082a5418: ft_platform_file_length
+    notes: >-
+      Raw words establish 112 bytes through the return at 0x081ef110;
+      the next real function begins at 0x081ef114. Two inbound plain BLs
+      at 0x081eeab0 and 0x081eeaf8; five outbound plain BLs, no predicated
+      BLs. Resolve slot, clean and translate source, write bytes, store
+      status/count; on success query length and mirror it to observer+8.
+      Preserve incoming r3 as length-output seed and ignore query status.
+      Reuse getter, translator and length ports. Target writer calls retail
+      0x0827899c because the existing Rust writer core is unwired by default.
   - address: 0x081ef938
     ghidra: FUN_081ef938
     name: path_traversal_construct
