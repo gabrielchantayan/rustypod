@@ -230,6 +230,43 @@ pub unsafe extern "C" fn service_manager_instance_veneer() -> *mut u8 {
     service_manager_instance()
 }
 
+/// service_manager_secondary_handler_state_with_fallback — original:
+/// `FUN_082011e0` @ 0x082011e0 (64 bytes, ending at the next function's
+/// push at 0x08201220). Raw-word decoding verifies two outbound plain BLs
+/// and no predicated BLs; two inbound plain BLs at 0x08200f64 and
+/// 0x0820101c, with no predicated callers.
+///
+/// Ignore the incoming instance, fetch the service-manager singleton through
+/// its veneer, and read the selected secondary record's state flags from
+/// instance + 4. Mask with 0x0c: zero returns zero, four returns one, and
+/// eight or twelve returns `fallback` unchanged (not normalized to a bool).
+///
+/// Deliberate deviations: reuse the existing singleton port and its crate
+/// static publication requirement rather than the stock holder word at
+/// 0x089ca94c. No new seam; otherwise preserve the original algorithm.
+///
+/// # Safety
+///
+/// The published singleton must contain the secondary table at byte +4.
+/// `slot` must satisfy the state-flags getter's memory-validity contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_secondary_handler_state_with_fallback(
+    _unused_instance: *mut u8,
+    slot: i32,
+    fallback: u32,
+) -> u32 {
+    let instance = service_manager_instance_veneer();
+    let flags = service_manager_secondary_handler_state_flags_get(
+        instance.add(4).cast(), slot,
+    );
+    match flags & 0x0c {
+        0 => 0,
+        4 => 1,
+        _ => fallback,
+    }
+}
+
 /// service_manager_secondary_handler_state_flags_get — original:
 /// `FUN_08193e50` @ 0x08193e50 (20 bytes; 10 direct, unconditional `bl`
 /// call sites).
@@ -1821,6 +1858,40 @@ mod service_handler_reset_tests {
             SERVICE_HANDLER_PENDING_EVENTS_CLEAR = old_pending_clear;
             SERVICE_HANDLER_STATE_ROUTINE = old_routine;
             SERVICE_MANAGER_INSTANCE = old_instance;
+        }
+    }
+}
+
+#[cfg(test)]
+mod state_with_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn state_bits_select_constant_or_full_width_fallback() {
+        let _guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
+        // One prefix word plus all three eight-word secondary records.
+        let mut instance = [0u32; 25];
+        unsafe {
+            let saved = SERVICE_MANAGER_INSTANCE;
+            SERVICE_MANAGER_INSTANCE = instance.as_mut_ptr().cast();
+            for slot in 0..3 {
+                for state in [0, 4, 8, 12] {
+                    for unrelated in [0, 3, 0xffff_fff3] {
+                        for fallback in [0, 1, 7, 0x8000_0000, u32::MAX] {
+                            instance[1 + slot * 8 + 4] = state | unrelated;
+                            let expected = if state == 0 { 0 }
+                                else if state == 4 { 1 } else { fallback };
+                            assert_eq!(
+                                service_manager_secondary_handler_state_with_fallback(
+                                    core::ptr::null_mut(), slot as i32, fallback,
+                                ),
+                                expected,
+                            );
+                        }
+                    }
+                }
+            }
+            SERVICE_MANAGER_INSTANCE = saved;
         }
     }
 }

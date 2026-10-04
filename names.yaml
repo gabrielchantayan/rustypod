@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082011e0
+    ghidra: FUN_082011e0
+    name: service_manager_secondary_handler_state_with_fallback
+    size: 64
+    sig: "u32 service_manager_secondary_handler_state_with_fallback(void *unused_instance, i32 slot, u32 fallback)"
+    module: app/service_manager
+    status: ported
+    renames:
+      param_1/r0: unused_instance
+      param_2/r1/r6: slot
+      param_3/r2/r5: fallback
+      uVar2/r0: masked_state_flags
+      uVar3/r4: result
+    notes: >-
+      Raw A32 establishes [0x082011e0,0x08201220), 64 bytes, ending at
+      the next independent push. Two outbound plain BLs target the existing
+      service_manager_instance_veneer at 0x081391ec and secondary handler
+      state-flags getter at 0x08193e50; no predicated outbound BLs.
+      Whole-image decoding finds two inbound plain BLs at 0x08200f64 and
+      0x0820101c, zero predicated inbound BLs. Ignore incoming r0, fetch
+      singleton, query secondary table at instance+4 using signed slot,
+      mask flags with 0x0c, return zero for zero, one for four, and the
+      full-width caller fallback for eight or twelve. No new seams.
+      Reuse the singleton port's crate-static publication requirement;
+      no other semantic deviations. Host tests cover all masked states,
+      unrelated bits, all valid slots and full-width fallbacks. Host suite
+      and ARM release build pass. Reviewed match.py exit-one diff: 16
+      original versus 18 Rust instructions; frame pointer and branches
+      replace predication, preserving both calls, table offset and mapping.
   - address: 0x081f047c
     ghidra: FUN_081f047c
     name: tree_payload_dispatch
