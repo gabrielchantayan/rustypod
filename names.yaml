@@ -209561,3 +209561,51 @@ functions:
       preserved in callee-saved r4 instead of the original helper-preserved r3.
       The object relocation supplies alignment_padding despite objdump's
       unresolved BL placeholder. No device execution.
+
+  # --- Component selection interval setter ---
+  - address: 0x0820db60
+    ghidra: FUN_0820db60
+    name: component_selection_set
+    size: 136
+    sig: "usize component_selection_set(ComponentSelection *state, i32 index, u32 notify)"
+    module: app/component_selection_set
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      param_2/r1/r5: index
+      param_3/r2/r6: notify
+      state+0x1d8: owner.payload (selection)
+      state+0x1dc: lower
+      state+0x1e0: upper
+      state+0x1e4: lower_endpoint
+      FUN_0829f278: component_vtable_slot_08_tail_dispatch
+      FUN_0826ec9c: ui_element_invalidate
+      FUN_0829f288: component_vtable_slot_12_payload_tail_dispatch
+      FUN_0820d98c: three_word_message_post
+      DAT_0820dbe4: selection_message_code (0x4b42534c)
+    notes: >-
+      Raw ARM establishes 136 bytes through 0x0820dbe7: 132 instruction
+      bytes plus the message-code literal; the next real push begins at
+      0x0820dbe8. The literal decodes as blmi but is data, not a call.
+      Binary-wide decoding finds two inbound plain BLs at 0x08130934 and
+      0x0820dc40, no predicated BLs. The body has three plain BLs and
+      a tail B to the existing message poster. Reject negative indices
+      returning the original owner; reject index >= signed component count
+      returning that count's unchanged bits. Accepted indices update the
+      selection and inclusive lower/upper endpoints (lower takes precedence);
+      interior indices retain the endpoint byte. Invalidate, then optionally
+      obtain the component slot-0c payload and post owner/payload/0x4b42534c
+      with flag zero, returning dispatch status. Ghidra incorrectly absorbs
+      the message dispatcher. Reuses all four existing Rust callees without
+      new seams. Host repr(C) widens pointers; target assertions fix offsets.
+      No semantic deviations; typed calls replace retail tail branches.
+      Host suite passes 13862 tests including signed count rejection,
+      endpoint equality, inverted bounds, interior flag preservation and
+      notification ordering. Standalone test-configured host execution
+      exercises the public API's negative and count-boundary rejection
+      through the actual slot-08 wrapper. Ordinary host library compilation
+      is blocked by six unrelated missing host seams; no changes to them.
+      ARM release builds; match.py reports 39 versus 33 instruction lines,
+      with equivalent signed branches, field offsets and message constant.
+      Relocations verify three calls and the message-post tail jump.
+      No device execution.
