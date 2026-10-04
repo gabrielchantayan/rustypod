@@ -12,11 +12,15 @@
 //! seam; the retail memcpy is an explicit ten-byte volatile copy.
 
 use crate::app::resource_chain::{ResourceKind, ResourceProvider};
+use crate::app::active_datetime_field_selector::active_datetime_field_selector;
 #[cfg(target_os = "none")]
 use crate::app::resource_chain::resource_chain_write;
 
+#[cfg(test)]
 const ACTIVE_MODE_OFFSET: usize = 0x138;
+#[cfg(test)]
 const SELECTOR_OBJECT_OFFSETS: [usize; 3] = [0x140, 0x144, 0x148];
+#[cfg(test)]
 const SELECTOR_VALUE_OFFSET: usize = 0x44;
 const DATETIME_OFFSET: usize = 0x14c;
 const DATETIME_RESOURCE_OFFSET: usize = 0x164;
@@ -54,15 +58,6 @@ unsafe fn word(object: *const u8, offset: usize) -> u32 {
     (object.add(offset) as *const u32).read_volatile()
 }
 
-#[inline(always)]
-unsafe fn active_datetime_field(controller: *const u8) -> u32 {
-    let mode = word(controller, ACTIVE_MODE_OFFSET);
-    if mode > 2 {
-        return 0;
-    }
-    let selector = word(controller, SELECTOR_OBJECT_OFFSETS[mode as usize]);
-    word(selector as usize as *const u8, SELECTOR_VALUE_OFFSET)
-}
 
 /// Adjusts the active packed date/time field and publishes its ten-byte record.
 ///
@@ -72,7 +67,7 @@ unsafe fn active_datetime_field(controller: *const u8) -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn datetime_adjust_and_store(controller: *mut u8, delta: u32) -> u32 {
-    let active_field = active_datetime_field(controller);
+    let active_field = active_datetime_field_selector(controller);
 
     #[cfg(target_os = "none")]
     let adjusted = date_time_adjust()(controller.add(DATETIME_OFFSET), active_field, delta, delta);

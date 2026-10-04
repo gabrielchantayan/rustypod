@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081dd80c
+    ghidra: FUN_081dd80c
+    name: active_datetime_field_selector
+    size: 56
+    sig: "u32 active_datetime_field_selector(const u8 *controller)"
+    module: app/active_datetime_field_selector
+    status: ported
+    renames:
+      param_1/r0/r1: controller
+      iVar1/r2: active_mode
+      selected_object/r0: selector
+      return/r0: field_code
+    notes: >-
+      Raw A32 words establish [0x081dd80c,0x081dd844), 56 bytes,
+      ending with BX LR before the next independent push. Whole-image
+      decoding finds two inbound plain BLs at 0x081dd75c and 0x081dd864,
+      no predicated inbound BLs, and no outbound BLs of either kind.
+      Mode at controller+0x138 selects the u32 pointer at +0x140, +0x144,
+      or +0x148 for modes 0, 1, or 2; return its field code at +0x44.
+      Other modes return zero without accessing selector storage. Callers
+      use the code in the 0x2d01..0x2d06 dispatch and packed DateTime
+      adjustment. No callees, new seams, null guards, or guessed identities.
+      Extract the existing datetime_adjust inline selector into this export
+      and migrate its caller. Preserve aligned volatile word reads and
+      target-width pointers on hosts. Host edge tests and standalone smoke
+      pass; the complete host suite and ARM release build pass. Reviewed
+      match.py exit-one diff: 14 original versus 12 Rust instructions;
+      LLVM combines three branches into an unsigned mode bound and indexed
+      pointer load, retains +0x138/+0x140/+0x44 and zero invalid-mode return,
+      and adds a frame only on valid modes. No device execution.
   - address: 0x081ef0a4
     ghidra: FUN_081ef0a4
     name: slot_array_owner_write_request
