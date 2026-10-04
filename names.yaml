@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820b074
+    ghidra: FUN_0820b074
+    name: encoded_pair_decode
+    size: 200
+    sig: "uint32_t encoded_pair_decode(EncodedPairReader *reader, uint16_t *output)"
+    module: app/encoded_pair_decode
+    status: ported
+    renames:
+      param_1/r0: reader
+      param_2/r1: output
+      local_28: character
+      sVar6/r5: decoded_value
+      iVar5/r4: digit_index
+      DAT_0820b138: decode_table
+      FUN_0820b1e0: is_line_break
+      FUN_0820b13c: read_after_line_break
+    notes: >-
+      Raw ARM establishes 196 instruction bytes plus the lookup pointer at
+      0x0820b138, ending at the next real function 0x0820b13c: 200 bytes.
+      Whole-image branch-word decoding finds two inbound plain BLs at
+      0x0820b1d8 and 0x082201b0, zero predicated inbound BLs; two outbound
+      plain BLs at 0x0820b0c4 and 0x0820b0dc, zero predicated outbound BLs,
+      and one virtual BLX instruction at 0x0820b0a8. Only r0/r1 are inputs.
+      Read low-halfword characters through virtual slot +0x24, delegate a
+      first CR/LF to verified unported helpers 0x0820b1e0 and 0x0820b13c,
+      otherwise accumulate two bytes from table 0x088ff91e in radix 16.
+      Preserve the literal table address: raw contents are not a conventional
+      ASCII hex map, so no inferred digit conversion is substituted. Reject
+      0xff and exhaustion by setting byte +4 without changing output; map
+      decoded LF/CR to 0x1d/0x1c. Helper return values pass through unchanged.
+      No target behavioral deviations; host fixtures widen pointer fields
+      and substitute helper/table boundaries. Host suite and ARM release
+      build passed. Edge tests cover wide character indexes, 254-valued
+      table entries, invalid first/second digits, exhaustion, first-only
+      CR/LF handling and helper failure. Production-entry executable smoke
+      checked 65024 pairs against the actual firmware table. match.py exits
+      1 with a structural diff: LLVM unrolls the two reads and calls retained
+      helper wrappers through BLX, preserving failure stores, table lookups,
+      radix-16 accumulation and LF/CR remapping. No device execution.
   - address: 0x0820b234
     ghidra: FUN_0820b234
     name: codepoint_group_map_get
