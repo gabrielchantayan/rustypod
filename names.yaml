@@ -212238,3 +212238,46 @@ functions:
       two independent loads, and saves fp instead of r4. Subtraction,
       divisor seven, divider call, and increment remain intact; the
       R_ARM_CALL relocation at +0x18 names __rt_udiv.
+
+  - address: 0x081f465c
+    ghidra: FUN_081f465c
+    name: mecca_io_task_get
+    size: 88
+    sig: "void *mecca_io_task_get(void)"
+    module: app/mecca_io_task
+    status: ported
+    vars:
+      DAT_081f46a4: singleton_guard (0x08a09d4c)
+      DAT_081f46a8: singleton_object (0x08ae48e8)
+      DAT_081f46ac: dso_handle (0x089ca09c)
+      DAT_081f46b0: opaque_destructor_word (0x081e9da4)
+      FUN_081f4b54: unported_task_constructor
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes 72 instruction bytes at 0x081f465c..0x081f46a4
+      followed by four literal words; the next real function prologue is
+      0x081f46b4, making the true extent 88 bytes. Independent aligned A32
+      decoding finds two inbound unconditional BLs at 0x08076798 and
+      0x08197634, zero predicated inbound BLs; four outbound unconditional
+      BLs to guard acquire, constructor 0x081f4b54, shutdown registration,
+      and guard release, zero predicated outbound BLs. Tests guard bit zero,
+      acquires, constructs the fixed object, registers the constructor result
+      with the opaque destructor and DSO handle, releases, and always returns
+      the fixed object. Constructor C initializes through object+0x60 and
+      starts MeCCAIOTask. Neither constructor nor destructor has a names.yaml
+      entry; no more specific callee identity is invented. Target dispatch
+      retains verified firmware addresses. Host storage is 25 aligned words
+      and host-only shutdown seams isolate tests from the global chain.
+      Tests cover first construction, a distinct constructor return, failed
+      registration without retry, initialized guards and nonzero even guards.
+      Full host suite and ARM build-std release build passed. Optimized
+      standalone production-source smoke with the real guard and shutdown
+      modules observed one construction, safe recursive entry, fixed-object
+      return, registration of the constructor result, and shutdown draining.
+      match.py exited 1 with a structural diff: 18 original versus 35 Rust
+      listed instructions. LLVM inlines shutdown registration and eliminates
+      the no-op guard release; the guard branches, constructor dispatch,
+      destructor and DSO words, and fixed-object return remain intact.
+      No on-device execution claimed.

@@ -537,6 +537,7 @@ pub mod lazy_static_object;
 pub mod lazy_static_object_08a762a0;
 pub mod lazy_static_object_081491a8;
 pub mod guarded_static_object;
+pub mod mecca_io_task;
 pub mod guarded_global_state;
 pub mod matched_entry;
 pub mod entry_result_construct;
