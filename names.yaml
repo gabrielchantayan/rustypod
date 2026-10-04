@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820457c
+    ghidra: FUN_0820457c
+    name: event_forward_to_delegate
+    size: 48
+    sig: "u32 event_forward_to_delegate(EventDelegateOwner *owner, u8 *event)"
+    module: ui/event_forward_to_delegate
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1/r4: event
+      piVar1/r0: delegate
+    notes: >-
+      Raw ARM establishes 48 bytes ending at the independent prologue at
+      0x082045ac. Whole-image decoding finds two plain inbound BLs at
+      0x081d2550 and 0x082856ec, zero predicated inbound BLs. Body has zero
+      plain or predicated BLs, one indirect BLX through owner slot +0xcc,
+      and one conditional tail BX through delegate slot +0x30. Return zero
+      for a null delegate; otherwise forward the original event and return
+      the handler's full word. Both callers consume r0, correcting Ghidra's
+      void signature. Delegate describes a role, not a concrete class.
+      No direct firmware callees or new seams. Native-width host vtables
+      deliberately widen slots; target offsets are asserted. All 13994
+      host tests and ARM release build passed. Standalone production-source
+      smoke verifies absence, handler mutation and full-width return.
+      Reviewed match.py exit-one diff: LLVM adds a frame pointer and an
+      explicit null branch/zero return, retaining slot offsets, BLX and
+      tail BX. No device execution.
   - address: 0x081f31a0
     ghidra: FUN_081f31a0
     name: packed_selector_class
