@@ -209678,3 +209678,48 @@ functions:
       offsets and branch conditions, reordered arms, a frame pointer
       and a normal completion call instead of the original tail B.
       No device execution.
+
+  - address: 0x0820d370
+    ghidra: FUN_0820d370
+    name: registration_handle_query_current_value
+    size: 104
+    sig: "int registration_handle_query_current_value(void **context_source, unsigned int selector_first, unsigned int *value_out, unsigned int selector_second)"
+    module: app/registration_handle_current_value
+    status: ported
+    renames:
+      param_1/r0: context_source
+      param_2/r1: selector_first
+      param_3/r2/r4: value_out
+      param_4/r3: selector_second
+      puStack_18: wrapper
+      piVar1/r0: target
+      FUN_081c877c: registration_handle_wrapper_init
+      FUN_0829dd28: current_record_handle_from_owner
+      FUN_081c87c4: registration_handle_wrapper_destroy
+    notes: >-
+      Raw ARM establishes 104 bytes ending at the next prologue at
+      0x0820d3d8. Whole-image branch decoding finds two inbound plain BLs
+      at 0x0820a280 and 0x0821c150, zero predicated BLs and no tail B
+      callers. The body contains four plain BLs, zero predicated BLs,
+      and one BLX at vtable +0x30. Initializes a temporary wrapper from
+      the stored context, selector_first and selector_second (r3 is
+      preserved into the initializer), obtains its current target and
+      invokes +0x30 with value_out. Returns one when absent or when the
+      callback returns nonzero, zero otherwise. Always destroys the
+      wrapper, including callback failure; output writes are not undone.
+      Virtual identity is deliberately limited to the observed query.
+      Reuses all three existing direct-callee ports. Host named fields
+      and widened vtable slots follow the adjacent status-query port;
+      target retains the existing current-record accessor and +0x30.
+      Dead stacked argument copies are omitted. Host suite passes 13869
+      tests; edge tests cover absent output preservation, NULL output on
+      absence, output writes on failure and signed result normalization.
+      Standalone host smoke executes real initialization, absent lookup
+      and destruction: result=1, output=deadbeef. An unrelated unexecuted
+      heap-delete boundary is replaced with a panic in that smoke only.
+      Full non-test host build is blocked by six existing missing helper
+      names in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. ARM release builds. match.py prints 26 versus
+      25 instructions: same virtual slot and result conditions, merged
+      destruction arms, extra frame pointer; structural diff exit 1.
+      No device execution.
