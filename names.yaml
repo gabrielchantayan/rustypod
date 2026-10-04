@@ -212442,3 +212442,55 @@ functions:
       the no-op guard release; the guard branches, constructor dispatch,
       destructor and DSO words, and fixed-object return remain intact.
       No on-device execution claimed.
+
+  - address: 0x081f3334
+    ghidra: FUN_081f3334
+    name: iap_command_84_retry
+    size: 168
+    module: app/iap_command_84_retry
+    sig: "u32 iap_command_84_retry(i32 slot)"
+    status: ported
+    renames:
+      param_1/r4: slot
+      iVar1: secondary_handler_or_packet
+      uVar2: status
+      DAT_081f33d0: command_84_retry_counts_089ccbbe
+      DAT_081f33d4: wildcard_tag_ffff
+      DAT_081f33d8: event_context_owner_089ccbb8
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_08193ec0: service_manager_secondary_handler_get
+      FUN_080f6da0: iap_packet_create
+      FUN_081d7f14: existing_unported_packet_completion_seam
+      FUN_08138fd0: pending_event_insert
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec proves 0x081f3334..0x081f33dc is 168 bytes: 156 code
+      bytes through pop at 0x081f33cc, followed by literals 0x089ccbbe,
+      0x0000ffff, and 0x089ccbb8. Next real function begins at 0x081f33dc
+      with push {r4-r9,lr}. Independently decoding aligned ARM BL words
+      finds two inbound calls: BLNE at 0x081f2c70 and plain BL at
+      0x081f2d20; six outbound BLs are plain and none predicated.
+      Resolve manager+4 secondary handler before checking the per-slot
+      byte count; NULL is fatal even with exhausted budget. Count >=3
+      returns 11 unchanged. Otherwise increment first, create a zero-body
+      iAP lingo-2 command-0x84 packet, panic if NULL, complete with state
+      zero while ignoring completion status, then return pending-event
+      insertion status for key=slot, tag_a=0xffff, tag_b=0x84, payload=0,
+      delay=300 at the context loaded from 0x089ccbb8+0x14. Failed queue
+      insertion consumes the attempt. No more specific protocol identity
+      is assumed. All identified ported callees are reused directly;
+      unrecovered 0x081d7f14 reuses IAP_PACKET_EVENT_SCHEDULE_OPS rather
+      than adding a seam. Host-only global fixtures replace target literals.
+      Host tests cover every byte count including 255, the three-attempt
+      transition, neighboring-byte preservation and exhausted public calls
+      for all three slots. Host suite and ARM release build passed.
+      Standalone production-source smoke with modeled dependencies observed
+      three consumed attempts despite completion=10 and insertion=12,
+      followed by status 11 without another completion. No device run.
+      match.py exits 1 with a structural diff: 39 original code instructions
+      versus 46 Rust listed instructions. Lookup-before-budget, increment
+      before allocation, both fatal NULL branches, completion before enqueue,
+      wildcard tag, command and delay survive. Differences are the frame,
+      completion BLX seam, inverted equivalent budget comparison and LLVM's
+      merged fatal path. The context word read is effectively aligned at
+      0x089ccbcc even though LLVM bases its load on the retry-table literal.

@@ -745,6 +745,7 @@ pub mod service_handler_slot_secondary_value_set;
 pub mod service_handler_slot_state_reset;
 pub mod service_handler_slot_initialize;
 pub mod service_handler_slot_state_set;
+pub mod iap_command_84_retry;
 pub mod silver_controller;
 pub mod controller_transition_request;
 pub mod silver_list_table;
