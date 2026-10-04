@@ -108,6 +108,41 @@ pub unsafe extern "C" fn strided_buffer_entry_at(
         .wrapping_add(index.wrapping_add(1).wrapping_mul(entry_size))
 }
 
+/// The buffer vtable's recovered extent selector (`+0x08` on target).
+#[repr(C)]
+pub struct StridedBufferVtable {
+    pub unresolved_00_04: [usize; 2],
+    pub entry_count: unsafe extern "C" fn(*const StridedBuffer) -> u32,
+}
+
+/// strided_buffer_clear — original: `FUN_081d86d0` @ `0x081d86d0` (52
+/// bytes; true extent `0x081d86d0..0x081d8704`). Raw whole-image ARM decoding
+/// finds two incoming plain BLs (`0x08209664`, `0x08209804`), no predicated
+/// BLs. Outbound: one BLX to vtable slot +8, one plain BL to entry_size,
+/// and a tail B to the IRAM memzero veneer; no predicated calls.
+///
+/// Dispatches the buffer's entry-count method, obtains its layout's entry
+/// size, and clears exactly their 32-bit wrapping product at entry_buffer.
+/// Both selectors execute even for a zero product; the buffer pointer is
+/// loaded only after both calls. No NULL checks. No behavioral deviations:
+/// the known IRAM veneer and entry-size helper use their existing Rust ports.
+/// The caller-visible API is void, as in Ghidra and both raw callers.
+///
+/// # Safety
+///
+/// `table` and its target-width vtable/layout links must be valid for the
+/// recovered dispatches. The selected buffer must be writable for the
+/// wrapped byte count. Callbacks must obey these same object invariants.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strided_buffer_clear(table: *const StridedBuffer) {
+    let vtable = (*table).opaque_00 as usize as *const StridedBufferVtable;
+    let count = ((*vtable).entry_count)(table);
+    let size = strided_buffer_entry_size(table);
+    let buffer = (*table).entry_buffer as usize as *mut u8;
+    crate::libc::iram_veneers::iram_memzero_veneer(buffer, count.wrapping_mul(size) as usize);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -195,5 +230,45 @@ mod tests {
         }
         assert_eq!(SEEN_LAYOUT.load(Ordering::SeqCst), layout as usize);
         assert_eq!(ENTRY_SIZE_CALLS.load(Ordering::SeqCst), 3);
+    }
+
+    unsafe extern "C" fn entry_count(table: *const StridedBuffer) -> u32 {
+        (*table).opaque_08
+    }
+
+    #[test]
+    fn clear_preserves_boundaries_for_zero_unaligned_and_wrapped_extents() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let Some((table, _, buffer)) = fixture() else {
+            note_missing_u32_fixture("app::strided_buffer_clear");
+            return;
+        };
+        unsafe {
+            let vtable = (table as *mut u8).add(0x200).cast::<super::StridedBufferVtable>();
+            vtable.write(super::StridedBufferVtable {
+                unresolved_00_04: [0; 2],
+                entry_count,
+            });
+            (*table).opaque_00 = vtable as u32;
+            for offset in 0..4u32 {
+                for (count, size, len) in [
+                    (0, 17, 0usize), (7, 0, 0), (1, 1, 1), (3, 11, 33),
+                    (8, 8, 64), (0x8000_0000, 2, 0), (0x8000_0001, 2, 2),
+                ] {
+                    let storage = buffer as usize as *mut u8;
+                    ptr::write_bytes(storage, 0xa5, 80);
+                    (*table).entry_buffer = buffer + 4 + offset;
+                    (*table).opaque_08 = count;
+                    ENTRY_SIZE.store(size, Ordering::SeqCst);
+                    super::strided_buffer_clear(table);
+                    for index in 0..80usize {
+                        let start = 4 + offset as usize;
+                        let expected = if (start..start + len).contains(&index) { 0 } else { 0xa5 };
+                        assert_eq!(*storage.add(index), expected,
+                            "offset={offset} count={count} size={size} index={index}");
+                    }
+                }
+            }
+        }
     }
 }
