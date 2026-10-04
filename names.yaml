@@ -214194,3 +214194,34 @@ functions:
       A separate non-test host library build is blocked by six existing
       missing host helpers in prepare_entry_metadata, shared_payload_select_kind,
       and calendar_schedule; no unrelated changes made to those modules.
+  - address: 0x081eddbc
+    ghidra: FUN_081eddbc
+    name: class_8900_playback_preference_byte
+    size: 32
+    sig: "u32 class_8900_playback_preference_byte(const Class8900 *this)"
+    module: app/class_8900_playback_preference_byte
+    status: ported
+    renames:
+      param_1/r0: this
+      iVar1: settings
+      uVar2: preference_byte_or_unset
+    notes: >-
+      Raw A32 confirms the 32-byte extent 0x081eddbc..0x081edddc;
+      the next function begins with push {r4,r5,r6,lr}. Whole-image
+      decoding finds two incoming plain BLs at 0x0810cca8 and 0x08233810,
+      zero predicated callers, and one outgoing plain BL at 0x081eddc4
+      to the existing instance_6000_settings_block at 0x08171ff8.
+      Loads the class-0x6000 store from this+0x378, obtains settings at
+      store+0x60, and returns UINT32_MAX if settings[6] is 0xff;
+      otherwise zero-extends settings[0x10]. The adjacent setter at
+      0x081edddc writes -1 for unset or -2 plus the supplied value.
+      User-facing preference identity is not established. Reuses the
+      existing Class8900 repr(C) layout and Rust accessor; volatile byte
+      reads preserve the conditional value access. No NULL guards added.
+      Host tests exercise every flag byte with unsigned value boundaries
+      and store preservation. Full host suite passed: 14057 tests.
+      ARM release build passed. match.py exits 1 with a structural diff:
+      LLVM uses fp setup and ldrb/cmp #255 instead of ldrsb/cmn #1;
+      the store load, accessor BL, conditional value load, sentinel and
+      return remain. Actual-source standalone host smoke exercised unset,
+      -2/high-bit values, another negative flag, and zero. No device run.
