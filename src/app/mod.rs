@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod record_stream_transferred_count;
 pub mod path_list_node_construct;
 pub mod text_key_selection_update;
 pub mod work_record_apply_adjustment;
