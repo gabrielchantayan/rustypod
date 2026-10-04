@@ -16,6 +16,53 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820c818
+    ghidra: FUN_0820c818
+    name: mov_chain_table_advance
+    size: 84
+    sig: "i32 mov_chain_table_advance(const MovChainTable *table, i32 steps, u32 start, u32 *out)"
+    module: mov/chain_table_advance
+    status: ported
+    args:
+      r0: table
+      r1: steps
+      r2: start
+      r3: out
+    vars:
+      param_1/r5: table
+      param_2/r4: steps
+      param_3/stack_8: current
+      param_4/r3: out
+      iVar2/r6: completed
+      iVar1/r0: status
+    notes: >-
+      Raw A32 verifies the exact 84-byte extent 0x0820c818..0x0820c86c;
+      the next real function begins with mov r3,#0. Whole-image immediate
+      BL decoding finds two inbound plain calls at 0x081e4cbc and
+      0x081e533c, zero predicated inbound calls, and one outbound plain
+      call at 0x0820c838 to the already-ported mov_chain_table_next at
+      0x0820c8a0, with no predicated outbound calls. Advances a local
+      cursor by a signed step count and stores to output only on success.
+      Nonpositive counts pass through even invalid starting indices without
+      reading the table. Any failed link read returns two without publishing
+      the local cursor. The end marker is accepted as the final result but
+      fails if traversed again. Cycles are not rejected; no 128-step limit.
+      Callers use the routine to partition MOV slot chains. Reuses the
+      established 20-byte entry layout and next-link accessor; no new seam,
+      no deliberate deviations. Three host tests cover signed nonpositive
+      extremes, invalid starts, valid and corrupt link boundaries, final
+      versus traversed end markers, cycles beyond 128 steps, differential
+      reference behavior and output aliasing. Host suite passes 13883 tests;
+      ARM build-std release build passes. Standalone source smoke confirms
+      final sentinel success, extra-step failure preserving output, and
+      negative-count pass-through. match.py exits one with 21 original
+      versus 26 Rust instructions: LLVM uses a descending positive counter,
+      a frame pointer and a saved output pointer, preserving the local
+      cursor, error exit and success-only store. Object relocation verifies
+      R_ARM_CALL mov_chain_table_next; the displayed BL to zero is unlinked,
+      not recursion. No device execution. An optional full host non-test
+      rlib smoke build encountered six unrelated missing cfg-gated helpers;
+      the isolated source smoke avoids those modules.
   - address: 0x0820c86c
     ghidra: FUN_0820c86c
     name: mov_chain_table_find_tag
