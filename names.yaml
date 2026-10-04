@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x082158b0
+    ghidra: FUN_082158b0
+    name: container_is_nonempty
+    size: 16
+    sig: "u32 container_is_nonempty(const u8 *container)"
+    module: cxx/templates
+    status: ported
+    vars:
+      param_1: container
+      uVar1: empty
+      FUN_083d7610: container_is_empty_alias_7610
+    notes: >-
+      Raw words e92d4010 eb070755 e2200001 e8bd8010 establish the
+      16-byte extent, followed by the independent push at 0x082158c0.
+      Two inbound plain BL sites at 0x0818b9fc and 0x0818bb5c, zero
+      predicated inbound BLs. Body has one plain BL at 0x082158b4 to
+      0x083d7610, zero predicated BLs and zero BLX. The named, ported
+      callee is a byte-identical container_is_empty alias: it tests the
+      aligned u32 word at container+0x20 for zero. XOR one therefore
+      returns one exactly when that word is nonzero. Caller 0x0818b9f0
+      queries front-object status only when this predicate is nonzero.
+      Deliberate deviation: call the canonical Rust container_is_empty
+      instead of introducing another alias export. All 13832 host tests
+      pass; ARM release build succeeds. An isolated executable using the
+      actual Rust predicate bodies verifies zero, one, two, high-bit-only,
+      UINT32_MAX, and a transition back to zero. match.py reports four
+      original versus five Rust instructions: LLVM uses fp rather than
+      r4 and adds mov fp,sp; BL and XOR-one structure are retained.
+      R_ARM_CALL confirms that the unlinked BL targets container_is_empty.
+
   - address: 0x082158c0
     ghidra: FUN_082158c0
     name: container_status_flags

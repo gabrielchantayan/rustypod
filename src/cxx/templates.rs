@@ -2687,6 +2687,47 @@ pub unsafe extern "C" fn container_is_empty(container: *const u8) -> u32 {
     u32::from((container as *const u32).add(8).read() == 0)
 }
 
+/// Nonempty predicate — original `FUN_082158b0` @ 0x082158b0.
+/// True size: 16 bytes; the next function starts at 0x082158c0.
+/// Two inbound plain BL sites (0x0818b9fc, 0x0818bb5c), zero predicated BL.
+/// Body: one plain BL to the container_is_empty alias at 0x083d7610,
+/// zero predicated BL or BLX; XOR its normalized result with one.
+/// Deliberate deviation: reuse the canonical Rust predicate for the
+/// byte-identical callee alias rather than introduce another export.
+///
+/// # Safety
+/// `container` must be aligned for u32 and have nine readable words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_is_nonempty(container: *const u8) -> u32 {
+    container_is_empty(container) ^ 1
+}
+
+#[cfg(test)]
+mod nonempty_tests {
+    use super::container_is_nonempty;
+
+    #[test]
+    fn nonempty_normalizes_the_full_state_word() {
+        let mut words = [0u32; 9];
+        for state in [0, 1, 2, 0x8000_0000, u32::MAX] {
+            words[8] = state;
+            assert_eq!(unsafe { container_is_nonempty(words.as_ptr().cast()) },
+                       if state == 0 { 0 } else { 1 });
+        }
+    }
+
+    #[test]
+    fn nonempty_ignores_surrounding_words() {
+        let mut words = [u32::MAX; 10];
+        words[8] = 0;
+        assert_eq!(unsafe { container_is_nonempty(words.as_ptr().cast()) }, 0);
+        words.fill(0);
+        words[8] = 7;
+        assert_eq!(unsafe { container_is_nonempty(words.as_ptr().cast()) }, 1);
+    }
+}
+
 /// Signature of the container's virtual element-slot method: given an
 /// index it returns the *address of the slot* holding the element
 /// pointer, which [`container_element_at`] then loads.
