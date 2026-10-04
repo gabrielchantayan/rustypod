@@ -3415,6 +3415,8 @@ pub mod hints {
     // 0x8fff_0000: dedicated to codegen/unpack_tagged_operand's target-width
     // operand slot, wrapper, and child fixtures; mappings never unmap.
     pub const CG_UNPACK_TAGGED_OPERAND: usize = 0x8fff_0000;
+    // Dedicated cxx/object_list_pop_front target-width node fixture; never unmapped.
+    pub const OBJECT_LIST_POP_FRONT: usize = 0x53d0_0000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
