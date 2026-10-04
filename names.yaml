@@ -210472,3 +210472,47 @@ functions:
       LLVM adds push {fp,lr}; mov fp,sp and returns via pop {fp,pc}
       rather than bx lr (four instructions versus two). No device execution
       was performed.
+
+  - address: 0x081ffcf4
+    ghidra: FUN_081ffcf4
+    name: media_player_index_select
+    size: 96
+    sig: "uint32_t media_player_index_select(void *unused, uint32_t index)"
+    module: app/media_player_index_select
+    status: ported
+    vars:
+      param_1: unused
+      param_2: index
+      piVar1: singleton_interface
+      uVar2: index_limit
+      uVar3: status
+    renames:
+      FUN_08259594: media_player_interface_get
+      FUN_08259928: settings_get
+      "vtable+0xec": unresolved_index_limit
+      "vtable+0xb8": unresolved_settings_prepare
+      "vtable+0xa4": unresolved_index_apply
+    notes: >-
+      Raw ARM proves the 96-byte extent through pop at 0x081ffd50,
+      followed by the next real prologue at 0x081ffd54. Whole-image
+      immediate-BL decoding finds two plain inbound sites at 0x081fdb00
+      and 0x081fe4d0, zero predicated sites. Outgoing calls are three
+      plain BL and three virtual BLX. The unsigned index must be less
+      than player slot +0xec; otherwise return 4 without settings effects.
+      On success invoke settings slot +0xb8, reacquire the player, and
+      call slot +0xa4 with index and three zero arguments, returning 0.
+      Callers pass a decoded 32-bit command value; virtual targets remain
+      unresolved and no concrete playlist/track identity is inferred.
+      Host vtables deliberately use native-width pointers at ARM word
+      indices. Tests cover empty limits, equality, unsigned high values,
+      rejection without preparation, and player replacement during
+      preparation. Standalone public-entry smoke proves rejection at
+      the limit and selection below it with all three zero arguments.
+      Existing singleton constructor prerequisites are inherited:
+      settings_get is documented not hook-ready until its ctor is ported.
+      Full host test suite and ARM release build passed. match.py reports
+      24 stock instructions versus 27 Rust instructions; the unsigned
+      branch, three direct calls, all virtual slot offsets, player reload,
+      and stacked fifth zero argument are preserved. Differences are
+      LLVM's frame setup, register allocation, and scheduling; archive
+      direct-call operands await linker relocation. No device run.
