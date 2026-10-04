@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08203250
+    ghidra: FUN_08203250
+    name: two_pair_string_pair_owner_get
+    size: 32
+    sig: "u32 two_pair_string_pair_owner_get(StringPairOwner *owner)"
+    module: app/two_pair_string_pair_owner_get
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      owner_plus_0x14: strings
+      vtable_plus_0x08: prepare
+    notes: >-
+      Raw ARM words establish eight instructions, 32 bytes through the return
+      at 0x0820326c, followed by the independently entered constructor at
+      0x08203270. Whole-image word decoding finds two inbound plain BLs at
+      0x081dcc64 and 0x081dcc94, zero predicated BLs. The body has no direct
+      BLs and one indirect BLX at 0x08203264. Invoke virtual slot +8 with
+      the original owner, discard its return and reload the owned string-pair
+      address word at +20. The existing two_pair_string_pair_owner_construct
+      port confirms that field's role. Its installed vtable 0x0899156c has
+      slot +8 pointing to 0x08291588, which has no names.yaml identity;
+      preserve dynamic dispatch rather than invent a callee or fixed seam.
+      No target semantic deviations or NULL guards. Native host vtable
+      pointers and slots widen; payload and returned address words stay u32.
+      Host edge tests cover post-dispatch replacement, repeated dispatch,
+      wrapping address mutation, ignored virtual returns, zero and high-bit
+      address values, and preservation of unrelated fields. All 14010 host
+      tests and ARM release build passed. Production-source executable smoke
+      returned 0x87654321 after one virtual call. Reviewed match.py exit-one
+      diff: identical slot load, BLX, post-call +20 reload; LLVM adds a frame
+      pointer and saves extra registers. No device execution performed.
   - address: 0x081f1244
     ghidra: FUN_081f1244
     name: context_lifecycle_request
