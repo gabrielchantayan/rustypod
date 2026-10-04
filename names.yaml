@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ef938
+    ghidra: FUN_081ef938
+    name: path_traversal_construct
+    size: 160
+    sig: "PathTraversal *path_traversal_construct(PathTraversal *this, const StringObject *root, u32 mode, u32 base_hint)"
+    module: app/path_traversal_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1/r6: root
+      param_3/r2/r5: mode
+      param_4/r3: base_hint
+      FUN_083de03c: pop_pending (path-record deque pop boundary)
+      FUN_081ef764: initialize_traversal (path traversal initialization boundary)
+    notes: >-
+      Raw A32 extent is 0x081ef938..0x081ef9d8 exclusive, comprising 156 code
+      bytes and literal 0x0898ff40 at 0x081ef9d4. Next entry begins with push.
+      Nine outbound plain BLs, zero predicated BLs. Whole-image word decoding
+      finds two inbound plain BLs at 0x08100994 and 0x08275214, zero predicated
+      forms. Constructs interface base with flag zero, installs derived
+      vtable, range-copies an empty 12-byte-record deque and retires temporary
+      records, stores low mode byte at target +0x38, copies root at +0x3c,
+      initializes traversal with a default empty path, and destroys that path.
+      Preserves constructor return threading. Uses existing Rust constructors
+      and destructor; pop at 0x083de03c and initialization at 0x081ef764 remain
+      typed fixed-address device boundaries. Native repr(C) pointer fields
+      deliberately expand host layout without assuming target byte offsets.
+      Host suite passes 14031 tests; ARM release build passes. Executable host
+      smoke exercises the real base, empty range and path constructors and
+      cleanup with host range-population and traversal-initialization boundaries.
+      Device execution was not exercised. Reviewed match.py structural diff:
+      39 original instructions versus 47 Rust instructions including three
+      literal words. Same 56-byte local frame, derived vtable, mode offset
+      +0x38, root offset +0x3c and drain loop. The empty predicate is inlined
+      as a count read; fixed-address boundaries lower to BLX. LLVM removes
+      redundant constructor return subtraction for known identity returns.
   - address: 0x082011e0
     ghidra: FUN_082011e0
     name: service_manager_secondary_handler_state_with_fallback
