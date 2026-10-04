@@ -210116,3 +210116,45 @@ functions:
       constructors return their input and eliminates the corresponding rebase
       arithmetic. Resident reset uses literal-loaded BLX; archive BL labels
       are unresolved member-constructor relocations. Frame layout differs.
+
+  - address: 0x0820c448
+    ghidra: FUN_0820c448
+    name: channel_slot_publish
+    size: 96
+    sig: "void channel_slot_publish(uint32_t *base, uint32_t channel, uint32_t unused_third, uint32_t replacement, uint32_t payload_0, uint32_t unused_sixth, uint32_t payload_1, uint32_t payload_2, uint32_t payload_3)"
+    module: app/channel_slot_publish
+    status: ported
+    renames:
+      param_1/r0: base
+      param_2/r1: channel
+      param_3/r2: unused_third
+      param_4/r3: replacement
+      param_5: payload_0
+      param_6: unused_sixth
+      param_7: payload_1
+      param_8: payload_2
+      param_9: payload_3
+      iVar1: selected
+      iVar2: record
+    notes: >-
+      Raw osos.dec establishes 96 bytes through return at 0x0820c4a4;
+      next real function starts at 0x0820c4a8. Independent A32 word
+      decoding finds zero outgoing plain or predicated BLs and two inbound
+      plain BLs at 0x081af9c4 and 0x081afb14, zero predicated inbound BLs.
+      No prior names entry and no callee seam. Read selector at base plus
+      channel times 4; record is base plus channel times 56 plus selected
+      times 28. Store payload words at +16, +24, +28, +32, conditionally
+      replace +12 for nonzero replacement, then publish byte state 3 at +8.
+      Increment selector, reread it, and reset for signed value >= 2.
+      Incoming r2 and sixth argument are unused. Caller copies five stack
+      words and selects channel zero; payload identities and concrete owner
+      remain unknown. No deliberate behavior deviations. Aligned u32 word
+      indices preserve target layout on hosts; volatile accesses retain
+      stock access order and reread. Host tests cover both slots, multiple
+      channels, zero/nonzero replacement, untouched bytes, and repeated
+      alternating publications. Full host suite and ARM release build pass.
+      Standalone smoke observed selector 1,0,1 and slot payloads 11/0,
+      11/21,31/21. match.py exits 1: 24 stock versus 26 Rust instructions;
+      offsets, optional store, byte publication and signed selector wrap
+      match. LLVM uses a smaller frame, individual stack loads instead of
+      LDM, and equivalent signed >1 rather than >=2. No calls introduced.
