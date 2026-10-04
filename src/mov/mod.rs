@@ -11,6 +11,7 @@ pub mod inline_descriptor_payload;
 pub mod atom_tree_has_offsets;
 pub mod atom_node;
 pub mod chain_table;
+pub mod chain_table_find_tag;
 pub mod chain_table_find_predecessor;
 pub mod chain_table_count_steps;
 pub mod esds_descriptor_size;
