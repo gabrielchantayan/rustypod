@@ -11,14 +11,13 @@
 //! The +4 word and trailing three bytes remain untouched. Callers allocate
 //! 0x28 bytes; the class and remaining field meanings are not established.
 //!
-//! Deliberate deviations: the final reset helper at 0x08215364 constructs
-//! an empty temporary handle, assigns it to the already-empty member, and
-//! releases the empty temporary. That provably effect-free sequence is
-//! omitted, rather than introducing a second port or firmware seam.
-//! `repr(C)` pointer fields widen on hosts; target offsets remain exact.
+//! Deliberate deviations: `repr(C)` pointer fields widen on hosts; target
+//! offsets remain exact. The final empty-member reset uses the separately
+//! ported helper at 0x08215364.
 
 use crate::cxx::shared_cell::{SharedCell, shared_cell_construct};
 use crate::cxx::string_object::{StringObject, string_default_construct};
+use super::shared_string_state_clear_shared::shared_string_state_clear_shared;
 
 #[repr(C)]
 pub struct SharedStringState {
@@ -48,6 +47,7 @@ pub unsafe extern "C" fn shared_string_state_construct(
     string_default_construct(core::ptr::addr_of_mut!((*this).string));
     core::ptr::addr_of_mut!((*this).trailing_words).write([0; 2]);
     core::ptr::addr_of_mut!((*this).flag).write(0);
+    shared_string_state_clear_shared(this);
     this
 }
 
