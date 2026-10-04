@@ -214397,3 +214397,47 @@ functions:
       LLVM reorders independent stores, uses a frame pointer, and ends
       with BX to literal 0x0817209c; the requested comparison includes
       Ghidra's erroneous extra functions. No validation or NULL guard.
+
+  - address: 0x081d9270
+    ghidra: FUN_081d9270
+    name: layer_activity_stop
+    size: 52
+    sig: "void layer_activity_stop(Display *display)"
+    module: drivers/display
+    status: ported
+    renames:
+      param_1/r4: display
+      FUN_081d89a8: display_lock_existing_layers
+      FUN_08120700: layer_pending_object_cleanup
+      FUN_081208f0: layer_mutex_unlock
+    notes: >-
+      Raw A32 words establish 0x081d9270..0x081d92a4, ending in the
+      tail B to the separately entered unlock loop at 0x081d8a44.
+      The next function begins with push at 0x081d92a4. Whole-image
+      decoding finds one plain inbound BL at 0x081d8a34, one BLNE
+      at 0x081d9028, and one BNE tail caller at 0x081d89a0.
+      The body has three plain outbound BLs and no predicated BLs.
+      Calls unnamed retail 0x0816a62c(driver), clears layers_active,
+      locks all existing layers, cleans their pending objects, and
+      unlocks them, in three separate ascending six-slot passes.
+      The panel callee's raw body calls 0x08168ebc(driver, 0) then
+      returns zero; neither address has a names.yaml identity, so
+      the original fixed-address call and ABI are preserved rather
+      than assigning a guessed Rust callee. Host tests replace only
+      that firmware boundary. Deliberate deviations: expand cleanup
+      and tail-unlock loops using existing layer_pending_object_cleanup
+      and mutex_unlock ports, omitting the ignored layer identity
+      return. Native-width Display fields preserve host pointers.
+      Removes the obsolete activity-stop hook and latch-only stub;
+      both existing callers now invoke this complete port. Host tests
+      cover sparse layers, skipped NULL slots, panel-before-teardown
+      ordering, blocker bypass, inactive repeat calls, and existing
+      enable/force transitions. All 14066 host tests pass; ARM release
+      build passes. match.py exits 1: LLVM unrolls the two six-slot
+      passes, adds its frame pointer, and calls the fixed-address
+      helper; the driver +0x94 load, +0x98 clear, lock call, non-NULL
+      cleanup gates, and mutex +0x78 unlock arguments are preserved.
+      Standalone host executable smoke is blocked by six existing
+      non-test host E0425 errors in prepare_entry_metadata,
+      shared_payload_select_kind, and calendar_schedule; the host
+      test configuration exercises the complete stop path instead.
