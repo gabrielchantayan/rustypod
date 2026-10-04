@@ -213304,3 +213304,45 @@ functions:
       build passed; match.py exit 1 reports 101 versus 48 instructions:
       counted acquisition inlined, six-slot scans unrolled, virtual BLX
       and owner reload preserved. No device execution.
+
+  - address: 0x08201de0
+    ghidra: FUN_08201de0
+    name: task_target_array_owner_construct
+    size: 156
+    sig: "void *task_target_array_owner_construct(void *storage)"
+    module: app/task_target_array_owner_construct.rs
+    status: ported
+    renames:
+      param_1/r0: storage
+      puVar1/r4: owner
+      FUN_0811113c: framework_base_construct_with_task_target
+      FUN_082aadd4: operator_new
+      FUN_082022ac: resident_child_construct
+      FUN_08271cec: observable_array_construct
+      DAT_08201e74: OWNER_VTABLE_08990F28
+      DAT_08201e78: MEMBER_VTABLE_089A5490
+    notes: >-
+      Raw A32 establishes [0x08201de0, 0x08201e7c): 148 executable bytes
+      plus two vtable literal words; the next real function starts with cmp
+      r0,0 at 0x08201e7c. Whole-image aligned decoding finds two inbound
+      plain BLs at 0x08236170 and 0x08237320, four outbound plain BLs,
+      and zero predicated BLs in either direction. Construct the framework
+      base with create_link=1, install owner vtable, clear flags +20/+21
+      and word +24, allocate 308 bytes and construct the child at
+      0x082022ac, storing its returned pointer at +28; clear +32.
+      Construct observable array at +40, install its derived vtable,
+      initialize sentinels and flags, and return the member result minus 40.
+      Ghidra's void signature loses both this return and the child's
+      allocation argument. Child class identity remains unknown; its raw
+      entry preserves r0 and initializes a 320x240 state. Device seam
+      invokes that exact entry; existing framework, heap and array ports
+      are reused. Host operations avoid native-pointer framework layout;
+      target fields remain four-byte words. Tests cover exact written
+      and untouched bytes, NULL child return and relocated constructor
+      results. Host suite and ARM release build passed. Isolated native
+      exported-path smoke with host dependency substitutes produced child
+      0x1040, array vtable 0x089a5490, sentinel 0xffffffff, flags 0x10000.
+      match.py exit 1: 37 reported instructions on each side, resident
+      child BL becomes BLX, adjacent byte stores combine, and LLVM removes
+      rebasing because existing base/member ports return their inputs.
+      No device execution.

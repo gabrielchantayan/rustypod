@@ -926,3 +926,4 @@ pub mod pending_payload_reset;
 pub mod indexed_record_selection_set;
 pub mod linked_owner_head;
 pub mod request_dispatch;
+pub mod task_target_array_owner_construct;
