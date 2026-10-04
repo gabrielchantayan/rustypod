@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0820fa58
+    ghidra: FUN_0820fa58
+    name: configured_range_view_construct
+    size: 144
+    sig: "ConfiguredRangeView *configured_range_view_construct(ConfiguredRangeView *view, ResourceProvider *resources, void *controller, void *parent, const ConfiguredRangeViewSpec *spec)"
+    module: ui/range_view
+    status: ported
+    vars:
+      param_1/r0: view
+      param_2/r1: resources
+      param_3/r2: controller
+      param_4/r3: parent
+      in_stack_00000000/r4: spec
+      FUN_0812b94c: range_view_construct
+      DAT_0820fae4: configured range view vtable (0x08992750)
+    notes: >-
+      Raw ARM verifies 140 code bytes ending at pop 0x0820fae0 plus
+      vtable literal 0x08992750 at 0x0820fae4; the next independent
+      function starts with cmp r0,0 at 0x0820fae8. True extent 144 bytes.
+      Whole-image aligned ARM word decoding finds two inbound plain BLs
+      (0x081e0114 and 0x0821355c), no predicated BLs. Body contains one
+      plain BL at 0x0820fa64 to the already-ported range_view_construct,
+      no predicated BLs. The latter caller is a derived constructor that
+      replaces the vtable again. Forward four register arguments and the
+      stacked spec, replace the range vtable, clear +0xb4, copy spec
+      +0x6c/+0x68/+0x70/+0x74/+0x78/+0x7c/+0x80/+0x84 into alternating
+      configuration words +0xb8..+0xf0, copy +0x8c to +0xf8, and clear
+      paired state words +0xbc..+0xf4. Spec +0x88 is unused. Configuration
+      identities remain positional rather than guessed. Deviations: restore
+      ABI arguments and return omitted by Ghidra; retain the input view
+      across the base call, which returns that pointer; vtable is a target
+      u32 address, never dispatched here. Host tests cover poisoned state,
+      zero/high-bit/all-one values, swapped first words, ignored reserved
+      word, inverted inherited bounds and pointer return. ARM release build
+      succeeds. match.py exits 1 with 35 original versus 39 Rust entries:
+      all load/store offsets and the vtable agree, LLVM unrolls both loops,
+      adds its frame and pool word, and schedules the final configuration
+      load after the first paired clear. Base BL relocation remains for
+      linking. Isolated optimized host smoke exercises the actual range
+      and derived constructors with only the grand-base boundary isolated.
   - address: 0x0821554c
     ghidra: FUN_0821554c
     name: deque_prepend_dispatch
