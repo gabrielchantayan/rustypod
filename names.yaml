@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f21a0
+    ghidra: FUN_081f21a0
+    name: iap_session_state_reset
+    size: 124
+    sig: "u32 iap_session_state_reset(void)"
+    module: app/iap_session_state_reset
+    status: ported
+    renames:
+      param_1: ignored incoming object pointer
+      DAT_081f2218: shared iAP session state at 0x089cca2c
+      DAT_081f2214: default rate (44100)
+      thunk_FUN_081d71c0: iap_incoming_process_thread_instance_veneer
+      FUN_081d7270: iap_incoming_process_thread_slot_poll
+    notes: >-
+      Raw ARM establishes 116 code bytes plus two literal words, ending at
+      the independent mov r0,#1 function at 0x081f221c. Whole-image decoding
+      finds two plain inbound BLs (0x081f1fec and 0x081f2610), zero predicated
+      inbound BLs. Body contains three plain BLs, no predicated BLs, and a
+      tail B to slot_poll. Ghidra incorrectly expands the tail into the
+      mutex-unlock implementation. Ignores incoming r0; resets shared state
+      at 0x089cca2c: +0x14 = 44100, clears +0x18..0x28, bytes +1 and +0,
+      and words +0x10, +8, +4, +0x34 in instruction order. Preserves bytes
+      +2..3, word +0x0c and registration indices +0x2c/+0x30. Polls the
+      first non-minus-one index, discarding its status, then checks the
+      second index after that poll and returns its status or minus one.
+      Both indices reload after obtaining the incoming-process instance.
+      Uses existing ported callees without new seams; host-only state
+      rebinding and volatile accesses are deliberate deviations. Host
+      tests cover preserved bytes, slot presence, status precedence and
+      second-slot mutation during the first poll.
+      ARM match review: LLVM uses state+0x2c as its base with negative store
+      offsets, synthesizes 44100, and retains all reset stores, both -1
+      tests, all three calls and the final tail branch. Host suite passed
+      13997 tests. Standalone public-entry smoke verified the absent-slot
+      path with fail-fast dependency guards; registered paths are covered
+      by the state-transition tests and existing canonical callee tests.
   - address: 0x0820457c
     ghidra: FUN_0820457c
     name: event_forward_to_delegate
