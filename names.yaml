@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08213c00
+    ghidra: FUN_08213c00
+    name: selected_buffer_offset_byte
+    size: 60
+    sig: "const u8 *selected_buffer_offset_byte(const BufferPointerPair *buffers, u32 *value, u32 prefer_first)"
+    module: app/selected_buffer_offset_byte
+    status: ported
+    renames:
+      param_1/r0: buffers
+      param_2/r1: value
+      param_3/r2: prefer_first
+      pbVar1: buffer
+      pbVar2/r3: field
+    notes: >-
+      Raw words establish the 60-byte extent ending at bx lr @ 0x08213c38;
+      the next real function pushes r3/lr @ 0x08213c3c. Whole-image A32
+      decoding finds two incoming plain BLs at 0x081e18d4 and 0x08213c50,
+      zero predicated incoming BLs and zero outbound calls. Select the
+      first pointer only when prefer_first is nonzero and it is non-null,
+      otherwise select the second pointer. Return buffer plus its first
+      unsigned byte and write the byte there zero-extended to the output
+      word. A null selected buffer returns null without accessing output.
+      Both callers use a pointer pair at object +0x6c; 0x08213c3c reads
+      a masked little-endian halfword at returned field + value +4.
+      Buffer format identity remains unresolved; no callee seams created.
+      repr(C) native pointer fields preserve target +0/+4 layout and host
+      pointer width. No deliberate behavioral deviations. Host tests cover
+      all 256 offsets, pointer availability and noncanonical nonzero
+      selectors; a direct smoke harness exercises selection and null paths.
+      Host suite and ARM release build pass. match.py reports 15 original
+      and 15 Rust instructions; LLVM uses a writeback indexed byte load,
+      an early conditional null return and a frame on the non-null path.
   - address: 0x0821432c
     ghidra: FUN_0821432c
     name: object_top_byte_flags_contains

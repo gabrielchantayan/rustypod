@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod selected_buffer_offset_byte;
+pub use selected_buffer_offset_byte::*;
 pub mod image_format_state_initialize;
 pub mod object_reset_sentinel_state;
 pub use object_reset_sentinel_state::*;
