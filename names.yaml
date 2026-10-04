@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081f71ec
+    ghidra: FUN_081f71ec
+    name: range_state_copy_construct
+    size: 140
+    sig: "RangeState *range_state_copy_construct(RangeState *destination, const RangeState *source)"
+    module: util/range_state
+    status: ported
+    vars:
+      param_1/r0/r4: destination
+      param_2/r1/r5: source
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw A32 words confirm extent 0x081f71ec..0x081f7278 (140 bytes),
+      returning at 0x081f7274 before the next constructor. Whole-image
+      decoding finds two inbound plain BLs at 0x081b4eec and 0x081b4f00,
+      zero predicated inbound BLs; one outbound plain BL at 0x081f7214,
+      zero predicated outbound BLs. Copies words 0 and 1, ten bytes at +8,
+      four word pairs at +20..+51, and tail words at +52..+63; preserves
+      destination padding bytes +18 and +19 and returns destination.
+      Existing RangeState repr(C) preserves the 64-byte word layout on
+      host and target. The verified 0x08037db0 veneer targets 0x22000020,
+      the IRAM mirror of ported 0x08000020; Rust calls __rt_memcpy directly
+      and ignores its return. Host tests cover padding, source preservation,
+      neighboring sentinels, and self-copy; a direct executable smoke passed.
+      match.py shows 36 versus 35 instructions: LLVM adds a frame pointer
+      and reverses independent pair stores, retaining both loads before
+      stores, the ten-byte copy call, all offsets, and destination return.
+
   - address: 0x0820868c
     ghidra: FUN_0820868c
     name: payload_cell_get
