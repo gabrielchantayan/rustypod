@@ -211712,3 +211712,42 @@ functions:
       release build passed. Final match.py exit 1 shows LLVM's frame and
       literal-loaded BX in place of direct B, preserving field operations,
       their order, kind 7, and destination. No device execution performed.
+
+  - address: 0x08209088
+    ghidra: FUN_08209088
+    name: selected_service_handler_is_ready
+    size: 76
+    sig: "u32 selected_service_handler_is_ready(void)"
+    module: app/selected_service_handler_readiness
+    renames:
+      DAT_082090d0: selected_service_handler_context_slot (global @ 0x089ccc18)
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_08138d8c: service_handler_state_is_ready
+      r4: ready
+      r5: context_slot
+      context_plus_0x2d0: handler
+      context_plus_0x2d4: selector
+    status: ported
+    notes: >-
+      Raw ARM words establish [0x08209088,0x082090d4): 72 instruction
+      bytes plus the slot-address literal at 0x082090d0; the next function
+      begins with push at 0x082090d4. Full-image aligned A32 B/BL decoding
+      finds two inbound plain BLs at 0x08208f68 and 0x082092f4, no predicated
+      inbound BLs or B tails. Two outbound plain BLs target the existing
+      service-manager veneer and lifecycle-readiness predicate; no predicated
+      outbound BLs. Incoming r0/r1 are overwritten, not arguments. Rejects
+      NULL context, zero handler, or signed selector >=3; otherwise gets the
+      manager, reloads the context slot and selector, and returns readiness
+      normalized to 0/1. Negative selectors remain admitted. Target accesses
+      original RAM with aligned volatile reads; host uses a native-pointer
+      fixture. Existing manager and lifecycle ports retain their documented
+      singleton/table adaptations; the manager must be initialized before
+      hook use. Reuses the already registered implementation from 085d072e;
+      adds missing metadata and zero-handler selector-boundary coverage.
+      Full host suite and ARM release build passed. Standalone entry smoke
+      with host test fixtures returns zero for an unset context; ordinary
+      host library compilation is blocked by six unrelated missing helper
+      definitions. match.py exit 1 shows LLVM frame changes, cmp #2/bgt
+      replacing cmp #3/bge, and a final tail B to the boolean lifecycle
+      predicate replacing BL plus normalization; semantics are preserved.
+      No device execution performed.
