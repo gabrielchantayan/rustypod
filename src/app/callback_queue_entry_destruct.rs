@@ -10,27 +10,58 @@
 //! object (clearing only the latter), and destroys the embedded base at +4.
 //! The base destructor's returned pointer is rebased by -4 for the result.
 //!
-//! Deliberate deviations: the queue submitter (0x081fb52c), embedded-state
-//! destructor (0x08206f5c), and base destructor (0x08207330) have no recovered
-//! names. Target builds call their verified retail addresses; host tests supply
-//! role-based operations. Host object and vtable pointers are widened.
+//! Deliberate deviations: the queue submitter (0x081fb52c) and embedded-state
+//! destructor (0x08206f5c) remain fixed-address target calls with host operations.
+//! The base destructor calls the port below. Host pointers and embedded mutex
+//! layout are widened; field offsets replace target-only byte offsets.
 
 use crate::app::callback_queue::callback_queue_instance_get;
+use crate::kernel::sync_mutex::{Mutex, mutex_lock, mutex_unlock, mutex_delete};
+
+/// Embedded callback-entry base. Target mutex starts at +0x14.
+#[repr(C)]
+pub struct CallbackQueueEntryBase {
+    pub vtable: u32,
+    pub state_words: [u32; 4],
+    pub mutex: Mutex,
+    pub trailing_words: [u32; 5],
+}
+
+/// `FUN_08207330` @ 0x08207330: 56 bytes through 0x08207368, including
+/// the literal at +0x34 (Ghidra's 52 bytes exclude it). Whole-image A32
+/// decoding finds two inbound plain BL sites, zero predicated BL sites.
+/// The body has three plain BL calls, zero predicated calls.
+///
+/// Restores vtable 0x08991994, waits on and signals the mutex at target
+/// +0x14, deletes its semaphore cell, and returns the original base pointer.
+/// No object storage is freed. Deliberate deviation: host mutex pointers
+/// widen in this repr(C) layout; target offsets and behavior are unchanged.
+///
+/// # Safety
+/// `base` must be writable and its mutex must satisfy the mutex API contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn callback_queue_entry_base_destruct(base: *mut CallbackQueueEntryBase) -> *mut CallbackQueueEntryBase {
+    core::ptr::addr_of_mut!((*base).vtable).write(0x0899_1994);
+    let mutex = core::ptr::addr_of_mut!((*base).mutex);
+    mutex_lock(mutex);
+    mutex_unlock(mutex);
+    mutex_delete(mutex);
+    base
+}
 
 const RETAIL_CALLBACK_QUEUE_SUBMIT: usize = 0x081f_b52c;
 const RETAIL_EMBEDDED_STATE_DESTRUCT: usize = 0x0820_6f5c;
-const RETAIL_ENTRY_BASE_DESTRUCT: usize = 0x0820_7330;
 
 type CallbackQueueSubmit = unsafe extern "C" fn(*mut u8, *mut CallbackQueueEntry);
 type EmbeddedStateDestruct = unsafe extern "C" fn(*mut u8);
-type EntryBaseDestruct = unsafe extern "C" fn(*mut u8) -> *mut u8;
 type Release = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 #[repr(C)]
 pub struct CallbackQueueEntry {
     pub owned: u32,
-    pub embedded_state: [u32; 12],
+    pub embedded_state: CallbackQueueEntryBase,
     pub optional: u32,
 }
 
@@ -38,7 +69,7 @@ pub struct CallbackQueueEntry {
 #[repr(C)]
 pub struct CallbackQueueEntry {
     pub owned: *mut HostReleaseObject,
-    pub embedded_state: [u32; 12],
+    pub embedded_state: CallbackQueueEntryBase,
     pub optional: *mut HostReleaseObject,
 }
 
@@ -60,21 +91,17 @@ pub struct HostReleaseObject {
 pub struct CallbackQueueEntryDestructOps {
     pub submit: CallbackQueueSubmit,
     pub destruct_embedded_state: EmbeddedStateDestruct,
-    pub destruct_base: EntryBaseDestruct,
 }
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_submit(_queue: *mut u8, _entry: *mut CallbackQueueEntry) { panic!("install callback-queue entry teardown host operations") }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_destruct_embedded_state(_state: *mut u8) { panic!("install callback-queue entry teardown host operations") }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_destruct_base(_base: *mut u8) -> *mut u8 { panic!("install callback-queue entry teardown host operations") }
 
 #[cfg(not(target_os = "none"))]
 pub static mut CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS: CallbackQueueEntryDestructOps = CallbackQueueEntryDestructOps {
     submit: missing_submit,
     destruct_embedded_state: missing_destruct_embedded_state,
-    destruct_base: missing_destruct_base,
 };
 
 #[inline(always)]
@@ -93,13 +120,6 @@ unsafe fn destruct_embedded_state(state: *mut u8) {
     unsafe { (core::ptr::addr_of!(CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS.destruct_embedded_state).read_volatile())(state) }
 }
 
-#[inline(always)]
-unsafe fn destruct_base(base: *mut u8) -> *mut u8 {
-    #[cfg(target_os = "none")]
-    unsafe { (core::mem::transmute::<usize, EntryBaseDestruct>(RETAIL_ENTRY_BASE_DESTRUCT))(base) }
-    #[cfg(not(target_os = "none"))]
-    unsafe { (core::ptr::addr_of!(CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS.destruct_base).read_volatile())(base) }
-}
 
 #[cfg(target_os = "none")]
 unsafe fn release(object: u32) {
@@ -123,7 +143,7 @@ unsafe fn release(object: *mut HostReleaseObject) {
 pub unsafe extern "C" fn callback_queue_entry_destruct(entry: *mut CallbackQueueEntry) -> *mut CallbackQueueEntry {
     unsafe {
         submit(callback_queue_instance_get(), entry);
-        destruct_embedded_state(entry.cast::<u8>().add(4));
+        destruct_embedded_state(core::ptr::addr_of_mut!((*entry).embedded_state).cast());
 
         #[cfg(target_os = "none")]
         {
@@ -142,7 +162,8 @@ pub unsafe extern "C" fn callback_queue_entry_destruct(entry: *mut CallbackQueue
             core::ptr::addr_of_mut!((*entry).owned).write_volatile(core::ptr::null_mut());
         }
 
-        destruct_base(entry.cast::<u8>().add(4)).sub(4).cast()
+        callback_queue_entry_base_destruct(core::ptr::addr_of_mut!((*entry).embedded_state))
+            .cast::<u8>().sub(core::mem::offset_of!(CallbackQueueEntry, embedded_state)).cast()
     }
 }
 
@@ -156,29 +177,35 @@ mod tests {
     static LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: [u8; 5] = [0; 5];
     static mut CALL_COUNT: usize = 0;
-    static mut BASE_RESULT: *mut u8 = core::ptr::null_mut();
 
     unsafe fn record(call: u8) { CALLS[CALL_COUNT] = call; CALL_COUNT += 1; }
     unsafe extern "C" fn submit(_queue: *mut u8, _entry: *mut CallbackQueueEntry) { unsafe { record(1) } }
     unsafe extern "C" fn embedded(_state: *mut u8) { unsafe { record(2) } }
-    unsafe extern "C" fn base(_state: *mut u8) -> *mut u8 { unsafe { record(5); BASE_RESULT } }
     unsafe extern "C" fn release_optional(_object: *mut u8) { unsafe { record(3) } }
     unsafe extern "C" fn release_owned(_object: *mut u8) { unsafe { record(4) } }
 
+    fn empty_base() -> CallbackQueueEntryBase {
+        CallbackQueueEntryBase {
+            vtable: 0, state_words: [0; 4],
+            mutex: crate::kernel::sync_mutex::Mutex { sem_cell: core::ptr::null_mut(), unused: 0 },
+            trailing_words: [0; 5],
+        }
+    }
+
     #[test]
-    fn submits_destroys_releases_in_order_and_rebases_base_result() {
+    fn submits_destroys_releases_and_tears_down_base() {
         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let optional_vtable = HostReleaseVtable { unresolved_00: 0, release: release_optional };
         let owned_vtable = HostReleaseVtable { unresolved_00: 0, release: release_owned };
         let mut optional = HostReleaseObject { vtable: &optional_vtable };
         let mut owned = HostReleaseObject { vtable: &owned_vtable };
-        let mut entry = CallbackQueueEntry { owned: &mut owned, embedded_state: [0; 12], optional: &mut optional };
+        let mut entry = CallbackQueueEntry { owned: &mut owned, embedded_state: empty_base(), optional: &mut optional };
         unsafe {
             CALLS = [0; 5]; CALL_COUNT = 0;
-            BASE_RESULT = (&mut entry as *mut CallbackQueueEntry).cast::<u8>().add(4);
-            CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS = CallbackQueueEntryDestructOps { submit, destruct_embedded_state: embedded, destruct_base: base };
+            CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS = CallbackQueueEntryDestructOps { submit, destruct_embedded_state: embedded };
             assert!(core::ptr::eq(callback_queue_entry_destruct(&mut entry), &mut entry));
-            assert_eq!(CALLS, [1, 2, 3, 4, 5]);
+            assert_eq!(&CALLS[..CALL_COUNT], [1, 2, 3, 4]);
+            assert_eq!(entry.embedded_state.vtable, 0x0899_1994);
             assert!(entry.owned.is_null());
             assert!(core::ptr::eq(entry.optional, &mut optional));
         }
@@ -187,13 +214,13 @@ mod tests {
     #[test]
     fn skips_null_releases_but_still_runs_all_direct_calls() {
         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
-        let mut entry = CallbackQueueEntry { owned: core::ptr::null_mut(), embedded_state: [0; 12], optional: core::ptr::null_mut() };
+        let mut entry = CallbackQueueEntry { owned: core::ptr::null_mut(), embedded_state: empty_base(), optional: core::ptr::null_mut() };
         unsafe {
             CALLS = [0; 5]; CALL_COUNT = 0;
-            BASE_RESULT = (&mut entry as *mut CallbackQueueEntry).cast::<u8>().add(4);
-            CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS = CallbackQueueEntryDestructOps { submit, destruct_embedded_state: embedded, destruct_base: base };
+            CALLBACK_QUEUE_ENTRY_DESTRUCT_OPS = CallbackQueueEntryDestructOps { submit, destruct_embedded_state: embedded };
             assert!(core::ptr::eq(callback_queue_entry_destruct(&mut entry), &mut entry));
-            assert_eq!(&CALLS[..CALL_COUNT], [1, 2, 5]);
+            assert_eq!(&CALLS[..CALL_COUNT], [1, 2]);
+            assert_eq!(entry.embedded_state.vtable, 0x0899_1994);
         }
     }
 }

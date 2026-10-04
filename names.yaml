@@ -126525,8 +126525,46 @@ functions:
       object's same slot. The function submits the entry to the callback
       queue, destructs +4, releases +0x34 without clearing it, releases and
       clears +0x00, then returns the +4 base-destructor result minus four.
-      The three direct callee identities remain unrecovered, so target builds
-      call their verified addresses and host tests expose role-based seams.
+      Queue submission and embedded-state teardown retain verified-address
+      target calls and host seams. Base teardown now calls the ported
+      callback_queue_entry_base_destruct directly. Host embedded-state layout
+      widens the mutex pointer; field offsets preserve the target layout.
+
+  - address: 0x08207330
+    ghidra: FUN_08207330
+    name: callback_queue_entry_base_destruct
+    size: 56
+    sig: "CallbackQueueEntryBase *callback_queue_entry_base_destruct(CallbackQueueEntryBase *base)"
+    module: app/callback_queue_entry_destruct
+    status: ported
+    renames:
+      param_1/r4: base
+      r5/param_1_plus_0x14: mutex
+      DAT_08207364: callback_queue_entry_base_vtable
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_0807f650: mutex_delete
+    notes: >-
+      Raw osos.dec establishes 52 instruction bytes plus the four-byte
+      vtable literal 0x08991994 at 0x08207364; the next real push-prologue
+      starts at 0x08207368, so the true extent is 56 bytes. Independent
+      whole-image aligned A32 decoding finds two inbound plain BL sites,
+      0x08207324 and 0x08207660, and zero predicated BL sites. The body
+      has three plain BL calls to already ported mutex_lock, mutex_unlock,
+      and mutex_delete, with no predicated calls. Restores the base vtable,
+      locks/unlocks/deletes the mutex at base+0x14, and returns base without
+      freeing object storage. Deliberate deviation: repr(C) host mutex
+      pointers widen; target layout and behavior remain unchanged. Migrates
+      the existing callback-entry caller off its fixed-address base seam.
+      Host tests cover live, zero-handle, NULL-cell and repeated teardown,
+      retained state and mutex padding, and original-pointer return. All
+      13981 host tests and the ARM build-std release build pass. Optimized
+      production-source smoke confirms wait/signal/delete/free ordering,
+      preserved state, pointer return and inert repeated teardown. match.py
+      reports a structural diff (13 original versus 15 Rust instructions):
+      frame-pointer setup, post-indexed vtable store and register choices
+      differ, but the three calls, mutex offset, vtable constant and
+      original-pointer return remain. No on-device execution claimed.
 
   # --- UI indexed-element selection ---
   - address: 0x081ea758
