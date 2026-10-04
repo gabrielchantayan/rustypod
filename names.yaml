@@ -213406,3 +213406,30 @@ functions:
       17 Rust instructions versus 13 original; LLVM branches and clz replace
       predication, preserves null guard and short-circuit pair comparison,
       and adds a frame. No device execution.
+
+  - address: 0x081f0258
+    ghidra: FUN_081f0258
+    name: image_format_context_slots_get
+    size: 24
+    sig: "u32 image_format_context_slots_get(const u32 *context)"
+    module: app/image_format_context_slots_get
+    status: ported
+    vars:
+      param_1: context
+      iVar1: slots_address
+      r1: base
+    notes: >-
+      Raw osos.dec words establish 0x081f0258..0x081f0270, ending in bx lr
+      before the next function's push. Read the aligned target-width pointer
+      at context +0x30; zero yields zero, otherwise return base +0x1c modulo
+      2^32, skipping a 28-byte header. Callers consume 36-byte descriptors.
+      Whole-image aligned A32 decoding verifies two incoming plain BLs at
+      0x0821af24 and 0x0821b234, zero predicated incoming BLs, and zero
+      outgoing calls. Both existing Rust callers now use this port directly;
+      obsolete getter seams and their duplicate test implementations are removed.
+      Target addresses remain u32 on hosts. No deliberate behavioral deviations.
+      Host suite passes 14029 tests; ARM release build passes. Standalone native
+      smoke verifies absent, present, and wrapping-to-zero addresses. match.py
+      exits 1 with six instructions on both sides: LLVM replaces the register
+      copy and bx lr with a frame prologue/epilogue, retaining the +0x30 word
+      load, zero comparison, and predicated +0x1c addition. No device execution.
