@@ -18,3 +18,4 @@
 pub mod source;
 pub mod stream_read_byte;
 pub mod stream_read_u16;
+pub mod stream_seek;
