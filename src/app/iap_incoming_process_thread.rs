@@ -472,52 +472,42 @@ pub unsafe extern "C" fn iap_incoming_process_thread_register_client(
     );
     (iap_thread_register_client_ops().register_client)(thread, &deadline, client, unread_seed)
 }
-/// Indirect dispatch for the unported slot-deadline setter @ 0x081d6e68.
-/// Target builds retain the retail implementation; host tests record its
-/// ephemeral deadline argument.
-#[derive(Clone, Copy)]
-pub struct IapThreadSlotDeadlineOps {
-    pub set_slot_deadline: unsafe extern "C" fn(
-        thread: *mut u8,
-        index: u32,
-        deadline: *const IapThreadRegistrationDeadline,
-    ) -> i32,
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_set_slot_deadline(
+/// Set a registration deadline under the thread's registry mutex.
+///
+/// Original `FUN_081d6e68` @ 0x081d6e68, true size 76 bytes:
+/// 0x081d6e68..0x081d6eb4, ending before the next function's push.
+/// Whole-image A32 decoding verifies two plain inbound BLs (0x081962d0,
+/// 0x081d6ed8), zero predicated inbound BLs; the body has three plain
+/// BLs, zero predicated BLs, and one tail B to mutex unlock.
+/// Lock thread+0x114, require index < 29 and a nonzero object word in
+/// the eight-byte slot at +0x154, copy the deadline to object+0x1c/+0x20,
+/// and return unlock's status. Lock errors are deliberately ignored.
+/// Invalid slots panic without unlocking. No behavioral deviations;
+/// existing Rust mutex and deadline ports replace the verified callees.
+///
+/// # Safety
+/// `thread` must be word-aligned with a live registry mutex and readable
+/// slot table. Selected object must be writable through +0x23, and
+/// `deadline` must reference two readable aligned words.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_slot_set_deadline(
     thread: *mut u8,
     index: u32,
     deadline: *const IapThreadRegistrationDeadline,
 ) -> i32 {
-    let f: unsafe extern "C" fn(*mut u8, u32, *const IapThreadRegistrationDeadline) -> i32 =
-        core::mem::transmute(0x081d_6e68usize);
-    f(thread, index, deadline)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_set_slot_deadline(
-    _thread: *mut u8,
-    _index: u32,
-    _deadline: *const IapThreadRegistrationDeadline,
-) -> i32 {
-    0
-}
-
-pub const DEFAULT_IAP_THREAD_SLOT_DEADLINE_OPS: IapThreadSlotDeadlineOps =
-    IapThreadSlotDeadlineOps {
-        set_slot_deadline: firmware_set_slot_deadline,
-    };
-
-/// Active deadline setter, loaded volatile so target dispatch remains a seam.
-pub static mut IAP_THREAD_SLOT_DEADLINE_OPS: IapThreadSlotDeadlineOps =
-    DEFAULT_IAP_THREAD_SLOT_DEADLINE_OPS;
-
-#[inline(always)]
-fn iap_thread_slot_deadline_ops() -> IapThreadSlotDeadlineOps {
-    unsafe {
-        core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_DEADLINE_OPS))
+    let mutex = thread.add(REGISTRY_MUTEX_OFFSET).cast::<PosixMutex>();
+    posix_mutex_lock(mutex);
+    if index >= SLOT_COUNT {
+        heap_panic();
     }
+    let object = thread.add(SLOT_TABLE_OFFSET + index as usize * SLOT_STRIDE)
+        .cast::<u32>().read();
+    if object == 0 {
+        heap_panic();
+    }
+    registration_set_deadline(object as usize as *mut u8, deadline);
+    posix_mutex_unlock(mutex) as i32
 }
 
 /// iap_incoming_process_thread_set_slot_deadline — original:
@@ -527,14 +517,9 @@ fn iap_thread_slot_deadline_ops() -> IapThreadSlotDeadlineOps {
 /// predicated `bl` instructions.
 ///
 /// Converts `timeout_millis` to the signed `{seconds, nanos}` pair used by a
-/// registration slot, then delegates to the unported locked slot setter @
-/// 0x081d6e68. The setter validates `index`, resolves the slot, and copies
-/// the pair into its object at offsets +0x1c/+0x20.
-///
-/// # Deviations
-///
-/// The unported setter remains behind [`IAP_THREAD_SLOT_DEADLINE_OPS`]:
-/// target builds call its retail address and host tests install a recorder.
+/// registration slot, then calls the ported locked slot setter directly.
+/// The setter validates `index`, resolves the slot, and copies the pair
+/// into its object at offsets +0x1c/+0x20. No deliberate deviations.
 ///
 /// # Safety
 ///
@@ -552,119 +537,54 @@ pub unsafe extern "C" fn iap_incoming_process_thread_set_slot_deadline(
         (&mut deadline as *mut IapThreadRegistrationDeadline).cast(),
         timeout_millis,
     );
-    (iap_thread_slot_deadline_ops().set_slot_deadline)(thread, index, &deadline)
+    iap_incoming_process_thread_slot_set_deadline(thread, index, &deadline)
 }
 
 #[cfg(test)]
 mod slot_deadline_tests {
-    extern crate std;
-
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
-    use std::sync::{Mutex, MutexGuard};
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut THREAD: *mut u8 = core::ptr::null_mut();
-    static mut INDEX: u32 = 0;
-    static mut DEADLINE: IapThreadRegistrationDeadline =
-        IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
-    static mut CALLS: u32 = 0;
-
-    unsafe extern "C" fn record_slot_deadline(
-        thread: *mut u8,
-        index: u32,
-        deadline: *const IapThreadRegistrationDeadline,
-    ) -> i32 {
-        THREAD = thread;
-        INDEX = index;
-        DEADLINE = core::ptr::read(deadline);
-        CALLS += 1;
-        -7
-    }
-
-    struct Bench {
-        _lock: MutexGuard<'static, ()>,
-        previous_ops: IapThreadSlotDeadlineOps,
-    }
-
-    fn bench() -> Bench {
-        let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let previous_ops = unsafe {
-            core::ptr::read_volatile(core::ptr::addr_of!(IAP_THREAD_SLOT_DEADLINE_OPS))
-        };
-        unsafe {
-            THREAD = core::ptr::null_mut();
-            INDEX = 0;
-            DEADLINE = IapThreadRegistrationDeadline { seconds: 0, nanos: 0 };
-            CALLS = 0;
-            core::ptr::write_volatile(
-                core::ptr::addr_of_mut!(IAP_THREAD_SLOT_DEADLINE_OPS),
-                IapThreadSlotDeadlineOps {
-                    set_slot_deadline: record_slot_deadline,
-                },
-            );
-        }
-        Bench {
-            _lock: lock,
-            previous_ops,
-        }
-    }
-
-    impl Drop for Bench {
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::write_volatile(
-                    core::ptr::addr_of_mut!(IAP_THREAD_SLOT_DEADLINE_OPS),
-                    self.previous_ops,
-                );
-            }
-        }
-    }
-
-    unsafe fn thread_fixture() -> Option<*mut u8> {
-        match try_map_u32_slab(hints::IAP_THREAD_SLOT_DEADLINE, 4) {
-            Some(pointer) => Some(pointer),
-            None => {
-                note_missing_u32_fixture(
-                    "app::iap_incoming_process_thread::slot_deadline",
-                );
-                None
-            }
-        }
-    }
 
     #[test]
-    fn forwards_slot_and_positive_millisecond_deadline() {
-        let bench = bench();
-        let Some(thread) = (unsafe { thread_fixture() }) else {
-            return;
-        };
+    fn updates_boundary_slots_and_preserves_other_words_and_recursive_lock() {
         unsafe {
-            assert_eq!(
-                iap_incoming_process_thread_set_slot_deadline(thread, 28, 1_001),
-                -7
-            );
-            assert_eq!(CALLS, 1);
-            assert_eq!(THREAD, thread);
-            assert_eq!(INDEX, 28);
-            assert_eq!(DEADLINE.seconds, 1);
-            assert_eq!(DEADLINE.nanos, 1_000_000);
+            let Some(slab) = try_map_u32_slab(hints::IAP_THREAD_LOCKED_SLOT_DEADLINE, 0x1000) else {
+                note_missing_u32_fixture("app::iap_incoming_process_thread::slot_deadline");
+                return;
+            };
+            let thread = slab;
+            let object = slab.add(0x400).cast::<u32>();
+            for index in [0, SLOT_COUNT - 1] {
+                core::ptr::write_bytes(thread, 0, 0x240);
+                let mutex = thread.add(REGISTRY_MUTEX_OFFSET).cast::<PosixMutex>();
+                // Recursive, already held twice by the default running thread.
+                thread.add(REGISTRY_MUTEX_OFFSET + 0xe).cast::<u16>().write(0x20);
+                (*mutex).owner = crate::kernel::posix_mutex::PRE_KERNEL_THREAD;
+                (*mutex).recursion = 2;
+                thread.add(SLOT_TABLE_OFFSET + index as usize * SLOT_STRIDE)
+                    .cast::<u32>().write(object as usize as u32);
+                for word in 0..10 { object.add(word).write(0xa5a5_a5a5); }
+                let deadline = IapThreadRegistrationDeadline {
+                    seconds: i32::MIN, nanos: i32::MAX,
+                };
+                assert_eq!(iap_incoming_process_thread_slot_set_deadline(
+                    thread, index, &deadline,
+                ), 0);
+                let mut expected = [0xa5a5_a5a5u32; 10];
+                expected[7] = i32::MIN as u32;
+                expected[8] = i32::MAX as u32;
+                assert_eq!(core::slice::from_raw_parts(object, 10), expected);
+                assert_eq!((*mutex).owner, crate::kernel::posix_mutex::PRE_KERNEL_THREAD);
+                assert_eq!((*mutex).recursion, 2);
+                for millis in [1_001, -1_001] {
+                    assert_eq!(iap_incoming_process_thread_set_slot_deadline(
+                        thread, index, millis,
+                    ), 0);
+                    assert_eq!(object.add(7).read() as i32, millis / 1_000);
+                    assert_eq!(object.add(8).read() as i32, millis % 1_000 * 1_000_000);
+                }
+            }
         }
-        core::mem::drop(bench);
-    }
-
-    #[test]
-    fn preserves_signed_remainder_for_negative_milliseconds() {
-        let bench = bench();
-        let Some(thread) = (unsafe { thread_fixture() }) else {
-            return;
-        };
-        unsafe {
-            iap_incoming_process_thread_set_slot_deadline(thread, 0, -1_001);
-            assert_eq!(DEADLINE.seconds, -1);
-            assert_eq!(DEADLINE.nanos, -1_000_000);
-        }
-        core::mem::drop(bench);
     }
 }
 
