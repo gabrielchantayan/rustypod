@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c0180
+    ghidra: FUN_081c0180
+    name: storage_buffer_initialize
+    size: 100
+    sig: "i32 storage_buffer_initialize(u8 *object)"
+    module: fs/storage_buffer_initialize
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0xec: kind
+      object_plus_0x10: embedded_storage_state
+      object_plus_0x10c: initialization_workspace
+      r2/ip: descriptor_word
+      FUN_080418ac: resident_storage_state_initialize
+    notes: >-
+      Raw A32 establishes [0x081c0180,0x081c01e4), 100 bytes: 76
+      instruction bytes and seven literal words. Whole-image BL decoding
+      finds two plain inbound calls at 0x08161f5c and 0x08161f6c, zero
+      predicated inbound calls, one plain outbound call and zero predicated
+      outbound calls. Unlike Ghidra's void signature, raw r0 dataflow and
+      callers prove an i32 status return. Kinds 3/4 select opaque words
+      0x0803a1fc/0x0803a19c; other kinds return 24 unchanged. The resident
+      initializer at 0x080418ac receives object+0x10, object+0x10c, the
+      selected word, and opaque callback words 0x081b4f20, 0x081b508c,
+      0x081b519c, 0x081b517c. No callback identity is inferred from Ghidra.
+      Private host injection is deliberate; supported production host calls
+      reject unavailable firmware. Tests cover all unsupported kind bytes,
+      both supported selections, success publication and signed errors.
+      All 14219 host tests and ARM release build pass. Exported host smoke
+      preserves the object on status 24. match.py exits 1: LLVM uses BLX
+      and arithmetic literal derivation; selection and status flow agree.
   - address: 0x081c02c0
     ghidra: FUN_081c02c0
     name: shared_selector_create

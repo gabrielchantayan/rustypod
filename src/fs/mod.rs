@@ -2,6 +2,8 @@
 //! HFS B-tree node access).
 /// Extent-backed storage buffer constructor @ 0x081c01e4.
 pub mod storage_buffer_construct;
+/// Extent-backed storage buffer initialization @ 0x081c0180.
+pub mod storage_buffer_initialize;
 /// FAT directory-entry start-cluster extraction @ 0x082e1378.
 pub mod fat_dirent;
 /// FAT directory-entry volume-information record writer @ 0x082e1390.
