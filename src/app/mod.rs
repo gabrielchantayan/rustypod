@@ -149,6 +149,7 @@ pub mod collection_find_byte_tag;
 pub mod collection_byte_tag_count;
 pub mod selected_entries_position_status;
 pub mod object_string_map_find_value;
+pub mod string_collection_find;
 pub mod range_context_has_handler;
 pub mod pop_queued_entry;
 pub mod resource_record_auxiliary_flag;
