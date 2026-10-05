@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c1cdc
+    ghidra: FUN_081c1cdc
+    name: provider_entry_count
+    size: 12
+    sig: "i32 provider_entry_count(const u8 *provider)"
+    module: app/provider_entry_count
+    status: ported
+    renames:
+      param_1/r0: provider
+      "provider+0x1c": count_state
+      "count_state+0x04": entry_count
+    notes: >-
+      Raw words e590001c, e5900004, e12fff1e establish the 12-byte extent
+      [0x081c1cdc,0x081c1ce8). The next independent function starts with
+      ldr r2,[r1,#16] and returns at 0x081c1d10. Whole-image A32 decoding
+      finds two plain inbound BLs at 0x0827b378 and 0x0827b448, zero
+      predicated BLs, and a BNE tail entry at 0x0827b314; no outbound calls.
+      Follow the target-width state pointer at provider+0x1c and return
+      the unchanged count word at state+4. Callers allocate and index
+      16-byte entries. No NULL checks or concrete class identities added.
+      Existing record-source count wrapper now reuses this accessor.
+      Host edge tests preserve zero, negative and extreme count bits and
+      follow changed state pointers. Host suite and ARM release build pass;
+      standalone smoke returns 0x80000000 unchanged. match.py exits 1:
+      both original loads match, with LLVM adding an fp/lr frame and
+      replacing bx lr with pop {fp,pc}; five instructions versus three.
   - address: 0x081ba8a4
     ghidra: FUN_081ba8a4
     name: line_fold_read
@@ -143596,12 +143622,10 @@ functions:
       Whole-image ARM B/BL-immediate decoding finds exactly five direct inbound
       BL calls, all plain unconditional at 0x081a1948, 0x081a19c0, 0x081a1a64,
       0x081a1a78, and 0x0827b4d4; there are no predicated BL calls. A null
-      provider returns -1. Otherwise the function tail-transfers to unported
-      FUN_081c1cdc, whose verified body returns the signed word at
-      [provider+0x1c]+4. The Rust port inlines that verified accessor rather
-      than creating an identity-bearing seam for the still-unnamed helper;
-      host tests use a below-4GiB target-layout fixture. match.py reports the
-      expected structural diff: Rust lowers the tail transfer as direct reads.
+      provider returns -1. Otherwise the function tail-transfers to
+      provider_entry_count, whose verified body returns the signed word at
+      [provider+0x1c]+4. Rust now reuses the separately ported accessor;
+      host tests use a below-4GiB target-layout fixture.
 
   # --- Opaque record-source entry lookup ---
   - address: 0x0827b434
@@ -143628,8 +143652,8 @@ functions:
       Whole-image ARM B/BL-immediate decoding finds exactly three inbound BL
       calls, all plain unconditional at 0x081a1980, 0x081a19d8, and
       0x081a1a20; there are no predicated inbound BL calls. The port calls the
-      existing verified opaque_record_source_entry_count accessor rather than
-      creating another seam for the still-unnamed provider_entry_count helper.
+      existing verified opaque_record_source_entry_count accessor, which now
+      reuses the separately ported provider_entry_count helper.
 
   - address: 0x08279338
     ghidra: FUN_08279338

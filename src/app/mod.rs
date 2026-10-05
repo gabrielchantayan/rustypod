@@ -599,6 +599,7 @@ pub mod layout_recompute_notify;
 pub mod opaque_record_source_get;
 pub mod locked_state_copy;
 pub mod locked_controller_records_copy;
+pub mod provider_entry_count;
 pub mod opaque_record_source_entry_count;
 pub mod opaque_record_source_entry_lookup;
 pub mod lazy_handle_manager;
