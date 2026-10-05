@@ -161423,9 +161423,9 @@ functions:
       forms, and two outbound plain bl calls to 0x081bad78. It copies the
       provider's four default bounds then, when segment_count is at least
       two, replaces bounds[0] and bounds[2] with resolved offsets for index
-      and wrapping index + 1. The unported resolver is an explicit
-      address-named seam: ARM calls retailOS at 0x081bad78 while host tests
-      install a recorder.
+      and wrapping index + 1. Both calls now use ported segment_index_offset,
+      explicitly preserving the provider third bounds word as the hidden r3
+      fallback. Host tests exercise the real observable-array dispatch.
   - address: 0x081b9db8
     ghidra: FUN_081b9db8
     name: registry_display_client_construct
@@ -193480,9 +193480,9 @@ functions:
       forms, and two outbound plain bl calls to 0x081bad78. It copies the
       provider's four default bounds then, when segment_count is at least
       two, replaces bounds[0] and bounds[2] with resolved offsets for index
-      and wrapping index + 1. The unported resolver is an explicit
-      address-named seam: ARM calls retailOS at 0x081bad78 while host tests
-      install a recorder.
+      and wrapping index + 1. Both calls now use ported segment_index_offset,
+      explicitly preserving the provider third bounds word as the hidden r3
+      fallback. Host tests exercise the real observable-array dispatch.
   - address: 0x081b9db8
     ghidra: FUN_081b9db8
     name: registry_display_client_construct
@@ -217549,3 +217549,37 @@ functions:
       forwarding, returned pointer and restored stack are verified. Only
       the unported inherited firmware constructor is intercepted. No device
       execution performed.
+
+  - address: 0x081bad78
+    ghidra: FUN_081bad78
+    name: segment_index_offset
+    size: 44
+    sig: "u32 segment_index_offset(u8 *context, u32 index, u32 unused, u32 fallback)"
+    module: util/segment_index_offset
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: index
+      param_3/r2: unused
+      param_4/r3: fallback
+      "context+0x100": first_index
+      "context+0x80": base_offset
+      "context+0x1e0": embedded_array
+      local_10: relative_offset
+    notes: >-
+      Raw extent 0x081bad78..0x081bada4 is 44 bytes; the next function
+      starts with push {r4,r5,r6,lr}. Whole-image aligned A32 decoding
+      finds two incoming plain BL sites at 0x081bac6c and 0x081bac7c,
+      zero predicated BL sites. One outgoing plain BL calls the already
+      ported observable_array_read_at at 0x082a4d10; no predicated BL.
+      Wrapping index-minus-first_index selects a word from the embedded
+      array; the success flag is ignored. Return wrapping base_offset plus
+      the resulting word, loading base_offset after dispatch. Rejection
+      preserves incoming r3, which the raw caller obtains from the third
+      provider bounds word. ARM assembly retains this hidden input exactly;
+      host Rust exposes a fourth fallback argument and uses the established
+      widened array vtable. The existing caller now uses this port instead
+      of an unported address seam. Host tests cover rejection, empty arrays,
+      last-element sentinel, index subtraction and output addition wrapping.
+      Release ARM match has identical eleven instructions except the BL
+      relocation to the ported callee. No device execution performed.
