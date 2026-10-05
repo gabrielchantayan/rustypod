@@ -117,6 +117,35 @@ functions:
       existing duration port. ARM match review confirms the direct call,
       six BLXs, seven vtable reloads and final BX; LLVM materializes resource
       immediates instead of literal loads and adds a frame pointer.
+  - address: 0x081a41ac
+    ghidra: FUN_081a41ac
+    name: recording_interval_seconds
+    size: 28
+    sig: "u64 recording_interval_seconds(void *context, u32 seconds)"
+    module: app/recording_interval_seconds
+    status: ported
+    renames:
+      r0/input: context_unused
+      r0/output: interval
+      r1: preserved_seconds
+      DAT_081a41c4: recording_interval_flag_address
+      global_089caf73: recording_interval_flag
+    notes: >-
+      Raw extent 0x081a41ac..0x081a41c8 is 24 code bytes plus a four-byte
+      pointer literal; the next function starts with PUSH at 0x081a41c8.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x081a2f30 and 0x081a4bc4, zero predicated inbound BLs, and zero
+      outgoing BLs. Load byte 0x089caf73; return 120 if zero, otherwise 2.
+      Both callers multiply by 60. Preserve r1 explicitly as the upper
+      u64 return word, not a semantic 64-bit interval. Context is ignored.
+      Volatile byte access retains mutable global reads; hosts substitute
+      a serialized byte fixture. The flag's broader meaning is unknown.
+      The existing duration query now calls this Rust port directly.
+      All 14288 host tests pass, including exhaustive flag values and
+      preserved high-bit seconds; standalone host smoke observes zero,
+      nonzero and back-to-zero transitions. ARM match confirms the same
+      global byte load and 120/2 selection with r1 untouched; LLVM adds a
+      frame-pointer prologue/epilogue and uses r2 for the byte comparison.
   - address: 0x081a4b88
     ghidra: FUN_081a4b88
     name: voice_memo_duration_query
