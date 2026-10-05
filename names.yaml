@@ -219799,3 +219799,48 @@ functions:
       changes that field; the regression fixture exercises this ordering.
       An exported-function host smoke preserved an unchanged full-width ID.
       No device execution was performed.
+
+  - address: 0x081a41c8
+    ghidra: FUN_081a41c8
+    name: demo_mode_string_refresh
+    size: 72
+    sig: "void demo_mode_string_refresh(void *owner, const void *source, StringObject *string)"
+    module: app/demo_mode_string_refresh
+    status: ported
+    renames:
+      param_1/r0: unused_owner
+      param_2/r5: source
+      param_3/r6: string
+      iVar1/r4: demo_mode
+      uVar2/r2: payload
+      FUN_081883fc: demo_mode_instance
+      FUN_08275d9c: string_object_ensure_capacity
+      FUN_08187d98: resident_writer_08187d98 (identity unresolved)
+      FUN_0827606c: string_object_resize_payload
+    notes: >-
+      Raw A32 words establish the 72-byte extent 0x081a41c8..0x081a4210;
+      the next independent function begins with push at 0x081a4210.
+      Whole-image aligned BL decoding finds two incoming unconditional calls
+      at 0x081a49b0 and 0x081a4b0c, no predicated calls. The body contains
+      three unconditional BLs, zero predicated BLs, and a final B to the
+      already ported string_object_resize_payload with size zero. Ghidra
+      incorrectly folds that helper's length measurement and virtual resize
+      dispatch into this function. Obtain the registered TCDemoMode singleton;
+      if NULL, return without inspecting the string or source. Otherwise ensure
+      40 bytes, call resident 0x08187d98(demo,source,payload,40), then resize
+      to the rewritten payload's inclusive NUL-terminated length. Both callers
+      consume the refreshed StringObject as UTF-8 text. The resident writer
+      invokes another object's slot +0x84 with selectors 9 and 0x11; its
+      identity remains unresolved, so no invented semantic callee is introduced.
+      Retain its verified address as a target-only seam; hosts require explicit
+      writer injection. Reuse the existing registry and StringObject helpers,
+      including their documented limitations. Deliberate deviations: host
+      pointer fields widen and host singleton lookup is injectable; the unused
+      owner argument remains ABI-compatible. Host regression tests cover NULL
+      singleton with inaccessible arguments and resulting lengths 0,1,38,39,
+      40,63 under a bounded writer. A standalone host executable exercised the
+      exported absent and present paths, observing result and resize size 7.
+      ARM release build succeeded; match.py exits 1 with a structural diff:
+      LLVM adds a frame, replaces the fixed writer BL with literal-load BLX,
+      and retains the NULL branch, bound 40 and final resize tail branch.
+      No device execution was performed.
