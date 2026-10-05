@@ -220564,3 +220564,35 @@ functions:
       handler NULL fatal guard, vtable +0x10 BLX, unsigned query threshold
       and early return. LLVM removes the provably unreachable group >=3
       check and the redundant slot truncation/post-break bounds check.
+  - address: 0x0818dab8
+    ghidra: FUN_0818dab8
+    name: aligned_buffer_set_destroy
+    size: 148
+    sig: "u32 *aligned_buffer_set_destroy(u32 *owner)"
+    module: app/aligned_buffer_set_destroy
+    status: ported
+    vars:
+      param_1/r4: owner
+      r0: buffer
+      r5: zero
+      FUN_081a8204: aligned_buffer_reset
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes 148 executable bytes [0x0818dab8,0x0818db4c),
+      followed by the vtable literal 0x08989a94 at 0x0818db4c and the next
+      independently entered function at 0x0818db50 (152-byte boundary span).
+      Whole-image aligned branch decoding finds two inbound plain BLs at
+      0x080d6cbc and 0x080d6cf0, zero predicated inbound BLs. The body has
+      ten outbound plain BLs, five pairs to ported aligned_buffer_reset at
+      0x081a8204 and ported operator_delete at 0x082aad24; no predicated BLs.
+      Install the vtable, reset and tag-2-delete nonzero owner words in order
+      0x119, 0x11b, 0x11c, 0x11a, 0x11d. Clear the first four slots even
+      when absent, but deliberately retain word 0x11d; finally clear word
+      0x101 and return this. The reset return feeds delete. Caller uses a
+      stack object on both success and failure; no class identity inferred.
+      Rust uses volatile aligned target-width words and a five-element loop
+      instead of unrolled pairs, retaining existing heap dispatch. Host tests
+      cover all 32 presence masks, allocation-present/absent owners, exact
+      free order and tags, reset-before-delete, untouched words and retained
+      final slot. Do not treat this destructor as idempotent when the final
+      owner slot is present.
