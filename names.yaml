@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d0ff8
+    ghidra: FUN_081d0ff8
+    name: timed_label_finish_lap
+    size: 52
+    sig: "u32 timed_label_finish_lap(u32 *owner)"
+    module: app/timed_label_finish_lap
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner+0x0c: current_lap_ms
+      owner+0x10: last_lap_ms
+      owner+0x20: countdown
+      FUN_081d1324: timed_label_update_elapsed
+      FUN_081d0f74: append_lap_firmware_helper
+    notes: >-
+      Raw A32 extent [0x081d0ff8,0x081d102c) is 52 executable bytes,
+      ending before the next independent push. Whole-image word decoding
+      finds two inbound plain BLs at 0x0815db68 and 0x0815e658, no
+      predicated inbound BLs; two outbound plain BLs at 0x081d1000 and
+      0x081d100c, no predicated outbound BLs. Update elapsed time, append
+      the word at +0x0c, reload it after the callback into +0x10, clear
+      +0x0c/+0x20 and always return one. No target behavioral deviations.
+      Reuse the elapsed-time port. No naming entry or Rust implementation
+      exists for helper 0x081d0f74: its raw code allocates four bytes,
+      copies the supplied word, invokes embedded collection virtual slot
+      +0x1c and trims via 0x083d2058 when the signed result exceeds 198.
+      Keep that verified helper as a firmware seam, with host injection.
+      All 14134 host tests pass; ARM release build passes. Cases cover
+      elapsed-update ordering, disabled state, wrap/clamp, reentrant lap
+      mutation, ignored append result and untouched fields. Isolated API
+      smoke prints submitted=123 snapshot=456 lap=0 countdown=0.
+      match.py exits 1: LLVM adds a frame and indirect append BLX/literal;
   - address: 0x081d111c
     ghidra: FUN_081d111c
     name: collection_value_statistics_refresh
