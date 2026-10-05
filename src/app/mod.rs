@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod two_value_wheel_node_set_values;
 pub mod timed_gateway_child_owner_destruct;
 pub use timed_gateway_child_owner_destruct::*;
 pub mod timed_gateway_child_owner_construct;

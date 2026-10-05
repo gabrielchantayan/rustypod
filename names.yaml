@@ -221044,3 +221044,46 @@ functions:
       frame-pointer prologue and uses BEQ plus BL for the first BLNE;
       field offsets, release order, derived literal and base tail branch
       are preserved (13 stock instructions versus 16 reported Rust lines).
+
+  - address: 0x081976ec
+    ghidra: FUN_081976ec
+    name: two_value_wheel_node_set_values
+    size: 120
+    sig: "void two_value_wheel_node_set_values(u32 *node, FixedValue *driver, FixedValue *step)"
+    module: app/two_value_wheel_node_set_values
+    status: ported
+    renames:
+      param_1/r0/r4: node
+      param_2/r1/r6: driver
+      param_3/r2/r7: step
+      DAT_08197760: SCHEDULER_SINGLETON_GLOBAL (0x089cc7e0)
+      FUN_082738e0: timing_wheel_remove
+      FUN_08273a14: retain_value
+      FUN_082739e0: release_refcounted_value
+      FUN_08273a40: value_aux_max
+      FUN_08273898: timing_wheel_insert (tail branch)
+    notes: >-
+      Raw firmware has 29 instruction words at 0x081976ec..0x0819775c
+      and the scheduler-global literal at 0x08197760; the next real
+      function starts with push at 0x08197764. True extent is 120 bytes,
+      not Ghidra's 116. Body calls are four plain BLs and two BLNEs,
+      followed by a tail B to timing_wheel_insert. Independent whole-image
+      word decoding finds two inbound plain BLs at 0x08152788 and
+      0x08152eb4, no predicated callers, tail callers, or aligned DATA
+      references. Unlinks the existing node, retains driver then step,
+      conditionally releases old driver at +0x1c then old step at +0x18,
+      replaces both slots, stores wrapping unsigned max(aux) + 1 as rank,
+      reloads the scheduler singleton and reinserts. All callees reuse
+      existing direct Rust ports; no new seam. Word-indexed target-pointer
+      fields preserve offsets on host. Tests exercise bucket migration,
+      old/new pointer aliasing, reference counts, empty old slots,
+      double-retain aliases, unsigned rank selection and signed-negative
+      insertion skips including UINT32_MAX wrapping to rank zero. Host
+      suite passes 14340 tests; a temporary live smoke observed rank zero
+      and linked zero for UINT32_MAX aux. ARM nm confirms the exported
+      symbol, folded onto timer_step_value_set_values. match.py cannot
+      find the alias label in objdump; comparison using that canonical
+      label shows 32 Rust instructions versus 29 stock instructions, with
+      the same retain/release ordering, slot stores, rank increment,
+      scheduler reload and tail insertion. No deliberate target deviations;
+      the existing scheduler host model is retained.

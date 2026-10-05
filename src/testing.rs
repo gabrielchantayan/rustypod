@@ -437,6 +437,8 @@ pub mod hints {
     // 0x2345_0000: dedicated to app/timing_wheel_node_replace_value's
     // target-width node and value fixtures; mappings never unmap.
     pub const TIMING_WHEEL_NODE_REPLACE_VALUE: usize = 0x2345_0000;
+    // Dedicated to app/two_value_wheel_node_set_values; mappings never unmap.
+    pub const TWO_VALUE_WHEEL_NODE_SET_VALUES: usize = 0x2356_0000;
     // 0x0100_0000: dedicated to cxx/stream_read's target-width descriptor,
     // complete-owner state, and reader fixture; mappings never unmap.
     pub const CXX_STREAM_READ: usize = 0x0100_0000;
