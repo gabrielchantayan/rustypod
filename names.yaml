@@ -221192,3 +221192,47 @@ functions:
       later field stores reorder without crossing the fatal check,
       pixel-tag load remains LDRH, and both exact tag comparisons and
       the final byte store are retained. Structural diff is intentional.
+
+  - address: 0x08197618
+    ghidra: FUN_08197618
+    name: selected_io_task_get
+    size: 88
+    sig: "IoTask *selected_io_task_get(void)"
+    module: app/selected_io_task
+    status: ported
+    renames:
+      pcRam0819766c: selection_state
+      pcVar1: selection_state
+      puVar2: task
+      FUN_081f465c: mecca_io_task_get
+      FUN_081e6724: alternate_task_accessor
+    notes: >-
+      Raw words establish 84 instruction bytes and the literal 0x089cfd28
+      at 0x0819766c; the next real prologue is 0x08197670, for 88 bytes.
+      Independent A32 decoding verifies two plain outbound BLs, no
+      predicated BLs, two indirect BLX calls and two predicated tail Bs.
+      Two inbound plain BLs occur at 0x0827db6c and 0x0827dcfc.
+      Sets state byte zero to one before invoking vtable slot zero on
+      the primary and alternate objects, in that order. Then rereads
+      byte one and obtains the selected object: zero selects primary,
+      every nonzero value selects alternate. Initialization callbacks
+      may reenter or change mode; the port preserves both behaviors.
+      Reuses the existing mecca_io_task_get Rust port. The alternate
+      guarded-static accessor is not registered in names.yaml; its
+      verified file entry 0x081e6724 maps to runtime 0x081db84c after
+      the relocator's 0xaed8-byte slide, as established by the existing
+      callback_target_getter entry. No invented class identity.
+      Host builds replace state and getters, using repr(C) native
+      pointer fields for vtable dispatch. Tests cover reentrancy,
+      callback-driven mode changes, repeated calls, noncanonical
+      initialization flags and noncanonical mode bytes. Standalone
+      host smoke obtains the primary object three times, initializes
+      both objects once and observes getter counts four and one.
+      ARM release build succeeds. match.py reports 31 instructions versus
+      22 stock words (the stock count includes its pointer literal).
+      LLVM preserves the initialization-byte gate, callback order,
+      post-callback mode load and selected return. The primary getter
+      call relocations refer to the existing Rust port, whose fixed-object
+      return becomes an explicit literal load; alternate calls use BLX
+      and a tail BX to the verified runtime address. The structural diff
+      is intentional, not an instruction-for-instruction match.
