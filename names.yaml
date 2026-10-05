@@ -220130,3 +220130,44 @@ functions:
       Standalone host-model executable verified returned storage, both
       descriptor writes, padding preservation and final halfword clearing.
       The smoke used cfg(test) only on this crate; its source was removed.
+  - address: 0x081a2fd0
+    ghidra: FUN_081a2fd0
+    name: selected_resource_play
+    size: 60
+    sig: "uint32_t selected_resource_play(SelectedResourcePlayback *state)"
+    module: app/selected_resource_play
+    status: ported
+    renames:
+      param_1/r0: state
+      "state+0x1c": playback_requested
+      "state+0x44": resource_object
+      "state+0x60": selection
+      uVar1/r4: start_status
+      FUN_08060fcc: start_selected_resource (unported retail seam)
+      FUN_08113a68: refresh_playback_root (unported retail seam)
+      DAT_081a3008: app_root_slot (0x089ca674)
+    notes: >-
+      Raw ARM words establish 60 bytes including the literal at 0x081a3008,
+      not Ghidra's 56 code bytes. The next function pushes at 0x081a300c.
+      Full-image A32 decoding finds two inbound plain BLs at 0x081e7f10
+      and 0x0820aa44, zero predicated inbound BLs. Outbound calls are
+      plain BL at 0x081a2fe4 to 0x08060fcc and BLNE at 0x081a2ff8 to
+      0x08113a68. Set requested byte, start playback with object and
+      selection, then load the app root and refresh it when non-null,
+      including on failure. Return exactly one for status zero and zero
+      for all other unsigned statuses; RSBS/MOVCC is not signed subtraction.
+      Caller 0x081e7ed8 navigates to GotoNowPlaying; 0x0820a9e4 handles
+      HandlePlayCurrentRecording. Callee 0x08060fcc validates a resource
+      reference, returns 0xfffeffff on failure, otherwise sets object
+      state +0xe38 to 5 and submits the selected resource. Callee
+      0x08113a68 refreshes root selection and notifications. Neither
+      callee has a names.yaml entry; both remain verified retail seams.
+      Deliberate deviations: shared APP_ROOT_OBJECT models the root slot;
+      repr(C) native pointers widen on hosts. Host tests cover unsigned
+      status boundaries, flag-before-start ordering, post-start root
+      replacement/removal, unconditional live-root refresh and preservation.
+      Host suite and ARM release build passed. Standalone host-model smoke
+      observed failure returning zero while setting the flag and refreshing
+      the root. No device execution. match.py exit 1 shows expected LLVM
+      frame setup, absolute BLX callees, branch around refresh and CLZ-based
+      zero comparison; target field offsets and saved status are retained.
