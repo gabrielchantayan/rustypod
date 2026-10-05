@@ -741,6 +741,7 @@ pub mod completion_gate;
 pub mod queued_message;
 pub mod queued_message_post_bytes;
 pub mod object_child_count_is_positive;
+pub mod object_child_pop_last;
 pub mod queued_message_create_and_post;
 pub mod pointer_queue;
 pub mod pointer_command_submit;

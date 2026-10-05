@@ -215872,3 +215872,36 @@ functions:
       Rust instructions including literals; indirect BLX replaces the seam
       call, r4 preserves payload, and all three derived stores retain their
       original order and offsets. No device execution was performed.
+  - address: 0x081d1690
+    ghidra: FUN_081d1690
+    name: object_child_pop_last
+    size: 72
+    sig: "u32 object_child_pop_last(const u32 *object, u32 unused_r1, u32 unused_r2, u32 initial_result)"
+    module: app/object_child_pop_last
+    status: ported
+    renames:
+      param_1/r4: object
+      r5: last_index
+      r6: saved_value
+      incoming_r3: initial_result
+      FUN_0829e100: object_child_count_is_positive
+      FUN_083d611c: vtable_slot_3c_result_u16
+    notes: >-
+      Raw osos.dec verifies the 72-byte extent ending at the distinct push
+      prologue at 0x081d16d8. Whole-image aligned A32 decoding finds two
+      incoming plain BLs at 0x0815faa4 and 0x081b9f00, zero predicated BLs.
+      The body has two plain BLs and one indirect BLX. Return zero for null
+      child or nonpositive signed count; otherwise retrieve count-1 through
+      slot +0x3c, reload child, invoke slot +0x2c with count-1, and return
+      the saved u16 value. The predicate leaves incoming r3 untouched;
+      preserve it as the result wrapper's initial cell value. Concrete
+      virtual method identities remain unrecovered. ARM reuses both existing
+      ports. Deliberate host deviation: pointer-sized child vtable followed
+      by count, with equivalent host predicate; enclosing child pointer
+      remains a u32 word at +8. Volatile reads preserve callback-visible
+      child replacement. Tests cover signed count boundaries, truncation,
+      unchanged result cells, and replacement-child mutation. Host suite:
+      14125 passed. ARM release build passes. match.py exits 1 with 18
+      original versus 23 Rust instructions: same two direct calls, indexed
+      read, child reload, slot +0x2c BLX, and saved return; Rust additionally
+      saves incoming r3 and uses an explicit empty-path branch.
