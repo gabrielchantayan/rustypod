@@ -537,6 +537,7 @@ pub mod iap_client_global_shutdown;
 pub mod iap_packet;
 pub mod iap_service_packet_submit;
 pub mod request_callback_state_complete_iap_packet;
+pub mod iap_command_1_request;
 pub mod iap_packet_completion;
 pub mod iap_packet_completion_event;
 pub mod iap_packet_completion_schedule;

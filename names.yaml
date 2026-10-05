@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e2d98
+    ghidra: FUN_081e2d98
+    name: iap_command_1_request
+    size: 152
+    sig: "u32 iap_command_1_request(RequestCallbackState *state)"
+    module: app/iap_command_1_request
+    status: ported
+    renames:
+      param_1/r4: state
+      r5: status
+      state+0x2d4: pending_request_payload
+      state+0x2e0: reply_progress[0]
+      DAT_081e2e2c: completion_delay_ms
+      FUN_080f6da0: iap_packet_create
+      FUN_081e2ff4: complete_iap_packet_and_schedule_event
+      FUN_081e2ae8: request_callback_state_reset
+      FUN_08257b60: event_hub_broadcast
+    notes: >-
+      Raw ARM establishes [0x081e2d98,0x081e2e30): 148 code bytes and
+      the 2500-ms literal at 0x081e2e2c before the next real function.
+      Four outbound plain BLs at 0x081e2dd4, 0x081e2dec, 0x081e2e0c,
+      0x081e2e20; zero predicated BLs. Full-image decoding finds two
+      inbound plain BLs at 0x081e270c and 0x081e2908, zero predicated.
+      With a pending owner and reply_progress[0] below four, create an
+      empty lingo-8 command-1 packet. Return 28 on creation failure;
+      otherwise complete with state zero and 2500 ms delay, propagating
+      its status. Default status is 11. Progress above three skips
+      creation, clears the callback registry with both state-reset flags
+      zero, then broadcasts (8,0,13,4). Reload progress after packet
+      handling. All callees use existing Rust ports; no new seam.
+      Unused fourth completion argument is zero instead of residual r3.
+      Host tests cover absent owner at retries 0..3, unrelated progress
+      bytes, exhausted retries 4/255 with absent or invalid owner, and
+      preserved fields. Reuse shared callee fixture locks. Host suite
+      passes 14143 tests; ARM release build passes. Host smoke exercises
+      retry boundaries. match.py exits 1: LLVM adds a frame, expands
+      predication into branches and materializes 2500 without a literal,
+      preserving four calls, progress reload and status handling.
   - address: 0x081e2f38
     ghidra: FUN_081e2f38
     name: iap_command_3_request
