@@ -217877,3 +217877,44 @@ functions:
       node NULL check, indirect BLX resource/source helpers, and reordered
       independent handle/byte stores; double destruction, saved successor,
       conditional handle processing and final source guard remain intact.
+
+  - address: 0x081ba16c
+    ghidra: FUN_081ba16c
+    name: track_extras_cache_reset
+    size: 128
+    sig: "void track_extras_cache_reset(ResetCache *cache, u32 option)"
+    status: ported
+    module: app/track_extras_cache_reset
+    args:
+      r0: cache
+      r1: option
+    vars:
+      "cache+0x48": scheduler
+      "cache+0x4c": entries
+      "cache+0x64": dispatched
+      "cache+0x65": reset_option
+      "object.vtable+0x14": on_reset
+      "object.vtable+0x24": on_full_reset
+    notes: >-
+      Raw ARM establishes [0x081ba16c,0x081ba1ec), 128 bytes, ending
+      in pop-to-PC before the next function's push. Whole-image decoding
+      finds two inbound unconditional BLs at 0x08066d54 and 0x08068f64,
+      zero predicated BLs; body has four plain BLs, no predicated BLs,
+      one BLX and one BLXEQ. Actual ABI uses only r0/r1; Ghidra's
+      r2/r3 arguments are stack-save artifacts. Clears dispatched, stores
+      option's low byte, walks the embedded collection using existing
+      cursor ports, calls each entry object's slot +0x14, rereads the
+      option and entry object, and calls slot +0x24 when the option is
+      zero. Calls unported 0x081f73fc with scheduler, then invalidates
+      the local cursor. No registry identity exists for that callee:
+      fixed-address target dispatch and host seam preserve it without
+      inventing an identity. Native host pointers widen repr(C) fields;
+      compile-time ARM offset assertions preserve target layout. Tests
+      cover empty and multiple entries, low-byte truncation, nonzero
+      options, callback changes in both directions and replacement
+      objects before the second callback. Host suite passes 14196 tests;
+      ARM release build passes. match.py exits 1 with 45 Rust instructions
+      versus 32 original: loop rotation duplicates the advance call site,
+      branches replace conditional instructions, scheduler uses BLX,
+      independent initial byte stores reorder, and dead local cursor
+      invalidation disappears. Entry callback order and reloads remain.
