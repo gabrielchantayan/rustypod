@@ -555,6 +555,55 @@ pub unsafe extern "C" fn container_view_construct_channels(
     view
 }
 
+/// Container-derived view with one embedded pair-header base.
+/// Concrete widget identity remains unrecovered.
+#[repr(C)]
+pub struct ContainerViewPair {
+    pub base: ContainerView,
+    pub state: u32,
+    pub pair: [u32; 0xb8 / 4],
+    pub trailing: u32,
+}
+
+const _: [u8; 0x1a8] = [0; core::mem::size_of::<ContainerViewPair>()];
+const _: [u8; 0xec] = [0; core::mem::offset_of!(ContainerViewPair, pair)];
+const _: [u8; 0x1a4] = [0; core::mem::offset_of!(ContainerViewPair, trailing)];
+
+/// container_view_construct_pair — FUN_081c9594 @ 0x081c9594.
+/// True size 60 bytes: 56 code plus the vtable literal 0x0898ce94 at
+/// 0x081c95cc; the next function starts at 0x081c95d0. Whole-image raw
+/// A32 decoding verifies two plain inbound BLs, zero predicated BLs or
+/// tail Bs; the body has two plain outbound BLs and zero predicated BLs.
+///
+/// Forwards all five arguments to the container constructor, installs the
+/// derived vtable, clears state +0xe8, constructs the pair-header base at
+/// +0xec, clears trailing +0x1a4, and returns this (not Ghidra's void).
+/// Deliberate deviation: retains this instead of subtracting 0xec from the
+/// pair constructor result; the existing callee returns its input. Fixed
+/// word fields preserve target offsets on hosts. No new dependency seams.
+///
+/// # Safety
+/// `view` must be writable for 0x1a8 bytes; other arguments must satisfy
+/// `container_view_construct`'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_pair(
+    view: *mut ContainerViewPair,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ContainerViewPair {
+    container_view_construct(view.cast(), resources, controller, parent, spec);
+    core::ptr::addr_of_mut!((*view).base.vtable).write(0x0898_ce94);
+    core::ptr::addr_of_mut!((*view).state).write(0);
+    crate::cxx::pair_header::pair_header_base_construct(
+        core::ptr::addr_of_mut!((*view).pair).cast(),
+    );
+    core::ptr::addr_of_mut!((*view).trailing).write(0);
+    view
+}
+
 /// A container-derived view with three 0xb8-byte pair-header bases.
 /// The concrete widget identity is unrecovered; the name describes its layout.
 #[repr(C)]
@@ -840,6 +889,36 @@ mod tests {
                 destruct_base: stub_destruct_base,
             },
         )
+    }
+
+    #[test]
+    fn single_pair_clears_state_and_preserves_pair_padding() {
+        let _lock = OPS_LOCK.lock();
+        let _array_lock = crate::testing::CPP_ARRAY_OPS_TEST_LOCK.lock().unwrap();
+        let _ops = install_stubs();
+        for fill in [0xcd, 0xff] {
+            let mut storage = [u32::from_le_bytes([fill; 4]); 0x1a8 / 4 + 2];
+            let ptr = unsafe { storage.as_mut_ptr().add(1).cast::<ContainerViewPair>() };
+            let spec = spec(0x12345678, 0);
+            assert_eq!(unsafe {
+                container_view_construct_pair(
+                    ptr, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec,
+                )
+            }, ptr);
+            let view = unsafe { &*ptr };
+            assert_eq!(view.base.vtable, 0x0898_ce94);
+            assert_eq!(view.base.config, 0x12345678);
+            assert_eq!(view.state, 0);
+            assert_eq!(view.trailing, 0);
+            assert_eq!(view.pair[0], 0x0898_1630);
+            assert_eq!(&view.pair[1..0x98 / 4], &[0; 0x94 / 4]);
+            assert_eq!(view.pair[0xac / 4], 0);
+            assert_eq!(view.pair[0xb0 / 4], 0);
+            assert_eq!(view.pair[0xb4 / 4].to_le_bytes(), [0, fill, fill, fill]);
+            assert_eq!(storage[0], u32::from_le_bytes([fill; 4]));
+            assert_eq!(storage[0x1a8 / 4 + 1], u32::from_le_bytes([fill; 4]));
+        }
     }
 
     #[test]
