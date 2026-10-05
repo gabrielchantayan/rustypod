@@ -218347,3 +218347,41 @@ functions:
       Ghidra extent excludes the literal). LLVM unrolls all four queue
       checks; the three-argument dispatch, post-call stamps and tail
       continuation remain, with BLX/BX for the address-backed seams.
+
+  - address: 0x081c01e4
+    ghidra: FUN_081c01e4
+    name: storage_buffer_construct
+    size: 156
+    sig: "u32 *storage_buffer_construct(u32 *object, u32 owner, const u32 *descriptor, u32 kind)"
+    module: fs/storage_buffer_construct
+    status: ported
+    vars:
+      param_1: object
+      param_2: owner
+      param_3: descriptor
+      param_4: kind
+    notes: >-
+      Raw extent 0x081c01e4..0x081c0280 includes 152 instruction bytes
+      and the vtable literal 0x0898ccb8 at 0x081c027c. Next real entry
+      starts with cmp r0,#0 at 0x081c0280. Five unconditional outbound
+      BL words and zero predicated BL words; two inbound BL calls are
+      at 0x08161ea8 and 0x08161ed4. Constructs the base through verified
+      stock helper 0x08136dd0 with mode 2 and flags 0, installs the
+      derived vtable, clears +0x108 and +0x174 and 104 bytes at +0x10c.
+      Reuses ported memzero_aligned via the verified IRAM veneer identity,
+      storage_extent_read, and bswap16. Reads logical block zero into
+      512 bytes; success converts the big-endian u16 at byte 32 to a
+      block count by shifting right nine and initializes the pool via
+      0x081c007c, ignoring its status. Raw pool body proves only r0 is
+      an input; Ghidras extra parameters are stack output temporaries.
+      Unported base and pool retain raw-address seams, not invented
+      Rust identities. Host export rejects unavailable stock helpers;
+      private callback core uses target-width fields and isolated tests.
+      Tests cover failed reads with uninitialized output, size boundaries,
+      truncation, pool failure, cleared fields and untouched neighbors.
+      Host suite passes 14217 tests; ARM release builds. Standalone smoke
+      observes blocks=9 and pool=99 with the tail sentinel intact.
+      match.py reports 38 original versus 41 Rust instructions, exit 1
+      for structural diff. Address seams use BLX; byte swap plus shift
+      folds to (raw_halfword >> 1) & 127. The 528-byte stack frame and
+      success-only pool branch remain. No on-device execution performed.
