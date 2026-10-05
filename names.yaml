@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a88b4
+    ghidra: FUN_081a88b4
+    name: shared_record_list_owner_count
+    size: 40
+    sig: "u32 shared_record_list_owner_count(SharedRecordListOwner *owner)"
+    module: cxx/shared_record_list_owner_count
+    status: ported
+    renames:
+      param_1/r0: owner
+      r4: embedded_mutex
+      r5: count_snapshot
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+    notes: >-
+      Raw extent [0x081a88b4,0x081a88dc) is 40 instruction bytes; next
+      independent function starts with ldr r0,[r1]. Whole-image ARM word
+      decoding verifies two incoming plain BLs at 0x081a8758 and 0x081a8774,
+      zero predicated incoming BLs; two outgoing plain BLs at 0x081a88c4
+      and 0x081a88d0, zero predicated outgoing BLs. Lock owner+0x28,
+      snapshot list count at +0x24, unlock and return snapshot regardless
+      of either status. Reuse existing SharedRecordListOwner repr(C)
+      layout and canonical POSIX mutex ports behind verified veneers.
+      Host pointers widen without overlapping count and mutex. Tests cover
+      acquisition publishing a new count, release changing it after the
+      snapshot, ignored release error, zero/high-bit/max counts, outer
+      recursive holds and overflow followed by unconditional unlock.
+      Host suite passed 14256 tests; ARM release build succeeded.
+      match.py structural diff (exit 1): 11 versus 10 instructions,
+      LLVM frame-pointer setup and different saved registers; same
+      target offsets and lock/read/unlock/snapshot-return sequence.
+      Standalone C driver linked the actual Rust getter using a throwaway
+      cfg(test) staticlib export: returned 0x80000001 and released mutex.
+      No device execution. Standalone non-test host build is blocked by
+      six existing unresolved host-only callees in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule.
   - address: 0x081b103c
     ghidra: FUN_081b103c
     name: record_secondary_data_get
