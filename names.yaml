@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a2ee8
+    ghidra: FUN_081a2ee8
+    name: class_8780_priority_toggle
+    size: 60
+    sig: "void class_8780_priority_toggle(u8 *object)"
+    module: app/class_8780_priority_toggle
+    status: ported
+    renames:
+      param_1/r0/r2: object
+      cVar1: toggle_value
+      uVar2: next_value
+      iVar3: dispatch_state
+      FUN_081a3ed4: class_8780_dispatch_state
+    notes: >-
+      Raw A32 words establish the 60-byte extent 0x081a2ee8..0x081a2f24,
+      ending in pop {pc} at 0x081a2f20 before an independent push prologue.
+      Whole-image aligned BL decoding finds two incoming plain calls at
+      0x081e82b0 and 0x081e83c8, zero predicated calls. Outgoing: one plain
+      BL to the existing class_8780_dispatch_state, zero predicated BLs.
+      Return unless dispatch state is 3; otherwise map byte +0xdd from
+      0 to 1, from 1 or 2 to 0, and leave all other values unchanged.
+      Both callers ignore return registers; Ghidra's final indirect call
+      is actually a stack return, with no virtual dispatch or hidden callee.
+      Deliberate deviations: unspecified return registers discarded;
+      byte +0xdd retains an observational name rather than a guessed
+      business meaning. Host tests exhaust every byte across all dispatch
+      states, check unchanged surrounding bytes, and repeated transitions.
   - address: 0x0819c30c
     ghidra: FUN_0819c30c
     name: ui_owner_clear_operation
