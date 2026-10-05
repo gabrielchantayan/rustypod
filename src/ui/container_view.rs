@@ -555,6 +555,65 @@ pub unsafe extern "C" fn container_view_construct_channels(
     view
 }
 
+/// A container-derived view with three 0xb8-byte pair-header bases.
+/// The concrete widget identity is unrecovered; the name describes its layout.
+#[repr(C)]
+pub struct ContainerViewTriplePair {
+    pub base: ContainerView,
+    pub state: u32,
+    pub active: u8,
+    pub padding: [u8; 7],
+    pub first_header: [u32; 2],
+    pub first: [u32; 0xb8 / 4],
+    pub second_header: [u32; 2],
+    pub second: [u32; 0xb8 / 4],
+    pub third_header: [u32; 2],
+    pub third: [u32; 0xb8 / 4],
+    pub trailing: u32,
+}
+
+/// container_view_construct_triple_pair — FUN_081ca75c @ 0x081ca75c.
+/// True size 116 bytes: 112 code and vtable literal 0x0898d264 at
+/// 0x081ca7cc; the next function begins at 0x081ca7d0. Whole-image A32
+/// decoding finds two plain inbound BLs, zero predicated BLs or tail Bs.
+/// The body has four plain outbound BLs, zero predicated: one container
+/// constructor and three pair-header base constructors.
+///
+/// Forwards all five arguments to the container constructor, replaces its
+/// vtable, clears the two-word headers at +0xf4/+0x1b4/+0x274 before
+/// constructing bases at +0xfc/+0x1bc/+0x27c, clears +0x334 and +0xe8,
+/// clears only the byte +0xec, and returns this.
+/// Deliberate deviation: retains this rather than recovering it from each
+/// subobject constructor result; both existing constructors return their
+/// input. Fixed-width fields preserve target offsets on hosts. No new seams.
+///
+/// # Safety
+/// `view` must be writable for 0x338 bytes; the other arguments must satisfy
+/// `container_view_construct`'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_triple_pair(
+    view: *mut ContainerViewTriplePair,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ContainerViewTriplePair {
+    use crate::cxx::pair_header::pair_header_base_construct;
+    container_view_construct(view.cast(), resources, controller, parent, spec);
+    core::ptr::addr_of_mut!((*view).base.vtable).write(0x0898_d264);
+    core::ptr::addr_of_mut!((*view).first_header).write([0; 2]);
+    pair_header_base_construct(core::ptr::addr_of_mut!((*view).first).cast());
+    core::ptr::addr_of_mut!((*view).second_header).write([0; 2]);
+    pair_header_base_construct(core::ptr::addr_of_mut!((*view).second).cast());
+    core::ptr::addr_of_mut!((*view).third_header).write([0; 2]);
+    pair_header_base_construct(core::ptr::addr_of_mut!((*view).third).cast());
+    core::ptr::addr_of_mut!((*view).trailing).write(0);
+    core::ptr::addr_of_mut!((*view).state).write(0);
+    core::ptr::addr_of_mut!((*view).active).write(0);
+    view
+}
+
 
 /// container_view_children — original: `FUN_081586e0` @ 0x081586e0
 /// (8 bytes exactly: `add r0, r0, #0xa8; bx lr`, no literal pool;
@@ -781,6 +840,46 @@ mod tests {
                 destruct_base: stub_destruct_base,
             },
         )
+    }
+
+    #[test]
+    fn triple_pair_initializes_all_bases_preserving_padding() {
+        let _lock = OPS_LOCK.lock();
+        let _array_lock = crate::testing::CPP_ARRAY_OPS_TEST_LOCK.lock().unwrap();
+        let _ops = install_stubs();
+        assert_eq!(size_of::<ContainerViewTriplePair>(), 0x338);
+        assert_eq!(offset_of!(ContainerViewTriplePair, first), 0xfc);
+        assert_eq!(offset_of!(ContainerViewTriplePair, second), 0x1bc);
+        assert_eq!(offset_of!(ContainerViewTriplePair, third), 0x27c);
+        for fill in [0xcd, 0xff] {
+            let mut view: Box<ContainerViewTriplePair> = Box::new(unsafe {
+                core::mem::transmute([fill; 0x338])
+            });
+            let spec = spec(0x12345678, 0);
+            let ptr = &mut *view as *mut ContainerViewTriplePair;
+            assert_eq!(unsafe {
+                container_view_construct_triple_pair(
+                    ptr, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec,
+                )
+            }, ptr);
+            assert_eq!(view.base.vtable, 0x0898_d264);
+            assert_eq!(view.base.config, 0x12345678);
+            assert_eq!(view.state, 0);
+            assert_eq!(view.active, 0);
+            assert_eq!(view.padding, [fill; 7]);
+            assert_eq!(view.first_header, [0; 2]);
+            assert_eq!(view.second_header, [0; 2]);
+            assert_eq!(view.third_header, [0; 2]);
+            assert_eq!(view.trailing, 0);
+            for base in [&view.first, &view.second, &view.third] {
+                assert_eq!(base[0], 0x0898_1630);
+                assert_eq!(&base[1..0x98 / 4], &[0; 0x94 / 4]);
+                assert_eq!(base[0xac / 4], 0);
+                assert_eq!(base[0xb0 / 4], 0);
+                assert_eq!(base[0xb4 / 4].to_le_bytes(), [0, fill, fill, fill]);
+            }
+        }
     }
 
     fn blank_view() -> Box<ContainerView> {

@@ -217240,3 +217240,41 @@ functions:
       selects the command with ORREQ, and retains the terminal dispatch B.
       Frame setup and one pooled constant account for the remaining diff.
       No device execution was performed.
+
+  - address: 0x081ca75c
+    ghidra: FUN_081ca75c
+    name: container_view_construct_triple_pair
+    size: 116
+    sig: "ContainerViewTriplePair *container_view_construct_triple_pair(ContainerViewTriplePair *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      puVar1: view
+      iVar2: pair_base
+      FUN_08158778: container_view_construct
+      FUN_0810ebbc: pair_header_base_construct
+      DAT_081ca7cc: triple_pair_vtable_address
+    notes: >-
+      Structural class name; concrete widget identity remains unrecovered.
+      Raw A32 extent is 116 bytes: 112 code plus vtable literal 0x0898d264
+      at 0x081ca7cc, before the next function at 0x081ca7d0. Whole-image
+      branch decoding finds two unconditional inbound BL sites, 0x0814157c
+      and 0x081ca44c, zero predicated inbound BLs and zero inbound Bs.
+      Four unconditional outbound BLs: container_view_construct followed by
+      three pair_header_base_construct calls. Forwards all five arguments,
+      installs the derived vtable, clears two-word headers at +0xf4/+0x1b4/
+      +0x274 before constructing bases at +0xfc/+0x1bc/+0x27c, then clears
+      +0x334, +0xe8, and only byte +0xec. Returns this, contrary to Ghidra's
+      void signature. Caller 0x0814148c allocates exactly 0x338 bytes.
+      Both callees already ported; no new seams. Deliberate deviation:
+      retain this instead of backing up each constructor result (existing
+      constructors return their inputs). Fixed-width layout preserves target
+      offsets on hosts. Existing callee seams and limitations are unchanged.
+      All 14173 host tests passed; ARM release build succeeded. Standalone
+      host public-entry smoke with substituted existing dependencies verified
+      three base vtables, byte-only clears, trailing zero and unchanged return.
+      match.py exits 1 with a structural diff: 28 original instructions versus
+      30 Rust instructions, four BLs, identical field offsets and vtable.
+      LLVM retains this in r4 and reorders the independent final clears;
+      frame-pointer setup replaces the original pointer-recovery arithmetic.
+      No device execution performed.
