@@ -207,4 +207,58 @@ mod tests {
         assert_eq!(unsafe { word_at(result, 0) }, VTABLE_FLAG_PAYLOAD_VTABLE_ADDRESS);
         assert_eq!(unsafe { word_at(result, 8) }, 0x1357_9bdf);
     }
+
+    #[test]
+    fn byte_derived_constructor_preserves_padding_for_all_state_bytes() {
+        use super::super::vtable_flag_payload_byte_construct::{
+            vtable_flag_payload_byte_construct, VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS,
+        };
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let _reset = OpsReset;
+        unsafe {
+            ptr::addr_of_mut!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS)
+                .write_volatile(DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS);
+        }
+        for state in 0..=u8::MAX {
+            for payload in [0, u32::MAX, 0x1357_9bdf] {
+                let mut storage = AlignedBytes([0xa5; 20]);
+                let object = unsafe { storage.0.as_mut_ptr().add(4) };
+                let returned = unsafe {
+                    vtable_flag_payload_byte_construct(object, payload, state)
+                };
+                let mut expected = [0xa5; 20];
+                expected[4..8].copy_from_slice(
+                    &VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS.to_le_bytes(),
+                );
+                expected[8] = 0;
+                expected[12..16].copy_from_slice(&payload.to_le_bytes());
+                expected[16] = state;
+                assert_eq!(returned, object);
+                assert_eq!(storage.0, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn byte_derived_constructor_updates_returned_object_not_input() {
+        use super::super::vtable_flag_payload_byte_construct::{
+            vtable_flag_payload_byte_construct, VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS,
+        };
+        let mut input = AlignedBytes([0x5a; 20]);
+        let mut output = AlignedBytes([0xa5; 20]);
+        let result = unsafe { output.0.as_mut_ptr().add(4) };
+        let (_lock, _reset) = install_relocating_base(result);
+        let returned = unsafe {
+            vtable_flag_payload_byte_construct(input.0.as_mut_ptr(), u32::MAX, 0xff)
+        };
+        let mut expected = [0xa5; 20];
+        expected[4..8].copy_from_slice(
+            &VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS.to_le_bytes(),
+        );
+        expected[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        expected[16] = 0xff;
+        assert_eq!(returned, result);
+        assert_eq!(input.0, [0x5a; 20]);
+        assert_eq!(output.0, expected);
+    }
 }
