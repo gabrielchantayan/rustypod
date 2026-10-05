@@ -49824,6 +49824,33 @@ functions:
       0x081d23f8` @ 0x081b8194). CLASS NOT NAMED, same reason as
       0x081eb0c4.
 
+  - address: 0x081b4d54
+    ghidra: FUN_081b4d54
+    name: day_and_seconds_add_seconds
+    size: 12
+    sig: "void day_and_seconds_add_seconds(DayAndSeconds *pair, i32 seconds_delta)"
+    module: time/day_and_seconds_add_seconds
+    status: ported
+    renames:
+      param_1/r0: pair
+      param_2/r1: seconds_delta
+      r2: seconds_delta
+    notes: >-
+      Raw words are mov r2,r1; mov r1,#0; mov r0,r0. The true entry shim
+      is 12 bytes before the separately callable normalize_day_and_seconds
+      entry at 0x081b4d60. It falls through the existing 96-byte body, returns
+      at 0x081b4dbc, and shares literals at 0x081b4dc0..0x081b4dc8 before
+      the next independent function at 0x081b4dcc. Full-image raw decoding
+      finds two plain inbound BL sites (0x0816de00 and 0x081fa638), zero
+      predicated inbound BL sites, and two plain BL calls to __rt_sdiv
+      at 0x08031568 in the shared body, with zero predicated body BL calls.
+      Adds signed wrapping seconds with zero day delta, preserving retail
+      negative-exact-day behavior (seconds becomes 86400). Rust tail-calls
+      the existing normalization port instead of instruction fallthrough.
+      match.py reports three original instructions versus six Rust
+      instructions: the same r1-to-r2 shuffle and zero day argument, with
+      LLVM frame setup/teardown and a final branch replacing fallthrough.
+
   - address: 0x0816ddb4
     ghidra: FUN_0816ddb4
     name: opaque_vtable_string_owner_assign_z_source
@@ -49837,14 +49864,14 @@ functions:
       0x0816de20 is the "Z\\0" literal and the next real function starts at
       0x0816de24. The body has four plain, unconditional BL calls
       (utf8_strcmp_safe @ 0x08276d64, record_lookup_value_word @ 0x08291d90,
-      unrecovered trailing-pair advance @ 0x081b4d54, and the
+      day_and_seconds_add_seconds @ 0x081b4d54, and the
       string_object_c_str thunk @ 0x082a704c), one indirect BLX through owner
       vtable slot +0x08, and zero predicated BL calls. It dispatches that
       slot, compares the embedded StringObject payload at +0x18 to "Z", and
       for a non-NULL source advances the +0x1c pair with source lookup key
       zero before assigning the source C string into the embedded StringObject.
-      Host uses explicit seams for the vtable slot and unrecovered helper;
-      target builds call their verified firmware addresses directly.
+      Host uses an explicit seam only for the vtable slot; target dispatches
+      that slot directly. Day/seconds addition uses the existing Rust port.
 
   - address: 0x0816de24
     ghidra: FUN_0816de24

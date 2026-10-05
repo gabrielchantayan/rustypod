@@ -16,6 +16,7 @@ pub mod current_datetime_query;
 pub mod current_datetime;
 pub mod current_unix_timestamp;
 pub mod normalize_day_and_seconds;
+pub mod day_and_seconds_add_seconds;
 pub mod datetime;
 /// Packed calendar record to FAT date/time fields @ 0x080aacc0.
 pub mod datetime_to_fat;

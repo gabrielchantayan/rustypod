@@ -3,7 +3,7 @@
 //! Original: `FUN_0816ddb4` at load address `0x0816ddb4` (108 bytes,
 //! `0x0816ddb4..0x0816de1f`). Raw `osos.dec` words establish four plain,
 //! unconditional `bl` calls (to `utf8_strcmp_safe`, `record_lookup_value_word`,
-//! the unrecovered trailing-pair advance helper, and `string_object_c_str`),
+//! the day/seconds addition helper, and `string_object_c_str`),
 //! one indirect `blx` through owner vtable slot +0x08, and zero predicated
 //! `bl` calls. `0x0816de20` is the `"Z\\0"` literal; the next real function
 //! begins at `0x0816de24`.
@@ -13,20 +13,19 @@
 //! source is looked up under key zero; that value advances the trailing pair,
 //! and the source's NULL-safe C string is assigned into the embedded string.
 //!
-//! Deliberate deviations: the vtable slot and the unrecovered helper at
-//! `0x081b4d54` remain explicit host seams. Target builds invoke their verified
-//! firmware addresses directly; all identified calls use existing Rust ports.
+//! Deliberate deviations: the vtable slot remains an explicit host seam.
+//! Target builds dispatch its verified slot directly; day/seconds addition
+//! and all identified calls use existing Rust ports.
 
 use core::mem;
 
 use super::opaque_vtable_string_owner_destroy::OpaqueVtableStringOwner;
 use super::string_object::{string_object_assign_payload, string_object_c_str, utf8_strcmp_safe, StringObject};
 use crate::ui::record_lookup_value_word::record_lookup_value_word;
+use crate::time::day_and_seconds_add_seconds::day_and_seconds_add_seconds;
+use crate::time::current_day_and_seconds::DayAndSeconds;
 
 type OwnerSlot8 = unsafe extern "C" fn(*mut OpaqueVtableStringOwner);
-type TrailingPairAdvance = unsafe extern "C" fn(*mut u32, u32);
-
-const TRAILING_PAIR_ADVANCE_ADDRESS: usize = 0x081b_4d54;
 
 #[cfg(target_os = "none")]
 unsafe fn owner_slot_8(this: *mut OpaqueVtableStringOwner) {
@@ -48,26 +47,6 @@ unsafe fn owner_slot_8(this: *mut OpaqueVtableStringOwner) {
 }
 
 
-unsafe fn advance_trailing_pair(pair: *mut u32, value: u32) {
-    #[cfg(target_os = "none")]
-    {
-        let advance: TrailingPairAdvance = mem::transmute(TRAILING_PAIR_ADVANCE_ADDRESS);
-        advance(pair, value);
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        OPAQUE_VTABLE_STRING_OWNER_TRAILING_PAIR_ADVANCE(pair, value);
-    }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_trailing_pair_advance(_: *mut u32, _: u32) {
-    panic!("opaque owner trailing-pair advance seam was not configured")
-}
-
-#[cfg(not(target_os = "none"))]
-pub static mut OPAQUE_VTABLE_STRING_OWNER_TRAILING_PAIR_ADVANCE: TrailingPairAdvance = missing_trailing_pair_advance;
-
 /// `opaque_vtable_string_owner_assign_z_source` — original: `FUN_0816ddb4` @
 /// `0x0816ddb4` (108 bytes; four plain BL calls, zero predicated BL calls).
 ///
@@ -88,7 +67,7 @@ pub unsafe extern "C" fn opaque_vtable_string_owner_assign_z_source(
     }
 
     let value = record_lookup_value_word(source.cast(), 0);
-    advance_trailing_pair((*this).trailing_pair.as_mut_ptr(), value);
+    day_and_seconds_add_seconds((*this).trailing_pair.as_mut_ptr().cast::<DayAndSeconds>(), value as i32);
     string_object_assign_payload(&mut (*this).string, string_object_c_str(source));
 }
 
