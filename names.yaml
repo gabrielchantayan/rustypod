@@ -218295,3 +218295,55 @@ functions:
       and ARM release build pass. match.py reports 47 versus 18 instructions:
       LLVM inlines the existing allocator lazy-init and heap dispatch; vtable,
       zero-length branch, tag 39, pointer-before-copy store and return remain.
+
+  - address: 0x081b7f18
+    ghidra: FUN_081b7f18
+    name: showcase_pending_queues_schedule
+    size: 132
+    sig: "void showcase_pending_queues_schedule(u32 *showcase, u32 slot)"
+    module: app/showcase_pending_queues_schedule
+    status: ported
+    renames:
+      param_1/r6: showcase
+      param_2/r9: slot
+      r4: queue_slot
+      r5: queue
+      r8: dispatch_request
+      FUN_081b6d4c: showcase_slot_pending_queue
+      FUN_081b7f9c: showcase_queue_has_pending_entry
+      FUN_08030f44: heap_panic
+      FUN_0822b2a8: dispatch_context
+      FUN_081b6ae8: continue_slot_pass
+    notes: >-
+      Raw ARM extent is 132 bytes from 0x081b7f18 to the next independently
+      entered predicate at 0x081b7f9c, including the 10000000 literal at
+      0x081b7f98. Full-image B/BL decoding finds two incoming BL sites:
+      BLEQ at 0x081b6e98 and plain BL at 0x081b6f84. Internally there are
+      three plain BLs, one BLEQ to heap_panic, and a final B to 0x081b6ae8.
+      Require the selected slot's pending queue, then visit all four queues
+      at +0x88 with 24-byte stride. Dispatch unequal-cursor queues using
+      their context word, request 10000000, and wrapping word(+0x10)<<19;
+      stamp their corresponding +0x1c4 pass counts to ten after dispatch.
+      Resume the original selected slot through 0x081b6ae8 with r2=0 and
+      r3=200. Lookup, predicate and panic reuse existing Rust ports.
+      Dispatch and continuation call verified firmware addresses on target;
+      no guessed semantic callee identity or host no-op is introduced.
+      Contrary to the existing 0x0822b2a8 identification, its raw body ends
+      at BX LR at 0x0822b2c0: 0x0822b2c4 is a separate push entry, not
+      fall-through. Its conditional tail target 0x081f0ec4 preserves both
+      r1 and r2 and forwards them to virtual slot +0x30. The new seam
+      therefore passes all three arguments rather than the recorded two.
+      Deliberate deviations are target-width word layout on hosts and a
+      private callback-parameterized core for isolated tests; invoking the
+      exported routine on a host explicitly rejects unavailable firmware
+      dispatch and continuation. Tests cover empty queues, mixed pending
+      slots, wrapping shifts, post-dispatch stamps and callbacks making
+      later queues pending.
+      Host suite passes 14214 tests and ARM release builds. An isolated host
+      executable exercises the real queue core, lookup and predicate with
+      an observed dispatch argument of 0xfff80000 and pass counts [10,0,0,0];
+      firmware callbacks and on-device continuation remain unexercised.
+      match.py reports 32 original versus 64 Rust instructions (its default
+      Ghidra extent excludes the literal). LLVM unrolls all four queue
+      checks; the three-argument dispatch, post-call stamps and tail
+      continuation remain, with BLX/BX for the address-backed seams.
