@@ -217000,3 +217000,45 @@ functions:
       branch, singleton call and +0x30 BLX; LLVM removes the empty destructor,
       uses a larger explicit frame and an indirect firmware call. Constructor
       BL is an archive relocation. No on-device execution was performed.
+
+  - address: 0x081bc548
+    ghidra: FUN_081bc548
+    name: string_collection_find
+    size: 100
+    sig: "u32 string_collection_find(collection: *mut u8, key: *const StringObject)"
+    module: app/string_collection_find
+    status: ported
+    renames:
+      param_1/r0: collection
+      param_2/r5: key
+      auStack_24/sp+4: iterator_state
+      local_10/sp+24: entry
+      uVar2/r4: matching_entry
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_082aad4c: string_object_equals
+      FUN_08155ec0: iterator_state_cleanup
+    notes: >-
+      Raw firmware establishes 25 A32 instructions, 100 bytes through
+      0x081bc5a8, with the next independent push prologue at 0x081bc5ac.
+      Binary-wide BL decoding finds two plain inbound calls at 0x081bc534
+      and 0x081bc5b8, zero predicated inbound calls. The body has four plain
+      BLs and zero predicated BLs. Constructs the five-word collection
+      iterator with start -2, advances until exhaustion or nonzero string
+      equality, always cleans up, and returns the first matching object
+      word or zero. Caller 0x081bc5ac increments the matching record's +8
+      count; 0x081006f0 reads that count. All four callees are existing ports
+      called directly; their existing iterator bookkeeping seams remain.
+      Deliberate deviation: zero-initialize local state and entry words so
+      existing host iterator defaults do not read uninitialized values.
+      The inlined scan helper has edge tests for empty and absent keys,
+      duplicate first-match stopping, prefixes, empty strings, and UTF-8.
+      Host suite passed 14164 tests; ARM release build passed. match.py
+      reports 25 original versus 35 Rust instructions, preserving the four
+      calls, advance/compare loop, exhaustion-zero path, and shared cleanup;
+      differences are zero initialization, frame setup, and branch layout.
+      Real-source standalone scan smoke returned the first duplicate match
+      after two visits and zero on exhaustion. Full public-entry host smoke
+      is blocked by six pre-existing missing host functions in
+      prepare_entry_metadata, shared_payload_select_kind, and calendar_schedule;
+      no unrelated fixes were made. No on-device execution was performed.
