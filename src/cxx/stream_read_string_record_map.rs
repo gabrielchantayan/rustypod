@@ -8,10 +8,9 @@
 //! string record, decodes the record through the unported entry helper, assigns
 //! the mapped string, and destroys both temporaries.
 //!
-//! Deliberate deviation: `FUN_082aae1c`, `FUN_083db32c`, and the three
-//! string-record helpers remain unported. Device builds call their verified
-//! retailOS addresses; host builds route them through a replaceable operation
-//! table so tests can prove the complete per-entry protocol.
+//! Deliberate deviation: remaining unported decode/assignment/destruction
+//! helpers retain their verified retail addresses. The key constructor uses
+//! its Rust port; host operation slots preserve the target-layout fixtures.
 
 use core::ptr;
 
@@ -46,6 +45,11 @@ struct StreamReadStringRecordMapOps {
 }
 
 #[cfg(target_os = "none")]
+unsafe extern "C" fn retail_record_construct(record: *mut StringRecord, primary: *const u8, secondary: *const u8, vector: *mut u32, flag: u32) -> *mut StringRecord {
+    super::string_vector_key_construct::string_vector_key_construct(record.cast(), primary, secondary, vector.cast(), flag).cast()
+}
+
+#[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn retail_ops() -> StreamReadStringRecordMapOps {
     unsafe {
@@ -53,7 +57,7 @@ unsafe fn retail_ops() -> StreamReadStringRecordMapOps {
             read_count: core::mem::transmute(0x083d_8134usize),
             read_string: core::mem::transmute(0x0807_45b8usize),
             clear_words: core::mem::transmute(0x083e_5aecusize),
-            record_construct: core::mem::transmute(0x0819_7ab8usize),
+            record_construct: retail_record_construct,
             decode_entry: core::mem::transmute(0x082a_ae1cusize),
             map_value: core::mem::transmute(0x083d_b32cusize),
             record_assign: core::mem::transmute(0x0819_7c68usize),
