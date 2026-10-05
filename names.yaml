@@ -216728,3 +216728,37 @@ functions:
       12 and 9 for steps 1, 2 and 0x80000000 from current 9, limit 12.
       ARM release build passes. match.py exits 1: both bodies have 26
       instructions; LLVM folds doubling into shifted add/sub and reorders
+
+  - address: 0x081cf650
+    ghidra: FUN_081cf650
+    name: class_6280_flag_dispatch
+    size: 80
+    sig: "void class_6280_flag_dispatch(void)"
+    module: app/class_6280_flag_dispatch
+    status: ported
+    renames:
+      FUN_0811b2c0: singleton_class_6280
+      FUN_0811c564: flag_2c_is_clear
+      FUN_0811c284: flag_2c_is_one
+      FUN_0811c010: class_6280_set_one_handler (firmware seam)
+      FUN_0811bd70: class_6280_clear_handler (firmware seam)
+      FUN_08259594: media_player_interface_get
+      "vtable+0xac": unresolved_media_player_interface_slot_ac
+    notes: >-
+      Raw A32 extent 0x081cf650..0x081cf6a0 is 80 bytes; the next
+      function begins with push {r4,lr}. Incoming calls are BLNE at
+      0x081cdfa0 and BL at 0x081cfae8: one plain, one predicated.
+      Body has seven plain BLs, no predicated BLs, direct tail branches
+      to 0x0811c010 and 0x0811bd70, and a virtual BX through slot +0xac.
+      Ghidra incorrectly incorporates the tail-target bodies into this
+      dispatcher. Zero singleton flag +0x2c selects the set-one handler;
+      exactly one selects the clear handler; other values select media.
+      Reacquire the singleton before every predicate and class handler.
+      Handler identities remain address-proven operations, not invented
+      class or playback names. Unported handlers use firmware-address
+      seams; existing singleton ports retain their cache/constructor
+      deviations and are not hook-ready. Native-width typed host vtables
+      reuse the slot-ac ABI; unspecified return registers are discarded.
+      Host edge tests cover every flag and changing singleton identities.
+      Standalone public-entry smoke with dependency fixtures observed
+      0 -> 1 -> 0 and flag 255 -> media vtable slot +0xac exactly once.
