@@ -216381,3 +216381,33 @@ functions:
       preservation of the +0xb8 timer. match.py exits 1 with an expected
       structural diff: eight versus seven instructions, an added frame
       pointer, and preserved +0xb4 BL / +0xb0 tail B ordering.
+
+  - address: 0x081d04e8
+    ghidra: FUN_081d04e8
+    name: stop_volume_up_timers
+    size: 28
+    sig: "void stop_volume_up_timers(u8 *controller)"
+    module: app/controller_timer_pair
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0xb0": first_timer
+      "controller+0xb4": second_timer
+      FUN_0812c6b0: timer_stop
+    notes: >-
+      Raw ARM establishes extent [0x081d04e8,0x081d0504): push {r4,lr},
+      save controller, load +0xb0, BL timer_stop, reload +0xb4, pop
+      {r4,lr}, B timer_stop. The next real function begins with push
+      {r4,lr}. Whole-image word decoding finds two incoming BL sites:
+      plain BL at 0x081d0248 and BLNE at 0x081ce25c. The latter is
+      the HandleRemoteVolumeUpUp release path. Ghidra incorrectly
+      incorporates timer_stop's body. Both outgoing branches target the
+      already-ported timer_stop at 0x0812c6b0; no new seams or NULL guards.
+      Rust expresses the tail branch as a direct call, preserving aligned
+      target-width pointer loads and their order. Host tests cover reloading
+      the second pointer after first-stop side effects, aliased timers, and
+      preservation of +0xb8. All 14143 host tests and ARM release build pass.
+      Throwaway public-API smoke with default timer operations observes both
+      timer states become 0x73746f70. match.py exits 1 with eight versus seven
+      instructions: LLVM adds a frame pointer but preserves +0xb0 BL and
+      +0xb4 tail B ordering. The export remains independently visible.
