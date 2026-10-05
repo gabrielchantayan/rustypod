@@ -220655,3 +220655,26 @@ functions:
       free order and tags, reset-before-delete, untouched words and retained
       final slot. Do not treat this destructor as idempotent when the final
       owner slot is present.
+
+  - address: 0x08197c68
+    ghidra: FUN_08197c68
+    name: cxx_string_vector_record_assign
+    size: 44
+    sig: "FlaggedStringVectorRecord *cxx_string_vector_record_assign(FlaggedStringVectorRecord *destination, const FlaggedStringVectorRecord *source)"
+    module: cxx/string_vector_record_assign
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: source, r4: destination, r5: source}
+    renames: {FUN_083d8d1c: cxx_string_assign, FUN_083e25a4: string_vector_record_vector_assign}
+    notes: >-
+      Raw A32 establishes the 44-byte extent 0x08197c68..0x08197c94;
+      the next function starts with push at 0x08197c94. Two outgoing
+      unconditional BLs and zero predicated BLs. Whole-image decoding finds
+      two inbound plain BLs at 0x080e40f8 and 0x082aaf94, no predicated
+      forms. Assigns the leading COW string through the existing port,
+      assigns the embedded record vector through the verified unported
+      firmware seam at 0x083e25a4, copies the uninterpreted byte at +0x10,
+      and returns destination. The vector seam consumes only r0/r1:
+      Ghidra's r2/r3 arguments are scratch registers saved on the stack.
+      Named repr(C) fields accommodate wider host pointers. Host tests
+      isolate the local flag behavior, covering all byte values, adjacent
+      guards, and self-assignment; vector ownership remains in firmware.

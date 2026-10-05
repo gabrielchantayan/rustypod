@@ -635,6 +635,7 @@ pub mod event_list_tree_release_subtree;
 pub mod string_vector_record_link;
 pub mod string_vector_record_range_destroy;
 pub mod string_vector_record_destroy;
+pub mod string_vector_record_assign;
 pub mod string_vector_record_vector_destroy;
 pub mod string_map;
 pub mod string_key_tree_node_key;
