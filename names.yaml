@@ -219568,3 +219568,44 @@ functions:
       Rust retains the exact ldrb r0,[r0,#212], adding the configured
       frame-pointer push/mov/pop instead of the original bx lr.
       No device execution was performed.
+
+  - address: 0x081a4f34
+    ghidra: FUN_081a4f34
+    name: class_8780_priority_media_dispatch
+    size: 48
+    sig: "void class_8780_priority_media_dispatch(void *object)"
+    module: app/class_8780_priority_media_dispatch
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_081a3ed4: class_8780_dispatch_state
+      FUN_08259594: media_player_interface_get
+      FUN_081a38c0: update_draw_events (unported firmware-address seam)
+      "media interface vtable+0xb8": unresolved_media_action
+    notes: >-
+      Raw A32 words establish the 48-byte extent 0x081a4f34..0x081a4f64,
+      where the independent constructor begins with push {r4,r5,r6,lr}.
+      Whole-image aligned BL decoding finds two incoming plain calls at
+      0x081a4ec0 and 0x081a4f10 and zero predicated calls. Outgoing:
+      two plain BLs, zero predicated BLs, one BLX r1 and one B tail call.
+      Return immediately unless the existing state selector returns 3;
+      otherwise obtain the media interface, invoke unresolved slot +0xb8,
+      then pass the original object to 0x081a38c0 without rechecking state.
+      Raw decoding of that separate routine confirms a media slot +0x120
+      query, optional event 0x2a2a2a2a/0x3d14 and priority-byte clear,
+      followed by Draw-tag events 0x7f0c/0x7f0d through object slot +0x58.
+      Ghidra incorrectly includes that tail target in this function.
+      No existing mapping for the assigned address or tail target was found
+      in the complete parsed names.yaml; reuse both mapped direct callees.
+      Deliberate deviations: unspecified return registers discarded;
+      unported draw-event routine retained at its verified firmware address;
+      native-width host vtable words retain four-byte target slot indices.
+      The existing singleton getter's not-hook-ready caveat applies.
+      Host tests cover inactive states and every nonzero priority byte,
+      including continuation after the media action clears the gate.
+      Host suite and ARM release build passed; standalone source smoke
+      observed skipped inactive dispatch and media-before-update ordering.
+      match.py exits 1 with the same compare/early-return, two BLs and
+      slot +0xb8 BLX structure; LLVM adds a frame-pointer prologue and
+      replaces the immediate tail B with a literal-loaded BX to 0x081a38c0.
+      No device execution was performed.
