@@ -1055,3 +1055,4 @@ pub mod controller_holder_prepare;
 pub mod vmax_owner_reset;
 pub mod voice_memo_duration;
 pub mod key_repeat_timer_update;
+pub mod kind1_record_post;
