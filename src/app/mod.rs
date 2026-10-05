@@ -8,6 +8,7 @@ pub mod resource_provider_update_refreshed;
 pub use resource_provider_update_refreshed::*;
 pub mod shared_selector_create;
 pub mod indexed_shared_child_create;
+pub mod twelve_byte_state_base_construct;
 pub mod twelve_byte_state_derived_construct;
 pub mod descriptor_provider_construct;
 pub mod track_sample_count;

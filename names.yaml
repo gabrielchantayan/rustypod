@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b126c
+    ghidra: FUN_081b126c
+    name: twelve_byte_state_base_construct
+    size: 76
+    sig: "u32 *twelve_byte_state_base_construct(u32 *storage)"
+    module: app/twelve_byte_state_base_construct
+    status: ported
+    renames:
+      entry_r0: storage
+      puVar1/returned_r0: object
+      DAT_081b12b4: TWELVE_BYTE_STATE_BASE_VTABLE
+      FUN_08275bb8: framework_object_construct
+    notes: >-
+      Raw extent [0x081b126c,0x081b12b8): 72 instruction bytes and
+      vtable literal 0x0898b6f8 at 0x081b12b4; next function starts
+      with cmp r0,#0. Two incoming plain BLs at 0x081b9714 and
+      0x08288fbc, no predicated incoming BLs; one outgoing plain BL
+      at 0x081b1270 to the ported framework_object_construct, no
+      predicated outgoing BLs. Installs the base vtable, clears bytes
+      +5..+15 then +4, returns the input pointer, and preserves derived
+      fields. Class and individual state meanings remain unknown.
+      Volatile stores preserve byte widths and order; no deviations.
+      match.py exits 1: LLVM adds an fp frame but preserves the root
+      call, vtable literal, ordered twelve byte stores and r0 return.
   - address: 0x081b4e2c
     ghidra: FUN_081b4e2c
     name: range_dispatch_scan
@@ -218406,7 +218430,7 @@ functions:
       entry_r0: storage
       puVar1/returned_r0: object
       DAT_081b9724: VTABLE (0x0898c58c)
-      FUN_081b126c: twelve_byte_state_base_construct (unported structural identity)
+      FUN_081b126c: twelve_byte_state_base_construct
     notes: >-
       Raw words establish [0x081b9710,0x081b9728): 20 code bytes plus
       the vtable literal at 0x081b9724. The next real function begins
@@ -218414,24 +218438,16 @@ functions:
       independently finds two incoming plain BLs at 0x081861ec and
       0x081b9678, zero predicated incoming BLs; one outgoing plain BL
       at 0x081b9714 to 0x081b126c and zero predicated outgoing BLs.
-      Calls that unported base, writes vtable 0x0898c58c to its returned
+      Calls the ported base, writes vtable 0x0898c58c to its returned
       object's first word, and returns the same r0 (Ghidra's void is
       incorrect). Raw base calls the ported framework root at 0x08275bb8,
       installs 0x0898b6f8, and clears bytes +5..+15 then +4. Both callers
       replace the derived vtable again. Concrete class and state meanings
       are not established; the semantic name describes the verified layout.
-      No registry entry or existing Rust seam names the base. Target calls
-      its verified retail address; host injection follows the existing
-      condvar_backed_object_construct convention. This host seam is the
-      only deliberate behavioral deviation. Host regression exercises dirty
-      storage, reconstruction, guards and preservation of derived fields.
-      All 14205 host tests and the ARM release build pass. Standalone
-      actual-source smoke with the binary-derived base model verifies a
-      relocated returned pointer, vtable, twelve cleared bytes and unchanged
-      surrounding words. match.py exits 1: LLVM uses an fp frame and an
-      indirect BLX through literal 0x081b126c rather than direct BL, then
-      loads 0x0898c58c, stores through returned r0 and returns it unchanged.
-      The call/store/return structure and both literals are preserved.
+      Both target and host now call the ported base directly; the obsolete
+      address/injection seam and its model were removed. No deliberate
+      deviations. Host regression exercises dirty storage, reconstruction,
+      guards and preservation of derived fields through the real base.
 
   - address: 0x081b9668
     ghidra: FUN_081b9668
