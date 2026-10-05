@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod collection_value_statistics_refresh;
 pub mod short_voicememo_probe;
 pub mod demo_mode_marker_refresh;
 pub mod audio_format_notify_mismatch;

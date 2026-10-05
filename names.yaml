@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d111c
+    ghidra: FUN_081d111c
+    name: collection_value_statistics_refresh
+    size: 156
+    sig: "void collection_value_statistics_refresh(u32 *owner)"
+    module: app/collection_value_statistics_refresh
+    status: ported
+    renames:
+      param_1/r4: owner
+      iVar5/r6: count
+      iVar4/r5: index
+      owner+0x14: maximum
+      owner+0x18: minimum
+      owner+0x1c: average
+      owner+0x30: collection
+      owner+0x34: signed_count
+      vtable+0x40: get_value_slot
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw A32 extent [0x081d111c,0x081d11b8) is 156 executable bytes;
+      the next real function starts with push at 0x081d11b8. Independent
+      whole-image decoding finds two inbound plain BLs at 0x0815e660 and
+      0x081d0dc0, no predicated inbound BLs. Body contains one plain BL
+      at 0x081d11ac to the existing unsigned-divider port, no predicated
+      BLs, and one BLX r2 at 0x081d1154. Snapshot signed count, visit
+      collection indices through its virtual slot +0x40, dereference each
+      returned slot and skip null value pointers. Compute unsigned extrema
+      and a wrapping u32 sum, then unsigned-divide by the full count,
+      including null entries. Zero count resets minimum to zero; negative
+      counts skip iteration but divide zero by the unsigned count bits.
+      Virtual callee identity is unknown and dispatch remains dynamic;
+      no invented fixed-address seam. No target behavioral deviations.
+      Host vtable code addresses widen to usize at the same byte offset;
+      object and value pointer fields remain u32 words. Host cases cover
+      empty/all-null/mixed collections, zero/full-width values, unsigned
+      extrema, sum overflow, negative counts and untouched owner words.
+      All 14133 host tests pass and ARM release build passes. Standalone
+      API smoke prints maximum=12, minimum=3, average=5 for [12,null,3].
+      match.py exits 1 with reviewed 39-versus-45-instruction differences:
+      frame setup, loop rotation, reordered independent loads/stores and
+      separate zero-count return. Virtual +0x40 BLX, signed iteration,
+      null skip, unsigned conditional extrema, wrapping add, divisor and
+      output offsets remain. No device execution.
   - address: 0x081d1324
     ghidra: FUN_081d1324
     name: timed_label_update_elapsed
