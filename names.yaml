@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bb7a8
+    ghidra: FUN_081bb7a8
+    name: opaque_owned_record_cleanup
+    size: 36
+    sig: "u32 *opaque_owned_record_cleanup(u32 *record)"
+    module: cxx/opaque_owned_record_cleanup
+    status: ported
+    renames:
+      param_1/r0/r4: record
+      FUN_082d110c: video_engine_dispatch_opaque_two_words_ffb4
+    notes: >-
+      Raw A32 words establish the 36-byte extent ending at the next
+      independent push at 0x081bb7cc. Whole-image aligned BL decoding finds
+      two inbound plain calls at 0x0828e6d4 and 0x0828e700, no predicated
+      inbound BLs, zero outbound plain BLs, and one outbound BLNE at
+      0x081bb7c0 to 0x082d110c. Other callers tail-branch. When record word
+      zero is nonzero, dispatches (1, record address) through the existing
+      ported opaque video-engine wrapper. Always returns the original
+      pointer without clearing or restoring any record fields. Host tests
+      cover zero bypass, high-bit first words, dispatcher mutation, and
+      absent engine. Deliberate deviation: ordinary Rust conditional
+      instead of ARM predication; resource semantics remain opaque.
+
   - address: 0x081caac0
     ghidra: FUN_081caac0
     name: shared_controller_resource_refresh
@@ -169734,11 +169757,11 @@ functions:
       at 0x083d3968. Two inbound direct BL sites at 0x0827bd48 and
       0x0827bd50 are plain; there are no predicated inbound BL sites. The
       body has one predicated BLNE to operator_delete_tag3 @ 0x082aad14,
-      then tail-branches to the unported cleanup helper @ 0x081bb7a8.
+      then tail-branches to the ported cleanup helper @ 0x081bb7a8.
       If target word 4 is nonzero, it releases nonzero target word 1; it
       always forwards the unchanged record to that helper and returns its
-      result. The helper has no recovered semantic identity, so target builds
-      call its verified address and host tests inject a cleanup seam.
+      result. Rust now calls the ported opaque_owned_record_cleanup directly;
+      host tests substitute only the allocator.
 
   - address: 0x083d3888
     ghidra: FUN_083d3888
@@ -201766,11 +201789,11 @@ functions:
       at 0x083d3968. Two inbound direct BL sites at 0x0827bd48 and
       0x0827bd50 are plain; there are no predicated inbound BL sites. The
       body has one predicated BLNE to operator_delete_tag3 @ 0x082aad14,
-      then tail-branches to the unported cleanup helper @ 0x081bb7a8.
+      then tail-branches to the ported cleanup helper @ 0x081bb7a8.
       If target word 4 is nonzero, it releases nonzero target word 1; it
       always forwards the unchanged record to that helper and returns its
-      result. The helper has no recovered semantic identity, so target builds
-      call its verified address and host tests inject a cleanup seam.
+      result. Rust now calls the ported opaque_owned_record_cleanup directly;
+      host tests substitute only the allocator.
 
   - address: 0x083d3888
     ghidra: FUN_083d3888
