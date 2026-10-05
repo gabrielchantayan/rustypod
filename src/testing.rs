@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const EMBEDDED_ARRAY_WORD_AT: usize = 0x4294_0000;
     pub const INDEXED_TASK_BITMAP_RESOLVE: usize = 0x4293_0000;
     pub const INDEXED_TASK_STRING_RESOLVE: usize = 0x4292_0000;
     pub const TV_OUT_RESOURCE_REFRESH: usize = 0x4291_0000;

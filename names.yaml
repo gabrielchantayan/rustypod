@@ -12168,6 +12168,32 @@ functions:
       direct Rust offsets replace register rebasing while preserving the
       same writes and return value. Host tests cover exact member bounds,
       guard bytes, and repeated initialization.
+  - address: 0x081d5e90
+    ghidra: FUN_081d5e90
+    name: embedded_array_word_at
+    size: 20
+    sig: "u32 embedded_array_word_at(const EmbeddedWordArray *this, i32 index)"
+    module: cxx/embedded_array_word_at
+    status: ported
+    renames:
+      param_1/r0: this
+      r1: index
+      FUN_082a4cf8: array_element_at
+    notes: >-
+      Raw ARM words establish extent 0x081d5e90..0x081d5ea3; the next
+      function begins with push at 0x081d5ea4. Adds 8 to this, calls
+      array_element_at at 0x082a4cf8 with r1 unchanged, and reads the
+      selected aligned u32. Full binary BL decoding finds two plain
+      inbound calls at 0x08137560 and 0x0820bbdc, zero predicated calls;
+      the body has one plain BL and no predicated BL. Ghidra omits the
+      index argument despite both callers supplying it. Reuses the
+      ported sentinel-aware virtual-stride accessor without a new seam.
+      No specific owner class is claimed. Host layout deliberately
+      widens the embedded array's native vtable pointer, retaining
+      member offset +8 through repr(C). Tests cover signed indices,
+      padded stride, full-width words, last-element selection, and
+      nonpositive count sentinel pass-through.
+
   - address: 0x081d9688
     ghidra: FUN_081d9688
     name: selector_pair_write_u64
