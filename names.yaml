@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b01f8
+    ghidra: FUN_081b01f8
+    name: flagged_string_record_copy_construct
+    size: 52
+    sig: "FlaggedStringRecord *flagged_string_record_copy_construct(FlaggedStringRecord *destination, const FlaggedStringRecord *source)"
+    module: cxx/flagged_string_record_copy_construct
+    status: ported
+    vars:
+      param_1/r0: destination
+      param_2/r1: source
+      r4: source
+      FUN_082773e0: string_object_copy_construct
+    notes: >-
+      Raw A32 words establish extent [0x081b01f8,0x081b022c), ending in
+      pop {r4,pc}; the next independently called destructor starts with
+      push {r4,lr}. Whole-image word decoding finds two inbound plain BLs
+      at 0x081b01d0 and 0x083d6394, no predicated inbound BLs. The body has
+      one plain BL at 0x081b0218 to string_object_copy_construct 0x082773e0
+      and no predicated BLs. Copies byte +0 and word +4, constructs the
+      embedded string at +8, subtracts eight from the callee result, copies
+      source word +0x10 through that returned pointer, and returns it.
+      Ghidra incorrectly declares the return void; both callers consume r0.
+      Padding +1..+3 stays untouched; no NULL guard. Directly reuses the
+      existing Rust string constructor, including its modeled vtable.
+      repr(C) retains string offset +8 on hosts while widening its pointers
+      and moving the trailing word. Class and opaque word meanings unknown.
+      Host suite passes 14267 tests, including NULL/empty/nonempty strings,
+      allocation failure, deep copy, padding preservation, and self copy.
+      match.py reports 15 Rust versus 13 original instructions: added frame
+      pointer and different registers; LLVM knows the string constructor
+      returns its input, eliminating the subtract and retaining destination.
+      Standalone host build is blocked by existing missing functions in
+      prepare_entry_metadata, shared_payload_select_kind, and calendar_schedule.
+      A standalone test-configured host library smoke exercises the real
+      constructor on self-copy, confirming payload, padding, and return pointer.
   - address: 0x081b022c
     ghidra: FUN_081b022c
     name: two_word_header_string_owner_destroy
