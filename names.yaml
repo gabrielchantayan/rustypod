@@ -12869,6 +12869,37 @@ functions:
       a match. The first ABI argument is unused. The port deliberately calls
       the existing accessor seam directly rather than creating a duplicate
       address boundary.
+  - address: 0x081e1448
+    ghidra: FUN_081e1448
+    name: event_dispatch_singleton_get
+    size: 88
+    sig: "void *event_dispatch_singleton_get(void)"
+    module: app/event_dispatch_singleton
+    status: ported
+    vars: {iVar1: acquired, uVar2: initialized_object}
+    renames:
+      DAT_081e1490: event_dispatch_guard
+      DAT_081e1494: event_dispatch_object
+      DAT_081e1498: dso_handle
+      DAT_081e149c: opaque_shutdown_handler_word
+    notes: >-
+      Raw osos.dec verifies extent [0x081e1448,0x081e14a0): 72 instruction
+      bytes and 16 literal bytes, followed by the next real function.
+      Independent ARM B/BL decoding finds two inbound plain BLs at 0x081d228c
+      and 0x081d24e4, zero predicated BLs, and no tail B. Four outgoing plain
+      BLs and zero predicated BLs call guard acquire, constructor 0x081e1594,
+      shutdown registration, and guard release. Tests bit zero of guard
+      0x089d01ec, acquires, constructs fixed object 0x08ad7db8, registers the
+      constructor return with raw handler 0x081d6724 and DSO handle 0x089ca09c,
+      releases, and always returns the fixed object. Callers use virtual
+      dispatch and fallback event handling; the class identity is unknown.
+      The unported constructor remains an address-backed target seam rather
+      than a guessed implementation. Host tests cover reentry, incomplete
+      nonzero guards, repeats, distinct constructor return, and registration
+      failure. Isolated host smoke exercises the actual guard and shutdown
+      chain ports with a host allocator and drains the registration.
+      match.py shows a larger LLVM frame and indirect seam calls, retaining
+      guard branches, call order, and fixed-object return.
   - address: 0x081e22c0
     ghidra: FUN_081e22c0
     name: guarded_static_object_get
