@@ -2953,6 +2953,8 @@ pub mod hints {
     pub const BUFFERED_STREAM_DESTROY: usize = 0xabcf_0000;
     // Dedicated backing, state, and pointer-array fixtures for collection flushing.
     pub const BUFFERED_STREAM_COLLECTION_FLUSH: usize = 0xabce_0000;
+    // Dedicated DMA-array owners and allocations for pair release.
+    pub const DMA_ARRAY_PAIR_RELEASE: usize = 0xabd0_0000;
     // 0xbeef_0000: dedicated to heap/region_list_erase_recycle's raw-u32
     // list and node fixture; mappings never unmap, so no other user may share
     // this hint.

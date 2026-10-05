@@ -16,6 +16,51 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e17d4
+    ghidra: FUN_081e17d4
+    name: dma_array_pair_release
+    size: 72
+    sig: "void dma_array_pair_release(uint32_t *state)"
+    module: app/dma_array_pair_release
+    status: ported
+    renames:
+      param_1/r0/r4: state
+      state+0x3c: first_array_owner
+      state+0x40: second_array_owner
+      state+0x2c: first_array_view
+      state+0x34: first_array_count
+      state+0x30: second_array_view
+      state+0x38: second_array_count
+      FUN_0839e164: dma_aligned_array_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes 18 A32 words, 72 bytes at
+      0x081e17d4..0x081e181c, ending with pop at 0x081e1818 before the
+      next independent push. Ghidra's 64-byte extent and noreturn delete
+      annotation omit reachable stores and the return. Whole-image branch
+      decoding finds two inbound plain BLs at 0x081e1a78 and 0x081e1c14,
+      zero predicated inbound BLs. Four outbound plain BLs at 0x081e17ec,
+      0x081e17f0, 0x081e1804 and 0x081e1808 invoke the existing array
+      destructor and tag-2 operator_delete ports; no predicated outbound BLs.
+      Destroy and delete each nonzero DMA-aligned-array owner in order,
+      clearing its slot after deletion and loading the second owner after
+      the first release. Clear first view and count unconditionally while
+      retaining second view and count. Callers create the two byte arrays
+      and use this helper for shutdown and failed initialization. Containing
+      class identity remains unproven; no invented class name or callee seam.
+      Pointer fields stay u32 on hosts. No r0 return contract is invented.
+      Host tests exercise all four owner-presence combinations with real
+      array destruction, tag-3-before-tag-2 frees, preserved unrelated words
+      and repeated release. Host suite and ARM release build pass.
+      Standalone API smoke verifies absent-owner clears and retained second
+      view/count using a test-configured host library because the existing
+      non-test host configuration has six unrelated missing helper errors.
+      match.py exits 1; its default extent is the incorrect Ghidra 64 bytes,
+      so the additional --size 72 report is authoritative. LLVM emits 21
+      versus 18 instructions, adds a frame, rematerializes zero and swaps
+      the final independent clears. Both guards, four calls, slot reload,
+      owner clears and field offsets agree. No device execution.
+
   - address: 0x081e1ea0
     ghidra: FUN_081e1ea0
     name: path_buffer_load_construct
