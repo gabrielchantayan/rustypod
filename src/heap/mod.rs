@@ -15,6 +15,7 @@ pub mod client_commit;
 pub mod client_construct;
 pub mod client_byte_limit;
 pub mod client_available_blocks;
+pub mod record_pool_available_bytes;
 pub mod client_erase;
 pub mod client_return_region;
 pub mod client_reserve;

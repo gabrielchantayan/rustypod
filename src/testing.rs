@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const SHARED_RECORD_LIST_OWNER_CONSTRUCT: usize = 0x417f_0000;
+    pub const RECORD_POOL_AVAILABLE_BYTES: usize = 0x429d_0000;
     pub const COLLECTION_FIND_FIRST_HANDLER: usize = 0x429c_0000;
     pub const DESCRIPTOR_PROVIDER_CONSTRUCT: usize = 0x429b_0000;
     pub const PROVIDER_ENTRY_COUNT: usize = 0x429a_0000;

@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a8514
+    ghidra: FUN_081a8514
+    name: record_pool_available_bytes
+    size: 80
+    sig: "u32 record_pool_available_bytes(u32 *pool)"
+    module: heap/record_pool_available_bytes
+    status: ported
+    vars:
+      param_1: pool
+      iVar2: available_blocks
+      iVar3: record_bytes
+      iVar4: block_size
+    notes: >-
+      Raw ARM verifies extent 0x081a8514..0x081a8564, two inbound
+      plain BL sites (0x081f0fd0 and 0x081f0ffc), no predicated BL,
+      and five outbound plain BL instructions. Locks pool+0x28,
+      dereferences the optional handle at pool+0, queries client available
+      blocks, sums sentinel-list record bodies, and returns the low word
+      of (region_block_size-16)*blocks+record_bytes after unlocking.
+      Deliberately inlines the verified 0x081a84dc list sum; reuses the
+      client, record-size and block-size ports and REGION_MUTEX_OPS.
+      NULL client is not made safe. Host suite passes 14257 tests;
+      tests cover empty and linked lists, flagged headers, negative counts,
+      block sizes at and below 16, and arithmetic overflow. ARM release
+      build passes. Executable smoke observes empty=1488 and linked=1521.
+      match.py exits 1 with 20 original versus 35 Rust instructions:
+      expected inline traversal, indirect mutex calls, frame and relocations.
   - address: 0x081a88b4
     ghidra: FUN_081a88b4
     name: shared_record_list_owner_count
