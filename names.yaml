@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0819c30c
+    ghidra: FUN_0819c30c
+    name: ui_owner_clear_operation
+    size: 40
+    sig: "void ui_owner_clear_operation(UiOperationOwner *owner)"
+    module: ui/owner_operation_clear
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "owner+0x30": operation
+      FUN_0816f050: ui_operation_destroy
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes ten A32 words at 0x0819c30c..0x0819c334,
+      ending with pop at 0x0819c330 before the next independent push.
+      Two outbound plain BLs at 0x0819c320 and 0x0819c324, zero predicated
+      BLs. Whole-image aligned A32 decoding verifies two inbound plain
+      BLs at 0x0819c5f4 and 0x081b5780, zero predicated BL callers;
+      Ghidra's inlined 0x081b676c reference is not another direct call.
+      Destroy the nullable owned UI operation at +0x30, pass the returned
+      pointer directly to tag-2 operator_delete, then clear the owner slot
+      unconditionally. Both callees already ported and called directly on
+      target. No target behavior deviations; host pointers widen only the
+      final field, with replaceable host call boundaries. Host edge tests
+      cover NULL ownership, distinct and NULL destructor returns, ordering,
+      callee slot mutation, prefix preservation, and repeated cleanup.
+      ARM match review preserves the +48 load/store, NULL branch, two BLs,
+      and final zero store; LLVM adds frame-pointer setup and saves.
   - address: 0x081a4028
     ghidra: FUN_081a4028
     name: voice_memo_is_paused
