@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b4e2c
+    ghidra: FUN_081b4e2c
+    name: range_dispatch_scan
+    size: 176
+    sig: "i32 range_dispatch_scan(u32 *context, const u32 *start, const u32 *end, u32 step)"
+    module: app/range_dispatch_scan
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r1: start
+      param_3/r7: end
+      param_4/r6: step
+      local_18: position
+      iVar2/r5: displacement
+      auStack_58: state
+      FUN_081f7278: range_state_construct
+      FUN_08155ef0: displacement_present_stock
+    notes: >-
+      Raw A32 extent is 0x081b4e2c..0x081b4edc, 176 bytes, ending
+      in pop before the next function's independent push. Two outbound
+      plain BLs at 0x081b4e58 and 0x081b4ea4, no predicated BLs, and one
+      indirect BLX at 0x081b4e7c. Whole-image decoding finds two inbound
+      plain BLs at 0x08155fac and 0x08155fec, no predicated inbound BLs.
+      Walks a live exclusive endpoint with wrapping forward or reverse
+      step. Constructs a 64-byte range state at resolution 1, dispatches
+      receiver vtable slot 5 with context and context+0x88 argument, and
+      accumulates step only for nonzero dispatch results. At the marker
+      in context+0x48, checks displacement membership via stock 0x08155ef0
+      on the collection at context+0x40; that routine compares each indexed
+      collection value against the requested displacement. Returns normalized
+      1 on membership, otherwise 0 at endpoint. Uses existing range constructor
+      and preserves u32 target pointer fields and callback-sensitive reloads.
+      Host membership boundary deliberately panics rather than fabricating
+      a result. Tests cover empty range, failed dispatch counting, marker
+      gating, noncanonical nonzero results, reverse/wrapping traversal, and
+      callback mutation of position and endpoint. Host suite: 14236 passed.
+      ARM release build passed. match.py reports 44 stock versus 58 Rust
+      instructions: equivalent loop and gates, constructor BL relocation,
+      slot-5 BLX, and retained membership call compiled as literal-address
+      BLX; extra register saves and early empty-range return are deliberate
+      compiler differences. No identity beyond observed traversal is inferred.
   - address: 0x081afd80
     ghidra: FUN_081afd80
     name: lazy_singleton_0x44_089ca8cc_get
