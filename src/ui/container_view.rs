@@ -494,6 +494,62 @@ pub unsafe extern "C" fn container_view_construct_state_1(
     view
 }
 
+/// Container view with three eleven-byte channels; the concrete widget role
+/// is unrecovered. Word and byte fields retain target offsets on hosts.
+#[repr(C)]
+pub struct ContainerViewChannels {
+    pub base: ContainerViewState1,
+    pub channel_key: u32,
+    pub channels: [[u8; 11]; 3],
+    pub byte_11d: u8,
+    pub state: u8,
+    pub tail: [u8; 25],
+}
+
+const _: [u8; 0x138] = [0; core::mem::size_of::<ContainerViewChannels>()];
+const _: [u8; 0xf8] = [0; core::mem::offset_of!(ContainerViewChannels, channel_key)];
+const _: [u8; 0xfc] = [0; core::mem::offset_of!(ContainerViewChannels, channels)];
+const _: [u8; 0x11e] = [0; core::mem::offset_of!(ContainerViewChannels, state)];
+
+/// Original `FUN_081e9be0` @ 0x081e9be0: 108 bytes, including the
+/// vtable literal at 0x081e9c48; next function begins at 0x081e9c4c.
+/// Whole-image raw A32 decoding finds two plain inbound BLs (0x081ddd0c,
+/// 0x081e97cc), zero predicated inbound BLs, and four unconditional outgoing
+/// BLs. Chains the five-argument state-one constructor, installs 0x0898fba0,
+/// clears +0x11e, stores the sixth argument at +0xf8, and clears exactly
+/// eleven bytes each at +0xfc, +0x107, and +0x112.
+///
+/// Deliberate deviations: aligned zero-fill uses the existing Rust body
+/// through a volatile function pointer; unaligned fills use the ported IRAM
+/// veneer. Retains the input pointer instead of ARM register shuffling.
+///
+/// # Safety
+/// `view` must be writable for 0x138 bytes and all five base arguments must
+/// satisfy [`container_view_construct_state_1`]'s requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_channels(
+    view: *mut ContainerViewChannels,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ContainerViewState1Spec,
+    channel_key: u32,
+) -> *mut ContainerViewChannels {
+    container_view_construct_state_1(view.cast(), resources, controller, parent, spec);
+    core::ptr::addr_of_mut!((*view).base.base.vtable).write_volatile(0x0898_fba0);
+    core::ptr::addr_of_mut!((*view).state).write_volatile(0);
+    core::ptr::addr_of_mut!((*view).channel_key).write_volatile(channel_key);
+    let channels = core::ptr::addr_of_mut!((*view).channels).cast::<u8>();
+    let zero_aligned = core::ptr::read_volatile(
+        &(crate::libc::memzero::memzero_aligned as unsafe extern "C" fn(*mut u8, usize) -> *mut u8),
+    );
+    zero_aligned(channels, 11);
+    crate::libc::iram_veneers::iram_memzero_veneer(channels.add(11), 11);
+    crate::libc::iram_veneers::iram_memzero_veneer(channels.add(22), 11);
+    view
+}
+
 
 /// container_view_children — original: `FUN_081586e0` @ 0x081586e0
 /// (8 bytes exactly: `add r0, r0, #0xa8; bx lr`, no literal pool;
@@ -1048,6 +1104,41 @@ mod tests {
         assert_eq!(view.word_f4, 0);
         assert_eq!(*trace(), std::vec!["linkage_base", "initialize", "container_initialize", "refresh_clip_rect"]);
     }
+
+    #[test]
+    fn channels_constructor_clears_only_channels_and_state() {
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        for key in [0, u32::MAX] {
+            let mut view: Box<ContainerViewChannels> =
+                Box::new(unsafe { core::mem::transmute([0xcdu8; size_of::<ContainerViewChannels>()]) });
+            let spec = ContainerViewState1Spec {
+                base: spec(0xfeed_beef, 0),
+                word_5c: 0,
+                word_5e: u16::MAX,
+            };
+            let this = &mut *view as *mut ContainerViewChannels;
+            let returned = unsafe {
+                container_view_construct_channels(
+                    this, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec, key,
+                )
+            };
+            assert_eq!(returned, this);
+            assert_eq!(view.base.base.vtable, 0x0898_fba0);
+            assert_eq!(view.base.base.config, 0xfeed_beef);
+            assert_eq!(view.base.word_5c, 0);
+            assert_eq!(view.base.word_5e, u16::MAX);
+            assert_eq!(view.base.state, 1);
+            assert_eq!(view.base.padding, [0xcd; 3]);
+            assert_eq!(view.channel_key, key);
+            assert_eq!(view.channels, [[0; 11]; 3]);
+            assert_eq!(view.byte_11d, 0xcd);
+            assert_eq!(view.state, 0);
+            assert_eq!(view.tail, [0xcd; 25]);
+        }
+    }
+
 
     /// The original is one unconditional `add` with no guard, and
     /// every one of the 22 call sites is an unconditional `bl`: a
