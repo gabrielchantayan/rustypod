@@ -16,6 +16,58 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e1ea0
+    ghidra: FUN_081e1ea0
+    name: path_buffer_load_construct
+    size: 92
+    sig: "PathBufferLoadState *path_buffer_load_construct(PathBufferLoadState *state, const StringObject *path, u32 path_hint)"
+    module: app/path_entry_load_to_heap
+    status: identified
+    renames:
+      param_1: state
+      param_2: path
+      param_3: path_hint
+      iVar1: constructed_state_or_buffer
+      uVar2: file_length
+      FUN_08278e8c: silver_controller_transition_addon_construct
+      FUN_0829e35c: ft_platform_file_length_or_zero
+      FUN_081a81c4: aligned_buffer_init
+      FUN_081e1e24: buffered_load_complete (unported)
+    notes: >-
+      Honest deferral: raw osos.dec establishes the true extent
+      0x081e1ea0..0x081e1efc, 92 code bytes without literals. The pop at
+      0x081e1ef8 precedes the independent push at 0x081e1efc.
+      Whole-image aligned ARM BL decoding finds two incoming plain BLs
+      at 0x08072b40 and 0x08097b88, zero predicated incoming BLs.
+      Four outgoing plain BLs at 0x081e1ec4 (0x08278e8c),
+      0x081e1ecc (0x0829e35c), 0x081e1ed8 (0x081a81c4),
+      and 0x081e1ef0 (0x081e1e24), zero predicated outgoing BLs.
+      Constructs the transition addon with (state, path, 1, path_hint,
+      0x400, 1, 0); queries file length; constructs the aligned buffer
+      at returned_state+0x54; reconstructs state from the buffer
+      constructor's return; clears completed length at +0x5c and
+      status at +0x60; invokes buffered completion and returns state.
+      Ghidra's CONCAT44 return is not a u64 ABI: the final pop restores
+      incoming r1, while only r0 is the constructed-state result.
+      Blocking register evidence: after the constructor BL, mov r4,r0
+      at 0x081e1ec8 is the only instruction before the length-query BL.
+      Consequently the query receives the constructor's residual r3.
+      The query at 0x0829e35c explicitly pushes r3 as its output seed,
+      and returns that seed on status zero if its callee leaves the
+      output untouched. Raw 0x082a5450..0x082a5470 establishes such
+      a path when state+0x18 is -1 and state+0x1c is zero.
+      The existing Rust constructor returns only a pointer and exposes
+      no residual-r3 contract. Its raw final call is registration at
+      0x08278f38 to 0x08278250, followed by mov r0,r4 and a pop that
+      does not restore r3. Registration includes virtual dispatch and
+      counted-mutex unlock, so no constant seed is established here.
+      Faithful implementation requires resolving that residual-register
+      contract or proving the successful no-output path unreachable
+      after registration; substituting zero or path_hint would guess.
+      The unported completion helper also saves incoming r3 at
+      0x081e1e24 and passes its stack word as the transfer output at
+      0x081e1e64. No Rust port, new seam, or hook is installed.
+
   - address: 0x081e2d98
     ghidra: FUN_081e2d98
     name: iap_command_1_request
