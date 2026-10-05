@@ -219609,3 +219609,39 @@ functions:
       slot +0xb8 BLX structure; LLVM adds a frame-pointer prologue and
       replaces the immediate tail B with a literal-loaded BX to 0x081a38c0.
       No device execution was performed.
+
+  - address: 0x081a4c28
+    ghidra: FUN_081a4c28
+    name: class_8780_priority_media_query
+    size: 40
+    sig: "u32 class_8780_priority_media_query(const void *object)"
+    module: app/class_8780_priority_media_query
+    status: ported
+    renames:
+      param_1/r0: object
+      FUN_081a3ed4: class_8780_dispatch_state
+      FUN_08259594: media_player_interface_get
+      piVar2: interface
+      "vtable+0x11c": unresolved_media_state_query
+    notes: >-
+      Raw ARM words establish the 40-byte extent 0x081a4c28..0x081a4c50,
+      ending in bx r1 before the next independent push prologue.
+      A complete aligned ARM BL-word scan finds two incoming plain calls
+      at 0x081a4eb0 and 0x081a4f00, with no predicated calls. Inside the
+      function are two plain BLs, no predicated BLs, and one virtual BX
+      tail dispatch. Return zero unless class_8780_dispatch_state is 3;
+      otherwise obtain media_player_interface_get and return its vtable
+      slot +0x11c result unchanged, without NULL guards. Both callers
+      distinguish zero from nonzero to choose their next dispatch.
+      Reuse both existing mapped callees and the existing slot +0x11c
+      repr(C) interface layout; no dynamic callee identity is invented.
+      Deliberate deviations: recover the object argument and u32 result
+      omitted by Ghidra, and use native-width host vtable pointers. The
+      existing singleton getter's not-hook-ready caveat still applies.
+      Host tests cover inactive states, priority precedence, and full-width
+      zero/nonzero slot results. All 14275 host tests and the ARM release
+      build passed. A standalone exported-function smoke returned zero
+      when inactive and 0xdeadbeef for priority 255. match.py exits 1:
+      LLVM adds mov fp,sp and uses fp instead of r4, but retains both BLs,
+      cmp/conditional zero return, both slot loads, and bx r1 tail dispatch.
+      No device execution was performed.
