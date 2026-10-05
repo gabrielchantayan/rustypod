@@ -218015,3 +218015,56 @@ functions:
       25 versus 17 instructions, operation-table BLX calls, preserved
       allocation/construct/process ordering, and conditional destruction.
       No device execution performed.
+  - address: 0x081b979c
+    ghidra: FUN_081b979c
+    name: collection_listener_notify_step
+    size: 220
+    sig: "u32 collection_listener_notify_step(u32 *context, u32 event, u32 single_step)"
+    module: app/collection_listener_notify_step
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2/r8: event
+      param_3/r9: single_step
+      param_4: absent (irrelevant incoming r3 saved as scratch)
+      piVar5/r6: collection
+      uVar6/r7: initial_count
+      piVar4/r5: listener
+      local_20/sp: entry
+      DAT_081b9874: collection_global (0x089cc8dc)
+      context+0x11c: next_index
+      context+0x120: accumulated_output
+      FUN_082753bc: registered_listener_notify
+      FUN_08036f14: __rt_udiv
+      FUN_081fa3b0: stage_progress_tracker_get
+      FUN_081fa378: stage_progress_set
+    notes: >-
+      Raw aligned A32 decoding establishes 216 code bytes plus the four-byte
+      literal at 0x081b9874, ending at the next real push at 0x081b9878.
+      Independently decoded two inbound unconditional BLs at 0x081b9924
+      and 0x081b99e0, zero predicated inbound BLs; four outgoing plain BLs,
+      zero predicated BLs and three indirect BLXs. Snapshot global collection
+      count at +4. While unsigned context index is below count, slot +0x3c
+      writes an entry pointer; its +0x98 listener receives prepare slot
+      +0x2c followed by notify slot +0x1c(event, context+0x120). Unless event
+      is 3, report wrapping (index+1)*500/count to stage 6. Increment the
+      callback-visible index; single-step returns zero even after the last
+      item. At exhaustion add registered_listener_notify(event) and return
+      one. Repeated exhausted calls repeat that final notification. No
+      invented concrete collection or listener class identity. Target uses
+      original global/vtable addresses and existing Rust direct callees;
+      host typed operations follow registered_listener_notify conventions.
+      Scratch entry initializes to NULL instead of unused incoming r3;
+      slot +0x3c must write it. Existing callees retain documented singleton
+      and dispatch deviations. Host tests cover unsigned exhaustion, empty
+      count, wrapping sums, count snapshot, event-3 suppression and delayed
+      single-step completion. Host suite and ARM release build pass.
+      Standalone actual-module smoke reports progress 250 and 500, then
+      returns (0,1,1), (0,2,3), (1,2,13) as result/index/total. Non-test
+      whole-crate host rlib compilation encounters six existing missing
+      helpers outside this port; standalone smoke uses actual division
+      source with a panic-only unexercised divide-zero signal boundary.
+      match.py exits 1 with reviewed structural diff: 72 Rust instructions
+      versus 54 original; frame setup, scratch zeroing and extra register
+      saves differ. The global literal, unsigned loop, three vtable offsets,
+      four direct calls, event guard and both completion paths are retained.
