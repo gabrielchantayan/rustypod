@@ -912,4 +912,5 @@ pub mod container_status_flags;
 pub mod queued_owner_destroy;
 pub mod queued_owner_construct;
 pub mod vtable_flag_state_payload_construct;
+pub mod alternate_error_object_construct;
 pub mod locked_container_single_key_matches;
