@@ -982,3 +982,4 @@ pub mod class_8900_state_2c_set_and_read;
 pub mod timed_label_array_construct;
 pub mod timed_label_update_elapsed;
 pub mod timed_label_finish_lap;
+pub mod timed_label_append_lap;

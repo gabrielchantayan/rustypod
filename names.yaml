@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d0f74
+    ghidra: FUN_081d0f74
+    name: timed_label_append_lap
+    size: 80
+    sig: "u32 timed_label_append_lap(u32 *owner, const u32 *value)"
+    module: app/timed_label_append_lap
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: value
+      local_10: cell
+      owner+0x30: lap_collection
+      vtable+0x1c: append_pointer_by_reference
+      FUN_082aadd4: operator_new
+      FUN_083d2058: collection_remove_index_firmware
+    notes: >-
+      Raw words prove the exact 80-byte extent [0x081d0f74,0x081d0fc4);
+      the next independent function begins with mov r1,#0 and clears
+      owner fields. Whole-image A32 decoding finds two inbound plain BLs
+      at 0x081d100c and 0x081d10ec, zero predicated inbound BLs. Outbound
+      calls are one plain BL to operator_new, one predicated BLGT to
+      0x083d2058, and one virtual BLX through collection slot +0x1c.
+      Allocate four bytes using the existing tag-2 allocator, then read
+      and copy the supplied word. Submit the cell pointer by reference
+      to the embedded collection at owner+0x30; if the signed return
+      exceeds 198, remove index zero. Always return one. r2/r3 are not
+      arguments, despite the decompiler signature. No target behavioral
+      deviations; the unported removal routine remains a fixed-address
+      firmware call. Host fixtures use native-width vtable slots while
+      preserving the collection byte offset. Tests cover signed extremes,
+      the 198/199 boundary, input mutation during allocation, pointer
+      replacement by append, and untouched owner words. Host tests and ARM
+      release build pass. Isolated API smoke copies 0xdeadbeef and returns
+      one with append result 198. match.py exits 1: LLVM emits 25 versus
+      20 instructions, adds a frame, stores the cell pointer earlier,
+      uses signed BLT against 199 rather than BLGT against 198, and calls
+      removal by literal-loaded BLX. Allocation, virtual slot, copy ordering,
+      trim arguments and constant return agree. The existing finish-lap
+      caller now calls this Rust port directly outside its host test seam.
   - address: 0x081e3ecc
     ghidra: FUN_081e3ecc
     name: record_range_intersection
@@ -57,7 +96,7 @@ functions:
       owner+0x10: last_lap_ms
       owner+0x20: countdown
       FUN_081d1324: timed_label_update_elapsed
-      FUN_081d0f74: append_lap_firmware_helper
+      FUN_081d0f74: timed_label_append_lap
     notes: >-
       Raw A32 extent [0x081d0ff8,0x081d102c) is 52 executable bytes,
       ending before the next independent push. Whole-image word decoding
@@ -66,11 +105,10 @@ functions:
       0x081d100c, no predicated outbound BLs. Update elapsed time, append
       the word at +0x0c, reload it after the callback into +0x10, clear
       +0x0c/+0x20 and always return one. No target behavioral deviations.
-      Reuse the elapsed-time port. No naming entry or Rust implementation
-      exists for helper 0x081d0f74: its raw code allocates four bytes,
-      copies the supplied word, invokes embedded collection virtual slot
-      +0x1c and trims via 0x083d2058 when the signed result exceeds 198.
-      Keep that verified helper as a firmware seam, with host injection.
+      Reuse the elapsed-time and lap-append Rust ports. The append port
+      allocates four bytes, copies the supplied word, invokes embedded
+      collection virtual slot +0x1c and removes index zero via 0x083d2058
+      when the signed result exceeds 198. Host tests inject append only.
       All 14134 host tests pass; ARM release build passes. Cases cover
       elapsed-update ordering, disabled state, wrap/clamp, reentrant lap
       mutation, ignored append result and untouched fields. Isolated API

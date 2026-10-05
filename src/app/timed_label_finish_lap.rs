@@ -8,31 +8,18 @@
 //! clear +0x0c and +0x20, and return 1 regardless of the append result.
 //!
 //! No target behavioral deviations. Reuse the existing elapsed-time port.
-//! The unported helper at 0x081d0f74 allocates a four-byte value and submits
-//! it through collection virtual slot +0x1c; retain it as a firmware seam.
-//! Host builds require an injected append implementation. Word indices keep
-//! target offsets independent of host pointer width.
-//! Codegen review: LLVM adds a frame and uses BLX through the append seam;
-//! the direct elapsed call, post-callback reload and ordered stores remain.
+//! Append uses the Rust timed-label lap port. Host tests inject an append
+//! implementation to exercise reentrant mutation. Word indices keep target
+//! offsets independent of host pointer width.
 
 use crate::app::timed_label_update_elapsed::timed_label_update_elapsed;
 
+#[cfg(test)]
 type AppendLap = unsafe extern "C" fn(*mut u32, *const u32) -> u32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_append_lap(owner: *mut u32, value: *const u32) -> u32 {
-    core::mem::transmute::<usize, AppendLap>(0x081d_0f74)(owner, value)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn unavailable_append_lap(_: *mut u32, _: *const u32) -> u32 {
-    panic!("lap append requires firmware collection or a host seam");
-}
-
-#[cfg(target_os = "none")]
-pub static mut TIMED_LABEL_APPEND_LAP: AppendLap = firmware_append_lap;
-#[cfg(not(target_os = "none"))]
-pub static mut TIMED_LABEL_APPEND_LAP: AppendLap = unavailable_append_lap;
+#[cfg(test)]
+static mut TIMED_LABEL_APPEND_LAP: AppendLap =
+    crate::app::timed_label_append_lap::timed_label_append_lap;
 
 /// # Safety
 /// `owner` must name a live, word-aligned timed-label owner (72 bytes on
@@ -42,8 +29,13 @@ pub static mut TIMED_LABEL_APPEND_LAP: AppendLap = unavailable_append_lap;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn timed_label_finish_lap(owner: *mut u32) -> u32 {
     timed_label_update_elapsed(owner);
-    let append = core::ptr::read_volatile(core::ptr::addr_of!(TIMED_LABEL_APPEND_LAP));
-    append(owner, owner.add(3));
+    #[cfg(test)]
+    {
+        let append = core::ptr::read_volatile(core::ptr::addr_of!(TIMED_LABEL_APPEND_LAP));
+        append(owner, owner.add(3));
+    }
+    #[cfg(not(test))]
+    crate::app::timed_label_append_lap::timed_label_append_lap(owner, owner.add(3));
     owner.add(4).write_volatile(owner.add(3).read_volatile());
     owner.add(3).write_volatile(0);
     owner.add(8).write_volatile(0);
