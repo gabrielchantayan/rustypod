@@ -217301,3 +217301,40 @@ functions:
       LLVM retains this in r4 and reorders the independent final clears;
       frame-pointer setup replaces the original pointer-recovery arithmetic.
       No device execution performed.
+
+  - address: 0x081c9594
+    ghidra: FUN_081c9594
+    name: container_view_construct_pair
+    size: 60
+    sig: "ContainerViewPair *container_view_construct_pair(ContainerViewPair *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      puVar1: view
+      iVar2: pair_base
+      FUN_08158778: container_view_construct
+      FUN_0810ebbc: pair_header_base_construct
+      DAT_081c95cc: pair_view_vtable_address
+    notes: >-
+      Structural class name; concrete widget identity is unrecovered. Raw A32
+      extent is 60 bytes, including the literal 0x0898ce94 at 0x081c95cc;
+      the next function begins at 0x081c95d0. Ghidra omits the literal and
+      incorrectly reports a void signature. Whole-image branch decoding finds
+      two plain inbound BLs at 0x081c94c0 and 0x081dff3c, zero predicated
+      inbound BLs and zero inbound Bs. Two plain outbound BLs, zero predicated,
+      call existing container_view_construct and pair_header_base_construct.
+      Forwards five ABI arguments, installs the derived vtable, clears state
+      at +0xe8, constructs the pair base at +0xec, clears +0x1a4 and returns
+      this. Both callers allocate 0x1a8 bytes. Deliberate deviation: retain this
+      rather than subtract 0xec from the pair constructor result; existing
+      constructors return their inputs. Fixed-width layout preserves offsets
+      on hosts. No new seams; existing dependencies and limitations unchanged.
+      Host regression exercises nonzero fills, pair padding and allocation
+      canaries. All 14175 host tests passed; ARM release build succeeded.
+      Standalone host public-entry smoke, using existing dependency seams,
+      verified return identity, both vtables, config, state, trailing zero
+      and the pair's byte-only clear. match.py exits 1 with the expected
+      structural diff: 14 original code instructions versus 19 Rust lines
+      including its literal, two BLs, matching offsets and vtable. LLVM keeps
+      this in r4 and adds frame-pointer setup instead of recovering this
+      from the pair result. No device execution performed.
