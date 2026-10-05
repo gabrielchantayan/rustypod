@@ -1024,3 +1024,4 @@ pub mod track_extras_cache_reset;
 pub mod track_list_clear;
 pub mod checked_handle_construct;
 pub mod showcase_pending_queues_refresh;
+pub mod range_dispatch_scan;
