@@ -2304,6 +2304,44 @@ pub unsafe extern "C" fn plist_node_destroy(node: *mut PlistNode) -> *mut PlistN
     node
 }
 
+/// A parsed plist document: root node followed by its embedded handle state.
+#[repr(C)]
+pub struct PlistDocument {
+    pub root: PlistNode,
+    pub handle: u32,
+    pub active: u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x2c] = [0; core::mem::offset_of!(PlistDocument, active)];
+
+/// plist_document_destroy — original: `FUN_081c832c` @ 0x081c832c (12 bytes).
+///
+/// Raw words are e3a02000, e5c0202c, ea025115; the next real function
+/// starts at 0x081c8338 with push {r4,r5,lr}. Whole-image A32 decoding
+/// finds two incoming plain BLs (0x080ab284, 0x080ab4c0), zero predicated
+/// BLs, and no outgoing BLs: the final B tails to plist_node_destroy
+/// @ 0x0825c790. Clear the embedded handle's active byte before destroying
+/// the root, preserving and returning this. Ghidra incorrectly inlines
+/// the tail callee in its C output.
+///
+/// Deliberate deviation: repr(C) native pointers widen the root on hosts;
+/// field access preserves the target +0x2c byte without host offset guesses.
+///
+/// # Safety
+/// `document` must be writable and its root valid for plist_node_destroy.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn plist_document_destroy(
+    document: *mut PlistDocument,
+) -> *mut PlistDocument {
+    unsafe {
+        (*document).active = 0;
+        plist_node_destroy(core::ptr::addr_of_mut!((*document).root));
+    }
+    document
+}
+
 /// plist_node_assign — retailOS `FUN_0825c824` @ 0x0825c824.
 ///
 /// True extent 0x0825c824..0x0825c870: 76 bytes, ending at the return
@@ -6052,6 +6090,49 @@ mod tests {
             companion: core::ptr::null_mut(),
             kind: 0,
         }
+    }
+
+    #[test]
+    fn plist_document_destroy_clears_only_active_state_and_preserves_this() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        for active in [0, 1, 0xff] {
+            let mut document = PlistDocument {
+                root: empty_plist_node(),
+                handle: 0xdeadbeef,
+                active,
+            };
+            document.root.kind = 7;
+            let result = unsafe { plist_document_destroy(&mut document) };
+            assert!(core::ptr::eq(result, &mut document));
+            assert_eq!(document.active, 0);
+            assert_eq!(document.handle, 0xdeadbeef);
+            assert_eq!(document.root.kind, 7);
+        }
+        assert_eq!(crate::heap::veneers::tests::free_log().0, 0);
+    }
+
+    #[test]
+    fn plist_document_destroy_releases_owned_companion_and_attributes() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let empty = crate::cxx::string::empty_rep_data();
+        let mut attributes = [CxxStringPair { first: empty, second: empty }];
+        let mut companion = empty_plist_node();
+        let mut document = PlistDocument {
+            root: empty_plist_node(),
+            handle: 123,
+            active: 1,
+        };
+        document.root.companion = &mut companion;
+        document.root.attributes.begin = attributes.as_mut_ptr();
+        document.root.attributes.end = unsafe { attributes.as_mut_ptr().add(1) };
+        document.root.attributes.capacity = document.root.attributes.end;
+        unsafe { plist_document_destroy(&mut document) };
+        assert_eq!(document.active, 0);
+        assert_eq!(document.handle, 123);
+        assert_eq!(
+            crate::heap::veneers::tests::free_log(),
+            (2, attributes.as_mut_ptr().cast(), 2),
+        );
     }
 
     #[test]
