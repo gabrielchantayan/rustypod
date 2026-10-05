@@ -215614,3 +215614,43 @@ functions:
       123 instructions versus stock 21: LLVM inlines conversions, scaling
       and add special paths, retains __fdiv and add/subtract magnitude
       calls, and preserves +12/+16/+36/+40 stores. No algorithm deviation.
+
+  - address: 0x081d50d4
+    ghidra: FUN_081d50d4
+    name: short_voicememo_probe
+    size: 176
+    sig: "void short_voicememo_probe(void)"
+    module: app/short_voicememo_probe
+    status: ported
+    renames:
+      auStack_44: marker_path
+      local_18/local_14/local_10/local_c: encoded_suffix_words
+      DAT_081d5180: device_flags (0x089caf44)
+      FUN_08030ff4: strcpy
+      FUN_080311b4: strcat
+      FUN_080f4aa8: path_exists
+      uVar1: query_status_low_byte
+    notes: >-
+      Raw osos.dec establishes the next real function at 0x081d5184:
+      132 code bytes through the return at 0x081d5154, followed by
+      44 bytes of suffix words, prefix text, and global pointer.
+      Three outbound unconditional BLs, zero predicated BLs. Two inbound
+      unconditional BLs at 0x081d3024 and 0x081d3048, zero predicated BLs.
+      Right-shifting ded0e6be/ecbee8e4/cac6d2de/dedacada by one produces
+      _short_voicememo. Query iPod_Control\Device\_short_voicememo with
+      flags zero and overwrite byte 0x089caf73 with the low byte of the
+      result, not a normalized boolean. Reuses the existing path_exists
+      port without a new callee seam. Deliberate deviation: fold fixed
+      suffix decoding and strcpy/strcat into a static NUL-terminated
+      literal, eliminating the temporary stack buffers and copy calls.
+      Host tests independently decode the firmware words and cover flag
+      clearing, high-bit truncation, non-boolean status, and adjacent bytes.
+      Full host suite passes (14116 tests); ARM release build passes.
+      match.py exits 1 with the expected 33-to-10 instruction diff:
+      literal load, zero flags, path_exists BL, global-address load, STRB.
+      Isolated smoke runs the actual entry with a host filesystem boundary
+      and mapped global storage through absent/present/absent transitions;
+      only the selected byte changes. Device filesystem execution is not
+      exercised. A normal non-test host library build is blocked by six
+      existing E0425 errors in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule; host tests and the ARM build are unaffected.
