@@ -12642,6 +12642,35 @@ functions:
       new_state even if their low bytes match. The virtual callee has no
       recovered semantic identity; target code retains target-width dispatch
       and host tests use a narrow recording seam.
+  - address: 0x081ccaf4
+    ghidra: FUN_081ccaf4
+    name: slideshow_interval_set
+    size: 132
+    sig: "void slideshow_interval_set(void *state, i32 interval_ms)"
+    module: app/slideshow_interval_set
+    status: ported
+    renames:
+      param_1/r0: slideshow_state
+      param_2/r1: interval_ms
+      "state+0x8cc": interval_ms
+      "state+0x8dc": timer
+    notes: >-
+      Raw A32 bytes establish 0x081ccaf4..0x081ccb77, followed by the
+      independent push {r4,lr} at 0x081ccb78. Binary-wide decoding finds
+      two inbound plain BL calls at 0x0810cb44 and 0x0810d2a8 and no
+      predicated BL calls. The body has six plain BL instructions and no
+      predicated BL instructions, ending in a tail branch to timer_restart
+      at 0x0812bf4c; Ghidra incorrectly incorporates that callee's body.
+      Stores the signed interval at +0x8cc, lazily allocates a 44-byte
+      timer at +0x8dc and constructs it with the state config word and zero
+      init/queue arguments, or stops the existing timer. Allocation failure
+      returns before notification. Calls slideshow_delay_set with signed
+      truncating division of wrapping (interval_ms+500) by 1000. Positive
+      intervals reprogram the timer to 1000 ms and restart it, reloading
+      the timer word before each call. Zero/negative values leave it stopped.
+      Reuses the existing allocator, timer, division and notification ports;
+      no new callee seam. Deliberate deviation: Rust expresses the tail
+      branch as a call, and LLVM may inline the existing timer ports.
   - address: 0x081cd2d8
     ghidra: FUN_081cd2d8
     name: slideshow_delay_set

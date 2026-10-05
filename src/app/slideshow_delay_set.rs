@@ -64,17 +64,19 @@ slideshow_delay_set:
 );
 
 #[cfg(test)]
+extern crate std;
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
     use core::ptr::{addr_of, addr_of_mut};
-    use std::sync::Mutex;
 
     const STATE_BYTES: usize = DELAY_OFFSET + 4;
     #[repr(align(4))]
     struct State([u8; STATE_BYTES]);
-
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut DISPATCH_ARGS: (*mut u8, u32, u32) = (core::ptr::null_mut(), 0, 0);
 
     unsafe extern "C" fn record_dispatch(state: *mut u8, category: u32, name: u32) {
