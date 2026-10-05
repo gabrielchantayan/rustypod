@@ -215252,3 +215252,37 @@ functions:
       deltas, truncating shifts, and preservation of neighboring words.
       Actual-source standalone smoke with simulated device boundaries observes
       zero-only invalidation, UINT_MAX/zero wrap, Q16 endpoints and a 75-ms arm.
+
+  - address: 0x081d64c4
+    ghidra: FUN_081d64c4
+    name: buffered_write_flush
+    size: 68
+    sig: "u32 buffered_write_flush(BufferedWriter *writer)"
+    module: cxx/buffered_write_flush
+    status: ported
+    renames:
+      param_1/r4: writer
+      local_18: written
+      iVar1/r0_after_blx: status
+      "writer+0x08": destination
+      "writer+0x0c": buffer
+      "writer+0x10": pending_length
+      "destination.vtable+0x50": write_method
+    notes: >-
+      Raw ARM establishes [0x081d64c4,0x081d6508), 68 bytes rather than
+      Ghidra 64; the return is at 0x081d6504 and the next push at 0x081d6508.
+      Whole-image aligned BL decoding finds one plain caller at 0x081d6574
+      and one BLNE at 0x081d65f0. Body has zero BL and one register BLX.
+      Writer 0x081d6508 fills the buffer and flushes at capacity; destructor
+      0x081d65d4 flushes a nonzero pending count. Dispatch destination slot
+      0x50 with length, buffer, and a zero-initialized output word; clear
+      pending_length regardless of status or reported count. Return 1 exactly
+      for status zero. Concrete virtual method identity remains unknown;
+      no fixed callee seam, retries, short-write handling, or NULL checks.
+      repr(C) pointer fields and usize vtable entries widen only on hosts;
+      target fields remain at offsets 8, 12, 16 and method index 20.
+      Host edge tests and a delivery/empty-flush runtime smoke passed.
+      ARM release build passed. match.py default uses the erroneous 64-byte
+      extent; reviewed again with --size 68. LLVM preserves the indirect
+      call and unconditional clear, using CLZ/LSR for the zero predicate
+      and a different frame/register allocation (18 versus 17 instructions).

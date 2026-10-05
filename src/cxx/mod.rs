@@ -354,6 +354,7 @@ pub mod optional_vtable_slot4_dispatch;
 pub mod optional_vtable_slot_20_dispatch;
 pub mod optional_vtable_slot4_invoke_737c;
 pub mod buffered_read_context_destroy;
+pub mod buffered_write_flush;
 pub mod stream_read_u64;
 pub mod empty_destructor;
 pub mod empty_destructor_1e741c;
