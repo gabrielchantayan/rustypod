@@ -1,4 +1,5 @@
 //! String-to-number conversions (strto* family, atof, bsearch).
+pub mod accumulate_decimal_digit;
 pub mod atoi_dead_sign;
 pub mod bdf_parse_i32;
 pub mod parse_boolean_value;

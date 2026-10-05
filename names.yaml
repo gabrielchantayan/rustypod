@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d6220
+    ghidra: FUN_081d6220
+    name: accumulate_decimal_digit
+    size: 92
+    sig: "u32 accumulate_decimal_digit(void *receiver, u32 *accumulator, DecimalDigitInput *input, u8 *count)"
+    module: strto/accumulate_decimal_digit
+    status: ported
+    renames:
+      param_1: unused_receiver
+      param_2/r4: accumulator
+      param_3/r2: input
+      param_4/r5: count
+      uVar1/r0: codepoint_then_count
+      uVar2/r1: digit
+      r6: accepted
+      "input.vtable+0x0c": read_codepoint_virtual_slot
+    notes: >-
+      Raw A32 words establish [0x081d6220,0x081d627c), 92 instruction bytes,
+      with the next real function beginning push {r4,lr} at 0x081d627c.
+      Full-image aligned word decoding finds two plain inbound BL calls at
+      0x082154b4 and 0x0821a730 and no predicated inbound BL. The body has
+      zero plain or predicated BL and one unconditional BLX r1 at 0x081d623c.
+      The virtual slot +0x0c has no established concrete callee identity;
+      preserve dynamic dispatch rather than inventing a fixed-address seam.
+      The 0x0821a6b4 caller supplies an accumulator at receiver+0x20 and
+      count at receiver+0x1d. Read a full-width codepoint, wrapping-subtract
+      ASCII zero, reject outside 0..9, then reject a post-call count >=4.
+      On acceptance increment the byte before reading and writing the
+      wrapping u32 accumulator times ten plus digit; return exactly 0 or 1.
+      Receiver is unused. Host repr(C) vtable fields widen by pointer width
+      while retaining target word indices; no algorithmic deviation.
+      Host edge tests and ARM release build pass. match.py shows 23 original
+      and 23 Rust instructions: identical +0x0c dispatch and state-write order,
+      with LLVM frame setup, early rejection return and shift/add in place
+      of MLA. Runtime smoke accepts 1,2,3,4 to produce 1234 and rejects a
+      fifth digit without modifying count or accumulator.
   - address: 0x081eb204
     ghidra: FUN_081eb204
     name: controller_apply_resource_flags
