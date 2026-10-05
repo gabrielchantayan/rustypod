@@ -216440,3 +216440,40 @@ functions:
       timer states become 0x73746f70. match.py exits 1 with eight versus seven
       instructions: LLVM adds a frame pointer but preserves +0xb0 BL and
       +0xb4 tail B ordering. The export remains independently visible.
+
+  - address: 0x081e201c
+    ghidra: FUN_081e201c
+    name: locked_container_single_key_matches
+    size: 92
+    sig: "uint32_t locked_container_single_key_matches(const uint32_t *header, uint32_t key)"
+    module: cxx/locked_container_single_key_matches
+    status: ported
+    renames:
+      param_1: header
+      param_2: key
+      local_14: guard
+      FUN_0818a128: counted_mutex_guard_acquire_lock
+      FUN_083dbde8: cxx_container_first_node_083dbde8
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw ARM establishes 92 bytes through the pop at 0x081e2074; the
+      next function begins with push at 0x081e2078. Four outgoing plain
+      BL instructions, no predicated BLs. Whole-image A32 BL decoding finds
+      two incoming plain sites at 0x082971dc and 0x08297274, no predicated
+      forms. Acquire the counted mutex pointer at header+0x1c, then return
+      one only if count at +0x14 is exactly one and the first node's word
+      at +0x10 equals key. The existing accessor at 0x083dbde8 loads the
+      nested container at header+0x10 and its first node at +0x08; Ghidra's
+      empty-body interpretation is wrong. All callees reuse existing ports.
+      Rust omits dead stack homes and shares the release path, retaining
+      target-width opaque pointers and short-circuiting non-singletons.
+      Host tests cover zero/multiple counts with invalid nested storage,
+      zero/high-bit/all-ones keys, mismatches, and balanced lock counts.
+      Host suite and ARM release build pass. Isolated real-code smoke observes
+      empty=0, singleton match=1, mismatch=0, multiple=0 and final lock count=0.
+      match.py exits 1 with 23 instructions on each side: LLVM merges the
+      two release paths and uses sub/clz/lsr for equality, preserving the
+      count guard, node-key load and all three existing callee targets.
+      A separate full host release build is blocked by six unresolved helpers
+      in prepare_entry_metadata, shared_payload_select_kind and calendar_schedule;
+      the isolated smoke compiles the real predicate, accessor and mutex code.

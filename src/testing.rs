@@ -3335,6 +3335,8 @@ pub mod hints {
     // 0x7680_0000: dedicated to cxx/container_first_node_083dbde8's target-width
     // nested-container and node fixture; mappings never unmap.
     pub const CXX_CONTAINER_FIRST_NODE_083DBDE8: usize = 0x7680_0000;
+    // Dedicated target-width singleton container fixture; mappings never unmap.
+    pub const LOCKED_CONTAINER_SINGLE_KEY_MATCHES: usize = 0x6e71_0000;
     // 0x7690_0000: dedicated to cxx/container_first_node_083dbdd4's target-width
     // nested-container and node fixture; mappings never unmap.
     pub const CXX_CONTAINER_FIRST_NODE_083DBDD4: usize = 0x7690_0000;
