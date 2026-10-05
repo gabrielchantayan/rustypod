@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const REMOTE_VOLUME_DOWN: usize = 0x4298_0000;
     pub const CONTEXT_TREE_CONSTRUCT: usize = 0x4297_0000;
     pub const COLLECTION_VALUE_STATISTICS_REFRESH: usize = 0x4296_0000;
     // Dedicated to mov/chain_record_word's 0x80000-byte record fixture.
