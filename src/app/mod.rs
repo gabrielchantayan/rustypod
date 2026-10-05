@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod audio_format_notify_mismatch;
 pub use audio_format_notify_mismatch::*;
+pub mod audio_resampler_set_rates;
 pub mod selection_step_animate;
 pub mod indexed_task_bitmap_resolve;
 pub use indexed_task_bitmap_resolve::*;
