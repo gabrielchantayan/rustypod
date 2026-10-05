@@ -176,6 +176,7 @@ pub mod element_reference_cookie;
 pub mod element_reference_persistent_id;
 pub mod element_reference_construct_string;
 pub mod font_handle;
+pub mod font_face_owner_destroy;
 pub mod font_descriptor_cached_resource;
 pub mod typeface_resource_apply;
 pub mod invalidate;
