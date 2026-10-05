@@ -215361,3 +215361,39 @@ functions:
       implementation completed with mapping, named vtable, adjacent-field
       layout assertions, and reconstruction coverage for dirty channels,
       nonzero state, preserved neighboring bytes, and complemented keys.
+
+  - address: 0x081e878c
+    ghidra: FUN_081e878c
+    name: two_pair_tokenizer_owner_construct
+    size: 48
+    sig: "void *two_pair_tokenizer_owner_construct(void *this, const void *first_pair, const void *second_pair, u32 delimiter)"
+    module: cxx/two_pair_tokenizer_owner_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: first_pair
+      param_3/r2: second_pair
+      param_4/r3: delimiter
+      DAT_081e87b8: VTABLE_ADDRESS
+      FUN_0811050c: vtable_two_pair_base_construct
+      FUN_08161494: empty_tokenizer_construct
+    notes: >-
+      Raw extent is 48 bytes: 44 code bytes followed by the owned vtable
+      literal 0x0898f800 at 0x081e87b8. The next real function starts at
+      0x081e87bc (cmp r1,0; conditional tail branch; bx lr). Whole-image
+      aligned ARM BL decoding finds two inbound plain calls at 0x081361c0
+      and 0x081362ac, zero predicated calls. The body contains two plain
+      BLs at 0x081e8794 and 0x081e87ac, zero predicated BLs. Forward the
+      first three arguments to the existing two-pair base constructor,
+      replace its vtable, then construct an empty tokenizer at +20 with
+      delimiter truncated to u16, remaining INT_MAX, and quotes disabled.
+      Both callees preserve r0; subtracting 20 returns this. Raw decoding
+      of 0x08161494 and 0x081bb6b8 verifies zero begin/end/cursor, halfword
+      delimiter, word countdown, byte quote flag, and untouched padding.
+      Deliberate deviation: inline the empty-tokenizer constructor and its
+      zero-pair helper following tokenizer.rs precedent; reuse the existing
+      Rust base constructor. Ghidra incorrectly drops arguments and the
+      empty constructor's returned pointer. Host tests cover dirty state,
+      delimiter truncation, padding, neighboring bytes, and aliased sources
+      observing the base vtable before the derived replacement. ARM match
+      review confirms one retained base BL and the inlined ordered stores.
