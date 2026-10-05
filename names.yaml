@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0819ccec
+    ghidra: FUN_0819ccec
+    name: input_state_buffer_get
+    size: 12
+    sig: "u8 *input_state_buffer_get(void)"
+    module: app/input_state_buffer
+    status: ported
+    renames:
+      r0: input_state_buffer
+      DAT_0819ccf4: input_state_buffer_address
+    notes: >-
+      Raw words e59f0000, e12fff1e, 08a7794c establish an eight-byte
+      body and four-byte literal; true extent ends at the next function's
+      push at 0x0819ccf8. Whole-image aligned ARM BL decoding finds two
+      inbound plain BLs at 0x08112ac0 and 0x081139d0, zero predicated
+      inbound BLs, and no outbound calls. Return the fixed input-state
+      buffer address 0x08a7794c, not a dereferenced global pointer.
+      Consumers read selector flags at +4 and byte +0x73; the sibling
+      transition routine updates the counter and flags and emits key events.
+      Incoming registers are unused. No new callee seams or deviations.
+      Host suite passes all 14291 tests, including unmapped-address return;
+      executable host smoke prints 08a7794c without firmware RAM mapping.
+      ARM release build passes. match.py exits 1: LLVM adds frame setup
+      and return teardown while preserving the literal load. No device run.
   - address: 0x0819e354
     ghidra: FUN_0819e354
     name: registered_container_view_construct

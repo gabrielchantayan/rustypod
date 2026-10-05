@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod input_state_buffer;
+pub use input_state_buffer::*;
 pub mod recording_interval_seconds;
 pub mod demo_mode_string_refresh;
 pub mod voice_memo_decimal_split;
