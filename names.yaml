@@ -220915,3 +220915,33 @@ functions:
       each (lengths 0,1,31,32,33,64 with empty/nonempty secondary), using
       explicit composite-callee fixtures; actual Rust representation creation,
       string copy, vector destruction and COW release execute in the emulator.
+
+  - address: 0x08197a74
+    ghidra: FUN_08197a74
+    name: string_vector_record_construct
+    size: 32
+    sig: "StringVectorRecord *string_vector_record_construct(StringVectorRecord *record)"
+    module: cxx/string_vector_record_construct
+    status: ported
+    vars: {param_1/r0: record}
+    renames:
+      FUN_083d8c20: cxx_string_default_ctor
+      FUN_083e5aec: three_word_clear_return
+    notes: >-
+      Raw ARM establishes 32 bytes through pop at 0x08197a90; the next
+      function begins with its own push at 0x08197a94. Two outbound plain
+      BLs, zero predicated BLs. Whole-image decoding finds two inbound plain
+      BLs at 0x08197b44 and 0x082aae5c, no predicated calls. Initializes
+      the string to shared empty data, clears the three adjacent vector
+      bounds, and returns the original record. Both callees reuse existing
+      Rust ports; the ported key constructor now calls this port directly.
+      Ghidra's extra arguments are unused register spills. Deliberate
+      deviations: dead stack spills and unused allocator addresses omitted;
+      host repr(C) pointer fields widen and are cleared as pointers.
+      Host suite and ARM release build pass. match.py prints a structural
+      diff (exit 1): eight instructions each, two BLs, vector offset +4,
+      preserved record return; LLVM uses r4 instead of subtracting four
+      and removes dead allocator spills. A bounded A32 interpreter executes
+      stock and linked Rust instructions for three initial storage patterns
+      each, verifying string identity, all zero bounds, preserved neighbors,
+      return pointer and restored stack. No device execution was performed.
