@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081afd80
+    ghidra: FUN_081afd80
+    name: lazy_singleton_0x44_089ca8cc_get
+    size: 56
+    sig: "void *lazy_singleton_0x44_089ca8cc_get(void)"
+    module: app/singletons
+    status: ported
+    renames:
+      iVar1/r4: globals
+      iVar2/r0: constructed_instance
+      DAT_081afdb4: globals_089ca8c4
+      globals_plus_8: instance_cache_089ca8cc
+      FUN_082aadd4: operator_new
+      FUN_081b0240: resident_singleton_0x44_089ca8cc_constructor
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 establishes 52 instruction bytes plus literal 0x089ca8c4 at
+      0x081afdb4; the next real function opens with PUSH at 0x081afdb8,
+      giving the exact 56-byte extent. Whole-image branch decoding finds
+      two incoming plain BLs at 0x0806e7a8 and 0x08114cb8, zero predicated
+      BLs and zero tail Bs. Body has two plain BLs and one BLEQ heap_panic.
+      On an empty globals+8 cache, allocate 0x44 bytes, invoke the resident
+      constructor with the allocation even when NULL, cache its return,
+      fail on a NULL constructor return and reload the cache. Constructor
+      0x081b0240 is absent from names.yaml; raw code verifies this-pointer
+      dataflow, embedded construction at +0x2c, word +0x3c = 0x10 and byte
+      +0x40 = 0. No concrete class identity is invented. Device builds use
+      the exact resident constructor and original cache address. Host
+      builds use a private cache and reject unavailable cold construction;
+      private injection tests cover cache-hit bypass, constructor cache
+      mutation, distinct returned pointers, NULL allocation success and
+      store-before-fatal ordering. All 14231 host tests pass; ARM release
+      builds. Public getter smoke returns the preseeded cache twice without
+      cold-path calls. match.py exits 1 with a reviewed structural diff:
+      LLVM adds its frame, addresses the cache directly, uses literal BLX
+      for the resident constructor and replaces BLEQ with BEQ to the fatal
+      BL. Allocation, constructor-result store and final reload remain.
+
   - address: 0x081b63c4
     ghidra: FUN_081b63c4
     name: selection_dispatch_resource_updates
