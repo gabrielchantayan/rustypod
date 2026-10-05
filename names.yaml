@@ -47303,10 +47303,9 @@ functions:
       virtual-dispatches that payload dtor. The base constructor
       0x08266a48 is now ported (app/message_kind,
       message_kind_construct) and is the wired default for the
-      QUEUED_MESSAGE_OPS.construct_base slot; only the payload
-      constructor 0x081b9248 remains behind the seam
-      (firmware-address default on target, panicking default on
-      host); operator_new is direct.
+      QUEUED_MESSAGE_OPS.construct_base slot. The payload slot now defaults
+      to the ported queued_message_payload_construct on both host and target;
+      operator_new is direct.
       Host tests pin the 0x16 kind argument, base-result adoption,
       derived vtable store, direct operator_new(0x10), full nested
       argument routing, returned payload store, and the zero-length
@@ -47345,8 +47344,8 @@ functions:
       it stores that constructor's result at +0x08 and returns the base
       constructor result. message_kind_construct (app/message_kind) and
       operator_new (heap/veneers) are ported directly; the payload constructor
-      0x081b9248 remains behind the existing QUEUED_MESSAGE_OPS slot, whose
-      target default calls the firmware address and whose host default panics.
+      0x081b9248 now uses queued_message_payload_construct as the existing
+      QUEUED_MESSAGE_OPS slot's default on both host and target.
       Host coverage records the full high-bit word, non-NULL four-byte payload
       pointer, construction order, return adoption, vtable/payload stores, and
       tag-2 allocation.
@@ -218221,3 +218220,42 @@ functions:
       Three calls, conditional nonnull replacement, field writes, byte copy
       and final clears are preserved. LLVM retains descriptor in r5 on the
       bypass path and reloads word 4 after the registry call.
+
+  - address: 0x081b9248
+    ghidra: FUN_081b9248
+    name: queued_message_payload_construct
+    size: 76
+    sig: "void *queued_message_payload_construct(void *block, u32 message_code, const u8 *source, u32 byte_count)"
+    module: app/queued_message
+    status: ported
+    renames:
+      param_1/r0/r4: block
+      param_2/r1: message_code
+      param_3/r2/r6: source
+      param_4/r3/r5: byte_count
+      DAT_081b9290: payload_vtable (0x0898c50c)
+      FUN_080eb67c: malloc_wrapper
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw osos.dec A32 words establish 76 bytes through the next independent
+      entry at 0x081b9294: 72 instruction bytes ending with pop at 0x081b928c
+      plus the vtable literal at 0x081b9290. Whole-image decoding finds two
+      incoming plain BLs at 0x0810349c and 0x081034e0, zero predicated BLs.
+      The two outgoing plain BLs target malloc_wrapper at 0x080eb67c and the
+      memcpy veneer at 0x08037db0; no predicated calls occur. Stores vtable,
+      message code and byte count; zero length sets the owned pointer to NULL
+      without allocation or source reads. Otherwise allocates byte_count bytes
+      with tag 0x27, stores the pointer before copying, and returns block.
+      No allocation failure guard, terminator, or release of previous storage
+      is added. The memcpy veneer targets 0x22000020, the IRAM mirror of the
+      ported 0x08000020. Both callees use existing Rust ports, with no new seam.
+      Both envelope factories now default their existing payload slot to this
+      port instead of firmware-address or panicking host defaults. repr(C)
+      retains native host pointers and the original ARM offsets +0/+4/+8/+12.
+      Host tests cover zero length with NULL source, high-bit codes, lengths
+      1..64, byte alignments, exact copy bounds, and independent owned storage.
+      An isolated executable smoke exercises both branches with the real port
+      source and runtime memcpy, using a native allocation adapter. Host suite
+      and ARM release build pass. match.py reports 47 versus 18 instructions:
+      LLVM inlines the existing allocator lazy-init and heap dispatch; vtable,
+      zero-length branch, tag 39, pointer-before-copy store and return remain.
