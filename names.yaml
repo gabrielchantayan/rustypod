@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a4028
+    ghidra: FUN_081a4028
+    name: voice_memo_is_paused
+    size: 28
+    sig: "u32 voice_memo_is_paused(const u8 *controller)"
+    module: app/voice_memo_is_paused
+    status: ported
+    renames:
+      param_1/r0: controller
+      r1: recording_active
+      controller+0x8a: recording_active
+      controller+0x8c: paused
+    notes: >-
+      Raw A32 words prove extent [0x081a4028,0x081a4044), seven
+      instructions ending in BX LR before the next function's push.
+      Whole-image BL decoding finds two plain inbound calls at 0x0815fd7c
+      and 0x081a4a34, zero predicated inbound calls and zero outbound BLs.
+      Return exactly 1 when bytes +0x8a and +0x8c are both nonzero,
+      otherwise 0; inactive controllers do not read +0x8c. The status-label
+      caller chooses VoiceMemos Paused for a true result. No callee seam.
+      Volatile byte reads deliberately retain conditional memory access.
+      Host suite passes 14296 tests, including all 65536 byte combinations,
+      no mutation and inactive short storage. ARM release build passes.
+      match.py exits 1: eleven versus seven instructions; LLVM adds a frame
+      and explicit branch, preserving byte offsets, short circuit and 0/1.
+      Standalone executable smoke verifies inactive, active and paused states.
+      No device execution.
   - address: 0x0819ca5c
     ghidra: FUN_0819ca5c
     name: key_repeat_timer_update
