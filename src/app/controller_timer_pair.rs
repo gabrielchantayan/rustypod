@@ -60,6 +60,25 @@ pub unsafe extern "C" fn stop_volume_down_timers(controller: *mut u8) {
     }
 }
 
+/// stop_volume_up_timers — original: `FUN_081d04e8` @ 0x081d04e8.
+///
+/// True extent: 28 bytes, 0x081d04e8..0x081d0504; the next function
+/// starts with `push {r4,lr}`. Binary-verified incoming calls: one plain
+/// BL at 0x081d0248 and one BLNE at 0x081ce25c. The body has one BL
+/// and one tail B, both to the ported timer_stop @ 0x0812c6b0.
+/// Stops controller +0xb0, then reloads and stops +0xb4, without NULL
+/// guards. Ghidra incorrectly incorporates the timer_stop body.
+/// Deliberate deviation: Rust expresses the final tail branch as a direct
+/// call; target-width aligned pointer loads and their order are preserved.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn stop_volume_up_timers(controller: *mut u8) {
+    unsafe {
+        timer_stop(timer_at(controller, SECOND_TIMER_OFFSET));
+        timer_stop(timer_at(controller, FIRST_TIMER_OFFSET));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -127,14 +146,18 @@ mod tests {
     };
 
     #[test]
-    fn reloads_b0_after_stopping_b4_and_leaves_b8_untouched() {
+    fn reloads_second_timer_after_first_stop_and_leaves_b8_untouched() {
         let _ops_guard = TIMER_OPS_TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let Some(base) = *SLAB else {
             assert!(note_missing_u32_fixture("app/controller_timer_pair"));
             return;
         };
         let base = base as *mut u8;
-        for stop in [stop_controller_timer_pair, stop_volume_down_timers] {
+        for (stop, first_offset, second_offset) in [
+            (stop_controller_timer_pair as unsafe extern "C" fn(*mut u8), FIRST_TIMER_OFFSET, SECOND_TIMER_OFFSET),
+            (stop_volume_down_timers, FIRST_TIMER_OFFSET, SECOND_TIMER_OFFSET),
+            (stop_volume_up_timers, SECOND_TIMER_OFFSET, FIRST_TIMER_OFFSET),
+        ] {
         unsafe {
             core::ptr::write_bytes(base, 0, SLAB_LEN);
             let first_timer = base.add(FIRST_TIMER_IN_SLAB);
@@ -142,10 +165,10 @@ mod tests {
             let replacement_timer = base.add(REPLACEMENT_TIMER_IN_SLAB);
             let untouched_timer = base.add(UNTOUCHED_TIMER_IN_SLAB);
 
-            base.add(FIRST_TIMER_OFFSET)
+            base.add(first_offset)
                 .cast::<u32>()
                 .write(first_timer as usize as u32);
-            base.add(SECOND_TIMER_OFFSET)
+            base.add(second_offset)
                 .cast::<u32>()
                 .write(original_second_timer as usize as u32);
             base.add(THIRD_TIMER_OFFSET)
@@ -156,7 +179,7 @@ mod tests {
             }
 
             ptr::addr_of_mut!(FIRST_TIMER).write(first_timer);
-            ptr::addr_of_mut!(SECOND_TIMER_SLOT).write(base.add(SECOND_TIMER_OFFSET).cast::<u32>());
+            ptr::addr_of_mut!(SECOND_TIMER_SLOT).write(base.add(second_offset).cast::<u32>());
             ptr::addr_of_mut!(REPLACEMENT_TIMER).write(replacement_timer);
             let saved_ops = ptr::addr_of!(TIMER_OPS).read_volatile();
             ptr::addr_of_mut!(TIMER_OPS).write_volatile(RELOAD_SECOND_TIMER_OPS);
@@ -171,15 +194,15 @@ mod tests {
             ];
             ptr::addr_of_mut!(TIMER_OPS).write_volatile(saved_ops);
 
-            assert_eq!(states[0], TIMER_STATE_STOPPED, "+0xb4 timer is stopped first");
-            assert_eq!(states[1], TIMER_STATE_RUNNING, "the stale +0xb0 target is not stopped");
-            assert_eq!(states[2], TIMER_STATE_STOPPED, "+0xb0 is reloaded after the first stop");
+            assert_eq!(states[0], TIMER_STATE_STOPPED, "first timer is stopped");
+            assert_eq!(states[1], TIMER_STATE_RUNNING, "the stale second target is not stopped");
+            assert_eq!(states[2], TIMER_STATE_STOPPED, "second pointer is reloaded after the first stop");
             assert_eq!(states[3], TIMER_STATE_RUNNING, "+0xb8 is not a target");
 
             // Both controller fields may refer to the same timer. Repeated
             // cancellation must leave it stopped and not touch its neighbours.
             first_timer.add(TIMER_STATE_OFFSET).cast::<u32>().write(TIMER_STATE_RUNNING);
-            base.add(SECOND_TIMER_OFFSET).cast::<u32>().write(first_timer as usize as u32);
+            base.add(second_offset).cast::<u32>().write(first_timer as usize as u32);
             ptr::addr_of_mut!(TIMER_OPS).write_volatile(TimerOps {
                 trace_assert: no_op_timer,
                 ..RELOAD_SECOND_TIMER_OPS
