@@ -43,11 +43,29 @@ pub unsafe extern "C" fn linked_node_status_set(root: u32, status: u32) {
     }
 }
 
+/// `linked_node_status_three` — original: `FUN_081b11b8` @ `0x081b11b8`
+/// (12 bytes, two plain inbound BL calls, zero predicated BL calls).
+///
+/// Raw words `e1a00001 e3a01003 ea010fad` move the second argument into
+/// r0 and tail-branch to `linked_node_status_set` @ `0x081f507c` with status 3.
+/// The next function begins at `0x081b11c4`. Callers at `0x08206f8c` and
+/// `0x082ca39c` supply the root in r1; r0 is ignored. This marks every node
+/// in the chain and clears the root owner's +0xac and +0x90 words if present.
+/// No deliberate semantic deviations; reuses the existing target-width port.
+///
+/// # Safety
+/// `root` must satisfy `linked_node_status_set`'s status-3 safety requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn linked_node_status_three(_context: u32, root: u32) {
+    linked_node_status_set(root, 3);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use super::linked_node_status_set;
+    use super::{linked_node_status_set, linked_node_status_three};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use core::ptr;
     use parking_lot::Mutex;
@@ -121,6 +139,47 @@ mod tests {
             assert_eq!(*tail.add(0x3d), 4);
             assert_eq!(*owner.add(0x90).cast::<u32>(), 0x1111_2222);
             assert_eq!(*owner.add(0xac).cast::<u32>(), 0x3333_4444);
+        }
+    }
+
+    #[test]
+    fn status_three_wrapper_handles_null_and_circular_links_with_optional_owner() {
+        let _guard = LOCK.lock();
+        let Some(base) = *FIXTURE else {
+            assert!(note_missing_u32_fixture("app/linked_node_status_set"));
+            return;
+        };
+        unsafe {
+            let root = record(base as *mut u8, 7);
+            let tail = record(base as *mut u8, 8);
+            let owner = record(base as *mut u8, 9);
+            for circular in [false, true] {
+                for has_owner in [false, true] {
+                    ptr::write_bytes(root, 0, RECORD_BYTES * 3);
+                    *root.add(0x40).cast::<u32>() = target_pointer(tail);
+                    *tail.add(0x40).cast::<u32>() =
+                        if circular { target_pointer(root) } else { 0 };
+                    *root.add(0x34).cast::<u32>() =
+                        if has_owner { target_pointer(owner) } else { 0 };
+                    *root.add(0x3c) = 0x55;
+                    *tail.add(0x3e) = 0xaa;
+                    *owner.add(0x90).cast::<u32>() = 0x1234_5678;
+                    *owner.add(0xac).cast::<u32>() = 0x8765_4321;
+                    *owner.add(0x94).cast::<u32>() = 0xdead_beef;
+
+                    linked_node_status_three(0xffff_ffff, target_pointer(root));
+
+                    assert_eq!(*root.add(0x3d), 3);
+                    assert_eq!(*tail.add(0x3d), 3);
+                    assert_eq!(*root.add(0x3c), 0x55);
+                    assert_eq!(*tail.add(0x3e), 0xaa);
+                    assert_eq!(*owner.add(0x90).cast::<u32>(),
+                        if has_owner { 0 } else { 0x1234_5678 });
+                    assert_eq!(*owner.add(0xac).cast::<u32>(),
+                        if has_owner { 0 } else { 0x8765_4321 });
+                    assert_eq!(*owner.add(0x94).cast::<u32>(), 0xdead_beef);
+                }
+            }
         }
     }
 }
