@@ -979,6 +979,32 @@ pub unsafe extern "C" fn observable_array_append(
     index
 }
 
+/// Append a word pair — `FUN_081d5eb8` @ `0x081d5eb8`, **36 bytes**,
+/// ending immediately before the independent prologue at `0x081d5edc`.
+/// Raw ARM branch decoding finds **2 plain BL callers, 0 predicated BL
+/// callers, and 2 unconditional tail branches**; the body has 2 plain BLs.
+///
+/// Save both input words, append the first to the embedded observable array
+/// at +8, then the second to the array at +0x18. Return the second append's
+/// r0 unchanged. Both calls use the existing port at 0x0827196c. Deliberate
+/// deviation from Ghidra: restore the three-argument signature and return
+/// value established by the raw words; r3 is not an input.
+///
+/// # Safety
+/// `owner` must contain valid concrete observable arrays at the target byte
+/// offsets +8 and +0x18. Their callbacks must consume each temporary word
+/// during the call, not retain its stack address.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_word_pair_append(
+    owner: *mut u8,
+    mut first: u32,
+    mut second: u32,
+) -> u32 {
+    observable_array_append(owner.add(8).cast(), core::ptr::addr_of_mut!(first).cast());
+    observable_array_append(owner.add(0x18).cast(), core::ptr::addr_of_mut!(second).cast())
+}
+
 /// Word index of an observer node's next link (`node + 0x10`), the link
 /// the broadcast @ 0x082a4ccc walks and the detach @ 0x08271724 splices.
 const OBSERVER_NEXT_WORD: usize = 4;
@@ -1861,6 +1887,64 @@ mod tests {
             "the `bxne r3` path bypasses resize, write, observer broadcast, and finish"
         );
     }
+    static PAIR_STORAGE: Mutex<(usize, [Vec<u32>; 2])> =
+        Mutex::new((0, [Vec::new(), Vec::new()]));
+
+    unsafe extern "C" fn pair_is_deferred(_this: *mut ObservableArray) -> u32 { 0 }
+
+    unsafe extern "C" fn pair_resize(this: *mut ObservableArray, delta: i32) {
+        assert_eq!(delta, 1);
+        let mut storage = PAIR_STORAGE.lock();
+        let slot = if this as usize == storage.0 + 8 { 0 } else {
+            assert_eq!(this as usize, storage.0 + 0x18);
+            1
+        };
+        storage.1[slot].push(0);
+        (*this.cast::<ObservableArrayAppendHost>()).len = storage.1[slot].len() as u32;
+    }
+
+    unsafe extern "C" fn pair_write(this: *mut ObservableArray, index: u32, word: *mut u8) {
+        let mut storage = PAIR_STORAGE.lock();
+        let slot = if this as usize == storage.0 + 8 { 0 } else { 1 };
+        storage.1[slot][index as usize] = word.cast::<u32>().read();
+    }
+
+    #[test]
+    fn word_pair_append_preserves_independent_lengths_and_full_word_values() {
+        let _lock = APPEND_LOCK.lock();
+        let _seam = install_append_recorder(0, 0);
+        let vtable = ObservableArrayAppendVtable {
+            append_is_deferred: pair_is_deferred,
+            append_resize: pair_resize,
+            append_write: pair_write,
+            ..APPEND_VTABLE
+        };
+        #[repr(C)]
+        struct Pair {
+            header: [u32; 2],
+            first: ObservableArrayAppendHost,
+            second: ObservableArrayAppendHost,
+        }
+        assert_eq!(core::mem::offset_of!(Pair, first), 8);
+        assert_eq!(core::mem::offset_of!(Pair, second), 0x18);
+        for (left, right) in [(0, u32::MAX), (0x8000_0000, 0x7fff_ffff), (7, 7)] {
+            let mut owner = Pair {
+                header: [0x1234_5678, 0xdead_beef],
+                first: ObservableArrayAppendHost { vtable: &vtable, len: 1 },
+                second: ObservableArrayAppendHost { vtable: &vtable, len: 3 },
+            };
+            let pointer = core::ptr::addr_of_mut!(owner).cast::<u8>();
+            *PAIR_STORAGE.lock() = (pointer as usize, [Vec::from([11]), Vec::from([22, 33, 44])]);
+            let returned = unsafe { observable_word_pair_append(pointer, left, right) };
+            assert_eq!(returned, 3);
+            assert_eq!(owner.header, [0x1234_5678, 0xdead_beef]);
+            assert_eq!((owner.first.len, owner.second.len), (2, 4));
+            let storage = PAIR_STORAGE.lock();
+            assert_eq!(storage.1[0], [11, left]);
+            assert_eq!(storage.1[1], [22, 33, 44, right]);
+        }
+    }
+
     static ERASE_LOCK: Mutex<()> = Mutex::new(());
     static ERASE_TRACE: Mutex<Vec<EraseStep>> = Mutex::new(Vec::new());
     #[derive(Debug, PartialEq)]
