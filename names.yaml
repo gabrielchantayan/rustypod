@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e5100
+    ghidra: FUN_081e5100
+    name: find_selection_mode
+    size: 76
+    sig: "u32 find_selection_mode(u8 *state, u32 mode, u32 *index)"
+    module: app/find_selection_mode
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: mode
+      param_3/r2: index
+      iVar1/r3: record
+      "state+0x1080": record_count
+      "state+0x128e+record*0x50": record_mode
+    notes: >-
+      Raw A32 establishes 76 bytes at 0x081e5100..0x081e514b; the next
+      prologue begins at 0x081e514c. Zero outbound plain or predicated BL
+      instructions. Two inbound BL calls at 0x081e43b8 and 0x081e5798 are
+      unconditional, with no predicated inbound BL. Snapshot signed count,
+      scan byte modes with stride 0x50, compare against full u32 mode,
+      and write only the first matching index. Return 0 on match, otherwise
+      3 without writing output. No behavioral deviations. The existing
+      selection_mode_validate caller now uses the Rust lookup directly.
   - address: 0x081e609c
     ghidra: FUN_081e609c
     name: form_lookup_context_destruct
@@ -159658,10 +159681,9 @@ functions:
       mode, while every other byte returns error 3. FUN_081e5100 is
       independently verified to scan state+0x128e records of stride 0x50 up
       to state+0x1080, writing the first matching index to state+0x1078;
-      either an invalid byte or a nonzero lookup result returns 3. On-device
-      the Rust port calls this identified but unported callee at 0x081e5100;
-      its replaceable host seam exists only because firmware addresses cannot
-      be executed by host tests.
+      either an invalid byte or a nonzero lookup result returns 3. The Rust
+      port now calls app/find_selection_mode directly on firmware and host,
+      without a replaceable host seam.
   - address: 0x081e41a4
     ghidra: FUN_081e41a4
     name: mov_chain_timeout_prepare
@@ -191716,10 +191738,9 @@ functions:
       mode, while every other byte returns error 3. FUN_081e5100 is
       independently verified to scan state+0x128e records of stride 0x50 up
       to state+0x1080, writing the first matching index to state+0x1078;
-      either an invalid byte or a nonzero lookup result returns 3. On-device
-      the Rust port calls this identified but unported callee at 0x081e5100;
-      its replaceable host seam exists only because firmware addresses cannot
-      be executed by host tests.
+      either an invalid byte or a nonzero lookup result returns 3. The Rust
+      port now calls app/find_selection_mode directly on firmware and host,
+      without a replaceable host seam.
   - address: 0x081e41a4
     ghidra: FUN_081e41a4
     name: mov_chain_timeout_prepare
