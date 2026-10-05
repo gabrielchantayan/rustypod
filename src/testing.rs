@@ -3212,6 +3212,8 @@ pub mod hints {
     // intrusive node ring and owner fixture; mappings never unmap, so no other
     // port may share this hint.
     pub const LINKED_NODE_STATUS_SET: usize = 0x6f50_0000;
+    // Dedicated playback-node fixture; permanent mapping, never shared.
+    pub const PLAYBACK_NODE_START: usize = 0x6101_0000;
     // 0x6f40_0000: dedicated to app/volume_controller_reschedule_timer's
     // target-width controller and embedded timer fixture; mappings never unmap.
     pub const VOLUME_CONTROLLER_RESCHEDULE_TIMER: usize = 0x6f40_0000;

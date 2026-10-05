@@ -219089,3 +219089,48 @@ functions:
       exits 1: LLVM adds a balanced frame setup/teardown before the same
       argument moves and tail branch. R_ARM_JUMP24 resolves that branch
       to linked_node_status_set; the wrapper remains a distinct symbol.
+  - address: 0x081b111c
+    ghidra: FUN_081b111c
+    name: playback_node_start
+    size: 156
+    sig: "void playback_node_start(u32 context, void *node, u32 callback, u32 callback_context)"
+    module: app/playback_node_start
+    status: ported
+    renames:
+      param_1/r0: context (ignored)
+      param_2/r1: node
+      param_3/r2: callback
+      r3: callback_context
+      field_48: delay
+      field_44: source_override_value
+      FUN_08087554: piezo_note_post
+      FUN_081f507c: linked_node_status_set
+      thunk_EXT_FUN_22007470: event_handler_source
+    notes: >-
+      Raw A32 verifies the 156-byte extent 0x081b111c..0x081b11b7,
+      ending in a tail branch to linked_node_status_set; the independent
+      status-three wrapper starts at 0x081b11b8. Whole-image decoding finds
+      two plain inbound BLs at 0x082070ac and 0x082c9ebc, zero predicated
+      inbound BLs, and two inbound tail branches at 0x0803c314 and 0x0805bc00.
+      The body has seven plain BLs and two BLNEs. Saves node+0x48 before
+      acquiring a child from the shared source; NULL acquisition returns
+      without node changes. Binds the node through 0x08121e5c, installs a
+      nonzero callback through 0x081225f8 with the saved fourth argument
+      (omitted by Ghidra), and enables the child through 0x08122220.
+      Tests node+0x3e bit 1 after enabling to post the (500,2) click.
+      Nonzero saved delay calls 0x081225f0 and applies the source override
+      through IRAM 0x22007c04 with (source,1,delay,node+0x44), then marks
+      the node chain with status 1. Unported helpers remain exact-address
+      seams; 0x080381d0 and 0x080381d8 contain literal targets 0x220078b0
+      and 0x22007c04, mirrors of raw osos bodies at 0x080078b0 and
+      0x08007c04, not mask ROM. Reuses the existing source, piezo and
+      linked-status ports. No deliberate semantic deviations. Host tests
+      cover exhausted acquisition, callback absence, context preservation,
+      click gating after binding, delay snapshot despite node mutation,
+      and circular status propagation. Host suite and ARM release build
+      pass. Standalone public-API smoke uses a host source fixture and
+      mapped NULL-returning acquisition code, observes unchanged node words.
+      match.py exits 1: 39 original versus 61 Rust instructions, preserving
+      the gates, helper order, fourth-argument forwarding and final status
+      tail call; differences are LLVM frames, BLX address seams, pooled
+      literals and relocatable calls to existing ports.
