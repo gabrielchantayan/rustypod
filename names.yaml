@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b6868
+    ghidra: FUN_081b6868
+    name: signed_range_contains
+    size: 60
+    sig: "u32 signed_range_contains(const i32 *range, i32 value)"
+    module: app/signed_range_contains
+    status: ported
+    renames:
+      param_1/r0/r2: range
+      param_2/r1/r3: value
+      FUN_081b68a4: resident_endpoints_valid
+    notes: >-
+      Raw A32 establishes [0x081b6868,0x081b68a4), 60 bytes, with the
+      independent endpoint-validity function beginning at 0x081b68a4.
+      Whole-image word decoding finds two inbound plain BL sites at
+      0x081a1cac and 0x081a1d24, one outbound plain BL at 0x081b6874,
+      and zero predicated BLs. The resident callee rejects either signed
+      endpoint equal to -1; containment then uses inclusive signed bounds.
+      Callers pass owner+0x7c and a record index in r1; Ghidra omits r1
+      at one call. ARM retains the verified resident callee, unmapped in
+      names.yaml; host builds execute its decoded behavior locally.
+      Host tests cover sentinel endpoints, reversed and singleton ranges,
+      negative values, and signed extrema. ARM match retains validity-first
+      short circuit and both signed comparisons; LLVM uses literal BLX
   - address: 0x081c0180
     ghidra: FUN_081c0180
     name: storage_buffer_initialize
