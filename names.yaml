@@ -218777,3 +218777,50 @@ functions:
       the base call; the same vtable and three zero stores remain.
       R_ARM_CALL relocation verifies the BL targets refcounted_base_init.
       No device execution.
+
+  - address: 0x081a9c28
+    ghidra: FUN_081a9c28
+    name: all_label_resolve
+    size: 96
+    sig: "void all_label_resolve(void *view, void *source, u32 index, StringObject *out)"
+    module: app/all_label_resolve
+    status: ported
+    renames:
+      param_1: unused_view
+      param_2: unused_source
+      param_3: unused_index
+      param_4/r4: out
+      uStack_10/uStack_c: temporary_string
+      FUN_08258ba0: lazy_singleton_0x80
+      FUN_082a50b0: string_object_c_str
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      FUN_082a5370: string_object_is_empty
+      FUN_0827639c: string_object_assign_cstr
+      DAT_081a9c84: english_all_fallback
+      "singleton vtable+0x20": construct_string (concrete identity unresolved)
+    notes: >-
+      Raw osos.dec establishes 92 code bytes through pop pc at 0x081a9c80
+      plus All-NUL at 0x081a9c84; next real push entry is 0x081a9c88,
+      giving 96 bytes true extent. Whole-image aligned A32 BL decoding finds
+      two inbound plain BLs at 0x081aa4f4 and 0x081aab44, zero predicated.
+      Outbound calls comprise five plain BLs, one BLNE and one virtual BLX.
+      Both callers use this path for their common All-label cases. Fetches
+      singleton string resource 1 via vtable +0x20 into a temporary, copies
+      its C string to out, destroys the temporary, then assigns English All
+      exactly when the resulting output is empty. Failed replacement can
+      leave a nonempty old output, suppressing fallback; this is preserved.
+      Reuses every registered callee; does not invent the virtual identity.
+      repr(C) pointer fields widen on hosts. Temporary incoming register
+      seeds are omitted because the virtual method constructs both words.
+      Existing singleton constructor and string virtual allocation seams
+      remain prerequisites for hooking; no device execution or hook readiness
+      is claimed. Host regression covers localized, NULL and empty sources,
+      allocation failure, and initially empty/nonempty destinations.
+      Host suite passes 14240 tests; ARM release build passes. Standalone
+      native smoke executes the public port and prints Tous then All.
+      match.py exits 1: LLVM adds a frame and saves the temporary pointer,
+      replaces BLNE with a branch around an ordinary call, and moves the
+      string literal to rodata. Same resource ID, +0x20 BLX, six direct
+      callees and copy/destroy/empty/fallback ordering; ARM relocations
+      independently verify every direct callee symbol.
