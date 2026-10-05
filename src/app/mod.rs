@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod voice_memo_decimal_split;
 pub mod controller_resource_list_replace;
 pub mod class_8c00_byte_d4_get;
 pub mod voice_memo_resource_refresh;
