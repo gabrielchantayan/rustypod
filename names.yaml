@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ba980
+    ghidra: FUN_081ba980
+    name: vtable_flag_payload_byte_construct
+    size: 32
+    sig: "void *vtable_flag_payload_byte_construct(void *this, uint32_t payload, uint8_t state)"
+    module: cxx/vtable_flag_payload_byte_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      param_3/r2: state
+      puVar1: constructed
+      FUN_081b6968: vtable_flag_payload_construct
+      DAT_081ba99c: derived_vtable (0x0898c7f4)
+    notes: >-
+      Raw ARM verifies 28 instruction bytes and a four-byte literal pool,
+      giving 32 bytes through the next function at 0x081ba9a0.
+      Two inbound plain BLs at 0x08148048 and 0x0814862c; zero predicated
+      BLs. One outbound plain BL at 0x081ba988 to the existing payload
+      constructor at 0x081b6968. Preserves r2's low byte across that call,
+      replaces the returned object's vtable with 0x0898c7f4, stores the
+      state byte at +12, and returns the same pointer. No new seam;
+      the callee's established base-constructor seam remains unchanged.
+      Host tests cover all 256 state bytes, zero and maximal payloads,
+      padding preservation and a relocated base result.
+      ARM release build and 14187 host tests pass. match.py reports
+      intentional codegen differences: LLVM preserves the state in r4
+      rather than r3 and reverses the independent vtable/state stores.
+      The archive relocation confirms the direct BL targets
+      vtable_flag_payload_construct; vtable literal and field offsets match.
   - address: 0x081bac88
     ghidra: FUN_081bac88
     name: item_state_flag_dispatch

@@ -880,6 +880,7 @@ pub mod opaque_vtable_string_owner_construct;
 pub mod opaque_vtable_string_owner_has_text;
 pub mod vtable_flag_construct;
 pub mod vtable_flag_payload_construct;
+pub mod vtable_flag_payload_byte_construct;
 pub mod vtable_0899219c_construct;
 pub mod opaque_vtable_payload_construct;
 pub mod vtable_shared_handle_construct;
