@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d5fd4
+    ghidra: FUN_081d5fd4
+    name: image_format_descriptor_cursor_reset
+    size: 12
+    sig: "void image_format_descriptor_cursor_reset(u32 *slots)"
+    module: app/image_format_descriptor_cursor_reset
+    status: ported
+    renames:
+      param_1/r0: slots
+      r1: before_first_slot
+      slots+0x28c: descriptor_cursor
+    notes: >-
+      Raw A32 words e3e01000 e580128c e12fff1e establish the true
+      12-byte extent [0x081d5fd4,0x081d5fe0). The next function begins
+      with cmp r1,#0x11. Whole-image decoding verifies two inbound plain
+      BL calls at 0x081f0c2c and 0x0821b23c, zero predicated inbound BLs,
+      and zero outbound plain or predicated BLs. Store UINT32_MAX at
+      word 163 (+0x28c), leaving descriptor records and count untouched.
+      The iterator at 0x081d5f54 increments this sentinel before scanning
+      slot zero; both callers reset before iteration. No callee seam or
+      deliberate deviations. Host coverage checks active, exhausted and
+      arbitrary prior cursors, repeated reset, and preservation of all
+      neighboring words.
   - address: 0x081d6220
     ghidra: FUN_081d6220
     name: accumulate_decimal_digit
