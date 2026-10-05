@@ -3,6 +3,7 @@
 pub mod record_range_intersection;
 pub use record_range_intersection::*;
 pub mod collection_value_statistics_refresh;
+pub mod collection_history_insert;
 pub mod short_voicememo_probe;
 pub mod demo_mode_marker_refresh;
 pub mod audio_format_notify_mismatch;

@@ -216242,3 +216242,40 @@ functions:
       immediately zeroes it. Host tests cover sentinel no-op, alternate
       mode, ignored processing failure, lookup partial updates, slot
       isolation, and zero-length subtraction wrapping.
+  - address: 0x081d0db0
+    ghidra: FUN_081d0db0
+    name: collection_history_insert
+    size: 72
+    sig: "u32 collection_history_insert(u32 *owner, u32 *value)"
+    module: app/collection_history_insert
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: value
+      local_10: cell
+      owner+4: history_array
+      vtable+0x20: insert_pointer_at_index
+      FUN_081d111c: collection_value_statistics_refresh
+      FUN_083d097c: opaque_observable_array_release_erase_at
+    notes: >-
+      Raw A32 extent [0x081d0db0,0x081d0df8) is 72 bytes; the next
+      independently entered function loads owner+8 and returns. Whole-image
+      decoding finds two inbound plain BLs at 0x0815e154 and 0x081d0f04,
+      zero predicated inbound BLs. Outbound: one plain BL at 0x081d0dc0,
+      one BLGT at 0x081d0dec, and one virtual BLX at 0x081d0ddc. Refresh
+      the supplied collection's statistics, insert its pointer by reference
+      at index zero into owner+4 via vtable+0x20, then release/erase index
+      zero if the signed insertion result exceeds four. Always return one.
+      r2/r3 are scratch, not arguments. Reuse both existing direct-callee
+      Rust ports; no new firmware seams or target behavioral deviations.
+      Host vtable entries use native width with an unaligned pointer read
+      preserving owner+4. Tests cover signed extremes, the four/five boundary,
+      refresh-before-insert ordering, local pointer replacement, and untouched
+      owner/value fields. All 14140 host tests pass; ARM release build passes.
+      Isolated public-API smoke observes statistics [0,0,0], insertion and
+      status one. A standalone Cargo example cannot link this staticlib-only
+      crate, and non-test host compilation has six existing missing-function
+      errors, so the throwaway smoke runs under the host test harness.
+      match.py exits 1: LLVM emits 22 versus 18 instructions, adds a frame,
+      uses signed BLT against five instead of predicated BLGT against four,
+      and retains both direct calls, virtual slot, receiver/index and return.
