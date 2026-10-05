@@ -668,9 +668,9 @@ mod slot_deadline_tests {
     }
 }
 
-/// Dispatch seams for the two unported direct callees of
-/// [`iap_incoming_process_thread_submit_message`]. The target defaults retain
-/// the retail call targets; host tests install a recorder.
+/// Dispatch seams for message submission, the unported handler-pending setter,
+/// and virtual release. The submission default calls the Rust envelope port;
+/// host tests may install a recorder.
 #[derive(Clone, Copy)]
 pub struct IapThreadMessageSubmitOps {
     pub submit_message: unsafe extern "C" fn(*mut u8, u32, u32, *mut *mut u8) -> i32,
@@ -678,26 +678,135 @@ pub struct IapThreadMessageSubmitOps {
     pub release_message: unsafe extern "C" fn(*mut u8),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_submit_message(
-    thread: *mut u8,
-    message_code: u32,
-    message_size: u32,
-    message: *mut *mut u8,
+/// iap_incoming_process_thread_submit_envelope — original: `FUN_081d6ee0`
+/// @ 0x081d6ee0, 156 bytes, ending at the independent push at 0x081d6f7c.
+/// Raw words verify two incoming plain BLs, zero incoming predicated BLs;
+/// body: five plain BLs, one `bleq` heap panic, and one virtual BLX.
+///
+/// Allocate and construct a twelve-byte kind-zero envelope from code and data.
+/// Under the +0x130 mutex, release it and return 0x21 if the +0x23c budget is
+/// zero; otherwise submit with flag 1, mode 0. Success reloads and decrements
+/// the budget with wrapping arithmetic; any submit error maps to 0x0c without
+/// releasing the envelope. Unlock on all returning paths; ignore mutex status.
+/// Deliberate deviations: direct callees use their existing Rust ports, mutex
+/// alias veneers resolve to canonical ports, and tests inject dependencies into
+/// the same body. Virtual release retains the target-width vtable slot +4.
+///
+/// # Safety
+/// `thread` must contain a live context, mutex at +0x130 and aligned budget
+/// word at +0x23c. `data` and `length` must satisfy the envelope constructor.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_incoming_process_thread_submit_envelope(
+    thread: *mut u8, code: u32, length: u32, data: *mut *mut u8,
 ) -> i32 {
-    let f: unsafe extern "C" fn(*mut u8, u32, u32, *mut *mut u8) -> i32 =
-        core::mem::transmute(0x081d_6ee0usize);
-    f(thread, message_code, message_size, message)
+    use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock};
+    let storage = crate::heap::veneers::operator_new(12).cast::<u32>();
+    let envelope = crate::app::message_envelope_construct::message_envelope_construct(
+        storage, code, data as usize as u32, length,
+    );
+    if envelope.is_null() {
+        crate::heap::veneers::heap_panic();
+    }
+    submit_envelope_body(
+        thread, envelope,
+        |mutex| { posix_mutex_lock(mutex.cast()); },
+        |owner, message| crate::cxx::opaque_context_submit::opaque_context_submit(
+            owner, message as usize as u32, 1, 0,
+        ),
+        |message| {
+            let vtable = message.read() as usize as *const u32;
+            let release: unsafe extern "C" fn(*mut u32) =
+                core::mem::transmute(vtable.add(1).read() as usize);
+            release(message);
+        },
+        |mutex| { posix_mutex_unlock(mutex.cast()); },
+    )
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_submit_message(
-    _thread: *mut u8,
-    _message_code: u32,
-    _message_size: u32,
-    _message: *mut *mut u8,
+#[inline(always)]
+unsafe fn submit_envelope_body(
+    thread: *mut u8, envelope: *mut u32,
+    lock: impl FnOnce(*mut u8),
+    submit: impl FnOnce(*mut u8, *mut u32) -> u32,
+    release: impl FnOnce(*mut u32),
+    unlock: impl FnOnce(*mut u8),
 ) -> i32 {
-    0
+    let mutex = thread.add(0x130);
+    let budget = thread.add(0x23c).cast::<u32>();
+    lock(mutex);
+    let status = if budget.read_volatile() == 0 {
+        release(envelope);
+        0x21
+    } else if submit(thread, envelope) == 0 {
+        budget.write_volatile(budget.read_volatile().wrapping_sub(1));
+        0
+    } else {
+        0x0c
+    };
+    unlock(mutex);
+    status
+}
+
+#[cfg(test)]
+mod envelope_submit_tests {
+    use super::submit_envelope_body;
+    use core::cell::Cell;
+
+    #[test]
+    fn budget_controls_release_ownership_and_error_mapping() {
+        for budget in [0, 1, 2, u32::MAX] {
+            for error in [0, 1, 0x14, u32::MAX] {
+                let mut thread = [0xa5a5_a5a5u32; 0x240 / 4];
+                thread[0x23c / 4] = budget;
+                let mut envelope = [0u32; 3];
+                let base = thread.as_mut_ptr().cast::<u8>();
+                let message = envelope.as_mut_ptr();
+                let phase = Cell::new(0);
+                let released = Cell::new(false);
+                let status = unsafe { submit_envelope_body(
+                    base, message,
+                    |mutex| { assert_eq!(mutex, base.add(0x130)); phase.set(1); },
+                    |owner, payload| {
+                        assert_eq!(phase.get(), 1);
+                        assert_eq!((owner, payload), (base, message));
+                        phase.set(2);
+                        error
+                    },
+                    |payload| {
+                        assert_eq!(phase.get(), 1);
+                        assert_eq!(payload, message);
+                        released.set(true);
+                        phase.set(2);
+                    },
+                    |_| { assert_eq!(phase.get(), 2); phase.set(3); },
+                ) };
+                assert_eq!(phase.get(), 3);
+                assert_eq!(released.get(), budget == 0);
+                assert_eq!(status, if budget == 0 { 0x21 } else if error == 0 { 0 } else { 0x0c });
+                assert_eq!(thread[0x23c / 4], if budget != 0 && error == 0 { budget - 1 } else { budget });
+                assert!(thread[..0x23c / 4].iter().all(|&word| word == 0xa5a5_a5a5));
+            }
+        }
+    }
+
+    #[test]
+    fn success_reloads_budget_after_submit_and_wraps_zero() {
+        for updated in [0u32, 7, u32::MAX] {
+            let mut thread = [0u32; 0x240 / 4];
+            thread[0x23c / 4] = 1;
+            let base = thread.as_mut_ptr().cast::<u8>();
+            let mut envelope = [0u32; 3];
+            let result = unsafe { submit_envelope_body(
+                base, envelope.as_mut_ptr(), |_| {},
+                |owner, _| { owner.add(0x23c).cast::<u32>().write(updated); 0 },
+                |_| panic!("successful submission must not release"),
+                |_| {},
+            ) };
+            assert_eq!(result, 0);
+            assert_eq!(thread[0x23c / 4], updated.wrapping_sub(1));
+        }
+    }
 }
 
 #[cfg(target_os = "none")]
@@ -730,7 +839,7 @@ unsafe extern "C" fn firmware_release_message(_message: *mut u8) {}
 
 pub const DEFAULT_IAP_THREAD_MESSAGE_SUBMIT_OPS: IapThreadMessageSubmitOps =
     IapThreadMessageSubmitOps {
-        submit_message: firmware_submit_message,
+        submit_message: iap_incoming_process_thread_submit_envelope,
         set_handler_pending: firmware_set_handler_pending,
         release_message: firmware_release_message,
     };
@@ -753,9 +862,10 @@ fn iap_thread_message_submit_ops() -> IapThreadMessageSubmitOps {
 /// submits the four-byte message pointer with code 0x501. A successful submit
 /// transfers ownership; when requested, it marks that service handler pending.
 /// Failed or rejected submissions release the retained message through vtable
-/// slot +4. Deliberate deviation: the two unported direct callees and host
-/// virtual release dispatch through [`IAP_THREAD_MESSAGE_SUBMIT_OPS`]; target
-/// builds retain 0x081d6ee0, 0x08194120, and the recovered vtable slot.
+/// slot +4. Deliberate deviation: the resident handler-pending setter and
+/// virtual release dispatch through [`IAP_THREAD_MESSAGE_SUBMIT_OPS`]; its
+/// submission default calls the Rust envelope port, while target builds retain
+/// the resident setter 0x08194120 and recovered virtual release slot.
 ///
 /// # Safety
 ///
