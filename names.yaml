@@ -10397,6 +10397,35 @@ functions:
       target-word wrapping. The unported lookup/insert is a verified address
       seam: host tests install a fixture and target builds call the retail
       address directly.
+  - address: 0x081e2078
+    ghidra: FUN_081e2078
+    name: context_tree_construct
+    size: 100
+    sig: "ContextTree *context_tree_construct(ContextTree *tree, uint32_t context)"
+    module: cxx/context_tree_construct
+    status: ported
+    renames:
+      param_1/r0: tree
+      param_2/r1: context
+      "tree+0x00": pool
+      "tree+0x10": sentinel
+      "tree+0x14": count
+      "tree+0x18": state
+      "tree+0x19": comparator_state
+      "tree+0x1c": context
+      FUN_083bdea0: red_black_tree_node_pool_acquire_083bdea0
+    notes: >-
+      Raw osos.dec verifies the 100-byte A32 extent 0x081e2078..0x081e20dc,
+      ending with pop {r3-r7,pc} before the next function's push. One outgoing
+      plain BL at 0x081e20b4 calls the existing ported 20-byte node pool.
+      Whole-image aligned decoding finds two incoming plain BLs at 0x08297338
+      and 0x08297400 and no incoming or outgoing predicated BLs. Clears the
+      pool, sentinel, count, and two state bytes, acquires a sentinel with null
+      parent and self-linked children, stores the full context word, and returns
+      tree. Preserves padding at +0x1a..+0x1b and node payload at +0x10.
+      Deliberate deviation: redundant stack zero spill/reload omitted.
+      Target pointer fields remain u32 words on hosts; calls the existing pool
+      port directly without a new seam.
   - address: 0x083bdea0
     ghidra: FUN_083bdea0
     name: red_black_tree_node_pool_acquire_083bdea0
