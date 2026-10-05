@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081caac0
+    ghidra: FUN_081caac0
+    name: shared_controller_resource_refresh
+    size: 24
+    sig: "u32 shared_controller_resource_refresh(void)"
+    module: app/shared_controller_resource_refresh
+    status: ported
+    renames:
+      DAT_081caad4: shared_controller_slot
+      piVar2/r4: controller
+      FUN_081cad34: refresh_selection_state_retail
+      DAT_081cae1c/r5: resource_group_wildcard
+      DAT_081cae18: first_resource_id
+      DAT_081cae20: second_resource_id
+    notes: >-
+      Raw A32 entry occupies [0x081caac0,0x081caad8), 24 bytes including
+      literal 0x089d00a0. The next real function begins at 0x081caad8.
+      BNE enters the separate 80-byte body [0x081cadd4,0x081cae24),
+      including three literals; Ghidra's 88-byte contiguous extent includes
+      unrelated neighboring functions. Whole-image aligned-word BL decoding
+      verifies two inbound plain BLs at 0x081caae0 and 0x081cac40, zero
+      predicated BLs. Entry has no BLs. Shared body has one plain BL to
+      0x081cad34, zero predicated BLs, one virtual BLX and one tail BX.
+      Capture singleton, skip NULL, call the unported selection/state helper,
+      then dispatch wildcard 0x2a2a2a2a with resource 0x8d01 and 0x8d02
+      through slot +0x58. Reload the captured object's vtable after the
+      first dispatch, never the singleton. Helper has no existing names.yaml
+      entry; retain its verified literal address rather than invent a callee
+      identity. Discontiguous body is inlined; repr(C) pointers widen on hosts.
+      Preserve final r0 result and zero on NULL despite callers ignoring it.
+      Host suite passed 14172 tests, covering NULL, refresh replacing vtable,
+      singleton mutation, first callback replacing vtable, and final result.
+      Standalone actual-module smoke and ARM release build passed. match.py
+      exits 1: 30 Rust instructions against 22 from the incorrect contiguous
+      reference; raw shared body confirms guards, helper address, +0x58
   - address: 0x081bbc84
     ghidra: FUN_081bbc84
     name: video_session_clear
