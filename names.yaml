@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e3ecc
+    ghidra: FUN_081e3ecc
+    name: record_range_intersection
+    size: 100
+    sig: "u32 record_range_intersection(const i32 *owner, i32 *start, i32 *end)"
+    module: app/record_range_intersection
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: start
+      param_3/r2: end
+      owner+0x1080: signed_record_count
+      owner+0x1268+index*0x50: record_start
+      owner+0x126c+index*0x50: record_end
+    notes: >-
+      Raw A32 extent [0x081e3ecc,0x081e3f30) is 100 bytes; the next
+      independent push starts at 0x081e3f30. Whole-image word decoding
+      verifies two incoming plain BLs at 0x081e3514 and 0x081e5598,
+      zero predicated incoming BLs, and zero outgoing calls. Seed from
+      the first record even for nonpositive counts, then compute signed
+      maximum start and minimum end at 0x50-byte strides; return zero.
+      Callers use the intersection as a half-open position interval.
+      No deliberate deviations; volatile aligned accesses preserve output
+      aliasing and count reloads. No callee seams. All 14138 host tests pass,
+      ARM release build passes, and API smoke reports status=0, [7,31).
+      match.py exits 1: LLVM emits 28 versus 25 instructions, adds a
+      conditional frame and advances a record pointer instead of multiplying
+      the index; signed comparisons, ordered accesses and zero return agree.
   - address: 0x081d0ff8
     ghidra: FUN_081d0ff8
     name: timed_label_finish_lap
