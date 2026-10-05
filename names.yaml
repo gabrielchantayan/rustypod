@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a0e44
+    ghidra: FUN_081a0e44
+    name: scroll_state_reset
+    size: 20
+    sig: "u32 *scroll_state_reset(u32 *owner)"
+    module: ui/scroll_state_reset
+    status: ported
+    vars:
+      param_1/r0: owner
+      r1: reset_value
+      "[owner + 0x14c]": scroll_position
+      "[owner + 0x150]": end_reached
+    notes: >-
+      Raw words e3a01000 e5c01150 e3e01003 e580114c e12fff1e establish
+      20 bytes ending at the next real function's push at 0x081a0e58.
+      Whole-image aligned A32 decoding finds zero inbound plain BLs, two
+      inbound BLNEs at 0x0821d854 and 0x0821ea5c, and no outbound BLs.
+      Clear the end-reached byte at +0x150, then write signed -4 to the
+      aligned scroll-position word at +0x14c; preserve r0 and every other
+      byte. Adjacent handler 0x081a0e58 increments/clamps that position
+      and sets the byte at the end; caller 0x0821e914 checks the byte
+      before its Genius action and resets after dispatch. No callees or
+      seams. Volatile accesses preserve store order and widths; word
+      indexing avoids host pointer-width assumptions. No behavioral
+      deviations. Host suite passed 14312 tests; standalone smoke verified
+      pointer preservation, reset values, and neighboring bytes. ARM release
+      build passed. match.py reports the same four body instructions, with
+      an added frame-pointer push/mov and pop return replacing bx lr
+      (7 instructions versus 5); no calls or symbol folding.
+
   - address: 0x081a2b24
     ghidra: FUN_081a2b24
     name: named_sequence_play
