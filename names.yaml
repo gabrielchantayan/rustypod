@@ -63524,6 +63524,29 @@ functions:
       ported singly_linked_list_count @ 0x0807a13c and zero predicated BL
       calls. It counts the NULL-terminated intrusive chain at queue+4 and
       returns one exactly for a zero count; the queue has no NULL guard.
+  - address: 0x0819bef8
+    ghidra: FUN_0819bef8
+    name: member_condition_queue_wait_empty
+    size: 40
+    sig: "void member_condition_queue_wait_empty(void *object)"
+    module: cxx/member_condition_queue_wait_empty
+    status: ported
+    renames:
+      param_1/r4: object
+      param_1_plus_0x28: queue
+      FUN_0839e540: condition_queue_is_empty
+      thunk_FUN_080568e8: task_sleep_thunk
+    notes: >-
+      Raw osos.dec verifies ten ARM words at 0x0819bef8..0x0819bf20,
+      ending with pop {r4,pc}; the next independent function begins with
+      push {r4,lr} at 0x0819bf20. Whole-image A32 decoding finds two inbound
+      plain BL calls at 0x081b5778 and 0x081b6038, zero predicated callers,
+      and two outbound plain BL calls with zero predicated BL calls.
+      Checks condition_queue_is_empty at 0x0839e540 on object+0x28 before
+      sleeping, then calls task_sleep_thunk at 0x080e9eb0 with 100 ticks
+      after each zero predicate result. Any nonzero result returns; there
+      is no timeout and the sleep return is discarded. Both target callees
+      reuse existing Rust ports; host-only operations model queue transitions.
   - address: 0x0839e540
     ghidra: FUN_0839e540
     name: condition_queue_is_empty
