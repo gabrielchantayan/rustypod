@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a47d4
+    ghidra: FUN_081a47d4
+    name: voice_memo_resource_refresh
+    size: 228
+    sig: "u32 voice_memo_resource_refresh(SelectionResourceObject *controller)"
+    module: app/voice_memo_resource_refresh
+    status: ported
+    renames:
+      param_1/r4: controller
+      r5: resource_category
+      vtable+0x58: resource_dispatch
+      FUN_081a4b88: voice_memo_duration_query
+    notes: >-
+      Raw extent 0x081a47d4..0x081a48b8 contains 192 executable bytes
+      and nine literal words; the next function opens with push {r4,r5,r6,lr}.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x081a3980 and 0x083a1c3c, zero predicated inbound BLs.
+      Outgoing calls are one plain BL to 0x081a4b88, no predicated BLs,
+      six virtual BLXs, and a final virtual BX. Query duration with DtTm,
+      then dispatch category 0x2a2a2a2a to 0x3d04 and 0x3d0a..0x3d0f,
+      reloading vtable slot +0x58 each time. Preserve the final r0 word
+      despite Ghidra's void signature; virtual callee identity remains opaque.
+      Host tests exercise calendar-before-dispatch, vtable replacement,
+      ordered state transitions and final-result preservation using the
+      existing duration port. ARM match review confirms the direct call,
+      six BLXs, seven vtable reloads and final BX; LLVM materializes resource
+      immediates instead of literal loads and adds a frame pointer.
   - address: 0x081a4b88
     ghidra: FUN_081a4b88
     name: voice_memo_duration_query
