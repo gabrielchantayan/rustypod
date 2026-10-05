@@ -220250,3 +220250,37 @@ functions:
       the root. No device execution. match.py exit 1 shows expected LLVM
       frame setup, absolute BLX callees, branch around refresh and CLZ-based
       zero comparison; target field offsets and saved status are retained.
+
+  - address: 0x0819c088
+    ghidra: FUN_0819c088
+    name: kind1_record_post
+    size: 48
+    module: app/kind1_record_post
+    status: ported
+    sig: "void kind1_record_post(void *owner)"
+    vars:
+      param_1: owner
+      allocation: record
+      owner_plus_0x28: synchronized_pointer_queue
+      FUN_082aadd4: operator_new
+      FUN_0839e4f8: resident_synchronized_pointer_queue_append
+    notes: >-
+      Raw A32 words prove extent [0x0819c088,0x0819c0b8), followed by
+      an independent push. One outbound plain BL allocates eight bytes;
+      zero predicated BLs. The final B tail-transfers to 0x0839e4f8.
+      Two inbound plain BLs, zero predicated, occur at 0x081b5770 and
+      0x081b6030. Initialize two u32 record words to kind 1 and payload 0,
+      then transfer ownership to the embedded queue at owner+0x28.
+      Ghidra wrongly inlines the queue body into this function. The
+      unmapped resident callee's raw code locks queue+0xc, allocates an
+      eight-byte pointer node, appends at queue+4, signals queue+0x14,
+      and tail-unlocks; it remains an opaque verified firmware seam.
+      Deliberate deviations: reuse ported operator_new, inject host
+      operations, preserve target-width record words and opaque owner
+      offsets. No allocation failure guard is added. Host tests verify
+      recycled record initialization before ownership transfer and
+      adjacent-storage preservation. Exported-entry host smoke verifies
+      queue offset 0x28 and initialized record consumption; no device run.
+      ARM release build succeeded. match.py exit 1 shows expected LLVM
+      frame changes, reordered independent stores, allocator relocation,
+      and literal-address BX instead of direct B to 0x0839e4f8.
