@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod signed_range_contains;
+pub use signed_range_contains::*;
 pub mod resource_provider_update_refreshed;
 pub use resource_provider_update_refreshed::*;
 pub mod shared_selector_create;
