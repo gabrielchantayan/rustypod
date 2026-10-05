@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d5f54
+    ghidra: FUN_081d5f54
+    name: image_format_descriptor_cursor_next
+    size: 60
+    sig: "u32 image_format_descriptor_cursor_next(u32 *slots)"
+    module: app/image_format_descriptor_cursor_next
+    status: ported
+    renames:
+      param_1/r1: slots
+      r0: index
+      r2: sequence
+      slots+0x28c: descriptor_cursor
+    notes: >-
+      Raw A32 establishes [0x081d5f54,0x081d5f90), followed by the
+      descriptor-count getter. Whole-image decoding finds two inbound plain
+      BLs at 0x081f0c74 and 0x0821b24c, no predicated inbound BLs, and no
+      outbound BLs. Ghidra's void return is incorrect: r0 returns the index
+      consumed by both callers. Wrapping-increment word 163, scan indices
+      0..17 using sequence words at 9 + index*9, skip UINT32_MAX, then store
+      and return the index or UINT32_MAX on exhaustion. A subsequent call
+      after exhaustion restarts at zero. Descriptor count is ignored.
+      No deliberate deviations or callee seams. The collection consumer
+      now uses this Rust port rather than its retail-address/host seam.
+      Host tests cover sparse/full/empty slots, boundary and arbitrary
+      cursors, wraparound, restart, sentinel discrimination, and preservation
+      of every word except the cursor.
+      ARM match review: 17 Rust instructions versus 15 retail instructions;
+      LLVM strength-reduces record addressing to a post-incremented pointer
+      and adds a frame. Unsigned bound, sentinel loop, cursor store and
+      returned index remain equivalent; no BL is introduced.
   - address: 0x081d5fd4
     ghidra: FUN_081d5fd4
     name: image_format_descriptor_cursor_reset

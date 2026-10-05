@@ -8,33 +8,30 @@
 //! cursor, and advance once per populated descriptor. Append each index whose
 //! exclusion query returns zero, preserving iteration order. Re-read the count
 //! on every iteration; leave the shared cursor at the last visited slot.
-//! No deliberate behavioral deviations. The slots getter is a shared Rust port;
-//! remaining unported callees use retail-address seams and host equivalents.
+//! No deliberate behavioral deviations. The slots getter and cursor-next are
+//! shared Rust ports; remaining unported callees use retail-address seams.
 //! No capacity or NULL checks.
 
 use super::image_format_descriptor_slot_count::image_format_descriptor_slot_count;
 use super::image_format_context_slots_get::image_format_context_slots_get;
+use super::image_format_descriptor_cursor_next::image_format_descriptor_cursor_next;
 
 type CursorReset = unsafe extern "C" fn(*mut u32);
-type CursorNext = unsafe extern "C" fn(*mut u32) -> u32;
 type IsExcluded = unsafe extern "C" fn(*mut u32, u32) -> u32;
 
 #[cfg(not(target_os = "none"))]
 pub struct CollectionOps {
     pub cursor_reset: CursorReset,
-    pub cursor_next: CursorNext,
     pub is_excluded: IsExcluded,
 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_reset(_: *mut u32) { panic!("install slot collection host seams") }
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_next(_: *mut u32) -> u32 { panic!("install slot collection host seams") }
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_excluded(_: *mut u32, _: u32) -> u32 { panic!("install slot collection host seams") }
 #[cfg(not(target_os = "none"))]
 pub static mut COLLECTION_OPS: CollectionOps = CollectionOps {
     cursor_reset: missing_reset,
-    cursor_next: missing_next, is_excluded: missing_excluded,
+    is_excluded: missing_excluded,
 };
 
 /// # Safety
@@ -46,15 +43,13 @@ pub static mut COLLECTION_OPS: CollectionOps = CollectionOps {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn image_format_slots_collect_unexcluded(owner: *mut u32, output: *mut u32) -> u32 {
     #[cfg(target_os = "none")]
-    let (reset, next, excluded) = (
+    let (reset, excluded) = (
         core::mem::transmute::<usize, CursorReset>(0x081d_5fd4),
-        core::mem::transmute::<usize, CursorNext>(0x081d_5f54),
         core::mem::transmute::<usize, IsExcluded>(0x0821_ae60),
     );
     #[cfg(not(target_os = "none"))]
-    let (reset, next, excluded) = (
+    let (reset, excluded) = (
         core::ptr::addr_of!(COLLECTION_OPS.cursor_reset).read(),
-        core::ptr::addr_of!(COLLECTION_OPS.cursor_next).read(),
         core::ptr::addr_of!(COLLECTION_OPS.is_excluded).read(),
     );
     let context = owner.add(1).read() as usize as *const u32;
@@ -63,7 +58,7 @@ pub unsafe extern "C" fn image_format_slots_collect_unexcluded(owner: *mut u32, 
     let mut visited = 0u32;
     let mut written = 0u32;
     while image_format_descriptor_slot_count(slots) > visited {
-        let index = next(slots);
+        let index = image_format_descriptor_cursor_next(slots);
         let omit = excluded(owner, index);
         visited = visited.wrapping_add(1);
         if omit == 0 {
@@ -78,18 +73,8 @@ pub unsafe extern "C" fn image_format_slots_collect_unexcluded(owner: *mut u32, 
 mod tests {
     use super::*;
 
-    // Behavioral equivalents of the three remaining retail callees, not exports.
+    // Behavioral equivalents of the two remaining retail callees, not exports.
     unsafe extern "C" fn reset(slots: *mut u32) { slots.add(163).write(u32::MAX); }
-    unsafe extern "C" fn next(slots: *mut u32) -> u32 {
-        let mut index = slots.add(163).read();
-        loop {
-            index = index.wrapping_add(1);
-            if index > 17 { index = u32::MAX; break; }
-            if slots.add(index as usize * 9 + 9).read() != u32::MAX { break; }
-        }
-        slots.add(163).write(index);
-        index
-    }
     unsafe extern "C" fn excluded(owner: *mut u32, index: u32) -> u32 {
         let start = owner.add(3).read();
         let end = owner.add(4).read();
@@ -109,7 +94,7 @@ mod tests {
             return;
         };
         unsafe {
-            COLLECTION_OPS = CollectionOps { cursor_reset: reset, cursor_next: next, is_excluded: excluded };
+            COLLECTION_OPS = CollectionOps { cursor_reset: reset, is_excluded: excluded };
             slab.write_bytes(0, 0x1000);
             let owner = slab.cast::<u32>();
             let context = slab.add(0x100).cast::<u32>();
