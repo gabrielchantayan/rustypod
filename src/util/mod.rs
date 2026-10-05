@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod video_engine_record_upload;
 pub mod owned_payload_list_get;
 pub mod extended_basic_layout_name;
 pub mod indexed_record_defaults;
