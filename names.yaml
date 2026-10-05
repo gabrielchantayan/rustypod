@@ -129717,7 +129717,7 @@ functions:
     renames:
       param_1/r0: cache
       param_2/r1: key
-      FUN_081ba1ec: unported_entry_lookup
+      FUN_081ba1ec: track_extras_cache_find_entry
       "*entry": entry_payload
     notes: >-
       Raw osos.dec establishes the exact 20-byte extent: push {r4,lr} at
@@ -129727,9 +129727,47 @@ functions:
       exactly four inbound calls, all unconditional plain bl at 0x08084e4c,
       0x0817c930, 0x081df048, and 0x0821144c; there are no predicated forms.
       It returns zero for a NULL entry or the matched entry's first word.
-      The unported direct callee 0x081ba1ec is invoked through a volatile
-      fixed-address seam; no broader identity is claimed. Host tests record
-      forwarded arguments and cover both the NULL and non-NULL entry paths.
+      Calls the ported track_extras_cache_find_entry directly; the obsolete
+      fixed-address seam and recording-only tests were removed. Search tests
+      exercise real collection and object virtual dispatch.
+  - address: 0x081ba1ec
+    ghidra: FUN_081ba1ec
+    name: track_extras_cache_find_entry
+    size: 116
+    sig: "TrackExtrasEntry *track_extras_cache_find_entry(void *cache, void *key)"
+    module: app/track_extras_cache_find_entry
+    status: ported
+    renames:
+      param_1/r0: cache
+      param_2/r1/r4: key
+      local_18: entry
+      uStack_14/uStack_10: cursor
+      cache+0x4c: entries
+      entry+0x00: object
+      object.vtable+0x08: key
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+    notes: >-
+      Raw A32 establishes [0x081ba1ec,0x081ba260), 116 bytes, followed by
+      a distinct push prologue. Whole-image decoding finds two incoming
+      plain BLs at 0x081ba044 and 0x081ba4a4, no predicated incoming BLs.
+      The body has four plain BLs to existing cursor ports, no predicated
+      BLs, and one BLX through the object's vtable slot +8. Walk the
+      embedded collection at cache+0x4c; compare virtual keys by pointer
+      identity and return the first matching entry or NULL. Invalidate
+      the cursor on both exits. Ghidra's r2/r3 parameters and u64 return
+      are saved-register artifacts, not the ABI. Typed host fields widen
+      naturally; target collection and key-slot offsets are asserted.
+      No new seam, validation, or guessed callee identity.
+      All 14193 host tests pass, including first-match/duplicate-key,
+      equal-content distinct-pointer, NULL-key, absent and empty cases.
+      ARM release build passes. Actual-module smoke exercises search and the
+      migrated payload caller for matching and absent keys. match.py exits 1
+      with 27 Rust instructions versus 29 stock: loop, +0x4c collection,
+      +8 virtual dispatch and cursor init/advance relocations are preserved.
+      LLVM eliminates both invalidate calls because their only effect is a
+      write to the dead local cursor; stack frame and exit paths differ.
   # --- TTrackExtrasCache fixed-static accessor ---
   - address: 0x081ba3ac
     ghidra: FUN_081ba3ac

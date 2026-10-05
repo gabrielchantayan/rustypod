@@ -13,33 +13,10 @@
 //!
 //! ## Deliberate deviations
 //!
-//! The lookup's broader identity remains unported. Target builds call its
-//! verified fixed address; host builds expose a recording seam.
+//! The lookup now calls the Rust search directly. Native host pointers widen;
+//! the payload API continues to return the target-width object address.
 
-use core::ptr;
-
-/// ABI of the unported lookup at `0x081ba1ec`.
-pub type TrackExtrasCacheEntryLookup = unsafe extern "C" fn(*mut u8, *mut u8) -> *const u32;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_entry_lookup(cache: *mut u8, key: *mut u8) -> *const u32 {
-    let function: TrackExtrasCacheEntryLookup = core::mem::transmute(0x081b_a1ecusize);
-    function(cache, key)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_entry_lookup(_cache: *mut u8, _key: *mut u8) -> *const u32 {
-    ptr::null()
-}
-
-/// Unported cache-entry lookup boundary. Volatile loading retains the target
-/// call while host tests install a recorder.
-pub static mut TRACK_EXTRAS_CACHE_ENTRY_LOOKUP: TrackExtrasCacheEntryLookup = firmware_entry_lookup;
-
-#[inline(always)]
-unsafe fn entry_lookup() -> TrackExtrasCacheEntryLookup {
-    ptr::read_volatile(ptr::addr_of!(TRACK_EXTRAS_CACHE_ENTRY_LOOKUP))
-}
+use super::track_extras_cache_find_entry::track_extras_cache_find_entry;
 
 /// `track_extras_cache_entry_payload` — original: `FUN_081ba040` @
 /// `0x081ba040` (20 bytes; 4 unconditional plain `bl` callers, no predicated
@@ -52,51 +29,7 @@ unsafe fn entry_lookup() -> TrackExtrasCacheEntryLookup {
 #[cfg_attr(target_os = "none", link_section = ".text.track_extras_cache_entry_payload")]
 #[inline(never)]
 pub unsafe extern "C" fn track_extras_cache_entry_payload(cache: *mut u8, key: *mut u8) -> u32 {
-    let entry = entry_lookup()(cache, key);
-    if entry.is_null() { 0 } else { entry.read() }
+    let entry = track_extras_cache_find_entry(cache, key);
+    if entry.is_null() { 0 } else { (*entry).object as usize as u32 }
 }
 
-#[cfg(test)]
-mod tests {
-    extern crate std;
-    use super::*;
-    use parking_lot::Mutex;
-    use std::sync::LazyLock;
-
-    static LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-    static mut LOOKUP_RESULT: *const u32 = ptr::null();
-    static mut OBSERVED: (*mut u8, *mut u8) = (ptr::null_mut(), ptr::null_mut());
-
-    unsafe extern "C" fn recording_lookup(cache: *mut u8, key: *mut u8) -> *const u32 {
-        OBSERVED = (cache, key);
-        LOOKUP_RESULT
-    }
-
-    #[test]
-    fn returns_zero_when_entry_lookup_finds_nothing() {
-        let _lock = LOCK.lock();
-        let saved = unsafe { TRACK_EXTRAS_CACHE_ENTRY_LOOKUP };
-        unsafe {
-            TRACK_EXTRAS_CACHE_ENTRY_LOOKUP = recording_lookup;
-            LOOKUP_RESULT = ptr::null();
-            let cache = 0x10usize as *mut u8;
-            let key = 0x20usize as *mut u8;
-            assert_eq!(track_extras_cache_entry_payload(cache, key), 0);
-            assert_eq!(OBSERVED, (cache, key));
-            TRACK_EXTRAS_CACHE_ENTRY_LOOKUP = saved;
-        }
-    }
-
-    #[test]
-    fn returns_matched_entry_first_word() {
-        let _lock = LOCK.lock();
-        let saved = unsafe { TRACK_EXTRAS_CACHE_ENTRY_LOOKUP };
-        let entry = [0xa5a5_5a5a, 0xffff_ffff];
-        unsafe {
-            TRACK_EXTRAS_CACHE_ENTRY_LOOKUP = recording_lookup;
-            LOOKUP_RESULT = entry.as_ptr();
-            assert_eq!(track_extras_cache_entry_payload(ptr::null_mut(), ptr::null_mut()), entry[0]);
-            TRACK_EXTRAS_CACHE_ENTRY_LOOKUP = saved;
-        }
-    }
-}

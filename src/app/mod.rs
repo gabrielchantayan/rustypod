@@ -1005,3 +1005,4 @@ pub mod dma_array_pair_release;
 pub mod class_6280_flag_dispatch;
 pub mod message_handler_dispatch;
 pub mod video_session_clear;
+pub mod track_extras_cache_find_entry;
