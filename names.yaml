@@ -220360,3 +220360,53 @@ functions:
       it instead of subtracting eight, with a larger frame. Relocation decoding
       confirms both BLs target string_default_construct, despite match.py's
       unresolved archive labels. No attached-device execution was performed.
+
+  - address: 0x0819ae74
+    ghidra: FUN_0819ae74
+    name: selected_record_view_refresh_geometry
+    size: 136
+    sig: "void selected_record_view_refresh_geometry(SelectedRecordView *owner)"
+    module: ui/selected_record_geometry
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner_plus_0xb0: selected_index
+      owner_plus_0xb8: view
+      r5: indexed_record
+      auStack_40: geometry
+      local_38: x_offset
+      local_2c: y_offset
+      FUN_080ffae8: indexed_record_lookup
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_0826d850: view_base_set_geometry
+    notes: >-
+      Raw A32 establishes [0x0819ae74,0x0819aefc), 136 bytes, ending in
+      pop {r4,r5,r6,pc}; the next real function begins with its own push
+      at 0x0819aefc. Whole-image raw BL decoding finds two inbound plain
+      calls at 0x0819ae44 and 0x0819af3c, zero predicated calls. The body
+      contains three plain BLs, zero predicated: indexed_record_lookup
+      at 0x0819ae84, iram_memcpy_veneer at 0x0819aea0, and
+      view_base_set_geometry at 0x0819aef0. All three are existing ports,
+      verified against names.yaml; no new callee seam is introduced.
+      The selected index at owner +0xb0 resolves an opaque record;
+      NULL returns without accessing the view. Otherwise copy the view's
+      48-byte geometry at +0x50, set scratch word +8 to unsigned record
+      halfword +14 minus (view.x_end - view.x_start) plus 9, and scratch
+      word +20 to unsigned record halfword +12 minus
+      (view.y_end - view.y_start) plus 4, then apply with redraw=1.
+      Preserve the original pointer reloads before y bounds and final
+      submission. Deliberate deviations: reuse the existing Rust callees,
+      widen only the receiver pointer on hosts, and use wrapping word
+      arithmetic with aligned halfword reads. Uninitialized scratch avoids
+      an unnecessary LLVM memclr before the complete word copy.
+      Host tests cover missing record with NULL view, zero dimensions,
+      ordinary dimensions, negative results, unsigned halfword maxima,
+      wrapping bounds, unchanged geometry words and bounds, and redraw.
+      Full host suite passed 14310 tests; after scratch optimization both
+      focused tests pass and the ARM release build succeeds. Standalone
+      public-entry smoke exercises the actual lookup, word-copy and setter
+      sources with a host redraw observer: x=179, y=44, all other words
+      preserved; disabled lookup safely skips a NULL view. No device run.
+      match.py exits 1 with a structural diff: LLVM uses a larger register
+      frame, equivalent reassociated arithmetic, and the same 48-byte
+      scratch, NULL branch, halfword loads, three calls and pointer reloads.
