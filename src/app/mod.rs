@@ -99,6 +99,7 @@ pub mod pending_navigation_dispatch;
 pub use pending_navigation_dispatch::*;
 pub mod image_lookup_cache;
 pub mod app_screen_dispatch_resource_updates;
+pub mod selection_dispatch_resource_updates;
 pub mod contextual_menu_dispatch;
 pub mod class_1700_clear_when_configured;
 pub mod image_format_selected_product_sum;

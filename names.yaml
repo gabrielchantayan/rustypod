@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b63c4
+    ghidra: FUN_081b63c4
+    name: selection_dispatch_resource_updates
+    size: 172
+    sig: "u32 selection_dispatch_resource_updates(SelectionResourceObject *receiver)"
+    module: app/selection_dispatch_resource_updates
+    status: ported
+    renames:
+      param_1/r4: receiver
+      uVar1/r5: category
+      r2: resource
+      r3: dispatch
+    notes: >-
+      Raw A32 establishes 140 code bytes plus eight literal words, ending at
+      the independent PUSH at 0x081b6470 (172 bytes total). Whole-image
+      word decoding finds two incoming plain BLs at 0x081b65ac/0x081b6618,
+      no predicated BLs, and a tail B at 0x081b55d8. The body has no direct
+      BLs, four unconditional indirect BLXs, and a final indirect BX.
+      Selection increment/decrement callers update their selected context
+      before dispatching these five opaque category/resource pairs:
+      0x53747220/0x9402, 0x53747220/0x9403, 0x44726177/0x9405,
+      0x44726177/0x9404, 0x436e746c/0x9406. Reload receiver vtable slot
+      +0x58 for every dispatch; no virtual callee identity or direct seam
+      is invented. Preserve the final r0 result despite Ghidra's void
+      signature. Host repr(C) pointers widen while retaining slot indices.
+      Host tests cover vtable replacement, ordered state transitions,
+      full-width state seeds and final result propagation; the full host
+      suite passes 14227 tests. An executable source smoke verifies all
+      five ordered pairs and final r0 0xfffffffa. ARM release builds.
+      match.py exits 1 with a reviewed structural diff: all four BLXs,
+      vtable reloads and final tail BX remain; LLVM synthesizes resource
+      immediates with MOV/ORR and adds its frame-pointer prologue.
   - address: 0x081b6868
     ghidra: FUN_081b6868
     name: signed_range_contains
