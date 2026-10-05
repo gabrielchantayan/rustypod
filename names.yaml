@@ -12634,6 +12634,29 @@ functions:
       slot with r1=0x53747220 ("Str ") and r2=0x848e. The virtual callee has
       no recovered semantic identity, so the ARM port retains the exact
       target-width dispatch and host tests install a narrow recording seam.
+  - address: 0x081cd4e4
+    ghidra: FUN_081cd4e4
+    name: slideshow_at_end
+    size: 24
+    sig: "u32 slideshow_at_end(const u32 *state)"
+    module: app/slideshow_at_end
+    status: ported
+    renames:
+      param_1/r0: slideshow_state
+      "state+0x8b8": position
+      "state+0x8c0": end_marker
+    notes: >-
+      Raw osos.dec words establish the 24-byte A32 leaf at
+      0x081cd4e4..0x081cd4fb; the independently entered push prologue at
+      0x081cd4fc starts the next function. Binary-wide aligned A32 branch
+      decoding finds two inbound unconditional BL calls at 0x0810cdd8 and
+      0x0810cf3c, zero predicated BL calls, and no outgoing calls. Load the
+      full words at state+0x8b8 and state+0x8c0, compare for equality, and
+      return exactly 1 or 0. Caller FUN_0810cd84 uses the result for its
+      EnterPlayingAtEndOfSlideshow transition. No callee seams or behavioral
+      deviations; aligned u32 word indices preserve the target layout on
+      64-bit hosts. Host tests cover equality, high-bit differences, reversed
+      unequal operands, the intervening word, and unchanged state.
   - address: 0x081d1f60
     ghidra: FUN_081d1f60
     name: kind_0x19_dispatch
