@@ -219309,3 +219309,42 @@ functions:
       retains the zero guard, byte clear before source BL, and tail dispatch
       to 0x22007fcc; differences are direct flag address, LLVM frame, source
       port relocation, and BX to the verified wrapper rather than its veneer.
+
+  - address: 0x081a78ac
+    ghidra: FUN_081a78ac
+    name: queued_message_post_to_self
+    size: 88
+    sig: "void queued_message_post_to_self(MessageTarget *target, u32 message_code, const u8 *bytes, u32 byte_count)"
+    status: ported
+    module: app/queued_message_post_to_self.rs
+    args:
+      r0: target
+      r1: message_code
+      r2: bytes
+      r3: byte_count
+    notes: >-
+      Raw osos.dec proves the 88-byte extent 0x081a78ac..0x081a7904,
+      ending with pop {r3-r9,pc} before the next function's push.
+      Whole-image A32 branch decoding finds two inbound unconditional BLs
+      at 0x081a800c and 0x081bc170, no predicated BLs, and one inbound
+      tail B at 0x081bc3f8. The body has four plain BLs, no predicated BLs:
+      message_arena_pool 0x08103400, fixed_block_pool_alloc 0x0826c0d8,
+      queued_message_construct 0x08103464, queued_message_post 0x08110fdc.
+      Snapshot target->owner (+0x10)->task_ctx (+0x0c)->queue_pool (+0x1c)
+      before allocation, allocate 12 bytes, construct the byte envelope,
+      then synchronously post with no_wait=0, saved reply queue, flags=0.
+      No allocation guard; discard post result. Zero saved queue reaches
+      the existing poster fallback unchanged. All callees reuse existing
+      ports, with no new firmware seams. Ghidra's fifth constructor argument
+      is stale stack data, not the verified four-register ABI. Typed repr(C)
+      links preserve ARM offsets and native host pointer width. Regression
+      tests cover destination mutation during construction with nonzero
+      and zero saved queues. Standalone host smoke exercises the exported
+      wrapper with simulated callees, a binary payload [00,80,ff], and a
+      null zero-length payload; device execution is not verified.
+      Host suite and ARM release build pass. match.py exits 1 with a
+      structural diff: 22 original instructions versus 25 Rust instructions.
+      ARM codegen retains the three queue-chain loads before allocation,
+      four BLs, 12-byte request, payload register order, saved reply queue,
+      zero no_wait and stack flags; differences are LLVM frame/register
+      choices and unresolved archive call relocations.
