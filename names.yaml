@@ -218068,3 +218068,41 @@ functions:
       versus 54 original; frame setup, scratch zeroing and extra register
       saves differ. The global literal, unsigned loop, three vtable offsets,
       four direct calls, event guard and both completion paths are retained.
+
+  - address: 0x081b9710
+    ghidra: FUN_081b9710
+    name: twelve_byte_state_derived_construct
+    size: 24
+    sig: "u32 *twelve_byte_state_derived_construct(u32 *storage)"
+    module: app/twelve_byte_state_derived_construct
+    status: ported
+    renames:
+      entry_r0: storage
+      puVar1/returned_r0: object
+      DAT_081b9724: VTABLE (0x0898c58c)
+      FUN_081b126c: twelve_byte_state_base_construct (unported structural identity)
+    notes: >-
+      Raw words establish [0x081b9710,0x081b9728): 20 code bytes plus
+      the vtable literal at 0x081b9724. The next real function begins
+      with cmp r0,#0 at 0x081b9728. Whole-image aligned A32 decoding
+      independently finds two incoming plain BLs at 0x081861ec and
+      0x081b9678, zero predicated incoming BLs; one outgoing plain BL
+      at 0x081b9714 to 0x081b126c and zero predicated outgoing BLs.
+      Calls that unported base, writes vtable 0x0898c58c to its returned
+      object's first word, and returns the same r0 (Ghidra's void is
+      incorrect). Raw base calls the ported framework root at 0x08275bb8,
+      installs 0x0898b6f8, and clears bytes +5..+15 then +4. Both callers
+      replace the derived vtable again. Concrete class and state meanings
+      are not established; the semantic name describes the verified layout.
+      No registry entry or existing Rust seam names the base. Target calls
+      its verified retail address; host injection follows the existing
+      condvar_backed_object_construct convention. This host seam is the
+      only deliberate behavioral deviation. Host regression exercises dirty
+      storage, reconstruction, guards and preservation of derived fields.
+      All 14205 host tests and the ARM release build pass. Standalone
+      actual-source smoke with the binary-derived base model verifies a
+      relocated returned pointer, vtable, twelve cleared bytes and unchanged
+      surrounding words. match.py exits 1: LLVM uses an fp frame and an
+      indirect BLX through literal 0x081b126c rather than direct BL, then
+      loads 0x0898c58c, stores through returned r0 and returns it unchanged.
+      The call/store/return structure and both literals are preserved.
