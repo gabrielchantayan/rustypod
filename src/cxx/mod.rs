@@ -3,6 +3,7 @@
 //! 0x083c0000-0x083dffff block of osos (~1000 functions), separate from
 //! the ARM ADS C runtime.
 pub mod shared_record_list_owner_construct;
+pub mod shared_record_list_owner_count;
 pub mod vtable_payload_flags_construct;
 pub mod context_tree_construct;
 pub mod form_lookup_context_destruct;
