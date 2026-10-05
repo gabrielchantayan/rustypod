@@ -70,6 +70,32 @@ pub unsafe extern "C" fn strided_array_find_index(this: *const StridedArray, key
     }
 }
 
+/// Strided-array membership predicate — retailOS `FUN_0819e3e4` at
+/// `0x0819e3e4` (24 bytes, next function at `0x0819e3fc`).
+///
+/// Raw words verify two incoming plain BL sites (`0x0829b2f4`,
+/// `0x0829b33c`), zero predicated BL callers, and one outgoing plain BL to
+/// `strided_array_find_index` at `0x082a47b8`. Ignores the caller's first
+/// key, looks up the second key, and returns 0 only for the -1 sentinel,
+/// otherwise 1. The original adds 1 with wrapping arithmetic and normalizes
+/// nonzero to 1; comparing against -1 is equivalent for every i32 result.
+/// No behavioral deviations; host layout follows the existing lookup port.
+///
+/// # Safety
+///
+/// `this` and `key` must satisfy [`strided_array_find_index`]'s contract.
+/// `ignored_key` is never dereferenced and may be NULL.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn strided_array_contains_key(
+    this: *const StridedArray,
+    ignored_key: *const u32,
+    key: *const u32,
+) -> u32 {
+    let _ = ignored_key;
+    (strided_array_find_index(this, key) != -1) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +182,57 @@ mod tests {
         assert_eq!(ZERO_CALLS.load(Ordering::SeqCst), 0);
         assert_eq!(NONZERO_CALLS.load(Ordering::SeqCst), 1);
         assert_eq!(FORWARDED_KEY.load(Ordering::SeqCst), &key as *const u32 as usize);
+    }
+
+    unsafe extern "C" fn select_zero(_: *const StridedArray) -> i32 {
+        0
+    }
+
+    unsafe extern "C" fn select_nonzero(_: *const StridedArray) -> i32 {
+        -3
+    }
+
+    unsafe extern "C" fn lookup_result(_: *const StridedArray, key: *const u32) -> i32 {
+        key.read() as i32
+    }
+
+    unsafe extern "C" fn forbidden_lookup(_: *const StridedArray, _: *const u32) -> i32 {
+        panic!("wrong lookup slot")
+    }
+
+    #[test]
+    fn membership_normalizes_only_minus_one_to_false() {
+        for nonzero in [false, true] {
+            let vtable = StridedArrayFindIndexVtable {
+                slots_before_predicate: [0; 25],
+                select_lookup: if nonzero { select_nonzero } else { select_zero },
+                slots_before_zero_lookup: [0; 9],
+                zero_lookup: if nonzero { forbidden_lookup } else { lookup_result },
+                slot_90: 0,
+                nonzero_lookup: if nonzero { lookup_result } else { forbidden_lookup },
+            };
+            let array = StridedArray { vtable: &vtable as *const _ as *const _, count: 1, storage: 0 };
+            let ignored_key = u32::MAX;
+            for result in [i32::MIN, -2, -1, 0, 1, i32::MAX] {
+                let key = result as u32;
+                let expected = u32::from(result.wrapping_add(1) != 0);
+                assert_eq!(
+                    unsafe { strided_array_contains_key(&array, &ignored_key, &key) },
+                    expected,
+                    "selector={nonzero}, lookup result={result}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn membership_rejects_nonpositive_count_without_touching_keys_or_vtable() {
+        for count in [i32::MIN, -1, 0] {
+            let array = StridedArray { vtable: core::ptr::null(), count, storage: 0 };
+            assert_eq!(
+                unsafe { strided_array_contains_key(&array, core::ptr::null(), core::ptr::null()) },
+                0,
+            );
+        }
     }
 }
