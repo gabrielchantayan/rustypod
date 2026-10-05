@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818bf34
+    ghidra: FUN_0818bf34
+    name: string_child_owner_reset
+    size: 92
+    sig: "void string_child_owner_reset(StringChildOwner *owner)"
+    module: app/string_child_owner_reset
+    status: ported
+    vars:
+      param_1/r4: owner
+      r5: zero
+      "[owner + 0x1c]": string
+      "[owner + 0x30]": derived_first
+      "[owner + 0x34]": derived_second
+    notes: >-
+      Raw osos.dec establishes 88 executable bytes and a four-byte empty
+      string literal, ending at the next real prologue at 0x0818bf90.
+      Whole-image aligned A32 scan finds two inbound plain BLs at
+      0x0818bf1c and 0x0818cb1c, no predicated BLs. Body contains one
+      plain BL to string_object_assign_cstr at 0x0827639c, no predicated
+      BLs, and two BLXNE calls to child vtable slot +4. Assign empty string,
+      zero state +0x28 and flag byte +0x2c, release and clear children
+      +0x30 then +0x34, and zero +0x38. Constant-empty assignment lowers
+      directly to the verified string vtable slot +0xc because the existing
+      assignment port has an unwired no-op clear boundary. repr(C) pointers
+      widen on hosts. Destructor caller now uses the reset port directly.
+      Host suite passed 14324 tests; ARM release build passed. Isolated
+      host runtime smoke passed repeated reset. match.py exits 1: LLVM uses
+      three BLX calls and branches, preserving target fields and callbacks.
   - address: 0x0818cb08
     ghidra: FUN_0818cb08
     name: string_child_owner_destruct
@@ -39,8 +67,8 @@ functions:
       vtable 0x089a6044 at +0x1c; call ported string_object_release_payload
       at 0x08275d74; tail-call verified base destructor 0x081d63c4, which
       installs 0x0898e004, releases +0x18 then +0x14, and returns owner.
-      Unported reset/base retain firmware-address seams; repr(C) pointers
-      widen on hosts. Concrete class identity remains unknown. Host suite
+      Reset now uses the port; base retains a firmware-address seam. repr(C)
+      pointers widen on hosts. Concrete class identity remains unknown. Host suite
       passed 14317 tests. ARM build passed. match.py exits 1: LLVM uses
       BLX/BX address seams and a larger frame, preserving store/call order
       and +0x1c offset; default comparison includes the next function.
