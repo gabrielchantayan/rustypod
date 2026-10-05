@@ -242,6 +242,7 @@ pub mod class_8780_dispatch_state;
 pub mod class_9300_remove_inactive_items;
 pub mod class_9000_remove_inactive_entries;
 pub mod selection_mode_validate;
+pub mod find_selection_mode;
 pub mod mov_chain_timeout_prepare;
 pub mod class_8900;
 pub mod class_8900_apply_directory_transition;
