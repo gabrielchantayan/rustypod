@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // Dedicated to mov/chain_record_word's 0x80000-byte record fixture.
+    pub const MOV_CHAIN_TABLE_LOAD_RECORD_WORD: usize = 0x4295_0000;
     // Dedicated to util/owned_payload_list_remove's target-width list fixture.
     pub const OWNED_PAYLOAD_LIST_REMOVE: usize = 0x41e6_0000;
     pub const EMBEDDED_ARRAY_WORD_AT: usize = 0x4294_0000;
