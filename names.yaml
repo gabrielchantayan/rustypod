@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d2bbc
+    ghidra: FUN_081d2bbc
+    name: demo_mode_marker_refresh
+    size: 216
+    sig: "void demo_mode_marker_refresh(void)"
+    module: app/demo_mode_marker_refresh
+    status: ported
+    renames:
+      local_28: silent_marker_path
+      local_14: demo_marker_path
+      iVar4: query_status
+      iVar1: device_flags
+      DAT_081d2c90: device_flags (0x089caf44)
+      FUN_080f4aa8: path_exists
+    notes: >-
+      Raw A32 words establish extent [0x081d2bbc,0x081d2c94): 192
+      instruction bytes and 24 literal bytes before the next real entry.
+      Two outbound plain BLs at 0x081d2c44 and 0x081d2c60 both target
+      the existing path_exists port at 0x080f4aa8; zero predicated BLs.
+      Two inbound plain BLs at 0x081a5c64 and 0x081d3074, zero predicated.
+      Word-shift decoding yields Demo Mode Silent and Demo Mode, the latter
+      terminated by STRB at sp+29. Query the silent marker with flags zero,
+      store its low result byte at device_flags+0x19, and query the ordinary
+      marker only if the full silent result is zero. Store the boolean OR
+      of full results at +0x18. Constant decoding and stack copies are
+      intentionally folded into static NUL-terminated literals. Host tests
+      cover absence, fallback, high-bit-only and nonboolean results,
+      short circuiting, intermediate store order, and adjacent-byte
+      preservation. Standalone host smoke exercises fallback and high-bit
+      silent status. Release ARM build passes. match.py exits 1 with the
+      expected structural diff: decoding loops and stack copies disappear,
+      while two R_ARM_CALL path_exists relocations, full-word comparisons,
+      short circuiting and ordered byte stores remain. LLVM biases the
+      global pointer to 0x089caf5c and uses store offsets 1 and 0.
   - address: 0x081e6c38
     ghidra: FUN_081e6c38
     name: owned_payload_list_get
