@@ -10932,25 +10932,53 @@ functions:
       param_1_plus_0x10: enabled
       r4: index
       vtable_plus_0x40/r2: cell_at
-      returned_cell_plus_0x00/r0: allocation_size
-      FUN_081991bc: opaque_header_allocate
+      returned_cell_plus_0x00/r0: string_pair
+      FUN_081991bc: string_pair_destroy
       FUN_082aad24: operator_delete
     notes: >-
       Raw osos.dec establishes the exact 88-byte extent: twenty-two A32 words
       from push {r4,r5,r6,lr} at 0x083d0738 through pop {r4,r5,r6,pc} at
       0x083d078c; the push at 0x083d0790 begins the next independently entered
       function. The body has two unconditional plain direct BL calls, at
-      0x083d0774 to still-unidentified FUN_081991bc and at 0x083d0778 to
+      0x083d0778 to string_pair_destroy/FUN_081991bc and at 0x083d077c to
       operator_delete/FUN_082aad24; it has zero predicated direct BL calls and
-      one unconditional virtual BLX through vtable+0x40 at 0x083d0764. Raw
+      one unconditional virtual BLX through vtable+0x40 at 0x083d0768. Raw
       whole-image branch decoding finds two inbound plain BL call sites,
       0x083d07e8 and 0x083d0820, and no predicated BL callers. If enabled is
       nonzero, it walks signed indices [0,count), reads each cell through that
       virtual accessor, and for the first cell with a nonzero first word calls
-      FUN_081991bc with that word, then tag-2-deletes the returned allocation.
-      The allocation helper's concrete identity is unrecovered, so the target
-      port calls its verified address and host tests inject an ABI-identical
-      seam; the seam name records only the raw header-allocation behavior.
+      string_pair_destroy with that pointer, then tag-2-deletes its storage.
+      The former opaque_header_allocate seam was misidentified: raw words
+      prove a two-string non-deleting destructor, now called directly.
+      Host collection cell pointers widen with native pointers.
+  - address: 0x081991bc
+    ghidra: FUN_081991bc
+    name: string_pair_destroy
+    size: 40
+    sig: "StringObjectPair *string_pair_destroy(StringObjectPair *this)"
+    module: cxx/string_pair_destroy
+    status: ported
+    renames:
+      param_1/r0: this
+      puVar2/r4: this
+      FUN_08277484: string_object_destroy
+      FUN_08275d74: string_object_release_payload
+      DAT_081991e4: STRING_OBJECT_VTABLE
+    notes: >-
+      Raw osos.dec establishes 40 code bytes [0x081991bc,0x081991e4),
+      followed by the vtable literal 0x089a6044 at 0x081991e4; the next
+      real function begins with cmp r1,#14 at 0x081991e8 (44-byte extent
+      including the pool). Two outbound plain BLs at 0x081991c4 and
+      0x081991d8, zero predicated BLs. Independently scanned inbound BLs
+      are 0x083d0778 and 0x083d07c8, both plain, none predicated.
+      Destroy the second StringObject at +8, derive this from its return
+      minus 8, plant the leading StringObject vtable, release its payload,
+      and return this without deleting storage or NULL-guarding this.
+      Both callees are already ported; no new callee seam. Host repr(C)
+      pairs widen with StringObject pointers; ARM layout retains +8.
+      match.py shows the same two calls, vtable write and pointer return;
+      LLVM retains this in r4 rather than subtracting from the known
+      identity return, and adds a frame-pointer prologue.
   # --- opaque observable-array pre-destruction ---
   - address: 0x083d0834
     ghidra: FUN_083d0834
