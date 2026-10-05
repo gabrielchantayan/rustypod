@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e2f38
+    ghidra: FUN_081e2f38
+    name: iap_command_3_request
+    size: 168
+    sig: "u32 iap_command_3_request(u8 *context, u32 index)"
+    module: app/iap_command_3_request
+    status: ported
+    renames:
+      param_1/r4: context
+      param_2: index
+      context+0x2d0: service_selector
+      context+0x2d4: packet_owner
+      context+0x2e1: retry_count
+      DAT_081e2fd8: index_state_global_089cca14
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_08138d8c: service_handler_state_is_ready
+      FUN_080f6da0: iap_packet_create
+      FUN_081e2ff4: complete_iap_packet_and_schedule_event
+    notes: >-
+      Raw A32 words establish [0x081e2f38,0x081e2fe0): 160 code bytes
+      followed by literals 0x089cca14 and 3000. The next independent
+      function starts mov r0,1; strb r0,[r1]. Four outbound plain BLs,
+      zero predicated BLs. Two inbound plain BLs at 0x081e25d0 and
+      0x081e2924, zero predicated inbound BLs. Return 11 when owner is
+      absent, retries exceed three, or service is unready; return 9
+      when the low index byte is not below the global count. Reload
+      owner after readiness, create lingo-8 command-3 with one payload
+      byte, return 28 on allocation failure, save index at global+2,
+      then complete with state zero and 3000 ms delay. All callees use
+      existing Rust ports; no new seam. Host global fixture substitutes
+      for the literal. Unused fourth completion argument is zero instead
+      of residual r3. Tests cover rejection precedence, retry boundary,
+      readiness, zero count, low-byte truncation, and untouched neighbors.
+      Host suite and ARM release build pass. match.py prints a structural
+      diff (exit 1): LLVM expands predication into branches and adds frame
+      setup, preserving statuses, payload, global write and completion.
   - address: 0x081d0f74
     ghidra: FUN_081d0f74
     name: timed_label_append_lap
