@@ -41946,6 +41946,30 @@ functions:
       Rust retains ordered volatile target-width stores; its range loop
       deliberately replaces the retail conditional branch-with-link back edge.
 
+  - address: 0x081c1ee0
+    ghidra: FUN_081c1ee0
+    name: track_sample_count
+    size: 28
+    sig: "u32 track_sample_count(const TrackListProvider *provider, i16 selector)"
+    module: app/track_sample_count
+    status: ported
+    vars: {param_1: provider, param_2: selector}
+    notes: >-
+      Raw extent is [0x081c1ee0,0x081c1efc), not Ghidra's 56 bytes:
+      BX LR ends the wrapper and PUSH at 0x081c1efc starts the next function.
+      Whole-image ARM word scan found two plain inbound BLs at 0x082842c0
+      and 0x082843a8, zero predicated inbound BLs, and zero outbound BLs.
+      Reads provider +0x1b0, sign-extends the selector, and conditionally
+      tail-branches to 0x081c8a04. That raw helper calls the already ported
+      list_find_by_id16 at 0x081c8a84 and returns the sample count at
+      *(track +0x7c) +4; empty or missing track returns zero. Callers
+      allocate and index 0x50-byte records using this count. Selectors 0
+      and -1 fall back to the head on a miss; other negative selectors
+      cannot match u16 IDs. Rust integrates the verified tail helper and
+      reuses the lookup; LLVM inlines the search. Native pointer layouts
+      widen host fixtures, with target offsets statically asserted.
+      No provider or selected sample-table null checks are added.
+
   - address: 0x081c8a84
     ghidra: FUN_081c8a84
     name: list_find_by_id16
