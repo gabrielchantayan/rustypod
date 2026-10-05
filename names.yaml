@@ -217622,3 +217622,41 @@ functions:
       last-element sentinel, index subtraction and output addition wrapping.
       Release ARM match has identical eleven instructions except the BL
       relocation to the ported callee. No device execution performed.
+
+  - address: 0x081c832c
+    ghidra: FUN_081c832c
+    name: plist_document_destroy
+    size: 12
+    sig: "PlistDocument *plist_document_destroy(PlistDocument *document)"
+    module: fp/fp_misc
+    status: ported
+    vars:
+      param_1: document
+    renames:
+      FUN_0825c790: plist_node_destroy
+    notes: >-
+      Raw words e3a02000 e5c0202c ea025115 cover exactly 12 bytes;
+      the next real function at 0x081c8338 begins with push {r4,r5,lr}.
+      Whole-image aligned ARM decoding finds two incoming plain BL sites,
+      0x080ab284 and 0x080ab4c0, zero predicated BLs and no incoming B.
+      There are zero outgoing BLs; the final unconditional B at 0x081c8334
+      targets the already-ported plist_node_destroy at 0x0825c790.
+      Clear the embedded handle active byte at +0x2c, then destroy the
+      root node and return this without freeing the outer object.
+      Constructor FUN_081c82bc initializes the root and the embedded state
+      at +0x28; FUN_081676ec and FUN_081676fc establish the state byte
+      initialization and destruction. Ghidra expands the tail callee into
+      its C body; that expansion is not this function's true extent.
+      PlistDocument uses repr(C) with the existing PlistNode, a u32 handle
+      and u8 active field; native host pointers widen the root deliberately.
+      A target-only offset assertion verifies active at +0x2c. Host tests
+      cover zero and noncanonical active bytes, preserved handle/root kind
+      and this pointer, plus owned companion and attribute-vector teardown.
+      Host suite passes 14187 tests. Release ARM build succeeds; match.py
+      shows six instructions instead of three due to LLVM's balanced frame
+      setup/teardown and a different zero register. The byte store remains
+      at +0x2c and the final B relocation names plist_node_destroy.
+      A throwaway A32 interpreter executes raw and compiled wrapper words
+      for active values 0, 1 and 255, checking unchanged neighboring bytes,
+      this/SP/LR preservation and the verified tail seam; callee behavior
+      is exercised by host tests. No device execution performed.
