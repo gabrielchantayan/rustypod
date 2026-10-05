@@ -18,17 +18,17 @@
 //! # Algorithm
 //!
 //! Return `-1` when the record source's provider word at `+0x04` is null.
-//! Otherwise tail-transfer to the unported `FUN_081c1cdc`, which raw code and
-//! its decompilation establish as loading the signed entry count from
-//! `provider[0x1c] + 4`.
+//! Otherwise tail-transfer to `provider_entry_count`, which loads the signed
+//! entry count from the state named by the target word at provider+0x1c.
 //!
 //! # Deliberate deviations
 //!
-//! The target tail branch is represented by its verified three-load result
-//! rather than inventing a Rust seam for the still-unnamed `FUN_081c1cdc`.
+//! None: the shared provider accessor preserves the verified tail operation.
 
 const PROVIDER_OFFSET: usize = 0x04;
+#[cfg(test)]
 const PROVIDER_COUNT_STATE_OFFSET: usize = 0x1c;
+#[cfg(test)]
 const COUNT_OFFSET: usize = 0x04;
 
 /// Returns a record source's signed entry count, or `-1` with no provider.
@@ -47,16 +47,7 @@ pub unsafe extern "C" fn opaque_record_source_entry_count(source: *const u8) -> 
         return -1;
     }
 
-    let count_state = unsafe {
-        ((provider as usize).wrapping_add(PROVIDER_COUNT_STATE_OFFSET) as *const u8)
-            .cast::<u32>()
-            .read()
-    };
-    unsafe {
-        ((count_state as usize).wrapping_add(COUNT_OFFSET) as *const u8)
-            .cast::<i32>()
-            .read()
-    }
+    super::provider_entry_count::provider_entry_count(provider as usize as *const u8)
 }
 
 #[cfg(test)]
