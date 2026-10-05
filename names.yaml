@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818af74
+    ghidra: FUN_0818af74
+    name: block_manager_secondary_mutex_lock
+    size: 8
+    sig: "u32 block_manager_secondary_mutex_lock(u8 *block_manager)"
+    module: heap/block_manager_secondary_mutex_lock
+    status: ported
+    args:
+      r0: block_manager
+    locals:
+      FUN_08261e20: posix_mutex_lock_veneer_a
+      FUN_082e8390: posix_mutex_lock
+    notes: >-
+      Raw extent [0x0818af74,0x0818af7c) is 8 bytes; next entry starts
+      with e92d41ff push. Words e2800f59 ea035ba8 add 0x164 to r0 and
+      tail-branch to 0x08261e20. Whole-image aligned ARM BL decoding:
+      two plain incoming BLs at 0x08207c84 and 0x08207d9c, zero
+      predicated incoming BLs, zero internal BLs. Veneer ea02195a
+      branches to the already mapped posix_mutex_lock at 0x082e8390.
+      Returns lock status unchanged; no object-pointer validation.
+      Callers traverse manager records under this secondary mutex.
+      Deliberately reuse canonical lock and its documented kernel seams.
+      Tests cover failed acquisition preserving ownership, successful
+      acquisition, recursion, 0xfffe/0xffff overflow, error-check deadlock,
+      and untouched surrounding storage. Host suite: 14340 passed.
+      ARM release build passed. match.py exits 1: two original versus
+      five Rust instructions; add r0,#356 and tail branch retained,
+      with LLVM frame setup/teardown and canonical-lock relocation.
+      Standalone cfg(test) real-crate rlib smoke verified acquisition,
+      recursive acquisition and two releases. Non-test host compilation
+      encounters six existing unresolved helpers. No device execution.
   - address: 0x0818b32c
     ghidra: FUN_0818b32c
     name: context_list_owner_construct

@@ -10,6 +10,7 @@ pub mod deque_push_front_elem4;
 pub mod block_mgr;
 pub mod block_manager_mutex_lock;
 pub mod block_manager_mutex_unlock;
+pub mod block_manager_secondary_mutex_lock;
 pub mod block_manager_secondary_mutex_unlock;
 pub mod block_region;
 pub mod client_commit;
