@@ -55777,6 +55777,30 @@ functions:
       free_wrapper lazy-init + HEAP_OPS dispatch standing in for the
       original's bl 0x080e7970 (the documented deviation).
 
+  - address: 0x0819e3e4
+    ghidra: FUN_0819e3e4
+    name: strided_array_contains_key
+    size: 24
+    sig: "u32 strided_array_contains_key(const StridedArray *this, const u32 *ignored_key, const u32 *key)"
+    module: cxx/strided_array_find_index
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: ignored_key
+      param_3/r2: key
+    notes: >-
+      EXTENT - six raw ARM words from push {r4,lr} at 0x0819e3e4
+      through pop {r4,pc} at 0x0819e3f8; next real function begins
+      with push {r4,r5,lr} at 0x0819e3fc. CALL SITES - independently
+      decoded raw firmware: two incoming plain BL sites at 0x0829b2f4
+      and 0x0829b33c, zero predicated BL callers. One outgoing plain
+      BL at 0x0819e3ec calls the already ported strided_array_find_index
+      at 0x082a47b8. BODY - discard r1, pass r2 as lookup key, return
+      zero only for -1 and one for every other result. No behavioral
+      deviations; comparison replaces wrapping adds/normalization.
+      match.py shows the same argument move, BL, sentinel normalization,
+      and return; LLVM adds an fp frame and uses mvn/subs instead of adds.
+
   - address: 0x082a47b8
     ghidra: FUN_082a47b8
     name: strided_array_find_index
