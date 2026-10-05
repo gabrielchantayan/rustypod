@@ -219025,3 +219025,32 @@ functions:
       cursor seams with BLX, and reuses the constructor's known return pointer;
       both early exits, allocation size, post-allocation kind read and signed
       key halfword preparation remain intact.
+
+  - address: 0x081b11b8
+    ghidra: FUN_081b11b8
+    name: linked_node_status_three
+    size: 12
+    sig: "void linked_node_status_three(u32 context, u32 root)"
+    module: app/linked_node_status_set
+    status: ported
+    renames:
+      param_1/r0: context (ignored)
+      param_2/r1: root
+      FUN_081f507c: linked_node_status_set
+    notes: >-
+      Raw A32 words e1a00001 e3a01003 ea010fad establish the exact
+      12-byte extent 0x081b11b8..0x081b11c3; the independent status-2
+      wrapper begins at 0x081b11c4. Whole-image word decoding verifies
+      two inbound plain BL calls at 0x08206f8c and 0x082ca39c, zero
+      predicated BL calls, and zero outbound BL calls. Moves the second
+      argument to r0, selects status 3, and tail-branches to the existing
+      port at 0x081f507c. Marks the null-terminated or root-terminated
+      intrusive chain and clears the root owner's +0xac and +0x90 words
+      when present. Context is unused; no semantic deviations or new
+      firmware seams. Host tests exercise both chain terminations, optional
+      owner, ignored context, and untouched neighboring fields. All 14250
+      host tests and the ARM release build pass. A standalone smoke
+      observes a marked circular chain and cleared owner words. match.py
+      exits 1: LLVM adds a balanced frame setup/teardown before the same
+      argument moves and tail branch. R_ARM_JUMP24 resolves that branch
+      to linked_node_status_set; the wrapper remains a distinct symbol.
