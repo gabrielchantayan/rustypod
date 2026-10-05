@@ -52,16 +52,12 @@
 //!   vtable reuses the derived class's [`PoolBaseVtable`] type because
 //!   that is the type of the field it is stored in.
 //! - **Ops table** ([`POOL_CLIENT_OPS`], house pattern): the mutex ctor
-//!   (0x082621b0), the node ctor (0x081eff0c), the client ctor
-//!   (0x081e6b34) and the static-init guard pair
-//!   (0x082ab31c/0x082ab338) are unported and dispatch indirectly. The
-//!   guard defaults reproduce their originals exactly (they are five
-//!   instructions between them: acquire claims a zero word and reports
-//!   1, release is a bare `mov pc, lr` — ADS's single-threaded guard),
-//!   and the node ctor default reproduces everything but the
-//!   unrecoverable vtable pointer. The client ctor defaults to the
-//!   no-block-manager answer (NULL), which is what makes
-//!   `block_deque_fill`'s gate refuse without a manager. The
+//!   (0x082621b0), node ctor (0x081eff0c), and static-init guard pair
+//!   (0x082ab31c/0x082ab338) dispatch indirectly. The guard defaults
+//!   reproduce their originals; the mutex uses the pre-kernel lock path,
+//!   and the node constructor omits the unrecoverable vtable pointer.
+//!   The client constructor is the real `block_manager_client_construct`
+//!   port, including its resident resource-execution worker. The
 //!   registration call (0x081eff38) is the real port
 //!   (heap/client_register.rs) — kept a slot only so host tests can
 //!   observe it, like `mailbox_slot_create` and `client_alloc`; its
@@ -179,7 +175,7 @@ pub struct PoolClientOps {
     /// (`veneers::operator_new`, real port).
     pub client_alloc: unsafe extern "C" fn(size: usize) -> *mut u8,
     /// Block-manager client ctor @ 0x081e6b34 `(storage, name)`.
-    /// Returns the constructed client (NULL with no block manager).
+    /// Returns storage after constructing the client; no NULL guard.
     pub client_construct:
         unsafe extern "C" fn(storage: *mut u8, name: *const u8) -> *mut u8,
     /// Client registration @ 0x081eff38 `(this)`: installs the
@@ -217,11 +213,6 @@ unsafe extern "C" fn default_node_construct(
     node
 }
 
-/// Default client ctor: no block manager, so nothing can be
-/// constructed — the state that makes `block_deque_fill` refuse.
-unsafe extern "C" fn stub_client_construct(_storage: *mut u8, _name: *const u8) -> *mut u8 {
-    core::ptr::null_mut()
-}
 
 /// Default guard acquire — the original @ 0x082ab31c verbatim.
 unsafe extern "C" fn guard_acquire(guard: *mut usize) -> i32 {
@@ -243,7 +234,7 @@ pub(crate) const DEFAULT_POOL_CLIENT_OPS: PoolClientOps = PoolClientOps {
     mailbox_slot_create: crate::kernel::kobj::mailbox_slot_create,
     node_construct: default_node_construct,
     client_alloc: crate::heap::veneers::operator_new,
-    client_construct: stub_client_construct,
+    client_construct: crate::heap::client_construct::block_manager_client_construct,
     client_register: crate::heap::client_register::client_register,
     guard_acquire,
     guard_release,
@@ -759,33 +750,6 @@ mod tests {
         teardown();
     }
 
-    #[test]
-    fn the_wired_defaults_refuse_without_a_block_manager() {
-        let _lock = OPS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            core::ptr::addr_of_mut!(POOL_CLIENT_OPS).write(DEFAULT_POOL_CLIENT_OPS);
-            core::ptr::addr_of_mut!(REGION_MUTEX_OPS).write(DEFAULT_REGION_MUTEX_OPS);
-            core::ptr::addr_of_mut!(SHARED_CLIENT).write(SharedClientSlot {
-                guard: 0,
-                client: core::ptr::null_mut(),
-            });
-            // Private mode so the default path stays off the singleton
-            // (and off the real allocator's guard bookkeeping).
-            let mut base = zeroed_base();
-            let this = &mut *base as *mut PoolBase;
-            (*this).client_shared = 0;
-            (*this).node.vtable = &CLIENT_NODE_VTABLE;
-            (*this).node.name = NAME.as_ptr();
-            // The real `client_alloc` would reach the target-only alloc
-            // engine; the stub client ctor is what decides the verdict,
-            // so keep the allocation on a host buffer.
-            (*core::ptr::addr_of_mut!(POOL_CLIENT_OPS)).client_alloc = mock_alloc;
-
-            assert_eq!(pool_client_attach(this), 0, "no manager, no client");
-            assert!((*this).client_cache.is_null());
-        }
-        teardown();
-    }
 
     #[test]
     fn the_default_node_vtable_names_the_node() {

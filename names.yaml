@@ -29100,6 +29100,34 @@ functions:
       match.py structural: identical field offsets and instruction
       order, ops-table blx in place of bl.
 
+  - address: 0x081e6b34
+    ghidra: FUN_081e6b34
+    name: block_manager_client_construct
+    size: 140
+    sig: "u8 *block_manager_client_construct(u8 *this, const u8 *name)"
+    module: heap/client_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: borrowed_name
+      auStack_34: temporary_ahtp_layout
+      DAT_081e6bbc: resource_operation_0x081dbbd4
+    notes: >-
+      Raw A32 extent 0x081e6b34..0x081e6bc0 contains 136 instruction
+      bytes plus four literal bytes; next function begins with push.
+      Nine outbound plain BLs and zero predicated BLs; two inbound plain
+      BLs at 0x081efd00 and 0x081efd6c. Construct 100-element context-array
+      owner, clear +0x10c, retain name at +0x110, construct mutex +0x114
+      and mutex/context +0x130, clear byte +0x16c. Construct temporary
+      40-byte AHTP layout, measure name, invoke constant-0x52 helper,
+      allocate 12 bytes and execute operation 0x081dbbd4 with client and
+      layout. Store result at +0x10c, destroy layout, return client.
+      Every direct callee reuses an existing port. No string assignment:
+      0x08261da0 is mov r0,#0x52; bx lr. Incidental mutex seeds are zero;
+      host strlen uses the original native pointer. Compiler barrier
+      retains the discarded strlen scan despite LLVM builtin knowledge.
+      Constant return and unobservable temporary tag clear may be elided.
+
   - address: 0x081efc8c
     ghidra: FUN_081efc8c
     name: pool_client_attach
@@ -29132,8 +29160,9 @@ functions:
       now ported, heap/client_register.rs.
       Ghidra's decompile of this one is accurate and agrees. A failed
       singleton is remembered as NULL and never retried (the guard is
-      spent) — reproduced. Still unported block-manager client
-      machinery: ctor 0x081e6b34, reserve
+      spent) — reproduced. Client ctor 0x081e6b34 is now ported in
+      heap/client_construct.rs and wired as the real default. Still
+      unported block-manager client machinery: reserve
       0x081fbe4c, headroom 0x081fc3f4. (Erase
       @ 0x081fc080, commit @ 0x081fc884 and populate @ 0x081fc298 are
       now ported — heap/client_erase.rs, heap/client_commit.rs,
