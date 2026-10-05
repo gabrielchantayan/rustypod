@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c02c0
+    ghidra: FUN_081c02c0
+    name: shared_selector_create
+    size: 176
+    sig: "void shared_selector_create(RefcountedBody **out, const IndexedSharedOwner *owner, u32 selector)"
+    module: app/shared_selector_create
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      param_2/r1/r5: owner
+      param_3/r2/r7: selector
+      owner_plus_4: shared_body
+      FUN_0839f030: refcounted_ptr_construct_slot7
+      FUN_082aadd4: operator_new
+      FUN_0839d198: refcounted_body_attach_slot1
+      FUN_081c0504: resident_selector_wrapper_construct
+      FUN_0839d0e8: refcounted_body_release_dtor_slot1_copy
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_0839d1d4: refcounted_body_release_slot1
+    notes: >-
+      Raw A32 words establish [0x081c02c0,0x081c0370), 176 bytes;
+      the next real function is ldr r0,[r0,#8]; bx lr. Whole-image
+      decoding verifies two inbound plain BLs at 0x08280a1c and
+      0x08280c00, eight outbound plain BLs and two BLNEs. Entry r3
+      is dead. Clear out, allocate 16 bytes, retain owner+4 temporarily,
+      construct the selector wrapper at 0x081c0504, wrap without a mutex,
+      copy its body to out and release both temporaries. The resident
+      constructor retains the source and invokes implementation vtable
+      slot 7 with selector; its concrete class remains unknown. Native
+      host pointers and the resident ABI seam are deliberate deviations.
+      The inline retain uses the equivalent existing attach helper.
+      Host edge tests cover null and wrapping refcounts; executable smoke
+      verifies live wrapper publication at count 1 and final source balance.
+      Required host tests and ARM release build pass. match.py exits 1:
+      LLVM removes the impossible slot-alias guard and calls the attach port.
   - address: 0x081c0378
     ghidra: FUN_081c0378
     name: checked_handle_construct
