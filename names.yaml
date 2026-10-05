@@ -221118,3 +221118,49 @@ functions:
       the same retain/release ordering, slot stores, rank increment,
       scheduler reload and tail insertion. No deliberate target deviations;
       the existing scheduler host model is retained.
+
+  - address: 0x08197670
+    ghidra: FUN_08197670
+    name: image_descriptor_construct
+    size: 108
+    module: app/image_descriptor_construct
+    status: ported
+    sig: "void image_descriptor_construct(ImageDescriptor *dst, u32 width, u32 height, u32 height_bytes, u32 auxiliary_tag, u32 auxiliary_10, u32 auxiliary_14, u32 bit_depth, u32 pixel_format_tag)"
+    vars:
+      param_1: dst
+      param_2: width
+      param_3: height
+      param_4: height_bytes
+      param_5: auxiliary_tag
+      param_6: auxiliary_10
+      param_7: auxiliary_14
+      param_8: bit_depth
+      param_9: pixel_format_tag
+      uVar1: format_2565
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM verifies 27 words, ending with bx lr at 0x081976d8;
+      the next real function starts at 0x081976dc. Full aligned firmware
+      BL decoding finds two plain inbound calls at 0x080fe458 and
+      0x0813e9d0, zero predicated inbound calls. Body contains one blne
+      to the existing heap_panic port at 0x08030f44, no new seam.
+      Callers pass the image-format geometry descriptor by value using
+      r1-r3 and five stack words. Stores three geometry words, one
+      auxiliary halfword, two auxiliary words and bit depth, then maps
+      0x0565 to byte zero and 0x2565 to byte one at +0x1c; every other
+      tag is fatal. Padding +0x0e..0x0f and +0x1d..0x1f is preserved.
+      repr(C) uses only fixed-width fields, preserving target offsets
+      on host. No deliberate behavioral deviations; argument-register
+      stack spills are omitted. Host tests cover both tags, full-width
+      fields, padding and surrounding sentinels, and seven unsupported
+      tags through the complete isolated fatal rundown. Temporary live
+      smoke exercised 220x176 geometry and both flags with preserved
+      padding.
+      Stack halfword arguments are accepted as u32 and explicitly
+      truncated, matching raw ldrh even when caller padding contains
+      nonzero high bits; tests include high-bit-set valid tags.
+      ARM release build succeeds. match.py reports 25 Rust instructions
+      versus 27 stock instructions: register stores coalesce into STM,
+      later field stores reorder without crossing the fatal check,
+      pixel-tag load remains LDRH, and both exact tag comparisons and
+      the final byte store are retained. Structural diff is intentional.

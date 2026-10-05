@@ -1318,7 +1318,7 @@ pub(crate) mod tests {
     static PANIC_ENTRY_STEP: AtomicUsize = AtomicUsize::new(0);
     /// Runs a fatal heap-panic entry in an isolated process and verifies its
     /// `raise(1, 0) -> exit -> terminate(1)` sequence.
-    fn assert_heap_panic_entry_fatal_path(
+    pub(crate) fn assert_heap_panic_entry_fatal_path(
         child_env: &str,
         test_name: &str,
         entry: unsafe extern "C" fn() -> !,
