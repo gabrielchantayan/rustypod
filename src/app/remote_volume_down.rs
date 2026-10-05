@@ -6,23 +6,15 @@
 //! and one BLNE at 0x081ce238. Body: three BL calls and one tail B.
 //! Stops both controller timers, applies the volume decrement using +0xb8,
 //! then reloads +0xb4 to program delay 500 and reloads it again to restart.
-//! No NULL guards. Deliberate deviations: final tail B is a Rust call;
-//! the unported decrement helper at 0x081cfc9c remains a fixed-address seam
-//! on device and an explicitly installed operation on host. Ghidra's body
+//! No NULL guards. Deliberate deviation: final tail B is a Rust call.
+//! The decrement uses the ported remote_position_decrement; its singleton
+//! constructor remains a hook-readiness prerequisite. Ghidra's body
 //! incorrectly includes timer implementation code beyond the true boundary.
 
 use super::controller_timer_pair::stop_controller_timer_pair;
 use crate::drivers::timer::{timer_start_after, timer_restart};
 
-type DecrementVolume = unsafe extern "C" fn(*mut u8, u32);
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_decrement(_controller: *mut u8, _step: u32) {
-    panic!("install remote volume decrement operation before host use")
-}
-
-#[cfg(not(target_os = "none"))]
-pub static mut REMOTE_VOLUME_DECREMENT: DecrementVolume = missing_decrement;
+use super::remote_position_decrement::remote_position_decrement;
 
 /// Handles a remote volume-down press and arms its repeat timer.
 ///
@@ -34,11 +26,7 @@ pub static mut REMOTE_VOLUME_DECREMENT: DecrementVolume = missing_decrement;
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn remote_volume_down(controller: *mut u8) {
     stop_controller_timer_pair(controller);
-    #[cfg(target_os = "none")]
-    let decrement: DecrementVolume = core::mem::transmute(0x081c_fc9cusize);
-    #[cfg(not(target_os = "none"))]
-    let decrement = core::ptr::addr_of!(REMOTE_VOLUME_DECREMENT).read_volatile();
-    decrement(controller, controller.add(0xb8).cast::<u32>().read());
+    remote_position_decrement(controller, controller.add(0xb8).cast::<u32>().read());
     timer_start_after(controller.add(0xb4).cast::<u32>().read() as usize as *mut u8, 500);
     timer_restart(controller.add(0xb4).cast::<u32>().read() as usize as *mut u8);
 }
@@ -49,17 +37,25 @@ mod tests {
     use crate::drivers::timer::{TIMER_OPS, TIMER_STATE_RUNNING, TIMER_STATE_STOPPED};
     use crate::testing::{hints, try_map_u32_slab, note_missing_u32_fixture, TIMER_OPS_TEST_LOCK};
     use core::ptr;
+    use super::super::remote_position_decrement::{REMOTE_POSITION_GETTER, TEST_LOCK};
+    use super::super::volume_controller_adjust_position::{PositionInterface, PositionVtable};
+    static mut CONTROLLER: *mut u8 = core::ptr::null_mut();
+    static mut INTERFACE: *mut PositionInterface = core::ptr::null_mut();
+    unsafe extern "C" fn get_interface() -> *mut PositionInterface { INTERFACE }
 
     unsafe extern "C" fn trace(_timer: *mut u8) {}
     unsafe extern "C" fn arm(_timer: *mut u8) {}
-    unsafe extern "C" fn decrement(controller: *mut u8, step: u32) {
-        // The real callee can change the controller: timer loads must not
-        // be hoisted across it. Assert both real timer stops happened first.
-        let base = controller;
+    unsafe extern "C" fn query(_interface: *mut PositionInterface) -> u32 {
+        let base = CONTROLLER;
         assert_eq!(base.add(0x220).cast::<u32>().read(), TIMER_STATE_STOPPED);
         assert_eq!(base.add(0x320).cast::<u32>().read(), TIMER_STATE_STOPPED);
-        assert_eq!(step, u32::MAX);
         base.add(0xb4).cast::<u32>().write(base.add(0x400) as usize as u32);
+        u32::MAX
+    }
+    unsafe extern "C" fn set(_interface: *mut PositionInterface, position: u32, flag: u32) -> u32 {
+        assert_eq!(position, 1);
+        assert_eq!(flag, 1);
+        0
     }
     unsafe extern "C" fn replace_during_delay_stop(timer: *mut u8) {
         if timer.add(4).cast::<u32>().read() == 23 {
@@ -71,6 +67,7 @@ mod tests {
     #[test]
     fn stops_both_timers_and_reloads_replacements_between_operations() {
         let _guard = TIMER_OPS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _position_guard = TEST_LOCK.lock();
         let Some(base) = try_map_u32_slab(hints::REMOTE_VOLUME_DOWN, 0x1000) else {
             assert!(note_missing_u32_fixture("app/remote_volume_down"));
             return;
@@ -87,19 +84,23 @@ mod tests {
             }
             base.add(0x404).cast::<u32>().write(23);
             let saved_ops = ptr::addr_of!(TIMER_OPS).read();
-            let saved_decrement = ptr::addr_of!(REMOTE_VOLUME_DECREMENT).read();
+            let saved_getter = ptr::addr_of!(REMOTE_POSITION_GETTER).read();
+            let vtable = PositionVtable { unresolved_00_50: [0; 21], set_position: set,
+                unresolved_58: 0, query_position: query, unresolved_60: 0, query_limit: query };
+            let mut interface = PositionInterface { vtable: &vtable };
+            CONTROLLER = base; INTERFACE = &mut interface;
             let mut ops = saved_ops;
             ops.trace_assert = trace;
             ops.arm_timer = arm;
             ptr::addr_of_mut!(TIMER_OPS).write(ops);
-            ptr::addr_of_mut!(REMOTE_VOLUME_DECREMENT).write(decrement);
+            ptr::addr_of_mut!(REMOTE_POSITION_GETTER).write(get_interface);
             // Delay programming stops the loaded timer; that stop replaces
             // +0xb4. Restart must reload rather than reusing that timer.
             ops.trace_assert = replace_during_delay_stop;
             ptr::addr_of_mut!(TIMER_OPS).write(ops);
             remote_volume_down(base);
             ptr::addr_of_mut!(TIMER_OPS).write(saved_ops);
-            ptr::addr_of_mut!(REMOTE_VOLUME_DECREMENT).write(saved_decrement);
+            ptr::addr_of_mut!(REMOTE_POSITION_GETTER).write(saved_getter);
             assert_eq!(base.add(0x404).cast::<u32>().read(), 500);
             assert_eq!(base.add(0x420).cast::<u32>().read(), TIMER_STATE_STOPPED);
             assert_eq!(base.add(0x520).cast::<u32>().read(), TIMER_STATE_RUNNING);

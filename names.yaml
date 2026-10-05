@@ -216608,3 +216608,46 @@ functions:
       reloads, delay 500, running-state store and final arm dispatch remain
       intact. Relocatable BL operands print as zero before linking.
       No device execution is claimed.
+
+  - address: 0x081cfc9c
+    ghidra: FUN_081cfc9c
+    name: remote_position_decrement
+    size: 72
+    sig: "uint32_t remote_position_decrement(void *controller, uint32_t step)"
+    module: app/remote_position_decrement
+    status: ported
+    renames:
+      param_1: controller (unused)
+      param_2: step
+      piVar2: interface
+      uVar3: current
+      uVar1: doubled_step
+      uVar4: position
+      FUN_08160148: lazy_singleton_0x8c
+    notes: >-
+      Raw ARM extent is 0x081cfc9c..0x081cfce4, ending before the next
+      push {r4,lr}. Whole-image branch-word decoding finds two incoming
+      plain BLs at 0x081d04cc and 0x081d06f8, zero predicated BLs and
+      zero direct B tails. Body contains one plain BL, zero predicated
+      BLs, one virtual BLX and a final virtual BX. Obtain the existing
+      0x8c singleton, query slot +0x5c, double step modulo 2^32, clamp
+      unsigned subtraction to zero, reload the vtable and invoke slot
+      +0x54 with flag 1. Slot names record observed position roles only;
+      no concrete class, volume unit or callee identity is invented.
+      Controller is unused; preserve the final dispatch's r0 result.
+      Reuses PositionInterface and its ARM-asserted vtable layout.
+      Host-only getter seam and native-width fixture pointers are deliberate
+      deviations. Target calls the existing singleton port, whose unported
+      constructor remains a hook-readiness prerequisite. The ported remote
+      volume-down caller now invokes this port without its old address seam.
+      Regression covers unsigned clamping, doubled-step overflow, zero
+      steps, high-bit comparisons and vtable replacement during the query.
+      Host test suite and ARM release build pass. Standalone host smoke
+      observes step 2 -> position 5, step 5 -> position 0 and step
+      0x80000000 -> position 9 from current position 9. match.py exits
+      1 with an 18-versus-18-instruction structural diff: LLVM folds
+      doubling into shifted subtraction/comparison and uses movcc rather
+      than movls because equality already subtracts to zero. The singleton
+      BL relocation, query BLX, vtable reload, setter arguments and tail
+      BX remain intact; register allocation and frame-pointer setup differ.
+      No device execution is claimed.
