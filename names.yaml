@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081ba8a4
+    ghidra: FUN_081ba8a4
+    name: line_fold_read
+    size: 140
+    sig: "uint32_t line_fold_read(LineFoldReader *reader, uint16_t *output)"
+    module: util/line_fold_read
+    status: ported
+    renames:
+      param_1/r4: reader
+      param_2/r6: output
+      local_18: character
+      param_3: absent (Ghidra artifact)
+      param_4: absent (Ghidra artifact)
+      reader+0x0c: preserve_whitespace
+      vtable+0x20: slot_20 (unresolved virtual query)
+      vtable+0x08: slot_08 (unresolved virtual operation)
+    notes: >-
+      Raw ARM establishes 140 bytes through the real entry at 0x081ba930.
+      Two inbound plain BLs at 0x081ba89c and 0x081ba978, zero predicated
+      BLs. Body has no direct BLs and three unconditional indirect BLX sites.
+      Query slot +0x20 into a halfword; fail without touching output when
+      its status is zero. Space/tab is copied when byte +0x0c is nonzero;
+      otherwise query again directly into output and normalize the status.
+      Other characters invoke slot +0x08 and return zero. Callers handle
+      LF and CR before this helper. No invented virtual callee identities.
+      Host repr(C) pointers widen deliberately; target layout asserts the
+      three recovered offsets. Halfword temporary replaces stock stack word.
+      All 14193 host tests pass; ARM release build succeeds. match.py shows
+      41 versus 35 instructions: frame setup, reordered blocks and explicit
+      return normalization differ; halfword accesses, flag byte and all
+      three virtual calls retain their recovered offsets. Standalone host
   - address: 0x081ba980
     ghidra: FUN_081ba980
     name: vtable_flag_payload_byte_construct
