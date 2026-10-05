@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0819e354
+    ghidra: FUN_0819e354
+    name: registered_container_view_construct
+    size: 68
+    sig: "ContainerView *registered_container_view_construct(ContainerView *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      r0/r4: view
+      r1: resources
+      r2: controller
+      r3/ip: parent
+      in_stack_00000000: spec
+      local_c: registered_view_pointer
+      FUN_08158778: container_view_construct
+      FUN_0827196c: observable_array_append
+      DAT_0819e390: registered_container_vtable
+      DAT_0819e394: registered_container_array
+    notes: >-
+      Raw extent [0x0819e354,0x0819e398) is 60 code bytes plus two
+      literals (0x0898aca4 vtable and 0x08ae5424 observable array); next
+      independent deleting destructor starts with cmp r0,#0. Two internal
+      plain BLs, zero predicated BLs; whole-image decoding finds two inbound
+      plain BLs at 0x0819e0f8 and 0x0820475c, zero predicated inbound BLs.
+      Five arguments forward unchanged to the existing container constructor.
+      Replace the vtable, append the address of a local pointer to the global
+      array, and return the saved view regardless of append result or element
+      mutation. No extra allocation, NULL guard or new callee seam. Caller
+      allocations are 0xe8 bytes; destructor removes the pointer from the same
+      array before base destruction. Ghidra's zero-argument signature is wrong.
+      Host fixtures replace the fixed array receiver with a native-layout
+      array and use native pointer-valued elements. Host suite passes 14285
+      tests, including config extremes, ordered repeated registrations,
+      vtable visibility and original-pointer return after element mutation.
+      ARM release build passes. match.py exits 1: 19 versus 15 instructions,
+      preserving both calls, stacked spec, vtable store, local pointer append
+      and saved-view return; LLVM adds frame setup and includes both literals.
+      Isolated executable smoke reuses actual constructor and append source
+      with a base-constructor fixture: vtable=0898aca4, config=deadbeef,
+      original view returned after UINT_MAX append result and element mutation.
+      Full non-test host library build is blocked by six existing unresolved
+      callees in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. No device execution.
   - address: 0x081a4554
     ghidra: FUN_081a4554
     name: voice_memo_decimal_split

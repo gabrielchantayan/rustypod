@@ -734,6 +734,49 @@ pub unsafe extern "C" fn container_view_children(view: *mut ContainerView) -> *m
         .cast::<Registry>()
 }
 
+#[cfg(not(target_os = "none"))]
+pub static mut HOST_REGISTERED_CONTAINER_ARRAY: *mut crate::cxx::observable_array::ObservableArray =
+    core::ptr::null_mut();
+
+/// Registered container constructor — `FUN_0819e354` @ `0x0819e354`.
+///
+/// True extent: 68 bytes, [0x0819e354, 0x0819e398), including the vtable
+/// and global-array literals at +0x3c/+0x40. Raw decoding verifies two
+/// internal plain BLs, no predicated BLs; two inbound plain BLs.
+/// Chain the five-argument container constructor, replace its vtable with
+/// 0x0898aca4, append the address of a local view pointer to the observable
+/// array at 0x08ae5424, and return the view regardless of append's result.
+///
+/// Deviations: restore arguments omitted by Ghidra; native host pointer
+/// width is retained in the local element, and tests substitute the global
+/// array receiver using the existing native append model. Both callees are
+/// direct existing ports; no new callee seam or allocation.
+///
+/// # Safety
+/// The base constructor's requirements apply. The global array must be
+/// initialized with callbacks accepting a pointer-valued element.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn registered_container_view_construct(
+    view: *mut ContainerView,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ContainerView {
+    let result = container_view_construct(view, resources, controller, parent, spec);
+    let mut constructed = result;
+    core::ptr::addr_of_mut!((*constructed).vtable).write_volatile(0x0898_aca4);
+    #[cfg(target_os = "none")]
+    let registry = 0x08ae_5424usize as *mut crate::cxx::observable_array::ObservableArray;
+    #[cfg(not(target_os = "none"))]
+    let registry = core::ptr::addr_of!(HOST_REGISTERED_CONTAINER_ARRAY).read();
+    crate::cxx::observable_array::observable_array_append(
+        registry, core::ptr::addr_of_mut!(constructed).cast(),
+    );
+    result
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -981,6 +1024,64 @@ mod tests {
             tail: [0; 0x0c],
             word_58: config,
         }
+    }
+
+    #[test]
+    fn registered_constructor_preserves_existing_entries_and_ignores_append_result() {
+        use crate::cxx::observable_array::{
+            ObservableArray, ObservableArrayAppendHost, ObservableArrayAppendVtable,
+        };
+        #[repr(C)]
+        struct Array {
+            base: ObservableArrayAppendHost,
+            entries: Vec<*mut ContainerView>,
+        }
+        unsafe extern "C" fn deferred(_: *mut ObservableArray) -> u32 { 1 }
+        unsafe extern "C" fn append(
+            array: *mut ObservableArray, index: i32, element: *mut u8,
+        ) -> u32 {
+            assert_eq!(index, 0x7fff_ffff);
+            let view = element.cast::<*mut ContainerView>().read();
+            assert_eq!((*view).vtable, 0x0898_aca4);
+            (*array.cast::<Array>()).entries.push(view);
+            element.cast::<*mut ContainerView>().write(core::ptr::null_mut());
+            0xffff_ffff
+        }
+        unsafe extern "C" fn finish(_: *mut ObservableArray, _: u32) { panic!("deferred") }
+        unsafe extern "C" fn write(_: *mut ObservableArray, _: u32, _: *mut u8) { panic!("deferred") }
+        unsafe extern "C" fn resize(_: *mut ObservableArray, _: i32) { panic!("deferred") }
+        let vtable = ObservableArrayAppendVtable {
+            unresolved_00_1c: [0; 8], append_deferred: append,
+            unresolved_24_5c: [0; 15], append_is_deferred: deferred,
+            unresolved_64_84: [0; 9], append_finish: finish,
+            unresolved_8c_a4: [0; 7], append_write: write,
+            unresolved_ac_b8: [0; 4], append_resize: resize,
+        };
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        let mut first = blank_view();
+        let mut second = blank_view();
+        let mut array = Array {
+            base: ObservableArrayAppendHost { vtable: &vtable, len: 0 },
+            entries: Vec::new(),
+        };
+        unsafe {
+            HOST_REGISTERED_CONTAINER_ARRAY = (&mut array as *mut Array).cast();
+            for (view, config) in [(&mut *first, 0), (&mut *second, u32::MAX)] {
+                let spec = spec(config, 0);
+                let this = view as *mut ContainerView;
+                assert_eq!(registered_container_view_construct(
+                    this, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec,
+                ), this);
+                assert_eq!(view.config, config);
+                assert_eq!(view.word_e4, 0);
+            }
+            HOST_REGISTERED_CONTAINER_ARRAY = core::ptr::null_mut();
+        }
+        assert_eq!(array.entries, std::vec![
+            &mut *first as *mut ContainerView, &mut *second as *mut ContainerView,
+        ]);
     }
 
     /// The struct must reproduce the target's byte offsets — the whole
