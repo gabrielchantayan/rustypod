@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081cd964
+    ghidra: FUN_081cd964
+    name: fifteen_record_slots_clear
+    size: 84
+    sig: "void fifteen_record_slots_clear(SlotRecord **slots)"
+    module: heap/fifteen_record_slots_clear
+    status: ported
+    renames:
+      param_1/r0/r6: slots
+      r4: index
+      r5: record
+      record+8: payload
+      record+12: kind
+      FUN_080e7970: free_wrapper
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x081cd964,0x081cd9b8), 84 bytes, not Ghidra's
+      52-byte noreturn-truncated extent. The next independently entered
+      indexed accessor starts at 0x081cd9b8. One outbound BLNE at 0x081cd990
+      frees payload with tag 0; one plain BL at 0x081cd998 deletes record.
+      Two inbound plain BLs at 0x081cda80 and 0x081cda98, no predicated BLs.
+      Scan fifteen slots in order; free non-NULL payload unless kind is 0x3a,
+      delete each non-NULL record, then clear the table. Tail zero veneer at
+      0x08037db8 points to 0x2200027c, IRAM mirror of ported memzero_aligned.
+      Native repr(C) pointers widen host fixtures; target layout remains +8/+12
+      and 60-byte table. Volatile zero-fill function pointer prevents builtin
+      substitution. Host tests cover all kind bytes, NULL payloads, sparse
+      first/last slots, release order, guard preservation and repeated clear.
+      ARM match with true size reviewed: same loop and ownership branches,
+      existing heap BL targets and indirect zero-fill tail call.
   - address: 0x081e17d4
     ghidra: FUN_081e17d4
     name: dma_array_pair_release
