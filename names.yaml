@@ -220064,3 +220064,42 @@ functions:
       prepare_entry_metadata, shared_payload_select_kind and calendar_schedule
       modules; the smoke archive used their cfg(test) host model instead.
       No device execution was performed.
+
+  - address: 0x0819c550
+    ghidra: FUN_0819c550
+    name: scoped_screen_base_construct
+    size: 88
+    sig: "void *scoped_screen_base_construct(void *storage)"
+    module: app/screen_base
+    status: ported
+    vars:
+      param_1: storage
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_08143990: screen_base_parent_construct_with_next
+      FUN_082840e8: context_scope_init
+      DAT_0819c5a4: scoped_screen_base_vtable_address
+    notes: >-
+      Raw ARM verifies 84 code bytes plus literal 0x0898a9f0 at
+      0x0819c5a4; the next real function begins at 0x0819c5a8.
+      Full-image branch-word decoding finds two unconditional inbound BLs
+      at 0x0812ce8c and 0x081b6630, zero predicated inbound BLs.
+      Three outbound unconditional BLs call the existing ports above.
+      Constructs the parent with task-context field +0x30, initial target
+      zero and create-link one; installs the vtable and constructs a
+      default context scope at +0x18. Clears words +0x2c/+0x30, byte
+      +0x34 and halfwords +0x36/+0x38, leaving +0x35 untouched.
+      Returns this through scope-result minus 0x18; Ghidra's void
+      signature is incorrect. Concrete class identity is unresolved.
+      Deliberate deviations: existing parent/task seams are reused;
+      firmware byte offsets and u32 vtable address are retained on hosts,
+      while the intermediate parent writes a native host vtable pointer.
+      Host tests cover relocated and in-place results, extreme provider
+      words, exact initialized fields, padding and surrounding preservation.
+      All 14295 host tests passed; ARM release build succeeded.
+      match.py exit 1 prints the expected structural diff: LLVM inlines
+      the task getter, retains the parent/scope calls, literal vtable store,
+      all five clearing stores and this return, adds a frame pointer and
+      reorders the independent stores. No device execution was performed.
+      Standalone host-model executable verified returned storage, both
+      descriptor writes, padding preservation and final halfword clearing.
+      The smoke used cfg(test) only on this crate; its source was removed.

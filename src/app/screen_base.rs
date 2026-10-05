@@ -418,6 +418,45 @@ pub unsafe extern "C" fn screen_base_parent_construct_with_next(
     this
 }
 
+/// `scoped_screen_base_construct` — original `FUN_0819c550` @
+/// **0x0819c550**, 88 bytes (84 code + vtable literal at 0x0819c5a4;
+/// next function starts at 0x0819c5a8). Raw-word scanning verifies two
+/// unconditional inbound BL calls, zero predicated BL calls; three outbound BLs.
+///
+/// Constructs the parent with the current task's +0x30 provider, target 0,
+/// and create-link 1. Installs vtable 0x0898a9f0, default-constructs the
+/// embedded context scope at +0x18, then clears words +0x2c/+0x30, byte
+/// +0x34, and halfwords +0x36/+0x38. Returns the scope constructor's
+/// result minus 0x18 (ADS this-return convention, missed by Ghidra).
+/// The concrete class name is unknown; the name describes its base role.
+///
+/// Deliberate deviations: reuse the existing parent and task-context seams;
+/// offsets remain firmware byte offsets on hosts, not host `ScreenBase`
+/// field offsets. The final vtable is a u32 firmware address on both targets.
+///
+/// # Safety
+/// Storage and any relocated parent result must be word-aligned, writable
+/// allocations of at least 0x3a bytes (and host-pointer aligned for the parent
+/// vtable write). The current task context must satisfy the getter's contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_screen_base_construct(storage: *mut u8) -> *mut u8 {
+    let provider = crate::util::context_field::task_ctx_field_0x30();
+    let this = screen_base_parent_construct_with_next(
+        storage.cast(), provider as usize as *mut u8, 0, 1,
+    ).cast::<u8>();
+    this.cast::<u32>().write(0x0898_a9f0);
+    let this = crate::app::context_scope::context_scope_init(
+        this.add(0x18), ptr::null_mut(), 0,
+    ).sub(0x18);
+    this.add(0x2c).cast::<u32>().write(0);
+    this.add(0x30).cast::<u32>().write(0);
+    this.add(0x34).write(0);
+    this.add(0x36).cast::<u16>().write(0);
+    this.add(0x38).cast::<u16>().write(0);
+    this
+}
+
 /// screen_base_construct — original: `FUN_082045ac` @ 0x082045ac
 /// (128 bytes including the two literal-pool words; **16 `bl` call
 /// sites**, binary-scanned).
@@ -686,6 +725,60 @@ mod tests {
                     ptr::addr_of_mut!(SCREEN_BASE_PARENT_CONSTRUCT_WITH_NEXT),
                     self.prior,
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn scoped_constructor_initializes_exact_fields_after_parent_relocation() {
+        let _ctx_lock = TASK_CTX_BLOCK_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _parent_lock = PARENT_CONSTRUCT_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        static mut CONTEXT: [u32; 13] = [0; 13];
+        unsafe extern "C" fn context() -> *mut u8 {
+            ptr::addr_of_mut!(CONTEXT).cast()
+        }
+        struct ContextGuard(unsafe extern "C" fn() -> *mut u8);
+        impl Drop for ContextGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    ptr::addr_of_mut!(crate::util::context_field::CURRENT_TASK_CTX_BLOCK)
+                        .write_volatile(self.0);
+                }
+            }
+        }
+        let slot = ptr::addr_of_mut!(crate::util::context_field::CURRENT_TASK_CTX_BLOCK);
+        let _context_guard = unsafe {
+            let prior = slot.read_volatile();
+            slot.write_volatile(context);
+            ContextGuard(prior)
+        };
+        for provider in [0, 1, 0x8000_0000, u32::MAX] {
+            for relocate in [false, true] {
+                // Eight-byte alignment supports the host parent's pointer write.
+                let mut storage = [0xa5a5_a5a5_a5a5_a5a5u64; 16];
+                let mut relocated = storage;
+                let incoming = storage.as_mut_ptr().cast::<u8>();
+                let expected = if relocate { relocated.as_mut_ptr().cast() } else { incoming };
+                let _parent = ParentConstructGuard::install(expected.cast());
+                unsafe {
+                    CONTEXT[12] = provider;
+                    assert_eq!(scoped_screen_base_construct(incoming), expected);
+                    let bytes = core::slice::from_raw_parts(expected, 128);
+                    assert_eq!(&bytes[..4], &0x0898_a9f0u32.to_le_bytes());
+                    assert_eq!(&bytes[8..0x18], &[0xa5; 16]);
+                    assert_eq!(&bytes[0x18..0x1c], &0x089a_6600u32.to_le_bytes());
+                    assert_eq!(&bytes[0x1c..0x29], &[0; 13]);
+                    assert_eq!(&bytes[0x29..0x2c], &[0xa5; 3]);
+                    assert_eq!(&bytes[0x2c..0x35], &[0; 9]);
+                    assert_eq!(bytes[0x35], 0xa5, "padding byte is not initialized");
+                    assert_eq!(&bytes[0x36..0x3a], &[0; 4]);
+                    assert_eq!(&bytes[0x3a..], &[0xa5; 128 - 0x3a]);
+                    if relocate {
+                        assert_eq!(storage, [0xa5a5_a5a5_a5a5_a5a5; 16]);
+                    }
+                    assert_eq!(PARENT_CONSTRUCT_CALL,
+                        Some((incoming.cast(), provider as usize as *mut u8, 0, 1)));
+                }
             }
         }
     }
