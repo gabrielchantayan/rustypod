@@ -218462,3 +218462,33 @@ functions:
       the four-queue loop, keeps all conditional dispatches and post-call
       position copies, and uses BLX for the verified firmware dispatch.
       Guard and timer-clear ordering remain intact; panic uses a cold branch.
+
+  - address: 0x081b6f94
+    ghidra: FUN_081b6f94
+    name: resource_provider_update_refreshed
+    size: 32
+    sig: "void resource_provider_update_refreshed(u8 *provider)"
+    module: app/resource_provider_update_refreshed
+    status: ported
+    renames:
+      param_1/r0: provider
+      cVar1/r1: refreshed
+      bVar2: first_flag_nonzero
+    notes: >-
+      Raw words establish 0x081b6f94..0x081b6fb4, eight A32 instructions,
+      ending in bx lr at 0x081b6fb0 before the next independent push.
+      Full-image aligned BL decoding finds two plain inbound calls at
+      0x0822e058 and 0x0822e080, zero predicated inbound calls, and zero
+      outbound calls. Writes provider byte +0xeb as the normalized conjunction
+      of nonzero bytes +0xe8 and +0xe9; the second read occurs only when the
+      first byte is nonzero. No behavioral deviations; volatile byte accesses
+      preserve conditional reads and byte-store width. Original r0 remains
+      unchanged but callers do not consume it as a result. Existing ported
+      view_event_prepare_resource_provider now calls this export instead of
+      duplicating the implementation. Exhaustive host coverage checks all
+      65536 byte pairs, stale-state clearing, and all neighboring bytes.
+      Host suite passes 14222 tests; ARM release build passes. Standalone
+      smoke observes false/true/false transitions and unchanged +0xea.
+      match.py exits 1: eight original versus thirteen Rust instructions;
+      LLVM adds a frame and replaces predication with a branch, preserving
+      short-circuit reads and normalized stores. No device execution.
