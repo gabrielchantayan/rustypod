@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e609c
+    ghidra: FUN_081e609c
+    name: form_lookup_context_destruct
+    size: 4
+    sig: "u32 *form_lookup_context_destruct(u32 *context)"
+    module: cxx/form_lookup_context_destruct
+    status: ported
+    renames:
+      r0: context
+    notes: >-
+      Raw word e12fff1e is BX LR. Next real entry at 0x081e60a0
+      begins push r4,lr, establishing the four-byte extent. Independent
+      whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x0818dc84 and 0x0818dcbc, zero predicated inbound BLs, zero
+      outbound BLs and no aligned word references to this entry.
+      Both caller paths pass a stack context initialized by 0x081e608c
+      with header 0x0898efec before lookup 0x081e5fa0, whose literal
+      0x464f524d identifies FORM. Exact C++ class identity is unknown.
+      Leaves memory and r0 unchanged; pointer return models register
+      preservation rather than Ghidra's void signature. No behavioral
+      deviations or callee seams. No existing registry entries for this
+      address, constructor, lookup or caller. Host tests cover unchanged
+      context and neighbors, null and non-dereferenceable pointers.
+      Full host suite passes 14121 tests; ARM release build and isolated
+      executable smoke pass. LLVM folds the exported symbol into
+      context_scope_drop: objdump retains a global alias at offset zero
+      in .text.context_scope_drop, size twelve. Requested match.py cannot
+      resolve the alias label; matching context_scope_drop instead gives
+      the reviewed BX LR versus push fp,lr; mov fp,sp; pop fp,pc diff.
   - address: 0x081d2bbc
     ghidra: FUN_081d2bbc
     name: demo_mode_marker_refresh
