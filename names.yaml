@@ -217918,3 +217918,36 @@ functions:
       branches replace conditional instructions, scheduler uses BLX,
       independent initial byte stores reorder, and dead local cursor
       invalidation disappears. Entry callback order and reloads remain.
+
+  - address: 0x081b9f30
+    ghidra: FUN_081b9f30
+    name: alternate_error_object_construct
+    size: 24
+    sig: "u8 *alternate_error_object_construct(u8 *this, u32 payload)"
+    module: cxx/alternate_error_object_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      FUN_081d17c8: vtable_flag_state_payload_construct
+      DAT_081b9f44: alternate_vtable (0x0898c758)
+    notes: >-
+      Raw words establish 20 instruction bytes through ldr pc,[sp],#4 at
+      0x081b9f40, plus the vtable literal at 0x081b9f44; the next real
+      function starts at 0x081b9f48 with cmp r0,#0. Independent whole-image
+      aligned ARM BL decoding finds two inbound plain BLs at 0x08148038
+      and 0x081d1768 and zero predicated BLs. One outbound plain BL at
+      0x081b9f34 calls the existing port at 0x081d17c8. Replace its returned
+      object's vtable with 0x0898c758 and return that pointer; Ghidra's void
+      signature is wrong. The base clears flag byte +4 and state word +8,
+      stores payload at +12, and preserves padding bytes +5..+7. Deliberate
+      deviations: reuse the existing Rust base constructor and volatile
+      field access; no new seam or wider class identity. Migrate the
+      stream_parse_error_result caller from its obsolete address seam.
+      Host tests cover zero, high-bit and maximum payloads, exact fields,
+      padding and surrounding sentinels; an isolated executable smoke
+      verifies a redirected base result and untouched input. All 14198
+      host tests and the ARM release build pass. match.py exits 1:
+      LLVM adds a frame-pointer prologue, retains the base BL and vtable
+      store, and includes the literal in its seven-instruction listing
+      versus five original instructions. No device execution performed.
