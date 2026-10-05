@@ -32312,6 +32312,34 @@ functions:
       +0x1c word with wrapping addition, caches, and returns the total.
       Rust reuses the existing typed seams for both verified callees.
 
+  - address: 0x0818aec0
+    ghidra: FUN_0818aec0
+    name: manager_client_find
+    size: 180
+    sig: "u32 manager_client_find(ManagerClientList *manager, u32 key, SharedCell **output)"
+    module: heap/manager_client_find
+    status: ported
+    vars:
+      param_1/r4: manager
+      param_2/r5: key
+      param_3/r7: output
+      local_1c: node
+      r6: found
+    notes: >-
+      Raw extent [0x0818aec0,0x0818af74) ends before an independent
+      mutex thunk. Whole-image ARM-word scan verifies two incoming plain
+      BL sites at 0x0818a664 and 0x0818a9d8, six outgoing plain BL
+      instructions, and zero predicated BL forms. Searches the circular
+      list rooted at manager+0x28, resolving each node+8 shared handle
+      through the verified handle_deref_or_null alias at 0x083d64f4.
+      Compares the client's first word to key; first match wins.
+      Assigns the matching handle through shared_cell_assign_direct_secondary
+      at 0x083b5210. On miss constructs a NULL temporary through 0x083b51bc,
+      assigns it, then releases it through 0x083b52f4. Returns only the
+      boolean in r0; Ghidra's undefined8 return is spurious. Inlines the
+      verified pointer inequality at 0x083d6f78; repr(C) pointer fields
+      retain ARM offsets while widening for host fixtures. Caller owns locking.
+
   - address: 0x081a7a9c
     ghidra: thunk_FUN_0818a364
     name: region_block_size_thunk
