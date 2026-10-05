@@ -217802,3 +217802,54 @@ functions:
       scalar base loads replacing LDRD, explicit failure branches, and
       equivalent carry selection. Signed MOVGT cap, +0x1b8/+0x10/+0x48/
       +0x4c fields, reader BL, and post-call table reload remain intact.
+
+  - address: 0x081c38c0
+    ghidra: FUN_081c38c0
+    name: track_list_clear
+    size: 160
+    sig: "u32 track_list_clear(TrackListProvider *provider)"
+    module: app/track_list_clear
+    status: ported
+    renames:
+      param_1/r6: provider
+      piVar1/r4: node
+      piVar2/r7: selected
+      piVar4/r5: next
+      DAT_081c395c: SELECTOR_OFFSET
+      FUN_081c8a84: list_find_by_id16
+      FUN_08056a68: hash_word
+      FUN_081c8d88: track_node_resource_destroy_retail
+      FUN_082aad24: operator_delete
+      thunk_FUN_082841c8: opaque_record_source_get
+      FUN_082844b4: record_source_clear_retail
+    notes: >-
+      Raw osos.dec establishes [0x081c38c0,0x081c3960), 160 bytes:
+      156 instruction bytes through pop at 0x081c3958 and the owned
+      selector-offset literal 0x2ba at 0x081c395c. The next independent
+      push is at 0x081c3960. Whole-image aligned A32 BL decoding finds
+      two inbound calls: BLNE at 0x081c7ef4 and plain BL at 0x081c8028.
+      Seven outbound BL instructions comprise six plain calls and BLNE
+      at 0x081c3950. Find the selected track using the sign-extended
+      provider halfword at +0x2ba. For each node, hash a nonzero +0x14
+      handle only when its +0x10 byte equals 3 and it is not selected,
+      then clear that byte and handle. Save +0 successor before calling
+      resource destructor 0x081c8d88 twice and operator_delete once;
+      clear provider +0x1b0 after traversal. Always get the record source
+      through the verified 0x080b43e4 tail thunk to 0x082841c8; clear it
+      through 0x082844b4 only if nonnull. Return zero. Raw destructor
+      clears resource slots through +0x9c; source clear frees the record
+      table and auxiliary allocation, resets provider/count/cache byte,
+      and sets its cursor to -1. These unported callees have no names
+      entry; fixed-address target calls preserve their behavior without
+      inventing class identities. Ported search/hash/get/delete are reused.
+      Native host node pointers widen semantic fields; target offset
+      assertions retain the verified layouts. Tests cover default, missing,
+      negative and matching selectors, zero handles, other kinds, saved
+      successors despite destructor mutation, double destruction before
+      deletion, and empty-list source cleanup. Seam-backed standalone
+      exported smoke traverses two nodes and proves the source NULL guard.
+      Host suite and ARM release build pass. match.py exits 1: 55 Rust
+      instructions versus 39 original, with inlined search, removed redundant
+      node NULL check, indirect BLX resource/source helpers, and reordered
+      independent handle/byte stores; double destruction, saved successor,
+      conditional handle processing and final source guard remain intact.
