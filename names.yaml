@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bac88
+    ghidra: FUN_081bac88
+    name: item_state_flag_dispatch
+    size: 104
+    sig: "void item_state_flag_dispatch(ItemOwner *owner)"
+    module: ui/item_state_flag_dispatch
+    status: ported
+    renames:
+      param_1/r4: owner
+      iVar1/r5: captured_state
+      owner+0x48: flags
+      owner+0xec: receiver
+      vtable+0x5c: state_query
+      receiver_vtable+0xd8: slot_d8
+      receiver_vtable+0x88: slot_88
+    notes: >-
+      Raw ARM establishes [0x081bac88,0x081bacf0), 104 bytes; next entry
+      pushes r0-r4 and lr. Whole-image aligned A32 scan finds two inbound
+      plain BLs at 0x081bae04 and 0x081bb004, zero predicated BLs.
+      Body has zero plain or predicated BLs, two BLX calls and one
+      conditional tail BX. Skip owner flag 0x02000000; query state through
+      owner slot +0x5c; clear captured state bit 0x40; invoke receiver
+      slot +0xd8; if that bit is restored, reload owner receiver and its
+      vtable before dispatching slot +0x88. Callers use this during item
+      measurement and rendering; concrete virtual identities remain
+      unresolved and no literal-address callee seam is invented.
+      Both callers discard r0; incidental register results are not a
+      return contract. Native repr(C) pointers widen on hosts; target
+      offsets are compile-time checked. Volatile aligned flag words
+      preserve original access width and callback-visible ordering.
+      Host tests cover skip with null receiver, both initial bit states,
+      callback-set bit, receiver replacement, and unrelated-bit preservation.
+      Host suite passes 14185 tests. Standalone actual-module smoke passes
+      clear-before-callback, restored-bit followup and skip with null
+      dispatch pointers. ARM release build passes. match.py exits 1:
+      27 Rust instructions versus 26 original, with an added frame-pointer
+      setup and explicit branch replacing final predication. Word accesses,
+      both BLX calls, captured-state reload, receiver reload and tail BX agree.
+
   - address: 0x081c88b8
     ghidra: FUN_081c88b8
     name: record_manager_refresh_secondary
