@@ -12743,6 +12743,44 @@ functions:
       builds retain the volatile firmware word while host tests use a private
       equivalent.
 
+  - address: 0x081bb6f4
+    ghidra: FUN_081bb6f4
+    name: video_engine_record_upload
+    size: 148
+    sig: "void video_engine_record_upload(u32 *record, const u32 *data, u32 count, u32 words_per_item)"
+    module: util/video_engine_record_upload
+    status: ported
+    renames:
+      param_1/r4: record
+      param_2/r8: data
+      param_3/r5: count
+      param_4/r6: words_per_item
+      DAT_081bb788: last_handle
+      DAT_081bb78c: VIDEO_ENGINE_SELECTOR_0X8892
+      DAT_081bb790: VIDEO_ENGINE_USAGE_0X88E4
+      FUN_082d1438: video_engine_dispatch_opaque_two_words_d0e4
+      FUN_082d0cb8: video_engine_set_selector_value
+      FUN_082d0d30: video_engine_dispatch_opaque_four_words_ce14
+      FUN_082d0d64: video_engine_dispatch_opaque_four_words
+    notes: >-
+      Raw A32 words verify a 148-byte executable body ending at 0x081bb788,
+      followed by three literal words; the next real function begins at
+      0x081bb794 (160-byte total extent). Two plain outbound BLs at 0x081bb760
+      and 0x081bb778, BLEQ at 0x081bb718, BLNE at 0x081bb73c. Whole-image
+      aligned BL decoding finds two inbound plain calls at 0x0828ca9c and
+      0x0828cb00, no predicated inbound calls. Initializes a zero handle through
+      the existing opaque wrapper, reloads it, updates the cache at 0x089d00c4
+      before binding selector 0x8892, and computes wrapping count times
+      words_per_item times four. Equal record word-2 count dispatches an
+      offset-zero update; unequal count dispatches with usage word 0x88e4.
+      Afterwards writes zero, count, and words_per_item into words 1 through 3;
+      word 4 is untouched. All four callees reuse existing ported seams;
+      their resident operations remain opaque. Deliberate deviations: host
+      cache stand-in, explicit volatile accesses across callbacks, and void
+      return ignoring incidental final r0 zero. Tests exercise initialization
+      ordering, cached binding suppression, changed handles, count-only branch
+      selection, zero dimensions, overflow, and post-dispatch field writes.
+
   - address: 0x081bd63c
     ghidra: FUN_081bd63c
     name: associated_object_word_at_0c_or_negative_one
