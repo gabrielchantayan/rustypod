@@ -39,6 +39,27 @@ pub unsafe extern "C" fn stop_controller_timer_pair(controller: *mut u8) {
     }
 }
 
+/// stop_volume_down_timers — original: `FUN_081d0670` @ 0x081d0670.
+///
+/// True extent: 28 bytes, 0x081d0670..0x081d068c, ending in a tail branch;
+/// the next real function begins with `push {r4,lr}` at 0x081d068c.
+/// Two incoming BL sites, binary-verified: one plain BL at 0x081d05ec
+/// and one BLNE at 0x081ce280 (the HandleRemoteVolumeDownUp path).
+/// Stops controller +0xb4, then reloads and stops +0xb0, without NULL
+/// guards. Both raw branches target the already-ported timer_stop.
+/// Deliberate deviation: the final tail branch is expressed as a direct
+/// call. A dedicated target section keeps this identical sibling export
+/// independently visible to disassembly tools.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.stop_volume_down_timers")]
+pub unsafe extern "C" fn stop_volume_down_timers(controller: *mut u8) {
+    unsafe {
+        timer_stop(timer_at(controller, FIRST_TIMER_OFFSET));
+        timer_stop(timer_at(controller, SECOND_TIMER_OFFSET));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -113,6 +134,7 @@ mod tests {
             return;
         };
         let base = base as *mut u8;
+        for stop in [stop_controller_timer_pair, stop_volume_down_timers] {
         unsafe {
             core::ptr::write_bytes(base, 0, SLAB_LEN);
             let first_timer = base.add(FIRST_TIMER_IN_SLAB);
@@ -139,7 +161,7 @@ mod tests {
             let saved_ops = ptr::addr_of!(TIMER_OPS).read_volatile();
             ptr::addr_of_mut!(TIMER_OPS).write_volatile(RELOAD_SECOND_TIMER_OPS);
 
-            stop_controller_timer_pair(base);
+            stop(base);
 
             let states = [
                 first_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read(),
@@ -153,6 +175,22 @@ mod tests {
             assert_eq!(states[1], TIMER_STATE_RUNNING, "the stale +0xb0 target is not stopped");
             assert_eq!(states[2], TIMER_STATE_STOPPED, "+0xb0 is reloaded after the first stop");
             assert_eq!(states[3], TIMER_STATE_RUNNING, "+0xb8 is not a target");
+
+            // Both controller fields may refer to the same timer. Repeated
+            // cancellation must leave it stopped and not touch its neighbours.
+            first_timer.add(TIMER_STATE_OFFSET).cast::<u32>().write(TIMER_STATE_RUNNING);
+            base.add(SECOND_TIMER_OFFSET).cast::<u32>().write(first_timer as usize as u32);
+            ptr::addr_of_mut!(TIMER_OPS).write_volatile(TimerOps {
+                trace_assert: no_op_timer,
+                ..RELOAD_SECOND_TIMER_OPS
+            });
+            stop(base);
+            let alias_state = first_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read();
+            let neighbour_state = untouched_timer.add(TIMER_STATE_OFFSET).cast::<u32>().read();
+            ptr::addr_of_mut!(TIMER_OPS).write_volatile(saved_ops);
+            assert_eq!(alias_state, TIMER_STATE_STOPPED);
+            assert_eq!(neighbour_state, TIMER_STATE_RUNNING);
+        }
         }
     }
 }

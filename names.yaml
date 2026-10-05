@@ -216315,3 +216315,31 @@ functions:
       match.py exits 1: LLVM emits 22 versus 18 instructions, adds a frame,
       uses signed BLT against five instead of predicated BLGT against four,
       and retains both direct calls, virtual slot, receiver/index and return.
+
+  - address: 0x081d0670
+    ghidra: FUN_081d0670
+    name: stop_volume_down_timers
+    size: 28
+    sig: "void stop_volume_down_timers(u8 *controller)"
+    module: app/controller_timer_pair
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0xb4": first_timer
+      "controller+0xb0": second_timer
+      FUN_0812c6b0: timer_stop
+    notes: >-
+      Raw ARM words establish extent [0x081d0670,0x081d068c): push
+      {r4,lr}, save controller, load +0xb4, BL timer_stop, reload +0xb0,
+      pop {r4,lr}, B timer_stop. The next function opens with push
+      {r4,lr}. Whole-image decoding finds two incoming BLs: plain BL
+      at 0x081d05ec and BLNE at 0x081ce280, the remote volume-down
+      release path. Both branches target the already-ported timer_stop
+      at 0x0812c6b0; no new seams or NULL guards. Rust expresses the
+      final tail branch as a direct call. A dedicated target text section
+      keeps the identical sibling export independently visible in objdump.
+      All 14141 host tests and the ARM release build pass. Tests cover
+      second-pointer replacement during the first stop, aliasing, and
+      preservation of the +0xb8 timer. match.py exits 1 with an expected
+      structural diff: eight versus seven instructions, an added frame
+      pointer, and preserved +0xb4 BL / +0xb0 tail B ordering.
