@@ -695,6 +695,27 @@ const _: [u8; 0x28] = [0; core::mem::offset_of!(DemoModeLookupContext, provider)
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0xe0] = [0; core::mem::offset_of!(DemoModeLookupVtable, lookup)];
 
+/// shared_provider_lookup_tail — original `FUN_081cb1a0` @ 0x081cb1a0.
+/// True size: 28 bytes (24 instruction bytes and the namespace literal),
+/// ending at the independent prologue at 0x081cb1bc.
+/// Verified inbound calls: 2 plain BL (0x081f43d8, 0x081f440c), 0 predicated;
+/// also reached by the tail branch at 0x081cb1d0. No outbound BL.
+///
+/// Load the context's provider at +0x28, load its virtual lookup at +0xe0,
+/// and tail-dispatch with (provider, 0x2a2a2a2a, key). Preserve the returned
+/// pointer, including NULL; both direct caller sites consume it.
+/// Deliberate deviations: Rust expresses BX as a final call; native repr(C)
+/// pointer fields widen on hosts, retaining exact target offsets. No NULL
+/// guards or concrete virtual callee identity are invented.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn shared_provider_lookup_tail(
+    context: *mut DemoModeLookupContext, key: u32,
+) -> *mut u8 {
+    let provider = (*context).provider;
+    ((*(*provider).vtable).lookup)(provider, 0x2a2a2a2a, key)
+}
+
 /// demo_mode_class_2600_lookup — original `FUN_081cb1bc` @ 0x081cb1bc.
 /// True size: 24 bytes, ending before the prologue at 0x081cb1d4.
 /// Verified inbound calls: 2 plain BL (0x0815a938, 0x0815a954), 0 predicated.
@@ -703,15 +724,13 @@ const _: [u8; 0xe0] = [0; core::mem::offset_of!(DemoModeLookupVtable, lookup)];
 /// with namespace 0x2a2a2a2a and the original key. Return the lookup result,
 /// as consumed by both caller sites, despite Ghidra's void signature.
 ///
-/// Deliberate deviation: inline the six-instruction shared tail helper,
-/// not a separate port or seam. No NULL checks are added; native pointer
-/// fields scale on hosts while retaining exact target offsets.
+/// Deliberate deviation: native pointer fields scale on hosts while retaining
+/// exact target offsets. No NULL checks are added.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn demo_mode_class_2600_lookup(key: u32) -> *mut u8 {
     let context = demo_mode_class_2600_instance().cast::<DemoModeLookupContext>();
-    let provider = (*context).provider;
-    ((*(*provider).vtable).lookup)(provider, 0x2a2a2a2a, key)
+    shared_provider_lookup_tail(context, key)
 }
 
 
@@ -1910,6 +1929,38 @@ mod tests {
             assert!(demo_mode_class_2600_lookup(0x8000_0000).is_null());
         }
         restore(guard);
+    }
+
+    #[test]
+    fn shared_lookup_reloads_provider_and_preserves_missing_and_boundary_results() {
+        unsafe {
+            let vtable = DemoModeLookupVtable {
+                unresolved_00: [0; 56], lookup: fixture_lookup,
+            };
+            let mut first = LookupFixture {
+                provider: DemoModeLookupProvider { vtable: &vtable },
+                zero_result: 0x12, high_result: 0x34,
+            };
+            let mut second = LookupFixture {
+                provider: DemoModeLookupProvider { vtable: &vtable },
+                zero_result: 0x56, high_result: 0x78,
+            };
+            let mut context = DemoModeLookupContext {
+                object: FrameworkObject { vtable: ptr::null() },
+                unresolved_04: [0; 9],
+                provider: ptr::addr_of_mut!(first.provider),
+            };
+            assert_eq!(shared_provider_lookup_tail(&mut context, 0),
+                ptr::addr_of_mut!(first.zero_result));
+            assert_eq!(shared_provider_lookup_tail(&mut context, u32::MAX),
+                ptr::addr_of_mut!(first.high_result));
+            assert!(shared_provider_lookup_tail(&mut context, 0x8000_0000).is_null());
+            context.provider = ptr::addr_of_mut!(second.provider);
+            assert_eq!(shared_provider_lookup_tail(&mut context, 0),
+                ptr::addr_of_mut!(second.zero_result));
+            assert_eq!(shared_provider_lookup_tail(&mut context, u32::MAX),
+                ptr::addr_of_mut!(second.high_result));
+        }
     }
 
 

@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081cb1a0
+    ghidra: FUN_081cb1a0
+    name: shared_provider_lookup_tail
+    size: 28
+    sig: "void *shared_provider_lookup_tail(DemoModeLookupContext *context, u32 key)"
+    module: app/registry
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1/r2: key
+      DAT_081cb1b8: lookup_namespace_2a2a2a2a
+    notes: >-
+      Raw words establish [0x081cb1a0,0x081cb1bc): six A32 instructions
+      followed by the 0x2a2a2a2a literal, then an independent push.
+      Ghidra's 24-byte size omits the literal. Whole-image aligned BL
+      decoding finds two plain inbound calls at 0x081f43d8 and 0x081f440c,
+      zero predicated; an additional tail branch is at 0x081cb1d0.
+      No outbound plain or predicated BL. Load provider at context +0x28,
+      load its vtable slot +0xe0, move key to r2, load namespace into r1,
+      and BX the virtual method. Both direct callers consume the returned
+      pointer; Ghidra's void return is wrong. No concrete virtual callee
+      identity is established or invented. Reuse native repr(C) lookup
+      types with checked target offsets and no added NULL guards.
+      Migrate demo_mode_class_2600_lookup from its duplicate inline body.
+      Host suite passes 14167 tests, including boundary keys, missing
+      result, and provider replacement. Standalone source smoke returns
+      bytes 17 and 29 and NULL for a missing key. ARM release build passes.
+      match.py exits 1: LLVM adds a frame push/pop and reorders loads,
+      but preserves provider +0x28, virtual slot +0xe0, the namespace,
+      key forwarding, and the final BX.
   - address: 0x081cb1bc
     ghidra: FUN_081cb1bc
     name: demo_mode_class_2600_lookup
@@ -38,11 +68,9 @@ functions:
       dispatches its vtable +0xe0 with namespace 0x2a2a2a2a and key.
       Both caller sites consume the returned object; Ghidra's void
       signature is wrong. No concrete virtual callee identity is invented.
-      Inline the shared tail helper without separately porting it; no
-      NULL guard is added. Native repr(C) fields preserve target offsets.
-      Host suite passes 14166 tests; standalone smoke verifies pointer and
-      NULL results. ARM release build passes. match.py exits 1: LLVM emits
-      the shared helper inline, retains the accessor BL, provider +0x28,
+      Uses the separately ported shared_provider_lookup_tail; no NULL guard
+      is added. Native repr(C) fields preserve target offsets. Host suite
+      passes 14167 tests after migration; ARM release build passes.
   - address: 0x081bc95c
     ghidra: FUN_081bc95c
     name: vtable_payload_flags_construct
