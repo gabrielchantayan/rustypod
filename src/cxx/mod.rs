@@ -5,6 +5,7 @@
 pub mod shared_record_list_owner_construct;
 pub mod two_word_header_string_owner_destroy;
 pub mod flagged_string_record_copy_construct;
+pub mod flagged_string_record_compare;
 pub mod shared_record_list_owner_count;
 pub mod vtable_payload_flags_construct;
 pub mod context_tree_construct;

@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b0184
+    ghidra: FUN_081b0184
+    name: flagged_string_record_compare
+    size: 60
+    sig: "int32_t flagged_string_record_compare(const FlaggedStringRecord *left, const FlaggedStringRecord *right)"
+    module: cxx/flagged_string_record_compare
+    status: ported
+    vars:
+      param_1/r0: left
+      param_2/r1: right
+      r2: right_flag
+      r3: left_flag
+    notes: >-
+      Raw A32 words establish extent [0x081b0184,0x081b01c0), with the
+      next independently called function beginning push {r4,lr}. Whole-image
+      word decoding finds two inbound plain BLs at 0x081b01dc and 0x083d63a0,
+      zero predicated inbound BLs, and zero outbound BLs. Both callers
+      copy-construct a temporary FlaggedStringRecord and consume this result.
+      Compare unsigned byte flags at +0 ascending; only on equality compare
+      unsigned trailing words at +0x10 descending. Return exactly -1, 0, 1.
+      Padding, opaque word, and embedded string are ignored; no NULL guard.
+      Reuses the existing repr(C) record without new seams; host pointers
+      widen the embedded string and move its trailing word. Field meanings
+      beyond the existing names remain unidentified. Host suite passes 14270
+      tests, including unsigned boundaries, flag precedence, equal keys with
+      differing ignored fields, and self-comparison. ARM release build passes.
+      match.py shows 18 Rust versus 15 original instructions: added frame,
+      register changes, and conditional returns, with both key comparisons
+      and target offsets retained. ARM emulation of raw firmware and compiled
+      Rust agrees with an independent reference across 1512 cases.
   - address: 0x081b01f8
     ghidra: FUN_081b01f8
     name: flagged_string_record_copy_construct
