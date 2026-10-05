@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081d1324
+    ghidra: FUN_081d1324
+    name: timed_label_update_elapsed
+    size: 144
+    sig: "void timed_label_update_elapsed(u32 *this)"
+    module: app/timed_label_update_elapsed
+    status: ported
+    renames:
+      param_1/r4: this
+      local_18: now_usec
+      local_14: elapsed_usec
+      local_10: elapsed_ms
+      FUN_0815e1ac: instance_of_class_5680
+      FUN_08086e24: read_usec_timer_into
+      FUN_08036f14: __rt_udiv
+      DAT_081d13b0: milliseconds_per_day
+    notes: >-
+      Raw A32 extent 0x081d1324..0x081d13b4 comprises 140 executable
+      bytes and a four-byte literal before the next independent push.
+      Whole-image aligned decoding finds two inbound plain BLs at
+      0x0815cbac and 0x081d1000, zero predicated inbound BLs; three
+      outbound plain BLs and zero predicated outbound BLs. TCSportTimer
+      byte +0x4c gates all updates. Sample Timer E once, unsigned-divide
+      the wrapping delta from owner+4 by 1000, wrapping-add to +8/+12,
+      replace +4, subtract 120 from signed-positive +32 without flooring,
+      then unsigned-clamp +8/+12 to 86400000 after addition. Ghidra extra
+      arguments are saved scratch registers, not inputs. No target
+      behavioral deviations. Reuse timer and unsigned-divider ports.
+      The named singleton accessor is marked ported but lacks a Rust
+      symbol in this worktree; retain its verified address 0x0815e1ac
+      as a volatile function-pointer seam. Hosts require injection.
+      Host cases cover disabled preservation, fractional truncation,
+      timer and accumulator wrap, clamp boundaries, signed countdown
+      boundaries and untouched fields. Exported API smoke passes.
+      ARM release build passes. Requested match.py exits 1 with reviewed
+      structural differences: frame setup, initialized timer scratch,
+      indirect singleton BLX and omitted unused stack copies. Both ported
+      calls, offsets, wrapping additions, signed countdown predication
+      and unsigned clamp predication remain. No device execution.
   - address: 0x081d15ec
     ghidra: FUN_081d15ec
     name: timed_label_array_construct
