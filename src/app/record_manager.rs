@@ -301,6 +301,90 @@ pub unsafe extern "C" fn record_manager_current_record_status_6c_failed(
 }
 
 
+/// Reads the selected record byte — original `FUN_081c84bc` @ `0x081c84bc`.
+///
+/// Verified extent: 136 bytes, ending at the next function `0x081c8544`.
+/// Raw decoding finds two inbound plain BL callers and zero predicated callers;
+/// the body has five plain BL instructions, zero predicated BLs, and one BLX.
+/// Builds a kind-two registration over `manager + 0xa0c`, invokes the selected
+/// handle's vtable slot +0x60 with a four-byte temporary, and copies only its
+/// first byte on success. Returns 1 on missing handle or nonzero virtual result,
+/// otherwise 0; destruction always follows, after the successful output write.
+///
+/// Deliberate deviations: host registration lookup uses a three-word target
+/// view and virtual dispatch uses a host operation, as in the adjacent ports.
+/// The raw selector initializer receives {selector, selector}, not the
+/// incomplete single argument shown by Ghidra.
+///
+/// # Safety
+/// The manager must satisfy the registration helpers' requirements. A selected
+/// handle must have a +0x60 method accepting writable four-byte storage. On
+/// success `output` must identify one writable byte.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn record_manager_current_record_byte(
+    manager: *mut u8,
+    output: *mut u8,
+    selector: u32,
+) -> u32 {
+    use crate::app::current_record_handle::{current_record_handle, CurrentRecordCursor};
+    use crate::app::registration_handle::{
+        registration_handle_destroy, registration_handle_init, RegistrationHandle,
+    };
+    use crate::app::selector_pair_init::selector_pair_init;
+
+    let mut pair = core::mem::MaybeUninit::<[u32; 2]>::uninit();
+    selector_pair_init(pair.as_mut_ptr().cast(), selector, selector);
+    let mut registration = core::mem::MaybeUninit::<RegistrationHandle>::uninit();
+    let registration = registration_handle_init(
+        registration.as_mut_ptr(), manager.add(0xa0c), 2, pair.as_ptr().cast(),
+    );
+    #[cfg(target_os = "none")]
+    let record = current_record_handle(registration.cast::<CurrentRecordCursor>()) as *mut u8;
+    #[cfg(not(target_os = "none"))]
+    let record = {
+        let cursor = CurrentRecordCursor {
+            opaque_00: (*registration).vtable,
+            records: (*registration).owner as usize as u32,
+            current_index: (*registration).slot_index,
+        };
+        current_record_handle(&cursor) as *mut u8
+    };
+
+    let mut value = core::mem::MaybeUninit::<u32>::uninit();
+    let failed = record.is_null() || current_record_byte(record, value.as_mut_ptr()) != 0;
+    if !failed {
+        output.write(value.as_ptr().cast::<u8>().read());
+    }
+    registration_handle_destroy(registration);
+    failed as u32
+}
+
+/// ABI of selected record vtable slot +0x60.
+pub type CurrentRecordByte = unsafe extern "C" fn(*mut u8, *mut u32) -> i32;
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn current_record_byte(record: *mut u8, output: *mut u32) -> i32 {
+    let vtable = record.cast::<u32>().read() as usize as *const u32;
+    let dispatch = vtable.add(0x60 / 4).read() as usize;
+    core::mem::transmute::<usize, CurrentRecordByte>(dispatch)(record, output)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_current_record_byte(_record: *mut u8, _output: *mut u32) -> i32 {
+    panic!("install record-manager current-record byte host operation before dispatch")
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut RECORD_MANAGER_CURRENT_RECORD_BYTE: CurrentRecordByte = missing_current_record_byte;
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+unsafe fn current_record_byte(record: *mut u8, output: *mut u32) -> i32 {
+    core::ptr::read_volatile(core::ptr::addr_of!(RECORD_MANAGER_CURRENT_RECORD_BYTE))(record, output)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -573,6 +657,50 @@ mod tests {
 
             CURRENT_RECORD_STATUS_RESULT = -1;
             assert_eq!(record_manager_current_record_status_6c_failed(manager, 0, 9), 1);
+            restore_current_record_ops();
+        }
+        restore(lock);
+    }
+    unsafe extern "C" fn read_record_byte(record: *mut u8, output: *mut u32) -> i32 {
+        assert_eq!(record as usize, 0x1234_5678);
+        output.write(0xfedc_ba03);
+        CURRENT_RECORD_STATUS_RESULT
+    }
+
+    #[test]
+    fn current_record_byte_preserves_output_on_failure_and_copies_only_one_byte() {
+        let lock = reset();
+        let Some(base) = *CURRENT_RECORD_FIXTURE else {
+            assert!(note_missing_u32_fixture("app::record_manager current-record byte"));
+            restore(lock);
+            return;
+        };
+        unsafe {
+            let manager = base as *mut u8;
+            manager.write_bytes(0, 0x2000);
+            let mut output = [0xa5, 0x5a];
+            install_current_record_ops(reject_current_record);
+            // Missing and out-of-range selections must not dereference output.
+            assert_eq!(record_manager_current_record_byte(manager, ptr::null_mut(), 0), 1);
+            assert_eq!(record_manager_current_record_byte(manager, ptr::null_mut(), 32), 1);
+            assert_eq!(record_manager_current_record_byte(manager, output.as_mut_ptr(), 0), 1);
+            assert_eq!(output, [0xa5, 0x5a]);
+
+            install_current_record_ops(acquire_current_record);
+            manager.add(0xa0c + 4).cast::<u32>().write(0x1234_5678);
+            RECORD_MANAGER_CURRENT_RECORD_BYTE = read_record_byte;
+            for status in [1, -1, i32::MIN] {
+                CURRENT_RECORD_STATUS_RESULT = status;
+                assert_eq!(record_manager_current_record_byte(manager, output.as_mut_ptr(), 0), 1);
+                assert_eq!(output, [0xa5, 0x5a]);
+            }
+            CURRENT_RECORD_STATUS_RESULT = 0;
+            assert_eq!(record_manager_current_record_byte(manager, output.as_mut_ptr(), 0), 0);
+            assert_eq!(output, [3, 0x5a]);
+            // An acquired slot may still contain no selected record.
+            manager.add(0xa0c + 4).cast::<u32>().write(0);
+            assert_eq!(record_manager_current_record_byte(manager, ptr::null_mut(), 0), 1);
+            RECORD_MANAGER_CURRENT_RECORD_BYTE = missing_current_record_byte;
             restore_current_record_ops();
         }
         restore(lock);
