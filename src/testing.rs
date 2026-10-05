@@ -1036,9 +1036,9 @@ pub mod hints {
     // silently on every host.
     pub const IAP_THREAD_SLOT_WAIT: usize = 0x6c00_0000;
     // 0x6c40_0000: dedicated to app/iap_incoming_process_thread's
-    // slot-deadline wrapper fixture; mappings never unmap, so no other user
-    // may share it.
-    pub const IAP_THREAD_SLOT_DEADLINE: usize = 0x6c40_0000;
+    // locked slot-deadline fixture; mappings never unmap, so no other user
+    // may share it. Replaces the removed wrapper-recorder fixture.
+    pub const IAP_THREAD_LOCKED_SLOT_DEADLINE: usize = 0x6c40_0000;
     // 0x6cc0_0000: dedicated to app/iap_incoming_process_thread's
     // slot-release fixture; mappings never unmap, so no other user may share it.
     pub const IAP_THREAD_SLOT_RELEASE: usize = 0x6cc0_0000;

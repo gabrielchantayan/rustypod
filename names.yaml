@@ -90101,8 +90101,7 @@ functions:
       param_2/r1/r5: index (registration slot selected by the locked callee)
       param_3/r2: timeout_millis (signed relative timeout converted to {seconds,nanos})
       FUN_08261e94: milliseconds_to_timespec (ported signed milliseconds converter)
-      FUN_081d6e68: iap_incoming_process_thread_slot_set_deadline (unported;
-        target default through IAP_THREAD_SLOT_DEADLINE_OPS)
+      FUN_081d6e68: iap_incoming_process_thread_slot_set_deadline (ported direct call)
     notes: >-
       Raw osos.dec confirms the 44-byte code-only extent exactly:
       0x081d6eb4 starts `push {r2,r3,r4,r5,r6,lr}`, 0x081d6edc is
@@ -90114,11 +90113,36 @@ functions:
       timeout_millis into stack-local {seconds,nanos}, then returns the
       locked slot setter's status unchanged. The setter validates index,
       resolves the slot, and copies the pair to its object at +0x1c/+0x20.
-      Deliberate deviation: 0x081d6e68 is unported, so the Rust wrapper
-      dispatches through IAP_THREAD_SLOT_DEADLINE_OPS; target builds call
-      the retail address while host tests install a recorder. Host tests
-      prove index/thread forwarding, status propagation, 1001ms ->
-      {1,1000000}, and -1001ms -> {-1,-1000000}.
+      The locked setter is now called directly without its obsolete seam.
+      Behavioral tests exercise actual deadline storage, first/last slots,
+      recursive mutex preservation and signed millisecond conversion.
+
+  - address: 0x081d6e68
+    ghidra: FUN_081d6e68
+    name: iap_incoming_process_thread_slot_set_deadline
+    size: 76
+    sig: "i32 iap_incoming_process_thread_slot_set_deadline(u8 *thread, u32 index, const IapThreadRegistrationDeadline *deadline)"
+    module: app/iap_incoming_process_thread
+    status: ported
+    renames:
+      param_1/r0/r5: thread
+      param_2/r1/r6: index
+      param_3/r2/r7: deadline
+      r4: registry_mutex
+      FUN_08261e20: posix_mutex_lock (verified veneer to 0x082e8390)
+      FUN_08261e24: posix_mutex_unlock (verified veneer to 0x082e83d8)
+      FUN_08030f44: heap_panic
+      FUN_08257ca0: registration_set_deadline
+    notes: >-
+      Raw A32 proves 76 code bytes at 0x081d6e68..0x081d6eb4; next
+      function starts with push. Whole-image decoding finds two plain
+      inbound BLs at 0x081962d0 and 0x081d6ed8, zero predicated BLs.
+      Body has three plain BLs, zero predicated BLs and an unlock tail B.
+      Lock thread+0x114 ignoring status; reject index >=29 or a zero
+      object word at thread+0x154+index*8 with nonreturning heap_panic.
+      Copy deadline to object+0x1c/+0x20; return unlock status. No behavioral
+      deviations. Existing Rust ports replace all verified callees;
+      Ghidra incorrectly folds the tail-called unlock into this body.
 
   - address: 0x081d6e38
     ghidra: FUN_081d6e38
