@@ -215519,3 +215519,40 @@ functions:
       second callback result. ARM match retains both append BL relocations,
       saved word temporaries, +8/+24 addressing, and second-call r0; LLVM
       uses a separate 8-byte stack allocation and frame-pointer prologue.
+
+  - address: 0x081e7148
+    ghidra: FUN_081e7148
+    name: audio_resampler_set_rates
+    size: 84
+    sig: "void audio_resampler_set_rates(AudioResampler *resampler, u32 source_rate, u32 destination_rate)"
+    module: app/audio_resampler_set_rates
+    status: ported
+    renames:
+      param_1/r0: resampler
+      param_2/r1: source_rate
+      param_3/r2: destination_rate
+      FUN_083ec9a0: __u2f
+      FUN_083ec5fc: __fdiv
+      FUN_083ed150: __fscalb
+      FUN_083ec4b4: __fadd
+      FUN_083ec90c: __f2u
+    notes: >-
+      Raw A32 verifies 84 bytes through 0x081e719b; the independent
+      halfword-copy function starts at 0x081e719c. Six outbound plain BLs,
+      zero predicated BLs. Two inbound plain BLs at 0x081970f4 and
+      0x08197498, zero predicated BLs; the assignment's count refers to
+      callers, not outbound calls. Callers validate sample rates, bit depths
+      and channels, establishing the existing AudioFormatComparison prefix.
+      Store source/destination rates at +12/+16, clear phase at +36,
+      store rounded unsigned Q16.16 source/destination ratio at +40.
+      Convert destination then source to binary32, divide, scale by 2^16,
+      add binary32 0.5 and truncate to unsigned. Reuse all five existing
+      named ADS helpers; no new seams. Host repr(C) vtable pointer widens,
+      preserving field order; target offsets remain exact. Host tests cover
+      audio-rate ratios, half-unit rounding, zero rates, overflow saturation,
+      unsigned conversion precision and untouched format metadata.
+      Standalone source smoke confirms phase reset and steps 60211, 71332,
+      and 1 for 44100/48000, 48000/44100, and 1/131072. ARM match has
+      123 instructions versus stock 21: LLVM inlines conversions, scaling
+      and add special paths, retains __fdiv and add/subtract magnitude
+      calls, and preserves +12/+16/+36/+40 stores. No algorithm deviation.
