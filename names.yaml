@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e6c38
+    ghidra: FUN_081e6c38
+    name: owned_payload_list_get
+    size: 92
+    sig: "u32 *owned_payload_list_get(void)"
+    module: util/owned_payload_list_get
+    status: ported
+    vars:
+      DAT_081e6c84: guard (0x089d05e4)
+      DAT_081e6c88: head (0x089d05e8)
+      DAT_081e6c8c: dso_handle (0x089ca09c)
+      DAT_081e6c90: opaque_shutdown_handler_word (0x081dbf80)
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw words establish the true 92-byte extent [0x081e6c38,0x081e6c94):
+      76 instruction bytes and 16 literal bytes before the independently
+      decoded owned_payload_list_remove entry. Three outbound plain BLs,
+      zero predicated BLs; whole-image raw-word scan finds two inbound
+      plain BLs at 0x08106ae0 and 0x08106c78, zero predicated inbound BLs.
+      Tests guard bit zero, acquires the ADS guard, zeroes the fixed head,
+      registers it with opaque handler word 0x081dbf80 and DSO 0x089ca09c,
+      releases the guard and always returns the fixed head. Registration
+      failure still publishes initialization; nonzero even guards preserve
+      the head because acquire rejects them. The handler word points into
+      existing code rather than a recovered function entry: retain its
+      exact target address, without inventing an identity. Host statics
+      model ARM-width cells; host handler invocation explicitly fails.
+      Volatile registration/release bindings retain both runtime calls.
+      All 14117 host tests pass; ARM release builds. Runtime smoke verifies
+      initialization despite allocation failure and preservation on repeat
+      access. match.py retains guard branches, zero store, registration,
+      release and head return; LLVM adds a frame and indirect BLX calls,
+      and computes head as guard+4. Exact matching is not claimed.
   - address: 0x081e6c94
     ghidra: FUN_081e6c94
     name: owned_payload_list_remove
