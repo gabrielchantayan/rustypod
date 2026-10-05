@@ -220979,3 +220979,30 @@ functions:
       stock and linked Rust instructions for three initial storage patterns
       each, verifying string identity, all zero bounds, preserved neighbors,
       return pointer and restored stack. No device execution was performed.
+  - address: 0x0818b100
+    ghidra: FUN_0818b100
+    name: block_manager_secondary_mutex_unlock
+    size: 8
+    sig: "u32 block_manager_secondary_mutex_unlock(u8 *block_manager)"
+    module: heap/block_manager_secondary_mutex_unlock
+    status: ported
+    renames:
+      param_1/r0: block_manager
+      FUN_08261e24: posix_mutex_unlock
+    notes: >-
+      Raw words e2800f59 ea035b46 establish the true 8-byte extent
+      0x0818b100..0x0818b108, where the next function starts with
+      push {r4,r5,r6,r7,lr}. Adds 0x164 to the block manager pointer
+      and tail-branches to the verified posix_mutex_unlock alias at
+      0x08261e24, which branches to 0x082e83d8. No internal BLs.
+      Full raw ARM-word scan finds two plain incoming BLs at 0x08207d78
+      and 0x08207e80 and no predicated incoming BLs. Ghidra incorrectly
+      folds the unlock body into this wrapper. Host regression exercises
+      non-owner rejection, recursive hold retention, final release status,
+      repeated release rejection, and neighboring storage preservation.
+      Deliberate deviation: calls the existing canonical unlock port,
+      retaining its documented kernel-operation seams. match.py prints a
+      structural diff: LLVM adds a frame push/mov/pop around the same
+      +0x164 calculation and canonical unlock tail branch. A bounded ARM
+      wrapper interpreter verifies four pointer boundaries, the unlock
+      relocation, preserved frame/return registers, and restored stack.
