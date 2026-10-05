@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bc95c
+    ghidra: FUN_081bc95c
+    name: vtable_payload_flags_construct
+    size: 36
+    sig: "u8 *vtable_payload_flags_construct(u8 *this, u32 payload)"
+    module: cxx/vtable_payload_flags_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2: payload
+      this+0: vtable
+      this+4: payload
+      this+8: cleared_flag
+      this+9: set_flag
+      DAT_081bc97c: vtable_0898cab4
+    notes: >-
+      Raw ARM words establish [0x081bc95c,0x081bc980): 32 instruction bytes
+      and a four-byte literal at 0x081bc97c, rather than Ghidra's 32-byte
+      code-only size. The next function starts a NULL-checked teardown
+      at 0x081bc980. Whole-image aligned BL decoding verifies two inbound
+      plain BLs at 0x082973a4 and 0x0829742c, zero predicated inbound BLs,
+      and no outbound calls. Store payload at +4, clear byte +8, set byte
+      +9 to one, then install vtable 0x0898cab4. Preserve r0 as the object
+      result, which both callers use after allocating 12 bytes. Bytes
+      +10/+11 remain untouched. No wider class identity or flag meanings
+      inferred; no callee seam and no behavioral deviations. Volatile
+      aligned target-word stores retain firmware ordering on hosts too.
+      Host tests cover zero/high-bit/max payloads, preexisting flag bytes,
+      preserved padding and neighboring words, and returned pointer.
+      Host suite and ARM release build pass. match.py exits 1: LLVM adds
+      a frame and uses pop instead of bx lr; the payload, byte stores,
+      vtable literal, write order and unchanged r0 agree.
+
   - address: 0x081cd964
     ghidra: FUN_081cd964
     name: fifteen_record_slots_clear
