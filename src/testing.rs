@@ -2549,6 +2549,8 @@ pub mod hints {
     // and nested-class fixture; mappings never unmap, so no other user may
     // share this hint.
     pub const ENTRY_MATCH_FIRST: usize = 0xa1c0_0000;
+    // Dedicated raw-u32 container, nested-class object, and entry fixture.
+    pub const ENTRY_CURSOR_ENSURE_KEY: usize = 0xa7f0_0000;
     // 0xa1d0_0000: dedicated to app/entry_match_source_payload's raw-u32
     // source and nested collection fixture; mappings never unmap, so no other
     // user may share this hint.

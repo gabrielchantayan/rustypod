@@ -218927,3 +218927,39 @@ functions:
       preservation and sentinel reset. match.py with verified size 160 exits
       1 with expected structural differences: LLVM materializes message
       immediates, adds a frame pointer and inlines the tail target's stores.
+
+  - address: 0x081a8d5c
+    ghidra: FUN_081a8d5c
+    name: entry_cursor_ensure_key
+    size: 84
+    sig: "u32 entry_cursor_ensure_key(EntryCursor *cursor)"
+    module: app/entry_cursor_ensure_key
+    status: ported
+    renames:
+      param_1/r4: cursor
+      iVar1: first_entry
+      param_1_plus_0x0c: match_key
+      FUN_080522bc: entry_match_first
+    notes: >-
+      Raw osos.dec A32 words verify the 84-byte extent ending at the independent
+      push at 0x081a8db0. Whole-image decoding finds two unconditional inbound
+      BLs at 0x081a8bf0 and 0x081a8dc0, zero predicated BLs. Body contains one
+      unconditional BL at 0x081a8d8c to the existing entry_match_first port and
+      one virtual BLX at 0x081a8d70 through vtable slot zero; no identity is
+      assigned to that callback. Always dispatch with cursor as r0. If it
+      succeeds and the post-dispatch cached key at +0x0c is zero, query the
+      container at +4 and copy a nonzero first entry's +8 word into the cache.
+      Return canonical nonzero-cache status even if dispatch fails. Callers
+      at 0x081a8be4 and 0x081a8db0 use this before counting or selecting entries
+      with that match key; the remaining object layout is deliberately opaque.
+      Deviation: direct Rust call to entry_match_first replaces the stock BL;
+      repr(C) native pointers support host callbacks while retaining ARM field
+      offsets. Host edge tests cover failed dispatch with cached keys, callback
+      mutation, absent entries, zero-key retry, full-width keys and cache reuse,
+      using the unique ENTRY_CURSOR_ENSURE_KEY u32 slab hint. All 14246 host
+      tests pass; ARM release build passes. Direct native runtime smoke verifies
+      a rejecting callback can supply key 73 and return ready=1. match.py exits
+      1 with an expected structural diff: LLVM adds a frame, hoists the cache
+      read after dispatch, and reuses the loaded key instead of reloading it;
+      virtual dispatch, container +4, entry +8, cache +12 and canonical result
+      remain intact.
