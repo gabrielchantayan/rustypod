@@ -79069,7 +79069,7 @@ functions:
     renames:
       FUN_080cb828: current_task_ctx_block
       FUN_0812c5dc: task_message_receive
-      FUN_081b5344: task_message_find_first_handler
+      FUN_081b5344: collection_find_first_handler
       FUN_081b52b8: collection_find_previous_handler
       FUN_080ed958: mqueue_node_recycle
       DAT_0812c084: task_message_quit_tag
@@ -79087,9 +79087,9 @@ functions:
       It receives from current_task_ctx_block()+0x1c, walks the optional
       +0x20 handler collection until a callback accepts the message, recycles
       a non-NULL auxiliary node, and exits after processing b"tiuq". The
-      first lookup helper at 0x081b5344 remains deliberately unnamed; its
-      raw call interface is exposed as a host seam, while the later lookup
-      uses the ported collection_find_previous_handler.
+      The first lookup uses collection_find_first_handler to initialize the
+      cursor from owner word 1; later lookups continue the reverse traversal
+      through collection_find_previous_handler.
   # --- scouted 0x08110000-0x0812ffff, not ported (display-layer sweep) ---
 
   - address: 0x0812c6b0
@@ -218593,3 +218593,44 @@ functions:
       calls, signed scheduling argument, final state store, panic path, and
       tail unlock. LLVM replaces BLEQ with a branch and omits dead register
       setup. No device execution.
+
+  - address: 0x081b5344
+    ghidra: FUN_081b5344
+    name: collection_find_first_handler
+    size: 36
+    sig: "u32 collection_find_first_handler(owner: *mut u8, key: u32, callback_out: *mut u32, context_out: *mut u32, cursor: *mut i32)"
+    module: app/vtable_set
+    status: ported
+    renames:
+      param_1/r0: owner
+      r1: key
+      r2: callback_out
+      r3: context_out
+      stack_arg_0: cursor
+      owner_plus_4: count
+      FUN_081b52b8: collection_find_previous_handler
+    notes: >-
+      Raw words establish the exact extent [0x081b5344,0x081b5368):
+      push {r3,lr}, preserve r3 in ip, load the fifth argument from sp+8,
+      load owner word 1 into lr, store it through cursor, forward cursor on
+      the stack, restore r3, BL 0x081b52b8, pop {ip,pc}. The next independent
+      function starts with push {r4,lr}. Full-image aligned ARM decoding
+      finds two plain inbound BLs at 0x0812c014 and 0x0812c328 and zero
+      predicated inbound BLs; the body has one plain outbound BL and zero
+      predicated BLs. Initializes reverse handler lookup at the collection
+      count, returning the existing previous-handler search result. Ghidra
+      misses the five-argument interface and return value; verified caller
+      setup and raw register/stack flow recover both. Rust omits the
+      argument-shuffling frame and directly reuses the ported callee.
+      Task-message dispatch now calls this port instead of the raw address.
+      Host tests cover restarting from a stale cursor, a skipped nonmatching
+      entry before a match, empty collections, missing keys, unchanged
+      callback/context on exhaustion, and iterator unlinking. Host suite
+      and ARM release build pass. Standalone host smoke observes a matching
+      callback/context/index (123,456,0), then empty-collection exhaustion
+      preserving outputs and resetting cursor. match.py exits 1: nine
+      original versus eight Rust instructions, with the same owner+4 load,
+      cursor store, and fifth-argument forwarding; LLVM emits a tail branch
+      instead of BL/pop. objdump -dr verifies R_ARM_JUMP24 targets
+      collection_find_previous_handler, not the unresolved self-address
+      displayed by match.py. No device execution.

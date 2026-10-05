@@ -336,9 +336,8 @@ pub unsafe extern "C" fn task_message_receive(
 
 /// Queue-handler lookup boundaries used by [`task_message_dispatch`].
 ///
-/// `FUN_081b5344` has not been named from raw evidence. Its call setup proves
-/// only that it initializes a handler lookup; the already ported
-/// `collection_find_previous_handler` is the subsequent lookup operation.
+/// The first lookup initializes the cursor from the collection count;
+/// `collection_find_previous_handler` continues the reverse traversal.
 /// Callback and context outputs are `usize` so host fixtures do not truncate
 /// their function pointers; they are 32-bit target words on ARM.
 #[derive(Clone, Copy)]
@@ -364,9 +363,11 @@ unsafe extern "C" fn missing_current_task_context() -> *mut u32 {
 unsafe extern "C" fn firmware_find_first_handler(
     owner: *mut u8, key: u32, callback: *mut usize, context: *mut usize, cursor: *mut i32,
 ) -> u32 {
-    let find: unsafe extern "C" fn(*mut u8, u32, *mut usize, *mut usize, *mut i32) -> u32 =
-        unsafe { core::mem::transmute(0x081b_5344usize) };
-    unsafe { find(owner, key, callback, context, cursor) }
+    unsafe {
+        crate::app::vtable_set::collection_find_first_handler(
+            owner, key, callback.cast(), context.cast(), cursor,
+        )
+    }
 }
 
 #[cfg(target_os = "none")]
