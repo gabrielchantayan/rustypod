@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod remote_volume_up;
 pub mod remote_volume_down;
 pub mod record_range_intersection;
 pub use record_range_intersection::*;
