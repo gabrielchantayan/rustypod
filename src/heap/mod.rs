@@ -12,6 +12,7 @@ pub mod block_manager_mutex_lock;
 pub mod block_manager_mutex_unlock;
 pub mod block_region;
 pub mod client_commit;
+pub mod client_construct;
 pub mod client_byte_limit;
 pub mod client_available_blocks;
 pub mod client_erase;
@@ -255,8 +256,6 @@ mod wiring_tests {
 /// - the mask-ROM kernel-object dispatchers and the mailbox block's
 ///   os-heap pair (`KOBJ_HOOKS`): the ROM is not part of osos, and the
 ///   os-heap veneers route into the same target-only engine;
-/// - `POOL_CLIENT_OPS.client_alloc` (the real `operator new` for the
-///   0x170-byte block-manager client), for the same reason;
 /// - the unported 0x081fxxxx block-manager client
 ///   (`POOL_BASE_OPS.client_attach`/`client_reserve`/`client_avail`) in
 ///   the success tests, which short-circuit the real attach; populate
@@ -290,7 +289,6 @@ mod pool_integration_tests {
 
     static mut NEW_CALLS: usize = 0;
     static mut DELETE_CALLS: usize = 0;
-    static mut CLIENT_NEW_CALLS: usize = 0;
     static mut MBOX_ALLOCS: usize = 0;
     static mut MBOX_FREES: usize = 0;
     static mut ROM_CREATES: usize = 0;
@@ -410,11 +408,6 @@ mod pool_integration_tests {
         assert_eq!(ptr, control());
     }
 
-    unsafe extern "C" fn client_new(size: usize) -> *mut u8 {
-        CLIENT_NEW_CALLS += 1;
-        assert_eq!(size, 0x170, "the block-manager client object size");
-        client_storage()
-    }
 
     unsafe extern "C" fn rom_create(_op: u32, slot: *mut u32) {
         ROM_CREATES += 1;
@@ -567,9 +560,6 @@ mod pool_integration_tests {
             let ops = &mut *core::ptr::addr_of_mut!(pool::POOL_OPS);
             ops.new_control = std_new;
             ops.delete_control = std_delete;
-            // Same alloc-engine hole: the real client allocation is
-            // `operator new` into the target-only engine.
-            (*core::ptr::addr_of_mut!(pool_client::POOL_CLIENT_OPS)).client_alloc = client_new;
             let hooks = &mut *core::ptr::addr_of_mut!(KOBJ_HOOKS);
             *hooks = KobjHooks {
                 op_create: rom_create,
@@ -648,44 +638,6 @@ mod pool_integration_tests {
 
     static NAME: &[u8] = b"integration_pool\0";
 
-    #[test]
-    fn create_without_a_client_fails_cleanly_through_the_real_chain() {
-        if fixture_unavailable() {
-            return;
-        }
-        let _guard = setup();
-        unsafe {
-            // The REAL client attach runs (pool_client.rs) and finds no
-            // block manager to construct a client from: the fill gate
-            // fails and pool_create must clean up fully.
-            let pool = pool::pool_create(0x2000, NAME.as_ptr());
-            assert!(pool.is_null());
-            assert_eq!(NEW_CALLS, 1);
-            assert_eq!(DELETE_CALLS, 1, "failed create frees the control struct");
-            assert_eq!(MBOX_ALLOCS, 2, "parent ctor +0x24, base ctor +0x78");
-            assert_eq!(MBOX_FREES, 1, "only the base dtor is ported (parent dtor is a stub)");
-            assert_eq!(ROM_CREATES, 2);
-            assert_eq!(ROM_DELETES, 1);
-            assert_eq!(ELEM_DTORS, 0, "deque never got elements");
-            // The attach reached the client ctor before refusing.
-            assert_eq!(CLIENT_NEW_CALLS, 1, "one 0x170-byte client attempt");
-            let base = control() as *mut PoolBase;
-            assert!((*base).client_cache.is_null(), "nothing memoized");
-            assert_eq!(
-                (*base).node.name,
-                NAME.as_ptr(),
-                "the real parent ctor named the registration node"
-            );
-            assert_eq!((*base).client_shared, 1, "pool_init constructs with flag 1");
-            assert!((*core::ptr::addr_of!(SEG_FREES)).is_empty());
-            // The real fill ran far enough to store the computed counts
-            // before the attach gate refused (they survive in the buffer
-            // because the base dtor's release zeroed them — check zeroed).
-            assert_eq!((*base).fill_block_count, 0, "release_blocks zeroed");
-            assert_eq!((*base).fill_cap, 0);
-        }
-        teardown();
-    }
 
     #[test]
     fn create_seeds_the_embedded_heap_from_real_deque_content() {
