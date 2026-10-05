@@ -2980,6 +2980,7 @@ pub mod hints {
     // object and child-record fixture; mappings never unmap, so no other user
     // may share this hint.
     pub const OBJECT_CHILD_COUNT_IS_POSITIVE: usize = 0x7801_0000;
+    pub const OBJECT_CHILD_POP_LAST: usize = 0x7802_0000;
     // 0x4244_0000: dedicated to util/tagged_buffer_payload_address's raw-u32
     // descriptor and payload fixture; mappings never unmap.
     pub const TAGGED_BUFFER_PAYLOAD_ADDRESS: usize = 0x4244_0000;
