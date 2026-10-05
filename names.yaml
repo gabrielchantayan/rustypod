@@ -218963,3 +218963,49 @@ functions:
       read after dispatch, and reuses the loaded key instead of reloading it;
       virtual dispatch, container +4, entry +8, cache +12 and canonical result
       remain intact.
+
+  - address: 0x081a8c98
+    ghidra: FUN_081a8c98
+    name: entry_cursor_create_result
+    size: 92
+    sig: "void *entry_cursor_create_result(void *cursor, u32 match_key, u32 index_bound)"
+    module: app/entry_cursor_create_result
+    status: ported
+    renames:
+      param_1/r6: cursor
+      param_2/r7: match_key
+      entry_r2: index_bound
+      iVar1/r4: matched_entry
+      uVar2/r5: result
+      FUN_081a8db0: resident_cursor_position_by_ordinal_or_index
+      FUN_081a8cf4: resident_cursor_find_key_in_same_index
+      FUN_082aadd4: operator_new
+      FUN_080fe500: entry_result_construct
+    notes: >-
+      Raw osos.dec words establish the exact 92-byte extent ending at the
+      independent push at 0x081a8cf4. Whole-image A32 decoding verifies two
+      inbound unconditional BLs at 0x08210988 and 0x08210a48 and no predicated
+      inbound BLs. The body has four unconditional BLs at 0x081a8cac,
+      0x081a8cc0, 0x081a8cd0 and 0x081a8ce4, with no predicated BLs.
+      Ghidra incorrectly omits the live r2 index bound, preserved into the
+      positioning call with ordinal UINT_MAX. Positioning failure or missing
+      same-index key returns NULL without allocation. Otherwise allocate 28
+      bytes, read the cursor kind byte at +8 after allocation, and construct
+      a result with the found entry and sign-extended low match-key halfword.
+      Raw callee instructions establish resident positioning and consecutive
+      index lookup semantics; neither address has an existing names entry or
+      Rust port. Reuse the existing operator_new and entry_result_construct
+      ports; only those two cursor operations use resident address seams.
+      Entry r3 seeds scratch storage overwritten by entry_match_index before
+      use and is deliberately excluded from the semantic ABI. Cursor storage
+      remains opaque target bytes rather than borrowing a native-pointer host
+      prefix with incompatible +8 placement. No NULL-allocation guard is added.
+      Host edge tests cover both early exits, full-width keys and index bounds,
+      noncanonical positioning success, low-halfword truncation, allocator
+      mutation of kind, and preserved result padding. A standalone public
+      factory smoke verifies both NULL paths and the constructed result fields.
+      Host suite and ARM release build pass. match.py exits 1 with a reviewed
+      structural diff: LLVM adds a frame and resident-address literal, calls
+      cursor seams with BLX, and reuses the constructor's known return pointer;
+      both early exits, allocation size, post-allocation kind read and signed
+      key halfword preparation remain intact.
