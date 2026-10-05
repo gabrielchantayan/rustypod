@@ -12166,6 +12166,37 @@ functions:
       slot with r1=0x53747220 ("Str ") and r2=0x848e. The virtual callee has
       no recovered semantic identity, so the ARM port retains the exact
       target-width dispatch and host tests install a narrow recording seam.
+  - address: 0x081d1f60
+    ghidra: FUN_081d1f60
+    name: kind_0x19_dispatch
+    size: 44
+    sig: "u32 kind_0x19_dispatch(void *context)"
+    module: app/kind_0x19_dispatch
+    status: ported
+    vars: {param_1: context}
+    renames:
+      FUN_08266aa4: message_kind_arena_alloc
+      FUN_08266a48: message_kind_construct
+      FUN_08124c60: callback_dispatch_release
+    notes: >-
+      Raw A32 establishes 44 bytes at 0x081d1f60..0x081d1f8c. The bx lr
+      at 0x081d1f8c is a separate leaf; the next prologue is at 0x081d1f90.
+      Two inbound unconditional BL calls at 0x0808cd58 and 0x08143b30,
+      zero predicated BL calls, zero inbound B calls, and no aligned data
+      references, verified by binary-wide word decoding. The body has two
+      unconditional BL instructions: allocate eight bytes through the ported
+      message-kind arena allocator, then construct kind 0x19. Restore the
+      context in r0, move the message to r1, set r2=0, and tail-branch to
+      the ported callback_dispatch_release at 0x08124c60. Ghidra incorrectly
+      inlines that wrapper and reports an inherited r4 argument; raw words
+      establish the three-argument tail call. No deliberate deviations.
+      Host tests exercise stale kind replacement and adjacent storage bounds.
+      ARM build succeeds; match.py shows the same two calls and final tail
+      branch, with an extra saved register and frame pointer. LLVM retains
+      the allocation pointer across the constructor, whose port returns it
+      unchanged. ARM instruction smoke preserves stack and callee-saved
+      registers across twelve context/status cases. The existing dispatcher
+      seam remains owned by callback_dispatch_release; no new seams.
   - address: 0x081d2018
     ghidra: FUN_081d2018
     name: framework_root_post_message_kind
