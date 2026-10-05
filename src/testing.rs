@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    // Dedicated to util/owned_payload_list_remove's target-width list fixture.
+    pub const OWNED_PAYLOAD_LIST_REMOVE: usize = 0x41e6_0000;
     pub const EMBEDDED_ARRAY_WORD_AT: usize = 0x4294_0000;
     pub const INDEXED_TASK_BITMAP_RESOLVE: usize = 0x4293_0000;
     pub const INDEXED_TASK_STRING_RESOLVE: usize = 0x4292_0000;

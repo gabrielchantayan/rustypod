@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081e6c94
+    ghidra: FUN_081e6c94
+    name: owned_payload_list_remove
+    size: 196
+    sig: "u32 owned_payload_list_remove(u32 *head, u32 key)"
+    module: util/owned_payload_list_remove
+    status: ported
+    vars:
+      param_1/r7: head
+      param_2/r1: key
+      puVar3/r4: node
+      puVar5/r6: previous
+      piVar4/r5: array
+      node+0x00: raw_payload
+      node+0x04: key
+      node+0x0c: array_payload_flag
+      node+0x10: array_descriptor
+      node+0x14: next
+    notes: >-
+      Raw A32 establishes [0x081e6c94,0x081e6d58), 196 bytes, ending
+      before the next independent push. Ghidra's 184-byte extent and
+      noreturn delete annotation hide the successful return and miss tail.
+      Whole-image decoding verifies two inbound plain BLs at 0x08106cb8
+      and 0x08106cc4, zero predicated inbound BLs; three outbound plain
+      BLs and one BLNE to already ported free_wrapper and operator_delete.
+      Remove only the first matching key, clean the raw tag-0x37 payload
+      or optional array descriptor with tag-3 backing storage, unlink,
+      tag-2-delete the node and return one; misses return zero unchanged.
+      Deliberately omit the empty trivial-element count loop. Target-width
+      pointer words preserve offsets on hosts. Host suite passes 14114 tests;
+      ARM release builds. True-size match review retains traversal, cleanup,
+      unlink and return paths; LLVM adds a frame and removes the empty loop.
   - address: 0x081e71cc
     ghidra: FUN_081e71cc
     name: audio_format_notify_mismatch
