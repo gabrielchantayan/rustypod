@@ -219675,3 +219675,45 @@ functions:
       LLVM adds mov fp,sp and uses fp instead of r4, but retains both BLs,
       cmp/conditional zero return, both slot loads, and bx r1 tail dispatch.
       No device execution was performed.
+
+  - address: 0x0819f330
+    ghidra: FUN_0819f330
+    name: controller_resource_list_replace
+    size: 212
+    sig: "u32 controller_resource_list_replace(ResourceListController *controller, u32 resource, void *view)"
+    module: app/controller_resource_list_replace
+    status: ported
+    renames:
+      param_1/r4: controller
+      param_2/r5: requested_resource
+      param_3/r6: view
+      r7: provider
+      FUN_0819fe10: application_resource_provider
+      FUN_082aadd4: operator_new
+      FUN_08184fd4: load_resource_list
+      FUN_0819ed10: resident_update_body (identity unrecovered)
+      DAT_0819f3fc: default_resource_tag (0x5349454d)
+      DAT_0819f400: explicit_resource_tag (0x4954454d)
+    notes: >-
+      Raw extent is 0x0819f330..0x0819f404: 204 code bytes followed by
+      two four-byte tag literals; the next real function begins with push
+      at 0x0819f404. Whole-image aligned A32 decoding finds two incoming
+      unconditional BLs at 0x08182a74 and 0x0819fc88 and no predicated BLs.
+      Body contains five unconditional BLs, no predicated BLs, one BLXNE
+      to optional view vtable+400 and one BLX to current-list vtable+4.
+      Fetch provider unconditionally; return zero if current list+12 equals
+      the request. Otherwise notify view with (view,0,1), reload the list,
+      destroy and clear it, allocate 36 bytes, construct and publish the new
+      list, then call resident 0x0819ed10(controller,view,1) and return one.
+      Zero request selects controller+44 and tag 0x5349454d; nonzero selects
+      the request and tag 0x4954454d. Ghidra drops the view callback's third
+      argument; raw movne r2,#1 proves it. Reuse the three already ported
+      direct callees; the update body retains its verified address without
+      inventing an identity. Native pointer fields widen only on hosts;
+      target layout assertions preserve +24 and +44. Host tests cover
+      unchanged zero/full-width IDs, absent lists/views, both tag paths,
+      callback mutation of the current list, and publication before update.
+      Allocation precedes reading controller+44, including when the allocator
+      changes that field; the regression fixture exercises this ordering.
+      An exported-function host smoke preserved an unchanged full-width ID.
+      No device execution was performed.
