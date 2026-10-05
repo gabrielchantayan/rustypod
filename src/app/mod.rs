@@ -975,3 +975,4 @@ pub mod class_8900_playback_preference_3_is_one;
 pub mod class_8900_set_playback_selection;
 pub mod class_8900_playback_selection;
 pub mod class_8900_state_2c_set_and_read;
+pub mod timed_label_array_construct;
