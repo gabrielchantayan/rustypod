@@ -218492,3 +218492,48 @@ functions:
       match.py exits 1: eight original versus thirteen Rust instructions;
       LLVM adds a frame and replaces predication with a branch, preserving
       short-circuit reads and normalized stores. No device execution.
+
+  - address: 0x081b6ee8
+    ghidra: FUN_081b6ee8
+    name: showcase_pending_queues_finish
+    size: 172
+    sig: "void showcase_pending_queues_finish(u8 *showcase)"
+    module: app/showcase_pending_queues_finish
+    status: ported
+    renames:
+      param_1/r4: showcase
+      r5: mutex
+      showcase_plus_0x20: state
+      showcase_plus_0xe9: slots_initialized
+      showcase_plus_0xea: completion_ready
+      showcase_plus_0xec: selected_slot
+      showcase_plus_0xf0: resource
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+      FUN_081b759c: resource_slot_table_initialize
+      FUN_081b6fb4: showcase_pending_queues_complete
+      FUN_081b7f18: showcase_pending_queues_schedule
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 establishes the 172-byte all-code extent
+      [0x081b6ee8,0x081b6f94); the next independent function updates +0xeb.
+      Full-image decoding finds two inbound plain BLs at 0x0822e050 and
+      0x08230658, zero predicated inbound BLs. The body contains four plain
+      BLs and one BLEQ to slot initialization, plus a tail B to mutex_unlock.
+      Locks the mutex at +0x18, skips idle state zero and resource-less state
+      one, panics for other resource-less states. Initializes slots if needed,
+      completes selected pending queues when not ready, re-reads readiness
+      and signed slot after completion, schedules ready queues with a valid
+      slot, then stores state three and unlocks. Panic paths do not unlock.
+      Reuses existing Rust ports; dead r1/r2 residue is deliberately omitted
+      because verified completion and scheduling callees do not consume it.
+      Host transition tests cover signed slots, resource/state boundaries,
+      callback mutations, failure preserving state, and neighboring storage.
+      The existing view_event_prepare_resource_provider caller now uses this
+      export instead of a firmware-address seam. All 14225 host tests pass;
+      ARM release builds. Standalone host smoke preserves idle state and
+      resource-less state one. match.py reports a structural diff (exit 1):
+      43 original versus 42 Rust instructions, with the same conditional
+      calls, signed scheduling argument, final state store, panic path, and
+      tail unlock. LLVM replaces BLEQ with a branch and omits dead register
+      setup. No device execution.

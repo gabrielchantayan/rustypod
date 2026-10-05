@@ -845,6 +845,7 @@ pub mod showcase_queue_has_pending_entry;
 pub mod showcase_slot_pending_queue;
 pub mod showcase_pending_queues_complete;
 pub mod showcase_pending_queues_schedule;
+pub mod showcase_pending_queues_finish;
 pub mod screen_base;
 pub mod screen_layout;
 pub mod singleton_state;

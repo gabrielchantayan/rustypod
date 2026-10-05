@@ -10,9 +10,9 @@
 //! zero-state refresh every 50 calls, then applies the view's mapped staged
 //! flags and returns the framework handled verdict.
 //!
-//! Deliberate deviations: `resource_provider_attach_view` (`0x08124af4`) and
-//! the provider refresh (`0x081b6ee8`) remain firmware seams. The 32-bit
-//! global refresh counter at `0x08a09dcc + 4` is represented by host storage
+//! Deliberate deviations: `resource_provider_attach_view` (`0x08124af4`)
+//! remains a firmware seam; provider refresh uses the Showcase finish port.
+//! Global refresh counter at `0x08a09dcc + 4` uses 32-bit host storage
 //! in tests; target builds access the retail word directly. The original
 //! tail-branches to `view_event_apply_mapped_staged_flags` at `0x0810de48`;
 //! Rust calls the existing ported wrapper, whose documented ABI establishes
@@ -24,6 +24,7 @@ use core::ptr::addr_of_mut;
 
 use super::resource_provider_contains_view::resource_provider_contains_view;
 use super::resource_provider_update_refreshed::resource_provider_update_refreshed;
+use super::showcase_pending_queues_finish::showcase_pending_queues_finish;
 use super::singletons::{app_screen_get, singleton_class_7f80};
 use super::view_event::view_event_apply_mapped_staged_flags;
 
@@ -60,22 +61,13 @@ unsafe extern "C" fn provider_attach_view(provider: *mut u8, view: *mut u8) {
     panic!("view_event_prepare_resource_provider requires resource_provider_attach_view 0x08124af4")
 }
 
-unsafe extern "C" fn provider_refresh(provider: *mut u8) {
-    #[cfg(target_os = "none")]
-    {
-        let f: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x081b_6ee8usize) };
-        unsafe { f(provider) };
-    }
-    #[cfg(not(target_os = "none"))]
-    panic!("view_event_prepare_resource_provider requires provider refresh 0x081b6ee8")
-}
 
 pub static mut VIEW_EVENT_PREPARE_RESOURCE_PROVIDER_OPS: ViewEventPrepareResourceProviderOps = ViewEventPrepareResourceProviderOps {
     app_screen_get,
     provider_get: singleton_class_7f80,
     provider_contains_view: provider_contains_view_adapter,
     provider_attach_view,
-    provider_refresh,
+    provider_refresh: showcase_pending_queues_finish,
     apply_mapped_staged_flags: view_event_apply_mapped_staged_flags,
 };
 
