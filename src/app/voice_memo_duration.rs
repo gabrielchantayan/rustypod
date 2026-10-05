@@ -89,11 +89,11 @@ pub unsafe extern "C" fn voice_memo_duration_query(controller: *mut u8, selector
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use core::sync::atomic::{AtomicU32, Ordering};
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(crate) static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     static INTERVAL: AtomicU32 = AtomicU32::new(0);
     static CALLS: AtomicU32 = AtomicU32::new(0);
