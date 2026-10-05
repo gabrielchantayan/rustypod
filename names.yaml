@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c048c
+    ghidra: FUN_081c048c
+    name: indexed_shared_child_create
+    size: 120
+    sig: "void indexed_shared_child_create(RefcountedBody **out, const IndexedSharedOwner *owner, u32 index)"
+    module: app/indexed_shared_child_create
+    status: ported
+    renames:
+      param_1/r0/r6: out
+      param_2/r1/r4: owner
+      param_3/r2/r5: index
+      owner_plus_4: shared_body
+      owner_plus_8: count
+      owner_plus_12: selector
+      FUN_081375e8: resident_shared_child_construct
+      FUN_082aadd4: operator_new
+      FUN_0839d198: refcounted_body_attach_slot1
+      FUN_0839eca0: refcounted_handle_construct_variant
+      FUN_0839d1d4: refcounted_body_release_slot1
+    notes: >-
+      Raw words prove [0x081c048c, 0x081c0504), 120 bytes, ending with
+      e8bd80f8 before the next function opens with e92d4070. Whole-image
+      A32 decoding finds two inbound plain BLs at 0x08280a64 and 0x08280c48,
+      six outbound plain BLs and no predicated BLs in either direction.
+      Entry r3 is dead, not a fourth argument. Unsigned index >= count
+      constructs an empty handle without touching the owner body. Otherwise
+      allocate 88 bytes, retain owner body in a temporary slot, construct
+      the child with that slot, selector and index, wrap the returned child
+      without a mutex, then release the temporary. Existing allocator and
+      all three handle ports are reused. The resident constructor at
+      0x081375e8 has a structural identity, not a guessed concrete class.
+      Deliberate deviations: native-pointer repr(C) host fields and an
+      indirect resident constructor seam. No allocation-failure guard.
+      Host edge tests exercise unsigned bounds, null bodies, null child
+      returns and temporary ownership balance. ARM release builds.
+      match.py exits 1: LLVM adds a frame pointer, reverses branch layout,
+      tail-calls empty-handle construction and uses BLX for the resident
+      constructor. Size 88, owner offsets 4/8/12 and retain/construct/wrap/
+      release ordering are preserved.
   - address: 0x081c1cdc
     ghidra: FUN_081c1cdc
     name: provider_entry_count
