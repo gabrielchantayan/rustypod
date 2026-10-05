@@ -220678,3 +220678,42 @@ functions:
       Named repr(C) fields accommodate wider host pointers. Host tests
       isolate the local flag behavior, covering all byte values, adjacent
       guards, and self-assignment; vector ownership remains in firmware.
+
+  - address: 0x0818c85c
+    ghidra: FUN_0818c85c
+    name: parser_quoted_character
+    size: 144
+    sig: "unsigned int parser_quoted_character(ParserQuoteState *state, unsigned int character, StringObject *output)"
+    module: app/parser_quoted_character
+    status: ported
+    vars:
+      param_1/r4: state
+      param_2/r5: character
+      param_3/r0: output
+      uVar1/r1: flags
+      uVar2/r6: result
+    notes: >-
+      Raw A32 establishes 0x0818c85c..0x0818c8ec, ending in pop at
+      0x0818c8e8 before the next real push. Body has zero plain BL and
+      two BLNE calls, both to the already-ported string_object_append_code_unit
+      at 0x082768e8. Whole-image aligned decoding finds two incoming plain
+      BL calls at 0x0818c10c and 0x0818c1a8, no predicated incoming BL.
+      Flags at +0x28: bit 16 means inside double quotes; bit 17 makes the
+      next character literal. Outside quotes returns 0 except opening quote
+      sets bit 16 and returns 2. Closing unescaped quote clears bit 16 and
+      returns 1. Quoted characters return 2 and append if output is non-NULL;
+      backslash is retained and sets bit 17 after append, rereading flags.
+      Escaped characters clear bit 17 before append, including quotes and
+      backslashes. Comparisons use the full u32; append truncates to u16.
+      No new seam or algorithm deviation; the existing StringObject virtual
+      allocator remains unported and must be wired before firmware hooking.
+      repr(C) opaque u32 prefix preserves +0x28 on host and ARM.
+      Host suite passed 14323 tests, including transition, sequence and real
+      output edge cases. ARM release build passed. match.py exit 1 shows
+      44 versus 36 instructions, with explicit branches instead of predication;
+      quote/escape tests, flag offset, update ordering, and two append calls
+      remain intact. LLVM clears both quote/escape bits on closing quote
+      because escape is already known clear on that path. Compiled ARM smoke
+      executed the real append/transcoding ports with a preallocated allocator
+      fixture: opening/escaped/closing quotes and full-width input produced
+      bytes 41 5c 22 42 00 and the expected 0/1/2 return and flag sequence.
