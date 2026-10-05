@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b022c
+    ghidra: FUN_081b022c
+    name: two_word_header_string_owner_destroy
+    size: 20
+    sig: "TwoWordHeaderStringOwner *two_word_header_string_owner_destroy(TwoWordHeaderStringOwner *this)"
+    module: cxx/two_word_header_string_owner_destroy
+    status: ported
+    vars:
+      param_1: this
+      iVar1: string
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw osos.dec establishes [0x081b022c,0x081b0240), five ARM words:
+      push {r4,lr}; add r0,r0,#8; bl 0x08277484; sub r0,r0,#8;
+      pop {r4,pc}. The next real function starts with push at 0x081b0240.
+      Whole-image ARM decoding finds two inbound plain BL sites at
+      0x0839cadc and 0x0839cb2c, zero predicated inbound BLs; the body has
+      one outbound plain BL and zero predicated BLs. Destroys the embedded
+      StringObject at +8 and returns the enclosing owner through the
+      callee's result, leaving both opaque header words unchanged.
+      No NULL guard and no enclosing allocation delete. Caller paths
+      subsequently invoke operator_delete separately. Reuses the existing
+      string_object_destroy port without a new seam; the owner class is
+      unidentified. repr(C) preserves the two u32 header words and +8
+      member offset on hosts while StringObject pointers widen.
+      Host suite passes 14262 tests, including empty payload, owned payload
+      release with tag 0x34, repeated destruction without double-free,
+      header preservation and enclosing-pointer return. ARM release builds.
+      match.py reports seven Rust instructions versus five original:
+      LLVM adds frame setup and saves the owner in r4 rather than subtracting
+      eight after the call; the callee always returns its input, so behavior
+      is unchanged. Object relocation verifies the sole BL targets
+      string_object_destroy, not the apparent self-call in unlinked output.
+      Standalone host smoke confirms empty-string destruction and return.
+
   - address: 0x081a8514
     ghidra: FUN_081a8514
     name: record_pool_available_bytes
