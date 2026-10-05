@@ -215180,3 +215180,51 @@ functions:
       with unchanged budget. match.py exits 1: 44 versus 39 instructions,
       frame pointer and separate panic branch; budget gate, reload/decrement,
       error mapping, virtual release and unconditional unlock are preserved.
+
+  - address: 0x081ea54c
+    ghidra: FUN_081ea54c
+    name: selection_step_animate
+    size: 160
+    sig: "void selection_step_animate(u32 *owner, i32 delta)"
+    module: app/selection_step_animate
+    status: ported
+    renames:
+      param_1: owner
+      param_2: delta
+      owner_plus_0x124: selected_index
+      owner_plus_0x11c: current_position
+      owner_plus_0x12c: from_value
+      owner_plus_0x144: to_value
+      owner_plus_0x15c: animation
+      owner_plus_0x180: timed_transition
+      FUN_0826ec9c: ui_element_invalidate
+      FUN_0826c5e8: usec_timer_read_seconds
+      FUN_081607b0: timed_transition_init
+      FUN_08166a40: animation_set_values
+      FUN_08292788: global_callback_register
+      FUN_0806e488: existing status-value notifier firmware boundary
+    notes: >-
+      Raw ARM extent is 0x081ea54c..0x081ea5ec exclusive, 160 bytes:
+      closing pop at 0x081ea5e8, next real function push at 0x081ea5ec.
+      Independent whole-image aligned BL decoding finds exactly two plain
+      callers at 0x081ea3a8 and 0x081ea48c, no predicated BL callers.
+      Body has six plain BL instructions, no predicated BL, and one BLX
+      through vtable +0x114. Invalidate unconditionally. For nonzero delta,
+      wrap-add to selected index +0x124 without clamping, snapshot +0x11c
+      shifted left 16 to +0x130, clear +0x134, resolve the updated index
+      virtually, store its low-16-bit Q16.16 endpoint at +0x148 and clear
+      +0x14c. Sample the existing seconds helper, initialize the embedded
+      transition with duration 75 and three zero arguments, rebind animation
+      to transition/from/to, register owner+0xa4, and notify with 1.
+      The callers' apparent third argument is unused by the raw function.
+      Deliberate deviations: word indices preserve target layout on hosts;
+      target calls existing Rust ports directly, with host-only replaceable
+      operations for state tests. Reuse STATUS_VALUE_SET_OPS.notify for the
+      unported 0x0806e488 boundary rather than inventing a new callee identity.
+      LLVM register allocation, store scheduling, and notifier tail-call
+      differ from ADS; the zero gate, wrapping index, endpoint shifts, helper
+      arguments, and call order are retained. Host tests cover zero delta,
+      negative delta, unsigned and signed-boundary wrap, extreme signed
+      deltas, truncating shifts, and preservation of neighboring words.
+      Actual-source standalone smoke with simulated device boundaries observes
+      zero-only invalidation, UINT_MAX/zero wrap, Q16 endpoints and a 75-ms arm.
