@@ -10,9 +10,9 @@ use core::ptr;
 /// string-vector key from `source`, performs the tree lookup-or-insert, then
 /// destroys every temporary and returns the mapped value at result-node + 20.
 ///
-/// Deliberate deviations: the three unported composite helpers remain opaque
-/// operation slots; their ABIs and call ordering are preserved without naming
-/// an unsupported container type.
+/// Deliberate deviations: the remaining unported composite helpers retain
+/// operation slots; the key constructor uses its Rust port. Their ABIs and
+/// call ordering are preserved without naming an unsupported container type.
 pub type VectorInitialize = unsafe extern "C" fn(*mut u8);
 pub type KeyConstruct = unsafe extern "C" fn(*mut u8, *const u8, *const u8, *mut u8, u32);
 pub type QueryConstruct = unsafe extern "C" fn(*mut u8, *const u8) -> *mut u8;
@@ -40,7 +40,7 @@ unsafe extern "C" fn retail_vector_initialize(destination: *mut u8) {
 }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_key_construct(destination: *mut u8, a: *const u8, b: *const u8, vector: *mut u8, flag: u32) {
-    unsafe { core::mem::transmute::<usize, KeyConstruct>(0x0819_7ab8)(destination, a, b, vector, flag) }
+    unsafe { super::string_vector_key_construct::string_vector_key_construct(destination.cast(), a, b, vector.cast(), flag); }
 }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_query_construct(destination: *mut u8, key: *const u8) -> *mut u8 {

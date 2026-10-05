@@ -213,6 +213,7 @@ pub mod byte_key_tree_recycle_subtree;
 pub mod resource_value_map_lookup_or_insert;
 pub mod string_value_map_lookup_or_insert;
 pub mod string_vector_map_lookup_or_insert;
+pub mod string_vector_key_construct;
 pub mod string_vector_flag_copy_construct;
 pub mod byte_key_map_lower_bound_value;
 pub mod byte_key_word_map;

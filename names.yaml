@@ -220842,3 +220842,47 @@ functions:
       and ARM release build passed. match.py exits 1: LLVM combines the
       adjacent byte stores into strh at +12 and reorders independent stores;
       offsets, vtable literal, preserved bytes, and pointer return agree.
+  - address: 0x08197ab8
+    ghidra: FUN_08197ab8
+    name: string_vector_key_construct
+    size: 216
+    sig: "StringVectorKey *string_vector_key_construct(StringVectorKey *destination, const char *primary, const char *secondary, const CxxStringVector *source_vector, u32 flag)"
+    module: cxx/string_vector_key_construct
+    status: ported
+    vars: {param_1/r4: destination, param_2/r9: primary, param_3/r7: secondary, param_4/r10: source_vector, param_5/r8: flag, r5: length}
+    renames:
+      FUN_08392478: strlen
+      FUN_083d8a64: cxx_string_rep_create
+      thunk_EXT_FUN_22000020: __rt_memcpy
+      FUN_08197a74: record_initialize
+      FUN_083d8ca0: cxx_string_assign_cstr
+      FUN_083e5bb8: vector_assign
+      FUN_083e23b8: record_append
+      FUN_083e5b88: cxx_string_vector_destruct
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw A32 establishes 216 bytes through the next prologue at 0x08197b90:
+      212 instruction bytes ending with pop at 0x08197b88, then the shared
+      empty representation literal 0x08b31804 at 0x08197b8c. Independent
+      whole-image BL decoding finds two inbound plain calls at 0x082aaf6c
+      and 0x083db364, no predicated calls. The body contains nine outbound
+      plain BLs and no predicated BLs. Copies primary into a COW string
+      with capacity max(length,32), or uses the shared empty representation;
+      clears the three vector bounds and writes the low flag byte. Nonempty
+      secondary constructs a temporary string/vector record, assigns secondary
+      and source_vector, appends it, then destroys vector and string in order.
+      Existing string, memcpy, and vector destructor ports are reused. The
+      three unported composite helpers retain exact verified retail addresses
+      behind an operation table; no callee identity is invented. Both ported
+      callers now use the Rust constructor. Host repr(C) pointer fields widen;
+      dead argument spills are omitted. The existing representation allocator
+      NULL-return deviation is inherited; allocation success is required.
+      Focused host tests pass (2); full x86_64 host suite passes (14332).
+      ARM release build passes. match.py prints a structural diff (exit 1):
+      LLVM inlines representation creation, uses three indirect operation
+      calls, and reorders independent zero/flag stores; primary capacity,
+      copy length, field offsets, conditional append and cleanup agree.
+      ARM execution smoke compares stock and compiled Rust over twelve cases
+      each (lengths 0,1,31,32,33,64 with empty/nonempty secondary), using
+      explicit composite-callee fixtures; actual Rust representation creation,
+      string copy, vector destruction and COW release execute in the emulator.
