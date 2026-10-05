@@ -9,8 +9,8 @@
 //! is nonempty, constructs a temporary string/vector record, assigns both
 //! members, appends it to the entry vector, and destroys the temporary.
 //! Deliberate deviations: host pointer fields widen via repr(C); dead r2/r3
-//! spills are omitted. Three unported composite operations retain verified
-//! retail addresses and ABIs rather than a guessed container implementation.
+//! spills are omitted. Two unported composite operations retain verified
+//! retail addresses; record initialization uses the Rust constructor.
 //! The existing representation allocator's NULL-return deviation is inherited;
 //! allocation success remains a precondition here, as in the retail constructor.
 
@@ -34,21 +34,15 @@ pub struct StringVectorKey {
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 16] = [0; core::mem::offset_of!(StringVectorKey, flag)];
 
-pub type RecordInitialize = unsafe extern "C" fn(*mut StringVectorRecord);
 pub type VectorAssign = unsafe extern "C" fn(*mut CxxStringVector, *const CxxStringVector);
 pub type RecordAppend = unsafe extern "C" fn(*mut CxxStringVector, *const StringVectorRecord);
 
 #[derive(Clone, Copy)]
 pub struct StringVectorKeyConstructOps {
-    pub initialize: RecordInitialize,
     pub assign_vector: VectorAssign,
     pub append: RecordAppend,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn initialize(record: *mut StringVectorRecord) {
-    core::mem::transmute::<usize, RecordInitialize>(0x0819_7a74)(record);
-}
 #[cfg(target_os = "none")]
 unsafe extern "C" fn assign_vector(destination: *mut CxxStringVector, source: *const CxxStringVector) {
     core::mem::transmute::<usize, VectorAssign>(0x083e_5bb8)(destination, source);
@@ -58,14 +52,12 @@ unsafe extern "C" fn append(destination: *mut CxxStringVector, record: *const St
     core::mem::transmute::<usize, RecordAppend>(0x083e_23b8)(destination, record);
 }
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn initialize(_: *mut StringVectorRecord) { panic!("install key record initializer fixture") }
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn assign_vector(_: *mut CxxStringVector, _: *const CxxStringVector) { panic!("install key vector assignment fixture") }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn append(_: *mut CxxStringVector, _: *const StringVectorRecord) { panic!("install key record append fixture") }
 
 pub const DEFAULT_STRING_VECTOR_KEY_CONSTRUCT_OPS: StringVectorKeyConstructOps = StringVectorKeyConstructOps {
-    initialize, assign_vector, append,
+    assign_vector, append,
 };
 pub static mut STRING_VECTOR_KEY_CONSTRUCT_OPS: StringVectorKeyConstructOps = DEFAULT_STRING_VECTOR_KEY_CONSTRUCT_OPS;
 
@@ -97,7 +89,7 @@ pub unsafe extern "C" fn string_vector_key_construct(
         let ops = ptr::read_volatile(ptr::addr_of!(STRING_VECTOR_KEY_CONSTRUCT_OPS));
         let mut temporary = core::mem::MaybeUninit::<StringVectorRecord>::uninit();
         let record = temporary.as_mut_ptr();
-        (ops.initialize)(record);
+        super::string_vector_record_construct::string_vector_record_construct(record);
         cxx_string_assign_cstr(ptr::addr_of_mut!((*record).string), secondary);
         (ops.assign_vector)(ptr::addr_of_mut!((*record).vector), source_vector);
         (ops.append)(ptr::addr_of_mut!((*destination).record.vector), record);
