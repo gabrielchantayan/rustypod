@@ -130,6 +130,32 @@ pub unsafe extern "C" fn mov_chain_timeout_prepare(state: *mut u8) -> i32 {
     if unsafe { unlock_state(state) } != 0 { 3 } else { 0 }
 }
 
+/// Prepare a MOV-chain timeout only when the state virtual callback is nonzero.
+///
+/// Original `FUN_081e50c4` @ `0x081e50c4`: true size 60 bytes, ending at
+/// the independent function at `0x081e5100`, with no literal pool. Raw A32
+/// scanning verifies two incoming plain BLs (0x081e3cb0, 0x081e425c), zero
+/// predicated BLs, one outgoing plain BL to `mov_chain_timeout_prepare`,
+/// and one virtual BLX through slot +0x3c.
+///
+/// Return zero immediately for a zero callback; otherwise prepare the timeout
+/// and normalize any nonzero result to three. Preparation invokes the callback
+/// again: the first result must not be cached or substituted for that call.
+/// Deliberate deviation: host execution reuses this module's callback seam;
+/// firmware reads the actual four-byte vtable slot. No algorithm deviations.
+///
+/// # Safety
+///
+/// Same object and callback requirements as `mov_chain_timeout_prepare`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mov_chain_timeout_prepare_if_active(state: *mut u8) -> i32 {
+    if unsafe { state_virtual_callback(state) } == 0 {
+        return 0;
+    }
+    if unsafe { mov_chain_timeout_prepare(state) } != 0 { 3 } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -183,6 +209,50 @@ mod tests {
                 assert_eq!(TIMEOUT_STATE.load(Ordering::Relaxed), state.as_mut_ptr().wrapping_add(0x139c) as usize);
                 assert_eq!(TIMEOUT_VALUE.load(Ordering::Relaxed), 10_000);
             }
+        }
+    }
+
+    static CALLBACK_CALLS: AtomicU32 = AtomicU32::new(0);
+    static FIRST_RESULT: AtomicI32 = AtomicI32::new(0);
+
+    unsafe extern "C" fn changing_callback(_: *mut u8) -> i32 {
+        if CALLBACK_CALLS.fetch_add(1, Ordering::Relaxed) == 0 {
+            FIRST_RESULT.load(Ordering::Relaxed)
+        } else {
+            CALLBACK_RESULT.load(Ordering::Relaxed)
+        }
+    }
+
+    #[test]
+    fn conditional_prepare_rechecks_callback_and_preserves_skipped_state() {
+        let _guard = TEST_LOCK.lock();
+        let old_callback = unsafe { MOV_CHAIN_TIMEOUT_STATE_VIRTUAL };
+        let old_timeout = unsafe { MOV_CHAIN_TIMEOUT_CONFIGURE };
+        unsafe {
+            MOV_CHAIN_TIMEOUT_STATE_VIRTUAL = changing_callback;
+            MOV_CHAIN_TIMEOUT_CONFIGURE = timeout;
+        }
+        for (first, second, timeout_result, expected, calls, timeout_calls, marker) in [
+            (0, 7, 9, 0, 1, 0, 0xa5),
+            (7, 0, 9, 0, 2, 0, 0xa5),
+            (-1, 7, 0, 0, 2, 1, 1),
+            (7, -1, -9, 3, 2, 1, 1),
+        ] {
+            let mut state = [0u8; 0x13a4];
+            state[0x1391] = 0xa5;
+            FIRST_RESULT.store(first, Ordering::Relaxed);
+            CALLBACK_RESULT.store(second, Ordering::Relaxed);
+            TIMEOUT_RESULT.store(timeout_result, Ordering::Relaxed);
+            CALLBACK_CALLS.store(0, Ordering::Relaxed);
+            TIMEOUT_CALLS.store(0, Ordering::Relaxed);
+            assert_eq!(unsafe { mov_chain_timeout_prepare_if_active(state.as_mut_ptr()) }, expected);
+            assert_eq!(CALLBACK_CALLS.load(Ordering::Relaxed), calls);
+            assert_eq!(TIMEOUT_CALLS.load(Ordering::Relaxed), timeout_calls);
+            assert_eq!(state[0x1391], marker);
+        }
+        unsafe {
+            MOV_CHAIN_TIMEOUT_STATE_VIRTUAL = old_callback;
+            MOV_CHAIN_TIMEOUT_CONFIGURE = old_timeout;
         }
     }
 }
