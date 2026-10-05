@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c0378
+    ghidra: FUN_081c0378
+    name: checked_handle_construct
+    size: 180
+    sig: "CheckedHandle *checked_handle_construct(CheckedHandle *out, RefcountedBody *const *source, u32 request, u32 selector)"
+    module: app/checked_handle_construct
+    status: ported
+    renames:
+      param_1/r0/r4: out
+      param_2/r1/r7: source
+      param_3/r2/r5: request
+      param_4/r3/r6: selector
+      out_plus_4: body
+      out_plus_8: cached
+      implementation_plus_4: status
+      FUN_0839f098: refcounted_ptr_construct_slot1
+      FUN_0839f118: refcounted_ptr_copy_assign_slot1
+      FUN_083d61b0: handle_deref_or_null
+      FUN_0839d1d4: refcounted_body_release_slot1
+    notes: >-
+      Raw ARM establishes 176 instruction bytes through pop at 0x081c0424,
+      followed by the vtable literal 0x0898ccc8 at 0x081c0428; the next real
+      function starts at 0x081c042c, so the full extent is 180 bytes.
+      Whole-image decoding verifies two inbound plain BLs at 0x08162530 and
+      0x0816271c; the body has eight plain BLs, zero predicated BLs, and two
+      virtual BLX calls. Install the wrapper vtable, retain the source handle,
+      invoke implementation slot 4 with request and selector, and inspect its
+      post-call status. Nonzero status releases the wrapper handle and caches
+      zero; zero status caches slot 6's return. Concrete class and argument
+      meanings remain unknown. Host fields use native repr(C) pointers.
+      Host tests and executable smoke verify both ownership paths. ARM build
+      succeeds; match.py shows both virtual calls and the failure cleanup.
+      LLVM eliminates the redundant third dereference on the success path.
   - address: 0x081c048c
     ghidra: FUN_081c048c
     name: indexed_shared_child_create
