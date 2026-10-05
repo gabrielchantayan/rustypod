@@ -215905,3 +215905,36 @@ functions:
       original versus 23 Rust instructions: same two direct calls, indexed
       read, child reload, slot +0x2c BLX, and saved return; Rust additionally
       saves incoming r3 and uses an explicit empty-path branch.
+  - address: 0x081e50c4
+    ghidra: FUN_081e50c4
+    name: mov_chain_timeout_prepare_if_active
+    size: 60
+    sig: "i32 mov_chain_timeout_prepare_if_active(u8 *state)"
+    module: app/mov_chain_timeout_prepare
+    status: ported
+    renames:
+      param_1/r4: state
+      iVar1: callback_or_prepare_status
+      "state->vtable+0x3c": state_virtual_callback
+      FUN_081e41a4: mov_chain_timeout_prepare
+    notes: >-
+      Raw A32 establishes the 60-byte extent [0x081e50c4,0x081e5100),
+      with no literals; the next function independently scans transfer slots.
+      Whole-image aligned decoding finds two incoming plain BLs at
+      0x081e3cb0 and 0x081e425c, zero predicated incoming BLs. The body
+      has one plain BL at 0x081e50e8 to mov_chain_timeout_prepare, zero
+      predicated BLs, and one virtual BLX at 0x081e50d8 through slot +0x3c.
+      Return zero if the callback returns zero; otherwise call the existing
+      timeout preparation port and map its nonzero result to three.
+      Preparation calls the callback again, so its first result is not cached.
+      Concrete virtual-method identity remains unrecovered. No new seam:
+      host execution reuses the existing callback seam; firmware reads the
+      actual four-byte vtable slot. No algorithm deviations. Host tests and
+      standalone smoke cover zero short-circuit, a second callback becoming
+      zero, negative nonzero callbacks, timeout success and negative failure,
+      and preservation of the callback-success byte when setup is skipped.
+      Host suite: 14128 passed. ARM release build passes. match.py exits 1:
+      15 original versus 16 Rust instructions, preserving virtual dispatch,
+      short-circuit, direct preparation call, and zero/three results. The
+      R_ARM_CALL relocation targets mov_chain_timeout_prepare; differences
+      are frame setup and return-path layout. No device execution performed.
