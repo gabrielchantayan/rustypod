@@ -217690,3 +217690,46 @@ functions:
       for active values 0, 1 and 255, checking unchanged neighboring bytes,
       this/SP/LR preservation and the verified tail seam; callee behavior
       is exercised by host tests. No device execution performed.
+  - address: 0x081c4ff4
+    ghidra: FUN_081c4ff4
+    name: mov_track_chunk_offset_table_load_window
+    size: 124
+    sig: "u32 mov_track_chunk_offset_table_load_window(MovTrackChunkOffsetParser *parser, u32 index)"
+    module: mov/track_chunk_offset_table_load_window
+    status: ported
+    renames:
+      param_1/r0/r6: parser
+      param_2/r1/r4: index
+      r5: window_count
+      r7: chunk_offset_table
+      parser+0x1b8: current_track
+      track+0x10: chunk_offsets
+      track+0x48: payload_base_lo
+      track+0x4c: payload_base_hi
+      table+0x00: entry_count
+      table+0x04: window_index
+      table+0x08: entries
+      FUN_081c3960: u32_window_reader
+    notes: >-
+      Raw A32 establishes [0x081c4ff4,0x081c5070), 124 bytes, followed
+      by a separate push prologue. Whole-image decoding finds two inbound
+      plain BLs at 0x081c6718 and 0x081c6828, zero predicated inbound
+      BLs; one outbound plain BL to the already ported u32_window_reader
+      at 0x081c3960, zero predicated outbound BLs. Reject a missing track
+      with status 3. Use signed comparison against wrapping index+0x4000
+      to select a window; add wrapping u32 index*4 and 16 to the track's
+      64-bit base with both carries. On reader success reload track/table
+      and store the index; otherwise return 3. Native host reader pointers
+      widen with adjusted padding retaining the +0x1b8 track slot;
+      nested track/table fields retain target-width u32 pointers.
+      No new callee seam or added validation. Host tests exercise the real
+      Rust reader, endian conversion, empty/remaining/capped windows,
+      signed count boundary, shifted-index wrapping, carries, failure
+      preserving the index, and reader replacement of the current track.
+      All 14190 host tests and the ARM release build pass. Standalone
+      actual-module smoke reads and converts two words at offset
+      0x80000000c and records index 1. match.py exits 1 with 36 Rust
+      instructions versus 31 original: frame setup, reordered loads,
+      scalar base loads replacing LDRD, explicit failure branches, and
+      equivalent carry selection. Signed MOVGT cap, +0x1b8/+0x10/+0x48/
+      +0x4c fields, reader BL, and post-call table reload remain intact.

@@ -3,6 +3,7 @@ pub mod atom_info;
 pub mod atom_table;
 pub mod atom_table_root;
 pub mod chunk_offset_table_load_window;
+pub mod track_chunk_offset_table_load_window;
 pub mod sample_size_table_load_window;
 pub mod sync_sample_table_load_window;
 pub mod u32_window_reader;
