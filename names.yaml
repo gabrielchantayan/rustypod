@@ -218895,3 +218895,35 @@ functions:
       match.py exits 1: LLVM adds a frame, reorders independent stores, uses
       BLX for the resident initializer and emits an early predicated return;
       all object offsets, constants, guard and publication remain intact.
+  - address: 0x081b12d0
+    ghidra: FUN_081b12d0
+    name: vmax_owner_reset
+    size: 160
+    sig: "void vmax_owner_reset(void *owner)"
+    module: app/vmax_owner_reset
+    status: ported
+    renames:
+      param_1: owner
+      uVar1: message_family
+      DAT_081b135c: reset_flag
+      DAT_081b1364: vmax_message_family
+    notes: >-
+      Raw osos.dec verifies 140 instruction bytes and five literal words,
+      ending before the independent push at 0x081b1370: true size 160 bytes.
+      Whole-image A32 BL decoding finds two plain inbound calls at 0x081b141c
+      and 0x081b1ab4, zero predicated calls. Body has two plain BLs to existing
+      container_dispose_elements and observable_array_clear ports, three
+      virtual BLXs through freshly loaded vtable slot +0x58, and a tail B
+      to 0x081b19ec. Sets global byte 0x089cfd64 to one, dispatches family
+      0x564d6178 with messages 0x6d0d, 0x6d0e, 0x6d08, disposes and clears
+      embedded container +0x58, zeros word +0x84 and byte +0x88. Deliberately
+      inlines the raw-verified five stores from the unregistered tail target:
+      minus one at +0x8c/+0x9c/+0xa0 and zero at +0x90/+0x98. No guessed
+      callee identity or seam. Host operations model dispatch and firmware
+      global storage without truncating native pointers; target uses existing
+      container ports and volatile aligned word accesses.
+      Verification: 14243 host tests pass; ARM release build passes. Direct
+      public-function host smoke verifies flag, final message, partial-byte
+      preservation and sentinel reset. match.py with verified size 160 exits
+      1 with expected structural differences: LLVM materializes message
+      immediates, adds a frame pointer and inlines the tail target's stores.
