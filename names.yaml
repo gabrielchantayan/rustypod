@@ -218106,3 +218106,46 @@ functions:
       indirect BLX through literal 0x081b126c rather than direct BL, then
       loads 0x0898c58c, stores through returned r0 and returns it unchanged.
       The call/store/return structure and both literals are preserved.
+
+  - address: 0x081b9668
+    ghidra: FUN_081b9668
+    name: descriptor_provider_construct
+    size: 120
+    sig: "u32 *descriptor_provider_construct(u32 *storage, u32 fallback_provider, const u32 *descriptor, u32 extra)"
+    module: app/descriptor_provider_construct
+    status: ported
+    vars:
+      param_1: storage
+      param_2: fallback_provider
+      param_3: descriptor
+      param_4: extra
+      puVar1: resource_reference_cursor
+      iVar2: resolved_provider
+      DAT_081b96dc: derived_vtable
+    notes: >-
+      Raw osos.dec establishes [0x081b9668,0x081b96e0): 116 code bytes
+      followed by literal 0x0898c520 at 0x081b96dc. The next real function
+      begins with cmp r0,#0 at 0x081b96e0. Independently counted three
+      outgoing plain BLs at 0x081b9678, 0x081b9684, 0x081b96b0, zero
+      predicated BLs; the assignment's two-call count is incorrect.
+      Reuses twelve_byte_state_derived_construct, resource_ref_clear and
+      registry_lookup_by_id. Installs the vtable, clears resource words
+      7..9, stores fallback in words 5 and 6, descriptor in word 4 and
+      extra in word 10. Descriptor word 9 is a registry class id: zero
+      and 0x9481 bypass lookup; a nonnull result replaces only word 6.
+      Copies descriptor byte 0 into object byte 4 and clears words 7..8.
+      Returns the base constructor's returned object, not necessarily the
+      input storage. Concrete class identity remains unknown. No deliberate
+      behavioral deviations; target-width pointer fields remain u32 on hosts.
+      Tests use local dependency injection rather than shared global mutation.
+      Host regression covers sentinel ids, adjacent ids, missing and found
+      providers, zero and high byte tags, dirty storage and guards. All 14206
+      host tests pass; ARM release build succeeds. Actual-source smoke exercises
+      the exported function with the real derived-base and resource-clear
+      ports, a binary-derived base model and a registry trap on the sentinel
+      path; relocated return pointer and exact object layout pass.
+      match.py exits 1 with expected compiler structural differences: fp
+      frame, reordered sentinel comparisons and lookup block placement.
+      Three calls, conditional nonnull replacement, field writes, byte copy
+      and final clears are preserved. LLVM retains descriptor in r5 on the
+      bypass path and reloads word 4 after the registry call.
