@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081cb1bc
+    ghidra: FUN_081cb1bc
+    name: demo_mode_class_2600_lookup
+    size: 24
+    sig: "void *demo_mode_class_2600_lookup(u32 key)"
+    module: app/registry
+    status: ported
+    renames:
+      param_1/r0/r4: key
+      FUN_081cb184: demo_mode_class_2600_instance
+      FUN_081cb1a0: shared_provider_lookup_tail
+      DAT_081cb1b8: lookup_namespace_2a2a2a2a
+    notes: >-
+      Raw six A32 words establish [0x081cb1bc,0x081cb1d4); the next
+      function starts with an independent push. Whole-image aligned BL
+      decoding finds two plain inbound calls at 0x0815a938 and 0x0815a954,
+      zero predicated calls. One outbound plain BL calls the existing
+      class-0x2600 accessor; no predicated outbound BL. Preserve the key,
+      then tail-branch to 0x081cb1a0, which loads provider at +0x28 and
+      dispatches its vtable +0xe0 with namespace 0x2a2a2a2a and key.
+      Both caller sites consume the returned object; Ghidra's void
+      signature is wrong. No concrete virtual callee identity is invented.
+      Inline the shared tail helper without separately porting it; no
+      NULL guard is added. Native repr(C) fields preserve target offsets.
+      Host suite passes 14166 tests; standalone smoke verifies pointer and
+      NULL results. ARM release build passes. match.py exits 1: LLVM emits
+      the shared helper inline, retains the accessor BL, provider +0x28,
   - address: 0x081bc95c
     ghidra: FUN_081bc95c
     name: vtable_payload_flags_construct
