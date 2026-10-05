@@ -223,14 +223,14 @@ pub unsafe extern "C" fn request_callback_state_reset(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use parking_lot::Mutex;
     use std::vec::Vec;
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
     static CALLBACK_LOG: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
     unsafe extern "C" fn record_release(callback: *mut HostCallbackEntry) {

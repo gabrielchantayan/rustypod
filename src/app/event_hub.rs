@@ -309,7 +309,7 @@ pub unsafe extern "C" fn event_hub_broadcast(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use crate::cxx::pair_header::{PairHeaderElementArrayOps, PAIR_HEADER_ELEMENT_ARRAY_OPS};
@@ -318,7 +318,7 @@ mod tests {
     use std::vec::Vec;
 
     /// Serializes the cache, broadcast state, and dispatch seam.
-    static EVENT_HUB_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static EVENT_HUB_LOCK: Mutex<()> = Mutex::new(());
     /// Calls made through the already-ported array adapter.
     static mut ARRAY_CALLS: Vec<(usize, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32)> =
         Vec::new();
