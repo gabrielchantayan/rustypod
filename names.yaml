@@ -215322,3 +215322,42 @@ functions:
       extent; reviewed again with --size 68. LLVM preserves the indirect
       call and unconditional clear, using CLZ/LSR for the zero predicate
       and a different frame/register allocation (18 versus 17 instructions).
+
+  - address: 0x081e9be0
+    ghidra: FUN_081e9be0
+    name: container_view_construct_channels
+    size: 108
+    sig: "ContainerViewChannels *container_view_construct_channels(ContainerViewChannels *view, ResourceProvider *resources, void *controller, void *parent, const ContainerViewState1Spec *spec, u32 channel_key)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: resources
+      param_3/r2: controller
+      param_4/r3: parent
+      param_5/stack: spec
+      param_6/stack: channel_key
+      DAT_081e9c48: CONTAINER_VIEW_CHANNELS_VTABLE_ADDRESS
+    notes: >-
+      Raw words establish 108 bytes through the owned vtable literal
+      0x0898fba0 at 0x081e9c48: 104 bytes of code, with the next real
+      function beginning at 0x081e9c4c (cmp r0,#0). Whole-image aligned
+      A32 BL decoding finds two plain inbound calls at 0x081ddd0c and
+      0x081e97cc, zero predicated inbound calls. The body has four plain
+      BL instructions and zero predicated BL instructions: the ported
+      container_view_construct_state_1 at 0x0812ed60, aligned zero-fill
+      veneer 0x08037db8, and twice the unaligned zero-fill veneer
+      0x08037dc8. These veneers reach 0x2200027c and 0x220002d4,
+      IRAM mirrors of ported memzero_aligned and memzero, not mask ROM.
+      Forward the five base arguments, install the derived vtable, clear
+      byte +0x11e, store the sixth argument at +0xf8, then clear exactly
+      eleven bytes at each of +0xfc, +0x107, and +0x112. Preserve byte
+      +0x11d and the tail from +0x11f. Concrete widget identity remains
+      unrecovered; the semantic name describes its verified channel state.
+      Deliberate deviations: retain the input pointer rather than register
+      shuffling; aligned zero-fill calls the existing Rust body through a
+      volatile function pointer and unaligned fills use the ported IRAM
+      veneer. repr(C) fields preserve target offsets on hosts. Existing
+      implementation completed with mapping, named vtable, adjacent-field
+      layout assertions, and reconstruction coverage for dirty channels,
+      nonzero state, preserved neighboring bytes, and complemented keys.
