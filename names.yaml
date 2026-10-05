@@ -216651,3 +216651,35 @@ functions:
       BL relocation, query BLX, vtable reload, setter arguments and tail
       BX remain intact; register allocation and frame-pointer setup differ.
       No device execution is claimed.
+
+  - address: 0x081cf9fc
+    ghidra: FUN_081cf9fc
+    name: remote_position_increment
+    size: 104
+    sig: "uint32_t remote_position_increment(void *controller, uint32_t step)"
+    module: app/remote_position_increment
+    status: ported
+    renames:
+      param_1: controller (unused)
+      param_2: step
+      piVar1: interface
+      uVar2: current
+      uVar3: limit
+      uVar4: selected
+      FUN_08160148: lazy_singleton_0x8c
+    notes: >-
+      Raw extent 0x081cf9fc..0x081cfa64 ends before the next push prologue.
+      Whole-image ARM decoding verifies two incoming plain BLs at
+      0x081d0068 and 0x081d06b4, zero predicated BLs. Body has one plain
+      BL, zero predicated BLs, two virtual BLXs and a final virtual BX.
+      Query position slot +0x5c, double step modulo 2^32, query limit
+      +0x64, select wrapping current-plus-delta only when wrapping
+      limit-minus-delta exceeds current, then clamp unsigned to limit.
+      Reload the vtable after both queries and set via +0x54 with flag 1.
+      Preserve tail r0. Reuses the existing typed PositionInterface ABI;
+      native-width host tables and host getter are deliberate deviations.
+      Target singleton constructor is still unported, blocking hook readiness.
+      Host suite passes 14149 tests; standalone smoke gives positions 11,
+      12 and 9 for steps 1, 2 and 0x80000000 from current 9, limit 12.
+      ARM release build passes. match.py exits 1: both bodies have 26
+      instructions; LLVM folds doubling into shifted add/sub and reorders
