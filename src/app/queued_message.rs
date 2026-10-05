@@ -43,12 +43,8 @@
 //! This factory then overwrites the vtable with its derived literal
 //! `DAT_081034ac = 0x08980744`.
 //!
-//! The base/message-kind constructor is now ported
-//! ([`crate::app::message_kind::message_kind_construct`]) and is the wired
-//! default for the base slot; only the payload constructor still rides
-//! [`QUEUED_MESSAGE_OPS`]. `operator_new(0x10)` is already ported and is
-//! called directly. The payload host default panics, so test callers must
-//! install an explicit recording payload op.
+//! Both constructor defaults in [`QUEUED_MESSAGE_OPS`] now use Rust ports.
+//! `operator_new(0x10)` is also ported and called directly.
 
 use core::ptr::addr_of_mut;
 
@@ -108,43 +104,72 @@ unsafe extern "C" fn ported_construct_base(
     unsafe { crate::app::message_kind::message_kind_construct(storage.cast(), kind) }.cast()
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_construct_payload(
+/// Nested queued-message payload. Pointer fields retain host pointer width;
+/// on ARM this is the original four-word, 16-byte object.
+#[repr(C)]
+pub struct QueuedMessagePayload {
+    pub vtable: u32,
+    pub message_code: u32,
+    pub byte_count: u32,
+    pub bytes: *mut u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 12] = [0; core::mem::offset_of!(QueuedMessagePayload, bytes)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 16] = [0; core::mem::size_of::<QueuedMessagePayload>()];
+
+/// `FUN_081b9248` @ **0x081b9248**: 76 bytes through the next entry at
+/// 0x081b9294 (72 code bytes plus vtable literal 0x0898c50c at 0x081b9290).
+/// Raw A32 scan verifies two incoming plain BLs, zero predicated BLs;
+/// two outgoing plain BLs to malloc_wrapper and the __rt_memcpy veneer.
+///
+/// Store the vtable, message code and byte count. For zero bytes store NULL
+/// without allocating or reading source; otherwise allocate with tag 0x27,
+/// store the owned pointer before copying exactly byte_count bytes, and
+/// return the input object. There is no allocation-failure guard in firmware.
+///
+/// Deliberate deviations: repr(C) retains native host pointers, while ARM
+/// offsets remain +0/+4/+8/+12. Reuse the ported allocator's existing heap
+/// dispatch and call __rt_memcpy directly instead of its IRAM-mirror veneer.
+///
+/// # Safety
+/// `block` must be aligned, writable storage for QueuedMessagePayload.
+/// For nonzero byte_count, source must be readable for that many bytes
+/// (including the runtime copy's documented word-read padding), and allocation
+/// must succeed with a disjoint writable buffer. Existing owned storage is
+/// not released: this is a constructor, not an assignment.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn queued_message_payload_construct(
     block: *mut u8,
-    code: u32,
-    bytes: *const u8,
+    message_code: u32,
+    source: *const u8,
     byte_count: u32,
 ) -> *mut u8 {
-    let f: unsafe extern "C" fn(*mut u8, u32, *const u8, u32) -> *mut u8 =
-        unsafe { core::mem::transmute(0x081b_9248usize) };
-    unsafe { f(block, code, bytes, byte_count) }
+    let payload = block.cast::<QueuedMessagePayload>();
+    unsafe {
+        core::ptr::addr_of_mut!((*payload).vtable).write_volatile(0x0898_c50c);
+        core::ptr::addr_of_mut!((*payload).message_code).write_volatile(message_code);
+        core::ptr::addr_of_mut!((*payload).byte_count).write_volatile(byte_count);
+        if byte_count == 0 {
+            core::ptr::addr_of_mut!((*payload).bytes).write_volatile(core::ptr::null_mut());
+        } else {
+            let bytes = crate::heap::veneers::malloc_wrapper(byte_count as usize, 0x27);
+            core::ptr::addr_of_mut!((*payload).bytes).write_volatile(bytes);
+            crate::rt_memcpy::__rt_memcpy(bytes, source, byte_count as usize);
+        }
+    }
+    block
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_construct_payload(
-    _block: *mut u8,
-    _code: u32,
-    _bytes: *const u8,
-    _byte_count: u32,
-) -> *mut u8 {
-    panic!("queued_message_construct requires payload constructor 0x081b9248")
-}
-
-#[cfg(target_os = "none")]
 const DEFAULT_QUEUED_MESSAGE_OPS: QueuedMessageOps = QueuedMessageOps {
     construct_base: ported_construct_base,
-    construct_payload: firmware_construct_payload,
+    construct_payload: queued_message_payload_construct,
 };
 
-#[cfg(not(target_os = "none"))]
-const DEFAULT_QUEUED_MESSAGE_OPS: QueuedMessageOps = QueuedMessageOps {
-    construct_base: ported_construct_base,
-    construct_payload: missing_construct_payload,
-};
-
-/// Active construction operations. Host tests replace these slots; the
-/// base-constructor default is the ported 0x08266a48, while the payload
-/// default still calls the firmware address on target (panics on host).
+/// Active construction operations. Both defaults use ports; host tests may
+/// replace these slots.
 pub static mut QUEUED_MESSAGE_OPS: QueuedMessageOps = DEFAULT_QUEUED_MESSAGE_OPS;
 
 /// queued_message_construct — original: `FUN_08103464` @ 0x08103464
@@ -157,9 +182,8 @@ pub static mut QUEUED_MESSAGE_OPS: QueuedMessageOps = DEFAULT_QUEUED_MESSAGE_OPS
 ///
 /// # Safety
 ///
-/// `storage` must name writable arena storage for a 12-byte target envelope;
-/// its base constructor and the payload constructor must be installed before
-/// host use. All requirements mirror the original.
+/// `storage` must name writable arena storage for a 12-byte target envelope.
+/// The allocator and nested payload constructor's safety requirements apply.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn queued_message_construct(
@@ -197,11 +221,8 @@ pub unsafe extern "C" fn queued_message_construct(
 ///
 /// # Deliberate deviations
 ///
-/// The payload constructor @ 0x081b9248 remains behind the existing
-/// [`QUEUED_MESSAGE_OPS`] dispatch slot: its target default calls the firmware
-/// address and its host default panics until a test installs an operation.
-/// The base constructor and tag-2 `operator_new(0x10)` are already ported and
-/// used through the same paths as the sibling constructor.
+/// Both constructor defaults use Rust ports through [`QUEUED_MESSAGE_OPS`].
+/// The tag-2 `operator_new(0x10)` is called directly as in the sibling factory.
 ///
 /// # Safety
 ///
@@ -532,6 +553,63 @@ mod tests {
     fn restore_mocks(guards: (MutexGuard<'static, ()>, MutexGuard<'static, ()>)) {
         unsafe { QUEUED_MESSAGE_OPS = DEFAULT_QUEUED_MESSAGE_OPS };
         drop(guards);
+    }
+    #[test]
+    fn empty_payload_initializes_without_allocation_or_source_read() {
+        let _heap = mock_heap();
+        let mut payload = QueuedMessagePayload {
+            vtable: 0, message_code: 0, byte_count: 99,
+            bytes: core::ptr::dangling_mut(),
+        };
+        let block = core::ptr::addr_of_mut!(payload).cast();
+        assert_eq!(unsafe {
+            queued_message_payload_construct(block, u32::MAX, core::ptr::null(), 0)
+        }, block);
+        assert_eq!(payload.vtable, 0x0898_c50c);
+        assert_eq!(payload.message_code, u32::MAX);
+        assert_eq!(payload.byte_count, 0);
+        assert!(payload.bytes.is_null());
+        assert_eq!(alloc_log().0, 0);
+    }
+
+    #[test]
+    fn owned_payload_copies_exact_bytes_and_survives_source_changes() {
+        let _heap = mock_heap();
+        for alignment in 0..4 {
+            for len in 1..=64 {
+                let mut source = [0u8; 72];
+                for (i, byte) in source.iter_mut().enumerate() {
+                    *byte = (i as u8).wrapping_mul(37);
+                }
+                let original = source;
+                let mut destination = [0xa5u8; 72];
+                let owned = unsafe { destination.as_mut_ptr().add(4 + alignment) };
+                set_alloc_ret(owned);
+                let mut payload = QueuedMessagePayload {
+                    vtable: 0, message_code: 0, byte_count: 0,
+                    bytes: core::ptr::null_mut(),
+                };
+                let block = core::ptr::addr_of_mut!(payload).cast();
+                assert_eq!(unsafe {
+                    queued_message_payload_construct(block, 0x8000_ffff,
+                        source.as_ptr().add(alignment), len as u32)
+                }, block);
+                assert_eq!(payload.vtable, 0x0898_c50c);
+                assert_eq!(payload.message_code, 0x8000_ffff);
+                assert_eq!(payload.byte_count, len as u32);
+                assert_eq!(payload.bytes, owned);
+                assert_eq!(&destination[4 + alignment..4 + alignment + len],
+                    &original[alignment..alignment + len]);
+                assert!(destination[..4 + alignment].iter().all(|&b| b == 0xa5));
+                assert!(destination[4 + alignment + len..].iter().all(|&b| b == 0xa5));
+                assert_eq!(source, original);
+                source.fill(0);
+                assert_eq!(unsafe { core::slice::from_raw_parts(payload.bytes, len) },
+                    &original[alignment..alignment + len]);
+                let (_, size, tag) = alloc_log();
+                assert_eq!((size, tag), (len, 0x27));
+            }
+        }
     }
 
     #[test]
