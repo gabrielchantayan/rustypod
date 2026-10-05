@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod named_sequence_play;
 pub mod selected_resource_play;
 pub mod input_state_buffer;
 pub use input_state_buffer::*;

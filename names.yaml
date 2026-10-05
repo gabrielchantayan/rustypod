@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a2b24
+    ghidra: FUN_081a2b24
+    name: named_sequence_play
+    size: 132
+    sig: "void named_sequence_play(u8 *manager, const StringObject *name)"
+    module: app/named_sequence_play
+    status: ported
+    vars:
+      param_1/r6: manager
+      param_2/r7: name
+      param_3/param_4: unused incoming words saved in temporary storage
+      uStack_20/uStack_1c: temporary_empty_string
+      bVar1/r4: temporary_constructed
+      bVar2/r5: nonempty
+      FUN_082a50b0: string_object_c_str
+      FUN_08277304: string_object_construct_from_cstr
+      FUN_082aad94: string_object_differs
+      FUN_08277484: string_object_destroy
+      FUN_081a2820: unported named sequence lookup
+      FUN_081a2998: unported default sequence initialization
+      FUN_0826c884: unported halfword-pair sequence playback
+    notes: >-
+      Raw osos.dec establishes 128 code bytes plus the empty-string word at
+      0x081a2ba4; the next real function starts with push at 0x081a2ba8.
+      Five outbound plain BLs, two predicated BLs (BLNE destroy, BLEQ default).
+      Whole-image A32 decoding finds one inbound plain BL at 0x0821646c and
+      one inbound BLNE at 0x0810a028. Empty names do nothing; destroy the
+      temporary before lookup, use the default on a miss, then play the result.
+      Raw default epilogue at 0x081a2af8..0x081a2b14 returns manager+0x30;
+      its r0 feeds playback unchanged. Playback reads count at +0xfac and
+      halfword pairs at +0x0c/+0x0e. Three unported callees retain verified
+      retail-address seams; existing string ports are reused directly.
+      Host tests cover null/empty payloads, UTF-8 names, hits and misses.
+      match.py confirms compare/destroy/lookup/default/play control flow.
+      LLVM removes the impossible c_str null branch and uses BLX retail seams.
   - address: 0x081a2d80
     ghidra: FUN_081a2d80
     name: embedded_member_init_noop
