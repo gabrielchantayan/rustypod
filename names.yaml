@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a2eac
+    ghidra: FUN_081a2eac
+    name: voice_memo_recording_active_get
+    size: 8
+    sig: "u32 voice_memo_recording_active_get(const u8 *controller)"
+    module: app/voice_memo_recording_active_get
+    status: ported
+    renames:
+      param_1/r0: controller
+      "controller+0x8a": recording_active
+    notes: >-
+      Raw words e5d0008a and e12fff1e establish the true eight-byte extent
+      [0x081a2eac,0x081a2eb4); the next function starts with push {r4,lr}.
+      Whole-image aligned A32 BL decoding finds two plain inbound calls
+      at 0x081263c0 and 0x0815fc94, zero predicated inbound calls and zero
+      outbound BLs. Load and zero-extend byte +0x8a without normalization.
+      Existing voice_memo_is_paused and duration ports identify this as
+      recording-active; both stock callers test nonzero. No callee seam
+      or deliberate behavior deviations. Host tests cover all 256 values
+      at four byte alignments, unchanged storage, repeated transitions,
+      and an allocation ending at the accessed byte. Host suite passes
+      14303 tests; ARM release build passes. Standalone executable smoke
+      returns 0, 1, 128, 255, 0. match.py exits 1: LLVM adds frame setup
+      and a pop return while preserving the sole ldrb at +138. No device run.
   - address: 0x081a2ee8
     ghidra: FUN_081a2ee8
     name: class_8780_priority_toggle

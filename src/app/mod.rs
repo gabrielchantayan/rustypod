@@ -6,6 +6,7 @@ pub use input_state_buffer::*;
 pub mod recording_interval_seconds;
 pub mod voice_memo_event_state;
 pub mod voice_memo_is_paused;
+pub mod voice_memo_recording_active_get;
 pub mod demo_mode_string_refresh;
 pub mod voice_memo_decimal_split;
 pub mod controller_resource_list_replace;
