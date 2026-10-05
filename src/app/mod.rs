@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod resource_provider_update_refreshed;
+pub use resource_provider_update_refreshed::*;
 pub mod shared_selector_create;
 pub mod indexed_shared_child_create;
 pub mod twelve_byte_state_derived_construct;

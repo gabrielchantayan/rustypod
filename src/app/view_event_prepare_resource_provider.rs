@@ -23,11 +23,11 @@ use core::ptr::{read_volatile, write_volatile};
 use core::ptr::addr_of_mut;
 
 use super::resource_provider_contains_view::resource_provider_contains_view;
+use super::resource_provider_update_refreshed::resource_provider_update_refreshed;
 use super::singletons::{app_screen_get, singleton_class_7f80};
 use super::view_event::view_event_apply_mapped_staged_flags;
 
 const PROVIDER_PENDING_OFFSET: usize = 0xc5;
-const PROVIDER_REFRESHED_OFFSET: usize = 0xeb;
 const REFRESH_INTERVAL: u32 = 50;
 const RETAIL_REFRESH_COUNTER: *mut u32 = 0x08a0_9dd0 as *mut u32;
 
@@ -89,11 +89,6 @@ unsafe fn refresh_counter() -> *mut u32 {
     { addr_of_mut!(HOST_REFRESH_COUNTER) }
 }
 
-unsafe fn update_provider_refreshed(provider: *mut u8) {
-    let refreshed = unsafe { provider.add(0xe8).read_volatile() != 0 }
-        && unsafe { provider.add(0xe9).read_volatile() != 0 };
-    unsafe { provider.add(PROVIDER_REFRESHED_OFFSET).write_volatile(refreshed as u8) };
-}
 
 /// Ensures `view` is attached to the class-0x7f80 resource provider, refreshes
 /// its pending state, applies mapped staged flags, and returns one.
@@ -117,13 +112,13 @@ pub unsafe extern "C" fn view_event_prepare_resource_provider(view: *mut u8) -> 
         unsafe { write_volatile(counter, next) };
         if next == REFRESH_INTERVAL {
             unsafe { (ops.provider_refresh)(provider) };
-            unsafe { update_provider_refreshed(provider) };
+            unsafe { resource_provider_update_refreshed(provider) };
             unsafe { write_volatile(counter, 0) };
         }
     } else {
         unsafe { (ops.provider_get)() };
         unsafe { (ops.provider_refresh)(provider) };
-        unsafe { update_provider_refreshed(provider) };
+        unsafe { resource_provider_update_refreshed(provider) };
         unsafe { provider.add(PROVIDER_PENDING_OFFSET).write_volatile(0) };
     }
     unsafe { (ops.apply_mapped_staged_flags)(view) }
