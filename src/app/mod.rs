@@ -263,6 +263,7 @@ pub mod animation;
 pub mod timing_wheel_node_replace_value;
 pub mod copy_eighteen_records_and_tail;
 pub mod identity_noop;
+pub mod embedded_member_init_noop;
 pub mod always_zero;
 pub mod always_one;
 pub mod mode_one_handler_pair;

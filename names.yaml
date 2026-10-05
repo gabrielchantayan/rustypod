@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a2d80
+    ghidra: FUN_081a2d80
+    name: embedded_member_init_noop
+    size: 4
+    sig: "u8 *embedded_member_init_noop(u8 *member)"
+    module: app/embedded_member_init_noop
+    status: ported
+    renames:
+      param_1/r0: member
+    notes: >-
+      Raw word e12fff1e is bx lr; true extent [0x081a2d80,0x081a2d84).
+      The next independently called function at 0x081a2d84 is another
+      bx lr, reached by BL at 0x080648c0. Whole-image aligned raw A32
+      decoding verifies two plain inbound BLs at 0x0806380c and
+      0x080be100, zero predicated inbound BLs and zero outgoing calls.
+      No aligned DATA pointer references found. Preserve the incoming
+      member pointer and access no memory. Callers pass object+0xb55
+      during initialization and enclosing-object+0xb59 during migration
+      of versions below 0x35; neither consumes the returned r0.
+      The member's domain meaning is unproven; no destructor identity
+      or callee seam is invented. No deliberate deviations: naked ARM
+      export preserves the exact register-transparent single-word body.
+      Host tests cover NULL, unaligned and dangling pointer words,
+      full-width pointer pass-through and unchanged member/neighbor bytes.
   - address: 0x081a2eac
     ghidra: FUN_081a2eac
     name: voice_memo_recording_active_get
