@@ -123,6 +123,37 @@ pub unsafe extern "C" fn silver_list_table_process_resource(
     unsafe { (ops.destroy)(table) }
 }
 
+/// Processes a Silver list resource during the caller's resource scan.
+///
+/// Original: `FUN_081b9cec` @ **0x081b9cec**, 68 bytes of ARM code,
+/// ending at the next function's push @ 0x081b9d30. Raw whole-image
+/// decoding finds two inbound BL sites: plain BL @ 0x081b9914 and BLNE
+/// @ 0x081b993c. The body has three plain BLs and zero predicated BLs.
+///
+/// Discards context, allocates 0x30 bytes, constructs with populate=1,
+/// processes the constructor's returned table, then dispatches vtable +4
+/// only for a non-NULL table. The NULL check deliberately follows processing.
+///
+/// Deviations: uses the existing resource operation table and Rust allocator
+/// and constructor ports; virtual destruction is a call rather than a tail
+/// transfer. No return value is exposed: callers discard r0, including the
+/// unspecified processor return on the NULL path. The virtual target remains
+/// runtime-supplied, without assigning an identity to encrypted vtable data.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn silver_list_table_process_scanned_resource(
+    _context: *mut u8,
+    resource_id: u32,
+) {
+    let ops = unsafe { resource_ops() };
+    let allocation = (ops.allocate)(0x30) as *mut SilverListTable;
+    let table = (ops.construct)(allocation, resource_id, 1);
+    (ops.process)(table, resource_id);
+    if !table.is_null() {
+        (ops.destroy)(table);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -184,6 +215,62 @@ mod tests {
         EVENTS.store(1234, Ordering::SeqCst);
         unsafe { drop(Box::from_raw(table)) };
         table
+    }
+
+    unsafe extern "C" fn null_allocate(_size: usize) -> *mut u8 {
+        ptr::null_mut()
+    }
+
+    unsafe extern "C" fn null_construct(
+        _table: *mut SilverListTable, _resource_id: u32, _populate: i32,
+    ) -> *mut SilverListTable {
+        ptr::null_mut()
+    }
+
+    unsafe extern "C" fn process_null(table: *mut SilverListTable, resource_id: u32) {
+        assert!(table.is_null());
+        RESOURCE_ID.store(resource_id, Ordering::SeqCst);
+        EVENTS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn forbidden_destroy(_table: *mut SilverListTable) -> *mut SilverListTable {
+        panic!("NULL constructor result must not be destroyed")
+    }
+
+    #[test]
+    fn scanned_null_table_is_processed_but_not_destroyed() {
+        let _guard = OPS_LOCK.lock();
+        let saved = unsafe { SILVER_LIST_TABLE_RESOURCE_OPS };
+        unsafe {
+            SILVER_LIST_TABLE_RESOURCE_OPS = SilverListTableResourceOps {
+                allocate: null_allocate,
+                construct: null_construct,
+                process: process_null,
+                destroy: forbidden_destroy,
+            };
+        }
+        EVENTS.store(0, Ordering::SeqCst);
+        for resource_id in [0, 0x8000_0000, u32::MAX] {
+            unsafe { silver_list_table_process_scanned_resource(ptr::null_mut(), resource_id) };
+            assert_eq!(RESOURCE_ID.load(Ordering::SeqCst), resource_id);
+        }
+        assert_eq!(EVENTS.load(Ordering::SeqCst), 3);
+        unsafe { SILVER_LIST_TABLE_RESOURCE_OPS = saved };
+    }
+
+    #[test]
+    fn scanned_table_is_processed_before_its_storage_is_released() {
+        let _guard = OPS_LOCK.lock();
+        let saved = unsafe { SILVER_LIST_TABLE_RESOURCE_OPS };
+        unsafe {
+            SILVER_LIST_TABLE_RESOURCE_OPS = SilverListTableResourceOps {
+                allocate, construct, process, destroy,
+            };
+        }
+        EVENTS.store(0, Ordering::SeqCst);
+        unsafe { silver_list_table_process_scanned_resource(usize::MAX as *mut u8, u32::MAX) };
+        assert_eq!(EVENTS.load(Ordering::SeqCst), 1234);
+        unsafe { SILVER_LIST_TABLE_RESOURCE_OPS = saved };
     }
 
     #[test]

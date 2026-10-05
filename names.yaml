@@ -217975,3 +217975,43 @@ functions:
       LLVM adds a frame-pointer prologue, retains the base BL and vtable
       store, and includes the literal in its seven-instruction listing
       versus five original instructions. No device execution performed.
+
+  - address: 0x081b9cec
+    ghidra: FUN_081b9cec
+    name: silver_list_table_process_scanned_resource
+    size: 68
+    sig: "void silver_list_table_process_scanned_resource(void *context, u32 resource_id)"
+    module: app/silver_list_table_resource
+    status: ported
+    renames:
+      param_1/r0: context (unused)
+      param_2/r1: resource_id
+      r4: constructed_table
+      FUN_082aadd4: operator_new
+      FUN_081473d8: silver_list_table_ctor
+      FUN_08147360: silver_list_table_item_process_all
+      "table vtable+0x04": virtual_destructor
+    notes: >-
+      Raw osos.dec establishes seventeen ARM words, exactly 68 bytes at
+      [0x081b9cec,0x081b9d30); the next entry starts with push {r2-r6,lr}.
+      A complete aligned ARM BL-immediate scan finds two inbound calls:
+      plain BL at 0x081b9914 and BLNE at 0x081b993c, both in the resource
+      scan caller 0x081b9878. The body has three plain BL instructions
+      (operator_new, silver_list_table_ctor, item processor), zero predicated
+      BL instructions, and a conditional virtual tail transfer bxne r1.
+      Context is discarded. Allocate 0x30 bytes, construct for resource_id
+      with populate=1, process the returned table, then destroy through
+      vtable+4 only when that table is non-NULL. Processing precedes the
+      NULL guard, which is not allocation-failure handling. Reuses the
+      existing SilverListTableResourceOps seams and ported allocator and
+      constructor; no new callee identity is invented. Virtual destructor
+      identity remains runtime-supplied. Deliberate deviations: dependency
+      calls use the existing operation table; return ABI is void because
+      both callers discard r0 and its NULL-path value is unspecified.
+      Host edge tests cover NULL processing without destruction and
+      non-NULL process-before-release ordering. All 14201 host tests pass;
+      isolated source smoke confirms the NULL path and high-bit resource ID.
+      ARM release build passes. match.py exits 1 with a structural diff:
+      25 versus 17 instructions, operation-table BLX calls, preserved
+      allocation/construct/process ordering, and conditional destruction.
+      No device execution performed.
