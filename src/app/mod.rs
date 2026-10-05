@@ -846,6 +846,7 @@ pub mod scoped_string_id_record_set_dispatch;
 pub mod selection_position_at_or_past_item_count;
 pub mod service_manager;
 pub mod service_handler_masked_event_dispatch;
+pub mod service_handler_mask_can_transfer;
 pub mod service_handler_global_dispatch;
 pub mod service_state_synchronize;
 pub mod service_handler_availability;

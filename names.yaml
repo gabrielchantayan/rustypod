@@ -220517,3 +220517,50 @@ functions:
       Differences are the frame-pointer prologue, shared key literal plus
       ORR key derivation, and out-of-line zero-return path. Its original
       listing uses Ghidra's truncated size; raw decoding verifies the tail.
+
+  - address: 0x0818fa2c
+    ghidra: FUN_0818fa2c
+    name: service_handler_mask_can_transfer
+    size: 172
+    sig: "u32 service_handler_mask_can_transfer(void *context, i32 requested_group, u32 mask)"
+    module: app/service_handler_mask_can_transfer
+    status: ported
+    vars:
+      param_1/r0: unused_context
+      param_2/r6: requested_group
+      param_3/r7: mask
+      uVar4/r4: slot
+      iVar1/r0: handler_group
+      piVar2/r0: handler
+      uVar3/r0: transfer_query_result
+    renames:
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_081941b8: service_manager_handler_group_for_slot
+      FUN_08193ee8: service_manager_slot_handler_get
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 extent is 0x0818fa2c..0x0818fad8, exactly 172 bytes;
+      0x0818fad8 begins the next independent push. Whole-image decoding
+      verifies two inbound plain BLs at 0x0819106c and 0x0819292c, no
+      predicated inbound BLs. Body contains five plain BLs (two singleton
+      veneer calls, group lookup, handler lookup, heap_panic), zero
+      predicated BLs, and one indirect BLX through vtable +0x10. Incoming
+      context is unused. Signed requested_group >=3 is fatal; negatives
+      are admitted. Scan mask bits 0..12 only. Group zero and the requested
+      group pass without querying. Other groups reload the singleton,
+      require a non-NULL handler, and pass only when the handler query
+      returns unsigned >1; otherwise return zero immediately. Return one
+      on completion. Query state names remain unknown. The raw signed
+      group >=3 fatal guard is retained although the existing getter
+      returns only 0..2. Host vtable entries use native function-pointer
+      width; target accesses exactly word four. Reuses the singleton port's
+      publication requirement, so hooking requires a published instance.
+      Fatal non-returning paths are not host-tested. Behavioral coverage
+      includes ignored high bits without a singleton, group-zero and
+      same-group bypass, groups one/two, negative requested groups,
+      unsigned query boundaries 0/1/2/UINT_MAX, slot 12 and early rejection.
+      match.py reviewed: 37 Rust instructions versus 43 original; retains
+      the bounded bit scan, two manager fetches on cross-group paths,
+      handler NULL fatal guard, vtable +0x10 BLX, unsigned query threshold
+      and early return. LLVM removes the provably unreachable group >=3
+      check and the redundant slot truncation/post-break bounds check.
