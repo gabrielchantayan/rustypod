@@ -219205,3 +219205,42 @@ functions:
       the gates, helper order, fourth-argument forwarding and final status
       tail call; differences are LLVM frames, BLX address seams, pooled
       literals and relocatable calls to existing ports.
+  - address: 0x081b0fe8
+    ghidra: FUN_081b0fe8
+    name: ui_dispatch_byte_halfword
+    size: 44
+    sig: void ui_dispatch_byte_halfword(u32 kind, u32 value, u32 unused_r2, u32 incoming_r3)
+    module: ui/dispatch_byte_halfword
+    status: ported
+    renames:
+      param_1/r0: kind
+      param_2/r1: value
+      param_3/r2: unused_r2
+      param_4/r3: incoming_r3
+      local_8: payload
+      DAT_081b1010: dispatch_key_owner
+    notes: >-
+      Raw A32 verifies 40 instruction bytes at 0x081b0fe8..0x081b100f,
+      then literal 0x089cb230 at 0x081b1010. Next independent function starts
+      at 0x081b1014, making the true extent 44 bytes. Two outgoing plain
+      BLs, zero predicated BLs; whole-image word decoding finds two plain
+      inbound BLs at 0x08179d70 and 0x0817af34, zero predicated inbound BLs.
+      Push r3, overwrite byte zero with low r0 and halfword at offset two
+      with low r1. Byte one remains incoming r3 bits 8..15, even though
+      callers do not explicitly set that register for this call; r2 is unused.
+      Acquire UI manager through verified 0x08037f88 -> 0x22005018, read
+      key at 0x089cb238, and call verified 0x08038110 -> 0x2200508c with
+      manager, key, count one, and stack payload address. Rust reuses the
+      existing ui_manager_instance port. The unported IRAM operation remains
+      an exact-address target-only seam with no invented callee identity;
+      its raw 0x0800508c mirror adds eight to r0 and tail-branches.
+      Host entry fails explicitly because dispatch requires retailOS.
+      Tests cover truncation, zero and maximum values, and preserved register
+      byte. Host suite passes 14258 tests; ARM release build passes.
+      Standalone payload runtime smoke observes bytes 34 cc 78 56 for
+      inputs 0x1234, 0x5678, and incoming r3 0xaabbccdd; device dispatch
+      was not exercised. match.py exits 1 with 10 original versus 21 Rust
+      instructions, preserving payload bits, manager initialization before
+      key read, count one, and synchronous stack-address dispatch. Differences
+      are word packing, LLVM frame, direct port call, constant manager result,
+      and BLX to the verified IRAM target.
