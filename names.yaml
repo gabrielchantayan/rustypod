@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081bbc84
+    ghidra: FUN_081bbc84
+    name: video_session_clear
+    size: 136
+    sig: "void video_session_clear(VideoSession *session)"
+    module: app/video_session_clear
+    status: ported
+    renames:
+      param_1/r4: session
+      session+0: interface
+      session+4: frames
+      session+12: active
+      session+16: pending
+      DAT_081bbd08/r6: shared_video_storage
+      FUN_081d5dbc: video_frame_manager_destroy_retail
+      FUN_082aad24: operator_delete
+      FUN_082aad34: pool_free_argument_swap
+      FUN_0826f7e4: pool_destroy
+    notes: >-
+      Raw A32 establishes [0x081bbc84,0x081bbd0c), 136 bytes including
+      the 0x08a09d90 literal at 0x081bbd08. The next real entry sets
+      byte +16 and returns. Ghidra truncates at returning operator_delete.
+      Whole-image BL decoding finds two inbound plain calls at 0x081bb948
+      and 0x081bbb64, zero predicated calls. Five outbound plain BLs,
+      zero predicated BLs, one virtual BLX through slot +20. Only active
+      exactly one closes the interface, clears it, destroys and tag-2
+      deletes frames, releases shared buffer, destroys and tag-2 deletes
+      shared pool, clearing each owner after release. Both flags always
+      clear. Destructor results feed deletion. No concrete interface class
+      identity invented. Native repr(C) pointers widen on hosts. Inline
+      the verified argument-swap wrapper using ported pool_free; the
+      frame-manager destructor remains a literal retail veneer. Existing
+      pool_destroy and operator_delete ports are ops-table defaults.
+      Host suite passes 14169 tests, including all owner-presence branches,
+      exact-one gating, adjusted destruction results, callback pool reload,
+      preserved fields and idempotence. ARM release build passes. Standalone
+      actual-module smoke proves resource-free close and repeated-clear
+      behavior; heap operations are excluded from that smoke. Full non-test
+      host build is blocked by six existing missing helpers outside this
+      port. match.py exits 1: 45 Rust instructions versus truncated 31;
+      ops loads and BLX replace direct BLs, with matching resource guards,
+      offsets and cleanup chain. Final independent flag stores reorder.
   - address: 0x081cb1a0
     ghidra: FUN_081cb1a0
     name: shared_provider_lookup_tail

@@ -1000,3 +1000,4 @@ pub mod timed_label_append_lap;
 pub mod dma_array_pair_release;
 pub mod class_6280_flag_dispatch;
 pub mod message_handler_dispatch;
+pub mod video_session_clear;
