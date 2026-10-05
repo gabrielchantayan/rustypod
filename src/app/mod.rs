@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod selection_step_animate;
 pub mod indexed_task_bitmap_resolve;
 pub use indexed_task_bitmap_resolve::*;
 pub mod indexed_task_string_resolve;
