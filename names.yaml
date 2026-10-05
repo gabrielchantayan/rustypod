@@ -216762,3 +216762,40 @@ functions:
       Host edge tests cover every flag and changing singleton identities.
       Standalone public-entry smoke with dependency fixtures observed
       0 -> 1 -> 0 and flag 255 -> media vtable slot +0xac exactly once.
+
+  - address: 0x081cf4bc
+    ghidra: FUN_081cf4bc
+    name: media_player_handle_previous
+    size: 72
+    sig: "uint32_t media_player_handle_previous(void)"
+    module: app/media_player_handle_previous
+    status: ported
+    renames:
+      piVar1: player
+      iVar2: query_result
+      FUN_08259594: media_player_interface_get
+      "vtable+0x1a0": unresolved_previous_query
+      "vtable+0xfc": unresolved_previous_action
+      "vtable+0x10c": unresolved_previous_action_with_flag
+    notes: >-
+      Raw A32 extent 0x081cf4bc..0x081cf504 is 72 bytes, ending before
+      the next push {r4,lr}. One plain outgoing BL, zero predicated BLs,
+      one register BLX, and conditional BX tail dispatches. Incoming
+      BLNE at 0x081ce034 and BL at 0x081d07e0 independently verified
+      from raw words. HandlePrevious caller establishes the action role;
+      virtual target identities remain unresolved. Reuse the existing
+      media_player_interface_get and subtract 0x14 for a non-NULL result
+      to recover the complete player. Query complete-object slot +0x1a0,
+      reload its vtable, then select +0x10c with argument 1 for zero or
+      +0xfc without an extra argument for any nonzero value. Preserve
+      the final r0 result. Ghidra omits the argument 1 and incorrectly
+      describes later independent code as unreachable blocks. Valid
+      singleton required; retail dereferences NULL rather than skipping
+      dispatch. Existing singleton cache/constructor deviations and
+      not-hook-ready caveat apply. Host vtables use native-width words.
+      Host tests cover zero, positive, sign-bit, and all-ones results
+      plus query-time vtable replacement. Full host suite: 14153 passed.
+      Public-entry smoke observed zero -> flagged(1)/33 and all-ones ->
+      previous/22. ARM release build passed; match.py shows the same
+      query/reload/two-tail-dispatch structure, with LLVM's larger frame,
+      explicit branch, and archive BL relocation (23 vs 18 instructions).
