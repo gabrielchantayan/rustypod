@@ -218416,3 +218416,49 @@ functions:
       for structural diff. Address seams use BLX; byte swap plus shift
       folds to (raw_halfword >> 1) & 127. The 528-byte stack frame and
       success-only pool branch remain. No on-device execution performed.
+
+  - address: 0x081b7824
+    ghidra: FUN_081b7824
+    name: showcase_pending_queues_refresh
+    size: 108
+    sig: "void showcase_pending_queues_refresh(u32 *showcase, u32 slot)"
+    module: app/showcase_pending_queues_refresh
+    status: ported
+    renames:
+      param_1/r0: showcase
+      r1: slot
+      r4: slot_index
+      r5: slot_record
+      r6: queue
+      r8/DAT_081b788c: request_10000000
+      FUN_081b6d4c: showcase_slot_pending_queue
+      FUN_08030f44: heap_panic
+      FUN_081b76b0: showcase_clear_timer_slots_and_stop
+      FUN_081b7f9c: showcase_queue_has_pending_entry
+      FUN_0822b2a8: context_link_dispatch_workflow
+    notes: >-
+      Raw extent 0x081b7824..0x081b7890 is 108 bytes: 104 instruction
+      bytes and request literal 10000000 at 0x081b788c; next real entry
+      begins push at 0x081b7890. Full-image aligned ARM BL decoding finds
+      two plain inbound calls at 0x081b6ad8 and 0x081b6eac, zero predicated
+      inbound calls. Body has four plain outbound BLs and one BLEQ.
+      Validate selected pending queue, panic if absent, clear timer slots
+      and stop timer, then scan four queues at +0x88 + slot*0x18.
+      For each unequal cursor pair, dispatch its context with r1=10000000
+      and r2=0x80000, then copy slot word +0x2c to +0x34 after dispatch.
+      Incoming r2 is unused. Existing lookup, predicate, panic and timer
+      ports are reused; caller showcase_initialization_complete now uses
+      this port. Dispatch retains the verified 0x0822b2a8 seam, whose raw
+      extent is 28 bytes through bx lr at 0x0822b2c0, followed by a new
+      function at 0x0822b2c4, not the registry's merged 312-byte extent.
+      Preserve all three dispatch arguments without inventing a semantic
+      identity for its tail target. Host firmware dispatch is unsupported;
+      private callback core tests cover empty queues, dispatch-time mutation,
+      commit ordering, later-queue activation and untouched neighboring words.
+      Standalone host smoke observes request=10000000, argument=0x80000,
+      committed position=123 and an unchanged empty neighbor. No device run.
+      Host cargo test and ARM release build pass. match.py exits 1 with
+      26 original instructions versus 54 Rust instructions: LLVM unrolls
+      the four-queue loop, keeps all conditional dispatches and post-call
+      position copies, and uses BLX for the verified firmware dispatch.
+      Guard and timer-clear ordering remain intact; panic uses a cold branch.

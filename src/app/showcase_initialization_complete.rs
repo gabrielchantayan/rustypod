@@ -17,8 +17,8 @@
 //!
 //! # Deliberate deviations
 //!
-//! The final refresh at `0x081b7824` has no recovered semantic identity.
-//! Target builds call that verified address; host tests use a narrow seam.
+//! The final refresh uses the ported pending-queue refresh; its incoming r2
+//! is unused by the raw callee. Host tests retain their narrow refresh seam.
 //! Target-width byte offsets preserve the retail layout on 64-bit hosts.
 
 use crate::heap::veneers::heap_panic;
@@ -42,12 +42,14 @@ unsafe extern "C" {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn retail_showcase_refresh(showcase: *mut u8, slot: i32, queues_completed: u32) {
-    let refresh: ShowcaseRefresh = core::mem::transmute(0x081b_7824usize);
-    refresh(showcase, slot, queues_completed);
+    let _ = queues_completed;
+    super::showcase_pending_queues_refresh::showcase_pending_queues_refresh(showcase.cast(), slot as u32);
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn no_op_showcase_refresh(_: *mut u8, _: i32, _: u32) {}
+unsafe extern "C" fn host_showcase_refresh(showcase: *mut u8, slot: i32, _: u32) {
+    super::showcase_pending_queues_refresh::showcase_pending_queues_refresh(showcase.cast(), slot as u32);
+}
 
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
@@ -61,7 +63,7 @@ pub struct ShowcaseInitializationCompleteOps {
 pub const DEFAULT_SHOWCASE_INITIALIZATION_COMPLETE_OPS: ShowcaseInitializationCompleteOps = ShowcaseInitializationCompleteOps {
     initialize_slots: crate::app::resource_slot_table_initialize::resource_slot_table_initialize,
     complete_pending_queues: crate::app::showcase_pending_queues_complete::showcase_pending_queues_complete,
-    refresh: no_op_showcase_refresh,
+    refresh: host_showcase_refresh,
 };
 
 #[cfg(not(target_os = "none"))]
