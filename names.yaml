@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081b103c
+    ghidra: FUN_081b103c
+    name: record_secondary_data_get
+    size: 44
+    sig: "u32 record_secondary_data_get(u64 key, u8 **data, u32 *length)"
+    module: app/record_secondary_data_get
+    status: ported
+    renames:
+      param_1/r0: key_low
+      param_2/r1: key_high
+      param_3/r2: data
+      param_4/r3: length
+      FUN_081c83b4: record_manager_get
+      FUN_081c88d0: retail current secondary record data operation
+    notes: >-
+      Raw A32 words establish [0x081b103c,0x081b1068), 44 bytes,
+      ending at the next push. Two inbound plain BLs at 0x0811600c
+      and 0x0817a628; two outbound plain BLs at 0x081b1050 to
+      0x081c83b4 and 0x081b1060 to 0x081c88d0. Zero predicated BLs.
+      Preserve the two output pointers across manager acquisition, place
+      them on the callee stack, and return its r0 failure flag unchanged.
+      Ghidra's void return and inferred 64-bit getter result are incorrect.
+      The retail data operation ignores r1 and the key in r2/r3, selects
+      the current registration from manager+0xa0c, and invokes virtual
+      slot +0x4c with data and length. Missing registration or nonzero
+      virtual result returns one; zero virtual result returns zero.
+      Both callers discard the flag and inspect length. Firmware retains
+      both retail callees because the Rust manager constructor is incomplete.
+      Deliberately zero unused r1 instead of retaining getter scratch state;
+      host operations use native pointers. All 14254 host tests and ARM release
+      build passed. match.py shows 11 original versus 20 emitted instructions
+      including two literals: same saved key, stack outputs, callee order and
+      returned r0; absolute calls use BLX, with explicit zero in unused r1.
+      Host reference edge cases cover missing registration with null or
+      preinitialized outputs, full-width keys and publication despite failure.
+      No device run.
   - address: 0x081a8b74
     ghidra: FUN_081a8b74
     name: shared_record_list_owner_construct

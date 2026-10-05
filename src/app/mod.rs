@@ -16,6 +16,7 @@ pub mod track_sample_count;
 pub mod observable_array_view_construct;
 pub mod device_state_is_clear;
 pub mod record_manager_refresh_secondary;
+pub mod record_secondary_data_get;
 pub mod shared_controller_resource_refresh;
 pub mod status_selected_command_dispatch;
 pub mod remote_volume_up;
