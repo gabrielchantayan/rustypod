@@ -217126,3 +217126,40 @@ functions:
       is blocked by six pre-existing missing host functions in
       prepare_entry_metadata, shared_payload_select_kind, and calendar_schedule;
       no unrelated fixes were made. No on-device execution was performed.
+  - address: 0x081cab4c
+    ghidra: FUN_081cab4c
+    name: status_selected_command_dispatch
+    size: 68
+    sig: "void *status_selected_command_dispatch(void)"
+    module: app/status_selected_command_dispatch
+    status: ported
+    renames:
+      FUN_081cabe8: vtable_slot_0x5c_result_is_three
+      FUN_081dfa20: command_dispatcher_get
+      FUN_081dfab0: command_dispatch_by_resource
+      DAT_081cab88: status_resource (0x0dad0dfa)
+      DAT_081cab8c: zero_status_command (0x0dad0dfb)
+    notes: >-
+      Raw firmware establishes 60 bytes of code plus two literal words at
+      0x081cab88 and 0x081cab8c, ending at the next push at 0x081cab90:
+      true extent 68 bytes. Two inbound unconditional BL sites, 0x081162f0
+      and 0x081a5ca8; no predicated inbound BL or inbound B. The body has
+      three unconditional BL instructions (one status query and two mutually
+      exclusive dispatcher getters), no predicated BL, and a terminal B to
+      command_dispatch_by_resource at 0x081dfab0. Dispatches resource
+      0x0dad0dfa, command 0x0dad0dfc for nonzero status or 0x0dad0dfb for
+      zero, auxiliary zero, returning the dispatched object unchanged.
+      Ghidra incorrectly inlines the tail callee into this function.
+      All callees already have ported names; no new seams. No wrapper
+      deviations; existing callees retain documented constructor limitations.
+      LLVM may coalesce the exclusive getter calls without changing order
+      or per-path count. Host edge tests cover zero and noncanonical nonzero
+      predicate words.
+      Verification: all 14168 host tests passed and the ARM release build
+      succeeded. Standalone public-entry smoke with substituted dependencies
+      exercised zero, one, and 0xffffffff status and checked resource, command,
+      auxiliary zero, and unchanged return. match.py reports 15 original
+      versus 14 Rust instructions: LLVM combines the exclusive getters,
+      selects the command with ORREQ, and retains the terminal dispatch B.
+      Frame setup and one pooled constant account for the remaining diff.
+      No device execution was performed.
