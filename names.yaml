@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a4554
+    ghidra: FUN_081a4554
+    name: voice_memo_decimal_split
+    size: 36
+    sig: "void voice_memo_decimal_split(void *controller, u32 value, u8 *quotient, u8 *remainder)"
+    module: app/voice_memo_decimal_split
+    status: ported
+    renames:
+      param_1/r0: unused_controller
+      param_2/r1: value
+      param_3/r2/r4: quotient_output
+      param_4/r3/r5: remainder_output
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw words establish the 36-byte A32 extent [0x081a4554,0x081a4578),
+      ending in pop {r4,r5,r6,pc}; the next function begins with push.
+      Whole-image aligned BL-immediate decoding finds two inbound plain
+      BL sites at 0x081a342c and 0x081a3458, zero predicated inbound BLs.
+      The body has one plain BL at 0x081a4568 to __rt_udiv (0x08036f14),
+      zero predicated BLs. Ignore controller; divide full-width unsigned
+      value by ten; store the low quotient byte, then the remainder byte.
+      Caller selects decimal digit images for voice-memo calendar bytes.
+      Aliased outputs leave the remainder. Reuse ported __rt_udivmod with
+      an explicit local remainder rather than the original r1 result.
+      Host suite passes 14282 tests; new tests cover all byte inputs,
+      quotient truncation, unsigned boundaries, byte-only stores and aliasing.
+      ARM release build passes. match.py exits 1: 16 versus nine instructions,
+      retaining one division call and ordered byte stores, with added frame,
+      stack remainder and reload. Object relocation confirms __rt_udivmod.
+      Standalone smoke using the actual split/divider/signal modules yields
+      UINT_MAX -> (153,5) and aliased 99 -> 9. No device execution.
   - address: 0x081a47d4
     ghidra: FUN_081a47d4
     name: voice_memo_resource_refresh
