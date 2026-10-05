@@ -11,8 +11,8 @@
 //!
 //! Deliberate deviations: repr(C) pointer fields widen on hosts. The
 //! concrete class is unknown; the name describes ownership, not an inferred
-//! class identity. The unported reset and base destructor retain verified
-//! firmware-address seams, with explicitly installed host operations.
+//! class identity. The base destructor retains a verified firmware-address
+//! seam, with an explicitly installed host operation; reset uses the port.
 //! The string release uses the existing port directly. Vtable stores are
 //! volatile to preserve the transitions observed by destruction callbacks.
 
@@ -35,19 +35,12 @@ pub struct StringChildOwner {
     pub trailing_state: u32,
 }
 
-type Reset = unsafe extern "C" fn(*mut StringChildOwner);
 type BaseDestruct = unsafe extern "C" fn(*mut StringChildOwner) -> *mut StringChildOwner;
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_reset(_: *mut StringChildOwner) {
-    panic!("install string-child owner host reset (0x0818bf34)")
-}
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_base(_: *mut StringChildOwner) -> *mut StringChildOwner {
     panic!("install string-child owner host base destructor (0x081d63c4)")
 }
-#[cfg(not(target_os = "none"))]
-pub static mut STRING_CHILD_OWNER_RESET: Reset = missing_reset;
 #[cfg(not(target_os = "none"))]
 pub static mut STRING_CHILD_OWNER_BASE_DESTRUCT: BaseDestruct = missing_base;
 
@@ -55,16 +48,12 @@ pub static mut STRING_CHILD_OWNER_BASE_DESTRUCT: BaseDestruct = missing_base;
 ///
 /// # Safety
 /// `owner` must have valid owned members and virtual dispatch tables.
-/// Hosts must install the reset and base-destructor operations.
+/// Hosts must install the base-destructor operation.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_child_owner_destruct(owner: *mut StringChildOwner) -> *mut StringChildOwner {
     core::ptr::addr_of_mut!((*owner).vtable).write_volatile(0x0898_9a40);
-    #[cfg(target_os = "none")]
-    let reset: Reset = core::mem::transmute(0x0818_bf34usize);
-    #[cfg(not(target_os = "none"))]
-    let reset = core::ptr::addr_of!(STRING_CHILD_OWNER_RESET).read();
-    reset(owner);
+    super::string_child_owner_reset::string_child_owner_reset(owner);
     core::ptr::addr_of_mut!((*owner).string.vtable)
         .write_volatile(0x089a_6044usize as *const StringObjectVtable);
     string_object_release_payload(core::ptr::addr_of_mut!((*owner).string));
@@ -79,16 +68,8 @@ pub unsafe extern "C" fn string_child_owner_destruct(owner: *mut StringChildOwne
 mod tests {
     use super::*;
 
-    // The reset model leaves the fixture payload allocated, as a virtual
-    // empty-string assignment may do. Teardown must release that post-reset
-    // payload, not capture it before the reset or assume it became NULL.
-    unsafe extern "C" fn reset(owner: *mut StringChildOwner) {
-        assert_eq!((*owner).vtable, 0x0898_9a40);
-        (*owner).state = 0;
-        (*owner).flag = 0;
-        (*owner).trailing_state = 0;
-        (*owner).string.vtable = core::ptr::null();
-    }
+    // Empty assignment may retain storage; teardown releases it afterward.
+    unsafe extern "C" fn clear(_: *mut StringObject) {}
     unsafe extern "C" fn base(owner: *mut StringChildOwner) -> *mut StringChildOwner {
         assert_eq!((*owner).string.vtable as usize, 0x089a_6044);
         assert!((*owner).string.payload.is_null(), "release precedes base teardown");
@@ -103,23 +84,23 @@ mod tests {
     fn null_and_allocated_payloads_release_once_and_preserve_unowned_words() {
         let _heap = crate::heap::veneers::tests::mock_heap();
         unsafe {
-            let old_reset = STRING_CHILD_OWNER_RESET;
             let old_base = STRING_CHILD_OWNER_BASE_DESTRUCT;
-            STRING_CHILD_OWNER_RESET = reset;
             STRING_CHILD_OWNER_BASE_DESTRUCT = base;
             let mut storage = [0u8; 16];
+            let vtable = StringObjectVtable { slots: [0, 0, 0, clear as *const () as usize, 0, 0] };
             let mut expected_frees = 0;
             for allocated in [false, true] {
                 let payload = if allocated { storage.as_mut_ptr() } else { core::ptr::null_mut() };
                 let mut owner = StringChildOwner {
                     vtable: 0, reserved: [0xfeed; 4],
                     base_first: core::ptr::null_mut(), base_second: core::ptr::null_mut(),
-                    string: StringObject { vtable: core::ptr::null(), payload },
+                    string: StringObject { vtable: &vtable, payload },
                     unknown_24: 0x1234, state: 7, flag: 1, padding: [0xab; 3],
                     derived_first: core::ptr::null_mut(), derived_second: core::ptr::null_mut(),
                     trailing_state: 9,
                 };
                 for _ in 0..2 {
+                    owner.string.vtable = &vtable;
                     assert_eq!(string_child_owner_destruct(&mut owner), &mut owner as *mut _);
                     assert_eq!(owner.vtable, 0x0898_e004);
                     assert_eq!(owner.reserved, [0xfeed; 4]);
@@ -134,7 +115,6 @@ mod tests {
                     assert_eq!(tag, 0x34);
                 }
             }
-            STRING_CHILD_OWNER_RESET = old_reset;
             STRING_CHILD_OWNER_BASE_DESTRUCT = old_base;
         }
     }
