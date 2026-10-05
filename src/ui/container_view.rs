@@ -509,7 +509,12 @@ pub struct ContainerViewChannels {
 const _: [u8; 0x138] = [0; core::mem::size_of::<ContainerViewChannels>()];
 const _: [u8; 0xf8] = [0; core::mem::offset_of!(ContainerViewChannels, channel_key)];
 const _: [u8; 0xfc] = [0; core::mem::offset_of!(ContainerViewChannels, channels)];
+const _: [u8; 0x11d] = [0; core::mem::offset_of!(ContainerViewChannels, byte_11d)];
 const _: [u8; 0x11e] = [0; core::mem::offset_of!(ContainerViewChannels, state)];
+const _: [u8; 0x11f] = [0; core::mem::offset_of!(ContainerViewChannels, tail)];
+
+/// Derived vtable loaded from the literal at 0x081e9c48.
+pub const CONTAINER_VIEW_CHANNELS_VTABLE_ADDRESS: u32 = 0x0898_fba0;
 
 /// Original `FUN_081e9be0` @ 0x081e9be0: 108 bytes, including the
 /// vtable literal at 0x081e9c48; next function begins at 0x081e9c4c.
@@ -537,7 +542,7 @@ pub unsafe extern "C" fn container_view_construct_channels(
     channel_key: u32,
 ) -> *mut ContainerViewChannels {
     container_view_construct_state_1(view.cast(), resources, controller, parent, spec);
-    core::ptr::addr_of_mut!((*view).base.base.vtable).write_volatile(0x0898_fba0);
+    core::ptr::addr_of_mut!((*view).base.base.vtable).write_volatile(CONTAINER_VIEW_CHANNELS_VTABLE_ADDRESS);
     core::ptr::addr_of_mut!((*view).state).write_volatile(0);
     core::ptr::addr_of_mut!((*view).channel_key).write_volatile(channel_key);
     let channels = core::ptr::addr_of_mut!((*view).channels).cast::<u8>();
@@ -1109,7 +1114,7 @@ mod tests {
     fn channels_constructor_clears_only_channels_and_state() {
         let _lock = OPS_LOCK.lock();
         let _guard = install_stubs();
-        for key in [0, u32::MAX] {
+        for key in [0, 0x1234_5678, u32::MAX] {
             let mut view: Box<ContainerViewChannels> =
                 Box::new(unsafe { core::mem::transmute([0xcdu8; size_of::<ContainerViewChannels>()]) });
             let spec = ContainerViewState1Spec {
@@ -1136,6 +1141,24 @@ mod tests {
             assert_eq!(view.byte_11d, 0xcd);
             assert_eq!(view.state, 0);
             assert_eq!(view.tail, [0xcd; 25]);
+            // Reconstruct a used object: all three channels and the state
+            // must reset without touching the adjacent per-instance bytes.
+            view.channels = [[0xff; 11]; 3];
+            view.state = 0xff;
+            view.byte_11d = 0x42;
+            view.tail = [0x69; 25];
+            let returned = unsafe {
+                container_view_construct_channels(
+                    this, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec, !key,
+                )
+            };
+            assert_eq!(returned, this);
+            assert_eq!(view.channel_key, !key);
+            assert_eq!(view.channels, [[0; 11]; 3]);
+            assert_eq!(view.state, 0);
+            assert_eq!(view.byte_11d, 0x42);
+            assert_eq!(view.tail, [0x69; 25]);
         }
     }
 
