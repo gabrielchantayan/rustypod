@@ -2036,6 +2036,8 @@ pub mod hints {
     // 0x9f20_0000: dedicated to mov/sync_sample_table_load_window's raw-u32
     // table fixture; mappings never unmap, so no other user may share this hint.
     pub const MOV_SYNC_SAMPLE_TABLE_LOAD_WINDOW: usize = 0x9f20_0000;
+    // Dedicated track chunk-offset window fixture; mappings never unmap.
+    pub const MOV_TRACK_CHUNK_OFFSET_WINDOW: usize = 0x9f30_0000;
     // 0x9d00_0000: dedicated to util/linked_list_append's raw-u32 anchor
     // and intrusive-node fixture; mappings never unmap, so no other user may
     // share this hint.
