@@ -141,6 +141,45 @@ functions:
       existing duration port. ARM match review confirms the direct call,
       six BLXs, seven vtable reloads and final BX; LLVM materializes resource
       immediates instead of literal loads and adds a frame pointer.
+  - address: 0x081a40e4
+    ghidra: FUN_081a40e4
+    name: voice_memo_event_state_apply
+    size: 200
+    sig: "void voice_memo_event_state_apply(void *context, u32 event_state, u32 source)"
+    module: app/voice_memo_event_state
+    status: ported
+    renames:
+      param_1: context_unused
+      param_2: event_state
+      param_3: source
+      FUN_08259534: lazy_singleton_0xbc
+      vtable_0x38: query_state
+      vtable_0x3c: request_state
+      vtable_0x44: apply_state
+    notes: >-
+      Raw extent 0x081a40e4..0x081a41ac is 200 executable bytes with no
+      literal pool; the next function starts with LDR at 0x081a41ac.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x081a4e10 and 0x081a4e58, zero predicated inbound BLs. Outgoing
+      calls comprise seven plain BLs to lazy_singleton_0xbc, zero
+      predicated BLs, three virtual BLX sites and a final virtual BX.
+      The caller supplies an event byte and source 0 or 1. Other event
+      states return immediately. State 1 with nonzero source applies 1.
+      With zero source, query +0x38; a zero result applies 255, otherwise
+      apply 1 minus event_state. State 0 with nonzero source requests 1
+      at +0x3c; a nonzero result returns, otherwise apply 0 at +0x44.
+      The singleton is reacquired before application, preserving changes
+      made by queries. Virtual slot identities remain otherwise unknown.
+      Deviations: repr(C) pointer-width vtable fields preserve ARM offsets
+      and permit native host fixtures. Reuses the existing singleton port
+      and its documented NOT-HOOK-READY constructor/cache deviations.
+      Host tests cover the full event/source/result truth table including
+      maximum u32 values, no-op events, request rejection, sentinel 255,
+      and controller replacement between query and application. A host
+      executable smoke observes inactive zero-source application of 255.
+      ARM match review confirms slots +0x38/+0x3c/+0x44 and final BX;
+      LLVM merges duplicated query/apply paths into three direct BL sites
+      and two BLX sites, adds a frame pointer, and computes 1-state with RSB.
   - address: 0x081a41ac
     ghidra: FUN_081a41ac
     name: recording_interval_seconds
