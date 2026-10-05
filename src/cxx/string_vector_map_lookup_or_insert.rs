@@ -44,7 +44,7 @@ unsafe extern "C" fn retail_key_construct(destination: *mut u8, a: *const u8, b:
 }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_query_construct(destination: *mut u8, key: *const u8) -> *mut u8 {
-    unsafe { core::mem::transmute::<usize, QueryConstruct>(0x0819_7b90)(destination, key) }
+    unsafe { super::string_vector_flag_copy_construct::string_vector_flag_copy_construct(destination, key) }
 }
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_tree_lookup_or_insert(result: *mut u32, tree: *mut u8, key: *const u8) {
