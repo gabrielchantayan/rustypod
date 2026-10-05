@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod event_handler_callback_cancel;
 pub mod entry_cursor_create_result;
 pub mod all_label_resolve;
 pub mod read_service_state_byte;

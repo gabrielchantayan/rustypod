@@ -219271,3 +219271,41 @@ functions:
       key read, count one, and synchronous stack-address dispatch. Differences
       are word packing, LLVM frame, direct port call, constant manager result,
       and BLX to the verified IRAM target.
+
+  - address: 0x081b0c90
+    ghidra: FUN_081b0c90
+    name: event_handler_callback_cancel
+    size: 44
+    sig: "void event_handler_callback_cancel(void)"
+    module: app/event_handler_callback_cancel
+    status: ported
+    renames:
+      DAT_081b0cb8: event_handler_global_state
+      DAT_081b0cb8_plus_2: callback_pending
+      thunk_EXT_FUN_22007470: iram_event_handler_source_veneer
+      DAT_0803814c: callback_target_slot_0c_dispatch_mirror
+    notes: >-
+      Raw A32 has 40 instruction bytes plus literal 0x089cb230 at
+      0x081b0cb8; next real function starts at 0x081b0cbc. One outgoing
+      unconditional BL at 0x081b0cac to 0x08038060, zero predicated BLs,
+      and a tail B at 0x081b0cb4 to 0x08038148. Whole-image branch-word
+      decoding finds two inbound plain BLs at 0x080586a0 and 0x081b0c0c,
+      no predicated BLs, and one inbound B at 0x08064a38. Read global byte
+      0x089cb232; return if zero, otherwise clear before obtaining the
+      event source and dispatching the callback target's vtable slot +0x0c.
+      Reuses the ported IRAM source veneer. The second literal veneer targets
+      0x22007fcc, the relocated osos 0x08007fcc body, which ignores incoming
+      r0, calls the verified callback_target_getter veneer at 0x08003910,
+      loads the target's first-word vtable and branches through slot +0x0c.
+      This unported wrapper remains an exact-address target seam; no guessed
+      callee identity or compatibility alias is introduced. Host entry fails
+      explicitly because it requires retailOS global state. Tests cover zero,
+      all 255 nonzero flag values, neighboring bytes, clear-before-callback,
+      reentrant cancellation and repeated cancellation. Host suite and ARM
+      release build pass. Standalone runtime smoke observes state bytes
+      11 22 00 44 and suppressed reentrant/repeated notifications; device
+      callback execution was not exercised. match.py exits 1: 11 original
+      disassembly rows including the literal versus 14 Rust rows. Codegen
+      retains the zero guard, byte clear before source BL, and tail dispatch
+      to 0x22007fcc; differences are direct flag address, LLVM frame, source
+      port relocation, and BX to the verified wrapper rather than its veneer.
