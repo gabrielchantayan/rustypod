@@ -133877,6 +133877,32 @@ functions:
       retains its exact 32-bit layout. The stock unlock tail branch is a
       normal Rust call.
 
+  # --- Service state byte reader ---
+  - address: 0x081af73c
+    ghidra: FUN_081af73c
+    name: read_service_state_byte
+    size: 16
+    sig: "int read_service_state_byte(const unsigned char *state, unsigned char *output)"
+    module: app/read_service_state_byte
+    status: ported
+    renames:
+      param_1: state
+      param_2: output
+      "state+0x8": service_state_byte
+    notes: >-
+      Raw words e5d00008 e5c10000 e3a00000 e12fff1e establish the exact
+      16-byte extent 0x081af73c..0x081af74c. The next function is a separate
+      pair-field setter at +0xc and +0x10. Full-image aligned A32 BL decoding
+      finds two unconditional inbound calls at 0x081c8430 and 0x081c8470,
+      zero predicated inbound calls, and no outgoing calls. Both callers
+      pass service+0xcb0, making the source byte service+0xcb8. Copy that
+      byte to output and return zero, without validation or normalization.
+      Volatile byte accesses preserve the single stock load/store and permit
+      overlapping output. Host tests cover every byte value, shifted source
+      addresses, output sentinels, and overlap in a minimum-size object.
+      No behavioral deviations. The existing service_state_synchronize
+      port retains its documented inline read of this byte.
+
   # --- Service state synchronization ---
   - address: 0x081c843c
     ghidra: FUN_081c843c
