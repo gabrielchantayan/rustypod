@@ -24,6 +24,7 @@ pub mod optional_flagged_byte;
 pub mod checked_flagged_width;
 pub mod encoded_field_layout_validate;
 pub mod chain_value_span;
+pub mod chain_record_word;
 pub mod chain_segment_bounds;
 pub mod mov_parser_slot_14_is_set;
 
