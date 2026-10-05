@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod observable_array_view_construct;
 pub mod device_state_is_clear;
 pub mod record_manager_refresh_secondary;
 pub mod shared_controller_resource_refresh;

@@ -217508,3 +217508,44 @@ functions:
       including its literal, two BLs, matching offsets and vtable. LLVM keeps
       this in r4 and adds frame-pointer setup instead of recovering this
       from the pair result. No device execution performed.
+
+  - address: 0x081bb0ec
+    ghidra: FUN_081bb0ec
+    name: observable_array_view_construct
+    size: 48
+    sig: "u8 *observable_array_view_construct(u8 *this, u32 inherited_first, u32 inherited_second, u32 inherited_third, u32 inherited_fourth)"
+    module: app/observable_array_view_construct
+    status: ported
+    vars:
+      puVar1: inherited_view
+      iVar2: constructed_array
+      DAT_081bb118: OBSERVABLE_ARRAY_VIEW_VTABLE
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw A32 words establish 44 executable bytes and the four-byte vtable
+      literal 0x0898c854 at 0x081bb118, ending before the next function at
+      0x081bb11c. Two outbound plain BL instructions, zero predicated BL;
+      whole-image decoding finds two inbound plain BL sites at 0x081852b0
+      and 0x081bab54, zero predicated BL. Forward r0-r3 and the first stack
+      argument unchanged to the unported inherited constructor 0x08288d38;
+      store the derived vtable through its returned pointer; construct the
+      ported observable array at return+0x1e0; return array-result-0x1e0.
+      Factory 0x081bab24 allocates 0x1f0 bytes. No existing names entry or
+      Rust seam for 0x08288d38 was found; its exact address is retained,
+      without guessing a class identity or inherited argument semantics.
+      Host-only inherited-constructor injection replaces that firmware call;
+      the real observable-array constructor is used on both platforms.
+      Tests verify redirected inherited return, empty array state, preserved
+      inherited initialization and untouched input/prefix/trailing canaries.
+      Host suite passes 14182 tests; ARM release build passes. match.py exits
+      1 with a structural diff: LLVM uses BLX through literal 0x08288d38,
+      retains the post-indexed +0x1e0 vtable store and observable-array BL,
+      and folds array-result-minus-offset into the saved inherited result
+      because the ported array constructor returns its input unchanged.
+      Standalone Unicorn execution of the linked ARM public entry passed
+      two inherited argument tuples (zero and high-bit/all-ones words),
+      with a redirected inherited return. The actual compiled observable
+      array and root constructors execute; exact memory writes, argument
+      forwarding, returned pointer and restored stack are verified. Only
+      the unported inherited firmware constructor is intercepted. No device
+      execution performed.
