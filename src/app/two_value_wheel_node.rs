@@ -114,6 +114,41 @@ pub unsafe extern "C" fn two_value_wheel_node_init(
     this
 }
 
+/// `two_value_wheel_node_destroy` — retailOS `FUN_08197874` @ `0x08197874`.
+///
+/// True extent: 56 bytes, comprising 52 instruction bytes through the tail
+/// branch at 0x081978a4 and the vtable literal at 0x081978a8; the next real
+/// function starts at 0x081978ac. Whole-image A32 decoding verifies two
+/// incoming plain BLs (0x08153250, 0x08197868), no predicated incoming BLs,
+/// and two outgoing BLNEs to release_refcounted_value (no outgoing plain BL).
+///
+/// Installs the derived vtable, releases non-NULL driver then step without
+/// clearing either slot, and destroys the refcounted timing-wheel base,
+/// returning the original pointer. Deliberate deviations: Rust need not
+/// tail-call the base destructor; its existing host scheduler model replaces
+/// the live firmware singleton. The vtable remains an address constant.
+///
+/// # Safety
+/// `this` must be a writable, aligned target-layout node; nonzero owned slots
+/// must be valid objects accepted by release_refcounted_value. Wheel links
+/// and rank must satisfy refcounted_base_destroy's invariants.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn two_value_wheel_node_destroy(
+    this: *mut TwoValueWheelNode,
+) -> *mut TwoValueWheelNode {
+    (*this).vtable = TWO_VALUE_WHEEL_NODE_VTABLE;
+    let driver = (*this).driver_value;
+    if driver != 0 {
+        release_refcounted_value(driver as usize as *mut u8);
+    }
+    let step = (*this).step_value;
+    if step != 0 {
+        release_refcounted_value(step as usize as *mut u8);
+    }
+    crate::app::fixed_value::refcounted_base_destroy(this.cast()).cast()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -203,6 +238,55 @@ mod tests {
             assert_eq!((*node).wheel_prev, 0x2222_2222);
             assert_eq!((*node).wheel_next, 0x3333_3333);
             assert_eq!((*node).flags, 0);
+        }
+    }
+
+    #[test]
+    fn destroy_handles_null_distinct_and_aliased_slots_and_unlinks() {
+        let _lock = take_lock();
+        let Some(base) = *FIXTURE else {
+            note_missing_u32_fixture("app::two_value_wheel_node::destroy");
+            return;
+        };
+        unsafe {
+            let base = base as *mut u8;
+            let node = base.cast::<TwoValueWheelNode>();
+            let driver = base.add(0x20).cast::<FixedValue>();
+            let step = base.add(0x38).cast::<FixedValue>();
+            let table = crate::app::animation::scheduler_table();
+            for (driver_present, step_present, alias) in [
+                (false, false, false), (true, false, false),
+                (false, true, false), (true, true, false), (true, true, true),
+            ] {
+                clear_table(table);
+                scalar(driver, 0);
+                scalar(step, 0);
+                (*driver).flags = 18;
+                (*step).flags = 18;
+                let driver_word = if driver_present { driver as usize as u32 } else { 0 };
+                let step_word = if step_present {
+                    if alias { driver as usize as u32 } else { step as usize as u32 }
+                } else { 0 };
+                core::ptr::write(node, TwoValueWheelNode {
+                    vtable: 0xdead_beef, opaque_04: 0x12345678, rank: 1,
+                    wheel_prev: 0, wheel_next: 0, flags: 3,
+                    step_value: step_word, driver_value: driver_word,
+                });
+                *table = node as usize as u32;
+                base.add(0x58).cast::<u32>().write(0xfeedface);
+                assert_eq!(two_value_wheel_node_destroy(node), node);
+                assert_eq!((*node).vtable, crate::app::fixed_value::REFCOUNTED_BASE_VTABLE);
+                assert_eq!((*node).opaque_04, 0x12345678);
+                assert_eq!((*node).rank, 1);
+                assert_eq!((*node).flags, 2);
+                assert_eq!([(*node).wheel_prev, (*node).wheel_next], [0, 0]);
+                assert_eq!([(*node).driver_value, (*node).step_value], [driver_word, step_word]);
+                assert_eq!(*table, 0);
+                assert_eq!((*driver).flags, 18 - 4 * (driver_present as u32 + alias as u32));
+                assert_eq!((*step).flags, 18 - 4 * (step_present && !alias) as u32);
+                assert_eq!(base.add(0x58).cast::<u32>().read(), 0xfeedface);
+            }
+            clear_table(table);
         }
     }
 }

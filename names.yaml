@@ -221006,3 +221006,41 @@ functions:
       +0x164 calculation and canonical unlock tail branch. A bounded ARM
       wrapper interpreter verifies four pointer boundaries, the unlock
       relocation, preserved frame/return registers, and restored stack.
+
+  - address: 0x08197874
+    ghidra: FUN_08197874
+    name: two_value_wheel_node_destroy
+    size: 56
+    sig: "TwoValueWheelNode *two_value_wheel_node_destroy(TwoValueWheelNode *this)"
+    module: app/two_value_wheel_node
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      DAT_081978a8: TWO_VALUE_WHEEL_NODE_VTABLE
+      FUN_082739e0: release_refcounted_value
+      FUN_081384a0: refcounted_base_destroy
+    notes: >-
+      Raw A32 verifies 52 instruction bytes through the tail branch at
+      0x081978a4 plus the vtable literal 0x08989b48 at 0x081978a8;
+      the next real function begins with bx lr at 0x081978ac, giving
+      a true extent of 56 bytes. Whole-image aligned branch decoding
+      finds two incoming plain BLs at 0x08153250 and 0x08197868 and
+      no incoming predicated BLs. The body has zero plain BLs and two
+      BLNEs to release_refcounted_value at 0x082739e0, followed by a
+      tail B to refcounted_base_destroy at 0x081384a0. Installs the
+      derived vtable before releasing non-NULL driver at +0x1c then
+      step at +0x18; slots are not cleared. Base teardown installs its
+      vtable, unlinks the wheel node, and returns the original pointer.
+      Reuses the existing target-width struct and both canonical ports.
+      Deliberate deviations: tail-call codegen is not required; host
+      execution uses the existing shared scheduler model. Vtable is
+      retained as an address constant, not decoded as live table data.
+      Host regression covers both NULL combinations, distinct and aliased
+      owned values, refcount decrements, wheel unlink, pointer identity,
+      preserved fields and a neighboring canary. Full host suite and ARM
+      release build pass. Native extracted-real-source smoke proves NULL
+      slots, unlink, base vtable, identity and preserved opaque field.
+      match.py exits 1 with the expected structural diff: LLVM adds its
+      frame-pointer prologue and uses BEQ plus BL for the first BLNE;
+      field offsets, release order, derived literal and base tail branch
+      are preserved (13 stock instructions versus 16 reported Rust lines).
