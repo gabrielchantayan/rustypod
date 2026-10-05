@@ -219509,3 +219509,32 @@ functions:
       prologue and unconditional mov #8 followed by moveq #13.
       Archive relocations verify direct calls to media_player_get and
       event_code_queue_post. No device execution was performed.
+
+  - address: 0x081a56f4
+    ghidra: FUN_081a56f4
+    name: class_8c00_byte_d4_get
+    size: 8
+    sig: "uint8_t class_8c00_byte_d4_get(const void *object)"
+    module: app/class_8c00_byte_d4_get
+    status: ported
+    vars:
+      param_1: object
+      "object+0xd4": opaque unsigned byte
+    notes: >-
+      Raw words e5d000d4 and e12fff1e implement ldrb r0,[r0,#0xd4];
+      bx lr. The next real function starts at 0x081a56fc with push
+      {r4,lr}, establishing the exact 8-byte extent. Whole-image aligned
+      A32 BL decoding finds two plain calls at 0x0810999c and 0x0812fe74,
+      zero predicated calls; the accessor has no outbound calls.
+      Both callers use the existing singleton_class_8c00 at 0x081a5500
+      and test the result for zero. Ghidra also associates an overlapping
+      caller at 0x0812ff28, not an additional raw BL site. The field's
+      domain is not established, so return every unsigned byte unchanged
+      rather than normalizing to bool. No deliberate deviations, new seams,
+      NULL checks, writes, or synchronization. Host regression covers all
+      256 values at four byte alignments and unchanged surrounding storage.
+      Host suite passed 14269 tests; ARM release build passed. Standalone
+      source smoke preserved 0x00, 0x01, 0x80, and 0xff. match.py exits 1:
+      Rust retains the exact ldrb r0,[r0,#212], adding the configured
+      frame-pointer push/mov/pop instead of the original bx lr.
+      No device execution was performed.
