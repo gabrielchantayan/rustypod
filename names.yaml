@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818cb08
+    ghidra: FUN_0818cb08
+    name: string_child_owner_destruct
+    size: 60
+    sig: "StringChildOwner *string_child_owner_destruct(StringChildOwner *owner)"
+    module: app/string_child_owner_destruct
+    status: ported
+    vars:
+      param_1/r4: owner
+      "[owner + 0x1c]": string
+    notes: >-
+      Raw osos.dec words establish 0x0818cb08..0x0818cb44: 52 executable
+      bytes and two vtable literals, followed by the next real prologue.
+      Ghidra's 116-byte extent conflates the tail-called base destructor
+      with this function. Whole-image aligned A32 scanning finds two inbound
+      unconditional BLs at 0x0818bc94 and 0x0818cafc, no predicated BLs.
+      Body has two unconditional BLs, no predicated BLs, and a tail B.
+      Store owner vtable 0x08989a40; call the verified one-pointer derived
+      reset at 0x0818bf34 (empty-string assignment, state/flag clear,
+      release and clear optional children at +0x30/+0x34); install string
+      vtable 0x089a6044 at +0x1c; call ported string_object_release_payload
+      at 0x08275d74; tail-call verified base destructor 0x081d63c4, which
+      installs 0x0898e004, releases +0x18 then +0x14, and returns owner.
+      Unported reset/base retain firmware-address seams; repr(C) pointers
+      widen on hosts. Concrete class identity remains unknown. Host suite
+      passed 14317 tests. ARM build passed. match.py exits 1: LLVM uses
+      BLX/BX address seams and a larger frame, preserving store/call order
+      and +0x1c offset; default comparison includes the next function.
+      Compiled ARM emulator smoke passed null and allocated payload cases
+      using retail reset/release/base, checking complete 60-byte final
+      state and return, with only virtual empty-string and heap-free hooks.
   - address: 0x081a0e44
     ghidra: FUN_081a0e44
     name: scroll_state_reset
