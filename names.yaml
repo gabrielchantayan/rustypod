@@ -220814,3 +220814,31 @@ functions:
       45 Rust instructions because LLVM inlines the existing timed gateway
       helper. Owner/child offsets, virtual dispatch, conditional clear, and
       pointer return remain intact; inlined request records 47 and 1001.
+
+  - address: 0x0818be78
+    ghidra: FUN_0818be78
+    name: timed_gateway_child_owner_construct
+    size: 40
+    sig: "TimedGatewayChildOwner *timed_gateway_child_owner_construct(TimedGatewayChildOwner *owner)"
+    module: app/timed_gateway_child_owner_construct
+    status: ported
+    vars: {param_1: owner, r0: owner, r1: vtable_or_zero, r2: unset_selection}
+    renames:
+      DAT_0818be9c: TIMED_GATEWAY_OWNER_VTABLE
+    notes: >-
+      Raw words establish 40 bytes through the next real function at
+      0x0818bea0: 36 code bytes plus literal 0x08989a10 at 0x0818be9c.
+      Independent aligned ARM decoding finds two incoming plain BLs at
+      0x08267bd0 and 0x0827365c, zero predicated BLs; the body has zero
+      plain or predicated BLs. Installs the existing owner vtable, clears
+      only byte +4 and the child pointer +8, writes 255 to +12 and zero
+      to +13, preserves +5..+7 and +14..+15, and returns unchanged r0.
+      Callers confirm the pointer return and virtual dispatch; Ghidra's
+      void signature is wrong. Reuses the destructor's owner layout and
+      vtable constant; no callee seams. Class and trailing-byte meanings
+      remain unverified. Deliberate deviation: repr(C) pointer fields
+      widen on hosts. Host edge tests cover dirty state, repeated init,
+      preserved bytes, pointer return, and neighboring objects. Host suite
+      and ARM release build passed. match.py exits 1: LLVM combines the
+      adjacent byte stores into strh at +12 and reorders independent stores;
+      offsets, vtable literal, preserved bytes, and pointer return agree.

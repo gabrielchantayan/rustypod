@@ -26,6 +26,9 @@ pub struct TimedGatewayChildOwner {
     pub vtable: usize,
     pub state: u32,
     pub child: *mut GatewayOwnedChild,
+    pub selection: u8,
+    pub flag: u8,
+    pub reserved: [u8; 2],
 }
 
 #[repr(C)]
@@ -108,7 +111,7 @@ mod tests {
             REQUESTS = 0;
             let table = GatewayOwnedChildVtable { first_slot: 0, destruct: destroy_child };
             let mut child = GatewayOwnedChild { vtable: &table };
-            let mut owner = TimedGatewayChildOwner { vtable: 0, state: 7, child: &mut child };
+            let mut owner = TimedGatewayChildOwner { vtable: 0, state: 7, child: &mut child, selection: 3, flag: 4, reserved: [5, 6] };
             OWNER = &mut owner;
             assert_eq!(timed_gateway_child_owner_destruct(&mut owner), &mut owner as *mut _);
             assert!(owner.child.is_null());
@@ -129,7 +132,7 @@ mod tests {
             TIMED_GATEWAY_OWNER_REQUEST = request;
             CHILD_CALLS = 0;
             REQUESTS = 0;
-            let mut owner = TimedGatewayChildOwner { vtable: usize::MAX, state: u32::MAX, child: ptr::null_mut() };
+            let mut owner = TimedGatewayChildOwner { vtable: usize::MAX, state: u32::MAX, child: ptr::null_mut(), selection: 3, flag: 4, reserved: [5, 6] };
             OWNER = &mut owner;
             assert_eq!(timed_gateway_child_owner_destruct(&mut owner), &mut owner as *mut _);
             assert_eq!(owner.state, u32::MAX);
