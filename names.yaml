@@ -220717,3 +220717,36 @@ functions:
       executed the real append/transcoding ports with a preallocated allocator
       fixture: opening/escaped/closing quotes and full-width input produced
       bytes 41 5c 22 42 00 and the expected 0/1/2 return and flag sequence.
+
+  - address: 0x08197b90
+    ghidra: FUN_08197b90
+    name: string_vector_flag_copy_construct
+    size: 152
+    sig: "u8 *string_vector_flag_copy_construct(u8 *destination, const u8 *source)"
+    module: cxx/string_vector_flag_copy_construct
+    status: ported
+    vars: {param_1/r0: destination, param_2/r1: source, r4: destination_bounds, r5: source_bounds, r6: capacity, r7: source}
+    renames:
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083d7798: vector_size_elem16
+      FUN_08266c70: operator_new_checked
+      FUN_083e8cb0: vector_copy_construct_range_elem16_alt
+    notes: >-
+      Raw extent 0x08197b90..0x08197c28 is 152 bytes; next word is the
+      next function's push. Independent aligned A32 decoding finds two
+      inbound plain BLs at 0x083c1f8c and 0x083db380, zero predicated
+      inbound BLs, five outbound plain BLs and zero predicated outbound BLs.
+      Copies the COW string, clears three vector bounds, allocates
+      max(unsigned size,32)*16 bytes, constructs the source range through
+      the existing entry-copy seam, recalculates end and capacity_end,
+      and copies only the flag byte at +0x10. Object layout uses target
+      u32 words. Dead r2/r3 arguments and stack spills are omitted.
+      Host string copy bridges the leading target pointer to native pointers;
+      host vector size reproduces signed wrapping subtraction and ASR.
+      The existing map caller's target constructor now calls this port.
+      Host tests and ARM release build passed. match.py reports 34 versus
+      38 instructions; capacity selection, five call boundaries, vector
+      offsets, and flag copy remain intact. Host tests cover empty allocation,
+      COW sharing, flag/padding preservation, size boundaries, wraparound,
+      and reversed bounds. Standalone host smoke is blocked by six existing
+      missing host-cfg helper definitions outside this port.
