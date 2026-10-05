@@ -41,6 +41,7 @@
 //! | 0x08259770 | [`event_listener_kind_10_get`] | 0x44 | 0x08a09f6c | 0x0825939c | 10 |
 //! | 0x082040ec | [`singleton_class_8e80`] | 0x48 | 0x089cc388 | 0x0820416c | 10 |
 
+//! | 0x081afd80 | [`lazy_singleton_0x44_089ca8cc_get`] | 0x44 | 0x089ca8cc | 0x081b0240 | 2 |
 //!
 //! (Call-site counts binary-scanned; the earlier scouting notes said 86
 //! / 38 / 37 / 36 for the bottom four.)
@@ -4039,5 +4040,144 @@ mod singleton_class_7a00_instance_tests {
 
             SINGLETON_CLASS_7A00_INSTANCE = ptr::null_mut();
         }
+    }
+}
+
+/// Original `FUN_081afd80` @ **0x081afd80**, true extent **56 bytes**
+/// (52 code bytes and the literal at 0x081afdb4; next function 0x081afdb8).
+/// Binary scan: **2 incoming plain BL, 0 predicated BL, 0 B**.
+/// Body: **2 plain BL and 1 predicated BLEQ**.
+///
+/// Reads the +8 cache word of globals 0x089ca8c4. On a miss, allocates
+/// 0x44 bytes with tag-2 operator_new, passes the allocation (even NULL)
+/// to constructor 0x081b0240, stores its returned pointer, and invokes
+/// heap_panic if that return is NULL. Reloads the cache before returning.
+/// The class identity is unknown: the constructor builds an embedded
+/// object at +0x2c, sets word +0x3c to 0x10 and clears byte +0x40.
+///
+/// Deliberate deviations: host builds use a private NULL-initialized cache
+/// and reject the unavailable retail constructor. Device builds use the
+/// real cache and constructor address, not a zeroing stand-in. LLVM may
+/// lower the fatal conditional call to a branch plus unconditional call.
+///
+/// # Safety
+/// Requires serialized access to the firmware singleton and a working
+/// retail constructor/heap on device.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn lazy_singleton_0x44_089ca8cc_get() -> *mut u8 {
+    #[cfg(target_os = "none")]
+    let cache = 0x089c_a8ccusize as *mut *mut u8;
+    #[cfg(not(target_os = "none"))]
+    let cache = core::ptr::addr_of_mut!(SINGLETON_0X44_089CA8CC);
+    singleton_0x44_089ca8cc_cached(
+        cache,
+        || operator_new(0x44),
+        |allocation| {
+            #[cfg(target_os = "none")]
+            {
+                let construct: Constructor = core::mem::transmute(0x081b_0240usize);
+                construct(allocation)
+            }
+            #[cfg(not(target_os = "none"))]
+            {
+                let _ = allocation;
+                panic!("retail constructor 0x081b0240 is unavailable on host")
+            }
+        },
+        || crate::heap::veneers::heap_panic(),
+    )
+}
+
+#[cfg(not(target_os = "none"))]
+static mut SINGLETON_0X44_089CA8CC: *mut u8 = core::ptr::null_mut();
+
+#[inline(always)]
+unsafe fn singleton_0x44_089ca8cc_cached(
+    cache: *mut *mut u8,
+    allocate: impl FnOnce() -> *mut u8,
+    construct: impl FnOnce(*mut u8) -> *mut u8,
+    fail: impl FnOnce(),
+) -> *mut u8 {
+    if core::ptr::read_volatile(cache).is_null() {
+        let instance = construct(allocate());
+        core::ptr::write_volatile(cache, instance);
+        if instance.is_null() {
+            fail();
+        }
+    }
+    core::ptr::read_volatile(cache)
+}
+
+#[cfg(test)]
+mod singleton_0x44_089ca8cc_tests {
+    extern crate std;
+    use super::singleton_0x44_089ca8cc_cached;
+    use core::ptr;
+
+    #[test]
+    fn cached_instance_skips_the_cold_path() {
+        let mut object = [0u8; 0x44];
+        let mut cache = object.as_mut_ptr();
+        let result = unsafe {
+            singleton_0x44_089ca8cc_cached(
+                &mut cache, || panic!("allocated cached object"),
+                |_| panic!("constructed cached object"), || panic!("failed cached object"),
+            )
+        };
+        assert_eq!(result, object.as_mut_ptr());
+    }
+
+    #[test]
+    fn constructor_return_overwrites_constructor_cache_changes() {
+        let mut allocation = [0u8; 0x44];
+        let allocation_ptr = allocation.as_mut_ptr();
+        let mut constructed = [0u8; 0x44];
+        let mut cache = ptr::null_mut();
+        let slot = &mut cache as *mut *mut u8;
+        let result = unsafe {
+            singleton_0x44_089ca8cc_cached(
+                slot, || allocation_ptr,
+                |raw| {
+                    assert_eq!(raw, allocation_ptr);
+                    ptr::write_volatile(slot, raw);
+                    constructed.as_mut_ptr()
+                },
+                || panic!("non-NULL construction failed"),
+            )
+        };
+        assert_eq!(result, constructed.as_mut_ptr());
+        assert_eq!(cache, constructed.as_mut_ptr());
+    }
+
+    #[test]
+    fn null_allocation_still_constructs_and_can_succeed() {
+        let mut object = [0u8; 0x44];
+        let mut cache = ptr::null_mut();
+        let result = unsafe {
+            singleton_0x44_089ca8cc_cached(
+                &mut cache, || ptr::null_mut(),
+                |raw| { assert!(raw.is_null()); object.as_mut_ptr() },
+                || panic!("successful constructor failed"),
+            )
+        };
+        assert_eq!(result, object.as_mut_ptr());
+        assert_eq!(cache, result);
+    }
+
+    #[test]
+    fn null_constructor_result_is_stored_before_fatal_dispatch() {
+        let mut allocation = [0u8; 0x44];
+        let mut cache: *mut u8 = ptr::null_mut();
+        let slot = &mut cache as *mut *mut u8;
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+            singleton_0x44_089ca8cc_cached(
+                slot, || allocation.as_mut_ptr(),
+                |raw| { ptr::write_volatile(slot, raw); ptr::null_mut() },
+                || { assert!(ptr::read_volatile(slot).is_null()); panic!("fatal NULL"); },
+            )
+        }));
+        assert!(failure.is_err());
+        assert!(cache.is_null());
     }
 }
