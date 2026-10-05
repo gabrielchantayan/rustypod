@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a4b88
+    ghidra: FUN_081a4b88
+    name: voice_memo_duration_query
+    size: 160
+    sig: "void *voice_memo_duration_query(void *controller, u32 selector)"
+    module: app/voice_memo_duration
+    status: ported
+    renames:
+      param_1/r4: controller
+      param_2/r5: selector
+      r0/r1: duration_seconds
+      controller+0x20: recorder
+      controller+0x78: duration_string
+      controller+0x80: duration_datetime
+      controller+0x8a: active
+      controller+0xd0: interval_count
+      FUN_08036f14: __rt_udiv
+      FUN_081a41ac: recording_interval_seconds
+      FUN_081a3e48: format_recording_duration
+      FUN_080964cc: unix_seconds_to_datetime
+      FUN_082a538c: string_object_raw_payload
+    notes: >-
+      Raw A32 extent 0x081a4b88..0x081a4c28 is 152 executable bytes plus
+      eight literal bytes. Independent whole-image decoding finds two plain
+      inbound BLs (0x081a3384, 0x081a47e0), no predicated BLs; the body has
+      four plain BLs, one virtual BLX and one payload-accessor tail B.
+      Active queries compute counter/1000 + 60*interval*count modulo 2^32.
+      Raw 0x081a41ac returns 120 or 2 and preserves r1, not a u64 result.
+      Str-space formats the embedded string; DtTm converts the embedded
+      calendar record; unknown selectors still query active counters.
   - address: 0x081b0184
     ghidra: FUN_081b0184
     name: flagged_string_record_compare

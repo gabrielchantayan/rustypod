@@ -1042,3 +1042,4 @@ pub mod range_dispatch_scan;
 pub mod refcounted_value_array;
 pub mod controller_holder_prepare;
 pub mod vmax_owner_reset;
+pub mod voice_memo_duration;
