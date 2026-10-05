@@ -219383,3 +219383,53 @@ functions:
       four BLs, 12-byte request, payload register order, saved reply queue,
       zero no_wait and stack flags; differences are LLVM frame/register
       choices and unresolved archive call relocations.
+
+  - address: 0x081a6b70
+    ghidra: FUN_081a6b70
+    name: media_context_cleanup_inactive_items
+    size: 192
+    sig: "void media_context_cleanup_inactive_items(void)"
+    module: app/media_context_cleanup_inactive_items
+    status: ported
+    renames:
+      piVar2/r4: media_player
+      auStack_24: context
+      bVar1/r5: cleanup_allowed
+      FUN_0817ceb4: media_player_get
+      FUN_08270394: scoped_context_construct
+      FUN_08270414: scoped_context_destroy
+      FUN_082a4380: vtable_predicate_state_flag_set
+      FUN_081303a8: singleton_class_9300
+      FUN_0812fda0: class_9300_remove_inactive_items
+      FUN_0812fb64: retail class-0x9300 update query (unported)
+      FUN_0812ff28: retail class-0x9300 update dispatch (unported)
+    notes: >-
+      Raw osos.dec words establish 0x081a6b70..0x081a6c30 as the true
+      192-byte extent. The next function sets bytes +0x69/+0x6a and
+      tail-branches at 0x081a6c3c. Whole-image A32 decoding finds two
+      inbound plain BLs at 0x081a59e0 and 0x081a6224, no predicated BLs.
+      The body contains ten plain direct BLs and three plain virtual BLXs,
+      with no predicated calls. Incoming r0 is unused. Query media-player
+      vtable +0x190 and short-circuit +0x194; when either is nonzero,
+      construct a scoped context, fill via +0x15c, and suppress cleanup
+      only when fill succeeds and the existing state-flag predicate finds
+      bit 0x8000. Destroy the context even on suppressed cleanup.
+      Otherwise remove inactive class-0x9300 items, reacquire the singleton
+      for FUN_0812fb64(this,0), and reacquire again only for a nonzero
+      query before FUN_0812ff28(this,1). Raw callee decoding confirms
+      FUN_0812fb64 does not consume saved r2/r3; FUN_0812ff28 is a
+      16-byte conditional branch wrapper, not Ghidra's merged body.
+      Both unported helpers remain verified fixed-address calls, without
+      assuming a class name or porting additional functions. Host tests
+      cover first/second predicate selection, failed fill, flag boundaries,
+      suppressed cleanup, and conditional update transitions. Host suite:
+      14265 passed. ARM release build passed. Isolated standalone host
+      smoke exercised the exported port with simulated singleton and
+      class operations: inactive count 3 to 0, one update. Full host
+      library example builds encounter six pre-existing missing helper
+      definitions outside cfg(test); no unrelated source was changed.
+      match.py exits 1: 48 original instructions versus 60 Rust
+      instructions. Slot offsets, short-circuit branches, repeated
+      singleton acquisition and mode values remain; context construction
+      is inlined, its empty destructor is removed, and fixed-address
+      calls become BLX. No device execution was performed.
