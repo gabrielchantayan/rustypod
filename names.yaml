@@ -216830,3 +216830,45 @@ functions:
       previous/22. ARM release build passed; match.py shows the same
       query/reload/two-tail-dispatch structure, with LLVM's larger frame,
       explicit branch, and archive BL relocation (23 vs 18 instructions).
+
+  - address: 0x081cdf0c
+    ghidra: FUN_081cdf0c
+    name: media_player_handle_next
+    size: 72
+    sig: "uint32_t media_player_handle_next(void)"
+    module: app/media_player_handle_next
+    status: ported
+    renames:
+      piVar1: complete_player
+      iVar2: query_result
+      uVar3: action_result
+      FUN_08259594: media_player_interface_get
+      "vtable+0x1a0": unresolved_next_query
+      "vtable+0xfc": unresolved_active_action
+      "vtable+0x108": unresolved_next_action_with_flag
+    notes: >-
+      Raw A32 extent 0x081cdf0c..0x081cdf54 is 72 bytes, not Ghidra's
+      116. Both paths terminate with conditional BX before the independent
+      cmp r1,0 / bne 0x081342d8 / bx lr helper at 0x081cdf54. The getter
+      at 0x081cdf60 has an independent branch reference from 0x0810d5a0.
+      One plain outgoing BL, zero predicated BLs, one register BLX,
+      and two conditional BX tail dispatches. Incoming BLNE at 0x081cdfec
+      and BL at 0x081d07b0 independently counted from raw words.
+      HandleNext string comparison in caller 0x081cdf70 establishes the
+      action role; virtual target identities remain unresolved. Reuse
+      media_player_interface_get, subtract 0x14 for non-NULL to recover
+      the complete player, query slot +0x1a0, then reload the vtable.
+      Zero selects +0x108 with argument 1; any nonzero selects +0xfc.
+      Preserve the final r0 result. Ghidra omits argument 1 and folds
+      later independent functions into unreachable blocks. Valid singleton
+      required; NULL is not a supported no-op. Existing singleton getter
+      cache/constructor deviations and not-hook-ready caveat apply.
+      Host fixtures use native-width vtable words; ARM slots are 4 bytes.
+      Host tests cover zero, positive, sign-bit, and all-ones query results
+      and query-time vtable replacement. Full host suite and ARM release
+      build passed. Public-entry smoke returned 33 for zero with flag 1
+      and 22 for the three nonzero classes using the replacement vtable.
+      match.py with verified size 72 shows the same query/reload/two-tail
+      dispatch structure (23 versus 18 instructions), LLVM's larger frame,
+      explicit branch, and archive BL relocation. NULL-path codegen differs
+      outside the documented valid-singleton safety precondition.

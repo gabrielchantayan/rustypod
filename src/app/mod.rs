@@ -59,6 +59,7 @@ pub mod member_payload_cache_poll;
 pub mod media_player_index_select;
 pub mod media_player_selector_update;
 pub mod media_player_handle_previous;
+pub mod media_player_handle_next;
 pub mod media_player_slot_3c_selector_update;
 pub mod media_player_slot_5c_selector_update;
 pub mod service_context_initialize;
