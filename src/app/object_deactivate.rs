@@ -5,7 +5,7 @@
 //! zero predicated outbound BLs, and one indirect BLX at 0x08237190.
 //!
 //! Clear byte +0x70, invoke vtable slot +0xd4 with (INT_MAX, 0), fetch
-//! the record manager, process its secondary records via 0x081c88b8,
+//! the record manager, refresh its secondary records through the Rust port,
 //! then release the global object via 0x08153d78. Ignore operation results
 //! and return zero. Both callers are cleanup paths, including a destructor.
 //!
@@ -13,7 +13,7 @@
 //! target-width virtual dispatch. Firmware retains the original getter
 //! (0x081c83b4, named record_manager_get), because the existing Rust getter's
 //! zeroing constructor and inert destructor are not faithful on this path.
-//! No firmware behavior changes; unported callees remain retail calls.
+//! No firmware behavior changes; the getter and global release remain retail calls.
 
 pub type DeactivateDispatch = unsafe extern "C" fn(*mut u8, u32, u32) -> u32;
 pub type RecordManagerGet = unsafe extern "C" fn() -> *mut u8;
@@ -59,6 +59,11 @@ unsafe extern "C" fn dispatch_target(object: *mut u8, limit: u32, mode: u32) -> 
     dispatch(object, limit, mode)
 }
 
+#[cfg(target_os = "none")]
+unsafe extern "C" fn refresh_secondary_target(manager: *mut u8) -> u32 {
+    super::record_manager_refresh_secondary::record_manager_refresh_secondary(manager.cast())
+}
+
 /// Deactivate an opaque retail object and perform its shared cleanup.
 ///
 /// # Safety
@@ -72,7 +77,7 @@ pub unsafe extern "C" fn object_deactivate(object: *mut u8) -> u32 {
     let ops = ObjectDeactivateOps {
         dispatch: dispatch_target,
         manager_get: core::mem::transmute(0x081c_83b4usize),
-        process_secondary_records: core::mem::transmute(0x081c_88b8usize),
+        process_secondary_records: refresh_secondary_target,
         release_global_object: core::mem::transmute(0x0815_3d78usize),
     };
     #[cfg(not(target_os = "none"))]

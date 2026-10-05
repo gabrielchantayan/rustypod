@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081c88b8
+    ghidra: FUN_081c88b8
+    name: record_manager_refresh_secondary
+    size: 24
+    sig: "u32 record_manager_refresh_secondary(RecordManagerSecondary *manager)"
+    module: app/record_manager_refresh_secondary
+    status: ported
+    renames:
+      param_1/r0: manager
+      FUN_081d9810: registration_slots_refresh
+    notes: >-
+      Raw words establish [0x081c88b8,0x081c88d0), 24 bytes, ending at
+      the next push {r4,r5,r6,lr}. Whole-image aligned A32 decoding finds
+      two inbound plain BLs at 0x08235c30 and 0x08237198, zero predicated
+      inbound BLs, one outbound plain BL at 0x081c88c4 to 0x081d9810,
+      and zero predicated outbound BLs. ADD 0x800 then ADD 0x20c selects
+      the secondary registration manager at +0xa0c; discard refresh status
+      and return zero. Callee identity is established by existing canonical
+      registration_slots_refresh entries and raw/decompiled caller flow.
+      Firmware retains that retail callee because its lock-service failure
+      behavior differs from the existing mutex-based Rust port. Host uses
+      the existing Rust refresh with a repr(C) native-width embedded manager,
+      including native alignment padding. Tests exercise NULL state-two
+      slots at both boundaries, preservation of another state and primary
+      storage, and repeated refresh. The existing object_deactivate target
+      caller now invokes this Rust wrapper.
+      Host suite passes 14181 tests; ARM release build passes. match.py
+      confirms both immediate adds, zero return, and a BLX through literal
+      0x081d9810 in place of the original direct BL. A standalone emulator
+      executed the compiled ARM wrapper for ordinary and wrapping addresses
+      with callee results zero, one, and all-ones: all six cases preserve
+      stack/return address, pass manager+0xa0c, and return zero.
+
   - address: 0x081c91b4
     ghidra: FUN_081c91b4
     name: device_state_is_clear
