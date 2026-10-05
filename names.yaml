@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081a8b74
+    ghidra: FUN_081a8b74
+    name: shared_record_list_owner_construct
+    size: 104
+    sig: "SharedRecordListOwner *shared_record_list_owner_construct(SharedRecordListOwner *owner, SharedCell **source)"
+    module: cxx/shared_record_list_owner_construct
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: source
+      FUN_083b51bc: shared_cell_construct_tertiary
+      FUN_0814d8d0: three_word_header_clear
+      FUN_083dc968: record_40_list_construct
+      FUN_083dc7e4: record_40_list_node_pool_acquire
+      FUN_082621b0: cxx_recursive_mutex_construct
+      FUN_083b5210: shared_cell_assign_direct_secondary
+    notes: >-
+      Raw extent [0x081a8b74,0x081a8bdc) is 104 instruction bytes;
+      next two functions are independent tail branches. Two incoming plain
+      BLs at 0x081f14b4 and 0x081f7498, zero predicated incoming BLs.
+      Five outgoing plain BLs at 0x081a8b80, 0x081a8b88, 0x081a8b94,
+      0x081a8b9c and 0x081a8bd0, zero predicated outgoing BLs.
+      Clears shared handle and three header words, constructs a one-node
+      pooled circular list at +0x10 and recursive mutex at +0x28, writes
+      -1 at +0x44, sets header bit 26 and links +0x8/+0xc to +0x4,
+      then assigns the source handle and returns owner. Inline decoded
+      header/list constructors; reuse the ported allocating pool, mutex,
+      shared-handle constructor and assignment. Omit the list's unread r1
+      stack address and initialize irrelevant mutex scratch words to zero.
+      Native host shared pointers widen via repr(C); ring/pool words stay
+      u32. Tests cover dirty storage, empty/nonempty and aliasing slots,
+      refcount wrapping, sentinel allocation/self-links, mutex and bounds.
+      Host suite passed 14250 tests; ARM release build succeeded. match.py
+      reports 36 versus 26 instructions: inlined zero stores and sentinel
+      setup retain target offsets, with final assignment tail-called.
   - address: 0x081b126c
     ghidra: FUN_081b126c
     name: twelve_byte_state_base_construct
