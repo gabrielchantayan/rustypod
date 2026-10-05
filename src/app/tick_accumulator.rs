@@ -362,6 +362,76 @@ pub unsafe extern "C" fn tick_accumulator_rejects_rate(
     }
 }
 
+/// tick_accumulator_set_scale_suppression — original: `FUN_081bb438` @
+/// `0x081bb438` (**24 bytes**, `0x081bb438..0x081bb450`; the next function
+/// begins with its own push at `0x081bb450`).
+///
+/// **2 incoming unconditional BL sites** (`0x0811493c`, `0x081fa184`),
+/// **0 predicated BL sites and 0 outgoing calls**, verified from raw ARM words.
+///
+/// Stores 1 in `scale_suppressed` when the unsigned wrapping difference
+/// `range_end - range_start` is below 20, otherwise stores 0. Only byte +0x25
+/// changes. Returns the unchanged accumulator pointer, preserving raw r0
+/// although Ghidra declares a void return. No deliberate deviations.
+///
+/// # Safety
+///
+/// `accumulator` must point to a writable, aligned `TickAccumulator`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_accumulator_set_scale_suppression(
+    accumulator: *mut TickAccumulator,
+    range_start: u32,
+    range_end: u32,
+) -> *mut TickAccumulator {
+    (*accumulator).scale_suppressed = (range_end.wrapping_sub(range_start) < 20) as u8;
+    accumulator
+}
+
+#[cfg(test)]
+mod scale_suppression_tests {
+    use super::{tick_accumulator_set_scale_suppression, TickAccumulator};
+
+    #[test]
+    fn unsigned_wrapping_range_threshold_and_repeated_updates() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            let accumulator_ptr = &mut accumulator as *mut TickAccumulator;
+            for (start, end, expected) in [
+                (0, 0, 1), (0, 19, 1), (0, 20, 0), (0, 21, 0),
+                (1, 0, 0), (0, u32::MAX, 0),
+                (u32::MAX, 0, 1), (u32::MAX - 9, 9, 1),
+                (u32::MAX - 9, 10, 0),
+                (0x8000_0000, 0x8000_0013, 1),
+                (0x8000_0000, 0x8000_0014, 0),
+            ] {
+                assert_eq!(
+                    tick_accumulator_set_scale_suppression(accumulator_ptr, start, end),
+                    accumulator_ptr
+                );
+                assert_eq!(accumulator.scale_suppressed, expected, "{start:#x}..{end:#x}");
+            }
+        }
+    }
+
+    #[test]
+    fn overwrites_noncanonical_flag_without_touching_other_bytes() {
+        unsafe {
+            let mut accumulator: TickAccumulator = core::mem::zeroed();
+            let accumulator_ptr = &mut accumulator as *mut TickAccumulator;
+            let bytes = accumulator_ptr.cast::<u8>();
+            core::ptr::write_bytes(bytes, 0xa5, core::mem::size_of::<TickAccumulator>());
+            tick_accumulator_set_scale_suppression(accumulator_ptr, 100, 120);
+            let stored = core::slice::from_raw_parts(bytes, core::mem::size_of::<TickAccumulator>());
+            for (offset, &byte) in stored.iter().enumerate() {
+                assert_eq!(byte, if offset == 0x25 { 0 } else { 0xa5 });
+            }
+            tick_accumulator_set_scale_suppression(accumulator_ptr, 100, 119);
+            assert_eq!(accumulator.scale_suppressed, 1);
+        }
+    }
+}
+
 /// tick_accumulator_reset_timing_state — original: `FUN_081bb3d0` @
 /// `0x081bb3d0` (**32 bytes**, `0x081bb3d0..0x081bb3f0`; the distinct next
 /// function begins at `0x081bb3f0`).
