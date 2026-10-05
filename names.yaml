@@ -220778,3 +220778,39 @@ functions:
       COW sharing, flag/padding preservation, size boundaries, wraparound,
       and reversed bounds. Standalone host smoke is blocked by six existing
       missing host-cfg helper definitions outside this port.
+
+  - address: 0x0818beb8
+    ghidra: FUN_0818beb8
+    name: timed_gateway_child_owner_destruct
+    size: 72
+    sig: "TimedGatewayChildOwner *timed_gateway_child_owner_destruct(TimedGatewayChildOwner *owner)"
+    module: app/timed_gateway_child_owner_destruct
+    status: ported
+    vars: {param_1: owner, r4: owner, r0: child_or_payload, r1: virtual_destruct_or_timeout}
+    renames:
+      DAT_0818befc: TIMED_GATEWAY_OWNER_VTABLE
+      FUN_08047f40: gateway_request_timed
+    notes: >-
+      Raw osos.dec establishes 72 bytes through the next function at
+      0x0818bf00: 68 bytes of code and the vtable literal 0x08989a10.
+      Independent aligned ARM word decoding counts two incoming plain BLs
+      at 0x0818beac and 0x081a8178, zero predicated BLs; body has one
+      plain BL to 0x08047f40, zero predicated BLs, and one virtual BLX r1.
+      A non-deleting wrapper at 0x081a8184 tail-branches here. Both BL
+      callers NULL-guard before calling, then tail-call operator delete.
+      Restores the owner vtable, destroys the optional child at +8 via
+      virtual slot +4, clears the child after the callback, posts timed
+      gateway payload 47 with timeout 1000, and returns the owner.
+      The class and payload's service meaning remain unverified; the
+      name describes only established behavior. Reuses the existing
+      gateway_request_timed port rather than inventing a callee seam.
+      Deliberate deviations: repr(C) pointers and virtual slots widen on
+      hosts, whose gateway operation must be explicitly installed.
+      Host tests cover absent children, callback mutation, ordering,
+      preserved state, pointer return, and repeated teardown. Standalone
+      smoke also exercises virtual dispatch and exact gateway arguments.
+      Verification: full host suite passed (14328 tests); ARM release build
+      passed. match.py exits 1 with a structural diff: 17 original versus
+      45 Rust instructions because LLVM inlines the existing timed gateway
+      helper. Owner/child offsets, virtual dispatch, conditional clear, and
+      pointer return remain intact; inlined request records 47 and 1001.
