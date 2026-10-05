@@ -1006,4 +1006,5 @@ pub mod class_6280_flag_dispatch;
 pub mod message_handler_dispatch;
 pub mod video_session_clear;
 pub mod track_extras_cache_find_entry;
+pub mod track_extras_cache_reset;
 pub mod track_list_clear;
