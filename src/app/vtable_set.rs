@@ -3983,6 +3983,33 @@ pub unsafe extern "C" fn collection_find_previous_handler(
     0
 }
 
+/// Find the first matching handler in reverse collection order.
+///
+/// Original: `FUN_081b5344` @ 0x081b5344, 36 bytes, ending at the
+/// independent push at 0x081b5368. Raw ARM verifies two plain inbound BLs
+/// (0x0812c014, 0x0812c328), zero predicated inbound BLs, and one plain
+/// outbound BL to 0x081b52b8. Initialize `*cursor` from owner word 1, then
+/// return [`collection_find_previous_handler`]'s reverse-search result.
+/// Deliberate deviation: Rust omits the ARM argument-shuffling stack frame.
+///
+/// # Safety
+///
+/// The owner must have a readable second 32-bit word and satisfy the
+/// iterator family's requirements. Output slots and cursor must satisfy
+/// [`collection_find_previous_handler`]'s contract, including on exhaustion.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn collection_find_first_handler(
+    owner: *mut u8,
+    key: u32,
+    callback_out: *mut u32,
+    context_out: *mut u32,
+    cursor: *mut i32,
+) -> u32 {
+    cursor.write(owner.cast::<u32>().add(1).read() as i32);
+    collection_find_previous_handler(owner, key, callback_out, context_out, cursor)
+}
+
 /// Byte offset of the observer-list head word inside the owner object
 /// (`ldr r2, [r0, #0xc]`) — the list [`iterator_state_release`] walks.
 const OBSERVER_HEAD_OFFSET: usize = 0x0c;
@@ -11889,6 +11916,43 @@ pub(crate) mod tests {
                 (0xa5a5_a5a5, 0x5a5a_5a5a, 0),
                 "an empty reverse walk leaves all caller out-slots untouched"
             );
+        }
+    }
+
+    #[test]
+    fn collection_find_first_handler_restarts_and_initializes_cursor_on_exhaustion() {
+        let Some(owner) = try_map_u32_slab(hints::COLLECTION_FIND_FIRST_HANDLER, 0x100) else {
+            assert!(crate::testing::note_missing_u32_fixture("collection_find_first_handler"));
+            return;
+        };
+        let _lock = SLOT_TEST_LOCK.lock();
+        let _restore = SlotGuard;
+        unsafe {
+            core::ptr::write_bytes(owner, 0, 0x100);
+            core::ptr::addr_of_mut!(ITERATOR_STATE_REFRESH).write_volatile(reverse_search_refresh);
+            core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH).write_volatile(reverse_search_fetch);
+            let mut cursor = -77;
+            let mut callback = 0xa5a5_a5a5;
+            let mut context = 0x5a5a_5a5a;
+            owner.cast::<u32>().add(1).write(3);
+            assert_eq!(
+                collection_find_first_handler(owner, 0xfeed_beef, &mut callback, &mut context, &mut cursor),
+                1
+            );
+            assert_eq!((callback, context, cursor), (0x4444_4444, 0x5555_5555, 1));
+            for count in [0, 3] {
+                owner.cast::<u32>().add(1).write(count);
+                cursor = -77;
+                callback = 0xa5a5_a5a5;
+                context = 0x5a5a_5a5a;
+                assert_eq!(
+                    collection_find_first_handler(owner, 0xdead_beef, &mut callback, &mut context, &mut cursor),
+                    0
+                );
+                assert_eq!((callback, context, cursor), (0xa5a5_a5a5, 0x5a5a_5a5a, count as i32));
+                assert_eq!(owner.cast::<u32>().add(1).read(), count);
+                assert_eq!(owner.cast::<u32>().add(3).read(), 0, "iterator unlinked");
+            }
         }
     }
 
