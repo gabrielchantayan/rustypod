@@ -668,6 +668,52 @@ pub unsafe extern "C" fn demo_mode_class_2600_instance() -> *mut u8 {
     )
 }
 
+/// Class-0x2600 view, modeled through its lookup provider at target +0x28.
+#[repr(C)]
+pub struct DemoModeLookupContext {
+    pub object: FrameworkObject,
+    pub unresolved_04: [usize; 9],
+    pub provider: *mut DemoModeLookupProvider,
+}
+
+#[repr(C)]
+pub struct DemoModeLookupProvider {
+    pub vtable: *const DemoModeLookupVtable,
+}
+
+#[repr(C)]
+pub struct DemoModeLookupVtable {
+    pub unresolved_00: [usize; 56],
+    /// Target +0xe0; the concrete callee identity is not established.
+    pub lookup: unsafe extern "C" fn(
+        provider: *mut DemoModeLookupProvider, namespace: u32, key: u32,
+    ) -> *mut u8,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0x28] = [0; core::mem::offset_of!(DemoModeLookupContext, provider)];
+#[cfg(target_pointer_width = "32")]
+const _: [u8; 0xe0] = [0; core::mem::offset_of!(DemoModeLookupVtable, lookup)];
+
+/// demo_mode_class_2600_lookup — original `FUN_081cb1bc` @ 0x081cb1bc.
+/// True size: 24 bytes, ending before the prologue at 0x081cb1d4.
+/// Verified inbound calls: 2 plain BL (0x0815a938, 0x0815a954), 0 predicated.
+/// One outbound BL to the ported class-0x2600 accessor, then a tail branch
+/// to 0x081cb1a0: load provider at +0x28 and dispatch its vtable +0xe0
+/// with namespace 0x2a2a2a2a and the original key. Return the lookup result,
+/// as consumed by both caller sites, despite Ghidra's void signature.
+///
+/// Deliberate deviation: inline the six-instruction shared tail helper,
+/// not a separate port or seam. No NULL checks are added; native pointer
+/// fields scale on hosts while retaining exact target offsets.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn demo_mode_class_2600_lookup(key: u32) -> *mut u8 {
+    let context = demo_mode_class_2600_instance().cast::<DemoModeLookupContext>();
+    let provider = (*context).provider;
+    ((*(*provider).vtable).lookup)(provider, 0x2a2a2a2a, key)
+}
+
 
 /// The `TCDemoMode` vtable, modeled down to the two slots its ported
 /// callers dispatch: +0xec and +0x100. The image's copy of the vtable page
@@ -1796,6 +1842,72 @@ mod tests {
             registry_register(this, CLASS_ID_DEMO_MODE);
             assert_eq!(demo_mode_instance(), this);
             assert!(demo_mode_class_2600_instance().is_null());
+        }
+        restore(guard);
+    }
+
+    #[repr(C)]
+    struct LookupSingleton {
+        object: FrameworkObject,
+        context: *mut DemoModeLookupContext,
+    }
+
+    unsafe extern "C" fn lookup_singleton_cast(
+        this: *mut FrameworkObject, class_id: u32,
+    ) -> *mut u8 {
+        match class_id {
+            CLASS_ID_DEMO_MODE => this.cast(),
+            DEMO_MODE_CLASS_ID_2600 => (*(this.cast::<LookupSingleton>())).context.cast(),
+            _ => ptr::null_mut(),
+        }
+    }
+
+    #[repr(C)]
+    struct LookupFixture {
+        provider: DemoModeLookupProvider,
+        zero_result: u8,
+        high_result: u8,
+    }
+
+    unsafe extern "C" fn fixture_lookup(
+        provider: *mut DemoModeLookupProvider, namespace: u32, key: u32,
+    ) -> *mut u8 {
+        assert_eq!(namespace, 0x2a2a2a2a);
+        let fixture = provider.cast::<LookupFixture>();
+        match key {
+            0 => ptr::addr_of_mut!((*fixture).zero_result),
+            u32::MAX => ptr::addr_of_mut!((*fixture).high_result),
+            _ => ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn demo_mode_lookup_uses_adjusted_class_view_and_preserves_key_and_null_result() {
+        let guard = mock();
+        unsafe {
+            let lookup_vtable = DemoModeLookupVtable {
+                unresolved_00: [0; 56], lookup: fixture_lookup,
+            };
+            let mut fixture = LookupFixture {
+                provider: DemoModeLookupProvider { vtable: &lookup_vtable },
+                zero_result: 0x12, high_result: 0x34,
+            };
+            let mut context = DemoModeLookupContext {
+                object: FrameworkObject { vtable: ptr::null() },
+                unresolved_04: [0; 9],
+                provider: ptr::addr_of_mut!(fixture.provider),
+            };
+            let cast_vtable = FrameworkObjectVtable {
+                unresolved_00: [0; 5], cast_to_class: lookup_singleton_cast,
+            };
+            let mut singleton = LookupSingleton {
+                object: FrameworkObject { vtable: &cast_vtable },
+                context: &mut context,
+            };
+            registry_register(ptr::addr_of_mut!(singleton).cast(), CLASS_ID_DEMO_MODE);
+            assert_eq!(demo_mode_class_2600_lookup(0), ptr::addr_of_mut!(fixture.zero_result));
+            assert_eq!(demo_mode_class_2600_lookup(u32::MAX), ptr::addr_of_mut!(fixture.high_result));
+            assert!(demo_mode_class_2600_lookup(0x8000_0000).is_null());
         }
         restore(guard);
     }
