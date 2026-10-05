@@ -215486,3 +215486,36 @@ functions:
       delimiter truncation, padding, neighboring bytes, and aliased sources
       observing the base vtable before the derived replacement. ARM match
       review confirms one retained base BL and the inlined ordered stores.
+
+  - address: 0x081d5eb8
+    ghidra: FUN_081d5eb8
+    name: observable_word_pair_append
+    size: 36
+    sig: "u32 observable_word_pair_append(u8 *owner, u32 first, u32 second)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: first
+      param_3/r2: second
+      FUN_0827196c: observable_array_append
+    notes: >-
+      Raw words establish 36 bytes at 0x081d5eb8..0x081d5edb; the next
+      independent function starts with push {r4,lr} at 0x081d5edc.
+      Whole-image aligned ARM branch decoding finds two unconditional BL
+      callers at 0x0820bb3c and 0x08210784, zero predicated BL callers,
+      and two unconditional tail branches at 0x0821513c and 0x08223b88.
+      The body contains two unconditional BLs to 0x0827196c, zero predicated
+      BLs. Save both input words before either call; append first to the
+      embedded observable array at +8, then second to the array at +0x18.
+      Preserve the second append result in r0. Existing names.yaml identifies
+      the callee as the ported observable_array_append; no new seam is needed.
+      Deliberate deviation from Ghidra: recover the three-argument signature
+      and u32 result from raw ARM; r3 is not consumed. Host fixtures retain
+      target byte offsets with native-vtable array prefixes. Tests exercise
+      unequal initial lengths, existing elements, zero, full-width boundaries,
+      equal inputs, and unchanged owner header. A standalone source smoke
+      exercises deferred appends, stored values, untouched lengths, and the
+      second callback result. ARM match retains both append BL relocations,
+      saved word temporaries, +8/+24 addressing, and second-call r0; LLVM
+      uses a separate 8-byte stack allocation and frame-pointer prologue.
