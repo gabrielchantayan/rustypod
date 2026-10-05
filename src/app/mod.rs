@@ -804,6 +804,7 @@ pub mod service_handler_slot_state_reset;
 pub mod service_handler_slot_initialize;
 pub mod service_handler_slot_state_set;
 pub mod iap_command_84_retry;
+pub mod iap_command_3_request;
 pub mod silver_controller;
 pub mod controller_transition_request;
 pub mod silver_list_table;
