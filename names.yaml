@@ -218739,3 +218739,41 @@ functions:
       instead of BL/pop. objdump -dr verifies R_ARM_JUMP24 targets
       collection_find_previous_handler, not the unresolved self-address
       displayed by match.py. No device execution.
+
+  - address: 0x081af4c8
+    ghidra: FUN_081af4c8
+    name: refcounted_value_array_default_init
+    size: 40
+    sig: "u32 *refcounted_value_array_default_init(u32 *this)"
+    module: app/refcounted_value_array
+    status: ported
+    renames:
+      puVar1/r0: this
+      DAT_081af4ec: REFCOUNTED_VALUE_ARRAY_VTABLE
+      FUN_08138460: refcounted_base_init
+    notes: >-
+      Raw A32 words establish 36 instruction bytes through pop pc at
+      0x081af4e8 plus the vtable literal at 0x081af4ec, giving a true
+      40-byte extent before the next function at 0x081af4f0. Whole-image
+      aligned BL decoding finds two plain inbound calls at 0x081567c8
+      and 0x08199e4c and zero predicated inbound calls. The body has one
+      outgoing plain BL and no predicated BLs. Both callers allocate
+      0x28 bytes and consume returned r0, correcting Ghidra's void/no-arg
+      signature. Calls the existing refcounted base constructor, installs
+      vtable 0x0898b63c, clears count +0x1c and storage +0x20/+0x24,
+      and returns this; all other words remain unchanged except base
+      flags/refcount +0x14. The adjacent destructor at 0x081af508
+      releases the +0x24 entries backwards using +0x1c and frees both
+      storage words. Target-width word accesses preserve host layout;
+      the vtable is an address constant following the base port's stale
+      decrypted-vtable caveat. Host regression covers zero/dirty words,
+      flags, preserved holes, adjacent canaries, identity and repeated
+      initialization.
+      Host suite and ARM release build pass. Extracted-real-source native
+      smoke verifies vtable, flags, array zeros, preserved holes, canaries
+      and pointer identity. match.py exits 1 with a structural diff:
+      nine original instructions versus twelve Rust instructions plus
+      the literal word. LLVM adds a frame and saves this in r4 across
+      the base call; the same vtable and three zero stores remain.
+      R_ARM_CALL relocation verifies the BL targets refcounted_base_init.
+      No device execution.
