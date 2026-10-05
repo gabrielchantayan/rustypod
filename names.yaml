@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818b494
+    ghidra: FUN_0818b494
+    name: segmented_buffer_state_reset
+    size: 36
+    sig: "uint32_t *segmented_buffer_state_reset(uint32_t *buffer)"
+    module: cxx/segmented_buffer_state_reset
+    status: ported
+    vars:
+      param_1/r0: buffer
+      r1: zero
+      "[buffer + 0x08]": position
+      "[buffer + 0x0c]": intra_segment_offset
+      "[buffer + 0x10]": current_segment
+      "[buffer + 0x18]": preserved_context
+      "[buffer + 0x1c]": chain_root
+    notes: >-
+      Raw A32 words establish exactly 36 executable bytes ending at the
+      independent push prologue at 0x0818b4b8. Whole-image aligned BL
+      decoding finds two plain inbound calls at 0x0818b434 and 0x0818b84c,
+      zero predicated inbound calls, and zero outbound BLs. Zero word
+      offsets +8, +12, +16, +28, +36, +32, +20 in that order; preserve
+      vtable, flag word, context +24, and r0. Constructor and chain-release
+      callers establish reset semantics; adjacent segmented read advances
+      position, intra-segment offset, and current segment. Remaining fields
+      retain unknown semantics. No seams or behavioral deviations; aligned
+      volatile u32 stores retain target layout and order on hosts. Host
+      suite passed 14332 tests; standalone repeated-reset smoke and ARM
+      release build passed. match.py exits 1: all seven stores match in
+      order, with added frame setup and pop return (11 versus 9 instructions).
   - address: 0x0818bf34
     ghidra: FUN_0818bf34
     name: string_child_owner_reset
