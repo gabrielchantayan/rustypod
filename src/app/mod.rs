@@ -321,6 +321,7 @@ pub mod descriptor_layout;
 pub mod descriptor_field;
 pub mod descriptor_attachment;
 pub mod callback_dispatch_release;
+pub mod kind_0x19_dispatch;
 pub mod value_dispatch_retain;
 pub mod callback_dispatch_has_pending;
 pub mod bool_message_dispatch;
