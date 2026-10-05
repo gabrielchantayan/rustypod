@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818b32c
+    ghidra: FUN_0818b32c
+    name: context_list_owner_construct
+    size: 200
+    sig: "u32 *context_list_owner_construct(u32 *this, u32 owner_word, u32 client_word)"
+    module: cxx/context_list_owner_construct
+    status: ported
+    vars:
+      param_1/r0/r5: this
+      param_2/r1: owner_word
+      param_3/r2/r7: client_word
+      r4: embedded_node_pool
+      r6: zero
+    renames:
+      FUN_083dd1a8: list_node_pool_acquire_083dd1a8
+      FUN_08261c48: opaque_context_array_construct
+      FUN_082621b0: cxx_recursive_mutex_construct
+      FUN_08261e28: cxx_mutex_construct
+      FUN_0826291c: initialize_opaque_context
+      FUN_082081e4: trailing_pair_and_flag_construct (unported)
+    notes: >-
+      Raw extent is 200 bytes: 196 code bytes through pop at 0x0818b3ec,
+      then vtable literal 0x08989990 at 0x0818b3f0; next function 0x0818b3f4.
+      Whole-image aligned word decode finds two plain inbound BLs at
+      0x0818a31c and 0x0818aa6c, seven plain outbound BLs and no predicated
+      forms. Constructs a 0x1d4-byte context/list owner with circular sentinel,
+      30-element context array, recursive mutex, two normal mutexes, opaque
+      context, client word, -1 index, empty trailing pair/flag and backlink.
+      Returns this, contrary to Ghidra void. Existing Rust seams are reused;
+      unused mutexattr seeds are zeroed, and the raw trailing initializer
+      at 0x082081e4 is a fixed-address target call with an exact host model.
+      Host tests cover dirty storage, byte padding, extreme input words and
+      sentinel self-links; standalone smoke exercised the real pool path.
+      Host suite and ARM build passed; match exit 1 preserves fields/call order.
   - address: 0x0818b494
     ghidra: FUN_0818b494
     name: segmented_buffer_state_reset
