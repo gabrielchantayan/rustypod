@@ -216872,3 +216872,45 @@ functions:
       dispatch structure (23 versus 18 instructions), LLVM's larger frame,
       explicit branch, and archive BL relocation. NULL-path codegen differs
       outside the documented valid-singleton safety precondition.
+
+  - address: 0x081e13e8
+    ghidra: FUN_081e13e8
+    name: message_handler_dispatch
+    size: 96
+    sig: "u32 message_handler_dispatch(void *owner, MessageHandler *handler, MessageKind *message)"
+    module: app/message_handler_dispatch
+    status: ported
+    renames:
+      param_1: unused_owner
+      param_2: handler
+      param_3: message
+      uStack_18: temporary_kind_zero_message
+      FUN_08266a48: message_kind_construct
+      thunk_FUN_08275bc8: message_kind_destruct
+      FUN_08298850: unported_kind_zero_singleton_dispatch
+      DAT_081e1444: global_handle_address_0x089d01e4
+    notes: >-
+      Raw A32 extent [0x081e13e8,0x081e1448) is 96 bytes: 92 code bytes
+      and the literal 0x089d01e4 at 0x081e1444. The next independently
+      entered function starts at 0x081e1448. Binary-wide word decoding
+      finds two plain inbound BLs at 0x081e1534 and 0x081e1584, zero
+      predicated BLs. Body has three plain BLs and one register BLX.
+      Owner r0 is unused; r3 is merely saved and overwritten as part of
+      the eight-byte stack temporary, not a semantic argument. Constructs
+      a kind-zero temporary, tests only the handler address low byte for
+      0xff, and on that sentinel calls 0x08298850(0x089d01e4) then returns
+      1 regardless of that callee result. Otherwise invokes handler vtable
+      +0x30 with the original message and preserves the complete return
+      word. The already-ported non-deleting temporary destructor is an
+      identity. Ghidra's 0x08298850 prototype is wrong: raw instructions
+      save r0 in r4, initialize the kind-zero singleton, load [r4], then
+      tail-call 0x0811a4d0 with singleton address 0x089d01b4 in r1.
+      This unported callee stays an exact firmware-address seam; no
+      invented implementation. Host fixtures use native pointer slots;
+      target vtable slots remain four bytes apart. Full host suite passed
+      14157 tests and ARM release build passed. Isolated real-source public
+      entry smoke returned 0x80000007 and mutated the original message.
+      match.py reports 26 versus 23 instructions: same low-byte sentinel
+      branch, singleton call and +0x30 BLX; LLVM removes the empty destructor,
+      uses a larger explicit frame and an indirect firmware call. Constructor
+      BL is an archive relocation. No on-device execution was performed.
