@@ -16,6 +16,52 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0819ca5c
+    ghidra: FUN_0819ca5c
+    name: key_repeat_timer_update
+    size: 184
+    sig: "void key_repeat_timer_update(const u32 *event)"
+    module: app/key_repeat_timer_update
+    status: ported
+    renames:
+      param_1/r5: event
+      r4: key_code
+      DAT_0819cb00: key_repeat_mutex
+      DAT_0819cb04: key_down_event_tag
+      DAT_0819cb08: input_runtime_state
+      DAT_0819cb0c: key_repeat_timer
+      DAT_0819cb10: alternate_delay_by_key
+      FUN_0819c77c: is_special_key_code
+      FUN_08076954: timer_trace_assert
+      FUN_080744c0: timer_set_delay
+      FUN_0807a228: timer_arm
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 words prove extent [0x0819ca5c,0x0819cb14): 164 bytes
+      of code plus five literal words, ending before the next real entry.
+      Whole-image BL decoding finds one plain inbound BL at 0x0819cc94
+      and one BLEQ at 0x0812c50c. Body has five plain BLs and one BLNE;
+      final B to mutex_unlock is a tail branch. Extract bits 16..23 of
+      event word +0x14 before locking mutex 0x089cb2bc. For kDwn
+      (0x6b44776e), exclude 0x71..0x77; otherwise trace an existing
+      nonzero active key, store the new key at state 0x089cb29c+2,
+      select delay +0x0c or +0x1c via byte table 0x08a77a8f, then
+      set delay and arm timer 0x08a779d0. All other event tags trace
+      and clear only on an active-key match, including zero. Always unlock.
+      Inline the independently raw-verified predicate at 0x0819c77c;
+      no new callee seam or second exported port. Host globals use
+      isolated storage; existing timer and mutex ports are reused.
+      Host suite passes 14293 tests, including all 256 key codes,
+      alternate-delay selection, special-key preservation and matching
+      release edges. ARM release build passes. match.py exits 1:
+      LLVM inlines the predicate and timer_set_delay, retaining the
+      conditional trace, delay selection, period store, arm and unlock
+      paths; literal-address arithmetic and register allocation differ.
+      Standalone exported down/up smoke runs with isolated timer/mutex
+      substitutes. Full non-test host linkage is blocked by six existing
+      missing helper definitions in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule. No device run.
   - address: 0x0819ccec
     ghidra: FUN_0819ccec
     name: input_state_buffer_get
