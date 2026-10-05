@@ -54,6 +54,7 @@ pub use indexed_task_bitmap_resolve::*;
 pub mod indexed_task_string_resolve;
 pub use indexed_task_string_resolve::*;
 pub mod controller_apply_resource_flags;
+pub mod controller_refresh_resource_state;
 pub mod word_state_set_and_notify;
 pub mod tv_out_resource_refresh;
 pub use tv_out_resource_refresh::*;

@@ -220475,3 +220475,45 @@ functions:
       match.py exits 1 with a structural diff: LLVM uses a larger register
       frame, equivalent reassociated arithmetic, and the same 48-byte
       scratch, NULL branch, halfword loads, three calls and pointer reloads.
+
+  - address: 0x0819ab14
+    ghidra: FUN_0819ab14
+    name: controller_refresh_resource_state
+    size: 140
+    sig: "u32 controller_refresh_resource_state(ResourceStateController *controller)"
+    module: app/controller_refresh_resource_state
+    status: ported
+    renames:
+      param_1/r4: controller
+      controller+0xb0: element
+      FUN_081883fc: demo_mode_instance
+      FUN_08275b9c: object_cast_to_class
+      FUN_0815d7d4: ui_element_has_nonzero_flags
+      FUN_081d0df8: service_status_word
+      thunk_FUN_0819f604: ui_flag_update_forwarder
+    notes: >-
+      Raw A32 extent is 0x0819ab14..0x0819aba0: 124 code bytes and
+      four literal words; the next function starts with push {r4,lr}.
+      Two inbound plain BLs at 0x0819aa24 and 0x0819ab00, no predicated
+      inbound BLs. Seven outbound plain BLs, no predicated BLs, one BLX,
+      and a tail B to the verified 0x082879b0 forwarder. Ghidra incorrectly
+      inlines that tail target and reports 123 bytes. Resolve 0x0dad017f
+      through demo-manager slot +0xf8; return zero for missing object or
+      rejected class 0x1700. Apply keys 0x0dad0d08 and 0x0dad0d0b using
+      the element's nonzero +0x48 word. Reload controller+0xb0 after
+      each update; apply key 0x0dad0d0a from nonzero element+0x34 status.
+      Return the last update's result, ignoring the first two results.
+      All direct callees reuse existing ports. No new callee identities
+      or validation. Deviations: Rust call replaces final tail transfer;
+      repr(C) pointer fields expand on host, whose lookup/cast/update
+      models leave the actual flag/status helper ports intact.
+      Host suite and ARM release build pass. Public-entry smoke enables
+      all three resources for high-bit/full-word nonzero inputs and clears
+      them for zero inputs, preserving the final result 0x12345678.
+      Tests additionally cover NULL/rejected lookup with an invalid controller
+      and synchronous replacement of the element between resource updates.
+      match.py exits 1: LLVM retains the lookup BLX, class gate, seven BLs,
+      all three element reloads, status normalization, and final tail B.
+      Differences are the frame-pointer prologue, shared key literal plus
+      ORR key derivation, and out-of-line zero-return path. Its original
+      listing uses Ghidra's truncated size; raw decoding verifies the tail.
