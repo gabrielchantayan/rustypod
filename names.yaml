@@ -219887,3 +219887,42 @@ functions:
       LLVM adds a frame, replaces the fixed writer BL with literal-load BLX,
       and retains the NULL branch, bound 40 and final resize tail branch.
       No device execution was performed.
+
+  - address: 0x0819d9b8
+    ghidra: FUN_0819d9b8
+    name: font_face_owner_destroy
+    size: 28
+    sig: "FontFaceOwner *font_face_owner_destroy(FontFaceOwner *this)"
+    module: ui/font_face_owner_destroy
+    status: ported
+    vars:
+      param_1/r4: this
+      param_1[2]: face
+    notes: >-
+      Raw osos.dec establishes 0x0819d9b8..0x0819d9d4; the next
+      function starts with sub ip,r1,#0x8000. Whole-image ARM decoding
+      finds two incoming plain BL calls at 0x0819d840 and 0x0819d910,
+      zero predicated incoming BL. The body has one plain BL to ported
+      ft_done_face at 0x0804c360, zero predicated BL, and a tail B to
+      ported string_object_destroy at 0x08277484, not the direct payload
+      release inferred by Ghidra. Release the face at +8, ignore its error,
+      destroy the embedded name, return this; preserve face and reference
+      count words. Callers separately invoke operator_delete. Constructor
+      0x0819d964 constructs the name and opens a FreeType face; the callers
+      maintain a three-entry named-face cache with reference counts at +12.
+      Deliberate deviations: reuse existing Rust callees and widen host
+      pointers with repr(C), retaining the 16-byte target layout. Host tests
+      cover null face and missing-driver errors without skipping name
+      destruction, preserving owner storage and return identity.
+      All 14289 host tests passed; ARM release build succeeded. match.py
+      reports a structural diff (exit 1): LLVM adds a frame pointer and
+      preserves the +8 face load, face-release BL and name-destroy tail B.
+      Archive disassembly shows unresolved relocation destinations as zero.
+      A standalone C executable linked to a temporary host-exported Rust
+      host-model archive verified returned identity, reset name vtable,
+      null face/payload and unchanged reference count 7. The temporary
+      export and smoke runner were removed. Normal non-test host library
+      builds encounter six existing missing-function errors in unrelated
+      prepare_entry_metadata, shared_payload_select_kind and calendar_schedule
+      modules; the smoke archive used their cfg(test) host model instead.
+      No device execution was performed.
