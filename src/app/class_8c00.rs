@@ -1,9 +1,7 @@
 //! Methods of the registry-class-0x8c00 singleton object (the
 //! `app/singletons.rs` 0xdc-byte object: ready bytes +0x69/+0x6a,
-//! embedded timers at +0x6c/+0x98, mode word +0xd8). Two live here:
-//! `class_8c00_commit_mode` below, and `class_8c00_rearm_timer_post_0x11`
-//! further down (its own doc header carries the address/extent/call-site
-//! evidence).
+//! embedded timers at +0x6c/+0x98, mode word +0xd8). Each method's
+//! doc header carries its own address, extent and call-site evidence.
 //!
 //! `class_8c00_commit_mode` — original: `default` @ `0x081a53c8`
 //! (120 bytes of code per Ghidra; true extent 124, `0x081a53c8..0x081a5444`,
@@ -988,5 +986,104 @@ mod tests {
 
         assert_eq!(rearm_calls(), []);
         assert_eq!(object.state(), TIMER_STATE_STOPPED);
+    }
+}
+
+/// class_8c00_post_media_query_code — original: `FUN_081a6330` @
+/// **0x081a6330**, **56 bytes**, ending immediately before the real
+/// function prologue at 0x081a6368. Whole-image aligned A32 decoding
+/// finds two inbound plain BLs (0x0810cd10, 0x0810d258), zero predicated
+/// BLs. The body has two plain BLs, zero predicated BLs, and one BLX.
+///
+/// Fetch the media-player singleton and invoke its vtable slot +0x190
+/// with the player as receiver. Post code 13 for a zero result, otherwise
+/// code 8, then clear the receiver's byte +0xd6 and return zero.
+/// The query's domain and the cleared byte's meaning are not established.
+/// Deliberate deviations: use native pointer-sized vtable entries on hosts
+/// (slot index 100 remains the same); retain the raw zero r0 result even
+/// though Ghidra types this void and both direct callers discard it.
+/// Existing singleton and queue dependencies are reused without new seams;
+/// the queue still requires its enqueue hook to be installed on target.
+///
+/// # Safety
+///
+/// `this` must be a live, writable class-0x8c00 object, at least 0xdc
+/// bytes, with a constructed EventCodeQueue base. The media-player
+/// singleton must have a readable vtable and callable slot 100.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class_8c00_post_media_query_code(this: *mut u8) -> u32 {
+    let player = crate::app::singletons::media_player_get();
+    let vtable = player.cast::<*const unsafe extern "C" fn(*mut u8) -> u32>().read();
+    let query = vtable.add(0x190 / 4).read();
+    let code = if query(player) == 0 { 13 } else { 8 };
+    event_code_queue_post(this.cast::<EventCodeQueue>(), code);
+    this.add(0xd6).write(0);
+    0
+}
+
+#[cfg(test)]
+mod media_query_code_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::app::event_code_queue::{EventCodeQueueHooks, EVENT_CODE_QUEUE_HOOKS};
+    use crate::app::singletons::{MEDIA_PLAYER_INSTANCE, SINGLETON_LOCK};
+    use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+
+    static QUERY_RESULT: AtomicU32 = AtomicU32::new(0);
+    static QUERY_RECEIVER: AtomicUsize = AtomicUsize::new(0);
+    static OWNER: AtomicUsize = AtomicUsize::new(0);
+    static POSTED: AtomicU32 = AtomicU32::new(0);
+    static FLAG_DURING_POST: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn query(player: *mut u8) -> u32 {
+        QUERY_RECEIVER.store(player as usize, Ordering::SeqCst);
+        QUERY_RESULT.load(Ordering::SeqCst)
+    }
+
+    unsafe extern "C" fn enqueue(_queue: *mut u8, code: *const u32) {
+        POSTED.store(code.read(), Ordering::SeqCst);
+        let owner = OWNER.load(Ordering::SeqCst) as *const u8;
+        FLAG_DURING_POST.store(owner.add(0xd6).read() as u32, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn selects_by_zero_and_clears_flag_only_after_post() {
+        let _singleton = SINGLETON_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _queue = crate::testing::EVENT_CODE_QUEUE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let saved_player = ptr::addr_of!(MEDIA_PLAYER_INSTANCE).read_volatile();
+            let saved_hooks = ptr::addr_of!(EVENT_CODE_QUEUE_HOOKS).read_volatile();
+            let vtable = [query as unsafe extern "C" fn(*mut u8) -> u32; 101];
+            let mut player = vtable.as_ptr();
+            let player_ptr = ptr::addr_of_mut!(player).cast::<u8>();
+            // Native queue layout widens on hosts; the trailing raw byte is
+            // still addressed at its retail offset, outside the queue base.
+            let mut storage = [0usize; 0xdc / core::mem::size_of::<usize>() + 1];
+            let owner = storage.as_mut_ptr().cast::<u8>();
+            owner.cast::<EventCodeQueue>().write(EventCodeQueue {
+                vtable: ptr::null(), pad_04: 0, queue: [0; 10], word_30: 0,
+                mutex: crate::kernel::sync_mutex::Mutex { sem_cell: ptr::null_mut(), unused: 0 },
+            });
+            OWNER.store(owner as usize, Ordering::SeqCst);
+            ptr::addr_of_mut!(MEDIA_PLAYER_INSTANCE).write_volatile(player_ptr);
+            ptr::addr_of_mut!(EVENT_CODE_QUEUE_HOOKS).write_volatile(EventCodeQueueHooks { enqueue });
+            for (result, code) in [(0, 13), (1, 8), (0x80000000, 8), (u32::MAX, 8)] {
+                QUERY_RESULT.store(result, Ordering::SeqCst);
+                owner.add(0xd5).write(0x51);
+                owner.add(0xd6).write(0xa5);
+                owner.add(0xd7).write(0x73);
+                let returned = class_8c00_post_media_query_code(owner);
+                let actual_code = POSTED.load(Ordering::SeqCst);
+                let during = FLAG_DURING_POST.load(Ordering::SeqCst);
+                let receiver = QUERY_RECEIVER.load(Ordering::SeqCst);
+                assert_eq!((returned, actual_code, during), (0, code, 0xa5));
+                assert_eq!(receiver, player_ptr as usize);
+                assert_eq!((owner.add(0xd5).read(), owner.add(0xd6).read(), owner.add(0xd7).read()), (0x51, 0, 0x73));
+            }
+            ptr::addr_of_mut!(EVENT_CODE_QUEUE_HOOKS).write_volatile(saved_hooks);
+            ptr::addr_of_mut!(MEDIA_PLAYER_INSTANCE).write_volatile(saved_player);
+        }
     }
 }
