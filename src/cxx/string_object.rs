@@ -559,6 +559,61 @@ pub unsafe extern "C" fn string_default_construct(this: *mut StringObject) -> *m
     this
 }
 
+/// Default-construct two adjacent strings — `FUN_0819b5e4` @ 0x0819b5e4.
+/// True extent: 24 bytes, ending at the independent destructor @ 0x0819b5fc.
+/// Raw whole-image decoding finds two inbound plain BL sites (0x08140694,
+/// 0x0820328c), zero predicated; the body has two plain BLs, zero predicated.
+/// Construct first, then second, and return the original pair pointer.
+/// Deliberate deviations: reuse the ported constructor's static vtable identity
+/// and repr(C) pointer fields; the second string is at +8 on ARM, +16 on hosts.
+///
+/// # Safety
+/// `this` must be aligned writable storage for a StringObjectPair. Existing
+/// payloads are overwritten without release, as in the original constructor.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_pair_default_construct(
+    this: *mut StringObjectPair,
+) -> *mut StringObjectPair {
+    string_default_construct(core::ptr::addr_of_mut!((*this).first));
+    string_default_construct(core::ptr::addr_of_mut!((*this).second));
+    this
+}
+
+#[cfg(test)]
+mod pair_default_construct_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct GuardedPair {
+        before: usize,
+        pair: StringObjectPair,
+        after: usize,
+    }
+
+    #[test]
+    fn overwrites_both_strings_without_touching_neighbors() {
+        for sentinel in [1usize, usize::MAX, 0xa5a5_a5a5] {
+            let string = || StringObject {
+                vtable: sentinel as *const StringObjectVtable,
+                payload: sentinel as *mut u8,
+            };
+            let mut storage = GuardedPair {
+                before: sentinel,
+                pair: StringObjectPair { first: string(), second: string() },
+                after: sentinel,
+            };
+            let pair = core::ptr::addr_of_mut!(storage.pair);
+            assert_eq!(unsafe { string_object_pair_default_construct(pair) }, pair);
+            for string in [&storage.pair.first, &storage.pair.second] {
+                assert_eq!(string.vtable, core::ptr::addr_of!(STRING_OBJECT_VTABLE));
+                assert!(string.payload.is_null());
+            }
+            assert_eq!((storage.before, storage.after), (sentinel, sentinel));
+        }
+    }
+}
+
 /// Indirect dispatch for the payload release @ 0x08275d74 (ported as
 /// [`string_object_release_payload`]; see the module header).
 #[derive(Clone, Copy)]
