@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817dc98
+    ghidra: FUN_0817dc98
+    name: media_context_transition
+    size: 164
+    sig: "void media_context_transition(MediaContextTransition *object, u32 first_value, u32 second_value)"
+    module: app/media_context_transition
+    status: ported
+    vars:
+      param_1/r0/r4: object
+      param_2/r1/r5: first_value
+      param_3/r2/r6: second_value
+      r4_after_virtual_call: context_result
+    notes: >-
+      Raw extent [0x0817dc98,0x0817dd3c) ends before the next push prologue.
+      Four outgoing unconditional BLs, two BLNEs, one virtual BLX at
+      receiver vtable +0x1c, and tail B to 0x081df124. Whole-image A32
+      decoding finds two unconditional incoming BLs and no predicated BLs.
+      Ghidra incorrectly incorporates the tail callee and drops the third
+      arguments of both conditional calls. Store state 3 before gating old
+      state; refresh old zero, accept old 5/6, otherwise return. Forward
+      each nonzero value using freshly loaded target and handle fields;
+      enqueue handle through 0x081decd8, dispatch receiver slot +0x1c with
+      embedded context +4, obtain dispatcher again and enqueue result
+      through 0x081df124. Reuses active_context_refresh and both scoped
+      context result ports. Retail lazy getter 0x081ded14 remains intact
+      because its Rust port has a non-retail cache and incomplete ctor.
+      Unported enqueue operations retain verified retail addresses without
+      inventing callee identities. Host pointers widen structurally; active
+      public host execution is unsupported. Tests cover every rejected
+      state with one-byte storage, all accepted states, zero-value skips,
+      callback mutation/reload ordering and context/queue result agreement.
+      Public-entry host smoke confirms rejected states require no receiver.
+      Host suite: 14401 passed. ARM release build succeeds. match.py
+      reports 41 original versus 49 Rust instructions, preserving state
+      gating, conditional forwarding, field reloads, virtual slot +0x1c,
+      both getter calls and final tail dispatch. Differences are LLVM
+      frame registers, branches instead of predicated BLs, relocatable
+      calls to ported symbols and fixed-address BLX/BX for retail callees.
   - address: 0x08184e04
     ghidra: FUN_08184e04
     name: resource_list_append_record
