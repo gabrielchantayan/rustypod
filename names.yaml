@@ -221430,3 +221430,47 @@ functions:
       match.py reports 31 Rust instructions versus 18 original instructions:
       guard gates, call order and return are preserved, with BLX seam dispatch
       and a larger register-save frame rather than instruction equality.
+  - address: 0x08195000
+    ghidra: FUN_08195000
+    name: iap_command_32_request
+    size: 152
+    sig: "u32 iap_command_32_request(u8 *context, u32 flags)"
+    module: app/iap_command_32_request
+    status: ported
+    args:
+      r0: context
+      r1: flags
+    renames:
+      param_1/r5: context
+      param_2/r7: flags
+      uVar2/r6: status
+      uStack_18: big_endian_payload
+      DAT_08195094: forbidden_flags_mask
+      FUN_081946ec: active_service_handler_is_ready
+      thunk_FUN_082e8390: posix_mutex_lock
+      FUN_08261638: pack_be32
+      FUN_080f6da0: iap_packet_create
+      FUN_08195214: schedule_iap_packet_event
+      thunk_FUN_082e83d8: posix_mutex_unlock
+    notes: >-
+      Raw extent [0x08195000,0x08195098) is 152 bytes: 148 code bytes
+      plus forbidden-flags literal 0x0feafee0 at 0x08195094. Next real
+      function begins with e92d4073. Whole-image aligned word decoding
+      finds two incoming plain BLs at 0x0825a39c and 0x0825a400, zero
+      predicated incoming BLs, six internal plain BLs and zero predicated
+      internal BLs. Callers supply 0x40000010 or zero. Readiness precedes
+      flag validation; reject with 11 when unavailable or any masked bit
+      is set. Otherwise lock context+0x2d8 ignoring status, pack flags
+      big-endian, create lingo-7 command-0x20 with owner word +0x2d0,
+      NULL secondary context and four-byte payload. NULL packet returns
+      28; otherwise schedule completion state 1 with delay 200 ms and
+      preserve scheduler status. Unlock on either creation outcome,
+      ignoring unlock status. All six existing canonical ports are reused;
+      no new seam. Deviations: bypass lock/unlock veneers; return only r0
+      because raw pop restores incoming r1, not a second return value.
+      Host tests cover unavailable service and each forbidden bit with
+      ready service and invalid request context. ARM build passed;
+      match.py exit 1 retains all six calls, mask, field offsets, four-byte
+      payload, packet failure and unconditional unlock. LLVM uses its frame,
+      rearranges pure gate comparisons and elides the scheduler's unused
+      context argument setup. No device execution performed.
