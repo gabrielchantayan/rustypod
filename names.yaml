@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815f290
+    ghidra: FUN_0815f290
+    name: record_promote
+    size: 100
+    sig: "void record_promote(RecordCollection *collection, i32 source, i32 destination)"
+    module: app/record_promote
+    status: ported
+    vars:
+      param_1: collection
+      param_2: source
+      param_3: destination
+      uVar3: saved_first_word
+      uVar4: saved_second_word
+      puVar2: record
+      iVar1: records_base_or_tracked_index
+    notes: >-
+      Raw A32 words establish [0x0815f290,0x0815f2f4), 100 bytes;
+      next independent push begins at 0x0815f2f4. Whole-image aligned
+      decoding finds two incoming plain BLs at 0x0815f448 and 0x0815f684,
+      zero predicated incoming BLs. One outgoing plain BL at 0x0815f2c0
+      reaches canonical iram_memmove_veneer at 0x08037f70; zero predicated
+      outgoing BLs. Save both source words, shift [destination,source)
+      right by eight bytes and restore at destination. Signed tracked
+      index +8 follows source or increments within the shifted interval.
+      Header and count remain untouched. No target deviations; repr(C)
+      host fixtures widen only the records pointer. Rotation-reference
+      tests cover overlap, equal indices, sentinels and tracking boundaries.
+      All 14453 host tests and ARM release build passed. Standalone smoke
+      moved record 4 to 1 and tracked index 2 to 3 with count unchanged.
+      match.py exits 1: both bodies have 25 instructions. Pair save/restore,
+      overlap copy and signed comparisons remain; LLVM uses explicit
+      branches instead of conditional returns and a larger saved frame.
+      ARM relocation verifies the sole call is iram_memmove_veneer.
   - address: 0x0816f32c
     ghidra: FUN_0816f32c
     name: three_child_value_sum
