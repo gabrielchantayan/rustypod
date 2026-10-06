@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08159424
+    ghidra: FUN_08159424
+    name: sync_clock
+    size: 36
+    sig: "u32 sync_clock(void)"
+    module: drivers/timer
+    status: ported
+    renames:
+      local_stack_word: counter_usec
+      FUN_08086e38: read_usec_timer_into_2
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw extent [0x08159424,0x08159448) contains nine A32 instructions;
+      the next real function starts with LDR r1,[r0]. Independent whole-image
+      decoding finds two incoming plain BLs at 0x081594ec and 0x08159518,
+      zero predicated BLs; the body has two plain BLs, zero predicated BLs,
+      and a tail B to __rt_udiv. Sample Timer E once through the existing
+      out-pointer helper, divide by 1000 twice, and return u32 whole seconds
+      within the wrapping microsecond epoch. No behavioral deviations;
+      Ghidra's u64 signature and expanded divider are tail-branch artifacts.
+      Host tests cover truncation boundaries, full-width unsigned input and
+      timer wrap; consumer smoke verifies activity at elapsed 3 and expiry at 4.
+      All 14545 host tests and the ARM release build pass. match.py exits 1:
+      LLVM emits 14 instructions instead of nine, initializes the stack slot,
+      adds a frame and uses BL for the final division rather than a tail B;
+      the timer helper and both divisions remain separate calls.
   - address: 0x081594cc
     ghidra: FUN_081594cc
     name: disk_mode_resource_8ca8_dispatch
@@ -68,8 +94,8 @@ functions:
       the byte without boolean normalization. The disk-mode resource
       getter selects its resource according to this value. Raw helper
       0x08159424..0x08159448 reads the microsecond timer through
-      0x08086e38 and divides by 1000 twice; retain this unported helper
-      as a literal retail call, not a guessed implementation. No target
+      0x08086e38 and divides by 1000 twice; now call the ported sync_clock
+      directly on-device, retaining the host clock override. No target
       behavioral deviations. Fixed-width opaque fields preserve offsets.
       Host tests cover boundaries, wraparound, backward time, all byte
       classes and persistent expiry; 14540 host tests pass. ARM release

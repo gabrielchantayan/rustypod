@@ -4,8 +4,8 @@
 //! zero incoming predicated BLs, one outgoing plain BL, and no predicated BLs.
 //! Read the clock, subtract the stored timestamp modulo 2^32, clear the
 //! activity byte when the unsigned difference is >= 4, then return that byte.
-//! The unported clock at 0x08159424 reads the microsecond timer and divides
-//! by 1000 twice. Call it directly on-device; host tests substitute the clock.
+//! The ported drivers::timer::sync_clock reads the microsecond timer and
+//! divides by 1000 twice; host tests can substitute the clock.
 //! Deliberate deviations: none in behavior; opaque prefix words retain the
 //! target layout without introducing host-width pointers.
 
@@ -21,17 +21,12 @@ pub struct DiskModeSyncState {
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn sync_clock() -> u32 {
-    let clock: unsafe extern "C" fn() -> u32 = core::mem::transmute(0x0815_9424usize);
-    clock()
+    crate::drivers::timer::sync_clock()
 }
 
 #[cfg(not(target_os = "none"))]
-pub static mut DISK_MODE_SYNC_CLOCK: unsafe extern "C" fn() -> u32 = missing_clock;
+pub static mut DISK_MODE_SYNC_CLOCK: unsafe extern "C" fn() -> u32 = crate::drivers::timer::sync_clock;
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_clock() -> u32 {
-    panic!("install disk-mode sync host clock")
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe fn sync_clock() -> u32 {
