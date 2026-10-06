@@ -6798,6 +6798,42 @@ functions:
       return, with literal-address BLX replacing the three direct BLs and
       a different frame prologue. No firmware behavioral deviations.
 
+  - address: 0x08167250
+    ghidra: FUN_08167250
+    name: own_target_notifier_destruct
+    size: 48
+    sig: "OwnTargetNotifierOwner *own_target_notifier_destruct(OwnTargetNotifierOwner *owner)"
+    module: app/own_target_notifier_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      owner+0x18: mutex_owner
+      DAT_0816727c: notifier_vtable
+      FUN_08093ca0: dual_mutex_owner_delete
+      tail_08111190: notifier_base_destruct
+    notes: >-
+      Raw words establish 44 bytes of code and a four-byte vtable literal
+      0x08987f18 before the next push at 0x08167280: true size 48.
+      Full-image aligned branch decoding finds two plain inbound BLs at
+      0x08167244 and 0x081e6718, zero predicated BLs. Outbound: one plain
+      BL at 0x08167264 to the existing dual_mutex_owner_delete port,
+      zero predicated BLs, and a tail B at 0x08167278 to 0x08111190.
+      Install the derived vtable, unconditionally delete the owned mutex
+      pair at +0x18, clear that member, and return the base destructor
+      result. Ghidra incorrectly expands the tail-called base into this
+      function. The base raw body installs 0x08981958, unregisters callbacks,
+      releases associated state and virtual children, then tails to
+      0x08125258. No existing names entry exists for that base; retain its
+      verified retail address rather than invent a class identity.
+      Deliberate deviations: host pointer field widens under repr(C);
+      host base operation is explicitly installed. Volatile stores preserve
+      teardown transitions. No firmware behavioral deviations.
+      Host regression exercises the real dual-mutex cleanup with empty
+      members, checks tag-10 deallocation before base dispatch, and preserves
+      base and mutex metadata. ARM release build succeeds; match.py retains
+      the vtable store, +0x18 load/clear, cleanup BL and base tail transfer,
+      using BX through literal 0x08111190 instead of a direct B.
+
   - address: 0x082371ac
     ghidra: FUN_082371ac
     name: object_mark_initialized
