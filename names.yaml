@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081685d0
+    ghidra: FUN_081685d0
+    name: owner_link_contains
+    size: 44
+    sig: "u32 owner_link_contains(const OwnerLinkRange *owner, u32 link)"
+    module: app/owner_link_contains
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: link
+      owner+0x14: begin
+      owner+0x18/r2: end
+      r0_after_bounds_load: cursor
+      r3: candidate
+    notes: >-
+      Raw A32 extent [0x081685d0,0x081685fc) is 44 executable bytes.
+      Next real function starts with e92d4070 at 0x081685fc.
+      Whole-image aligned decoding finds two incoming plain BLs at
+      0x08168420 and 0x08168574, zero predicated BLs; body has no calls.
+      Snapshot end then begin, compare aligned u32 identities until match
+      or pointer equality with end, return exactly zero or one. Callers
+      check membership before virtual dispatch or append at owner+0x14.
+      Ghidra expands callers across tail branches and invents unused r2/r3
+      parameters. No callee seam is needed. Target layout uses repr(C)
+      with five prefix words then begin/end pointers at +0x14/+0x18;
+      host pointers widen naturally. No target behavioral deviations.
+      Host tests compare all bounded subranges with slice membership,
+      including duplicates, high-bit identities, excluded end, missing
+      values, and empty non-dereferenceable bounds.
   - address: 0x0816867c
     ghidra: FUN_0816867c
     name: owner_link_visit_words_with_literal_callback
