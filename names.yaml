@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817be10
+    ghidra: FUN_0817be10
+    name: media_context_value_refresh
+    size: 80
+    sig: "u32 media_context_value_refresh(MediaValueOwner *owner)"
+    module: app/media_context_value_refresh
+    status: ported
+    vars:
+      param_1/r0/r5: owner
+      r4: embedded_mutex
+      owner+0x54: context
+      context+0x04: query_interface
+      interface_vtable+0x94: query_value
+      owner_vtable+0x100: accept_value
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+    notes: >-
+      Raw extent [0x0817be10,0x0817be60) is 80 bytes; the next real
+      function starts with push at 0x0817be60. One outgoing plain BL,
+      zero predicated BLs, two virtual BLX calls and a tail B to unlock.
+      Whole-image A32 decoding finds one incoming plain BL at 0x0817d398
+      and one BLNE at 0x0817d4ec. Veneer words ea021878/ea021889 resolve
+      to canonical posix_mutex_lock/unlock at 0x082e8390/0x082e83d8.
+      Ignore lock status on owner+0xa4c; if owner+0x54 is non-NULL,
+      query its secondary interface at +4 via vtable +0x94, then forward
+      the complete result to owner vtable +0x100. Return unlock status.
+      Callers compare the query against time-like values; concrete virtual
+      method identities remain unresolved and are kept dynamic. Ghidra
+      incorrectly incorporates the tail unlock body. Deliberate deviations:
+      snapshot existing REGION_MUTEX_OPS before locking; repr(C) pointers
+      and vtable words widen on hosts while retaining target field order.
+      Host edge tests and standalone exported API smoke cover absent/present
+      contexts, ignored lock failure, full-word value forwarding, ordered
+      dispatch and unlock return propagation. ARM build passes; match.py
+      shows the same guarded virtual calls and tail unlock, with indirect
+      mutex calls and larger register-save set caused by the existing seam.
   - address: 0x0817dc98
     ghidra: FUN_0817dc98
     name: media_context_transition
