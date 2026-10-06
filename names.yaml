@@ -223362,3 +223362,32 @@ functions:
       a literal. LLVM inlines mutex acquisition and hold-count increment,
       uses BLX for resident vector seams, retains unsigned division and
       tail unlock, and preserves target offsets 0x5c/0x64/0x68.
+
+  - address: 0x0816f1c4
+    ghidra: FUN_0816f1c4
+    name: paired_container_observer_construct
+    size: 20
+    sig: "RegistryObserver *paired_container_observer_construct(RegistryObserver *this)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: this, puVar1: observer}
+    notes: >-
+      Derived observer constructor used for the paired containers at +0xa8
+      and +0xac in constructor 0x0812b6e8. Full raw-word scan finds two
+      unconditional incoming BLs at 0x0812b78c and 0x0812b7b0, zero
+      predicated BLs. Raw words e92d4010 ebfe7b03 e59f1004 e5801000
+      e8bd8010 call the already ported registry_observer_base_construct
+      at 0x0810dddc, store vtable literal 0x08988b4c at the returned
+      pointer, and return unchanged r0. Code extent is 20 bytes through
+      0x0816f1d8 exclusive; the literal occupies 0x0816f1d8 and the next
+      real function starts at 0x0816f1dc. Callers allocate eight bytes
+      and pass the constructed observer to container virtual slot +0x54.
+      No new seam or inferred vtable methods. No target deviations;
+      repr(C) native pointer fields expand on hosts. Host tests cover
+      dirty inherited state, pointer identity, final derived vtable and
+      adjacent storage preservation. A standalone test-configured host
+      executable constructs two independent objects and checks their
+      returned pointers, vtables and cleared state. ARM release builds.
+      match.py exits 1: LLVM adds a frame-pointer move and reports the
+      literal as an instruction; the base BL, vtable store and pointer
+      return structure are retained.

@@ -12,6 +12,7 @@
 //! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
 //! | 0x082028a4 | [`registry_observer_construct`] | 20 | 3 `bl` |
 //! | 0x08188b5c | [`demo_mode_observer_construct`] | 20 | 4 `bl` |
+//! | 0x0816f1c4 | [`paired_container_observer_construct`] | 20 | 2 `bl` |
 //! (Call-site counts are binary-scanned over osos.dec; one of the nine
 //! class-registry `bl`s is the static-init chain @ 0x082afb6c, which runs it
 //! against the statically allocated registry object @ 0x08a79ca4 — the
@@ -607,6 +608,36 @@ pub unsafe extern "C" fn demo_mode_observer_construct(this: *mut u8) -> *mut u8 
     core::ptr::write_volatile(
         observer.cast::<*const RegistryObserverVtable>(),
         DEMO_MODE_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+    );
+    observer
+}
+
+/// paired_container_observer_construct — original: `FUN_0816f1c4`
+/// @ 0x0816f1c4 (20 bytes; 2 plain BL call sites, zero predicated).
+///
+/// Constructs the 8-byte observer installed on each of the two containers
+/// at +0xa8/+0xac by constructor 0x0812b6e8. Calls the ported observer base,
+/// replaces its returned object's vtable with 0x08988b4c, and returns the
+/// same pointer. Raw words: e92d4010 ebfe7b03 e59f1004 e5801000 e8bd8010.
+/// Code ends at 0x0816f1d8; the literal occupies that word and the next
+/// real function begins at 0x0816f1dc. One outgoing unconditional BL.
+///
+/// Deliberate deviations: none on target. Native pointer fields expand on
+/// hosts; repr(C) preserves the firmware layout on ARM. Only the vtable
+/// address is modeled, not unverified virtual methods.
+///
+/// # Safety
+/// `this` must address a writable, aligned [`RegistryObserver`]. The original
+/// has no NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn paired_container_observer_construct(
+    this: *mut RegistryObserver,
+) -> *mut RegistryObserver {
+    let observer = registry_observer_base_construct(this);
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*observer).vtable),
+        0x08988b4c as *const RegistryObserverVtable,
     );
     observer
 }
@@ -1624,6 +1655,32 @@ mod tests {
             assert!(ptr::read_volatile(ptr::addr_of!(registry.observer)).is_null());
         }
         restore(guard);
+    }
+
+    #[test]
+    fn paired_container_observer_clears_inherited_state_without_touching_neighbors() {
+        #[repr(C)]
+        struct GuardedObserver {
+            before: usize,
+            observer: RegistryObserver,
+            after: usize,
+        }
+        for state in [0, 1, 0x8000_0000, u32::MAX] {
+            let mut guarded = GuardedObserver {
+                before: 0x1234_5678,
+                observer: RegistryObserver {
+                    vtable: 0xdead_beefusize as *const RegistryObserverVtable,
+                    state,
+                },
+                after: 0x8765_4321,
+            };
+            let this = ptr::addr_of_mut!(guarded.observer);
+            assert_eq!(unsafe { paired_container_observer_construct(this) }, this);
+            assert_eq!(guarded.observer.vtable as usize, 0x08988b4c);
+            assert_eq!(guarded.observer.state, 0);
+            assert_eq!(guarded.before, 0x1234_5678);
+            assert_eq!(guarded.after, 0x8765_4321);
+        }
     }
 
     // ---- the directly ported observer base ----
