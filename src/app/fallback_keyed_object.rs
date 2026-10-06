@@ -216,6 +216,91 @@ pub unsafe extern "C" fn keyed_object_action_select(
     if action == -1 { 0 } else { action as i32 }
 }
 
+/// Request prefix for the +0x108 action selector (override at +0x0c).
+#[repr(C)]
+pub struct KeyedObjectPrimaryActionRequest {
+    pub unresolved_00: u32,
+    pub key: u32,
+    pub unresolved_08: u32,
+    pub action_override: i16,
+}
+
+#[repr(C)]
+pub struct KeyedPrimaryActionObject {
+    pub vtable: *const KeyedPrimaryActionVtable,
+    pub unresolved_04: [u32; 9],
+    pub default_action: u32,
+    pub unresolved_2c: [u32; 8],
+    pub key: u32,
+}
+
+#[repr(C)]
+pub struct KeyedPrimaryActionVtable {
+    pub unresolved_00: [usize; 66],
+    pub contextual_action: unsafe extern "C" fn(*mut KeyedPrimaryActionObject, u32) -> i32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(core::mem::offset_of!(KeyedObjectPrimaryActionRequest, action_override) == 0x0c);
+    assert!(core::mem::offset_of!(KeyedPrimaryActionObject, default_action) == 0x28);
+    assert!(core::mem::offset_of!(KeyedPrimaryActionObject, key) == 0x4c);
+    assert!(core::mem::offset_of!(KeyedPrimaryActionVtable, contextual_action) == 0x108);
+};
+
+/// Select a keyed object's primary action — `FUN_0818431c`, **0x0818431c**.
+///
+/// True size: 184 bytes, including the literal at 0x081843d0; the next real
+/// function starts at 0x081843d4. Whole-image raw BL decoding verifies two
+/// incoming plain calls (0x08181c88, 0x081822c4), zero predicated calls.
+/// Body: one plain BL, one BLEQ, two register BLX sites.
+/// Resolve request+4; panic on NULL; suppress object key 0x0dad05af before
+/// honoring the signed request+0x0c override. Otherwise query virtual +0x108
+/// with a nonzero context; -1 falls back. `use_default` selects object+0x28
+/// instead of a zero-context query. Truncate results to i16; fallback -1
+/// becomes zero. Deliberate deviations: typed host-width pointer fields and
+/// existing Rust resolver/panic ports; no guessed virtual callee or guards.
+///
+/// # Safety
+/// Inputs must be live objects with these prefixes. The resolver must return
+/// this layout and its +0x108 virtual method must satisfy the declared ABI.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn keyed_object_primary_action_select(
+    context: *mut FallbackKeyedObjectContext,
+    request: *const KeyedObjectPrimaryActionRequest,
+    use_default: u32,
+    action_context: u32,
+) -> i32 {
+    let object = unsafe {
+        primary_or_demo_mode_keyed_object(context, (*request).key, core::ptr::null_mut())
+    }.cast::<KeyedPrimaryActionObject>();
+    if object.is_null() {
+        unsafe { crate::heap::veneers::heap_panic() }
+    }
+    if unsafe { (*object).key } == 0x0dad_05af {
+        return 0;
+    }
+    let explicit = unsafe { (*request).action_override };
+    if explicit != -1 {
+        return explicit as i32;
+    }
+    if action_context != 0 {
+        let action = unsafe {
+            ((*(*object).vtable).contextual_action)(object, action_context)
+        } as i16;
+        if action != -1 && use_default == 0 {
+            return action as i32;
+        }
+    }
+    let action = if use_default != 0 {
+        (unsafe { (*object).default_action }) as i16
+    } else {
+        (unsafe { ((*(*object).vtable).contextual_action)(object, 0) }) as i16
+    };
+    if action == -1 { 0 } else { action as i32 }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -497,6 +582,68 @@ mod tests {
             unsafe { PRIMARY_RESULT = addr_of_mut!(fixture.object).cast() };
             let result = unsafe {
                 keyed_object_action_select(&mut controller, &request, use_default, action_context)
+            };
+            assert_eq!(result, expected);
+            assert_eq!(fixture.calls, calls);
+        }
+        restore(guard);
+    }
+    #[repr(C)]
+    struct PrimaryActionFixture {
+        object: KeyedPrimaryActionObject,
+        contextual_result: i32,
+        zero_result: i32,
+        calls: std::vec::Vec<u32>,
+    }
+
+    unsafe extern "C" fn primary_fixture_action(
+        object: *mut KeyedPrimaryActionObject, context: u32,
+    ) -> i32 {
+        let fixture = unsafe { &mut *object.cast::<PrimaryActionFixture>() };
+        fixture.calls.push(context);
+        if context == 0 { fixture.zero_result } else { fixture.contextual_result }
+    }
+
+    static PRIMARY_ACTION_VTABLE: KeyedPrimaryActionVtable = KeyedPrimaryActionVtable {
+        unresolved_00: [0; 66],
+        contextual_action: primary_fixture_action,
+    };
+
+    #[test]
+    fn primary_action_precedence_and_sentinel_boundaries() {
+        let guard = install();
+        let cases: &[(u32, i16, u32, u32, i32, i32, u32, i32, &[u32])] = &[
+            (0x0dad05af, 9, 0, 7, 4, 3, 2, 0, &[]),
+            (1, -32768, 0, 7, 4, 3, 2, -32768, &[]),
+            (1, 0, 1, 7, 4, 3, 2, 0, &[]),
+            (1, 32767, 1, 7, 4, 3, 2, 32767, &[]),
+            (1, -1, 0, 7, 0x12348000, 3, 2, -32768, &[7]),
+            (1, -1, 0, 7, 0x1234ffff, 0x12348001, 2, -32767, &[7, 0]),
+            (1, -1, 0, 7, -1, -1, 2, 0, &[7, 0]),
+            (1, -1, 0, 0, 4, 0x12340002, 3, 2, &[0]),
+            (1, -1, 0, 0, 4, -1, 3, 0, &[0]),
+            (1, -1, 9, 7, 4, 3, 0x12348000, -32768, &[7]),
+            (1, -1, 9, 7, -1, 3, 0x1234ffff, 0, &[7]),
+            (1, -1, 9, 0, 4, 3, 0x12340002, 2, &[]),
+            (1, -1, 9, 0, 4, 3, 0xffff, 0, &[]),
+        ];
+        for &(key, explicit, use_default, action_context, contextual_result,
+              zero_result, default_action, expected, calls) in cases {
+            let mut fixture = PrimaryActionFixture {
+                object: KeyedPrimaryActionObject {
+                    vtable: &PRIMARY_ACTION_VTABLE, unresolved_04: [0; 9],
+                    default_action, unresolved_2c: [0; 8], key,
+                },
+                contextual_result, zero_result, calls: std::vec::Vec::new(),
+            };
+            let request = KeyedObjectPrimaryActionRequest {
+                unresolved_00: 0, key: 42, unresolved_08: 0,
+                action_override: explicit,
+            };
+            let mut controller = context(ptr::null_mut());
+            unsafe { PRIMARY_RESULT = addr_of_mut!(fixture.object).cast() };
+            let result = unsafe {
+                keyed_object_primary_action_select(&mut controller, &request, use_default, action_context)
             };
             assert_eq!(result, expected);
             assert_eq!(fixture.calls, calls);

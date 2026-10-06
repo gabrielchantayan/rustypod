@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818431c
+    ghidra: FUN_0818431c
+    name: keyed_object_primary_action_select
+    size: 184
+    sig: "i32 keyed_object_primary_action_select(FallbackKeyedObjectContext *context, const KeyedObjectPrimaryActionRequest *request, u32 use_default, u32 action_context)"
+    module: app/fallback_keyed_object
+    status: ported
+    vars:
+      param_1: context
+      param_2: request
+      param_3: use_default
+      param_4: action_context
+      piVar2: object
+      sVar1: action
+    renames:
+      FUN_0817ee34: primary_or_demo_mode_keyed_object
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM extent [0x0818431c,0x081843d4) is 180 instruction bytes
+      plus literal 0x0dad05af at 0x081843d0; next real function starts
+      with push. Whole-image aligned BL decoding verifies two incoming
+      plain calls at 0x08181c88 and 0x081822c4, zero predicated calls.
+      Body contains one plain BL, one BLEQ and two register BLX sites.
+      Resolve request key +4; NULL is fatal. Suppress object key +0x4c
+      equal to 0x0dad05af before signed override at request+0x0c.
+      Otherwise query virtual +0x108 for nonzero context; truncate to i16.
+      Contextual -1 falls back; use_default selects object+0x28 instead
+      of zero-context dispatch. Fallback -1 becomes zero. Reuses canonical
+      resolver and panic ports; repr(C) host pointers widen. No guessed
+      virtual callee identity or added guards. Host cases cover precedence,
+      signed boundaries, truncation and sentinel fallback. Full host suite
+      passes 14406 tests; ARM release build passes. Temporary runtime smoke
+      returned (-32768,12,0). match.py exits 1: 45 stock instructions versus
+      56 Rust entries; guards and both virtual paths remain, with LLVM frame
+      setup, halfword default load and different low-halfword sentinel tests.
   - address: 0x08184658
     ghidra: FUN_08184658
     name: keyed_object_action_select
