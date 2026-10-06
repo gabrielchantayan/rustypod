@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08182200
+    ghidra: FUN_08182200
+    name: app_controller_restore_mode_resources
+    size: 68
+    sig: "void app_controller_restore_mode_resources(void *controller)"
+    module: ui/app_controller_restore_mode_resources
+    status: ported
+    vars:
+      param_1/r5: controller
+      r4: slot
+      FUN_081d8870: display_get
+      FUN_081d8af8: firmware_display_refresh
+      FUN_0817f710: take_queued_mode_resource
+      FUN_0817f4f4: activate_mode_resource
+    notes: >-
+      Raw A32 establishes [0x08182200,0x08182244), 68 bytes without
+      literals; next independent push begins at 0x08182244. Whole-image
+      decoding finds two inbound plain BLs at 0x0817ed8c and 0x0817ff28,
+      zero predicated inbound BLs. Body has three plain BLs and one BLNE.
+      Refresh secondary display, then take slots 0..3 in order, activating
+      only non-NULL resources. Verified take clears word +0xd8+4*slot.
+      Callbacks can change later slots; the queue is never snapshotted.
+      Retains retail display_get because the existing Rust getter has an
+      incomplete constructor; reuses the refresh seam. Unported take and
+      activation retain verified firmware addresses without guessed class
+      identities. Host fixtures use native pointers. Tests cover empty
+      and sparse queues, clear-before-activation and callback replacement
+      and removal of later resources.
+      Verification: full host suite passed 14424 tests; both edge tests
+      pass after the host-lock update. Standalone exported API smoke
+      activated sparse resources and cleared all four slots. ARM release
+      build passes. match.py exits 1 with 17 stock versus 47 Rust entries:
+      LLVM unrolls four slots, uses fixed-address BLX instead of direct BL,
+      and tail-dispatches the final non-NULL activation. Refresh ordering,
+      lazy takes and all four NULL guards are preserved.
   - address: 0x0817808c
     ghidra: FUN_0817808c
     name: parser_skip_blanks
