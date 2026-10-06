@@ -32372,6 +32372,34 @@ functions:
       unported and dispatch through target-addressed seams; the existing
       operator_new and heap_panic ports are called directly. Rust uses a
       normal call rather than the original tail branch.
+  - address: 0x0818a41c
+    ghidra: FUN_0818a41c
+    name: manager_client_notify
+    size: 60
+    sig: "u32 manager_client_notify(void *manager, u32 event, u32 client)"
+    module: heap/manager_client_notification
+    status: ported
+    vars:
+      param_1/r0/r4: manager
+      param_2/r1/r5: event
+      param_3/r2/r6: client
+      FUN_082aadd4: operator_new
+      FUN_08214270: resident_client_event_constructor
+      FUN_08030f44: heap_panic
+      FUN_08261998: dispatch_item_submit
+    notes: >-
+      Raw extent [0x0818a41c,0x0818a458), next push at 0x0818a458.
+      Two outgoing plain BLs, one BLEQ to heap_panic, and a tail B to
+      dispatch_item_submit. Whole-image aligned A32 decoding finds one
+      incoming plain BL at 0x081fc27c and one BLNE at 0x081fbf58.
+      Allocate 16 bytes; resident constructor 0x08214270 calls the ported
+      type-three payload constructor, writes vtable 0x0899313c and client
+      at +0x0c, and returns the node. Panic on NULL constructor return,
+      submit at manager+0x3c, and return status unchanged. Ghidra wrongly
+      includes the queue body across the tail branch. Constructor remains
+      a fixed-address ARM seam; host uses verified stores and the existing
+      base port. Rust call replaces tail B. Both client notification
+      callers now use this port, removing suppression/resident defaults.
   - address: 0x0818ae48
     ghidra: FUN_0818ae48
     name: block_manager_get
@@ -47063,13 +47091,12 @@ functions:
     notes: >-
       Binary-verified 76-byte completion gate: one plain bl to
       state_flags_contain(client, 0x10000), one predicated blne to the
-      unported parent notifier 0x0818a41c, and no other calls. Returns 1
+      parent notifier manager_client_notify at 0x0818a41c, and no other calls. Returns 1
       only when the flag is present and the unsigned +0x18 produced count
       is <= +0x1c expected count. A nonzero notify_parent sends event 5 to
       *(client+4), with client as the third argument. The notification
-      body is behind CLIENT_COMPLETION_NOTIFY_OPS; its target default
-      deliberately suppresses this unavailable external side effect until
-      0x0818a41c is ported, while host tests record the exact tuple.
+      body is behind CLIENT_COMPLETION_NOTIFY_OPS; its default invokes
+      manager_client_notify, while host tests install a recorder.
   - address: 0x081fc230
     ghidra: FUN_081fc230
     name: client_capacity_notify
@@ -47086,14 +47113,9 @@ functions:
       <= capacity_end +0x50. Returns 1 on eligibility, including when
       notification flag 0x100000 is already set. Otherwise sends parent
       +4 event 7 with client, ignores the notifier result, then reloads
-      +0x44 and ORs 0x100000, preserving callback changes. Target calls the
-      verified unported resident notifier through BLX; host rejects that
-      external call and tests the algorithm with a synchronous callback.
-      Unused r2 helper argument is omitted. Existing Rust target callers
-      use the new port rather than the resident completion function.
-      ARM match review verifies both flag calls, signed BGT rejection,
-      notify-before-reload/store ordering, and the resident 0x0818a41c
-      literal; LLVM adds a frame and an early conditional return.
+      +0x44 and ORs 0x100000, preserving callback changes. Uses the
+      manager_client_notify Rust port; behavioral tests use a synchronous
+      callback. Unused r2 helper argument is omitted.
   - address: 0x081fc3f4
     ghidra: FUN_081fc3f4
     name: state_flags_contain

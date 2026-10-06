@@ -30,6 +30,7 @@ pub mod manager_client_find;
 pub mod manager_flagged_client_count;
 pub mod manager_flagged_client_release;
 pub mod manager_notification;
+pub mod manager_client_notification;
 pub mod client_mutex_unlock;
 pub mod client_mutex_lock;
 pub mod dcache;
