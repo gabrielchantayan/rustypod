@@ -364,6 +364,7 @@ pub mod tracked_operation_dispatch;
 pub mod byte_flag_at_d_is_one;
 pub mod object_kind_is_two_five_or_seven;
 pub mod transfer_kind_invalidate;
+pub mod transfer_kind_set;
 pub mod category_is_below_three;
 pub mod synchronized_selection_transition;
 pub mod flagged_base_construct;

@@ -221569,3 +221569,36 @@ functions:
       for the fixed-address submission seam. Gate, store offset, four-byte
       stack snapshot, constructor arguments and success result are retained.
       Firmware submission was not executed on a device.
+
+  - address: 0x081890e8
+    ghidra: FUN_081890e8
+    name: transfer_kind_set
+    size: 8
+    sig: "u8 *transfer_kind_set(u8 *record, u32 kind)"
+    module: app/transfer_kind_set
+    status: ported
+    vars:
+      param_1/r0: record
+      param_2/r1: kind
+    notes: >-
+      Raw words e5c01004 e12fff1e establish the exact extent
+      [0x081890e8,0x081890f0): strb r1,[r0,#4]; bx lr. The next real
+      function is the canonical transfer_kind_invalidate, beginning with
+      mov r1,#0xff; no veneer or literal pool intervenes. Independent
+      whole-image aligned A32 BL decoding finds two incoming plain BLs
+      at 0x08167364 and 0x0818dbf8, zero predicated BLs; the body makes
+      no calls. Both callers set kind 2, 3, or 4 before the transfer
+      operation, which reads byte +4 for tag selection, then invalidate
+      the record. Store only the low byte of the full r1 input and return
+      the unchanged r0 record pointer, matching the canonical invalidator.
+      Deliberate deviations: none. Host regressions cover four byte
+      alignments, observed kinds, zero, invalid sentinel, full-register
+      truncation, neighboring-byte preservation and invalid-to-valid
+      transition. Standalone smoke exercises all 256 low-byte values at
+      four alignments with nonzero high input bits, preserving pointer
+      identity and all neighboring bytes. No device execution performed.
+      Full host suite passed: 14365 tests, zero failures. ARM release
+      build passed. match.py exit 1: original two instructions versus
+      four Rust instructions; LLVM adds push {fp,lr}, mov fp,sp and
+      pop {fp,pc} in place of bx lr. The exact strb r1,[r0,#4] store
+      and unchanged r0 return are retained; no extra calls or guards.
