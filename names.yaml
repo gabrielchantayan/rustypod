@@ -35132,11 +35132,42 @@ functions:
       Verified extent 0x08166a14..0x08166a2c (six ARM words): saves binding,
       bl 0x08038090 for the IRAM IRQ-table base, loads binding->irq as a byte,
       then tail-branches to 0x080380b0 with (table, irq). Four direct plain
-      bl callers, zero predicated forms. The two veneer targets remain
-      deliberately unnamed: their calling conventions, but not identities,
-      are verified. Rust uses volatile-read dispatch seams and an ordinary
-      call in place of the tail branch; target defaults call the stock
-      veneers and host defaults are inert.
+      BL callers, zero predicated forms. Rust reuses the ported IRQ-entry
+      veneer (Rust BSS table) and retains a volatile-read seam for the
+      stock enable veneer. An ordinary call replaces the final tail branch;
+      the stock enable operation remains inert by default on host.
+
+  - address: 0x081669bc
+    ghidra: FUN_081669bc
+    name: irq_binding_set_handler
+    size: 32
+    sig: "void irq_binding_set_handler(IrqBinding *binding, Option<IrqHandler> handler)"
+    module: kernel/irq_binding
+    status: ported
+    renames:
+      param_1: binding
+      param_2: handler
+      uVar1: table
+    notes: >-
+      Raw extent 0x081669bc..0x081669dc is eight ARM words, 32 bytes;
+      Ghidra's 36 includes the next function's push. Binary scan finds two
+      unconditional BL callers (0x08089950, 0x081669e4), zero predicated BLs.
+      Body stores handler at binding+4, BLs 0x08038090, reloads handler and
+      byte IRQ, then tail Bs 0x080380a0. That veneer targets 0x22004d20,
+      the IRAM mirror of osos 0x08004d20, whose verified code rejects IRQs
+      >=64, masks the source via 0x08004cf0, and stores at table+8+irq*4.
+      Binding updates still occur for invalid IRQs and NULL handlers.
+      Rust reuses rtxc_irq_enter_veneer and its BSS table, retains a
+      volatile-read registration seam to the stock veneer, and replaces
+      the final tail branch with an ordinary call. Native repr(C) fields
+      accommodate host pointer width. Attach/enable now calls the setter
+      directly; the obsolete setter-address seam is removed.
+      Scalar volatile function-pointer loads avoid an observed LLVM 22.1.8
+      ARM miscompile of a whole three-field ops copy. match.py shows the
+      same store, entry call, field reloads, and tail transfer, with extra
+      seam loads and ABI saves. A temporary ARM instruction execution smoke
+      matched raw and compiled setter state across 24 cases, including
+      callback register clobbers, binding mutation, NULL, and IRQ boundaries.
 
   - address: 0x081669dc
     ghidra: FUN_081669dc
@@ -35160,13 +35191,12 @@ functions:
       argument entirely. Binary scan: 15 unconditional bl call sites, zero
       predicated forms; callers pass the handler from a literal-pool word
       (e.g. driver init 0x08058388 builds ten bindings for irqs 8, 0x15,
-      0x21, 3, 2, 1, 0, 0x10, 0x11, 0x18). Both callees unported, so they
-      ride the IRQ_BINDING_ATTACH_OPS read_volatile seam (animation.rs
-      precedent): target defaults transmute 0x081669bc/0x08166a14
-      (hook-ready), host defaults inert. No NULL guard, no irq-range guard
-      at this level (table helpers ignore >= 64). match.py: structural
-      diff only from the seam indirection (ldrd/blx vs bl); LLVM kept the
-      enable as a tail call.
+      0x21, 3, 2, 1, 0, 0x10, 0x11, 0x18). Rust calls the ported setter
+      and enable directly, with no obsolete setter-address dispatch seam.
+      Their shared IRQ_BINDING_OPS uses the ported table accessor and
+      stock registration/enable veneers on target, inert table operations
+      on host. No NULL binding guard or IRQ-range guard at this level
+      (the table helpers ignore >=64).
 
   - address: 0x08037db0
     name: rom_thunk_table

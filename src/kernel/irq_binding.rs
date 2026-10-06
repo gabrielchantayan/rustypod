@@ -1,5 +1,4 @@
-//! Port of the retailOS IRQ binding "attach and enable" combiner
-//! `irq_binding_attach_enable` — original: `FUN_081669dc` @ 0x081669dc.
+//! Ports of the retailOS IRQ binding setter, enable, and attach/enable combiner.
 //!
 //! The original is the front door of a small C++-style object family
 //! living at 0x081669a4..0x08166a40 in osos. An `IrqBinding` is an 8-byte
@@ -43,10 +42,9 @@
 //!
 //! Deliberate deviations:
 //!
-//! - The unported setter rides [`IRQ_BINDING_ATTACH_OPS`]; enable's two
-//!   stock veneers ride [`IRQ_BINDING_ENABLE_OPS`]. Target defaults call
-//!   their respective firmware addresses, while host defaults are inert and
-//!   tests install recording mocks.
+//! - The IRQ-table base defaults to the established Rust IRQ-entry veneer.
+//!   Registration and enable still call their verified stock veneers on
+//!   target; host defaults are inert and tests install behavioral models.
 //! - The original tail-calls the enable; the Rust body calls it normally,
 //!   which is observationally identical (nothing follows it).
 
@@ -57,9 +55,8 @@ use super::irq::IrqHandler;
 // setter 0x081669bc).
 // ---------------------------------------------------------------------------
 
-/// IRQ binding POD, 8 bytes on the 32-bit target. This port only forwards
-/// the pointer; the fields are documented for the sibling functions that
-/// own them.
+/// IRQ binding POD, 8 bytes on the 32-bit target. `repr(C)` preserves the
+/// target field offsets while allowing native handler pointers on host.
 #[repr(C)]
 pub struct IrqBinding {
     /// +0x00: global interrupt number 0..63 (VIC0 sources 0..31, VIC1
@@ -81,51 +78,32 @@ const _: () = {
 };
 
 // ---------------------------------------------------------------------------
-// Dispatch seams for the unported handler setter and the two ROM veneers.
+// Dispatch seams for the table accessor and unported table operations.
 // ---------------------------------------------------------------------------
 
-/// Firmware load address of the unported handler-registration callee
-/// (`FUN_081669bc`), kept beside the transmute below.
-pub const IRQ_BINDING_SET_HANDLER_ADDRESS: usize = 0x0816_69bc;
-
-/// The two veneers called by `irq_binding_enable`. Their IRAM targets are
-/// deliberately not named: only their calling convention is verified here.
-pub const IRQ_TABLE_BASE_VENEER_ADDRESS: usize = 0x0803_8090;
+pub const IRQ_REGISTER_FROM_TABLE_VENEER_ADDRESS: usize = 0x0803_80a0;
 pub const IRQ_ENABLE_FROM_TABLE_VENEER_ADDRESS: usize = 0x0803_80b0;
 
-/// Indirect dispatch for the unported handler setter used by
-/// [`irq_binding_attach_enable`].
+/// Verified veneer ABIs. The table accessor defaults to its existing Rust
+/// port; the remaining operations call stock firmware on target.
 #[derive(Clone, Copy)]
-pub struct IrqBindingAttachOps {
-    /// Original @ 0x081669bc: store `handler` into the binding and register
-    /// it in the IRAM dispatch table (source masked in the VIC first).
-    pub set_handler: unsafe extern "C" fn(binding: *mut IrqBinding, handler: Option<IrqHandler>),
-}
-
-/// Indirect dispatch for the two veneers called by [`irq_binding_enable`].
-/// Host tests install recording models; target defaults call the stock
-/// veneers, so this function remains hook-ready before either veneer is ported.
-#[derive(Clone, Copy)]
-pub struct IrqBindingEnableOps {
+pub struct IrqBindingOps {
     pub irq_table_base: unsafe extern "C" fn() -> *mut u32,
+    pub register_from_table: unsafe extern "C" fn(*mut u32, u8, Option<IrqHandler>),
     pub enable_from_table: unsafe extern "C" fn(*mut u32, u8),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_binding_set_handler(
-    binding: *mut IrqBinding,
-    handler: Option<IrqHandler>,
-) {
-    let f: unsafe extern "C" fn(*mut IrqBinding, Option<IrqHandler>) =
-        core::mem::transmute(IRQ_BINDING_SET_HANDLER_ADDRESS);
-    f(binding, handler)
+unsafe extern "C" fn irq_table_base() -> *mut u32 {
+    super::irq::rtxc_irq_enter_veneer().cast()
 }
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_irq_table_base() -> *mut u32 {
-    let f: unsafe extern "C" fn() -> *mut u32 =
-        core::mem::transmute(IRQ_TABLE_BASE_VENEER_ADDRESS);
-    f()
+unsafe extern "C" fn firmware_register_from_table(
+    table: *mut u32, irq: u8, handler: Option<IrqHandler>,
+) {
+    let f: unsafe extern "C" fn(*mut u32, u8, Option<IrqHandler>) =
+        core::mem::transmute(IRQ_REGISTER_FROM_TABLE_VENEER_ADDRESS);
+    f(table, irq, handler)
 }
 
 #[cfg(target_os = "none")]
@@ -135,45 +113,56 @@ unsafe extern "C" fn firmware_enable_from_table(table: *mut u32, irq: u8) {
     f(table, irq)
 }
 
-/// Host defaults: inert (see the module header's NOT-hook-ready note).
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_binding_set_handler(
-    _binding: *mut IrqBinding,
-    _handler: Option<IrqHandler>,
-) {
-}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_irq_table_base() -> *mut u32 {
-    core::ptr::null_mut()
-}
+unsafe extern "C" fn firmware_register_from_table(
+    _table: *mut u32, _irq: u8, _handler: Option<IrqHandler>,
+) {}
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn firmware_enable_from_table(_table: *mut u32, _irq: u8) {}
 
-/// Wired defaults: firmware addresses on target, inert stubs on host.
-pub const DEFAULT_IRQ_BINDING_ATTACH_OPS: IrqBindingAttachOps = IrqBindingAttachOps {
-    set_handler: firmware_binding_set_handler,
-};
-pub const DEFAULT_IRQ_BINDING_ENABLE_OPS: IrqBindingEnableOps = IrqBindingEnableOps {
-    irq_table_base: firmware_irq_table_base,
+pub const DEFAULT_IRQ_BINDING_OPS: IrqBindingOps = IrqBindingOps {
+    irq_table_base,
+    register_from_table: firmware_register_from_table,
     enable_from_table: firmware_enable_from_table,
 };
 
 /// Active callees, read through `read_volatile` so LLVM cannot fold calls.
-pub static mut IRQ_BINDING_ATTACH_OPS: IrqBindingAttachOps = DEFAULT_IRQ_BINDING_ATTACH_OPS;
-pub static mut IRQ_BINDING_ENABLE_OPS: IrqBindingEnableOps = DEFAULT_IRQ_BINDING_ENABLE_OPS;
-
-#[inline(always)]
-fn attach_ops() -> IrqBindingAttachOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IRQ_BINDING_ATTACH_OPS)) }
-}
-#[inline(always)]
-fn enable_ops() -> IrqBindingEnableOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(IRQ_BINDING_ENABLE_OPS)) }
-}
+pub static mut IRQ_BINDING_OPS: IrqBindingOps = DEFAULT_IRQ_BINDING_OPS;
 
 // ---------------------------------------------------------------------------
 // The ported function.
 // ---------------------------------------------------------------------------
+/// irq_binding_set_handler — original: `FUN_081669bc` @ 0x081669bc.
+/// True extent 0x081669bc..0x081669dc, 32 bytes (Ghidra's 36 includes
+/// the next function's push). Two plain BL callers, zero predicated BLs;
+/// the body has one plain BL and a tail B.
+///
+/// Store the handler, obtain the IRQ dispatch table via 0x08038090,
+/// reload handler and byte IRQ from the binding, then register through
+/// 0x080380a0 -> IRAM 0x22004d20 (osos mirror 0x08004d20). That helper
+/// masks valid IRQs before storing the handler; IRQs >= 64 leave the table
+/// unchanged, but the binding's handler is still updated here.
+///
+/// Deliberate deviations: use the established Rust table-accessor port
+/// (Rust BSS table), a volatile-read seam for the unported registration
+/// veneer, and an ordinary call in place of the final tail branch.
+/// Native `repr(C)` pointer layout is used on host. No NULL binding guard.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn irq_binding_set_handler(
+    binding: *mut IrqBinding,
+    handler: Option<IrqHandler>,
+) {
+    (*binding).handler = handler;
+    // Read only the two required pointers. Copying the whole three-field
+    // ops struct miscompiled on LLVM 22.1.8 ARM (lost binding/branch-target
+    // register moves); these scalar loads retain correct AAPCS codegen.
+    let table_base = core::ptr::addr_of!(IRQ_BINDING_OPS.irq_table_base).read_volatile();
+    let register = core::ptr::addr_of!(IRQ_BINDING_OPS.register_from_table).read_volatile();
+    let table = table_base();
+    register(table, (*binding).irq, (*binding).handler);
+}
+
 
 /// irq_binding_attach_enable — original: `FUN_081669dc` @ 0x081669dc
 /// (24 bytes; Ghidra says 28 — it absorbs the next function's `push`).
@@ -189,174 +178,147 @@ pub unsafe extern "C" fn irq_binding_attach_enable(
     binding: *mut IrqBinding,
     handler: Option<IrqHandler>,
 ) {
-    (attach_ops().set_handler)(binding, handler);
+    irq_binding_set_handler(binding, handler);
     irq_binding_enable(binding);
 }
 
 /// irq_binding_enable — original: `FUN_08166a14` @ 0x08166a14 (24 bytes;
 /// verified extent 0x08166a14..0x08166a2c).
 ///
-/// Calls veneer 0x08038090 to obtain the IRAM IRQ-table base, loads the
-/// binding's byte-sized IRQ number, then tail-branches through veneer
-/// 0x080380b0 with `(table, irq)`. The raw body has one `bl`; four direct
-/// callers use plain `bl`, with zero predicated forms. The veneer targets
-/// remain indirect dispatch seams because their identities are not proven.
-/// Deliberate deviation: Rust makes the tail branch an ordinary call.
+/// Calls the existing Rust port of veneer 0x08038090 to obtain the IRQ
+/// table base, loads the binding's byte-sized IRQ number, then calls
+/// stock veneer 0x080380b0 with `(table, irq)`. The raw body has one BL;
+/// four direct callers use plain BL, with zero predicated forms.
+/// Deliberate deviations: Rust BSS table, indirect enable seam, and an
+/// ordinary call in place of the final tail branch.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn irq_binding_enable(binding: *mut IrqBinding) {
-    let ops = enable_ops();
-    (ops.enable_from_table)((ops.irq_table_base)(), (*binding).irq);
+    let table_base = core::ptr::addr_of!(IRQ_BINDING_OPS.irq_table_base).read_volatile();
+    let enable = core::ptr::addr_of!(IRQ_BINDING_OPS.enable_from_table).read_volatile();
+    enable(table_base(), (*binding).irq);
 }
 
 // ---------------------------------------------------------------------------
-// Host tests: recording mocks prove call structure and argument forwarding.
+// Host tests: binding updates and registration ordering across edge cases.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     extern crate std;
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-    use std::vec::Vec;
+    use parking_lot::Mutex;
 
-    /// One recorded seam invocation, in call order.
-    #[derive(Clone, PartialEq, Debug)]
-    enum Call {
-        SetHandler(*mut IrqBinding, Option<IrqHandler>),
-        Enable(*mut u32, u8),
-    }
-
-    static mut LOG: Vec<Call> = Vec::new();
-    static mut TABLE: u32 = 0;
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static mut BINDING: *mut IrqBinding = core::ptr::null_mut();
+    static mut REWRITE: bool = false;
+    static mut REGISTERED: Option<IrqHandler> = None;
+    static mut MASKED: bool = false;
+    static mut ENABLED: bool = false;
 
-    unsafe extern "C" fn recording_set_handler(
-        binding: *mut IrqBinding,
-        handler: Option<IrqHandler>,
+    unsafe extern "C" fn first_handler() {}
+    unsafe extern "C" fn second_handler() {}
+
+    // Table entry can re-enter driver code: observe the store and alter
+    // the binding before returning, forcing the setter to reload fields.
+    unsafe extern "C" fn model_table_base() -> *mut u32 {
+        assert!((*BINDING).handler.is_some());
+        if REWRITE {
+            (*BINDING).irq = 63;
+            (*BINDING).handler = Some(second_handler);
+        }
+        core::ptr::null_mut()
+    }
+
+    unsafe extern "C" fn model_register(
+        _table: *mut u32, irq: u8, handler: Option<IrqHandler>,
     ) {
-        (*core::ptr::addr_of_mut!(LOG)).push(Call::SetHandler(binding, handler));
-    }
-
-    unsafe extern "C" fn recording_irq_table_base() -> *mut u32 {
-        core::ptr::addr_of_mut!(TABLE)
-    }
-
-    unsafe extern "C" fn recording_enable(table: *mut u32, irq: u8) {
-        (*core::ptr::addr_of_mut!(LOG)).push(Call::Enable(table, irq));
-    }
-
-    unsafe extern "C" fn mock_handler() {}
-
-    /// Installs the recording seams and clears the log; restores the wired
-    /// defaults when the returned guard drops.
-    fn mock() -> MutexGuard<'static, ()> {
-        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            core::ptr::addr_of_mut!(IRQ_BINDING_ATTACH_OPS).write_volatile(IrqBindingAttachOps {
-                set_handler: recording_set_handler,
-            });
-            core::ptr::addr_of_mut!(IRQ_BINDING_ENABLE_OPS).write_volatile(IrqBindingEnableOps {
-                irq_table_base: recording_irq_table_base,
-                enable_from_table: recording_enable,
-            });
-            (*core::ptr::addr_of_mut!(LOG)).clear();
+        if irq < 64 {
+            MASKED = true;
+            REGISTERED = handler;
         }
-        guard
     }
 
-    fn logged() -> Vec<Call> {
-        unsafe { (*core::ptr::addr_of!(LOG)).clone() }
+    unsafe extern "C" fn model_enable(_table: *mut u32, irq: u8) {
+        if irq < 64 {
+            assert!(MASKED);
+            assert_eq!(REGISTERED.map(|f| f as usize), (*BINDING).handler.map(|f| f as usize));
+            ENABLED = true;
+        }
     }
 
-    /// Restores the wired defaults (each test calls this explicitly before
-    /// dropping its lock guard).
-    fn restore() {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::addr_of_mut!(IRQ_BINDING_OPS).write_volatile(DEFAULT_IRQ_BINDING_OPS);
+                BINDING = core::ptr::null_mut();
+            }
+        }
+    }
+
+    unsafe fn setup(binding: *mut IrqBinding, rewrite: bool) -> Restore {
+        BINDING = binding;
+        REWRITE = rewrite;
+        REGISTERED = Some(second_handler);
+        MASKED = false;
+        ENABLED = false;
+        core::ptr::addr_of_mut!(IRQ_BINDING_OPS).write_volatile(IrqBindingOps {
+            irq_table_base: model_table_base,
+            register_from_table: model_register,
+            enable_from_table: model_enable,
+        });
+        Restore
+    }
+
+    #[test]
+    fn stores_before_entry_and_reloads_after_entry() {
+        let _lock = TEST_LOCK.lock();
+        let mut binding = IrqBinding { irq: 255, _pad: [0xa5; 3], handler: None };
         unsafe {
-            core::ptr::addr_of_mut!(IRQ_BINDING_ATTACH_OPS)
-                .write_volatile(DEFAULT_IRQ_BINDING_ATTACH_OPS);
-            core::ptr::addr_of_mut!(IRQ_BINDING_ENABLE_OPS)
-                .write_volatile(DEFAULT_IRQ_BINDING_ENABLE_OPS);
+            let _restore = setup(&mut binding, true);
+            irq_binding_set_handler(&mut binding, Some(first_handler));
+            assert_eq!(binding.irq, 63);
+            assert_eq!(binding._pad, [0xa5; 3]);
+            assert_eq!(binding.handler.map(|f| f as usize), Some(second_handler as *const () as usize));
+            assert_eq!(core::ptr::addr_of!(REGISTERED).read().map(|f| f as usize),
+                Some(second_handler as *const () as usize));
+            assert!(core::ptr::addr_of!(MASKED).read());
+        }
+    }
+
+    unsafe extern "C" fn table_without_reentry() -> *mut u32 {
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn null_replacement_and_irq_boundaries_preserve_binding_padding() {
+        let _lock = TEST_LOCK.lock();
+        for irq in [0, 31, 32, 63, 64, 255] {
+            let mut binding = IrqBinding { irq, _pad: [0x5a; 3], handler: Some(first_handler) };
+            unsafe {
+                let _restore = setup(&mut binding, false);
+                (*core::ptr::addr_of_mut!(IRQ_BINDING_OPS)).irq_table_base = table_without_reentry;
+                irq_binding_set_handler(&mut binding, None);
+                assert!(binding.handler.is_none());
+                assert_eq!(binding.irq, irq);
+                assert_eq!(binding._pad, [0x5a; 3]);
+                assert_eq!(core::ptr::addr_of!(MASKED).read(), irq < 64);
+                assert_eq!(core::ptr::addr_of!(REGISTERED).read().map(|f| f as usize),
+                    if irq < 64 { None } else { Some(second_handler as *const () as usize) });
+            }
         }
     }
 
     #[test]
-    fn attaches_then_enables_same_binding() {
-        let _guard = mock();
-        let mut binding = IrqBinding { irq: 0x15, _pad: [0; 3], handler: None };
-        let binding_ptr = &mut binding as *mut IrqBinding;
+    fn attach_enable_registers_before_unmasking() {
+        let _lock = TEST_LOCK.lock();
+        let mut binding = IrqBinding { irq: 32, _pad: [0; 3], handler: None };
         unsafe {
-            irq_binding_attach_enable(binding_ptr, Some(mock_handler));
+            let _restore = setup(&mut binding, false);
+            irq_binding_attach_enable(&mut binding, Some(first_handler));
+            assert!(core::ptr::addr_of!(ENABLED).read());
+            assert_eq!(binding.handler.map(|f| f as usize), Some(first_handler as *const () as usize));
         }
-        assert_eq!(
-            logged(),
-            std::vec![
-                Call::SetHandler(binding_ptr, Some(mock_handler)),
-                Call::Enable(core::ptr::addr_of_mut!(TABLE), 0x15),
-            ]
-        );
-        restore();
     }
-
-    #[test]
-    fn forwards_null_handler_without_guard() {
-        let _guard = mock();
-        let mut binding = IrqBinding { irq: 0, _pad: [0; 3], handler: Some(mock_handler) };
-        let binding_ptr = &mut binding as *mut IrqBinding;
-        unsafe {
-            irq_binding_attach_enable(binding_ptr, None);
-        }
-        // No NULL guard in the original: None is forwarded verbatim.
-        assert_eq!(
-            logged(),
-            std::vec![
-                Call::SetHandler(binding_ptr, None),
-                Call::Enable(core::ptr::addr_of_mut!(TABLE), 0),
-            ]
-        );
-        restore();
-    }
-
-    #[test]
-    fn distinct_bindings_keep_identity() {
-        let _guard = mock();
-        let mut a = IrqBinding { irq: 3, _pad: [0; 3], handler: None };
-        let mut b = IrqBinding { irq: 0x21, _pad: [0; 3], handler: None };
-        let pa = &mut a as *mut IrqBinding;
-        let pb = &mut b as *mut IrqBinding;
-        unsafe {
-            irq_binding_attach_enable(pa, Some(mock_handler));
-            irq_binding_attach_enable(pb, None);
-        }
-        assert_eq!(
-            logged(),
-            std::vec![
-                Call::SetHandler(pa, Some(mock_handler)),
-                Call::Enable(core::ptr::addr_of_mut!(TABLE), 3),
-                Call::SetHandler(pb, None),
-                Call::Enable(core::ptr::addr_of_mut!(TABLE), 0x21),
-            ]
-        );
-        restore();
-    }
-
-    #[test]
-    fn host_defaults_are_inert() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            core::ptr::addr_of_mut!(IRQ_BINDING_ATTACH_OPS)
-                .write_volatile(DEFAULT_IRQ_BINDING_ATTACH_OPS);
-            core::ptr::addr_of_mut!(IRQ_BINDING_ENABLE_OPS)
-                .write_volatile(DEFAULT_IRQ_BINDING_ENABLE_OPS);
-        }
-        let mut binding = IrqBinding { irq: 8, _pad: [0xaa; 3], handler: Some(mock_handler) };
-        unsafe {
-            irq_binding_attach_enable(&mut binding, Some(mock_handler));
-        }
-        // Inert defaults touch nothing (documented: not hook-ready on host).
-        assert_eq!(binding.irq, 8);
-        assert_eq!(binding._pad, [0xaa; 3]);
-        assert!(binding.handler == Some(mock_handler));
-    }
-
 }
