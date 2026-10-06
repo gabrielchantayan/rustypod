@@ -676,6 +676,7 @@ pub mod matched_entry;
 pub mod entry_result_construct;
 pub mod object_has_resolved_flag_0x40;
 pub mod object_cached_byte;
+pub mod context_dispatch_mapped_code;
 pub mod object_has_resolved_flag_0x800;
 pub mod resolve_successor_value;
 pub mod media_command_facade;
