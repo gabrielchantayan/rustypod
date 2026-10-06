@@ -1610,6 +1610,50 @@ pub unsafe extern "C" fn scoped_context_assign_owner_string(
     string_object_assign_utf16(out, counted_ptr.add(1), i32::from(counted_ptr.read()));
 }
 
+/// A polymorphic context source. Only its leading vtable pointer is consumed.
+#[repr(C)]
+pub struct ScopedContextFlagSource {
+    pub vtable: *const usize,
+}
+
+/// scoped_context_source_owner_flags_any_8062 — original `FUN_081896c4`
+/// @ 0x081896c4, 108 bytes through 0x0818972c; next function @ 0x08189730.
+/// Raw-image scan: two incoming plain BLs, zero predicated BLs. The body
+/// contains three plain BLs, zero predicated BLs, and two virtual BLX calls.
+///
+/// Dispatch source slot +0x1a4; any nonzero answer returns zero. Otherwise
+/// construct an empty scoped context, reload the source from its handle,
+/// dispatch slot +0x15c to fill the token, test its owner's 0x8062 flags,
+/// destroy the token and return the predicate.
+///
+/// Deviations: pointer-sized vtable slots and repr(C) objects preserve the
+/// target's four-byte layout while supporting host pointers. The existing
+/// token model and direct callees are reused; its empty destructor may be
+/// optimized away. No identity is assigned to the two unresolved virtual
+/// methods beyond their observed gate/fill behavior.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_source_owner_flags_any_8062(
+    source_handle: *const *mut ScopedContextFlagSource,
+) -> u32 {
+    let source = source_handle.read();
+    let gate: unsafe extern "C" fn(*mut ScopedContextFlagSource) -> u32 =
+        core::mem::transmute((*source).vtable.add(0x1a4 / 4).read());
+    if gate(source) != 0 {
+        return 0;
+    }
+    let mut token = MaybeUninit::<ScopedContext>::uninit();
+    let token = token.as_mut_ptr();
+    scoped_context_construct(token, ptr::null_mut(), 0);
+    let source = source_handle.read();
+    let fill: unsafe extern "C" fn(*mut ScopedContextFlagSource, *mut ScopedContext) =
+        core::mem::transmute((*source).vtable.add(0x15c / 4).read());
+    fill(source, token);
+    let result = scoped_context_owner_flags_any_8062(token);
+    scoped_context_destroy(token);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1623,6 +1667,86 @@ mod tests {
     /// and that module's tests write it too, so the lock is the crate-wide
     /// [`APP_ROOT_TEST_LOCK`] rather than a private one.
     use crate::testing::APP_ROOT_TEST_LOCK as SLOT_TEST_LOCK;
+
+    #[repr(C)]
+    struct FlagSourceFixture {
+        source: ScopedContextFlagSource,
+        gate: u32,
+        valid: u32,
+        owner: *mut u8,
+        handle: *mut *mut ScopedContextFlagSource,
+        replacement: *mut ScopedContextFlagSource,
+        token_vtable: *const ScopedContextVtable,
+    }
+
+    unsafe extern "C" fn flag_source_gate(source: *mut ScopedContextFlagSource) -> u32 {
+        let fixture = &mut *source.cast::<FlagSourceFixture>();
+        if !fixture.handle.is_null() {
+            fixture.handle.write(fixture.replacement);
+        }
+        fixture.gate
+    }
+
+    unsafe extern "C" fn flag_source_valid(token: *const ScopedContext) -> u32 {
+        (*token).owner_valid
+    }
+
+    unsafe extern "C" fn flag_source_fill(
+        source: *mut ScopedContextFlagSource, token: *mut ScopedContext,
+    ) {
+        let fixture = &*source.cast::<FlagSourceFixture>();
+        (*token).vtable = fixture.token_vtable;
+        (*token).owner_valid = fixture.valid;
+        (*token).owner = fixture.owner;
+    }
+
+    #[test]
+    fn source_flags_gate_and_owner_mask_edges() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut source_slots = [0usize; 0x1a4 / 4 + 1];
+        source_slots[0x1a4 / 4] = flag_source_gate as *const () as usize;
+        source_slots[0x15c / 4] = flag_source_fill as *const () as usize;
+        let mut owner = [0u32; 0xbc / 4 + 1];
+        let mut token_slots = [0usize; 15];
+        token_slots[VALIDITY_SLOT] = flag_source_valid as *const () as usize;
+        let token_vtable = ScopedContextVtable { slots: token_slots };
+        let mut fixture = FlagSourceFixture {
+            source: ScopedContextFlagSource { vtable: source_slots.as_ptr() },
+            gate: 0, valid: 0, owner: ptr::null_mut(),
+            handle: ptr::null_mut(), replacement: ptr::null_mut(),
+            token_vtable: &token_vtable,
+        };
+        let handle = &mut fixture.source as *mut ScopedContextFlagSource;
+        for gate in [1, 0x8000_0000, u32::MAX] {
+            fixture.gate = gate;
+            // A blocked source must not even dispatch the invalid fill slot.
+            source_slots[0x15c / 4] = 0;
+            assert_eq!(unsafe { scoped_context_source_owner_flags_any_8062(&handle) }, 0);
+        }
+        source_slots[0x15c / 4] = flag_source_fill as *const () as usize;
+        fixture.gate = 0;
+        assert_eq!(unsafe { scoped_context_source_owner_flags_any_8062(&handle) }, 0);
+        fixture.valid = 1;
+        fixture.owner = owner.as_mut_ptr().cast();
+        for flags in [0, 1, 8, 0xffff_0000, 2, 0x20, 0x40, 0x8000, u32::MAX] {
+            owner[0xbc / 4] = flags;
+            assert_eq!(unsafe { scoped_context_source_owner_flags_any_8062(&handle) },
+                u32::from(flags & 0x8062 != 0), "flags {flags:#x}");
+        }
+        // The gate may replace the handle: fill must use the reloaded source.
+        let mut replacement = FlagSourceFixture {
+            source: ScopedContextFlagSource { vtable: source_slots.as_ptr() },
+            gate: 0, valid: 1, owner: owner.as_mut_ptr().cast(),
+            handle: ptr::null_mut(), replacement: ptr::null_mut(),
+            token_vtable: &token_vtable,
+        };
+        owner[0xbc / 4] = 2;
+        fixture.valid = 0;
+        let mut changing_handle = &mut fixture.source as *mut ScopedContextFlagSource;
+        fixture.handle = &mut changing_handle;
+        fixture.replacement = &mut replacement.source;
+        assert_eq!(unsafe { scoped_context_source_owner_flags_any_8062(&changing_handle) }, 1);
+    }
 
     static mut MOCK_CALLS: u32 = 0;
     static mut MOCK_OWNER: *mut u8 = ptr::null_mut();
