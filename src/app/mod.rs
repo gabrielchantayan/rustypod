@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod demo_mode_snapshot_refresh;
 pub mod transfer_payload_read;
 pub mod current_reference_word_request;
 pub mod guarded_object_08ac8dbc;

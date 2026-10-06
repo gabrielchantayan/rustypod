@@ -221686,3 +221686,40 @@ functions:
       tag lookup table, frame and fixed-address BLX; signed cap, store order,
       allocation NULL path, slot-four mode-2 dispatch, post-call length reload
       and exact-count comparison are preserved.
+
+  - address: 0x08188510
+    ghidra: FUN_08188510
+    name: demo_mode_snapshot_refresh
+    size: 52
+    sig: "void demo_mode_snapshot_refresh(u8 *demo)"
+    module: app/demo_mode_snapshot_refresh
+    status: ported
+    vars:
+      param_1/r0/r4: demo
+      DAT_0818853c: current_global_089cc634
+      DAT_08188540: snapshot_global_089cc638
+      FUN_08187544: resident demo-mode calendar/resource refresh (identity unresolved)
+      FUN_08187d00: resident demo-mode timer rearm
+    notes: >-
+      Raw A32 establishes [0x08188510,0x08188544): 44 executable bytes
+      plus two literal words, followed by an independent bx lr function.
+      Whole-image aligned BL decoding finds zero plain inbound calls and
+      two BLNEs at 0x081a5950 and 0x081a6230. Body has one plain BL,
+      zero predicated BLs, and one tail B. Copy word 0x089cc634 into
+      0x089cc638 before resident refresh 0x08187544, then tail-dispatch
+      resident 0x08187d00 with the original demo pointer. Raw rearm body
+      starts the timer at +0x11c using delay +0x148 and tails timer_restart.
+      Assigned address and both resident callees have no prior canonical
+      address entries. Ghidra incorrectly incorporates timer callees beyond
+      the terminal branch. Preserve resident implementations, not guessed
+      identities or additional ports. Volatile aligned reads/stores preserve
+      the global snapshot before callback mutations; no NULL guard added.
+      Deviations: fixed resident branches become BLX/BX, host-only ops replace
+      target RAM and resident calls. Regression covers zero, high-bit and
+      all-one words, repeated updates, and snapshot-before-mutation ordering.
+      Full host suite and ARM release build passed. Standalone exported-entry
+      smoke passed 1024 transitions including u32 wraparound. No device run.
+      match.py exits 1: 11 stock versus 16 Rust instructions including three
+      literal words; LLVM adds a frame, shares the adjacent global base,
+      uses BLX for refresh and retains a terminal BX for timer rearm.
+      Copy ordering, original object argument and both resident targets match.
