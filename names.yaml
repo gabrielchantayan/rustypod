@@ -222996,3 +222996,40 @@ functions:
       Host tests cover all four slots, noncanonical nonzero active bytes,
       and every invalid byte category with a NULL controller. An actual
       standalone Rust smoke run checks all 65536 category/state pairs.
+
+  - address: 0x08180a28
+    ghidra: FUN_08180a28
+    name: app_controller_activate_or_queue_resource
+    size: 44
+    sig: "void app_controller_activate_or_queue_resource(u8 *controller, u8 *resource)"
+    module: ui/app_controller_activate_or_queue_resource
+    status: ported
+    renames:
+      param_1/r0/r3: controller
+      param_2/r1/r4: resource
+      FUN_08180f9c: app_controller_resource_slot_available
+      FUN_0817f6c8: queue_mode_resource
+      FUN_0817f4f4: activate_mode_resource
+    notes: >-
+      Raw A32 establishes [0x08180a28,0x08180a54), 44 bytes, ending with
+      BNE to 0x0817f4f4 before the next independent push. One outbound
+      unconditional BL at 0x08180a34 targets 0x08180f9c; zero predicated
+      BLs. Whole-image aligned decoding finds two inbound unconditional
+      BLs at 0x0817ed34 and 0x08181f8c, zero predicated BL callers.
+      Dispatch to queue 0x0817f6c8 when category-slot availability is zero,
+      otherwise activate 0x0817f4f4. Raw queue code maps category +0x11d
+      and stores the resource at controller+0xd8+4*slot unless slot is -1.
+      Activation independently checks availability before display setup.
+      Reuse the existing availability port and preserve unported action
+      targets as firmware seams. Ghidra's 80-byte extent and expanded C
+      cross the real boundary and follow tail targets. No semantic
+      deviations; normal Rust ABI replaces reliance on preserved r3.
+      Host tests cover activation-to-queue transitions for all four
+      categories, noncanonical nonzero active bytes, slot isolation, and
+      every invalid category without controller access.
+      Standalone production-dispatch smoke passes all 65536 category/active
+      byte pairs using the real Rust availability and category helpers.
+      ARM codegen retains one helper BL and a tail BX, selecting activation
+      0x0817f4f4 or queue 0x0817f6c8 (base plus 468 on zero).
+      match.py's default 80-byte window includes the next function; the
+      verified extent is 44 bytes. Host suite and release ARM build pass.
