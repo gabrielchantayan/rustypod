@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815aa00
+    ghidra: FUN_0815aa00
+    name: tree_deque_owner_cleanup
+    size: 132
+    sig: "void tree_deque_owner_cleanup(u8 *owner)"
+    module: app/tree_deque_owner_cleanup
+    status: ported
+    vars:
+      param_1/r4: owner
+      local_18: first
+      local_1c: last
+      FUN_083c3bd8: owner_tree_erase_range
+      FUN_0815b850: owner_deque_pop
+      FUN_083d75e0: container_is_empty
+      FUN_0811d188: vtable_file_record_destruct
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw A32 establishes [0x0815aa00,0x0815aa84), 132 bytes ending
+      with e8bd8010 before the next independent e92d4070 prologue.
+      Whole-image aligned branch decoding verifies two inbound plain BLs
+      at 0x0815b0f8 and 0x0815ba80, zero predicated inbound BLs.
+      Five outbound plain BLs at 0x0815aa48, 0x0815aa54, 0x0815aa5c,
+      0x0815aa74 and 0x0815aa78, zero predicated outbound BLs.
+      If byte +0x5a is nonzero, erase the tree range from header.left
+      to header at owner+0x84, repeatedly pop the deque at +0xa0 until
+      empty, then destruct and delete the optional file record at +0xcc.
+      Do not clear the enable byte or freed record slot. The file-record
+      destructor return feeds operator_delete directly. Existing canonical
+      Rust ports supply emptiness, file-record destruction and deletion;
+      only the two unported collection operations have literal retail
+      veneers. Raw 0x0815b850..0x0815b8e8 is the deque pop body with one
+      owner argument, ending in a tail branch to 0x0815b194; Ghidra expands
+      it across the next prologue and invents extra incoming arguments.
+      No concrete owner class identity is claimed. Rust omits redundant
+      iterator stack copies and initializes the output scratch word.
+      Host tests cover disabled invalid members, zero/one/many deque
+      items, erase-before-drain ordering and preserved enable byte.
+      Full host suite passes 14516 tests; ARM release build passes.
+      match.py exits 1: both bodies have 33 instructions and retain all
+      five calls, guards and drain loop; LLVM uses a frame, caches the
+      deque address and rearranges the loop. No device execution performed.
   - address: 0x0815b104
     ghidra: FUN_0815b104
     name: validated_lookup_noop
