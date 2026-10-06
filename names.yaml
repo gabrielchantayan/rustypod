@@ -222765,3 +222765,41 @@ functions:
       remain intact. No semantic deviations. Host tests cover hidden and
       excluded children, negative coordinates, empty rectangles, an empty
       collection, empty and nonempty accumulators, and untouched neighbors.
+
+  - address: 0x08178914
+    ghidra: FUN_08178914
+    name: parse_duration_milliseconds
+    size: 144
+    sig: "uint32_t parse_duration_milliseconds(uint32_t context, const StringObject *text)"
+    module: app/parse_duration_milliseconds
+    status: ported
+    vars:
+      param_1: unused_context
+      param_2: text
+      pbVar1/r0: cursor
+      iVar3/r2: prefix
+      iVar2/r1: field
+      uVar4/r3: byte
+      FUN_082a50b0: string_object_c_str
+    notes: >-
+      Raw osos.dec proves 144 bytes at 0x08178914..0x081789a4, all code
+      including the eleven-entry branch table; the next real function starts
+      at 0x081789a4. Two incoming plain BL calls at 0x08178558 and
+      0x081785d0, zero predicated BL calls; one outgoing unconditional BL
+      at 0x0817891c to the already-ported string_object_c_str (0x082a50b0).
+      Caller FUN_08178434 supplies temporary StringObjects and stores the
+      resulting milliseconds at output+4 and output+8. Digits accumulate
+      decimal fields; colon folds prefix*60+field and clears the field.
+      Other non-NUL bytes are ignored without resetting accumulation.
+      NUL returns (prefix*60+field)*1000, wrapping every operation at 32
+      bits. Unused leading context word retained; no new callee seam.
+      No semantic deviations. Existing repr(C) StringObject preserves
+      target offsets with native host pointers; existing accessor supplies
+      its modeled shared empty string for NULL payload. Host tests cover
+      empty and multiple fields, consecutive and trailing colons, out-of-
+      range fields, ignored punctuation and high bytes, embedded NUL,
+      NULL payload, and field/prefix/scaling overflow. Executable smoke:
+      1:02:03 returns 3723000 ms. ARM match retains the accessor BL, NUL
+      byte loop, decimal accumulation, base-60 fold, and final multiply;
+      LLVM replaces the jump table with branches, strength-reduces the
+      multiplications by 10 and 60, and adds an early empty-string return.
