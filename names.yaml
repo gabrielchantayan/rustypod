@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08165e6c
+    ghidra: FUN_08165e6c
+    name: active_entry_last_label
+    size: 92
+    sig: "u32 active_entry_last_label(const ActiveEntrySelection *selection, u32 primary)"
+    module: util/active_entry_last_label
+    status: ported
+    renames:
+      param_1: selection
+      param_2: primary
+      uVar1: count
+      uVar2: label
+      iVar3: table_base
+      DAT_08165eb8: enabled_secondary_table
+      DAT_08165ebc: enabled_primary_table
+      DAT_08165ec0: disabled_secondary_table
+      DAT_08165ec4: disabled_primary_table
+    notes: >-
+      Raw osos.dec establishes extent 0x08165e6c..0x08165ec8:
+      76 instruction bytes and 16 bytes of table-address literals.
+      The next real function begins with push {r4,lr} at 0x08165ec8.
+      Independent decoding counts zero outgoing plain BLs and zero
+      predicated BLs. Two inbound plain BLs occur at 0x081e1b0c and
+      0x081e1b4c in FUN_081e1aac; no inbound predicated BLs.
+      A nonzero mode byte at +0 selects enabled tables; any nonzero
+      primary argument selects the primary table. Enabled primary and
+      secondary u16 counts at +2 and +6 select 0x08a0e738 and 0x08a0e7a0.
+      Disabled primary and secondary counts at +4 and +8 select
+      0x08a0e7f0 and 0x08a0e818. FUN_08165f6c fills these counts through
+      assign_active_entry_labels. Returns the low 16 bits of the aligned
+      word at base + count*8 - 4, retaining the preceding-word read for
+      count zero. The caller adds one to size its allocations. Tables
+      remain runtime firmware memory, not copied raw resource contents.
+      No callee seam is needed. Deliberate deviations are fixed-width
+      semantic fields, volatile accesses, and private host replacement
+      bases. Tests cover all selections, noncanonical true values, zero
+      and maximum counts, distinct unselected counts, and truncation.
   - address: 0x0815a0d8
     ghidra: FUN_0815a0d8
     name: container_view_construct_controller_query
