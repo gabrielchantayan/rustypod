@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08172610
+    ghidra: FUN_08172610
+    name: controller_event_set_enabled
+    size: 128
+    sig: "void controller_event_set_enabled(const u32 *controller, u32 event, u32 enabled)"
+    module: app/controller_event_set_enabled
+    status: ported
+    renames:
+      param_1/r0: controller
+      param_2/r1: event
+      param_3/r2: enabled
+      r7: event_mask
+      r5: event_class
+      r6: selected_mask
+      controller_plus_0xa8: input_state
+      FUN_080d21f8: event_mask
+      FUN_080e2054: event_class
+      FUN_080538a4: class_zero_mask
+      FUN_080538b0: class_one_mask
+      tail_08067124: set_class_zero_mask
+      tail_08067140: set_class_one_mask
+    notes: >-
+      Raw osos.dec proves extent 0x08172610..0x08172690 (128 bytes),
+      not Ghidra's 184 bytes; the next independent push starts at 0x08172690.
+      Four unconditional BLs occur at 0x08172628, 0x08172634, 0x0817264c,
+      and 0x08172688; zero predicated BLs. Conditional tail branches select
+      setters at 0x08067124 and 0x08067140. Map event to bits and class,
+      read the selected mask, clear bits for zero enabled or OR them for any
+      nonzero enabled. Unsupported classes never access controller. Raw setter
+      bodies compare before storing and tail-call 0x0805e66c to mark +0xb90
+      dirty. All six callees lack naming entries and retain verified addresses.
+      Host operation injection is the deliberate deviation. Behavioral tests
+      cover both classes, unrelated bits, zero masks, nonboolean enablement,
+      unchanged masks and unsupported classes. Host smoke confirms enable and
+      disable transitions. Corrected-size match.py review preserves call order,
+      branching and setter tail dispatch; LLVM uses indirect operation calls.
   - address: 0x0817470c
     ghidra: FUN_0817470c
     name: app_screen_set_byte_0x28
