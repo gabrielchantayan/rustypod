@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08184658
+    ghidra: FUN_08184658
+    name: keyed_object_action_select
+    size: 184
+    sig: "i32 keyed_object_action_select(FallbackKeyedObjectContext *context, const KeyedObjectActionRequest *request, u32 use_default, u32 action_context)"
+    module: app/fallback_keyed_object
+    status: ported
+    vars:
+      param_1: context
+      param_2: request
+      param_3: use_default
+      param_4: action_context
+      piVar2: object
+      sVar1: action
+    renames:
+      FUN_0817ee34: primary_or_demo_mode_keyed_object
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 extent is 0x08184658..0x08184710: 180 instruction bytes
+      and literal 0x0dad05af at 0x0818470c; next function starts with
+      mov r1,#0. Whole-image aligned BL decoding finds two incoming plain
+      calls at 0x0818242c and 0x081827a4, no predicated incoming calls.
+      Body has one plain BL, one BLEQ, and two register BLX instructions.
+      Resolve request+4; NULL is fatal. Object key +0x4c equal to 0x0dad05af
+      suppresses all actions, before signed override at request+0xe.
+      Otherwise query virtual +0x10c for nonzero context; truncate to i16.
+      A -1 contextual result falls back; use_default selects object+0x2c
+      instead of the zero-context query. Fallback -1 becomes zero.
+      Host cases cover signed overrides, suppression, contextual sentinel
+      fallback, default precedence, and low-halfword truncation. Standalone
+      production-function smoke returned -32768 and 12 for contextual and
+      stored-default paths. ARM match.py: 45 original instructions versus
+      56 emitted entries; same guards and both virtual paths, with LLVM
+      frame setup, low-halfword default load, and different sentinel tests.
   - address: 0x0817be10
     ghidra: FUN_0817be10
     name: media_context_value_refresh
