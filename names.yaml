@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081680a4
+    ghidra: FUN_081680a4
+    name: audio_buffer_ring_release
+    size: 72
+    sig: "void audio_buffer_ring_release(u32 *ring)"
+    module: app/audio_buffer_ring_release
+    status: ported
+    vars:
+      param_1/r4: ring
+      ring_plus_0x14: mutex
+      ring_plus_0x334: read_index
+      ring_plus_0x338: last_index
+      ring_plus_0x38_plus_index_times_12: buffer_length
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 proves [0x081680a4,0x081680ec), 72 bytes; the next
+      function starts with push {r4,lr}. One outbound unconditional BL
+      at 0x081680b0 locks ring+0x14; zero predicated BLs. The final
+      instruction tail-branches to mutex_unlock at 0x0807f6a0.
+      Whole-image word decoding finds two inbound unconditional BLs,
+      at 0x0827d954 and 0x0827dac4, and zero predicated inbound BLs.
+      The audio consumer obtains the current buffer through 0x08167e7c
+      then releases it here: clear its length at +0x38+12*read_index,
+      reload and wrapping-increment the index at +0x334, and reset it
+      only when the increment is unsigned-greater than +0x338.
+      Uses the existing ported mutex pair; no new callee seam.
+      Deliberate deviations: volatile aligned word accesses preserve the
+      original reload/store sequence, and Rust expresses the final tail
+      branch as a return-position call. Host fixtures align the native
+      mutex pointer separately while retaining target word offsets.
+
   - address: 0x0815aa00
     ghidra: FUN_0815aa00
     name: tree_deque_owner_cleanup
