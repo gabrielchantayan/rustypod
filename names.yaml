@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08184f18
+    ghidra: FUN_08184f18
+    name: resource_list_factory
+    size: 56
+    sig: "ResourceList *resource_list_factory(u32 resource_data, u32 parser)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: resource_data
+      param_2/r1/r5: parser
+      r6: provider
+      FUN_0819fe10: application_resource_provider
+      FUN_082aadd4: operator_new
+      FUN_08184fd4: load_resource_list
+    notes: >-
+      Raw A32 words establish [0x08184f18,0x08184f50), exactly 56 bytes;
+      the next initializer begins with ldr ip,[sp]. Whole-image B/BL decoding
+      finds two inbound plain BL calls at 0x0818281c and 0x0818298c, zero
+      predicated BL calls and no tail branches. The body has three plain BL
+      instructions and zero predicated BL instructions. Read the application
+      resource provider, allocate 36 bytes with tag-2 operator_new, then call
+      load_resource_list(allocation, provider, resource_data, parser, 0).
+      Return the constructed allocation; Ghidra's void return is incorrect,
+      as caller FUN_081827d8 consumes r0 as a resource-list owner. No allocation
+      failure guard or new seam is introduced; all three callees are ported.
+      No deliberate behavioral deviations. Host edge tests cover NULL provider,
+      zero and high-bit parser/data words, dirty owner initialization and
+      untouched padding. Full host suite passes (14398 tests), ARM release
+      build passes. Standalone executable smoke verifies zero/high-bit inputs,
+      constructor state and return identity using the real Rust factory.
+      match.py exits 1: 14 stock versus 17 Rust instructions, retaining three
+      calls in order, allocation size 36 and zero fifth argument on the stack;
+      frame/register allocation differs and archive BL relocations print zero.
+      No device execution.
   - address: 0x0817ddd0
     ghidra: FUN_0817ddd0
     name: active_context_refresh

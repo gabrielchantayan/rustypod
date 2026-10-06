@@ -368,6 +368,33 @@ pub unsafe extern "C" fn load_cros_resource_list(resource_data: u32) -> *mut Res
     unsafe { load_resource_list(list, provider, resource_data, CROS_RESOURCE_TAG, 0) }
 }
 
+/// resource_list_factory — original: `FUN_08184f18` @ `0x08184f18`.
+///
+/// Raw extent is 56 bytes, `[0x08184f18, 0x08184f50)`; the next function
+/// starts with `ldr ip,[sp]`. A complete ARM B/BL scan finds two inbound
+/// plain BL calls (0x0818281c, 0x0818298c), zero predicated calls, and no
+/// tail branches. The body has three plain BL calls and no predicated BL.
+///
+/// Reads the current application resource provider, allocates a 0x24-byte
+/// list, then initializes it with the supplied resource-data and parser
+/// words and zero options. Returns the initialized allocation unchanged.
+/// Deliberate deviations: none; all three direct callees are already ported.
+///
+/// # Safety
+///
+/// The resource-data and parser words must satisfy [`load_resource_list`].
+/// Allocation must succeed: retailOS does not guard NULL before construction.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_list_factory(
+    resource_data: u32,
+    parser: u32,
+) -> *mut ResourceList {
+    let provider = unsafe { application_resource_provider() } as usize as u32;
+    let list = unsafe { operator_new(core::mem::size_of::<ResourceList>()) }.cast::<ResourceList>();
+    unsafe { load_resource_list(list, provider, resource_data, parser, 0) }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -834,6 +861,64 @@ mod tests {
             assert_eq!(result, core::ptr::addr_of_mut!(list));
             assert_eq!(DESTROY_CALLS.load(Ordering::SeqCst), expected_calls);
             assert_eq!(list.vtable, RESOURCE_LIST_VTABLE_ADDRESS);
+        }
+    }
+
+    #[test]
+    fn factory_preserves_parser_words_and_initializes_empty_owner() {
+        let _provider_lock =
+            crate::app::application_resource_provider::APPLICATION_RESOURCE_PROVIDER_TEST_LOCK.lock();
+        let _list_lock = TEST_LOCK.lock();
+        let _provider_restore = CrosProviderRestore(unsafe {
+            crate::app::application_resource_provider::application_resource_provider_word()
+        });
+        let _initialize_restore = OpsRestore(unsafe {
+            core::ptr::addr_of!(RESOURCE_LIST_OPS).read_volatile()
+        });
+        let previous_heap = unsafe {
+            core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile()
+        };
+        let _heap_restore = CrosHeapOpsRestore {
+            heap: previous_heap,
+            default_heap: unsafe {
+                core::ptr::addr_of!(crate::heap::types::DEFAULT_HEAP).read_volatile()
+            },
+        };
+        unsafe {
+            core::ptr::addr_of_mut!(RESOURCE_LIST_OPS).write_volatile(recording_initialize);
+            let mut heap = previous_heap;
+            heap.alloc = recording_cros_allocation;
+            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(heap);
+            core::ptr::addr_of_mut!(crate::heap::types::DEFAULT_HEAP)
+                .write_volatile(1usize as *mut crate::heap::types::HeapDescriptorDescriptor);
+        }
+        for (provider, resource_data, parser) in [
+            (0usize, 0, 0),
+            (0xa1b2_c3d4, 0xffff_ffff, 0x8000_0000),
+            (0x1020_3040, 0, 0xffff_ffff),
+        ] {
+            unsafe {
+                crate::app::application_resource_provider::install_application_resource_provider_for_test(
+                    provider as *mut u8,
+                );
+                core::ptr::write_bytes(
+                    core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast::<u8>(), 0xff, 0x24,
+                );
+            }
+            let result = unsafe { resource_list_factory(resource_data, parser) };
+            assert_eq!(result, core::ptr::addr_of_mut!(CROS_ALLOCATED_LIST).cast::<ResourceList>());
+            unsafe {
+                assert_eq!((*result).vtable, RESOURCE_LIST_VTABLE_ADDRESS);
+                assert_eq!((*result).provider, provider as u32);
+                assert_eq!((*result).resource_data, resource_data);
+                assert_eq!((*result).parser, parser);
+                assert_eq!((*result).vector_words, [0; 3]);
+                assert_eq!((*result).state, 0);
+                assert_eq!((*result).loading, 0);
+                assert_eq!((*result).first_flag, 0);
+                assert_eq!((*result).second_flag, 0);
+                assert_eq!((*result).unused_23, 0xff);
+            }
         }
     }
 }
