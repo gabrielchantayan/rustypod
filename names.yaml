@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08194120
+    ghidra: FUN_08194120
+    name: service_handler_slot_counted_flag_set
+    size: 112
+    sig: "void service_handler_slot_counted_flag_set(u32 *slot_table, i32 slot, u32 enabled)"
+    module: app/service_handler_slot_counted_flag_set
+    status: ported
+    vars:
+      param_1/r4: slot_table
+      param_2/r1: slot
+      param_3/r2: enabled
+      iVar3/r5: slot_record
+      cVar1: counted_flag_count
+      FUN_08193f9c: slot_status_bit_1_query
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent [0x08194120,0x08194190) is 112 instruction bytes;
+      the next real function starts with cmp r1,#3. Whole-image aligned
+      ARM decoding finds two incoming plain BLs at 0x081d70b8 and
+      0x081d7178, zero predicated incoming BLs; two outbound plain BLs
+      to 0x08193f9c and one signed BLGE to heap_panic. Toggle slot word
+      +0xc bit 1 only on transitions and adjust byte +0xc8: increment
+      wraps, decrement saturates at zero but still clears the flag.
+      Any nonzero enabled value sets the flag; signed negative slots remain
+      unchecked. Deliberately inline the raw-verified query at 0x08193f9c;
+      Ghidra omits its slot argument. No new firmware seam or extra port.
+      Host tests cover all byte counts, slots, transitions, non-Boolean
+      enables and valid negative-slot storage. Host suite and ARM build pass.
+      match.py exits 1: 28 instructions each; inlined query removes BLs,
+      retaining signed guard, flag transitions and byte counter paths.
+      Standalone actual-source host smoke passes; no device execution.
   - address: 0x08194e78
     ghidra: FUN_08194e78
     name: iap_command_36_request
