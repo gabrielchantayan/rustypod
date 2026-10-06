@@ -225275,3 +225275,26 @@ functions:
       pop after the final subtraction. Archive relocations verify two
       R_ARM_CALL and one R_ARM_JUMP24 to vtable_089a8414_destruct with
       unchanged +0x2b8 and -0x15c adjustments. No device execution.
+
+  - address: 0x08159bcc
+    ghidra: FUN_08159bcc
+    name: genius_request_source_construct
+    size: 60
+    sig: "u8 *genius_request_source_construct(u8 *storage)"
+    module: app/genius_request_source_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      iVar1/r0: returned_source
+      r4: aggregate_base
+    notes: >-
+      Raw A32 extent [0x08159bcc,0x08159c08) ends in POP before the
+      next function's PUSH. Whole-image decoding verifies two incoming
+      plain BLs at 0x0816ea8c and 0x0819c3dc, zero predicated; body has
+      six plain BLs, zero predicated. Construct sources through exact
+      addresses 0x082335d8, 0x0821a92c, 0x0823132c, advancing each
+      returned pointer by 0x15c. Derive base from final return minus
+      0x2b8 and invoke ported vtable_slot_1c_then_slot_08_dispatch on
+      base, base+0x15c and base+0x2b8. Constructor identities remain
+      unrecovered; no extra null checks. Migrate Genius initialization
+      to pass the retained operator_new(0x414) result, restoring r0 ABI.

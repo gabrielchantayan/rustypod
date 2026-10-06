@@ -1136,6 +1136,7 @@ pub mod media_player_trim_current_item;
 pub mod parser_skip_blanks;
 pub mod three_child_value_sum;
 pub mod genius_request_initialize;
+pub mod genius_request_source_construct;
 pub mod selector_string_resource_assign;
 pub mod buffered_reader_refill;
 pub mod container_bitmap_resources_remove;

@@ -2,8 +2,8 @@
 //! True extent [0x0816ea70,0x0816eb38): 192 instruction bytes and eight
 //! literal bytes. Two incoming plain BLs, zero predicated; body has eight
 //! plain BLs and one BLEQ (heap_panic), independently decoded from osos.dec.
-//! Reclaim memory, perform the retained 0x414-byte allocation, acquire two
-//! sources and a metadata context, then fetch one key or a key array. On
+//! Reclaim memory, allocate 0x414 bytes and construct the source there, acquire
+//! the provider and a metadata context, then fetch one key or a key array. On
 //! success attach the element reference and set active; failures retain all
 //! earlier writes and leave later fields untouched. Attachment errors are
 //! ignored, as in retailOS. No allocation is freed here.
@@ -58,18 +58,17 @@ unsafe fn initialize(request: *mut u32, backend: &mut impl Backend) -> u32 {
 }
 
 #[cfg(target_os = "none")]
-struct Retail;
+struct Retail { source_storage: *mut u8 }
 
 #[cfg(target_os = "none")]
 impl Backend for Retail {
     unsafe fn prepare(&mut self) {
         let reclaim: unsafe extern "C" fn(u32) = core::mem::transmute(0x0813eb3cusize);
         reclaim(0x180000);
-        let _ = crate::heap::veneers::operator_new(0x414);
+        self.source_storage = crate::heap::veneers::operator_new(0x414).cast();
     }
     unsafe fn source(&mut self) -> u32 {
-        let acquire: unsafe extern "C" fn() -> u32 = core::mem::transmute(0x08159bccusize);
-        acquire()
+        crate::app::genius_request_source_construct::genius_request_source_construct(self.source_storage) as u32
     }
     unsafe fn provider(&mut self) -> u32 {
         let acquire: unsafe extern "C" fn() -> u32 = core::mem::transmute(0x08159ca4usize);
@@ -107,7 +106,7 @@ impl Backend for Retail {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn genius_request_initialize(request: *mut u32) -> u32 {
     #[cfg(target_os = "none")]
-    { initialize(request, &mut Retail) }
+    { initialize(request, &mut Retail { source_storage: core::ptr::null_mut() }) }
     #[cfg(not(target_os = "none"))]
     { let _ = request; panic!("Genius initialization requires retail firmware dependencies") }
 }
