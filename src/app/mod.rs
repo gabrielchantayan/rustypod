@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod validated_lookup_noop;
+pub use validated_lookup_noop::*;
 pub mod selected_item_string_enabled;
 pub mod owner_link_base_construct;
 pub mod owner_link_is_current;
