@@ -221811,3 +221811,35 @@ functions:
       literal words; LLVM adds a frame, shares the adjacent global base,
       uses BLX for refresh and retains a terminal BX for timer rearm.
       Copy ordering, original object argument and both resident targets match.
+
+  - address: 0x08187d98
+    ghidra: FUN_08187d98
+    name: dispatch_pair_string
+    size: 128
+    sig: "void dispatch_pair_string(void *owner, const char *source, char *destination, u32 capacity)"
+    module: app/dispatch_pair_string
+    status: ported
+    vars: {param_1: owner, param_2: source, param_3: destination, param_4: capacity}
+    notes: >-
+      Raw extent 0x08187d98..0x08187e18: 124 code bytes plus the four-byte
+      space literal; next real function begins with push at 0x08187e18.
+      Four plain outbound BLs, zero predicated BLs, two virtual BLX calls.
+      Two incoming plain BLs at 0x08187898 and 0x081a41fc; no predicated BL.
+      object_dispatch_target (0x0829919c) preserves the incoming owner,
+      contrary to Ghidra's missing argument. Invoke target vtable slot 33
+      with destination, capacity, selector 9 and source; strcat a space;
+      call strlen twice; invoke freshly loaded slot 33 with the terminator,
+      wrapping capacity-minus-length, selector 17 and the same source.
+      Concrete target class and selector meanings remain unresolved.
+      Existing strcat and strlen ports replace their recognized targets.
+      Native-width host vtable pointers are deliberate; owner+0x18 retains
+      its target-width u32 pointer. No NULL or capacity guard is introduced.
+      Host regression covers empty/nonempty first results, zero and
+      underflow capacities, delimiter/NUL placement and vtable replacement.
+      Demo-mode string refresh now calls this port rather than resident code.
+      Verification: full x86_64 host suite and ARM release build passed.
+      Standalone entry smoke produced "left right" with its NUL terminator.
+      match.py exits 1 with 31 stock versus 35 Rust instructions: LLVM
+      inlines the strcat space copy, shares post-append strlen measurements,
+      and changes frame/register allocation. Both virtual calls retain slot
+      +0x84, selectors 9/17, source argument and fresh vtable lookup.

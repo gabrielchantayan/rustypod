@@ -22,6 +22,7 @@ pub mod voice_memo_event_state;
 pub mod voice_memo_is_paused;
 pub mod voice_memo_recording_active_get;
 pub mod demo_mode_string_refresh;
+pub mod dispatch_pair_string;
 pub mod voice_memo_decimal_split;
 pub mod controller_resource_list_replace;
 pub mod class_8c00_byte_d4_get;

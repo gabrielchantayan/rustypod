@@ -5,9 +5,9 @@
 //! (0x081a49b0, 0x081a4b0c), zero predicated BLs.
 //!
 //! Obtain TCDemoMode; if absent, leave the string untouched. Otherwise ensure
-//! at least 40 bytes, call resident 0x08187d98 with the singleton, source,
+//! at least 40 bytes, call dispatch_pair_string with the singleton, source,
 //! current payload and bound 40, then resize to the resulting inclusive
-//! C-string length. The resident writer's identity remains unresolved.
+//! C-string length.
 //! Deviations: native-width StringObject fields on hosts; explicit host-only
 //! dependency injection. The unused incoming owner is retained for ABI parity.
 //! Existing registry/capacity helpers retain their documented limitations.
@@ -16,22 +16,19 @@ use crate::app::registry::demo_mode_instance;
 use crate::cxx::string_object::{StringObject, string_object_ensure_capacity,
     string_object_resize_payload};
 
+use super::dispatch_pair_string::dispatch_pair_string;
 type Writer = unsafe extern "C" fn(*mut u8, *const u8, *mut u8, u32);
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_writer(_: *mut u8, _: *const u8, _: *mut u8, _: u32) {
-    panic!("demo_mode_string_refresh requires resident writer 0x08187d98")
-}
 #[cfg(not(target_os = "none"))]
 pub static mut DEMO_MODE_STRING_INSTANCE: unsafe extern "C" fn() -> *mut u8 = demo_mode_instance;
 #[cfg(not(target_os = "none"))]
-pub static mut DEMO_MODE_STRING_WRITER: Writer = missing_writer;
+pub static mut DEMO_MODE_STRING_WRITER: Writer = dispatch_pair_string;
 
-/// Refresh a string through the demo-mode resident bounded writer.
+/// Refresh a string through the demo-mode composite selector writer.
 /// # Safety
-/// A present singleton requires a valid source accepted by resident 0x08187d98,
-/// a valid StringObject and allocation slot, and a NUL-terminated writer result.
-/// The resident writer must respect the 40-byte bound. No allocation NULL guard
-/// is added: stock passes the observed payload directly to the writer.
+/// A present singleton requires a valid source and dispatch target accepted
+/// by dispatch_pair_string, a valid StringObject and allocation slot, and
+/// enough storage for both selector results plus a space and terminator.
+/// No allocation NULL guard is added.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn demo_mode_string_refresh(
@@ -45,7 +42,7 @@ pub unsafe extern "C" fn demo_mode_string_refresh(
     if demo.is_null() { return; }
     let payload = string_object_ensure_capacity(string, 40);
     #[cfg(target_os = "none")]
-    let writer: Writer = core::mem::transmute(0x0818_7d98usize);
+    let writer: Writer = dispatch_pair_string;
     #[cfg(not(target_os = "none"))]
     let writer = DEMO_MODE_STRING_WRITER;
     writer(demo, source, payload, 40);
@@ -104,7 +101,7 @@ mod tests {
                 assert_eq!(payload[41], b'z');
             }
             DEMO_MODE_STRING_INSTANCE = demo_mode_instance;
-            DEMO_MODE_STRING_WRITER = missing_writer;
+            DEMO_MODE_STRING_WRITER = dispatch_pair_string;
         }
     }
 }
