@@ -224841,3 +224841,36 @@ functions:
       count-minus-one comparison into signed count <= next, adds a
       frame pointer, and uses literal-loaded BX for the retail tail gate.
       No physical-device execution.
+
+  - address: 0x08168164
+    ghidra: FUN_08168164
+    name: recording_buffer_free_space
+    size: 64
+    sig: "u32 recording_buffer_free_space(const u8 *buffer)"
+    status: ported
+    module: app/recording_buffer_free_space.rs
+    vars:
+      param_1/r0/r2: buffer
+      r0: free_bytes
+      uVar2/r1: slot
+      r12: slot_count
+      r3: slot_used_then_free_bytes
+    notes: >-
+      Raw A32 establishes 64 bytes through BX LR at 0x081681a0; the next
+      real function prologue starts at 0x081681a4. Zero internal plain BL
+      and zero predicated BL instructions. Full-image aligned word decoding
+      finds exactly two incoming plain BL calls at 0x08168030 and
+      0x08168074, with no predicated incoming BL. Caller writes recording
+      data and compares the result against 0x180000 to trigger low-space
+      handling. Returns zero when the byte at buffer+0x1c is zero;
+      otherwise sums 0x80000 minus the used word at buffer+0x38+12*slot,
+      for unsigned slot indices strictly below the word at buffer+0x338.
+      Preserves exclusive count semantics despite neighboring routines
+      treating that field as a pending marker or last index. Both subtraction
+      and accumulation wrap at 32 bits. No callee seams. Deliberate
+      deviation: conventional Rust loop replaces the predicated ARM body;
+      volatile aligned word reads preserve stock read boundaries. Host
+      edge tests cover disabled short storage, zero count, non-boolean
+      enabled flags, all 64 slots, capacity boundaries and arithmetic wrap.
+      Standalone native execution returns 0x80001 for a full slot, a slot
+      with one free byte, and an empty slot. No physical-device execution.
