@@ -1134,3 +1134,4 @@ pub mod selector_string_resource_assign;
 pub mod buffered_reader_refill;
 pub mod container_bitmap_resources_remove;
 pub mod owner_link_register;
+pub mod selected_container_advance;

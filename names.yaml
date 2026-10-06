@@ -224801,3 +224801,43 @@ functions:
       copy/lookup/release order and boolean normalization. LLVM adds a
       frame pointer and a literal-loaded BLX for the retained stock call.
       No physical-device execution.
+
+  - address: 0x0815aa84
+    ghidra: FUN_0815aa84
+    name: selected_container_advance
+    size: 116
+    sig: "void selected_container_advance(u8 *owner)"
+    status: ported
+    module: app/selected_container_advance.rs
+    vars:
+      param_1/r0/r4: owner
+      r5: selected_container
+      r6: next_index
+    renames:
+      FUN_083d75e0: container_is_empty
+      FUN_083e0044: deque_back_elem4
+      FUN_081cb3e0: container_item_count_or_zero
+      thunk_FUN_0806e488: singleton_class_8c00_ready_gate
+    notes: >-
+      Raw A32 establishes 112 instruction bytes plus the four-byte event
+      literal at 0x0815aaf4; next real prologue is 0x0815aaf8, hence a
+      116-byte extent. Three internal plain BL, zero predicated BL, one
+      virtual BLX and a tail B to 0x081bb29c. Full-image word decoding
+      finds two inbound plain BL at 0x081f6194 and 0x081f61bc, no
+      predicated inbound BL. Nonempty owner deque at +0xa0 supplies its
+      back object. Increment its u16 index with wrapping, sign-extend
+      to i16, and reject when signed item count minus one is smaller.
+      Otherwise store the index, dispatch vtable slot +0x58 with event
+      0x424d6170 and context word +0x60, then invoke the ready gate
+      with one. No extra NULL guards. Reuses existing Rust empty/back/
+      count ports; identified unported ready gate remains a retail ARM
+      call and an explicit host callback. Ghidra incorrectly absorbs
+      the tail target into this function. All 14513 host tests pass;
+      ARM release build passes. Linked ARM export executed under Unicorn
+      proves successful advance, upper-bound rejection, signed wrap
+      32767 to -32768, and rejection of 65535 to zero with zero count;
+      observes store before event dispatch before ready gate. match.py
+      exits 1 with 28 original versus 32 Rust instructions: LLVM folds
+      count-minus-one comparison into signed count <= next, adds a
+      frame pointer, and uses literal-loaded BX for the retail tail gate.
+      No physical-device execution.
