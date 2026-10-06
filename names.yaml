@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816867c
+    ghidra: FUN_0816867c
+    name: owner_link_visit_words_with_literal_callback
+    size: 20
+    sig: "u32 owner_link_visit_words_with_literal_callback(const u32 *receiver)"
+    status: identified
+    renames:
+      param_1: receiver
+      receiver+0x14: begin
+      receiver+0x18: end
+      DAT_0816868c: callback_entry_0815d7c4
+      FUN_083eaab0: visit_word_range_return_callback
+    notes: >-
+      Deferred: the literal callback is an interior, stack-dependent entry;
+      a faithful ordinary Rust callback cannot be established from this image.
+      Raw words at 0x0816867c are e5901018 e5900014 e59f2000 ea0a0908,
+      followed by literal 0815d7c4 at 0x0816868c. True extent is 20 bytes
+      including the literal, 16 executable bytes; the next real function
+      starts at 0x08168690 with e5901000 e5911024 e12fff11.
+      Whole-image aligned A32 decoding finds one plain BL at 0x08168534
+      and one predicated BLLE at 0x081683f0. Body has no BL and tail-branches
+      to 0x083eaab0 with begin, end, and callback. Raw visitor code at
+      0x083eaab0..0x083eaae0 saves r4-r6 and lr, snapshots begin/end,
+      invokes r6 on each aligned u32 via BLX, advances by four until
+      equality, and returns r6 in r0, including for an empty range.
+      The callback literal is not a standalone function: 0x0815d7b0
+      starts e1a00001 e92d4010 e3a01ffa ebfb65d4 e59f1008, then
+      0x0815d7c4 is ebfce340 e59f0000 e8bd8010, with literal 08a79344
+      at 0x0815d7d0. Entering at 0x0815d7c4 skips the prologue and r1
+      initialization, calls the already-ported unix_seconds_to_datetime
+      at 0x080964cc, then pops r4 and pc from the range visitor's frame.
+      Ghidra's standalone callback and expanded loop conceal this mismatch.
+      Neither the assigned address, callback entry, visitor, nor containing
+      entry at 0x0815d7b0 had a canonical names.yaml entry.
+      Requires evidence of runtime replacement or the intended callback
+      entry and register/stack contract before porting; no guessed callee
+      seam or Rust implementation is introduced.
   - address: 0x08168758
     ghidra: FUN_08168758
     name: owner_link_is_current
