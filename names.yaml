@@ -222114,3 +222114,53 @@ functions:
       Standalone smoke linked the actual crate and real timer/cast ports:
       NULL cast preserved 0xa5; defer produced completion zero, timer state
       0x72756e20 and queue zero with a zero period. No on-device execution.
+  - address: 0x0817e160
+    ghidra: FUN_0817e160
+    name: context_dispatch_mapped_code
+    size: 96
+    sig: "void context_dispatch_mapped_code(u32 *context)"
+    module: app/context_dispatch_mapped_code
+    status: ported
+    renames:
+      param_1/r0/r4: context
+      r5: mapped_code
+      context_plus_0x20: descriptor
+      descriptor_plus_5: code
+      context_plus_4: cached_byte_object
+      FUN_0829cf40: byte_is_three_or_four
+      FUN_082a270c: object_cached_byte
+      FUN_080bd6cc: retail_code_mapping
+      FUN_081b0ab4: retail_mapped_code_dispatch
+    notes: >-
+      Raw osos.dec establishes 96 bytes at 0x0817e160..0x0817e1c0,
+      where the next independently entered push prologue begins. Ghidra's
+      128-byte extent absorbs downstream dispatch. Whole-image aligned A32
+      decoding finds one plain incoming BL at 0x0817ddf0 and one BLNE
+      at 0x0817caa0. Body has five plain outgoing BLs, zero predicated
+      BLs, and a final tail B to 0x081b0ab4. State bytes other than 3/4
+      return before descriptor access. Map descriptor byte +5 through
+      verified 0x080bd6cc (100..121 maps to 1..22; otherwise zero).
+      Unless descriptor byte is 107, call object_cached_byte on context+4;
+      a nonzero result triggers another lookup and maps that second result.
+      The second virtual predicate can mutate the cache, so it is not
+      eliminated and its result can map to zero. Dispatch selected mapping
+      through verified 0x081b0ab4, which constructs the UI-manager payload.
+      Existing predicate and cached-byte ports are reused. Unported mapping
+      and dispatch stay at verified retailOS addresses rather than creating
+      additional ports. Host mapping models the raw return table; host
+      dispatch exposes a replaceable boundary that otherwise fails explicitly.
+      Target-width pointer words preserve context offsets on 64-bit hosts.
+      Host regression covers all inactive state bytes, both active states,
+      special-code bypass, zero first lookup, changed second lookup,
+      zero/out-of-range second values and descriptor mapping boundaries.
+      Host suite passed 14391 tests; ARM release build passed. match.py's
+      default 128-byte reference includes the next function; its structural
+      diff shows 31 Rust instructions including address literals versus
+      32 reference instructions. The port retains state gating, descriptor
+      reread after mapping, both cached-byte calls, mapping and final dispatch.
+      LLVM uses fixed-address BLX for mapping and BX for tail dispatch.
+      Standalone smoke compiled the actual port and existing callee source
+      modules: state 3 with descriptor k dispatched mapping 8. A whole-crate
+      non-test host rlib smoke was unavailable because unrelated existing
+      modules lack six host helper definitions; host tests and ARM build
+      are unaffected. No on-device execution.
