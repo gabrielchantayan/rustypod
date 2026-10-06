@@ -739,6 +739,46 @@ functions:
       state. match.py exits 1: nine stock versus thirteen Rust instructions;
       LLVM reverses comparisons, adds a frame and duplicates the store/return
       while preserving both transitions and the no-store path.
+  - address: 0x0816bc68
+    ghidra: FUN_0816bc68
+    name: tick_range_view_construct
+    size: 120
+    sig: "TickRangeView *tick_range_view_construct(TickRangeView *view, ResourceProvider *resources, void *controller, void *parent, const TickRangeViewSpec *spec)"
+    module: ui/range_view
+    status: ported
+    vars:
+      r0/r4/puVar1: view
+      r1: resources
+      r2: controller
+      r3: parent
+      r5/in_stack_00000000: spec
+      FUN_0812b94c: range_view_construct
+      FUN_082aadd4: operator_new
+      FUN_081bb450: tick_accumulator_construct
+      DAT_0816bcd8: tick_range_vtable_08988328
+      DAT_0816bcdc: backoff_interval_ms_350
+    notes: >-
+      Raw extent [0x0816bc68,0x0816bce0) is 120 bytes: 112 code bytes
+      plus two literals; the next function starts with cmp r0,0. Independent
+      whole-image decoding finds two incoming plain BLs at 0x0816ac38 and
+      0x081e9d9c, three outgoing plain BLs and no predicated BLs. Forward
+      all five arguments to the range base, install 0x08988328, allocate
+      52 bytes and construct a tick accumulator with divisor 5, mode 1 and
+      backoff 350 ms. Store its pointer at +0xb4, clear +0x114, +0x110,
+      +0xec, +0xe0 and +0x118, set +0xe8 to 0xffffffff, and copy spec
+      +0x68/+0x6c to +0xb8/+0xbc. Preserve all other tail words. Both
+      callers allocate 0x11c bytes. Existing ports are called directly;
+      no new seam. Deviations restore Ghidra's missing arguments and return,
+      retain verified base input identity and keep target pointers as u32
+      on hosts. The accumulator consumes four arguments, not Ghidra's
+      spurious fifth. Names are structural. Host edge tests cover extreme
+      configuration and untouched poisoned words. Full host suite passes
+      14482 tests; ARM release build passes. Isolated full-constructor smoke
+      exercises real base/range and tick ports with host dependency fixtures,
+      observing deadlines 450/500, divisor 5, mode 1, backoff 350, inverted
+      bounds and return identity. match.py exits 1: 28 stock versus 33 Rust
+      instructions, retaining three calls and field stores; LLVM adds a frame
+      and synthesizes the 350 constant.
   - address: 0x081860dc
     ghidra: FUN_081860dc
     name: service_range_view_construct
