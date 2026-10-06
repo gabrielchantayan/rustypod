@@ -224493,3 +224493,50 @@ functions:
       retains the field offsets and query/copy/cleanup sequence; LLVM uses
       BLX for fixed retail seams and removes the verified empty destructor
       call. No on-device execution performed.
+  - address: 0x08168914
+    ghidra: FUN_08168914
+    name: guarded_optional_tagged_node_lookup
+    size: 152
+    sig: "void guarded_optional_tagged_node_lookup(TaggedRecord *result, const void *receiver, u32 key_low, u32 key_high)"
+    module: app/guarded_optional_tagged_node_lookup
+    status: ported
+    renames:
+      param_1/r0/r4: result
+      param_2/r1/r5: receiver
+      param_3/r2/r6: key_low
+      param_4/r3/r7: key_high
+      auStack_28: scoped_global_guard
+      auStack_20: temporary_record
+      DAT_081689a8: application_root_slot
+    notes: >-
+      Raw extent [0x08168914,0x081689ac) is 152 bytes: 148 instruction
+      bytes plus root-slot literal 0x089ca674 at 0x081689a8. The next
+      real function starts with PUSH at 0x081689ac. Whole-image aligned
+      A32 decoding verifies two incoming plain BLs at 0x08211520 and
+      0x082c7d9c, six outgoing plain BLs and zero predicated BLs either way.
+      Ghidra's 140-byte extent truncates the cleanup call and branch.
+      Initialize an empty record and construct a guard even for zero keys.
+      Zero keys skip root and receiver reads. Otherwise load root+0x30,
+      call ui_tdat_node_lookup, construct a temporary with the returned
+      pointer and receiver byte +0x44, copy payload/flag, destroy temporary
+      and finally destroy guard. The raw constructor at 0x08155b4c leaves
+      r1=0; the lookup receives (owner,0,key_low,key_high), uses node ID
+      (0,key_low), and ignores key_high except for the caller's zero test.
+      Its registry string-tail identity conflicts with raw PUSH/BL/stores/POP
+      and is not reused as a semantic identity. Keep this verified constructor
+      as a stock seam. Existing initializer, node lookup, empty destructor
+      and scoped guard destructor ports are reused. Rust returns void rather
+      than an incidental stack-local pointer. Host injection replaces root
+      RAM and guard construction; no target-pointer-width assumptions on host.
+      Tests exercise zero keys with NULL root/receiver, either nonzero key
+      word with a real NULL-context lookup, full flag bytes, preserved padding
+      and initial-store precedence with aliased result/receiver. Host suite
+      and ARM release build pass. A standalone smoke executes the high-only
+      and zero-key paths with the real lookup and existing record/destructor
+      ports. The smoke library needs cfg(test) because unrelated existing
+      modules lack their non-test host callees. match.py exits 1 with a
+      structural diff, also reviewed using --size 152: LLVM uses ORRS for
+      the zero test, BLX for stock guard construction, relocated BLs for
+      Rust ports, a larger stack frame, and removes the empty destructor.
+      Root/receiver read gating, field offsets and cleanup order are retained.
+      No device execution performed.
