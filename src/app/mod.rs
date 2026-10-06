@@ -729,6 +729,7 @@ pub mod timestamp_index_seek;
 pub mod signed_backend_adjust;
 pub mod optional_backend_request;
 pub mod format_duration;
+pub mod parse_duration_milliseconds;
 pub mod indexed_timestamp_window_bounds;
 pub mod indexed_payload_lookup;
 pub mod selected_resource_path_load;
