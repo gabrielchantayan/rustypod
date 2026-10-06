@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08193f9c
+    ghidra: FUN_08193f9c
+    name: service_handler_slot_counted_flag_get
+    size: 28
+    sig: "u32 service_handler_slot_counted_flag_get(const u32 *slot_table, i32 slot)"
+    module: app/service_handler_slot_counted_flag_get
+    status: ported
+    vars:
+      param_1/r0: slot_table
+      param_2/r1: slot
+    renames:
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw words establish [0x08193f9c,0x08193fb8), 28 bytes without
+      literals; next function begins with cmp r1,#3 at 0x08193fb8.
+      Whole-image aligned ARM decoding finds two incoming plain BLs at
+      0x08194140 and 0x08194164, zero predicated incoming BLs; outbound
+      zero plain BLs and one signed BLGE to canonical heap_panic.
+      Reject signed slots >=3, read the selected 32-byte record's status
+      word at +0xc, and return bit 1 normalized to 0/1. Negative slots
+      remain accepted. No behavioral deviations or new firmware seams.
+      Word indexing preserves target layout on wider-pointer hosts.
+      Existing counted-flag setter intentionally retains its inlined query.
+      Host edge tests and full suite pass; ARM release build passes.
+      match.py exits 1: seven original versus nine Rust instructions;
+      signed <=2 predication replaces BLGE, shifted bit extraction remains,
+      and the fatal path adds a frame plus a relocated BL to heap_panic.
+      Actual-source host smoke checks slots -1..2 and proves slots 3/MAX
+      reach the fatal seam before a null read. No device execution.
   - address: 0x08193fec
     ghidra: FUN_08193fec
     name: service_manager_notification_update
