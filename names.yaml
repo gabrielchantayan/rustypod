@@ -224540,3 +224540,33 @@ functions:
       Rust ports, a larger stack frame, and removes the empty destructor.
       Root/receiver read gating, field offsets and cleanup order are retained.
       No device execution performed.
+
+  - address: 0x08168764
+    ghidra: FUN_08168764
+    name: owner_link_base_construct
+    size: 20
+    sig: "OwnerLinkBase *owner_link_base_construct(OwnerLinkBase *receiver, u32 owner)"
+    module: app/owner_link_base_construct
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: owner
+      DAT_08168774: owner_link_base_vtable (0x089a746c)
+    notes: >-
+      Raw words e59f2008 e5801004 e5802000 e12fff1e establish 16 bytes
+      of code followed by literal 0x089a746c at 0x08168774. True extent
+      is 20 bytes; the next independent function starts at 0x08168778
+      with push and is reached by a branch at 0x081e2394. Whole-image
+      aligned A32 branch decoding verifies two inbound plain BL calls
+      at 0x0813aff4 and 0x081e236c, zero predicated BL callers, and zero
+      outbound calls. Store the supplied owner word at receiver+4, install
+      the base vtable at receiver+0, and return receiver unchanged in r0.
+      Both callers replace the base vtable and initialize derived fields
+      before registering through 0x0816874c. No concrete class identity
+      is asserted and no callee seam is introduced. Target fields remain
+      u32 words on hosts. Host tests cover zero, high-bit and all-ones
+      owners, overwritten prefixes, preserved surrounding storage and
+      the returned receiver. All 14501 host tests and ARM release build
+      pass. match.py exits 1: LLVM adds a frame-pointer prologue/epilogue
+      and reverses the two independent stores; literal, offsets and r0
+      preservation agree. No behavioral deviations or device execution.
