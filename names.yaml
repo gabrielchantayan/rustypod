@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816e330
+    ghidra: FUN_0816e330
+    name: pair_header_cache_construct
+    size: 32
+    sig: "u32 *pair_header_cache_construct(u32 *cache)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r0: cache, iVar1: constructed_base}
+    notes: >-
+      Raw extent 0x0816e330..0x0816e34f: next real function begins at
+      0x0816e350. Two inbound unconditional BL sites at 0x0809e274 and
+      0x082aca98, no predicated inbound BLs; one outgoing unconditional
+      BL to the already-ported pair_header_base_construct at 0x0810ebbc.
+      Clears the two cache-key words at +0/+4, constructs the 0xb8-byte
+      embedded base at +8, and subtracts eight from its returned pointer.
+      Caller 0x0809e224 allocates 0xc0 bytes and compares these keys
+      against the input pair before rebinding the embedded payload;
+      0x082aca90 constructs a static instance. Uses the existing Rust
+      base constructor and its existing element-array dependency seam.
+      Host coverage checks dirty and zero keys, clear-before-initializer
+      ordering, embedded-base effects, return identity, and boundary
+      canaries.
+      ARM release build succeeds. match.py shows the two zero stores
+      and embedded-base BL retained; LLVM proves the existing base
+      constructor returns its input and folds the final subtraction into
+      returning the saved cache pointer. Standalone non-test host smoke
+      is blocked by existing missing host functions in other modules;
+      the full host test suite exercises this path successfully.
+
   - address: 0x0815d9b0
     ghidra: FUN_0815d9b0
     name: selector_primary_string_resource_assign

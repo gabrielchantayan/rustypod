@@ -247,6 +247,30 @@ pub unsafe extern "C" fn pair_header_base_construct(base: *mut u32) -> *mut u32 
     core::ptr::write_bytes(grand_base.cast::<u8>(), 0, 0x94);
     object
 }
+
+/// pair_header_cache_construct — original: `FUN_0816e330` @ `0x0816e330`.
+///
+/// True extent: 32 bytes, ending at the return at 0x0816e34c; the next
+/// constructor/destructor sibling starts at 0x0816e350. Raw A32 decoding
+/// verifies two inbound plain BL sites (0x0809e274, 0x082aca98), zero
+/// predicated inbound BL sites, and one outgoing plain BL to 0x0810ebbc.
+/// Clears the two cache-key words, constructs the embedded PairHeaderBase
+/// at +8, and returns the callee result rebased by -8. The caller at
+/// 0x0809e224 compares these words against its input pair before loading
+/// a new payload. Deliberate deviation: calls the existing Rust base
+/// constructor rather than retailOS; its existing element-array seam remains.
+///
+/// # Safety
+/// `cache` must be aligned, writable storage for two u32 keys followed by
+/// the complete 0xb8-byte PairHeaderBase (0xc0 bytes total), and satisfy
+/// the base constructor's initialization dependency.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_cache_construct(cache: *mut u32) -> *mut u32 {
+    cache.write(0);
+    cache.add(1).write(0);
+    pair_header_base_construct(cache.add(2)).sub(2)
+}
 ///
 /// PairHeaderBase's owned payload release — original: `FUN_0810e908` @
 /// **0x0810e908** (52 bytes; the preceding `pop {...,pc}` at 0x0810e904
@@ -1739,6 +1763,50 @@ mod tests {
             assert_eq!(base[0xac / 4], 0);
             assert_eq!(base[0xb0 / 4], 0);
             assert_eq!(base[0xb4 / 4], 0xaaaa_5500);
+        }
+    }
+
+    unsafe extern "C" fn cache_element_array_reset(
+        this: *mut u32, field_count: u32, field_size: u32,
+        allocation_header_bytes: u32, initializer_argument: u32,
+        element_initializer: u32, initializer_context: u32,
+        allocator_callback: u32, allocator_context: u32,
+        allocation_flags: u32, zero_initialize: u32,
+    ) -> *mut u32 {
+        let cache = this.sub(GRAND_BASE_BODY_OFFSET_WORDS + 3);
+        assert_eq!(cache.read(), 0, "first key cleared before initialization");
+        assert_eq!(cache.add(1).read(), 0, "second key cleared before initialization");
+        recording_element_array_reset(
+            this, field_count, field_size, allocation_header_bytes,
+            initializer_argument, element_initializer, initializer_context,
+            allocator_callback, allocator_context, allocation_flags, zero_initialize,
+        )
+    }
+
+    #[test]
+    fn cache_constructor_clears_dirty_keys_and_preserves_storage_boundaries() {
+        let _lock = lock_ops();
+        let _guard = OpsGuard::install(PairHeaderElementArrayOps {
+            reset: cache_element_array_reset,
+        });
+        unsafe {
+            for keys in [[u32::MAX, 1], [0, u32::MAX], [0, 0]] {
+                reset_recording();
+                let mut storage = vec![FILL; BASE_WORDS + 4];
+                let cache = storage.as_mut_ptr().add(1);
+                cache.write(keys[0]);
+                cache.add(1).write(keys[1]);
+                assert_eq!(pair_header_cache_construct(cache), cache);
+                assert_eq!(&storage[1..3], &[0, 0]);
+                assert_eq!(storage[3], PAIR_HEADER_BASE_VTABLE);
+                assert!(storage[4..4 + 0x94 / 4].iter().all(|&word| word == 0));
+                assert_eq!(cache.add(2 + 0xac / 4).read(), 0);
+                assert_eq!(cache.add(2 + 0xb0 / 4).read(), 0);
+                assert_eq!(cache.add(2 + 0xb4 / 4).read(), 0xaaaa_5500);
+                assert_eq!(cache.add(2 + 0x98 / 4).read(), FILL);
+                assert_eq!(storage[0], FILL);
+                assert_eq!(storage[BASE_WORDS + 3], FILL);
+            }
         }
     }
 
