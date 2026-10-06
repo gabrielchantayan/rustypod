@@ -221529,3 +221529,43 @@ functions:
       build passed. Standalone host-library smoke is unavailable because
       unrelated non-test host modules have six unresolved helper functions;
       no device execution performed.
+  - address: 0x08189198
+    ghidra: FUN_08189198
+    name: current_reference_word_request
+    size: 84
+    sig: "u32 current_reference_word_request(CurrentReferenceWordRequest *request, u32 word)"
+    module: app/current_reference_word_request
+    status: ported
+    vars:
+      param_1: request
+      param_2: word
+      iVar1: reference_is_current
+      local_c: word
+      FUN_082a6620: ui_element_reference_is_current
+      FUN_08103550: message_arena_alloc
+      FUN_08103464: queued_message_construct
+      FUN_0810007c: unresolved_message_submission
+    notes: >-
+      Raw extent [0x08189198,0x081891ec) is 84 bytes, including the
+      0x66000012 literal at 0x081891e8. Next function starts with
+      e92d4013. Full-image aligned A32 decoding finds two incoming plain
+      BLs at 0x082c6d98 and 0x082c6dc0, zero predicated; four outbound
+      plain BLs, zero predicated. Gate owner+0x60 with the canonical UI
+      reference predicate. Rejection returns zero without changing state.
+      Success stores word at +0x18, allocates 12 bytes, constructs an owned
+      four-byte payload with code 0x66000012 and submits through receiver
+      +4 to unported firmware routine 0x0810007c, returning one regardless
+      of its discarded result. No callee class identity inferred; the
+      submission seam is not substituted with queued_message_post.
+      Ghidra's fifth constructor argument is spurious; raw r0-r3 supply
+      exactly the canonical four arguments. Deviations: repr(C) pointer
+      fields widen on hosts, retaining exact target offsets. Tests cover
+      rejected gates, noncanonical nonzero gates, full-width payload words,
+      store-before-allocation and payload snapshot despite state mutation.
+      Full host suite: 14363 passed. ARM release build passed. Standalone
+      helper smoke delivered 0xabcdef01 and retained the requested state.
+      match.py exit 1: 20 original versus 30 Rust instructions; LLVM adds
+      a frame, materializes the code without a literal pool, and uses BLX
+      for the fixed-address submission seam. Gate, store offset, four-byte
+      stack snapshot, constructor arguments and success result are retained.
+      Firmware submission was not executed on a device.
