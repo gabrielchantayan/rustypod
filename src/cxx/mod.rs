@@ -518,6 +518,7 @@ pub mod vtable_089820c4_destruct;
 pub mod vtable_08982424_destruct;
 pub mod vtable_089824fc_destruct;
 pub mod vtable_08989104_destruct;
+pub mod embedded_containers_clear;
 pub mod opaque_observable_array_flag_construct;
 pub mod opaque_observable_array_payload_destroy;
 pub mod opaque_observable_array_dispose_elements;

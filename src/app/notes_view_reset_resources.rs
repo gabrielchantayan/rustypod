@@ -10,21 +10,19 @@
 //! A32 decoding finds three inbound plain `bl` call sites and no predicated
 //! inbound forms.
 //!
-//! It destroys the embedded state at `+0x58` through the unported retail
-//! helper `0x08178d64`, releases and clears the nullable owned object at
+//! It clears the embedded containers at `+0x58` through the ported
+//! `embedded_containers_clear`, releases and clears the nullable owned object at
 //! `+0xd8`, then posts `Str ` resources `0x419c` and `0x419d` through vtable
 //! slot `+0x58` in that order.
 //!
-//! Deliberate deviations: the direct helper has no established semantic
-//! identity, so target code calls its verified retail address rather than
-//! inventing a seam. Host tests substitute all three external calls; target
+//! Deliberate deviations: target code calls the existing embedded-container
+//! cleanup port. Host tests substitute all three external calls; target
 //! vtable slots remain target-width words.
 
 use core::ptr;
 
 const EMBEDDED_STATE_OFFSET: usize = 0x58;
 const OWNED_OBJECT_OFFSET: usize = 0xd8;
-const RETAIL_EMBEDDED_STATE_DESTROY: usize = 0x0817_8d64;
 const MESSAGE_CATEGORY: u32 = 0x5374_7220;
 const FIRST_RESOURCE_ID: u32 = 0x419c;
 const SECOND_RESOURCE_ID: u32 = 0x419d;
@@ -47,10 +45,14 @@ pub static mut NOTES_VIEW_OWNED_OBJECT_RELEASE: OwnedObjectRelease = missing_own
 #[cfg(not(target_arch = "arm"))]
 pub static mut NOTES_VIEW_MESSAGE_DISPATCH: MessageDispatch = missing_message_dispatch;
 
+#[cfg(target_arch = "arm")]
+unsafe extern "C" fn destroy_embedded_containers(state: *mut u8) {
+    crate::cxx::embedded_containers_clear::embedded_containers_clear(state.cast());
+}
 #[inline(always)]
 unsafe fn destroy_embedded_state(receiver: *mut u8) {
     #[cfg(target_arch = "arm")]
-    let destroy: EmbeddedStateDestroy = core::mem::transmute(RETAIL_EMBEDDED_STATE_DESTROY);
+    let destroy: EmbeddedStateDestroy = destroy_embedded_containers;
     #[cfg(not(target_arch = "arm"))]
     let destroy = ptr::read_volatile(ptr::addr_of!(NOTES_VIEW_EMBEDDED_STATE_DESTROY));
     destroy(receiver.add(EMBEDDED_STATE_OFFSET));

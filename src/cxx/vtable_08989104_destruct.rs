@@ -12,8 +12,8 @@
 //! Forward the base return unchanged. This is not a deleting destructor.
 //!
 //! Deliberate deviations: already ported member destructors are direct Rust
-//! calls on target. The unported cleanup and base destructor retain their
-//! verified retail addresses; no more specific class identity is asserted.
+//! calls on target, including embedded-container cleanup. The unported base
+//! destructor retains its verified retail address; class identity is unresolved.
 //! Host replacements avoid interpreting target-width object pointers as
 //! native pointers. LLVM chooses call versus tail-branch lowering.
 
@@ -49,7 +49,7 @@ pub unsafe extern "C" fn vtable_08989104_destruct(this: *mut u32) -> *mut u32 {
         this.write_volatile(VTABLE_WORD);
         #[cfg(target_os = "none")]
         let (cleanup, first, second, base): (Cleanup, Destroy, Destroy, Destroy) = (
-            core::mem::transmute(0x0817_8d64usize),
+            super::embedded_containers_clear::embedded_containers_clear,
             super::vtable_08982424_destruct::vtable_08982424_destruct,
             super::vtable_089824fc_destruct::vtable_089824fc_destruct,
             core::mem::transmute(0x0826_c04cusize),
