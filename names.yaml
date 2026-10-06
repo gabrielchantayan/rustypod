@@ -224208,3 +224208,52 @@ functions:
       firmware seam with BLX through a literal, replaces POPEQ with BEQ,
       and relocates the delete BL. The +0xec load, guard, delete-before-clear,
       zero store, and final return agree. No device execution performed.
+
+  - address: 0x0815c9ac
+    ghidra: FUN_0815c9ac
+    name: paired_range_view_construct
+    size: 76
+    sig: "u32 *paired_range_view_construct(u32 *view, ResourceProvider *resources, void *controller, void *parent, const PairedRangeViewSpec *spec)"
+    module: ui/paired_range_view
+    status: ported
+    renames:
+      r0: view
+      r1: resources
+      r2: controller
+      r3: parent
+      in_stack_00000000/r5: spec
+      r4: object derived from array helper result
+      FUN_0812b94c: range_view_construct
+      FUN_082ab234: cpp_array_construct
+      FUN_0815bf5c: initialize paired range state (unported fixed-address seam)
+      DAT_0815c9f0: paired range vtable word (0x089877ac)
+      DAT_0815c9f4: opaque element initializer word (0x08150f30)
+    notes: >-
+      Raw osos.dec A32 words establish 68 code bytes through the pop at
+      0x0815c9ec plus two literal words; true extent is 76 bytes and the next
+      real function starts at 0x0815c9f8. Independent whole-image decoding
+      finds two inbound plain BL calls at 0x0815be5c and 0x081b8e80, three
+      outbound plain BLs to 0x0812b94c, 0x082ab234, and 0x0815bf5c, and no
+      predicated BLs in either set. The allocating caller requests 0x2dc
+      bytes and forwards resources, controller, parent, and the stacked spec.
+      Constructs the range base, installs vtable 0x089877ac, initializes two
+      0xd4-byte elements at base+0xc4 using raw callback word 0x08150f30,
+      derives the final object from helper return minus 0xc4, copies spec
+      +0x68 to object+0xbc, calls the paired-state initializer, and returns
+      that object. No prior canonical entry exists for this address or the
+      initializer/callback. Callback identity is deliberately not invented.
+      The verified initializer uses only its object argument; its unported
+      implementation stays at firmware address 0x0815bf5c on ARM, with an
+      explicitly installed host seam. Ghidra loses all arguments and return
+      provenance; the port restores them. Aligned u32 word offsets preserve
+      target layout on hosts. Host regression covers zero, high-bit, and
+      all-ones configuration, alternate helper-result storage, and untouched
+      neighboring words. All 14486 host tests pass; ARM release build passes.
+      Isolated standalone smoke exercises the actual constructor with
+      substituted dependencies, proving alternate helper-result provenance,
+      configuration-before-initialization, and preservation of input storage.
+      match.py exits 1 with a structural diff: base and array BLs, vtable
+      store with +0xc4 postincrement, two 0xd4 elements, helper-result minus
+      0xc4, spec+0x68 copy to result-8, and returned object are retained.
+      LLVM adds a frame-pointer prologue and calls the initializer seam with
+      BLX through its operation slot. No device execution performed.
