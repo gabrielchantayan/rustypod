@@ -9,9 +9,8 @@
 //! client, including already-notified clients; otherwise returns 0.
 //!
 //! Deliberate deviations: omit the unused r2 argument to the flag helper;
-//! the unported parent notifier is called at its verified resident address
-//! through BLX rather than BL. Host execution rejects that resident call;
-//! behavioral tests exercise the same algorithm with a synchronous callback.
+//! the parent notifier now uses the manager-client notification Rust port.
+//! Host behavioral tests exercise the algorithm with a synchronous callback.
 
 use crate::util::state_flags::state_flags_contain;
 
@@ -37,22 +36,13 @@ unsafe fn capacity_notify_with(client: *mut u8, notify: impl FnOnce(u32, u32, *m
 
 /// # Safety
 /// `client` must provide aligned readable words through +0x50 and a writable
-/// flag word at +0x44. Its parent must satisfy the resident event-queue ABI.
+/// flag word at +0x44. Its parent must satisfy the manager event-queue ABI.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn client_capacity_notify(client: *mut u8) -> u32 {
     capacity_notify_with(client, |parent, event, client| {
-        #[cfg(target_os = "none")]
-        {
-            let notify: unsafe extern "C" fn(u32, u32, *mut u8) -> u32 =
-                core::mem::transmute(0x0818_a41cusize);
-            notify(parent, event, client);
-        }
-        #[cfg(not(target_os = "none"))]
-        {
-            let _ = (parent, event, client);
-            panic!("resident parent event notifier unavailable on host");
-        }
+        crate::heap::manager_client_notification::manager_client_notify(
+            parent as usize as *mut u8, event, client as usize as u32);
     })
 }
 

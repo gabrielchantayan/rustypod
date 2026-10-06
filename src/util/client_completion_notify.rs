@@ -5,9 +5,8 @@
 //! unsigned produced counter at `+0x18` is no greater than expected at
 //! `+0x1c`. On success it optionally notifies the parent word at `+0x04` with
 //! event code 5 and the client pointer, and returns 1; every other path
-//! returns 0. The parent notification body at `0x0818a41c` is unported, so it
-//! is an ops-table boundary: the target default deliberately suppresses that
-//! unavailable external side effect, while host tests install a recorder.
+//! returns 0. The parent notification uses the manager-client notification
+//! port; host tests replace the notification boundary with a recorder.
 
 use crate::util::state_flags::state_flags_contain;
 
@@ -17,17 +16,20 @@ const EXPECTED: usize = 0x1c;
 const COMPLETION_FLAG: u32 = 0x10000;
 const COMPLETION_EVENT: u32 = 5;
 
-/// Boundary for the unported parent notification @ `0x0818a41c`.
+/// Parent notification boundary, using the manager-client notification port.
 #[derive(Clone, Copy)]
 pub struct ClientCompletionNotifyOps {
     pub notify_parent: unsafe extern "C" fn(parent: u32, event: u32, client: *mut u8),
 }
 
-unsafe extern "C" fn suppress_parent_notification(_parent: u32, _event: u32, _client: *mut u8) {}
+unsafe extern "C" fn notify_parent(parent: u32, event: u32, client: *mut u8) {
+    crate::heap::manager_client_notification::manager_client_notify(
+        parent as usize as *mut u8, event, client as usize as u32);
+}
 
-/// Wired default until the parent notification body is ported.
+/// Wired default invokes the ported parent notifier.
 pub const DEFAULT_CLIENT_COMPLETION_NOTIFY_OPS: ClientCompletionNotifyOps = ClientCompletionNotifyOps {
-    notify_parent: suppress_parent_notification,
+    notify_parent,
 };
 
 /// Active notification boundary. Host tests replace it with a recorder.
