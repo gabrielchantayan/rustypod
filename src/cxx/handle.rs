@@ -2791,28 +2791,17 @@ pub unsafe extern "C" fn refcounted_body_release_tag3(slot: *mut *mut Refcounted
 /// ABI of the direct implementation disposer at 0x0816f5c0.
 type RefcountedImplementationDisposer = unsafe extern "C" fn(*mut u8) -> *mut u8;
 
-/// Calls the still-unported implementation disposer directly on device.
-///
-/// The complete 124-byte body at 0x0816f5c0 frees several implementation
-/// fields and returns its input. It is deliberately not assigned a class
-/// identity here.
+/// Calls the ported six-bit-set state destructor on device.
 #[cfg(target_os = "none")]
 #[inline(always)]
 unsafe fn firmware_refcounted_implementation_dispose(implementation: *mut u8) -> *mut u8 {
-    let disposer: RefcountedImplementationDisposer = core::mem::transmute(0x0816_f5c0usize);
-    disposer(implementation)
+    crate::app::six_bit_set_state_destroy::six_bit_set_state_destroy(implementation)
 }
 
-/// Host default for the unported 0x0816f5c0 implementation disposer.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_refcounted_implementation_dispose(implementation: *mut u8) -> *mut u8 {
-    implementation
-}
-
-/// Host-only test injection for the raw 0x0816f5c0 direct call.
+/// Host-only test injection; production defaults to the real destructor.
 #[cfg(not(target_os = "none"))]
 static mut REFCOUNTED_IMPLEMENTATION_DISPOSE: RefcountedImplementationDisposer =
-    missing_refcounted_implementation_dispose;
+    crate::app::six_bit_set_state_destroy::six_bit_set_state_destroy;
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
@@ -2864,14 +2853,12 @@ unsafe fn firmware_refcounted_retain_count_dispose(implementation: *mut u8, refc
 /// Owning sibling of [`refcounted_body_release_owned`]: it drops the signed
 /// refcount under the optional mutex, NULLs the slot after every non-NULL
 /// body path, and destroys the mutex and body on the final transition only.
-/// Unlike the sibling, its NULL-guarded implementation word is passed to the
-/// unported direct callee at 0x0816f5c0, whose return feeds tag-2
-/// [`operator_delete`] directly. Raw bytes establish that the callee returns
-/// its input after teardown; no class identity is inferred for it.
+/// Its NULL-guarded implementation is passed to the ported
+/// [`crate::app::six_bit_set_state_destroy::six_bit_set_state_destroy`],
+/// whose return feeds tag-2 [`operator_delete`] directly.
 ///
-/// Deliberate host deviation: 0x0816f5c0 remains unported, so host builds use
-/// an identity test seam for that call; target builds dispatch to its firmware
-/// address directly.
+/// Host tests can inject a recording disposer instead of owning a complete
+/// state object; production host and target paths use the real destructor.
 ///
 /// # Safety
 /// `slot` must be a valid aligned pointer slot. Its non-NULL body, mutex, and
@@ -6110,7 +6097,7 @@ mod tests {
             assert!(events().is_empty());
         }
 
-        /// The final transition calls the unported 0x0816f5c0 disposer,
+        /// The final transition calls the 0x0816f5c0 state destructor,
         /// tag-2-deletes its returned implementation, then tears down the
         /// mutex and body in the raw ARM order.
         #[test]

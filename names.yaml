@@ -63205,10 +63205,10 @@ functions:
       implementation then tag-2 deletes its returned pointer, unlocks,
       mutex-deletes plus tag-2 deletes the mutex, clears body+8, tag-2 deletes
       the body, and NULLs the slot. The direct implementation disposer
-      0x0816f5c0 is unported: raw ARM confirms its separate 124-byte body
-      returns its input after teardown, but no class identity is invented.
-      Target builds transmute-call that address; host tests use an identity
-      seam solely to record the direct call. Codegen deviation: LLVM inlines
+      0x0816f5c0 is now ported as six_bit_set_state_destroy; production host
+      and target paths call the Rust destructor. Host lifecycle tests retain
+      a recording injection rather than owning complete state objects.
+      Codegen deviation: LLVM inlines
       the ported mutex and heap helpers, retaining the same
       guard/decrement/dispose/unlock/teardown order.
 
@@ -223158,3 +223158,43 @@ functions:
       match.py prints a structural diff: LLVM uses an explicit scratch frame,
       reordered byte stores, and absolute BLX calls for the two retail seams
       rather than direct BL/tail B; guards and virtual slot are preserved.
+
+  - address: 0x0816f5c0
+    ghidra: FUN_0816f5c0
+    name: six_bit_set_state_destroy
+    size: 124
+    sig: "SixBitSetState *six_bit_set_state_destroy(SixBitSetState *state)"
+    module: app/six_bit_set_state_destroy
+    status: ported
+    vars:
+      param_1: state
+      iVar1: returned_vector
+      FUN_08274874: bit_set_destroy
+      FUN_082aad24: operator_delete
+      FUN_082aad14: operator_delete_tag3
+      FUN_083e6e74: u16_vector_destroy
+      FUN_08094424: mutex_delete_counted
+    notes: >-
+      Raw A32 extent is [0x0816f5c0,0x0816f63c), 124 bytes, ending with
+      pop at 0x0816f638; the separately entered conditional tail-call
+      function starts at 0x0816f63c. Whole-image aligned branch decoding
+      verifies two inbound plain BLs at 0x0815f4c8 and 0x0839cf8c, nine
+      outbound plain BLs, and zero predicated BLs in either direction.
+      Destroy and tag-2 delete optional bit sets at +4,+8,+12 in order;
+      tag-3 delete +16 unconditionally, clear +12,+8,+4,+16, destroy
+      the vector at +0x68, subtract 0x68 from its return, destroy the
+      counted mutex at returned owner+0x5c, and return the owner.
+      Semantic repr(C) fields preserve target layout and widen host
+      pointers deliberately. All five callees reuse existing ports.
+      No class identity beyond the existing six-bit-set state constructor
+      is inferred. Host tests cover all eight optional-set combinations,
+      release-before-clear ordering, unrelated storage preservation,
+      counted-lock reset, owner return, and repeated empty destruction.
+      Host suite passes 14436 tests; ARM release builds. A standalone
+      test-configured host executable exercises the real destructor and
+      confirms owner return, storage preservation, lock reset, and repeated
+      empty teardown. match.py exits 1 with a structural diff: 54 Rust
+      instructions versus 31 original. LLVM folds the vector's proven
+      identity return/container adjustment and inlines counted-mutex
+      teardown with existing kernel dispatch. Target offsets, optional-set
+      guards, release order, and clear order are preserved.
