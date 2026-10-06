@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08167e7c
+    ghidra: FUN_08167e7c
+    name: audio_buffer_ring_acquire
+    size: 116
+    sig: "u32 audio_buffer_ring_acquire(u32 *ring, u32 requested_length, u32 *buffer_address, u32 draining)"
+    module: app/audio_buffer_ring_acquire
+    status: ported
+    vars:
+      param_1/r4: ring
+      param_2/r1: unused_requested_length
+      param_3/r5: buffer_address
+      param_4/r6: draining
+      ring_plus_0x14: mutex
+      ring_plus_0x334: read_index
+      ring_plus_0x30_plus_index_times_12: buffer_address_word
+      ring_plus_0x38_plus_index_times_12: buffer_length
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 proves [0x08167e7c,0x08167ef0), 116 bytes; the next
+      independent function begins with cmp r1,#0. Three outbound plain
+      BLs at 0x08167e90, 0x08167ec8 and 0x08167ee4, zero predicated BLs.
+      Whole-image word decoding finds two inbound plain BLs at 0x0827d974
+      and 0x0827dae4, zero predicated BLs. The audio consumer passes
+      draining zero during playback and one while flushing. Lock ring+0x14,
+      clear output, accept only length 0x80000 unless draining, copy the
+      buffer address, unlock, then reload index and length. r1 is ignored.
+      Reuses existing mutex ports, with no new seam. Deviations: volatile
+      aligned words preserve ordering and aliasing; hosts align native Mutex
+      separately and retain u32 buffer addresses. Host edge tests cover full,
+      partial, empty, wrapping indices and output aliasing. ARM match.py exits
+      1: 29 stock versus 31 Rust instructions, retaining all three calls,
+      rejection and post-unlock reload; LLVM adds a frame and reorders guards.
   - address: 0x081680a4
     ghidra: FUN_081680a4
     name: audio_buffer_ring_release
