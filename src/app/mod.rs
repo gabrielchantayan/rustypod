@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod cover_flow_step;
 pub mod record_promote;
 pub mod class6000_write_ui32_property_6056;
 pub mod event_subscription_utc_refresh;

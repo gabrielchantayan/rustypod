@@ -223774,3 +223774,35 @@ functions:
       and a larger frame. The signed guard, existing helper calls, post-call
       state reloads, selection adjustment, virtual notification and final
       dirty-byte store remain present.
+
+  - address: 0x0816cfb8
+    ghidra: FUN_0816cfb8
+    name: cover_flow_step
+    size: 120
+    sig: "void cover_flow_step(CoverFlowOwner *owner, i32 step)"
+    module: app/cover_flow_step
+    status: ported
+    vars: {param_1/r0: owner, r1: step, piVar2/r4: notifications, r5: string_kind}
+    notes: >-
+      Raw A32 proves 100 bytes of instructions and 20 bytes of literals,
+      extent 0x0816cfb8..0x0816d030; next function begins with cmp r1,#0.
+      Two outgoing plain BLs, zero predicated BLs, two virtual BLX calls
+      and one final virtual BX. Inbound calls are plain BL at 0x0816d12c
+      and BLNE at 0x0816d69c. Ghidra omits the live second argument r1.
+      Next/previous handlers pass signed +1/-1 and the wheel handler passes
+      its signed delta. Forward step to the model at owner +0xb0 through
+      verified unported 0x081429e4, which records signed step >=2 at +0xd8,
+      updates model subobjects and sets +0xa8. No identity is assumed for
+      its concrete class. Reuse singleton_class_7a00_instance at 0x0827e48c.
+      Notify virtual slot +0x58 with (0x564d6178,0x7a0b),
+      (0x53747220,0x7a09), then (0x53747220,0x7a0a), reloading the vtable
+      before every notification. Host repr(C) pointers widen; target owner
+      offset and vtable offset remain +0xb0/+0x58. Model update is a typed
+      retail-address seam; final tail dispatch is a final Rust call.
+      Host regression covers signed extrema, zero, +/-1, two, update-before-
+      getter ordering, and vtable replacement between notifications.
+      Full host tests and ARM release build pass. Standalone host smoke
+      executes step -1 and observes three ordered property notifications.
+      match.py exits 1 with expected structural differences: LLVM retains
+      all three slot loads and the final BX, synthesizes property immediates,
+      and uses the model seam via BLX plus a relocated singleton BL.
