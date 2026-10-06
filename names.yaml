@@ -224365,3 +224365,44 @@ functions:
       0xc4, spec+0x68 copy to result-8, and returned object are retained.
       LLVM adds a frame-pointer prologue and calls the initializer seam with
       BLX through its operation slot. No device execution performed.
+
+  - address: 0x0816a580
+    ghidra: FUN_0816a580
+    name: panel_apply_transition
+    size: 164
+    sig: "u32 panel_apply_transition(void *panel, u32 mode, u32 reserved, u32 transition)"
+    status: ported
+    module: drivers/panel_transition.rs
+    args:
+      r0: panel
+      r1: mode
+      r2: reserved
+      r3: transition
+    notes: >-
+      Raw osos.dec establishes 164 code bytes through the pop at 0x0816a620,
+      then literals 0x089cc9b4 and 0x089caf7e; the next real function starts
+      at 0x0816a62c. Independent whole-image A32 decoding finds two inbound
+      plain BLs at 0x081d8da0 and 0x081d9164, zero predicated BLs. The body
+      has seven plain BLs and one virtual BLX through vtable slot 8.
+      Writes shared state byte 7 as 3 for transition 2, otherwise 0; calls
+      0x08168ebc(panel,1), 0x0816a2b0(panel,mode), and
+      0x0816a370(panel,transition!=2); applies panel_set_scale_mode with the
+      boolean byte at 0x089caf7e, then invokes slot 8 with (panel,1).
+      Writes state byte 8 as 1, enables the IRQ binding loaded from state
+      word 0x30, calls the LCD reset at 0x080be760, and finally calls
+      0x0816a3fc(panel,transition). Ignores all callee statuses and returns
+      zero. r2 is unused; mode and transition remain full-width words.
+      No canonical entries exist for the four unnamed configuration callees
+      or the LCD reset, so private exact-address dispatch retains them
+      without inventing public identities. Existing scale and IRQ Rust ports
+      replace their verified stock entries. The display caller now invokes
+      this port directly; its obsolete retail seam is removed.
+      Host regression exercises invalid/high-word modes, transition 2,
+      arbitrary nonzero scale flags, ordered state visibility and a flag
+      changed by configuration. Standalone smoke confirms selector 3,
+      activation before IRQ enable, full-word mode propagation and the
+      complete ordered transition. Host tests and ARM release build pass.
+      match.py exits 1 with a structural diff: LLVM uses BLX for original
+      firmware callees, direct relocated BLs for Rust ports, and addresses
+      shared state from byte 7; virtual slot 8 and ordered calls/stores remain.
+      No device execution performed.

@@ -1117,7 +1117,7 @@ pub unsafe extern "C" fn display_set_pending_nibbles(
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn display_set_transition_mode(display: *mut Display, mode: u32) -> u32 {
-    display_set_transition_mode_with(display, mode, retail_panel_transition)
+    display_set_transition_mode_with(display, mode, super::panel_transition::panel_apply_transition)
 }
 
 unsafe fn display_set_transition_mode_with(
@@ -1151,22 +1151,6 @@ unsafe fn display_set_transition_mode_with(
     0
 }
 
-/// Verified four-register ABI; the broader panel routine remains unnamed.
-unsafe extern "C" fn retail_panel_transition(
-    driver: *mut u8, mode: u32, second: u32, third: u32,
-) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let call: unsafe extern "C" fn(*mut u8, u32, u32, u32) -> u32 =
-            core::mem::transmute(0x0816_a580usize);
-        call(driver, mode, second, third)
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = (driver, mode, second, third);
-        panic!("display transition requires a retail panel-call fixture")
-    }
-}
 
 #[cfg(test)]
 mod transition_mode_tests {
