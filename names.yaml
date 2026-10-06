@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815cb84
+    ghidra: FUN_0815cb84
+    name: timed_label_to_string
+    size: 28
+    sig: "void timed_label_to_string(void *owner, const void *label, StringObject *output)"
+    module: app/timed_label_to_string
+    status: ported
+    renames:
+      param_1/r0: ignored_owner
+      param_2/r1: label
+      param_3/r2: output
+      DAT_0815cb9c: fallback_cstr
+    notes: >-
+      Raw extent 0x0815cb84..0x0815cba0 is 24 instruction bytes plus
+      the 0x083eb28c literal, before the next PUSH. Independent whole-image
+      aligned decoding finds two inbound plain BLs at 0x0815d36c and
+      0x0815e004, no predicated inbound BLs, and zero outgoing BLs.
+      Conditional tail branches select string_object_assign_cstr at
+      0x0827639c for NULL, otherwise the unported formatter at 0x081d1068.
+      That helper dispatches sport-timer provider slot +0x88 with output,
+      17, label+0x24. Raw fallback bytes are 72 00 (r followed by NUL),
+      not an empty string. Target retains firmware assignment and
+      formatting to preserve virtual allocation; hosts reuse the string
+      port and an injectable formatter. Rust models tail branches as
+      final calls and returns void; both verified callers discard r0.
+      Host tests cover replacement, bounds, and allocation failure.
+      ARM release build succeeds. match.py reports a structural diff:
+      both paths retain tail BX calls; LLVM adds a frame and volatile
+      formatter-pointer load. Its seven-instruction stock listing includes
+      the literal as an instruction; only six words are executable.
+      Standalone host smoke exercises both branch choices with a formatter
+      seam; no on-device formatter execution was performed.
+
   - address: 0x0816e330
     ghidra: FUN_0816e330
     name: pair_header_cache_construct

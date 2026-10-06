@@ -1094,6 +1094,7 @@ pub mod timed_label_array_construct;
 pub mod timed_label_update_elapsed;
 pub mod timed_label_finish_lap;
 pub mod timed_label_append_lap;
+pub mod timed_label_to_string;
 pub mod dma_array_pair_release;
 pub mod class_6280_flag_dispatch;
 pub mod message_handler_dispatch;
