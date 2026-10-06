@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081594e4
+    ghidra: FUN_081594e4
+    name: disk_mode_sync_active
+    size: 40
+    sig: "u8 disk_mode_sync_active(DiskModeSyncState *state)"
+    module: app/disk_mode_sync_active
+    status: ported
+    renames:
+      param_1/r4: state
+      iVar1/r0: now
+      state_plus_0x1c: active
+      state_plus_0x20: timestamp
+      FUN_08159424: sync_clock
+    notes: >-
+      Raw A32 extent is 0x081594e4..0x0815950c, ten instructions
+      ending in POP before the next independent PUSH prologue.
+      Whole-image word decoding counts two incoming plain BLs at
+      0x08159360 and 0x08159398, no incoming predicated BLs, one
+      outgoing plain BL at 0x081594ec, and no outgoing predicated BLs.
+      Read the clock, subtract timestamp at +0x20 modulo 2^32, clear
+      the activity byte at +0x1c when unsigned elapsed >= 4, and return
+      the byte without boolean normalization. The disk-mode resource
+      getter selects its resource according to this value. Raw helper
+      0x08159424..0x08159448 reads the microsecond timer through
+      0x08086e38 and divides by 1000 twice; retain this unported helper
+      as a literal retail call, not a guessed implementation. No target
+      behavioral deviations. Fixed-width opaque fields preserve offsets.
+      Host tests cover boundaries, wraparound, backward time, all byte
+      classes and persistent expiry; 14540 host tests pass. ARM release
+      build passes. Consumer smoke verifies active, expired and rollback
+      states. match.py exits 1: LLVM adds a frame, literal BLX and uses
   - address: 0x08165e0c
     ghidra: FUN_08165e0c
     name: active_entry_count
