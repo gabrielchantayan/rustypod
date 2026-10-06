@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08165e0c
+    ghidra: FUN_08165e0c
+    name: active_entry_count
+    size: 40
+    sig: "u32 active_entry_count(const u16 *owner, u32 enabled, u32 primary)"
+    module: util/active_entry_count
+    status: ported
+    renames:
+      param_1: owner
+      param_2: enabled
+      param_3: primary
+      uVar1: count
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x08165e0c..0x08165e34:
+      ten A32 instructions ending in bx lr; the next function starts
+      with cmp r1,#0. Independent word decoding counts zero outgoing
+      plain BLs and zero outgoing predicated BLs; two incoming plain
+      BLs at 0x081537bc and 0x081537d0, with no predicated incoming BLs.
+      Any nonzero enabled selects owner offsets 2/6; zero selects 4/8.
+      Any nonzero primary selects the first offset in either pair.
+      LDRH zero-extends the count into r0. FUN_0815379c sums primary
+      and secondary counts and allocates ten times that sum plus
+      fifteen bytes for serialized entries. The neighboring
+      active_entry_table_address uses the same flags. No callee seam
+      and no deliberate behavioral deviations. The Rust pointer is
+      halfword-aligned; only the selected halfword is read. Host tests
+      cover all selections, noncanonical true flags, zero, 0x8000,
+      and 0xffff counts. A host smoke run exercises count-sum sizing.
+      ARM match.py reports a structural diff: LLVM computes index 1/3
+      or 2/4 using conditional moves, doubles the index, and performs
+      one unsigned LDRH. It adds a frame-pointer prologue/epilogue but
+      no calls; both flag selections are preserved. Host tests and
+      the ARM release build pass.
   - address: 0x08165e34
     ghidra: FUN_08165e34
     name: active_entry_table_address
