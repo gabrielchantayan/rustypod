@@ -57,7 +57,6 @@ use core::ptr::{addr_of, addr_of_mut};
 
 use crate::kernel::sync_mutex::{kernel_running, mutex_lock_counted, mutex_unlock_counted, CountedMutex};
 
-const RETAIL_CLEAR_CONTEXT_ENTRY_FLAGS: usize = 0x0818_5b60;
 
 /// Caller-owned record as read by the original. Every pointer field remains a
 /// target-width word even on the host.
@@ -150,10 +149,8 @@ pub type QueuedEntryCallbacks = unsafe extern "C" fn(context: *mut CallbackDispa
 #[cfg(not(target_os = "none"))]
 pub type QueuedEntryPrimaryCallbackInvocation =
     unsafe extern "C" fn(callback_word: u32, callback_argument: u32, entry: *mut u8, active: bool);
-#[cfg(not(target_os = "none"))]
-pub type ContextEntryFlagsClear = unsafe extern "C" fn(state_plus_4: *mut u8);
 
-/// Host-only equivalents of the raw callback and unported clear edge.
+/// Host-only equivalents of raw callback edges.
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct ContextCallbackDispatchOps {
@@ -161,13 +158,10 @@ pub struct ContextCallbackDispatchOps {
     pub pop_queued_entry: QueuedEntryPop,
     pub invoke_queued_entry_callback: QueuedEntryPrimaryCallbackInvocation,
     pub invoke_queued_entry_secondary_callbacks: QueuedEntryCallbacks,
-    pub clear_entry_flags: ContextEntryFlagsClear,
 }
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_context_callback(_callback_word: u32, _argument: u32, _mode: u32) {}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_entry_flag_clear(_state_plus_4: *mut u8) {}
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_queued_entry_primary_callback(
     _callback_word: u32,
@@ -190,10 +184,9 @@ pub const DEFAULT_CONTEXT_CALLBACK_DISPATCH_OPS: ContextCallbackDispatchOps = Co
     pop_queued_entry: crate::pop_queued_entry::pop_queued_entry,
     invoke_queued_entry_callback: missing_queued_entry_primary_callback,
     invoke_queued_entry_secondary_callbacks: missing_queued_entry_callbacks,
-    clear_entry_flags: missing_entry_flag_clear,
 };
 
-/// Host-only replacement for target-width callback words and `FUN_08185b60`.
+/// Host-only replacement for target-width callback words.
 #[cfg(not(target_os = "none"))]
 pub static mut CONTEXT_CALLBACK_DISPATCH_OPS: ContextCallbackDispatchOps =
     DEFAULT_CONTEXT_CALLBACK_DISPATCH_OPS;
@@ -221,11 +214,6 @@ unsafe fn invoke_retail_queued_entry_primary_callback(
     callback(callback_argument, entry as usize as u32, active as u32);
 }
 
-#[cfg(target_os = "none")]
-unsafe fn clear_retail_context_entry_flags(state_plus_4: *mut u8) {
-    let clear: unsafe extern "C" fn(*mut u8) = core::mem::transmute(RETAIL_CLEAR_CONTEXT_ENTRY_FLAGS);
-    clear(state_plus_4);
-}
 
 
 
@@ -346,10 +334,7 @@ pub unsafe extern "C" fn context_dispatch_callbacks_and_advance(context: *mut Ca
         }
 
         let state_plus_4 = addr_of_mut!((*state).queued_entries).cast::<u8>();
-        #[cfg(target_os = "none")]
-        clear_retail_context_entry_flags(state_plus_4);
-        #[cfg(not(target_os = "none"))]
-        (ops.clear_entry_flags)(state_plus_4);
+        crate::clear_context_entry_flags::clear_context_entry_flags(state_plus_4);
     }
     dispatch_depth.write_volatile(dispatch_depth.read_volatile().wrapping_add(1));
 }
@@ -433,7 +418,6 @@ mod tests {
     const COMPLETION_SECOND_AT: usize = 0x340;
     const QUEUED_FIRST_AT: usize = 0x380;
     const QUEUED_SECOND_AT: usize = 0x3c0;
-    const CLEAR_EVENT: u32 = 0xc1ea_0001;
     const POP_EVENT_BASE: u32 = 0x9000_0000;
     const SECONDARY_EVENT_BASE: u32 = 0xb200_0000;
 
@@ -451,8 +435,6 @@ mod tests {
     static mut QUEUED_CALLBACK_ARGUMENTS: [(u32, usize, bool); 3] = [(0, 0, false); 3];
     static mut QUEUED_CALLBACK_LEN: usize = 0;
     static mut SECONDARY_LEN: usize = 0;
-    static mut STATE_DURING_CLEAR: *mut CallbackDispatchState = core::ptr::null_mut();
-    static mut DEPTH_SEEN_BY_CLEAR: u32 = u32::MAX;
 
     unsafe extern "C" fn record_callback(callback_word: u32, argument: u32, mode: u32) {
         ORDER[ORDER_LEN] = callback_word;
@@ -461,11 +443,6 @@ mod tests {
         CALLBACK_LEN += 1;
     }
 
-    unsafe extern "C" fn record_clear(_state_plus_4: *mut u8) {
-        ORDER[ORDER_LEN] = CLEAR_EVENT;
-        ORDER_LEN += 1;
-        DEPTH_SEEN_BY_CLEAR = addr_of!((*STATE_DURING_CLEAR).dispatch_depth).read_volatile();
-    }
 
     unsafe extern "C" fn pop_queued_entry(_queue: *mut u8) -> *mut u8 {
         ORDER[ORDER_LEN] = POP_EVENT_BASE + POP_LEN as u32;
@@ -519,7 +496,6 @@ mod tests {
                     pop_queued_entry,
                     invoke_queued_entry_callback: record_queued_entry_primary_callback,
                     invoke_queued_entry_secondary_callbacks: record_secondary_queued_entry,
-                    clear_entry_flags: record_clear,
                 });
                 addr_of_mut!(ORDER).write([0; 12]);
                 addr_of_mut!(ORDER_LEN).write(0);
@@ -530,8 +506,6 @@ mod tests {
                 addr_of_mut!(QUEUED_CALLBACK_ARGUMENTS).write([(0, 0, false); 3]);
                 addr_of_mut!(QUEUED_CALLBACK_LEN).write(0);
                 addr_of_mut!(SECONDARY_LEN).write(0);
-                addr_of_mut!(STATE_DURING_CLEAR).write(base.add(STATE_AT).cast());
-                addr_of_mut!(DEPTH_SEEN_BY_CLEAR).write(u32::MAX);
                 Some(Self { _guard: guard, base, previous_ops })
             }
         }
@@ -597,7 +571,6 @@ mod tests {
         fn drop(&mut self) {
             unsafe {
                 addr_of_mut!(CONTEXT_CALLBACK_DISPATCH_OPS).write(self.previous_ops);
-                addr_of_mut!(STATE_DURING_CLEAR).write(core::ptr::null_mut());
             }
         }
     }
@@ -614,11 +587,11 @@ mod tests {
             fixture.node(SECOND_NODE_AT, 0, THIRD_NODE_AT);
             fixture.node(THIRD_NODE_AT, 0x3333_3333, FIRST_NODE_AT);
             context_dispatch_callbacks_and_advance(fixture.context());
-            assert_eq!(ORDER_LEN, 3);
-            assert_eq!(&ORDER[..ORDER_LEN], &[0x1111_1111, 0x3333_3333, CLEAR_EVENT]);
+            assert_eq!(ORDER_LEN, 2);
+            assert_eq!(&ORDER[..ORDER_LEN], &[0x1111_1111, 0x3333_3333]);
             assert_eq!(CALLBACK_LEN, 2);
             assert_eq!(&CALLBACK_ARGUMENTS[..CALLBACK_LEN], &[(0x0bad_f00d, 1), (0x0bad_f00d, 1)]);
-            assert_eq!(DEPTH_SEEN_BY_CLEAR, 0, "clear follows callbacks before the increment");
+            assert_eq!(addr_of!((*fixture.state()).queued_entries).cast::<u8>().add(16).read(), 0);
             assert_eq!(addr_of!((*fixture.state()).dispatch_depth).read(), 1);
         }
     }
@@ -631,9 +604,13 @@ mod tests {
         };
         unsafe {
             fixture.initialize(0, false);
+            let slots = addr_of_mut!((*fixture.state()).queued_entries).cast::<u8>();
+            slots.add(16).write(0xff);
+            slots.add(36).write(0x80);
             context_dispatch_callbacks_and_advance(fixture.context());
-            assert_eq!(ORDER_LEN, 1);
-            assert_eq!(ORDER[0], CLEAR_EVENT);
+            assert_eq!(slots.add(16).read(), 0);
+            assert_eq!(slots.add(36).read(), 0x80);
+            assert_eq!(ORDER_LEN, 0);
             assert_eq!(CALLBACK_LEN, 0);
             assert_eq!(addr_of!((*fixture.state()).dispatch_depth).read(), 1);
         }

@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod clear_context_entry_flags;
+pub use clear_context_entry_flags::*;
 pub mod odd_state_byte_advance;
 pub use odd_state_byte_advance::*;
 pub mod owned_virtual_member_clear;
