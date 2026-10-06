@@ -221315,3 +221315,43 @@ functions:
       return becomes an explicit literal load; alternate calls use BLX
       and a tail BX to the verified runtime address. The structural diff
       is intentional, not an instruction-for-instruction match.
+
+  - address: 0x081952d8
+    ghidra: FUN_081952d8
+    name: guarded_object_08ac8dbc_get
+    size: 92
+    sig: "u8 *guarded_object_08ac8dbc_get(void)"
+    module: app/guarded_object_08ac8dbc
+    status: ported
+    vars:
+      DAT_08195320: guard_base
+      DAT_08195324: initialization_guard
+      DAT_08195328: fixed_object
+      DAT_0819532c: dso_handle
+      DAT_08195330: opaque_shutdown_handler_word
+      FUN_08195334: opaque_fixed_object_constructor
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes the true 92-byte extent [0x081952d8,
+      0x08195334): 72 instruction bytes plus five literal words before
+      the next real constructor entry. Four outbound unconditional BLs,
+      zero predicated BLs; two inbound unconditional BLs at 0x081657e8
+      and 0x0825a66c, zero predicated inbound BLs. Test guard bit zero
+      at 0x089ccb60 (literal base 0x089ccb5c plus four), acquire the ADS
+      guard, invoke verified unported constructor 0x08195334 with fixed
+      object 0x08ac8dbc, register its return with opaque shutdown handler
+      word 0x0818a4c8 and DSO handle 0x089ca09c, then release the guard.
+      Every path returns the fixed object, not the constructor result;
+      registration failure is ignored. Constructor and handler identities
+      are deliberately not invented. Target dispatch retains the verified
+      addresses; host storage and callback seams isolate tests. Tests cover
+      zero, initialized, incomplete nonzero and high-bit guards, constructor
+      reentry, distinct constructor return and failed registration. The full
+      host suite passes (14354 tests); ARM release build passes. Standalone
+      smoke using the actual accessor, guard and shutdown-chain modules
+      proves one-time construction, fixed return, real registration and drain.
+      match.py reports 31 Rust instructions versus 18 original instructions:
+      guard gates, call order and return are preserved, with BLX seam dispatch
+      and a larger register-save frame rather than instruction equality.

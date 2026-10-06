@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod guarded_object_08ac8dbc;
 pub mod selected_io_task;
 pub use selected_io_task::*;
 pub mod image_descriptor_construct;
