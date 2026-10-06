@@ -225120,3 +225120,37 @@ functions:
       caches the deque address, uses a BMI to shared return and literal BX
       for the retail tail gate. Decrement/sign-extension/store sequence
       and virtual dispatch offsets match. No physical-device execution.
+
+  - address: 0x0815a47c
+    ghidra: FUN_0815a47c
+    name: screen_resource_selector_construct
+    size: 80
+    sig: "u32 *screen_resource_selector_construct(u32 *storage, FrameworkObject *provider, u32 owner)"
+    module: app/screen_resource_selector_construct
+    status: ported
+    renames:
+      param_1: storage
+      param_2: provider
+      param_3: owner
+      puVar1: screen
+      FUN_0816f658: ScreenCursorBaseConstruct (verified unported base seam)
+      FUN_08275b9c: object_cast_to_class
+      DAT_0815a4cc: screen_vtable_08987548
+      DAT_0815a4d0: default_state_089a6044
+    notes: >-
+      Raw A32 words verify 80 code bytes followed by 8 literal bytes;
+      next real function starts at 0x0815a4d4. Two outgoing plain BL
+      instructions, zero predicated BL; whole-image aligned BL decoding
+      finds two inbound plain calls at 0x0815a7a8 and 0x08287740.
+      Ghidra's apparent call at 0x082891f0 is a misbounded derived
+      constructor. Calls the unported cursor-bearing base at 0x0816f658
+      with storage and provider; raw base forwards both arguments to
+      screen_base_parent_construct_with_next with r2/r3 zero, installs
+      vtable 0x08988df0, and clears word +0x18. The assigned constructor
+      uses that returned object, installs vtable 0x08987548, clears only
+      bytes +0x24 and +0x30 and word +0x2c, installs 0x089a6044 at +0x28,
+      then stores object_cast_to_class(provider, 6) at +0x1c and owner
+      at +0x20. No class-name identity inferred. Host substitutes only
+      the unported base call; target-width word storage preserves layout.
+      Tests cover redirected base result, padding preservation, NULL
+      and rejected providers, adjusted cast result, and owner extremes.
