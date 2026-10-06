@@ -135914,14 +135914,11 @@ functions:
       forms. The separate unconditional tail branch at 0x08277520 is not a
       call site. The function conditionally locks the already ported counted
       mutex, dispatches every nonzero callback word in the circular list with
-      `(context+0x90, 1)` only at depth zero, reaches unported 0x08185b60
-      with `state+4`, and wraps the depth increment. `FUN_08185b60` is a
-      real decoded function entry but remains unported; its inferred name
-      records only its observed flag-clearing effect. Target builds invoke its
-      verified address; host tests use a volatile seam because host function
-      pointers cannot fit the callback's u32 slot. Tests cover circular
-      order, zero callback suppression, clear-before-increment ordering, the
-      empty anchor, and a nonzero depth wrapping from u32::MAX to zero.
+      `(context+0x90, 1)` only at depth zero, calls the Rust
+      clear_context_entry_flags port with `state+4`, and wraps the depth
+      increment. Only raw callback words retain host seams. Tests cover
+      circular order, zero callback suppression, actual first-flag clearing,
+      the empty anchor, and a nonzero depth wrapping from u32::MAX to zero.
 
   - address: 0x080d2118
     ghidra: FUN_080d2118
@@ -222265,3 +222262,29 @@ functions:
       non-test host rlib smoke was unavailable because unrelated existing
       modules lack six host helper definitions; host tests and ARM build
       are unaffected. No on-device execution.
+  - address: 0x08185b60
+    ghidra: FUN_08185b60
+    name: clear_context_entry_flags
+    size: 56
+    sig: "void clear_context_entry_flags(u8 *slots)"
+    module: app/clear_context_entry_flags
+    status: ported
+    renames:
+      param_1/r0/r5: slots
+      r4: slot_index
+      r6: cleared_flag
+      FUN_0829cff8: active_slot_count
+      "slots + slot_index * 20 + 16": active_flag
+    notes: >-
+      Raw A32 words establish 56 bytes at 0x08185b60..0x08185b98;
+      the next function begins with ldr r1,[pc,#8] at 0x08185b98.
+      Independent whole-image decoding finds two plain inbound BLs at
+      0x08094324 and 0x080d6b8c, zero predicated BLs. The body has one
+      plain BL at 0x08185b74 to existing active_slot_count, no predicated
+      BLs. Recount the active prefix before every indexed clear; clearing
+      slot zero makes the next count zero, so later flags remain untouched.
+      Preserve the loop and wrapping u8 index rather than caching count.
+      Volatile byte access follows the existing count port convention;
+      opaque bytes preserve target stride and flag offsets on hosts.
+      The Rust context-dispatch caller now uses this port directly; its
+      obsolete resident-address and host flag-clear seams are removed.
