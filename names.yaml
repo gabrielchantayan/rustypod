@@ -223806,3 +223806,45 @@ functions:
       match.py exits 1 with expected structural differences: LLVM retains
       all three slot loads and the final BX, synthesizes property immediates,
       and uses the model seam via BLX plus a relocated singleton BL.
+
+  - address: 0x0816cdec
+    ghidra: FUN_0816cdec
+    name: refcounted_ptr_release_dtor_inline_lock
+    size: 156
+    sig: "RefcountedBody **refcounted_ptr_release_dtor_inline_lock(RefcountedBody **slot)"
+    module: cxx/handle
+    status: ported
+    vars:
+      param_1/r4: slot
+      r5: body_to_free
+      r6: zero
+      body_plus_0x0: implementation
+      body_plus_0x4: refcount
+      body_plus_0x8: mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_0839d188: refcounted_body_mutex_unlock_dtor_copy
+      FUN_0807f650: mutex_delete
+      FUN_082aad24: operator_delete
+    notes: >-
+      Raw osos.dec establishes [0x0816cdec,0x0816ce88), 156 bytes through
+      mov r0,r4 at 0x0816ce80 and pop at 0x0816ce84; the next independent
+      push starts at 0x0816ce88. Ghidra's 148-byte extent omits the return.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x08280aac and 0x08280ca4, zero predicated inbound BLs. Outbound calls
+      are five plain BLs, one BLNE to mutex_lock at 0x0816ce08, and one
+      virtual BLXNE at 0x0816ce38 through implementation vtable word 1.
+      Returns slot on both exits. NULL body leaves slot untouched; otherwise
+      locks the optional mutex, reloads slot, wrapping-decrements refcount,
+      and clears slot. Final release dispatches the implementation destructor
+      without freeing implementation, reloads slot to unlock through the ported
+      0x0839d188 copy, reloads again for optional mutex destruction, tag-2-frees
+      the reloaded mutex, clears body+8, and tag-2-frees body. Shared release
+      only unlocks before clearing slot. Uses existing repr(C) native-pointer
+      fields, preserving +0/+4/+8 on target and widening pointers on hosts.
+      Host edge tests cover NULL body, shared and wrapping counts, final NULL
+      implementation/mutex, destructor slot selection, ordered unlock/deletes,
+      and slot return. ARM release build succeeds. match.py resolves the unique
+      symbol and shows 44 Rust instructions versus its truncated 37-instruction
+      original; LLVM uses explicit branches instead of predication and adds a
+      frame pointer. Reloads, decrement, virtual dispatch, cleanup order, and
+      the full slot-return tail agree with raw firmware. No behavioral deviation.
