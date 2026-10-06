@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818ac5c
+    ghidra: FUN_0818ac5c
+    name: manager_flagged_client_release
+    size: 76
+    sig: "u32 manager_flagged_client_release(ManagerFlaggedClients *manager)"
+    module: heap/manager_flagged_client_release
+    status: ported
+    args:
+      r0: manager
+    renames:
+      param_1/r4: manager
+      manager+0x180: notification_mutex
+      manager+0x19c: pending_context
+      manager+0x1c0: flagged_count
+      thunk_FUN_082e8390: posix_mutex_lock
+      thunk_FUN_082e7d4c: drain_opaque_context
+      FUN_0818ae58: manager_flagged_client_count
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw extent [0x0818ac5c,0x0818aca8) is 76 instruction bytes;
+      next real function starts with e92d407c push. Independent whole-image
+      A32 decoding finds two incoming plain BLs at 0x081fc4d0 and
+      0x081fc76c, zero predicated callers. Body has two plain BLs
+      (lock and count), BLEQ drain, BLNE panic, and a tail B to unlock.
+      Ghidra incorrectly incorporates the unlock body past this tail.
+      Lock manager+0x180 ignoring status, decrement unsigned +0x1c0
+      only when nonzero, drain +0x19c only on 1-to-0, recount flagged
+      clients, reload stored count and panic on mismatch without unlocking.
+      Otherwise return unlock status. Lock/unlock veneers 0x08261e20/
+      0x08261e24 and drain veneer 0x08262918 are raw-verified and reuse
+      canonical existing ports; no new seam. Deliberate deviations:
+      repr(C) list pointer widens on host, volatile counter reloads;
+      existing kernel and opaque-initializer seam limitations remain.
+      Tests cover zero, last release, multiple releases, high unsigned
+      values, ignored lock/drain errors, counter mutation during recount,
+      mismatch preventing unlock, and unlock-status preservation.
+      Host suite passes 14355 tests. Standalone actual-crate smoke verifies
+      zero and final release with real client-list counting and an empty
+      pending context. ARM release build passes. match.py exits 1 with
+      21 Rust versus 19 stock instructions: early zero branch replaces
+      predicated decrement; BLEQ drain, BLNE panic, field offsets and
+      unlock tail branch remain. No device execution performed.
+
   - address: 0x081962f8
     ghidra: FUN_081962f8
     name: banked_slot_close
