@@ -223232,3 +223232,45 @@ functions:
       identity return/container adjustment and inlines counted-mutex
       teardown with existing kernel dispatch. Target offsets, optional-set
       guards, release order, and clear order are preserved.
+
+  - address: 0x0816f388
+    ghidra: FUN_0816f388
+    name: u16_buffer_prepare
+    size: 72
+    sig: "void u16_buffer_prepare(U16BufferOwner *owner, u32 total, u32 width)"
+    module: app/u16_buffer_prepare
+    status: ported
+    vars: {param_1: owner, param_2: total, param_3: width}
+    renames:
+      owner+0x5c: lock
+      owner+0x68: buffer
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_08036f14: __rt_udiv
+      FUN_083e6cd0: resident_u16_vector_clear
+      FUN_083e6d24: resident_u16_vector_reserve
+    notes: >-
+      Raw A32 words establish [0x0816f388,0x0816f3d0), 72 bytes, ending
+      in a tail B to mutex_unlock_counted; the next function starts with
+      push at 0x0816f3d0. Independent whole-image aligned BL decoding finds
+      two inbound plain BLs at 0x081319f4 and 0x08132810, zero predicated
+      inbound BLs, four outbound plain BLs, and zero predicated outbound
+      BLs. Lock owner+0x5c, clear its u16 vector at +0x68, reserve the
+      unsigned quotient total/(width<<1), and unlock. The shift wraps at
+      32 bits; zero divisor behavior belongs to the existing __rt_udiv
+      port. Callers prepare the vector before inserting two-byte entries.
+      Both vector helper identities were checked against raw instructions;
+      neither has an existing names entry, so they remain resident seams,
+      not additional ports. Existing mutex and division ports are reused.
+      Deliberate deviations: repr(C) native pointer fields expand on hosts
+      but preserve target member offsets; host operations are supplied.
+      Host tests cover zero total, truncation, growth after clear, retained
+      capacity and contents, full-width unsigned inputs, wrapping shift,
+      prefix preservation, and hold-counter wraparound. The host suite
+      passes 14438 tests; ARM release builds. A standalone test-configured
+      host executable exercises the exported API with host vector seams:
+      clear, reserve 32 elements for total=129/width=2, release the lock.
+      match.py exits 1: 26 Rust instructions versus 18 original, including
+      a literal. LLVM inlines mutex acquisition and hold-count increment,
+      uses BLX for resident vector seams, retains unsigned division and
+      tail unlock, and preserves target offsets 0x5c/0x64/0x68.
