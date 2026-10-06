@@ -223419,3 +223419,42 @@ functions:
       and 255. ARM match.py exits 1 only because LLVM adds push {fp,lr},
       mov fp,sp and pop {fp,pc} around the identical ldrb [r0,#0x34];
       the load width, offset and unsigned return are preserved.
+
+  - address: 0x08171ae4
+    ghidra: FUN_08171ae4
+    name: event_subscription_utc_refresh
+    size: 188
+    sig: "void event_subscription_utc_refresh(UtcRefreshReceiver *receiver)"
+    module: app/event_subscription_utc_refresh
+    status: ported
+    renames:
+      param_1/r4: receiver
+      local_14: base_utc_offset_minutes
+      local_18: daylight_saving_minutes
+      r5: owner_event_code
+    notes: >-
+      Raw ARM extent is 0x08171ae4..0x08171ba0; the latter starts an
+      independently entered push prologue. Nine outbound unconditional BLs,
+      zero predicated BLs; two inbound plain BLs at 0x08114fa4 and 0x081722f0,
+      zero predicated inbound BLs. The 0x080a6af8 callee is a 12-byte
+      null-output tail veneer into current_utc_offset_query, not the body
+      Ghidra inlined. If the calendar is valid, query UTC/DST, normalize the
+      subscription active byte, and compare its full +8 word against the
+      signed UTC halfword and its event activity against normalized DST.
+      On mismatch, inspect the owner's metadata code: raw r0 is forwarded
+      into indexed_record_value_lookup at 0x080ffcf0, despite Ghidra omitting
+      that argument. Reuse a matching code or call the verified retail
+      resolver at 0x080ffbbc with signed i16 UTC and signed i8 DST, then
+      invoke the existing event_subscription_rtc_sync port. Activity at
+      0x080ffea0 and resolution have no names.yaml identities and retain
+      fixed-address target calls; host operations isolate external effects.
+      C-layout receiver fields accommodate native host pointers without
+      pretending they are four bytes. No behavioral deviations; omit the
+      null-output veneer and inline the subscription's trivial accessors.
+      Host tests cover invalid calendar, unchanged subscription, metadata
+      reuse, full-word rank mismatch, short-circuit activity, signed UTC
+      boundaries, and DST 0/60/128/255. All 14448 host tests pass.
+      ARM release build succeeds. match.py exits 1: LLVM changes register
+      allocation/frame layout, inlines accessors, uses BLX for fixed-address
+      unported calls, and normalizes activity with CLZ; the two queries,
+      signed loads, comparisons, short-circuit branches and final sync remain.
