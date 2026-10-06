@@ -225582,3 +225582,41 @@ functions:
       LLVM adds a frame and replaces CMP/conditional MOV with
       SUB/CLZ/LSR. Both word loads, normalized result and absence
       of calls are preserved. Exported Rust symbol is present.
+  - address: 0x08165938
+    ghidra: FUN_08165938
+    name: byte_ring_read
+    size: 40
+    sig: "u32 byte_ring_read(u32 *ring)"
+    module: app/byte_ring_read
+    status: ported
+    renames:
+      param_1/r0: ring
+      ring_plus_0: write_cursor
+      ring_plus_4: read_cursor
+      ring_plus_8: payload
+      iVar2/r1: old_read_cursor
+      uVar3/r2: next_read_cursor
+      uVar1/r1: byte
+    notes: >-
+      Raw words establish extent 0x08165938..0x08165960, 40 bytes;
+      BX LR at 0x0816595c ends the body and the independent byte-write
+      function starts at 0x08165960 with MOV r2,r1. Whole-image A32
+      decoding finds two plain incoming BLs at 0x080cc2dc and
+      0x080cc300, zero predicated incoming BLs, and zero outgoing
+      plain or predicated BLs. Caller 0x080cc298 checks the ported
+      byte_ring_is_empty predicate before draining its ring at +0x85c.
+      Increment the aligned u32 read cursor at +4, load an unsigned byte
+      at +8 plus the old cursor, then reset the cursor to zero if the
+      increment's low ten bits are zero (MOVS LSL #22). Do not mask
+      every increment or check emptiness. No callee seams or deliberate
+      behavioral deviations; volatile accesses retain stock access order.
+      Host tests cover all 1024 valid cursors, unsigned payload bytes,
+      unchanged write cursor and payload, unchecked empty reads,
+      out-of-range cursors and consumer drain across wrap. Standalone
+      consumer smoke dequeues 0xaa then 1 across wrap and observes empty.
+      All 14547 host tests pass; ARM build-std release succeeds.
+      match.py exits 1 with a structural diff: LLVM adds a frame and
+      materializes mask 0x3ff for TST instead of MOVS LSL #22. Cursor
+      load/increment/store, unsigned payload load, conditional reset
+      and absence of calls are preserved; exported symbol is present.
+      No device execution performed.
