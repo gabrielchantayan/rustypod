@@ -131,6 +131,91 @@ pub unsafe extern "C" fn primary_or_demo_mode_keyed_object(
     fallback
 }
 
+/// Action request prefix consumed by [`keyed_object_action_select`].
+#[repr(C)]
+pub struct KeyedObjectActionRequest {
+    pub unresolved_00: u32,
+    pub key: u32,
+    pub unresolved_08: [u8; 6],
+    pub action_override: i16,
+}
+
+/// Object prefix: pointer fields expand naturally on hosts, word fields do not.
+#[repr(C)]
+pub struct KeyedActionObject {
+    pub vtable: *const KeyedActionVtable,
+    pub unresolved_04: [u32; 10],
+    pub default_action: u32,
+    pub unresolved_30: [u32; 7],
+    pub key: u32,
+}
+
+#[repr(C)]
+pub struct KeyedActionVtable {
+    pub unresolved_00: [usize; 67],
+    pub contextual_action: unsafe extern "C" fn(*mut KeyedActionObject, u32) -> i32,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(core::mem::offset_of!(KeyedActionObject, default_action) == 0x2c);
+    assert!(core::mem::offset_of!(KeyedActionObject, key) == 0x4c);
+    assert!(core::mem::offset_of!(KeyedActionVtable, contextual_action) == 0x10c);
+};
+
+/// Select a keyed object's action — `FUN_08184658`, load **0x08184658**.
+///
+/// True extent: 184 bytes (180 instructions plus literal 0x0dad05af);
+/// next function begins at 0x08184710. Two incoming plain BL calls, no
+/// predicated incoming BL; body has one plain BL, one BLEQ, two register BLX.
+/// Resolve the request key, panic on a miss, suppress key 0x0dad05af, then
+/// prefer the signed request override. Otherwise query vtable +0x10c for a
+/// nonzero context; a -1 result falls back to the zero-context query or the
+/// stored default according to `use_default`. Normalize fallback -1 to zero.
+/// All action results truncate to signed 16 bits. Deliberate deviations:
+/// typed host-width pointer fields; existing Rust resolver/panic ports replace
+/// direct firmware calls. No added guards or invented virtual callee identity.
+///
+/// # Safety
+/// Inputs must be live framework objects with the documented prefixes and a
+/// valid +0x10c virtual method. The resolver must return this object layout.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn keyed_object_action_select(
+    context: *mut FallbackKeyedObjectContext,
+    request: *const KeyedObjectActionRequest,
+    use_default: u32,
+    action_context: u32,
+) -> i32 {
+    let object = unsafe {
+        primary_or_demo_mode_keyed_object(context, (*request).key, core::ptr::null_mut())
+    }.cast::<KeyedActionObject>();
+    if object.is_null() {
+        unsafe { crate::heap::veneers::heap_panic() }
+    }
+    if unsafe { (*object).key } == 0x0dad_05af {
+        return 0;
+    }
+    let explicit = unsafe { (*request).action_override };
+    if explicit != -1 {
+        return explicit as i32;
+    }
+    if action_context != 0 {
+        let action = unsafe {
+            ((*(*object).vtable).contextual_action)(object, action_context)
+        } as i16;
+        if action != -1 && use_default == 0 {
+            return action as i32;
+        }
+    }
+    let action = if use_default != 0 {
+        (unsafe { (*object).default_action }) as i16
+    } else {
+        (unsafe { ((*(*object).vtable).contextual_action)(object, 0) }) as i16
+    };
+    if action == -1 { 0 } else { action as i32 }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -356,6 +441,66 @@ mod tests {
 
         assert_eq!(result, unsafe { addr_of_mut!(FALLBACK_OBJECT).cast() });
         assert_eq!(unsafe { FALLBACK_ARGS }.1, 0x0dad_0123);
+        restore(guard);
+    }
+
+    #[repr(C)]
+    struct ActionFixture {
+        object: KeyedActionObject,
+        contextual_result: i32,
+        zero_result: i32,
+        calls: std::vec::Vec<u32>,
+    }
+
+    unsafe extern "C" fn fixture_action(object: *mut KeyedActionObject, context: u32) -> i32 {
+        let fixture = unsafe { &mut *object.cast::<ActionFixture>() };
+        fixture.calls.push(context);
+        if context == 0 { fixture.zero_result } else { fixture.contextual_result }
+    }
+
+    static ACTION_VTABLE: KeyedActionVtable = KeyedActionVtable {
+        unresolved_00: [0; 67],
+        contextual_action: fixture_action,
+    };
+
+    #[test]
+    fn action_precedence_fallback_and_signed_truncation() {
+        let guard = install();
+        let cases: &[(u32, i16, u32, u32, i32, i32, u32, i32, &[u32])] = &[
+            (0x0dad05af, 9, 0, 7, 4, 3, 2, 0, &[]),
+            (1, -2, 0, 7, 4, 3, 2, -2, &[]),
+            (1, 0, 1, 7, 4, 3, 2, 0, &[]),
+            (1, -1, 0, 7, 0x12348000, 3, 2, -32768, &[7]),
+            (1, -1, 0, 7, 0x1234ffff, 0x12348001, 2, -32767, &[7, 0]),
+            (1, -1, 0, 7, -1, -1, 2, 0, &[7, 0]),
+            (1, -1, 0, 0, 4, 0x12340002, 3, 2, &[0]),
+            (1, -1, 0, 0, 4, -1, 3, 0, &[0]),
+            (1, -1, 9, 7, 4, 3, 0x12348000, -32768, &[7]),
+            (1, -1, 9, 7, -1, 3, 0x1234ffff, 0, &[7]),
+            (1, -1, 9, 0, 4, 3, 0x12340002, 2, &[]),
+            (1, -1, 9, 0, 4, 3, 0xffff, 0, &[]),
+        ];
+        for &(key, explicit, use_default, action_context, contextual_result,
+              zero_result, default_action, expected, calls) in cases {
+            let mut fixture = ActionFixture {
+                object: KeyedActionObject {
+                    vtable: &ACTION_VTABLE, unresolved_04: [0; 10],
+                    default_action, unresolved_30: [0; 7], key,
+                },
+                contextual_result, zero_result, calls: std::vec::Vec::new(),
+            };
+            let request = KeyedObjectActionRequest {
+                unresolved_00: 0, key: 42, unresolved_08: [0; 6],
+                action_override: explicit,
+            };
+            let mut controller = context(ptr::null_mut());
+            unsafe { PRIMARY_RESULT = addr_of_mut!(fixture.object).cast() };
+            let result = unsafe {
+                keyed_object_action_select(&mut controller, &request, use_default, action_context)
+            };
+            assert_eq!(result, expected);
+            assert_eq!(fixture.calls, calls);
+        }
         restore(guard);
     }
 }
