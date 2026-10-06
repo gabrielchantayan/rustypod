@@ -3942,6 +3942,32 @@ pub unsafe extern "C" fn vector_size_elem12(vector: *const VectorBounds) -> i32 
     __rt_sdiv(span, 12)
 }
 
+/// vector_record12_first_word_at — `FUN_0816cb5c` @ 0x0816cb5c.
+/// True extent [0x0816cb5c, 0x0816cb84): 40 bytes, two incoming plain
+/// BL calls and zero predicated incoming calls. Body: one plain BL to
+/// vector_size_elem12 and one unsigned BLLS to heap_panic.
+///
+/// Compute the signed, truncating 12-byte record count, compare its bits
+/// unsigned against index, and fail non-returningly when count <= index.
+/// Otherwise reload begin and return the aligned first word at index * 12.
+/// Deliberate deviations: reuse VectorBounds' native-width host pointer
+/// fields (target fields remain four bytes apart); LLVM chooses registers.
+///
+/// # Safety
+/// `vector` must be a readable VectorBounds. An accepted index must select
+/// a readable, four-byte-aligned word; record offsets use ARM u32 wrapping.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_record12_first_word_at(
+    vector: *const VectorBounds, index: u32,
+) -> u32 {
+    if vector_size_elem12(vector) as u32 <= index {
+        crate::heap::veneers::heap_panic();
+    }
+    let begin = core::ptr::read_unaligned(core::ptr::addr_of!((*vector).begin));
+    begin.wrapping_add(index.wrapping_mul(12) as usize).cast::<u32>().read()
+}
+
 /// vector_size_elem24 — original: `FUN_083d7750` @ 0x083d7750
 /// (16 bytes; 31 `bl` call sites there, 45 across the 2 byte-identical
 /// copies — the second instantiation, `FUN_083d77dc` @ 0x083d77dc with
@@ -10029,6 +10055,54 @@ mod tests {
             let reversed = VectorBounds { begin: begin.add(13), end: begin };
             assert_eq!(vector_size_elem12(&reversed), -1, "-13 / 12 truncates to -1");
         }
+    }
+
+    #[test]
+    fn vector_record12_first_word_at_selects_words_not_neighbors() {
+        let mut records = [
+            [0x8000_0001u32, 0x1111_1111, 0x2222_2222],
+            [0xffff_ffff, 0x3333_3333, 0x4444_4444],
+            [0, 0x5555_5555, 0x6666_6666],
+        ];
+        unsafe {
+            let begin = records.as_mut_ptr().cast::<u8>();
+            let vector = VectorBounds { begin, end: begin.add(36) };
+            for index in 0..3 {
+                assert_eq!(vector_record12_first_word_at(&vector, index), records[index as usize][0]);
+            }
+            let partial = VectorBounds { begin, end: begin.add(35) };
+            assert_eq!(vector_record12_first_word_at(&partial, 1), 0xffff_ffff);
+            // Negative signed counts are compared as unsigned, not clamped.
+            let reversed = VectorBounds { begin: begin.add(12), end: begin };
+            assert_eq!(vector_record12_first_word_at(&reversed, 0), 0xffff_ffff);
+        }
+    }
+
+    #[test]
+    fn vector_record12_first_word_at_rejects_unsigned_boundaries() {
+        unsafe extern "C" fn invalid_access() -> ! {
+            let case: u32 = std::env::var("RUSTYPOD_RECORD12_CASE").unwrap().parse().unwrap();
+            let mut records = [0u32; 6];
+            let begin = records.as_mut_ptr().cast::<u8>();
+            let (length, index) = match case {
+                0 => (0, 0),
+                1 => (12, 1),
+                2 => (23, 1),
+                _ => (24, u32::MAX),
+            };
+            let vector = VectorBounds { begin, end: begin.add(length) };
+            vector_record12_first_word_at(&vector, index);
+            std::process::exit(90);
+        }
+        for case in ["0", "1", "2", "3"] {
+            std::env::set_var("RUSTYPOD_RECORD12_CASE", case);
+            crate::heap::veneers::tests::assert_heap_panic_entry_fatal_path(
+                "RUSTYPOD_RECORD12_CHILD",
+                "cxx::templates::tests::vector_record12_first_word_at_rejects_unsigned_boundaries",
+                invalid_access,
+            );
+        }
+        std::env::remove_var("RUSTYPOD_RECORD12_CASE");
     }
 
     // ---- vector_size_elem24 ------------------------------------------
