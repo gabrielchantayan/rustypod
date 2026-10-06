@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817470c
+    ghidra: FUN_0817470c
+    name: app_screen_set_byte_0x28
+    size: 8
+    sig: "void app_screen_set_byte_0x28(u8 *screen, u8 value)"
+    module: app/app_screen_set_byte_0x28
+    status: ported
+    renames:
+      param_1/r0: screen
+      param_2/r1: value
+      screen_plus_0x28: byte_0x28
+    notes: >-
+      Raw osos.dec words e5c01028 e12fff1e establish the complete
+      extent [0x0817470c,0x08174714): strb r1,[r0,#0x28]; bx lr.
+      The next real function at 0x08174714 stores byte +0x27 and
+      returns before the independent push prologue at 0x0817471c.
+      Whole-image A32 decoding verifies two inbound plain BLs at
+      0x081309a4 and 0x08130a18, zero predicated inbound BLs, and
+      zero outbound calls. Both callers obtain the screen through the
+      existing app_screen_get identity at 0x08173848 and pass zero or
+      one respectively. The field's precise meaning remains unknown;
+      preserve all byte values rather than normalize to boolean.
+      No deliberate behavioral deviations or null guard. Host tests
+      exhaust all 256 values at four pointer alignments and verify the
+      entire surrounding storage remains unchanged. Full host suite:
+      14430 passed. ARM release build passes. match.py exits 1 with
+      two original versus four Rust instructions: the same byte store
+      at +0x28, with LLVM frame-pointer push/mov/pop replacing bx lr.
+      Standalone host smoke exercises 1, 0, 255 and 128 with unchanged
+      adjacent bytes.
+
   - address: 0x08182200
     ghidra: FUN_08182200
     name: app_controller_restore_mode_resources
