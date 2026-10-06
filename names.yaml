@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08186dc4
+    ghidra: FUN_08186dc4
+    name: owned_virtual_member_clear
+    size: 48
+    sig: "VirtualMemberOwner *owned_virtual_member_clear(VirtualMemberOwner *owner)"
+    module: app/owned_virtual_member_clear
+    vars: {param_1/r4: owner, r0/member: member, r1: virtual_release}
+    status: ported
+    notes: >-
+      Raw A32 extent [0x08186dc4,0x08186df4) is twelve instruction words;
+      next function starts with push {r4-r6,lr}. Whole-image decoding finds
+      two inbound plain BLs at 0x0839c3b4 and 0x0839c3f8, zero predicated
+      BLs. Body has zero plain/predicated BLs and one register BLX.
+      If owner word 1 is non-NULL, dispatch object vtable word 1 with
+      the object as r0, then clear owner word 1. Return the saved owner.
+      Raw callers subsequently delete that owner; Ghidra omits its argument
+      and incorrectly marks delete noreturn. Concrete class and virtual
+      release identity remain unknown; no invented fixed-address seam.
+      No prior canonical assigned entry. Deliberate deviation: repr(C)
+      pointers widen on hosts, preserving field/vtable order; target +4
+      offsets remain exact. Tests cover absent members, preserved header,
+      release-before-clear, overwritten callback replacement and repeated
+      cleanup. Full host suite and ARM release build pass; standalone
+      actual-source smoke verifies dispatch, clear, return and repeat.
+      match.py exits 1: 12 stock versus 15 Rust instructions preserve NULL
+      guard, virtual +4 BLX, post-call member +4 clear and saved return.
+      LLVM moves the guard before a larger frame. No device execution.
   - address: 0x0817e4c8
     ghidra: FUN_0817e4c8
     name: owned_observable_array_replace

@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod owned_virtual_member_clear;
+pub use owned_virtual_member_clear::*;
 pub mod owned_observable_array_replace;
 pub mod demo_mode_rearm_timer;
 pub mod demo_mode_prepare_collection;
