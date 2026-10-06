@@ -224066,3 +224066,34 @@ functions:
       for boolean conversion instead of the stock conditional early return.
       The relocatable BL operand shown as zero resolves to the existing
       callee. No on-device execution performed.
+
+  - address: 0x0815cab0
+    ghidra: FUN_0815cab0
+    name: ui_element_associated_word_get
+    size: 16
+    sig: "u32 ui_element_associated_word_get(const u8 *element)"
+    module: ui/associated_word_get
+    status: ported
+    renames:
+      param_1/r0: element
+      uVar1: associated_word
+    notes: >-
+      Raw words e5900048/e3500000/1590000c/e12fff1e establish the
+      16-byte extent ending at 0x0815cac0, a separate r1-based selector.
+      Whole-image aligned A32 decoding finds two incoming plain BLs at
+      0x0815cf18 and 0x0815e3d0, zero incoming predicated BLs, and zero
+      outgoing plain or predicated BLs. Read the target-width pointer
+      at element +0x48; return zero if null, otherwise the complete u32
+      at associated +0xc. The property-dispatch caller passes r8 as the
+      element; the formatter caller divides the result by 1000 and
+      renders time fields. A stronger field identity is not assumed.
+      No deliberate behavioral deviations and no callee seams.
+      Aligned reads and 32-bit pointer fields are retained on hosts.
+      Host tests cover null association with minimal storage, two distinct
+      associated pointers, zero and high-bit/all-ones values, and preserved
+      neighboring fields. Full x86_64 host suite and ARM release build pass.
+      Standalone host smoke returns null=0 and linked=0x80001234.
+      match.py exits 1: four stock instructions versus eight Rust instructions.
+      LLVM uses an explicit null early return and a frame-pointer prologue
+      on the nonnull path instead of LDRNE; offsets and unchecked loads agree.
+      No on-device execution performed.
