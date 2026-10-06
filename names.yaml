@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08165e34
+    ghidra: FUN_08165e34
+    name: active_entry_table_address
+    size: 56
+    sig: "u32 active_entry_table_address(const void *owner, u32 enabled, u32 primary)"
+    module: util/active_entry_table_address
+    status: ported
+    renames:
+      param_1: owner
+      param_2: enabled
+      param_3: primary
+      uVar1: table_address
+      DAT_08165e5c: enabled_secondary_table
+      DAT_08165e60: enabled_primary_table
+      DAT_08165e64: disabled_secondary_table
+      DAT_08165e68: disabled_primary_table
+    notes: >-
+      Raw osos.dec establishes extent 0x08165e34..0x08165e6c:
+      40 instruction bytes followed by four address literals. The next
+      real function starts with ldrb r2,[r0] at 0x08165e6c. Independent
+      A32 decoding counts zero outgoing plain BLs and zero predicated
+      BLs; two incoming plain BLs at 0x0815382c and 0x08153858, with
+      no predicated incoming BLs. r0 is ignored. Any nonzero r1 selects
+      enabled tables; any nonzero r2 selects the primary table.
+      Enabled secondary/primary bases are 0x08a0e7a0/0x08a0e738;
+      disabled secondary/primary bases are 0x08a0e818/0x08a0e7f0.
+      FUN_0815379c passes the selected base to FUN_081538bc, which
+      serializes eight-byte entries until their second word is zero.
+      These are runtime table addresses, not immutable raw resource
+      contents. No callee seam is needed. Deliberate deviation: a u32
+      firmware address is returned rather than a host-sized pointer;
+      the unused owner is never dereferenced. Host tests cover all
+      selections, noncanonical true flags, and null/invalid owners.
+      ARM match.py shows a structural diff: LLVM replaces four literal
+      loads with one 0x08a0e738 base and conditional additions of
+      0x68, 0xb8, and 0xe0, preserving both flag selections. It adds
+      a frame-pointer prologue/epilogue; there are still no calls.
   - address: 0x08165e6c
     ghidra: FUN_08165e6c
     name: active_entry_last_label
