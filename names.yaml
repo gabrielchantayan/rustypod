@@ -54427,6 +54427,34 @@ functions:
       target-address/host-recorder seam; the now-named shared provider-vtable
       slot models +0x60 directly on both host and target. Host tests cover
       no-current, accepted, rejected, and NULL-replacement paths.
+  - address: 0x0816ee74
+    ghidra: FUN_0816ee74
+    name: genius_request_advance
+    size: 136
+    sig: "u32 genius_request_advance(GeniusRequest *request)"
+    module: app/genius_request_advance
+    status: ported
+    vars: {param_1/r4: request, r5: identifier_lo, r6: identifier_hi, "request+0x18": descriptor_owner, "request+0x34": iterator}
+    notes: >-
+      Raw extent is 0x0816ee74..0x0816eefc, including the manager-root
+      literal 0x089ca674 at 0x0816eef8; the next real prologue is at
+      0x0816eefc. Whole-image aligned ARM decoding finds two plain inbound
+      BLs at 0x0816eca0 and 0x081de6a0, zero predicated callers. The body
+      contains three plain BLs and one BLNE. Completed requests return one;
+      otherwise request+0x34 is passed to the NULL-guarded 64-bit identifier
+      wrapper at 0x082cacfc (raw BNE tail target 0x08269e48). Zero identifier
+      returns zero. Nonzero identifiers are looked up by alternate ID via
+      manager+0x30 then service+0xf60; found descriptors attach to the owner
+      at request+0x18 with NULL context. Missing descriptors and attachment
+      failure still return one. Existing readiness, lookup, and attachment
+      ports are reused; only the iterator boundary remains retailOS.
+      The wait-ready caller now uses this port. No target behavior deviations.
+      Host tests cover zero-ID short circuit, either nonzero identifier half,
+      missing descriptors, and the exported inactive/exhausted request path.
+      ARM match prints a structural diff: LLVM uses ORRS for the 64-bit
+      zero test and branches around attachment rather than BLNE. The iterator
+      seam uses BLX; ported calls are linker relocations. Global chain loads
+      and NULL attachment context are retained.
   - address: 0x0816ecd8
     ghidra: FUN_0816ecd8
     name: genius_request_selection_is_complete

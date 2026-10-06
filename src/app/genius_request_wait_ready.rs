@@ -22,7 +22,7 @@
 //!
 //! 0x0816ecd8 is now ported as
 //! [`genius_request_selection_is_complete`]; target builds call it directly.
-//! 0x0816ee74 remains at its fixed retailOS address, while host tests replace
+//! Request advance also calls the ported implementation; host tests replace
 //! both helpers through a volatile operation table. The Timer E reader is
 //! already ported and called directly. No deliberate behavioral deviations.
 
@@ -57,8 +57,7 @@ unsafe extern "C" fn firmware_request_is_ready(_request: *mut c_void) -> u32 {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_request_advance(request: *mut c_void) -> u32 {
-    let advance: GeniusRequestAdvance = unsafe { core::mem::transmute(0x0816_ee74usize) };
-    unsafe { advance(request) }
+    unsafe { crate::app::genius_request_advance::genius_request_advance(request.cast()) }
 }
 
 #[cfg(not(target_os = "none"))]
@@ -68,8 +67,8 @@ unsafe extern "C" fn firmware_request_advance(_request: *mut c_void) -> u32 {
 
 /// The request-advance helper called by [`genius_request_wait_ready`].
 ///
-/// Target builds call the ported ready predicate directly and retailOS for
-/// request advance; host tests install both recording implementations.
+/// Target builds call the ported ready predicate and request advance directly;
+/// host tests install both recording implementations.
 pub static mut GENIUS_REQUEST_WAIT_OPS: GeniusRequestWaitOps = GeniusRequestWaitOps {
     is_ready: firmware_request_is_ready,
     advance: firmware_request_advance,
