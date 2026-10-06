@@ -224980,3 +224980,32 @@ functions:
       enabled flags, all 64 slots, capacity boundaries and arithmetic wrap.
       Standalone native execution returns 0x80001 for a full slot, a slot
       with one free byte, and an empty slot. No physical-device execution.
+  - address: 0x081676ec
+    ghidra: FUN_081676ec
+    name: plist_handle_construct
+    size: 16
+    sig: "u32 *plist_handle_construct(u32 *handle)"
+    module: util/plist_handle_construct
+    status: ported
+    vars:
+      param_1/r0: handle / returned object
+      r1: zero
+      handle_plus_4: active/kind byte
+    notes: >-
+      Raw words e3a01000 e5801000 e5c01004 e12fff1e prove the true extent
+      [0x081676ec,0x081676fc), bounded by the independent state-byte-only
+      destructor. Whole-image aligned A32 decoding finds two inbound plain
+      BLs at 0x080ab3b8 and 0x081c82f8, zero predicated inbound BLs, and
+      zero outbound BLs. Clear the node handle word and active/kind byte
+      at +4; preserve padding and later fields. Return this unchanged:
+      caller 0x081c82fc subtracts 0x28 from r0 to recover the document.
+      Adjacent accessors distinguish node-vector kind 1 and XML kind 2.
+      No callees or new seams. No behavioral deviations; correct Ghidra's
+      void return and retain target-width handle storage on hosts. Host
+      edge tests cover empty/nonzero handles, kinds 0/1/2/255, preserved
+      neighbors and padding, pointer identity, and repeated construction.
+      Full host suite and release ARM build pass. Actual-source native
+      smoke confirms cleared fields, preserved padding/following field
+      and returned pointer. match.py shows six instructions versus four:
+      LLVM adds a frame and reverses independent byte/word stores; offsets,
+      zero values and unchanged r0 match. No physical-device execution.
