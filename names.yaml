@@ -48841,6 +48841,35 @@ functions:
       virtual tail dispatch as a typed call; vtable-load order, all four
       arguments, and unguarded NULL behavior match stock.
 
+  - address: 0x08171c00
+    ghidra: FUN_08171c00
+    name: class6000_read_ui32_property_60ae
+    size: 28
+    sig: "u32 *class6000_read_ui32_property_60ae(Class6000 *store)"
+    module: app/class_6000_property
+    status: ported
+    renames:
+      param_1/r0: store
+      "[store + 0x00]": vtable
+      "[vtable + 0xe0]": read_typed
+      DAT_08171c18: RESOURCE_KIND_UI32
+    notes: >-
+      Raw osos.dec words are e5901000 e3a02a06 e591c0e0 e59f3004
+      e28210ae e12fff1c followed by literal 55693332 ("Ui32").
+      The true extent is 28 bytes: 24 instruction bytes through
+      0x08171c14 and the literal at 0x08171c18; the next real function
+      begins at 0x08171c1c with e92d4010. Independently decoded ARM BL
+      targets yield two plain unconditional calls at 0x08140be8 and
+      0x08141440, with no predicated BL calls. It loads store->vtable
+      and tail-dispatches slot +0xe0 as read_typed(store, 0x60ae,
+      0x6000, "Ui32"), preserving the raw pointer result including NULL.
+      The caller at 0x08141440 stores that pointer at receiver +0x100
+      after a property-0x60ae notification; no more specific property
+      identity is established. Reuses the existing Class6000VTable
+      typed-read seam without assigning a concrete virtual callee.
+      Deliberate deviation: Rust expresses the terminal bx ip as a
+      typed call, retaining the unguarded loads, arguments, and result.
+
   - address: 0x08171fdc
     ghidra: FUN_08171fdc
     name: class6000_read_ui32_property_6056
