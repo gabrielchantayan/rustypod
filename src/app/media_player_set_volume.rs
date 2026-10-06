@@ -5,23 +5,23 @@
 //! function begins at `0x08111794`. Raw ARM decoding finds **3 plain
 //! unconditional `bl` callers and 0 predicated `bl` callers**. The body itself
 //! has five direct `bl` instructions: two calls to `instance_of_class_6000`,
-//! and one each to the unported class-0x6000 helper, an empty function, and
+//! and one each to the class-0x6000 property writer, an empty function, and
 //! `resource_chain_write`.
 //! # Algorithm
 //!
-//! Store the requested volume at `player + 0x464`, invoke the unported helper
-//! at `0x08172004` on the class-0x6000 singleton, conditionally change
-//! `player + 0x494` from zero to ten, and write `(raw kind 0x70724944, id
+//! Store the requested volume at `player + 0x464`, invoke
+//! `class6000_write_ui32_property_6056` on the class-0x6000 singleton,
+//! conditionally change `player + 0x494` from zero to ten, and write
+//! `(raw kind 0x70724944, id
 //! 0x6031, value 0x6035, flags 4)` to the singleton's resource-provider chain.
 //! Finally dispatch player vtable slot `+0x58` with the two verified opaque
 //! words `0x089ca660` and `0x63f9`.
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_082898dc` is an empty body and is omitted. The helper at `0x08172004`
-//! and terminal virtual dispatch have no established semantic identity, so
-//! host builds expose them as seams while target builds call their verified
-//! ABI shapes directly.
+//! `FUN_082898dc` is an empty body and is omitted. Host builds expose the
+//! property update and terminal virtual dispatch as seams; target builds
+//! call the Rust property writer and verified virtual ABI respectively.
 
 #[cfg(target_os = "none")]
 use crate::app::registry::instance_of_class_6000;
@@ -74,8 +74,7 @@ pub static mut MEDIA_PLAYER_SET_VOLUME_OPS: MediaPlayerSetVolumeOps = DEFAULT_ME
 
 #[cfg(target_os = "none")]
 unsafe fn class6000_update(store: *mut u8, volume: u32) {
-    let update: unsafe extern "C" fn(*mut u8, u32) = core::mem::transmute(0x0817_2004usize);
-    update(store, volume);
+    crate::app::class6000_write_ui32_property_6056::class6000_write_ui32_property_6056(store.cast(), volume);
 }
 
 #[cfg(target_os = "none")]

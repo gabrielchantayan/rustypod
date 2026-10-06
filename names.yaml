@@ -48874,6 +48874,37 @@ functions:
       LLVM adds the frame-pointer push/pop every tiny port in this crate
       shows (observable_set_changed precedent).
 
+  - address: 0x08172004
+    ghidra: FUN_08172004
+    name: class6000_write_ui32_property_6056
+    size: 152
+    sig: "void class6000_write_ui32_property_6056(Property6056Store *store, u32 value)"
+    module: app/class6000_write_ui32_property_6056
+    status: ported
+    renames:
+      param_1/r0: store
+      param_2/r1: value
+      uStack_10: value
+      "[vtable + 0xd8]": write_typed
+      "[vtable + 0x58]": notify
+      DAT_08172088: RESOURCE_KIND_UI32
+      DAT_0817208c: NOTIFICATION_CONTROL
+      DAT_08172098: NOTIFICATION_STRING
+    notes: >-
+      Raw osos.dec establishes 132 instruction bytes through 0x08172084,
+      followed by five literal words; next real function begins at
+      0x0817209c, giving 152 bytes total. Independently scanned ARM words
+      find two plain BL callers at 0x081116f8 and 0x081ed008, no predicated
+      BL callers. Body has zero direct BL and four register BLX calls.
+      Writes slot +0xd8 as (store, 0x6056, 0x6000, &value, 0x55693332),
+      then dispatches slot +0x58 with ("Cntl", 0x6056), ("Cntl", 0x63f9),
+      and ("Str ", 0x60ed), reloading the vtable after every callback.
+      Ghidra's sixth write argument is saved r0, not an argument; only
+      one argument word was placed on the outgoing stack. The property's
+      broader semantic identity is not assumed. No behavioral deviations;
+      repr(C) native-pointer host fixtures widen slots, with target offset
+      assertions. Both existing target callers now use this Rust port.
+
   - address: 0x081115cc
     ghidra: FUN_081115cc
     name: class6000_ui32_property_6056

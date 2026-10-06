@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod class6000_write_ui32_property_6056;
 pub mod u16_buffer_prepare;
 pub mod app_screen_set_context_mode;
 pub mod app_screen_set_byte_0x28;
