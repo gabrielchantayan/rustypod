@@ -223558,3 +223558,46 @@ functions:
       A standalone host executable also exercised the exported Rust entry
       with the real comparator on descending keys 70/50/30/10: query keys
       5/20/40/80 returned not-found indices 3/3/2/0 respectively.
+  - address: 0x0816ea70
+    ghidra: FUN_0816ea70
+    name: genius_request_initialize
+    size: 200
+    sig: "u32 genius_request_initialize(GeniusRequest *request)"
+    module: app/genius_request_initialize
+    status: ported
+    vars: {param_1/r4: request, "request+0x10": active, "request+0x28": metadata_context, "request+0x2c": provider, "request+0x30": source, "request+0x34": metadata, "request+0x38": keys, "request+0x3c": key_count, "request+0x40": array_mode}
+    renames:
+      FUN_0813eb3c: retail_memory_reclaim
+      FUN_082aadd4: operator_new
+      FUN_08159bcc: retail_request_source_acquire
+      FUN_08159ca4: retail_request_provider_acquire
+      FUN_082caca0: retail_metadata_context_construct
+      FUN_082cacec: metadata_fetch_or_null
+      FUN_082ca98c: retail_metadata_array_fetch
+      FUN_08030f44: heap_panic
+      FUN_0816ed0c: retail_request_element_attach
+    notes: >-
+      Raw A32 extent [0x0816ea70,0x0816eb38) contains 192 instruction
+      bytes plus literals 0x414 and 0x089ca674. Next real function starts
+      with PUSH at 0x0816eb38. Whole-image aligned BL decoding finds two
+      incoming plain BLs at 0x0812ce30 and 0x081b6270, zero predicated.
+      Body has eight plain BLs and one BLEQ to heap_panic. Reclaim with
+      0x180000, retain the otherwise unused operator_new(0x414), acquire
+      source and provider, construct context with third argument zero,
+      and fetch either the full two-word key or the nonempty key array.
+      Each zero result stops acquisition, preserves later fields, and
+      clears only the active byte. Invalid array pointer/count panics
+      before metadata/active writes. Successful metadata attaches the
+      reference at +0x14 using (*0x089ca674)+0x30 and the original key
+      as fifth/sixth arguments; ignore attachment error and set active.
+      Reuses ported operator_new, heap_panic and metadata_fetch_or_null.
+      Other identities are structural exact-address seams, not new ports.
+      Incoming attachment r3 is unused (raw callee overwrites it before
+      reading it), so the port supplies zero. Firmware uses typed BLX;
+      host exported entry explicitly panics because retail dependencies
+      are unavailable; isolated tests execute the shared body.
+      All 14459 host tests pass. ARM release builds. Standalone host
+      smoke exercises shared-body success and attachment mutation.
+      match.py exits 1: 66 Rust versus 48 original instructions, including
+      Rust literals; acquisition gates, ordered stores, conditional panic,
+      two fetch modes, stacked key arguments and byte result survive.

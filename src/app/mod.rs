@@ -1114,3 +1114,4 @@ pub mod banked_slot_close;
 pub mod media_player_trim_current_item;
 pub mod parser_skip_blanks;
 pub mod three_child_value_sum;
+pub mod genius_request_initialize;
