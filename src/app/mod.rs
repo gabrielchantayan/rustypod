@@ -875,6 +875,7 @@ pub mod search_query_token_score;
 pub mod handle_vtable_sequence_dispatch;
 pub mod scoped_string_id_record_set;
 pub mod scoped_string_id_record_set_dispatch;
+pub mod context_match_string_id;
 pub mod selection_position_at_or_past_item_count;
 pub mod service_manager;
 pub mod service_handler_masked_event_dispatch;
