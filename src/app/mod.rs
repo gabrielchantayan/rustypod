@@ -207,6 +207,7 @@ pub mod clock_remove_selection;
 pub mod root_query_is_zero;
 pub mod selected_resource_prepare;
 pub mod string_resource_c_str;
+pub mod draw_resource_lookup;
 pub mod flagged_owned_array_clear;
 pub mod pending_list_clear;
 pub mod locked_word_pair_reset;

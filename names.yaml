@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816e478
+    ghidra: FUN_0816e478
+    name: draw_resource_lookup
+    size: 20
+    sig: "void *draw_resource_lookup(const DrawResourceObject *object)"
+    module: app/draw_resource_lookup
+    status: ported
+    renames:
+      param_1/r0: object
+      object_plus_0x38: resources
+      object_plus_0x44: resource_id
+      DAT_0816e488: RESOURCE_KIND_DRAW
+      FUN_0827216c: resource_chain_find
+    notes: >-
+      Raw osos.dec establishes 16 code bytes at 0x0816e478..0x0816e488
+      plus the Draw literal 0x44726177 at 0x0816e488. Next real function
+      begins with push {r4,r5,r6,lr} at 0x0816e48c: true extent 20 bytes.
+      Independent whole-image aligned ARM BL decoding finds two plain
+      inbound calls at 0x0816e404 and 0x0816e5e4, zero predicated calls.
+      Body has zero plain or predicated BLs and one tail B to the already
+      ported resource_chain_find at 0x0827216c. Loads ID from +0x44 and
+      provider head from +0x38, queries (Draw, ID), returns the raw answer.
+      Both callers NULL-check it and consume the word at +4; no further
+      payload interpretation is inferred. Ghidra incorrectly inlines the
+      chain traversal. No new seams. Deliberate deviations: repr(C) opaque
+      pointer-sized words widen on hosts; Rust call replaces retail tail B.
+      Host tests cover empty and exhausted chains, ID boundaries, child
+      answers, noncanonical acceptance, accepted NULL, and a declining
+      provider's out-word write surviving a later miss. All 14463 host
+      tests pass; ARM release build passes. match.py exits 1 with the
+      expected structural diff: LLVM adds an fp frame and an r3 temporary,
+      retaining +0x38/+0x44 loads, Draw literal and resource-chain tail B.
+      Isolated real-source native smoke returns NULL for an empty provider
+      chain and maximum ID. No device execution claimed.
   - address: 0x0815f290
     ghidra: FUN_0815f290
     name: record_promote
