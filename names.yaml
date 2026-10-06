@@ -223086,3 +223086,39 @@ functions:
       Deliberate deviations: none; stores the verified vtable address
       without inventing identities for its runtime slots. Host tests cover
       zero and dirty state, pointer identity, and adjacent-word preservation.
+
+  - address: 0x08174484
+    ghidra: FUN_08174484
+    name: app_screen_set_context_mode
+    size: 140
+    sig: "void app_screen_set_context_mode(void *screen, RefcountedBody **source, uint32_t mode, uint32_t detail, uint32_t flags)"
+    module: app/app_screen_set_context_mode
+    status: ported
+    vars:
+      param_1/r0/r4: screen
+      param_2/r1/r7: source
+      param_3/r2/r5: mode
+      param_4/r3/r8: detail
+      param_5/stack/r9: flags
+      local_28: queried_mode
+      local_24: queried_detail
+    notes: >-
+      Raw ARM establishes [0x08174484,0x08174510), 140 bytes. Whole-image
+      aligned branch decoding finds two plain inbound BLs at 0x081e0f80
+      and 0x08260914, zero predicated inbound BLs. Four outbound plain BLs
+      target ported refcounted_body_release, refcounted_body_acquire,
+      handle_deref_or_null, and unported 0x08174368; zero predicated BLs.
+      One virtual BLX queries slot +0xac; final B targets 0x081779c8.
+      Ghidra incorrectly absorbs that separately linked notification body.
+      Replaces screen+0x18 handle unless source aliases that slot. Mode one
+      queries mutable detail/mode copies; queried detail 16 selects mode two,
+      while queried mode is ignored. Stores selected mode, original detail,
+      and flags as bytes at +0x24..+0x26, then calls the mode-dependent helper
+      and notification helper at their verified retail addresses. Native
+      pointers adapt host fixtures; target offsets are unchanged. Host tests
+      cover replacement counts, self-assignment, NULL replacement, query
+      promotion and ignored mode mutation, full-width mode comparison, and
+      byte truncation. Host suite passes 14434 tests; ARM release builds.
+      match.py prints a structural diff: LLVM uses an explicit scratch frame,
+      reordered byte stores, and absolute BLX calls for the two retail seams
+      rather than direct BL/tail B; guards and virtual slot are preserved.
