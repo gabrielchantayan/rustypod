@@ -148,5 +148,40 @@ mod tests {
             assert_eq!(state.applied, (0..expected_tags).map(|i| (10 + i, RESOURCE_TAGS[i as usize % 3])).collect::<std::vec::Vec<_>>());
             assert!(state.destroyed);
         }
+
+        // Callees can change both the selector and the selected vector's size.
+        // A cached selector or loop bound would visit a second declaration.
+        unsafe extern "C" fn changing_count(_: *const u8, selector: u32) -> u32 {
+            if STATE.lock().keys.is_empty() {
+                assert_eq!(selector, 0);
+                3
+            } else {
+                assert_eq!(selector, 0x80);
+                1
+            }
+        }
+        unsafe extern "C" fn changing_apply(
+            controller: *mut u8, resource: u32, object: *mut u8,
+            declaration: *const u32, tag: u32, mode: u32,
+        ) -> u32 {
+            controller.add(0xcd).write(0x80);
+            apply(controller, resource, object, declaration, tag, mode)
+        }
+        *STATE.lock() = State {
+            count: 3, missing: u32::MAX, declaration, keys: std::vec::Vec::new(),
+            applied: std::vec::Vec::new(), destroyed: false,
+        };
+        let mut controller = [0u32; 52];
+        controller[8] = 10;
+        unsafe {
+            reset_with_ops(controller.as_mut_ptr().cast(), ResetOps {
+                construct, count: changing_count, item, resolve,
+                apply: changing_apply, destruct,
+            });
+        }
+        let state = STATE.lock();
+        assert_eq!(state.keys, [0]);
+        assert_eq!(state.applied, [(10, RESOURCE_TAGS[0]), (11, RESOURCE_TAGS[1]), (12, RESOURCE_TAGS[2])]);
+        assert!(state.destroyed);
     }
 }
