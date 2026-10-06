@@ -181,6 +181,84 @@ pub unsafe extern "C" fn configured_range_view_construct(
     view
 }
 
+/// Specification for a range view owning one mandatory and one optional service.
+#[repr(C)]
+pub struct ServiceRangeViewSpec {
+    pub range: RangeViewSpec,
+    pub primary_header: u32,
+    pub secondary_header: u32,
+    pub configuration: u32,
+}
+
+#[repr(C)]
+pub struct ServiceRangeView {
+    pub range: RangeView,
+    pub primary_service: u32,
+    pub secondary_service: u32,
+    pub configuration: u32,
+}
+
+const _: [u8; 0x74] = [0; core::mem::size_of::<ServiceRangeViewSpec>()];
+const _: [u8; 0xc0] = [0; core::mem::size_of::<ServiceRangeView>()];
+
+/// service_range_view_construct — FUN_081860dc @ 0x081860dc.
+/// True size 108 bytes: 104 code bytes through the pop at 0x08186140,
+/// then vtable literal 0x08989518; the next function starts at 0x08186148.
+/// Raw A32 decoding verifies two inbound plain BLs (0x08185ee8,
+/// 0x081fb230), five outgoing plain BLs, and zero predicated BLs.
+///
+/// Construct the range base, install the derived vtable, allocate and
+/// construct a 200-byte pair-header service using view +0x38 and spec +0x68,
+/// then do the same for spec +0x6c only when nonzero. Store both returned
+/// service pointers at +0xb4/+0xb8 and copy spec +0x70 to +0xbc.
+///
+/// Deliberate deviations: restore Ghidra's missing five arguments and return;
+/// retain the base's known-identical input pointer. Service pointers and
+/// vtable remain target u32 words, including on hosts. Service/class names
+/// are structural; no more specific UI identity is inferred.
+///
+/// # Safety
+/// Objects must be aligned and valid for their types. The base operations,
+/// heap, and pair-header element-array dependency must be configured.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn service_range_view_construct(
+    view: *mut ServiceRangeView,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ServiceRangeViewSpec,
+) -> *mut ServiceRangeView {
+    range_view_construct(
+        core::ptr::addr_of_mut!((*view).range), resources, controller, parent,
+        core::ptr::addr_of!((*spec).range),
+    );
+    core::ptr::addr_of_mut!((*view).range.base.vtable).write_volatile(0x0898_9518);
+    service_range_tail(view, spec, |provider, header| {
+        let storage = crate::heap::veneers::operator_new(200).cast::<u32>();
+        crate::cxx::pair_header::pair_header_construct(storage, provider.read_volatile(), header.read_volatile()) as usize as u32
+    });
+    view
+}
+
+#[inline(always)]
+unsafe fn service_range_tail(
+    view: *mut ServiceRangeView,
+    spec: *const ServiceRangeViewSpec,
+    mut construct: impl FnMut(*const u32, *const u32) -> u32,
+) {
+    let provider = view.cast::<u32>().add(0x38 / 4);
+    let primary = construct(provider, core::ptr::addr_of!((*spec).primary_header));
+    core::ptr::addr_of_mut!((*view).primary_service).write_volatile(primary);
+    let secondary = if (*spec).secondary_header != 0 {
+        construct(provider, core::ptr::addr_of!((*spec).secondary_header))
+    } else {
+        0
+    };
+    core::ptr::addr_of_mut!((*view).secondary_service).write_volatile(secondary);
+    core::ptr::addr_of_mut!((*view).configuration).write_volatile((*spec).configuration);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -325,6 +403,35 @@ mod tests {
                     configuration[3], 0, configuration[4], 0, configuration[5], 0,
                     configuration[6], 0, configuration[7], 0, configuration[9],
                 ]);
+            }
+        }
+    }
+
+    #[test]
+    fn service_tail_zero_header_skips_only_secondary_and_overwrites_poison() {
+        for secondary_header in [0, 1, u32::MAX] {
+            let specification = ServiceRangeViewSpec {
+                range: spec(0, 0, 0, 0),
+                primary_header: 0,
+                secondary_header,
+                configuration: u32::MAX,
+            };
+            let mut storage = core::mem::MaybeUninit::<ServiceRangeView>::uninit();
+            unsafe {
+                ptr::write_bytes(storage.as_mut_ptr().cast::<u8>(), 0xa5, 0xc0);
+                let view = storage.as_mut_ptr();
+                let mut calls = 0;
+                service_range_tail(view, &specification, |_, _| {
+                    calls += 1;
+                    // A null primary result must not suppress the optional service.
+                    if calls == 1 { 0 } else { 0x1234_5678 }
+                });
+                assert_eq!(calls, if secondary_header == 0 { 1 } else { 2 });
+                assert_eq!((*view).primary_service, 0);
+                assert_eq!((*view).secondary_service,
+                    if secondary_header == 0 { 0 } else { 0x1234_5678 });
+                assert_eq!((*view).configuration, u32::MAX);
+                assert_eq!((*view).range.maximum, 0xa5a5_a5a5);
             }
         }
     }
