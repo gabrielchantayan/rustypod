@@ -134,6 +134,41 @@ pub unsafe extern "C" fn region_block_size() -> u32 {
     }
     (mgr.add(BLOCK_SIZE_OFFSET) as *const u32).read()
 }
+/// manager_free_block_count — original: `FUN_0818aba4` @ `0x0818aba4`.
+///
+/// True extent [0x0818aba4, 0x0818abd8): 52 bytes, comprising 48 bytes
+/// of instructions and the global-address literal at 0x0818abd4. Raw ARM
+/// words verify two outgoing and two incoming plain BLs, no predicated BLs.
+/// Snapshot the manager pointer; NULL returns zero. Otherwise lock its
+/// +0x148 mutex, read the free-list count at +0x14, unlock, and return the
+/// saved count regardless of either mutex status.
+///
+/// Deliberate deviations: reuse the modeled [`BLOCK_MANAGER`] global and
+/// existing REGION_MUTEX_OPS seam (verified veneers 0x082621a8/0x082621ac
+/// branch to canonical posix_mutex_lock/unlock). The aligned count read is
+/// volatile to preserve its position between the runtime-swappable calls.
+///
+/// # Safety
+/// The installed manager must remain live through both calls, with a readable
+/// aligned u32 at +0x14 and a valid mutex at +0x148. Installation must not race
+/// this query; the existing mutex boundary's safety requirements also apply.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn manager_free_block_count() -> u32 {
+    let manager = block_manager();
+    if manager.is_null() {
+        return 0;
+    }
+    let lock = core::ptr::read_volatile(core::ptr::addr_of!(
+        crate::heap::block_region::REGION_MUTEX_OPS.lock));
+    lock(manager.add(MANAGER_MUTEX_OFFSET));
+    let count = manager.add(0x14).cast::<u32>().read_volatile();
+    let unlock = core::ptr::read_volatile(core::ptr::addr_of!(
+        crate::heap::block_region::REGION_MUTEX_OPS.unlock));
+    unlock(manager.add(MANAGER_MUTEX_OFFSET));
+    count
+}
+
 /// region_block_count — original: `FUN_0818ac40` @ 0x0818ac40 (24 bytes;
 /// 5 direct, plain `bl` call sites; no calls in its own body).
 ///
@@ -956,6 +991,42 @@ pub(crate) mod tests {
         }
         restore_body(_guard);
     }
+    unsafe extern "C" fn free_count_lock(mutex: *mut u8) -> u32 {
+        push(Ev::Lock(mutex as usize));
+        mutex.sub(MANAGER_MUTEX_OFFSET).add(0x14).cast::<u32>().write(u32::MAX);
+        // The query must retain its original manager, not reload the global.
+        BLOCK_MANAGER = core::ptr::null_mut();
+        5
+    }
+
+    unsafe extern "C" fn free_count_unlock(mutex: *mut u8) -> u32 {
+        push(Ev::Unlock(mutex as usize));
+        mutex.sub(MANAGER_MUTEX_OFFSET).add(0x14).cast::<u32>().write(0);
+        0x1a
+    }
+
+    #[test]
+    fn free_count_handles_null_and_snapshots_inside_mutex_despite_errors() {
+        let guard = install_ops();
+        unsafe {
+            clear_manager();
+            assert_eq!(manager_free_block_count(), 0);
+            assert!(events().is_empty());
+            let manager = core::ptr::addr_of_mut!(FAKE_MGR).cast::<u8>();
+            manager.add(0x14).cast::<u32>().write(7);
+            BLOCK_MANAGER = manager;
+            crate::heap::block_region::REGION_MUTEX_OPS =
+                crate::heap::block_region::RegionMutexOps {
+                    lock: free_count_lock, unlock: free_count_unlock,
+                };
+            assert_eq!(manager_free_block_count(), u32::MAX);
+            assert_eq!(manager.add(0x14).cast::<u32>().read(), 0);
+            let mutex = manager.add(MANAGER_MUTEX_OFFSET) as usize;
+            assert_eq!(events(), std::vec![Ev::Lock(mutex), Ev::Unlock(mutex)]);
+        }
+        restore_ops(guard);
+    }
+
     #[test]
     fn block_count_byte_size_locks_reads_and_wraps_the_product() {
         let _guard = install_ops();

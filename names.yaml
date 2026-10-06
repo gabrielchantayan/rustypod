@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0818aba4
+    ghidra: FUN_0818aba4
+    name: manager_free_block_count
+    size: 52
+    sig: "u32 manager_free_block_count(void)"
+    module: heap/block_mgr
+    status: ported
+    args: {}
+    locals:
+      r4: manager
+      r5: free_count_snapshot
+      DAT_0818abd4: block_manager_global_089cb1b4
+      manager+0x14: free_list_count
+      manager+0x148: mutex
+      FUN_082621a8: posix_mutex_lock_veneer_b
+      FUN_082621ac: posix_mutex_unlock_veneer_b
+    notes: >-
+      Raw extent [0x0818aba4,0x0818abd8) is 52 bytes: 48 instruction
+      bytes plus the global-address literal at 0x0818abd4; next real
+      function begins with e92d401c. Two outgoing plain BLs at
+      0x0818abbc/0x0818abc8, zero predicated BLs. Two incoming plain
+      BLs at 0x08292328/0x08295dc8, zero predicated incoming BLs,
+      independently decoded across aligned raw firmware words.
+      Snapshot global 0x089cb1b4; NULL returns zero. Otherwise lock
+      manager+0x148, save its free-list count at +0x14, unlock the same
+      manager, and return the saved u32 ignoring both mutex statuses.
+      Callers display free blocks alongside total region block count.
+      Deliberate deviations: reuse modeled BLOCK_MANAGER global and
+      existing REGION_MUTEX_OPS seam, whose canonical lock/unlock ports
+      are reached by raw-verified 0x082621a8/0x082621ac veneers; use an
+      aligned volatile count read to retain ordering. Existing global
+      initialization and kernel seam limitations remain.
   - address: 0x0818ac5c
     ghidra: FUN_0818ac5c
     name: manager_flagged_client_release
