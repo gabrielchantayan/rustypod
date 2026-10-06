@@ -4,6 +4,7 @@ pub mod selected_item_string_enabled;
 pub mod owner_link_base_construct;
 pub mod owner_link_is_current;
 pub mod owner_link_contains;
+pub mod owner_link_has_secondary;
 pub mod guarded_tagged_record_lookup;
 pub mod guarded_optional_tagged_node_lookup;
 pub mod context_property_60bf_60c0_apply;
