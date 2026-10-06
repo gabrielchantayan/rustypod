@@ -60,6 +60,112 @@ pub struct ResourceList {
     pub unused_23: u8,
 }
 
+/// One encoded resource record; all fields retain their four-byte target ABI.
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResourceRecord {
+    pub length: u32,
+    pub tag: u32,
+    pub data: u32,
+}
+
+type AppendResourceRecord = unsafe extern "C" fn(*mut u32, *const *mut ResourceRecord);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_append_resource_record(
+    vector: *mut u32, record: *const *mut ResourceRecord,
+) {
+    let append: AppendResourceRecord = core::mem::transmute(0x083e_46fcusize);
+    append(vector, record);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_append_resource_record(_: *mut u32, _: *const *mut ResourceRecord) {
+    panic!("resource_list_append_record requires resident vector append 0x083e46fc")
+}
+
+/// Host injection for the unported pointer-vector append; target uses retailOS.
+#[cfg(target_os = "none")]
+pub static mut RESOURCE_LIST_APPEND_RECORD: AppendResourceRecord = firmware_append_resource_record;
+#[cfg(not(target_os = "none"))]
+pub static mut RESOURCE_LIST_APPEND_RECORD: AppendResourceRecord = missing_append_resource_record;
+
+#[inline(always)]
+unsafe fn append_record_with(
+    list: *mut ResourceList, data: u32, length: u32, tag: u32,
+    allocate: impl FnOnce() -> *mut ResourceRecord,
+    append: impl FnOnce(*mut u32, *const *mut ResourceRecord),
+) {
+    (*list).loading = 1;
+    let record = allocate();
+    (*record).data = data;
+    (*record).length = length;
+    (*record).tag = tag;
+    append(core::ptr::addr_of_mut!((*list).vector_words).cast(), &record);
+}
+
+/// `FUN_08184e04` @ 0x08184e04, exactly 64 bytes to the next push at
+/// 0x08184e44. Raw words verify two outbound plain BLs, zero predicated BLs;
+/// whole-image decoding finds two inbound plain BLs, zero predicated BLs.
+///
+/// Set loading before allocating 12 bytes, store data at +8 and length/tag at
+/// +0/+4, then append the allocated pointer by reference to the vector at +20.
+/// Deliberate deviations: none on target. Host pointer locals widen naturally;
+/// record and owner fields remain target words. The verified resident vector
+/// append at 0x083e46fc is not ported and remains an injectable firmware seam.
+///
+/// # Safety
+/// `list` must be writable and contain a valid resident pointer vector.
+/// Allocation must succeed, as stock dereferences it without a NULL guard.
+/// The resident append must synchronously copy the pointer, not retain its
+/// stack-local address. `data` must satisfy the resource consumer's lifetime.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn resource_list_append_record(
+    list: *mut ResourceList, data: u32, length: u32, tag: u32,
+) {
+    append_record_with(list, data, length, tag,
+        || operator_new(core::mem::size_of::<ResourceRecord>()).cast(),
+        |vector, record| {
+            let append = core::ptr::read_volatile(core::ptr::addr_of!(RESOURCE_LIST_APPEND_RECORD));
+            append(vector, record);
+        });
+}
+
+#[cfg(test)]
+mod append_record_tests {
+    use super::*;
+
+    #[test]
+    fn records_preserve_zero_and_high_bits_and_only_set_loading() {
+        for (data, length, tag) in [(0, 0, 0), (u32::MAX, 0x8000_0000, 0xdead_beef)] {
+            let mut list = ResourceList { vtable: 1, provider: 2, parser: 3,
+                resource_data: 4, state: 5, vector_words: [6, 7, 8],
+                loading: 0xa5, first_flag: 0xb6, second_flag: 0xc7, unused_23: 0xd8 };
+            let owner = &mut list as *mut ResourceList;
+            let mut storage = ResourceRecord { length: 99, tag: 99, data: 99 };
+            let record = &mut storage as *mut ResourceRecord;
+            let mut retained = core::ptr::null_mut();
+            unsafe {
+                append_record_with(owner, data, length, tag,
+                    || { assert_eq!((*owner).loading, 1); record },
+                    |vector, slot| {
+                        assert_eq!(vector, core::ptr::addr_of_mut!((*owner).vector_words).cast());
+                        retained = *slot;
+                    });
+                assert_eq!(*retained, ResourceRecord { length, tag, data });
+            }
+            assert_eq!(retained, record);
+            assert_eq!([list.vtable, list.provider, list.parser, list.resource_data, list.state],
+                [1, 2, 3, 4, 5]);
+            assert_eq!(list.vector_words, [6, 7, 8]);
+            assert_eq!([list.loading, list.first_flag, list.second_flag, list.unused_23],
+                [1, 0xb6, 0xc7, 0xd8]);
+            assert_eq!(core::mem::size_of::<ResourceRecord>(), 12);
+        }
+    }
+}
+
 /// The unported field initializer `FUN_08184f50`.
 pub type ResourceListInitialize = unsafe extern "C" fn(
     list: *mut ResourceList,
