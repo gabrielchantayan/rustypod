@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817e4c8
+    ghidra: FUN_0817e4c8
+    name: owned_observable_array_replace
+    size: 56
+    sig: "void owned_observable_array_replace(ObservableArrayOwner *owner, void *replacement)"
+    module: app/owned_observable_array_replace
+    vars: {param_1: owner, param_2: replacement, iVar1: old_array, FUN_08271d2c: observable_array_destruct, FUN_082aad24: operator_delete}
+    status: ported
+    notes: >-
+      Raw A32 extent is [0x0817e4c8,0x0817e500), fourteen words ending
+      with pop at 0x0817e4fc; the independent bx lr at 0x0817e500 is
+      the next function. Whole-image branch decoding finds two inbound
+      plain BLs at 0x081bb5a8 and 0x081faad8, zero predicated BLs.
+      Two outbound plain BLs at 0x0817e4ec and 0x0817e4f4 call the
+      canonical observable_array_destruct and operator_delete ports.
+      Return immediately when owner+0x20 equals replacement. Otherwise
+      destroy non-NULL old+4, delete the destructor return minus four,
+      then publish the saved replacement. Ghidra's noreturn annotation
+      on operator_delete is wrong. Native owner pointers widen on hosts;
+      target +0x20 is asserted and array fields remain target-width.
+      Tests cover NULL and identical slots, clearing, teardown ordering,
+      redirected destructor return and callback mutation of the slot.
+      ARM release build succeeds. match.py reports fourteen stock versus
+      fifteen Rust instructions: equality and NULL guards, two calls and
+      final +0x20 store correspond. LLVM uses the saved old pointer for
+      delete because the existing destructor returns its input; the source
+      preserves return-minus-four semantics. Frame/register allocation
+      differs, and archive call relocations appear as unresolved zero targets.
+
   - address: 0x08193ed4
     ghidra: FUN_08193ed4
     name: service_handler_slot_set
