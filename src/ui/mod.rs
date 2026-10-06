@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod shown_children_bounds_union;
 pub mod scroll_state_reset;
 pub mod selected_record_geometry;
 pub mod owner_operation_clear;

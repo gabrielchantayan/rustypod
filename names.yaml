@@ -90570,6 +90570,45 @@ functions:
       the expected ops-table dispatches and larger LLVM frame rather than
       an exact instruction match.
 
+  - address: 0x08184278
+    ghidra: FUN_08184278
+    name: shown_children_bounds_union
+    size: 112
+    sig: "void shown_children_bounds_union(void *owner, ContainerView *container)"
+    module: ui/shown_children_bounds_union
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r1: container
+      uStack_18: cursor
+      local_10: child
+      "owner+0xb8": accumulated_bounds
+      "child+0x80": bounds
+      FUN_081586e0: container_view_children
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+      FUN_082a26c8: ui_element_is_shown
+      FUN_08275b9c: object_cast_to_class
+      FUN_0826c3d8: rect_union
+    notes: >-
+      Raw osos.dec proves the 112-byte extent ending with pop at 0x081842e4;
+      the next independently called function begins at 0x081842e8 with cmp
+      r1,#1. Whole-image ARM BL decoding finds two plain inbound calls and
+      no predicated inbound calls. The body has six plain BLs and one BLEQ
+      to rect_union. Walks the container child registry, unions rectangles
+      of shown children not castable to class 0x1280 into owner+0xb8, and
+      invalidates the cursor. Does not initialize or clear the accumulator.
+      All callees reuse existing ports without new seams. Ghidra's extra
+      third/fourth arguments are saved-register stack slots, not inputs;
+      the Rust ABI takes only owner and container. Native host pointer widths
+      are used for cursor/output pointers; fixed geometry offsets remain
+      target-exact. Tests cover hidden and excluded children, accumulated
+      negative bounds, empty source/destination rectangles and empty traversal.
+      match.py prints an expected structural diff: LLVM inlines rect_union,
+      retaining its empty checks and signed min/max geometry, and uses a
+      larger frame than ADS.
+
   - address: 0x081586e0
     ghidra: FUN_081586e0
     name: container_view_children
