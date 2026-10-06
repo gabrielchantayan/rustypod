@@ -223916,3 +223916,48 @@ functions:
       LLVM adds a frame pointer, expands begin into byte loads, predicates
       the successful load/return with HI, and leaves panic as a plain BL.
       Unsigned comparison, stride, aligned result load, and fatal path agree.
+
+  - address: 0x0816bfe4
+    ghidra: FUN_0816bfe4
+    name: framework_buffer_state_construct
+    size: 96
+    sig: "FrameworkBufferState *framework_buffer_state_construct(FrameworkBufferState *storage, u32 size)"
+    module: cxx/framework_buffer_state_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1/r4: size
+      puVar1: this
+      piVar2: buffer
+      DAT_0816c040: FRAMEWORK_BUFFER_STATE_VTABLE
+      FUN_08275cd4: framework_sentinel_state_construct
+      FUN_081a81c4: aligned_buffer_init
+    notes: >-
+      Raw extent [0x0816bfe4,0x0816c044): 92 instruction bytes plus
+      vtable literal 0x0898846c at 0x0816c040; next real function is
+      the destructor at 0x0816c044. Whole-image aligned ARM word scan
+      verifies two incoming plain BLs at 0x08149ca4 and 0x08149d00,
+      zero predicated incoming BLs; outgoing plain BLs at 0x0816bfec
+      to framework_sentinel_state_construct and 0x0816bffc to
+      aligned_buffer_init, zero predicated outgoing BLs. Reuses both
+      existing ports without new seams. Construct sentinel prefix,
+      install derived vtable, construct aligned owner at +12, clear
+      words +20/+24/+28/+32/+36/+44 and byte +40, then copy data
+      to +20 and set capacity +24 to size (zero becomes one) only
+      when data is nonzero. Preserve padding +9..+11 and +41..+43.
+      Return original object in r0; Ghidra's void signature is wrong.
+      Callers replace its vtable and add a stream handle at +48;
+      other state-word roles are not established. No deliberate
+      behavioral deviations. Fixed-width fields retain target offsets
+      on hosts. Host tests cover dirty storage, padding and adjacent
+      bounds, allocation failure, aligned and misaligned allocation,
+      alignment wrapping to zero, zero size and high-bit sizes.
+      Host suite and ARM release build pass. Standalone cfg(test) host
+      smoke uses a real low-address mmap allocation via the existing
+      heap dispatch table, verifies original-object return and capacity
+      65, and writes/reads both usable buffer endpoints. match.py
+      reports 28 Rust instructions versus 23 stock instructions:
+      LLVM adds a frame pointer, retains the original object in r5,
+      folds both callees' known return identities, and branches around
+      the conditional capacity store instead of using STRNE. The two
+      calls, field stores, zero-size normalization and return agree.
