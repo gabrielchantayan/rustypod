@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081860dc
+    ghidra: FUN_081860dc
+    name: service_range_view_construct
+    size: 108
+    sig: "ServiceRangeView *service_range_view_construct(ServiceRangeView *view, ResourceProvider *resources, void *controller, void *parent, const ServiceRangeViewSpec *spec)"
+    module: ui/range_view
+    status: ported
+    vars:
+      r0/r4/puVar1: view
+      r1: resources
+      r2: controller
+      r3: parent
+      r5/in_stack_00000000: spec
+      FUN_0812b94c: range_view_construct
+      FUN_082aadd4: operator_new
+      FUN_08124a38: pair_header_construct
+      DAT_08186144: service_range_vtable_08989518
+    notes: >-
+      Raw words establish [0x081860dc,0x08186148): 104 code bytes through
+      pop at 0x08186140 plus vtable literal 0x08989518. The next function
+      begins with cmp r0,#0 at 0x08186148. Whole-image BL decoding finds
+      two inbound plain BLs at 0x08185ee8 and 0x081fb230, no predicated
+      inbound BLs. The body has five plain BLs and no predicated BLs:
+      range_view_construct once, operator_new twice, pair_header_construct
+      twice. Forward all five arguments to the range base, replace the
+      vtable, allocate 200 bytes and construct a service with view +0x38
+      and spec +0x68; store its returned pointer at +0xb4. Repeat for
+      spec +0x6c only when nonzero, otherwise store zero at +0xb8.
+      Copy spec +0x70 to +0xbc and return view. No allocation failure
+      guard is added. Existing ports are called directly; no new seam.
+      Deviations restore Ghidra's arguments/return, retain the base's
+      verified-identical input pointer, and retain target u32 pointer
+      fields on hosts. Names are structural, not an inferred UI identity.
+      Host edge tests cover zero mandatory headers, optional presence,
+      null primary results, dirty tail replacement and untouched base
+      state. Isolated full-constructor smoke verified real pair-header
+      construction/clears, allocation counts, inverted bounds, vtable
+      and return identity. Structural diff retains the five calls,
+      optional branch, 200-byte allocations and field offsets; LLVM
+      uses extra saved registers/frame setup and an explicit zero path.
+
   - address: 0x081862cc
     ghidra: FUN_081862cc
     name: utf8_iterator_next
