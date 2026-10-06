@@ -225,6 +225,127 @@ pub struct ScopedContext {
     pub mode: u8,
 }
 
+/// Heap-held selection: an inactive byte, an embedded context, an index,
+/// and an opaque attachment. Target offsets are +0, +4, +0x1c, +0x20.
+#[repr(C)]
+pub struct ScopedContextSelection {
+    pub active: u8,
+    pub context: ScopedContext,
+    pub index: u32,
+    pub attachment: *mut u8,
+}
+
+/// Construct a scoped-context selection — retailOS @ `0x0817e1ec`.
+///
+/// True extent: 76 bytes (72 instruction bytes and the vtable literal at
+/// 0x0817e234); next function starts at 0x0817e238. Whole-image ARM decoding
+/// verifies two incoming plain BL calls, zero predicated BL; body has no calls.
+/// Clears active, installs the context vtable, copies the source's five
+/// non-vtable fields in order, stores index and attachment, and returns this.
+/// Padding is untouched. No validation or owner lookup is added.
+///
+/// Deviations: repr(C) native pointers follow the existing ScopedContext host
+/// model; the vtable uses SCOPED_CONTEXT_VTABLE rather than its ROM address.
+/// This corrects Ghidra's void return and missing fourth argument at one caller.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn scoped_context_selection_construct(
+    this: *mut ScopedContextSelection,
+    source: *const ScopedContext,
+    index: u32,
+    attachment: *mut u8,
+) -> *mut ScopedContextSelection {
+    ptr::addr_of_mut!((*this).active).write(0);
+    ptr::addr_of_mut!((*this).context.vtable).write(&SCOPED_CONTEXT_VTABLE);
+    ptr::addr_of_mut!((*this).context.owner_valid).write(ptr::addr_of!((*source).owner_valid).read());
+    ptr::addr_of_mut!((*this).context.owner).write(ptr::addr_of!((*source).owner).read());
+    ptr::addr_of_mut!((*this).context.service_context).write(ptr::addr_of!((*source).service_context).read());
+    ptr::addr_of_mut!((*this).context.registry_token).write(ptr::addr_of!((*source).registry_token).read());
+    ptr::addr_of_mut!((*this).context.mode).write(ptr::addr_of!((*source).mode).read());
+    ptr::addr_of_mut!((*this).index).write(index);
+    ptr::addr_of_mut!((*this).attachment).write(attachment);
+    this
+}
+
+#[cfg(test)]
+mod selection_construct_tests {
+    use super::*;
+    use core::mem::{offset_of, size_of};
+
+    #[repr(C, align(16))]
+    struct Storage([u8; 128]);
+
+    #[test]
+    fn copies_context_without_reading_vtable_and_preserves_padding() {
+        for (valid, mode, index) in [(0, 0, 0), (u32::MAX, 0xff, u32::MAX), (0x12345600, 0x80, 7)] {
+            let mut owner = 1u8;
+            let mut service = 2u8;
+            let mut registry = 3u8;
+            let mut attachment = 4u8;
+            let source = ScopedContext {
+                vtable: ptr::null(),
+                owner_valid: valid,
+                owner: &mut owner,
+                service_context: &mut service,
+                registry_token: &mut registry,
+                mode,
+            };
+            let mut storage = Storage([0xa5; 128]);
+            let this = storage.0.as_mut_ptr().cast::<ScopedContextSelection>();
+            unsafe {
+                assert_eq!(scoped_context_selection_construct(this, &source, index, &mut attachment), this);
+                assert_eq!((*this).active, 0);
+                assert_eq!((*this).context.vtable, &SCOPED_CONTEXT_VTABLE as *const _);
+                assert_eq!((*this).context.owner_valid, valid);
+                assert_eq!((*this).context.owner, source.owner);
+                assert_eq!((*this).context.service_context, source.service_context);
+                assert_eq!((*this).context.registry_token, source.registry_token);
+                assert_eq!((*this).context.mode, mode);
+                assert_eq!((*this).index, index);
+                assert_eq!((*this).attachment, &mut attachment as *mut _);
+            }
+            let context = offset_of!(ScopedContextSelection, context);
+            let ranges = [
+                (0, 1),
+                (context + offset_of!(ScopedContext, vtable), size_of::<*const ScopedContextVtable>()),
+                (context + offset_of!(ScopedContext, owner_valid), 4),
+                (context + offset_of!(ScopedContext, owner), size_of::<*mut u8>()),
+                (context + offset_of!(ScopedContext, service_context), size_of::<*mut u8>()),
+                (context + offset_of!(ScopedContext, registry_token), size_of::<*mut u8>()),
+                (context + offset_of!(ScopedContext, mode), 1),
+                (offset_of!(ScopedContextSelection, index), 4),
+                (offset_of!(ScopedContextSelection, attachment), size_of::<*mut u8>()),
+            ];
+            for (offset, byte) in storage.0.iter().enumerate() {
+                if !ranges.iter().any(|&(start, len)| offset >= start && offset < start + len) {
+                    assert_eq!(*byte, 0xa5, "untouched byte {offset}");
+                }
+            }
+            assert_eq!(source.vtable, ptr::null());
+            assert_eq!(source.mode, mode);
+        }
+    }
+
+    #[test]
+    fn null_context_fields_and_attachment_are_copied() {
+        let source = ScopedContext {
+            vtable: &SCOPED_CONTEXT_VTABLE, owner_valid: 0,
+            owner: ptr::null_mut(), service_context: ptr::null_mut(),
+            registry_token: ptr::null_mut(), mode: 1,
+        };
+        let mut storage = Storage([0xff; 128]);
+        let this = storage.0.as_mut_ptr().cast::<ScopedContextSelection>();
+        unsafe {
+            scoped_context_selection_construct(this, &source, 0, ptr::null_mut());
+            assert!((*this).context.owner.is_null());
+            assert!((*this).context.service_context.is_null());
+            assert!((*this).context.registry_token.is_null());
+            assert!((*this).attachment.is_null());
+            assert_eq!((*this).context.mode, 1);
+        }
+    }
+}
+
 /// An opaque receiver whose scoped-context token begins at target offset
 /// +0x38. The preceding words have no recovered semantic identity.
 #[repr(C)]
