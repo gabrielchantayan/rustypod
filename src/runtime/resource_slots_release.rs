@@ -40,8 +40,7 @@ unsafe extern "C" fn unavailable_free_tagged_resource(_resource: u32, _tag: u32)
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn destroy_and_delete_resource(resource: u32) {
-    let destroy: unsafe extern "C" fn(u32) = unsafe { core::mem::transmute(0x0815_9c08usize) };
-    unsafe { destroy(resource) };
+    unsafe { crate::cxx::three_vtable_objects_destruct::three_vtable_objects_destruct(resource as *mut u32) };
     let delete: unsafe extern "C" fn(u32) = unsafe { core::mem::transmute(0x082a_ad24usize) };
     unsafe { delete(resource) }
 }

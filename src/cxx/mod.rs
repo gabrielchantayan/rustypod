@@ -903,6 +903,7 @@ pub mod vtable_08980110_construct;
 pub mod vtable_08990af8_destruct;
 pub mod vtable_089a8414_construct;
 pub mod vtable_089a8414_destruct;
+pub mod three_vtable_objects_destruct;
 pub mod vector_default_slot;
 pub mod vector8_erase;
 pub mod task_base_construct;
