@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815a0d8
+    ghidra: FUN_0815a0d8
+    name: container_view_construct_controller_query
+    size: 84
+    sig: "ContainerViewControllerQuery *container_view_construct_controller_query(ContainerViewControllerQuery *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1: view
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      param_5: spec
+      puVar1: view
+      uVar2: controller_result
+      FUN_08158778: container_view_construct
+      DAT_0815a128: controller_query_view_vtable
+    notes: >-
+      Raw A32 words establish 80 code bytes plus vtable literal 0x089873c4
+      at 0x0815a128; the next real function starts at 0x0815a12c.
+      Two plain inbound BLs at 0x0815a040 and 0x08185424, zero predicated
+      inbound BLs; one plain outbound BL to container_view_construct,
+      zero predicated outbound BLs, and one register BLX at 0x0815a110.
+      Forwards all five arguments to the existing base constructor, uses
+      its result, installs the derived vtable, queries non-null controller
+      slot +0x160, stores its full word at +0xe8, clears only byte +0xec,
+      and returns the constructed view. Class and query identities remain
+      unrecovered; no new callee seam. Fixed-width object fields preserve
+      target offsets; usize vtable slots follow the existing host-callable
+      model, with four-byte slots on ARM. Tests cover zero, high-bit and
+      all-ones results, query-before-store ordering, tail padding, and
+      the allocation boundary. LLVM codegen reviewed with match.py.
   - address: 0x081675c0
     ghidra: FUN_081675c0
     name: video_engine_upload_and_enable
