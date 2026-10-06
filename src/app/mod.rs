@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod owner_link_base_construct;
 pub mod guarded_tagged_record_lookup;
 pub mod guarded_optional_tagged_node_lookup;
 pub mod context_property_60bf_60c0_apply;
