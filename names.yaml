@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081675c0
+    ghidra: FUN_081675c0
+    name: video_engine_upload_and_enable
+    size: 32
+    sig: "void video_engine_upload_and_enable(VideoImageOwner *owner, u32 data, u32 side, u32 secondary)"
+    module: util/video_engine_upload_and_enable
+    status: ported
+    renames:
+      param_1/r0: owner
+      r1: data
+      r2: side
+      r3: secondary
+      "owner+0x128": group
+      FUN_0827bb8c: resident_group_image_upload
+      FUN_0827b9d8: video_engine_set_group_enabled
+    notes: >-
+      Raw words establish 32 bytes through the tail B at 0x081675dc;
+      the next independent function starts with CMP at 0x081675e0.
+      Whole-image aligned ARM scan finds a plain inbound BL at 0x0816e450
+      and BLNE at 0x0816e600. Outbound: one plain BL to 0x0827bb8c,
+      zero predicated BLs, and a tail B to the ported 0x0827b9d8.
+      Forwards r1-r3 unchanged to the resident image upload entry, reloads
+      the owner's group pointer at +0x128 after upload, then enables it
+      with flag 1. Ghidra incorrectly absorbs the tail callee and loses
+      three arguments. The unported upload entry creates/updates primary
+      square image status and optionally the secondary image; no guessed
+      implementation replaces it. Host repr(C) widens pointers safely.
+      Tests cover callback replacement of the group, absent optional
+      statuses and noncanonical enabled bytes. Host suite and ARM release
+      build pass. match.py confirms both +0x128 loads, argument forwarding,
+      flag 1 and final tail branch; LLVM adds a frame and uses literal BLX
+      for the resident call and a relocation for the Rust tail target.
+      No target behavioral deviation.
   - address: 0x08167e7c
     ghidra: FUN_08167e7c
     name: audio_buffer_ring_acquire
