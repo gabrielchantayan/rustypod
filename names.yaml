@@ -223519,3 +223519,42 @@ functions:
       allocation/frame layout, inlines accessors, uses BLX for fixed-address
       unported calls, and normalizes activity with CLZ; the two queries,
       signed loads, comparisons, short-circuit branches and final sync remain.
+
+  - address: 0x0815f214
+    ghidra: FUN_0815f214
+    name: record_u16_casefold_search
+    size: 124
+    sig: "int record_u16_casefold_search(const CasefoldRecordArray *owner, int last_index, const u8 *key, const StringObject *key_text, int *index_out)"
+    module: cxx/record_u16_casefold_search
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: last_index
+      param_3/r2: key
+      param_4/r3: key_text
+      param_5/stack0: index_out
+      iVar3/r6: low
+      iVar2/r4: middle
+      iVar1/r0: order
+    notes: >-
+      Raw ARM words establish 124 bytes through the return at 0x0815f28c;
+      the next real prologue is 0x0815f290. Full-image BL-immediate decoding
+      finds two inbound plain BL calls at 0x0815f400 and 0x0815f64c and zero
+      predicated calls. The body has one plain BL at 0x0815f254 to the
+      existing record_u16_casefold_compare port at 0x080be778, no predicated
+      BL, and no new seams. Callers supply count-1, not count. Search starts
+      low=0, loops only while signed low<high, and uses wrapping addition
+      followed by arithmetic right shift for midpoint. Positive comparison
+      sets high=middle-1, negative sets low=middle+1, and equality writes
+      middle and returns 1. Exhaustion writes low and returns 0 without
+      comparing the remaining slot. Negative and zero bounds do not read
+      owner or comparison arguments. The repr(C) prefix retains target
+      record pointer offset +12 and permits native host pointer alignment;
+      there are no algorithmic deviations. All 14456 host tests pass and
+      ARM release build succeeds. match.py exits 1 with 38 Rust versus 31
+      original instructions: frame layout and branch scheduling differ,
+      but signed bounds, midpoint ASR, eight-byte stride, one comparator
+      BL and the two return/output paths remain.
+      A standalone host executable also exercised the exported Rust entry
+      with the real comparator on descending keys 70/50/30/10: query keys
+      5/20/40/80 returned not-found indices 3/3/2/0 respectively.
