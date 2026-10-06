@@ -395,6 +395,28 @@ pub unsafe extern "C" fn tick_millis() -> u32 {
     }
 }
 
+/// sync_clock — original: `FUN_08159424` @ 0x08159424.
+///
+/// True extent: 36 bytes, [0x08159424, 0x08159448); the next function
+/// starts with `ldr r1, [r0]`. Whole-image A32 decoding verifies two
+/// incoming plain BLs (0x081594ec, 0x08159518), zero predicated BLs.
+/// The body has two plain BLs and no predicated BLs, followed by a tail B
+/// to the unsigned divider at 0x08036f14.
+///
+/// Sample Timer E once through read_usec_timer_into_2, divide the unsigned
+/// counter by 1000, then divide that quotient by 1000: whole seconds within
+/// the wrapping 32-bit microsecond timer epoch, not a monotonic uptime.
+/// Deliberate deviations: none in returned behavior; Ghidra's u64 return
+/// and expanded divider body are artifacts of following the tail branch.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn sync_clock() -> u32 {
+    let mut counter_usec = 0;
+    read_usec_timer_into_2(&mut counter_usec);
+    let millis = crate::runtime::rt_div::__rt_udiv(counter_usec, 1_000);
+    crate::runtime::rt_div::__rt_udiv(millis, 1_000)
+}
+
 
 /// iram_usec_timer_read_veneer — original: `thunk_EXT_FUN_08037e20` @
 /// 0x08037e20 (Ghidra reports 4 bytes; the real stub is **8** — the
@@ -761,6 +783,23 @@ mod usec_timer_tests {
                 counter.wrapping_add(1)
             );
         }
+    }
+
+    #[test]
+    fn sync_clock_truncates_seconds_and_restarts_at_timer_wrap() {
+        let _guard = configure_usec_timer(0, 1);
+        for (counter, expected) in [
+            (0, 0), (999, 0), (1_000, 0), (999_999, 0),
+            (1_000_000, 1), (1_999_999, 1), (2_000_000, 2),
+            (u32::MAX, 4_294),
+        ] {
+            HOST_USEC_TIMER_COUNT.store(counter, Ordering::Relaxed);
+            HOST_USEC_TIMER_READS.store(0, Ordering::Relaxed);
+            assert_eq!(unsafe { sync_clock() }, expected, "counter={counter}");
+            assert_eq!(HOST_USEC_TIMER_READS.load(Ordering::Relaxed), 1);
+        }
+        // The final sample above advances the physical counter through wrap.
+        assert_eq!(unsafe { sync_clock() }, 0);
     }
 
     #[test]
