@@ -1097,3 +1097,4 @@ pub mod kind1_record_post;
 pub mod aligned_buffer_set_destroy;
 pub mod parser_quoted_character;
 pub mod banked_slot_close;
+pub mod media_player_trim_current_item;
