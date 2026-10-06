@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081594cc
+    ghidra: FUN_081594cc
+    name: disk_mode_resource_8ca8_dispatch
+    size: 24
+    sig: "u32 disk_mode_resource_8ca8_dispatch(void)"
+    module: app/disk_mode_resource_8ca8_dispatch
+    status: ported
+    renames:
+      piVar1/r0: receiver
+      DAT_081594e0: disk_mode_receiver_slot
+      uRam081594c8: wildcard_category
+      uRam081594c4: resource_id
+    notes: >-
+      Raw A32 extent 0x081594cc..0x081594e4 contains five instructions
+      and the singleton-address literal; the next real PUSH starts at
+      0x081594e4. Independently decoded whole-image words find two plain
+      incoming BLs at 0x08112c2c and 0x081143c0, no predicated incoming
+      BLs and no outgoing BLs. Load receiver from RAM 0x089cc79c; NULL
+      returns zero in r0. Otherwise BNE enters the preceding tail body
+      0x081594b0, loading receiver vtable slot +0x58 and dispatching
+      (receiver, 0x2a2a2a2a, 0x8ca8). The virtual callee and resource
+      meaning are unidentified; no invented direct-callee seam is used.
+      Reuse ScreenResourceObject/Vtable repr(C) layouts. Preserve virtual
+      r0 instead of Ghidra's void signature. Host tests cover NULL,
+      callback removal of the singleton and full-width return values.
+      Host suite and ARM release build pass; consumer smoke passes.
+      match.py exits 1: LLVM inlines the shared tail body, adds a frame,
+      materializes 0x8ca8 with MOV/ORR and retains the final virtual BX.
   - address: 0x081594e4
     ghidra: FUN_081594e4
     name: disk_mode_sync_active
