@@ -16,6 +16,48 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815cb60
+    ghidra: FUN_0815cb60
+    name: timed_label_time_to_string
+    size: 36
+    sig: "void timed_label_time_to_string(void *owner, const void *label, StringObject *output, u32 mode)"
+    module: app/timed_label_time_to_string
+    status: ported
+    renames:
+      param_1/r0: ignored_owner
+      param_2/r1: label
+      param_3/r2: output
+      param_4/r3: mode
+      DAT_0815cb80: fallback_cstr
+    notes: >-
+      Raw extent 0x0815cb60..0x0815cb84 is 32 executable bytes plus
+      the four-byte 0x083eb28c literal. The next wrapper is independently
+      called at 0x0815d36c and 0x0815e004. Whole-image aligned word decoding
+      finds two inbound plain BLs at 0x0815d34c and 0x0815dfd8, no predicated
+      inbound BLs, and zero outgoing BLs. NULL tail-branches to the already
+      named string_object_assign_cstr at 0x0827639c with output and the
+      fallback pointer. Raw bytes there are 72 00 (r followed by NUL), not
+      an empty string. Non-NULL tail-branches to the unported time formatter
+      at 0x081d102c with label, output, and unchanged mode. Raw formatter
+      code gets the class-0x5680 instance and its dispatch target, then invokes
+      vtable slot +0x88 with output, operation 13 for mode zero or 14 for
+      any nonzero mode, and label+0x24. Both callers discard r0, so Rust
+      returns void and models tail branches as final calls. Target preserves
+      firmware allocation and formatting; hosts use the existing assignment
+      port and an injectable formatter, matching the adjacent wrapper's
+      convention. No callee identity is inferred from Ghidra's erroneous
+      inlining of these tail targets into the assigned function.
+      Host regression tests cover fallback replacement without overruns,
+      mode-independent NULL handling, and allocation failure preserving
+      previous payload. A temporary host formatter smoke exercised the
+      non-NULL path with modes 0, 1, 2, and UINT32_MAX; removed after passing.
+      Full host suite and ARM release build pass. match.py exits 1 with
+      an expected structural diff: both paths retain tail BX calls and
+      non-NULL preserves label, output, and mode register order. LLVM adds
+      a frame and volatile formatter-pointer load. The stock listing
+      decodes the literal as a ninth instruction; only eight are executable.
+      No on-device formatter execution was performed.
+
   - address: 0x0815cb84
     ghidra: FUN_0815cb84
     name: timed_label_to_string
