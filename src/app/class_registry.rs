@@ -4,6 +4,7 @@
 //! | address | name | size | sites |
 //! |---|---|---:|---:|
 //! | 0x0810dddc | [`registry_observer_base_construct`] | 20 | 24 `bl` |
+//! | 0x0816f70c | [`capacity_four_container_observer_construct`] | 20 | 2 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
 //! | 0x08135380 | [`registry_container_destruct`] | 72 | 6 `bl` + 16 tail `b` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
@@ -202,6 +203,9 @@ unsafe extern "C" fn construct_container_observer(
     this: *mut RegistryObserver,
     vtable: *const RegistryObserverVtable,
 ) -> *mut RegistryObserver {
+    if vtable as usize == CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS {
+        return capacity_four_container_observer_construct(this);
+    }
     let observer = registry_observer_base_construct(this);
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*observer).vtable), vtable);
     observer
@@ -524,6 +528,36 @@ pub unsafe extern "C" fn registry_observer_base_construct(
         REGISTRY_OBSERVER_BASE_VTABLE_ADDRESS as *const RegistryObserverVtable,
     );
     this
+}
+
+/// capacity_four_container_observer_construct — original: `FUN_0816f70c`
+/// @ 0x0816f70c (20 bytes; 2 plain unconditional BL call sites, zero predicated).
+///
+/// Constructs the 8-byte default observer selected for capacity-four registry
+/// containers. Calls [`registry_observer_base_construct`], replaces only the
+/// returned object's vtable with `0x08988eb0`, and returns that same pointer.
+/// Raw words `e92d4010 ebfe79b1 e59f1004 e5801000 e8bd8010` establish the
+/// code extent through 0x0816f720 exclusive. The literal occupies 0x0816f720;
+/// the next real function starts at 0x0816f724. Callers at 0x0813515c and
+/// 0x082a49a8 construct an eight-byte allocation before caching and attaching it.
+///
+/// Deliberate deviations: none. Only the verified vtable address is modeled;
+/// its slots are not inferred from the decrypted runtime page.
+///
+/// # Safety
+/// `this` must point to a writable, aligned [`RegistryObserver`]. There is no
+/// NULL guard in the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn capacity_four_container_observer_construct(
+    this: *mut RegistryObserver,
+) -> *mut RegistryObserver {
+    let observer = registry_observer_base_construct(this);
+    core::ptr::write_volatile(
+        core::ptr::addr_of_mut!((*observer).vtable),
+        CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS as *const RegistryObserverVtable,
+    );
+    observer
 }
 
 
@@ -1669,6 +1703,37 @@ mod tests {
             );
         }
         restore(guard);
+    }
+
+    #[test]
+    fn capacity_four_observer_constructor_initializes_state_without_touching_neighbors() {
+        #[repr(C)]
+        struct Fixture {
+            before: usize,
+            observer: RegistryObserver,
+            after: usize,
+        }
+        for state in [0, 1, u32::MAX] {
+            let mut fixture = Fixture {
+                before: 0x12345678,
+                observer: RegistryObserver {
+                    vtable: core::ptr::null(),
+                    state,
+                },
+                after: 0x87654321,
+            };
+            let observer = core::ptr::addr_of_mut!(fixture.observer);
+            unsafe {
+                assert_eq!(capacity_four_container_observer_construct(observer), observer);
+            }
+            assert_eq!(fixture.observer.state, 0);
+            assert_eq!(
+                fixture.observer.vtable as usize,
+                CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS,
+            );
+            assert_eq!(fixture.before, 0x12345678);
+            assert_eq!(fixture.after, 0x87654321);
+        }
     }
 
 

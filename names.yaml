@@ -223064,3 +223064,25 @@ functions:
       0x0817f4f4 or queue 0x0817f6c8 (base plus 468 on zero).
       match.py's default 80-byte window includes the next function; the
       verified extent is 44 bytes. Host suite and release ARM build pass.
+
+  - address: 0x0816f70c
+    ghidra: FUN_0816f70c
+    name: capacity_four_container_observer_construct
+    size: 20
+    sig: "RegistryObserver *capacity_four_container_observer_construct(RegistryObserver *this)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1/r0: this, puVar1: observer, DAT_0816f720: CAPACITY_FOUR_CONTAINER_OBSERVER_VTABLE_ADDRESS}
+    notes: >-
+      Raw words e92d4010 ebfe79b1 e59f1004 e5801000 e8bd8010 establish
+      the 20-byte code extent [0x0816f70c,0x0816f720). The literal at
+      0x0816f720 is 0x08988eb0; the next real function begins at 0x0816f724.
+      Calls ported registry_observer_base_construct at 0x0810dddc,
+      replaces the returned observer vtable, and returns unchanged r0.
+      Whole-image aligned BL decoding finds two unconditional callers at
+      0x0813515c and 0x082a49a8, zero predicated callers. Both allocate
+      eight bytes, cache the constructed observer, and dispatch attachment.
+      The first caller selects this observer for capacity exactly four.
+      Deliberate deviations: none; stores the verified vtable address
+      without inventing identities for its runtime slots. Host tests cover
+      zero and dirty state, pointer identity, and adjacent-word preservation.
