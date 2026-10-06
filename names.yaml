@@ -44430,6 +44430,33 @@ functions:
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
 
+  - address: 0x08177ce0
+    ghidra: FUN_08177ce0
+    name: context_match_string_id
+    size: 76
+    sig: "u32 context_match_string_id(const void *item_handle, u32 index)"
+    module: app/context_match_string_id
+    status: ported
+    renames:
+      param_1/r0/r4: item_handle
+      param_2/r1/r5: index
+      FUN_081115f4: root_query (unported retail boundary)
+      FUN_083d6190: handle_deref_or_null (existing canonical Rust port)
+      FUN_0813df7c: item_query (unported retail boundary)
+      DAT_08177d24: app_root_slot_089ca674
+      DAT_08177d28: matching_context_string_id_63eb
+    notes: >-
+      Raw extent is 76 bytes, 0x08177ce0..0x08177d2c: 68 code bytes
+      followed by two referenced literals; the next real function opens
+      with e92d4070 at 0x08177d2c. Three outgoing plain BL instructions,
+      zero predicated BLs. Two incoming plain BLs at 0x08133a38 and
+      0x08174f98, zero predicated callers. Query *0x089ca674 through
+      verified retail 0x081115f4; nonzero returns zero without accessing
+      the handle. Otherwise resolve the handle through the existing port
+      and query its index through verified retail 0x0813df7c. Exactly one
+      returns 0x63eb; every other result returns zero. Host queries are
+      replaceable native operations; ARM retains both retail boundaries
+      and the real global slot. No guessed callee class identity.
   - address: 0x08177d2c
     ghidra: FUN_08177d2c
     name: scoped_string_id_record_set_dispatch
