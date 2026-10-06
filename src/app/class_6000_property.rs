@@ -28,6 +28,7 @@ const RESOURCE_KIND_DIRP: ResourceKind = ResourceKind(0x4469_7250);
 
 const PROPERTY_KEY_6056: u32 = 0x6056;
 const PROPERTY_KEY_6063: u32 = 0x6063;
+const PROPERTY_KEY_60AE: u32 = 0x60ae;
 const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
 
 
@@ -69,6 +70,25 @@ pub unsafe extern "C" fn class6000_read_ui32_property_6056(store: *mut Class6000
 pub unsafe extern "C" fn class6000_read_ui32_property_6063(store: *mut Class6000) -> *mut u32 {
     let read_typed = (*(*store).vtable).read_typed;
     read_typed(store, PROPERTY_KEY_6063, CLASS_ID_6000, RESOURCE_KIND_UI32)
+}
+
+/// `class6000_read_ui32_property_60ae` — original: `FUN_08171c00` @
+/// `0x08171c00` (24 instruction bytes through `0x08171c14`, plus the
+/// `"Ui32"` literal at `0x08171c18`; 28-byte extent to the next real
+/// function at `0x08171c1c`). **2 plain `bl` call sites**, at `0x08140be8`
+/// and `0x08141440`, and **0 predicated `bl` call sites**, raw-binary verified.
+///
+/// Dispatches slot +0xe0 as `read_typed(store, 0x60ae, 0x6000, "Ui32")`,
+/// preserving the raw pointer, including NULL. The property's semantic
+/// identity is not recovered beyond its verified key and type.
+///
+/// Deliberate deviation: the terminal ARM `bx ip` is expressed as a typed
+/// Rust call; the unguarded loads, arguments, and returned pointer are exact.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_read_ui32_property_60ae(store: *mut Class6000) -> *mut u32 {
+    let read_typed = (*(*store).vtable).read_typed;
+    read_typed(store, PROPERTY_KEY_60AE, CLASS_ID_6000, RESOURCE_KIND_UI32)
 }
 
 /// `class6000_ui32_property_6056` — original: `FUN_081115cc` @ `0x081115cc`
@@ -360,6 +380,54 @@ mod tests {
         assert_eq!(unsafe { class6000_dirp_property_6066_or_default() }, DEFAULT_PROPERTY_6067);
         unsafe {
             assert_eq!((*core::ptr::addr_of!(TYPED_CALLS)).len(), 1);
+        }
+    }
+
+    #[repr(C)]
+    struct Ui32Store {
+        base: Class6000,
+        value: u32,
+        present: bool,
+    }
+
+    unsafe extern "C" fn lookup_ui32(
+        store: *mut Class6000,
+        key: u32,
+        class_id: u32,
+        kind: ResourceKind,
+    ) -> *mut u32 {
+        let store = &mut *store.cast::<Ui32Store>();
+        if store.present && key == 0x60ae && class_id == 0x6000 && kind.0 == 0x5569_3332 {
+            core::ptr::addr_of_mut!(store.value)
+        } else {
+            core::ptr::null_mut()
+        }
+    }
+
+    #[test]
+    fn typed_property_60ae_preserves_absence_and_live_value_identity() {
+        let vtable = Class6000VTable {
+            slots_below: [None; 55],
+            read: unreachable_read,
+            read_typed: lookup_ui32,
+        };
+        let mut store = Ui32Store {
+            base: Class6000 { vtable: &vtable },
+            value: 0,
+            present: false,
+        };
+        unsafe {
+            assert!(class6000_read_ui32_property_60ae(&mut store.base).is_null());
+            store.present = true;
+            let result = class6000_read_ui32_property_60ae(&mut store.base);
+            assert_eq!(result, core::ptr::addr_of_mut!(store.value));
+            assert_eq!(*result, 0);
+            *result = u32::MAX;
+            assert_eq!(store.value, u32::MAX);
+            store.value = 0x8000_0000;
+            assert_eq!(*class6000_read_ui32_property_60ae(&mut store.base), 0x8000_0000);
+            store.present = false;
+            assert!(class6000_read_ui32_property_60ae(&mut store.base).is_null());
         }
     }
 
