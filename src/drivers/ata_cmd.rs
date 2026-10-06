@@ -333,6 +333,23 @@ pub unsafe extern "C" fn ata_cmd_set_flags(cmd: *mut u8, flags: u32) {
 pub unsafe extern "C" fn ata_cmd_get_flags(cmd: *const u8) -> u32 {
     (cmd.add(FLAGS) as *const u32).read_volatile()
 }
+
+/// ata_cmd_get_block_size — original: `FUN_081660d0` @ 0x081660d0
+/// (8 bytes, `0x081660d0..0x081660d8`; next entry is the flags getter).
+/// Two incoming plain `bl` calls at 0x08283df4 and 0x08283e04, zero
+/// predicated `bl` calls, verified by whole-image A32 instruction decoding.
+/// No outgoing calls.
+///
+/// Reads the complete block size in bytes at +0x34. The transfer state
+/// machine caps remaining work by this value; reset defaults it to 512.
+/// No validation or NULL guard. Original: `ldr r0,[r0,#0x34]; bx lr`.
+/// No deliberate deviations; the pointer must reference an aligned,
+/// readable command block through +0x37.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_block_size(cmd: *const u8) -> u32 {
+    (cmd.add(BLOCK_SIZE) as *const u32).read_volatile()
+}
 /// ata_cmd_get_transfer_progress — original: `FUN_081213dc` @ 0x081213dc
 /// (8 bytes exactly, `0x081213dc..0x081213e4`; the next separately entered
 /// setter begins at 0x081213e4). Three direct call sites, all unconditional
@@ -1437,6 +1454,19 @@ mod tests {
         for flags in [0u32, 0x0000_0080, 0x0008_0000, 0xffff_ffff] {
             block.0[FLAGS..FLAGS + 4].copy_from_slice(&flags.to_le_bytes());
             assert_eq!(unsafe { ata_cmd_get_flags(block.0.as_ptr()) }, flags);
+        }
+    }
+
+    #[test]
+    fn block_size_getter_preserves_zero_and_all_value_bits() {
+        let mut block = poisoned();
+        // Distinct neighbours detect a wrong offset; no masking, clamping,
+        // or substitution of the reset default is part of this getter.
+        for size in [0u32, 1, 512, 4096, 0x8000_0001, u32::MAX] {
+            block.0[BLOCK_SIZE..BLOCK_SIZE + 4].copy_from_slice(&size.to_le_bytes());
+            let before = block;
+            assert_eq!(unsafe { ata_cmd_get_block_size(block.0.as_ptr()) }, size);
+            assert_eq!(block, before);
         }
     }
 
