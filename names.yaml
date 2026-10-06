@@ -32312,6 +32312,38 @@ functions:
       +0x1c word with wrapping addition, caches, and returns the total.
       Rust reuses the existing typed seams for both verified callees.
 
+  - address: 0x0818ae58
+    ghidra: FUN_0818ae58
+    name: manager_flagged_client_count
+    size: 104
+    sig: "u32 manager_flagged_client_count(ManagerClientList *manager)"
+    module: heap/manager_flagged_client_count
+    status: ported
+    vars:
+      param_1/r5: manager
+      r4: count
+      puStack_18: node
+      local_14: sentinel
+    notes: >-
+      Raw extent [0x0818ae58,0x0818aec0) is 104 bytes, not Ghidra's
+      56 bytes; FUN_0818ae90 is an interior addne instruction. Next
+      independent function starts with push {r1-r7,lr} at 0x0818aec0.
+      Independent whole-image ARM-word scan verifies three outgoing
+      plain BL instructions (0x083d64f4, 0x081fc3f4, 0x083d6f78),
+      zero predicated BLs, and two incoming plain BL sites at
+      0x0818ac8c and 0x0818ad30. Traverses the circular client list
+      rooted at manager+0x28 and counts resolved clients whose +0x44
+      flags contain 0x40000. Callers check this against manager+0x1c0.
+      Reuses handle_deref_or_null for its verified 0x083d64f4 alias
+      and state_flags_contain; inlines the verified pointer inequality.
+      Reuses the repr(C) manager/client-link layout, widening pointers
+      on hosts without changing ARM offsets. No NULL-client fallback or
+      locking is added. LLVM retains the two semantic helper calls and
+      circular traversal, adding the helper's canonical 0/1 result
+      directly instead of cmp/addne. Host tests cover empty, mixed,
+      all-set, all-clear, and changed flags; a real-source standalone
+      smoke confirms a one-client transition from count 1 to 0.
+
   - address: 0x0818aec0
     ghidra: FUN_0818aec0
     name: manager_client_find
