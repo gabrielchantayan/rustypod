@@ -249,6 +249,7 @@ pub mod apply_mode_dimensions;pub mod object_stack_push;
 pub mod replace_owned_resource;
 pub mod resource_owner_replace_slot_1b4;
 pub mod app_controller_release_mode_resource;
+pub mod app_controller_resource_slot_available;
 
 pub mod mutex_handoff_guarded_reset;
 pub mod four_slot_buffer_process;

@@ -222937,3 +222937,34 @@ functions:
       BL; LLVM rotates the loop and uses a larger register-save frame.
       Archive direct-call zeros are relocations, not recursion. No device
       execution was performed.
+
+  - address: 0x08180f9c
+    ghidra: FUN_08180f9c
+    name: app_controller_resource_slot_available
+    size: 52
+    sig: "u32 app_controller_resource_slot_available(u8 *controller, const u8 *resource)"
+    module: ui/app_controller_resource_slot_available
+    status: ported
+    renames:
+      param_1/r0/r2: controller
+      param_2/r1: resource
+      iVar1/r0: category_slot
+      "resource+0x11d": category
+      "controller+0xd4+slot": slot_active
+      FUN_081842e8: controller_event_category_index
+    notes: >-
+      Raw osos.dec establishes the exact 52-byte extent
+      [0x08180f9c,0x08180fd0); the next independent function starts with
+      push {r1-r11,lr} at 0x08180fd0. The body has one unconditional BL
+      at 0x08180fa8 to 0x081842e8 and no predicated BL instructions.
+      Whole-image aligned A32 BL decoding finds two inbound plain BL
+      sites at 0x0817f504 and 0x08180a34, with no predicated BL callers.
+      Read resource category byte +0x11d, reuse the already-ported
+      controller_event_category_index, and return exactly 1 when its
+      valid slot's active byte at controller+0xd4+slot is zero; otherwise
+      return 0. Invalid categories do not access controller fields.
+      No semantic deviations. Rust preserves the controller through its
+      normal ABI rather than relying on the stock callee preserving r2.
+      Host tests cover all four slots, noncanonical nonzero active bytes,
+      and every invalid byte category with a NULL controller. An actual
+      standalone Rust smoke run checks all 65536 category/state pairs.
