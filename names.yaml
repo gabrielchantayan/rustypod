@@ -223848,3 +223848,38 @@ functions:
       original; LLVM uses explicit branches instead of predication and adds a
       frame pointer. Reloads, decrement, virtual dispatch, cleanup order, and
       the full slot-return tail agree with raw firmware. No behavioral deviation.
+
+  - address: 0x0816cb5c
+    ghidra: FUN_0816cb5c
+    name: vector_record12_first_word_at
+    size: 40
+    sig: "u32 vector_record12_first_word_at(const VectorBounds *vector, u32 index)"
+    module: cxx/templates
+    status: ported
+    vars: {param_1: vector, param_2: index, uVar1: record_count}
+    renames:
+      FUN_083d76f8: vector_size_elem12
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw osos.dec A32 words establish [0x0816cb5c,0x0816cb84), 40 bytes
+      without literals; the next real function starts with push at 0x0816cb84.
+      Whole-image aligned BL decoding finds two incoming plain calls at
+      0x081e8d94 and 0x081e8e9c, zero predicated incoming calls. Body has
+      one plain BL at 0x0816cb68 to canonical vector_size_elem12 and one
+      BLLS at 0x0816cb70 to canonical non-returning heap_panic. Compute
+      signed truncating (end-begin)/12, compare its bits unsigned to index,
+      fail when count <= index, otherwise reload begin and return the first
+      aligned word at wrapping index*12. Callers use the vector at owner+0x18
+      and store or resolve the returned word; no stronger word identity is
+      assumed. Reuses existing ports, with no new firmware seams. Deliberate
+      deviation: existing VectorBounds widens host pointer fields while
+      retaining target +0/+4 layout, and its unaligned begin read lowers to
+      byte loads on ARM. Host tests cover first/middle/last words, high bits,
+      partial and reversed spans, empty bounds, index equal to count, and
+      UINT_MAX through isolated fatal-path verification. All 14473 host
+      tests pass; ARM release build succeeds. Standalone host smoke linked
+      the real port in cfg(test) mode and returned 0x76543210 for record 1.
+      match.py finds the unique symbol: 17 Rust instructions versus 10 stock;
+      LLVM adds a frame pointer, expands begin into byte loads, predicates
+      the successful load/return with HI, and leaves panic as a plain BL.
+      Unsigned comparison, stride, aligned result load, and fatal path agree.
