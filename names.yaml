@@ -221953,3 +221953,50 @@ functions:
       replacing direct target calls. Host edge tests cover NULL selection,
       zero key, cast rejection, exact-key precedence, fallback without
       allocation, and screen-record preparation followed by application.
+  - address: 0x08187c08
+    ghidra: FUN_08187c08
+    name: demo_mode_prepare_collection
+    size: 80
+    sig: "void demo_mode_prepare_collection(u8 *demo, u32 defer)"
+    module: app/demo_mode_prepare_collection
+    status: ported
+    vars:
+      param_1/r0: demo
+      param_2/r1: defer
+      demo_plus_0x28: collection_object
+      demo_plus_0xec: embedded_timer
+      demo_plus_0x118: completed
+    renames:
+      FUN_08275b9c: object_cast_to_class
+      FUN_0812bf4c: timer_restart
+      FUN_081b9878: resident_collection_processing
+    notes: >-
+      Raw ARM words establish 76 executable bytes ending at pop {r4,pc}
+      at 0x08187c50 plus the class-id literal 0x7d80 at 0x08187c54;
+      the next real function starts with push {r4,lr} at 0x08187c58.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x081883c4
+      and 0x081b918c, zero predicated BLs. Body has two plain BLs and
+      zero predicated BLs, plus a conditional tail B to timer_restart.
+      Nonzero defer clears the completion byte and restarts the embedded
+      timer. Zero defer casts the target-width +0x28 object pointer to
+      class 0x7d80, leaves completion unchanged on NULL, otherwise calls
+      resident 0x081b9878 with single_step zero and the completion pointer,
+      then stores one. Ghidra wrongly absorbs the tail timer body.
+      Existing checked-cast and timer ports are reused directly. The
+      resident collection loop remains at its verified address; its incoming
+      r3 is saved as scratch, not an input: iterator 0x0811cdd8 writes the
+      pointed-to result rather than consuming its previous contents.
+      Deliberate deviations: Rust call instead of tail B, fixed-address
+      BLX for the unported collection loop, host-only volatile seam.
+      Host regression covers NULL/rejected casts preserving the byte,
+      successful processing followed by the final store, and nonzero
+      full-width defer values restarting the real timer without reading
+      an invalid collection pointer.
+      Host suite and ARM release build passed. match.py exits 1 with a
+      structural diff: 19 stock instructions versus 37 Rust instructions,
+      including literals. LLVM expands timer_restart into timer_stop,
+      the running-state store at demo+0x10c and TimerOps arm dispatch;
+      the cast, NULL guard, resident BLX and final completion store remain.
+      Standalone smoke linked the actual crate and real timer/cast ports:
+      NULL cast preserved 0xa5; defer produced completion zero, timer state
+      0x72756e20 and queue zero with a zero period. No on-device execution.
