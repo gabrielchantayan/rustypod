@@ -223601,3 +223601,39 @@ functions:
       match.py exits 1: 66 Rust versus 48 original instructions, including
       Rust literals; acquisition gates, ordered stores, conditional panic,
       two fetch modes, stacked key arguments and byte result survive.
+
+  - address: 0x0815dd44
+    ghidra: FUN_0815dd44
+    name: selector_string_resource_assign
+    size: 96
+    sig: "void selector_string_resource_assign(const void *receiver, StringObject *destination)"
+    module: app/selector_string_resource_assign
+    status: ported
+    vars:
+      param_1: receiver
+      param_2: destination
+      cVar1: selector
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_08276474: string_object_assign_payload
+    notes: >-
+      Raw extent [0x0815dd44,0x0815dda8): 84 code bytes and three
+      literal words (0x56a5, 0x56a6, 0x56a7). Next function starts
+      with CMP r1,#0. Ghidra's 88-byte extent includes only the first
+      literal and incorrectly inlines the assignment tail target.
+      Whole-image aligned ARM BL decoding finds one plain inbound BL
+      at 0x0815d4a4 and one BLEQ at 0x0815df94. Body has four plain
+      BLs, zero predicated BLs, and a final B to 0x08276474.
+      Selector byte +0x7c chooses resource ids 0x56a5 through 0x56a7
+      for values 1 through 3; all other byte values leave destination
+      unchanged and avoid task access. Existing task context and string
+      lookup ports supply the resource; existing payload assignment owns
+      empty/missing clearing and allocation failure. No new seam or
+      class identity is invented. Ordinary Rust calls replace branches;
+      existing assignment virtual operations require wiring before hooking.
+      Host tests cover every invalid selector, both nonempty selections,
+      empty and missing resources, allocation failure and write boundaries.
+      All 14460 host tests pass; ARM release build succeeds. match.py exits
+      1 with structural differences: LLVM merges the three selector arms
+      into an unsigned range check and arithmetic resource id, inlines
+      task context access, and retains lookup plus assignment tail branch.
