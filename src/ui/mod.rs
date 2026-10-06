@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod flags_set_byte_clear;
+pub use flags_set_byte_clear::*;
 pub mod app_controller_restore_mode_resources;
 pub mod shown_children_primary_bounds_union;
 pub mod shown_children_bounds_union;

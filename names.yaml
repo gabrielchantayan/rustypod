@@ -224035,3 +224035,34 @@ functions:
       match.py reports 55 Rust instructions versus 52 stock instructions;
       frame pointer, register allocation and branches differ, while target
       offsets, bounded read, BLX, sentinel subtraction and EOF store agree.
+
+  - address: 0x0815cae0
+    ghidra: FUN_0815cae0
+    name: ui_element_flags_set_byte_clear
+    size: 44
+    sig: "u32 ui_element_flags_set_byte_clear(const u8 *element)"
+    module: ui/flags_set_byte_clear
+    status: ported
+    renames:
+      param_1/r0: element
+      r4: saved_element
+      iVar1: has_nonzero_flags
+    notes: >-
+      Raw ARM words establish extent 0x0815cae0..0x0815cb0c, exactly
+      44 executable bytes; the next function starts with CMP r1, #0.
+      Independently scanning aligned A32 words finds two incoming plain
+      BLs at 0x08126058 and 0x082246d0, no predicated incoming BLs.
+      One outgoing plain BL at 0x0815cae8 targets the already ported
+      ui_element_has_nonzero_flags at 0x0815d7d4; no outgoing predicated BLs.
+      Return one exactly when word +0x48 is nonzero and byte +0x4c is zero.
+      A zero word skips the byte read. Reuses the existing callee without
+      introducing a seam or assigning an unverified meaning to the byte.
+      No deliberate behavioral deviations. Host tests cover all 256 byte
+      values across zero, low-bit, high-bit and all-ones flag words, and a
+      prefix ending before the byte. Full host suite and ARM release build
+      pass. Standalone host smoke confirms zero-word, high-bit/clear-byte,
+      and nonzero-byte paths. match.py exits 1 with an expected structural
+      diff: one BL remains, LLVM predicates the byte read and uses CLZ/LSR
+      for boolean conversion instead of the stock conditional early return.
+      The relocatable BL operand shown as zero resolves to the existing
+      callee. No on-device execution performed.
