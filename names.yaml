@@ -221602,3 +221602,49 @@ functions:
       four Rust instructions; LLVM adds push {fp,lr}, mov fp,sp and
       pop {fp,pc} in place of bx lr. The exact strb r1,[r0,#4] store
       and unchanged r0 return are retained; no extra calls or guards.
+
+  - address: 0x08189034
+    ghidra: FUN_08189034
+    name: transfer_payload_read
+    size: 180
+    sig: "u32 transfer_payload_read(u8 *record, TransferStream *stream, u32 position, u32 flags, u8 **buffer_out, i32 *length_out)"
+    module: app/transfer_payload_read
+    status: ported
+    vars:
+      param_1/r0: record
+      param_2/r1: stream
+      param_3/r2: position
+      param_4/r3: flags
+      param_5: buffer_out
+      param_6: length_out
+      FUN_081059a0: resident transfer-header reader (unported fixed-address seam)
+      FUN_082aad74: operator_new_tag3 (canonical port, no new seam)
+    notes: >-
+      Raw A32 establishes [0x08189034,0x081890e8): 172 executable bytes
+      followed by tags 0x554c5400 and 0x55534c54 at 0x081890e0/e4.
+      The next real function is transfer_kind_set, strb r1,[r0,#4]; bx lr.
+      Independent whole-image branch-word decoding finds two plain inbound
+      BLs at 0x0816737c and 0x0818dc10, zero predicated inbound BLs.
+      Body has two plain BLs at 0x0818907c (header @ 0x081059a0) and
+      0x08189098 (operator_new_tag3), zero predicated BLs, and one virtual
+      BLX at 0x081890c4 through stream vtable slot four. Kind byte +4
+      selects the first tag for 2, second for 3/4, otherwise flags.
+      Header receives record, stream, position, flags, selected tag; raw
+      header entry verifies forwarding position/flags to stream slot five.
+      Header failure preserves outputs. Success caps signed record word zero
+      at 0x2800, stores requested length before allocation, publishes even a
+      NULL result, clears length on allocation failure, and reads in mode 2.
+      Exact count returns zero; short reads return one and retain ownership.
+      Zero/negative lengths deliberately retain original unguarded behavior;
+      allocation size uses the full target u32 bit pattern on hosts.
+      Deviations: fixed resident header call becomes BLX; repr(C) stream and
+      vtable pointers widen on hosts. Existing tag-3 allocator called directly.
+      Host regression covers all tag branches, signed extremes, cap boundaries,
+      zero length, header rejection, allocation failure, and short reads.
+      Full host suite: 14366 passed, zero failures. ARM release build passed.
+      Standalone smoke used actual host allocation and verified all 10240
+      bytes after a header length of 12000. No device execution performed.
+      match.py exit 1: 43 original versus 52 Rust instructions. LLVM uses a
+      tag lookup table, frame and fixed-address BLX; signed cap, store order,
+      allocation NULL path, slot-four mode-2 dispatch, post-call length reload
+      and exact-count comparison are preserved.
