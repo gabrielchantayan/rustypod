@@ -166399,19 +166399,17 @@ functions:
       Raw osos.dec establishes the full 120-byte extent 0x08165b84..0x08165bfc:
       29 ARM instructions (116 bytes) plus the trailing vtable literal at
       0x08165bf8; 0x08165bfc is the next real function (`bx lr`). There are
-      three outgoing plain unconditional bl instructions (to 0x081659cc,
-      0x082779c4, and 0x08165a18) and no predicated bl instructions. It calls
+      four outgoing plain unconditional bl instructions (two to 0x081659cc,
+      one each to 0x082779c4 and 0x08165a18), no predicated bl instructions. It calls
       the size-class worker with (object, selector), calls the base constructor
       with (object, tag, size >> 4, size & 15, class, extra), overwrites word
       +0 with 0x08987eb0 on the returned object, then reclassifies selector and
       calls the finalizer with (returned, tag, size, class, extra). The concrete
-      class is unrecovered, so the three unported callees use literal ARM veneers
-      on target and volatile host seams; their names state only this verified role.
-      Host test verifies the split at a nonzero remainder, both classification
-      calls, all worker arguments, returned-object vtable replacement, and that
-      the input object is not substituted for the base constructor result.
-      match.py exit 1 is the expected structural diff: LLVM has a larger frame,
-      routes the three calls through local veneers, and emits 32 instructions.
+      class is unrecovered. Classification now uses the ported version_size_class;
+      the other two workers retain literal ARM veneers and volatile host seams.
+      The old mocked forwarding test was removed at classification cutover;
+      host tests exercise real classification across all bytes and full-word edges.
+      The original constructor match review preceded this classification cutover.
   - address: 0x081614e0
     ghidra: FUN_081614e0
     name: opaque_record_vtable_construct
@@ -198457,19 +198455,17 @@ functions:
       Raw osos.dec establishes the full 120-byte extent 0x08165b84..0x08165bfc:
       29 ARM instructions (116 bytes) plus the trailing vtable literal at
       0x08165bf8; 0x08165bfc is the next real function (`bx lr`). There are
-      three outgoing plain unconditional bl instructions (to 0x081659cc,
-      0x082779c4, and 0x08165a18) and no predicated bl instructions. It calls
+      four outgoing plain unconditional bl instructions (two to 0x081659cc,
+      one each to 0x082779c4 and 0x08165a18), no predicated bl instructions. It calls
       the size-class worker with (object, selector), calls the base constructor
       with (object, tag, size >> 4, size & 15, class, extra), overwrites word
       +0 with 0x08987eb0 on the returned object, then reclassifies selector and
       calls the finalizer with (returned, tag, size, class, extra). The concrete
-      class is unrecovered, so the three unported callees use literal ARM veneers
-      on target and volatile host seams; their names state only this verified role.
-      Host test verifies the split at a nonzero remainder, both classification
-      calls, all worker arguments, returned-object vtable replacement, and that
-      the input object is not substituted for the base constructor result.
-      match.py exit 1 is the expected structural diff: LLVM has a larger frame,
-      routes the three calls through local veneers, and emits 32 instructions.
+      class is unrecovered. Classification now uses the ported version_size_class;
+      the other two workers retain literal ARM veneers and volatile host seams.
+      The old mocked forwarding test was removed at classification cutover;
+      host tests exercise real classification across all bytes and full-word edges.
+      The original constructor match review preceded this classification cutover.
   - address: 0x081614e0
     ghidra: FUN_081614e0
     name: opaque_record_vtable_construct
@@ -225497,3 +225493,34 @@ functions:
       No callees or new seams. Host tests cover zero and high-bit flags,
       already-tagged resources, full-width metadata, destination return,
       and adjacent guard words.
+
+  - address: 0x081659cc
+    ghidra: FUN_081659cc
+    name: version_size_class
+    size: 76
+    sig: "u32 version_size_class(VersionInfo *object, u32 selector)"
+    module: cxx/version_info_construct
+    status: ported
+    renames:
+      param_1/r0: object (unused)
+      param_2/r1: selector
+      return/r0: selector_class
+    notes: >-
+      Raw A32 words establish extent [0x081659cc,0x08165a18), ending in
+      mov r0,#0; bx lr before the next independently entered finalizer.
+      Whole-image aligned BL decoding verifies two incoming plain calls at
+      0x08165ba0 and 0x08165bd4, zero incoming predicated calls, and zero
+      outgoing plain or predicated calls. Map exact selectors 0x10, 0x20,
+      0x40, 0x60, 0x80 to classes 1, 2, 3, 4, 5; all other full-width
+      words return zero. Never dereference object. Retain the established
+      semantic name without inferring table contents or a concrete class.
+      Deliberate deviation: use a Rust match instead of the signed compare
+      tree; equality results are identical for every u32 bit pattern.
+      Replace both constructor call sites and remove the obsolete ARM
+      veneer, host classifier seam, and mocked forwarding test. Host tests
+      cover all byte selectors, high-bit words, and an invalid unused pointer.
+      Full x86_64 host suite and ARM build-std release build succeed.
+      Standalone host smoke confirms all five classes and zero for unknown
+      and sign-bit selectors. match.py exits 1: LLVM replaces the compare
+      tree with subtract-16, rotate-right-4, unsigned bound 7 and a constant
+      lookup; there are no calls and the object remains unused. No device run.
