@@ -224406,3 +224406,49 @@ functions:
       firmware callees, direct relocated BLs for Rust ports, and addresses
       shared state from byte 7; virtual slot 8 and ordered calls/stores remain.
       No device execution performed.
+
+  - address: 0x0815b27c
+    ghidra: FUN_0815b27c
+    name: container_bitmap_resources_remove
+    size: 100
+    sig: "void container_bitmap_resources_remove(const u8 *owner, const u8 *container)"
+    module: app/container_bitmap_resources_remove
+    status: ported
+    renames:
+      param_1/r6: owner
+      param_2/r7: container
+      r4: index
+      r5: item_count
+      r8: bitmap_kind
+      "owner+0xcc": resource_manager
+      "element+0x14": bitmap_id
+      FUN_081cb3e0: container_item_count_or_zero
+      FUN_081cb408: deque_element_at
+      FUN_0811cca0: stock_resource_remove
+    notes: >-
+      Raw words establish 96 instruction bytes at 0x0815b27c..0x0815b2dc,
+      followed by the BMap literal 0x424d6170; the next real function starts
+      at 0x0815b2e0, giving a true extent of 100 bytes. Internal calls are
+      plain BL at 0x0815b290 and 0x0815b2ac, plus BLNE at 0x0815b2c0.
+      Whole-image A32 BL decoding finds two inbound plain calls at
+      0x0815a900 and 0x0815b878, and no predicated inbound calls.
+      NULL containers return immediately. The signed i16 count is captured
+      once; each non-NULL deque element supplies its bitmap ID at +0x14,
+      and the owner's resource manager word at +0xcc is reloaded per removal.
+      The index increments with signed-i16 wrapping. Raw 0x0811cca0 takes
+      three meaningful arguments (manager, resource kind, resource ID);
+      its saved r3 stack word is an output slot overwritten by lookup, not
+      a fourth input. Ghidra omitted this function's r2 ID load at 0x0815b2b4.
+      The count uses the existing Rust port. The stock deque seam is retained:
+      the existing Rust deque_element_at returns an iterator slot, whereas
+      raw 0x081cb44c dereferences it; its actual extent ends at 0x081cb458,
+      not the currently recorded 0x081cb438. No other function was changed.
+      Stock removal remains at 0x0811cca0; host seams model these boundaries.
+      Host tests cover NULL, empty and negative counts, NULL elements,
+      high count-word bits, snapshot count during mutation, and manager reload.
+      All 14495 host tests and the ARM release build pass. Standalone smoke
+      executes the port and removes bitmap 73 from manager 0x1234.
+      match.py exits 1: LLVM uses BLX for stock callees, a relocated BL for
+      the count port, branches instead of conditional loads/call, and a larger
+      frame. NULL handling, signed-index loop, ID/manager loads and BMap kind
+      are preserved. No device execution performed.
