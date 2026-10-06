@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816b560
+    ghidra: FUN_0816b560
+    name: grid_render_slots
+    size: 84
+    sig: "void grid_render_slots(i32 *grid)"
+    module: ui/grid_render_slots
+    status: ported
+    renames:
+      param_1/r0: grid
+      iVar2: columns
+      iVar1: allocated_rows
+      iVar4: item
+      iVar3: slot
+    notes: >-
+      Raw A32 extent [0x0816b560,0x0816b5b4) ends before the next PUSH.
+      Whole-image decoding verifies two incoming plain BLs at 0x0816b078
+      and 0x0816b9c8, no predicated incoming BLs; one outgoing plain BL
+      at 0x0816b59c to 0x0816b394, no predicated outgoing BLs. Neither
+      address has an existing entry. Callee clears out-of-range slots or
+      draws a resource into the rectangle at grid[0xec/4]+slot*16.
+      Snapshot columns +0xb8, allocated rows +0xc0, visible rows +0xbc
+      and first item +0xe8. Render the wrapping signed dimension product
+      slots starting at first minus trunc(wrapping row difference/2).
+      No target deviations; hosts inject the unported retail renderer.
+      Tests cover odd centering of either sign, nonpositive counts,
+      product and index overflow, subtraction overflow and callback mutation.
+      Full host suite and ARM release build pass. Standalone smoke renders
+      six centered slots into owner state. match.py exits 1: 21 versus 24
+      instructions, retaining multiply, sign-corrected shift and loop;
+      LLVM uses BLX to literal 0x0816b394, an early empty-count guard,
+      and start+slot indexing. No on-device execution performed.
   - address: 0x0815cb60
     ghidra: FUN_0815cb60
     name: timed_label_time_to_string
