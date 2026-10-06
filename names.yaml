@@ -222803,3 +222803,48 @@ functions:
       byte loop, decimal accumulation, base-60 fold, and final multiply;
       LLVM replaces the jump table with branches, strength-reduces the
       multiplications by 10 and 60, and adds an early empty-string return.
+
+  - address: 0x0818361c
+    ghidra: FUN_0818361c
+    name: controller_declaration_resources_reset
+    size: 232
+    sig: "void controller_declaration_resources_reset(u8 *controller)"
+    module: app/controller_declaration_resources_reset
+    status: ported
+    vars:
+      param_1/r0/r4: controller
+      r5: index
+      r6: object
+      r7: declaration
+      auStack_70: source
+    renames:
+      FUN_081e0bac: event_source_construct
+      FUN_081e0c4c: event_source_destruct
+      FUN_0829e2e0: opaque_keyed_collection_item_count
+      FUN_0829e2f8: opaque_keyed_collection_item_at
+      FUN_0817ee34: primary_or_demo_mode_keyed_object
+    notes: >-
+      Raw A32 establishes [0x0818361c,0x08183704), 220 instruction bytes
+      plus three literal words; next real function begins with push at
+      0x08183704. Independent whole-image aligned BL decoding finds two
+      plain inbound calls at 0x081dded4 and 0x081ddf68, zero predicated
+      calls. Body has eight plain BL instructions, zero predicated BLs.
+      Construct a 92-byte temporary event source from controller+0x28.
+      Repeatedly count the vector selected by byte +0xcd using a signed
+      comparison, fetch each declaration, resolve its +4 key, and stop
+      at the first NULL object. Apply tags 0x564c7974, 0x56536c74 and
+      0x56437673 in order with mode zero, reloading controller+0x20
+      each time. Ignore application results; always destroy the source.
+      Caller r1 is unused, not a second argument. Existing verified Rust
+      ports are reused; unported resource application retains the existing
+      typed retail-address seam at 0x081827d8, without inventing a callee
+      identity. No behavioral deviations; LLVM chooses stack/register layout.
+      Host coverage includes zero/negative counts, first/later missing
+      objects, resource reloads, ignored zero application results and
+      selector/count mutation during traversal. Full host suite passes
+      14420 tests; ARM release build succeeds. match.py exits 1 and shows
+      preserved signed loop, NULL exit, three ordered applications and
+      destructor. Retail application uses literal-address BLX instead of
+      BL; LLVM rotates the loop and uses a larger register-save frame.
+      Archive direct-call zeros are relocations, not recursion. No device
+      execution was performed.
