@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08178d64
+    ghidra: FUN_08178d64
+    name: embedded_containers_clear
+    size: 52
+    sig: "void embedded_containers_clear(u32 *this)"
+    module: cxx/embedded_containers_clear
+    status: ported
+    vars:
+      param_1/r0/r4: this
+      r5: first_container
+      FUN_0839c540: container_release_enabled_elements
+      FUN_0839c470: vtable_slot_40_release_each
+      FUN_08271c84: observable_array_clear
+    notes: >-
+      Raw A32 establishes [0x08178d64,0x08178d98), 52 bytes; the next
+      function starts with str r1,[r0,#0x7c] and bx lr at 0x08178d98.
+      Three outbound plain BLs at 0x08178d74, 0x08178d7c and 0x08178d88,
+      zero predicated BLs, and final tail B to observable_array_clear.
+      Whole-image decoding finds two inbound plain BLs at 0x08179060
+      and 0x0828a684, zero predicated inbound BLs. Releases enabled
+      elements at this+0x24 then clears that array; releases allocations
+      yielded by this+0x50 then clears that array. Reuses all three
+      verified ports without inventing class identity or adding guards.
+      Host models use repr(C) members to accommodate native pointers.
+      Tests exercise disabled containers with nonzero and wrapping
+      lengths, repeated clearing, and the enabled-empty allocation case.
+      Both existing Rust callers use this port on target.
+      Verification: 14414 host tests passed; ARM release build passed.
+      match.py confirms the same three BLs, member offsets and final
+      tail B, with LLVM frame-pointer setup replacing the unused r6 save.
+      Unlinked object BL labels are relocation placeholders, not recursion.
+      A linked ARM Unicorn smoke exercised the actual four helper calls
+      with nonzero, empty, UINT_MAX and INT_MIN length patterns: both
+      counts became zero and virtual clears occurred in member order.
   - address: 0x0817904c
     ghidra: FUN_0817904c
     name: vtable_08989104_destruct
@@ -26,7 +60,7 @@ functions:
     vars:
       param_1/r0/r4: this
       DAT_08179080: VTABLE_08989104
-      FUN_08178d64: retail embedded-state cleanup (class identity unresolved)
+      FUN_08178d64: embedded_containers_clear
       FUN_0839c518: vtable_08982424_destruct
       FUN_0839c5e8: vtable_089824fc_destruct
       FUN_0826c04c: retail base destructor (class identity unresolved)
@@ -40,15 +74,15 @@ functions:
       embedded-state cleanup on this, destroys this+0x50, destroys the
       first return minus 0x2c, then chains to the base destructor at the
       second return minus 0x24, forwarding its return unchanged. Existing
-      member ports are reused; unported callees retain verified retail
-      addresses without inventing a class identity. Host tests exercise
+      member and cleanup ports are reused; only the unported base retains
+      its verified retail address. Host tests exercise
       shifted callee returns, teardown ordering and untouched words.
       Host suite passed 14411 tests and ARM release build passed. match.py
       default 88-byte comparison includes the next function. Codegen
       retains cleanup, both member calls, and final base dispatch. LLVM
       proves member returns equal inputs and folds pointer adjustments to
-      this+0x24 and this. Retail calls use literal-address BLX/BX instead
-      of direct BL/B. No null guard or deleting behavior is added.
+      this+0x24 and this. The base retail call uses literal-address BX
+      instead of direct B. No null guard or deleting behavior is added.
   - address: 0x0818431c
     ghidra: FUN_0818431c
     name: keyed_object_primary_action_select
