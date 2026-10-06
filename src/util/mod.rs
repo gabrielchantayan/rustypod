@@ -28,6 +28,7 @@ pub mod active_selection_previous_index;
 pub mod afm_next_statement_token;
 pub mod binary_data_read;
 pub mod assign_active_entry_labels;
+pub mod active_entry_count;
 pub mod active_entry_last_label;
 pub mod active_entry_table_address;
 pub mod always_succeeds;
