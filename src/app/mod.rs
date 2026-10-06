@@ -674,6 +674,7 @@ pub mod selected_decimal_digit_decrement;
 pub mod selected_decimal_digit_increment;
 pub mod selected_decimal_digit_index;
 pub mod context_primary_target_is_present;
+pub mod context_secondary_target_is_present;
 pub mod context_secondary_target_set;
 pub mod input_sequence_item_acquire;
 pub mod managed_entry;
