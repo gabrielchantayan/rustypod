@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815b104
+    ghidra: FUN_0815b104
+    name: validated_lookup_noop
+    size: 4
+    sig: "void *validated_lookup_noop(void *receiver, u32 mode)"
+    module: app/validated_lookup_noop
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: mode
+    notes: >-
+      Raw word e12fff1e is BX LR. True extent [0x0815b104,0x0815b108)
+      is four bytes; preceding function ends with e8bd8010 at 0x0815b100,
+      next function starts with e59f0004 at 0x0815b108. Whole-image aligned
+      A32 decoding finds two plain incoming BLs at 0x081f62e8 and
+      0x081f6420, zero predicated BLs, and zero outgoing calls. No aligned
+      image word references this address as data. Callers supply receiver
+      from object+0x94 and mode zero or one after successful 0x0815b118
+      lookup, ignore the return, and increment object+0x9e. No class or
+      setter identity is inferred. Touch no memory and preserve r0 despite
+      Ghidra's void signature. No deviations or callee seams. A distinct
+      text section prevents folding. Host edge tests and standalone smoke
+      Full host suite and ARM release build pass. match.py exits 1:
+      LLVM emits push {fp,lr}; mov fp,sp; pop {fp,pc}, preserving r0
+      with a frame instead of BX LR. No on-device execution performed.
   - address: 0x081685d0
     ghidra: FUN_081685d0
     name: owner_link_contains
