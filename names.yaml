@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08168758
+    ghidra: FUN_08168758
+    name: owner_link_is_current
+    size: 12
+    sig: "u32 owner_link_is_current(const OwnerLinkBase *receiver)"
+    module: app/owner_link_is_current
+    status: ported
+    renames:
+      param_1/r0/r1: receiver
+      receiver+4: owner
+      tail_081682dc: unported owner-current counted-lock query
+    notes: >-
+      Raw words e1a01000 e5900004 eafffedd establish [0x08168758,
+      0x08168764), 12 bytes, before owner_link_base_construct.
+      Ghidra's 68-byte extent and expanded C are incorrect. Whole-image
+      aligned A32 decoding finds two incoming plain BLs at 0x080fcabc
+      and 0x080fcb44, zero predicated BLs. Body has zero BLs and one
+      tail B to 0x081682dc. Neither address had a canonical entry.
+      Raw destination words establish a 56-byte counted-lock query:
+      lock owner+4, compare owner+0x20 with receiver, unlock, return
+      0 or 1. Wrapper loads receiver+4 and preserves that result.
+      Reuses the two-u32 OwnerLinkBase layout; no NULL guards. Target
+      retains the unported retail destination; hosts inject it. Only
+      this wrapper is ported, with no concrete class identity inferred.
+      Requested host test covers different links sharing an owner,
+      current-link changes and no current link. Full host suite and ARM
+      release build pass. Standalone host smoke observes 1 and 0.
+      match.py exits 1: its 17-word stock extent includes adjacent
+      functions. Rust retains mov r1,r0 and ldr r0,[r0,#4], adds a
+      frame and literal-loaded BX to 0x081682dc instead of immediate B.
+      No on-device execution performed.
   - address: 0x0816a9d8
     ghidra: FUN_0816a9d8
     name: context_property_60bf_60c0_apply
