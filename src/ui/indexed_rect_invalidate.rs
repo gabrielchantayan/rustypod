@@ -8,9 +8,7 @@
 //! visible index range via 0x0816b1dc, copy the indexed rectangle with its
 //! local origin, offset it by the element bounds origin, then invalidate it.
 //!
-//! Deliberate deviations: the unported range predicate executes at its verified
-//! retail address on device; hosts evaluate its exact wrapping MLA and signed
-//! comparisons. Existing Rust ports supply the other three callees. The stock
+//! Deliberate deviations: existing Rust ports supply all four callees. The stock
 //! epilogue restores the overwritten stack rectangle into r0-r3 on success;
 //! expose r0/r1 as a packed u64 (top/left), or element/index when out of range.
 //! Host element addresses in this target-width result are truncated to u32.
@@ -18,28 +16,9 @@
 //! and those registers are caller-saved under AAPCS.
 
 use super::indexed_rect::indexed_rect_copy_offset;
+use super::indexed_rect_is_visible::indexed_rect_is_visible;
 use super::invalidate::ui_element_invalidate_region;
 use super::rect::{rect_offset, Rect};
-
-#[inline(always)]
-unsafe fn indexed_rect_is_visible(element: *const u32, index: i32) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let predicate: unsafe extern "C" fn(*const u32, i32) -> u32 =
-            core::mem::transmute(0x0816_b1dcusize);
-        predicate(element, index)
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        let first = element.add(0xe8 / 4).read() as i32;
-        if first > index {
-            return 0;
-        }
-        let span = (element.add(0xb8 / 4).read() as i32)
-            .wrapping_mul(element.add(0xbc / 4).read() as i32);
-        u32::from(first.wrapping_add(span) > index)
-    }
-}
 
 /// # Safety
 /// `element` must be an aligned live UI object through +0xf4, with a valid

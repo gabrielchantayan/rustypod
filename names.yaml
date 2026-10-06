@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816b1dc
+    ghidra: FUN_0816b1dc
+    name: indexed_rect_is_visible
+    size: 44
+    sig: "u32 indexed_rect_is_visible(const u32 *element, i32 index)"
+    module: ui/indexed_rect_is_visible
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: index
+      "element+0xe8": first_visible_index
+      "element+0xb8": dimension_a
+      "element+0xbc": dimension_b
+      r2: first_visible_index
+      r3: dimension_a
+    notes: >-
+      Raw words establish the 44-byte extent [0x0816b1dc,0x0816b208),
+      ending in BX LR before the next independent wrapper. Whole-image A32
+      decoding finds two incoming plain BLs at 0x0816b10c and 0x0816b2dc,
+      zero predicated incoming BLs and zero outgoing plain or predicated BLs.
+      Signed half-open range check: first <= index < wrapping(first +
+      dimension_a*dimension_b). Reject below-first indices before reading
+      dimensions. No target deviations. Fields use aligned four-byte word
+      indices on hosts. Replaces the indexed_rect_invalidate retail-address
+      seam and duplicated host predicate with the shared Rust implementation.
+      Host suite passes all 14489 tests, including signed boundaries, zero
+      and negative dimensions, and product/addition wraparound. Standalone
+      smoke observes the -3..3 range and rejects a wrapped upper bound.
+      ARM release build passes. match.py exits 1: 11 stock versus 14 Rust
+      instructions; retains the early signed rejection, aligned field
+      reads, MLA and signed exclusive upper comparison. LLVM adds a frame
+      and uses conditional POP rather than BX. No on-device run performed.
   - address: 0x0816b2d0
     ghidra: FUN_0816b2d0
     name: indexed_rect_invalidate
@@ -45,8 +77,8 @@ functions:
       MLA for first + rows*columns and an exclusive upper bound. On success,
       copy the indexed rectangle, apply its local origin, translate by the
       bounds origin, and call the existing region invalidation port. Device
-      builds call the unported predicate at its verified retail address;
-      hosts evaluate its raw arithmetic. Return the restored r0/r1 packed
+      builds and hosts use the shared indexed_rect_is_visible Rust port.
+      Return the restored r0/r1 packed
       as top/left, or element/index when rejected. Host pointers in this
       result truncate to u32; r2/r3 restoration is deliberately omitted
       because the two real callers discard all return registers. ARM
