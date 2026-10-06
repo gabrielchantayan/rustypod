@@ -31,6 +31,43 @@ const PROPERTY_KEY_6063: u32 = 0x6063;
 const PROPERTY_KEY_60AE: u32 = 0x60ae;
 const RESOURCE_KIND_UI32: ResourceKind = ResourceKind(0x5569_3332);
 
+/// `class6000_backlight_timer` — original: `FUN_08171bdc` @ `0x08171bdc`.
+/// True extent: 8 bytes, ending at the next function at `0x08171be4`.
+/// Raw words: `e5d00034` (`ldrb r0,[r0,#0x34]`), `e12fff1e` (`bx lr`).
+/// Binary decoding verifies 2 plain BL callers (`0x081edfc4`, `0x08227ee4`)
+/// and 0 predicated BL callers; the body contains no calls.
+///
+/// Reads the class-0x6000 store's backlight-timer byte at +0x34 and returns
+/// it zero-extended in r0. The settings refresh caller identifies its use
+/// as `ShowSetting_BacklightTimer`. Deliberate deviations: none.
+///
+/// # Safety
+/// `store.add(0x34)` must point to a readable byte in the store allocation.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_backlight_timer(store: *const u8) -> u32 {
+    store.add(0x34).read() as u32
+}
+
+#[cfg(test)]
+mod backlight_timer_tests {
+    use super::class6000_backlight_timer;
+
+    #[test]
+    fn reads_only_timer_byte_and_zero_extends_every_value() {
+        // Vary base alignment and poison both neighboring bytes.
+        for alignment in 0..4 {
+            let mut bytes = [0xa5u8; 0x38];
+            for value in 0..=255u32 {
+                bytes[alignment + 0x34] = value as u8;
+                let before = bytes;
+                assert_eq!(unsafe { class6000_backlight_timer(bytes.as_ptr().add(alignment)) }, value);
+                assert_eq!(bytes, before);
+            }
+        }
+    }
+}
+
 
 /// `class6000_read_ui32_property_6056` — original: `FUN_08171fdc` @
 /// `0x08171fdc` (24 bytes: five ARM instructions through `0x08171ff0` plus

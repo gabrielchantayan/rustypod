@@ -11,8 +11,8 @@
 //! vtable +0x58 with (0x2a2a2a2a, 0x891a). Return 1 unconditionally.
 //! The caller identifies this path as `ShowSetting_BacklightTimer`.
 //!
-//! Deliberate deviations: none on target; unported callees retain their
-//! verified firmware addresses. Host builds inject those external operations.
+//! Deliberate deviations: none on target; the getter uses the Rust port and
+//! unported external operations retain verified addresses or host injection.
 //! The context prefix uses repr(C) fields so its pointer remains native-width
 //! on the host while occupying the stock +0xb0 word on ARM.
 
@@ -26,7 +26,6 @@ pub struct BacklightTimerContext {
 #[derive(Clone, Copy)]
 pub struct BacklightTimerOps {
     pub instance: unsafe extern "C" fn() -> *mut u8,
-    pub read_timer: unsafe extern "C" fn(*mut u8) -> u32,
     pub set_timer: unsafe extern "C" fn(*mut u8, u32),
 }
 
@@ -42,16 +41,15 @@ pub unsafe extern "C" fn backlight_timer_refresh(context: *mut BacklightTimerCon
     #[cfg(target_os = "none")]
     {
         let store = crate::app::registry::instance_of_class_6000();
-        let read_timer: unsafe extern "C" fn(*mut u8) -> u32 = core::mem::transmute(0x0817_1bdcusize);
         let set_timer: unsafe extern "C" fn(*mut u8, u32) = core::mem::transmute(0x081e_da94usize);
-        let timer = read_timer(store);
+        let timer = crate::app::class_6000_property::class6000_backlight_timer(store);
         set_timer(core::ptr::addr_of!((*context).settings).read(), timer);
     }
     #[cfg(not(target_os = "none"))]
     {
         let ops = core::ptr::addr_of!(BACKLIGHT_TIMER_OPS).read().expect("install backlight timer host operations");
         let store = (ops.instance)();
-        let timer = (ops.read_timer)(store);
+        let timer = crate::app::class_6000_property::class6000_backlight_timer(store);
         (ops.set_timer)(core::ptr::addr_of!((*context).settings).read(), timer);
     }
     1
@@ -64,7 +62,6 @@ mod tests {
 
     static STORE: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
     unsafe extern "C" fn instance() -> *mut u8 { STORE.load(Ordering::Relaxed) }
-    unsafe extern "C" fn read_timer(store: *mut u8) -> u32 { store.add(0x34).read() as u32 }
     // Model the verified setter's state transition and notification. The
     // notification observes the new value, rather than just echoing arguments.
     #[repr(C)]
@@ -81,7 +78,7 @@ mod tests {
         let mut settings = Settings { words: [0xdead_beef; 12], observed: 0xdead_beef };
         let mut context = BacklightTimerContext { prefix: [0xa5a5_a5a5; 44], settings: (&mut settings as *mut Settings).cast() };
         STORE.store(store.as_mut_ptr(), Ordering::Relaxed);
-        unsafe { BACKLIGHT_TIMER_OPS = Some(BacklightTimerOps { instance, read_timer, set_timer }); }
+        unsafe { BACKLIGHT_TIMER_OPS = Some(BacklightTimerOps { instance, set_timer }); }
         for value in 0..=255u32 {
             store[0x34] = value as u8;
             assert_eq!(unsafe { backlight_timer_refresh(&mut context) }, 1);
