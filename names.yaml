@@ -224701,3 +224701,47 @@ functions:
       the verified wrapper. LLVM adds a frame-pointer save/restore and
       uses a literal-loaded BX to 0x08168558 instead of a direct B.
       Receiver transfer, owner load and tail-call destination agree.
+
+  - address: 0x0815b118
+    ghidra: FUN_0815b118
+    name: selected_item_string_enabled
+    size: 124
+    sig: "u32 selected_item_string_enabled(u8 *owner, u32 selector)"
+    module: app/selected_item_string_enabled
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      param_2/r1/r5: selector
+      uStack_10: temporary_key
+      iVar1: mapped_value
+    renames:
+      FUN_083d75e0: container_is_empty
+      FUN_083e0044: deque_back_elem4
+      FUN_081cb408: stock_element_at
+      FUN_083d8c30: cxx_string_copy_ctor
+      FUN_083db510: string_value_map_lookup_or_insert
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw A32 establishes 124 bytes from push at 0x0815b118 through pop
+      at 0x0815b190; the next independent function starts at 0x0815b194.
+      Six internal plain BL instructions, no predicated BL. Full-image
+      aligned BL decoding finds two inbound plain calls at 0x081f62d4
+      and 0x081f640c and no predicated inbound calls. Checks deque at
+      owner+0xa0, dereferences its back slot, sign-extends the object's
+      i16 index, and fetches that item. Copies its COW string at +8 for
+      selector zero or +12 for any nonzero selector, looks up/inserts
+      the map value at owner+0x84, releases the temporary, and returns
+      value != 0. Only r0/r1 are arguments; Ghidra's r3 parameter is an
+      incidental saved stack word. Deliberate deviation: retains stock
+      0x081cb408 because the existing Rust port returns an element slot
+      rather than the raw callee's dereferenced element. Reuses existing
+      Rust deque-back, container-empty, COW-string and map ports.
+      All 14505 host tests pass; ARM release build passes. Standalone
+      Unicorn execution of the linked ARM export confirms empty-owner
+      return zero for selector zero and UINT32_MAX. Nonempty host cases
+      cover the signed index, all nonzero selectors, full-width mapped
+      values and COW lifetime. match.py exits 1: 31 original versus 38
+      Rust instructions; equivalent guards, signed load, selector offsets,
+      copy/lookup/release order and boolean normalization. LLVM adds a
+      frame pointer and a literal-loaded BLX for the retained stock call.
+      No physical-device execution.
