@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081725a8
+    ghidra: FUN_081725a8
+    name: read_global_passkey
+    size: 104
+    sig: "u32 read_global_passkey(void *receiver, i32 *state, u8 *enabled, StringObject *text)"
+    module: app/passkey_snapshot
+    status: ported
+    vars:
+      param_1: unused_receiver
+      param_2: state
+      param_3: enabled
+      param_4: text
+      piVar1: passkey_record
+      iVar2: current_state
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      Raw osos.dec proves 104 bytes through the next PUSH at 0x08172610:
+      92 instruction bytes, the 0x08a77114 global literal at 0x08172604,
+      and eight bytes of default text and padding at 0x08172608. Two plain
+      outgoing BLs at 0x081725d0 and 0x081725f8 both target the existing
+      string_object_assign_cstr port; zero predicated BLs. Whole-image
+      aligned decoding finds two plain incoming BLs at 0x0827f5e0 and
+      0x0827fbf4, zero predicated. Publish the signed global state; -1
+      clears enabled before assigning "0000" and returns zero. All other
+      states assign the text at record+5, reload and normalize the flag at
+      record+4 after assignment, and return one. Receiver is unused.
+      Callers consume the string and normalized flag in passkey views.
+      Host tests cover the sentinel, signed extremes, empty text, flag
+      normalization, and flag mutation during assignment. Public-ABI smoke
+      exercised the fixed global and actual string assignment seam.
+      ARM match review preserves both branches and call ordering; LLVM
+      uses a frame pointer and one unconditional normalized-byte store.
+      Both emitted call relocations resolve to string_object_assign_cstr.
+      No deliberate behavioral deviations.
   - address: 0x08172610
     ghidra: FUN_08172610
     name: controller_event_set_enabled
