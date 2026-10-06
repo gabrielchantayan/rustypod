@@ -1054,6 +1054,7 @@ pub mod indexed_record_payload_clear;
 pub mod numeric_pair_table;
 pub mod record28_vector_last;
 pub mod view_event_clear_screen_indices;
+pub mod screen_indices_clear;
 pub mod app_screen_dispatch_94_then_90;
 pub mod image_format_slots_collect_unexcluded;
 pub mod context_handle_request;

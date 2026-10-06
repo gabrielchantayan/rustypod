@@ -13,30 +13,19 @@
 //! Deliberate deviations: Rust calls the real completion body rather than
 //! its branch veneer. The unused event word (preserved in r1 by retailOS)
 //! remains in the public ABI but is not forwarded to the one-argument target.
-//! The unported screen-clear helper uses the established firmware seam;
-//! the singleton getter and event completion use existing Rust ports.
+//! The singleton getter, screen-clear helper, and event completion use
+//! existing Rust ports.
 
 use core::ptr::addr_of;
 use super::singletons::app_screen_get;
 use super::view_event::view_event_complete;
+use super::screen_indices_clear::screen_indices_clear;
 
 pub struct ViewEventClearScreenIndicesOps {
     pub screen_get: unsafe extern "C" fn() -> *mut u8,
     pub clear_indices: unsafe extern "C" fn(*mut u8),
 }
 
-unsafe extern "C" fn screen_indices_clear(screen: *mut u8) {
-    #[cfg(target_os = "none")]
-    {
-        let clear: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(0x0817_78f0usize) };
-        unsafe { clear(screen) };
-    }
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = screen;
-        panic!("view_event_clear_screen_indices requires screen index clear 0x081778f0")
-    }
-}
 
 pub static mut VIEW_EVENT_CLEAR_SCREEN_INDICES_OPS: ViewEventClearScreenIndicesOps = ViewEventClearScreenIndicesOps {
     screen_get: app_screen_get,

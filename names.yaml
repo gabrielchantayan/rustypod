@@ -6156,6 +6156,34 @@ functions:
       cover zero, one, high-bit and all-bit counts, adjacent-byte preservation
       and cleanup order. Public-entry smoke covers both command branches.
       ARM build passes. match.py exit 1 shows 50 versus 42 instructions with
+  - address: 0x081778f0
+    ghidra: FUN_081778f0
+    name: screen_indices_clear
+    size: 28
+    sig: "void screen_indices_clear(u8 *screen)"
+    module: app/screen_indices_clear
+    status: ported
+    vars:
+      param_1/r0/r4: screen
+      FUN_083e6808: vector_clear_elem4 (existing Rust port)
+      "screen+0x840": indices
+      "screen+0x84c": valid
+    notes: >-
+      Raw ARM words establish 0x081778f0..0x0817790c, 28 bytes; the
+      next real entry opens with ldrb r2,[r0,#0x25]. Full aligned raw
+      BL decoding finds two plain inbound calls at 0x082325c0 and
+      0x082398e4, no predicated calls. Body has one plain BL at
+      0x081778fc to the already ported vector_clear_elem4, 0x083e6808.
+      Clears the vector head at +0x840 without releasing its storage
+      or touching elements, then invalidates byte +0x84c. Reuses the
+      existing Rust callee and replaces the view-event firmware seam.
+      Repr(C) fields preserve target offsets and expand pointers on
+      hosts without overlapping the validity byte. No target semantic
+      deviations. Host tests cover empty, partial and full vectors,
+      null empty heads, all-bit validity flags and unrelated storage.
+      Host suite and ARM release build pass. match.py exits 1: eight
+      Rust instructions versus seven stock, extra frame setup only;
+      vector-clear BL, +0x840 adjustment and +0x84c byte store retained.
   - address: 0x082398c8
     ghidra: FUN_082398c8
     name: view_event_clear_screen_indices
@@ -6167,7 +6195,7 @@ functions:
       param_1/r0: view
       param_2/r1: event (preserved but unused by the completion target)
       FUN_08173848: app_screen_get (existing Rust singleton port)
-      FUN_081778f0: screen_indices_clear (unported firmware seam)
+      FUN_081778f0: screen_indices_clear (existing Rust port)
       tail_08260880: view_event_complete_thunk (ported completion veneer)
     notes: >-
       Raw ARM words establish 0x082398c8..0x082398f8, exactly 48 bytes;
@@ -6183,8 +6211,8 @@ functions:
       one, high-bit and all-bit flags with and without a timer, cache
       invalidation before completion, and preservation of the flag.
       Deviations: omit the completion branch veneer and unused r1
-      forwarding; retain the unported clear helper behind a firmware
-      seam. match.py exit 1 shows conditional clear, two BLX seam calls,
+      forwarding. The screen clear now uses the Rust port. Historical
+      match.py exit 1 showed conditional clear, two BLX seam calls,
       and completion BL plus constant handled return rather than tail B.
   - address: 0x082502bc
     ghidra: FUN_082502bc
