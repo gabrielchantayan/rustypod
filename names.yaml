@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08193fec
+    ghidra: FUN_08193fec
+    name: service_manager_notification_update
+    size: 148
+    sig: "void service_manager_notification_update(u32 *slot_table)"
+    module: app/service_manager
+    status: ported
+    vars:
+      param_1/r4: slot_table
+      param_2/r1: unused_incoming_register
+      param_3/r2: unused_saved_register
+      local_14: ready
+      uStack_18: constructed
+      uVar5/r5: notification_state
+      uVar4/r1: combined_status
+      iVar3/r0: slot
+    renames:
+      FUN_08165520: service_manager_instance
+      FUN_08165558: service_manager_initialization_state_get
+      FUN_080e2540: retail_service_manager_notification
+    notes: >-
+      Raw A32 extent is 0x08193fec-0x08194080 (148 bytes), with three
+      outbound plain BLs and no predicated BLs. Two inbound plain BLs at
+      0x08165338 and 0x0818f21c; the initializer also falls through here.
+      Ready 1/2 clears all three +0x18 event words and notifies state 1;
+      otherwise OR the three +0x0c statuses and notify 3 if bit 0 is set,
+      else 2. Dead incoming r1/r2 are omitted. Reuses existing singleton,
+      initialization-byte accessors and the 0x080e2540 target/host seam.
   - address: 0x08194120
     ghidra: FUN_08194120
     name: service_handler_slot_counted_flag_set

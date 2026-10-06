@@ -13,6 +13,7 @@
 //! | 0x08193ee8 | [`service_manager_slot_handler_get`] | 20 | 14 direct |
 //! | 0x08193f38 | [`service_manager_secondary_handler_has_events_get`] | 24 | 5 direct |
 //! | 0x08193fb8 | [`service_manager_secondary_handler_initialize`] | 200 | 3 direct |
+//! | 0x08193fec | [`service_manager_notification_update`] | 148 | 2 direct |
 //! | 0x08194110 | [`service_handler_set`] | 16 | 5 direct |
 //! | 0x081941a4 | [`service_handler_state_set`] | 20 | 4 direct |
 //! | 0x081941b8 | [`service_manager_handler_group_for_slot`] | 64 | 5 direct |
@@ -680,11 +681,37 @@ pub unsafe extern "C" fn service_manager_secondary_handler_initialize(
     core::ptr::write(record.add(6), 0);
     core::ptr::write(record.add(7), 0);
 
-    service_manager_instance();
+    service_manager_notification_update(slot_table);
+}
+
+/// Update the service-manager notification from its three handler records.
+///
+/// Original: `FUN_08193fec` @ 0x08193fec, 148 bytes, ending before the
+/// independent slot getter at 0x08194080. Raw words verify three outbound
+/// plain BLs and zero predicated BLs; two inbound plain BLs at 0x08165338
+/// and 0x0818f21c, with no predicated callers. The initializer at 0x08193fb8
+/// also falls through to this entry.
+///
+/// Assert the singleton exists and fetch its initialization bytes. Ready
+/// values 1 and 2 clear word +0x18 of all three 0x20-byte records and notify
+/// state 1. Otherwise notify state 3 if any +0x0c status has bit zero set,
+/// or state 2 if none does. Constructed status does not affect the result.
+///
+/// Deliberate deviations: omit dead incoming r1/r2 and unused stack bytes;
+/// reuse the holder statics and notification host seam documented above.
+/// On target, notification still calls the verified retail address 0x080e2540.
+///
+/// # Safety
+/// `slot_table` must address three aligned, readable/writable eight-word
+/// records, and the service-manager singleton must have been installed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_manager_notification_update(slot_table: *mut u32) {
+    let instance = service_manager_instance();
     let mut constructed = 0u8;
     let mut ready = 4u8;
     service_manager_initialization_state_get(
-        core::ptr::null_mut(),
+        instance,
         &mut constructed,
         &mut ready,
     );
@@ -725,6 +752,58 @@ static mut SERVICE_MANAGER_NOTIFICATION: unsafe extern "C" fn(i32) =
 #[inline(always)]
 unsafe fn invoke_unported_service_manager_notification(notification_state: i32) {
     core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_MANAGER_NOTIFICATION))(notification_state);
+}
+
+#[cfg(test)]
+mod notification_update_tests {
+    use super::*;
+
+    static mut OBSERVED: i32 = 0;
+
+    unsafe extern "C" fn record_notification(state: i32) {
+        OBSERVED = state;
+    }
+
+    #[test]
+    fn ready_precedence_and_status_bit_across_all_records() {
+        let _guard = SERVICE_MANAGER_INSTANCE_TEST_LOCK.lock();
+        unsafe {
+            let saved_instance = SERVICE_MANAGER_INSTANCE;
+            let saved_constructed = SERVICE_MANAGER_CONSTRUCTED;
+            let saved_ready = SERVICE_MANAGER_READY;
+            let saved_notification = SERVICE_MANAGER_NOTIFICATION;
+            for ready in [0u8, 1, 2, 3, 4, 0x80, 0xff] {
+                for active_slot in 0..4 {
+                    for constructed in [0u8, 1, 0xff] {
+                        let mut table = [0xa5a5_5a5au32; 24];
+                        for slot in 0..3 {
+                            table[slot * 8 + 3] = if slot == active_slot { 0x8000_0001 } else { 0x8000_0002 };
+                        }
+                        let mut expected = table;
+                        let expected_state = if ready == 1 || ready == 2 {
+                            for slot in 0..3 {
+                                expected[slot * 8 + 6] = 0;
+                            }
+                            1
+                        } else if active_slot < 3 { 3 } else { 2 };
+                        SERVICE_MANAGER_INSTANCE = table.as_mut_ptr().cast();
+                        SERVICE_MANAGER_CONSTRUCTED = constructed;
+                        SERVICE_MANAGER_READY = ready;
+                        SERVICE_MANAGER_NOTIFICATION = record_notification;
+                        OBSERVED = -1;
+                        service_manager_notification_update(table.as_mut_ptr());
+                        let observed = OBSERVED;
+                        assert_eq!(observed, expected_state);
+                        assert_eq!(table, expected, "ready={ready}, active_slot={active_slot}");
+                    }
+                }
+            }
+            SERVICE_MANAGER_INSTANCE = saved_instance;
+            SERVICE_MANAGER_CONSTRUCTED = saved_constructed;
+            SERVICE_MANAGER_READY = saved_ready;
+            SERVICE_MANAGER_NOTIFICATION = saved_notification;
+        }
+    }
 }
 
 #[cfg(test)]
