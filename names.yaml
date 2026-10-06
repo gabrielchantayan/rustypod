@@ -81233,6 +81233,40 @@ functions:
       dataflow. match.py structural: literal load and fixed-argument
       tail-call shape are retained.
 
+  - address: 0x08185bac
+    ghidra: FUN_08185bac
+    name: pair_header_grand_base_body_destruct
+    size: 36
+    sig: "u32 *pair_header_grand_base_body_destruct(u32 *this)"
+    module: cxx/pair_header
+    status: identified
+    vars: {param_1: this, DAT_08185bcc: unresolved_element_callback}
+    notes: >-
+      Deferred: the supplied raw firmware contradicts the presumed element
+      destructor identity, so no Rust seam or replacement was invented.
+      True extent is [0x08185bac,0x08185bd0): eight ARM instructions
+      (32 bytes) plus the literal 0x08283a80 at 0x08185bcc (4 bytes).
+      The next real function starts with push {r4,r5,r6,lr} at 0x08185bd0.
+      Full-image aligned A32 decoding independently finds two inbound plain
+      BLs at 0x0809db68 and 0x0810ec2c, zero predicated inbound BLs, and
+      one outbound plain BL at 0x08185bc0 to cpp_finalise_dtor_guard
+      (0x082ab3ec), zero predicated outbound BLs. The wrapper saves this,
+      calls that existing adapter with (this,4,20,0x08283a80), discards its
+      result, and returns the saved this. Callers use a stack array or the
+      embedded base-object body at +0x30. The adapter forwards the nonzero
+      callback unchanged to __cpp_finalise at 0x080336d8, whose mov pc,r7
+      at 0x08033700 invokes it without an address adjustment.
+      Blocking raw evidence: 0x08283a7c is push {r4,r5,r6,lr}, whereas
+      the literal callback 0x08283a80 is sub sp,sp,#24, an interior entry
+      into the resident_controller_initialize routine already named by
+      the 0x081a8f40 entry. That routine writes through object+0x54,
+      allocates controller resources, and ends with add sp,sp,#24 at
+      0x08283c00 and pop {r4,r5,r6,pc} at 0x08283c04. Entering at
+      0x08283a80 skips the matching register save and is not a verified
+      20-byte element destructor. Faithful porting requires evidence for
+      the runtime callback address or image correction; substituting
+      0x08283a7c or guessing a destructor would change the raw behavior.
+
   - address: 0x082ab264
     ghidra: FUN_082ab264
     name: cpp_array_allocate
