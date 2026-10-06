@@ -232,6 +232,7 @@ pub mod object_word_0x8_low_byte;
 pub mod object_set_byte_0x27;
 pub mod object_set_byte_0x18;
 pub mod object_set_word_0x40;
+pub mod object_clear_pending_and_notify;
 pub mod object_set_word_0x20;
 pub mod object_top_byte_flags_contains;
 pub mod object_assign_word_0x20_and_dispatch_slot_8;
