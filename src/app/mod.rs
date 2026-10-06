@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod app_screen_set_byte_0x28;
 pub mod controller_declaration_resources_reset;
 pub mod media_context_value_refresh;
 pub mod clear_context_entry_flags;
