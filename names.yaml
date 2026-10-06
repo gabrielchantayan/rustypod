@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817ddd0
+    ghidra: FUN_0817ddd0
+    name: active_context_refresh
+    size: 56
+    sig: "void active_context_refresh(u8 *context)"
+    module: app/active_context_refresh
+    status: ported
+    vars: {param_1/r0/r4: context}
+    notes: >-
+      Raw extent [0x0817ddd0,0x0817de08) is 56 bytes, not Ghidras 60.
+      Next function begins with an independently entered ldrb. Whole-image
+      A32 decoding finds two incoming plain BLs at 0x0817dcd0 and
+      0x0817e038, zero predicated incoming BLs; four outgoing plain BLs,
+      zero predicated outgoing BLs, plus tail B to 0x0817de8c.
+      Gate state byte 3/4, then dispatch status, mapped code, scalar value
+      and scaled level in order, preserving the pointer across mutations.
+      Reuse canonical predicate, state_status_dispatch and mapped-code ports.
+      No canonical entry exists for the two remaining updates. Raw words
+      verify single-pointer ABIs at 0x0817dfac and 0x0817de8c; keep those
+      retail calls rather than porting additional functions. Names are
+      structural, not inferred subsystem identities. No target behavioral
+      deviations; host unported updates fail explicitly. Host edge tests
+      cover 254 inactive states and unaligned contexts. Actual-source smoke
+      verifies one-byte read-only contexts at a guard-page boundary; active
+      hardware side effects are not host emulated.
+      Full host suite and ARM release build pass. match.py exits 1: its
+      default 60-byte reference includes the next functions ldrb; the true
+      body is 14 instructions. Rust has 20 including a literal, preserves
+      the gate, three canonical BLs, fixed-address scalar BLX and final
+      scaled-level BX. LLVM adds a frame and forms 0x0817dfac by ORing
+      0x120 into the 0x0817de8c literal. No device execution.
   - address: 0x0817de08
     ghidra: FUN_0817de08
     name: odd_state_byte_advance
