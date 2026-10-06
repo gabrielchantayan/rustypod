@@ -222695,3 +222695,39 @@ functions:
       retail addresses. ARM diff preserves guards and effects with a countdown
       loop and fixed-address BLX calls. Host tests cover mismatch, unsigned
       bounds, equality, release-induced count changes, wraparound and source write.
+
+  - address: 0x08184064
+    ghidra: FUN_08184064
+    name: shown_children_primary_bounds_union
+    size: 112
+    sig: "void shown_children_primary_bounds_union(void *owner, ContainerView *container)"
+    module: ui/shown_children_primary_bounds_union
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r1: container
+      uStack_18/uStack_14: cursor
+      local_10: child
+      FUN_081586e0: container_view_children
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+      FUN_082a26c8: ui_element_is_shown
+      FUN_08275b9c: object_cast_to_class
+      FUN_0826c3d8: rect_union
+    notes: >-
+      Raw extent 0x08184064..0x081840d4 ends immediately before the next
+      push {r4,lr}. Whole-image aligned ARM BL decoding finds one plain
+      inbound call at 0x08182414 and one EQ-predicated call at 0x081811b4.
+      Outbound calls are six plain BLs and one EQ-predicated rect_union.
+      Walk container+0xa8 through the existing cursor ports; only shown
+      children whose class-0x1280 cast fails contribute their +0x80 rectangle
+      to owner+0xa8. Preserve the existing accumulator and invalidate the
+      exhausted cursor. Ghidra's third and fourth parameters are saved
+      registers reused as locals, not arguments. Host pointers use native
+      widths with fixed geometry offsets. ARM match shows LLVM inlines
+      rect_union's empty checks and min/max updates and removes the dead
+      local cursor invalidation; iteration, filter order and +0xa8 writes
+      remain intact. No semantic deviations. Host tests cover hidden and
+      excluded children, negative coordinates, empty rectangles, an empty
+      collection, empty and nonempty accumulators, and untouched neighbors.
