@@ -165775,6 +165775,37 @@ functions:
       0x081684bc, and zero predicated inbound BL forms. It reads the
       target-width primary_target word at context+0x20 and returns a
       normalized zero or one predicate. Deliberate deviations: none.
+  - address: 0x08168340
+    ghidra: FUN_08168340
+    name: context_secondary_target_is_present
+    size: 16
+    sig: "u32 context_secondary_target_is_present(const u32 *context)"
+    module: app/context_secondary_target_is_present
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x24": secondary_target
+      r0: secondary_target_present
+    notes: >-
+      Raw osos.dec words e5900024 e3500000 13a00001 e12fff1e establish
+      the exact 16-byte extent [0x08168340,0x08168350): ldr r0,[r0,#0x24];
+      cmp r0,#0; movne r0,#1; bx lr. The next independent function is the
+      secondary-target setter at 0x08168350. Full-image aligned A32
+      branch-immediate decoding finds two incoming plain BLs at 0x08168498
+      and 0x081684dc, zero predicated incoming BLs, and no outgoing calls.
+      Returns exactly zero or one from the secondary-target word without
+      dereferencing it. Reuses the adjacent primary-target predicate's
+      target-width word-index convention; no callee seam is needed.
+      Ghidra expands callers across shared tail branches and incorrectly
+      models incidental r1 preservation as a second return word.
+      Deliberate deviations: none.
+      Full host suite and ARM release build pass. Standalone host smoke
+      confirms secondary-target absence independently of primary presence
+      and normalization of high-bit and maximum-width words. match.py
+      exits 1: LLVM emits six instructions versus four, adding a frame
+      pointer prologue and replacing bx lr with pop {fp,pc}; the load,
+      comparison and conditional normalization are unchanged. No device
+      execution performed.
   - address: 0x08168350
     ghidra: FUN_08168350
     name: context_secondary_target_set
