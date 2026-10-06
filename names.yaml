@@ -224003,3 +224003,35 @@ functions:
       folds both callees' known return identities, and branches around
       the conditional capacity store instead of using STRNE. The two
       calls, field stores, zero-size normalization and return agree.
+
+  - address: 0x0816bd2c
+    ghidra: FUN_0816bd2c
+    name: buffered_reader_refill
+    size: 208
+    sig: "void buffered_reader_refill(BufferedReader *reader, uint32_t requested)"
+    module: app/buffered_reader_refill
+    status: ported
+    vars: {param_1: reader, param_2: requested, uVar3: cursor, uVar1: buffered_or_read_limit, iVar2: received}
+    notes: >-
+      Raw A32 extent ends at next prologue 0x0816bdfc. One plain BL,
+      zero predicated BLs, one virtual BLX at 0x0816bdbc through vtable
+      +0x44; Ghidra's two call sites include that BLX. The BL at
+      0x0816bd70 targets veneer 0x08037e00, words e51ff004/220000d4,
+      the IRAM mirror of already-ported memmove at 0x080000d4.
+      Callers 0x0816bec8 and 0x0816bf0c request one byte and a bulk count.
+      If wrapping cursor + requested exceeds buffered and EOF is clear,
+      compact unread bytes, reset cursor, and read once with the unsigned
+      minimum of capacity minus buffered and remaining. Add received bytes,
+      increment read count, subtract received from remaining unless UINT32_MAX,
+      and set only the EOF byte when buffered becomes zero. Preserve position
+      except for virtual-reader effects. No retry or error reinterpretation.
+      Target repr(C) fields match +0/+4/+20/+24/+28/+32/+36/+40/+44;
+      host pointers and vtable slots widen deliberately. Existing Rust memmove
+      replaces the mirror veneer; LLVM lowers it to __aeabi_memmove.
+      Host edge tests cover compaction, finite and unlimited sources, short
+      and empty reads, EOF, wrapping request/count, padding and buffer bounds.
+      Host suite and ARM release build passed. Standalone smoke observed
+      compacted bytes [3,4], appended [9,10], remaining 4 and one read.
+      match.py reports 55 Rust instructions versus 52 stock instructions;
+      frame pointer, register allocation and branches differ, while target
+      offsets, bounded read, BLX, sentinel subtraction and EOF store agree.
