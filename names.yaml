@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817808c
+    ghidra: FUN_0817808c
+    name: parser_skip_blanks
+    size: 56
+    sig: "void parser_skip_blanks(const void *context, const StringObject *string, int32_t *index)"
+    module: app/parser_skip_blanks
+    status: ported
+    vars:
+      param_1/r0: unused_context
+      param_2/r1/r5: string
+      param_3/r2/r4: index
+      iVar1: codepoint
+      FUN_082a52c8: string_object_codepoint_at
+    notes: >-
+      Raw A32 words establish [0x0817808c,0x081780c4), 56 bytes of code;
+      the next real function starts with push {r4,lr} at 0x081780c4.
+      One outbound plain BL at 0x081780b0 calls the existing port
+      string_object_codepoint_at; zero predicated outbound BLs. Whole-image
+      decoding finds two inbound plain BLs at 0x081786cc and 0x08178718,
+      zero predicated inbound BLs. Advance the caller's codepoint index
+      while the decoded character is ASCII space or tab; all other values
+      stop, including NUL, negative indices and NULL payloads. The first
+      ABI argument is unused. No deliberate deviations; increments wrap
+      like ARM ADD and the existing decoder remains the real callee.
+      Host tests cover empty/all-blank strings, nonzero codepoint indices
+      after multibyte UTF-8, other whitespace, NULL payloads, and negative
+      and past-end indices.
   - address: 0x08178d64
     ghidra: FUN_08178d64
     name: embedded_containers_clear
