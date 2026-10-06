@@ -13,6 +13,7 @@ pub mod copy_64_bytes_and_terminate;
 pub mod texture_wrap_mode;
 pub mod object_payload_time_text;
 pub mod plist_dict_i64;
+pub mod plist_handle_construct;
 pub mod plist_indexed_i32;
 pub mod secondary_collection_count;
 pub mod long_filename_byte_is_rejected;
