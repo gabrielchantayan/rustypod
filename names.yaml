@@ -47737,6 +47737,46 @@ functions:
       use the factory/release boundary because host pointers are wider than
       the target vtable words.
 
+  - address: 0x08184c3c
+    ghidra: FUN_08184c3c
+    name: copy_entry_payload_by_kind
+    size: 184
+    sig: "void copy_entry_payload_by_kind(void *owner_input, FirstEntryPayload *output, u32 kind)"
+    module: util/first_entry_payload
+    status: ported
+    renames:
+      param_1/r0: owner_input
+      param_2/r1/r7: output
+      param_3/r2/r8: kind
+      piVar1/r5: temporary_owner
+      uVar4/r4: index
+      iVar2/r6: entry
+      FUN_08184b24: load_cros_resource_list
+      FUN_083d78c4: vector_size_elem4_alias_78c4
+      FUN_08184f98: ptr_vector_at
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw extent is 0x08184c3c..0x08184cf4, where the next function starts
+      with push {r4,lr}. Verified five outbound unconditional BL instructions
+      and zero predicated BLs; two inbound unconditional BLs at 0x081a0bc4
+      and 0x08270584. Loads a CROS temporary owner and searches its vector
+      at +0x14, rechecking the unsigned size each iteration and sign-extending
+      the low 16 index bits before ptr_vector_at. Entry +8 holds a pointer
+      to a 12-byte payload; its byte +8 is compared to the full u32 kind.
+      The first match copies all 12 bytes. Empty and exhausted searches write
+      zero words at output +0/+4 and byte 6 at +8, preserving +9..+11.
+      Releases a non-NULL temporary through vtable +4, without adding an
+      earlier NULL guard. Calls existing ported helpers directly. Reuses the
+      existing host factory/release boundary with native-width pointer
+      fixtures; target fields remain four bytes. Virtual tail dispatch
+      becomes call/return and dead r9 bookkeeping is omitted.
+      All 14400 host tests and the ARM release build pass. A standalone
+      executable verified matching copy, full-width-kind miss, and release.
+      match.py reports 46 original versus 45 Rust entries (structural diff,
+      exit 1): LLVM hoists the pure size helper into a countdown loop over
+      the unchanged temporary vector, retaining the signed-16 accessor
+      index, kind comparison, copy/empty paths, and virtual release tail.
+
   - address: 0x08184f84
     ghidra: FUN_08184f84
     name: ptr_vector_count

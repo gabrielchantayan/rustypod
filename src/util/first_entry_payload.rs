@@ -143,6 +143,75 @@ pub unsafe extern "C" fn copy_first_entry_payload(
     }
 }
 
+/// Copies the first resource-list payload with the requested kind.
+///
+/// Original `FUN_08184c3c` @ 0x08184c3c: 184 bytes, ending at the next
+/// function's push @ 0x08184cf4. Raw A32 decoding verifies five outbound
+/// plain BL instructions, zero predicated BLs, and two inbound plain BLs
+/// (0x081a0bc4 and 0x08270584).
+///
+/// Loads a temporary CROS list, rechecks its vector size each iteration,
+/// sign-extends the low 16 bits of the index for the checked accessor, and
+/// compares the payload's kind byte against the full u32 request. The first
+/// match copies all 12 bytes; no match writes two zero words and byte 6,
+/// preserving the three padding bytes. Releases the temporary via vtable +4.
+///
+/// Deliberate deviations: uses the existing host factory/release fixtures
+/// and host-width entry pointer field; target fields remain four bytes.
+/// The virtual tail branch becomes a call/return; dead r9 bookkeeping is
+/// omitted. Already-ported callees are called directly on target.
+/// ARM codegen hoists the pure size helper into a countdown loop (the
+/// temporary vector is not mutated during the search), and retains the
+/// signed-16 index, byte comparison, copy/empty paths, and release tail.
+///
+/// # Safety
+/// The factory must return a valid owner with a vector at +0x14. Each visited
+/// entry must contain a readable payload pointer at +8, pointing to 12 bytes.
+/// `output` must be writable and the owner must support virtual release.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn copy_entry_payload_by_kind(
+    owner_input: *mut u8,
+    output: *mut FirstEntryPayload,
+    kind: u32,
+) {
+    let ops = unsafe { first_entry_payload_ops() };
+    #[cfg(target_os = "none")]
+    let temporary = unsafe {
+        load_cros_resource_list(owner_input as usize as u32).cast::<u8>()
+    };
+    #[cfg(not(target_os = "none"))]
+    let temporary = unsafe { (ops.create_owner)(owner_input) };
+    let vector = unsafe { temporary.add(VECTOR_OFFSET) as *const VectorBounds };
+    let mut matched = false;
+    if unsafe { vector_size_elem4_alias_78c4(vector) } != 0 {
+        let mut index = 0u32;
+        while index < unsafe { vector_size_elem4_alias_78c4(vector) } as u32 {
+            let entry = unsafe { ptr_vector_at(temporary, (index as i16 as i32) as u32) };
+            let payload = unsafe {
+                entry.add(ENTRY_PAYLOAD_OFFSET).cast::<*const u8>().read()
+            };
+            if unsafe { payload.add(8).read() } as u32 == kind {
+                unsafe { __rt_memcpy(output.cast::<u8>(), payload, PAYLOAD_SIZE) };
+                matched = true;
+                break;
+            }
+            index = index.wrapping_add(1);
+        }
+    }
+    if !matched {
+        unsafe {
+            core::ptr::addr_of_mut!((*output).first).write(0);
+            core::ptr::addr_of_mut!((*output).second).write(0);
+            core::ptr::addr_of_mut!((*output).kind).write(6);
+        }
+    }
+    let release_target = unsafe { core::ptr::addr_of!(temporary).read_volatile() };
+    if !release_target.is_null() {
+        unsafe { (ops.release_owner)(release_target) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +269,50 @@ mod tests {
             self.0.as_mut_ptr()
         }
     }
+    #[test]
+    fn kind_lookup_selects_first_match_or_preserves_empty_padding() {
+        let _guard = OPS_LOCK.lock();
+        unsafe {
+            #[repr(C)]
+            struct Entry {
+                header: [u32; 2],
+                payload: *const FirstEntryPayload,
+            }
+            let payloads = [
+                FirstEntryPayload { first: 11, second: 12, kind: 0, tail: [1, 2, 3] },
+                FirstEntryPayload { first: 21, second: 22, kind: 255, tail: [4, 5, 6] },
+                FirstEntryPayload { first: 31, second: 32, kind: 255, tail: [7, 8, 9] },
+                FirstEntryPayload { first: 41, second: 42, kind: 1, tail: [10, 11, 12] },
+            ];
+            let mut entries = payloads.each_ref().map(|payload| Entry { header: [0; 2], payload });
+            let mut slots = entries.each_mut().map(|entry| (entry as *mut Entry).cast::<u8>());
+            let begin = slots.as_mut_ptr().cast::<u8>();
+            for (count, kind, expected) in [
+                (0, 0, None), (4, 0, Some(0)), (4, 255, Some(1)),
+                (4, 1, Some(3)), (4, 2, None), (4, 256, None),
+                (4, 511, None),
+            ] {
+                let mut owner = Owner::with_vector(begin, begin.add(count * 4));
+                install(owner.ptr());
+                let mut output = FirstEntryPayload {
+                    first: u32::MAX, second: u32::MAX, kind: 99, tail: [0xaa, 0xbb, 0xcc],
+                };
+                copy_entry_payload_by_kind(core::ptr::null_mut(), &mut output, kind);
+                let actual = (output.first, output.second, output.kind, output.tail);
+                let reference = match expected {
+                    Some(index) => {
+                        let p = &payloads[index];
+                        (p.first, p.second, p.kind, p.tail)
+                    }
+                    None => (0, 0, 6, [0xaa, 0xbb, 0xcc]),
+                };
+                assert_eq!(actual, reference, "count={count}, kind={kind}");
+                assert_eq!(RELEASED_OWNER, owner.ptr());
+                restore();
+            }
+        }
+    }
+
 
     #[test]
     fn copies_the_first_entry_payload_and_releases_the_temporary() {
