@@ -938,6 +938,7 @@ pub mod u16_be_vtable_dispatch;
 pub mod u16_le_vtable_read_mode;
 pub mod utf8_clear_tail_character;
 pub mod three_word_message_post;
+pub mod iap_command_36_request;
 pub mod triple_scaled_cursor_advance;
 pub mod triple_scaled_word_cursor_advance;
 pub mod tick_accumulator;

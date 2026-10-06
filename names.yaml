@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08194e78
+    ghidra: FUN_08194e78
+    name: iap_command_36_request
+    size: 128
+    sig: "u32 iap_command_36_request(u8 *context, u32 value)"
+    module: app/iap_command_36_request
+    status: ported
+    args:
+      param_1: context
+      param_2: value
+    locals:
+      r4: mutex
+      r5: context
+      r6: status
+      uStack_14: payload
+      FUN_081946ec: active_service_handler_is_ready
+      thunk_FUN_082e8390: posix_mutex_lock
+      FUN_080f6da0: iap_packet_create
+      FUN_08195214: schedule_iap_packet_event
+      thunk_FUN_082e83d8: posix_mutex_unlock
+    notes: >-
+      Raw extent [0x08194e78,0x08194ef8) is 128 instruction bytes,
+      followed by an independent push prologue; no literals. Whole-image
+      aligned ARM decoding finds two incoming plain BLs at 0x0825a3cc
+      and 0x0825a3ec, zero predicated incoming BLs, five internal plain
+      BLs and zero predicated internal BLs. Callers supply a masked byte
+      or zero. Return 11 unless the active service is ready; otherwise
+      lock context+0x2d8 and create a lingo-7 command-0x24 packet using
+      the owner word at +0x2d0 and one byte from the saved argument.
+      Null packet returns 28; otherwise schedule completion state 1
+      with delay 200 ms and return its status. Both creation paths unlock.
+      Deliberately reuse all canonical Rust callees and omit the incidental
+      unused third stacked packet-factory argument; mutex results remain
+      ignored. Host tests cover unavailable global context, missing owner,
+      and selector rejection before request-context access. ARM release
+      build passes; match.py reports 37 versus 32 instructions with the
+      same readiness, lock, allocation, null-result, scheduling and unlock
+      paths. Existing callee runtime seams retain their limitations.
   - address: 0x0818aba4
     ghidra: FUN_0818aba4
     name: manager_free_block_count
