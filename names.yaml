@@ -20275,6 +20275,38 @@ functions:
       accesses preserve the source load/store order; wrapping arithmetic and
       the explicit bit clear retain the ARM rollover behavior. Reference C:
       decomp/c/014/08165dd0_FUN_08165dd0.c; assembly: osos.asm 0x08165dd0.
+  - address: 0x081660a4
+    ghidra: FUN_081660a4
+    name: object_clear_pending_and_notify
+    size: 28
+    sig: "void object_clear_pending_and_notify(NotificationObject *object)"
+    module: util/object_clear_pending_and_notify
+    status: ported
+    renames:
+      param_1/r0: object
+      "[object + 0x3c]": callback
+      "[object + 0x4a]": pending
+      "[object + 0x5c]": mailbox
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw osos.dec establishes the true 28-byte extent
+      0x081660a4..0x081660c0; the next function starts with strb r1,[r0,#0x4a]
+      and bx lr. Whole-image A32 word decoding finds two incoming plain BLs
+      at 0x081667bc and 0x082831dc, zero predicated BLs, and no outgoing BLs.
+      Clears byte +0x4a before dispatching callback +0x3c with the original
+      object in r0, or tail-posting mailbox slot +0x5c through the existing
+      mailbox_slot_post at 0x0808e2a8. Ghidra incorrectly folds the mailbox
+      implementation into this function; +0x5c is a pointer slot, not an
+      embedded semaphore. Both callers first set completion state +0x58 to
+      6 and result +0x40. Callback identity and the pending flag's wider
+      lifecycle remain unresolved; no new callback service seam is invented.
+      The repr(C) partial object uses native pointers, preserving target
+      offsets while deliberately changing host offsets. Host tests prove
+      clear-before-callback, callback rearming and precedence over an invalid
+      mailbox, unchanged opaque fields, and real mailbox count rollover.
+      ARM match.py reports a structural diff: LLVM adds frame-pointer
+      push/pop and an explicit branch, preserving offsets 0x4a/0x3c/0x5c,
+      indirect callback tail dispatch, and the mailbox tail branch.
   - address: 0x081660f0
     ghidra: FUN_081660f0
     name: object_set_word_0x40
