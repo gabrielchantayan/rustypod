@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081862cc
+    ghidra: FUN_081862cc
+    name: utf8_iterator_next
+    size: 44
+    sig: "u32 utf8_iterator_next(const u8 **cursor, u16 *output)"
+    module: cxx/utf8_iterator_next
+    status: ported
+    vars: {param_1/r0: cursor, param_2/r4: output, uVar1: codepoint}
+    notes: >-
+      Raw A32 extent [0x081862cc,0x081862f8) ends at the next push
+      prologue. Independent whole-image decoding finds two inbound plain
+      BLs at 0x08276dfc and 0x08276e58, zero predicated inbound BLs.
+      Body has one plain BL at 0x081862e8 to the canonical port
+      utf8_next_codepoint at 0x08276214, zero predicated BLs. Caller
+      iterates codepoints for composition. Literal NUL returns zero without
+      writes; otherwise advance the first pointer field through the decoder,
+      store its low sixteen bits and return one even for decoded zero.
+      No deliberate deviations or new seams; no host byte-offset assumptions.
+      Tests cover NUL preservation, multibyte, malformed and overlong input.
+      Host suite passes (14390 tests); ARM release build passes. match.py
+      exits 1: eleven stock versus thirteen Rust instructions preserve the
+      guard, decoder BL and halfword store, with branch/frame differences.
   - address: 0x08186dc4
     ghidra: FUN_08186dc4
     name: owned_virtual_member_clear
