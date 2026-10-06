@@ -5,12 +5,13 @@
 //! 0x081a5950/0x081a6230. Body: one plain BL, zero predicated BLs,
 //! and one tail B. Copy global word 0x089cc634 to 0x089cc638 before
 //! resident demo-mode refresh 0x08187544, then rearm its timer through
-//! resident 0x08187d00 (raw: timer_start_after(this+0x11c, this[0x148]),
-//! tail timer_restart). Both resident addresses lack names.yaml entries.
+//! the ported demo_mode_rearm_timer @ 0x08187d00.
 //! The first resident refresh updates calendar/resources; its precise
 //! identity remains unresolved. No NULL guard exists in the original.
 //! Deviations: fixed-address calls lower to BLX; tail B becomes a Rust
-//! call/return. Host-only dependency injection substitutes RAM and residents.
+//! call/return. Host-only dependency injection substitutes RAM and refresh.
+
+use crate::app::demo_mode_rearm_timer::demo_mode_rearm_timer;
 
 pub type ResidentRefresh = unsafe extern "C" fn(*mut u8);
 
@@ -20,7 +21,6 @@ pub struct DemoModeSnapshotOps {
     pub current: *const u32,
     pub snapshot: *mut u32,
     pub refresh: ResidentRefresh,
-    pub rearm: ResidentRefresh,
 }
 
 #[cfg(not(target_os = "none"))]
@@ -31,7 +31,7 @@ unsafe extern "C" fn missing_resident(_: *mut u8) {
 #[cfg(not(target_os = "none"))]
 pub static mut DEMO_MODE_SNAPSHOT_OPS: DemoModeSnapshotOps = DemoModeSnapshotOps {
     current: core::ptr::null(), snapshot: core::ptr::null_mut(),
-    refresh: missing_resident, rearm: missing_resident,
+    refresh: missing_resident,
 };
 
 #[inline(always)]
@@ -54,11 +54,11 @@ pub unsafe extern "C" fn demo_mode_snapshot_refresh(demo: *mut u8) {
     #[cfg(target_os = "none")]
     refresh_snapshot(demo, 0x089c_c634 as *const u32, 0x089c_c638 as *mut u32,
         core::mem::transmute::<usize, ResidentRefresh>(0x0818_7544),
-        core::mem::transmute::<usize, ResidentRefresh>(0x0818_7d00));
+        demo_mode_rearm_timer);
     #[cfg(not(target_os = "none"))]
     {
         let ops = core::ptr::read_volatile(core::ptr::addr_of!(DEMO_MODE_SNAPSHOT_OPS));
-        refresh_snapshot(demo, ops.current, ops.snapshot, ops.refresh, ops.rearm);
+        refresh_snapshot(demo, ops.current, ops.snapshot, ops.refresh, demo_mode_rearm_timer);
     }
 }
 

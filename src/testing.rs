@@ -826,6 +826,8 @@ pub mod hints {
     // 0x8800_0000: dedicated to app/context_timer_restart's embedded
     // target-width timer fixture; mappings never unmap.
     pub const CONTEXT_TIMER_RESTART: usize = 0x8800_0000;
+    // Dedicated demo-mode embedded timer fixture; mappings never unmap.
+    pub const DEMO_MODE_REARM_TIMER: usize = 0x5efa_0000;
     // Dedicated slideshow interval state/timer fixture; mappings never unmap.
     pub const SLIDESHOW_INTERVAL_SET: usize = 0x0cc0_0000;
     // 0x3900_0000, skipping 0x2e00_0000..0x3500_0000: sibling ports in
