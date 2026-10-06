@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod layout_resources_release;
 pub mod associated_word_get;
 pub use associated_word_get::*;
 pub mod flags_set_byte_clear;

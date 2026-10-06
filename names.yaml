@@ -224137,3 +224137,43 @@ functions:
       LLVM uses an explicit null early return and a frame-pointer prologue
       on the nonnull path instead of LDRNE; offsets and unchecked loads agree.
       No on-device execution performed.
+
+  - address: 0x0816ba38
+    ghidra: FUN_0816ba38
+    name: ui_layout_resources_release
+    size: 40
+    sig: "void ui_layout_resources_release(uint32_t *owner)"
+    module: ui/layout_resources_release
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      owner_plus_0xec: auxiliary_allocation
+      FUN_0816b318: layout_owned_objects_teardown (unported firmware seam)
+      FUN_082aad14: operator_delete_tag3 (existing Rust port)
+    notes: >-
+      Raw osos.dec establishes ten ARM words at 0x0816ba38..0x0816ba60;
+      the next real function starts with push {r4,lr} at 0x0816ba60.
+      Two internal plain BLs, zero predicated BLs. Independent whole-image
+      ARM-word decoding finds two inbound plain BLs at 0x0816ae54 and
+      0x0816bafc, zero predicated BLs. First tear down owned objects via
+      0x0816b318, then reload +0xec; if nonzero, delete with tag 3 and
+      clear after deletion. The teardown raw body releases +0x114 via
+      0x082646ac and tag-2 delete, clears +0x114, then invokes the +4
+      virtual slot on +0x110 and clears +0x110. Neither the assigned
+      address nor 0x0816b318 had a canonical entry before this port.
+      The precise layout class and allocation element type are unresolved.
+      Deliberate deviations: existing Rust operator_delete_tag3 is used;
+      unported owned-object teardown stays a direct-address firmware seam.
+      Host fields retain target-width u32 words and supply the teardown seam.
+      Host tests cover null transitions in both directions, replacement
+      allocations, high-bit pointers, repeated release, and neighbor integrity.
+      Full x86_64 host suite passes (14485 tests); ARM release build passes.
+      Isolated standalone host smoke proves post-teardown null avoids stale
+      deletion, using a panic-on-delete sentinel rather than a real heap.
+      A non-test host library build is blocked by six unrelated missing
+      host callees in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule; the host test build is unaffected.
+      match.py exits 1: LLVM adds a frame-pointer prologue, calls the
+      firmware seam with BLX through a literal, replaces POPEQ with BEQ,
+      and relocates the delete BL. The +0xec load, guard, delete-before-clear,
+      zero store, and final return agree. No device execution performed.
