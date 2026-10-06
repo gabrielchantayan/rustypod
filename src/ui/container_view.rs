@@ -351,6 +351,58 @@ pub unsafe extern "C" fn container_view_construct(
     refresh_clip_rect(view);
     view
 }
+/// Container-derived view retaining the controller's slot-+0x160 result.
+#[repr(C)]
+pub struct ContainerViewControllerQuery {
+    pub base: ContainerView,
+    pub controller_result: u32,
+    pub state: u8,
+    pub padding: [u8; 3],
+}
+
+const _: [u8; 0xf0] = [0; core::mem::size_of::<ContainerViewControllerQuery>()];
+const _: [u8; 0xe8] = [0; core::mem::offset_of!(ContainerViewControllerQuery, controller_result)];
+const _: [u8; 0xec] = [0; core::mem::offset_of!(ContainerViewControllerQuery, state)];
+
+/// container_view_construct_controller_query — FUN_0815a0d8 @ 0x0815a0d8.
+/// True size 84 bytes: 80 code bytes and the vtable literal 0x089873c4
+/// at 0x0815a128; the next function begins at 0x0815a12c.
+/// Whole-image aligned A32 decoding verifies two plain inbound BLs
+/// (0x0815a040, 0x08185424), zero predicated inbound BLs. The body has
+/// one plain outbound BL to container_view_construct, zero predicated
+/// BLs, and one register BLX through controller vtable slot +0x160.
+///
+/// Constructs the container base with all five arguments, installs the
+/// derived vtable, queries the non-null controller, stores its full word
+/// result at +0xe8, clears only byte +0xec, and returns the constructed
+/// object. Concrete class and query identities remain unrecovered.
+/// Deliberate deviation: usize vtable slots follow the existing controller
+/// model for host-callable pointers; target slots remain four bytes apart.
+///
+/// # Safety
+/// Base arguments must satisfy container_view_construct; storage must be
+/// writable for 0xf0 bytes. Controller must be non-null with a readable
+/// vtable through slot +0x160, callable as ContentProviderQuery.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn container_view_construct_controller_query(
+    view: *mut ContainerViewControllerQuery,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const ViewSpec,
+) -> *mut ContainerViewControllerQuery {
+    let view = container_view_construct(view.cast(), resources, controller, parent, spec)
+        .cast::<ContainerViewControllerQuery>();
+    core::ptr::addr_of_mut!((*view).base.vtable).write_volatile(0x0898_73c4);
+    let vtable = (controller as *const *const usize).read_volatile();
+    let query: ContentProviderQuery = core::mem::transmute(vtable.add(0x160 / 4).read());
+    let result = query(controller);
+    core::ptr::addr_of_mut!((*view).controller_result).write_volatile(result);
+    core::ptr::addr_of_mut!((*view).state).write_volatile(0);
+    view
+}
+
 /// A concrete container view whose only recovered state is the byte the
 /// constructor installs at +0xe8.
 #[repr(C)]
@@ -932,6 +984,52 @@ mod tests {
                 destruct_base: stub_destruct_base,
             },
         )
+    }
+
+    #[test]
+    fn controller_query_constructor_preserves_full_result_and_tail_padding() {
+        let _lock = OPS_LOCK.lock();
+        let _guard = install_stubs();
+        #[repr(C)]
+        struct Controller {
+            vtable: *const usize,
+            view: *mut ContainerViewControllerQuery,
+            result: u32,
+        }
+        unsafe extern "C" fn provider(_controller: *mut u8) -> u32 {
+            0x1234_5678
+        }
+        unsafe extern "C" fn query(controller: *mut u8) -> u32 {
+            let controller = &*(controller as *const Controller);
+            let view = &*controller.view;
+            assert_eq!(view.base.vtable, 0x0898_73c4);
+            assert_eq!(view.base.content_provider, 0x1234_5678);
+            assert_eq!(view.controller_result, 0xa5a5_a5a5);
+            assert_eq!(view.state, 0xa5);
+            controller.result
+        }
+        let mut table = [0usize; 0x160 / 4 + 1];
+        table[CONTENT_PROVIDER_SLOT_INDEX] = provider as usize;
+        table[0x160 / 4] = query as usize;
+        #[repr(align(8))]
+        struct Storage([u32; 0xf0 / 4 + 1]);
+        for result in [0, 0x8000_0000, u32::MAX] {
+            let mut storage = Storage([0xa5a5_a5a5u32; 0xf0 / 4 + 1]);
+            let view = storage.0.as_mut_ptr().cast::<ContainerViewControllerQuery>();
+            let mut controller = Controller { vtable: table.as_ptr(), view, result };
+            let spec = spec(7, 1);
+            let returned = unsafe {
+                container_view_construct_controller_query(
+                    view, core::ptr::null_mut(),
+                    (&mut controller as *mut Controller).cast(),
+                    core::ptr::null_mut(), &spec,
+                )
+            };
+            assert_eq!(returned, view);
+            assert_eq!(storage.0[0xe8 / 4], result);
+            assert_eq!(storage.0[0xec / 4].to_le_bytes(), [0, 0xa5, 0xa5, 0xa5]);
+            assert_eq!(storage.0[0xf0 / 4], 0xa5a5_a5a5);
+        }
     }
 
     #[test]
