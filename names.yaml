@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08184e04
+    ghidra: FUN_08184e04
+    name: resource_list_append_record
+    size: 64
+    sig: "void resource_list_append_record(ResourceList *list, u32 data, u32 length, u32 tag)"
+    module: util/resource_list
+    status: ported
+    renames:
+      param_1/r0/r4: list
+      param_2/r1/r5: data
+      param_3/r2/r6: length
+      param_4/r3/r7: tag
+      local_18: record
+      FUN_082aadd4: operator_new
+      FUN_083e46fc: resident_resource_record_pointer_vector_append
+    notes: >-
+      Raw A32 extent [0x08184e04,0x08184e44) is 64 bytes, no literals;
+      next real function starts with push {r3,r4,r5,r6,r7,r8,r9,lr}.
+      Two outbound plain BLs, zero predicated BLs. Independent whole-image
+      decoding finds inbound plain BLs at 0x08184ba8 and 0x08184ea4,
+      zero predicated BLs. Encoded-record callers pass data, length and tag.
+      Set loading at owner+32 before operator_new(12), store data at +8,
+      length/tag at +0/+4, append the pointer by reference to owner+20.
+      Existing Rust allocator is called directly. Unported 0x083e46fc stays
+      a resident seam verified from its pointer-copy and vector-growth paths.
+      No target behavioral deviations; host pointer locals widen, fields do not.
+      Host suite passes 14399 tests; ARM release build passes. Edge tests cover
+      zero/high-bit fields, dirty loading and unchanged owner fields. Exported
+      standalone smoke passes with host allocator and resident-append injection.
+      match.py exits 1: 16 stock instructions versus 22 Rust listing entries;
+      allocation size, field offsets and pointer-reference append are retained.
+      Frame/register layout differs; injectable append uses BLX instead of BL.
   - address: 0x08184f18
     ghidra: FUN_08184f18
     name: resource_list_factory
