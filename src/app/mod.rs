@@ -706,6 +706,7 @@ pub mod media_player_query_index_select;
 pub mod media_interface_slot_4c_result;
 pub mod metadata_record;
 pub mod indexed_slot_pending_reset;
+pub mod service_handler_slot_set;
 pub mod path_object_join;
 pub mod path_object_duplicate_join;
 pub mod path_object_copy_join_cstr;

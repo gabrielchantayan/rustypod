@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08193ed4
+    ghidra: FUN_08193ed4
+    name: service_handler_slot_set
+    size: 20
+    sig: "void service_handler_slot_set(u32 *table, i32 slot, u32 handler)"
+    module: app/service_handler_slot_set
+    status: ported
+    vars:
+      param_1/r0: table
+      param_2/r1: slot
+      param_3/r2: handler
+    renames:
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 words establish [0x08193ed4,0x08193ee8), 20 bytes;
+      the next real function begins with cmp r1,#13. Independent whole-image
+      aligned BL decoding finds two plain incoming calls at 0x08165744 and
+      0x08165858, zero predicated incoming calls. The body has zero plain
+      BLs and one signed BLGE to canonical heap_panic at 0x08030f44.
+      The application constructor installs service handlers for slots 0..12.
+      Reject signed slots >=13, otherwise store the full handler word at
+      table+0x64+slot*8. Negative slots remain accepted without a lower bound.
+      No behavioral deviations or new callee seams; u32 word indexing
+      preserves the target layout on wider-pointer hosts. Host tests cover
+      every valid slot, full-width values, negative indices, untouched
+      neighboring words, and fatal indices 13 and INT_MAX with NULL storage.
+      Full host suite and ARM release build pass; standalone host smoke
+      exercises negative and final slots. match.py exits 1: five original
+      versus seven Rust instructions; signed <=12 predication preserves the
+      shifted addressing and +0x64 store, while the fatal path adds a frame
+      and a relocated BL to heap_panic.
+
   - address: 0x08193f9c
     ghidra: FUN_08193f9c
     name: service_handler_slot_counted_flag_get
