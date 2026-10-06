@@ -259,6 +259,82 @@ unsafe fn service_range_tail(
     core::ptr::addr_of_mut!((*view).configuration).write_volatile((*spec).configuration);
 }
 
+/// Specification for the range view with a tick accumulator.
+#[repr(C)]
+pub struct TickRangeViewSpec {
+    pub range: RangeViewSpec,
+    pub configuration: [u32; 2],
+}
+
+/// Target layout; unknown and untouched tail words retain their input bytes.
+#[repr(C)]
+pub struct TickRangeView {
+    pub range: RangeView,
+    pub tail: [u32; 26],
+}
+
+const _: [u8; 0x70] = [0; core::mem::size_of::<TickRangeViewSpec>()];
+const _: [u8; 0x11c] = [0; core::mem::size_of::<TickRangeView>()];
+
+/// tick_range_view_construct — FUN_0816bc68 @ 0x0816bc68.
+/// True extent 120 bytes: 112 code bytes and literals 0x08988328/350;
+/// next real function starts at 0x0816bce0. Raw whole-image decoding finds
+/// two incoming plain BLs (0x0816ac38, 0x081e9d9c), three outgoing plain
+/// BLs, and no predicated BLs in either direction.
+///
+/// Construct the range base, install the derived vtable, allocate a 52-byte
+/// tick accumulator with divisor 5, mode 1 and backoff 350 ms. Store it at
+/// +0xb4, clear five state words, set +0xe8 to -1, and copy spec +0x68/+0x6c.
+/// Other tail words are deliberately untouched.
+///
+/// Deviations: restore Ghidra's missing five arguments and return; preserve
+/// the base's verified input identity. Target pointers remain u32 on hosts.
+/// The extra stacked spec argument seen by Ghidra at the accumulator call
+/// is not consumed by that verified four-argument constructor.
+///
+/// # Safety
+/// Aligned objects must be valid for their types; base, heap and tick
+/// accumulator dependencies must be configured. Allocation failure is not
+/// guarded, matching retailOS.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn tick_range_view_construct(
+    view: *mut TickRangeView,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const TickRangeViewSpec,
+) -> *mut TickRangeView {
+    range_view_construct(
+        core::ptr::addr_of_mut!((*view).range), resources, controller, parent,
+        core::ptr::addr_of!((*spec).range),
+    );
+    core::ptr::addr_of_mut!((*view).range.base.vtable).write_volatile(0x0898_8328);
+    let storage = crate::heap::veneers::operator_new(0x34)
+        .cast::<crate::app::tick_accumulator::TickAccumulator>();
+    let accumulator = crate::app::tick_accumulator::tick_accumulator_construct(
+        storage, 5, 1, 350,
+    );
+    tick_range_tail(view, spec, accumulator as usize as u32);
+    view
+}
+
+#[inline(always)]
+unsafe fn tick_range_tail(
+    view: *mut TickRangeView,
+    spec: *const TickRangeViewSpec,
+    accumulator: u32,
+) {
+    let tail = core::ptr::addr_of_mut!((*view).tail).cast::<u32>();
+    tail.write_volatile(accumulator);
+    for offset in [0x114, 0x110, 0xec, 0xe0, 0x118] {
+        tail.add((offset - 0xb4) / 4).write_volatile(0);
+    }
+    tail.add((0xe8 - 0xb4) / 4).write_volatile(u32::MAX);
+    tail.add(1).write_volatile((*spec).configuration[0]);
+    tail.add(2).write_volatile((*spec).configuration[1]);
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -432,6 +508,33 @@ mod tests {
                     if secondary_header == 0 { 0 } else { 0x1234_5678 });
                 assert_eq!((*view).configuration, u32::MAX);
                 assert_eq!((*view).range.maximum, 0xa5a5_a5a5);
+            }
+        }
+    }
+
+    #[test]
+    fn tick_tail_preserves_unknown_words_and_copies_extreme_configuration() {
+        for configuration in [[0, u32::MAX], [0x8000_0000, 0]] {
+            let specification = TickRangeViewSpec {
+                range: spec(0, 0, 0, 0), configuration,
+            };
+            let mut storage = core::mem::MaybeUninit::<TickRangeView>::uninit();
+            unsafe {
+                ptr::write_bytes(storage.as_mut_ptr().cast::<u8>(), 0xa5, 0x11c);
+                let view = storage.as_mut_ptr();
+                tick_range_tail(view, &specification, 0x1234_5678);
+                let words = core::slice::from_raw_parts(view.cast::<u32>(), 0x11c / 4);
+                for (index, &actual) in words.iter().enumerate() {
+                    let expected = match index * 4 {
+                        0xb4 => 0x1234_5678,
+                        0xb8 => configuration[0],
+                        0xbc => configuration[1],
+                        0x114 | 0x110 | 0xec | 0xe0 | 0x118 => 0,
+                        0xe8 => u32::MAX,
+                        _ => 0xa5a5_a5a5,
+                    };
+                    assert_eq!(actual, expected, "word {index}");
+                }
             }
         }
     }
