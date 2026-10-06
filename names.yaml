@@ -221914,3 +221914,42 @@ functions:
       verify the timer_start_after and timer_stop BL targets. Standalone
       host smoke with real timer callees produced period=0,
       state=0x72756e20, armed=0. No on-device execution was performed.
+  - address: 0x0817ee90
+    ghidra: FUN_0817ee90
+    name: app_controller_apply_pending_command
+    size: 132
+    sig: "void app_controller_apply_pending_command(AppControllerPendingCommand *controller, u32 first_key, u32 second_key)"
+    module: app/controller_pending_command
+    status: ported
+    vars:
+      param_1/r0: controller
+      param_2/r1: first_key
+      param_3/r2: second_key
+      r4: class_1700_target
+      r0_after_resolve: record
+    renames:
+      FUN_08275b9c: object_cast_to_class
+      FUN_08182c78: command_record_resolve_or_allocate
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 extent [0x0817ee90,0x0817ef14), 132 bytes; the next function
+      begins with PUSH. Whole-image aligned BL decoding finds two incoming
+      unconditional calls at 0x0817edb4 and 0x08180134, zero predicated calls.
+      Body has three plain BLs, one BLEQ, one virtual BLX, and a plain B tail
+      to unported FUN_08286d84. Ghidra incorrectly incorporates that helper's
+      body into this function. Select through controller +0x34 / vtable +0xe4
+      before testing first_key; reject NULL selection, zero first_key, or a
+      failed checked cast to class 0x1700. Resolve (first_key, second_key)
+      without allocation, retry (first_key, 0) on NULL, panic on a second miss,
+      and pass the four-word record to the selected target via 0x08286d84.
+      The verified tail helper copies the record to target +0x108 and performs
+      virtual state/selection updates; its broader identity is not inferred.
+      Existing Rust resolver and checked-cast ports are reused; the screen
+      dispatcher now calls this port directly, removing its obsolete seam.
+      Deliberate deviations: returning call in place of the final tail branch;
+      volatile ops boundary for the unported tail helper and host-width
+      selection. Mnemonic comparison shows the same rejection, two-lookup
+      fallback and fatal-miss branches, with ops loads and indirect dispatch
+      replacing direct target calls. Host edge tests cover NULL selection,
+      zero key, cast rejection, exact-key precedence, fallback without
+      allocation, and screen-record preparation followed by application.
