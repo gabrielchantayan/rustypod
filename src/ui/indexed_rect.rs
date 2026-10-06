@@ -5,7 +5,7 @@
 //! internal `bl`, and four inbound plain `bl` calls with no predicated calls.
 //! The function selects a four-word QuickDraw rectangle from the table at
 //! `object+0xec`, indexed relative to `object+0xe8`, copies it to `out_rect`,
-//! then translates it by the x/y offsets at `object+0xf0/+0xf4`.
+//! then translates it by the y/x offsets at `object+0xf0/+0xf4`.
 //!
 //! Deliberate deviation: the retail tail branch becomes a Rust call to the
 //! already-ported [`super::rect::rect_offset`]; it preserves the same
@@ -31,8 +31,8 @@ pub unsafe extern "C" fn indexed_rect_copy_offset(
     core::ptr::write(out_rect, core::ptr::read(source));
     rect_offset(
         out_rect,
-        *object.add(0x3c) as i32,
         *object.add(0x3d) as i32,
+        *object.add(0x3c) as i32,
     );
 }
 
@@ -65,7 +65,7 @@ mod tests {
 
             let mut out = Rect::default();
             indexed_rect_copy_offset(object.as_ptr(), 18, &mut out);
-            assert_eq!(out, Rect { top: -18, left: 29, bottom: 42, right: -51 });
+            assert_eq!(out, Rect { top: -21, left: 32, bottom: 39, right: -48 });
 
             object[0x3c] = 1;
             object[0x3d] = 1;

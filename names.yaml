@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816b2d0
+    ghidra: FUN_0816b2d0
+    name: indexed_rect_invalidate
+    size: 72
+    sig: "u64 indexed_rect_invalidate(UiElement *element, i32 index)"
+    module: ui/indexed_rect_invalidate
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2/r5: index
+      stack_rect: region
+      "element+0xe8": first_visible_index
+      "element+0xb8": visible_rows
+      "element+0xbc": visible_columns
+      "element+0x80": bounds_top
+      "element+0x84": bounds_left
+      FUN_0816b1dc: indexed_rect_is_visible
+      FUN_0816b52c: indexed_rect_copy_offset
+      FUN_0826c574: rect_offset
+      FUN_0826ec14: ui_element_invalidate_region
+    notes: >-
+      Raw bytes establish [0x0816b2d0,0x0816b318), ending in pop
+      {r0-r6,pc} before the next function's push. Whole-image decoding finds
+      two plain incoming BLs at 0x0816b9a0 and 0x0816b9ac, zero predicated
+      BLs, tail branches, or address data words. The body has four plain
+      BLs and zero predicated BLs. The signed range predicate uses wrapping
+      MLA for first + rows*columns and an exclusive upper bound. On success,
+      copy the indexed rectangle, apply its local origin, translate by the
+      bounds origin, and call the existing region invalidation port. Device
+      builds call the unported predicate at its verified retail address;
+      hosts evaluate its raw arithmetic. Return the restored r0/r1 packed
+      as top/left, or element/index when rejected. Host pointers in this
+      result truncate to u32; r2/r3 restoration is deliberately omitted
+      because the two real callers discard all return registers. ARM
+      differential smoke exposed and corrected the existing indexed_rect
+      callee's swapped origins: +0xf0 is dy and +0xf4 is dx.
   - address: 0x0816b560
     ghidra: FUN_0816b560
     name: grid_render_slots
@@ -154267,8 +154303,8 @@ functions:
       param_3/r2: out_rect
       object_plus_0xe8: first_index
       object_plus_0xec: rect_table
-      object_plus_0xf0: origin_x
-      object_plus_0xf4: origin_y
+      object_plus_0xf0: origin_y
+      object_plus_0xf4: origin_x
       FUN_0826c574: rect_offset
     notes: >-
       Raw osos.dec establishes the exact 52-byte extent
@@ -154279,7 +154315,8 @@ functions:
       (0x0816ac98, 0x0816b124, 0x0816b2f4, and 0x08224924) and zero inbound
       predicated BL calls. It subtracts first_index from index, selects the
       four-word QuickDraw rect from rect_table, copies it to out_rect, then
-      tail-calls rect_offset with origin_x and origin_y. The existing
+      tail-calls rect_offset with origin_x (+0xf4 in r1) and
+      origin_y (+0xf0 in r2), verified from raw words. The existing
       rect_offset entry at 0x0826c574 is ported and its target-width wrapping
       arithmetic matches the raw tail call. Deliberate deviation: Rust emits
       a normal call that LLVM lowers to a tail branch, while preserving the
@@ -186324,8 +186361,8 @@ functions:
       param_3/r2: out_rect
       object_plus_0xe8: first_index
       object_plus_0xec: rect_table
-      object_plus_0xf0: origin_x
-      object_plus_0xf4: origin_y
+      object_plus_0xf0: origin_y
+      object_plus_0xf4: origin_x
       FUN_0826c574: rect_offset
     notes: >-
       Raw osos.dec establishes the exact 52-byte extent
@@ -186336,7 +186373,8 @@ functions:
       (0x0816ac98, 0x0816b124, 0x0816b2f4, and 0x08224924) and zero inbound
       predicated BL calls. It subtracts first_index from index, selects the
       four-word QuickDraw rect from rect_table, copies it to out_rect, then
-      tail-calls rect_offset with origin_x and origin_y. The existing
+      tail-calls rect_offset with origin_x (+0xf4 in r1) and
+      origin_y (+0xf0 in r2), verified from raw words. The existing
       rect_offset entry at 0x0826c574 is ported and its target-width wrapping
       arithmetic matches the raw tail call. Deliberate deviation: Rust emits
       a normal call that LLVM lowers to a tail branch, while preserving the

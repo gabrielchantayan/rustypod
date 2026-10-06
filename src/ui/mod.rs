@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod indexed_rect_invalidate;
 pub mod grid_render_slots;
 pub use grid_render_slots::*;
 pub mod layout_resources_release;

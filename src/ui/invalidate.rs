@@ -306,6 +306,70 @@ mod tests {
     }
 
     #[test]
+    fn indexed_invalidation_checks_signed_range_and_translates_before_clipping() {
+        use crate::testing::{hints, try_map_u32_slab};
+        use crate::ui::indexed_rect_invalidate::indexed_rect_invalidate;
+
+        let _guard = install_recorders();
+        let Some(memory) = try_map_u32_slab(hints::INDEXED_RECT_INVALIDATE, 4096) else {
+            assert!(crate::testing::note_missing_u32_fixture(module_path!()));
+            return;
+        };
+        let table = memory as *mut Rect;
+        let mut element = [0u32; 0x100 / 4];
+        let element_ptr = element.as_mut_ptr().cast::<u8>();
+        let mut context = [0u8; 1];
+        unsafe {
+            element_ptr.add(0x3c).cast::<*mut u8>().write_unaligned(context.as_mut_ptr());
+            element[0x48 / 4] = 0x800;
+            element_ptr.add(0x80).cast::<Rect>().write(Rect {
+                top: 10, left: 20, bottom: 100, right: 200,
+            });
+            element[0xb8 / 4] = 2;
+            element[0xbc / 4] = 1;
+            element[0xe8 / 4] = (-3i32) as u32;
+            element[0xec / 4] = table as u32;
+            element[0xf0 / 4] = 3;
+            element[0xf4 / 4] = 4;
+            table.write(Rect { top: -8, left: -10, bottom: 40, right: 50 });
+            table.add(1).write(Rect { top: 5, left: 6, bottom: 7, right: 8 });
+
+            // Lower and exclusive upper boundaries must not touch even a NULL table.
+            let saved_table = element[0xec / 4];
+            element[0xec / 4] = 0;
+            for index in [-4i32, -1, i32::MIN, i32::MAX] {
+                assert_eq!(indexed_rect_invalidate(element_ptr, index),
+                    element_ptr as usize as u32 as u64 | ((index as u32 as u64) << 32));
+            }
+            assert_eq!(INVALIDATE_CALLS, 0);
+            element[0xec / 4] = saved_table;
+
+            assert_eq!(indexed_rect_invalidate(element_ptr, -3), 5 | (14u64 << 32));
+            // Clip to bounds, then the existing renderer adds +2/+3.
+            assert_eq!(SEEN_RECT, Rect { top: 12, left: 23, bottom: 55, right: 77 });
+            assert_eq!(indexed_rect_invalidate(element_ptr, -2), 18 | (30u64 << 32));
+            assert_eq!(SEEN_RECT, Rect { top: 20, left: 33, bottom: 22, right: 35 });
+            assert_eq!(INVALIDATE_CALLS, 2);
+
+            // Wrapping MLA changes the range; never normalize it to host arithmetic.
+            element[0xb8 / 4] = i32::MAX as u32;
+            element[0xbc / 4] = 2;
+            assert_eq!(indexed_rect_invalidate(element_ptr, -3),
+                element_ptr as usize as u32 as u64 | ((-3i32 as u32 as u64) << 32));
+            assert_eq!(INVALIDATE_CALLS, 2);
+
+            // Coordinate overflow must wrap in each translation, even if hidden.
+            element[0xb8 / 4] = 2;
+            element[0x48 / 4] = 0;
+            table.write(Rect { top: i32::MAX, left: i32::MAX, bottom: 0, right: 0 });
+            assert_eq!(indexed_rect_invalidate(element_ptr, -3),
+                (i32::MIN.wrapping_add(12) as u32 as u64)
+                    | ((i32::MIN.wrapping_add(23) as u32 as u64) << 32));
+            assert_eq!(INVALIDATE_CALLS, 2);
+        }
+    }
+
+    #[test]
     fn clips_then_transforms_and_invalidates_the_resolved_context() {
         let _guard = install_recorders();
         let mut context = [0u8; 1];
