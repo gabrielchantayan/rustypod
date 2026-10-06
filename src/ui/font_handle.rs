@@ -24,6 +24,34 @@
 //! `0x0829bea4`, register-on-miss via `0x08275490`, one-time init flag at
 //! `0x089cc8d4`) remains unported behind the boundary below.
 
+/// Construct a tagged font handle — `FUN_0815988c` @ `0x0815988c`.
+///
+/// True extent: 24 bytes, `0x0815988c..0x081598a4`, ending in `bx lr`
+/// before the separate two-word clear constructor. Whole-image A32 decoding
+/// verifies two plain inbound BLs (0x08275538, 0x08275600), zero predicated
+/// inbound BLs, and zero outbound calls. Both callers in 0x08275490 pass
+/// a font resource word, zero metadata, and style bit 2 shifted down.
+///
+/// Store the resource and metadata words, then OR bit 0 into the resource
+/// iff `style_flag` is nonzero. Existing resource bits are never cleared.
+/// Return `out`, matching unchanged r0 despite Ghidra's void prototype.
+/// Deliberate deviation: omit the redundant initial resource store; this
+/// constructor operates on ordinary object storage, not MMIO.
+///
+/// # Safety
+/// `out` must be aligned and writable for two consecutive u32 words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_font_handle_construct(
+    out: *mut u32, resource: u32, metadata: u32, style_flag: u32,
+) -> *mut u32 {
+    unsafe {
+        out.add(1).write(metadata);
+        out.write(resource | u32::from(style_flag != 0));
+    }
+    out
+}
+
 /// ABI of the unported font-handle resolver at retailOS address
 /// `0x08275044`.
 ///
@@ -125,6 +153,24 @@ mod tests {
     extern crate std;
 
     use super::*;
+
+    #[test]
+    fn construct_normalizes_style_without_clearing_resource_bits() {
+        for resource in [0, 1, 2, 0x8000_0000, 0xffff_fffe, u32::MAX] {
+            for metadata in [0, 0x8765_4321, u32::MAX] {
+                for flag in [0, 1, 2, 0x8000_0000, u32::MAX] {
+                    let mut words = [0xdead_beef, 0xa5a5_a5a5, 0x5a5a_5a5a, 0xcafe_babe];
+                    let out = words.as_mut_ptr().wrapping_add(1);
+                    let returned = unsafe {
+                        ui_font_handle_construct(out, resource, metadata, flag)
+                    };
+                    let expected_resource = if flag == 0 { resource } else { resource | 1 };
+                    assert_eq!(returned, out);
+                    assert_eq!(words, [0xdead_beef, expected_resource, metadata, 0xcafe_babe]);
+                }
+            }
+        }
+    }
 
     static mut RECEIVED_NAME: *const u8 = core::ptr::null();
     static mut RECEIVED_SIZE: u32 = 0;

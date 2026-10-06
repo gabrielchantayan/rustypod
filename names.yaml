@@ -225367,3 +225367,32 @@ functions:
       base, base+0x15c and base+0x2b8. Constructor identities remain
       unrecovered; no extra null checks. Migrate Genius initialization
       to pass the retained operator_new(0x414) result, restoring r0 ABI.
+
+  - address: 0x0815988c
+    ghidra: FUN_0815988c
+    name: ui_font_handle_construct
+    size: 24
+    sig: "u32 *ui_font_handle_construct(u32 *out, u32 resource, u32 metadata, u32 style_flag)"
+    module: ui/font_handle
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: resource
+      param_3/r2: metadata
+      param_4/r3: style_flag
+      return/r0: out
+    notes: >-
+      Raw A32 words establish extent [0x0815988c,0x081598a4): STM r0,
+      {r1,r2}; MOVS r2,r3; MOVNE r2,#1; ORR r1,r1,r2; STR r1,[r0];
+      BX lr. The next real function is ported two_word_clear. Whole-image
+      BL decoding finds two plain inbound calls at 0x08275538 and
+      0x08275600, zero predicated inbound calls, and zero outbound calls.
+      Both callers in the font registry lookup at 0x08275490 pass a font
+      resource from +0x98, zero metadata, and normalized style bit 2.
+      Construct two target-width words; OR the normalized nonzero flag
+      into resource bit 0 without clearing existing bits. Preserve out in
+      r0, correcting Ghidra's void return. Deliberate deviation: eliminate
+      the redundant initial resource store to ordinary object storage.
+      No callees or new seams. Host tests cover zero and high-bit flags,
+      already-tagged resources, full-width metadata, destination return,
+      and adjacent guard words.
