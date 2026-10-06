@@ -14,6 +14,7 @@ pub mod owner_operation_clear;
 pub mod item_state_flag_dispatch;
 pub mod timed_pair_view;
 pub mod timer_backed_view;
+pub mod paired_range_view;
 pub mod collect_eligible_descendants;
 pub mod event_forward_to_delegate;
 pub mod item_padded_size;
