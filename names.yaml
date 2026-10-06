@@ -225552,3 +225552,33 @@ functions:
       and sign-bit selectors. match.py exits 1: LLVM replaces the compare
       tree with subtract-16, rotate-right-4, unsigned bound 7 and a constant
       lookup; there are no calls and the object remains unused. No device run.
+  - address: 0x0816598c
+    ghidra: FUN_0816598c
+    name: byte_ring_is_empty
+    size: 24
+    sig: "u32 byte_ring_is_empty(const u32 *cursors)"
+    module: app/byte_ring_is_empty
+    status: ported
+    renames:
+      param_1/r0: cursors
+      cursors_plus_0: write_cursor
+      cursors_plus_4: read_cursor
+    notes: >-
+      Raw words e5901000 e5900004 e1510000 13a00000 03a00001
+      e12fff1e prove extent 0x0816598c..0x081659a4, 24 bytes;
+      the next real function begins with PUSH at 0x081659a4.
+      Whole-image A32 decoding finds two plain incoming BLs at
+      0x080cc2f0 and 0x080cc4e8, no predicated incoming BLs,
+      and no outgoing plain or predicated BLs. Compare aligned
+      u32 write/read cursors at +0/+4 and return exactly 1 for
+      equality, otherwise 0, without writes or payload access.
+      Caller 0x080cc298 drains bytes using 0x08165938, which
+      advances the read cursor and wraps at 1024. No callee seam
+      or deliberate behavioral deviations. Host tests cover
+      full-width equality, out-of-range cursors and drain/wrap
+      transitions. All 14544 host tests and ARM release build pass;
+      consumer smoke observes 0,1,0,1 across wrap, enqueue and drain.
+      match.py exits 1: eight Rust versus six stock instructions;
+      LLVM adds a frame and replaces CMP/conditional MOV with
+      SUB/CLZ/LSR. Both word loads, normalized result and absence
+      of calls are preserved. Exported Rust symbol is present.

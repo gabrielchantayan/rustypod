@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod byte_ring_is_empty;
+pub use byte_ring_is_empty::*;
 pub mod disk_mode_sync_active;
 pub mod disk_mode_resource_8ca8_dispatch;
 pub mod screen_resource_selector_construct;
