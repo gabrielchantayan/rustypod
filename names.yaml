@@ -225239,3 +225239,39 @@ functions:
       bit, including zero, without validation or a NULL guard. No
       deliberate deviations. Host tests cover zero, one, sector sizes,
       high-bit values, all bits set, and unchanged neighbouring fields.
+
+  - address: 0x08159c08
+    ghidra: FUN_08159c08
+    name: three_vtable_objects_destruct
+    size: 32
+    sig: "u32 *three_vtable_objects_destruct(u32 *object)"
+    module: cxx/three_vtable_objects_destruct
+    status: ported
+    renames:
+      param_1/r0: object
+      r0_after_each_call: returned_subobject
+      FUN_0827c748: vtable_089a8414_destruct
+    notes: >-
+      Raw A32 words establish 32 bytes at 0x08159c08..0x08159c28;
+      the next independently entered function begins with e92d401c.
+      Ghidra's 56-byte extent absorbs part of that next function and its
+      decompilation expands destructor tail calls into unrelated transitive
+      callees. Independent raw-word counts give two outgoing plain BL,
+      zero predicated BL, and one tail B, all targeting 0x0827c748.
+      Whole-image decoding finds two incoming plain BL at 0x0816ebb4
+      and 0x0819c43c, zero predicated BL. Destroy the subobject at +0x2b8,
+      rebase its returned pointer by -0x15c, destroy that subobject, rebase
+      its returned pointer by -0x15c, then tail-destroy the first and return
+      its result. This is destruction only, not deletion; the resource
+      caller separately calls operator_delete. Reuses the existing Rust
+      vtable_089a8414_destruct port; its opaque member/base seams remain
+      unchanged. The resource-release target caller now uses this port.
+      No deliberate behavioral deviations. Host tests cover ordered
+      teardown effects, return-dependent rebasing, padding and guards.
+      All 14532 host tests pass; ARM release build succeeds. Standalone
+      exported-function smoke verifies vtable resets, payload teardown,
+      pointer return and guards. Both requested and true-size match.py
+      reviews exit 1; LLVM adds a frame-pointer instruction and moves the
+      pop after the final subtraction. Archive relocations verify two
+      R_ARM_CALL and one R_ARM_JUMP24 to vtable_089a8414_destruct with
+      unchanged +0x2b8 and -0x15c adjustments. No device execution.
