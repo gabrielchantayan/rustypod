@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod odd_state_byte_advance;
+pub use odd_state_byte_advance::*;
 pub mod owned_virtual_member_clear;
 pub use owned_virtual_member_clear::*;
 pub mod owned_observable_array_replace;

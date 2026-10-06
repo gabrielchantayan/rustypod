@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0817de08
+    ghidra: FUN_0817de08
+    name: odd_state_byte_advance
+    size: 36
+    sig: "void odd_state_byte_advance(u8 *state)"
+    module: app/odd_state_byte_advance
+    status: ported
+    vars: {param_1/r0: state, cVar1/r1: state_value}
+    notes: >-
+      Raw A32 words establish [0x0817de08,0x0817de2c), nine instructions
+      ending in bx lr before the next push prologue. Independent whole-image
+      decoding finds two incoming plain BLs at 0x0817ab18 and 0x0817ab20,
+      zero predicated incoming BLs, and zero outgoing BLs of either kind.
+      Read byte zero; change 1 to 2 or 3 to 4, otherwise perform no store.
+      Caller FUN_0817aae0 selects the objects at owner +0x54 and +0x58;
+      Ghidra omits the +0x54 argument on one path. State domain is unknown;
+      name is structural. No previous assigned entry and no new callee seam.
+      Volatile byte accesses preserve the load and conditional store. No
+      behavioral deviations; void API does not promise incidental r0 identity.
+      Host tests cover every byte, four offsets, adjacent-byte preservation,
+      idempotence and the minimum one-byte object. Full host suite passes
+      (14394 tests); ARM release build passes. Actual-source standalone smoke
+      passes all states at a guard-page boundary and a read-only unchanged
+      state. match.py exits 1: nine stock versus thirteen Rust instructions;
+      LLVM reverses comparisons, adds a frame and duplicates the store/return
+      while preserving both transitions and the no-store path.
   - address: 0x081860dc
     ghidra: FUN_081860dc
     name: service_range_view_construct
