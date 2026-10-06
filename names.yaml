@@ -224452,3 +224452,44 @@ functions:
       the count port, branches instead of conditional loads/call, and a larger
       frame. NULL handling, signed-index loop, ID/manager loads and BMap kind
       are preserved. No device execution performed.
+  - address: 0x081689ac
+    ghidra: FUN_081689ac
+    name: guarded_tagged_record_lookup
+    size: 128
+    sig: "void guarded_tagged_record_lookup(TaggedRecord *result, const void *receiver, u32 key_low, u32 key_high)"
+    module: app/guarded_tagged_record_lookup
+    status: ported
+    vars:
+      param_1/r0/r4: result
+      param_2/r1/r5: receiver
+      param_3/r2/r6: key_low
+      param_4/r3/r7: key_high
+      auStack_28: scoped_global_guard
+      auStack_20: temporary_record
+      DAT_08168a28: application_root_slot
+    notes: >-
+      Raw extent [0x081689ac,0x08168a2c) is 128 bytes: 124 code bytes
+      plus root-slot literal 0x089ca674. Next entry opens with PUSH.
+      Whole-image aligned A32 scan verifies two incoming plain BLs at
+      0x081b580c and 0x081b5c6c, six outgoing plain BLs, and no predicated
+      BLs in either direction. Initialize an empty record, construct a
+      scoped global guard, load root+0x30 after construction, query the
+      two-word key, initialize a temporary with the answer and receiver
+      byte +0x44, copy payload/flag, and destroy temporary then guard.
+      Reuses tagged_record_init, empty_destructor and scoped_global_guard_destroy.
+      Raw query entry 0x08051358 ignores incoming r1, replaces it with r3,
+      NULL-checks context+0xf9c, and calls 0x0805054c with the key and
+      stack argument 1. No product identity is invented for this boundary.
+      The existing string-tail entry for 0x08155b4c conflicts with current
+      raw instructions: PUSH, BL 0x0820c304, stores of vtable 0x08986aa0
+      and zero allocation, POP, literal. Use its verified guard-constructor
+      role as a retail seam; leave unrelated registry entries unchanged.
+      Both callers discard r0; Rust returns void rather than the incidental
+      final destructor return of a stack-local pointer. Host dependencies
+      are explicit; target uses retail root RAM and verified entry addresses.
+      Tests cover zero and full-width keys/payloads, all flag bits, untouched
+      padding and initial-store precedence with aliased receiver/result.
+      Host suite passes; ARM release build passes. match.py structural diff
+      retains the field offsets and query/copy/cleanup sequence; LLVM uses
+      BLX for fixed retail seams and removes the verified empty destructor
+      call. No on-device execution performed.
