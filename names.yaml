@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816a9d8
+    ghidra: FUN_0816a9d8
+    name: context_property_60bf_60c0_apply
+    size: 120
+    sig: "u32 context_property_60bf_60c0_apply(PropertyContext *context, u32 direction)"
+    module: app/context_property_60bf_60c0_apply
+    status: ported
+    vars:
+      param_1/r0/r4: context
+      r1/r6: direction
+      piVar1/r5: store
+      uVar2/r0/r2: query_result
+      FUN_08172124: instance_of_class_6000
+      context+0xe8: member
+      member+0x38: query_interface
+      member+0x44: value
+    notes: >-
+      Raw A32 establishes [0x0816a9d8,0x0816aa50), 120 bytes including
+      literals 0x60c0 and 0x60bf at 0x0816aa48 and 0x0816aa4c; next entry
+      begins with PUSH at 0x0816aa50. Ghidra's 112 bytes omit literals and
+      its C drops direction and the fourth store argument. Independent
+      whole-image word scan finds two inbound plain BLs at 0x0816a888 and
+      0x0816a994, zero predicated inbound BLs. One outbound plain BL to
+      canonical instance_of_class_6000, zero predicated BLs, three BLX.
+      If store exists, query member's interface through virtual +0x10,
+      reload member and dispatch store virtual +0xd4 with member+0x44,
+      query result and 0x60c0 for zero direction or 0x60bf otherwise.
+      Finally dispatch context virtual +0xd4; always return 1. Virtual
+      identities and property semantics remain unresolved. No new retail
+      seams. Host repr(C) pointers and vtable words widen; host resolution
+      is injectable. Tests cover missing store with NULL context, every
+      direction class, full-width values, callback order and member replacement
+      during query. Host suite and ARM release build pass. Native smoke
+      returns 1 with absent singleton and NULL context. match.py exits 1:
+      28 stock executable instructions versus 32 Rust instructions; retains
+      NULL guard, field offsets, member reload, all three virtual calls and
+      return 1. LLVM adds a frame and synthesizes selectors instead of
+      literal loads. No on-device execution performed.
   - address: 0x0816b1dc
     ghidra: FUN_0816b1dc
     name: indexed_rect_is_visible
