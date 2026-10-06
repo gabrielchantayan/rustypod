@@ -125577,6 +125577,42 @@ functions:
       u32::MAX-to-zero changes, store-before-callback order, and the
       untouched neighboring +0x4c field.
 
+  - address: 0x0817e1ec
+    ghidra: FUN_0817e1ec
+    name: scoped_context_selection_construct
+    size: 76
+    sig: "ScopedContextSelection *scoped_context_selection_construct(ScopedContextSelection *this, const ScopedContext *source, u32 index, void *attachment)"
+    module: app/scoped_context
+    renames:
+      param_1/r0: this
+      param_2/r1: source
+      param_3/r2: index
+      param_4/r3: attachment
+      DAT_0817e234: SCOPED_CONTEXT_VTABLE_ADDRESS
+    status: ported
+    notes: >-
+      Raw ARM extent is 76 bytes: 72 instruction bytes through the return at
+      0x0817e230 and the vtable literal 0x089a5b30 at 0x0817e234; the next
+      separately called function starts at 0x0817e238. Whole-image aligned
+      ARM branch decoding finds two incoming plain BL at 0x08179868 and
+      0x0817ac84, zero predicated BL and zero tail B. Body has zero BL.
+      Clears byte +0, installs the embedded ScopedContext vtable at +4,
+      copies source +4/+8/+0xc/+0x10 words to +8/+0xc/+0x10/+0x14 and
+      source mode byte +0x14 to +0x18, stores index at +0x1c and attachment
+      at +0x20, and returns the unchanged receiver in r0. Both callers
+      allocate 0x24 bytes and pass their receiver+0x948 as the attachment;
+      Ghidra incorrectly omits that argument in the first caller and declares
+      a void return. Attachment remains opaque, not an invented class identity.
+      Reuses the existing repr(C) native-pointer ScopedContext and modeled
+      SCOPED_CONTEXT_VTABLE; host offsets widen consistently. Padding is
+      untouched and no owner lookup or validation is introduced. Host tests
+      cover full-width validity/index, mode 0/0x80/0xff, NULL fields, returned
+      receiver and every untouched padding/neighbor byte. Standalone host
+      smoke executes the actual constructor source. match.py shows identical
+      field widths and target offsets, no calls, and receiver passthrough;
+      differences are LLVM's frame and independent-store scheduling, plus
+      the relocated modeled vtable literal.
+
   - address: 0x0817e238
     ghidra: FUN_0817e238
     name: registry_element_enqueue_animation
