@@ -170,6 +170,7 @@ pub mod element_reference;
 pub mod element_reference_teardown;
 pub mod operation_destroy;
 pub mod element_reference_item;
+pub mod owner_reference_item;
 pub mod element_reference_item_count;
 pub mod element_reference_target_field_210;
 pub mod element_reference_target_flag_bit_0;

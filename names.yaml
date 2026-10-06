@@ -222499,3 +222499,29 @@ functions:
       opaque bytes preserve target stride and flag offsets on hosts.
       The Rust context-dispatch caller now uses this port directly; its
       obsolete resident-address and host flag-clear seams are removed.
+
+  - address: 0x0817bb2c
+    ghidra: FUN_0817bb2c
+    name: ui_owner_reference_item_at
+    size: 8
+    sig: "u32 ui_owner_reference_item_at(const u8 *owner, u32 index)"
+    module: ui/owner_reference_item
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      FUN_082a60a8: ui_element_reference_item_at
+    notes: >-
+      Raw words e2800060 ea04a95c establish the exact eight-byte extent
+      0x0817bb2c..0x0817bb34, where the next function begins with push
+      {r4,r5,r6,lr}. Adds 0x60 to the owner and tail-transfers to the
+      already ported ui_element_reference_item_at, preserving index and
+      returning its result. Ghidra incorrectly expands the callee logic
+      into this adapter. Whole-image A32 branch decoding finds two plain
+      inbound BLs at 0x08064958 and 0x080673e8, zero predicated BLs, and
+      one inbound B at 0x081003c0. No outgoing BLs; one unconditional B
+      to 0x082a60a8. No semantic deviations. Host tests exercise failed
+      resolution, both selectors, reverse indexing, bounds and wrong class
+      through the real Rust callee. ARM match shows LLVM adds a balanced
+      frame-pointer push/mov/pop around the same adjustment and tail branch;
+      the unresolved archive branch relocation names the existing callee.
