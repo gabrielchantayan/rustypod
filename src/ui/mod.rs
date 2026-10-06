@@ -259,3 +259,4 @@ pub mod optional_four_word_record_equal;
 pub mod set_bounds;
 pub mod collection_append;
 pub mod three_state_bounds_select;
+pub mod remove_selected_item;
