@@ -38,6 +38,38 @@ pub unsafe extern "C" fn selector_string_resource_assign(
     string_object_assign_payload(destination, text);
 }
 
+/// Selector primary string resource assignment — `FUN_0815d9b0` @ 0x0815d9b0.
+///
+/// True extent: 100 bytes (88 code + 12 literals), next real function is
+/// `bx lr` @ 0x0815da14. Raw words verify four outbound plain BLs, zero
+/// predicated BLs; two inbound plain BLs @ 0x0815d490 and 0x0815df48.
+/// Selectors 1..=3 at byte +0x7c resolve resources 0x56a2..=0x56a4 from
+/// the current task's provider chain, then assign the C-string payload.
+/// Other selectors leave the destination untouched without context access.
+///
+/// Deliberate deviations: Rust calls replace shared/tail branches, using
+/// the existing resource and virtual StringObject allocation/clear boundaries.
+/// No new seam; the existing virtual operations must be wired before hooking.
+///
+/// # Safety
+/// `receiver` must be readable through +0x7c. For selectors 1..=3, the task
+/// context, provider chain and destination assignment operations must be valid.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn selector_primary_string_resource_assign(
+    receiver: *const u8, destination: *mut StringObject,
+) {
+    let resource_id = match receiver.add(0x7c).read() {
+        1 => 0x56a2,
+        2 => 0x56a3,
+        3 => 0x56a4,
+        _ => return,
+    };
+    let head = task_ctx_field_0x30() as usize as *mut ResourceProvider;
+    let text = resource_chain_find_string(head, resource_id);
+    string_object_assign_payload(destination, text);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,13 +80,14 @@ mod tests {
 
     static mut CONTEXT: [u32; 13] = [0; 13];
     static mut FAIL_ALLOCATION: bool = false;
+    static mut RESOURCE_BASE: u32 = 0;
     unsafe extern "C" fn context() -> *mut u8 { ptr::addr_of_mut!(CONTEXT).cast() }
     unsafe extern "C" fn invalid_context() -> *mut u8 { panic!("invalid selector accessed context") }
     unsafe extern "C" fn find(
         _: *mut ResourceProvider, kind: ResourceKind, id: u32, out: *mut *mut u8,
     ) -> u32 {
         assert_eq!(kind, ResourceKind::STRING);
-        let text: &[u8] = match id { 0x56a5 => b"first\0", 0x56a6 => b"second\0", 0x56a7 => b"\0", _ => panic!("wrong resource id") };
+        let text: &[u8] = match id.wrapping_sub(RESOURCE_BASE) { 0 => b"first\0", 1 => b"second\0", 2 => b"\0", _ => panic!("wrong resource id") };
         *out = text.as_ptr() as *mut u8;
         1
     }
@@ -80,10 +113,22 @@ mod tests {
     }
     #[test]
     fn selector_bounds_assignment_missing_empty_and_allocation_failure() {
+        exercise_assignment(selector_string_resource_assign, 0x56a5,
+            crate::testing::hints::SELECTOR_STRING_RESOURCE_ASSIGN);
+    }
+    #[test]
+    fn primary_selector_bounds_assignment_missing_empty_and_allocation_failure() {
+        exercise_assignment(selector_primary_string_resource_assign, 0x56a2,
+            crate::testing::hints::SELECTOR_PRIMARY_STRING_RESOURCE_ASSIGN);
+    }
+    fn exercise_assignment(
+        assign: unsafe extern "C" fn(*const u8, *mut StringObject),
+        resource_base: u32, slab_hint: usize,
+    ) {
         let _context_lock = crate::testing::TASK_CTX_BLOCK_TEST_LOCK.lock().unwrap();
         let _assignment_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap();
         let Some(slab) = crate::testing::try_map_u32_slab(
-            crate::testing::hints::SELECTOR_STRING_RESOURCE_ASSIGN, 4096,
+            slab_hint, 4096,
         ) else { return; };
         let mut receiver = [0xa5u8; 0x7d];
         let mut storage = [0xccu8; 16];
@@ -93,11 +138,12 @@ mod tests {
                 ptr::addr_of!(CURRENT_TASK_CTX_BLOCK).read_volatile(),
                 ptr::addr_of!(STRING_OBJECT_ASSIGN_CSTR_OPS).read_volatile(),
             );
+            RESOURCE_BASE = resource_base;
             ptr::addr_of_mut!(CURRENT_TASK_CTX_BLOCK).write_volatile(invalid_context);
             for selector in 0..=255u8 {
                 if (1..=3).contains(&selector) { continue; }
                 receiver[0x7c] = selector;
-                selector_string_resource_assign(receiver.as_ptr(), &mut destination);
+                assign(receiver.as_ptr(), &mut destination);
                 assert_eq!(storage, [0xcc; 16]);
             }
             ptr::addr_of_mut!(CURRENT_TASK_CTX_BLOCK).write_volatile(context);
@@ -110,17 +156,17 @@ mod tests {
             for (selector, expected) in [(1, &b"first\0"[..]), (2, &b"second\0"[..]), (3, &b"\0"[..])] {
                 storage.fill(0xcc);
                 receiver[0x7c] = selector;
-                selector_string_resource_assign(receiver.as_ptr(), &mut destination);
+                assign(receiver.as_ptr(), &mut destination);
                 assert_eq!(&storage[..expected.len()], expected);
                 assert!(storage[expected.len()..].iter().all(|&b| b == 0xcc));
             }
             receiver[0x7c] = 1;
             storage.fill(0xcc);
             FAIL_ALLOCATION = true;
-            selector_string_resource_assign(receiver.as_ptr(), &mut destination);
+            assign(receiver.as_ptr(), &mut destination);
             assert_eq!(storage, [0xcc; 16]);
             CONTEXT[12] = 0;
-            selector_string_resource_assign(receiver.as_ptr(), &mut destination);
+            assign(receiver.as_ptr(), &mut destination);
             assert_eq!(storage[0], 0);
             assert_eq!(&storage[1..], &[0xcc; 15]);
             assert!(receiver[..0x7c].iter().all(|&b| b == 0xa5));

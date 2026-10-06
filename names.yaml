@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815d9b0
+    ghidra: FUN_0815d9b0
+    name: selector_primary_string_resource_assign
+    size: 100
+    sig: "void selector_primary_string_resource_assign(const void *receiver, StringObject *destination)"
+    module: app/selector_string_resource_assign
+    status: ported
+    vars: {param_1: receiver, param_2: destination, cVar1: selector, uVar2: provider_chain, uVar5: resource_id, pbVar3: text, FUN_0827233c: task_ctx_field_0x30, FUN_0827239c: resource_chain_find_string}
+    notes: >-
+      Raw osos.dec establishes 0x0815d9b0..0x0815da14: 88 code bytes
+      plus 12 literal bytes, followed by a separate bx lr function.
+      Four outbound plain BLs, zero predicated BLs; two inbound plain BLs
+      at 0x0815d490 and 0x0815df48. Selector byte +0x7c values 1, 2, 3
+      resolve resource IDs 0x56a2, 0x56a3, 0x56a4 from the current task
+      provider chain; other values leave destination untouched without
+      context access. Tail B targets string_object_assign_payload at
+      0x08276474; Ghidra incorrectly absorbs its body into this function.
+      Rust reuses existing context, resource and StringObject ports with
+      no new seam. Missing/empty text clears the destination; allocation
+      failure leaves its payload untouched. Deliberate deviations are
+      ordinary Rust calls replacing shared and tail branches, and the
+      existing injectable virtual allocation/clear boundary. The module
+      is already registered. Host tests cover every invalid selector,
+      all three IDs, copy terminators and sentinels, missing/empty text
+      and allocation failure. match.py structural diff retains selector
+      guard, resource resolution and assignment tail; LLVM combines
+      the three context calls and computes contiguous IDs arithmetically.
+
   - address: 0x0816e478
     ghidra: FUN_0816e478
     name: draw_resource_lookup

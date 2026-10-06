@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const SELECTOR_STRING_RESOURCE_ASSIGN: usize = 0x4304_0000;
+    pub const SELECTOR_PRIMARY_STRING_RESOURCE_ASSIGN: usize = 0x4305_0000;
     pub const CONTROLLER_DECLARATION_RESET: usize = 0x4303_0000;
     pub const DISPATCH_PAIR_STRING: usize = 0x4302_0000;
     pub const ALIGNED_BUFFER_SET_DESTROY: usize = 0x4301_0000;
