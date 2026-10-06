@@ -222559,3 +222559,32 @@ functions:
       through the real Rust callee. ARM match shows LLVM adds a balanced
       frame-pointer push/mov/pop around the same adjustment and tail branch;
       the unresolved archive branch relocation names the existing callee.
+
+  - address: 0x0817a800
+    ghidra: FUN_0817a800
+    name: media_player_trim_current_item
+    size: 212
+    sig: "u32 media_player_trim_current_item(MediaPlayerQueueOwner *player)"
+    module: app/media_player_trim_current_item
+    status: ported
+    renames:
+      param_1/r4: player
+      r5: class singleton then removal counter
+      r6: removed flag
+      r7: wrapping removal count
+      "vtable+0x158": current index
+      "vtable+0x130": removal operation with zero argument
+      FUN_081b5e5c: class limit getter (unported; raw words return 10)
+      FUN_081b58c4: locked class operation with zero argument (unported)
+    notes: >-
+      Raw extent ends at the next push at 0x0817a8d4. Whole-image A32 decoding
+      finds two unconditional inbound BLs at 0x0817bcac and 0x0817d290,
+      zero predicated inbound BLs, seven unconditional outbound BLs and four
+      register BLX sites. When the class item matches and index is at least
+      the class limit, release queue+0x88, reread index and remove wrapping
+      index-limit+1 entries. Each removal reacquires the singleton. Update
+      optional source+0x1c from a fresh index and refresh even for zero count.
+      Reuses four Rust dependencies; two unported class callees retain fixed
+      retail addresses. ARM diff preserves guards and effects with a countdown
+      loop and fixed-address BLX calls. Host tests cover mismatch, unsigned
+      bounds, equality, release-induced count changes, wraparound and source write.
