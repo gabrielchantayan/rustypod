@@ -16,6 +16,53 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081962f8
+    ghidra: FUN_081962f8
+    name: banked_slot_close
+    size: 124
+    sig: "u32 banked_slot_close(u32 context, u32 bank, u32 index)"
+    module: app/banked_slot_close
+    status: ported
+    args:
+      r0: context
+      r1: bank
+      r2: index
+    renames:
+      piVar2/r4: slot
+      uVar3/r5: status
+      DAT_08196370: banked_slot_table
+      FUN_081969b0: resident_slot_finalizer
+    notes: >-
+      Raw extent [0x081962f8,0x08196374) contains 120 instruction bytes
+      and one literal word, 0x08aca424. Next real function starts with
+      e0812281 at 0x08196374. Independently decoded calls: one plain BL
+      at 0x0819633c to 0x081969b0, zero predicated BL, one register BLX
+      at 0x0819635c through vtable +4. Table stride is 0x2100 per bank
+      and 0x210 per slot; unsigned index >=16 or null object returns 13.
+      Kind byte +8 equal to 1 or 2 invokes the resident finalizer with
+      unchanged context, bank and index. Preserve its status and reload
+      the object; a cleared slot returns immediately. Otherwise release
+      the current object through vtable +4 and clear the slot word.
+      Other kinds skip finalization and return zero after release.
+      No bank validation or synchronization added. Assigned address and
+      finalizer had no existing address entries; finalizer raw entry
+      independently computes the same bank/slot and reads kind +8.
+      Its class identity is not assumed and it remains resident ARM code.
+      Deliberate deviations: volatile target words across callbacks;
+      injected host callbacks exercise the shared algorithm without
+      truncating host pointers. Tests cover all 256 kinds, finalizer
+      retaining/clearing/replacing the object, status preservation,
+      bank 1 slot 15 addressing, neighboring words, absent objects and
+      unsigned invalid indices. Host suite passes all 14351 tests.
+      ARM release build passes. match.py exits 1 with a reviewed
+      structural diff, 30 original versus 38 Rust instructions:
+      LLVM uses an early unsigned return, folded stride arithmetic,
+      a range test for kinds 1..2, and BLX to the resident finalizer.
+      Object reload, virtual release, zero store and status return remain.
+      Standalone actual-source exported-entry smoke verifies real
+      target-width virtual dispatch, clearing and empty/invalid returns.
+      No device execution performed.
+
   - address: 0x0818af74
     ghidra: FUN_0818af74
     name: block_manager_secondary_mutex_lock
