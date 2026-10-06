@@ -221843,3 +221843,42 @@ functions:
       inlines the strcat space copy, shares post-append strlen measurements,
       and changes frame/register allocation. Both virtual calls retain slot
       +0x84, selectors 9/17, source argument and fresh vtable lookup.
+
+  - address: 0x08187d00
+    ghidra: FUN_08187d00
+    name: demo_mode_rearm_timer
+    size: 32
+    sig: "void demo_mode_rearm_timer(u8 *demo)"
+    module: app/demo_mode_rearm_timer
+    status: ported
+    renames:
+      param_1: demo
+      param_1_plus_0x11c: embedded demo timer
+      param_1_plus_0x148: delay_ms
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+    notes: >-
+      Raw A32 extent 0x08187d00..0x08187d20 is exactly 32 bytes;
+      the next function loads +0x28, stores +0x30, and returns.
+      Two incoming plain BLs at 0x08187fd0 and 0x08188938, zero
+      predicated BLs, independently counted across the raw image.
+      Body has one plain BL to timer_start_after at 0x0812c63c and
+      one tail B to timer_restart at 0x0812bf4c. Ghidra incorrectly
+      expands the timer callees and invents extra arguments.
+      Load delay_ms at demo+0x148, stop/reprogram the embedded timer
+      at demo+0x11c, then restart it. Caller 0x08188854 identifies
+      that timer as the demo refresh event source; 0x08187fc0 refreshes
+      resources before rearming. Existing timer ports are called directly;
+      demo_mode_snapshot_refresh no longer calls the resident address.
+      No NULL guard, delay clamp, or extra armed check. Deliberate
+      deviation: Rust expresses the tail B as a return-position call.
+      Host regression exercises real timer state/queue/deadline behavior
+      for zero, one, high-bit and maximum delays, including modulo-u32
+      deadline overflow and preservation of the surrounding object.
+      Full host suite passed (14376 tests), ARM release build passed.
+      match.py exits 1: 8 stock versus 21 Rust instructions; LLVM
+      expands timer_restart into timer_stop, the running-state store
+      at demo+0x13c, and the existing TimerOps arm dispatch. Relocations
+      verify the timer_start_after and timer_stop BL targets. Standalone
+      host smoke with real timer callees produced period=0,
+      state=0x72756e20, armed=0. No on-device execution was performed.
