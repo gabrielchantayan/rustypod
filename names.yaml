@@ -223637,3 +223637,49 @@ functions:
       1 with structural differences: LLVM merges the three selector arms
       into an unsigned range check and arithmetic resource id, inlines
       task context access, and retains lookup plus assignment tail branch.
+  - address: 0x0815dcb8
+    ghidra: FUN_0815dcb8
+    name: ui_collection_remove_selected_item
+    size: 140
+    sig: "void ui_collection_remove_selected_item(u32 *element)"
+    module: ui/remove_selected_item
+    status: ported
+    renames:
+      param_1/r4: element
+      "element+0x30": embedded_observable_array
+      "element+0x34": item_count
+      "element+0x48": nonzero_flags
+      "element+0x80": selected_index
+      "element+0x98": dirty_byte
+      FUN_0815d7d4: ui_element_has_nonzero_flags
+      FUN_0815e634: retail_reset_seam
+      FUN_083d097c: opaque_observable_array_release_erase_at
+      "vtable+0x58": resource_dispatch_identity_unestablished
+      DAT_0815dd3c: resource_568a
+      DAT_0815dd40: action_VMax
+    notes: >-
+      Raw osos.dec verifies 132 instruction bytes plus eight literal bytes,
+      ending at independently called entry 0x0815dd44: true size 140, not
+      Ghidra's 132. Whole-image A32 decoding finds two plain inbound BLs
+      at 0x08212840 and 0x082128e4 and no predicated inbound BLs. Body
+      calls are plain BL at 0x0815dcd4 and 0x0815dcf0, BLNE at 0x0815dce4,
+      and virtual BLX at 0x0815dd2c. Reject signed negative selection;
+      zero selection with nonzero flags calls verified retail 0x0815e634
+      with mode zero. This helper clears +0x48, resets state bytes, and
+      dispatches resource updates; its class identity is not asserted.
+      Reload selection after reset, release/erase embedded array via the
+      existing Rust port, reload count and selection after erase, set -1
+      for empty or decrement when selection equals count. Reload vtable,
+      dispatch VMax/0x568a, then set dirty byte. Both reset and erase
+      returns are ignored. Host-only callbacks preserve target field offsets
+      while modeling embedded-array effects; native vtable slots avoid
+      truncating host pointers. Tests cover negative indices, reset gating,
+      callback mutations, empty/middle/final selection, wrapping subtraction,
+      vtable replacement, and notification-before-dirty ordering. Standalone
+      exported-function smoke exercises final-item removal and dirty ordering.
+      Full x86_64 host suite and ARM build-std release build succeed.
+      match.py exits 1 with a structural diff: LLVM uses branches instead
+      of predicated calls, an indirect BLX for the fixed retail reset address,
+      and a larger frame. The signed guard, existing helper calls, post-call
+      state reloads, selection adjustment, virtual notification and final
+      dirty-byte store remain present.
