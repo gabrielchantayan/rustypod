@@ -225042,3 +225042,45 @@ functions:
       and returned pointer. match.py shows six instructions versus four:
       LLVM adds a frame and reverses independent byte/word stores; offsets,
       zero values and unchanged r0 match. No physical-device execution.
+
+  - address: 0x0815a99c
+    ghidra: FUN_0815a99c
+    name: selected_container_retreat
+    size: 100
+    sig: "void selected_container_retreat(u8 *owner)"
+    module: app/selected_container_retreat.rs
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      r0_after_back: selected_container
+      r1: previous_index_then_event
+      r2: context
+      r3: dispatch
+    renames:
+      FUN_083d75e0: container_is_empty
+      FUN_083e0044: deque_back_elem4
+      thunk_FUN_0806e488: singleton_class_8c00_ready_gate
+    notes: >-
+      Raw A32 proves 96 instruction bytes plus the four-byte event literal
+      at 0x0815a9fc, ending before the independent prologue at 0x0815aa00.
+      Two internal plain BL, zero predicated BL, one virtual BLX and a
+      tail B to 0x081bb29c. Whole-image aligned decoding finds two inbound
+      plain BL at 0x081f60f4 and 0x081f61a4, zero predicated inbound BL.
+      Nonempty deque at owner+0xa0 supplies its back object. Decrement the
+      object's u16 index with wrapping and reject negative sign-extended
+      i16 results. Otherwise store, dispatch slot +0x58 with event
+      0x424d6170 and context word +0x60, then invoke the ready gate with one.
+      Ghidra incorrectly follows the tail branch into unrelated code.
+      Reuses Rust container-empty and deque-back ports; the identified
+      unported gate remains a retail ARM call and uses the adjacent advance
+      port's explicitly installed host callback. No added NULL guards.
+      Host edge tests cover zero, one, signed boundaries, unsigned wrap,
+      unchanged neighboring halfword, and store/dispatch/gate ordering.
+      Full host suite passes (14527 tests); release ARM build passes.
+      Temporary native execution of the actual export proves empty return,
+      successful decrement, event/context forwarding, store before dispatch
+      before gate, and rejection at zero. match.py exits 1: 24 original
+      instructions versus 30 Rust instructions; LLVM adds a frame pointer,
+      caches the deque address, uses a BMI to shared return and literal BX
+      for the retail tail gate. Decrement/sign-extension/store sequence
+      and virtual dispatch offsets match. No physical-device execution.
