@@ -387,6 +387,7 @@ pub mod flagged_base_construct;
 pub mod work_record_construct;
 pub mod work_record_assign_value;
 pub mod six_bit_set_state_construct;
+pub mod six_bit_set_state_destroy;
 pub mod callback_target_dispatch;
 pub mod callback_queue;
 pub mod callback_queue_context_post;
