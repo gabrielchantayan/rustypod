@@ -66,8 +66,8 @@ pub unsafe extern "C" fn controller_adjust_property_6056(controller: *mut u32, a
     let store = controller.add(0xde).read_volatile();
     #[cfg(target_os = "none")]
     {
-        let update: unsafe extern "C" fn(*mut u8, i32) = core::mem::transmute(0x0817_2004usize);
-        update(store as usize as *mut u8, new);
+        crate::app::class6000_write_ui32_property_6056::class6000_write_ui32_property_6056(
+            (store as usize as *mut u8).cast(), new as u32);
         dispatch(controller, 0x436e_746c, 0x890d);
         dispatch(controller, 0x2a2a_2a2a, 0x8918);
     }
