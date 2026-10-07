@@ -30,8 +30,8 @@
 //! All twelve callers pass a path C string and zero as the second word;
 //! callers branch on its status, with several distinguishing 0 and 13 for
 //! setup/error paths. [`path_component_query_worker`] preserves the exact
-//! scoped guard/facade/query sequence, with the unresolved facade operation
-//! at 0x08149e38 isolated as its own device boundary.
+//! scoped guard/facade/query sequence, using the ported cumulative
+//! path-prefix dispatcher at 0x08149e38.
 
 use core::mem::MaybeUninit;
 

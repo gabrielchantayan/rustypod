@@ -107,13 +107,13 @@ pub unsafe extern "C" fn string_object_normalize_volume_path(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     extern crate std;
     use parking_lot::Mutex;
     use std::ptr;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
     static mut CALLS: [u8; 2] = [0; 2];
     static mut CALL_COUNT: usize = 0;
     static mut NORMALIZE_ARGS: (usize, u32, u32) = (0, 0, 0);
