@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod owned_child_view;
 pub mod indexed_item_query;
 pub mod item_outside_position_window;
 pub mod element_detach_clear_words;
