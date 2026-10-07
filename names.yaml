@@ -45556,10 +45556,9 @@ functions:
       circuiting in that order. Seven direct plain BL instructions, zero
       predicated BL: payload getter 0x0814d230, direct one-word getters
       0x0814d284/0x0814d2a0/0x0814d2a8, and three recursive BLs. The Rust
-      port calls the existing payload getter and volatile-loads the three
-      documented link words directly; this deliberate deviation avoids
-      inventing seams for unported getter identities while preserving their
-      observed loads. Cycles recurse forever and invalid non-NULL links
+      port calls the existing payload and child-B getters and volatile-loads
+      the remaining documented link words directly, preserving their reads.
+      Cycles recurse forever and invalid non-NULL links
       fault, as stock. Host tests use a dedicated u32-addressable slab and
       cover NULL, a complete three-link tree, and an unparsed node on every
       recursive link.
@@ -226931,3 +226930,30 @@ functions:
       24-bit overflow, 32-bit overflow, and high bits in the supplied size.
       Executable host smoke passes 9216 header/extension combinations.
       Host suite passes all 14617 tests; ARM release build succeeds.
+
+  - address: 0x0814d284
+    ghidra: FUN_0814d284
+    name: mov_atom_node_get_child_b
+    size: 8
+    sig: "u32 mov_atom_node_get_child_b(const MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    vars: {param_1/r0: node, return/r0: child_b}
+    notes: >-
+      Raw words e5900004/e12fff1e decode as ldr r0,[r0,#4]; bx lr.
+      True extent [0x0814d284,0x0814d28c); next function starts with
+      cmp r1,#0. Whole-image ARM decoding finds two plain inbound BLs
+      at 0x081f3ad0 and 0x081f3ef8, zero predicated BLs, no inbound B,
+      and no outgoing calls. Returns the MOV atom node child-B link at
+      +0x04 unchanged, including zero and high-bit target addresses.
+      Reuses the repr(C) MovAtomNode u32 field and performs one aligned
+      volatile read; no NULL receiver guard and no link dereference.
+      No behavior deviations. Existing recursive offset validator now
+      calls this getter. Host tests cover NULL link, high-bit words,
+      all-one bits, and unchanged neighboring fields.
+      Host cargo test and ARM release build pass. match.py exits 1:
+      LLVM emits four instructions rather than two, adding push/mov
+      frame setup and replacing bx lr with pop {fp,pc}; the node load
+      is unchanged. A throwaway A32 runner executes original and compiled
+      bodies for five link values, verifying return bits, one node read,
+      and restored frame pointer, stack and return address. No device run.

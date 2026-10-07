@@ -256,6 +256,31 @@ pub unsafe extern "C" fn mov_atom_node_get_size(node: *const MovAtomNode) -> u64
     (u64::from(size_hi) << 32) | u64::from(size_lo)
 }
 
+/// MOV atom node child-B getter — original: `FUN_0814d284` @
+/// **0x0814d284** (8 bytes, 0x0814d284..0x0814d28c, 2 instructions).
+/// The next real function begins with `cmp r1, #0` at 0x0814d28c.
+/// Whole-image raw ARM decoding finds two plain inbound BLs at 0x081f3ad0
+/// and 0x081f3ef8, zero predicated BLs, and no inbound B. No outgoing calls.
+///
+/// `ldr r0, [r0, #4]; bx lr` returns the child-B link as an unchanged
+/// target-width word, including NULL. The recursive offset validator and
+/// atom parser use this link to descend through the MOV atom tree.
+///
+/// # Deliberate deviations
+///
+/// None. A volatile aligned u32 load preserves the single firmware read;
+/// the link is not dereferenced or widened to a host pointer.
+///
+/// # Safety
+///
+/// `node` must point to a readable [`MovAtomNode`]. No NULL receiver guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_get_child_b")]
+pub unsafe extern "C" fn mov_atom_node_get_child_b(node: *const MovAtomNode) -> u32 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).child_b)) }
+}
+
 
 
 /// MOV atom node link reset — original: `FUN_0814d2e0` @ 0x0814d2e0
@@ -473,6 +498,18 @@ mod tests {
     use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
+
+    #[test]
+    fn child_b_getter_preserves_null_and_all_link_bits_without_touching_neighbors() {
+        let mut words = [0xa5a5_5a5au32; 10];
+        for link in [0, 4, 0x0800_0000, 0x8000_0000, u32::MAX] {
+            words[1] = link;
+            let before = words;
+            let node = words.as_ptr().cast::<MovAtomNode>();
+            assert_eq!(unsafe { mov_atom_node_get_child_b(node) }, link);
+            assert_eq!(words, before);
+        }
+    }
 
     /// 0x28 bytes of heap-block stand-in, word-aligned, poisoned so the
     /// fields the initializer must NOT touch (+0x0c, +0x20) are

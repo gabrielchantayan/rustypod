@@ -12,11 +12,10 @@
 //!
 //! # Deliberate deviations
 //!
-//! Rust accesses the three known link words directly rather than adding seams
-//! for the stock one-word getters at 0x0814d284/0x0814d2a0/0x0814d2a8. This
-//! preserves their observed loads while avoiding unported callee identities.
+//! Rust uses the ported child-B getter. Child-A and duplicate-chain remain
+//! direct volatile word loads, preserving the stock getters' observed reads.
 
-use crate::mov::atom_node::{mov_atom_node_get_offset, MovAtomNode};
+use crate::mov::atom_node::{mov_atom_node_get_child_b, mov_atom_node_get_offset, MovAtomNode};
 
 #[inline]
 fn node_from_word(link: u32) -> *const MovAtomNode {
@@ -47,7 +46,7 @@ pub unsafe extern "C" fn mov_atom_tree_has_offsets(
     if unsafe { mov_atom_tree_has_offsets(parser, node_from_word(child_a)) } == 0 {
         return 0;
     }
-    let child_b = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).child_b)) };
+    let child_b = unsafe { mov_atom_node_get_child_b(node) };
     if unsafe { mov_atom_tree_has_offsets(parser, node_from_word(child_b)) } == 0 {
         return 0;
     }
