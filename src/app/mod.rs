@@ -287,6 +287,7 @@ pub mod app_screen_position_decrement_if_flagged;
 pub mod app_screen_update_position;
 pub mod visible_range_recompute;
 pub mod active_service_handler_readiness;
+pub mod iap_packet_context_readiness;
 pub mod service_handler_context_readiness;
 pub mod action_context_readiness;
 pub mod global_readiness_gate;

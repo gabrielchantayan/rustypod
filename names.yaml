@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08164090
+    ghidra: FUN_08164090
+    name: iap_packet_context_is_ready
+    size: 76
+    sig: "u32 iap_packet_context_is_ready(void)"
+    module: app/iap_packet_context_readiness
+    status: ported
+    vars:
+      r4: ready
+      r5: packet_context_holder
+      r0: context_or_manager
+      r1: selector
+    renames:
+      DAT_081640d8: packet_context_holder_089ccbd4
+      thunk_FUN_08165520: service_manager_instance_veneer
+      FUN_08138d8c: service_handler_state_is_ready
+    notes: >-
+      Raw extent [0x08164090,0x081640dc) is 76 bytes: 72 instruction
+      bytes and the holder literal 0x089ccbd4 at 0x081640d8. The next
+      real function starts with push at 0x081640dc. Independent word
+      decoding finds two outbound plain BLs, zero predicated BLs, and
+      two inbound plain BLs at 0x08163be4 and 0x0816468c, zero predicated
+      inbound BLs. Incoming r0/r1 are overwritten, not arguments.
+      Read context from holder+4 (0x089ccbd8); return zero for null,
+      zero handler at +0x2d0, or signed selector at +0x2d4 >=3.
+      Otherwise call the canonical manager veneer, reload context and
+      selector, and normalize the canonical lifecycle readiness predicate
+      to 0/1. Negative selectors deliberately pass the signed guard.
+      Callers gate iAP packet processing and response creation on this
+      predicate. Deviations: native-pointer host slot fixture; firmware
+      retains the original RAM slot. Existing manager and lifecycle ports
+      retain their documented singleton/table adaptations. Host coverage
+      checks short-circuiting with an absent manager, signed selector
+      boundaries, and all signed-byte states for selectors -1,0,1,2.
+      Verification: 14568 host tests passed and the ARM release build passed.
+      match.py returned structural diff exit 1: LLVM uses signed >2 instead
+      of >=3, addresses the slot directly, and tail-branches to the existing
+      0/1 lifecycle predicate instead of re-normalizing its result. ARM
+      relocations verify the manager CALL and lifecycle JUMP24 targets.
+      Standalone host smoke linkage was unavailable: the crate is staticlib
+      only, and a host rlib build fails in unrelated metadata, shared-payload,
+      and calendar modules with six missing-function errors. No device run.
+
   - address: 0x08164bf4
     ghidra: FUN_08164bf4
     name: device_1da_validate
