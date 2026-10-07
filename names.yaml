@@ -226591,3 +226591,37 @@ functions:
       vector search plus handle construction, retained as a direct call.
       Existing Rust slot-1 lifecycle helpers are reused. Deliberate deviation:
       repr(C) host pointers widen; vector word-span count remains unsigned.
+  - address: 0x08162058
+    ghidra: FUN_08162058
+    name: metadata_refresh_if_changed
+    size: 84
+    sig: "u32 metadata_refresh_if_changed(MetadataObject *object)"
+    module: app/metadata_refresh_if_changed
+    status: ported
+    vars:
+      param_1/r5: object
+      iVar1/r4: result
+      iVar2/r0: metadata_differs
+      FUN_08161d10: retail_metadata_differs
+      FUN_08161b28: retail_metadata_header_rebuild
+    notes: >-
+      Raw A32 establishes [0x08162058,0x081620ac), followed by a new
+      PUSH r4-r6/lr. Independent aligned decoding finds two outbound plain
+      BLs at 0x0816207c and 0x0816208c, zero predicated BLs, and two
+      virtual BLX sites at 0x0816206c and 0x0816209c. Whole-image scan
+      finds two inbound plain BLs at 0x080441d4 and 0x081620c4, no
+      predicated inbound BLs. Call virtual slot zero and return its nonzero
+      result immediately. Otherwise compare current header fields against
+      cached metadata through verified retail helper 0x08161d10; a nonzero
+      comparison invokes header reconstruction at 0x08161b28, then reloads
+      the vtable and calls slot one. Preserve the final result bit-for-bit.
+      Neither helper has an existing names entry or Rust implementation;
+      seam names describe verified roles, not guessed class identities.
+      Deliberate deviations: no target behavior change; repr(C) host
+      pointers widen and explicit host helper seams replace retail calls.
+      Tests cover prepare errors including high-bit results, equal metadata,
+      changed metadata, rebuild-induced vtable replacement, and commit errors.
+      ARM codegen preserves both gates and the vtable reload; fixed-address
+      helper calls become BLX and the final virtual call becomes a BX tail.
+      Host suite: 14598 passed. External smoke exercised changed metadata
+      committing value seven with result 107, then an unchanged zero return.
