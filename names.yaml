@@ -226182,3 +226182,34 @@ functions:
       Host tests cover signed extremes, threshold, output aliasing, reload,
       and error precedence. Exported host smoke covers -1,0,10. Host suite
       and ARM release build pass. match.py exits 1: 18 versus 23 instructions,
+
+  - address: 0x08155954
+    ghidra: FUN_08155954
+    name: string_array6_owner_destroy
+    size: 28
+    sig: "StringArray6Owner *string_array6_owner_destroy(StringArray6Owner *this)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1/r0: this
+      DAT_0815596c: owner_vtable_address
+      FUN_0827dea4: string_object_array6_destroy
+    notes: >-
+      Raw osos.dec verifies extent [0x08155954,0x08155970): six A32
+      instructions plus the 0x08986a70 literal at 0x0815596c. The next
+      real function starts with PUSH at 0x08155970. Body has one plain
+      BL to the already-ported string_object_array6_destroy at 0x0827dea4
+      and no predicated BLs. Whole-image word decoding independently finds
+      two incoming plain BLs at 0x08136114 and 0x081361a0, zero predicated.
+      Installs the outer vtable, destroys the six-string member at +0x14,
+      then subtracts 0x14 from its returned pointer. Other outer words and
+      both array header words are untouched; there is no NULL guard or
+      outer delete. repr(C) and offset_of! preserve member identity on
+      pointer-widened hosts and retain ARM offsets. Host tests cover mixed
+      NULL/non-NULL payloads, reverse destruction, vtable resets, preserved
+      headers and returned owner. All 14574 host tests and the ARM release
+      build pass. Temporary smoke exercised the production payload-release
+      path with six empty strings. Standalone host library build is blocked
+      by six existing missing helpers outside this module. match.py exits 1:
+      LLVM retains the vtable store and one BL, saves this in r4 instead of
+      subtracting the known callee offset, and adds a frame-pointer prologue.
