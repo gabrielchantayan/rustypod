@@ -2860,6 +2860,55 @@ pub unsafe extern "C" fn string_object_substring(
     string_object_assign_utf8_capped(out, start, max_codepoints);
 }
 
+/// Extract a resource-name suffix — FUN_08162580 @ 0x08162580.
+/// True extent: 116 bytes (108 code + 8 literals), next entry 0x081625f4.
+/// Raw A32 verifies two inbound and four outbound plain BLs, no predicated BLs.
+///
+/// Search for dots starting at codepoint one, resuming one codepoint after
+/// each match, then construct the substring following the final match.
+/// With no matching dot, the start remains one: retailOS drops the first
+/// codepoint rather than copying the whole name. A leading dot is ignored.
+/// Destroy the empty stack temporary after constructing the output.
+///
+/// Deviations: use the existing modeled vtable and virtual allocation/release
+/// boundaries; named repr(C) fields adapt target pointers to host width.
+/// Keep the unused r1 argument and wrapping 32-bit index/count arithmetic.
+///
+/// ARM structural review: LLVM removes the unreachable zero-start branch
+/// (a -1 search result exits before the next increment). The search loop,
+/// count/subtract, substring construction and temporary teardown remain.
+///
+/// # Safety
+/// `out` must be writable; `source` must contain a valid string payload or NULL.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_resource_suffix(
+    out: *mut StringObject,
+    _context: usize,
+    source: *const StringObject,
+) {
+    let mut temporary = StringObject {
+        vtable: &STRING_OBJECT_VTABLE,
+        payload: core::ptr::null_mut(),
+    };
+    let mut found = 0i32;
+    let start = loop {
+        let start = found.wrapping_add(1);
+        found = string_object_find_utf8_prefix(source, b".\0".as_ptr(), start);
+        if found == -1 {
+            break start;
+        }
+    };
+    if start == 0 {
+        (*out).vtable = &STRING_OBJECT_VTABLE;
+        (*out).payload = core::ptr::null_mut();
+    } else {
+        let count = utf8_codepoint_count_safe((*source).payload) as i32;
+        string_object_substring(out, source, start, count.wrapping_sub(start));
+    }
+    string_object_destroy(&mut temporary);
+}
+
 /// Split a path's final anchor — original: `FUN_0826bee0` @ 0x0826bee0.
 /// True extent: 212 bytes, ending at 0x0826bfb4's next push prologue.
 /// Raw A32 decoding verifies two inbound plain BL sites, nine outbound
@@ -5948,6 +5997,48 @@ pub(crate) mod tests {
             &[(out_ptr as usize, 3, 0)],
         );
         assert_eq!(&destination[..3], b"\xc2\xa9\0");
+        assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+        assert!(out.payload.is_null());
+    }
+
+    #[test]
+    fn resource_suffix_preserves_dot_search_and_codepoint_edges() {
+        let _release_lock = STRING_OBJECT_OPS_TEST_LOCK
+            .lock().unwrap_or_else(|poison| poison.into_inner());
+        for (text, expected) in [
+            (&b"archive.part.ext\0"[..], &b"ext\0"[..]),
+            (&b"plain\0"[..], &b"lain\0"[..]),
+            (&b".hidden\0"[..], &b"hidden\0"[..]),
+            (&b"a..tail\0"[..], &b"tail\0"[..]),
+            (&b"\xc2\xa9.\xe2\x82\xacZ\0"[..], &b"\xe2\x82\xacZ\0"[..]),
+            (&b"\xc2\xa9Z\0"[..], &b"Z\0"[..]),
+            (&b"trailing.\0"[..], &b"\0"[..]),
+            (&b"x\0"[..], &b"\0"[..]),
+            (&b"\0"[..], &b"\0"[..]),
+        ] {
+            let source = StringObject {
+                vtable: core::ptr::null(),
+                payload: text.as_ptr() as *mut u8,
+            };
+            let mut destination = [0xa5u8; 32];
+            let mut out = substring_garbage_out();
+            let _bench = assign_cstr_bench(destination.as_mut_ptr());
+            unsafe { string_object_resource_suffix(&mut out, usize::MAX, &source) };
+            assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
+            if expected == b"\0" {
+                assert!(out.payload.is_null());
+                assert_eq!(destination, [0xa5; 32]);
+            } else {
+                assert_eq!(&destination[..expected.len()], expected);
+                assert_eq!(destination[expected.len()], 0xa5);
+            }
+        }
+        let source = StringObject {
+            vtable: core::ptr::null(),
+            payload: core::ptr::null_mut(),
+        };
+        let mut out = substring_garbage_out();
+        unsafe { string_object_resource_suffix(&mut out, 0, &source) };
         assert_eq!(out.vtable, &STRING_OBJECT_VTABLE as *const _);
         assert!(out.payload.is_null());
     }

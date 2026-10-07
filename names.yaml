@@ -226452,3 +226452,41 @@ functions:
       1: LLVM emits a frame, STM for the two stack arguments and BLX via
       literal 0x08162820 rather than direct BL. The argument arrangement,
       ARM-state callee and unchanged r0 return agree with stock.
+
+  - address: 0x08162580
+    ghidra: FUN_08162580
+    name: string_object_resource_suffix
+    size: 116
+    sig: "void string_object_resource_suffix(StringObject *out, uintptr_t context, const StringObject *source)"
+    module: cxx/string_object
+    status: ported
+    vars:
+      param_1/r5: out
+      param_2/r1: unused_context
+      param_3/r8: source
+      iVar2/r0: found_index
+      iVar3/r4: suffix_start
+      local_20: empty_temporary
+      DAT_081625ec: STRING_OBJECT_VTABLE
+      DAT_081625f0: dot_needle
+      FUN_082a5170: string_object_find_utf8_prefix
+      FUN_082770e0: utf8_codepoint_count_safe
+      FUN_082a5118: string_object_substring
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw A32 establishes [0x08162580,0x081625f4): 108 code bytes through
+      POP at 0x081625e8, then vtable and dot literals at 0x081625ec/f0.
+      Next real entry is MOV r0,r1 at 0x081625f4. Independent whole-image
+      aligned decoding finds two inbound plain BLs at 0x08162494 and
+      0x08162680, no predicated inbound BLs; four outbound plain BLs at
+      0x081625ac/c8/dc/e4, no predicated outbound BLs. Search dots from
+      codepoint one, advance one after every match, construct the suffix
+      after the final match, then destroy the empty stack temporary.
+      No matching dot drops the first codepoint; leading dots are ignored
+      and trailing dots produce an empty constructed output. The unused
+      r1 context argument is retained. All callees already have canonical
+      ported entries; no new seam. Deliberate deviations are the existing
+      modeled vtable and virtual allocation/release boundaries and repr(C)
+      host pointer fields; index and count arithmetic retain ARM wrapping.
+      Host tests cover repeated, leading, absent and trailing dots,
+      multibyte indices and suffixes, one-codepoint, empty and NULL payloads.
