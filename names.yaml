@@ -227295,3 +227295,36 @@ functions:
       instructions: the backward scan, size BL, NULL-guarded store and
       full-storage insertion remain; LLVM adds frame setup and dispatches
       the existing insertion seam via BLX. No on-device execution.
+  - address: 0x0813ecb4
+    ghidra: FUN_0813ecb4
+    name: selector_value_record_create
+    size: 48
+    sig: "u32 *selector_value_record_create(u32 selector, const u32 *value)"
+    module: cxx/selector_value_record_create
+    status: ported
+    vars: {param_1/r0/r4: selector, param_2/r1/r5: value, puVar1/r0: record}
+    renames: {FUN_082aadd4: operator_new, FUN_0813ece4: opaque_vtable_08985198_construct, DAT_0813ece0: selector_value_record_vtable}
+    notes: >-
+      Raw extent [0x0813ecb4,0x0813ece4) is 48 bytes: eleven A32
+      instructions and literal 0x08990b28 at 0x0813ece0, followed by
+      the real base constructor. Ghidra's 44 bytes exclude the literal.
+      Independent whole-image aligned BL decoding finds two incoming
+      plain calls at 0x0815f18c and 0x0815fb7c, zero predicated calls,
+      two outgoing plain calls and zero predicated outgoing calls.
+      Allocate twelve bytes through the existing tag-2 operator_new;
+      call the existing opaque base constructor, replace word 0 with
+      vtable 0x08990b28, write selector to word 1, then read *value and
+      write word 2. Return the allocation in unchanged r0; Ghidra's void
+      return is wrong and both callers consume it. The concrete class
+      remains unidentified. No new seam or semantic deviation; aligned
+      volatile u32 accesses retain target layout and access ordering,
+      including source aliasing with the initialized header or selector.
+      Host tests cover full-width scalar bits, unchanged source and
+      adjacent words, pointer identity and all three source-alias cases.
+      Host suite passed 14644 tests. Native executable smoke with actual
+      host allocation passed; ARM release build passed. match.py exits 1:
+      thirteen Rust instructions plus literal versus eleven original
+      instructions, frame-pointer setup, register reassignment and two
+      STRs replacing STM. Relocations verify both original BL targets;
+      allocation size, read/write order and return pointer are preserved.
+      No device run.
