@@ -116,14 +116,14 @@ pub unsafe extern "C" fn vtable_flag_payload_construct(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     extern crate std;
 
     use super::*;
     use core::ptr;
     use std::sync::{Mutex, MutexGuard};
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(in crate::cxx) static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut BASE_CALLS: u32 = 0;
     static mut BASE_INPUT: *mut u8 = ptr::null_mut();
     static mut BASE_RESULT: *mut u8 = ptr::null_mut();
