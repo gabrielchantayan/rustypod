@@ -48,20 +48,15 @@
 //!
 //! ## Deliberate host deviation
 //!
-//! The two ADS local-static accessors remain retailOS functions. On the
-//! target their fixed load addresses are called directly. Host builds use a
-//! no-op trace accessor and a born-published house-static default root; test
-//! seams may replace both. Pointer fields are native-width for the host
+//! The target calls the ported trace and default-root accessors. Host builds
+//! use a no-op trace accessor and a born-published house-static default root;
+//! test seams may replace both. Pointer fields are native-width for the host
 //! parked-pointer convention; all relevant offsets are literal on the
 //! 32-bit target.
 
 /// Firmware load address of the trace-static accessor called after every
 /// miss (`FUN_0814a08c`).
 pub const TRACE_STATIC_ACCESSOR_ADDRESS: usize = 0x0814_a08c;
-
-/// Firmware load address of the ADS local-static accessor returning the
-/// registry's default interface root (`FUN_0814a030`).
-pub const DEFAULT_ROOT_ACCESSOR_ADDRESS: usize = 0x0814_a030;
 
 /// Fixed object returned by `FUN_0814a030`: the registry's default interface
 /// root, whose constructor publishes its facade before releasing the guard.
@@ -143,8 +138,7 @@ unsafe extern "C" fn trace_static_accessor_default(dead_argument: u32) {
 unsafe extern "C" fn default_root_accessor_default() -> *mut RegistryNode {
     #[cfg(target_os = "none")]
     {
-        let accessor: DefaultRootAccessor = core::mem::transmute(DEFAULT_ROOT_ACCESSOR_ADDRESS);
-        accessor()
+        crate::app::default_interface_root::default_interface_root_get()
     }
 
     #[cfg(not(target_os = "none"))]
@@ -179,7 +173,7 @@ static mut REGISTRY_DEFAULT_FACADE: RegistryFacade = RegistryFacade {
 /// the node, matching the stock constructor's publish-before-guard-release
 /// order.
 #[cfg(not(target_os = "none"))]
-unsafe fn host_default_root() -> *mut RegistryNode {
+pub(crate) unsafe fn host_default_root() -> *mut RegistryNode {
     let node = core::ptr::addr_of_mut!(REGISTRY_DEFAULT_NODE);
     (*node).facade = core::ptr::addr_of_mut!(REGISTRY_DEFAULT_FACADE);
     node
@@ -197,7 +191,7 @@ pub(crate) unsafe fn host_default_facade() -> *mut RegistryFacade {
 static mut TRACE_STATIC_ACCESSOR: TraceStaticAccessor = trace_static_accessor_default;
 
 /// Active default-root accessor boundary. Tests replace it with chains of
-/// house-static nodes; target builds call `FUN_0814a030` through the default.
+/// house-static nodes; target builds call the ported default-root accessor.
 static mut DEFAULT_ROOT_ACCESSOR: DefaultRootAccessor = default_root_accessor_default;
 
 #[inline(always)]

@@ -736,6 +736,7 @@ pub mod lazy_handle_manager_release;
 pub mod lazy_static_object;
 pub mod lazy_static_object_08a762a0;
 pub mod lazy_static_object_081491a8;
+pub mod default_interface_root;
 pub mod static_buffer_pool;
 pub mod guarded_static_object;
 pub mod event_dispatch_singleton;

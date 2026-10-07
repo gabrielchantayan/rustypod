@@ -54,7 +54,6 @@
 use core::ffi::c_void;
 
 use crate::heap::veneers::operator_new;
-use crate::app::facade_registry_walk::DEFAULT_ROOT_ACCESSOR_ADDRESS;
 use crate::kernel::condvar::{condvar_init, condvar_wait_forever, CondVar};
 use crate::kernel::sync_mutex::{
     mutex_lock, mutex_lock_counted, mutex_unlock, mutex_unlock_counted, CountedMutex, Mutex,
@@ -178,14 +177,12 @@ pub struct TraceBuffer {
     pub initialized_condvar: CondVar,
 }
 
-/// ABI of the unported ADS local-static accessor `FUN_0814a030`.
+/// ABI view of the ported default-root accessor used by the trace table.
 pub type TraceBufferDefaultEntryAccessor = unsafe extern "C" fn() -> *mut TraceBufferEntry;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn default_trace_buffer_entry() -> *mut TraceBufferEntry {
-    let accessor: TraceBufferDefaultEntryAccessor =
-        core::mem::transmute(DEFAULT_ROOT_ACCESSOR_ADDRESS);
-    accessor()
+    crate::app::default_interface_root::default_interface_root_get().cast()
 }
 
 #[cfg(not(target_os = "none"))]
@@ -195,9 +192,8 @@ unsafe extern "C" fn default_trace_buffer_entry() -> *mut TraceBufferEntry {
 
 /// Boundary for the registry's default-root accessor at `0x0814a030`.
 ///
-/// That ADS local-static accessor is not yet ported. Device builds call its
-/// verified fixed address; host tests install a concrete root to observe the
-/// invalid-slot path.
+/// Device builds call the ported accessor; host tests install a concrete root
+/// to observe the invalid-slot path, retaining the existing null host default.
 pub static mut TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR: TraceBufferDefaultEntryAccessor =
     default_trace_buffer_entry;
 
