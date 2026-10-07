@@ -228492,3 +228492,39 @@ functions:
       Linked ARM export execution in Unicorn passes all seven null/live
       and zero/nonzero cases using the real handle accessor and target
       +0x54 layout; owner, cell and payload memory remain unchanged.
+  - address: 0x08147108
+    ghidra: FUN_08147108
+    name: context_word_message_dispatch
+    size: 60
+    sig: "void context_word_message_dispatch(u8 *context, u32 word)"
+    module: app/context_word_message_dispatch
+    status: ported
+    vars:
+      param_1: context
+      param_2: word
+      local_10: word
+      uVar1: message
+      FUN_08103400: message_arena_pool
+      FUN_0826c0d8: fixed_block_pool_alloc
+      FUN_08103464: queued_message_construct
+      FUN_08124c60: callback_dispatch_release
+    notes: >-
+      Raw A32 extent is 60 bytes, 0x08147108..0x08147144; the next
+      real function starts with push at 0x08147144. Independent whole-image
+      branch-word decoding finds two plain BL callers at 0x08147078 and
+      0x081470f8, zero predicated BL callers and zero B callers. The body
+      contains four plain BLs and zero predicated BLs. Ghidra's apparent
+      calls from FUN_08147144 are duplicated/inlined semantics, not additional
+      raw callers. Allocate a 12-byte envelope from message_arena_pool,
+      read the context word at +0xe8 as the message code, construct a queued
+      message with an owned four-byte copy of the input word, then dispatch
+      and release with extra=0. Callers pass direction -1/+1, but all input
+      bits are preserved. All four callees are already ported; no new seam
+      and no deliberate target behavioral deviation. Host tests run the real
+      payload constructor for zero, one, all-ones, high-bit and mixed-byte
+      words, checking ownership and adjacent storage/context preservation.
+      Host suite passes 14701 tests; release ARM build succeeds. Linked ARM
+      and original raw ARM Unicorn smoke passes all five words with callee
+      interception, verifying call order, +0xe8 code, payload bytes, extra=0
+      and unchanged context. match.py shows the same four-call structure and
+      data flow; LLVM adds a frame pointer and uses stack +4 for the payload.
