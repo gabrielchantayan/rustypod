@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081522a8
+    ghidra: FUN_081522a8
+    name: buffered_text_owner_generate
+    size: 196
+    sig: "u32 buffered_text_owner_generate(u8 *owner, const u8 *model, const u8 *serial, u32 device, u32 filesystem)"
+    module: app/buffered_text_owner_generate
+    status: ported
+    vars: {param_1: owner, param_2: model, param_3: serial, param_4: device, param_5: filesystem, uVar2: required}
+    renames: {DAT_08152368: fallback_text_buffer}
+    notes: >-
+      Raw extent [0x081522a8,0x0815236c) includes 192 instruction
+      bytes and fallback literal 0x089cc96c; next entry is LDR/BX LR.
+      Independent whole-image word decoding finds incoming plain BLs
+      at 0x080fdbac and 0x08293588, ten outgoing plain BLs and zero
+      predicated BLs in either direction. Return is u32 owner+24,
+      not Ghidra's undefined8: epilogue restores incidental saved r1.
+      Active storage formats model/serial into 20-byte fields, stores
+      device, configures filesystem, populates capabilities and generates
+      text. If wrapping capacity+overflow exceeds capacity and is below
+      0x3c10, initialize a temporary descriptor for sum+1 bytes, copy
+      its three ARM words to owner, release the temporary, reset embedded
+      text from the copied words and regenerate. Preserve upper flag
+      bytes from saved model argument and the surprising temporary
+      release after descriptor copy. No target behavioral deviations.
+      Retain verified retail callees; existing Rust snprintf uses explicit
+      VaList rather than the required variadic ABI. Host production is
+      unsupported. Host tests cover inactive state, unsigned wrap, both
+      capacity boundaries and copied descriptor surviving release.
+      Host suite, ARM release build and executable source smoke passed.
+      match.py exits 1: 73 versus 48 instructions, BLX fixed addresses,
   - address: 0x0815236c
     ghidra: FUN_0815236c
     name: buffered_text_owner_data
