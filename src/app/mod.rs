@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod service_handler_object_status;
+pub use service_handler_object_status::*;
 pub mod packed_record_cipher_seed;
 pub use packed_record_cipher_seed::*;
 pub mod view_clear_flag_display;

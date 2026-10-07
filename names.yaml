@@ -139980,7 +139980,7 @@ functions:
       DAT_0818f900: service-handler status lock table
       DAT_0818f904: service-handler status query-object table
       thunk_FUN_082e8390: posix_mutex_lock_veneer_a
-      FUN_081637fc: unported service-handler status query
+      FUN_081637fc: service_handler_object_status
       thunk_FUN_082e83d8: posix_mutex_unlock_veneer_a
     notes: >-
       Raw ARM is exactly 96 bytes from the push at 0x0818f8a0 through the
@@ -139991,9 +139991,9 @@ functions:
       unconditional plain bl and no predicated forms or tail branches:
       0x08163b88, 0x0818e430, 0x0818e91c, 0x081917e0, 0x0819205c, and
       0x081956fc. Selectors 0..2 lock a 28-byte table entry, query its
-      optional object with unported 0x081637fc, and always unlock. A NULL
+      optional object with ported service_handler_object_status, and always unlock. A NULL
       object or nonzero query status returns 0x7fffffff; zero query status
-      returns the callee-written stack word. Target calls the unported query
+      returns the callee-written stack word. Target calls the Rust query
       directly; host tests use a volatile seam with no target effect.
 
   # --- service-handler masked event dispatch ---
@@ -226090,3 +226090,30 @@ functions:
       to end. ARM release build succeeds. match.py exits 1: 37 original
       versus 39 Rust instructions, larger frame, reordered stores and
       branches; retained validity BL, count reload, comparisons and wraps.
+
+  - address: 0x081637fc
+    ghidra: FUN_081637fc
+    name: service_handler_object_status
+    size: 72
+    sig: "u32 service_handler_object_status(void *object, i32 *output)"
+    module: app/service_handler_object_status
+    status: ported
+    vars:
+      param_1/r4: object
+      param_2/r5: output
+      local_10/sp: metadata
+      object+0x908: signed_status
+      FUN_081638d4: resident_metadata_resolution
+    notes: >-
+      Raw extent [0x081637fc,0x08163844) is eighteen A32 words; next
+      boundary is an independent PUSH. Full-image decoding finds two plain
+      inbound BLs at 0x0818f8e4 and 0x08190980, no predicated BLs. Body has
+      one plain BL to 0x081638d4, no predicated BLs. Signed status <=10
+      writes output and returns zero. Otherwise resolve metadata using a
+      zero scratch word, reload status, and preserve output and helper
+      result if still >10. A now-valid status overrides any helper error.
+      Resident helper reads +0x904 and may write +0x908; no class identity
+      invented. Volatile aligned word accesses preserve callback mutations.
+      Host tests cover signed extremes, threshold, output aliasing, reload,
+      and error precedence. Exported host smoke covers -1,0,10. Host suite
+      and ARM release build pass. match.py exits 1: 18 versus 23 instructions,
