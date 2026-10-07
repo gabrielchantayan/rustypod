@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08150238
+    ghidra: FUN_08150238
+    name: owned_storage_initialize
+    size: 72
+    sig: "u8 *owned_storage_initialize(u8 *storage, u32 capacity, u8 *fallback)"
+    module: app/owned_storage_initialize
+    status: ported
+    vars: {param_1: storage, param_2: capacity, param_3: fallback, iVar1: allocation, uVar2: fallback_length}
+    renames: {FUN_082aad74: operator_new_tag3, FUN_08392478: strlen}
+    notes: >-
+      Raw ARM extent [0x08150238,0x08150280) is 72 instruction bytes;
+      next function begins with PUSH at 0x08150280. Two plain outgoing
+      BLs, zero predicated BLs. Whole-image aligned word scan finds two
+      plain incoming BLs at 0x08152338 and 0x08152380, none predicated.
+      Allocate capacity through ported operator_new_tag3. Success stores
+      allocation at +4, capacity at +8 and ownership byte 1. Failure
+      stores borrowed fallback at +4, unguarded strlen at +8 and byte 0.
+      Returns storage; padding +1..+3 and bytes beyond +11 are untouched.
+      No behavioral deviations; fields use target-width u32 words even
+      on hosts. Existing buffered_text_owner_construct now calls this
+      port directly instead of the raw-address seam. Host tests cover
+      zero and maximum capacities, unreadable fallback on success,
+      empty and embedded-NUL fallbacks, and exact write extent. Host
+      suite, ARM release build and executable two-path smoke passed.
+      match.py exits 1: 22 versus 18 instructions; LLVM adds a frame,
+      replaces predicated STM with branch/stores and shares the final
+      capacity/length store. Both BLs and ownership selection remain.
   - address: 0x081522a8
     ghidra: FUN_081522a8
     name: buffered_text_owner_generate
@@ -89,9 +116,9 @@ functions:
       0x08123cb4 with mode zero. Subtract 12 from the returned text
       pointer, clear owner bytes +0x27b/+0x28f/+0x3e6/+0x3e7, and
       return that owner. Ghidra incorrectly reports void and offsets
-      relative to the embedded text. Neither callee has an existing
-      names entry or Rust seam; target calls preserve their raw verified
-      addresses. No target deviations; host production calls are
+      relative to the embedded text. Storage initialization now calls
+      the ported owned_storage_initialize directly; text construction
+      retains its verified raw-address seam. Host production calls are
       unsupported. Host tests cover exact write extent, nonzero initial
       flags, preserved neighbors and constructor-selected owner identity.
       Host suite and ARM release build passed; executable smoke exercised
