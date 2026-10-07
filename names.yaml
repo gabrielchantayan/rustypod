@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813b36c
+    ghidra: FUN_0813b36c
+    name: record_gate_acquire
+    size: 124
+    sig: "u32 record_gate_acquire(RecordGate *gate, const GateRecord *record, u32 blocking)"
+    module: app/record_gate_acquire
+    status: ported
+    vars: {param_1/r4: gate, param_2/r7: record, param_3/r6: blocking, r5: result}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_0807f6a0: mutex_unlock, FUN_080ed9dc: condvar_wait_forever, FUN_0813b48c: record_gate_query, FUN_0813b3e8: record_gate_reserve}
+    notes: >-
+      Raw A32 proves [0x0813b36c,0x0813b3e8), 124 bytes without literals;
+      the next real entry loads gate+0x20. Five outbound plain BLs and
+      zero predicated BLs. Whole-image aligned BL decoding finds two
+      inbound plain sites at 0x0814b8a0 and 0x0814c334, none predicated.
+      Lock the gate; query status 2 succeeds, status 1 fails in nonblocking
+      mode or waits on gate+8 and retries, and status 3 returns the
+      reservation helper result. Other statuses retry without waiting.
+      Unlock on every return. Raw helpers establish blocked key at +0x14,
+      reserved key at +0x18, blocked record at +0x1c, reserved record at
+      +0x20; records contain key and value words. The two unported helpers
+      remain fixed-address ARM calls, not additional ports. Reuses ported
+      mutex and condvar functions. Hosts widen repr(C) pointer fields and
+      model helper semantics; no target behavioral deviations. Host tests
+      cover sentinel precedence, nonblocking rejection, occupied reservation
+      fields, extreme keys, and repeated wakeups before a changed key can
+      reserve. Structural match retains the query loop, wait/retry path,
+      reservation result and common unlock; LLVM uses BLX for fixed-address
+      helpers, with a larger register frame and literal address.
   - address: 0x08149e38
     ghidra: FUN_08149e38
     name: path_prefix_dispatch

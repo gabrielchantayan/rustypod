@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod record_gate_acquire;
 pub mod locked_state_cancel;
 pub mod virtual_dispatch_clear_active;
 pub use virtual_dispatch_clear_active::*;
