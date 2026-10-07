@@ -226844,3 +226844,33 @@ functions:
       exercises NULL and live-object dispatch with callback slot mutation.
       match.py exits 1: LLVM uses an early NULL return, a larger frame and
       unconditional BLX within the live branch; original uses BLXNE.
+
+  - address: 0x0814d7a4
+    ghidra: FUN_0814d7a4
+    name: record_extend_body_size
+    size: 40
+    sig: "void record_extend_body_size(u32 *record, u32 additional_body_size)"
+    module: util/record_extend_body_size
+    status: ported
+    renames:
+      param_1/r5: record
+      param_2/r4: additional_body_size
+      iVar1/r0: body_size
+      FUN_0814d51c: record_body_size
+      FUN_0814d6b0: record_header_set_body_size
+    notes: >-
+      Raw A32 establishes [0x0814d7a4,0x0814d7cc), ending at the next
+      function's push. Whole-image decoding finds two inbound plain BL
+      calls at 0x0814d5a8 and 0x0814d654, no predicated BL or inbound B.
+      The body contains one plain BL to record_body_size(record, 4),
+      no predicated BL, and a tail B to record_header_set_body_size.
+      Add the supplied body size and 16 bytes of overhead to the current
+      low-24-bit body size, wrapping modulo 2^24 while preserving all
+      high-byte flags. Both callers combine adjacent records; the record
+      class remains unidentified. Reuses both existing Rust seams.
+      No behavior deviations; ARM match.py reports 10 original versus 11
+      Rust instructions, adding a frame pointer while preserving the BL
+      and setter tail B. Tests cover every flag byte, neighbors, zero extension,
+      24-bit overflow, 32-bit overflow, and high bits in the supplied size.
+      Executable host smoke passes 9216 header/extension combinations.
+      Host suite passes all 14617 tests; ARM release build succeeds.
