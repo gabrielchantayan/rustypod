@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08137034
+    ghidra: FUN_08137034
+    name: wave_find_chunk
+    size: 96
+    sig: "u32 wave_find_chunk(const u32 *owner, u32 riff_base, u32 fourcc)"
+    module: util/wave_find_chunk
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: riff_base
+      param_3/r2/r7: fourcc
+      r4: chunk
+      r5: length
+      r6: end
+      FUN_080ed748: read_u32_le
+      FUN_080743b8: read_u32_be
+    notes: >-
+      Raw extent [0x08137034,0x08137094) is 96 bytes; pop at 0x08137090
+      precedes the next function. Whole-image ARM-word decoding finds two
+      plain BL callers at 0x081371e0 and 0x081371f8, zero predicated BL
+      callers, and two outgoing plain BLs to the canonical endian readers.
+      Caller 0x08137148 validates RIFF/WAVE and searches fmt-space and data
+      (literal words at 0x0813722c-0x08137238). Owner word one points to
+      two u32 fields: buffer base and byte length. Probe riff_base+12
+      unconditionally, compare the big-endian tag, and advance by the
+      little-endian length plus eight. Preserve the unusual post-advance
+      test next+previous_length+8 >= buffer_end, unsigned wrapping u32
+      arithmetic, and absence of odd-length padding. No deliberate
+      behavioral deviations. Host test covers first-match despite zero
+      declared length, mixed endianness, unaligned odd-length successors,
+      zero-length chunks, exact double-stride bound, missing tag and
+      wrapping buffer end. All 14702 host tests and ARM release build pass.
+      Standalone public-entry smoke finds data at RIFF+12. match.py shows
+      24 original versus 28 Rust instructions: LLVM inlines the LE gather,
+      delays it until tag mismatch, retains the BE reader call and the
+      unsigned double-stride bound. Read reordering is valid for readable
+      ordinary buffers; the API does not represent volatile or concurrently
+      modified memory.
   - address: 0x08147360
     ghidra: FUN_08147360
     name: context_tree_process

@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod wave_find_chunk;
 pub mod unit_word_range;
 pub mod line_fold_read;
 pub mod video_engine_record_upload;
