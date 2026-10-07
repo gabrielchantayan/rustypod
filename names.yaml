@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08153534
+    ghidra: FUN_08153534
+    name: settings_item_select
+    size: 28
+    sig: "u32 settings_item_select(const u8 *item, u32 selector)"
+    module: app/settings_item_select
+    status: ported
+    renames:
+      param_1/r0: item
+      param_2/r1: selector
+    notes: >-
+      Raw A32 words establish extent [0x08153534,0x08153550), ending
+      with bx lr and followed by an independently entered push prologue.
+      Whole-image aligned-word decoding verifies two incoming plain BLs
+      at 0x08067fc4 and 0x0806b89c, zero predicated BLs, and no outgoing
+      calls. Selector 0 reads the u32 at record +4; selector 1 reads +0;
+      every other selector returns zero without dereferencing the record.
+      Both direct callers use selector 1 as a virtual-dispatch object
+      address obtained from settings_item_get. Pointer words stay 32-bit
+      on hosts. No deliberate algorithm deviations. The mode setter now
+      calls the Rust selector directly rather than an unported seam.
+      ARM match.py exits 1: LLVM emits 13 instructions versus seven,
+      adding a frame-pointer prologue and checking selector 1 first.
+      Both bodies retain the two conditional word reads and a no-read
+      zero-return path; neither makes any calls.
   - address: 0x08155858
     ghidra: FUN_08155858
     name: seven_string_snapshot_construct
@@ -114883,12 +114908,13 @@ functions:
       Decoding every ARM B/BL word in osos.dec found exactly seven direct BL
       callers, all unconditional and zero predicated: 0x08067f60, 0x081a59e8,
       0x081a5c34, 0x081a5f00, 0x081a6200, 0x081a6780, and 0x081a69c4.
-      settings_item_get @ 0x081533ec is already ported; the selector
-      0x08153534 remains retailOS behind a target-only direct pointer and a
-      host override seam. The virtual targets have no recovered identities
-      and are modeled only by their verified vtable offsets. Focused host
-      tests cover zero-mode ordering, nonzero truncation/canonical callback
-      flag, unchanged mode, and a null selector that changes the live byte.
+      settings_item_get @ 0x081533ec and settings_item_select @ 0x08153534
+      are ported and called directly. Host fixtures store a low-address
+      target in the real record's 32-bit word rather than overriding the
+      selector. The virtual targets have no recovered identities and are
+      modeled only by their verified vtable offsets. Focused host tests
+      cover zero-mode dispatch, nonzero truncation/canonical callback
+      flag, unchanged mode, and a null selected target.
   # --- Current UTC offset applied to seconds timestamp (time/utc_adjust) ---
   - address: 0x0806ba5c
     ghidra: FUN_0806ba5c

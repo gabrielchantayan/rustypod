@@ -957,6 +957,7 @@ pub mod singleton_selection_predecessor;
 pub mod stream_offset_to_milliseconds;
 pub mod stream_buffer_offset_to_milliseconds;
 pub mod settings_item;
+pub mod settings_item_select;
 pub mod settings_item_update_state;
 pub mod settings_mode_set;
 pub mod validated_singleton_0x89c;
