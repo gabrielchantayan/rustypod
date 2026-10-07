@@ -228081,3 +228081,44 @@ functions:
       build pass. match.py exits 1: eight original versus nine Rust
       instructions, added frame pointer, otherwise same calls, -2 store
       at +0x14 and tail release. No physical-device execution.
+
+  - address: 0x08139be8
+    ghidra: FUN_08139be8
+    name: iap_packet_enqueue_complete
+    size: 212
+    sig: "u32 iap_packet_enqueue_complete(u8 *context, u8 *packet, u32 delay_ms, u16 *sequence, u32 completion_state)"
+    module: app/iap_packet_enqueue_complete
+    status: ported
+    renames:
+      param_1/r0/r8: context
+      param_2/r1/r6: packet
+      param_3/r2/r9: delay_ms
+      param_4/r3/r4: sequence
+      param_5/sp+0x30/sl: completion_state
+      r7: owner_mode
+      local_28: sequence_tag
+      local_24: command_tag
+      FUN_080f6b3c: iap_packet_owner_mode
+      FUN_08138fd0: pending_event_insert
+      FUN_08138f14: pending_event_take
+      FUN_081d7f14: existing_packet_completion_seam
+    notes: >-
+      Raw osos.dec extent 0x08139be8..0x08139cbc is 212 bytes: 208 code
+      bytes plus 0xffff literal at 0x08139cb8; next real function begins
+      with push at 0x08139cbc. Independent ARM word decoding finds two
+      inbound plain BLs at 0x0818e60c and 0x08190c2c, zero predicated;
+      body has four plain BLs, zero predicated. Read owner mode and packet
+      command +0x10, insert zero-payload pending event before completion.
+      Insert failure returns immediately. Completion failure cancels matching
+      event and returns take status, even if zero; caller sequence unchanged.
+      Success increments non-wildcard sequence, skipping 0xffff to zero;
+      NULL sequence means wildcard. Correct Ghidra void return to u32:
+      raw epilogue preserves last callee r0; 0x08190c30 consumes it.
+      Reuse all three ported callees and established completion ops seam;
+      stack word tags become u16 locals. Tests exhaust all 65536 sequences,
+      queue exhaustion, rollback, cancellation miss and NULL sequence.
+      Host suite and ARM release build passed. Production-source standalone
+      smoke confirms wrap and rollback using modeled dependencies; no device
+      run. match.py exits 1: 52 original versus 56 Rust listed instructions;
+      same enqueue-first branches, rollback and sentinel skip, different
+      frame, halfword locals, completion BLX seam and duplicated epilogues.

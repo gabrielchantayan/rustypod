@@ -690,6 +690,7 @@ pub mod iap_packet_completion_schedule;
 pub mod iap_packet_event_dispatch;
 pub mod iap_packet_notification_broadcast;
 pub mod iap_packet_event_schedule;
+pub mod iap_packet_enqueue_complete;
 pub mod itunesdb_read_default_field;
 pub mod image_format;
 pub mod image_region_render_request;
