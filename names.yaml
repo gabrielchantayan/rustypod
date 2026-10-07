@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814a9c4
+    ghidra: FUN_0814a9c4
+    name: indexed_handle_owner_create
+    size: 124
+    sig: "u32 *indexed_handle_owner_create(u32 mode, u32 index)"
+    module: app/indexed_handle_owner_create
+    status: ported
+    vars: {param_1/r5: mode, param_2/r6: index, puVar1: storage, piVar3/r4: owner}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_081070a8: embedded_handle_construct_firmware
+      FUN_08030f44: heap_panic
+      FUN_0814a904: indexed_handle_owner_setup_firmware
+      DAT_0814aa3c: indexed_handle_owner_vtable_089866e8
+    notes: >-
+      Raw words establish [0x0814a9c4,0x0814aa40), 120 instruction
+      bytes plus the vtable literal; the next independent PUSH is at
+      0x0814aa40. Whole-image aligned decoding finds two incoming plain
+      BLs at 0x081435c8 and 0x081cc7f4, no predicated incoming BLs.
+      Body contains three plain BLs, one BLEQ to heap_panic, one virtual
+      BLX. Allocate 28 bytes, initialize vtable/invalid index/null children,
+      construct the handle at +20, subtract 20 from its returned pointer,
+      panic if the owner is null, and run setup(mode,index). Zero status
+      invokes vtable slot +4 and returns null; any nonzero status retains
+      the owner. Preserve word +8 and handle padding +25..27. Raw handle
+      constructor preserves r0 despite Ghidra's void signature. Reuse
+      canonical operator_new and heap_panic ports. Unported constructor
+      and setup retain verified firmware-address ABIs; host seams replace
+      firmware calls and virtual destruction. Seven u32 words preserve
+      layout on host. Host suite, ARM release build and public-entry smoke
+      pass. match.py exits 1: 30 original versus 40 Rust lines, frame
+      pointer and address BLX calls; initialization, null gate, setup,
+      virtual failure destruction and pointer/null return remain intact.
+      No physical-device run or deliberate target algorithmic deviation.
   - address: 0x0813e57c
     ghidra: FUN_0813e57c
     name: query_explicit_resource_construct
