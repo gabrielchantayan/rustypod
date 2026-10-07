@@ -74,9 +74,10 @@ mod tests {
     unsafe extern "C" fn find_link(
         _this: *mut u8,
         key: u32,
-        tag_a: u16,
-        tag_b: u16,
+        tag_a: u32,
+        tag_b: u32,
     ) -> *mut u32 {
+        let (tag_a, tag_b) = (tag_a as u16, tag_b as u16);
         FIND_CALLS += 1;
         let mut link = head();
         while *link != 0 {

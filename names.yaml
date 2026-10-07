@@ -116924,10 +116924,10 @@ functions:
       insert stores deadline = now_ms + delta and pops free nodes via
       FUN_081391f0, so entries are scheduled events serviced by the IAP
       incoming-process thread's timer queue (thread+0x114 mutex; handle at
-      session+0x2c8). Deviations: the three callees stay unported behind
-      PENDING_EVENT_TAKE_OPS (target transmutes 0x08139190/0x0813908c/
-      0x0813957c, inert host stubs, tests install recording reference
-      models); lock/unlock call the canonical ported posix_mutex symbols
+      session+0x2c8). Deviations: PENDING_EVENT_TAKE_OPS now defaults to
+      ported pending_event_find_link and pending_event_timer_rearm, with
+      release at 0x0813908c remaining a fixed-address target boundary.
+      Host tests install recording models; lock/unlock call posix_mutex
       directly per the names.yaml veneer-alias resolution; the original's
       three node reloads from the link word collapse to one load (C
       aliasing artifact, unobservable for non-aliased stack outs); the
@@ -228160,3 +228160,28 @@ functions:
       full-width comparison, reloaded setter vtable and final byte clear.
       Differences are frame pointer, explicit branches instead of predication,
       archive relocations and crate-static literal.
+  - address: 0x08139190
+    ghidra: FUN_08139190
+    name: pending_event_find_link
+    size: 92
+    sig: "u32 *pending_event_find_link(void *session, u32 key, u32 tag_a, u32 tag_b)"
+    module: app/pending_event_find_link
+    status: ported
+    renames:
+      param_1/r0: session_link_cursor
+      param_2/r1: key
+      param_3/r2: tag_a
+      param_4/r3: tag_b
+      piVar1/lr: node
+    notes: >-
+      Raw A32 extent [0x08139190,0x081391ec) is 92 bytes: 88 code bytes
+      and wildcard literal 0x0000ffff at 0x081391e8; next entry is a B veneer.
+      Two inbound plain BLs at 0x08138f4c and 0x081390b0, zero predicated
+      inbound BLs and zero outbound BLs. Walk session+4 intrusive head;
+      return the matching predecessor link address, not the node, or NULL.
+      Key is exact; each full-width tag query is equal-or-0xffff wildcard.
+      Reuses PendingEventNode target-width layout and replaces the search
+      default in PendingEventTakeOps. No behavioral deviations. Host edge
+      tests, ARM release build and executable lookup/unlink smoke passed.
+      match.py reports 22 versus 30 instructions; LLVM synthesizes 0xffff,
+      short-circuits tag reads, adds a frame pointer and preserves link traversal.
