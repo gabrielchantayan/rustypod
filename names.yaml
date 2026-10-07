@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814da30
+    ghidra: FUN_0814da30
+    name: mode_offset_translate
+    size: 36
+    sig: "u32 mode_offset_translate(const u32 *context, u32 mode, u32 offset)"
+    module: fs/mode_offset_translate
+    status: ported
+    vars: {param_1: context, param_2: mode, param_3: offset}
+    notes: >-
+      Raw A32 extent [0x0814da30,0x0814da54) has nine instructions and
+      no literals; the next independent function clears five object words.
+      Zero outgoing plain or predicated BLs. Whole-image aligned word
+      decoding finds two incoming plain BLs at 0x0813aa20 and 0x0814d968,
+      zero predicated incoming BLs. Mode 5 subtracts context word 4
+      (+0x10) from offset; mode 6 adds it; all other modes return zero
+      without reading context. Arithmetic wraps modulo 2^32. Caller
+      0x0814d944 translates the first word of each two-word record;
+      0x0813a83c passes a mode-6 result to virtual slot +0x94. No callee
+      seams or behavioral deviations. Word indexing retains the target
+      field offset on hosts. Host tests compare against wide arithmetic
+      across zero, sign-bit and overflow boundaries and exercise unsupported
+      modes with NULL context. Executable smoke passed both wrapping paths
+      and unsupported-mode NULL bypass. ARM release build passed. match.py
+      reports fourteen Rust instructions versus nine original: LLVM adds
+      a frame and explicit branches, tests mode 6 first, and retains both
+      conditional +0x10 loads and the ADD/SUB/zero results without calls.
   - address: 0x0814da74
     ghidra: FUN_0814da74
     name: storage_scratch_buffer_ensure

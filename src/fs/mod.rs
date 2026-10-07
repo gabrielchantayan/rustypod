@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Mode-selected offset translation @ 0x0814da30.
+pub mod mode_offset_translate;
 /// Lazy aligned storage-transfer scratch buffer @ 0x0814da74.
 pub mod storage_scratch_buffer_ensure;
 /// Extent-backed storage buffer constructor @ 0x081c01e4.
