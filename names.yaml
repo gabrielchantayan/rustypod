@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813908c
+    ghidra: FUN_0813908c
+    name: pending_event_release
+    size: 96
+    sig: "u32 pending_event_release(void *session, PendingEventNode *node)"
+    module: app/pending_event_release
+    status: ported
+    vars: {param_1/r5: session, param_2/r4: node, puVar1/r0: link, uVar2/r6: status}
+    renames: {FUN_08139190: pending_event_find_link, FUN_08030f44: heap_panic}
+    notes: >-
+      Raw A32 extent [0x0813908c,0x081390ec) is 96 instruction bytes,
+      without literals; next function begins with push {r0-r8,lr}.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x08138fa4 and 0x08139548, zero predicated inbound calls; body has
+      two plain outgoing BLs and zero predicated BLs. Re-search by node
+      key and zero-extended halfword tags using canonical ported
+      pending_event_find_link at 0x08139190. NULL node is fatal through
+      canonical heap_panic at 0x08030f44. A search miss returns 0x52
+      without mutation; a first match pointing to another node is fatal,
+      including duplicate keys/tags and earlier wildcard matches. Unlink
+      the exact node, push it onto session+0x18 free list, return zero.
+      Existing take/take-due ops default to Rust release on both platforms.
+      No deliberate behavioral deviations. Host tests cover unlink
+      positions, recycling, misses, field preservation, and fatal paths.
+      ARM codegen retains search, miss/fatal branches, and all three writes.
   - address: 0x0814955c
     ghidra: FUN_0814955c
     name: string_buffer_state_reset

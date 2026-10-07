@@ -82,7 +82,7 @@
 //! # Deviations
 //!
 //! - Search defaults to the ported [`super::pending_event_find_link::pending_event_find_link`].
-//!   Release remains a fixed-address device boundary at 0x0813908c;
+//!   Release defaults to the ported pending-event release on both platforms;
 //!   rearm defaults to the ported timer helper. Host tests can replace
 //!   the ops with recording reference models.
 //! - The lock/unlock go through the canonical ported
@@ -147,8 +147,8 @@ const _: () = assert!(core::mem::offset_of!(PendingEventNode, tag_a) == 0x0c);
 const _: () = assert!(core::mem::offset_of!(PendingEventNode, tag_b) == 0x0e);
 const _: () = assert!(core::mem::offset_of!(PendingEventNode, payload) == 0x10);
 
-/// Indirect dispatch for queue operations. Search uses the ported helper;
-/// release remains unported. Host tests install recording models.
+/// Indirect dispatch for queue operations. Search and release use ported
+/// helpers. Host tests install recording models.
 #[derive(Clone, Copy)]
 pub struct PendingEventTakeOps {
     /// Search 0x08139190 `(this, key, tag_a, tag_b)` -> address of the
@@ -161,33 +161,14 @@ pub struct PendingEventTakeOps {
         tag_b: u32,
     ) -> *mut u32,
     /// Release 0x0813908c `(this, node)`: unlink the node from the live
-    /// chain and push it on the +0x18 free list. Returns 0, or panics
-    /// on a corrupt queue.
+    /// chain and push it on the +0x18 free list. Returns 0 on success,
+    /// 0x52 on a miss, or panics on NULL or a mismatched first match.
     pub release_node: unsafe extern "C" fn(this: *mut u8, node: *mut PendingEventNode) -> u32,
     /// Rearm 0x0813957c `(this)`: re-program the IAP-thread wakeup from
     /// the new head's deadline. Always returns 0 on firmware.
     pub rearm_timer: unsafe extern "C" fn(this: *mut u8) -> u32,
 }
 
-/// Target default: the ROM release path.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release_node(
-    this: *mut u8,
-    node: *mut PendingEventNode,
-) -> u32 {
-    let f: unsafe extern "C" fn(*mut u8, *mut PendingEventNode) -> u32 =
-        core::mem::transmute(0x0813_908cusize);
-    f(this, node)
-}
-
-/// Host default: inert — the tests install their own model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_release_node(
-    _this: *mut u8,
-    _node: *mut PendingEventNode,
-) -> u32 {
-    0
-}
 
 /// Target default: the ported timer rearm.
 #[cfg(target_os = "none")]
@@ -201,11 +182,11 @@ unsafe extern "C" fn firmware_rearm_timer(_this: *mut u8) -> u32 {
     0
 }
 
-/// Wired defaults: ported search on both platforms; release and timer
-/// retain their platform-specific defaults.
+/// Wired defaults: ported search and release on both platforms; timer
+/// retains its platform-specific defaults.
 pub const DEFAULT_PENDING_EVENT_TAKE_OPS: PendingEventTakeOps = PendingEventTakeOps {
     find_link: super::pending_event_find_link::pending_event_find_link,
-    release_node: firmware_release_node,
+    release_node: super::pending_event_release::pending_event_release,
     rearm_timer: firmware_rearm_timer,
 };
 

@@ -17,8 +17,8 @@
 //! # Deliberate deviations
 //!
 //! The release and rearm calls reuse the existing
-//! [`super::pending_event_take::PENDING_EVENT_TAKE_OPS`] seam: their ROM
-//! targets are still unported at 0x0813908c and 0x0813957c. The clock read
+//! [`super::pending_event_take::PENDING_EVENT_TAKE_OPS`] seam, whose device
+//! defaults now use the ported release and timer helpers. The clock read
 //! is the original dynamic vtable call through `clock + 0x0c`; its stock
 //! slot is the documented mid-function anomaly, so the target default
 //! reads and calls it rather than inventing a callee. Host tests replace
