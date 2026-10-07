@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08149f20
+    ghidra: FUN_08149f20
+    name: virtual_dispatch_clear_active
+    size: 36
+    sig: "void virtual_dispatch_clear_active(ActiveDispatchObject *object)"
+    module: app/virtual_dispatch_clear_active
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      object+0: vtable
+      vtable+0x30: unresolved_virtual_slot_30
+      object+8: active
+    notes: >-
+      Raw A32 words establish [0x08149f20,0x08149f44), 36 bytes;
+      next independent entry is BX LR. Whole-image aligned decoding
+      verifies two incoming plain BLs at 0x081bdfc0 and 0x081bfa2c,
+      zero predicated BLs. Body has zero plain/predicated BLs and one
+      BLX through vtable slot +0x30. Dispatch with the original object,
+      then clear only byte +8, even when initially inactive. Both callers
+      test the active byte before calling and ignore r0. Virtual method
+      identity remains unresolved; no fixed-address seam is invented.
+      Native repr(C) pointers and slots widen on hosts; target offsets
+      are compile-time checked. No target algorithmic deviations;
+      incidental r0 is not a return contract. Tests cover inactive and
+      high-bit flags, callback-before-clear, callback field and vtable
+      mutations, repeated dispatch and neighboring byte preservation.
+      Full host suite and ARM release build pass. Standalone public-entry
+      smoke confirms callback-before-clear and adjacent-byte preservation.
+      match.py exits 1: nine original versus ten Rust instructions;
+      added frame pointer and different zero register, but virtual slot
+      +0x30, object forwarding and post-call STRB +8 are preserved.
+      No physical-device execution.
   - address: 0x0813b53c
     ghidra: FUN_0813b53c
     name: base_vtable_value_init
