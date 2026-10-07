@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Convert logical extent pairs to backend block ranges @ 0x08136d80.
+pub mod storage_extents_translate;
 /// Mode-selected two-word record setter @ 0x0814d91c.
 pub mod mode_record_pair_set;
 /// Mode-selected offset translation @ 0x0814da30.

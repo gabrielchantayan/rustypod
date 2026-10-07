@@ -228595,3 +228595,39 @@ functions:
       interception, verifying call order, +0xe8 code, payload bytes, extra=0
       and unchanged context. match.py shows the same four-call structure and
       data flow; LLVM adds a frame pointer and uses stack +4 for the payload.
+  - address: 0x08136d80
+    ghidra: FUN_08136d80
+    name: storage_extents_translate
+    size: 80
+    sig: "void storage_extents_translate(u32 *extents)"
+    module: fs/storage_extents_translate
+    status: ported
+    vars:
+      param_1: extents
+      iVar1: index
+      FUN_08161e48: translate_extent
+    notes: >-
+      Raw words establish the exact 80-byte extent 0x08136d80..0x08136dd0;
+      the next independently entered function begins with push at 0x08136dd0.
+      Whole-image aligned A32 BL decoding finds two unconditional callers,
+      0x08136994 and 0x08136f18, and zero predicated callers. The body has
+      one unconditional BL at 0x08136db0 to 0x08161e48, no predicated BLs.
+      Translate up to eight logical start/length pairs at object+0x3c,
+      stopping at the first zero start, into the u32-pointer array at +0x9c.
+      Pass the u32 backend pointer at +4 plus 0x10 to the raw helper and
+      increment the existing count at +0xe0 after each call, with wrapping.
+      Neither this function nor its callee had a prior names.yaml entry.
+      The unported helper remains a target raw-address seam; independently
+      verified words at 0x08161e48..0x08161e74 compute start*scale+base and
+      length*scale from backend+0x3c0/+0x3c4. Host execution reproduces its
+      arithmetic and ordered loads/stores. No deliberate target behavioral
+      deviation. LLVM unrolls all eight iterations and emits BLX through the
+      absolute helper address instead of the stock loop and direct BL;
+      match.py confirms the zero guards, pair offsets, helper arguments and
+      post-call count increments (structural diff exit 1).
+      Host suite passes 14704 tests; release ARM build succeeds. Tests cover
+      every prefix length, empty input with null pointer fields, zero length,
+      zero scale, arithmetic/count overflow, in-place output, untouched suffix
+      and source preservation. Standalone host smoke verifies early stop,
+      zero length, existing count and destination/count aliasing. No device
+      or ARM emulation execution was performed.
