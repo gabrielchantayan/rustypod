@@ -236,6 +236,117 @@ pub unsafe extern "C" fn service_handler_lifecycle_select_default_descriptor(
     0
 }
 
+/// service_handler_lifecycle_set_format — original: `FUN_08138de8` @
+/// **0x08138de8**, 124 bytes (120 instruction bytes and table literal at
+/// 0x08138e60; next function starts at 0x08138e64). Raw whole-image BL
+/// decoding finds two plain incoming calls and no predicated incoming calls;
+/// this body has no plain BL and one signed BLGE to canonical heap_panic.
+///
+/// Ignore manager, reject signed selectors >=3, and accept only format
+/// (1, 0) or (2, 0), with lengths 16 or 20 respectively. Store format,
+/// revision, and length at record +0x10..+0x12. Invalid formats clear all
+/// three bytes and return 3 without touching output; valid formats write
+/// one output byte and return 0. Ghidra's void return is incorrect.
+///
+/// Deliberate deviation: host builds share the existing lifecycle fixture.
+/// No device behavior changes; the signed guard still admits negative slots.
+/// Codegen review: match.py reports 30 original versus 50 Rust instructions.
+/// LLVM splits format cases, uses MLA for the 0x114 stride and CLZ for the
+/// revision-zero test; signed rejection, byte-store order, statuses, and
+/// success-only output write remain intact.
+///
+/// # Safety
+/// selector must address a writable lifecycle record, including pre-table
+/// records for negative selectors. output must be writable on success only.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_lifecycle_set_format(
+    _manager: *mut u8,
+    selector: i32,
+    format: u32,
+    revision: u32,
+    output: *mut u8,
+) -> u32 {
+    if selector >= SERVICE_HANDLER_LIFECYCLE_RECORD_COUNT {
+        heap_panic();
+    }
+    let length = match (format, revision) {
+        (1, 0) => 16,
+        (2, 0) => 20,
+        _ => 0,
+    };
+    let record = service_handler_lifecycle_records().wrapping_offset(selector as isize)
+        as *mut ServiceHandlerLifecycleRecord;
+    let fields = ptr::addr_of_mut!((*record)._remaining).cast::<u8>();
+    ptr::write_volatile(fields, if length != 0 { format as u8 } else { 0 });
+    ptr::write_volatile(fields.add(1), 0);
+    ptr::write_volatile(fields.add(2), length);
+    if length == 0 {
+        return 3;
+    }
+    ptr::write_volatile(output, length);
+    0
+}
+
+#[cfg(test)]
+mod lifecycle_format_tests {
+    use super::*;
+
+    #[test]
+    fn formats_update_only_three_record_bytes_and_one_output_byte() {
+        let _guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap();
+        unsafe {
+            for selector in -1..3 {
+                for format in [0, 1, 2, 3, 0x101, u32::MAX] {
+                    for revision in [0, 1, 0x100, u32::MAX] {
+                        let record = service_handler_lifecycle_records()
+                            .wrapping_offset(selector as isize) as *mut u8;
+                        let mut saved = [0u8; 0x114];
+                        ptr::copy_nonoverlapping(record, saved.as_mut_ptr(), saved.len());
+                        ptr::write_bytes(record, 0xa5, saved.len());
+                        let mut output = [0x7b; 3];
+                        let valid = (format == 1 || format == 2) && revision == 0;
+                        let expected_length = if valid { if format == 1 { 16 } else { 20 } } else { 0 };
+                        let status = service_handler_lifecycle_set_format(
+                            ptr::null_mut(), selector, format, revision, output.as_mut_ptr().add(1));
+                        assert_eq!(status, if valid { 0 } else { 3 });
+                        assert_eq!(output, [0x7b, if valid { expected_length } else { 0x7b }, 0x7b]);
+                        for offset in 0..saved.len() {
+                            let expected = match offset {
+                                0x10 => if valid { format as u8 } else { 0 },
+                                0x11 => 0,
+                                0x12 => expected_length,
+                                _ => 0xa5,
+                            };
+                            assert_eq!(ptr::read(record.add(offset)), expected);
+                        }
+                        // Failure must not dereference even a null output.
+                        if !valid {
+                            assert_eq!(service_handler_lifecycle_set_format(
+                                ptr::null_mut(), selector, format, revision, ptr::null_mut()), 3);
+                        }
+                        ptr::copy_nonoverlapping(saved.as_ptr(), record, saved.len());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn output_alias_is_written_after_record_fields() {
+        let _guard = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap();
+        unsafe {
+            let record = service_handler_lifecycle_records() as *mut ServiceHandlerLifecycleRecord;
+            let fields = ptr::addr_of_mut!((*record)._remaining).cast::<u8>();
+            let saved = [ptr::read(fields), ptr::read(fields.add(1)), ptr::read(fields.add(2))];
+            assert_eq!(service_handler_lifecycle_set_format(
+                ptr::null_mut(), 0, 2, 0, fields), 0);
+            assert_eq!([ptr::read(fields), ptr::read(fields.add(1)), ptr::read(fields.add(2))], [20, 0, 20]);
+            ptr::copy_nonoverlapping(saved.as_ptr(), fields, 3);
+        }
+    }
+}
+
 /// # Safety
 ///
 /// `selector` must name a readable lifecycle record at 0x08ad0f34. The
