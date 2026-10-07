@@ -1246,6 +1246,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn signed_outer_seek_observes_absolute_bounds_and_sign_extension() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            let handle = prepare_length_query(0, 0, 0, u32::MAX);
+            for (offset, result, cursor) in [
+                (0, 0, 0), (64, 0, 64), (i32::MAX, 0, i32::MAX as u32),
+                (-1, 5, 37), (i32::MIN, 5, 37),
+            ] {
+                (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 37;
+                assert_eq!(
+                    crate::fs::file_seek_signed::file_seek_signed_absolute(&handle, offset),
+                    result,
+                );
+                assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, cursor);
+                assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+            }
+            let handle = prepare_length_query(0, 0, 0, 64);
+            for (offset, result, cursor) in [(64, 0, 64), (65, 5, 37)] {
+                (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 37;
+                assert_eq!(crate::fs::file_seek_signed::file_seek_signed_absolute(&handle, offset), result);
+                assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, cursor);
+            }
+        }
+    }
+
+    #[test]
+    fn signed_outer_seek_preserves_state_and_open_errors() {
+        let _guard = TEST_OPS_LOCK.lock();
+        unsafe {
+            for (state, entry, status, expected) in [(1, 0, -37, 2), (0, -1, -37, -37), (0, -1, 19, 19)] {
+                let handle = prepare_length_query(state, entry, status, 64);
+                (*core::ptr::addr_of_mut!(FILE_OBJECT)).cursor = 37;
+                assert_eq!(crate::fs::file_seek_signed::file_seek_signed_absolute(&handle, -1), expected);
+                assert_eq!((*core::ptr::addr_of!(FILE_OBJECT)).cursor, 37);
+                assert_eq!((*core::ptr::addr_of!(FILE_LOCK_OWNER)).length_query_lock.hold_count, 0x51);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------
     // ft_platform_file_open.
 
