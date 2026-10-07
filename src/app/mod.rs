@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod view_clear_flag_display;
 pub mod byte_ring_is_empty;
 pub use byte_ring_is_empty::*;
 pub mod byte_ring_read;

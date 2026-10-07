@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08158f38
+    ghidra: FUN_08158f38
+    name: view_clear_flag_display
+    size: 76
+    sig: "void view_clear_flag_display(u8 *view)"
+    module: app/view_clear_flag_display
+    status: ported
+    vars:
+      param_1/r4: view
+      view+0xb1: cleared_flag
+      uStack_c: temporary_message
+      DAT_08158f80: display_source
+    renames:
+      FUN_0810dfe8: stop_view_timer
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 extent 0x08158f38..0x08158f84 is 76 bytes: 72 code bytes
+      and one literal, followed by the next independent push. Three plain
+      outbound BLs at 0x08158f4c, 0x08158f5c, 0x08158f78; zero predicated
+      outbound BLs; virtual BLX at 0x08158f70. Full-image aligned decoding
+      finds two inbound plain BLs at 0x081590ac and 0x0815911c, no predicated
+      inbound BLs. Clears byte +0xb1, stops the optional +0x50 timer,
+      constructs a COW string from 0x083eb638, displays through vtable
+      +0x11c, then releases it. Literal bytes are
+      06 60 a6 e0 05 80 50 e0 04 c0 d1 e0 00; these resemble ARM code,
+      so the target retains the exact pointer without inventing text.
+      Host uses those exact bytes. Omits unused register inputs and
+      allocator-tag stack residue as in the existing string port.
+      Native-width host vtable entries use word index 71, matching target
+      +0x11c. Tests exercise absent timer, adjacent-byte preservation,
+      callback state changes, and copied versus unretained COW lifetime.
+      Host suite and ARM release build pass. match.py exits 1 with an
+      expected structural diff: retains the +0xb1 store, three direct
+      calls, vtable +0x11c BLX, cleanup, and source literal 0x083eb638;
+      LLVM uses a different stack frame and initializes the string slot.
+
   - address: 0x08159424
     ghidra: FUN_08159424
     name: sync_clock
