@@ -468,6 +468,13 @@ pub struct StringObjectArray6 {
     pub strings: [StringObject; 6],
 }
 
+/// Opaque five-word prefix followed by the six-string member at ARM +0x14.
+#[repr(C)]
+pub struct StringArray6Owner {
+    pub header: [u32; 5],
+    pub array: StringObjectArray6,
+}
+
 
 /// The decoded prefix of an otherwise unidentified record whose word-one
 /// member is a [`StringObject`]. On ARM this places `primary` at +0x04; the
@@ -2452,6 +2459,30 @@ pub unsafe extern "C" fn string_object_array6_destroy(
     let current = string_object_destroy(current.sub(1));
     let current = string_object_destroy(current.sub(1));
     current.sub(1).cast()
+}
+
+/// string_array6_owner_destroy — original: `FUN_08155954` @ 0x08155954.
+/// True extent: 28 bytes (24-byte code plus literal at 0x0815596c);
+/// next function begins at 0x08155970. Raw A32 decoding verifies one
+/// outgoing plain BL, zero predicated BLs; two incoming plain BLs.
+///
+/// Installs vtable 0x08986a70, destroys the embedded six-string array at
+/// +0x14 via string_object_array6_destroy @ 0x0827dea4, and subtracts
+/// the member offset from the returned pointer. No NULL guard or delete.
+///
+/// Deliberate deviation: repr(C) member placement and offset_of! account
+/// for widened host pointers; ARM retains the original +0x14 offset.
+/// The opaque outer vtable is retained as its firmware word, not invoked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_array6_owner_destroy(
+    this: *mut StringArray6Owner,
+) -> *mut StringArray6Owner {
+    (*this).header[0] = 0x0898_6a70;
+    let array = string_object_array6_destroy(core::ptr::addr_of_mut!((*this).array));
+    array.cast::<u8>()
+        .sub(core::mem::offset_of!(StringArray6Owner, array))
+        .cast()
 }
 
 /// string_object_destroy_veneer — original: `thunk_FUN_082792fc` @
@@ -8107,6 +8138,41 @@ pub(crate) mod tests {
             assert_eq!(*vtable, &STRING_OBJECT_VTABLE as *const _ as usize);
         }
     }
+
+    #[test]
+    fn array6_owner_destroy_preserves_headers_and_destroys_every_string() {
+        let _bench = bench();
+        let mut owner = StringArray6Owner {
+            header: [0xdead_beef, 1, 0xffff_ffff, 3, 4],
+            array: StringObjectArray6 {
+                header: [0xfeed_face, 0xdead_c0de],
+                strings: core::array::from_fn(|index| StringObject {
+                    vtable: (0xdead_beefusize + index) as *const StringObjectVtable,
+                    payload: if index % 2 == 0 {
+                        core::ptr::null_mut()
+                    } else {
+                        (0xcafe_f000usize + index) as *mut u8
+                    },
+                }),
+            },
+        };
+        let payloads = owner.array.strings.each_ref().map(|string| string.payload);
+        let this = &mut owner as *mut StringArray6Owner;
+        unsafe { assert_eq!(string_array6_owner_destroy(this), this); }
+        assert_eq!(owner.header, [0x0898_6a70, 1, 0xffff_ffff, 3, 4]);
+        assert_eq!(owner.array.header, [0xfeed_face, 0xdead_c0de]);
+        let calls = release_calls();
+        assert_eq!(calls.len(), 6);
+        for (index, string) in owner.array.strings.iter().enumerate() {
+            assert_eq!(string.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert_eq!(string.payload, payloads[index]);
+            assert_eq!(calls[5 - index], (
+                string as *const StringObject as usize,
+                &STRING_OBJECT_VTABLE as *const _ as usize,
+            ));
+        }
+    }
+
 
     #[test]
     fn the_destroy_veneer_reaches_destroy_and_is_a_distinct_symbol() {
