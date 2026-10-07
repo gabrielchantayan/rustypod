@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814d0d0
+    ghidra: FUN_0814d0d0
+    name: playback_clock_set_position
+    size: 48
+    sig: "void playback_clock_set_position(PlaybackClock *clock, u32 position)"
+    module: app/playback_clock_set_position
+    status: ported
+    vars: {param_1/r0/r4: clock, param_2/r1/r5: position, clock_plus_0x08: position_baseline, clock_plus_0x0c: timestamp_ms}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_0807f6a0: mutex_unlock, FUN_0836af80: timer_e_counter_read, FUN_08036f14: __rt_udiv}
+    notes: >-
+      Raw A32 extent [0x0814d0d0,0x0814d100) is 48 bytes with no
+      literals; next function begins with PUSH. Whole-image aligned BL
+      decoding finds two incoming plain calls at 0x080f5a08 and 0x080f5a28,
+      zero predicated calls. Body has three plain BLs and no predicated BLs,
+      followed by a tail B to mutex_unlock. Lock embedded mutex, store
+      position at +8, sample Timer E, unsigned-divide by 1000, store time
+      at +12, unlock. Companion getter adds elapsed milliseconds to the
+      baseline; callers reset it from the current playback item position.
+      All callees reuse existing ports. No semantic deviations; repr(C)
+      fields accommodate host pointers without changing target offsets.
+      Volatile stores preserve update order. Host tests cover submillisecond
+      truncation, unsigned extremes, repeated replacement and untouched state.
+      Host suite passed 14643 tests; native public-entry smoke passed using
+      existing host test seams (non-test host build has unrelated missing
+      callees). ARM release build passed. match.py exits 1: thirteen versus
+      twelve instructions, swapped saved registers and an added frame pointer;
+      three calls, +8/+12 stores, divisor 1000 and tail unlock remain. No device run.
   - address: 0x0813ece4
     ghidra: FUN_0813ece4
     name: opaque_vtable_08985198_construct
