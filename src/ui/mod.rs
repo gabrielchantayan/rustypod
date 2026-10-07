@@ -95,6 +95,7 @@ pub mod render_cell_state;
 pub mod object_resource_count;
 pub mod object_resource_max_ordinal_for_presence;
 pub mod query_object_display_name;
+pub mod query_object_resource_count;
 pub mod backend_active_item;
 pub mod object_resource_counted_string;
 pub mod object_resource_vector16_counted_string;
