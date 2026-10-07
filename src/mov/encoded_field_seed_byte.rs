@@ -11,16 +11,16 @@
 //! Return the byte one position beyond the combined fields. The caller at
 //! 0x08164c98 uses this byte to seed its byte transform.
 //!
-//! Deliberate deviations: express the unported optional-prefix helper through
-//! the existing prefix-size seam, gated by the high header bit. Express the
-//! raw 0x08164de8 width mask directly: its unsigned <=3 return accepts all
-//! masked values, unlike the existing Rust seam's erroneous width-3 rejection.
-//! Unreachable fatal checks in these masked helpers are omitted. No bit-4
-//! extra byte is added (unlike the adjacent payload-address routine).
+//! Deliberate deviations: express the raw 0x08164de8 width mask directly:
+//! its unsigned <=3 return accepts all masked values, unlike the existing
+//! Rust seam's erroneous width-3 rejection. The optional prefix uses the
+//! faithful optional_prefix_size seam, whose unreachable fatal check is omitted.
+//! No bit-4 extra byte is added (unlike the adjacent payload-address routine).
 
 use crate::app::encoded_field_prefix_size::encoded_field_prefix_size;
 use crate::util::tagged_header_low_bits::tagged_header_low_bits;
 use super::optional_flagged_byte::optional_flagged_byte;
+use super::optional_prefix_size::optional_prefix_size;
 
 /// # Safety
 /// `field` must be readable through the computed seed offset (at most 16).
@@ -31,11 +31,7 @@ pub unsafe extern "C" fn encoded_field_seed_byte(field: *const u8) -> u8 {
     let primary_size = (tagged_header_low_bits(field)
         + encoded_field_prefix_size(field)) as u8;
     let optional_width = optional_flagged_byte(field) & 3;
-    let optional_prefix = if *field & 0x80 != 0 {
-        encoded_field_prefix_size(field.add(1)) as u8
-    } else {
-        0
-    };
+    let optional_prefix = optional_prefix_size(field) as u8;
     let optional_size = optional_width.wrapping_add(optional_prefix);
     let optional_size = if optional_size == 0 {
         0

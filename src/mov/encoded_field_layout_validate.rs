@@ -20,6 +20,7 @@ use crate::app::encoded_field_prefix_size::encoded_field_prefix_size;
 use crate::heap::veneers::heap_panic;
 use crate::mov::checked_flagged_width::mov_checked_flagged_width;
 use crate::mov::optional_flagged_byte::optional_flagged_byte;
+use super::optional_prefix_size::optional_prefix_size;
 use crate::util::tagged_header_low_bits::tagged_header_low_bits;
 
 /// Validates the encoded field and returns its payload pointer.
@@ -38,7 +39,7 @@ pub unsafe extern "C" fn encoded_field_layout_validate(field: *const u8) -> *con
     let optional_size = if optional_width == 0 {
         0
     } else {
-        let optional_prefix_size = encoded_field_prefix_size(field.add(1));
+        let optional_prefix_size = optional_prefix_size(field);
         let optional_marker_size = 1 + u32::from(optional_flagged_byte(field) & 0x10 != 0);
         optional_width + optional_prefix_size + optional_marker_size
     };

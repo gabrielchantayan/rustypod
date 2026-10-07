@@ -15777,6 +15777,39 @@ functions:
       Rust zero-initializes the iterator local because its constructor owns
       every field later read; host tests use native-width vtables while target
       dispatch retains target-width slot addressing.
+  - address: 0x08164db8
+    ghidra: FUN_08164db8
+    name: optional_prefix_size
+    size: 48
+    sig: "u32 optional_prefix_size(const u8 *field)"
+    module: mov/optional_prefix_size
+    status: ported
+    renames:
+      param_1/r0: field
+      uVar1/r0: optional_byte
+      uVar2/r1: prefix_size
+      FUN_08164c80: optional_flagged_byte
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 words establish [0x08164db8,0x08164de8), 48 instruction
+      bytes without literals; next real function begins with push {r4,lr}.
+      Whole-image aligned BL decoding verifies two plain incoming calls at
+      0x08164e54 and 0x08164f08, zero predicated incoming calls. Body has
+      one plain BL to optional_flagged_byte and one BLHI to heap_panic.
+      Ghidra omits the field pointer argument: r0 passes directly to the
+      optional-byte helper. Header bit 7 gates reading field[1]; return
+      zero if optional bits 0..1 are zero, otherwise 1+((optional&12)>>2).
+      Deliberate deviation: omit the unreachable >4 fatal check because
+      the masked result is bounded to 1..4. Both existing Rust callers
+      now use this seam instead of their inline prefix equivalents.
+      Host tests cover every header/optional-byte pair, including width 3,
+      ignored high bits, absent prefixes, and single-byte absent fields.
+      All 14558 host tests and the ARM release build pass. Standalone smoke
+      verifies absent and zero-width prefixes and all lengths 1..4.
+      match.py reports eight Rust instructions versus twelve stock:
+      the optional-byte call, width test, prefix extraction, conditional
+      increment, and return remain; only the unreachable fatal path is removed.
+      LLVM extracts bits 2..3 before testing width and uses ADDNE.
   - address: 0x08164e00
     ghidra: FUN_08164e00
     name: encoded_field_payload_size
@@ -15832,8 +15865,7 @@ functions:
       and primary prefix; a nonzero optional width adds its optional prefix,
       marker byte, and bit-4 byte, then validates that the complete field plus
       two trailing bytes is below 26 and returns the resulting payload pointer.
-      The optional-prefix helper is expressed by calling encoded_field_prefix_size
-      on field+1, preserving its checked semantics without another Rust port.
+      The optional-prefix helper now uses the ported optional_prefix_size seam.
       Native-width host pointer arithmetic; target addresses wrap at 32 bits.
   - address: 0x08164ed8
     ghidra: FUN_08164ed8
@@ -15864,9 +15896,9 @@ functions:
       extra byte. Raw 0x08164de8 masks with 3 and returns unsigned <=3,
       accepting width 3; the existing Rust width seam erroneously rejects 3.
       This port uses optional_flagged_byte and the verified mask directly.
-      The unported 0x08164db8 helper is expressed via encoded_field_prefix_size
-      on field+1 only when header bit 7 is set. Deliberate deviations:
-      unreachable masked-helper fatal checks are omitted; no behavior changes.
+      The 0x08164db8 helper now uses the ported optional_prefix_size seam.
+      Deliberate deviations: unreachable masked-helper fatal checks are
+      omitted; no behavior changes.
       Host tests cover all 65536 header/optional-byte pairs and a minimal
       two-byte field with absent prefixes.
       match.py reports 24 Rust instructions versus 21 stock instructions:

@@ -22,6 +22,7 @@ pub mod fatal_mov_chunk_offsets_cleanup_no_op;
 pub mod fatal_mov_object_cleanup_no_op;
 pub mod fatal_mov_cleanup_08153bc0_no_op;
 pub mod optional_flagged_byte;
+pub mod optional_prefix_size;
 pub mod checked_flagged_width;
 pub mod encoded_field_layout_validate;
 pub mod encoded_field_payload_size;
