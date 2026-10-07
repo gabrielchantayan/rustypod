@@ -63,8 +63,7 @@ struct Retail { source_storage: *mut u8 }
 #[cfg(target_os = "none")]
 impl Backend for Retail {
     unsafe fn prepare(&mut self) {
-        let reclaim: unsafe extern "C" fn(u32) = core::mem::transmute(0x0813eb3cusize);
-        reclaim(0x180000);
+        crate::sqlite::soft_heap_limit_entry::sqlite_soft_heap_limit_entry(0x180000);
         self.source_storage = crate::heap::veneers::operator_new(0x414).cast();
     }
     unsafe fn source(&mut self) -> u32 {

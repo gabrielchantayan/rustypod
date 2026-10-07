@@ -227410,3 +227410,32 @@ functions:
       context words and adjacent canaries. Host suite and ARM release build
       passed; native public-entry smoke passed. match.py reports one
       instruction versus one, EXACT MATCH. No physical-device execution.
+
+  - address: 0x0813eb3c
+    ghidra: thunk_FUN_08391408
+    name: sqlite_soft_heap_limit_entry
+    size: 4
+    sig: "i32 sqlite_soft_heap_limit_entry(i32 limit)"
+    module: sqlite/soft_heap_limit_entry
+    status: ported
+    vars: {param_1: limit}
+    notes: >-
+      Raw word 0xea094a31 is B 0x08391408, not an inlined reclaimer.
+      True extent [0x0813eb3c,0x0813eb40); the next real function opens
+      with PUSH {r4,lr}. Whole-image aligned B/BL decoding finds two
+      plain BL callers at 0x0811f794 and 0x0816ea80, no predicated BL,
+      and one tail B at 0x0816ebdc. The resident target is verified from
+      raw instructions: clamp signed limit to zero for the tracked stats
+      setter, set its callback/limit, read current usage, subtract the
+      original signed limit, and tail-enter 0x0839100c when the signed
+      low-word difference is positive. No existing names.yaml entry or
+      Rust port for 0x08391408 was found; its body remains in firmware.
+      Port uses naked LDR PC,[PC,#-4] plus literal 0x08391408 (8 bytes)
+      rather than a relative B, preserving every register, flags, SP and
+      LR without linker placement assumptions. The existing Rust genius
+      request initializer now calls this entry directly. Host suite and
+      ARM release build passed; match.py reviewed the intentional B to
+      absolute-load diff. Unicorn executed emitted ARM and original bytes
+      across seven signed-limit edge values and three flag states with
+      identical full register state at target entry. No host substitute,
+      forwarding-only unit test, or physical-device execution.

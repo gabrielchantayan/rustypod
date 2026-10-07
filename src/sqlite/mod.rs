@@ -65,6 +65,7 @@
 //! Scanning every pointer literal into 0x088e0000..0x08920000 agrees:
 //! their targets are readable C strings only at `+0xaed8`.
 
+pub mod soft_heap_limit_entry;
 pub mod affinity_type;
 pub mod analyze_database;
 pub mod select_clear;
