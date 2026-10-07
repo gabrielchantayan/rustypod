@@ -4,6 +4,7 @@
 //! the ARM ADS C runtime.
 pub mod owned_object_handle_construct;
 pub use owned_object_handle_construct::*;
+pub mod owned_object_handle_replace;
 pub mod record_u16_casefold_search;
 pub mod segmented_buffer_state_reset;
 pub mod shared_record_list_owner_construct;
