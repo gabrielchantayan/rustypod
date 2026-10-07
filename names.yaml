@@ -227146,3 +227146,34 @@ functions:
       match.py exits 1: LLVM emits 8 instructions versus 12, testing the
       high-word sign directly and using predicated stores at +0x10/+0x14,
       preserving status values and store order. No on-device execution.
+
+  - address: 0x08160254
+    ghidra: FUN_08160254
+    name: rtc_binding_refresh
+    size: 64
+    sig: "u32 rtc_binding_refresh(void *object)"
+    module: app/rtc_binding_refresh
+    status: ported
+    vars: {param_1/r0: object, r4: saved_object, r5: rtc_owner, r1: companion, r2: virtual_refresh}
+    notes: >-
+      Raw A32 establishes 0x08160254..0x08160294, 64 instruction bytes;
+      next function starts with ldrb r0,[r0,#0x52]. Independent whole-image
+      decoding finds two incoming plain BLs at 0x08116e0c and 0x081605e0,
+      zero predicated incoming BLs, three outgoing plain BLs and zero
+      predicated outgoing BLs, followed by bx r2 virtual tail dispatch.
+      Obtain TMediaNowPlayingCntlr through instance_of_class_3280, follow
+      +0x28 then +0x30 to its RTC owner, store rtc_context_handle at
+      destination +0x54 and dispatch destination vtable +0x84 with
+      object_nested_companion_word. Both callers refresh an existing or
+      newly constructed object. Reuses all three existing ports; no new
+      firmware seams. Deliberate deviations: native-width host pointers
+      at fixed field offsets and injectable host singleton lookup; returns
+      the virtual method's r0 word, which Ghidra incorrectly marks void.
+      Regression covers zero/high-bit/full-width values, repeated binding
+      replacement, store-before-dispatch, virtual return and untouched
+      neighboring words. Isolated executable host smoke compiles the actual
+      wrapper and extracted existing accessor source, proving handle storage,
+      full companion argument, callback mutation and virtual return. No
+      device execution. ARM release build succeeds. match.py exits 1 with
+      16 instructions on each side: LLVM inlines both accessors, adds frame
+      setup and preserves the singleton lookup and bx r2 tail dispatch.
