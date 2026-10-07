@@ -264,6 +264,40 @@ pub unsafe extern "C" fn mov_atom_node_set_offset(node: *mut MovAtomNode, offset
     }
     0
 }
+/// MOV atom node total-size setter — original: `FUN_0814d1c4` @
+/// **0x0814d1c4** (48 bytes, 0x0814d1c4..0x0814d1f4).
+/// Whole-image raw A32 decoding verifies two incoming plain BL calls
+/// (0x081d839c, 0x081f3edc), zero predicated BLs and no outgoing calls.
+///
+/// SUBS low,#8 followed by SBCS high,zero compares the signed 64-bit
+/// total size against the minimum eight-byte atom header. Sizes below 8
+/// return 1 without accessing the node. Otherwise store low at +0x18,
+/// then high at +0x1c, and return 0. Both parser callers pass size in
+/// r2:r3; the next independent function starts with CMP r1,#0.
+///
+/// # Deliberate deviations
+///
+/// None. AAPCS aligns `size` to r2:r3, leaving r1 unused. Volatile
+/// target-width stores preserve the original write order.
+///
+/// # Safety
+///
+/// For sizes at least 8, `node` must point to one writable [`MovAtomNode`].
+/// Rejected sizes do not require a valid node pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_set_size")]
+pub unsafe extern "C" fn mov_atom_node_set_size(node: *mut MovAtomNode, size: i64) -> u32 {
+    if size < 8 {
+        return 1;
+    }
+    unsafe {
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).size_lo), size as u32);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).size_hi), (size as u64 >> 32) as u32);
+    }
+    0
+}
+
 /// MOV atom node total-size getter — original: `FUN_0814d1ac` @
 /// **0x0814d1ac** (16 bytes, 0x0814d1ac..0x0814d1bc, 4 instructions, no
 /// literal pool). The next separately linked function starts at 0x0814d1bc.
@@ -553,6 +587,49 @@ mod tests {
     extern crate std;
 
     use super::*;
+
+    #[test]
+    fn size_setter_checks_signed_wide_minimum_and_preserves_neighbors() {
+        let initial = [0xa5a5_5a5au32; 10];
+        for size in [
+            i64::MIN, -0x1_0000_0000, -1, 0, 1, 7, 8, 9,
+            0x7fff_ffff, 0x8000_0000, 0xffff_ffff,
+            0x1_0000_0000, 0x1_0000_0007, i64::MAX,
+        ] {
+            let mut words = initial;
+            let node = words.as_mut_ptr().cast::<MovAtomNode>();
+            let status = unsafe { mov_atom_node_set_size(node, size) };
+            // Independent high/low-word reference: signed high first,
+            // unsigned low only when the high word is zero.
+            let high = (size >> 32) as i32;
+            let low = size as u32;
+            let accepted = high > 0 || (high == 0 && low >= 8);
+            let mut expected = initial;
+            if accepted {
+                expected[6] = low;
+                expected[7] = high as u32;
+            }
+            assert_eq!(status, u32::from(!accepted), "size {size}");
+            assert_eq!(words, expected, "size {size}");
+            if !accepted {
+                assert_eq!(unsafe { mov_atom_node_set_size(core::ptr::null_mut(), size) }, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn size_setter_rejection_keeps_last_accepted_size() {
+        let mut words = [0xdead_beefu32; 10];
+        let node = words.as_mut_ptr().cast::<MovAtomNode>();
+        assert_eq!(unsafe { mov_atom_node_set_size(node, 0x1_0000_0007) }, 0);
+        let accepted = words;
+        for size in [7, 0, -1, i64::MIN] {
+            assert_eq!(unsafe { mov_atom_node_set_size(node, size) }, 1);
+            assert_eq!(words, accepted);
+        }
+        assert_eq!(unsafe { mov_atom_node_set_size(node, 8) }, 0);
+        assert_eq!((words[6], words[7]), (8, 0));
+    }
     use crate::heap::veneers::tests::{alloc_log, free_log, mock_heap, set_alloc_ret};
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
