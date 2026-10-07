@@ -128856,7 +128856,7 @@ functions:
       call sites, all unconditional, none predicated, no data-word
       references (verified by decoding every B/BL word and scanning every
       word of osos.dec) - never dispatched virtually. The callee
-      0x08148b98 stays in retailOS behind a one-pointer seam: it takes
+      0x08148b98 is now ported as ui_active_session and called directly: it takes
       the scheduler lock (0x08148cc8), loads the WindowManager singleton's
       (0x089cb2ec; "WindowManager" string at 0x08148b30) active-session
       word at +0x10, and unlocks (0x08148dd4); teardown 0x08148e20 clears
@@ -128864,11 +128864,33 @@ functions:
       window object: 0x0828d9b4 tests its title byte at +0x101, 0x081ec31c
       virtual-calls vtable +0xd8, and 0x08180ce0/0x08182ce0/0x081843d4/
       0x0817f7a4/0x0828e3d4 pass its +0xe8 handle to the window-list
-      lookup 0x082775f4. match.py diff is the expected seam shape
-      (ldr/blx through the ACTIVE_SESSION static plus LLVM's fp frame);
-      the core cmp/ldrne at +28 matches. Host fixtures use the dedicated
+      lookup 0x082775f4. The target no longer uses the ACTIVE_SESSION seam;
+      host overrides are thread-local. Host fixtures use the dedicated
       CURRENT_WINDOW hint (0x43000000); the +0x1c field is read as a u32
       target word and widened.
+
+  - address: 0x08148b98
+    ghidra: FUN_08148b98
+    name: ui_active_session
+    size: 32
+    sig: "void *ui_active_session(void)"
+    module: ui/current_window
+    status: ported
+    renames:
+      uVar1/r4: session
+      DAT_08148bb4: window_manager_089cb2ec
+      FUN_08148cc8: scheduler_lock
+      FUN_08148dd4: scheduler_unlock
+    notes: >-
+      Raw ARM words verify 28 instruction bytes followed by the singleton
+      literal 0x089cb2ec at 0x08148bb4; the next function starts at
+      0x08148bb8, giving a true 32-byte extent. Whole-image word decoding
+      finds two inbound plain BLs at 0x0811e2e8 and 0x08148d90, no predicated
+      BLs. Two outgoing plain BLs call the existing scheduler lock/unlock
+      ports. Snapshots the singleton's aligned u32 pointer word at +0x10
+      between lock and unlock, returning it unchanged including NULL.
+      No target semantic deviations; host tests substitute local state and
+      lock callbacks and verify acquisition and release-time mutation.
 
   - address: 0x08148cc8
     ghidra: FUN_08148cc8
