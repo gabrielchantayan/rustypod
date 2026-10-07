@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814d91c
+    ghidra: FUN_0814d91c
+    name: mode_record_pair_set
+    size: 40
+    sig: "u32 mode_record_pair_set(u32 *context, u32 mode, u32 first, u32 second)"
+    module: fs/mode_record_pair_set
+    status: ported
+    vars: {param_1: context, param_2: mode, param_3: first, param_4: second}
+    notes: >-
+      Raw A32 extent [0x0814d91c,0x0814d944) contains ten instructions
+      and no literals; the next real function starts with PUSH and its own
+      record loop. Whole-image aligned BL decoding verifies two incoming
+      unconditional calls at 0x0813a394 and 0x0813a720, zero predicated
+      incoming calls, and zero outgoing plain or predicated BLs.
+      Mode 5 stores first and second at context words 0 and 1; mode 6
+      stores them at words 2 and 3. Both return zero; other modes return
+      0x17 without accessing context. Callers pass a parent +0x04 subobject
+      after successful virtual operations, selecting modes 5 and 6.
+      No callee seams or behavioral deviations; word indexing preserves
+      target field offsets on hosts. Host tests cover full-width values,
+      untouched surrounding words, successive independent pair updates,
+      and rejected modes including NULL context. Executable smoke passed
+      both selected modes and the invalid-mode NULL bypass. Host suite
+      and ARM release build passed. match.py reports sixteen instructions
+      versus ten: LLVM adds a frame, checks mode 6 first, uses individual
+      stores and a shared indexed second store. Both selected offsets,
+      zero success and 0x17 failure remain intact, with no calls.
   - address: 0x0814da30
     ghidra: FUN_0814da30
     name: mode_offset_translate
