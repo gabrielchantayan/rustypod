@@ -81,12 +81,10 @@
 //!
 //! # Deviations
 //!
-//! - **The search and release callees are unported** and dispatch through
-//!   [`PENDING_EVENT_TAKE_OPS`] (the `ui/table_slot_allocate.rs` pattern):
-//!   target builds transmute their ROM addresses 0x08139190/0x0813908c;
-//!   the rearm default calls the ported
-//!   [`super::pending_event_timer_rearm::pending_event_timer_rearm`].
-//!   Host tests replace all three calls with a recording reference model.
+//! - Search defaults to the ported [`super::pending_event_find_link::pending_event_find_link`].
+//!   Release remains a fixed-address device boundary at 0x0813908c;
+//!   rearm defaults to the ported timer helper. Host tests can replace
+//!   the ops with recording reference models.
 //! - The lock/unlock go through the canonical ported
 //!   [`crate::kernel::posix_mutex::posix_mutex_lock`]/`_unlock`
 //!   directly — the original calls the 4-byte alias veneers
@@ -149,9 +147,8 @@ const _: () = assert!(core::mem::offset_of!(PendingEventNode, tag_a) == 0x0c);
 const _: () = assert!(core::mem::offset_of!(PendingEventNode, tag_b) == 0x0e);
 const _: () = assert!(core::mem::offset_of!(PendingEventNode, payload) == 0x10);
 
-/// Indirect dispatch for the three unported callees (see the module
-/// header). Host tests install recording models; a later port of each
-/// callee replaces its default without touching this caller.
+/// Indirect dispatch for queue operations. Search uses the ported helper;
+/// release remains unported. Host tests install recording models.
 #[derive(Clone, Copy)]
 pub struct PendingEventTakeOps {
     /// Search 0x08139190 `(this, key, tag_a, tag_b)` -> address of the
@@ -160,8 +157,8 @@ pub struct PendingEventTakeOps {
     pub find_link: unsafe extern "C" fn(
         this: *mut u8,
         key: u32,
-        tag_a: u16,
-        tag_b: u16,
+        tag_a: u32,
+        tag_b: u32,
     ) -> *mut u32,
     /// Release 0x0813908c `(this, node)`: unlink the node from the live
     /// chain and push it on the +0x18 free list. Returns 0, or panics
@@ -170,30 +167,6 @@ pub struct PendingEventTakeOps {
     /// Rearm 0x0813957c `(this)`: re-program the IAP-thread wakeup from
     /// the new head's deadline. Always returns 0 on firmware.
     pub rearm_timer: unsafe extern "C" fn(this: *mut u8) -> u32,
-}
-
-/// Target default: the ROM search.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_find_link(
-    this: *mut u8,
-    key: u32,
-    tag_a: u16,
-    tag_b: u16,
-) -> *mut u32 {
-    let f: unsafe extern "C" fn(*mut u8, u32, u16, u16) -> *mut u32 =
-        core::mem::transmute(0x0813_9190usize);
-    f(this, key, tag_a, tag_b)
-}
-
-/// Host default: inert — the tests install their own model.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_find_link(
-    _this: *mut u8,
-    _key: u32,
-    _tag_a: u16,
-    _tag_b: u16,
-) -> *mut u32 {
-    core::ptr::null_mut()
 }
 
 /// Target default: the ROM release path.
@@ -228,10 +201,10 @@ unsafe extern "C" fn firmware_rearm_timer(_this: *mut u8) -> u32 {
     0
 }
 
-/// Wired defaults: ROM addresses on target, documented inert stubs on
-/// host.
+/// Wired defaults: ported search on both platforms; release and timer
+/// retain their platform-specific defaults.
 pub const DEFAULT_PENDING_EVENT_TAKE_OPS: PendingEventTakeOps = PendingEventTakeOps {
-    find_link: firmware_find_link,
+    find_link: super::pending_event_find_link::pending_event_find_link,
     release_node: firmware_release_node,
     rearm_timer: firmware_rearm_timer,
 };
@@ -270,7 +243,7 @@ pub unsafe extern "C" fn pending_event_take(
     let mutex = this.wrapping_add(QUEUE_MUTEX_OFFSET) as *mut PosixMutex;
     posix_mutex_lock(mutex);
     let ops = pending_event_take_ops();
-    let link = (ops.find_link)(this, key, *tag_a, *tag_b);
+    let link = (ops.find_link)(this, key, *tag_a as u32, *tag_b as u32);
     if !link.is_null() {
         let node = *link as usize as *mut PendingEventNode;
         if node.is_null() {
@@ -388,9 +361,11 @@ mod tests {
     unsafe extern "C" fn mock_find_link(
         this: *mut u8,
         key: u32,
-        tag_a: u16,
-        tag_b: u16,
+        tag_a: u32,
+        tag_b: u32,
     ) -> *mut u32 {
+        let tag_a = tag_a as u16;
+        let tag_b = tag_b as u16;
         CALLS.push(Call::FindLink { key, tag_a, tag_b });
         let base = this as usize;
         debug_assert_eq!(base, slab() as usize, "find_link receives this");

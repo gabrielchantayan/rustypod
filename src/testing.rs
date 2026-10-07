@@ -821,6 +821,7 @@ pub mod hints {
     // silently on every host.
     pub const VIEW_BASE: usize = 0x2d00_0000;
     pub const SERVICE_MANAGER_SECONDARY_HANDLER: usize = 0x3600_0000;
+    pub const PENDING_EVENT_FIND_LINK: usize = 0x5efb_0000;
     // 0x6a00_0000: dedicated to ui/geometry_changed's target-width view,
     // parent, and owner fixture; mappings never unmap.
     pub const VIEW_BASE_GEOMETRY_CHANGED: usize = 0x6a00_0000;

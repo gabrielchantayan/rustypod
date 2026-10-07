@@ -173,10 +173,10 @@ mod tests {
     unsafe extern "C" fn record_take(
         _session: *mut u8,
         key: u32,
-        tag_a: u16,
-        tag_b: u16,
+        tag_a: u32,
+        tag_b: u32,
     ) -> *mut u32 {
-        TAKE_CALLS.push((key, tag_a, tag_b));
+        TAKE_CALLS.push((key, tag_a as u16, tag_b as u16));
         ptr::null_mut()
     }
 

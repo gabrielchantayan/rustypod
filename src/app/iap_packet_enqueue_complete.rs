@@ -83,7 +83,8 @@ mod tests {
     unsafe extern "C" fn complete(_: *mut u8, state: u32) -> u32 {
         assert!(LIVE); assert_eq!(state, 7); COMPLETIONS += 1; COMPLETE_STATUS
     }
-    unsafe extern "C" fn find(context: *mut u8, key: u32, a: u16, b: u16) -> *mut u32 {
+    unsafe extern "C" fn find(context: *mut u8, key: u32, a: u32, b: u32) -> *mut u32 {
+        let (a, b) = (a as u16, b as u16);
         if MISS || !LIVE || (*NODE).key != key || (a != WILDCARD_TAG && (*NODE).tag_a != a)
             || (b != WILDCARD_TAG && (*NODE).tag_b != b) { return ptr::null_mut(); }
         let link = context.cast::<u32>();
