@@ -225725,3 +225725,34 @@ functions:
       load/increment/store, unsigned payload load, conditional reset
       and absence of calls are preserved; exported symbol is present.
       No device execution performed.
+  - address: 0x08158b68
+    ghidra: FUN_08158b68
+    name: unit_word_range
+    size: 56
+    sig: "void unit_word_range(u32 *destination, const u32 *start)"
+    module: util/unit_word_range
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: start
+      local_1c: end
+      local_18: temporary_range
+    notes: >-
+      Raw A32 words prove extent 0x08158b68..0x08158ba0; the next
+      independently entered PUSH prologue begins at 0x08158ba0.
+      Whole-image decoding finds two plain incoming BLs at 0x08127778
+      and 0x0829b1fc, zero predicated incoming BLs, one plain outgoing
+      BL at 0x08158b88 to 0x08158cb0, and zero predicated outgoing BLs.
+      Snapshot the aligned input word and increment modulo 2^32.
+      The resident constructor 0x08158cb0 builds two zero-extended
+      word pairs using copy_u32_pair at 0x081b4e10, whose raw return
+      register is the destination pointer (unlike Ghidra's void type).
+      Output is four words [start, 0, start+1, 0], including wraparound
+      to zero rather than carry into the high word. Deliberate deviation:
+      expand the verified pure constructor and temporary copy, adding
+      no resident seam or extra port. Volatile word accesses preserve
+      input snapshot before output writes, including overlapping input.
+      Host tests cover word-width boundaries, untouched surrounding words
+      and all four overlapping input positions. Standalone consumer smoke
+      observes [4294967295, 0, 0, 0] for overlapping wraparound and
+      [42, 0, 43, 0] for an ordinary range. No device execution performed.
