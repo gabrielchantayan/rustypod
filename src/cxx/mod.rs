@@ -4,6 +4,8 @@
 //! the ARM ADS C runtime.
 pub mod opaque_vtable_08985198_construct;
 pub use opaque_vtable_08985198_construct::*;
+pub mod two_word_value_record_create;
+pub use two_word_value_record_create::*;
 pub mod selector_value_record_create;
 pub use selector_value_record_create::*;
 pub mod owned_object_handle_construct;
