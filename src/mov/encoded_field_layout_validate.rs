@@ -3,17 +3,18 @@
 //! `encoded_field_layout_validate` — original: `FUN_08164e24` at load address
 //! `0x08164e24` (**120 bytes**, `0x08164e24..0x08164e9b`). Raw `osos.dec`
 //! words establish the next separately linked function at `0x08164e9c`.
-//! Ghidra finds three direct inbound `bl` callers. The body contains five
+//! Ghidra finds three direct inbound `bl` callers. The body contains six
 //! plain `bl` instructions (to `0x08164ec4`, `0x08164e9c`, `0x08164de8`,
-//! `0x08164db8`, and `0x08164c80`) and one predicated `blcs` to `heap_panic`
-//! at `0x08030f44`.
+//! `0x08164db8`, `0x08164c80`, and `heap_panic` at `0x08030f44`) and no
+//! predicated calls.
 //!
 //! It sums the low header tag, primary prefix length, and—when the optional
 //! width is nonzero—the optional width, its prefix length, marker byte, and
 //! optional bit-4 byte. It then verifies the resulting field span plus two
-//! trailing bytes is below 26. The checked-width helper rejects the only
-//! malformed optional width before this final bound can be exceeded. No
-//! deliberate deviations.
+//! trailing bytes is below 26, returning the pointer just past those bytes.
+//! The checked-width helper rejects the only malformed optional width before
+//! this final bound can be exceeded. Host pointer arithmetic retains native
+//! width; the target uses wrapping 32-bit addresses like the original.
 
 use crate::app::encoded_field_prefix_size::encoded_field_prefix_size;
 use crate::heap::veneers::heap_panic;
@@ -21,7 +22,7 @@ use crate::mov::checked_flagged_width::mov_checked_flagged_width;
 use crate::mov::optional_flagged_byte::optional_flagged_byte;
 use crate::util::tagged_header_low_bits::tagged_header_low_bits;
 
-/// Validates the encoded field beginning at `field`.
+/// Validates the encoded field and returns its payload pointer.
 ///
 /// # Safety
 ///
@@ -30,7 +31,7 @@ use crate::util::tagged_header_low_bits::tagged_header_low_bits;
 /// bounds guard.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn encoded_field_layout_validate(field: *const u8) {
+pub unsafe extern "C" fn encoded_field_layout_validate(field: *const u8) -> *const u8 {
     let tag_size = tagged_header_low_bits(field);
     let primary_prefix_size = encoded_field_prefix_size(field);
     let optional_width = mov_checked_flagged_width(field) as u32;
@@ -42,9 +43,11 @@ pub unsafe extern "C" fn encoded_field_layout_validate(field: *const u8) {
         optional_width + optional_prefix_size + optional_marker_size
     };
 
-    if tag_size + primary_prefix_size + optional_size + 2 >= 26 {
+    let payload = field.wrapping_add((tag_size + primary_prefix_size + optional_size + 2) as usize);
+    if payload as usize >= field.wrapping_add(26) as usize {
         heap_panic();
     }
+    payload
 }
 
 #[cfg(test)]
@@ -52,18 +55,17 @@ mod tests {
     use super::encoded_field_layout_validate;
 
     #[test]
-    fn accepts_every_valid_primary_and_optional_encoding() {
-        for first in 0u8..=u8::MAX {
-            for optional in [0x00, 0x01, 0x02, 0x10, 0x11, 0x12, 0x80, 0x81, 0x82, 0x90, 0x91, 0x92] {
-                unsafe { encoded_field_layout_validate([first, optional].as_ptr()) };
-            }
-        }
-    }
-
-    #[test]
-    fn clear_optional_flag_does_not_require_a_second_byte() {
-        for first in 0u8..0x80 {
-            unsafe { encoded_field_layout_validate(&first) };
+    fn returns_payload_after_primary_optional_and_trailing_fields() {
+        for (header, optional, offset) in [
+            (0x00, 0x00, 2), (0x0f, 0x00, 9),
+            (0x80, 0x0c, 2), (0x80, 0x01, 5),
+            (0x80, 0x1e, 10), (0x8f, 0x1e, 17),
+        ] {
+            let field = [header, optional];
+            assert_eq!(
+                unsafe { encoded_field_layout_validate(field.as_ptr()) },
+                field.as_ptr().wrapping_add(offset),
+            );
         }
     }
 }

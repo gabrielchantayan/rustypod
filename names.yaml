@@ -15777,11 +15777,38 @@ functions:
       Rust zero-initializes the iterator local because its constructor owns
       every field later read; host tests use native-width vtables while target
       dispatch retains target-width slot addressing.
+  - address: 0x08164e00
+    ghidra: FUN_08164e00
+    name: encoded_field_payload_size
+    size: 36
+    sig: "u32 encoded_field_payload_size(const u8 *field)"
+    module: mov/encoded_field_payload_size
+    status: ported
+    renames:
+      param_1/r0: field
+      r4: field
+      r0/return: payload_size
+      FUN_08164e24: encoded_field_layout_validate
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw A32 extent [0x08164e00,0x08164e24) is nine instruction words;
+      next real function begins with push at 0x08164e24. Whole-image decoding
+      finds two incoming plain BLs at 0x08163f50 and 0x08164ccc, no predicated
+      BLs. Body has two plain BLs and no predicated BLs. Return
+      (field+28-payload_pointer)&255 when <=26, otherwise heap_panic.
+      Ghidra's char argument and void return are incorrect. Reuse the ported
+      layout validator, repairing its omitted payload-pointer return contract.
+      Exhaustive valid header pairs match an independent layout reference;
+      edge cases return 26 for no metadata and 11 for the maximum span.
+      ARM match retains both calls, subtraction, byte mask, unsigned bound,
+      and conditional return; LLVM reorders add/sub and adds its frame.
+      Native-width host addresses deliberately avoid truncating host pointers;
+      target arithmetic remains wrapping 32-bit.
   - address: 0x08164e24
     ghidra: FUN_08164e24
     name: encoded_field_layout_validate
     size: 120
-    sig: "void encoded_field_layout_validate(const u8 *field)"
+    sig: "const u8 *encoded_field_layout_validate(const u8 *field)"
     module: mov/encoded_field_layout_validate
     status: ported
     renames:
@@ -15797,17 +15824,17 @@ functions:
     notes: >-
       Raw osos.dec establishes the exact 120-byte A32 body
       0x08164e24..0x08164e9b; the next word at 0x08164e9c starts the
-      separately linked encoded_field_prefix_size function. The body has five
+      separately linked encoded_field_prefix_size function. The body has six
       unconditional BLs (tagged_header_low_bits, encoded_field_prefix_size,
-      mov_checked_flagged_width, optional_prefix_size, and
-      optional_flagged_byte) plus one predicated BLCS heap_panic. Ghidra finds
-      three direct inbound BL callers. The function adds the low header tag
+      mov_checked_flagged_width, optional_prefix_size, optional_flagged_byte,
+      and heap_panic), not a predicated BLCS.
+      Ghidra finds three direct inbound BL callers. The function adds the low header tag
       and primary prefix; a nonzero optional width adds its optional prefix,
       marker byte, and bit-4 byte, then validates that the complete field plus
-      two trailing bytes is below 26. The optional-prefix helper is expressed
-      by calling encoded_field_prefix_size on field+1, preserving its checked
-      semantics without adding an otherwise redundant Rust port. Deliberate
-      deviations: none.
+      two trailing bytes is below 26 and returns the resulting payload pointer.
+      The optional-prefix helper is expressed by calling encoded_field_prefix_size
+      on field+1, preserving its checked semantics without another Rust port.
+      Native-width host pointer arithmetic; target addresses wrap at 32 bits.
   - address: 0x08164ed8
     ghidra: FUN_08164ed8
     name: encoded_field_seed_byte

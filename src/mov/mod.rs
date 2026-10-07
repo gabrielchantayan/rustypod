@@ -24,6 +24,7 @@ pub mod fatal_mov_cleanup_08153bc0_no_op;
 pub mod optional_flagged_byte;
 pub mod checked_flagged_width;
 pub mod encoded_field_layout_validate;
+pub mod encoded_field_payload_size;
 pub mod encoded_field_seed_byte;
 pub mod chain_value_span;
 pub mod chain_record_word;
