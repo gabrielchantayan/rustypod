@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08155858
+    ghidra: FUN_08155858
+    name: seven_string_snapshot_construct
+    size: 148
+    sig: "SevenStringSnapshot *seven_string_snapshot_construct(SevenStringSnapshot *destination, SevenStringProvider *source)"
+    module: app/seven_string_snapshot
+    status: ported
+    renames:
+      param_1/r5: destination
+      param_2/r4: source
+      FUN_082773e0: string_object_copy_construct
+      source_vtable_slot_08: refresh
+    notes: >-
+      Raw A32 words establish extent [0x08155858,0x081558ec), ending in
+      pop {r4,r5,r6,pc}; the next real constructor starts with a push
+      prologue at 0x081558ec. Whole-image aligned-word scanning finds two
+      inbound plain BLs at 0x081360f8 and 0x08136184, no predicated inbound
+      BLs. Body contains seven plain BLs to the already-ported canonical
+      string_object_copy_construct at 0x082773e0, zero predicated BLs,
+      and one BLX through source vtable slot +8. Refreshes the source
+      before reading its seven StringObjects at +0x14..+0x44, constructs
+      destination strings at +0..+0x30, copies raw bytes +0x4c..+0x4e to
+      +0x38..+0x3a, and returns destination in r0, contrary to Ghidra void.
+      No NULL guards; the fourth trailing padding byte is untouched.
+      Deliberate deviations: repr(C) native-width pointers for host layouts
+      and the existing StringObject modeled vtable/allocator seams. ARM
+      match.py exits 1 with 37 instructions on each side: same virtual
+      refresh, seven constructors and three byte copies. LLVM adds a frame
+      pointer and uses fixed destination offsets rather than chaining the
+      callee result because the ported constructor always returns this.
+      Host tests cover refreshed mixed nonempty/empty/NULL payloads,
+      allocation failure, self-construction, high-bit flag bytes and
+      untouched padding. Full host suite: 14583 passed, zero failed.
+      ARM release build passed. Actual-library C smoke passed refresh,
+      all seven self-constructions, destination return and flag/padding checks.
   - address: 0x0816373c
     ghidra: FUN_0816373c
     name: group_item_cursor_initialize
