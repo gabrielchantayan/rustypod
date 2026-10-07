@@ -140,6 +140,36 @@ pub unsafe extern "C" fn query_tree_mutex_construct(
     core::ptr::write_volatile(core::ptr::addr_of_mut!((*this).vtable), 0x089a_7920);
     this
 }
+/// query_explicit_resource_construct — `FUN_0813e57c` @ `0x0813e57c`.
+///
+/// True size: 48 bytes, 44 code bytes plus vtable literal 0x08984e18 at
+/// 0x0813e5a8; the next function begins at 0x0813e5ac. Raw-word decoding
+/// verifies two incoming plain BLs (0x0813e518, 0x0817b5c8), one outgoing
+/// plain BL to query_tree_mutex_construct, and zero predicated BLs.
+///
+/// Construct the tree/mutex base, install the query vtable, set kind +0x45
+/// to 3, truncate the supplied id into +0x44, store resource at +0x40, and
+/// return the base constructor's result. Preserve bytes +0x46/+0x47.
+/// Deliberate deviations: reuse the host-widened repr(C) base layout and
+/// correct Ghidra's void return from the raw r0 pass-through.
+///
+/// # Safety
+/// `this` must satisfy query_tree_mutex_construct's storage/runtime contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn query_explicit_resource_construct(
+    this: *mut SharedInterfaceTreeMutex,
+    id: u32,
+    resource: u32,
+) -> *mut SharedInterfaceTreeMutex {
+    let this = query_tree_mutex_construct(this);
+    (*this).vtable = 0x0898_4e18;
+    (*this).trailing[0] = 3;
+    (*this).mode = id as u8;
+    (*this).kind_resource = resource;
+    this
+}
+
 
 /// shared_interface_tree_mutex_construct — original: `FUN_0813e9ec` @
 /// `0x0813e9ec` (184 bytes including its three literal-pool words; ten
@@ -748,6 +778,28 @@ mod tests {
                 let padding = ptr::addr_of!(base.tree.comparator).cast::<u8>().add(1);
                 assert_eq!(padding.read(), fill);
                 assert_eq!(padding.add(1).read(), fill);
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_query_constructs_base_and_truncates_id_preserving_padding() {
+        let _heap = tree_heap();
+        for (id, resource) in [(0, 0), (0x100, u32::MAX), (u32::MAX, 0x12345678)] {
+            let mut query = object(0xdead_beef, 0x55, [0xa5; 3]);
+            unsafe {
+                let result = query_explicit_resource_construct(&mut query, id, resource);
+                assert_eq!(result, ptr::addr_of_mut!(query));
+                assert_eq!(query.vtable, 0x0898_4e18);
+                assert_eq!(query.mode, id as u8);
+                assert_eq!(query.kind_resource, resource);
+                assert_eq!(query.trailing, [3, 0xa5, 0xa5]);
+                assert_eq!(query.mutex[MUTEX_STATUS_OFFSET], 2);
+                assert_eq!(query.tree.node_count, 0);
+                let header = query.tree.header;
+                assert!((*header).parent.is_null());
+                assert_eq!((*header).left, header);
+                assert_eq!((*header).right, header);
             }
         }
     }
