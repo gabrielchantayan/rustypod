@@ -228003,3 +228003,30 @@ functions:
       existing born-published root model; isolated algorithm tests use local
       repr(C) nodes and cover initialization, distinct constructor result,
       failed registration, repeat access and nonzero even guards.
+  - address: 0x0813b414
+    ghidra: FUN_0813b414
+    name: locked_state_cancel
+    size: 32
+    sig: "void locked_state_cancel(LockedState *object)"
+    module: app/locked_state_cancel
+    status: ported
+    vars: {param_1/r0/r4: object, object_plus_0x14: state}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_0807f6a0: mutex_unlock}
+    notes: >-
+      Raw A32 words prove [0x0813b414,0x0813b434), 32 bytes, no
+      literals; the next independent function begins with PUSH. Whole-image
+      aligned branch decoding finds two inbound plain BL sites at 0x0814bf84
+      and 0x0814bfd4, zero predicated BL sites. Body has one plain BL to
+      mutex_lock and a tail B to mutex_unlock. Acquire the leading mutex,
+      store -2 at +0x14, release the same mutex; preserve every other field.
+      Caller 0x0814be3c uses this during completion/cancellation cleanup.
+      No concrete class identity is invented. Existing ported mutex seams
+      are reused. Native repr(C) pointers widen on hosts; ARM state offset
+      remains +0x14. Volatile store preserves the critical-section update.
+      Rust return-position call represents the original tail branch.
+      Tests cover acquisition/release ordering, producer mutation during
+      acquisition, neighboring fields, NULL cells, zero handles, extreme
+      initial states and repeated cancellation. Host suite and ARM release
+      build pass. match.py exits 1: eight original versus nine Rust
+      instructions, added frame pointer, otherwise same calls, -2 store
+      at +0x14 and tail release. No physical-device execution.
