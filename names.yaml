@@ -225914,3 +225914,35 @@ functions:
       incorrectly declares a void return. Rust retains target-width u32 words
       on hosts, leaves the second allocated word untouched, and introduces no
       callee seams or guessed concrete class identity.
+
+  - address: 0x081573c8
+    ghidra: FUN_081573c8
+    name: owned_object_handle_replace
+    size: 48
+    sig: "void owned_object_handle_replace(u8 **slot, u8 *replacement)"
+    module: cxx/owned_object_handle_replace
+    status: ported
+    vars:
+      param_1/r4: slot
+      param_2/r5: replacement
+      r0: old_object
+      r1_at_blx: virtual_method
+    notes: >-
+      Raw A32 words establish the 48-byte extent 0x081573c8..0x081573f8;
+      the next function begins with push at 0x081573f8. Zero outgoing plain
+      BLs, zero predicated BLs, one BLXNE at 0x081573ec through vtable +0x04.
+      Full-image aligned decoding finds two inbound plain BLs at 0x081245d4
+      and 0x0815fb94, zero predicated inbound BLs. Equal old and replacement
+      pointers do nothing; otherwise dispatch the non-NULL old object's
+      second vtable entry, then store replacement after the callback. No
+      concrete virtual method identity or static callee seam is invented.
+      Return register is path-dependent, not a meaningful API result.
+      Host pointer and vtable storage use native-width entries, matching
+      neighboring guarded dispatch ports; target entries remain four bytes.
+      Host tests cover invalid-but-equal pointers, NULL transitions, adjacent
+      storage preservation, callback observation of old ownership and
+      callback mutation overwritten by replacement. All 14563 host tests
+      pass; standalone smoke confirms self-assignment and clearing behavior;
+      ARM release build passes. match.py exits 1: LLVM emits 14 instructions
+      versus 12, adds a frame pointer and replaces predication with branches;
+      equality guard, NULL guard, vtable +0x04 BLX and post-call store remain.
