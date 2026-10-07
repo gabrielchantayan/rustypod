@@ -1173,3 +1173,4 @@ pub mod selected_container_retreat;
 pub mod buffered_text_owner_construct;
 pub mod owned_storage_initialize;
 pub mod metadata_refresh_if_changed;
+pub mod category_client_register;

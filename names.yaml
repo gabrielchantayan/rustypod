@@ -226957,3 +226957,38 @@ functions:
       is unchanged. A throwaway A32 runner executes original and compiled
       bodies for five link values, verifying return bits, one node read,
       and restored frame pointer, stack and return address. No device run.
+  - address: 0x08161270
+    ghidra: FUN_08161270
+    name: category_client_register
+    size: 52
+    sig: "u32 category_client_register(u32 *registry, void *client)"
+    module: app/category_client_register
+    status: ported
+    vars:
+      param_1/r4: registry
+      param_2/r5: client
+      param_1_plus_0x10: registration_mutex
+      FUN_0807f5c4: mutex_lock
+      FUN_08161068: unported_category_client_registration
+      FUN_0807f6a0: mutex_unlock
+      return/r0: registration_status
+    notes: >-
+      Raw A32 words prove the true 52-byte extent [0x08161270,0x081612a4):
+      pop at 0x081612a0 returns, and the next constructor starts with push.
+      Three outbound unconditional plain BLs at 0x08161280, 0x0816128c,
+      and 0x08161298; zero predicated BLs. Whole-image word decoding finds
+      two inbound unconditional BLs at 0x0806b9cc and 0x0806b9dc, zero
+      predicated inbound BLs. Lock registry+0x10, call 0x08161068 with the
+      unchanged registry and client, unlock the same mutex, preserve status.
+      Raw callee code returns 1 for NULL, 7 for a category outside 0..2,
+      4 for failed virtual activation, or stores the client in the category
+      slot and returns 0. Neither assigned address nor registration callee
+      had a names entry; the latter remains an explicit fixed-address seam,
+      not a newly invented port. Reuses ported mutex_lock and mutex_unlock.
+      Hosts inject operations and use u32 word indices to preserve +0x10.
+      No target behavioral deviations. match.py exits 1 with 13 original
+      versus 17 Rust instructions: added frame setup and literal-loaded BLX
+      replace immediate registration BL while preserving operation order and
+      saved result. Host suite passes 14624 tests; ARM release build passes.
+      Executable host smoke verifies client mutation, full-width status,
+      NULL error and lock release. No on-device execution.
