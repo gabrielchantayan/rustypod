@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod indexed_handle_owner_create;
 pub mod context_pending_complete;
 pub mod handle_owner_shutdown;
 pub mod buffered_text_owner_data;
