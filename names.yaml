@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08152374
+    ghidra: FUN_08152374
+    name: buffered_text_owner_construct
+    size: 64
+    sig: "u8 *buffered_text_owner_construct(u8 *owner)"
+    module: app/buffered_text_owner_construct
+    status: ported
+    vars: {param_1: owner, iVar1: constructed_text}
+    renames: {DAT_081523b0: fallback_text_buffer, FUN_08150238: owned_storage_initialize, FUN_08123cb4: text_buffer_construct}
+    notes: >-
+      Raw A32 extent [0x08152374,0x081523b4) comprises 60 instruction
+      bytes plus fallback literal 0x089cc96c; the next independent
+      function is BX LR at 0x081523b4. Incoming plain BLs at 0x080fe0f4
+      and 0x08293550, no predicated incoming BLs; two outgoing plain
+      BLs and no predicated outgoing BLs. Initialize storage with
+      capacity 0x3500 via verified retail callee 0x08150238, load
+      ARM words +4/+8, and construct embedded text at +12 via
+      0x08123cb4 with mode zero. Subtract 12 from the returned text
+      pointer, clear owner bytes +0x27b/+0x28f/+0x3e6/+0x3e7, and
+      return that owner. Ghidra incorrectly reports void and offsets
+      relative to the embedded text. Neither callee has an existing
+      names entry or Rust seam; target calls preserve their raw verified
+      addresses. No target deviations; host production calls are
+      unsupported. Host tests cover exact write extent, nonzero initial
+      flags, preserved neighbors and constructor-selected owner identity.
+      Host suite and ARM release build passed; executable smoke exercised
+      the port body. match.py exits 1 with 21 versus 15 instructions:
+      LLVM calls the verified addresses through BLX and clears flags
+      in reverse order relative to the text pointer before subtracting
+      12. Effective addresses and returned owner are unchanged; the
+      generated literal pool contains both verified callee addresses.
   - address: 0x08152ff8
     ghidra: FUN_08152ff8
     name: item_outside_position_window
