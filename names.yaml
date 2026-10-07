@@ -15770,6 +15770,47 @@ functions:
       by calling encoded_field_prefix_size on field+1, preserving its checked
       semantics without adding an otherwise redundant Rust port. Deliberate
       deviations: none.
+  - address: 0x08164ed8
+    ghidra: FUN_08164ed8
+    name: encoded_field_seed_byte
+    size: 84
+    sig: "u8 encoded_field_seed_byte(const u8 *field)"
+    module: mov/encoded_field_seed_byte
+    status: ported
+    renames:
+      param_1/r0: field
+      r6: field
+      r4: primary_size
+      r5: optional_width
+      FUN_08164ec4: tagged_header_low_bits
+      FUN_08164e9c: encoded_field_prefix_size
+      FUN_08164de8: optional_width_mask
+      FUN_08164db8: optional_prefix_size
+    notes: >-
+      Raw A32 establishes [0x08164ed8,0x08164f2c), 84 instruction bytes
+      without literals; the next real function begins with push {r0-r6,lr}.
+      Full-image aligned BL decoding finds two inbound plain BLs at
+      0x08163f44 and 0x08164cd8, zero predicated inbound BLs. The body
+      has four plain BLs and zero predicated BLs. Returns the transform seed
+      byte at field+1+primary tag width+primary prefix size+optional span.
+      The optional span is zero when width plus prefix is zero, otherwise
+      width plus prefix plus one. Header bit 7 gates the optional byte.
+      Unlike the adjacent payload-address routine, optional bit 4 adds no
+      extra byte. Raw 0x08164de8 masks with 3 and returns unsigned <=3,
+      accepting width 3; the existing Rust width seam erroneously rejects 3.
+      This port uses optional_flagged_byte and the verified mask directly.
+      The unported 0x08164db8 helper is expressed via encoded_field_prefix_size
+      on field+1 only when header bit 7 is set. Deliberate deviations:
+      unreachable masked-helper fatal checks are omitted; no behavior changes.
+      Host tests cover all 65536 header/optional-byte pairs and a minimal
+      two-byte field with absent prefixes.
+      match.py reports 24 Rust instructions versus 21 stock instructions:
+      primary helper calls, high-bit optional-prefix gating, masked optional
+      width, conditional marker increment, and final byte load remain.
+      LLVM removes redundant byte truncations because sizes are bounded;
+      relocatable BL destinations in the diff are unresolved placeholders.
+      ARM release build and all 14550 host tests pass. A standalone source-linked
+      smoke run returns 0x5a at maximum offset 16 with width 3 and bit 4 set.
   - address: 0x08169be0
     ghidra: FUN_08169be0
     name: panel_set_scale_mode
