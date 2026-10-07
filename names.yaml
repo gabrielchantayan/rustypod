@@ -226367,3 +226367,37 @@ functions:
       match.py exits 1 with seven Rust instructions versus four stock:
       LLVM adds a frame and chooses offset 4/12 with MOVEQ before one
       LDR, preserving nonzero selection and the full-width return.
+
+  - address: 0x08162ac0
+    ghidra: FUN_08162ac0
+    name: parse_context_process_buffer
+    size: 28
+    sig: "int32_t parse_context_process_buffer(void *context, const uint8_t *buffer, uint32_t length, void *output)"
+    module: app/parse_context_process_buffer
+    status: ported
+    vars:
+      param_1/r0: context
+      param_2/r1: buffer
+      param_3/r2: length
+      param_4/r3: output
+    notes: >-
+      Raw words establish extent [0x08162ac0,0x08162adc), ending before
+      the two-word context constructor. Independent whole-image aligned
+      A32 decoding finds two incoming plain BLs (0x08119e6c,0x081b1e74),
+      zero incoming predicated BLs, one outgoing plain BL to 0x08162820,
+      and zero outgoing predicated BLs. PUSH and STRD place length/output
+      on the stack, move buffer to r3 and insert mode 1 and option 0.
+      The stock callee iterates image collection entries, allocates planar
+      storage, decodes the input and converts entry pixel formats; the
+      precise input format remains unidentified. No canonical callee
+      entry or Rust implementation exists, so retain it as a fixed-address
+      six-argument firmware seam, not a newly exported port. Its first
+      raw branch returns -6 for NULL output. Both callers consume r0 as
+      a status: Ghidra's void return for this wrapper is incorrect.
+      No semantic deviations. Host NULL-output edge tests use the verified
+      early-return reference; direct smoke verifies inserted arguments,
+      pointer mapping and full-width signed status preservation.
+      All 14586 host tests and the ARM release build pass. match.py exits
+      1: LLVM emits a frame, STM for the two stack arguments and BLX via
+      literal 0x08162820 rather than direct BL. The argument arrangement,
+      ARM-state callee and unchanged r0 return agree with stock.

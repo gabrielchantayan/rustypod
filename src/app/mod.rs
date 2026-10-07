@@ -217,6 +217,8 @@ pub mod parse_context_construct;
 pub use parse_context_construct::*;
 pub mod parse_context_destroy;
 pub use parse_context_destroy::*;
+pub mod parse_context_process_buffer;
+pub use parse_context_process_buffer::*;
 pub mod string_pair_vector_last;
 pub use string_pair_vector_last::*;
 pub mod six_halfword_defaults_initialize;
