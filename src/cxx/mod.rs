@@ -891,6 +891,7 @@ pub mod guarded_vtable_slot_40_dispatch;
 pub mod guarded_vtable_slot_40_dispatch_615c;
 pub mod vtable_object_base_construct;
 pub mod vtable_two_pair_base_construct;
+pub mod two_pair_seven_string_owner_construct;
 pub mod two_pair_tokenizer_owner_construct;
 pub mod vtable_two_pair_metadata_construct;
 pub mod vtable_two_pair_derived_construct;

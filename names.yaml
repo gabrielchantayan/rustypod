@@ -226264,3 +226264,41 @@ functions:
       canaries and NULL. match.py exits 1: LLVM emits PUSH fp,lr /
       MOV fp,sp / POP fp,pc instead of BX LR, preserving the same r0
       pass-through behavior with the configured frame-pointer prologue.
+
+  - address: 0x081558ec
+    ghidra: FUN_081558ec
+    name: two_pair_seven_string_owner_construct
+    size: 100
+    sig: "TwoPairSevenStringOwner *two_pair_seven_string_owner_construct(TwoPairSevenStringOwner *this, const void *first_pair, const void *second_pair)"
+    module: cxx/two_pair_seven_string_owner_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: first_pair
+      param_3/r2: second_pair
+      FUN_0811050c: vtable_two_pair_base_construct
+      FUN_08277440: string_default_construct
+      DAT_08155950: TWO_PAIR_SEVEN_STRING_OWNER_VTABLE
+    notes: >-
+      Raw extent 0x081558ec..0x08155954 is 100 bytes: 96 code bytes and
+      the vtable literal 0x08986a70 at 0x08155950. The next real function
+      starts at 0x08155954. Whole-image aligned ARM decoding finds two
+      inbound plain BLs at 0x081360ec and 0x081da93c, zero predicated
+      inbound BLs; the body has eight plain BLs and zero predicated BLs.
+      Construct the 20-byte two-pair base with incoming r1/r2, replace
+      its vtable, default-construct seven eight-byte strings at offsets
+      20, 28, 36, 44, 52, 60, 68, and set bytes 76/77/78 to 0/1/0.
+      Return this and preserve byte 79. Ghidra drops the arguments; both
+      callers leave r1/r2 inherited from their callers. The concrete class
+      identity remains unknown. Reuse both existing Rust constructors,
+      with no new firmware seam. Deliberate deviation: explicit pair
+      source arguments; host strings use two target-width words rather
+      than overlapping widened host pointers, following the existing
+      framework_string_pair_construct precedent. Ordered-reference host
+      tests cover external and overlapping sources, including string-area
+      sources, final padding and canaries. Host suite and ARM release build
+      pass. A direct executable smoke verifies all seven strings, pairs,
+      flags, padding, return identity and canaries. match.py exits 1:
+      LLVM keeps this in r4 and uses absolute field offsets, with a frame
+      pointer prologue; eight BLs, literal, store order and return semantics
+      remain intact.
