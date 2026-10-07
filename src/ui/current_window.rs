@@ -8,10 +8,10 @@
 //!
 //! The global struct at 0x089cb2ec is the WindowManager singleton state
 //! (its literal pool neighbour at 0x8148b30 is the string
-//! "WindowManager"). The unported stock accessor 0x08148b98 returns its
-//! field at +0x10 — the active session — under the scheduler lock pair
+//! "WindowManager"). The accessor `ui_active_session` returns its
+//! field at +0x10 under the scheduler lock pair
 //! 0x08148cc8/0x08148dd4; teardown at 0x08148e20 clears that field to
-//! NULL. This accessor answers "which window is current right now": it
+//! NULL. The current-window accessor answers "which window is current right now": it
 //! reads the session's current-window word at +0x1c, or 0 when there is
 //! no active session.
 //!
@@ -25,37 +25,64 @@
 /// (`ldrne r0, [r0, #28]`).
 const CURRENT_WINDOW_OFFSET: usize = 0x1c;
 
-/// Active-session signature shared with the host-test interception slot.
+#[cfg(test)]
 type ActiveSession = unsafe extern "C" fn() -> *mut u8;
 
-/// Calls the stock WindowManager active-session accessor, which remains
-/// in retailOS.
-///
-/// This is deliberately a boundary rather than a port of 0x08148b98.
-/// Host tests replace the one function pointer below; ARM builds call its
-/// fixed firmware load address. The original takes the scheduler lock
-/// (0x08148cc8), loads the WindowManager singleton's active-session word
-/// at 0x089cb2ec + 0x10, releases the lock (0x08148dd4) and returns it;
-/// NULL means no session is active.
-unsafe extern "C" fn firmware_active_session() -> *mut u8 {
-    #[cfg(target_os = "none")]
-    {
-        let active_session: ActiveSession = core::mem::transmute(0x0814_8b98usize);
-        active_session()
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        core::ptr::null_mut()
-    }
+#[cfg(test)]
+extern crate std;
+#[cfg(test)]
+std::thread_local! {
+    static ACTIVE_SESSION: core::cell::Cell<ActiveSession> =
+        core::cell::Cell::new(no_active_session);
+}
+#[cfg(test)]
+unsafe extern "C" fn no_active_session() -> *mut u8 {
+    core::ptr::null_mut()
 }
 
-/// Narrow boundary for the unported 0x08148b98 dependency.
-static mut ACTIVE_SESSION: ActiveSession = firmware_active_session;
+#[cfg(not(target_os = "none"))]
+static mut HOST_WINDOW_MANAGER: [u32; 5] = [0; 5];
 
 #[inline(always)]
-unsafe fn active_session_fn() -> ActiveSession {
-    core::ptr::read_volatile(core::ptr::addr_of!(ACTIVE_SESSION))
+unsafe fn window_manager() -> *mut u32 {
+    #[cfg(target_os = "none")]
+    { 0x089c_b2ec as *mut u32 }
+    #[cfg(not(target_os = "none"))]
+    { core::ptr::addr_of_mut!(HOST_WINDOW_MANAGER).cast::<u32>() }
+}
+
+#[cfg(test)]
+static mut SESSION_LOCK: unsafe extern "C" fn() = super::scheduler_lock::scheduler_lock;
+#[cfg(test)]
+static mut SESSION_UNLOCK: unsafe extern "C" fn() = super::scheduler_lock::scheduler_unlock;
+
+/// WindowManager active session — `FUN_08148b98` @ 0x08148b98.
+///
+/// True extent: 32 bytes (28 instruction bytes, singleton literal at
+/// 0x08148bb4); the next function begins at 0x08148bb8. Verified inbound
+/// BL count: 2 plain, 0 predicated. Outgoing BL count: 2 plain, 0 predicated.
+/// Acquires the scheduler lock, snapshots the singleton's +0x10 target
+/// pointer word, releases the lock, and returns that snapshot (including NULL).
+///
+/// Deliberate deviations: none on target. Host builds use a local singleton;
+/// tests replace the lock pair to exercise state changes at each boundary.
+///
+/// # Safety
+/// The WindowManager and scheduler globals must be initialized. Returning a
+/// session does not extend its lifetime or retain the scheduler lock.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ui_active_session() -> *mut u8 {
+    #[cfg(test)]
+    core::ptr::read_volatile(core::ptr::addr_of!(SESSION_LOCK))();
+    #[cfg(not(test))]
+    super::scheduler_lock::scheduler_lock();
+    let session = window_manager().add(4).read() as usize as *mut u8;
+    #[cfg(test)]
+    core::ptr::read_volatile(core::ptr::addr_of!(SESSION_UNLOCK))();
+    #[cfg(not(test))]
+    super::scheduler_lock::scheduler_unlock();
+    session
 }
 
 /// ui_current_window — original: `FUN_0811e2e4` @ 0x0811e2e4 (20 bytes,
@@ -94,7 +121,10 @@ unsafe fn active_session_fn() -> ActiveSession {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn ui_current_window() -> *mut u8 {
-    let session = active_session_fn()();
+    #[cfg(test)]
+    let session = ACTIVE_SESSION.with(|accessor| accessor.get()());
+    #[cfg(not(test))]
+    let session = ui_active_session();
     if session.is_null() {
         return core::ptr::null_mut();
     }
@@ -114,6 +144,41 @@ mod tests {
     static SEAM_LOCK: Mutex<()> = Mutex::new(());
     static mut STUB_SESSION: *mut u8 = ptr::null_mut();
     static mut STUB_CALLS: u32 = 0;
+
+    static SESSION_STATE_LOCK: Mutex<()> = Mutex::new(());
+    static mut LOCKED_SESSION: u32 = 0;
+    static mut SESSION_PHASE: u32 = 0;
+
+    unsafe extern "C" fn acquire_session() {
+        assert_eq!(SESSION_PHASE, 0);
+        SESSION_PHASE = 1;
+        window_manager().add(4).write(LOCKED_SESSION);
+    }
+
+    unsafe extern "C" fn release_session() {
+        assert_eq!(SESSION_PHASE, 1);
+        SESSION_PHASE = 2;
+        window_manager().add(4).write(0xdead_beef);
+    }
+
+    #[test]
+    fn active_session_snapshots_locked_word_before_unlock() {
+        let _guard = SESSION_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            SESSION_LOCK = acquire_session;
+            SESSION_UNLOCK = release_session;
+            for expected in [0, 1, 0x089c_b300, 0xffff_ffff] {
+                HOST_WINDOW_MANAGER = [0xfeed_face; 5];
+                LOCKED_SESSION = expected;
+                SESSION_PHASE = 0;
+                assert_eq!(ui_active_session() as usize, expected as usize);
+                assert_eq!(SESSION_PHASE, 2);
+                assert_eq!(HOST_WINDOW_MANAGER[4], 0xdead_beef);
+            }
+            SESSION_LOCK = super::super::scheduler_lock::scheduler_lock;
+            SESSION_UNLOCK = super::super::scheduler_lock::scheduler_unlock;
+        }
+    }
 
     unsafe extern "C" fn active_session_stub() -> *mut u8 {
         STUB_CALLS += 1;
@@ -159,7 +224,7 @@ mod tests {
     unsafe fn prepare(stub_session: *mut u8) {
         STUB_SESSION = stub_session;
         STUB_CALLS = 0;
-        ACTIVE_SESSION = active_session_stub;
+        ACTIVE_SESSION.with(|accessor| accessor.set(active_session_stub));
 
         // Poison the words bracketing +0x1c so a test catches a port that
         // reads the wrong offset.
