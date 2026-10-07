@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod context_tree_process;
 pub mod string_buffer_state_reset;
 pub mod record_gate_acquire;
 pub mod locked_state_cancel;
