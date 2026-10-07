@@ -158156,21 +158156,20 @@ functions:
       param_7/stack/r7: arg7
       param_8/stack/r8: arg8
       FUN_0814a08c: trace_buffer_get
-      FUN_0814a1c0: unported trace_buffer_entry_submit
+      FUN_0814a1c0: trace_buffer_install_entry
     notes: >-
       Raw osos.dec words from the push at 0x0807c724 through pop at
       0x0807c760 establish the exact 64-byte extent
       0x0807c724..0x0807c764; the next independently entered function starts
       at 0x0807c764. It saves all eight caller words, calls trace_buffer_get
-      at 0x0814a08c, and calls the next-function unported trace-buffer entry
+      at 0x0814a08c, and calls the ported trace-buffer entry
       submitter at 0x0814a1c0 with the returned buffer plus all eight original
       words. It has two outbound unconditional plain BL instructions and no
       predicated BL instructions. Independent whole-image A32 BL-immediate
       decoding finds four inbound direct plain BL calls (0x080c68f4,
       0x0813a6b0, 0x0813a8e0, and 0x0813a990), and zero predicated inbound
       BL calls. Ghidra's void return is inaccurate: the final helper result
-      remains in r0. Deliberate deviation: the unported 0x0814a1c0 target is
-      a verified fixed-address call on device and a volatile host-test seam;
+      remains in r0. The wrapper now calls trace_buffer_install_entry directly.
       Rust call/return replaces the retail register-save sequence while
       preserving all nine helper arguments and its r0 result.
   - address: 0x08077284
@@ -190243,21 +190242,20 @@ functions:
       param_7/stack/r7: arg7
       param_8/stack/r8: arg8
       FUN_0814a08c: trace_buffer_get
-      FUN_0814a1c0: unported trace_buffer_entry_submit
+      FUN_0814a1c0: trace_buffer_install_entry
     notes: >-
       Raw osos.dec words from the push at 0x0807c724 through pop at
       0x0807c760 establish the exact 64-byte extent
       0x0807c724..0x0807c764; the next independently entered function starts
       at 0x0807c764. It saves all eight caller words, calls trace_buffer_get
-      at 0x0814a08c, and calls the next-function unported trace-buffer entry
+      at 0x0814a08c, and calls the ported trace-buffer entry
       submitter at 0x0814a1c0 with the returned buffer plus all eight original
       words. It has two outbound unconditional plain BL instructions and no
       predicated BL instructions. Independent whole-image A32 BL-immediate
       decoding finds four inbound direct plain BL calls (0x080c68f4,
       0x0813a6b0, 0x0813a8e0, and 0x0813a990), and zero predicated inbound
       BL calls. Ghidra's void return is inaccurate: the final helper result
-      remains in r0. Deliberate deviation: the unported 0x0814a1c0 target is
-      a verified fixed-address call on device and a volatile host-test seam;
+      remains in r0. The wrapper now calls trace_buffer_install_entry directly;
       Rust call/return replaces the retail register-save sequence while
       preserving all nine helper arguments and its r0 result.
   - address: 0x08077284
@@ -227754,3 +227752,37 @@ functions:
       and preserved neighboring state. match.py exits 1: 12 original versus
       13 Rust instructions, added frame pointer, same +0x28 byte store,
       +0x2c/+0x34 addressing, two BL relocations and tail unlock. No device run.
+
+  - address: 0x0814a1c0
+    ghidra: FUN_0814a1c0
+    name: trace_buffer_install_entry
+    size: 216
+    sig: "u32 trace_buffer_install_entry(u8 *buffer, u32 interface, u32 mode, u32 parameter, u32 limit, u32 child_context, u32 selector, u32 flag, u32 derived)"
+    module: app/trace_buffer_install_entry
+    status: ported
+    vars: {param_1: buffer, param_2: interface, param_3: mode, param_4: parameter, param_5: limit, param_6: child_context, param_7: selector, param_8: flag, param_9: derived}
+    renames:
+      FUN_0818a128: counted_mutex_guard_acquire_lock
+      FUN_08149f68: trace_buffer_slot_presence_matches
+      FUN_082aadd4: operator_new
+      FUN_082972e4: buffer_pool_owner_construct
+      FUN_081efc28: resident_derived_buffer_pool_owner_construct
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0814a298: work_pending_notify
+    notes: >-
+      Raw A32 establishes [0x0814a1c0,0x0814a298), 216 code bytes, no literals;
+      the next independent PUSH begins at 0x0814a298. Two incoming plain BLs
+      at 0x0807c71c and 0x0807c758, ten outgoing plain BLs, zero predicated
+      calls in either direction. Lock +28; reject invalid/occupied slots with
+      2; allocate 88 or 96 bytes according to full-width derived; construct;
+      return 25 on NULL, otherwise publish returned pointer, notify, return 0.
+      Every normal path releases the counted lock. Existing Rust validator
+      polarity is reversed relative to raw: pass zero to its API to reproduce
+      retail r2=1 without changing that separate port. Derived constructor
+      0x081efc28 preserves r0 despite Ghidra void; retain its resident ABI.
+      Host suite passes 14663 tests; ARM release build passes. Standalone
+      native smoke exercises production installation with modeled boundaries:
+      slot publication before notification, occupied/invalid rejection and unlock.
+      No device execution. match.py exits 1: 54 original versus 52 Rust
+      instructions including two literals; LLVM merges allocation/constructor
+      branches into size/function selection and BLX, sharing the unlock path.
