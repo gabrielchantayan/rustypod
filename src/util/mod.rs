@@ -288,6 +288,7 @@ pub mod record_extend_body_size;
 pub mod record_header_clear_high_flags;
 pub mod record_header_set_body_size;
 pub mod record_read_trailer_header;
+pub mod record_list_insert_after;
 pub mod record_store_trailer_header;
 pub mod record_stream_begin;
 pub mod record_entry_payload_length;
