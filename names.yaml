@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813ece4
+    ghidra: FUN_0813ece4
+    name: opaque_vtable_08985198_construct
+    size: 16
+    sig: "u32 *opaque_vtable_08985198_construct(u32 *this)"
+    module: cxx/opaque_vtable_08985198_construct
+    status: ported
+    vars: {param_1/r0: this, r1: base_vtable}
+    notes: >-
+      Raw extent [0x0813ece4,0x0813ecf4) includes three A32 instructions
+      and the literal 0x08985198 at 0x0813ecf0. Ghidra's 12-byte extent
+      excludes that literal. The next function starts with CMP r0,#0,
+      BNE 0x082aad24, BX lr. Independent whole-image aligned ARM BL
+      decoding finds two incoming unconditional calls at 0x0813ec90 and
+      0x0813ecc8, zero predicated calls, no outgoing calls, and no incoming
+      plain-B tails. Load the opaque base vtable into r1, store at this
+      word 0, and return this in unchanged r0. Both allocating callers
+      consume r0 to replace the vtable and initialize words 1 and 2;
+      Ghidra's void return is incorrect. No class identity is inferred.
+      No callee seams or deliberate semantic deviations; volatile aligned
+      word store preserves the original access without host pointer-width
+      assumptions. Host tests cover header replacement, unchanged payload
+      and adjacent words, pointer identity, and single-word storage.
   - address: 0x0814d1c4
     ghidra: FUN_0814d1c4
     name: mov_atom_node_set_size
