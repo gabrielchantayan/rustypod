@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod virtual_dispatch_clear_active;
+pub use virtual_dispatch_clear_active::*;
 pub mod base_vtable_value_init;
 pub mod indexed_handle_owner_create;
 pub mod context_pending_complete;
