@@ -227045,3 +227045,42 @@ functions:
       mov_atom_info now calls the port directly, removing its flag seam.
       No semantic deviations. match.py shows the same single byte load
       with LLVM frame setup and pop return instead of bx lr.
+
+  - address: 0x08160e24
+    ghidra: FUN_08160e24
+    name: usb_payload_write
+    size: 64
+    sig: "u32 usb_payload_write(const u32 *owner, const u8 *buffer, u32 length)"
+    module: app/usb_payload_write
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: buffer
+      param_3/r2: length
+      local_8: completed
+      iVar1: status
+    notes: >-
+      Raw A32 words establish 64 bytes at 0x08160e24..0x08160e64,
+      ending with pop at 0x08160e60; the next real function starts with
+      push at 0x08160e64. Independent whole-image aligned BL decoding
+      finds two plain incoming calls at 0x08160a14 and 0x081d9478,
+      zero predicated incoming calls, one plain outgoing BL at 0x08160e4c
+      to the already ported usb_in_transfer (0x08294984), and zero
+      predicated outgoing calls. Reads the request word at owner +0x0c,
+      initializes completed to length, submits buffer synchronously on
+      endpoint 0x83, and returns completed on status zero or zero on any
+      nonzero status. Callers compare against requested length and either
+      cancel the endpoint or mark their stream failed and advance by the
+      returned byte count. Deliberate deviations: private generic operation
+      boundary for host tests; production directly reuses usb_in_transfer.
+      Target pointer storage uses four-byte word indices on all hosts.
+      Tests cover zero and maximal lengths, partial/zero/unmodified
+      completion, and positive/negative errors overriding completion.
+      Host suite passes 14628 tests and ARM release build passes.
+      Executable host smoke exercises the production wrapper with a host
+      engine, verifying request offset, endpoint, synchronous mode, initial
+      completion, partial success and error -257. No device execution.
+      match.py exits 1 with 16 original versus 18 Rust instructions:
+      LLVM adds frame setup and selects the returned completion in a
+      register rather than clearing its stack slot. The request load,
+      single transfer call and nonzero-status zero result remain.
