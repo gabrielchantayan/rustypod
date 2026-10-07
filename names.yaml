@@ -228309,3 +228309,24 @@ functions:
       Tests cover negative and valid selectors, nonzero/high-word
       revisions and formats, untouched surrounding bytes, null output
       on failure, and output alias ordering.
+
+  - address: 0x08138d34
+    ghidra: FUN_08138d34
+    name: service_handler_slot_value_set
+    size: 48
+    sig: "u32 service_handler_slot_value_set(void *context, u32 slot, i32 value)"
+    module: app/service_handler_slot_value_set
+    status: ported
+    vars: {param_1: context, param_2: slot, param_3: value, DAT_08138d64: service_handler_slot_table}
+    notes: >-
+      Raw A32 code spans [0x08138d34,0x08138d64), exactly 48 bytes;
+      0x08138d64 holds the 0x08ad0f34 fixed-table literal and the next
+      real function begins at 0x08138d68. Whole-image aligned BL decoding
+      finds two plain incoming calls at 0x08192e2c and 0x08193b84, zero
+      predicated incoming BLs, and zero outgoing BLs of either kind.
+      Ignore context. Unsigned (slot - 1) < 2 admits only slots 1 and 2;
+      signed value < 3 deliberately admits negative values. Store the
+      full value at +0x08 of the selected 0x114-byte record and return 0;
+      invalid inputs return 9 without modifying the table. The meaning
+      of this word is not established. Hosts reuse the existing shared
+      slot-table seam and its test mutex; target accesses the stock address.
