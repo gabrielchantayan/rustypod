@@ -5213,6 +5213,53 @@ pub unsafe extern "C" fn vector_push_back_elem4(
     }
 }
 
+/// vector_bucket_insert_unique_word — `FUN_0814d12c` @ `0x0814d12c`.
+/// Raw extent: 108 bytes, `0x0814d12c..0x0814d198`, where the next
+/// function starts `cmp r1, #4`. Two plain outgoing BLs (size and insert),
+/// zero predicated BLs; two plain inbound BLs, zero predicated callers.
+///
+/// Select a three-pointer vector by index, scan its words backward, and
+/// append the value only if absent. Advance end before storing to a non-NULL
+/// spare slot; when full, insert through the existing elem4 growth helper.
+///
+/// Deliberate deviations: the unported `0x083e6500` helper uses
+/// `VECTOR_PUSH_BACK_ELEM4_OPS`; host vector strides follow `repr(C)` native
+/// pointers (24 bytes on x86-64, the original 12 on ARM). Ghidra's fourth
+/// argument is only a saved scratch register, not an input.
+///
+/// # Safety
+/// `buckets` must contain a writable vector at `index`. Its initialized
+/// words must be aligned/readable, and its spare end slot writable unless
+/// NULL. Full storage must satisfy the configured insertion helper contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn vector_bucket_insert_unique_word(
+    buckets: *mut VectorStorage,
+    index: u32,
+    value: u32,
+) {
+    let vector = buckets.add(index as usize);
+    let mut remaining = vector_size_elem4_alias_7a48(vector.cast());
+    loop {
+        remaining = remaining.wrapping_sub(1);
+        if remaining < 0 {
+            break;
+        }
+        if (*vector).begin.cast::<u32>().add(remaining as usize).read() == value {
+            return;
+        }
+    }
+    let end = (*vector).end;
+    if end == (*vector).end_of_storage {
+        (vector_push_back_elem4_ops().insert_aux)(vector, end, &value);
+        return;
+    }
+    (*vector).end = end.wrapping_add(4);
+    if !end.is_null() {
+        end.cast::<u32>().write(value);
+    }
+}
+
 /// A `{base, count}` pointer array — the two words [`array_at_checked`]
 /// reads. Addressed by field, so the count lands one word after the
 /// base on both the 32-bit target and a 64-bit host.
@@ -11917,6 +11964,102 @@ mod tests {
             elem4_insert_aux_calls().is_empty(),
             "distinct end/capacity stays on the fast path"
         );
+    }
+
+    #[test]
+    fn bucket_unique_word_preserves_duplicates_and_appends_only_to_selected_bucket() {
+        let _guard = push_back_elem4_guard();
+        let mut left = [17u32, 0xdead_beef];
+        let mut words = [0u32, u32::MAX, 42, 0xdead_beef, 0xdead_beef];
+        let left_begin = left.as_mut_ptr().cast::<u8>();
+        let begin = words.as_mut_ptr().cast::<u8>();
+        let mut buckets = [
+            VectorStorage { begin: left_begin, end: unsafe { left_begin.add(4) },
+                end_of_storage: unsafe { left_begin.add(8) } },
+            VectorStorage { begin, end: unsafe { begin.add(12) },
+                end_of_storage: unsafe { begin.add(20) } },
+        ];
+        unsafe {
+            // First, middle, and last matches must all leave end unchanged.
+            for value in [0, u32::MAX, 42] {
+                vector_bucket_insert_unique_word(buckets.as_mut_ptr(), 1, value);
+                assert_eq!(buckets[1].end, begin.add(12));
+            }
+            vector_bucket_insert_unique_word(buckets.as_mut_ptr(), 1, 99);
+            vector_bucket_insert_unique_word(buckets.as_mut_ptr(), 1, 99);
+            assert_eq!(buckets[1].end, begin.add(16));
+            assert_eq!(buckets[1].begin, begin);
+            assert_eq!(buckets[1].end_of_storage, begin.add(20));
+            assert_eq!(buckets[0].end, left_begin.add(4));
+        }
+        assert_eq!(words, [0, u32::MAX, 42, 99, 0xdead_beef]);
+        assert_eq!(left, [17, 0xdead_beef]);
+    }
+
+    #[test]
+    fn bucket_unique_word_full_duplicate_does_not_grow_and_empty_spare_slot_appends() {
+        let _guard = push_back_elem4_guard();
+        let mut word = 7u32;
+        let begin = core::ptr::addr_of_mut!(word).cast::<u8>();
+        let end = unsafe { begin.add(4) };
+        let mut vector = VectorStorage { begin, end, end_of_storage: end };
+        // A full duplicate must not cross the growth boundary.
+        unsafe {
+            vector_bucket_insert_unique_word(&mut vector, 0, 7);
+            assert_eq!(vector.end, end);
+            vector.end = begin;
+            vector_bucket_insert_unique_word(&mut vector, 0, u32::MAX);
+            assert_eq!(vector.end, end);
+        }
+        assert_eq!(word, u32::MAX);
+    }
+
+    #[test]
+    fn bucket_unique_word_null_empty_spare_end_advances_without_store() {
+        let _guard = push_back_elem4_guard();
+        let mut vector = VectorStorage {
+            begin: core::ptr::null_mut(), end: core::ptr::null_mut(),
+            end_of_storage: 0x1000usize as *mut u8,
+        };
+        unsafe { vector_bucket_insert_unique_word(&mut vector, 0, 123) };
+        assert_eq!(vector.end, 4usize as *mut u8);
+    }
+
+    #[test]
+    fn bucket_unique_word_growth_preserves_contents_and_suppresses_repeat() {
+        let _guard = push_back_elem4_guard();
+        static mut GROWN_WORDS: [u32; 4] = [0; 4];
+        unsafe extern "C" fn grow(
+            vector: *mut VectorStorage, position: *mut u8, element: *const u32,
+        ) {
+            let old = (*vector).begin;
+            let count = (position as usize - old as usize) / 4;
+            assert!(count < 4);
+            let grown = core::ptr::addr_of_mut!(GROWN_WORDS).cast::<u32>();
+            core::ptr::copy_nonoverlapping(old.cast::<u32>(), grown, count);
+            grown.add(count).write(element.read());
+            (*vector).begin = grown.cast();
+            (*vector).end = grown.add(count + 1).cast();
+            (*vector).end_of_storage = grown.add(4).cast();
+        }
+        unsafe {
+            core::ptr::addr_of_mut!(VECTOR_PUSH_BACK_ELEM4_OPS)
+                .write_volatile(VectorPushBackElem4Ops { insert_aux: grow });
+            let mut old = [11u32, 22];
+            let begin = old.as_mut_ptr().cast::<u8>();
+            let mut vector = VectorStorage {
+                begin, end: begin.add(8), end_of_storage: begin.add(8),
+            };
+            vector_bucket_insert_unique_word(&mut vector, 0, 33);
+            let grown = core::ptr::addr_of_mut!(GROWN_WORDS).cast::<u32>();
+            assert_eq!(core::slice::from_raw_parts(vector.begin.cast::<u32>(), 3),
+                &[11, 22, 33]);
+            assert_eq!(vector.end, grown.add(3).cast());
+            assert_eq!(vector.end_of_storage, grown.add(4).cast());
+            vector_bucket_insert_unique_word(&mut vector, 0, 33);
+            assert_eq!(vector.end, grown.add(3).cast());
+            assert_eq!(old, [11, 22]);
+        }
     }
 
     #[test]

@@ -227204,3 +227204,44 @@ functions:
       device execution. ARM release build succeeds. match.py exits 1 with
       16 instructions on each side: LLVM inlines both accessors, adds frame
       setup and preserves the singleton lookup and bx r2 tail dispatch.
+
+  - address: 0x0814d12c
+    ghidra: FUN_0814d12c
+    name: vector_bucket_insert_unique_word
+    size: 108
+    sig: "void vector_bucket_insert_unique_word(VectorStorage *buckets, u32 index, u32 value)"
+    module: cxx/templates
+    status: ported
+    renames:
+      param_1/r0: buckets
+      param_2/r1: index
+      param_3/r2: value
+      param_4/r3: unused_saved_scratch
+      piVar3/r4: vector
+      iVar1/r0: remaining
+      piVar2/r1: end
+      local_10: insertion_value
+      FUN_083d7a48: vector_size_elem4_alias_7a48
+      FUN_083e6500: insert_aux (existing VECTOR_PUSH_BACK_ELEM4_OPS seam)
+    notes: >-
+      Raw ARM establishes 0x0814d12c..0x0814d198, 108 bytes; the next
+      function starts cmp r1,#4. Independent aligned-word BL decoding finds
+      two plain inbound calls at 0x080958f8 and 0x081b7674, no predicated
+      inbound calls; two plain outgoing calls at 0x0814d140 to 0x083d7a48
+      and 0x0814d190 to 0x083e6500, no predicated outgoing calls. Select
+      vector index with a 12-byte target stride, scan initialized u32 words
+      backward and return on equality; otherwise append once. Full storage
+      passes vector, old end and a stack copy of value to the existing
+      grow/insert helper. Spare storage advances end before a NULL-guarded
+      word store. Ghidra's fourth argument is not consumed. Callers use
+      bucket indices for categorized values, including index 3. Deliberate
+      deviations: reuse the volatile elem4 growth seam and native repr(C)
+      pointer fields for host fixtures (24-byte host stride, 12-byte target
+      stride). Host suite and ARM release build pass. Edge tests cover
+      duplicates at every position, selected-bucket isolation, empty and
+      NULL spare storage, full duplicate suppression, and growth preserving
+      contents. Executable host smoke produces [10,20,30,40] after repeated
+      insertions. match.py exits 1 with 27 original versus 38 Rust
+      instructions: the backward scan, size BL, NULL-guarded store and
+      full-storage insertion remain; LLVM adds frame setup and dispatches
+      the existing insertion seam via BLX. No on-device execution.
