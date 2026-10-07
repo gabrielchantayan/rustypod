@@ -227084,3 +227084,34 @@ functions:
       LLVM adds frame setup and selects the returned completion in a
       register rather than clearing its stack slot. The request load,
       single transfer call and nonzero-status zero result remain.
+
+  - address: 0x0814d240
+    ghidra: FUN_0814d240
+    name: mov_atom_node_set_offset
+    size: 48
+    sig: "u32 mov_atom_node_set_offset(MovAtomNode *node, i64 offset)"
+    module: mov/atom_node
+    status: ported
+    vars: {param_1/r0: node, param_2/r1: unused_alignment_slot, param_3/r2: offset_lo, param_4/r3: offset_hi, r4: saved_node, r5: saved_offset_lo, r6: saved_offset_hi}
+    notes: >-
+      Raw A32 words establish 48 bytes at 0x0814d240..0x0814d270,
+      ending with e8bd8070; the next real function is the flag getter
+      beginning with e5d00020 at 0x0814d270. Independent whole-image
+      BL decoding finds two plain incoming calls at 0x081d8390 and
+      0x081f3ed0, zero predicated incoming calls and no outgoing calls.
+      SUBS low,#0 followed by SBCS high,zero tests a signed 64-bit
+      file offset. Negative offsets return 1 without accessing node;
+      otherwise store the low word at +0x10 then high at +0x14 and
+      return 0. Both MOV atom parsers supply their file offset in r2:r3.
+      AAPCS i64 alignment leaves r1 unused. Reuses the existing registered
+      atom_node module and target-width repr(C) node fields; no new seams
+      or semantic deviations. Volatile stores preserve the stock order.
+      Boundary tests cover negative extremes, zero, low-word sign set,
+      high-word transitions, maximal accepted offset and poisoned neighbors.
+      Added state-transition regression proves rejected updates preserve
+      the last accepted offset. Host suite passes 14631 tests; ARM release
+      build passes. Executable host smoke verifies wide acceptance,
+      rejection preserving state, negative NULL safety and zero replacement.
+      match.py exits 1: LLVM emits 8 instructions versus 12, testing the
+      high-word sign directly and using predicated stores at +0x10/+0x14,
+      preserving status values and store order. No on-device execution.
