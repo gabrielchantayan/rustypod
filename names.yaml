@@ -17481,6 +17481,33 @@ functions:
       literal installation, the base flag clear, and an untouched trailing
       sentinel. No class identity beyond observed vtable behavior is claimed.
 
+  - address: 0x0814878c
+    ghidra: FUN_0814878c
+    name: vtable_089865c8_construct
+    size: 20
+    sig: "void *vtable_089865c8_construct(void *this, u32 payload)"
+    module: cxx/vtable_089865c8_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: payload
+      puVar1: constructed
+      FUN_081b6968: vtable_flag_payload_construct
+      DAT_081487a0: derived_vtable (0x089865c8)
+    notes: >-
+      Raw ARM verifies 20 instruction bytes through 0x0814879c and a
+      four-byte literal at 0x081487a0, with the next real function at
+      0x081487a4 (24-byte extent). Whole-image decoding finds two inbound
+      plain BL calls at 0x08148060 and 0x0814861c, no predicated BL calls,
+      and one outbound plain BL at 0x08148790 to the existing constructor.
+      Forward this and payload, install vtable 0x089865c8 on the returned
+      pointer, and return it. No deviations at this boundary; reuse the
+      callee's existing base-constructor seam without inferring class identity.
+      Tests cover zero and full-width payloads, flag clearing, padding and
+      adjacent sentinels, synchronized with the callee's seam tests.
+      ARM match confirms the direct call, literal load, store and return;
+      LLVM adds a frame pointer and includes the literal in its 28-byte symbol.
+
   - address: 0x081d5e2c
     ghidra: FUN_081d5e2c
     name: parse_result_scope_construct

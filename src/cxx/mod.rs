@@ -909,6 +909,7 @@ pub mod vtable_flag_construct;
 pub mod vtable_flag_payload_construct;
 pub mod vtable_flag_payload_byte_construct;
 pub mod vtable_0899219c_construct;
+pub mod vtable_089865c8_construct;
 pub mod opaque_vtable_payload_construct;
 pub mod vtable_shared_handle_construct;
 pub mod vtable_08980110_construct;
