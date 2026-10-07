@@ -226761,3 +226761,32 @@ functions:
       helper calls become BLX and the final virtual call becomes a BX tail.
       Host suite: 14598 passed. External smoke exercised changed metadata
       committing value seven with result 107, then an unchanged zero return.
+  - address: 0x08161a80
+    ghidra: FUN_08161a80
+    name: file_seek_signed_absolute
+    size: 36
+    sig: "i32 file_seek_signed_absolute(void *const *handle, i32 offset)"
+    module: fs/file_seek_signed
+    status: ported
+    vars: {param_1: handle, param_2: offset}
+    notes: >-
+      Raw A32 words establish extent 0x08161a80..0x08161aa4, followed by
+      a distinct handle-load/tail-branch function. Whole-image decoding
+      finds two plain inbound BLs at 0x08236a4c and 0x08236bd4, no
+      predicated inbound BLs, and one plain outbound BL at 0x08161a9c
+      to the already-ported ft_platform_file_seek at 0x082787b8.
+      Loads the outer handle's first pointer, copies offset to r2,
+      arithmetic-shifts offset by 31 into r1/r3, and stacks origin zero.
+      Returns the callee status unchanged; Ghidra's void return is wrong,
+      as both raw callers compare r0 against zero. Negative offsets
+      become unsigned 64-bit positions above the file length and fail.
+      No algorithm deviations; host pointer slots use native pointer width.
+      Tests exercise absolute zero/end/out-of-range, INT32_MAX, negative
+      offsets with UINT32_MAX length, state/open errors, and balanced locks
+      through the real seek body. Host suite passes all 14610 tests; ARM
+      release build passes. match.py reports 9 original versus 11 Rust
+      instructions: LLVM adds a frame pointer and omits the unused
+      duplicate-offset sign word in r1, which the callee overwrites.
+      A throwaway A32 interpreter executes raw original and compiled Rust
+      bodies for 24 offset/status cases, verifying handle, offset words,
+      origin, returned status, and restored stack. No device execution.

@@ -111,6 +111,8 @@ pub mod zero_cache_position;
 pub mod cache_lock;
 /// Platform C++ file-object read wrapper @ 0x082784b8.
 pub mod file_read;
+/// Signed absolute seek through an outer file handle @ 0x08161a80.
+pub mod file_seek_signed;
 /// Exact-length resource-reader transfer @ 0x082a6aa4.
 pub mod resource_reader_read_exact;
 /// Absolute resource-reader file seek @ 0x082a6ad8.
