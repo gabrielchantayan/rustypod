@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Mode-selected two-word record setter @ 0x0814d91c.
+pub mod mode_record_pair_set;
 /// Mode-selected offset translation @ 0x0814da30.
 pub mod mode_offset_translate;
 /// Lazy aligned storage-transfer scratch buffer @ 0x0814da74.
