@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814cd44
+    ghidra: FUN_0814cd44
+    name: chunk_probe_context_destroy
+    size: 4
+    sig: "void *chunk_probe_context_destroy(void *context)"
+    module: app/chunk_probe_context_destroy
+    status: ported
+    vars: {param_1/r0: context}
+    notes: >-
+      Raw extent [0x0814cd44,0x0814cd48) is the sole A32 word
+      0xe12fff1e (BX LR). Next body loads object member +4 and
+      tail-dispatches its vtable slot +0x14; it is a separate function.
+      Whole-image aligned raw BL decoding verifies two incoming plain
+      calls at 0x0820c7a4 and 0x0820c7ac, zero predicated calls, zero
+      outgoing calls, and no aligned DATA references. Caller 0x0820c668
+      constructs a four-byte stack temporary through 0x0814cd40 and
+      probes chunk headers through 0x0814cbb4, then destroys the
+      temporary on both result paths. No concrete class identity is
+      inferred. Return without memory access, preserving incoming r0;
+      both callers discard that result. No seams or semantic deviations.
+      Naked ARM body preserves all registers exactly; host model returns
+      its pointer unchanged. Host tests cover NULL, unaligned and invalid
+      pointer words, four-byte temporary contents and adjacent canaries.
+      Host suite and ARM release build passed. Native public-entry smoke
+      passed. match.py reports one instruction versus one, EXACT MATCH.
+      No physical-device execution.
   - address: 0x0814d0d0
     ghidra: FUN_0814d0d0
     name: playback_clock_set_position
