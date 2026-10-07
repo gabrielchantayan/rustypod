@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Lazy aligned storage-transfer scratch buffer @ 0x0814da74.
+pub mod storage_scratch_buffer_ensure;
 /// Extent-backed storage buffer constructor @ 0x081c01e4.
 pub mod storage_buffer_construct;
 /// Extent-backed storage buffer initialization @ 0x081c0180.
