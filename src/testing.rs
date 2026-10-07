@@ -655,6 +655,7 @@ pub mod hints {
     pub const ITERATOR_STATE_SEEK_CONSTRUCT: usize = 0x1c20_0000;
     pub const ITERATOR_STATE_SEEK_BEGIN: usize = 0x1c30_0000;
     pub const ITERATOR_STATE_CURRENT_INDEX: usize = 0x1c40_0000;
+    pub const ITERATOR_STATE_REFRESH: usize = 0xe710_0000;
     // 0x1c70_0000: dedicated to app/vtable_set's collection reverse-search
     // fixture; mappings never unmap, so no other port may share this hint.
     pub const COLLECTION_FIND_PREVIOUS_HANDLER: usize = 0x1c70_0000;
