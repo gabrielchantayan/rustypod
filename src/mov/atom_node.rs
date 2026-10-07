@@ -256,6 +256,28 @@ pub unsafe extern "C" fn mov_atom_node_get_size(node: *const MovAtomNode) -> u64
     (u64::from(size_hi) << 32) | u64::from(size_lo)
 }
 
+/// MOV atom node flag getter — original: `FUN_0814d270` @ **0x0814d270**
+/// (8 bytes, 0x0814d270..0x0814d278, two instructions, no literal pool).
+/// The next real function starts at 0x0814d278 with `strb r1,[r0,#32]`.
+/// Full-image A32 decoding finds two incoming plain BL calls (0x081c2258
+/// and 0x081c8094), zero predicated BL calls, and no aligned DATA references.
+/// The body has no calls: `ldrb r0,[r0,#32]; bx lr`.
+///
+/// Returns the byte at node +0x20 unchanged, including non-boolean values.
+/// No NULL guard is added. Deliberate semantic deviations: none; a volatile
+/// byte read preserves the original single access. ARM codegen adds a frame
+/// (`push {fp,lr}; mov fp,sp`) and returns via `pop {fp,pc}` instead of `bx lr`.
+///
+/// # Safety
+///
+/// `node` must point to one readable [`MovAtomNode`].
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_get_flag")]
+pub unsafe extern "C" fn mov_atom_node_get_flag(node: *const MovAtomNode) -> u8 {
+    unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).flag)) }
+}
+
 /// MOV atom node child-B getter — original: `FUN_0814d284` @
 /// **0x0814d284** (8 bytes, 0x0814d284..0x0814d28c, 2 instructions).
 /// The next real function begins with `cmp r1, #0` at 0x0814d28c.
@@ -499,6 +521,20 @@ mod tests {
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
     use std::sync::LazyLock;
 
+
+    #[test]
+    fn flag_getter_preserves_every_byte_and_ignores_neighbor_fields() {
+        let mut words = [0xa5a5_5a5au32; 10];
+        for flag in 0..=u8::MAX {
+            words[8] = 0xff80_0000 | u32::from(flag);
+            let before = words;
+            assert_eq!(
+                unsafe { mov_atom_node_get_flag(words.as_ptr().cast()) },
+                flag,
+            );
+            assert_eq!(words, before);
+        }
+    }
     #[test]
     fn child_b_getter_preserves_null_and_all_link_bits_without_touching_neighbors() {
         let mut words = [0xa5a5_5a5au32; 10];

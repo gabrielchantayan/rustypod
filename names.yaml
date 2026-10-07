@@ -45656,7 +45656,7 @@ functions:
       +0x24 fourcc key; offset setter rejects < 0, size setter
       rejects < 8, both fields born -1. The payload-offset getter
       0x0814d230 is now ported directly as mov_atom_node_get_offset;
-      the remaining four callees dispatch through MOV_ATOM_INFO_OPS.
+      the flag getter is direct too; root, search and size retain dispatch.
       Ghidra C is faithful here (mvneq r0,#0 is move-NOT, i.e. -1).
 
   - address: 0x081c83b4
@@ -227022,3 +227022,26 @@ functions:
       saved result. Host suite passes 14624 tests; ARM release build passes.
       Executable host smoke verifies client mutation, full-width status,
       NULL error and lock release. No on-device execution.
+
+  - address: 0x0814d270
+    ghidra: FUN_0814d270
+    name: mov_atom_node_get_flag
+    size: 8
+    sig: "u8 mov_atom_node_get_flag(const MovAtomNode *node)"
+    module: mov/atom_node
+    status: ported
+    renames:
+      param_1/r0: node
+      param_1_plus_0x20: flag
+    notes: >-
+      Raw words e5d00020 e12fff1e establish the exact 8-byte extent
+      0x0814d270..0x0814d278: ldrb r0,[r0,#32]; bx lr. The next real
+      function begins at 0x0814d278 with strb r1,[r0,#32]. Full-image
+      A32 decoding finds two incoming plain BL calls, 0x081c2258 and
+      0x081c8094, zero predicated BL calls, and no aligned DATA references.
+      The body makes no calls. Returns the MOV atom node flag byte at
+      +0x20 unchanged, not normalized to bool, with no NULL guard.
+      Host tests cover all 256 byte values and poisoned neighbors.
+      mov_atom_info now calls the port directly, removing its flag seam.
+      No semantic deviations. match.py shows the same single byte load
+      with LLVM frame setup and pop return instead of bx lr.
