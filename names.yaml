@@ -227535,3 +227535,29 @@ functions:
       5 Rust instructions, argument move r1=r2 and tail branch to the
       existing builder, rather than three calls; intentional structural
       diff. No new firmware seam or module. No physical-device execution.
+
+  - address: 0x0814ab18
+    ghidra: FUN_0814ab18
+    name: gateway_timer_activate
+    size: 56
+    sig: "u32 gateway_timer_activate(u8 *object)"
+    module: app/gateway_timer_activate
+    status: ported
+    vars: {param_1: object, r4: object, "object+0x50": gateway_requested}
+    notes: >-
+      Raw A32 extent [0x0814ab18,0x0814ab50), ending after POP {r4,pc};
+      the next real function starts at 0x0814ab50. Whole-image word decoding
+      finds two incoming plain BL sites at 0x0814aeec and 0x0814af58,
+      zero predicated BLs. The body has two plain BLs and zero predicated
+      BLs: gateway_request_blocking at 0x08048000 with payload 25 and flag
+      zero, conditionally when byte object+0x50 is zero, then unconditional
+      timer_rearm_after_15000 at 0x0814b490. Store one to the request byte
+      after the gateway returns; preserve all nonzero initial values.
+      Always return one after timer re-arm. Both callees reuse existing
+      direct Rust ports; no new seam or algorithmic deviation. Host tests
+      cover all nonzero byte values, repeat activation, gateway-side byte
+      mutation and request/store/re-arm ordering. ARM match.py reports
+      14 original versus 15 Rust instructions: same conditional request,
+      byte store, unconditional re-arm and constant result, with LLVM's
+      frame-pointer prologue and reordered argument moves. No physical
+      device execution.

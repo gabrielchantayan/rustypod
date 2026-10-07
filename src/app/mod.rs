@@ -515,6 +515,7 @@ pub mod volume_channel_set_level;
 pub mod volume_channel_set_balance;
 pub mod volume_controller_reschedule_timer;
 pub mod timer_rearm_after_15000;
+pub mod gateway_timer_activate;
 pub mod derived_object_construct;
 pub mod derived_object_construct_0899f394;
 pub mod configuration_entry;
