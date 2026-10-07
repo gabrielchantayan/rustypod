@@ -9,15 +9,15 @@
 //!
 //! Algorithm: begin with status `INT_MAX`. Selectors below three lock their
 //! 28-byte table entry at 0x08a25650, load that selector's optional query
-//! object from the 0x08a255e4 pointer table, and invoke the unported query
-//! routine at 0x081637fc with a stack status word. A zero query return makes
+//! object from the 0x08a255e4 pointer table, and invoke the Rust object-status
+//! query with a stack status word. A zero query return makes
 //! that written word the result; any nonzero return restores `INT_MAX`. The
 //! mutex release is unconditional once acquired, and both mutex return values
 //! are deliberately ignored as in the raw ARM body.
 //!
 //! Deliberate deviation: host builds use writable stand-ins for the firmware
-//! tables and a volatile query seam, allowing the unported callee's return and
-//! status-write contract to be tested. Target builds call 0x081637fc directly.
+//! tables and a volatile query seam for caller-isolation tests. Target builds
+//! call the ported service_handler_object_status directly.
 
 #[cfg(test)]
 extern crate std;
@@ -41,11 +41,6 @@ struct ServiceHandlerStatusOps {
     query: StatusQuery,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_status_query(object: *mut u8, status: *mut i32) -> u32 {
-    let query: StatusQuery = core::mem::transmute(0x0816_37fcusize);
-    query(object, status)
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn unavailable_status_query(_object: *mut u8, _status: *mut i32) -> u32 {
@@ -113,7 +108,7 @@ pub unsafe extern "C" fn service_handler_status(selector: u32) -> i32 {
         let object = status_query_table().add(selector as usize).read();
         if object != 0 {
             #[cfg(target_os = "none")]
-            let query_status = firmware_status_query(object as usize as *mut u8, &mut status);
+            let query_status = crate::app::service_handler_object_status::service_handler_object_status(object as usize as *mut u8, &mut status);
             #[cfg(not(target_os = "none"))]
             let query_status = (status_ops().query)(object as usize as *mut u8, &mut status);
             if query_status != 0 {
