@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08136fc4
+    ghidra: FUN_08136fc4
+    name: wave_has_small_tagged_descriptor
+    size: 48
+    sig: "u32 wave_has_small_tagged_descriptor(const u32 *owner)"
+    module: util/wave_has_small_tagged_descriptor
+    status: ported
+    renames:
+      param_1: owner
+      piVar1: descriptor
+      owner+4: descriptor_address
+      descriptor+0: tag
+      descriptor+4: size
+    notes: >-
+      Raw ARM words establish [0x08136fc4,0x08136ff4), 48 bytes;
+      next independent entry starts with mov r1,r0. Whole-image aligned
+      decoding finds two incoming plain BLs at 0x08137154 and 0x08207430,
+      zero predicated BL callers and zero outgoing calls. Return one iff
+      owner word one is not 0xffffffff, descriptor word zero equals
+      0xffff0000 and descriptor word one is unsigned less than four.
+      The WAVE validator bypasses RIFF parsing for this case; its caller
+      selects a separate loading path. Deeper tag meaning is unresolved.
+      Preserve target-width pointers, all-ones rather than NULL sentinel,
+      tag-first short circuit, and unsigned size comparison. No deliberate
+      behavioral deviations. All 14703 host tests and ARM release build
+      pass. Host edges cover sentinel, exact and near-miss tags, all accepted
+      sizes, four, high-bit sizes, and a wrong tag at the mapping's final
+      word. Standalone public-entry smoke exercises sizes zero, three, four
+      and all-ones, wrong tag and sentinel. No physical-device execution.
   - address: 0x08137034
     ghidra: FUN_08137034
     name: wave_find_chunk
