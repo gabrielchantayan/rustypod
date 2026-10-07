@@ -69,6 +69,38 @@ functions:
       callees). ARM release build passed. match.py exits 1: thirteen versus
       twelve instructions, swapped saved registers and an added frame pointer;
       three calls, +8/+12 stores, divisor 1000 and tail unlock remain. No device run.
+  - address: 0x0813ec80
+    ghidra: FUN_0813ec80
+    name: two_word_value_record_create
+    size: 52
+    sig: "u32 *two_word_value_record_create(const u32 *source)"
+    module: cxx/two_word_value_record_create
+    status: ported
+    vars: {param_1/r0/r4: source, puVar1/r0: record, r2: copied_word}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_0813ece4: opaque_vtable_08985198_construct
+      DAT_0813ecb0: TWO_WORD_VALUE_RECORD_VTABLE
+    notes: >-
+      Raw words establish [0x0813ec80,0x0813ecb4), 52 bytes: twelve
+      A32 instructions plus literal 0x089908d8 at 0x0813ecb0. Ghidra's
+      48-byte size omits the literal; the next real function begins with
+      PUSH at 0x0813ecb4. Independent decoding finds two outgoing plain
+      BLs, zero predicated BLs, and two incoming plain BLs at 0x0815f140
+      and 0x0815fb88, with zero predicated incoming BLs. Allocate 12 bytes,
+      call the ported base constructor, replace word 0 with the opaque
+      derived vtable, then read/store source words 0 and 1 into record
+      words 1 and 2 in that order. Return record in r0, correcting
+      Ghidra's void signature. Class identity is not inferred. Existing
+      heap and constructor ports are reused without new seams. Aligned
+      volatile u32 accesses preserve target layout and alias-sensitive
+      ordering; no semantic deviations. Host tests cover full-width bits,
+      unchanged source and neighbors, pointer identity, and overlapping
+      source access order. Host suite and ARM release build passed.
+      Native public-entry smoke produced [089908d8,12345678,87654321].
+      match.py exits 1: added frame pointer/save registers, r1 instead
+      of r2, and included literal; two BLs and ordered word accesses
+      remain. No device run.
   - address: 0x0813ece4
     ghidra: FUN_0813ece4
     name: opaque_vtable_08985198_construct
