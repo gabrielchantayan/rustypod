@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08161b04
+    ghidra: FUN_08161b04
+    name: owned_object_handle_release
+    size: 36
+    sig: "u8 **owned_object_handle_release(u8 **slot)"
+    module: cxx/owned_object_handle_release
+    status: ported
+    vars: {param_1: slot, r4: saved_slot, r0: object, r1: virtual_method}
+    notes: >-
+      Raw A32 extent [0x08161b04,0x08161b28) ends with POP {r4,pc};
+      the next independent function begins with PUSH {r4,lr}. Whole-image
+      aligned decoding verifies two inbound plain BLs at 0x082369d4 and
+      0x08236b3c, zero predicated inbound BLs, and zero outgoing plain or
+      predicated BLs. One outgoing BLXNE at 0x08161b1c dispatches the
+      non-NULL object's vtable word 1 (+4), passing the object in r0.
+      The concrete virtual method remains unnamed and dynamically resolved.
+      Return the original handle regardless of callback result; do not clear
+      the slot or delete the handle. Constructor 0x08161abc stores an
+      allocated object pointer, and caller 0x082368b8 separately deletes
+      the handle after this release. Host pointer and vtable words widen
+      following owned_object_handle_replace; no target behavioral deviation
+      or new retail-call seam. Tests cover NULL skipping, exact handle
+      return, neighboring slots, retained slots, repeated release, and
+      callback mutation without an overriding clear. The host suite passed
+      14604 tests; executable smoke exercised NULL and live-object paths.
+      ARM release build passed. match.py exited 1 with 13 Rust instructions
+      versus nine original: LLVM uses an early NULL return, a larger frame,
+      and an unconditional BLX inside the non-NULL branch instead of BLXNE.
+      Slot +4 dispatch, object argument, and saved-handle return are preserved.
   - address: 0x08150238
     ghidra: FUN_08150238
     name: owned_storage_initialize
