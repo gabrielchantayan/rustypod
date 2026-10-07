@@ -226512,3 +226512,28 @@ functions:
       host pointer fields; index and count arithmetic retain ARM wrapping.
       Host tests cover repeated, leading, absent and trailing dots,
       multibyte indices and suffixes, one-codepoint, empty and NULL payloads.
+  - address: 0x081623b0
+    ghidra: FUN_081623b0
+    name: handler_select
+    size: 200
+    sig: "void handler_select(RefcountedBody **output, HandlerRegistry *registry, u32 query, u32 identifier)"
+    module: app/handler_select
+    status: ported
+    renames:
+      param_1: output
+      param_2: registry
+      param_3: query
+      param_4: identifier
+      FUN_08162370: identifier_handle_lookup
+    notes: >-
+      Raw A32 establishes [0x081623b0,0x08162478); the next entry pushes
+      r4-r8 and lr. Independent aligned whole-image BL decoding finds
+      two incoming plain calls at 0x081624c0 and 0x081626ac, no predicated
+      calls. Body contains nine plain BL instructions and one BLX through
+      virtual slot 5. Prefer the nonzero identifier lookup when its body
+      has an implementation; otherwise scan the live handle vector for
+      the first nonzero predicate result, copy-construct output, then
+      release the temporary. Stock helper 0x08162370 is a verified identifier
+      vector search plus handle construction, retained as a direct call.
+      Existing Rust slot-1 lifecycle helpers are reused. Deliberate deviation:
+      repr(C) host pointers widen; vector word-span count remains unsigned.
