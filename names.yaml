@@ -228231,3 +228231,32 @@ functions:
       tests, ARM release build and executable lookup/unlink smoke passed.
       match.py reports 22 versus 30 instructions; LLVM synthesizes 0xffff,
       short-circuits tag reads, adds a frame pointer and preserves link traversal.
+
+  - address: 0x08138de8
+    ghidra: FUN_08138de8
+    name: service_handler_lifecycle_set_format
+    size: 124
+    module: app/service_handler_availability
+    status: ported
+    sig: "u32 service_handler_lifecycle_set_format(void *manager, i32 selector, u32 format, u32 revision, u8 *output)"
+    vars: {param_1/r0: manager, param_2/r1: selector, param_3/r2: format, param_4/r3: revision, param_5/lr: output, iVar1/r0: status, uVar3/r12: length, iVar2/r1: lifecycle_record}
+    renames: {FUN_08030f44: heap_panic, DAT_08138e60: service_handler_lifecycle_records}
+    notes: >-
+      Raw A32 extent [0x08138de8,0x08138e64) is 120 instruction bytes
+      plus the 0x08ad0f34 table literal at 0x08138e60. The next real
+      function starts with bic r0,r2,#0x1f00. Whole-image aligned BL
+      decoding finds two unconditional incoming calls at 0x08164928
+      and 0x08193288, no predicated incoming calls. The body contains
+      zero plain BLs and one signed BLGE to canonical heap_panic at
+      0x08030f44. Ignore manager; signed selectors >=3 are fatal,
+      negative selectors remain accepted. Accept only full-word format
+      1 or 2 with full-word revision zero, yielding length 16 or 20.
+      Store format, zero revision, and length at lifecycle record
+      +0x10..+0x12 (stride 0x114). Invalid pairs clear these bytes,
+      return 3, and leave output untouched; valid pairs write one output
+      byte after the record stores and return 0. Ghidra's void return
+      and 120-byte extent are incorrect. Host builds reuse the existing
+      five-record lifecycle fixture; device behavior is unchanged.
+      Tests cover negative and valid selectors, nonzero/high-word
+      revisions and formats, untouched surrounding bytes, null output
+      on failure, and output alias ordering.
