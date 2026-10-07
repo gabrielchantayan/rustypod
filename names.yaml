@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08147360
+    ghidra: FUN_08147360
+    name: context_tree_process
+    size: 96
+    sig: "void context_tree_process(u32 *owner, u32 context)"
+    module: app/context_tree_process
+    status: ported
+    renames:
+      param_1/r5: owner
+      param_2/r6: context
+      local_20: cursor
+      local_18: end_header
+      FUN_083cf8d8: u32_indirect_equal
+      FUN_083b5ea4: red_black_tree_advance_cursor
+      FUN_081e06f4: resident_payload_processor
+    notes: >-
+      Raw extent [0x08147360,0x081473c0) is 96 code bytes; next prologue
+      starts at 0x081473c0. Three outgoing plain BLs, zero predicated BLs.
+      Whole-image decoding finds two incoming plain BLs at 0x0812d7e0
+      and 0x081b9d10, none predicated. Ghidra's third argument is unused.
+      Walk from owner+0x1c header's leftmost link, load each node+0x14
+      pointer, pass it and context to resident 0x081e06f4, then advance.
+      Reload the end header after callbacks. Resident raw entry preserves
+      r0/r1 and reads payload+0x10; C iterates resource-dependent records.
+      No canonical entry exists for that processor; no class is invented.
+      Deviations: omit dead iterator stack copies, reuse canonical helpers,
+      volatile end-header reads preserve mutations. Four-byte target links.
+      Tests cover empty/singleton, in-order traversal, payload mutation and
+      callback end replacement. Public-entry host smoke verifies empty
+      sentinel return and owner canaries. No physical-device execution.
+      Host suite and cargo build -Z build-std=core --release pass.
+      match.py exits 1: 24 original versus 34 Rust instructions; LLVM
+      adds a frame pointer, peels the first end comparison, uses BLX for
+      the resident address and checks normalized equality against zero.
+      Payload load, context argument, successor and header reload remain.
   - address: 0x08147810
     ghidra: FUN_08147810
     name: owned_child_view_construct

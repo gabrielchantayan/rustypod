@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const CONTEXT_TREE_PROCESS: usize = 0x4312_0000;
     // Dedicated raw-u32 query/backend fixture; mappings never unmap.
     pub const QUERY_OBJECT_RESOURCE_COUNT: usize = 0x4310_0000;
     pub const IAP_PACKET_ENQUEUE_COMPLETE: usize = 0x426b_0000;
