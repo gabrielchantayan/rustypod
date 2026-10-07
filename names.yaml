@@ -228330,3 +228330,34 @@ functions:
       invalid inputs return 9 without modifying the table. The meaning
       of this word is not established. Hosts reuse the existing shared
       slot-table seam and its test mutex; target accesses the stock address.
+  - address: 0x081486a8
+    ghidra: FUN_081486a8
+    name: embedded_array_attached_owner_destruct
+    size: 52
+    sig: "EmbeddedArrayAttachedOwner *embedded_array_attached_owner_destruct(EmbeddedArrayAttachedOwner *this)"
+    module: cxx/embedded_array_attached_owner_destruct
+    status: ported
+    vars: {param_1: this, iVar1: destroyed_array, DAT_081486d8: owner_vtable, FUN_08271d2c: observable_array_destruct}
+    notes: >-
+      Raw osos.dec establishes 48 executable A32 bytes followed by vtable
+      literal 0x089865b4 at 0x081486d8; the next real function starts with
+      push at 0x081486dc. True extent is 52 bytes, not Ghidra's 48.
+      Independent whole-image aligned BL decoding finds two plain inbound
+      calls at 0x080c6d0c and 0x081dcf64, zero predicated inbound calls.
+      The body has one plain BL to ported observable_array_destruct at
+      0x08271d2c, zero predicated BLs, and one indirect BLXNE. Install the
+      owner vtable, destroy the embedded array at +0x40, derive the owner
+      from the returned receiver minus 0x40, then release the nonzero
+      attached word at +0x3c through its object's virtual slot +4.
+      Return the owner without clearing the attached word. The virtual
+      callee identity is not assumed. repr(C) u32 fields preserve target
+      offsets on hosts. Deliberate deviations are behavior-based naming
+      and ordinary conditional dispatch rather than predication; host
+      tests substitute only virtual dispatch and call the real array
+      destructor. Host tests cover empty and maximum lengths, preservation,
+      return identity and release-after-array-cleanup ordering. ARM build
+      and Unicorn execution of the linked export pass both null and live
+      attached-object cases with real virtual dispatch. match.py shows
+      equivalent direct/conditional-indirect call structure; LLVM adds a
+      frame and retains the original owner because the array callee returns
+      its receiver, replacing the original returned-pointer subtraction.
