@@ -136,6 +136,53 @@ pub unsafe extern "C" fn media_player_setting_select(
     0
 }
 
+/// Consume a recorded media-player setting change — `FUN_08139b1c`,
+/// load address **0x08139b1c**, true extent **116 bytes**: 112 instruction
+/// bytes plus the 0x089cca20 literal at 0x08139b8c; next function at 0x08139b90.
+/// Raw calls: one plain BL to settings_get, one BLEQ to heap_panic, and two
+/// virtual BLX sites (one BLXNE). Whole-image scan: two plain inbound BLs,
+/// zero predicated inbound BLs.
+///
+/// Reject signed selectors >=3 with status 4. For a matching pending record,
+/// compare the full current setting with the saved byte, restore that byte
+/// through virtual +0x104 if different, then clear pending. Otherwise return
+/// zero without accessing settings. Negative selectors remain valid.
+/// Deliberate deviations: reuse the producer's crate-static RW record and
+/// native-width host operation seam; target vtable slots retain word offsets.
+/// The existing settings_get constructor limitation also applies here.
+///
+/// # Safety
+/// The settings singleton and its +0x104/+0x108 methods must be valid;
+/// host callers must install equivalent operations. Access to the shared
+/// change record and operations must be externally serialized.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn media_player_setting_change_consume(
+    _unused: *mut u8,
+    selector: i32,
+) -> u32 {
+    if selector >= 3 {
+        return INVALID_ARGUMENT;
+    }
+    let change = core::ptr::addr_of_mut!(MEDIA_PLAYER_SETTING_CHANGE);
+    if unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*change).pending)) } != 0
+        && unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*change).selector)) } == selector
+    {
+        let ops = unsafe { setting_operations() };
+        let settings = unsafe { (ops.get_settings)() };
+        if settings.is_null() {
+            unsafe { crate::heap::veneers::heap_panic() };
+        }
+        let current = unsafe { (ops.get_value)(settings) };
+        let saved = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*change).old_value)) };
+        if current != saved as u32 {
+            unsafe { (ops.set_value)(settings, saved as u32) };
+        }
+        unsafe { core::ptr::write_volatile(core::ptr::addr_of_mut!((*change).pending), 0) };
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +241,60 @@ mod tests {
         assert_eq!(unsafe { media_player_setting_select(core::ptr::null_mut(), 3, 0, 0) }, INVALID_ARGUMENT);
         assert_eq!(unsafe { media_player_setting_select(core::ptr::null_mut(), 0, 3, 0) }, INVALID_ARGUMENT);
         assert_eq!(SET_CALLS.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn consume_restores_first_record_and_clears_only_pending() {
+        let _lock = TEST_LOCK.lock();
+        install(0x101);
+        unsafe {
+            assert_eq!(media_player_setting_select(core::ptr::null_mut(), -1, 2, 1), 0);
+            assert_eq!(media_player_setting_select(core::ptr::null_mut(), 2, 0, 1), 0);
+        }
+        SET_CALLS.store(0, Ordering::Relaxed);
+        assert_eq!(unsafe { media_player_setting_change_consume(core::ptr::null_mut(), -1) }, 0);
+        assert_eq!(SET_VALUE.load(Ordering::Relaxed), 1);
+        assert_eq!(SET_CALLS.load(Ordering::Relaxed), 1);
+        let change = unsafe { &*core::ptr::addr_of!(MEDIA_PLAYER_SETTING_CHANGE) };
+        assert_eq!((change.pending, change.old_value, change.selector), (0, 1, -1));
+    }
+
+    #[test]
+    fn consume_equal_value_clears_record_without_setter() {
+        let _lock = TEST_LOCK.lock();
+        for selector in [i32::MIN, -1, 0, 2] {
+            install(255);
+            unsafe {
+                MEDIA_PLAYER_SETTING_CHANGE = MediaPlayerSettingChange {
+                    pending: 7, old_value: 255, _padding_02: [0xa5; 2], selector,
+                };
+                assert_eq!(media_player_setting_change_consume(core::ptr::null_mut(), selector), 0);
+                let change = &*core::ptr::addr_of!(MEDIA_PLAYER_SETTING_CHANGE);
+                assert_eq!((change.pending, change.old_value, change.selector, change._padding_02),
+                    (0, 255, selector, [0xa5; 2]));
+            }
+            assert_eq!(SET_CALLS.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn consume_invalid_unmatched_and_empty_records_do_not_access_settings() {
+        let _lock = TEST_LOCK.lock();
+        for (pending, recorded, selector, status) in [
+            (1, 3, 3, 4), (1, i32::MAX, i32::MAX, 4),
+            (1, 0, 2, 0), (0, -1, -1, 0),
+        ] {
+            install(0);
+            unsafe {
+                MEDIA_PLAYER_SETTING_CHANGE = MediaPlayerSettingChange {
+                    pending, old_value: 9, _padding_02: [0; 2], selector: recorded,
+                };
+                // NULL is fatal if the getter is reached.
+                MEDIA_PLAYER_SETTING_SELECT_OPS = DEFAULT_MEDIA_PLAYER_SETTING_SELECT_OPS;
+                assert_eq!(media_player_setting_change_consume(core::ptr::null_mut(), selector), status);
+                let change = &*core::ptr::addr_of!(MEDIA_PLAYER_SETTING_CHANGE);
+                assert_eq!((change.pending, change.old_value, change.selector), (pending, 9, recorded));
+            }
+        }
     }
 }

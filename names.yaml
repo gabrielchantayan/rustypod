@@ -228122,3 +228122,41 @@ functions:
       run. match.py exits 1: 52 original versus 56 Rust listed instructions;
       same enqueue-first branches, rollback and sentinel skip, different
       frame, halfword locals, completion BLX seam and duplicated epilogues.
+
+  - address: 0x08139b1c
+    ghidra: FUN_08139b1c
+    name: media_player_setting_change_consume
+    size: 116
+    module: app/media_player_setting_select
+    sig: "u32 media_player_setting_change_consume(void *unused, i32 selector)"
+    status: ported
+    vars: {param_1: unused, param_2: selector, pcVar1: change, piVar2: settings, uVar3: current}
+    renames:
+      DAT_08139b8c: MEDIA_PLAYER_SETTING_CHANGE
+      FUN_08259928: settings_get
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw ARM extent [0x08139b1c,0x08139b90) is 116 bytes: 112 instruction
+      bytes plus literal 0x089cca20 at 0x08139b8c; next function opens with
+      cmp r1,#0. Independently decoded body has one plain BL to settings_get,
+      one BLEQ to heap_panic, one plain virtual BLX and one BLXNE.
+      Whole-image aligned immediate decoding finds two plain inbound BLs,
+      at 0x0818f500 and 0x081a9b48, with zero predicated inbound BLs.
+      Reject signed selector >=3 with status 4; negative selectors remain
+      valid. Only a nonzero pending byte and matching selector obtain settings.
+      Compare full u32 virtual +0x108 result with saved byte at change+1;
+      if different, reload vtable and call +0x104 with that saved byte in r1.
+      Clear only pending after the setter, return zero; unmatched records
+      are untouched. Reuse producer media_player_setting_select state and
+      operation seam rather than introducing a second global or callee identity.
+      Deviations: runtime-initialized RW record is a crate static and host
+      operations use native pointers; target slots use four-byte word indices.
+      Existing settings_get constructor limitation remains: not hook-ready
+      until its constructor is implemented. Host tests and ARM release build
+      passed; standalone production-source smoke exercises producer, invalid
+      selector, mismatch, restoration of truncated old value and consume-once.
+      match.py exits 1 with 28 original versus 33 Rust listed instructions:
+      same signed gate, pending/selector guards, getter and NULL panic,
+      full-width comparison, reloaded setter vtable and final byte clear.
+      Differences are frame pointer, explicit branches instead of predication,
+      archive relocations and crate-static literal.
