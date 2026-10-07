@@ -227625,3 +227625,41 @@ functions:
       byte store, unconditional re-arm and constant result, with LLVM's
       frame-pointer prologue and reordered argument moves. No physical
       device execution.
+  - address: 0x0813d378
+    ghidra: FUN_0813d378
+    name: tagged_value_from_keyed_source
+    size: 48
+    sig: "TaggedValue *tagged_value_from_keyed_source(TaggedValue *this, void *source, u32 key_low, u32 key_high)"
+    module: cxx/tagged_value
+    status: ported
+    renames:
+      param_1/r0/r4: this
+      param_2/r1: source
+      r2: key_low
+      r3: key_high
+      auStack_1c: record
+      FUN_0828407c: tagged_value_from_optional_word4
+    notes: >-
+      Raw extent [0x0813d378,0x0813d3a8) is 48 bytes, twelve ARM
+      instructions, no literals; next independent push starts at 0x0813d3a8.
+      Whole-image aligned ARM decoding finds two plain inbound BLs at
+      0x0810c764 and 0x0810c848, zero predicated inbound BLs. Body has
+      one plain BL to the already ported tagged_value_from_optional_word4,
+      zero predicated BLs, and one indirect BLX through vtable +0x298.
+      Dispatch with an uninitialized five-word record, source, and unchanged
+      r2/r3 key words; convert record word +0x04 to the destination and
+      return its pointer. Raw caller loads both key words from +0x148/+0x14c.
+      Source class, key identity and concrete virtual callee are unresolved;
+      no invented fixed-address seam. Correct Ghidra's missing arguments
+      and void return. Host vtable pointers widen natively; target accesses
+      remain aligned u32 words. Existing registered module and helper reused.
+      Tests cover either key half mismatching, full-width keys/payload,
+      zero payload selecting the default, return identity and preserved
+      destination padding. No target algorithmic deviations or device run.
+
+      Host suite passes 14659 tests; native public-API executable smoke
+      verifies full-width payload and padding preservation. ARM release
+      build passes. match.py exits 1: twelve versus fourteen instructions,
+      additional saved registers/frame pointer and cached record pointer;
+      slot +0x298, unchanged r2/r3, BLX then helper BL, five-word scratch
+      and returned destination remain intact.

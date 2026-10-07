@@ -301,6 +301,71 @@ pub unsafe extern "C" fn tagged_value_from_indexed_source(
     write_indexed_source_record(record.as_mut_ptr().cast(), source, index);
     tagged_value_from_optional_word4(this, record.as_ptr().cast())
 }
+
+const KEYED_SOURCE_WRITE_RECORD_WORD: usize = 0x298 / 4;
+type KeyedSourceWriteRecord = unsafe extern "C" fn(*mut u32, *mut u8, u32, u32);
+
+/// Native-pointer host model of target vtable slot +0x298.
+#[cfg(not(target_os = "none"))]
+#[repr(C)]
+pub struct HostKeyedSourceVtable {
+    pub unresolved_000_to_294: [usize; KEYED_SOURCE_WRITE_RECORD_WORD],
+    pub write_keyed_record: KeyedSourceWriteRecord,
+}
+
+/// Host object prefix for [`HostKeyedSourceVtable`].
+#[cfg(not(target_os = "none"))]
+#[repr(C)]
+pub struct HostKeyedSource {
+    pub vtable: *const HostKeyedSourceVtable,
+}
+
+/// Builds a tagged value from an opaque two-word key selected by a source.
+///
+/// Original: `FUN_0813d378` @ **0x0813d378**, true extent
+/// `[0x0813d378, 0x0813d3a8)` (48 bytes; next independent push at
+/// 0x0813d3a8). Whole-image aligned ARM decoding finds two plain inbound
+/// BLs (0x0810c764, 0x0810c848), zero predicated inbound BLs. The body has
+/// one plain BL, zero predicated BLs, and one indirect BLX.
+///
+/// Invoke source vtable slot +0x298 with an uninitialized five-word record,
+/// source, and the unchanged r2/r3 key words. Construct the destination
+/// from record word +0x04 using the already ported optional-word helper;
+/// return its destination pointer. The key's wider meaning and the slot's
+/// concrete target remain unresolved; neither is replaced by a guessed seam.
+/// Deliberate deviations: correct Ghidra's omitted r2/r3 arguments and void
+/// return; host vtable pointers are native-width rather than target u32.
+///
+/// # Safety
+///
+/// `this` must be writable aligned [`TaggedValue`] storage. `source` must
+/// supply a valid vtable and callable +0x298 slot with the stated four-word
+/// ABI. The slot must initialize record word +0x04 and must not access
+/// beyond the five-word temporary. No pointer is NULL-checked.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.tagged_value_from_keyed_source")]
+#[inline(never)]
+pub unsafe extern "C" fn tagged_value_from_keyed_source(
+    this: *mut TaggedValue,
+    source: *mut u8,
+    key_low: u32,
+    key_high: u32,
+) -> *mut TaggedValue {
+    let mut record = MaybeUninit::<[u32; 5]>::uninit();
+    #[cfg(target_os = "none")]
+    let write_record: KeyedSourceWriteRecord = {
+        let vtable = source.cast::<u32>().read() as usize as *const u32;
+        core::mem::transmute(vtable.add(KEYED_SOURCE_WRITE_RECORD_WORD).read() as usize)
+    };
+    #[cfg(not(target_os = "none"))]
+    let write_record = {
+        let source = source.cast::<HostKeyedSource>();
+        let vtable = core::ptr::read_volatile(core::ptr::addr_of!((*source).vtable));
+        (*vtable).write_keyed_record
+    };
+    write_record(record.as_mut_ptr().cast(), source, key_low, key_high);
+    tagged_value_from_optional_word4(this, record.as_ptr().cast())
+}
 /// Compares the payload word pair of two tagged values — original:
 /// `FUN_08258d7c` @ `0x08258d7c` (36 bytes).
 ///
@@ -363,6 +428,68 @@ mod tests {
         write_indexed_record: record_indexed_source,
     };
 
+
+    #[repr(C)]
+    struct KeyedFixture {
+        source: HostKeyedSource,
+        key_low: u32,
+        key_high: u32,
+        payload: u32,
+    }
+
+    unsafe extern "C" fn lookup_keyed_record(
+        record: *mut u32, source: *mut u8, key_low: u32, key_high: u32,
+    ) {
+        let fixture = &*source.cast::<KeyedFixture>();
+        // An exact two-word lookup: either half mismatching selects default.
+        let payload = if key_low == fixture.key_low && key_high == fixture.key_high {
+            fixture.payload
+        } else {
+            0
+        };
+        record.add(1).write(payload);
+    }
+
+    static KEYED_SOURCE_VTABLE: HostKeyedSourceVtable = HostKeyedSourceVtable {
+        unresolved_000_to_294: [0; KEYED_SOURCE_WRITE_RECORD_WORD],
+        write_keyed_record: lookup_keyed_record,
+    };
+
+    #[test]
+    fn keyed_lookup_handles_both_key_words_missing_and_zero_payload() {
+        let _guard = HOST_DEFAULT_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            reset_host_default(TaggedValue {
+                vtable: TAGGED_VALUE_VTABLE, kind: 0, padding: [0; 3],
+                payload: 0x1234_5678, auxiliary: 0x8765_4321,
+            }, 1);
+            let mut fixture = KeyedFixture {
+                source: HostKeyedSource { vtable: &KEYED_SOURCE_VTABLE },
+                key_low: 0x8000_0000, key_high: u32::MAX, payload: u32::MAX,
+            };
+            for (low, high, payload, expected_kind) in [
+                (0x8000_0000, u32::MAX, u32::MAX, 1),
+                (0, u32::MAX, u32::MAX, 0),
+                (0x8000_0000, 0, u32::MAX, 0),
+                (0x8000_0000, u32::MAX, 0, 0),
+            ] {
+                fixture.payload = payload;
+                let mut destination = TaggedValue {
+                    vtable: 0, kind: 0xff, padding: [0x12, 0x34, 0x56],
+                    payload: 0, auxiliary: 0,
+                };
+                let this = core::ptr::addr_of_mut!(destination);
+                assert_eq!(tagged_value_from_keyed_source(
+                    this, core::ptr::addr_of_mut!(fixture).cast(), low, high,
+                ), this);
+                assert_eq!(destination.vtable, TAGGED_VALUE_VTABLE);
+                assert_eq!(destination.kind, expected_kind);
+                assert_eq!(destination.padding, [0x12, 0x34, 0x56]);
+                assert_eq!(destination.payload, if expected_kind == 1 { u32::MAX } else { 0x1234_5678 });
+                assert_eq!(destination.auxiliary, if expected_kind == 1 { 0 } else { 0x8765_4321 });
+            }
+        }
+    }
     #[test]
     fn indexed_source_dispatch_forwards_index_and_constructs_tagged_value() {
         let _guard = HOST_DEFAULT_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
