@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813d064
+    ghidra: FUN_0813d064
+    name: query_object_set_masks
+    size: 52
+    sig: "u32 query_object_set_masks(const void *query, u32 first, u32 second)"
+    module: ui/query_object_set_masks
+    status: ported
+    vars: {param_1/r0: query, param_2/r1: first, param_3/r2: second, r4: saved_query, r5: translated_second}
+    renames:
+      FUN_080c0608: query_mask_to_backend_mask (verified, inlined)
+      FUN_080cbed4: backend_set_masks (verified, inlined)
+    notes: >-
+      Raw A32 extent [0x0813d064,0x0813d098) is 52 bytes, not
+      Ghidra's 68. Next independent wrapper loads +0x40 and tail-branches
+      to 0x0805417c. Body has two unconditional BLs to 0x080c0608,
+      zero predicated BLs, and a tail B to 0x080cbed4. Whole-image
+      decoding finds unconditional inbound BLs at 0x080febb4 and
+      0x082373e0 and no predicated inbound BLs. Convert both masks:
+      preserve bits 0..3 and 21, map bits 4/5/6/7 to 5/6/8/15,
+      discard other bits. Load target-width backend pointer at query
+      +0x40; replace backend +0xe30/+0xe34; return zero. Converter
+      preserves r3, used by original to save first input across first BL.
+      Inline verified converter and setter without new seams. Host tests
+      cover low-byte combinations, bit 21, all one-hot inputs, unsupported
+      bits, replacement and adjacent canaries. Host suite and ARM release
+      build pass; executable source-entry smoke yields status 0 and masks
+      0x62/0 for caller inputs 0x32/0. match.py exits 1, comparing its
+      incorrect 68-byte original window (17 instructions) with 23 Rust
+      instructions: inline shifts/masks replace calls; pointer load,
+      both offsets and zero return remain. LLVM reverses independent
+      stores and adds a frame pointer. No device run.
   - address: 0x0813d098
     ghidra: FUN_0813d098
     name: query_object_resource_count

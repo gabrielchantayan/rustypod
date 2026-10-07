@@ -41,6 +41,7 @@ extern crate std;
 pub mod hints {
     // Dedicated raw-u32 query/backend fixture; mappings never unmap.
     pub const QUERY_OBJECT_RESOURCE_COUNT: usize = 0x4310_0000;
+    pub const QUERY_OBJECT_SET_MASKS: usize = 0x4311_0000;
     pub const SETTINGS_MODE_SELECT_TARGET: usize = 0x430a_0000;
     pub const VIEW_CHILDREN_SYNC: usize = 0x4309_0000;
     pub const TREE_DEQUE_OWNER_CLEANUP: usize = 0x4308_0000;
