@@ -52994,6 +52994,32 @@ functions:
       push/pop. Same structure otherwise (load, cmp, align arithmetic,
       bic of the flags byte, subtract).
 
+  - address: 0x0814d6e4
+    ghidra: FUN_0814d6e4
+    name: record_list_insert_after
+    size: 28
+    sig: "void record_list_insert_after(RecordListNode *position, RecordListNode *record)"
+    module: util/record_list_insert_after
+    status: ported
+    vars:
+      param_1/r0: position
+      param_2/r1: record
+      uVar1/r2: successor
+      node_plus_0: header
+      node_plus_4: next
+      node_plus_8: previous
+    notes: >-
+      Seven raw A32 words at 0x0814d6e4..0x0814d6fc end in bx lr;
+      the push at 0x0814d700 starts the next function, proving 28 bytes.
+      Full raw-image decoding finds two plain BL callers at 0x081a82c8
+      and 0x081a8624, zero predicated BL callers and no outgoing calls.
+      Both callers insert a variable-length record after an owner sentinel
+      at owner+4. The next function unlinks the same +4/+8 links.
+      Preserve the successor reload and alias-sensitive store ordering.
+      No target deviations; repr(C) native pointers widen on hosts while
+      preserving header/next/previous offsets 0/4/8 on ARM. Tests cover
+      empty-ring insertion, insertion between nodes, and link aliases.
+
   - address: 0x0814d6c8
     ghidra: FUN_0814d6c8
     name: record_read_trailer_header
