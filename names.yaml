@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081619fc
+    ghidra: FUN_081619fc
+    name: vtable_object_owner_construct
+    size: 76
+    sig: "u32 *vtable_object_owner_construct(u32 *owner)"
+    module: cxx/vtable_object_owner_construct
+    status: ported
+    vars: {param_1: owner, r1: scratch, r2: default_state}
+    notes: >-
+      Raw A32 extent [0x081619fc,0x08161a48) contains 68 code bytes
+      and two literal words; the next real entry is the existing owner
+      destructor. Whole-image aligned BL decoding finds two incoming
+      plain calls at 0x081492f4 and 0x0827de28, no predicated incoming
+      calls and no outgoing plain or predicated BLs. Install vtable
+      0x08987da0; clear words +4, +8, +16, +20, +44 and byte +24.
+      Store 0x80000000 at +40, then read global byte 0x089caf72;
+      any nonzero byte replaces +40 with 0x01000000. Other bytes
+      remain untouched. Return the original pointer: both callers use
+      unchanged r0 as their embedded subobject, despite Ghidra's void
+      signature. No callee seam or guessed class identity. Target-width
+      word storage preserves offsets on hosts; an atomic host byte
+      substitutes for the fixed-address global without target changes.
+      Host edge tests cover zero, multiple nonzero values including 0x80
+      and 0xff, reinitialization, pointer identity and every untouched
+      byte including padding. Native executable smoke verifies zero,
+      nonzero and zero-again modes, sparse clears and original pointer.
+      Host suite and ARM release build pass. match.py exits 1: LLVM
+      adds a frame, schedules the default-state MOV later and includes
+      literals in its 21 lines versus 17 original instructions. Sparse
+      stores, global byte load, conditional replacement and r0 identity
+      are preserved with no calls. No physical-device execution.
   - address: 0x0814d91c
     ghidra: FUN_0814d91c
     name: mode_record_pair_set
