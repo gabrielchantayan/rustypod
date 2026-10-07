@@ -226213,3 +226213,31 @@ functions:
       by six existing missing helpers outside this module. match.py exits 1:
       LLVM retains the vtable store and one BL, saves this in r4 instead of
       subtracting the known callee offset, and adds a frame-pointer prologue.
+
+  - address: 0x08162aec
+    ghidra: FUN_08162aec
+    name: parse_context_destroy
+    size: 4
+    sig: "void *parse_context_destroy(void *context)"
+    module: app/parse_context_destroy
+    status: ported
+    vars:
+      param_1/r0: context
+    notes: >-
+      Raw osos.dec word e12fff1e is BX LR, not a veneer. True extent
+      [0x08162aec,0x08162af0): preceding two-word zeroing constructor
+      returns at 0x08162ae8; the next function is MOV r0,0 / BX LR.
+      Whole-image aligned A32 decoding finds two incoming plain BLs at
+      0x08119ebc and 0x081b1f10, zero predicated BLs, zero internal BLs,
+      and no aligned DATA words equal to this address. Both callers
+      destroy an eight-byte stack context initialized at 0x08162adc
+      and passed to the buffer-processing wrapper at 0x08162ac0.
+      No specific parser format or virtual-dispatch identity is assumed.
+      Returns context unchanged without accessing memory, including NULL,
+      unaligned and dangling pointer words. No semantic deviations.
+      Dedicated text section retains the independently hookable symbol.
+      All 14578 host tests and the ARM release build pass. Direct host
+      smoke through an opaque function pointer preserves the context,
+      canaries and NULL. match.py exits 1: LLVM emits PUSH fp,lr /
+      MOV fp,sp / POP fp,pc instead of BX LR, preserving the same r0
+      pass-through behavior with the configured frame-pointer prologue.
