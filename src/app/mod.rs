@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod buffered_text_owner_data;
 pub mod handler_select;
 pub mod string_tag_pack;
 pub mod seven_string_snapshot;

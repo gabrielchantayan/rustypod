@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0815236c
+    ghidra: FUN_0815236c
+    name: buffered_text_owner_data
+    size: 8
+    sig: "u32 buffered_text_owner_data(const u8 *owner)"
+    module: app/buffered_text_owner_data
+    status: ported
+    vars: {param_1: owner, r0_return: data_address}
+    notes: >-
+      Raw words e5900010/e12fff1e establish extent
+      [0x0815236c,0x08152374): LDR r0,[r0,#16]; BX LR. The next
+      real function is the buffered text owner constructor with a PUSH
+      prologue. Whole-image aligned A32 decoding finds two incoming
+      plain BLs at 0x080fdcc4 and 0x08293618, zero predicated incoming
+      BLs and zero outgoing plain or predicated BLs. Return the embedded
+      text data-address word at owner +16; both callers use it for
+      chunked copies. No callee seam or behavioral deviations. Preserve
+      the four-byte address as u32 on hosts without dereferencing it.
+      Host tests cover zero, unaligned and high-bit address values,
+      receiver-relative access and unchanged owner state. All 14597 host
+      tests, executable source smoke and ARM release build passed.
+      match.py exits 1: LLVM adds a frame prologue/epilogue around
+      the identical LDR; four instructions versus the original two.
   - address: 0x08152374
     ghidra: FUN_08152374
     name: buffered_text_owner_construct
