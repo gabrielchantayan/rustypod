@@ -227875,3 +227875,37 @@ functions:
       instructions; LLVM inlines both constructors, retaining capture-slot
       dispatches, signed and unsigned gates, exact collection offsets,
       indexed load, payload call and final field-copy call. No device run.
+
+  - address: 0x0814a030
+    ghidra: FUN_0814a030
+    name: default_interface_root_get
+    size: 92
+    sig: "RegistryNode *default_interface_root_get(void)"
+    module: app/default_interface_root
+    status: ported
+    renames:
+      DAT_0814a078: guard_page
+      DAT_0814a07c: default_interface_root_guard
+      DAT_0814a080: default_interface_root
+      DAT_0814a084: dso_handle
+      DAT_0814a088: opaque_destructor_word
+      FUN_082973bc: unported_default_root_constructor
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw osos.dec establishes 92 bytes: 72 instruction bytes followed by
+      five literal words, before the next real function at 0x0814a08c.
+      Independently decoded two inbound plain BLs at 0x0814a194 and
+      0x08296ef0, zero predicated BLs; four outbound plain BLs, zero
+      predicated BLs. Tests bit zero of guard 0x089cb1f4 (guard page
+      0x089cb1ec + 8), acquires the ADS guard, calls unported constructor
+      0x082973bc on fixed root 0x08a778f4, registers the constructor result
+      with opaque destructor word 0x0828c580 and DSO 0x089ca09c, then
+      releases the guard regardless of registration result. Always returns
+      the fixed root. Neither constructor nor destructor has an existing
+      names.yaml identity; target retains their verified addresses.
+      The registry walk now calls this port on target. Host retains the
+      existing born-published root model; isolated algorithm tests use local
+      repr(C) nodes and cover initialization, distinct constructor result,
+      failed registration, repeat access and nonzero even guards.
