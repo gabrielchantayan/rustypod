@@ -22,21 +22,20 @@
 //!
 //! ## Deliberate deviations
 //!
-//! Target builds access the fixed mode-state address and retain the unported
-//! selector at `0x08153534` through a direct function-pointer boundary. Host
-//! builds substitute private state and an overrideable selector so tests can
-//! exercise the null and virtual-dispatch paths. The vtable's unrecovered
-//! slots remain opaque; only its verified +16 and +32 callbacks are modeled.
+//! Target builds access the fixed mode-state address and the ported settings
+//! selector. Host builds substitute private state and a low-address target
+//! fixture, preserving the settings record's 32-bit pointer words. The
+//! vtable's unrecovered slots remain opaque; only +16 and +32 are modeled.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr;
 
 use crate::app::settings_item::settings_item_get;
+use crate::app::settings_item_select::settings_item_select;
 
 const SETTINGS_MODE_STATE_ADDRESS: usize = 0x089c_a5e0;
 const SETTINGS_ITEM_TARGET_SELECTOR: u32 = 1;
 
-type SettingsItemSelect = unsafe extern "C" fn(*mut u8, u32) -> *mut SettingsModeTarget;
 type SettingsModeCallback = unsafe extern "C" fn(*mut SettingsModeTarget, u32);
 
 /// State words touched by `settings_mode_set`.
@@ -89,29 +88,6 @@ unsafe fn settings_mode_state() -> *mut SettingsModeState {
     ptr::addr_of_mut!(HOST_SETTINGS_MODE_STATE)
 }
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn settings_item_select() -> SettingsItemSelect {
-    core::mem::transmute(0x0815_3534usize)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_settings_item_select(
-    _item: *mut u8,
-    _selector: u32,
-) -> *mut SettingsModeTarget {
-    panic!("settings_mode_set requires settings item selector 0x08153534")
-}
-
-/// Host seam for the unported selector at `0x08153534`.
-#[cfg(not(target_os = "none"))]
-pub static mut SETTINGS_ITEM_SELECT: SettingsItemSelect = missing_settings_item_select;
-
-#[cfg(not(target_os = "none"))]
-#[inline(always)]
-unsafe fn settings_item_select() -> SettingsItemSelect {
-    ptr::read_volatile(ptr::addr_of!(SETTINGS_ITEM_SELECT))
-}
 
 /// `settings_mode_set` — original: `FUN_0806b880` @ `0x0806b880` (136
 /// instruction bytes plus a 4-byte literal pool; 7 direct unconditional `bl`
@@ -134,7 +110,8 @@ unsafe fn settings_item_select() -> SettingsItemSelect {
 pub unsafe extern "C" fn settings_mode_set(requested_mode: u32) -> u32 {
     let state = settings_mode_state();
     let previous_mode = (*state).active_mode;
-    let target = settings_item_select()(settings_item_get(), SETTINGS_ITEM_TARGET_SELECTOR);
+    let target = settings_item_select(settings_item_get(), SETTINGS_ITEM_TARGET_SELECTOR)
+        as usize as *mut SettingsModeTarget;
 
     if target.is_null() {
         return (*state).active_mode.into();
@@ -166,10 +143,8 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
     static mut APPLY_CALLS: u32 = 0;
     static mut PREPARE_CALLS: u32 = 0;
-    static mut SELECT_CALLS: u32 = 0;
     static mut LAST_APPLY_MODE: u32 = u32::MAX;
     static mut LAST_PREPARE_MODE: u32 = u32::MAX;
-    static mut TARGET: SettingsModeTarget = SettingsModeTarget { vtable: core::ptr::null() };
 
     unsafe extern "C" fn record_apply(_target: *mut SettingsModeTarget, mode: u32) {
         APPLY_CALLS += 1;
@@ -188,33 +163,12 @@ mod tests {
         prepare_zero_mode: record_prepare,
     };
 
-    unsafe extern "C" fn record_select(_item: *mut u8, selector: u32) -> *mut SettingsModeTarget {
-        SELECT_CALLS += 1;
-        assert_eq!(selector, SETTINGS_ITEM_TARGET_SELECTOR);
-        ptr::addr_of_mut!(TARGET)
-    }
-
-    unsafe extern "C" fn select_null_after_mode_change(
-        _item: *mut u8,
-        selector: u32,
-    ) -> *mut SettingsModeTarget {
-        SELECT_CALLS += 1;
-        assert_eq!(selector, SETTINGS_ITEM_TARGET_SELECTOR);
-        (*settings_mode_state()).active_mode = 0x5a;
-        ptr::null_mut()
-    }
 
     struct Seams {
         _settings_item_lock: MutexGuard<'static, ()>,
         _test_lock: MutexGuard<'static, ()>,
-        select: SettingsItemSelect,
     }
 
-    impl Drop for Seams {
-        fn drop(&mut self) {
-            unsafe { ptr::addr_of_mut!(SETTINGS_ITEM_SELECT).write(self.select) }
-        }
-    }
 
     fn install(mode: u8, mode_word: u32) -> Seams {
         let settings_item_lock = SETTINGS_ITEM_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -227,18 +181,19 @@ mod tests {
             });
             APPLY_CALLS = 0;
             PREPARE_CALLS = 0;
-            SELECT_CALLS = 0;
             LAST_APPLY_MODE = u32::MAX;
             LAST_PREPARE_MODE = u32::MAX;
-            ptr::addr_of_mut!(TARGET).write(SettingsModeTarget { vtable: &VTABLE });
-            let item = settings_item_get().cast::<SettingsModeTarget>();
-            item.write(SettingsModeTarget { vtable: &VTABLE });
-            let select = ptr::read_volatile(ptr::addr_of!(SETTINGS_ITEM_SELECT));
-            ptr::addr_of_mut!(SETTINGS_ITEM_SELECT).write(record_select);
+            static TARGET_ADDRESS: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+                crate::testing::try_map_u32_slab(
+                    crate::testing::hints::SETTINGS_MODE_SELECT_TARGET, 4096,
+                ).expect("low-address settings target fixture") as usize
+            });
+            let target_address = *TARGET_ADDRESS;
+            (target_address as *mut SettingsModeTarget).write(SettingsModeTarget { vtable: &VTABLE });
+            settings_item_get().cast::<u32>().write(target_address as u32);
             Seams {
                 _settings_item_lock: settings_item_lock,
                 _test_lock: test_lock,
-                select,
             }
         }
     }
@@ -251,7 +206,6 @@ mod tests {
         unsafe {
             assert_eq!(HOST_SETTINGS_MODE_STATE.active_mode, 0);
             assert_eq!(HOST_SETTINGS_MODE_STATE.mode_state_word_08, 1);
-            assert_eq!(SELECT_CALLS, 1);
             assert_eq!(PREPARE_CALLS, 1);
             assert_eq!(LAST_PREPARE_MODE, 0);
             assert_eq!(APPLY_CALLS, 1);
@@ -267,7 +221,6 @@ mod tests {
         unsafe {
             assert_eq!(HOST_SETTINGS_MODE_STATE.active_mode, 0);
             assert_eq!(HOST_SETTINGS_MODE_STATE.mode_state_word_08, 0);
-            assert_eq!(SELECT_CALLS, 1);
             assert_eq!(PREPARE_CALLS, 0);
             assert_eq!(APPLY_CALLS, 1);
             assert_eq!(LAST_APPLY_MODE, 1);
@@ -282,22 +235,20 @@ mod tests {
         unsafe {
             assert_eq!(HOST_SETTINGS_MODE_STATE.active_mode, 1);
             assert_eq!(HOST_SETTINGS_MODE_STATE.mode_state_word_08, 0x1357_9bdf);
-            assert_eq!(SELECT_CALLS, 1);
             assert_eq!(PREPARE_CALLS, 0);
             assert_eq!(APPLY_CALLS, 0);
         }
     }
 
     #[test]
-    fn null_selection_returns_the_live_mode_without_writing_state() {
+    fn null_selection_returns_the_current_mode_without_writing_state() {
         let _seams = install(1, 0x2468_ace0);
-        unsafe { ptr::addr_of_mut!(SETTINGS_ITEM_SELECT).write(select_null_after_mode_change) };
+        unsafe { settings_item_get().cast::<u32>().write(0) };
 
-        assert_eq!(unsafe { settings_mode_set(0) }, 0x5a);
+        assert_eq!(unsafe { settings_mode_set(0) }, 1);
         unsafe {
-            assert_eq!(HOST_SETTINGS_MODE_STATE.active_mode, 0x5a);
+            assert_eq!(HOST_SETTINGS_MODE_STATE.active_mode, 1);
             assert_eq!(HOST_SETTINGS_MODE_STATE.mode_state_word_08, 0x2468_ace0);
-            assert_eq!(SELECT_CALLS, 1);
             assert_eq!(PREPARE_CALLS, 0);
             assert_eq!(APPLY_CALLS, 0);
         }
