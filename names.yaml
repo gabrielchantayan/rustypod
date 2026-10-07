@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08160dd4
+    ghidra: FUN_08160dd4
+    name: usb_payload_read
+    size: 64
+    sig: "u32 usb_payload_read(const u32 *owner, u8 *buffer, u32 length)"
+    module: app/usb_payload_read
+    status: ported
+    vars: {param_1: owner, param_2: buffer, param_3: length, local_8: completed}
+    notes: >-
+      Raw A32 extent [0x08160dd4,0x08160e14) is 64 bytes with no
+      literals. The next independent function loads request word +0x0c
+      and tail-branches. Whole-image aligned ARM BL decoding finds two
+      incoming plain calls at 0x08160d40 and 0x081d9430, zero predicated
+      incoming calls, one outgoing plain call at 0x08160dfc to 0x082948f4,
+      and zero predicated outgoing calls. Load the target request word
+      at owner +0x0c, seed completed with length, call endpoint 2 with
+      asynchronous mode zero, and return completed only on status zero.
+      Raw words at 0x082948f4 prove the OUT-direction wrapper rejects
+      bit 0x80 with -1 and otherwise calls transfer engine 0x082933e0;
+      neither address has a canonical names entry. Preserve the wrapper's
+      six-argument address ABI rather than porting a second function.
+      Ghidra's void wrapper return is wrong: both raw wrappers return the
+      engine status. Callers consume the byte count and detect short reads.
+      Host edge tests cover zero/full-width lengths, unchanged/partial/zero
+      completion and signed nonzero statuses, including partial completion
+      before failure. Native public-entry smoke verifies a partial receive,
+      buffer canaries, and error-after-write. Host suite: 14632 passed;
+      ARM release build passed. match.py exits 1: 20 versus 16 instructions,
+      a frame pointer, larger frame and literal-address BLX replace direct
+      BL; endpoint, six arguments, completion seed and error-zero selection
+      remain equivalent. No target algorithmic deviations or device run.
   - address: 0x081610d0
     ghidra: FUN_081610d0
     name: guarded_state_byte_get

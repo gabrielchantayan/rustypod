@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod buffered_text_owner_data;
 pub mod usb_payload_write;
+pub mod usb_payload_read;
 pub mod buffered_text_owner_generate;
 pub mod handler_select;
 pub mod string_tag_pack;
