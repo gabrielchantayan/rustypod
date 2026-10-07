@@ -226214,6 +226214,29 @@ functions:
       LLVM retains the vtable store and one BL, saves this in r4 instead of
       subtracting the known callee offset, and adds a frame-pointer prologue.
 
+  - address: 0x08162adc
+    ghidra: FUN_08162adc
+    name: parse_context_construct
+    size: 16
+    sig: "void *parse_context_construct(void *context)"
+    module: app/parse_context_construct
+    status: ported
+    vars:
+      param_1/r0: context
+    notes: >-
+      Raw words e3a01000 e5801000 e5801004 e12fff1e establish the true
+      extent [0x08162adc,0x08162aec), ending at the independently called
+      parse_context_destroy. Clears two aligned 32-bit words at +0 and
+      +4 without reading them; preserves the context pointer in r0.
+      Whole-image aligned A32 decoding finds two incoming plain BLs at
+      0x08119dc4 and 0x081b1e18, zero incoming predicated BLs and zero
+      internal calls. Callers use an eight-byte stack context with the
+      buffer-processing wrapper at 0x08162ac0; no parser format or field
+      identity is assumed. No semantic deviations. Host tests cover
+      independent dirty words, uninitialized storage, pointer preservation
+      and surrounding canaries. Direct host smoke confirms both word
+      stores, pointer preservation and unchanged neighbors.
+
   - address: 0x08162aec
     ghidra: FUN_08162aec
     name: parse_context_destroy
