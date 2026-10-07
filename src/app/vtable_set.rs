@@ -3722,14 +3722,11 @@ pub unsafe extern "C" fn iterator_state_current_index(state: *const u32) -> i32 
 /// -3 remains the end sentinel, -2 and every other negative position
 /// become the before-first sentinel, and positions at or beyond the
 /// owner's +0x04 count become -3. It then calls
-/// [`ITERATOR_STATE_REFRESH`] to derive the previous (+0x04) and next
-/// (+0x0c) indexes. A position of -1 or -5 is invalid, so the original
-/// returns without changing the state. Deliberate deviation: the ARM
-/// tail-branches to `FUN_08155bac`; Rust makes the existing refresh-seam
-/// call because it cannot require a tail call. Host builds only dereference
-/// the dedicated low-address iterator fixtures; other host owners retain
-/// the former seam's unbounded-count behavior to avoid dereferencing a
-/// truncated target-width pointer.
+/// [`iterator_state_refresh`] to derive the previous (+0x04) and next
+/// (+0x0c) indexes. Invalid positions return without changing the state.
+/// Deliberate deviation: Rust cannot require the original tail call.
+/// The existing host seek fixtures retain their count fallback; production
+/// reads the real owner count. Refresh itself has no pointer fallback.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn iterator_state_seek(state: *mut u32, position: i32) {
@@ -3756,7 +3753,10 @@ pub unsafe extern "C" fn iterator_state_seek(state: *mut u32, position: i32) {
         position
     };
     state.add(2).write(normalized as u32);
+    #[cfg(test)]
     let refresh = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_REFRESH));
+    #[cfg(not(test))]
+    let refresh = iterator_state_refresh;
     refresh(state);
 }
 
@@ -3808,22 +3808,102 @@ pub unsafe extern "C" fn iterator_state_construct(
     state
 }
 
-/// Indirect call to the unported prev/next refresh `FUN_08155bac` @
-/// 0x08155bac — the seek's second half factored out: from the state
-/// word at +0x08 and the owner's count word it rederives the next
-/// (+0x0c) and prev (+0x04) index words (2 `bl` + 1 `b` sites: this
-/// family's advance, the seek @ 0x08155dc4, and a tail @ 0x08155e2c).
-/// Its return value is discarded.
+/// iterator_state_refresh — original: `FUN_08155bac` @ 0x08155bac.
+/// Raw extent: 148 bytes, 0x08155bac..0x08155c40, no literal pool.
+/// Verified callers: two plain BL, zero predicated BL, one plain B;
+/// body: one plain BL to [`iterator_state_is_valid`].
 ///
-/// The seam keeps that unported bookkeeping outside this one-function
-/// port while retaining the target's `refresh(state)` ABI.
+/// Derives previous (+4) and next (+12) indexes from position (+8) and
+/// the owner's signed count (+4). Invalid -1/-5 positions do nothing.
+/// Empty collections preserve before-first (-2), otherwise use end (-3)
+/// for both neighbors. Nonempty before-first points next to zero; end
+/// points previous to count-1. Other positions use wrapping +/-1, signed
+/// next/count comparison, and the previous result's sign bit.
+/// Deliberate deviations: native Rust control flow replaces ARM predicates;
+/// target-width word indexing preserves offsets on hosts. No NULL guard.
+///
+/// # Safety
+/// `state` addresses five writable u32 words. For valid positions, its owner
+/// word names an object with a readable aligned signed count at +4.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iterator_state_refresh(state: *mut u32) {
+    if !iterator_state_is_valid(state) {
+        return;
+    }
+    let owner = state.read() as usize as *const u32;
+    let position = state.add(2).read() as i32;
+    let count = owner.add(1).read() as i32;
+    if count <= 0 {
+        let neighbor = if position == -2 { -2i32 } else { -3i32 };
+        state.add(3).write(neighbor as u32);
+        state.add(1).write(neighbor as u32);
+    } else if position == -2 {
+        state.add(3).write(0);
+        state.add(1).write((-2i32) as u32);
+    } else if position == -3 {
+        state.add(3).write((-3i32) as u32);
+        state.add(1).write((owner.add(1).read() as i32).wrapping_sub(1) as u32);
+    } else {
+        let next = position.wrapping_add(1);
+        state.add(3).write(if next >= count { (-3i32) as u32 } else { next as u32 });
+        let previous = position.wrapping_sub(1);
+        state.add(1).write(if previous < 0 { (-2i32) as u32 } else { previous as u32 });
+    }
+}
+
+#[cfg(test)]
+mod refresh_tests {
+    use super::iterator_state_refresh;
+
+    #[test]
+    fn neighbors_cover_empty_sentinels_boundaries_and_wrapping() {
+        let Some(owner) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::ITERATOR_STATE_REFRESH, 0x100,
+        ) else {
+            assert!(crate::testing::note_missing_u32_fixture("iterator_state_refresh"));
+            return;
+        };
+        let owner = owner.cast::<u32>();
+        let cases = [
+            (0, -2, -2, -2), (0, -3, -3, -3), (-1, 0, -3, -3),
+            (i32::MIN, 7, -3, -3), (1, -2, -2, 0), (1, -3, 0, -3),
+            (1, 0, -2, -3), (3, 0, -2, 1), (3, 1, 0, 2),
+            (3, 2, 1, -3), (3, 3, 2, -3), (3, -4, -2, -3),
+            (3, i32::MAX, i32::MAX - 1, i32::MIN),
+            (3, i32::MIN, i32::MAX, i32::MIN + 1),
+            (i32::MAX, -3, i32::MAX - 1, -3),
+        ];
+        unsafe {
+            for (count, position, previous, next) in cases {
+                owner.add(1).write(count as u32);
+                let mut state = [owner as u32, 0xaaaa_aaaa, position as u32, 0xbbbb_bbbb, 0xcccc_cccc];
+                iterator_state_refresh(state.as_mut_ptr());
+                assert_eq!(state, [owner as u32, previous as u32, position as u32, next as u32, 0xcccc_cccc],
+                           "count={count}, position={position}");
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_positions_preserve_every_word_without_reading_owner() {
+        for position in [-1i32, -5] {
+            let mut state = [0, 0xaaaa_aaaa, position as u32, 0xbbbb_bbbb, 0xcccc_cccc];
+            let original = state;
+            unsafe { iterator_state_refresh(state.as_mut_ptr()) };
+            assert_eq!(state, original);
+        }
+    }
+}
+
+/// Test-only operation override for legacy iterator consumer fixtures.
+/// Production callers invoke the port directly.
+#[cfg(test)]
 pub static mut ITERATOR_STATE_REFRESH: unsafe extern "C" fn(
     state: *mut u32,
 ) = iterator_state_refresh_unported;
 
-/// Default for [`ITERATOR_STATE_REFRESH`]: the refresh is unported, so
-/// it has no local effect (the `iterator_state_link_unported`
-/// precedent).
+#[cfg(test)]
 unsafe extern "C" fn iterator_state_refresh_unported(_state: *mut u32) {}
 
 /// Indirect call to the unported guarded fetch `FUN_08155e30` @
@@ -3870,12 +3950,9 @@ unsafe extern "C" fn iterator_state_fetch_unported(_state: *mut u32, _out: *mut 
 /// the function look like it owns the index guard; the raw ARM shows
 /// the guard belongs to 0x08155e30, a separately called function
 /// (binary-verified: `bl` @ 0x08213728, plus the seek's `b` @
-/// 0x08155dc0). This port is exactly the 44-byte advance; both
-/// callees ride the [`ITERATOR_STATE_REFRESH`] / [`ITERATOR_STATE_FETCH`]
-/// seams (no-op / 0-returning defaults — the family precedent, so an
-/// unswapped table advances the position and reports an empty
-/// traversal). The tail branch is a plain call here (Rust has no
-/// guaranteed tail calls — the operator_delete_tag3 deviation).
+/// 0x08155dc0). Refresh now calls [`iterator_state_refresh`] directly;
+/// guarded fetch remains the [`ITERATOR_STATE_FETCH`] seam. The tail
+/// branch is a plain call here because Rust cannot guarantee tail calls.
 ///
 /// `class_6800`'s local seam knows this function as
 /// `collection_iterator_next`; `vtable_file_record_teardown`'s inner
@@ -3891,7 +3968,10 @@ unsafe extern "C" fn iterator_state_fetch_unported(_state: *mut u32, _out: *mut 
 pub unsafe extern "C" fn iterator_state_next(state: *mut u32, out: *mut u8) -> u32 {
     let next = state.add(3).read();
     state.add(2).write(next);
+    #[cfg(test)]
     let refresh = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_REFRESH));
+    #[cfg(not(test))]
+    let refresh = iterator_state_refresh;
     refresh(state);
     let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
     fetch(state, out)
@@ -3927,7 +4007,10 @@ pub unsafe extern "C" fn iterator_state_next(state: *mut u32, out: *mut u8) -> u
 pub unsafe extern "C" fn iterator_state_previous(state: *mut u32, out: *mut u8) -> u32 {
     let previous = state.add(1).read();
     state.add(2).write(previous);
+    #[cfg(test)]
     let refresh = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_REFRESH));
+    #[cfg(not(test))]
+    let refresh = iterator_state_refresh;
     refresh(state);
     let fetch = core::ptr::read_volatile(core::ptr::addr_of!(ITERATOR_STATE_FETCH));
     fetch(state, out)

@@ -226015,3 +226015,35 @@ functions:
       frame and four-entry width jump table, retains byte loads and
       little-endian shifts, prefix-zero early exit and optional-byte
       offset, and emits no calls. No exact ADS instruction match claimed.
+
+  - address: 0x08155bac
+    ghidra: FUN_08155bac
+    name: iterator_state_refresh
+    size: 148
+    sig: "void iterator_state_refresh(state: *mut u32)"
+    module: app/vtable_set
+    status: ported
+    vars:
+      param_1/r4: state
+      r0: position
+      r1: count
+      r2: owner_then_next
+      r3: end_sentinel
+      ip: before_first_sentinel
+    notes: >-
+      Raw A32 extent 0x08155bac..0x08155c40 is 148 bytes with no literals;
+      the next function begins with LDR r2,[r0,#4]. Whole-image aligned
+      decoding finds plain BL callers 0x08155d84 and 0x08155db0, zero
+      predicated BL callers, and the tail B at 0x08155e2c. One internal BL
+      calls the existing iterator_state_is_valid at 0x0829baa8. Derive
+      previous/next indexes using signed count, -2/-3 sentinels, wrapping
+      arithmetic and the previous result sign bit. Invalid -1/-5 preserves
+      all words without reading owner. Production seek/next/previous call
+      the port directly; legacy operation overrides are test-only.
+      Target-word indexing preserves host layout; no NULL fallback.
+      Host suite: 14569 passed; edge tests cover nonpositive counts,
+      sentinels, first/interior/last/out-of-range positions and signed
+      overflow. Standalone smoke walks before-first through three items
+      to end. ARM release build succeeds. match.py exits 1: 37 original
+      versus 39 Rust instructions, larger frame, reordered stores and
+      branches; retained validity BL, count reload, comparisons and wraps.
