@@ -270,3 +270,4 @@ pub mod set_bounds;
 pub mod collection_append;
 pub mod three_state_bounds_select;
 pub mod remove_selected_item;
+pub mod view_children_sync;

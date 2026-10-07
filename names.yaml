@@ -225783,3 +225783,41 @@ functions:
       and all four overlapping input positions. Standalone consumer smoke
       observes [4294967295, 0, 0, 0] for overlapping wraparound and
       [42, 0, 43, 0] for an ordinary range. No device execution performed.
+  - address: 0x081584f0
+    ghidra: FUN_081584f0
+    name: view_sync_children_transition
+    size: 208
+    sig: "void view_sync_children_transition(ViewBase *view, u32 request)"
+    module: ui/view_children_sync
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: request
+      local_10: child
+      iStack_18: cursor
+      "view+0xa8": children
+      "vtable+0xa4": synchronize
+    notes: >-
+      Raw A32 establishes extent 0x081584f0..0x081585c0, ending in POP
+      before the next independent PUSH prologue. Whole-image decoding
+      finds two plain incoming BLs at 0x081e9bc4 and 0x082887fc, zero
+      predicated incoming BLs; ten plain outgoing BLs, zero predicated
+      outgoing BLs, and two indirect BLX sites. Both raw callers pass
+      only view and request. Nonzero requests normalize to one, synchronize
+      the owner first, then query shown state and propagate via child
+      vtable slot +0xa4 across the embedded collection at +0xa8. Zero
+      requests query and propagate first, then synchronize the owner.
+      Reuses all five existing Rust callees without new resident seams.
+      Deliberate deviations: discard spurious Ghidra third/fourth inputs,
+      merge duplicate loops, and use native host collection/vtable slots;
+      element vtable words remain u32. Host tests cover all owner modes,
+      shown/hidden parents, zero and noncanonical nonzero requests,
+      empty/two-child collections, notification ordering, unrelated bits,
+      and callback mutation without rechecking shown state. Host suite
+      and ARM release build succeed. Standalone actual-library consumer
+      smoke observes owner activation before child activation and child
+      deactivation before owner deactivation. match.py exits 1: LLVM
+      inlines the owner synchronizer, merges loops, and eliminates dead
+      cursor invalidation; collection +0xa8, child virtual +0xa4, request
+      normalization and activation/deactivation ordering remain intact.
+      No device execution performed.
