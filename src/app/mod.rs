@@ -1186,3 +1186,4 @@ pub mod metadata_refresh_if_changed;
 pub mod category_client_register;
 pub mod rtc_binding_refresh;
 pub mod playback_clock_set_position;
+pub mod work_pending_notify;

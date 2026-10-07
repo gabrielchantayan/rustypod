@@ -227663,3 +227663,37 @@ functions:
       additional saved registers/frame pointer and cached record pointer;
       slot +0x298, unchanged r2/r3, BLX then helper BL, five-word scratch
       and returned destination remain intact.
+  - address: 0x0814a298
+    ghidra: FUN_0814a298
+    name: work_pending_notify
+    size: 48
+    sig: "void work_pending_notify(WorkPendingOwner *owner)"
+    module: app/work_pending_notify
+    status: ported
+    vars: {param_1/r0/r4: owner, r5: mutex, owner_plus_0x28: pending, owner_plus_0x34: changed}
+    renames:
+      FUN_0807f5c4: mutex_lock
+      FUN_0807f5cc: condvar_broadcast
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 proves [0x0814a298,0x0814a2c8), 48 bytes without literals;
+      next independent PUSH begins at 0x0814a2c8. Whole-image aligned
+      decoding finds two incoming plain BLs at 0x0807c6d4 and 0x0814a284,
+      zero predicated incoming BLs. Body has two plain BLs at 0x0814a2a8
+      and 0x0814a2b8, zero predicated BLs, and a tail B to mutex_unlock.
+      Lock owner+0x2c, set pending byte +0x28 to one, broadcast condition
+      +0x34, unlock. Caller 0x0814a1c0 invokes this after installing a
+      newly allocated work object in an indexed slot; caller 0x0807c690
+      also notifies after its preparation fails. Ghidra expands the unlock
+      thunk into misleading semaphore guards; raw tail target is 0x0807f6a0.
+      Reuse all three canonical Rust ports, without new seams. No semantic
+      deviations; repr(C) fields widen host pointers while retaining ARM
+      offsets, volatile byte publication precedes wakes, tail B becomes
+      return-position call. Serialized host tests use existing condvar
+      fixture lock and prove publication before wake, repeated notifications,
+      empty/single/multiple waiters and preserved neighbors for initial bytes
+      0,1,0x80,0xff. Host suite passes 14661 tests; ARM release build passes.
+      Standalone test-configured native smoke proves repeated publication
+      and preserved neighboring state. match.py exits 1: 12 original versus
+      13 Rust instructions, added frame pointer, same +0x28 byte store,
+      +0x2c/+0x34 addressing, two BL relocations and tail unlock. No device run.
