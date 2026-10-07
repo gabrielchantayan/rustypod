@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08155b24
+    ghidra: FUN_08155b24
+    name: service_context_scope_acquire
+    size: 40
+    sig: "void service_context_scope_acquire(ServiceContextScope *scope)"
+    module: app/service_context_scope_acquire
+    status: ported
+    vars:
+      param_1/r4: scope
+      piVar1/r5: cell
+      scope+4: published_cell
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_0820c208: resident_service_context_gate_enter
+    notes: >-
+      Raw words establish [0x08155b24,0x08155b4c), exactly 40 bytes,
+      followed by an independent PUSH. Two outbound unconditional BLs,
+      zero outbound predicated BLs. Whole-image aligned decoding finds
+      zero inbound plain BLs and two BLEQ calls at 0x0813c518 and
+      0x0813c77c. Allocate four bytes, write scope into the cell, enter
+      the resident service-context gate, then publish cell at scope+4.
+      Caller mode byte 1 activates the scope before selection changes;
+      the destructor releases the gate through the back-pointer and
+      deletes the cell. No old-cell or NULL-allocation guard. Raw gate
+      0x0820c208 ignores incoming r0 and uses task/context globals at
+      0x089cc374, condition 0x08a78f8c and root slot 0x089ca674; no
+      existing names entry or Rust port exists for that gate. Retain
+      its exact resident address on ARM, require injection on hosts.
+      Native pointer fields and cell allocation widen together on hosts;
+      ARM layout remains two words and a one-word cell. Tests cover empty
+      and occupied scopes, preservation of vtable/old cell, initialized
+      back-pointer before gate entry and publication after gate mutation.
+      Host suite passes 14571 tests. ARM match review is recorded in the
+      function documentation.
+
   - address: 0x08164090
     ghidra: FUN_08164090
     name: iap_packet_context_is_ready
