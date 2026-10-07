@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081625f4
+    ghidra: FUN_081625f4
+    name: string_tag_pack
+    size: 116
+    sig: "u32 string_tag_pack(const void *context, const u8 *text)"
+    module: app/string_tag_pack
+    status: ported
+    vars: {param_1: context, param_2: text, uVar2: tag, iVar1: length}
+    renames: {FUN_08392478: strlen}
+    notes: >-
+      Raw ARM words establish extent 0x081625f4..0x08162668, ending at
+      the next independent PUSH prologue. One outbound plain BL to the
+      ported strlen at 0x08392478; zero predicated outbound BLs. Two
+      incoming plain BLs at 0x081624a8 and 0x08162694, zero predicated.
+      Ignores context, reads four bytes unconditionally and packs them
+      big-endian before strlen. Length 1 ORs 0x00202020, length 2 ORs
+      0x00002020, length 3 ORs 0x20, length 4 returns the packed word;
+      all other lengths return zero. Post-NUL bytes remain significant,
+      not replaced by spaces. No algorithmic deviations; volatile byte
+      reads retain the read order/extent, and no new callee seam is needed.
+      Host suite passed 14590 tests; ARM release build passed. Executable
+      source smoke verified post-NUL OR, four-byte packing and rejection.
+      match.py exits 1: LLVM emits 32 versus 29 instructions, keeps all
+      four loads before strlen but packs after the call, and uses a range
+      check and jump table rather than successive conditional branches.
   - address: 0x08153534
     ghidra: FUN_08153534
     name: settings_item_select
