@@ -226337,3 +226337,33 @@ functions:
       LLVM keeps this in r4 and uses absolute field offsets, with a frame
       pointer prologue; eight BLs, literal, store order and return semantics
       remain intact.
+  - address: 0x0815378c
+    ghidra: FUN_0815378c
+    name: active_entry_serialized_size
+    size: 16
+    sig: "u32 active_entry_serialized_size(const u32 *buffers, u32 enabled)"
+    module: util/active_entry_serialized_size
+    status: ported
+    renames:
+      param_1: buffers
+      param_2: enabled
+      uVar1: byte_length
+    notes: >-
+      Raw words establish extent [0x0815378c,0x0815379c): CMP r1,#0,
+      LDREQ r0,[r0,#12], LDRNE r0,[r0,#4], BX lr; the next real
+      function starts with PUSH. Independent whole-image A32 decoding
+      finds two incoming plain BLs at 0x08213cdc and 0x08213d38, zero
+      incoming predicated BLs, and zero outgoing plain/predicated BLs.
+      Nonzero enabled selects word 1; zero selects word 3. The adjacent
+      serializer at 0x0815379c stores buffer addresses in words 0/2 and
+      byte lengths in words 1/3. Caller 0x08213c98 encodes the low 16
+      bits in little-endian packet fields; the getter returns all 32 bits.
+      No callee seam or behavioral deviation. Aligned u32 word indices
+      preserve target offsets on hosts. Tests cover zero, high-bit and
+      maximal lengths, noncanonical nonzero flags, and a two-word fixture
+      proving the enabled path does not require the disabled slot.
+      Host suite and ARM release build pass. Consumer smoke verifies
+      enabled bytes 78 56 and disabled bytes f0 de in packet fields.
+      match.py exits 1 with seven Rust instructions versus four stock:
+      LLVM adds a frame and chooses offset 4/12 with MOVEQ before one
+      LDR, preserving nonzero selection and the full-width return.

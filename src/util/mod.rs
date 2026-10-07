@@ -507,3 +507,4 @@ pub mod query_filter_is_empty;
 pub mod tagged_buffer_payload_size;
 pub mod owned_payload_list_remove;
 pub mod segment_index_offset;
+pub mod active_entry_serialized_size;
