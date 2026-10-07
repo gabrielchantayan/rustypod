@@ -155,6 +155,7 @@ pub mod media_player_handle_next;
 pub mod media_player_slot_3c_selector_update;
 pub mod media_player_slot_5c_selector_update;
 pub mod service_context_initialize;
+pub mod service_context_scope_acquire;
 pub mod channel_slot_publish;
 pub mod string_array_pair_owner_construct;
 pub mod identity_noop_with_options;
