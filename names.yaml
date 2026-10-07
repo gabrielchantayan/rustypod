@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814955c
+    ghidra: FUN_0814955c
+    name: string_buffer_state_reset
+    size: 88
+    sig: "void string_buffer_state_reset(StringBufferState *state)"
+    module: app/string_buffer_state_reset
+    status: ported
+    vars: {param_1/r4: state, uStack_18: empty_string, local_14/r5: zero}
+    renames: {FUN_08276474: string_object_assign_payload, FUN_08277484: string_object_destroy, FUN_080e7970: free_wrapper}
+    notes: >-
+      Raw osos.dec establishes [0x0814955c,0x081495b4), 88 bytes:
+      84 bytes of A32 code followed by the 0x089a6044 vtable literal;
+      the next real function starts with ldr r1,[r0,#20]. Whole-image
+      aligned branch decoding finds one inbound BL at 0x08149628 and
+      one inbound BLNE at 0x08149544. Body has one plain BL to the
+      empty temporary's string destructor and two BLNE calls to NULL
+      payload assignment and tag-0 buffer free. Clear the leading string,
+      destroy the temporary, free non-NULL buffer at +8, then zero words
+      +8/+12/+16/+20 and byte +24, preserving vtable and byte padding.
+      Deviations: expand NULL assignment into verified virtual slot +0xc
+      to avoid the existing unwired clear seam; omit impossible stack
+      self-alias guard; widen repr(C) pointers on hosts. match.py reviewed:
+      virtual BLX, destructor BL, conditional free BLNE, and all clears remain.
   - address: 0x0813b36c
     ghidra: FUN_0813b36c
     name: record_gate_acquire
