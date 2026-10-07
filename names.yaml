@@ -227834,3 +227834,44 @@ functions:
       No device execution. match.py exits 1: 54 original versus 52 Rust
       instructions including two literals; LLVM merges allocation/constructor
       branches into size/function selection and BLX, sharing the unlock path.
+
+  - address: 0x0813b898
+    ghidra: FUN_0813b898
+    name: indexed_item_context_construct
+    size: 104
+    sig: "void indexed_item_context_construct(ScopedContext *destination, const IndexedContextSource *source, i32 index)"
+    module: app/scoped_context
+    status: ported
+    vars:
+      param_1: destination
+      param_2: source
+      param_3: index
+      auStack_28: temporary
+      uVar1: initialized_destination
+      uVar2: selected_payload_or_context
+    renames:
+      FUN_08270394: scoped_context_construct
+      FUN_08054454: object_payload_if_available
+      FUN_08270418: scoped_context_copy_fields
+    notes: >-
+      Raw A32 establishes [0x0813b898,0x0813b900), 104 code bytes with
+      no literals; the next independent push starts at 0x0813b900.
+      Whole-image word decoding finds two incoming plain BL at 0x080fec7c
+      and 0x08112d30, zero predicated BL; body has four plain BL and zero
+      predicated BL. Initializes destination before the signed-negative
+      index check; reads collection at source+0x40, unsigned count at
+      collection+0xef4, array at collection+0xeec. In-range item payload
+      becomes a temporary context owner with source byte +0x44 as mode;
+      copies fields without calling a destructor. All three callees already
+      have canonical ported identities. Native repr(C) pointer fields preserve
+      ARM offsets while adapting host layout; recovered void ABI retained.
+      Host suite passes 14666 tests including signed/count boundaries,
+      first/last selection, payload availability and mode edges using real
+      callees. ARM release build passes. Standalone test-configured native
+      smoke exercises zero-payload selection and preserves mode 0xab;
+      ordinary non-test host build is blocked by six unrelated missing
+      functions in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. match.py exits 1: 26 original versus 46 Rust
+      instructions; LLVM inlines both constructors, retaining capture-slot
+      dispatches, signed and unsigned gates, exact collection offsets,
+      indexed load, payload call and final field-copy call. No device run.

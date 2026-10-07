@@ -689,6 +689,65 @@ pub unsafe extern "C" fn scoped_context_copy_fields(
     (*destination).mode = (*source).mode;
 }
 
+/// Indexed context source: opaque prefix, collection at target +0x40,
+/// and context mode at +0x44. Native pointers retain host consistency.
+#[repr(C)]
+pub struct IndexedContextSource {
+    pub preceding_words: [u32; 16],
+    pub collection: *const IndexedContextCollection,
+    pub mode: u8,
+}
+
+/// The collection's item array at target +0xeec and count at +0xef4.
+#[repr(C)]
+pub struct IndexedContextCollection {
+    pub preceding_words: [u32; 0xeec / 4],
+    pub items: *const *const u8,
+    pub intervening_word: u32,
+    pub count: u32,
+}
+
+/// indexed_item_context_construct — original `FUN_0813b898` at
+/// 0x0813b898, **104 bytes**, ending before the distinct push at 0x0813b900.
+/// Raw-word scanning finds **2 incoming plain BL, 0 predicated BL**;
+/// the body has **4 plain BL, 0 predicated BL**.
+///
+/// Initializes an ownerless context before checking the signed index. A
+/// negative or unsigned out-of-range index leaves that context intact.
+/// Otherwise constructs a temporary from the item's flag-gated payload and
+/// source mode, then copies its fields into the destination. No destructor
+/// is called. Deliberate deviation: repr(C) native pointer fields replace
+/// target byte offsets for host tests; the existing three callee ports are
+/// reused directly. The recovered void signature is retained.
+///
+/// # Safety
+/// Destination must be writable. Nonnegative indices require a readable
+/// source and collection; in-range indices require a valid item array and
+/// object, and nonzero payloads require the constructor's system root.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn indexed_item_context_construct(
+    destination: *mut ScopedContext,
+    source: *const IndexedContextSource,
+    index: i32,
+) {
+    let destination = scoped_context_construct(destination, ptr::null_mut(), 0);
+    if index < 0 {
+        return;
+    }
+    let collection = (*source).collection;
+    if index as u32 >= (*collection).count {
+        return;
+    }
+    let item = (*collection).items.add(index as usize).read();
+    let owner = crate::ui::object_payload::object_payload_if_available(item);
+    let mut temporary = MaybeUninit::<ScopedContext>::uninit();
+    let temporary = scoped_context_construct(
+        temporary.as_mut_ptr(), owner as usize as *mut u8, (*source).mode,
+    );
+    scoped_context_copy_fields(destination, temporary);
+}
+
 /// service_context_selection_construct — original: `FUN_082a5ee4` @
 /// 0x082a5ee4 (**152 bytes**, exact: the distinct next function begins with
 /// `push {r4,r5,r6,lr}` at 0x082a5f7c; **8 direct `bl` call sites**, all
@@ -1993,6 +2052,75 @@ mod tests {
         MOCK_OWNER = usize::MAX as *mut u8;
         MOCK_MODE_AT_CALL = 0xff;
         ptr::addr_of_mut!(CAPTURE_CONTEXT_FIELDS).write_volatile(recording_capture);
+    }
+
+    #[test]
+    fn indexed_context_rejects_signed_and_count_boundaries() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _restore = SlotGuard;
+        let mut token = poisoned_token();
+        for index in [i32::MIN, -1] {
+            unsafe { indexed_item_context_construct(&mut token, ptr::null(), index) };
+            assert_eq!(token.vtable, &SCOPED_CONTEXT_VTABLE as *const _);
+            assert_eq!(token.owner_valid, 0);
+            assert!(token.owner.is_null());
+            assert!(token.service_context.is_null());
+            assert!(token.registry_token.is_null());
+            assert_eq!(token.mode, 0);
+        }
+        let mut collection = IndexedContextCollection {
+            preceding_words: [0; 0xeec / 4], items: ptr::null(),
+            intervening_word: 0, count: 0,
+        };
+        let source = IndexedContextSource {
+            preceding_words: [0; 16], collection: &collection, mode: 0xff,
+        };
+        for (count, index) in [(0, 0), (2, 2), (2, i32::MAX)] {
+            collection.count = count;
+            unsafe { indexed_item_context_construct(&mut token, &source, index) };
+            assert!(token.owner.is_null());
+            assert_eq!(token.mode, 0);
+        }
+    }
+
+    #[test]
+    fn indexed_context_resolves_selected_payload_and_availability() {
+        let _lock = SLOT_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _restore = SlotGuard;
+        let mut root = [ptr::null_mut::<u8>(); ROOT_SERVICE_CONTEXT_SLOT + 1];
+        let mut service = vec![ptr::null_mut::<u8>(); SERVICE_CONTEXT_REGISTRY_SLOT + 1];
+        root[ROOT_SERVICE_CONTEXT_SLOT] = service.as_mut_ptr().cast();
+        unsafe { ptr::addr_of_mut!(APP_ROOT_OBJECT).write(root.as_mut_ptr().cast()) };
+        let mut objects = [[0u32; 9]; 2];
+        objects[0][8] = 0x1234;
+        objects[1][8] = 0x5678;
+        let items = [objects[0].as_ptr().cast::<u8>(), objects[1].as_ptr().cast::<u8>()];
+        let collection = IndexedContextCollection {
+            preceding_words: [0; 0xeec / 4], items: items.as_ptr(),
+            intervening_word: 0, count: 2,
+        };
+        let mut source = IndexedContextSource {
+            preceding_words: [0; 16], collection: &collection, mode: 0,
+        };
+        for mode in [0, 1, 0xff] {
+            source.mode = mode;
+            for index in 0..2 {
+                let mut token = poisoned_token();
+                unsafe { indexed_item_context_construct(&mut token, &source, index) };
+                assert_eq!(token.owner as usize, [0x1234, 0x5678][index as usize]);
+                assert_eq!(token.service_context, service.as_mut_ptr().cast());
+                assert!(token.registry_token.is_null());
+                assert_eq!(token.owner_valid, 0);
+                assert_eq!(token.mode, mode);
+                assert_eq!(token.vtable, &SCOPED_CONTEXT_VTABLE as *const _);
+            }
+        }
+        unsafe { objects[1].as_mut_ptr().cast::<u8>().add(0x1d).write(1) };
+        let mut token = poisoned_token();
+        unsafe { indexed_item_context_construct(&mut token, &source, 1) };
+        assert!(token.owner.is_null());
+        assert!(token.service_context.is_null());
+        assert_eq!(token.mode, 0xff);
     }
 
     #[test]
