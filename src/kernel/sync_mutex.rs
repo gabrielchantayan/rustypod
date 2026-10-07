@@ -869,6 +869,79 @@ mod tests {
         }
     }
 
+    static mut CANCEL_STATE: *mut crate::app::locked_state_cancel::LockedState =
+        core::ptr::null_mut();
+
+    unsafe extern "C" fn cancel_wait(handle: u32) {
+        assert_eq!((*CANCEL_STATE).state, i32::MIN);
+        (*CANCEL_STATE).state = 123;
+        record(Call::Wait(handle));
+    }
+
+    unsafe extern "C" fn cancel_signal(handle: u32) {
+        assert_eq!((*CANCEL_STATE).state, -2);
+        record(Call::Signal(handle));
+    }
+
+    #[test]
+    fn state_cancel_overwrites_after_acquire_before_release_and_preserves_neighbors() {
+        use crate::app::locked_state_cancel::{locked_state_cancel, LockedState};
+        let _guard = mock_kernel();
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                unsafe {
+                    ROM_KERNEL = MOCK_KERNEL;
+                    CANCEL_STATE = core::ptr::null_mut();
+                }
+            }
+        }
+        let _reset = Reset;
+        let mut cell = 0x42;
+        let mut object = LockedState {
+            mutex: Mutex { sem_cell: &mut cell, unused: 0xa5a5a5a5 },
+            reserved: [1, 0x80000000, u32::MAX],
+            state: i32::MIN,
+        };
+        unsafe {
+            CANCEL_STATE = &mut object;
+            ROM_KERNEL.sema_wait = cancel_wait;
+            ROM_KERNEL.sema_signal = cancel_signal;
+            locked_state_cancel(&mut object);
+        }
+        assert_eq!(calls(), vec![Call::Wait(0x42), Call::Signal(0x42)]);
+        assert_eq!(object.state, -2);
+        assert_eq!(object.reserved, [1, 0x80000000, u32::MAX]);
+        assert_eq!(object.mutex.unused, 0xa5a5a5a5);
+        assert_eq!(object.mutex.sem_cell, &mut cell as *mut u32);
+        assert_eq!(cell, 0x42);
+    }
+
+    #[test]
+    fn state_cancel_updates_with_null_or_zero_handle_and_is_idempotent() {
+        use crate::app::locked_state_cancel::{locked_state_cancel, LockedState};
+        let _guard = mock_kernel();
+        let mut cell = 0u32;
+        for sem_cell in [core::ptr::null_mut(), &mut cell as *mut u32] {
+            for state in [i32::MIN, i32::MAX, 0, -1, -2] {
+                let mut object = LockedState {
+                    mutex: Mutex { sem_cell, unused: 17 },
+                    reserved: [3, 4, 5],
+                    state,
+                };
+                unsafe {
+                    locked_state_cancel(&mut object);
+                    locked_state_cancel(&mut object);
+                }
+                assert_eq!(object.state, -2);
+                assert_eq!(object.reserved, [3, 4, 5]);
+                assert_eq!(object.mutex.sem_cell, sem_cell);
+                assert_eq!(object.mutex.unused, 17);
+            }
+        }
+        assert_eq!(calls(), vec![]);
+    }
+
     static mut WORD_PAIR_OWNER: *mut crate::app::locked_word_pair_reset::LockedWordPairOwner =
         core::ptr::null_mut();
 
