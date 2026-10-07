@@ -226817,3 +226817,30 @@ functions:
       A throwaway A32 interpreter executes raw original and compiled Rust
       bodies for 24 offset/status cases, verifying handle, offset words,
       origin, returned status, and restored stack. No device execution.
+  - address: 0x08161a48
+    ghidra: FUN_08161a48
+    name: vtable_object_owner_destruct
+    size: 48
+    sig: "VtableObjectOwner *vtable_object_owner_destruct(VtableObjectOwner *owner)"
+    module: cxx/vtable_object_owner_destruct
+    status: ported
+    vars: {param_1: owner}
+    notes: >-
+      Raw A32 establishes 44 instruction bytes plus the vtable literal at
+      0x08161a74, ending at the next real function at 0x08161a78 (48 bytes).
+      Whole-image decoding finds two inbound plain BLs at 0x0814932c and
+      0x0827de98, zero predicated inbound BLs, zero outgoing plain or
+      predicated BLs, and one outgoing BLXNE at 0x08161a68. Restore owner
+      vtable 0x08987da0, then dispatch a non-NULL object from owner word 1
+      through its vtable word 1 with that object as receiver. Ignore method
+      result and return original owner; do not clear the slot or free owner.
+      Callers subtract embedded-member offsets 8 and 16 from the result.
+      Concrete virtual method remains unnamed; no new retail-call seam.
+      Host pointers and vtable words widen following owned_object_handle_release;
+      target fields remain four bytes. No target algorithm deviation.
+      Tests cover NULL, restoration before dispatch, receiver identity,
+      retained object, repeated release, callback mutation, and neighbors.
+      Host test suite and ARM release build pass. Executable host smoke
+      exercises NULL and live-object dispatch with callback slot mutation.
+      match.py exits 1: LLVM uses an early NULL return, a larger frame and
+      unconditional BLX within the live branch; original uses BLXNE.
