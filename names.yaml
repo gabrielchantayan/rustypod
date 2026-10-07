@@ -225981,3 +225981,37 @@ functions:
       ARM release build passes. match.py exits 1: LLVM emits 14 instructions
       versus 12, adds a frame pointer and replaces predication with branches;
       equality guard, NULL guard, vtable +0x04 BLX and post-call store remain.
+
+  - address: 0x08164b3c
+    ghidra: FUN_08164b3c
+    name: packed_record_cipher_seed
+    size: 104
+    sig: "u32 packed_record_cipher_seed(const u8 *record)"
+    module: app/packed_record_cipher_seed
+    status: ported
+    vars:
+      param_1/r3: record
+      bVar1/r1: header
+      uVar4/r2: prefix_bytes_then_seed_address
+      uVar3/r0: seed
+    notes: >-
+      Raw A32 extent 0x08164b3c..0x08164ba4 is 104 instruction bytes,
+      ending with BX LR before the next independent function. Whole-image
+      aligned decoding finds two inbound plain BLs at 0x08163ef4 and
+      0x08164cb8, zero predicated inbound BLs, and zero outbound plain
+      or predicated BLs. Header low two bits select a preceding 1..3-byte
+      field; zero returns zero without further reads. Skip the header,
+      preceding field, and one extra byte if bit 7 is set. Bits 2..3
+      select 1..4 seed bytes assembled little-endian. Caller 0x08164c98
+      derives cipher feedback from the result; the protocol identity
+      remains unproven. No callee seams or behavioral deviations. Rust
+      omits the unreachable fallback after the 0x0c mask. Tests compare
+      all header values, four alignments, all widths and high-bit seed
+      patterns with an independent byte-fold reference; absent-prefix
+      fixtures contain only the header. Host suite passes 14567 tests.
+      Standalone execution verifies an extended three-byte prefix with
+      seed 0x80ff0182 and an absent prefix. ARM release build passes.
+      match.py exits 1 with the expected structural diff: LLVM adds a
+      frame and four-entry width jump table, retains byte loads and
+      little-endian shifts, prefix-zero early exit and optional-byte
+      offset, and emits no calls. No exact ADS instruction match claimed.
