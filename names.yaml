@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814b004
+    ghidra: FUN_0814b004
+    name: context_pending_complete
+    size: 52
+    sig: "u32 context_pending_complete(PendingContextOwner *owner, u32 context, u32 event)"
+    module: app/context_pending_complete
+    status: ported
+    vars: {param_1/r4: owner, param_2/r0: context, param_3/r1: event, owner_plus_0x34: current_context, owner_plus_0x84: pending_event}
+    notes: >-
+      Raw A32 extent [0x0814b004,0x0814b038) is 52 bytes, thirteen
+      instructions and no literals; next independent body starts with PUSH.
+      Whole-image aligned decoding finds two inbound plain BLs at
+      0x0814abfc and 0x0814b164, zero predicated inbound BLs; body has
+      one plain BL at 0x0814b02c to 0x081f065c and no predicated BLs.
+      For event 0x52800008 clear current_context only when matching
+      context; call the retained operation with context and event, then
+      clear pending_event. No names entry exists for the callee; raw body
+      locks context+0x50, operates on +0x64 and tail-unlocks +0x50.
+      Its broader identity is unresolved, so retain the verified address
+      ABI without porting another function. Preserve opaque r0 return;
+      both known callers discard it. Target-width u32 fields preserve
+      offsets on host. Tests cover matching/mismatched/zero context,
+      neighboring event IDs, full-width values, store ordering, callee
+      mutations and untouched surrounding words. Host suite and ARM release
+      build passed. Executable smoke confirms clear-before-call and
+      clear-after-call ordering and result preservation. match.py exits 1:
+      thirteen versus eighteen lines, added frame pointer and literals,
+      CMP replaces split SUB and fixed-address BLX replaces direct BL.
+      Conditional +0x34 clear, forwarded arguments and post-call +0x84
+      clear remain intact. No algorithmic deviations or physical-device run.
   - address: 0x0814c2a0
     ghidra: FUN_0814c2a0
     name: handle_owner_shutdown
