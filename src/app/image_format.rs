@@ -386,6 +386,35 @@ pub unsafe extern "C" fn image_format_descriptor(descriptor: *mut u8, format: u3
     memcpy_forward_words(descriptor, local.as_ptr(), DESCRIPTOR_SIZE);
 }
 
+/// image_format_descriptor_with_context — original: `FUN_0813e958` @
+/// 0x0813e958 (64 bytes, ending at the next prologue @ 0x0813e998).
+/// Raw-word scan: 2 incoming plain BL sites, 0 predicated BL sites;
+/// 3 outgoing BL instructions (zero-fill, descriptor builder, copy).
+///
+/// Zero a 32-byte stack descriptor, build it from the format in r2,
+/// then copy all 32 bytes to r0. The context in r1 is never read.
+/// Callers pass an artwork context and a sign-extended format id.
+///
+/// Deliberate deviations: call the existing zero-initializing builder
+/// directly into the destination, eliminating the redundant temporary,
+/// zero-fill and copy. This inherits its documented zero-fill of bytes
+/// the stock builder leaves uninitialized (including unknown formats).
+/// Stock's outer zero-fill cannot initialize the builder's separate stack
+/// temporary. The three-argument ABI and unsigned format bits are retained.
+///
+/// # Safety
+/// `descriptor` must be four-byte aligned and writable for 32 bytes.
+/// `context` is not accessed and may be null, dangling, or overlap the output.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn image_format_descriptor_with_context(
+    descriptor: *mut u8,
+    _context: *const u8,
+    format: u32,
+) {
+    image_format_descriptor(descriptor, format)
+}
+
 /// image_format_descriptor_for_kind — original: `FUN_08105b38` @
 /// 0x08105b38 (32 bytes; 15 `bl` call sites, no tail `b`,
 /// binary-scanned).
@@ -830,6 +859,38 @@ mod tests {
         for kind in [9u32, 11, 13, 18, 100, 0x8000_0000, u32::MAX] {
             assert_eq!(image_pixel_buffer_size_for_kind(kind), 0, "kind {kind:#x}");
             assert_eq!(reference_size(kind), 0, "reference kind {kind:#x}");
+        }
+    }
+
+    #[test]
+    fn contextual_descriptor_writes_exact_extent_and_ignores_context() {
+        // Exercise aligned outputs and an overlapping context: stock
+        // never reads r1. Check geometry and every surrounding sentinel.
+        for offset in 0..2 {
+            let mut words = [0xa5a5_a5a5u32; 11];
+            let start = 4 + offset * 4;
+            let bytes = unsafe {
+                core::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), 44)
+            };
+            let out = unsafe { bytes.as_mut_ptr().add(start) };
+            unsafe { image_format_descriptor_with_context(out, out, 0x3f5) };
+            assert!(bytes[..start].iter().all(|&b| b == 0xa5));
+            assert_eq!(&bytes[start..start + DESCRIPTOR_SIZE],
+                &reference_descriptor(Some((220, 176, 352, 0x10e, 16, 0x565))));
+            assert!(bytes[start + DESCRIPTOR_SIZE..].iter().all(|&b| b == 0xa5));
+        }
+    }
+
+    #[test]
+    fn contextual_descriptor_unknown_signed_formats_clear_stale_geometry() {
+        // Holes, unsigned bounds, and negative sign-extended short ids.
+        for format in [0, 0x3f0, 0x3f2, 0x42e, 0xffff_8000, u32::MAX] {
+            let mut words = [0xa5a5_a5a5u32; DESCRIPTOR_SIZE / 4];
+            unsafe {
+                image_format_descriptor_with_context(
+                    words.as_mut_ptr().cast(), core::ptr::null(), format);
+            }
+            assert_eq!(words, [0u32; DESCRIPTOR_SIZE / 4], "format {format:#x}");
         }
     }
 }

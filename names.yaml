@@ -227475,3 +227475,33 @@ functions:
       across seven signed-limit edge values and three flag states with
       identical full register state at target entry. No host substitute,
       forwarding-only unit test, or physical-device execution.
+
+  - address: 0x0813e958
+    ghidra: FUN_0813e958
+    name: image_format_descriptor_with_context
+    size: 64
+    sig: "void image_format_descriptor_with_context(u8 *descriptor, const u8 *context, u32 format)"
+    module: app/image_format
+    status: ported
+    vars: {param_1: descriptor, param_2: context, param_3: format, auStack_2c: temporary_descriptor}
+    notes: >-
+      Raw extent [0x0813e958,0x0813e998), ending at the next PUSH prologue.
+      Two incoming plain BL sites at 0x080fe358 and 0x0813e9b0; zero
+      predicated BL sites. Three outgoing BL instructions: 0x08037db8
+      zero-fill veneer to IRAM memzero_aligned (0x0800027c mirrored at
+      0x2200027c), image_format_descriptor at 0x08105b58, and 0x08037df8
+      copy veneer to memcpy_forward_words (0x08000188 mirrored at
+      0x22000188). Zero a 32-byte local, build from r2, copy to r0;
+      r1 is never read. Context callers supply artwork state; the format
+      is a sign-extended short passed as unchanged unsigned bits.
+      Deviations: reuse the existing zero-initializing descriptor builder
+      directly into the destination, removing redundant local zeroing and
+      copying. Inherit its documented deterministic zero-fill for padding
+      and unsupported ids; stock's outer zero-fill does not initialize the
+      builder's separate stack temporary. Preserve the three-argument ABI.
+      Host tests cover aligned output bounds, overlapping/null ignored
+      context, geometry with nonzero auxiliary tag, holes, unsigned bounds
+      and negative short ids. ARM match.py: 16 stock instructions versus
+      5 Rust instructions, argument move r1=r2 and tail branch to the
+      existing builder, rather than three calls; intentional structural
+      diff. No new firmware seam or module. No physical-device execution.
