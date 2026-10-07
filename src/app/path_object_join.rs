@@ -13,7 +13,7 @@ use crate::cxx::string_object::{
 /// 0x082a5630), zero predicated calls. The body takes the destination's
 /// one-codepoint suffix, removes all trailing `:`, `/`, or `\\` when that
 /// suffix is a delimiter, then appends `/` only when a nonempty source is
-/// joined onto an empty destination, and finally appends the source C string.
+/// joined onto a nonempty destination, and finally appends the source C string.
 ///
 /// Deliberate deviation: `string_object_remove_trailing_codepoint` remains an
 /// unported target helper at 0x082771e0, so this port retains that exact call
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn path_object_join(
         }
     }
     if !string_object_is_empty(source) {
-        if string_object_is_empty(this) {
+        if !string_object_is_empty(this) {
             let slash = [b'/', 0];
             string_object_insert_cstr(this, i32::MAX, slash.as_ptr());
         }

@@ -875,6 +875,7 @@ pub mod device_1da_validate;
 pub mod quoted_input_candidate_find;
 pub mod path_component_query;
 pub mod path_component_query_worker;
+pub mod path_prefix_dispatch;
 pub mod path_object_construct;
 pub mod path_probe;
 pub mod path_stage_budget_set;

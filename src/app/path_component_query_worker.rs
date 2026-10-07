@@ -12,17 +12,13 @@
 //! `path_object` in r4. It constructs the guard with the live r1 base hint,
 //! fetches facade selector 1, invokes the fixed facade query at 0x08149e38
 //! with `(facade, path_object)`, destroys the guard, then returns that query
-//! status verbatim. The resolved facade operation's semantic identity is not
-//! established; its arguments and status propagation are the only claims this
-//! port makes.
+//! status verbatim. The callee walks cumulative path prefixes through facade
+//! slot +0x58, tolerating statuses 0, 13 and 53.
 //!
 //! ## Deliberate deviations
 //!
-//! Guard construction, facade selection, and destruction reuse their existing
-//! ported/boundary seams from `path_probe`. The separately linked 0x08149e38
-//! callee remains a read-volatile dispatch boundary: device builds call its
-//! fixed retailOS address; host builds fail closed with status 0 and tests
-//! install a recorder. No callee identity is invented.
+//! Existing guard boundaries and the host-recordable query slot remain;
+//! the query slot's default now calls the ported path-prefix dispatcher.
 
 use core::mem::MaybeUninit;
 
@@ -33,12 +29,7 @@ use crate::app::path_probe::{
 };
 use crate::cxx::string_object::StringObject;
 
-/// Firmware load address of the unresolved facade query called at
-/// 0x0809b6c8. Its body consumes `(facade, path_object)` but its concrete
-/// operation remains unidentified.
-pub const PATH_COMPONENT_FACADE_QUERY_ADDRESS: usize = 0x0814_9e38;
-
-/// ABI of the unresolved facade query at [`PATH_COMPONENT_FACADE_QUERY_ADDRESS`].
+/// ABI of the cumulative path-prefix dispatcher.
 pub type PathComponentFacadeQuery =
     unsafe extern "C" fn(facade: *mut FacadeObject, path_object: *mut StringObject) -> u32;
 
@@ -46,23 +37,10 @@ unsafe extern "C" fn firmware_path_component_facade_query(
     facade: *mut FacadeObject,
     path_object: *mut StringObject,
 ) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let query: PathComponentFacadeQuery =
-            core::mem::transmute(PATH_COMPONENT_FACADE_QUERY_ADDRESS);
-        query(facade, path_object)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = facade;
-        let _ = path_object;
-        0
-    }
+    crate::app::path_prefix_dispatch::path_prefix_dispatch(facade, path_object)
 }
 
-/// The active 0x08149e38 facade-query boundary. Device builds call its fixed
-/// retailOS entry; host tests replace it with a recording implementation.
+/// Host-recordable query slot; the default calls the ported dispatcher.
 pub static mut PATH_COMPONENT_FACADE_QUERY: PathComponentFacadeQuery =
     firmware_path_component_facade_query;
 
@@ -91,13 +69,12 @@ unsafe fn facade_query_fn() -> PathComponentFacadeQuery {
 /// branches**).
 ///
 /// Constructs a scoped interface guard with `base_hint`, fetches facade
-/// selector 1, calls the unresolved facade query with the fetched facade and
+/// selector 1, calls the path-prefix dispatcher with the fetched facade and
 /// `path_object`, destroys the same guard frame, and returns the query status
 /// unchanged. The raw body has no NULL guard; each dereference/call occurs in
 /// the decoded order.
 ///
-/// Deliberate deviation: 0x08149e38 is not yet ported, so its device call is
-/// retained as [`PATH_COMPONENT_FACADE_QUERY`] and the host default returns 0.
+/// Deliberate deviation: a host-recordable dispatch slot defaults to the port.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn path_component_query_worker(

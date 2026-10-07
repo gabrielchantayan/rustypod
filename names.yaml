@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08149e38
+    ghidra: FUN_08149e38
+    name: path_prefix_dispatch
+    size: 216
+    sig: "u32 path_prefix_dispatch(FacadeObject *facade, const StringObject *path)"
+    module: app/path_prefix_dispatch
+    status: ported
+    renames:
+      param_1/r5: facade
+      r1: path
+      auStack_14: remaining
+      local_1c: prefix
+      auStack_24: component
+      iVar2: status
+      DAT_08149f0c: PATH_OBJECT_VTABLE_ADDRESS
+    notes: >-
+      Raw A32 establishes extent [0x08149e38,0x08149f10): 212 code bytes
+      and the path vtable literal 0x089a60d8; the next entry sets byte +8
+      and returns. Whole-image aligned BL decoding finds two plain inbound
+      sites at 0x0809b6c8 and 0x08278444, no predicated inbound sites.
+      Body has ten plain BLs, no predicated BLs and one BLX at facade slot
+      +0x58. Ghidra omits the live r1 source argument. Copy-constructs the
+      source, plants the path vtable, normalizes separators through the
+      existing 0x08279198 boundary, then extracts components and joins them
+      into cumulative prefixes. Dispatch continues for statuses 0, 13 and
+      53; exhaustion returns zero, other statuses return unchanged. Both
+      live temporaries are destroyed on either exit. Reuses canonical Rust
+      copy/count/extract/join/destroy helpers and the existing normalizer
+      seam. The worker query slot now defaults to this port. Corrects the
+      existing join port's inverted slash-insertion predicate: raw CMP at
+      0x082793e4 and BNE at 0x082793e8 skip slash insertion for an empty
+      destination. Host tests cover empty and separator-only input, tolerated
+      statuses, early errors, UTF-8 prefixes, input ownership and cleanup.
+      A standalone host smoke emitted a, a/b and a/b/c, returned 7 and skipped
+      the remaining component. match.py reports 62 versus 53 instructions;
+      frame, helper dispatch and merged cleanup differ, while the component
+      loop, slot +0x58 BLX and tolerated-status decisions remain. Deliberate
+      deviations are widened host pointer fields and existing helper seams.
+
   - address: 0x08149f20
     ghidra: FUN_08149f20
     name: virtual_dispatch_clear_active
@@ -148391,7 +148430,7 @@ functions:
       (0x08149e90, 0x081bd52c, 0x081bde9c, 0x08279358, 0x082a5630), and
       zero predicated calls. It samples the destination's one-codepoint
       suffix, removes trailing colon/slash/backslash runs, prefixes a slash
-      only when joining nonempty source to an empty destination, then appends
+      only when joining nonempty source to a nonempty destination, then appends
       source's NULL-safe C string and returns this. All named string helpers
       are ported and direct except string_object_remove_trailing_codepoint
       (0x082771e0), whose raw target call remains a documented target seam
