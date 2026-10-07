@@ -228,6 +228,39 @@ pub unsafe extern "C" fn mov_atom_node_get_offset(node: *const MovAtomNode) -> u
     let offset_lo = unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*node).offset_lo)) };
     (u64::from(offset_hi) << 32) | u64::from(offset_lo)
 }
+
+/// MOV atom node payload-offset setter — original: `FUN_0814d240` @
+/// **0x0814d240** (48 bytes, 0x0814d240..0x0814d270, 12 instructions).
+/// The next function is the flag getter at 0x0814d270. Raw ARM decoding
+/// finds two incoming plain BLs (0x081d8390, 0x081f3ed0), zero predicated
+/// BLs, and no outgoing calls.
+///
+/// Compares the signed 64-bit offset against zero using SUBS/SBCS. Negative
+/// offsets return 1 without accessing the node; otherwise stores the low
+/// word at +0x10, then the high word at +0x14, and returns 0.
+///
+/// # Deliberate deviations
+///
+/// None. AAPCS aligns `offset` to r2:r3, leaving r1 unused as in stock.
+/// Volatile word stores retain the original store order.
+///
+/// # Safety
+///
+/// For nonnegative offsets, `node` must point to one writable [`MovAtomNode`].
+/// Negative offsets do not require a valid node pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mov_atom_node_set_offset")]
+pub unsafe extern "C" fn mov_atom_node_set_offset(node: *mut MovAtomNode, offset: i64) -> u32 {
+    if offset < 0 {
+        return 1;
+    }
+    unsafe {
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).offset_lo), offset as u32);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!((*node).offset_hi), (offset as u64 >> 32) as u32);
+    }
+    0
+}
 /// MOV atom node total-size getter — original: `FUN_0814d1ac` @
 /// **0x0814d1ac** (16 bytes, 0x0814d1ac..0x0814d1bc, 4 instructions, no
 /// literal pool). The next separately linked function starts at 0x0814d1bc.
@@ -800,6 +833,33 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn sets_only_nonnegative_payload_offsets() {
+        for offset in [i64::MIN, -0x1_0000_0000, -1, 0, 0xffff_ffff,
+                       0x1_0000_0000, 0x1234_5678_9abc_def0, i64::MAX] {
+            let mut words = [0xa5a5_a5a5u32; 10];
+            let mut expected = words;
+            if offset >= 0 {
+                expected[4] = offset as u32;
+                expected[5] = (offset as u64 >> 32) as u32;
+            }
+            let status = unsafe {
+                mov_atom_node_set_offset(words.as_mut_ptr().cast(), offset)
+            };
+            assert_eq!(status, u32::from(offset < 0), "offset {offset}");
+            assert_eq!(words, expected, "offset {offset}");
+        }
+    }
+
+    #[test]
+    fn negative_payload_offset_does_not_access_null_node() {
+        for offset in [i64::MIN, -0x1_0000_0000, -1] {
+            assert_eq!(unsafe {
+                mov_atom_node_set_offset(core::ptr::null_mut(), offset)
+            }, 1);
+        }
+    }
 
     #[test]
     fn gets_payload_offset_from_target_width_words_without_writing() {
