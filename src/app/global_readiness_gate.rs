@@ -9,24 +9,22 @@
 //! site decoding finds three inbound plain `bl` calls and no predicated forms.
 //!
 //! Algorithm: read the runtime gate word at 0x089caed0; return zero when it is
-//! zero, otherwise invoke the stock readiness predicate at 0x08149078 and
-//! normalize its nonzero result to one. The global and predicate have no
-//! established subsystem identity, so their names deliberately describe only
-//! the verified gate behavior. Host builds replace both firmware boundaries
-//! with test seams; target builds call the stock predicate through its fixed
-//! address.
+//! zero, otherwise invoke the ported PMU readiness predicate at 0x08149078 and
+//! normalize its nonzero result to one. The global's subsystem identity remains
+//! unknown. Host builds replace the global and predicate with test seams;
+//! target builds call the Rust PMU port, preserving incoming r1-r3 and supplying
+//! the loaded gate word as r0.
 use core::ptr;
 
 const GLOBAL_READINESS_GATE_ADDRESS: *const u32 = 0x089c_aed0usize as *const u32;
-const RETAIL_READINESS_PREDICATE_ADDRESS: usize = 0x0814_9078;
 
-type ReadinessPredicate = unsafe extern "C" fn() -> u32;
+type ReadinessPredicate = unsafe extern "C" fn(u32, u32, u32, u32) -> u32;
 
 #[cfg(not(target_os = "none"))]
 static mut HOST_GLOBAL_READINESS_GATE: u32 = 0;
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_readiness_predicate() -> u32 {
+unsafe extern "C" fn missing_readiness_predicate(_: u32, _: u32, _: u32, _: u32) -> u32 {
     panic!("global_readiness_gate_is_ready requires predicate 0x08149078")
 }
 
@@ -47,16 +45,15 @@ unsafe fn global_readiness_gate_word() -> u32 {
 }
 
 #[inline(always)]
-unsafe fn readiness_predicate() -> u32 {
+unsafe fn readiness_predicate(gate: u32, r1: u32, r2: u32, r3: u32) -> u32 {
     #[cfg(target_os = "none")]
     {
-        let predicate: ReadinessPredicate = unsafe { core::mem::transmute(RETAIL_READINESS_PREDICATE_ADDRESS) };
-        unsafe { predicate() }
+        unsafe { crate::drivers::pmu::pmu_readiness_status_available(gate, r1, r2, r3) }
     }
 
     #[cfg(not(target_os = "none"))]
     {
-        unsafe { ptr::read_volatile(ptr::addr_of!(GLOBAL_READINESS_PREDICATE))() }
+        unsafe { ptr::read_volatile(ptr::addr_of!(GLOBAL_READINESS_PREDICATE))(gate, r1, r2, r3) }
     }
 }
 
@@ -65,15 +62,18 @@ unsafe fn readiness_predicate() -> u32 {
 /// # Safety
 ///
 /// Firmware execution requires 0x089caed0 to be readable and, when nonzero,
-/// requires the retail predicate at 0x08149078 to be callable.
+/// requires the PMU transaction boundaries to be callable.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn global_readiness_gate_is_ready() -> u32 {
-    if unsafe { global_readiness_gate_word() } == 0 {
+pub unsafe extern "C" fn global_readiness_gate_is_ready(
+    _incoming_r0: u32, incoming_r1: u32, incoming_r2: u32, incoming_r3: u32,
+) -> u32 {
+    let gate = unsafe { global_readiness_gate_word() };
+    if gate == 0 {
         return 0;
     }
 
-    (unsafe { readiness_predicate() } != 0) as u32
+    (unsafe { readiness_predicate(gate, incoming_r1, incoming_r2, incoming_r3) } != 0) as u32
 }
 
 #[cfg(test)]
@@ -87,7 +87,7 @@ mod tests {
     static mut PREDICATE_RESULT: u32 = 0;
     static mut PREDICATE_CALLS: u32 = 0;
 
-    unsafe extern "C" fn predicate() -> u32 {
+    unsafe extern "C" fn predicate(_: u32, _: u32, _: u32, _: u32) -> u32 {
         unsafe {
             PREDICATE_CALLS += 1;
             PREDICATE_RESULT
@@ -103,7 +103,7 @@ mod tests {
             PREDICATE_CALLS = 0;
         }
 
-        assert_eq!(unsafe { global_readiness_gate_is_ready() }, 0);
+        assert_eq!(unsafe { global_readiness_gate_is_ready(0, 0, 0, 0) }, 0);
         assert_eq!(unsafe { PREDICATE_CALLS }, 0);
     }
 
@@ -116,10 +116,10 @@ mod tests {
             PREDICATE_CALLS = 0;
             PREDICATE_RESULT = 0;
         }
-        assert_eq!(unsafe { global_readiness_gate_is_ready() }, 0);
+        assert_eq!(unsafe { global_readiness_gate_is_ready(0, 0, 0, 0) }, 0);
 
         unsafe { PREDICATE_RESULT = u32::MAX; }
-        assert_eq!(unsafe { global_readiness_gate_is_ready() }, 1);
+        assert_eq!(unsafe { global_readiness_gate_is_ready(0, 0, 0, 0) }, 1);
         assert_eq!(unsafe { PREDICATE_CALLS }, 2);
 
         unsafe {
