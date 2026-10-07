@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814c2a0
+    ghidra: FUN_0814c2a0
+    name: handle_owner_shutdown
+    size: 128
+    sig: "void handle_owner_shutdown(HandleOwner *owner)"
+    module: app/handle_owner_shutdown
+    status: ported
+    vars: {param_1/r0/r4: owner, r5: mutex, local_20: condition, owner_plus_0x14: handle, owner_plus_0x6c: active}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_080ed9c8: condvar_bind, FUN_0814ba28: event_post_with_condition, FUN_080ed9dc: condvar_wait_forever, FUN_083d64f4: handle_deref_or_null, FUN_08076920: state_object_destroy, FUN_0807f6a0: mutex_unlock}
+    notes: >-
+      Raw A32 extent [0x0814c2a0,0x0814c320) is 128 bytes, including
+      the event literal 0x207 at 0x0814c31c; Ghidra reports only the
+      124 code bytes. Next independent PUSH starts at 0x0814c320.
+      Whole-image aligned BL decoding finds two incoming plain BLs,
+      at 0x0814c224 and 0x0814c704, zero predicated incoming BLs,
+      seven outgoing plain BLs and zero predicated outgoing BLs.
+      Lock owner+0x58, bind a zeroed stack CondVar to that lock, post
+      event 0x207 with its pointer, then wait and re-read the two-level
+      handle at owner+0x14 until null. Clear owner+0x6c, destroy the
+      stack base and unlock. Posting failure is ignored, not an early
+      return. Callers are setup-failure cleanup and owner destruction;
+      no concrete class identity is inferred. Raw 0x0814ba28 packages
+      the condition pointer as four-byte event data and posts to owner;
+      no names entry exists, so retain this verified fixed-address ABI
+      rather than invent a ported callee. All other calls reuse ports.
+      Host pointer fields widen through repr(C); target offsets remain
+      exact. Tests model null slots, null cells, spurious wake and slot
+      replacement after failed posting. Native host compilation is blocked
+      by six pre-existing missing functions elsewhere in the crate;
+      executable smoke uses the existing host test configuration.
+      Host suite passes 14652 tests and ARM release build passes.
+      match.py exits 1: 36 versus 31 instructions, added frame pointer,
+      fixed-address BLX for posting, duplicated initial handle predicate;
+      lock+0x58, event 0x207, wait loop and clear+0x6c remain. LLVM
+      removes redundant pre-bind zero stores and the empty destructor.
+      No target algorithmic deviations or physical-device execution.
   - address: 0x0814cd44
     ghidra: FUN_0814cd44
     name: chunk_probe_context_destroy
