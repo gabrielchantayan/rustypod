@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813b53c
+    ghidra: FUN_0813b53c
+    name: base_vtable_value_init
+    size: 20
+    sig: "BaseVtableValue *base_vtable_value_init(BaseVtableValue *storage, u32 value)"
+    module: app/base_vtable_value_init
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: value
+      DAT_0813b54c: base_vtable
+    notes: >-
+      Raw words e5801004 e59f1004 e5801000 e12fff1e followed by
+      literal 08984de4 establish a 20-byte true extent; the next real
+      function starts at 0x0813b550. Ghidra reports the 16-byte code body.
+      Whole-image raw decoding verifies two inbound plain BL sites at
+      0x080facd8 and 0x080fb468, zero predicated BLs and no internal calls.
+      Store value at +4, install the base vtable at +0, preserve r0.
+      Both callers replace the vtable through the returned pointer;
+      Ghidra's void return is incorrect. Concrete class identity remains
+      unverified. Volatile word stores preserve retail write order;
+      no new callee seams. Host tests cover all-bit values, reconstruction,
+      pointer return and neighboring guards. No device verification.
   - address: 0x0813c9dc
     ghidra: FUN_0813c9dc
     name: indexed_item_query
