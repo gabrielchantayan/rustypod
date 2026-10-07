@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813c9dc
+    ghidra: FUN_0813c9dc
+    name: indexed_item_query
+    size: 16
+    sig: "u32 indexed_item_query(void *output, IndexedItemInterface *interface, u32 index)"
+    module: ui/indexed_item_query
+    status: ported
+    vars: {param_1/r0: output, param_2/r1: interface, param_3/r2: index, r3: virtual_method}
+    notes: >-
+      Raw words e5913000 e2822001 e5933288 e12fff13 establish a
+      16-byte extent ending at the independent PUSH at 0x0813c9ec.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x0810c864
+      and 0x0810c8d4, zero predicated inbound BLs and zero internal BLs.
+      Increment the zero-based index modulo 2^32, then tail-dispatch
+      unresolved vtable slot +0x288 with output and interface unchanged.
+      Callers iterate collection items and inspect the output object.
+      Preserve the opaque r0 result although both callers ignore it.
+      No fixed-address seam or invented concrete method identity.
+      Host repr(C) pointers widen while preserving target word indices.
+      Tests cover item selection, out-of-range output preservation,
+      signed-boundary and all-ones wrapping, and adjacent canaries.
+      Host suite and ARM release build pass. Executable source-entry smoke
+      confirms index 2 becomes 3, all-ones becomes 0, and callback result
+      0xabcddcba survives. match.py exits 1: the four original instructions
+      remain, with frame-pointer PUSH/MOV/POP added. No device run.
   - address: 0x0813d064
     ghidra: FUN_0813d064
     name: query_object_set_masks
