@@ -12,6 +12,9 @@
 //! - [`trace_buffer_slot_presence_matches`] — original: `FUN_08149f68` @
 //!   `0x08149f68` (**56-byte raw extent; three unconditional `bl` callers,
 //!   no predicated `bl` forms**).
+//! - [`trace_buffer_slot_is_present`] — original: `FUN_0814a11c` @
+//!   `0x0814a11c` (**16-byte raw extent; two unconditional `bl` callers,
+//!   no predicated forms**).
 
 
 //!
@@ -287,6 +290,28 @@ pub unsafe extern "C" fn trace_buffer_slot_presence_matches(
     }
 }
 
+/// trace_buffer_slot_is_present — original: `FUN_0814a11c` @ `0x0814a11c`.
+///
+/// True size: 16 bytes; the separately entered `bx lr` at `0x0814a12c`
+/// begins the next function. Two unconditional inbound BLs at `0x080c6820`
+/// and `0x080d3548`, no predicated BLs; no outbound calls.
+///
+/// Loads the aligned 32-bit word at `slots[selector]` and returns one if it
+/// is nonzero, otherwise zero. No bounds check or synchronization is added.
+/// Deliberate deviations: none; host fixtures retain target-width words.
+///
+/// # Safety
+/// `slots.add(selector as usize)` must designate a readable aligned u32.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.trace_buffer_slot_is_present")]
+pub unsafe extern "C" fn trace_buffer_slot_is_present(
+    slots: *const u32,
+    selector: u32,
+) -> u32 {
+    (slots.add(selector as usize).read() != 0) as u32
+}
+
 
 
 /// trace_buffer_slot_acquire — original: `FUN_0814a130` @ `0x0814a130`
@@ -363,6 +388,19 @@ mod tests {
     static TRACE_BUFFER_LOCK: Mutex<()> = Mutex::new(());
     static mut ALLOCATED_BLOCKS: Vec<*mut u8> = Vec::new();
     static mut CONSTRUCTED_BLOCKS: Vec<*mut u8> = Vec::new();
+
+    #[test]
+    fn slot_presence_normalizes_all_nonzero_words_and_uses_word_indices() {
+        let slots = [0, 1, 0x8000_0000, 0, u32::MAX, 0x0100_0000, 0, 2];
+        for (selector, word) in slots.iter().enumerate() {
+            let expected = if *word == 0 { 0 } else { 1 };
+            assert_eq!(
+                unsafe { trace_buffer_slot_is_present(slots.as_ptr(), selector as u32) },
+                expected,
+                "selector {selector}",
+            );
+        }
+    }
     static mut CTOR_RETURNS_NULL: bool = false;
     static mut DEFAULT_ENTRY_RESULT: *mut TraceBufferEntry = ptr::null_mut();
     static mut DEFAULT_ENTRY_CALLS: u32 = 0;

@@ -125605,6 +125605,29 @@ functions:
       CountedMutex layouts diverge at 64-bit pointer width; target builds
       directly invoke the ported condvar and counted-mutex functions.
 
+  - address: 0x0814a11c
+    ghidra: FUN_0814a11c
+    name: trace_buffer_slot_is_present
+    size: 16
+    sig: "u32 trace_buffer_slot_is_present(const u32 *slots, u32 selector)"
+    module: app/trace_buffer
+    status: ported
+    renames:
+      param_1/r0: slots
+      param_2/r1: selector
+    notes: >-
+      Raw words e7900101 e3500000 13a00001 e12fff1e decode as
+      ldr r0,[r0,r1,lsl #2]; cmp r0,#0; movne r0,#1; bx lr.
+      The true extent is 16 bytes, ending at 0x0814a12c, whose
+      independent bx lr is entered by the tail branch at 0x08084da8.
+      Whole-image aligned A32 BL-immediate decoding finds two plain
+      unconditional inbound calls at 0x080c6820 and 0x080d3548 and zero
+      predicated inbound calls; the function makes no outbound calls.
+      Reads the selector-indexed aligned target word and normalizes its
+      presence to zero or one, without validation or locking. The Rust
+      implementation uses u32 slots on both host and target, matching the
+      existing word-slot validator. No deliberate behavioral deviations.
+
   - address: 0x0814a130
     ghidra: FUN_0814a130
     name: trace_buffer_slot_acquire
