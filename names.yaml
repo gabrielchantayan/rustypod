@@ -228428,3 +228428,32 @@ functions:
       equivalent direct/conditional-indirect call structure; LLVM adds a
       frame and retains the original owner because the array callee returns
       its receiver, replacing the original returned-pointer subtraction.
+  - address: 0x081375b0
+    ghidra: FUN_081375b0
+    name: embedded_handle_first_word_nonzero
+    size: 56
+    sig: "u32 embedded_handle_first_word_nonzero(const EmbeddedWordHandleOwner *owner)"
+    module: cxx/handle
+    status: ported
+    vars: {param_1: owner, iVar1: payload, piVar2: payload, FUN_083d60ac: handle_deref_or_null}
+    notes: >-
+      Raw A32 instructions span [0x081375b0,0x081375e8), 56 bytes;
+      the next real function begins with push at 0x081375e8. Whole-image
+      aligned branch decoding finds two plain incoming BLs at 0x082808a8
+      and 0x08280c64, zero predicated incoming BLs, two plain outgoing
+      BLs to 0x083d60ac, and zero predicated outgoing BLs. The callee is
+      the already-ported byte-identical handle_deref_or_null alias.
+      Resolve the two-level handle at owner+0x54; return zero for a null
+      result, otherwise resolve again and return exactly one if the
+      aligned first u32 of the payload is nonzero, zero otherwise.
+      Unknown owner fields and payload meaning remain opaque. The source
+      retains both accessor calls; LLVM folds the second pure read-only
+      call for a stable handle. No deliberate target behavioral deviations;
+      repr(C) host fixtures widen pointer fields and may pad the handle
+      offset. match.py verifies the +0x54 access, NULL guard, first-word
+      load and Boolean normalization; LLVM also changes the frame and
+      return layout. Tests cover null cell, null payload, zero, positive
+      and high-bit first words, and preservation of other words.
+      Linked ARM export execution in Unicorn passes all seven null/live
+      and zero/nonzero cases using the real handle accessor and target
+      +0x54 layout; owner, cell and payload memory remain unchanged.

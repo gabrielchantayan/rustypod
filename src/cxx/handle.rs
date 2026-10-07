@@ -94,6 +94,85 @@ pub unsafe extern "C" fn handle_deref_or_null(slot: *const *const *mut u8) -> *m
     cell.read()
 }
 
+/// Opaque owner prefix with a two-level handle at target offset +0x54.
+/// Pointer fields widen naturally on hosts; the unknown prefix stays 21
+/// target words. Host alignment may pad before `handle`.
+#[repr(C)]
+pub struct EmbeddedWordHandleOwner {
+    pub opaque_prefix: [u32; 21],
+    pub handle: *const *mut u8,
+}
+
+/// embedded_handle_first_word_nonzero — original: `FUN_081375b0`
+/// @ load address 0x081375b0 (56 bytes, next function at 0x081375e8).
+/// Whole-image raw A32 decoding finds 2 plain incoming BLs at 0x082808a8
+/// and 0x08280c64, no predicated incoming BLs; the body has 2 plain BLs
+/// to 0x083d60ac and no predicated BLs.
+///
+/// Resolve the handle at +0x54 with [`handle_deref_or_null`]. If it is
+/// NULL, return 0. Otherwise resolve it again, load the payload's first
+/// aligned u32, and return exactly 1 for nonzero or 0 for zero. The
+/// 0x083d60ac callee is a registered byte-identical alias of that seam.
+///
+/// No deliberate target behavior deviations. Hosts widen the handle
+/// pointers using repr(C) rather than assuming four-byte pointers.
+/// The source preserves both accessor calls; LLVM folds the second pure
+/// read-only call under Rust's requirement that this handle remain stable.
+///
+/// # Safety
+/// `owner` must be readable. Its non-NULL handle cell must be readable,
+/// and a non-NULL resolved payload must contain an aligned readable u32.
+/// The handle must remain valid across both accessor calls.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn embedded_handle_first_word_nonzero(
+    owner: *const EmbeddedWordHandleOwner,
+) -> u32 {
+    let slot = core::ptr::addr_of!((*owner).handle);
+    if handle_deref_or_null(slot).is_null() {
+        return 0;
+    }
+    let payload = handle_deref_or_null(slot);
+    u32::from(payload.cast::<u32>().read() != 0)
+}
+
+#[cfg(test)]
+mod embedded_handle_word_tests {
+    use super::{embedded_handle_first_word_nonzero, EmbeddedWordHandleOwner};
+
+    #[test]
+    fn null_cell_and_null_payload_return_zero() {
+        let mut owner = EmbeddedWordHandleOwner {
+            opaque_prefix: [u32::MAX; 21],
+            handle: core::ptr::null(),
+        };
+        assert_eq!(unsafe { embedded_handle_first_word_nonzero(&owner) }, 0);
+        let payload = core::ptr::null_mut();
+        owner.handle = &payload;
+        assert_eq!(unsafe { embedded_handle_first_word_nonzero(&owner) }, 0);
+        assert_eq!(owner.opaque_prefix, [u32::MAX; 21]);
+    }
+
+    #[test]
+    fn first_word_is_normalized_without_reading_later_words() {
+        let mut words = [0u32, u32::MAX];
+        let payload = words.as_mut_ptr().cast::<u8>();
+        let owner = EmbeddedWordHandleOwner {
+            opaque_prefix: [u32::MAX; 21],
+            handle: &payload,
+        };
+        for value in [0, 1, 2, 0x8000_0000, u32::MAX] {
+            words[0] = value;
+            assert_eq!(
+                unsafe { embedded_handle_first_word_nonzero(&owner) },
+                if value == 0 { 0 } else { 1 },
+            );
+            assert_eq!(words, [value, u32::MAX]);
+        }
+        assert_eq!(owner.opaque_prefix, [u32::MAX; 21]);
+    }
+}
+
 /// handle_deref_field12 — original: `FUN_083d5ea0` @ 0x083d5ea0
 /// (20 bytes; 11 `bl` call sites — the only copy of this offset in the
 /// image).
