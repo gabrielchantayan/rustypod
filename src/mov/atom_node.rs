@@ -238,6 +238,9 @@ pub unsafe extern "C" fn mov_atom_node_get_offset(node: *const MovAtomNode) -> u
 /// Compares the signed 64-bit offset against zero using SUBS/SBCS. Negative
 /// offsets return 1 without accessing the node; otherwise stores the low
 /// word at +0x10, then the high word at +0x14, and returns 0.
+/// Raw words `e2520000` (SUBS low, #0) and `e0d61003` (SBCS high,
+/// zero) establish a signed 64-bit comparison, not a low-word sign test.
+/// Both parser callers supply the file offset in r2:r3; r1 is unused.
 ///
 /// # Deliberate deviations
 ///
@@ -858,6 +861,22 @@ mod tests {
             assert_eq!(unsafe {
                 mov_atom_node_set_offset(core::ptr::null_mut(), offset)
             }, 1);
+        }
+    }
+
+    #[test]
+    fn rejected_offset_preserves_the_last_accepted_offset() {
+        let mut words = [0x5a5a_5a5au32; 10];
+        let node = words.as_mut_ptr().cast();
+        for offset in [0x1234_5678_ffff_ffffi64, 0, i64::MAX] {
+            assert_eq!(unsafe { mov_atom_node_set_offset(node, offset) }, 0);
+            assert_eq!(unsafe { mov_atom_node_get_offset(node) }, offset as u64);
+            let accepted = words;
+            for rejected in [-1, i64::MIN, -0x1_0000_0000] {
+                assert_eq!(unsafe { mov_atom_node_set_offset(node, rejected) }, 1);
+                assert_eq!(words, accepted);
+                assert_eq!(unsafe { mov_atom_node_get_offset(node) }, offset as u64);
+            }
         }
     }
 
