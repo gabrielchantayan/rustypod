@@ -225821,3 +225821,40 @@ functions:
       cursor invalidation; collection +0xa8, child virtual +0xa4, request
       normalization and activation/deactivation ordering remain intact.
       No device execution performed.
+
+  - address: 0x08157670
+    ghidra: FUN_08157670
+    name: ui_element_detach_clear_words
+    size: 76
+    sig: "void ui_element_detach_clear_words(UiElement *element, void *item)"
+    module: ui/element_detach_clear_words
+    status: ported
+    renames:
+      param_1/r4: element
+      param_2: item
+      local_c: detached_item
+      pcVar2/r2: detach_method
+      "element+0xa8": detach_interface
+      "interface vtable+0x28": detach_method
+    notes: >-
+      Raw A32 words establish extent 0x08157670..0x081576bc (76 bytes),
+      ending with POP before a distinct PUSH prologue. Whole-image decoding
+      finds one plain incoming BL at 0x08187bbc and one BLNE at 0x0826f168;
+      the body has four plain BL, zero predicated BL, and one indirect BLX.
+      Callers detach an item from its previous owner. Dispatch through the
+      embedded interface at +0xa8, vtable slot +0x28, passing a local item
+      pointer address and retaining the method address in r2. The virtual
+      callee identity is not assumed. Read the possibly replaced item's
+      +0x94 byte using existing object_byte_at_94. If nonzero, resolve the
+      element render context; if non-null, resolve it again and clear that
+      second result using existing coordinate_owner_clear_words. Do not
+      cache the two resolutions or recheck the second result. Deliberate
+      deviations: native-width host vtable slots; incidental r3 and saved
+      stack r0 are not treated as semantic virtual arguments. Host tests
+      exercise pointer replacement, zero/high/noncanonical gates, null first
+      resolution, distinct first/second contexts, preserved capacity/data.
+      Host suite and ARM release build pass. Standalone consumer smoke
+      observes virtual mutation disabling the gate without accessing a null
+      render root. match.py exits 1: 19 original versus 22 Rust instructions;
+      frame setup differs, but indirect dispatch, four direct calls, two
+      gate branches and repeated resolution are preserved. No device run.
