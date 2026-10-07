@@ -399,6 +399,30 @@ pub unsafe extern "C" fn pmu_board_version_status_available(
     (core::ptr::read_volatile(&status) != 0) as u32
 }
 
+/// pmu_readiness_status_available — original: `FUN_08149078` @
+/// `0x08149078` (20 bytes, ending before 0x0814908c; one plain outgoing
+/// `bl`, two plain incoming `bl` calls, zero predicated calls, raw-verified).
+///
+/// Forwards the four incoming ABI words to the board-version PMU availability
+/// predicate and returns zero for zero, one otherwise. In particular, incoming
+/// r3 supplies the scratch byte when the PMU register-address write fails.
+///
+/// # Deviations
+///
+/// Uses the existing Rust callee. As in that callee, a volatile stack read
+/// retains the call-and-normalize structure rather than a tail branch.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_readiness_status_available(
+    incoming_r0: u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    let status = pmu_board_version_status_available(incoming_r0, incoming_r1, incoming_r2, incoming_r3);
+    (core::ptr::read_volatile(&status) != 0) as u32
+}
+
 /// pmu_register_0x4b_bit2 — original: `FUN_082e53d8` @ `0x082e53d8`
 /// (52 bytes; 6 unconditional `bl` call sites, binary-verified).
 ///
@@ -857,6 +881,27 @@ mod tests {
 
         let _i2c = install_raw_i2c_for_test(-5, 0, 0);
         assert_eq!(unsafe { pmu_board_version_status_available(0, 0, 0, 1) }, 1);
+    }
+
+    #[test]
+    fn readiness_status_selects_board_bit_and_preserves_failed_write_scratch() {
+        for (board, bit) in [(0x0011_0000, 1u8), (0x0010_ffff, 4u8)] {
+            let _board = install_host_cached_board_version(board);
+            for sample in [0, bit, !bit, 0xff] {
+                let _i2c = install_raw_i2c_for_test(0, 0, sample);
+                assert_eq!(
+                    unsafe { pmu_readiness_status_available(0, 0, 0, 0xff) },
+                    ((sample & bit) != 0) as u32,
+                );
+            }
+            for scratch in [0, bit as u32, (!bit) as u32, 0xffff_ff00 | bit as u32] {
+                let _i2c = install_raw_i2c_for_test(-5, 0, !bit);
+                assert_eq!(
+                    unsafe { pmu_readiness_status_available(0, 0, 0, scratch) },
+                    ((scratch & bit as u32) != 0) as u32,
+                );
+            }
+        }
     }
 
     #[test]
