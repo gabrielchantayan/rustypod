@@ -1231,6 +1231,56 @@ mod tests {
     }
 
     // ---- broadcast -----------------------------------------------------
+    #[test]
+    fn pending_work_publishes_before_waking_and_repeatedly_drains_waiters() {
+        use crate::app::work_pending_notify::{work_pending_notify, WorkPendingOwner};
+        use crate::kernel::sync_mutex::Mutex as OwnerMutex;
+
+        unsafe extern "C" fn wake_after_publication(pending: *mut u32) {
+            assert_eq!((pending as *mut u8).read_volatile(), 1);
+            mock_waiter_wake(pending);
+        }
+
+        let _guard = install(MockState::default());
+        unsafe { (*core::ptr::addr_of_mut!(CONDVAR_HOOKS)).waiter_wake = wake_after_publication };
+        for initial in [0, 1, 0x80, 0xff] {
+            let mut owner = WorkPendingOwner {
+                preserved: [0x1234_5678; 10],
+                pending: initial,
+                padding: [0xa5; 3],
+                mutex: OwnerMutex { sem_cell: null_mut(), unused: 0xdead_beef },
+                changed: make_condvar(),
+            };
+            let pending = core::ptr::addr_of_mut!(owner.pending) as *mut u32;
+            let mut nodes = [
+                WaitNode { next: null_mut(), object: pending },
+                WaitNode { next: null_mut(), object: pending },
+            ];
+            for count in [0, 2, 1, 0] {
+                state().as_mut().unwrap().wakes.clear();
+                unsafe {
+                    for node in &mut nodes[..count] {
+                        list_push_back(&mut owner.changed.waiters, node as *mut WaitNode as *mut ListNode);
+                    }
+                    work_pending_notify(&mut owner);
+                }
+                assert_eq!(owner.pending, 1);
+                assert!(owner.changed.waiters.head.is_null());
+                assert!(owner.changed.waiters.tail.is_null());
+                assert_eq!(state().as_ref().unwrap().wakes, std::vec![pending as usize; count]);
+                assert_eq!(owner.preserved, [0x1234_5678; 10]);
+                assert_eq!(owner.padding, [0xa5; 3]);
+                assert_eq!(owner.mutex.unused, 0xdead_beef);
+                assert!(owner.mutex.sem_cell.is_null());
+                assert!(owner.changed.lock_obj.is_null());
+                for node in &nodes {
+                    assert!(node.next.is_null());
+                }
+            }
+        }
+        unsafe { (*core::ptr::addr_of_mut!(CONDVAR_HOOKS)).waiter_wake = mock_waiter_wake };
+    }
+
 
     #[test]
     fn condvar_broadcast_wakes_all_in_fifo_order() {
