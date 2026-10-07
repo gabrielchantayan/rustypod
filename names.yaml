@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0814d1c4
+    ghidra: FUN_0814d1c4
+    name: mov_atom_node_set_size
+    size: 48
+    sig: "u32 mov_atom_node_set_size(MovAtomNode *node, i64 size)"
+    module: mov/atom_node
+    status: ported
+    vars: {param_1/r0: node, param_2/r1: unused_alignment_slot, param_3/r2: size_lo, param_4/r3: size_hi, r4: saved_node, r5: saved_size_lo, r6: saved_size_hi}
+    notes: >-
+      Raw A32 extent [0x0814d1c4,0x0814d1f4) is 48 bytes, twelve
+      instructions with no literals. The next real function begins with
+      CMP r1,#0. Independent whole-image aligned BL decoding finds two
+      plain incoming calls at 0x081d839c and 0x081f3edc, zero predicated
+      incoming calls and no outgoing calls. SUBS low,#8 and SBCS high,zero
+      compare the signed 64-bit total atom size against 8. Reject smaller
+      sizes with status 1 and no node access; otherwise store low at +0x18
+      then high at +0x1c and return 0. Both MOV parser callers supply the
+      total size in r2:r3; r1 is the unused AAPCS alignment slot, not an
+      argument. Reuses registered mov/atom_node and its target-width
+      repr(C) fields; no new seams or semantic deviations. Volatile stores
+      preserve write order. Tests cover signed extremes, 7/8 boundary,
+      low-word sign and carry boundaries, unchanged neighbors, rejected
+      NULL and rejection preserving the last accepted size. Host suite:
+      14635 passed. Native source-entry smoke and ARM release build pass.
+      match.py exits 1: ten versus twelve instructions, a frame pointer,
+      fewer saved registers and retained SUBS/SBCS signed comparison with
+      predicated low/high stores and exact status values. No device run.
   - address: 0x08160dd4
     ghidra: FUN_08160dd4
     name: usb_payload_read
