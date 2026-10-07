@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08164bf4
+    ghidra: FUN_08164bf4
+    name: device_1da_validate
+    size: 140
+    sig: "u32 device_1da_validate(void)"
+    module: app/device_1da_validate
+    status: ported
+    vars:
+      r4: result
+      r5: gateway_payload
+      auStack_8c: validation_buffer
+      s__iPod_Control_Device_1da_08164c64: marker_path
+    notes: >-
+      Raw words establish extent 0x08164bf4..0x08164c80: 112 bytes
+      of instructions plus 28 bytes of inline path and padding before
+      the next real function. Two inbound plain BLs at 0x08164264 and
+      0x081647e0; five outbound plain BLs; zero predicated BLs.
+      Acquire gateway payload 54 with flag zero, query the exact path
+      /iPod_Control/Device/1da with flags zero, and only on nonzero
+      existence fill 128 bytes with 0x5d and call retained retailOS
+      0x082d4474(buffer, 128, path). Return one iff that call returns
+      zero; release gateway payload 54 with timeout 1000 on both paths.
+      No established identity or port exists for 0x082d4474, so retain
+      its verified address without an invented callee name. Deviations:
+      Rust read-only path storage and typed array initialization replace
+      inline data and ADS memset(dst, length, value). Host tests exercise
+      missing and nonzero existence statuses, zero and nonzero validation
+      statuses, full buffer initialization, mutation, and release ordering.
+      Host suite: 14562 tests passed. ARM release build passed.
+      match.py printed the expected structural diff (exit 1): same
+      existence gate, conditional 128-byte 0x5d fill, zero-status result,
+      and unconditional timed gateway release. LLVM uses __aeabi_memset4,
+      specializes the retained-address wrapper, and inlines the timed
+      gateway frame/dispatch sequence; stack layout and register saves differ.
+
   - address: 0x08158f38
     ghidra: FUN_08158f38
     name: view_clear_flag_display
