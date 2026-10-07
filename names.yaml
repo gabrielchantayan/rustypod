@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081610d0
+    ghidra: FUN_081610d0
+    name: guarded_state_byte_get
+    size: 36
+    sig: "u8 guarded_state_byte_get(GuardedStateByte *collection)"
+    module: kernel/guarded_state_byte
+    status: ported
+    vars: {param_1: collection, r4: collection, r5: saved_state, collection_plus_0x10: mutex}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_0807f6a0: mutex_unlock}
+    notes: >-
+      Raw A32 words prove extent [0x081610d0,0x081610f4), nine
+      instructions and no literals; the next independent function starts
+      with push {r4,r5,r6,r7,r8,lr}. Whole-image word decoding finds
+      two inbound plain BLs at 0x0806b9f4 and 0x0825aa08, zero
+      predicated inbound BLs. The body has two outbound plain BLs
+      at 0x081610dc and 0x081610e8, zero predicated BLs. Lock the
+      embedded mutex at +0x10, snapshot unsigned byte +0, unlock and
+      return the saved byte without normalization. Constructor 0x081612a4
+      initializes that byte, three storage words and the mutex; caller
+      0x0806b994 compares the snapshot against state 2. Reuse ported
+      mutex_lock and mutex_unlock; no new seam. Volatile byte access
+      preserves lock/read/unlock ordering; host mutex pointers widen but
+      target-width opaque words keep the mutex at +0x10. Host edge tests
+      cover lock-time and unlock-time mutations, unsigned bytes, absent
+      cells, zero handles and untouched fields. Native executable smoke
+      passed all 256 byte values and the lock-time snapshot. Host suite
+      and ARM release build pass. match.py exits 1: eleven instructions
+      versus nine, an added frame pointer and a cached mutex address;
+      both calls bracket LDRB and the saved byte remains the return value.
+      No physical-device execution or target algorithmic deviations.
   - address: 0x081619fc
     ghidra: FUN_081619fc
     name: vtable_object_owner_construct
