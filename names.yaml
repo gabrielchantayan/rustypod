@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08147810
+    ghidra: FUN_08147810
+    name: owned_child_view_construct
+    size: 148
+    sig: "OwnedChildView *owned_child_view_construct(OwnedChildView *storage, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/owned_child_view
+    status: ported
+    vars: {r4: view, r5: zero, storage: storage, child: owned_child, callback: callback}
+    renames:
+      FUN_0826f26c: view_base_construct
+      FUN_082aadd4: operator_new
+      FUN_0839c428: resident_child_construct_mode
+      FUN_0816f23c: resident_callback_construct
+      DAT_081478a0: owned_child_view_vtable
+    notes: >-
+      Raw A32 extent [0x08147810,0x081478a4) is 144 code bytes plus
+      the 0x08986444 vtable literal. Next real function starts with CMP
+      at 0x081478a4. Five outgoing plain BLs, zero predicated BLs and
+      two virtual BLXs; whole-image word decoding finds two incoming
+      plain BLs at 0x081475f8 and 0x081e0d64, none predicated.
+      Construct ViewBase, plant derived vtable, clear child at +0xa4,
+      allocate/construct 44-byte mode-1 child and 8-byte callback,
+      dispatch child slots +0x54(callback) and +0x5c(1), then normalize
+      final view+0x48 bit 26 into byte +0xa8 and return view.
+      Reuse ported base and allocator; raw-verified resident constructor
+      seams retain unknown concrete class identities. Native pointers
+      widen host fixtures; target layout remains 0xac bytes.
+      Host suite and ARM release build pass. Public-entry fixture smoke
+      confirms callback-updated flag is read after dispatch. Host edges
+      cover unrelated flag bits, base-result redirection and byte canaries.
+      match.py exits 1: 36 original versus 42 Rust lines; resident BLXs,
+      frame pointer and shift/AND differ, but call order and offsets remain.
   - address: 0x081385e4
     ghidra: FUN_081385e4
     name: service_handler_lifecycle_generate_bytes
