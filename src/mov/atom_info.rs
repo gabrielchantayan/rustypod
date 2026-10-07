@@ -80,13 +80,11 @@
 //!
 //! # Deviations
 //!
-//! - Three unported callees dispatch through [`MOV_ATOM_INFO_OPS`] (the
-//!   `app/event_hub.rs` pattern): the table-root accessor now calls the
-//!   direct [`crate::mov::atom_table_root::mov_atom_table_root`] port on
-//!   target builds; the remaining ROM addresses 0x080a3ea0 / 0x0814d1ac /
-//!   0x0814d270 remain hook-ready. Host defaults are inert (NULL table root,
-//!   NULL node, zeroed getters — the miss path) and every test installs
-//!   recording models.
+//! - The remaining table-root, search, and size dispatch use
+//!   [`MOV_ATOM_INFO_OPS`]. The flag and offset getters call their direct
+//!   ports. Target table-root dispatch also uses its direct port; search
+//!   and size retain their fixed firmware addresses. Host dispatch
+//!   defaults take the miss path; tests install recording models.
 //! - The r0 incoming argument is dropped unread by the original
 //!   (`mov r0, r1` @ 0x081c8040 before any use); the port keeps it as
 //!   `_this` purely to preserve the ABI slot. Observed callers pass
@@ -95,9 +93,8 @@
 //!   `streq`/`strd`/`strb` have none, and adding one would be a
 //!   behavior change.
 
-/// Indirect dispatch for the four remaining unported callees (see the module
-/// header). Host tests install recording models; the real ports replace the
-/// defaults when they land.
+/// Indirect dispatch for table-root, search, and size access.
+/// Host tests install recording models.
 #[derive(Clone, Copy)]
 pub struct MovAtomInfoOps {
     /// Callee 0x08280114 `(table)`: the handle dereference
@@ -113,8 +110,6 @@ pub struct MovAtomInfoOps {
     /// Callee 0x0814d1ac `(node)`: `ldrd [node, #24]` — the atom total
     /// size, -1 while only a placeholder exists.
     pub size_get: unsafe extern "C" fn(node: *mut u8) -> u64,
-    /// Callee 0x0814d270 `(node)`: `ldrb [node, #32]` — the flag byte.
-    pub flag_get: unsafe extern "C" fn(node: *mut u8) -> u8,
 }
 
 /// Target default: the direct port of the handle dereference @ 0x08280114.
@@ -166,31 +161,17 @@ unsafe extern "C" fn firmware_size_get(_node: *mut u8) -> u64 {
     0
 }
 
-/// Target default: the ROM flag getter @ 0x0814d270.
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_flag_get(node: *mut u8) -> u8 {
-    let f: unsafe extern "C" fn(*mut u8) -> u8 = core::mem::transmute(0x0814_d270usize);
-    f(node)
-}
 
-/// Host default: inert (see `firmware_size_get`).
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_flag_get(_node: *mut u8) -> u8 {
-    0
-}
-
-/// Wired default: the four remaining ROM addresses on target, documented
-/// inert stubs on host.
+/// Target defaults use the direct table-root port and firmware search/size;
+/// host defaults take the miss path.
 pub const DEFAULT_MOV_ATOM_INFO_OPS: MovAtomInfoOps = MovAtomInfoOps {
     table_root: firmware_table_root,
     find_or_create: firmware_find_or_create,
     size_get: firmware_size_get,
-    flag_get: firmware_flag_get,
 };
 
-/// The active callee set — the dispatch seams for 0x08280114, 0x080a3ea0,
-/// 0x0814d1ac and 0x0814d270. Host tests install recording models; the real
-/// ports replace the defaults when they exist.
+/// Active dispatch for table-root, search, and size. Host tests install
+/// recording models.
 pub static mut MOV_ATOM_INFO_OPS: MovAtomInfoOps = DEFAULT_MOV_ATOM_INFO_OPS;
 
 /// Volatile read so LLVM cannot fold the defaults in and delete the
@@ -247,7 +228,7 @@ pub unsafe extern "C" fn mov_atom_info(
     }
     *offset_out = crate::mov::atom_node::mov_atom_node_get_offset(node.cast());
     *size_out = (ops.size_get)(node);
-    *flag_out = (ops.flag_get)(node);
+    *flag_out = crate::mov::atom_node::mov_atom_node_get_flag(node.cast());
     node
 }
 
@@ -275,9 +256,8 @@ mod tests {
 
     /// A fake atom node, laid out exactly as the firmware reads it:
     /// u64 payload offset at +0x10, u64 total size at +0x18, flag byte
-    /// at +0x20. The recording getters below are honest field reads,
-    /// not canned values, so the plumbing is tested against the real
-    /// offsets.
+    /// at +0x20. Direct offset/flag ports and the recording size getter
+    /// read these real fields.
     #[repr(C, align(8))]
     struct FakeNode {
         bytes: [u8; 40],
@@ -317,13 +297,8 @@ mod tests {
         (node.add(0x18) as *const u64).read()
     }
 
-    unsafe extern "C" fn recording_flag_get(node: *mut u8) -> u8 {
-        (*ptr::addr_of_mut!(TRACE)).push("flag");
-        (*ptr::addr_of_mut!(GETTER_NODES)).push(node);
-        *node.add(0x20)
-    }
 
-    /// Installs the two recording ROM getter seams and clears the statics.
+    /// Installs recording dispatch and clears the statics.
     fn mock(root: *mut u8, node: *mut u8) -> MutexGuard<'static, ()> {
         let guard = MOV_ATOM_INFO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe {
@@ -331,7 +306,6 @@ mod tests {
                 table_root: recording_table_root,
                 find_or_create: recording_find_or_create,
                 size_get: recording_size_get,
-                flag_get: recording_flag_get,
             };
             ROOT_RESULT = root;
             NODE_RESULT = node;
@@ -384,21 +358,11 @@ mod tests {
         assert_eq!(offset, 0x1122_3344_5566_7788);
         assert_eq!(size, 0x0000_0001_0000_0008);
         assert_eq!(flag, 0x5a);
-        assert_eq!(
-            trace(),
-            std::vec!["root", "find", "size", "flag"],
-            "handle deref, search, direct offset getter, then the two ROM getters"
-        );
         unsafe {
             assert_eq!(
                 (*ptr::addr_of!(SEARCH_ARGS)).as_slice(),
                 &[(root, FOURCC_STSD, 1)],
                 "the search sees the deref result, the fourcc, populate=1"
-            );
-            assert_eq!(
-                (*ptr::addr_of!(GETTER_NODES)).as_slice(),
-                &[node, node],
-                "every ROM getter receives the node, never the table or root"
             );
         }
         restore(guard);
