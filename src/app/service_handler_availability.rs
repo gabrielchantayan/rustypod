@@ -347,6 +347,141 @@ mod lifecycle_format_tests {
     }
 }
 
+/// service_handler_lifecycle_generate_bytes — `FUN_081385e4` @
+/// **0x081385e4**, 108 bytes: 104 instruction bytes plus the table literal
+/// at 0x0813864c; the next function starts at 0x08138650.
+/// Whole-image A32 decoding finds two plain incoming BLs (0x08193370,
+/// 0x0819358c), no predicated incoming BLs. Outbound: three plain BLs and
+/// one signed BLGE to heap_panic.
+///
+/// Ignore manager; signed selectors >=3 are fatal (negative selectors
+/// remain accepted). Generate length bytes into output through the verified
+/// random-byte filler at 0x082cdcb8. On success, clear exactly 255 bytes at
+/// lifecycle record +0x14, then copy length bytes from output and return 0.
+/// On filler failure, leave the record untouched and return 0x40.
+///
+/// Deliberate deviations: reuse the host lifecycle fixture and inject only
+/// the unported filler on hosts. Target calls its verified two-argument ABI.
+/// The IRAM veneers resolve to ported memzero_aligned and __rt_memcpy;
+/// volatile function-pointer reads prevent LLVM builtin substitution.
+/// Codegen review: 26 original versus 35 Rust instructions; LLVM uses MLA,
+/// folds +0x14 into the table base, and emits BLX for the verified seams.
+///
+/// # Safety
+/// output must satisfy the filler and copy contracts for length bytes.
+/// selector must address writable storage, including pre-table storage for
+/// negative selectors. No length clamp or nonaliasing guard exists in stock.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn service_handler_lifecycle_generate_bytes(
+    _manager: *mut u8, selector: i32, length: u32, output: *mut u8,
+) -> u32 {
+    if selector >= SERVICE_HANDLER_LIFECYCLE_RECORD_COUNT {
+        heap_panic();
+    }
+    #[cfg(target_os = "none")]
+    let fill: LifecycleRandomFill = core::mem::transmute(0x082c_dcb8usize);
+    #[cfg(not(target_os = "none"))]
+    let fill = ptr::read(ptr::addr_of!(LIFECYCLE_RANDOM_FILL));
+    if fill(output, length) != 0 {
+        return 0x40;
+    }
+    let record = service_handler_lifecycle_records().wrapping_offset(selector as isize);
+    let destination = record.cast::<u8>().cast_mut().add(0x14);
+    let zero = ptr::read_volatile(&LIFECYCLE_ZERO);
+    zero(destination, 255);
+    let copy = ptr::read_volatile(&LIFECYCLE_COPY);
+    copy(destination, output, length as usize);
+    0
+}
+
+pub type LifecycleRandomFill = unsafe extern "C" fn(*mut u8, u32) -> u32;
+static LIFECYCLE_ZERO: unsafe extern "C" fn(*mut u8, usize) -> *mut u8 =
+    crate::memzero::memzero_aligned;
+static LIFECYCLE_COPY: unsafe extern "C" fn(*mut u8, *const u8, usize) -> *mut u8 =
+    crate::rt_memcpy::__rt_memcpy;
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_lifecycle_random_fill(_output: *mut u8, _length: u32) -> u32 {
+    panic!("retailOS random-byte filler requires a host seam");
+}
+
+#[cfg(not(target_os = "none"))]
+pub static mut LIFECYCLE_RANDOM_FILL: LifecycleRandomFill = missing_lifecycle_random_fill;
+
+#[cfg(test)]
+mod lifecycle_generate_tests {
+    use super::*;
+
+    unsafe extern "C" fn fill_pattern(output: *mut u8, length: u32) -> u32 {
+        for index in 0..length as usize {
+            output.add(index).write((index as u8).wrapping_mul(37).wrapping_add(11));
+        }
+        0
+    }
+
+    unsafe extern "C" fn fail_after_write(output: *mut u8, _length: u32) -> u32 {
+        output.write(0x19);
+        7
+    }
+
+    #[test]
+    fn generated_bytes_clear_tail_and_preserve_record_boundaries() {
+        let _lock = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap();
+        unsafe {
+            let old_fill = LIFECYCLE_RANDOM_FILL;
+            LIFECYCLE_RANDOM_FILL = fill_pattern;
+            for selector in -1..3 {
+                for length in [0, 1, 3, 4, 16, 20, 254, 255, 256] {
+                    let record = service_handler_lifecycle_records()
+                        .wrapping_offset(selector as isize).cast::<u8>().cast_mut();
+                    let mut saved = [0u8; 0x114];
+                    ptr::copy_nonoverlapping(record, saved.as_mut_ptr(), saved.len());
+                    ptr::write_bytes(record, 0xa6, 0x114);
+                    let mut output = [0x7bu8; 258];
+                    assert_eq!(service_handler_lifecycle_generate_bytes(
+                        ptr::null_mut(), selector, length, output.as_mut_ptr().add(1)), 0);
+                    for index in 0..0x114 {
+                        let expected = if index < 0x14 { 0xa6 }
+                            else if index - 0x14 < length as usize {
+                                ((index - 0x14) as u8).wrapping_mul(37).wrapping_add(11)
+                            } else if index < 0x113 { 0 } else { 0xa6 };
+                        assert_eq!(record.add(index).read(), expected, "slot {selector}, length {length}, byte {index}");
+                    }
+                    assert_eq!(output[0], 0x7b);
+                    assert_eq!(output[length as usize + 1], 0x7b);
+                    ptr::copy_nonoverlapping(saved.as_ptr(), record, saved.len());
+                }
+            }
+            LIFECYCLE_RANDOM_FILL = old_fill;
+        }
+    }
+
+    #[test]
+    fn filler_failure_preserves_record_and_alias_observes_clear_before_copy() {
+        let _lock = SERVICE_HANDLER_LIFECYCLE_RECORDS_LOCK.lock().unwrap();
+        unsafe {
+            let old_fill = LIFECYCLE_RANDOM_FILL;
+            let record = service_handler_lifecycle_records().cast::<u8>().cast_mut();
+            let mut saved = [0u8; 0x114];
+            ptr::copy_nonoverlapping(record, saved.as_mut_ptr(), saved.len());
+            ptr::write_bytes(record, 0xa6, 0x114);
+            LIFECYCLE_RANDOM_FILL = fail_after_write;
+            let mut output = [0x7b; 4];
+            assert_eq!(service_handler_lifecycle_generate_bytes(
+                ptr::null_mut(), 0, 4, output.as_mut_ptr()), 0x40);
+            assert_eq!(output, [0x19, 0x7b, 0x7b, 0x7b]);
+            assert_eq!(core::slice::from_raw_parts(record, 0x114), &[0xa6; 0x114]);
+            LIFECYCLE_RANDOM_FILL = fill_pattern;
+            assert_eq!(service_handler_lifecycle_generate_bytes(
+                ptr::null_mut(), 0, 20, record.add(0x14)), 0);
+            assert_eq!(core::slice::from_raw_parts(record.add(0x14), 255), &[0; 255]);
+            ptr::copy_nonoverlapping(saved.as_ptr(), record, saved.len());
+            LIFECYCLE_RANDOM_FILL = old_fill;
+        }
+    }
+}
+
 /// # Safety
 ///
 /// `selector` must name a readable lifecycle record at 0x08ad0f34. The
