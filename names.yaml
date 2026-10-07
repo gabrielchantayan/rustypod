@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0816373c
+    ghidra: FUN_0816373c
+    name: group_item_cursor_initialize
+    size: 128
+    sig: "GroupItemCursor *group_item_cursor_initialize(GroupItemCursor *destination, Collection *collection, const i32 *starting_group, i32 item_index)"
+    module: app/group_item_cursor_initialize
+    status: ported
+    vars:
+      param_1/r4: destination
+      param_2/r1: collection
+      param_3/r5: starting_group
+      param_4/r3: item_index
+      local_18: current_group
+      iStack_14: cursor.collection
+      iStack_10: cursor.index
+    notes: >-
+      Raw bytes establish extent 0x0816373c..0x081637bc, followed by a real
+      push prologue. Two incoming plain BLs at 0x08211a58 and 0x08211a6c,
+      no predicated incoming BLs; three outgoing plain BLs to canonical
+      cursor_init, cursor_advance and cursor_invalidate, none predicated.
+      Stores starting group/item index and scans signed group keys at word 8.
+      Upper is a maximum; lower compares the starting key before assigning
+      the current key, faithfully preserving the non-minimum behavior.
+      Empty collections retain INT_MAX/INT_MIN without dereferencing the
+      starting group. Recovered return is destination in r0, not Ghidra's
+      scratch-r1 u64. Host tests and actual-source executable smoke pass;
+      ARM release build passes. match.py exits 1: 32 original versus 40
+      Rust instructions, same signed conditional stores and traversal loop.
+      LLVM duplicates the advance call for loop entry and removes the
+      unobservable final stack-cursor invalidation.
   - address: 0x08155b24
     ghidra: FUN_08155b24
     name: service_context_scope_acquire
