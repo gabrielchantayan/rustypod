@@ -1,6 +1,7 @@
 //! RAM-side kernel-service layer over the RTXC mask-ROM kernel.
 pub mod condvar;
 pub mod control_state;
+pub mod guarded_state_byte;
 pub mod csem;
 pub mod diag_ring_record;
 pub mod diag_ring_block_get_or_create;

@@ -621,6 +621,60 @@ mod tests {
     static OPS_LOCK: StdMutex<()> = StdMutex::new(());
 
     #[test]
+    fn guarded_state_byte_snapshots_after_wait_before_signal() {
+        use crate::kernel::guarded_state_byte::{GuardedStateByte, guarded_state_byte_get};
+        static mut COLLECTION: *mut GuardedStateByte = core::ptr::null_mut();
+        static mut LOCKED_STATE: u8 = 0;
+        unsafe extern "C" fn wait_and_change_state(handle: u32) {
+            record(Call::Wait(handle));
+            core::ptr::addr_of_mut!((*COLLECTION).state).write_volatile(LOCKED_STATE);
+        }
+        unsafe extern "C" fn signal_and_change_state(handle: u32) {
+            record(Call::Signal(handle));
+            core::ptr::addr_of_mut!((*COLLECTION).state).write_volatile(0x55);
+        }
+        let _guard = mock_kernel();
+        unsafe {
+            let saved = ROM_KERNEL;
+            ROM_KERNEL.sema_wait = wait_and_change_state;
+            ROM_KERNEL.sema_signal = signal_and_change_state;
+            let mut cell = 0x42;
+            let mut collection = GuardedStateByte {
+                state: 0xaa, padding: [0xa5; 3],
+                storage_words: [0x12345678, 0x87654321, 0xffffffff],
+                mutex: Mutex { sem_cell: &mut cell, unused: 0xdeadbeef },
+            };
+            COLLECTION = &mut collection;
+            assert_eq!(core::ptr::addr_of!(collection.mutex) as usize
+                - core::ptr::addr_of!(collection) as usize, 0x10);
+            for state in [0, 1, 2, 0x7f, 0x80, 0xff] {
+                CALLS.lock().unwrap().clear();
+                LOCKED_STATE = state;
+                collection.state = 0xaa;
+                assert_eq!(guarded_state_byte_get(&mut collection), state);
+                assert_eq!(collection.state, 0x55);
+                assert_eq!(calls(), vec![Call::Wait(0x42), Call::Signal(0x42)]);
+            }
+            for absent_cell in [false, true] {
+                CALLS.lock().unwrap().clear();
+                cell = 0;
+                collection.mutex.sem_cell = if absent_cell {
+                    core::ptr::null_mut()
+                } else { &mut cell };
+                collection.state = 0xfe;
+                assert_eq!(guarded_state_byte_get(&mut collection), 0xfe);
+                assert_eq!(collection.state, 0xfe);
+                assert_eq!(calls(), vec![]);
+            }
+            assert_eq!(collection.padding, [0xa5; 3]);
+            assert_eq!(collection.storage_words, [0x12345678, 0x87654321, 0xffffffff]);
+            assert_eq!(collection.mutex.unused, 0xdeadbeef);
+            COLLECTION = core::ptr::null_mut();
+            ROM_KERNEL = saved;
+        }
+    }
+
+    #[test]
     fn descriptor_owner_construct_resets_metadata_preserves_records_and_padding() {
         use crate::app::image_format_descriptor_owner_construct::{
             image_format_descriptor_owner_construct, ImageFormatDescriptorOwner,
