@@ -225858,3 +225858,27 @@ functions:
       render root. match.py exits 1: 19 original versus 22 Rust instructions;
       frame setup differs, but indirect dispatch, four direct calls, two
       gate branches and repeated resolution are preserved. No device run.
+
+  # --- owned-object handle constructor ---
+  - address: 0x0815743c
+    ghidra: FUN_0815743c
+    name: owned_object_handle_construct
+    size: 12
+    sig: "uint32_t *owned_object_handle_construct(uint32_t *handle)"
+    module: cxx/owned_object_handle_construct
+    status: ported
+    renames:
+      param_1/r0: handle
+      r1: zero
+    notes: >-
+      Raw words e3a01000, e5801000, e12fff1e clear only the first word and
+      preserve r0 as the returned handle. The next real function starts at
+      0x08157448, establishing a 12-byte extent. Full-image aligned ARM decoding
+      finds two inbound plain BL sites at 0x08124614 and 0x0815fc0c, zero
+      predicated BL sites and zero outgoing calls. Both raw callers allocate
+      eight bytes and use the returned pointer as replacement for the already
+      ported owned_guarded_slot_04_replace. The adjacent guarded dispatch
+      wrapper interprets the first word as an optional object pointer. Ghidra
+      incorrectly declares a void return. Rust retains target-width u32 words
+      on hosts, leaves the second allocated word untouched, and introduces no
+      callee seams or guessed concrete class identity.
