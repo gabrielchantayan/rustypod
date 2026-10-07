@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813e57c
+    ghidra: FUN_0813e57c
+    name: query_explicit_resource_construct
+    size: 48
+    sig: "SharedInterfaceTreeMutex *query_explicit_resource_construct(SharedInterfaceTreeMutex *this, u32 id, u32 resource)"
+    module: app/root_context_f9c_bound
+    status: ported
+    renames:
+      param_1: this
+      param_2/r4: id
+      param_3/r5: resource
+      puVar1: constructed_object
+      FUN_082597c0: query_tree_mutex_construct
+      DAT_0813e5a8: explicit-resource query vtable (0x08984e18)
+    notes: >-
+      Raw extent 0x0813e57c..0x0813e5ac is 48 bytes: 44 code bytes and
+      one vtable literal. Next real function begins cmp r0,#0 at 0x0813e5ac.
+      Whole-image ARM word decoding verifies two plain incoming BLs at
+      0x0813e518 and 0x0817b5c8, one plain outgoing BL at 0x0813e588 to
+      the already ported query_tree_mutex_construct, and zero predicated BLs.
+      Construct the base, install vtable 0x08984e18, write kind +0x45=3,
+      truncate id to byte +0x44, store resource at +0x40, and return r0.
+      Preserve +0x46/+0x47. Deviations: reuse host-widened repr(C) layout;
+      correct Ghidra's void return. LLVM reorders independent field stores
+      and adds frame-pointer setup; match.py retains the BL and all four
+      field writes (11 stock instructions versus 13 Rust lines with literal).
+      All 14656 host tests pass; ARM release build passes. Public API smoke
+      with test-configured host crate verifies real base initialization,
+      circular sentinel, mutex status, id truncation and preserved padding.
+      No physical-device execution. Existing module registration is reused.
   - address: 0x0814b004
     ghidra: FUN_0814b004
     name: context_pending_complete
