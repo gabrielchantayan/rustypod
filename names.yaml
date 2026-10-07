@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0813d098
+    ghidra: FUN_0813d098
+    name: query_object_resource_count
+    size: 8
+    sig: "u32 query_object_resource_count(const void *query)"
+    module: ui/query_object_resource_count
+    status: ported
+    vars: {param_1/r0: query, iVar1: backend}
+    renames:
+      FUN_0805417c: object_resource_count (ported)
+      FUN_08051dc4: object_backend_for_kind (ported, transitive)
+    notes: >-
+      Raw words e5900040 eafc5c36 decode to ldr r0,[r0,#0x40]
+      followed by b 0x0805417c. The next real function starts at
+      0x0813d0a0, proving the eight-byte extent. Whole-image A32 decoding
+      verifies two inbound plain BL callers at 0x08179ed0 and 0x0817a06c,
+      no predicated BL callers, and zero internal BL instructions.
+      Returns the kind-resolved resource count of the query's +0x40 object.
+      Both verified callers use the result to bound resource traversal.
+      Reuses object_resource_count; no new callee seam or validation.
+      Rust expresses the tail branch as a returning call and retains a
+      target-width query pointer on hosts; the existing resolver models its
+      proxy pointer at host width in fixtures. Host tests cover direct and
+      proxy counts 0, 1, 0x80000000, and 0xffffffff and adjacent query data.
+      ARM codegen retains the load and a tail branch relocated to
+      object_resource_count, with an extra frame-pointer prologue/epilogue.
   - address: 0x0814a9c4
     ghidra: FUN_0814a9c4
     name: indexed_handle_owner_create
