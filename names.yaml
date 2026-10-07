@@ -227354,3 +227354,27 @@ functions:
       STRs replacing STM. Relocations verify both original BL targets;
       allocation size, read/write order and return pointer are preserved.
       No device run.
+  - address: 0x0814cbb0
+    ghidra: FUN_0814cbb0
+    name: fat_format_context_destroy
+    size: 4
+    sig: "void *fat_format_context_destroy(void *context)"
+    module: app/fat_format_context_destroy
+    status: ported
+    vars: {param_1/r0: context}
+    notes: >-
+      Raw extent [0x0814cbb0,0x0814cbb4) is the sole A32 word
+      0xe12fff1e (BX LR); next body starts with PUSH. Whole-image
+      aligned raw decoding verifies two inbound plain BLs at 0x080d6c58
+      and 0x080d6cf8, zero predicated BLs, zero outgoing calls and no
+      aligned DATA references. Caller 0x080d6ba4 constructs an eight-byte
+      temporary through 0x0814cb9c, storing vtable 0x089867dc and a
+      borrowed storage object. Operation 0x0814c8ac prepares FAT32
+      boot/partition data and writes a sector through that object.
+      Both result paths destroy the context and discard incoming r0.
+      Return without memory access, preserving the pointer. No seams or
+      semantic deviations; naked ARM body preserves all registers exactly.
+      Host model tests NULL, unaligned and invalid pointer words, both
+      context words and adjacent canaries. Host suite and ARM release build
+      passed; native public-entry smoke passed. match.py reports one
+      instruction versus one, EXACT MATCH. No physical-device execution.

@@ -221,6 +221,8 @@ pub mod comparison_context_destroy;
 pub use comparison_context_destroy::*;
 pub mod chunk_probe_context_destroy;
 pub use chunk_probe_context_destroy::*;
+pub mod fat_format_context_destroy;
+pub use fat_format_context_destroy::*;
 pub mod parse_context_construct;
 pub use parse_context_construct::*;
 pub mod parse_context_destroy;
