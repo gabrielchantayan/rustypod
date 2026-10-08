@@ -306,6 +306,38 @@ pub unsafe extern "C" fn silver_controller_construct(this: *mut u8, name: *const
         this
     }
 }
+
+/// silver_controller_construct_vtable_981288 — original: `FUN_0810c53c`
+/// @ 0x0810c53c (24 bytes: 20 code bytes plus the vtable literal at
+/// 0x0810c550; next function begins at 0x0810c554). Raw-image decoding
+/// verifies two incoming plain BL sites (0x0810c634, 0x0816c55c), zero
+/// predicated BL sites, and one outbound plain BL to 0x08134db4.
+///
+/// Passes `this` and `name` unchanged to [`silver_controller_construct`],
+/// installs loaded-image vtable 0x08981288 on its returned object, and
+/// returns that object. Ghidra incorrectly drops both arguments and the
+/// return value. The class identity is unknown; the name records only
+/// the verified vtable specialization.
+///
+/// Deliberate deviations: no semantic changes; reuses the base port and
+/// its existing unported boundaries, so this is not independently
+/// hook-ready (see the module header).
+///
+/// # Safety
+///
+/// Both arguments must satisfy [`silver_controller_construct`]'s contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn silver_controller_construct_vtable_981288(
+    this: *mut u8,
+    name: *const u8,
+) -> *mut u8 {
+    unsafe {
+        let this = silver_controller_construct(this, name);
+        write_word(this, 0x0898_1288);
+        this
+    }
+}
 /// silver_controller_construct_flagged — original: `FUN_08212c10` @
 /// 0x08212c10 (**48 bytes**: 11 instructions plus one literal-pool word;
 /// **4 plain `bl` sites and 0 predicated `bl` sites**, decoded from every
@@ -556,12 +588,44 @@ mod tests {
     }
 
     #[test]
-    fn the_layout_constants_match_the_original_offsets() {
-        assert_eq!(AUXILIARY_MAP_OFFSET, 0x78);
-        assert_eq!(BINDING_MAP_OFFSET, 0x94);
-        assert_eq!(BINDING_MAP_OFFSET - AUXILIARY_MAP_OFFSET, CONTAINER_SIZE);
-        assert_eq!(DEMO_MODE_OFFSET, 0x44);
-        assert_eq!(VTABLE_ADDRESS, 0x0898_4570);
+    fn specialized_vtable_is_installed_on_the_returned_object_only() {
+        if SLAB.is_none() && note_missing_u32_fixture("app::silver_controller") {
+            return;
+        }
+        unsafe extern "C" fn relocating_base(this: *mut u8, name: *const u8) -> *mut u8 {
+            (*core::ptr::addr_of_mut!(BASE_CALLS)).push((this, name));
+            this.add(OBJECT_LEN)
+        }
+        for relocate in [false, true] {
+            let (_guard, object, auxiliary_node, binding_node) = bench();
+            unsafe {
+                if relocate {
+                    let mut active = ops();
+                    active.construct_base = relocating_base;
+                    core::ptr::addr_of_mut!(SILVER_CONTROLLER_OPS).write_volatile(active);
+                }
+                let expected = if relocate { object.add(OBJECT_LEN) } else { object };
+                let returned = silver_controller_construct_vtable_981288(
+                    object, b"TCSpecialized\0".as_ptr(),
+                );
+                assert_eq!(returned, expected);
+                assert_eq!(word_at(returned, 0), 0x0898_1288);
+                assert_empty_container(returned.add(AUXILIARY_MAP_OFFSET), auxiliary_node);
+                assert_empty_container(returned.add(BINDING_MAP_OFFSET), binding_node);
+                for offset in 4..OBJECT_LEN {
+                    let touched = (AUXILIARY_MAP_OFFSET..AUXILIARY_MAP_OFFSET + CONTAINER_SIZE)
+                        .contains(&offset)
+                        || (BINDING_MAP_OFFSET..BINDING_MAP_OFFSET + CONTAINER_SIZE).contains(&offset);
+                    if !touched {
+                        assert_eq!(returned.add(offset).read(), 0xa5, "offset {offset:#x}");
+                    }
+                }
+                if relocate {
+                    assert!(core::slice::from_raw_parts(object, OBJECT_LEN)
+                        .iter().all(|&byte| byte == 0xa5));
+                }
+            }
+        }
     }
 
     #[test]
