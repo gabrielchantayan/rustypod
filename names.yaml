@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08121538
+    ghidra: FUN_08121538
+    name: stream_write_scoped
+    size: 144
+    sig: "u32 stream_write_scoped(StreamWriteContext *context, const u8 *name, u32 first, u32 second)"
+    module: cxx/stream_write_scoped
+    status: ported
+    vars: {param_1: context, param_2: name, param_3: first, param_4: second, local_124: owner, uVar2: result}
+    notes: >-
+      Raw extent [0x08121538,0x081215c8) is 144 instruction bytes without
+      literals; the next constructor starts at 0x081215c8. Whole-image
+      aligned A32 decoding finds zero plain inbound BLs and two predicated
+      inbound BLs at 0x081e58f0 and 0x08206918. The body has three plain
+      BLs, zero predicated BLs, and three BLX-register calls.
+      Construct a 0x114-byte stack owner through the existing port
+      stream_write_owner_construct at 0x081f542c with capacity 1024 and
+      ignored fourth argument 1. Publish it at context +4 and open via
+      owner vtable +8. Nonzero open destroys via the existing port
+      stream_write_owner_destroy at 0x081f5478 and returns 1. Otherwise
+      invoke context vtable +8 with both payload words, close via vtable
+      +12 of the reloaded context owner, destroy the original stack
+      owner, and return the dispatch result regardless of close status.
+      Preserve the dangling context pointer. Ghidra callers omit the
+      two preserved payload registers. Host deviations use native pointer
+      fields/slots and callbacks for the fixed firmware owner vtable.
+      Tests cover nonzero open normalization, skipped write/close,
+      full-width dispatch results, ignored close errors, owner replacement
+      during dispatch, and untouched replacement storage.
+      All 14831 host tests and the ARM release build passed. Standalone
+      public-entry smoke observed success 255 with open/write/close trace
+      123 and open failure 1 with trace 1. match.py exits 1: 36 original
+      versus 32 Rust instructions. LLVM shares destructor cleanup and
+      omits the unused fourth constructor input. ARM relocations verify
+      both existing Rust callees; all three virtual slots and the owner
+      reload remain.
   - address: 0x0812252c
     ghidra: FUN_0812252c
     name: audio_processing_pair_select
