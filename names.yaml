@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812bc8c
+    ghidra: FUN_0812bc8c
+    name: six_string_pair_vector_owner_destroy
+    size: 68
+    sig: "SixStringPairVectorOwner *six_string_pair_vector_owner_destroy(SixStringPairVectorOwner *this)"
+    module: cxx/six_string_pair_vector_owner_destroy
+    status: ported
+    vars:
+      param_1/r0: this
+      iVar1/r0: member
+    renames:
+      FUN_083e3aa8: string_object_pair_vector_destroy
+      FUN_08277484: string_object_destroy
+    notes: >-
+      Raw ARM words establish [0x0812bc8c,0x0812bcd0), 68 code bytes;
+      pop {r4,pc} at 0x0812bccc precedes the next push at 0x0812bcd0.
+      Seven outbound plain BLs, zero predicated BLs. Whole-image branch-word
+      decoding finds two inbound plain BLs at 0x0839c010 and 0x0839c054,
+      zero predicated forms. Destroys the string-pair vector at +60,
+      then strings at +52,+44,+32,+20,+12,+4; returns this without deleting
+      the owner or modifying opaque words +0,+28,+40. Uses existing ported
+      callees; no new seam. Repr(C) member fields preserve ARM offsets while
+      widening pointers on hosts. Host tests exercise empty and reserved-empty
+      vectors, mixed NULL/non-NULL payloads, release count, last release,
+      reset vtables, preserved opaque words, and return identity. ARM match
+      review shows seven BLs with the same member offsets; LLVM retains this
+      in r4 instead of chaining callee return pointers, adds a frame pointer,
+      and emits 19 instructions instead of 17.
+
   - address: 0x0812e738
     ghidra: FUN_0812e738
     name: string_object_with_word_and_flag_copy_construct

@@ -5,6 +5,7 @@
 pub mod vtable_flag_base_construct;
 pub use vtable_flag_base_construct::*;
 pub mod five_string_array_state_construct;
+pub mod six_string_pair_vector_owner_destroy;
 pub mod extended_attached_owner_destruct;
 pub mod opaque_vtable_08985198_construct;
 pub use opaque_vtable_08985198_construct::*;
