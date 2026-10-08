@@ -6,30 +6,15 @@
 //! Start at the header's leftmost link, dispatch node+0x14, advance in order,
 //! and reload owner+0x24 before every end comparison. Always return one.
 //!
-//! Deliberate deviations: reuse the ported equality and cursor-advance helpers;
-//! the unported 0x0811f150 payload-vector virtual-slot-0x24 dispatch remains
-//! a fixed-address firmware seam, replaceable on hosts. No node is erased.
+//! Deliberate deviations: reuse the ported equality, cursor-advance and
+//! payload-vector dispatch helpers. No node is erased.
 
 use crate::cxx::red_black_tree_increment::red_black_tree_advance_cursor;
 use crate::cxx::templates::equal_deref;
 
-type PayloadDispatch = unsafe extern "C" fn(*mut u8);
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_payload_dispatch(payload: *mut u8) {
-    let dispatch: PayloadDispatch = core::mem::transmute(0x0811_f150usize);
-    dispatch(payload);
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_payload_dispatch(_payload: *mut u8) {
-    panic!("tree_payload_dispatch requires firmware payload dispatch 0x0811f150")
-}
-
-#[cfg(target_os = "none")]
-pub static mut TREE_PAYLOAD_DISPATCH: PayloadDispatch = firmware_payload_dispatch;
-#[cfg(not(target_os = "none"))]
-pub static mut TREE_PAYLOAD_DISPATCH: PayloadDispatch = missing_payload_dispatch;
+use super::payload_vector_dispatch::payload_vector_dispatch;
+#[cfg(test)]
+use super::payload_vector_dispatch::PayloadVector;
 
 /// Dispatches every payload in the owner's tree and returns one.
 ///
@@ -47,8 +32,7 @@ pub unsafe extern "C" fn tree_payload_dispatch(owner: *mut u32) -> u32 {
         if equal_deref(&cursor, &end) == 1 {
             return 1;
         }
-        let dispatch = core::ptr::read_volatile(core::ptr::addr_of!(TREE_PAYLOAD_DISPATCH));
-        dispatch((cursor as usize as *mut u8).add(0x14));
+        payload_vector_dispatch((cursor as usize as *mut u8).add(0x14).cast());
         red_black_tree_advance_cursor(&mut cursor);
     }
 }
@@ -62,7 +46,8 @@ mod tests {
     static mut OWNER: *mut u32 = core::ptr::null_mut();
     static mut STOP_AT: u32 = 0;
 
-    unsafe extern "C" fn record(payload: *mut u8) {
+    unsafe extern "C" fn record(object: *mut u8) {
+        let payload = object.cast::<usize>().add(1).read() as *mut u8;
         CALLS.lock().push(payload as usize);
         // Mutate payload, not links; optionally replace the owner's end marker.
         payload.cast::<u32>().write(0xfeed_beef);
@@ -78,11 +63,27 @@ mod tests {
             let owner = base.cast::<u32>();
             let header = owner.add(32);
             let left = owner.add(64);
-            let root = owner.add(80);
-            let right = owner.add(96);
+            let root = owner.add(96);
+            let right = owner.add(128);
             let addr = |p: *mut u32| p as usize as u32;
-            let saved = TREE_PAYLOAD_DISPATCH;
-            TREE_PAYLOAD_DISPATCH = record;
+            let mut table = [0usize; 10];
+            table[9] = record as *const () as usize;
+            let mut objects = [
+                [table.as_ptr() as usize, left.add(5) as usize],
+                [table.as_ptr() as usize, root.add(5) as usize],
+                [table.as_ptr() as usize, right.add(5) as usize],
+            ];
+            let mut cells = objects.each_mut().map(|object| object.as_mut_ptr().cast::<u8>());
+            let mut slots = cells.each_mut().map(|cell| cell as *mut *mut u8);
+            for (i, node) in [left, root, right].into_iter().enumerate() {
+                node.add(5).cast::<PayloadVector>().write_unaligned(PayloadVector {
+                    prefix: 0,
+                    vector: crate::cxx::templates::VectorBounds {
+                        begin: slots.as_mut_ptr().add(i).cast(),
+                        end: slots.as_mut_ptr().add(i + 1).cast(),
+                    },
+                });
+            }
             OWNER = owner;
             STOP_AT = 0;
             owner.add(9).write(addr(header));
@@ -121,7 +122,6 @@ mod tests {
             CALLS.lock().clear();
             STOP_AT = 0;
             OWNER = core::ptr::null_mut();
-            TREE_PAYLOAD_DISPATCH = saved;
         }
     }
 }
