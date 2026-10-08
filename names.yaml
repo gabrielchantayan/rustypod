@@ -233390,3 +233390,37 @@ functions:
       Rust instructions (exit 1, structural diff): four direct BLs, two
       indirect BLXs, slot +0x98, state stores and offset reloads remain.
       Frame/register allocation and load order differ. No device execution.
+  - address: 0x0810c53c
+    ghidra: FUN_0810c53c
+    name: silver_controller_construct_vtable_981288
+    size: 24
+    sig: "void *silver_controller_construct_vtable_981288(void *this, const char *name)"
+    module: app/silver_controller
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: name
+      puVar1/r0: constructed_controller
+      DAT_0810c550: loaded_image_vtable_981288
+      FUN_08134db4: silver_controller_construct
+    notes: >-
+      Raw A32 extent 0x0810c53c..0x0810c554 is 24 bytes: five instructions
+      and literal 0x08981288 at 0x0810c550, loaded by ldr r1,[pc,#4].
+      The next function starts with cmp r0,#0 at 0x0810c554. Full-image
+      branch decoding verifies two incoming plain BL sites at 0x0810c634
+      and 0x0816c55c, zero predicated BL sites. One outbound plain BL
+      calls the existing silver_controller_construct port at 0x08134db4.
+      Passes this and name unchanged, replaces the returned object vtable
+      with 0x08981288, and returns that object. Ghidra drops both arguments
+      and the return value; its allocation-wrapper xref overlaps the real
+      caller at 0x0816c55c. Class identity remains unknown. No semantic
+      deviation or new callee seam; inherits the base port unported
+      boundaries and is not independently hook-ready. Host suite passed
+      14911 tests; regression covers ordinary and relocated objects, empty
+      containers, and untouched bytes. ARM release build passed. Isolated
+      actual-source smoke with supplied prerequisite boundaries observed
+      returned=0x17000100, vtable=0x08981288, auxiliary=0x17000300,
+      binding=0x17000320, original untouched. match.py exit 1: five original
+      versus seven Rust instructions; call, literal load, vtable store and
+      returned r0 remain. LLVM adds a frame-pointer move, uses fp instead
+      of r4, and includes the literal in its listing. No device execution.
