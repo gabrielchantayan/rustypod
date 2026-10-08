@@ -687,6 +687,7 @@ pub mod ostream_insert_cstr;
 pub mod ostream_insert_string;
 pub mod stream_write_owner_construct;
 pub mod stream_write_owner_destroy;
+pub mod stream_write_scoped;
 pub mod logs_data_file_path_construct;
 pub mod string_member_record_assign;
 pub mod string_object;
