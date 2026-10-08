@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod calendar_set_selected_date;
 pub mod coverflow_construct;
 pub mod timed_view_stop_invalidate;
 pub mod owned_child_view;
