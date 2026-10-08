@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const SELECTION_STATE_PLAYLIST_VALUE: usize = 0x435e_0000;
+    pub const SELECTION_STATE_ACTIVE_ITEM_VALUE: usize = 0x435f_0000;
     pub const STATUS_STRING_RESOURCE: usize = 0x433f_0000;
     pub const DESCRIPTOR_HANDLE_PRESENT: usize = 0x4327_0000;
     pub const LISTENER_LIST_NEXT: usize = 0x4326_0000;

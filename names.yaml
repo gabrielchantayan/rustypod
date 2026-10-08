@@ -232674,3 +232674,45 @@ functions:
       dispatches. LLVM adds a frame pointer, uses fixed-address BLX for
       configuration, and constructs resource constants with MOV/ORR.
       No device execution.
+
+  - address: 0x081134ec
+    ghidra: FUN_081134ec
+    name: selection_state_refresh_active_item_value
+    size: 156
+    sig: "void selection_state_refresh_active_item_value(u32 *state)"
+    module: app/selection_state_refresh_active_item_value
+    status: ported
+    renames:
+      param_1/r4: state
+      iVar2/r0: active_item
+      uVar3/r0: payload_value
+      uVar1/r5: notification_action
+      state_plus_0xf0: cached_active_item_value
+    notes: >-
+      Raw A32 extent 0x081134ec..0x08113588 contains 140 instruction bytes
+      and 16 literal bytes, followed by the next real function's push.
+      Two plain direct BL instructions to 0x08066618 and the already-ported
+      ui_backend_active_item at 0x08054724; zero predicated BL instructions.
+      Whole-image word decoding finds two inbound plain BL sites at
+      0x08114020 and 0x08114910, zero predicated inbound calls. Two indirect
+      BLX calls and a final BX use vtable slot +0x58. Configure state +0x30's
+      inner object with selectors (1,0), reload that pointer, resolve the
+      active item, read its +0x40 payload pointer and zero-extend payload
+      +0x2e's halfword; a missing item yields zero. Compare against cache
+      +0xf0. Unchanged returns; changed stores before notifying VMax resources
+      0x6389, 0x63d0, 0x63d1, reloading the vtable each time. No broader
+      payload identity is assumed. Reuses the existing configuration seam
+      without inventing a callee identity. Deliberate deviations: host-only
+      configuration/dispatch operations retain target-width data pointers;
+      final dispatch expressed as a call with unobserved result (LLVM emits
+      tail BX). All 14881 host tests passed and ARM release build passed.
+      Standalone direct-entry smoke observed cache 0x8001 and three ordered
+      notifications, then none on an unchanged invocation. match.py exits 1
+      with a structural diff preserving lookup, conditional halfword read,
+      comparison, cache store, and three reloaded virtual dispatches. LLVM
+      adds a frame pointer, uses fixed-address BLX for configuration and
+      MOV/ORR resource constants. An optional non-test host rlib build fails
+      on six existing missing host helpers in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule; the standalone
+      smoke instead compiles the port and real UI lookup modules directly.
+      No device execution.
