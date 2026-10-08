@@ -778,6 +778,7 @@ pub mod mode_selected_handle_construct;
 pub mod mode_two_attachment;
 pub mod mode_two_attachment_destruct;
 pub mod media_now_playing_controller_noop;
+pub mod selection_metric_refresh;
 pub mod mode_selected_position;
 pub mod indexed_mode_position_adjust;
 pub mod mode_selected_position_validate;

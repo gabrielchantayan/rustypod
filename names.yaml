@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081314ac
+    ghidra: FUN_081314ac
+    name: selection_metric_refresh
+    size: 80
+    sig: "u32 selection_metric_refresh(const SelectionMetricOwner *owner)"
+    module: app/selection_metric_refresh
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner_plus_0xbc: selection
+      FUN_08131854: object_bytes_64_or_6c_nonzero
+      FUN_08289690: instance_of_class_3280
+      FUN_08289a5c: media_now_playing_controller_noop
+      FUN_081323ac: ui_state_dependent_handle_metric
+    notes: >-
+      Raw extent [0x081314ac,0x081314fc), twenty ARM words, ends before
+      the next independent push. Whole-image word decoding verifies two
+      incoming plain BLs (0x08130964,0x081315d8), six outgoing plain BLs,
+      and zero predicated BLs in either direction. Owner +0xbc supplies
+      selection; bytes +0x64/+0x6c choose controller callback mode. Query
+      state-dependent handle metric only when both are zero. Zero metric
+      triggers discarded +0x19 byte read, omitted by Ghidra. Return one.
+      Reuses four existing Rust ports; no new firmware-address seams.
+      Host pointers widen; singleton lookup is injected. Final byte load
+      is volatile. Full host tests and ARM release build pass; actual-source
+      test-configured library smoke confirms blocked and inactive paths.
+      match.py exits 1: twenty versus eighteen instructions. LLVM merges
+      lookup branches, eliminates proven no-op callback, retains conditional
+      metric and +0x19 load, folds reload after read-only metric, adds frame.
+
   - address: 0x08132cc8
     ghidra: FUN_08132cc8
     name: worker_stop_request
