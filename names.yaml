@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123c14
+    ghidra: FUN_08123c14
+    name: output_buffer_append_suffix
+    size: 12
+    sig: "void output_buffer_append_suffix(OutputBufferState *state)"
+    module: app/output_buffer_append_suffix
+    status: ported
+    vars: {param_1: state}
+    renames: {DAT_08123c1c: firmware_suffix, FUN_08123c58: output_buffer_append_c_string}
+    notes: >-
+      Raw extent [0x08123c14,0x08123c20) contains eight instruction bytes
+      and literal 0x083e9413. Words e59f1000 ea00000e 083e9413 load r1
+      and tail B to independent appender 0x08123c58; next function begins
+      with LDR at 0x08123c20. Two plain incoming BLs at 0x080b5920 and
+      0x08152174, zero predicated incoming BLs, zero outgoing plain or
+      predicated BLs, verified by whole-image aligned A32 decoding.
+      Ghidra incorrectly merges the appender body. Append without reset,
+      using raw suffix bytes e1 1e ff 2f e1 04 00 via the literal pointer.
+      Reuses OUTPUT_BUFFER_APPEND_C_STRING with no new seam or callee port.
+      Deliberate deviation is volatile indirect dispatch instead of direct B.
+      Host regression covers existing output, strict fit, wrapping arithmetic
+      and untouched neighbors. All 14823 host tests and ARM release passed.
+      Isolated public-entry smoke with reference appender exercised capacities
+      10 and 11 with write count 3 and overflow wrapping. match.py diff
+      reviewed: LLVM retains r0 and exact suffix literal and tail BX dispatches
+      through the seam with saved/restored frame. Zero archive literal is the
+      unresolved seam-address relocation.
   - address: 0x08123c38
     ghidra: FUN_08123c38
     name: output_buffer_reset_with_prefix
