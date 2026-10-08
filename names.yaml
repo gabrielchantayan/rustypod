@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08140534
+    ghidra: FUN_08140534
+    name: range_context_replace_owned
+    size: 8
+    sig: "void range_context_replace_owned(RangeOwnedContext *context, OwnedVirtualMember *replacement)"
+    module: app/range_context_replace_owned
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: replacement
+      context_plus_0x34: owned
+      FUN_083e73f4: owned_pointer_replace_tail_helper
+    notes: >-
+      Raw words e2800034 ea0a9bad prove an 8-byte wrapper ending at
+      0x0814053c, where a separate function begins with push {r4,r5,r6,lr}.
+      Ghidra's 56-byte extent incorrectly includes the following function.
+      Adds 0x34 to r0 and tail-branches to 0x083e73f4. That verified
+      48-byte helper ends at 0x083e7424: compare old with replacement,
+      return on identity, release non-NULL old through vtable slot +4,
+      then store replacement even if the callback changed the slot.
+      No concrete virtual callee identity is inferred. Full-image aligned
+      raw decoding verifies two incoming plain BLs at 0x081dcdf0 and
+      0x081dce20, zero predicated incoming BLs, and zero outgoing BLs
+      in the wrapper. The tail helper has one BLXNE and no direct BLs.
+      Both callers supply a value obtained from scoped range state.
+      Neither address already had a names entry. Deliberate deviations:
+      inline the verified helper rather than introduce a firmware seam;
+      reuse existing owned virtual member types with repr(C) host pointer
+      widening and unchanged target offsets. Host edge tests cover null,
+      identical unreadable pointers, release-before-publication, callback
+      slot mutation, replacement by null, and preserved context prefix.
+      Full host suite passes 14735 tests; ARM release build passes.
+      Actual-source smoke proves install, identical no-op, and clear with
+      exactly one release. Required match.py exits 1 because its default
+      56-byte reference includes unrelated next-function instructions.
+      Rust has 14 instructions retaining the +0x34 load/store, identity
+      and null guards, vtable +4 dispatch, and ordered final store; LLVM
+      expands the tail helper and adds a frame-pointer prologue.
   - address: 0x08141290
     ghidra: FUN_08141290
     name: calendar_set_selected_date
