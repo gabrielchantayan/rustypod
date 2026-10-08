@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const CONTROLLER_VIRTUAL_BASE_CONSTRUCT: usize = 0x4360_0000;
     pub const SELECTION_STATE_PLAYLIST_VALUE: usize = 0x435e_0000;
     pub const SELECTION_STATE_ACTIVE_ITEM_VALUE: usize = 0x435f_0000;
     pub const STATUS_STRING_RESOURCE: usize = 0x433f_0000;
