@@ -232330,3 +232330,38 @@ functions:
       bytes; targets retain the original addresses. Tests cover NULL
       and empty payloads, UTF-8 end insertion, repeated appends,
       canaries, and allocation failure preserving the object.
+
+  - address: 0x081164fc
+    ghidra: FUN_081164fc
+    name: target_size_within_limit
+    size: 120
+    sig: "u32 target_size_within_limit(u8 *owner)"
+    module: ui/target_size_within_limit
+    status: ported
+    renames:
+      param_1: owner
+      iVar1: initial_size
+      uVar3: limit
+      uVar4: current_size
+      FUN_0816029c: record_layout_size
+    notes: >-
+      Raw A32 establishes [0x081164fc, 0x08116574), with the next real
+      function's push at 0x08116574. Independent aligned-word scan finds
+      two inbound unconditional BLs at 0x081f879c and 0x081f87d0, no
+      predicated BLs. Body contains one direct BL to the canonical port
+      record_layout_size and four indirect BLX calls. Query owner target
+      +0x88c through vtable +0x8c; zero returns zero. Query +0x88 and
+      return zero if equal to record_layout_size. Otherwise query +0x5c
+      as an unsigned limit, then query +0x88 again and return one iff
+      the fresh result is at most the limit. Reload target before every
+      virtual call. Caller selects text for events 0x7f22 and 0x7f23;
+      concrete virtual method identities remain unrecovered. No new
+      direct-callee seams. Host-only representation uses native pointers
+      at the fixed owner byte offset and native-width vtable slots.
+      Tests cover early exits, fresh results, equality, zero, unsigned
+      high-bit boundaries, and target replacement during limit query.
+      Host suite passes 14866 tests; ARM release build passes. match.py
+      exits 1 with 30 original versus 31 Rust instructions: frame and
+      register allocation differ, unsigned compare is reversed with LS,
+      and returns share an epilogue. All four reloads and BLX calls and
+      the record_layout_size BL remain in order.
