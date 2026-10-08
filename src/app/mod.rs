@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod pending_action_timeout_poll;
 pub mod context_owned_interface_predicate;
 pub use context_owned_interface_predicate::*;
 pub mod context_owned_interface_state;

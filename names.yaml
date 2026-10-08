@@ -232598,3 +232598,41 @@ functions:
       receiver mutation and untouched context storage. match.py exits 1:
       four original versus seven Rust instructions; identical three LDRs
       and final BX, with added frame-pointer PUSH/MOV/POP. No device run.
+  - address: 0x081137a8
+    ghidra: FUN_081137a8
+    name: pending_action_timeout_poll
+    size: 52
+    sig: "void pending_action_timeout_poll(uint8_t *state)"
+    module: app/pending_action_timeout_poll
+    status: ported
+    renames:
+      param_1/r4: state
+      r0/clock: now
+      r1: deadline
+    notes: >-
+      Raw A32 extent is 0x081137a8..0x081137dc, ending at POP before
+      the next PUSH prologue. Ghidra's 88-byte extent and inlined flag
+      updates do not match this image. Whole-image aligned-word decoding
+      finds two plain incoming BLs at 0x08113cac and 0x081144e8, zero
+      predicated incoming BLs, one plain outgoing BL to 0x0826c5e8,
+      zero predicated outgoing BLs, and a BHI tail dispatch to 0x08112bf8.
+      If the pending byte at +0x51a is zero, return without reading time.
+      Otherwise reuse the ported clock, then load +0x520, wrap-add 250,
+      and complete only when the clock sample is unsigned-greater.
+      The existing timer symbol usec_timer_read_seconds actually divides
+      microseconds by 1000. The unported completion routine at 0x08112bf8
+      loads +0x51c, calls 0x08113018, clears +0x51a and sets +0x519;
+      call its verified address without creating another port or inventing
+      a concrete method identity. Host builds expose clock/completion seams.
+      Deliberate deviation is expressing the tail dispatch as a void call;
+      incidental r0 return values are not exposed. Tests cover strict
+      equality, unsigned high-bit ordering, wrapping deadlines, inactive
+      clock suppression and timestamp loading after the clock callback.
+      Full host suite passed (14879 tests), and the ARM release build passed.
+      Direct-entry host smoke observed pending at deadline 350 and completion
+      at sample 351. match.py exits 1 with a structural diff; its default
+      88-byte extent incorrectly includes the next function. Repeating with
+      --size 52 shows the same byte guard, clock call, word load, wrapping
+      ADD and unsigned comparison. LLVM preserves tail dispatch using BX
+      with the exact 0x08112bf8 literal, adding a frame-pointer prologue.
+      No device execution.
