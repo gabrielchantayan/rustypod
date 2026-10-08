@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081114dc
+    ghidra: FUN_081114dc
+    name: context_media_query_slot_194
+    size: 16
+    sig: "u32 context_media_query_slot_194(MediaQuery194Context *context)"
+    module: app/context_media_query_slot_194
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x888": media_interface
+      "media_interface.vtable+0x194": query
+      return/r0: query_result
+    notes: >-
+      Raw words e5900888 e5901000 e5911194 e12fff11 establish extent
+      [0x081114dc,0x081114ec), 16 bytes; the next function begins ADD r1,r1,#2
+      and updates signed property +0x6fc before branching to 0x08116cac.
+      Whole-image aligned A32 scan verifies two inbound plain BLs at
+      0x08114774 and 0x08232bf0, zero predicated inbound BLs, zero outbound
+      plain or predicated BLs, and one BX virtual tail dispatch. Load context
+      +0x888 and invoke its interface's vtable slot +0x194 with that interface
+      as receiver. Both callers test zero/nonzero; preserve the full u32
+      result, correcting Ghidra's void signature. Concrete virtual method
+      identity remains unproven; no fixed-address callee seam or null guards.
+      Host repr(C) pointers widen while retaining field and slot indices.
+      All 14891 host tests, ARM release build and standalone query smoke pass.
+      match.py exits 1: all three loads and final BX match; LLVM adds only
+      frame-pointer push/setup/pop. Tests cover full-width results, wrapping
+      receiver mutation, receiver replacement and unchanged context storage.
   - address: 0x081114fc
     ghidra: FUN_081114fc
     name: media_player_refresh_collection_cache
