@@ -229968,3 +229968,35 @@ functions:
       LLVM inlines timer_restart, retaining +0x44 receiver adjustment,
       stop call, running-state store at owner+0x64, and indirect arm tail
       call through the existing TimerOps table. No device execution.
+
+  - address: 0x0812f200
+    ghidra: FUN_0812f200
+    name: node_list_query_current_view
+    size: 52
+    sig: "usize node_list_query_current_view(void)"
+    module: app/node_list
+    status: ported
+    vars: {piVar1: list, piVar2: view, FUN_0810fa30: node_list_get}
+    notes: >-
+      Raw A32 words establish extent 0x0812f200..0x0812f234, where the
+      next function starts with push {r4,lr}. Two incoming plain BLs
+      at 0x0812ee44 and 0x0812ee80; zero predicated incoming BLs.
+      Body contains one plain BL to ported node_list_get, zero predicated
+      BLs, one BLX through list vtable +0x14, and a tail B to 0x08275b9c.
+      That raw thunk checks r0 for null and dispatches object vtable
+      +0x14 with r1=0, returning zero for null or forwarding the virtual
+      result. Ghidra incorrectly reports void; both callers test r0
+      before dispatching their notification. No concrete virtual method
+      identity is assumed from stale runtime-initialized vtable data.
+      Deliberate deviations: inline the null-safe thunk, native-width
+      vtable slots for host fixtures (four bytes on target), and reuse
+      the existing Rust singleton accessor. Host tests cover both null
+      stages, dispatch order/receivers, argument zero, and result values
+      zero, one, high-bit, and all-ones. All 14765 host tests passed;
+      ARM release build passed. Standalone exported-function smoke
+      observed null list=0, null view=0, and result=0x80000001 using
+      simulated virtual methods. match.py exits 1: 13 original versus
+      15 Rust instructions; LLVM removes the list-null check because
+      node_list_get always returns storage, inlines the final thunk,
+      and preserves both +0x14 dispatches and the zero argument.
+      No device execution.
