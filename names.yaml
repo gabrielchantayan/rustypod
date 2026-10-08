@@ -231372,3 +231372,45 @@ functions:
       677 Rust instructions: indentation BLX, inlined signed 64-bit decimal
       conversion and bounded rendering, then append dispatch replace the
       original snprintf BL and tail B. This is intentional, not binary parity.
+  - address: 0x08122220
+    ghidra: FUN_08122220
+    name: event_handler_source_child_enable
+    size: 52
+    sig: "void event_handler_source_child_enable(void *child)"
+    module: kernel/event_handler_source_child_enable
+    status: ported
+    renames:
+      param_1/r4: child
+      uVar2/r5: value
+      uVar1/r0: source
+      child_plus_0x68: enabled
+      child_plus_0x90: bound_node
+      bound_node_plus_0x30: source_value
+      thunk_EXT_FUN_22007470: event_handler_source
+      DAT_0803806c: source_child_value_publish_iram
+    notes: >-
+      Raw extent ends with the tail B at 0x08122250; the independent next
+      body starts at 0x08122254, so Ghidra's 56-byte extent includes its
+      first instruction. Decoding all 13 words gives one plain BL and zero
+      predicated BLs, plus one tail B, not two BLs. Write halfword 1 at
+      child+0x68, snapshot node+0x30 through the target-width pointer at
+      child+0x90, or use 0x7fff when NULL, then acquire the shared source
+      and publish the unmodified value. Raw veneer 0x08038060 contains
+      target 0x22007470; reuse its ported osos source getter. Raw veneer
+      0x08038068 contains target 0x22007a68, an IRAM mirror of osos
+      0x08007a68, not mask ROM. That separately verified body updates
+      each matching child slot's value at source+0x30+4*i and recomputes
+      the unsigned minimum capped at 0x7fff at source+0x24; retain an
+      exact-address seam rather than porting a second function. Existing
+      playback_node_start now calls this port. Tests cover adjacent-halfword
+      preservation, NULL node, unclamped boundary values, and snapshot
+      timing despite source-acquisition mutation. All 14829 host tests and
+      ARM release build pass. Isolated public-entrypoint smoke with simulated
+      source getter and mapped publish seam observes enabled=1, default
+      0x7fff, and bound value 0xffff1234. Full host non-test library smoke
+      is unavailable because six unrelated cfg-gated helpers are undefined.
+      match.py reports structural differences: preserves flag store,
+      conditional aligned node read, source getter BL and final IRAM
+      dispatch; LLVM materializes the getter's fixed source address and
+      tail-dispatches with BX. Default match extent includes the next body's
+      first instruction; literal pool words also appear in Rust's listing.
