@@ -12,10 +12,10 @@
 //! then clear bytes +0x27b, +0x28f, +0x3e6 and +0x3e7 on the owner
 //! returned by that constructor. Return that owner, not void. Ghidra's
 //! offsets are relative to the embedded buffer and are not owner offsets.
-//! No target behavioral deviations. Storage initialization calls the ported
-//! owned_storage_initialize; text construction (0x08123cb4) remains a
-//! verified retail call. Host production text construction is unsupported;
-//! tests inject reference callees without changing the ARM word layout.
+//! No target behavioral deviations. Storage initialization and text
+//! construction call their Rust ports directly. Host production storage
+//! initialization is unsupported; tests inject reference callees without
+//! changing the ARM word layout.
 
 pub(crate) type StorageInitialize = unsafe extern "C" fn(*mut u8, u32, *mut u8) -> *mut u8;
 pub(crate) type TextConstruct = unsafe extern "C" fn(*mut u8, u32, u32, u8) -> *mut u8;
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn buffered_text_owner_construct(owner: *mut u8) -> *mut u
     #[cfg(target_os = "none")]
     {
         construct_with(owner, super::owned_storage_initialize::owned_storage_initialize,
-                       core::mem::transmute(0x0812_3cb4usize))
+                       super::text_buffer_construct::text_buffer_construct)
     }
     #[cfg(not(target_os = "none"))]
     {
