@@ -333,6 +333,7 @@ pub mod global_readiness_gate;
 pub mod object_activate_until_query_matches;
 pub mod playback_position_get;
 pub mod showcase_clear_timer_slots;
+pub mod owner_timer_stop;
 pub mod service_status_word;
 pub mod address_book_availability_word;
 pub mod status_code_normalize;

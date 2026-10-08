@@ -229667,3 +229667,25 @@ functions:
       ARM release build passes; actual-source smoke passes 1024 cases.
       match.py exits 1: seven stock versus ten Rust instructions, with a
       frame, ORR/CMP for 5/7 and SUB/CLZ/LSR for 1. No calls or device run.
+
+  - address: 0x081325d0
+    ghidra: FUN_081325d0
+    name: owner_timer_stop
+    size: 16
+    sig: "void owner_timer_stop(u8 *owner)"
+    module: app/owner_timer_stop
+    status: ported
+    vars:
+      param_1/r0: owner
+      owner_plus_0x80: optional timer pointer (four-byte target field)
+      FUN_0812c6b0: timer_stop (existing port)
+    notes: >-
+      Raw words e5900080 e3500000 1affe834 e12fff1e establish the true
+      extent 0x081325d0..0x081325e0; the next push starts a real function.
+      Whole-image A32 decoding finds two inbound unconditional BLs at
+      0x08132ca8 and 0x08134000, zero predicated BLs and zero inbound tail
+      branches. Body: zero BLs, one conditional tail B to timer_stop.
+      Loads owner+0x80 and stops the non-NULL timer. Both callers ignore r0.
+      Ghidra incorrectly includes the tail callee body; owner class unknown.
+      Deliberate deviation: return-position Rust call. Host tests cover NULL,
+      running, expired callback cancellation, stopped state and owner integrity.
