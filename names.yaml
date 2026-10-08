@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081242f4
+    ghidra: FUN_081242f4
+    name: conditional_string_resource_construct
+    size: 64
+    sig: "StringObject *conditional_string_resource_construct(StringObject *this, u32 resource_id, u32 resolve_resource)"
+    module: app/conditional_string_resource_construct
+    status: ported
+    vars: {param_1/r4: this, param_2/r5: resource_id, param_3/r2: resolve_resource}
+    renames:
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+      FUN_082773e0: string_object_copy_construct
+      FUN_0827735c: string_owner_embedded_init
+      DAT_08124330: fallback_object_address
+    notes: >-
+      Raw A32 establishes [0x081242f4,0x08124334), 64 bytes: 60 code
+      bytes and the literal 0x089ca8a0 at 0x08124330 before the next PUSH.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x08123ec8 and 0x08124190, zero predicated inbound BLs; body contains
+      two plain BLs to context and resource lookup, zero predicated BLs.
+      Zero flag ignores resource_id and tail BEQ copy-constructs from the
+      fixed fallback object. Any nonzero flag resolves the unsigned string
+      resource ID and tail B constructs from its C-string result, including
+      NULL. Ghidra incorrectly inlines both constructor tail targets and
+      reports 60 bytes excluding the literal. Existing Rust ports are reused
+      without new callee seams. Host tests replace only the fixed fallback
+      address with native-width storage; static-image font-name text there
+      does not establish an empty-string singleton identity. Tests cover
+      fallback duplication, self-copy, NULL fallback, nonboolean flags,
+      unsigned IDs, missing/empty resources, NULL chain and allocation failure.
+      Host suite passes all 14814 tests; ARM release build passes. The
+      match.py structural diff preserves flag selection and fallback literal;
+      LLVM inlines the context getter using its existing dispatch slot and
+      replaces constructor tail branches with BL/return sequences. Existing
+      modeled vtables are inherited deviations. Direct host-entry smoke
+      verifies construction with a NULL provider chain for four nonzero flags.
   - address: 0x081268dc
     ghidra: FUN_081268dc
     name: refresh_calendar_day_and_notify
