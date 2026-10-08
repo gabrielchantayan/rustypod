@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod default_sequence_schedule;
 pub mod view_handle_play;
 pub mod view_handle_pause;
 pub mod view_stop_slideshow_and_dispatch;

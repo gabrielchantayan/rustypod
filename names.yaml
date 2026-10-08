@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08109d80
+    ghidra: FUN_08109d80
+    name: default_sequence_schedule
+    size: 52
+    sig: "void default_sequence_schedule(DefaultSequenceOwner *owner, u32 expired)"
+    module: app/default_sequence_schedule
+    status: ported
+    vars: {param_1/r0/r4: owner, param_2/r1: expired}
+    renames:
+      owner_plus_0x18: embedded_timer
+      owner_plus_0xc8: sequence_manager
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+      FUN_081a2ba8: unported default sequence playback wrapper
+      DAT_08109db0: delay_ms_10000
+    notes: >-
+      Raw A32 extent [0x08109d80,0x08109db4): 48 code bytes plus the
+      10000-ms literal, followed by PUSH. Ghidra's 64-byte extent and
+      expanded C are incorrect. Full-image scan: zero plain incoming BLs,
+      two BLEQs at 0x08109fdc and 0x0810a910. One plain outgoing BL,
+      zero predicated BLs; BNE to 0x081a2ba8 and B to timer_restart.
+      Zero sets and restarts the +0x18 timer for ten seconds; nonzero
+      plays the +0xc8 manager's default. Raw 0x081a2ba8 calls 0x081a2998
+      then tail-branches to 0x0826c884; retained as a verified retail seam.
+      Host repr(C) manager pointer widens; preceding words remain u32.
+      Tests cover cancellation, delay overwrite, running state, ordering,
+      nonzero extremes and untouched timer. All 14916 host tests, ARM build
+      and executable cfg(test) playback smoke pass. Ordinary host builds
+      have six unrelated missing helpers. match.py exits 1 with stale
+      64-byte extent; offsets/delay/BX retained, timer_restart inlined.
   - address: 0x0810c664
     ghidra: FUN_0810c664
     name: view_handle_play

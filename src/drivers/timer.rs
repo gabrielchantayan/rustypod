@@ -1844,6 +1844,45 @@ mod tests {
     }
 
     #[test]
+    fn default_sequence_schedule_rearms_for_ten_seconds_or_consumes_default() {
+        use crate::app::default_sequence_schedule::*;
+        let _lock = mock_env();
+        unsafe extern "C" fn play(manager: *mut u8) {
+            *manager = (*manager).wrapping_add(1);
+        }
+        unsafe {
+            let saved = DEFAULT_SEQUENCE_PLAY;
+            DEFAULT_SEQUENCE_PLAY = play;
+            let mut played = 0u8;
+            let mut owner = DefaultSequenceOwner { words: [0; 50], manager: &mut played };
+            let timer = (&mut owner as *mut DefaultSequenceOwner).cast::<u8>().add(0x18);
+            set_word(timer, STATE, TIMER_STATE_EXPIRED);
+            set_word(timer, CALLBACK_HANDLE, 0x08a0_1234);
+            set_word(timer, PERIOD, u32::MAX);
+            default_sequence_schedule(&mut owner, 0);
+            assert_eq!(word(timer, PERIOD), 10_000);
+            assert_eq!(word(timer, STATE), TIMER_STATE_RUNNING);
+            assert_eq!(played, 0);
+            assert_eq!(calls(), vec![
+                Call::Trace(timer as usize), Call::Wait(MOCK_HANDLE),
+                Call::Cancel(0x08a0_1234, 0x0812_16b4, timer as usize),
+                Call::Signal(MOCK_HANDLE), Call::Trace(timer as usize),
+                Call::Trace(timer as usize), Call::Wait(MOCK_HANDLE),
+                Call::Signal(MOCK_HANDLE), Call::Arm(timer as usize),
+            ]);
+            let before = owner.words;
+            for mode in [1, 2, 0x8000_0000, u32::MAX] {
+                CALLS.lock().clear();
+                default_sequence_schedule(&mut owner, mode);
+                assert_eq!(owner.words, before);
+                assert!(calls().is_empty());
+            }
+            assert_eq!(played, 4);
+            DEFAULT_SEQUENCE_PLAY = saved;
+        }
+    }
+
+    #[test]
     fn class_9300_dispatch_zero_refreshes_and_all_nonzero_modes_restart_embedded_timer() {
         let _lock = mock_env();
         unsafe extern "C" fn refresh(owner: *mut u8) {
