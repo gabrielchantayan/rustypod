@@ -28,6 +28,7 @@ pub mod controller_mode_set_and_settle;
 pub mod controller_request_submit_wait;
 pub mod controller_request_wait_response;
 pub mod controller_command_initialize;
+pub mod controller_configuration_enable;
 pub mod audio_output_level;
 pub mod audio_output_registers_initialize;
 pub mod cache_address_translate;
