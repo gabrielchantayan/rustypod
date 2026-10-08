@@ -1208,3 +1208,4 @@ pub mod rtc_binding_refresh;
 pub mod playback_clock_set_position;
 pub mod work_pending_notify;
 pub mod tagged_storage_view_destroy;
+pub mod range_context_replace_secondary_owned;
