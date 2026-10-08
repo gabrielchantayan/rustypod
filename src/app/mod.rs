@@ -269,6 +269,7 @@ pub mod virtual_array_assign;
 pub mod flagged_record_construct;
 pub mod serialized_record_construct;
 pub mod record_collection_get;
+pub mod indexed_string_word_flag_construct;
 pub mod record_collection_collect_all;
 pub mod selected_record_dispatch;
 pub mod descriptor_object_create;

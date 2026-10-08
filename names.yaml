@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123f4c
+    ghidra: FUN_08123f4c
+    name: indexed_string_word_flag_construct
+    size: 40
+    sig: "StringObjectWithWordAndFlag *indexed_string_word_flag_construct(StringObjectWithWordAndFlag *destination, void *owner, usize index)"
+    module: app/indexed_string_word_flag_construct
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: owner
+      param_3/r2: index
+      FUN_083d689c: container_element_at_alias_689c
+      FUN_0812e738: string_object_with_word_and_flag_copy_construct
+    notes: >-
+      Raw A32 words establish [0x08123f4c,0x08123f74), ending in a tail
+      branch before the next function's push. Whole-image word decoding finds
+      two plain inbound BLs at 0x081b23b0 and 0x0829d6f8, no predicated
+      inbound BLs. Body has one plain BL at 0x08123f60 to 0x083d689c,
+      no predicated BLs, and a tail branch at 0x08123f70 to 0x0812e738.
+      Looks up index in the embedded container at owner+0x9c, copy-constructs
+      the selected string/opaque-word/raw-flag record, and returns the
+      constructor result. Ghidra incorrectly reports void and inlines the
+      tail-called constructor. Both callees are existing canonical ports;
+      no new seams or guards. Deviations inherit modeled string vtable and
+      host-width repr(C) record pointers; embedded container offset stays
+      +0x9c and target record offsets stay +8/+12. Host tests cover selected
+      records, extreme words and indices, non-boolean flags, unchanged padding,
+      NULL payloads and self-construction with a nonempty payload. All 14817
+      host tests and ARM release build pass. match.py exits 1 with ten
+      instructions on each side: LLVM adds its frame pointer and folds the
+      owner-address addition; lookup BL and constructor tail branch remain.
   - address: 0x08123fe4
     ghidra: FUN_08123fe4
     name: indexed_string_bytes_construct
