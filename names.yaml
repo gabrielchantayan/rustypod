@@ -231313,3 +231313,32 @@ functions:
       the deliberate structural difference: 16 original instructions versus
       290 Rust instructions, with indentation BLX, inlined fixed-format
       conversion/copy, and final append dispatch replacing snprintf/tail B.
+
+  - address: 0x081237b8
+    ghidra: FUN_081237b8
+    name: output_buffer_write_keyed_i64
+    size: 80
+    sig: "void output_buffer_write_keyed_i64(OutputBufferState *state, const char *key, int64_t value, uint32_t level)"
+    module: app/output_buffer_write_keyed_i64
+    status: ported
+    vars: {param_1: state, param_2: key, param_3: value_low, param_4: value_high, param_5: level}
+    renames: {FUN_08123a54: indent_prepare, FUN_0802f768: snprintf, FUN_08123c58: output_buffer_append_c_string}
+    notes: >-
+      Raw extent is 80 instruction bytes ending at 0x08123808, followed by
+      44 format/padding bytes before the next PUSH at 0x08123834.
+      Two incoming plain BLs at 0x080b5578 and 0x080b55c4; two outgoing
+      plain BLs to indentation and snprintf, no predicated BLs, and tail B
+      to the independent appender at 0x08123c58. Ghidra merges that body.
+      r2/r3 hold the signed 64-bit value; level is the fifth argument.
+      Emit indentation, key and signed decimal integer into the 512-byte
+      scratch, then append. No XML escaping. Fixed-format stack rendering
+      replaces snprintf's placeholder Rust engine; truncation preserves
+      511-byte output plus NUL, including INT64_MIN. Reuses existing
+      firmware-bound indentation and append seams instead of guessing
+      runtime indentation-table contents. Tail branch becomes call/return.
+      Host suite and ARM release build pass. Entrypoint smoke emits the
+      signed minimum with a keyed two-tab fragment and append accounting.
+      match.py finds the exported symbol and reports 20 original versus
+      677 Rust instructions: indentation BLX, inlined signed 64-bit decimal
+      conversion and bounded rendering, then append dispatch replace the
+      original snprintf BL and tail B. This is intentional, not binary parity.
