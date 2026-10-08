@@ -230102,3 +230102,40 @@ functions:
       node_list_get always returns storage, inlines the final thunk,
       and preserves both +0x14 dispatches and the zero argument.
       No device execution.
+
+  - address: 0x0812d300
+    ghidra: FUN_0812d300
+    name: registry_dispose
+    size: 24
+    sig: "Registry *registry_dispose(Registry *registry)"
+    module: app/class_registry
+    status: ported
+    vars:
+      param_1/r0: registry
+      r4: saved_registry
+      FUN_0812d294: unported_registry_drain
+      thunk_FUN_08135380: registry_container_destruct
+    notes: >-
+      Raw osos.dec establishes six A32 words at [0x0812d300,0x0812d318),
+      ending with a tail B before the next real function's cmp r1,#0.
+      Independent whole-image ARM-word decoding finds two plain inbound BLs
+      at 0x0811d09c and 0x0811d1c4, zero predicated inbound BLs. The body has
+      one plain BL at 0x0812d308 to unported 0x0812d294, zero predicated BLs,
+      and one tail B at 0x0812d314 to 0x0810e6b0. Raw bytes verify that the
+      latter is a four-byte B thunk to the canonical ported
+      registry_container_destruct at 0x08135380. Preserve the original object
+      across draining, then destroy its container and return the destructor
+      result. Ghidra incorrectly folds the tail-chain bodies into this function
+      and invents extra arguments. Deviations: invoke the unported drain at its
+      verified firmware address and bypass the destructor thunk with a direct
+      Rust call. Existing Registry host-width layout and base-destructor test
+      seam are inherited. Both file-record callers now default to this port
+      instead of a no-op. Host tests exercise post-drain NULL/non-NULL ownership
+      and ordered destruction; 14769 host tests pass and ARM release builds.
+      A throwaway public-entrypoint smoke executed real container destruction
+      with only the firmware drain and host-layout base boundary substituted;
+      no device execution claimed. match.py prints a structural diff (exit 1):
+      six stock instructions versus nine Rust lines, including an address
+      literal. LLVM uses literal-load BLX for the drain and a direct relocated
+      tail B for the destructor; extra saved registers/frame setup are ABI
+      differences, not algorithm changes.

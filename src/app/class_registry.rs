@@ -7,6 +7,7 @@
 //! | 0x0816f70c | [`capacity_four_container_observer_construct`] | 20 | 2 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
 //! | 0x08135380 | [`registry_container_destruct`] | 72 | 6 `bl` + 16 tail `b` |
+//! | 0x0812d300 | [`registry_dispose`] | 24 | 2 plain `bl` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
 //! | 0x08135308 | [`registry_container_construct`] | 48 | 6 `bl` |
 //! | 0x0813533c | [`registry_container_construct_default`] | 44 | 23 `bl` |
@@ -491,6 +492,41 @@ pub unsafe extern "C" fn registry_container_destruct(registry: *mut Registry) ->
 
     #[cfg(not(test))]
     observable_array_destruct(registry.cast::<ObservableArray>()).cast::<Registry>()
+}
+
+/// registry_dispose — original: `FUN_0812d300` @ 0x0812d300.
+///
+/// True extent: 24 bytes, [0x0812d300, 0x0812d318), six raw A32 words.
+/// Two inbound plain BLs (0x0811d09c, 0x0811d1c4), zero predicated BLs.
+/// The body has one plain BL to 0x0812d294, no predicated BLs, and a tail
+/// B through 0x0810e6b0 to the ported registry_container_destruct.
+///
+/// Drain remaining registry entries, preserve the original object pointer
+/// across that call, then destroy the container and return its result.
+/// Deliberate deviations: bypass the four-byte destructor thunk; express
+/// its tail branch as a Rust call. The unported drain helper is invoked at
+/// its raw verified address, not reimplemented from Ghidra's merged body.
+/// Host tests inject the drain operation and exercise the real container
+/// destructor with its existing host-layout base-destructor seam.
+///
+/// # Safety
+/// `registry` must be a live registry accepted by the retailOS drain helper
+/// and container destructor. There is no NULL guard. The drain helper's
+/// absolute address is executable only in the target firmware.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn registry_dispose(registry: *mut Registry) -> *mut Registry {
+    let drain: unsafe extern "C" fn(*mut Registry) =
+        core::mem::transmute(0x0812_d294usize);
+    registry_dispose_with(registry, |registry| drain(registry))
+}
+
+#[inline(always)]
+unsafe fn registry_dispose_with(
+    registry: *mut Registry, drain: impl FnOnce(*mut Registry),
+) -> *mut Registry {
+    drain(registry);
+    registry_container_destruct(registry)
 }
 
 /// registry_observer_base_construct — original: `FUN_0810dddc` @
@@ -1655,6 +1691,45 @@ mod tests {
             assert!(ptr::read_volatile(ptr::addr_of!(registry.observer)).is_null());
         }
         restore(guard);
+    }
+
+    #[test]
+    fn registry_dispose_destroys_the_post_drain_state() {
+        for allocation in [0usize, 0x1234_5000] {
+            let guard = mock();
+            unsafe {
+                let mut observer = RegistryObserver {
+                    vtable: ptr::addr_of!(TEARDOWN_OBSERVER_VTABLE),
+                    state: 0,
+                };
+                let mut registry = Registry {
+                    vtable: ptr::addr_of!(MOCK_REGISTRY_VTABLE),
+                    container: [0; 7],
+                    changed: 0,
+                    notify_enabled: 0,
+                    reserved: [0; 2],
+                    observer: ptr::addr_of_mut!(observer).cast(),
+                };
+                let this = ptr::addr_of_mut!(registry);
+                TEARDOWN_REGISTRY = this;
+                REGISTRY_CONTAINER_BASE_DESTRUCT = record_base_destruct;
+                let returned = registry_dispose_with(this, |object| {
+                    // Drain may change owned state before the final destructor.
+                    (*object).container[6] = allocation;
+                    (*object).changed = 1;
+                });
+                assert_eq!(returned, this);
+                assert_eq!(registry.container[6], 0);
+                assert!(registry.observer.is_null());
+                assert_eq!(TEARDOWN_FREED as usize, allocation);
+                assert_eq!(*trace(), if allocation == 0 {
+                    std::vec!["detach", "base_destruct"]
+                } else {
+                    std::vec!["detach", "free", "base_destruct"]
+                });
+            }
+            restore(guard);
+        }
     }
 
     #[test]

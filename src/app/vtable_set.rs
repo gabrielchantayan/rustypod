@@ -4243,42 +4243,16 @@ pub static mut VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP: unsafe extern "C" fn(
     state: *mut u32,
 ) -> *mut u32 = iterator_state_cleanup;
 
-/// The registry dispose behind the `bl 0x0812d300` at 0x0811d09c
-/// inside [`vtable_file_record_teardown`]. `FUN_0812d300` @ 0x0812d300
-/// (24 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm` — this
-/// function's and 0x0811d1c4, the kind-2 branch of the tag-dispatching
-/// dispose `FUN_0811d188`; **unported**):
-///
-/// ```text
-/// 0812d300  stmdb sp!, {r4, lr}
-/// 0812d304  mov   r4, r0
-/// 0812d308  bl    0x0812d294        @ drain the remaining entries
-/// 0812d30c  mov   r0, r4
-/// 0812d310  ldmia sp!, {r4, lr}
-/// 0812d314  b     0x0810e6b0        @ tail: object teardown
-/// ```
-///
-/// 0x0812d294 walks the registry with the same begin/step pair
-/// (`FUN_081dde18` / `FUN_081ddde8`) disposing each remaining entry
-/// (0x0810e6b0 + `operator_delete`); the tail 0x0810e6b0 (a 4-byte
-/// thunk, `b 0x08135380`) tears the object itself down (vtable-pointer
-/// store, a vtable slot +0x1c call on the +0x24 member, the +0x1c
-/// member freed and both words zeroed). The reference C's
-/// "Subroutine does not return" on this callee is a Ghidra
-/// mis-analysis: the tail chain returns (0x08135380 ends in its own
-/// returning tail `b 0x08271d2c`), and the sibling call site runs
-/// `bl 0x082aad24` immediately after it at 0x0811d1c8. The wired
-/// default is a no-op — the registry-object subsystem is unported and
-/// the object's words are unobservable until then (the
-/// `construct_guard_unported` no-op precedent); the following
-/// `operator_delete` still frees the block. Host tests install a
-/// recording mock via `core::ptr::addr_of_mut!`.
+/// Registry disposal at 0x0812d300; target and host defaults now invoke
+/// the ported [`super::class_registry::registry_dispose`]. Host tests replace
+/// this role-specific seam because the drain helper remains firmware code.
 pub static mut VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE: unsafe extern "C" fn(
     registry: *mut u8,
-) = teardown_registry_dispose_unported;
+) = teardown_registry_dispose;
 
-/// Default registry dispose: a no-op (see the seam's doc).
-unsafe extern "C" fn teardown_registry_dispose_unported(_registry: *mut u8) {}
+unsafe extern "C" fn teardown_registry_dispose(registry: *mut u8) {
+    super::class_registry::registry_dispose(registry.cast());
+}
 
 /// vtable_file_record_teardown — original: `FUN_0811d008` @ 0x0811d008
 /// (176 bytes; **1 `bl` call site**, grep on `decomp/osos.asm`:
@@ -4534,24 +4508,12 @@ unsafe extern "C" fn destruct_container_teardown_default(container: *mut u8) -> 
     container
 }
 
-/// The kind-2 +0x18 dispose behind the `bl 0x0812d300` at 0x0811d1c4
-/// inside [`vtable_file_record_destruct`]. `FUN_0812d300` @ 0x0812d300
-/// (24 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm` — this
-/// function's and 0x0811d09c inside [`vtable_file_record_teardown`];
-/// **unported**) is the registry dispose already documented under
-/// [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]: it drains the
-/// remaining entries (0x0812d294) and tail-branches to the object
-/// teardown 0x0810e6b0 (`b 0x08135380`). The reference C's
-/// "Subroutine does not return" is the same Ghidra mis-analysis — the
-/// tail chain returns and the `bl 0x082aad24` at 0x0811d1c8 is live.
-/// Wired to the SAME no-op default as the teardown sibling's seam
-/// (the [`VTABLE_FILE_RECORD_KIND2_GUARD`] precedent — a
-/// role-specific name keeps host tests from racing the sibling's
-/// parallel tests). Host tests install a recording mock via
-/// `core::ptr::addr_of_mut!`.
+/// Kind-2 registry disposal at 0x0812d300, using the same ported default as
+/// [`VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE`]. Separate host seams keep
+/// the two callers' scripted tests isolated.
 pub static mut VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE: unsafe extern "C" fn(
     registry: *mut u8,
-) = teardown_registry_dispose_unported;
+) = teardown_registry_dispose;
 
 /// vtable_file_record_destruct — original: `FUN_0811d188` @ 0x0811d188
 /// (128 bytes; **2 `bl` call sites**, grep on `decomp/osos.asm`:
@@ -5061,13 +5023,13 @@ pub(crate) mod tests {
                 core::ptr::addr_of_mut!(ITERATOR_STATE_FETCH)
                     .write_volatile(iterator_state_fetch_unported);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_REGISTRY_DISPOSE)
-                    .write_volatile(teardown_registry_dispose_unported);
+                    .write_volatile(teardown_registry_dispose);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER08_TEARDOWN)
                     .write_volatile(destruct_container_teardown_default);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND1_CONTAINER10_TEARDOWN)
                     .write_volatile(destruct_container_teardown_default);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_DESTRUCT_KIND2_DISPOSE)
-                    .write_volatile(teardown_registry_dispose_unported);
+                    .write_volatile(teardown_registry_dispose);
                 core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_INSERT_LOOKUP)
                     .write_volatile(vtable_file_record_lookup);
             }
@@ -10988,45 +10950,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn file_record_teardown_default_seams_yield_an_empty_traversal() {
-        // The wired defaults (reinstalled by the guard) are the
-        // documented empty-traversal stubs: no-op begins,
-        // 0-returning steps, no-op dispose — but operator_delete still
-        // frees the registry block. The cleanup seam alone is mocked:
-        // its default is the ported iterator_state_cleanup, whose
-        // release now walks the owner list for real, and the teardown's
-        // zeroed stand-in iterators carry a NULL owner word the unlink
-        // would dereference (the ported cleanup is exercised directly
-        // by its own tests).
-        let _lock = SLOT_TEST_LOCK.lock();
-        let _restore = SlotGuard;
-        let _heap = HeapGuard;
-        let mut record = [0xa5u8; 0x20];
-        unsafe {
-            install_stub_heap();
-            let mut ops = core::ptr::addr_of!(crate::heap::veneers::HEAP_OPS).read_volatile();
-            ops.free = recording_td_free;
-            core::ptr::addr_of_mut!(crate::heap::veneers::HEAP_OPS).write_volatile(ops);
-            TD_EVENT_COUNT = 0;
-            TD_FREE_COUNT = 0;
-            core::ptr::addr_of_mut!(VTABLE_FILE_RECORD_TEARDOWN_ITER_CLEANUP)
-                .write_volatile(recording_td_cleanup);
-            let registry = td_record(&mut record);
-
-            vtable_file_record_teardown(record.as_mut_ptr());
-
-            assert_eq!(
-                &TD_EVENTS[..TD_EVENT_COUNT],
-                &[TD_EV_CLEANUP, TD_EV_FREE, TD_DELETE_TAG],
-                "no iteration, no dispose — straight to the delete"
-            );
-            assert_eq!(TD_FREE_COUNT, 1);
-            assert_eq!(TD_FREE_PTRS[0], (registry as u32) as *mut u8);
-            assert_eq!(record[0], 0);
-            assert_eq!(record.as_ptr().add(4).cast::<u32>().read(), 0);
-        }
-    }
 
     // ---- recording mocks for the vtable_file_record_destruct seams ---
 
