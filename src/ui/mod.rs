@@ -3,6 +3,7 @@
 pub mod calendar_reset_elements;
 pub mod calendar_change_day;
 pub mod calendar_advance_day;
+pub mod calendar_select_today;
 pub mod indexed_style_entry_update;
 pub use indexed_style_entry_update::*;
 pub mod calendar_set_selected_date;
