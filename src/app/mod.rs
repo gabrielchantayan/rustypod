@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod context_media_query_slot_194;
 pub mod root_media_query_is_zero;
 pub mod media_player_refresh_cached_values;
 pub mod media_player_refresh_collection_cache;
