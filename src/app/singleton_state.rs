@@ -60,6 +60,27 @@ pub unsafe extern "C" fn singleton_state_get() -> u32 {
     unsafe { (singleton.add(0x18) as *const u32).read() }
 }
 
+/// singleton_state_noop — original: `FUN_081279a0` @ 0x081279a0.
+///
+/// True extent: 4 bytes, ending at the next prologue at 0x081279a4.
+/// Raw ARM is solely `bx lr`: zero outbound BLs; two plain inbound BLs
+/// (0x08199528, 0x0819afe8), zero predicated inbound BLs, and no raw
+/// address-valued DATA references. Both callers pass the singleton base
+/// in r0 and 1 in r1, then overwrite r0 without consuming its value.
+/// Does not read or mutate the object, interpret the flag, or call anything.
+/// Deliberately exposes the unchanged r0 as a pointer return rather than
+/// Ghidra's void signature; the flag's meaning and concrete class are unknown.
+/// Verified ARM codegen retains a real exported symbol: LLVM emits
+/// `push {fp,lr}; mov fp,sp; pop {fp,pc}` instead of the stock `bx lr`.
+/// This adds a frame but leaves r0 and object storage untouched. Host tests
+/// and a standalone actual-source executable verify pointer pass-through
+/// and unchanged storage; no on-device execution is claimed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub extern "C" fn singleton_state_noop(singleton: *mut u8, _flag: u32) -> *mut u8 {
+    singleton
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     extern crate std;
@@ -87,6 +108,24 @@ pub(crate) mod tests {
                 .write(core::ptr::null_mut());
         }
         guard
+    }
+
+    #[test]
+    fn noop_preserves_null_and_unreadable_pointer_values_for_all_flag_bits() {
+        for singleton in [core::ptr::null_mut(), 1usize as *mut u8, usize::MAX as *mut u8] {
+            for flag in [0, 1, 0x8000_0000, u32::MAX] {
+                assert_eq!(singleton_state_noop(singleton, flag), singleton);
+            }
+        }
+    }
+
+    #[test]
+    fn noop_leaves_singleton_storage_unchanged() {
+        let mut singleton = [0x1234_5678u32, 0, u32::MAX, 0x8765_4321];
+        let original = singleton;
+        let pointer = singleton.as_mut_ptr().cast::<u8>();
+        assert_eq!(singleton_state_noop(pointer, 1), pointer);
+        assert_eq!(singleton, original);
     }
 
     #[test]
