@@ -24,9 +24,46 @@ pub unsafe extern "C" fn width_0c_minus_inset(obj: *const u8, mode: u32) -> u32 
     width.wrapping_sub(inset) & 0xffff
 }
 
+/// Set the list/text-layout width — `FUN_0811f6dc` @ `0x0811f6dc`.
+///
+/// True extent: 40 bytes up to the next function at `0x0811f704`:
+/// 36 instruction bytes and the `0x0000ffff` literal at `0x0811f700`.
+/// Verified incoming BLs: one plain (`0x081900d8`) and one predicated
+/// (`0x0818ee8c`, BLNE). No outgoing plain or predicated BLs.
+/// Clamp the full unsigned input to 128..=65535, then store only the
+/// aligned halfword at object +0x0c. The adjacent query reads this field;
+/// the owning class remains unidentified. No deliberate deviations.
+///
+/// # Safety
+/// `obj + 0x0c` must point to a writable, halfword-aligned `u16`.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn width_0c_set_clamped(obj: *mut u8, width: u32) {
+    (obj.add(0x0c) as *mut u16).write(width.clamp(128, 65535) as u16);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setter_clamps_full_unsigned_input_and_preserves_neighbors() {
+        for (input, expected) in [
+            (0, 128), (127, 128), (128, 128), (129, 129),
+            (1024, 1024), (65534, 65534), (65535, 65535),
+            (65536, 65535), (0x8000_0000, 65535), (u32::MAX, 65535),
+        ] {
+            let mut obj = [0xa55au16; 8];
+            unsafe { width_0c_set_clamped(obj.as_mut_ptr().cast(), input) };
+            assert_eq!(obj[6], expected, "input={input:#x}");
+            assert_eq!(&obj[..6], &[0xa55a; 6]);
+            assert_eq!(obj[7], 0xa55a);
+            assert_eq!(
+                unsafe { width_0c_minus_inset(obj.as_ptr().cast(), 4) },
+                u32::from(expected) - 9,
+            );
+        }
+    }
 
     /// Writes `width` at offset `0x0c` of a scratch object standing in
     /// for the unidentified owning class. The buffer is halfword-aligned
