@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810d768
+    ghidra: FUN_0810d768
+    name: view_dispatch_and_arm_unless_inhibited
+    size: 52
+    sig: "u32 view_dispatch_and_arm_unless_inhibited(u8 *view, u32 inhibited)"
+    module: app/view_timer
+    status: ported
+    renames:
+      param_1/r4: view
+      param_2/r1: inhibited
+      vtable_slot_0x150: dispatch
+      FUN_0810e02c: view_timer_start_after
+    notes: >-
+      Raw A32 extent [0x0810d768,0x0810d79c), 52 bytes, ends with
+      pop before the next function's push. Whole-image aligned BL scan
+      finds zero plain and two predicated incoming BLs: BLEQ at
+      0x083a3468 and 0x083a49e0. Body has one plain BL to the already
+      ported view_timer_start_after and one BLX through virtual +0x150;
+      no predicated outgoing calls. Nonzero inhibition returns 1 without
+      accessing view. Zero dispatches virtual word 84 with view in r0,
+      ignores its result, starts the view timer with delay 1, and returns 1.
+      Callers pass the byte at view+0x184 for event type 0x16/subtype 0x2503.
+      Concrete virtual method identity remains unproven; no new seam.
+      Host vtable pointer and slots widen to usize; timer fields keep
+      firmware offsets and u32 pointers. Tests exercise nonzero extremes
+      with NULL view and virtual replacement of the timer before arming,
+      proving one-tick delay, callback order and untouched stale timer.
+      All 14906 host tests and ARM release build pass. match.py exits 1:
+      13 versus 16 instructions; LLVM adds a frame pointer and early
+      guarded return, retaining +0x150 BLX, delay-1 BL and constant result.
   - address: 0x0810f548
     ghidra: FUN_0810f548
     name: owner_object_get_or_create
