@@ -22,16 +22,10 @@
 //!
 //! # Deliberate deviations
 //!
-//! The base constructor is not yet ported (and has no ledger entry), so the
-//! call uses a volatile replaceable seam. Its default reproduces the fully
-//! decoded base stores on both host and target; a later direct port can replace
-//! the seam without changing this constructor. The wider class identity is
-//! unestablished, so names describe only the observed vtable, flag, and payload
-//! behavior.
+//! None. Call the verified direct Rust base constructor; no wider class
+//! identity is inferred.
 
-/// Base vtable installed by unported `FUN_08135788` before this constructor
-/// replaces it.
-pub const VTABLE_FLAG_BASE_VTABLE_ADDRESS: u32 = 0x0898_4948;
+use super::vtable_flag_base_construct::vtable_flag_base_construct;
 /// Derived vtable literal at 0x081b6984.
 pub const VTABLE_FLAG_PAYLOAD_VTABLE_ADDRESS: u32 = 0x0898_c2a4;
 
@@ -55,41 +49,6 @@ const _: [u8; 0x04] = [0; core::mem::offset_of!(VtableFlagPayloadPrefix, flag)];
 #[cfg(target_pointer_width = "32")]
 const _: [u8; 0x08] = [0; core::mem::offset_of!(VtableFlagPayloadPrefix, payload)];
 
-/// ABI of the unported base constructor at 0x08135788.
-pub type VtableFlagBaseConstruct = unsafe extern "C" fn(*mut u8) -> *mut u8;
-
-/// One dependency of [`vtable_flag_payload_construct`].
-#[derive(Clone, Copy)]
-pub struct VtableFlagPayloadConstructOps {
-    pub construct_base: VtableFlagBaseConstruct,
-}
-
-/// Behavioral model of the fully decoded, still-unported base constructor.
-unsafe extern "C" fn default_construct_base(this: *mut u8) -> *mut u8 {
-    unsafe {
-        this.cast::<u32>()
-            .write_volatile(VTABLE_FLAG_BASE_VTABLE_ADDRESS);
-        this.add(4).write_volatile(0);
-    }
-    this
-}
-
-/// Default base-constructor seam until 0x08135788 receives its own port.
-pub const DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS: VtableFlagPayloadConstructOps =
-    VtableFlagPayloadConstructOps {
-        construct_base: default_construct_base,
-    };
-
-/// Active base-constructor boundary. Tests replace it to preserve the raw
-/// post-call use of the base constructor's returned pointer.
-pub static mut VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS: VtableFlagPayloadConstructOps =
-    DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS;
-
-#[inline(always)]
-unsafe fn ops() -> VtableFlagPayloadConstructOps {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS)) }
-}
-
 /// Constructs the observed vtable/flag/payload prefix and returns the base
 /// constructor's result.
 ///
@@ -105,7 +64,7 @@ pub unsafe extern "C" fn vtable_flag_payload_construct(
     this: *mut u8,
     payload: u32,
 ) -> *mut u8 {
-    let constructed = unsafe { (ops().construct_base)(this) };
+    let constructed = unsafe { vtable_flag_base_construct(this) };
     unsafe {
         constructed
             .cast::<u32>()
@@ -117,51 +76,7 @@ pub unsafe extern "C" fn vtable_flag_payload_construct(
 
 #[cfg(test)]
 pub(super) mod tests {
-    extern crate std;
-
     use super::*;
-    use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
-
-    pub(in crate::cxx) static TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut BASE_CALLS: u32 = 0;
-    static mut BASE_INPUT: *mut u8 = ptr::null_mut();
-    static mut BASE_RESULT: *mut u8 = ptr::null_mut();
-
-    struct OpsReset;
-
-    impl Drop for OpsReset {
-        fn drop(&mut self) {
-            unsafe {
-                ptr::addr_of_mut!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS)
-                    .write_volatile(DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS);
-            }
-        }
-    }
-
-    unsafe extern "C" fn relocating_base(this: *mut u8) -> *mut u8 {
-        unsafe {
-            BASE_CALLS += 1;
-            BASE_INPUT = this;
-            BASE_RESULT
-        }
-    }
-
-    fn install_relocating_base(result: *mut u8) -> (MutexGuard<'static, ()>, OpsReset) {
-        let lock = TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        unsafe {
-            BASE_CALLS = 0;
-            BASE_INPUT = ptr::null_mut();
-            BASE_RESULT = result;
-            ptr::addr_of_mut!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS).write_volatile(
-                VtableFlagPayloadConstructOps {
-                    construct_base: relocating_base,
-                },
-            );
-        }
-        (lock, OpsReset)
-    }
-
     #[repr(C, align(4))]
     struct AlignedBytes([u8; 20]);
 
@@ -171,12 +86,6 @@ pub(super) mod tests {
 
     #[test]
     fn default_base_initializes_prefix_and_payload_without_touching_padding() {
-        let _lock = TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        let _reset = OpsReset;
-        unsafe {
-            ptr::addr_of_mut!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS)
-                .write_volatile(DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS);
-        }
         let mut storage = AlignedBytes([0xa5; 20]);
         let object = unsafe { storage.0.as_mut_ptr().add(4) };
 
@@ -192,33 +101,10 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn writes_derived_fields_to_base_return_and_preserves_call_input() {
-        let mut storage = AlignedBytes([0x3c; 20]);
-        let input = storage.0.as_mut_ptr();
-        let result = unsafe { storage.0.as_mut_ptr().add(4) };
-        let (_lock, _reset) = install_relocating_base(result);
-
-        let returned = unsafe { vtable_flag_payload_construct(input, 0x1357_9bdf) };
-
-        assert_eq!(returned, result);
-        assert_eq!(unsafe { BASE_CALLS }, 1);
-        assert_eq!(unsafe { BASE_INPUT }, input);
-        assert_eq!(unsafe { word_at(input, 0) }, 0x3c3c_3c3c);
-        assert_eq!(unsafe { word_at(result, 0) }, VTABLE_FLAG_PAYLOAD_VTABLE_ADDRESS);
-        assert_eq!(unsafe { word_at(result, 8) }, 0x1357_9bdf);
-    }
-
-    #[test]
     fn byte_derived_constructor_preserves_padding_for_all_state_bytes() {
         use super::super::vtable_flag_payload_byte_construct::{
             vtable_flag_payload_byte_construct, VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS,
         };
-        let _lock = TEST_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        let _reset = OpsReset;
-        unsafe {
-            ptr::addr_of_mut!(VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS)
-                .write_volatile(DEFAULT_VTABLE_FLAG_PAYLOAD_CONSTRUCT_OPS);
-        }
         for state in 0..=u8::MAX {
             for payload in [0, u32::MAX, 0x1357_9bdf] {
                 let mut storage = AlignedBytes([0xa5; 20]);
@@ -239,26 +125,4 @@ pub(super) mod tests {
         }
     }
 
-    #[test]
-    fn byte_derived_constructor_updates_returned_object_not_input() {
-        use super::super::vtable_flag_payload_byte_construct::{
-            vtable_flag_payload_byte_construct, VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS,
-        };
-        let mut input = AlignedBytes([0x5a; 20]);
-        let mut output = AlignedBytes([0xa5; 20]);
-        let result = unsafe { output.0.as_mut_ptr().add(4) };
-        let (_lock, _reset) = install_relocating_base(result);
-        let returned = unsafe {
-            vtable_flag_payload_byte_construct(input.0.as_mut_ptr(), u32::MAX, 0xff)
-        };
-        let mut expected = [0xa5; 20];
-        expected[4..8].copy_from_slice(
-            &VTABLE_FLAG_PAYLOAD_BYTE_VTABLE_ADDRESS.to_le_bytes(),
-        );
-        expected[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
-        expected[16] = 0xff;
-        assert_eq!(returned, result);
-        assert_eq!(input.0, [0x5a; 20]);
-        assert_eq!(output.0, expected);
-    }
 }

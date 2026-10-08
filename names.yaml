@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08135788
+    ghidra: FUN_08135788
+    name: vtable_flag_base_construct
+    size: 24
+    sig: "u8 *vtable_flag_base_construct(u8 *this)"
+    module: cxx/vtable_flag_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      r1: vtable_then_zero
+      DAT_0813579c: base_vtable (0x08984948)
+    notes: >-
+      Raw extent [0x08135788,0x081357a0) is 20 instruction bytes plus
+      the four-byte vtable literal; next real function begins with cmp r0,#0.
+      Whole-image aligned ARM decoding finds two incoming plain BLs at
+      0x081b6970 and 0x081d17d0, no predicated BLs, no outgoing BL/BLX.
+      Store vtable 0x08984948 at +0, clear only byte +4, return unchanged r0.
+      No deliberate deviations or new seams. Both existing Rust callers now
+      call this port directly; obsolete replaceable seam and relocation-only
+      tests removed. Host edge test covers every flag byte, padding, adjacent
+      fields, returned pointer and repeated construction.
+      Volatile stores preserve stock write order under LLVM. Full host suite
+      passes 14744 tests; final targeted run passes five tests. ARM release
+      build and actual-source host smoke pass. match.py exits 1: five stock
+      instructions versus eight Rust entries, adding frame-pointer save/restore
+      and the literal word; ordered word/byte stores and unchanged r0 match.
   - address: 0x08135894
     ghidra: FUN_08135894
     name: collection_selection_move_next
@@ -135334,14 +135360,13 @@ functions:
       bl at 0x08135ba8, 0x0813ee48, 0x08143a6c, 0x08148790, 0x08177f0c,
       0x08187080, 0x0819cd3c, 0x081ba988, 0x081deb68, and 0x0820b210; no
       predicated bl or plain-b transfer reaches the entry. No aligned DATA
-      word references it. The function preserves r1 in r2 across unported
+      word references it. The function preserves r1 in r2 across ported
       0x08135788, overwrites the returned object's base vtable with
       0x0898c2a4, writes the preserved payload at +8, and returns the base
-      result. The fully decoded 0x08135788 has no existing ledger port, so a
-      volatile seam models its stores (base vtable 0x08984948 at +0 and zero
-      byte at +4) until it is ported separately; no wider class identity is
-      inferred. Host tests cover the literal fields, sentinels, and a base
-      return distinct from its input. match.py is structural review only.
+      result. Calls vtable_flag_base_construct directly after its port;
+      the replaceable model seam and impossible relocation tests are removed.
+      No wider class identity is inferred. Host tests cover literal fields,
+      padding and sentinels. match.py is structural review only.
 
   # --- ATA command flag-word getter ---
   - address: 0x081660d8
@@ -222378,7 +222403,7 @@ functions:
       param_1/r0: this (returned unchanged by the decoded base)
       param_2/r1: payload
       r2: saved_payload
-      FUN_08135788: existing VtableFlagBaseConstruct seam
+      FUN_08135788: vtable_flag_base_construct
       DAT_081d17ec: derived_vtable (0x0898dd10)
       "this+4": flag
       "this+8": cleared_state_word
@@ -222393,17 +222418,12 @@ functions:
       install 0x08984948, clear byte +4, and preserve r0 and r2. Preserve
       payload across that call, replace the returned object's vtable, write
       payload at +12, clear word +8, and return the base result. Bytes +5..+7
-      remain untouched. Deliberate deviation: reuse the existing volatile
-      base-constructor seam from vtable_flag_payload_construct rather than
-      adding a duplicate boundary or inferring a wider class identity.
+      remain untouched. No deliberate deviations: calls the direct Rust
+      base port without a replaceable seam or inferred wider class identity.
       Host tests cover zero, high-bit and maximum payloads, exact field
-      stores, padding and surrounding sentinels, and a distinct base result.
-      Isolated host smoke exercises the actual exported entry and verifies
-      all fields and the returned pointer. Host suite and ARM release build
-      pass. match.py exits 1: nine original instructions versus fourteen
-      Rust instructions including literals; indirect BLX replaces the seam
-      call, r4 preserves payload, and all three derived stores retain their
-      original order and offsets. No device execution was performed.
+      stores, padding and surrounding sentinels. The impossible distinct-base
+      result test and injected helper are removed. Host suite and ARM release
+      build pass. No device execution was performed.
   - address: 0x081d1690
     ghidra: FUN_081d1690
     name: object_child_pop_last

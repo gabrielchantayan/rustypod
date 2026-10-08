@@ -8,8 +8,8 @@
 //! Preserve the incoming state byte across the payload constructor, install
 //! vtable 0x0898c7f4 on its returned object, store the byte at +12, and return
 //! that pointer. The base clears byte +4 and stores the payload at +8.
-//! Deliberate deviations: none at this boundary; reuse the callee's existing
-//! base-constructor seam. The wider class identity remains unestablished.
+//! Deliberate deviations: none; reuse the direct Rust prefix and base ports.
+//! The wider class identity remains unestablished.
 
 use super::vtable_flag_payload_construct::vtable_flag_payload_construct;
 
