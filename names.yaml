@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812805c
+    ghidra: FUN_0812805c
+    name: calendar_change_day
+    size: 184
+    sig: "void calendar_change_day(u32 *view, u32 day)"
+    module: ui/calendar_change_day
+    status: ported
+    renames:
+      param_1/r4: view
+      param_2/r5: day
+      r6: old_month
+      r7: old_weekday
+      FUN_0807eafc: day_number_to_datetime
+      FUN_0839c258: observable_element_array_clear
+    notes: >-
+      Raw extent [0x0812805c,0x08128114) is 184 bytes: 168 bytes of
+      instructions plus four referenced literals, before the next push.
+      Whole-image aligned raw decoding finds two plain inbound BLs at
+      0x08126d3c and 0x08126d94 and zero predicated inbound BLs. Body:
+      two plain BLs, one BLNE, one BLX and two BLXNE. Ghidra mistakes
+      scratch r2/r3 for parameters and omits two event arguments.
+      Equal days are a no-op. Convert old day, save month and weekday,
+      publish day at +0x288, clear embedded elements at +0xc0 if byte
+      +0xec is nonzero, notify group 0x53747220 event 0x36dd, reconvert
+      the current day to preserve reentrant updates, then notify weekday
+      event 0x36de before month event 0x36df if those bytes changed.
+      Reuses existing converter dispatch and ported array clear. Deviations:
+      zero-initializes unread scratch bytes and omits register effects.
+      Host tests cover unchanged, separate and combined changes, zero day,
+      nonboolean clear flags and reentrancy. All 14803 host tests pass;
+      ARM release builds. Reviewed match.py diff retains guards, offsets,
+      reconversion and event order (58 versus 42 instructions). Standalone
+      smoke exercises exported body and real virtual dispatch successfully.
   - address: 0x081292cc
     ghidra: FUN_081292cc
     name: input_sequence_item_release

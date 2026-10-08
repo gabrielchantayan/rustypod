@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod calendar_change_day;
 pub mod indexed_style_entry_update;
 pub use indexed_style_entry_update::*;
 pub mod calendar_set_selected_date;
