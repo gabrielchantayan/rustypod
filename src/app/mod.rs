@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod context_owned_interface_query;
+pub use context_owned_interface_query::*;
 pub mod context_cached_rtc_value_invalidate;
 pub mod class6000_context_refresh;
 pub mod owned_interface_destroy;
