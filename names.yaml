@@ -96509,8 +96509,9 @@ functions:
       (0x08130af4, 0x081314d4, and 0x08132118), all unconditional, with no
       predicated direct callers. Active objects select handle word +4 according
       to state +0x1a: first for 2/5/7, second for 0/5/7, and third for 1/5/7.
-      The three stock predicate callees are inlined from verified raw behavior;
-      the existing handle_deref_or_null port supplies the shared handle access.
+      The first and third stock predicates remain inlined from verified raw
+      behavior; the second now calls ui_state_is_second_metric. The existing
+      handle_deref_or_null port supplies the shared handle access.
 
   # --- Media-player interface status ---
   - address: 0x0813921c
@@ -229573,3 +229574,33 @@ functions:
       the ordered member stores and notification, adds a frame, and tail
       dispatches through BX to 0x08132c6c rather than a direct B.
       No device execution performed.
+
+  - address: 0x08132d80
+    ghidra: FUN_08132d80
+    name: ui_state_is_second_metric
+    size: 28
+    sig: "u32 ui_state_is_second_metric(const u8 *object)"
+    module: ui/state_is_second_metric
+    status: ported
+    renames:
+      param_1/r0: object
+      cVar1: state
+      object_plus_0x1a: state_byte
+    notes: >-
+      Raw A32 words establish [0x08132d80,0x08132d9c), seven instructions
+      ending with BX LR; the next independent PUSH begins at 0x08132d9c.
+      Whole-image aligned BL decoding finds exactly two incoming plain BLs
+      at 0x081323f8 and 0x08132844, zero predicated incoming BLs, and zero
+      outgoing plain or predicated BLs. LDRB at +0x1a followed by CMP 7,
+      CMPNE 5, CMPNE 0 and MOVEQ/MOVNE returns exactly 1 for 0/5/7,
+      otherwise 0. Existing ui_state_dependent_handle_metric identifies
+      this as the second-handle metric selector and now calls the port
+      instead of duplicating its predicate. No new callee seams or inferred
+      class identity. Deliberate behavioral deviations: none. Host tests
+      cover all 256 unsigned states, unaligned/inactive objects and unchanged
+      surrounding bytes. Full host suite passes 14749 tests; ARM release
+      build passes; actual-source executable smoke checks all 256 states.
+      match.py exits 1: seven stock versus nine Rust instructions. LLVM
+      adds a frame, uses ORR with 2 and CMP 7 for states 5/7, and CLZ/LSR
+      to normalize the zero-state result. Byte offset and normalized return
+      are preserved; symbol remains separately exported. No device run.
