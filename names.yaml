@@ -229523,3 +229523,53 @@ functions:
       view includes neighboring functions. LLVM retains the conditional
       three-BL path, adds a frame pointer, and emits BLX to the fixed
       final helper rather than a tail B. Device execution is untested.
+
+  - address: 0x08132f28
+    ghidra: FUN_08132f28
+    name: owner_request_state_two
+    size: 64
+    sig: "u32 owner_request_state_two(StateRequestOwner *owner)"
+    module: app/owner_request_state_two
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      "[owner + 0x64]": state
+      "[owner + 0x66]": request_pending
+      "[owner + 0x70]": mailbox_slot
+      "[owner + 0x74]": counted_mutex
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0808e2a8: mailbox_slot_post
+      "0x08132c6c": resident owner prepare/wait helper
+    notes: >-
+      Raw osos.dec establishes [0x08132f28,0x08132f68), sixteen A32
+      instruction words with no literals; the next independent PUSH starts
+      at 0x08132f68. Whole-image aligned BL decoding finds one incoming
+      plain BL at 0x08130944 and one BLNE at 0x081324e8, not two plain
+      calls. Three outgoing plain BLs at 0x08132f34, 0x08132f44 and
+      0x08132f54, zero predicated outgoing BLs, followed by tail B to
+      0x08132c6c. Ghidra's C incorrectly absorbs the prepare/wait tail
+      chain into this function. Lock +0x74, store state 2 at +0x64,
+      unlock, set request_pending +0x66 to 1, post mailbox slot +0x70,
+      then call resident 0x08132c6c with timeout 200. Raw helper code
+      allocates/constructs member +0x80 when absent, prepares the owner,
+      passes timeout to 0x0812c63c and tail-calls 0x08132d48 with r1=0;
+      that tail chain returns 1 normally. No concrete class identity or
+      stronger meaning for state 2 is inferred. All three BL callees reuse
+      existing names.yaml ports; the unregistered tail helper remains a
+      typed resident-address seam, not an additional port. Deliberate
+      deviations: repr(C) pointer fields expand host layout while keeping
+      ARM offsets, and hosts explicitly install the resident operation.
+      Host tests cover arbitrary previous state/flag bytes, hold-count
+      wraparound, mailbox token extremes, unchanged opaque fields and
+      preservation of resident mutations and full-width return values.
+      Host suite passes 14747 tests; ARM release build passes. A standalone
+      test-configured actual-crate executable observes state=2, pending=1,
+      tokens=10 from 9, holds=0, timeout=200 and result=1. Non-test host
+      library compilation is blocked by six existing missing helper names
+      in unrelated ports; no changes to those ports were made. match.py
+      exits 1: 23 Rust instructions versus 16 stock, including a resident
+      address literal. LLVM partially inlines counted acquisition, retains
+      the ordered member stores and notification, adds a frame, and tail
+      dispatches through BX to 0x08132c6c rather than a direct B.
+      No device execution performed.
