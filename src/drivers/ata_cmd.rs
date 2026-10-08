@@ -387,6 +387,26 @@ pub unsafe extern "C" fn ata_cmd_get_opaque_word_40(cmd: *const u8) -> u32 {
 }
 
 
+/// ata_cmd_get_lba_high — original: `FUN_081213f4` @ 0x081213f4.
+/// True size: 8 bytes, `0x081213f4..0x081213fc`; the next real entry
+/// reads the adjacent LBA-mid byte. Whole-image A32 decoding verifies two
+/// incoming plain BL calls (0x08166530, 0x082832e0), zero predicated BL
+/// calls, and no outgoing calls.
+///
+/// Reads the legacy ATA taskfile LBA-high byte at +0x18, zero-extended
+/// by `ldrb r0,[r0,#0x18]; bx lr`. The LBA28 packer writes bits 16..23
+/// here, and the caller at 0x082832bc shifts this result back by 16.
+/// No validation, masking, or mutation. No deliberate semantic deviations;
+/// volatile access follows the command-block convention.
+///
+/// # Safety
+/// `cmd` must be readable through byte +0x18; byte alignment suffices.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_lba_high(cmd: *const u8) -> u8 {
+    cmd.add(LBA_HIGH).read_volatile()
+}
+
 /// ata_cmd_get_device_head — original: `FUN_081212d8` @ 0x081212d8
 /// (8 bytes exactly, `0x081212d8..0x081212df`; **4 direct `bl` call
 /// sites, all unconditional, no predicated forms**, verified by decoding
@@ -1523,6 +1543,22 @@ mod tests {
             let before = block;
             assert_eq!(unsafe { ata_cmd_get_device_head(block.0.as_ptr()) }, device_head);
             assert_eq!(block, before);
+        }
+    }
+
+    #[test]
+    fn lba_high_getter_preserves_all_bits_at_every_byte_alignment() {
+        for alignment in 0..4 {
+            let mut bytes = [0x5au8; 0x60 + 3];
+            for value in 0..=u8::MAX {
+                bytes[alignment + 0x18] = value;
+                let before = bytes;
+                assert_eq!(
+                    unsafe { ata_cmd_get_lba_high(bytes.as_ptr().add(alignment)) } as u32,
+                    value as u32
+                );
+                assert_eq!(bytes, before);
+            }
         }
     }
 
