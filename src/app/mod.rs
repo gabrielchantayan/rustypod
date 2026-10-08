@@ -70,6 +70,7 @@ pub mod demo_mode_rearm_timer;
 pub mod demo_mode_prepare_collection;
 pub mod demo_mode_snapshot_refresh;
 pub mod transfer_payload_read;
+pub mod worker_stop_request;
 pub mod current_reference_word_request;
 pub mod guarded_object_08ac8dbc;
 pub mod selected_io_task;

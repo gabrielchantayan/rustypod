@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08132cc8
+    ghidra: FUN_08132cc8
+    name: worker_stop_request
+    size: 48
+    sig: "void worker_stop_request(WorkerStopState *worker)"
+    module: app/worker_stop_request
+    status: ported
+    vars: {param_1: worker}
+    renames:
+      FUN_08094404: mutex_lock_counted
+      FUN_0809449c: mutex_unlock_counted
+      FUN_0808e2a8: mailbox_slot_post
+      "[worker + 0x64]": cancellation_requested
+      "[worker + 0x66]": notification_pending
+      "[worker + 0x70]": mailbox
+      "[worker + 0x74]": lock
+    notes: >-
+      Raw words establish [0x08132cc8,0x08132cf8), with the next function
+      starting at a push. Two incoming BL sites: BLNE at 0x08130a4c and
+      plain BL at 0x08132d00; two outgoing plain BLs to the counted mutex
+      ports and a tail B to mailbox_slot_post. Sets cancellation_requested
+      to 1 under the lock, then notification_pending to 1 after releasing,
+      and posts the mailbox on every call. The worker at 0x08131870 checks
+      cancellation to abandon its work; 0x08132cf8 requests stop and waits.
+      Ghidra incorrectly absorbs mailbox posting and atomic/wake callees
+      into the decompilation and invents extra parameters; raw code takes
+      only the worker in r0. No new dispatch seams. Host repr(C) pointer
+      fields expand naturally; ARM retains the firmware offsets. Tests
+      exercise repeated posts, count wrapping, flag overwrite, preserved
+      adjacent bytes and counted-mutex wrapping with a NULL semaphore cell.
+      ARM release build passed. match.py shows 17 Rust instructions versus
+      12 original: LLVM inlines the lock hold-count increment after the
+      mutex wait, retains the two flag stores at +0x64/+0x66, the mutex
+      release call, and tail mailbox post at +0x70. Frame/register allocation
+      differs; no symbol folding. All 14750 host tests passed. Standalone
+      host smoke using the test-configured library observed two real posts:
+      cancellation=1, notification=1, mailbox count=2, hold count=0.
+
   - address: 0x08135788
     ghidra: FUN_08135788
     name: vtable_flag_base_construct
