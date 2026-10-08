@@ -230391,3 +230391,60 @@ functions:
       1 with a structural diff (35 original versus 45 Rust instructions):
       cursor calls and mask loop remain, negative bytes are rejected by an
       equivalent unsigned bound, and stock calls use literal-address BLX.
+
+  - address: 0x08129c04
+    ghidra: FUN_08129c04
+    name: input_sequence_dispatch
+    size: 860
+    sig: "u32 input_sequence_dispatch(u8 *state, u32 event)"
+    module: app/input_sequence_dispatch
+    status: ported
+    renames:
+      param_1/r4: state
+      param_2/r1: event
+      "state+0xa1": mode
+      "state+0xa8": primary_collection
+      "state+0xac": alternate_collection
+      "state+0xb0": selected_item
+      "state+0xb4": pending_action_count
+      "state+0xb8": action_index
+      "state+0xd4": initial_action_index
+      "state+0xd8": window_dirty
+      "state+0xd9": window_restart
+      FUN_08129ab4: input_sequence_clear_and_reacquire
+      FUN_08129330: input_sequence_item_reposition
+      FUN_0812a074: input_sequence_commit_alternate
+    notes: >-
+      Raw osos.dec proves the true extent [0x08129c04,0x08129f60),
+      860 bytes including its branch table; the next function has its own
+      push at 0x08129f60. Ghidra's 28-byte extent stops before dispatch.
+      The body contains 17 plain BLs and three predicated BLs, plus six
+      plain and one predicated BLX-register instructions. Two inbound
+      plain BLs are at 0x0812961c and 0x08129a40; none is predicated.
+      Dispatches events 0x20..0x2f, returning zero for unsupported events
+      (including 0x22 and 0x23), one for recognized events. Selects and
+      clears actions, enters one/two/three-item window modes, erases primary
+      item bounds, advances/repositions the window, clears selected
+      collections and commits alternate items. Owner pointer slots remain
+      u32 words; collection vtable/count fields widen naturally on hosts.
+      Reuses canonical Rust cursor, item, bounds and drawing ports.
+      Verified unported callees stay direct-address target seams:
+      0x08129ab4 clears/reacquires a selected collection item;
+      0x08129330 repositions an item and updates its timestamp;
+      0x0812a074 copies/repositions alternate items then swaps collections.
+      These helpers panic on hosts rather than fabricate behavior.
+      Deviations: three equivalent mode transitions share one body and the
+      empty draw-state destructor is omitted. ARM-width wrapping arithmetic
+      and signed/unsigned comparisons are preserved. Draw storage is
+      uninitialized until its real constructor, avoiding redundant clearing.
+      Host suite passes 14786 tests. ARM release builds. Unicorn smoke
+      executes actual linked Rust ARM and raw retail ARM: 576 unsupported,
+      no-op and window-transition cases match returns, owner bytes and both
+      collection records, including modes 0/1/2/3/4/5/6/255, counts -1/0/2,
+      and initially clear/set dirty flags. No device execution claimed.
+      match.py exits 1; its default comparison uses Ghidra's wrong 28 bytes.
+      Repeated with --size 860, the full structural comparison preserves
+      event dispatch, signed action checks, clear loops, drawing loop,
+      collection virtual calls and signed-byte window repositioning; LLVM
+      shares transitions, changes register allocation and emits literal BLX
+      for the unported seams, removing the dead cursor invalidation.
