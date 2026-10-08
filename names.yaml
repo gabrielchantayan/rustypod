@@ -233609,3 +233609,42 @@ functions:
       in r4 because the member constructor returns its input, then emits
       separate store and return instead of the stock pre-decrement STR.
       It adds a frame-pointer prologue. No intentional symbol folding.
+
+  - address: 0x08107a00
+    ghidra: FUN_08107a00
+    name: dma_control_transition
+    size: 144
+    sig: "u32 dma_control_transition(void *context, u32 mode)"
+    module: drivers/dma_control_transition
+    status: ported
+    vars: {param_1: unused_context, param_2: mode, uVar2: start_ticks,
+      uVar1: register_value, iVar3: deadline_expired, bVar4: status_pending,
+      _DAT_38400804: dma_control, _DAT_38400014: dma_status}
+    notes: >-
+      Raw A32 bytes establish the 144-byte extent through pop at 0x08107a8c;
+      the next independent function begins with push at 0x08107a90.
+      Two incoming plain BLs at 0x08107e48 and 0x08107e98, zero predicated
+      callers. Four outgoing plain BLs, zero predicated: timer read at
+      0x08107a1c/0x08107a58 and elapsed at 0x08107a40/0x08107a7c.
+      Nonzero mode ORs control +0x804 bit 7 and polls while status +0x14
+      bit 6 and control bit 2 are both clear; zero mode ORs bit 8 and
+      polls while both are set. Short-circuits the control read when the
+      status condition completes. Samples the timer once and stops after
+      100 microseconds or hardware completion; always returns one,
+      including timeout. Context in r0 is overwritten without being used.
+      The caller brackets DMA channel operations with modes one and zero.
+      Reuses ported IRAM timer veneers: verified literal targets
+      0x22001edc/0x22001ee8 mirror osos 0x08001edc/0x08001ee8.
+      Deliberate codegen deviation is one shared polling loop rather than
+      duplicated mode paths; aligned volatile MMIO preserves read order.
+      Host tests cover all bit combinations, arbitrary nonzero modes,
+      delayed completion via either bit, preservation of unrelated bits,
+      and timeout at a wrapping deadline. Full host suite passed 14921
+      tests; ARM release build passed. Actual-source standalone smoke
+      mapped the MMIO page and exercised the exported function with the
+      existing timer-counter seam: nonzero/zero returned one and preserved
+      control bits (0x280 then 0x380). No device execution claimed.
+      match.py exits one with a structural diff: shared loop, frame pointer,
+      and normalized bit comparisons; relocations verify the two retained
+      BL targets are iram_usec_timer_read_veneer and
+      iram_usec_timer_elapsed_veneer. No intentional symbol folding.
