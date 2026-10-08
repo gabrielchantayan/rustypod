@@ -36,6 +36,7 @@ pub mod byte_identity_slot_init;
 pub mod channel_control_enable;
 pub mod bitmap;
 pub mod dma_channel_command;
+pub mod dma_control_transition;
 pub mod clock;
 pub mod cp15;
 pub mod clock_config;
