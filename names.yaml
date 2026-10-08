@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08114e08
+    ghidra: FUN_08114e08
+    name: status_string_resource
+    size: 60
+    sig: "const u8 *status_string_resource(void)"
+    module: app/status_string_resource
+    status: ported
+    renames:
+      r4: resource_id
+      FUN_08051de0: status_code_normalize
+      FUN_0827233c: task_ctx_field_0x30
+      FUN_0827239c: resource_chain_find_string
+    notes: >-
+      Raw A32 extent [0x08114e08,0x08114e44): 48 code bytes and 12 literal
+      bytes; next independent push is at 0x08114e44. Two incoming plain
+      BLs at 0x081127c8 and 0x08112880, no predicated incoming BLs.
+      Body has two plain BLs, no predicated BLs, and a tail B to the
+      string lookup. Normalized status 1 selects 0x0dad0ae3, status 3
+      selects 0x0dad0ae2, otherwise 0x6411. Receiver is unused; returns
+      the task-local string resource or NULL. Reuses existing callees.
+      Host tests cover raw status boundaries, chained lookup, missing
+      resources and NULL head. ARM match preserves selection and lookup;
+      LLVM inlines the context getter as dispatch plus a +0x30 word load.
   - address: 0x08116d54
     ghidra: FUN_08116d54
     name: context_cached_rtc_value_invalidate
