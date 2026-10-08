@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081440d8
+    ghidra: FUN_081440d8
+    name: framework_data_span_state_construct
+    size: 76
+    sig: "FrameworkDataSpanState *framework_data_span_state_construct(FrameworkDataSpanState *storage, u32 data, u32 extent)"
+    module: cxx/framework_data_span_state_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: data
+      param_3/r2: extent
+      puVar1/r0: this
+      DAT_08144120: FRAMEWORK_DATA_SPAN_STATE_VTABLE
+      FUN_08275cd4: framework_sentinel_state_construct
+    notes: >-
+      Raw extent [0x081440d8,0x08144124): 72 instruction bytes and
+      vtable literal 0x089860b0 at 0x08144120, true size 76. Next real
+      function is the destructor at 0x08144124. Whole-image ARM word
+      scan finds two incoming plain BLs at 0x0807f7ac and 0x081030f0,
+      zero predicated BLs; one outgoing plain BL at 0x081440e4 to
+      already-ported framework_sentinel_state_construct, zero predicated
+      BLs. Construct the sentinel prefix, install derived vtable, clear
+      state +20, retain data and extent at +12/+16, clear +24/+28 and
+      set bytes +32..+35 to [24,0,0,0]. Return the base result in r0.
+      Caller 0x0810301c supplies a data address and virtual read result;
+      other state roles remain unestablished. No deliberate deviations:
+      fixed-width fields and volatile stores preserve offsets, prefix
+      padding and store order. Host tests cover dirty storage, zero and
+      extreme arguments, unaligned retained addresses, bounds and
+      reconstruction. Full host suite and ARM release build pass.
+      Standalone actual-source smoke with a minimal root constructor
+      model verifies returned storage, full state, padding and guards.
+      match.py exits 1: LLVM adds a frame-pointer instruction, swaps
+      saved argument registers and includes the literal omitted by
+      Ghidra's size. All stores retain order and widths; R_ARM_CALL at
+      offset 0x10 targets framework_sentinel_state_construct. Literal
+      remains 0x089860b0. The function stays a distinct exported symbol.
   - address: 0x081446cc
     ghidra: FUN_081446cc
     name: timing_node_owner_destroy
