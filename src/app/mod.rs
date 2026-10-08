@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod row_mask_rectangles_collect;
 pub mod code_is_0x10_through_0x1f;
+pub mod code_is_0x14_or_0x1c;
 pub mod profile_members_reset;
 pub mod selection_context_reset;
 pub mod virtual_dispatch_zero;

@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08129b44
+    ghidra: FUN_08129b44
+    name: code_is_0x14_or_0x1c
+    size: 20
+    sig: "u32 code_is_0x14_or_0x1c(u32 code)"
+    module: app/code_is_0x14_or_0x1c
+    status: ported
+    vars: {param_1/r0: code}
+    notes: >-
+      Raw A32 extent [0x08129b44,0x08129b58), 20 bytes ending BX LR;
+      next real function starts CMP r0,#0x17. Words are e3500014,
+      1350001c, 03a00001, 13a00000, e12fff1e. Independent aligned
+      whole-image decoding verifies two plain inbound BLs at 0x08129608
+      and 0x08129710, zero predicated inbound BLs, and zero outgoing
+      plain or predicated BLs. Return one exactly for full-word codes
+      0x14 and 0x1c, otherwise zero. Caller 0x081295a0 classifies input
+      bytes for pending-state and pair processing; no domain identity
+      is inferred. No existing canonical entry and no callee seam needed.
+      No deliberate behavioral deviations. All 14790 host tests pass,
+      including exhaustive byte classification and high-word rejection;
+      ARM release build succeeds. Actual-source executable smoke passes
+      131072 consecutive words and five high-word cases. match.py exits 1:
+      five stock versus seven Rust instructions. LLVM clears bit 3 with
+      BIC, subtracts 20, then uses CLZ and LSR 5 for exact 0/1 equality,
+      with frame setup/restore and no calls. No device execution.
+
   - address: 0x0812aebc
     ghidra: FUN_0812aebc
     name: code_is_0x10_through_0x1f
