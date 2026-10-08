@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08141290
+    ghidra: FUN_08141290
+    name: calendar_set_selected_date
+    size: 28
+    sig: "void calendar_set_selected_date(u32 *view, u32 date)"
+    module: ui/calendar_set_selected_date
+    status: ported
+    vars:
+      param_1/r0: view
+      param_2/r1: date
+      "view+0xec": selection_owner
+      "owner+0xe8": selected_date
+      "owner+0xec": selected_date_valid_byte
+    renames:
+      FUN_081ca470: owner_set_selected_date
+      FUN_08140c20: invalidate_selected_day
+    notes: >-
+      Raw A32 extent is [0x08141290,0x081412ac), seven words, 28 bytes;
+      the next real function begins with push at 0x081412ac. Ghidra's
+      56-byte extent and merged decompilation are wrong. Independent full
+      raw-word decoding finds one incoming plain BL at 0x081407bc and one
+      BLNE at 0x08140d40. Body has one plain BL to 0x081ca470, zero
+      predicated BLs, and a tail B to 0x08140c20. Setter writes date at
+      owner+0xe8 and normalized nonzero byte at +0xec, preserving r2;
+      tail helper gates on owner and validity, then invalidates the date's
+      day cell. Full ledger has no prior assigned or callee entries. Both
+      unported callees remain verified firmware seams. Rust saves view in
+      a callee-saved register rather than relying on preserved r2. Host
+      suite passes 14731 tests; ARM release build passes. Executable wrapper
+      smoke with modeled firmware seams verifies select/clear transitions
+      and adjacent-byte preservation. match.py's default extent includes
+      the next function; the corrected 28-byte comparison shows one BLX
+      and one BX tail call to literal ARM addresses, with view restored
+      after the setter. No target behavioral deviations.
   - address: 0x08142d84
     ghidra: FUN_08142d84
     name: coverflow_construct
