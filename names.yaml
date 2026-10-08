@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08107d00
+    ghidra: FUN_08107d00
+    name: controller_configuration_enable
+    size: 60
+    sig: "void controller_configuration_enable(uint32_t *output)"
+    module: drivers/controller_configuration_enable
+    status: ported
+    vars: {param_1/r0: output, r1: default_configuration, r2: saved_configuration}
+    renames: {DAT_08107d38: default_configuration_0xa01c1806, DAT_38400018: controller_configuration_register, DAT_38400008: controller_control_register}
+    notes: >-
+      Raw A32 extent [0x08107d00,0x08107d3c) contains 56 instruction
+      bytes and literal 0xa01c1806 at 0x08107d38. Next function begins
+      with PUSH {r4,lr}. Full-image word decoding finds two plain inbound
+      BLs at 0x08107878 and 0x08108250, zero predicated inbound BLs,
+      and no outgoing BLs. Defaults the object word at +0x8c if zero,
+      writes it to MMIO 0x38400018, rereads and replaces a zero readback
+      with the default, then preserves control bits while setting bit 0
+      at 0x38400008. Register bit meanings remain unidentified; no seams.
+      Volatile MMIO preserves stock readback and access order; host uses
+      an isolated register array. Word indices avoid host pointer-size
+      assumptions. Tests cover zero, high-bit, all-ones and mixed saved
+      configuration/control values, adjacent canaries and repeated enable.
+      All 14918 host tests and ARM release build pass. Public-entry smoke
+      verifies defaulting, preserving high-bit configuration and adjacent
+      object words. No device execution. match.py exits 1 with a structural
+      diff (14 original versus 18 Rust listing lines): LLVM adds frame
+      setup/restore, rebases MMIO to 0x38400018 and elides the redundant
+      ordinary object reload. Both conditional defaults, MMIO readback,
+      control-bit read/OR/write and zero outgoing calls are preserved.
   - address: 0x081083b8
     ghidra: FUN_081083b8
     name: audio_output_registers_initialize
