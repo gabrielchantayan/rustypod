@@ -231835,3 +231835,44 @@ functions:
       including the literal. LLVM uses a null-path early return, a larger
       frame, and an unconditional BLX inside the non-null branch; the
       restored vtable, +8 member, +0x1c virtual slot and return are preserved.
+
+
+  - address: 0x0811e4f8
+    ghidra: FUN_0811e4f8
+    name: resource_backed_container_destruct
+    size: 60
+    sig: "u32 *resource_backed_container_destruct(u32 *view)"
+    module: ui/resource_backed_container_destruct
+    status: ported
+    renames:
+      param_1/r0/r4: view
+      param_1[0x3a]: resource
+      DAT_0811e530: RESOURCE_CONTAINER_VTABLE
+      FUN_08148e0c: release_resource (unported firmware helper)
+      FUN_0815880c: container_view_destruct (existing Rust port)
+    notes: >-
+      Raw ARM establishes [0x0811e4f8,0x0811e534), 56 code bytes plus
+      the vtable literal 0x08982d34 at 0x0811e530. The next real function
+      starts with push {r4,lr} at 0x0811e534. Full-image BL decoding finds
+      two plain inbound calls at 0x0811e4ec and 0x081b9e94, zero predicated
+      calls, and no data-word references. Body has one plain BL to
+      0x08148e0c, zero predicated BLs, one BLX through slot +0x114, and
+      a tail B to 0x0815880c. Both callers are deleting wrappers. Install
+      the derived vtable, dispatch slot +0x114, reload resource +0xe8,
+      release even when zero, clear it after release, and forward the
+      existing container destructor result. The release helper runs
+      0x08148cc8, clears global 0x089cb2ec+0x10, runs 0x08148dd4, and
+      optionally resolves/frees its argument; it must not become plain free.
+      Ghidra incorrectly continues into multiple later destructors. The
+      concrete class and virtual slot identity remain unresolved; the raw
+      vtable slot contains stale 0xffffffff in osos.dec and is loaded from
+      runtime firmware on target, not assigned an invented callee address.
+      Host-only seams substitute the runtime slot, release helper, and
+      base destruction because the host Registry exceeds its target
+      0x28-byte storage. Target calls the existing Rust base directly.
+      All 14851 host tests and the ARM release build pass. Production-source
+      smoke verifies reloaded resource, clear-before-base, unchanged fields,
+      and return identity. match.py exits 1: 14 stock versus 18 Rust
+      instructions including literals; larger frame and fixed-address BLX
+      replace ADS direct BL, preserving virtual slot, resource offsets,
+      ordering, and the tail branch to the existing base port.

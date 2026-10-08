@@ -256,6 +256,7 @@ pub mod view_interaction_active;
 pub mod range_view;
 pub mod range_release;
 pub mod container_view;
+pub mod resource_backed_container_destruct;
 pub mod set_geometry;
 pub mod geometry_changed;
 pub mod set_position_offsets;
