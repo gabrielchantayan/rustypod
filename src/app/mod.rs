@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod selection_context_reset;
 pub mod virtual_dispatch_zero;
 pub use virtual_dispatch_zero::*;
 pub mod range_context_replace_owned;

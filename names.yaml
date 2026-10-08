@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812f6ec
+    ghidra: FUN_0812f6ec
+    name: selection_context_reset
+    size: 104
+    sig: "void selection_context_reset(SelectionContextOwner *owner)"
+    module: app/selection_context_reset
+    status: ported
+    vars: {param_1/r4: owner, r5: array, auStack_24: temporary_context}
+    renames:
+      FUN_083d10b8: scoped_context_container_delete_enabled_elements
+      FUN_08271c84: observable_array_clear
+      FUN_0812f6b4: selection_value_pair_reset_retail
+      FUN_08270394: scoped_context_construct
+      FUN_08270418: scoped_context_copy_fields
+      FUN_08270414: scoped_context_destroy
+    notes: >-
+      Raw A32 establishes [0x0812f6ec,0x0812f754), 104 bytes: push
+      e92d4030 through pop e8bd8030, followed by an independent byte getter
+      (e5d00070/e12fff1e). Whole-image aligned word decoding finds two plain
+      incoming BLs at 0x0811512c and 0x081304b8, no predicated incoming BLs;
+      six plain outgoing BLs and no predicated outgoing BLs. Deletes enabled
+      scoped-context elements of the array at +0x18 before clearing the array;
+      zeros flag bytes +0x3b/+0x42 and words +0x30/+0x34; invokes the verified
+      unported helper at 0x0812f6b4, which resets the value-pair member +0x78
+      and zeros +0x74; constructs a null-owner context and copies its payload
+      into +0x7c without changing that member's vtable. No concrete class name
+      is inferred. Deliberate deviations: native pointers widen repr(C) host
+      fields, with target offsets checked at compile time; the unported helper
+      remains a firmware call on target and an explicit host callback seam.
+      Host edge tests cover empty, signed and wrapping array counts,
+      reset-before-helper ordering, cleared context, and preserved unowned
+      fields. A throwaway public-API smoke exercised array clear, state reset,
+      context clear, and member-vtable preservation. ARM release build passed.
+      match.py structural diff reviewed: deletion/clear precede state reset,
+      the retained helper is BLX through literal 0x0812f6b4, the null-owner
+      constructor is inlined with its capture callback retained, and the
+      payload-copy call remains. LLVM reorders independent zero stores;
+      the empty destructor folds away. Incidental r0 pass-through is not exposed.
   - address: 0x08130a60
     ghidra: FUN_08130a60
     name: selection_timer_stop
