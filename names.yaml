@@ -229209,3 +229209,41 @@ functions:
       frame-pointer prologue/epilogue differences. Byte loads/stores remain
       sequential at +8/+9/+10; R_ARM_CALL resolves to the canonical constructor.
       Hardware execution untested.
+  - address: 0x08140648
+    ghidra: FUN_08140648
+    name: five_string_array_state_construct
+    size: 136
+    sig: "FiveStringArrayState *five_string_array_state_construct(FiveStringArrayState *this)"
+    module: cxx/five_string_array_state_construct
+    status: ported
+    vars:
+      param_1/r0: this
+      DAT_081406c8: state_vtable_089857e0
+      DAT_081406cc: array_vtable_089a4488
+      FUN_08277440: string_default_construct
+      FUN_08158cf0: four_word_clear
+      FUN_0819b5e4: string_object_pair_default_construct
+      FUN_08271cec: observable_array_construct
+    notes: >-
+      Raw A32 establishes 128 executable bytes followed by two vtable
+      literals; the next real function begins at 0x081406d0, making the
+      extent 136 bytes. Whole-image decoding finds two plain inbound BLs
+      at 0x081dd1c4 and 0x081e8710, zero predicated; the body has six plain
+      BLs and zero predicated. Both callers allocate 120 bytes. Plants
+      0x089857e0, constructs strings at +4/+12/+20, clears four words
+      at +28 and six at +44, constructs a string pair at +68, constructs
+      an observable array at +84 and replaces its vtable with 0x089a4488.
+      Sets byte +100 to one, leaves +101..+103 untouched, clears four
+      words at +104, returns this. All callees reuse canonical Rust ports;
+      no new seams. Deliberate deviations are the existing static string
+      vtable identity and native-pointer repr(C) host widening; target
+      field offsets and 120-byte size are compile-time checked. Host
+      tests cover dirty storage, reserved bytes, and adjacent guards.
+      Full host suite passes 14732 tests; ARM release build passes.
+      Standalone actual-source host smoke confirms empty strings, enabled
+      empty array, and preserved reserved bytes. match.py prints the
+      expected structural diff (exit 1): LLVM retains six BLs and all
+      initialization offsets, using a saved base pointer rather than
+      chaining known identity returns. LLVM also schedules the enabled
+      byte store before the independent derived-vtable store; there is
+      no callback between them. Hardware execution remains untested.
