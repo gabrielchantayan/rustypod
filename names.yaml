@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810f99c
+    ghidra: FUN_0810f99c
+    name: entry_collection_prune
+    size: 84
+    sig: "void entry_collection_prune(u32 *owner)"
+    module: app/entry_collection_prune
+    status: ported
+    renames:
+      param_1/r6: owner
+      iVar3/r4: remaining_count
+      iVar4/r5: index
+      FUN_082a4cf8: array_element_at
+      FUN_0810f92c: entry_cleanup_unless_type_3 (stock seam)
+      FUN_08271bec: observable_array_erase_at
+    notes: >-
+      Raw A32 extent [0x0810f99c,0x0810f9f0) ends with pop; the next
+      word is a separate push. Three plain outbound BLs, zero predicated;
+      inbound calls are BL at 0x0810ef80 and BLNE at 0x0812e378.
+      Snapshot signed count at owner+8; access embedded array at owner+4.
+      Cleanup at 0x0810f92c retains type 3, otherwise releases the entry
+      and returns nonzero (also for NULL). Erase without advancing index;
+      ignore erase result and decrement local count. Reuses ported array
+      helpers. Host tests inject operations into the shared loop. ARM match
   - address: 0x08110be4
     ghidra: FUN_08110be4
     name: associated_object_replace
