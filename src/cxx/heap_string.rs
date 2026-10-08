@@ -106,6 +106,42 @@ pub unsafe extern "C" fn heap_string_data(this: *const HeapString) -> *mut u8 {
     (*this).data
 }
 
+/// heap_string_reallocate — `FUN_0810b4c4` @ 0x0810b4c4.
+/// True extent: 80 bytes (76 code bytes and the inline `nil\0` descriptor);
+/// the next function starts at 0x0810b514. Raw decoding finds two inbound
+/// plain BLs (0x0810b54c, 0x0810b5a0), no predicated inbound BLs; the body
+/// has one plain BL to realloc_wrapper and one BLEQ to the failure reporter.
+///
+/// Reallocates the holder's payload with tag 20 and the supplied copy flag,
+/// publishes the result before reporting NULL with code 4 and `nil`, then
+/// initializes byte zero only when the OLD payload was NULL. Rereads the
+/// holder after the reporter, including when that reporter returns.
+///
+/// Deviations: uses the existing heap and allocation-failure ops seams.
+/// The reporter's unported default is inert; as in stock, returning from
+/// it with a NULL payload on an initial allocation is not a recovery path.
+/// The inline descriptor is represented by a static byte string.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn heap_string_reallocate(
+    this: *mut HeapString,
+    size: usize,
+    copy_on_move: usize,
+) -> *mut u8 {
+    let previous = (*this).data;
+    (*this).data = realloc_wrapper(previous, size, HEAP_STRING_PAYLOAD_FREE_TAG, copy_on_move);
+    if (*this).data.is_null() {
+        let ops = core::ptr::read_volatile(core::ptr::addr_of!(
+            crate::heap::new_handler::ALLOCATION_CONSTRUCT_GUARD_OPS
+        ));
+        (ops.report_allocation_failure)(4, b"nil\0".as_ptr());
+    }
+    if previous.is_null() {
+        (*this).data.write(0);
+    }
+    (*this).data
+}
+
 /// The raw `mov r1,#512` bound in `heap_string_format`.
 const HEAP_STRING_FORMAT_BUFFER_LEN: usize = 512;
 
@@ -134,8 +170,7 @@ pub unsafe extern "C" fn heap_string_assign_from_cstr(this: *mut HeapString, sou
     }
 
     let len = strlen_safe(source) + 1;
-    let data = realloc_wrapper((*this).data, len, HEAP_STRING_PAYLOAD_FREE_TAG, 0);
-    (*this).data = data;
+    let data = heap_string_reallocate(this, len, 0);
     if !data.is_null() {
         core::ptr::copy_nonoverlapping(source, data, len);
     }
@@ -242,6 +277,54 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::heap::veneers::tests::{free_log, mock_heap, realloc_log, set_alloc_ret};
+
+    #[test]
+    fn reallocate_initializes_only_previously_empty_payload() {
+        let _heap = mock_heap();
+        let mut output = [0xa5u8; 4];
+        let mut holder = HeapString { data: core::ptr::null_mut() };
+        set_alloc_ret(output.as_mut_ptr());
+        unsafe { heap_string_reallocate(&mut holder, 4, 1) };
+        assert_eq!(output, [0, 0xa5, 0xa5, 0xa5]);
+        output[0] = b'x';
+        unsafe { heap_string_reallocate(&mut holder, 4, 0) };
+        assert_eq!(output, [b'x', 0xa5, 0xa5, 0xa5]);
+        assert_eq!(holder.data, output.as_mut_ptr());
+    }
+
+    static mut FAILURE_HOLDER: *mut HeapString = core::ptr::null_mut();
+    static mut FAILURE_REPLACEMENT: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn repair_failed_allocation(code: usize, descriptor: *const u8) {
+        assert_eq!(code, 4);
+        assert_eq!(core::slice::from_raw_parts(descriptor, 4), b"nil\0");
+        assert!((*FAILURE_HOLDER).data.is_null(), "publish before reporting");
+        (*FAILURE_HOLDER).data = FAILURE_REPLACEMENT;
+    }
+
+    #[test]
+    fn failed_reallocation_rereads_holder_after_reporter_returns() {
+        let _diagnostic = crate::heap::new_handler::tests::LOCK.lock().unwrap();
+        let _heap = mock_heap();
+        unsafe {
+            let saved = crate::heap::new_handler::ALLOCATION_CONSTRUCT_GUARD_OPS;
+            crate::heap::new_handler::ALLOCATION_CONSTRUCT_GUARD_OPS.report_allocation_failure =
+                repair_failed_allocation;
+            let mut output = [0xa5u8; 4];
+            for previous in [core::ptr::null_mut(), 1usize as *mut u8] {
+                let mut holder = HeapString { data: previous };
+                FAILURE_HOLDER = &mut holder;
+                FAILURE_REPLACEMENT = output.as_mut_ptr();
+                output[0] = 0xa5;
+                set_alloc_ret(core::ptr::null_mut());
+                let result = heap_string_reallocate(&mut holder, 4, 0);
+                assert_eq!(result, output.as_mut_ptr());
+                assert_eq!(output[0], if previous.is_null() { 0 } else { 0xa5 });
+                assert_eq!(&output[1..], &[0xa5; 3]);
+            }
+            crate::heap::new_handler::ALLOCATION_CONSTRUCT_GUARD_OPS = saved;
+        }
+    }
 
     /// A non-empty source reallocates the existing payload with the raw
     /// `(tag = 0x14, a4 = 0)` arguments and copies its trailing NUL.
