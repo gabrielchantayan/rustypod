@@ -232007,3 +232007,50 @@ functions:
       versus 10 original words: stop/start remain calls, restart is inlined
       into stop, run-state store, and existing arm dispatch. Three +0xb0
       loads and the 3000 delay are preserved; no identical-symbol fold.
+
+  - address: 0x0811ab94
+    ghidra: FUN_0811ab94
+    name: seek_down_with_timer
+    size: 92
+    sig: "u32 seek_down_with_timer(u8 *controller)"
+    module: app/seek_down_with_timer
+    status: ported
+    vars:
+      param_1/r0/r4: controller
+      controller_plus_0xb0: tuning_timer
+      controller_plus_0xb4: pending_direction
+      controller_plus_0xb8: frequency_change_timer
+      controller_plus_0xbc: class_object
+    renames:
+      FUN_0803c264: initialize_seek_subsystem_retail
+      FUN_0812c6b0: timer_stop
+      FUN_0811a890: stop_frequency_change_and_start_tuning_timer
+      FUN_0811aa6c: show_tuning_region
+      FUN_0811c564: flag_2c_is_clear
+      FUN_0811bd70: class_6280_clear_handler
+      FUN_0811c298: object_dispatch_entry_dispatch_vtable_slot_50
+      FUN_0811a938: start_frequency_change_direction_retail
+    notes: >-
+      Raw A32 extent [0x0811ab94,0x0811abf0) is exactly 92 bytes;
+      pop {r4,pc} ends it and the next real function starts with
+      push {r2,r3,r4,lr}. Six plain outbound BLs and two BLEQ;
+      inbound calls are BLNE at 0x0811a600 and BLEQ at 0x0811adc8.
+      The event-name caller identifies SeekDownWithTimer; the repeat
+      callback selects it when pending direction is 2. Initialize the
+      retail seek subsystem only when +0xb4 is zero, stop +0xb0,
+      reset frequency timing, display tuning region, clear nonzero
+      class +0x2c, dispatch virtual slot +0x50, start direction 2,
+      return 1. Reload pointer fields after callbacks. Existing Rust
+      ports are called directly; the class clear operation reuses
+      CLASS_6280_FLAG_DISPATCH_OPS. Unported 0x0803c264 retains its
+      unresolved subsystem identity; 0x0811a938 is independently decoded
+      as stop/start-after-3000ms/store-direction/restart on timer +0xb8.
+      Neither dependency is reimplemented by this port. No algorithm
+      deviations. Host tests cover every class-flag byte and direction
+      boundaries, ordering, and callback-induced pointer replacement.
+      ARM emulator smoke compares the compiled export against raw retail
+      instructions in 24 cases, with external operations intercepted:
+      calls, pointer reloads, state, and return agree. match.py shows LLVM
+      frame changes, explicit conditional branches, inlined flag query,
+      BLX retail seams, and the shared mutable clear seam; ordered timer,
+      display, dispatch, and final direction-2 operations are preserved.
