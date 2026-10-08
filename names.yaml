@@ -228846,3 +228846,45 @@ functions:
       build pass. match.py shows the ownership guard, conditional +0x9c
       load and zero return preserved; inlined free adds a NULL guard and
       heap-ops loads with BLX dispatch, producing 18 versus 7 instructions.
+
+  - address: 0x08144124
+    ghidra: FUN_08144124
+    name: tagged_storage_view_destroy
+    size: 56
+    sig: "u32 *tagged_storage_view_destroy(u32 *view)"
+    module: app/tagged_storage_view_destroy
+    status: ported
+    vars:
+      param_1/r4: view
+      r0: storage
+      r1: heap_tag
+    renames:
+      FUN_080e7970: free_wrapper
+      FUN_08275cfc: framework root destructor tail veneer
+      FUN_08275bc8: framework_object_destruct
+      DAT_08144158: tagged storage view vtable (0x089860b0)
+    notes: >-
+      Raw words establish [0x08144124,0x0814415c), 56 bytes: 52 bytes
+      of instructions and the vtable literal at 0x08144158. The next
+      independent function starts with e92d4070. Whole-image ARM BL
+      decoding finds two plain callers at 0x0807f848 and 0x0810316c,
+      zero predicated callers. Body has zero plain BLs and one BLNE
+      to free_wrapper at 0x080e7970. Install vtable 0x089860b0; release
+      word +0x0c only when nonzero and ownership byte +0x23 is nonzero,
+      using byte +0x20 as heap tag. Preserve every other field, including
+      the dangling pointer and ownership flag, and return this. Both
+      callers construct 36-byte stack objects through 0x081440d8;
+      concrete class identity remains unknown. The final B to 0x08275cfc
+      reaches eaffffb1, a B to 0x08275bc8, whose e12fff1e is bare BX LR.
+      Deliberate deviations: omit this identity tail chain and reuse the
+      existing heap dispatch; u32 words preserve target layout on hosts.
+      Host regression covers absent, borrowed and owned storage,
+      nonboolean ownership, tags 0/3/255, vtable installation before free,
+      pointer return and preservation of all other words. Host suite and
+      ARM release build pass. Standalone actual-source smoke retains a
+      borrowed mmap allocation and releases owned storage through a
+      munmap-backed host deallocator; firmware hardware untested.
+      match.py exits 1: LLVM produces 18 instructions versus 13, retains
+      the pointer and ownership guards, byte tag and vtable literal,
+      shrink-wraps the frame around free_wrapper and replaces the identity
+      root tail chain with BX LR. The BL is a relocatable free_wrapper call.

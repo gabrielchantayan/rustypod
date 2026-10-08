@@ -58,6 +58,7 @@ pub mod hints {
     pub const SELECTOR_PRIMARY_STRING_RESOURCE_ASSIGN: usize = 0x4305_0000;
     pub const CONTROLLER_DECLARATION_RESET: usize = 0x4303_0000;
     pub const DISPATCH_PAIR_STRING: usize = 0x4302_0000;
+    pub const TAGGED_STORAGE_VIEW_DESTROY: usize = 0x4316_0000;
     pub const ALIGNED_BUFFER_SET_DESTROY: usize = 0x4301_0000;
     pub const SERVICE_HANDLER_MASK_CAN_TRANSFER: usize = 0x429e_0000;
     pub const SHARED_RECORD_LIST_OWNER_CONSTRUCT: usize = 0x417f_0000;
