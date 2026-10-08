@@ -49089,6 +49089,32 @@ functions:
       @ 0x081c38e0..0x081c8a38 (owns the moov/trak/mdhd atom literals),
       which looks up track nodes by id.
 
+  - address: 0x0810b4c4
+    ghidra: FUN_0810b4c4
+    name: heap_string_reallocate
+    size: 80
+    sig: "u8 *heap_string_reallocate(HeapString *this, usize size, usize copy_on_move)"
+    module: cxx/heap_string
+    status: ported
+    vars: {param_1: this, param_2: size, param_3: copy_on_move, iVar2: previously_empty}
+    renames:
+      FUN_080edbf0: realloc_wrapper
+      FUN_081b53e4: report_allocation_failure
+    notes: >-
+      Raw words establish 76 bytes of code plus the inline nil-NUL descriptor
+      at 0x0810b510; the next real function begins at 0x0810b514. Two inbound
+      plain BLs at 0x0810b54c and 0x0810b5a0, zero predicated inbound BLs.
+      The body has one plain BL to realloc_wrapper and one BLEQ to the
+      allocation-failure reporter. Passes the previous payload, requested size,
+      tag 20 and copy flag to realloc; publishes its result before reporting
+      NULL with code 4 and nil. Only an originally NULL payload initializes
+      byte zero, rereading the holder after a returning reporter. Uses existing
+      heap and allocation-failure ops seams; the reporter default remains
+      unported and inert, not a safe initial-allocation failure recovery.
+      Host tests cover initial versus existing payloads and reporter mutation.
+      ARM match shows the same publish/report/conditional-byte-store sequence;
+      inlined heap initialization and indirect ops calls enlarge the body.
+
   - address: 0x0810b514
     ghidra: FUN_0810b514
     name: heap_string_assign_from_cstr
@@ -49099,7 +49125,7 @@ functions:
     vars: {param_1: this, param_2: source}
     renames:
       FUN_0810b3e4: heap_string_destroy
-      FUN_0810b4c4: heap_string_reallocate (inlined through realloc_wrapper)
+      FUN_0810b4c4: heap_string_reallocate
       FUN_0810b610: strlen_safe
       FUN_080edbf0: realloc_wrapper
       DAT_08037db4: memcpy entry (0x08037db0)
@@ -49113,10 +49139,9 @@ functions:
       exactly len+1 bytes when allocation succeeded. Whole-image ARM branch
       decoding finds five direct inbound calls (0x0809e724, 0x081132c4,
       0x081132d0, 0x08113874, 0x081a3634): five unconditional bl and zero
-      predicated bl forms. The Rust port uses the existing realloc_wrapper
-      directly instead of reproducing the tiny helper, whose fully decoded
-      behavior is that wrapper plus initial-allocation NUL initialization;
-      this function's non-empty source overwrites that NUL immediately.
+      predicated bl forms. The Rust port calls heap_string_reallocate,
+      preserving initial-allocation NUL initialization and NULL-result
+      reporting before copying the source.
   - address: 0x0810b610
     ghidra: FUN_0810b610
     name: strlen_safe
