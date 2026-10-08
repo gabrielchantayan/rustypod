@@ -228739,3 +228739,52 @@ functions:
       instructions, an added frame-pointer prologue, a combined unsigned
       selector guard, one indexed load, comparison with 160, and conditional
       zero result. No device execution claimed.
+  - address: 0x08136954
+    ghidra: FUN_08136954
+    name: storage_extents_refresh
+    size: 88
+    sig: "i32 storage_extents_refresh(u32 *object)"
+    module: fs/storage_extents_refresh
+    status: ported
+    renames:
+      param_1/r0/r4: object
+      cVar1: kind
+      uVar2/r5: status
+      object+0x9c: extent_buffer_address
+      object+0xa0: inline_extents
+      object+0xe0: extent_count
+      object+0xe4: extent_capacity
+      object+0xe8: owns_extent_buffer
+      object+0xec: kind
+      FUN_081368a0: release_owned_extents
+      FUN_08136d80: storage_extents_translate
+      FUN_081369ac: rebuild_storage_extents
+    notes: >-
+      Raw osos.dec establishes [0x08136954,0x081369ac), 88 instruction
+      bytes; the next real function starts with push {r4-r9,lr}.
+      Whole-image aligned A32 decoding verifies two inbound plain BLs at
+      0x081be598 and 0x081bfaf4, zero predicated inbound BLs. The body has
+      three plain BLs at 0x0813695c, 0x08136994 and 0x0813699c, zero
+      predicated BLs, correcting the assignment's two-call report.
+      Release the old buffer first, point +0x9c at inline storage +0xa0,
+      reset count/capacity/ownership to 0/8/0, then read kind at +0xec.
+      Kinds 3, 4, 6 call the canonical ported translator and return zero;
+      other kinds call the verified builder and return its status unchanged.
+      The raw release helper at 0x081368a0 conditionally calls canonical
+      free at 0x0802edc8 when ownership is nonzero; neither release nor
+      builder has a prior canonical entry, so both remain resident-address
+      seams, not additional ports. Host injection models owned-buffer
+      destruction and the builder's real zero-length fast path; unavailable
+      public host helpers explicitly panic. Four-byte target pointer fields
+      and byte-width kind reads are preserved. No target behavior deviation.
+      Host suite passes 14711 tests; ARM release build succeeds. Tests cover
+      every kind byte, zero/nonzero ownership, empty/single/eight extents,
+      wrapping translation, old-buffer destruction and full object canaries.
+      Standalone host smoke proves release-before-reset, post-release kind
+      selection, builder mutation and propagation of status -108. No device
+      execution. match.py exits 1 with a structural diff: 22 original versus
+      28 Rust instructions. LLVM adds a frame pointer, splits STRD into
+      stores, uses a guarded bit mask 0x58 for kinds 3/4/6, BLX for release
+      and a tail BX for rebuild. The translator remains a real BL target;
+      archive relocation targets storage_extents_translate. Reset ordering,
+      zero translation return and unchanged builder status are retained.

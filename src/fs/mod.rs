@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Release and rebuild cached storage extents @ 0x08136954.
+pub mod storage_extents_refresh;
 /// Convert logical extent pairs to backend block ranges @ 0x08136d80.
 pub mod storage_extents_translate;
 /// Mode-selected two-word record setter @ 0x0814d91c.
