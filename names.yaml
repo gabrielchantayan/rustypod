@@ -228788,3 +228788,35 @@ functions:
       and a tail BX for rebuild. The translator remains a real BL target;
       archive relocation targets storage_extents_translate. Reset ordering,
       zero translation return and unchanged builder status are retained.
+
+  - address: 0x081368a0
+    ghidra: FUN_081368a0
+    name: owner_buffer_release
+    size: 28
+    sig: "u32 owner_buffer_release(const u32 *owner)"
+    module: util/owner_buffer_release
+    status: ported
+    vars:
+      param_1: owner
+      owner+0x9c: buffer_address
+      owner+0xe8: heap_ownership
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec establishes seven ARM words at 0x081368a0..0x081368bb;
+      the next real function begins with push {r4,r5,r6,lr} at 0x081368bc.
+      Whole-image aligned branch decoding finds exactly two inbound plain
+      BLs at 0x0813695c and 0x08136f60, zero predicated inbound BLs, and no
+      inbound B. The sole outbound call is BLNE free at 0x0802edc8.
+      Ghidra additionally attributes a caller at 0x081c0298; the raw scan
+      does not support that edge. Release the +0x9c target pointer iff the
+      +0xe8 ownership word is nonzero, leave all owner fields unchanged,
+      and return zero. The reset caller then installs its inline buffer
+      at +0xa0 and clears ownership. Preserve u32 field spacing on hosts.
+      Deliberate deviation: reuse the ported free with its documented
+      heap-ops dispatch rather than a direct retail BLNE. Host tests cover
+      zero ownership with an invalid pointer, owned NULL, ownership one
+      and all-ones, and preservation of every owner word. Executable smoke
+      exercises inactive and owned-NULL paths. Host suite and ARM release
+      build pass. match.py shows the ownership guard, conditional +0x9c
+      load and zero return preserved; inlined free adds a NULL guard and
+      heap-ops loads with BLX dispatch, producing 18 versus 7 instructions.
