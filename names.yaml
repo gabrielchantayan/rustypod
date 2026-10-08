@@ -49089,6 +49089,35 @@ functions:
       SINGLETON_CTORS dispatch table with a zeroing stub default and the
       cache is the crate static MEDIA_PLAYER_INSTANCE.
 
+  - address: 0x081115f4
+    ghidra: FUN_081115f4
+    name: root_media_query_is_zero
+    size: 24
+    sig: "u32 root_media_query_is_zero(void *root)"
+    module: app/root_media_query_is_zero
+    status: ported
+    renames:
+      param_1/r0: root
+      uVar1: media_query_result
+      FUN_08051c1c: media_query (verified unported retail boundary)
+    notes: >-
+      Raw extent 0x081115f4..0x0811160c, ending in e8bd8010 before
+      the next real function's e92d4038 prologue. One outgoing plain BL
+      at 0x081115fc to 0x08051c1c, zero predicated BLs. Two incoming
+      plain BLs at 0x0812f338 and 0x08177cf4, zero predicated callers.
+      Load the aligned word at root +0x30 and pass it to the verified
+      media query. RSBS r0,r0,#1 / MOVCC r0,#0 returns one exactly for
+      zero, otherwise zero including all unsigned values above one.
+      Callee raw code ignores the argument, calls media_player_get at
+      0x0817ceb4, and returns 1 for nonzero virtual slot +0x190, else
+      2 for nonzero slot +0x194, else 0. No guessed playback semantics.
+      ARM retains the unported callee address; hosts install a native
+      operation. Volatile word load preserves the original access.
+      context_match_string_id now calls this canonical port.
+      match.py confirms LDR +0x30 and BLX to literal 0x08051c1c;
+      LLVM uses CLZ / LSR #5 for exact-zero rather than RSBS / MOVCC,
+      with an fp frame instead of the original spare r4 save.
+
   - address: 0x08177ce0
     ghidra: FUN_08177ce0
     name: context_match_string_id
@@ -49099,7 +49128,7 @@ functions:
     renames:
       param_1/r0/r4: item_handle
       param_2/r1/r5: index
-      FUN_081115f4: root_query (unported retail boundary)
+      FUN_081115f4: root_media_query_is_zero (canonical Rust port)
       FUN_083d6190: handle_deref_or_null (existing canonical Rust port)
       FUN_0813df7c: item_query (unported retail boundary)
       DAT_08177d24: app_root_slot_089ca674
@@ -49110,11 +49139,11 @@ functions:
       with e92d4070 at 0x08177d2c. Three outgoing plain BL instructions,
       zero predicated BLs. Two incoming plain BLs at 0x08133a38 and
       0x08174f98, zero predicated callers. Query *0x089ca674 through
-      verified retail 0x081115f4; nonzero returns zero without accessing
+      canonical root_media_query_is_zero; nonzero returns zero without accessing
       the handle. Otherwise resolve the handle through the existing port
       and query its index through verified retail 0x0813df7c. Exactly one
       returns 0x63eb; every other result returns zero. Host queries are
-      replaceable native operations; ARM retains both retail boundaries
+      replaceable native operations; ARM retains the item retail boundary
       and the real global slot. No guessed callee class identity.
   - address: 0x08177d2c
     ghidra: FUN_08177d2c
