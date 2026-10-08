@@ -7,15 +7,16 @@
 //! change timing, displays the tuning region, clears a nonzero class flag,
 //! dispatches the class target's virtual slot +0x50, then starts frequency
 //! change timing with direction 2. Always returns handled (1).
-//! Deviations: none in the algorithm. Unported subsystem initialization and
-//! direction timing retain exact retail-address seams; the class clear seam
-//! is reused. Target-width pointer fields stay u32 on hosts. No null guards.
+//! Deviations: none in the algorithm. Unported subsystem initialization keeps
+//! its exact retail-address seam; direction timing calls the Rust port and
+//! the class clear seam is reused. Target-width pointer fields stay u32 on hosts.
 
 use super::tuning_timer::stop_frequency_change_and_start_tuning_timer;
 use super::tuning_status::show_tuning_region;
 use super::object_dispatch_entry::{object_dispatch_entry_dispatch_vtable_slot_50, ObjectDispatchSource};
 use crate::drivers::timer::timer_stop;
 use crate::ui::flag_2c::flag_2c_is_clear;
+use super::frequency_change_direction::start_frequency_change_direction;
 
 #[cfg(target_os = "none")]
 unsafe fn initialize_seek_subsystem() {
@@ -26,17 +27,6 @@ unsafe fn initialize_seek_subsystem() {
 #[cfg(not(target_os = "none"))]
 unsafe fn initialize_seek_subsystem() { panic!("retail seek subsystem unavailable on host"); }
 
-#[cfg(target_os = "none")]
-unsafe fn start_frequency_change_direction(controller: *mut u8, direction: u8) {
-    // Raw 0x0811a938..0x0811a96c stops/reprograms +0xb8 for 3000 ms,
-    // stores direction at +0xb4, and tail-branches to timer_restart.
-    let call: unsafe extern "C" fn(*mut u8, u8) = core::mem::transmute(0x0811_a938usize);
-    call(controller, direction);
-}
-#[cfg(not(target_os = "none"))]
-unsafe fn start_frequency_change_direction(_: *mut u8, _: u8) {
-    panic!("retail frequency-change direction timing unavailable on host");
-}
 
 #[inline(always)]
 unsafe fn pointer_at(controller: *const u8, offset: usize) -> *mut u8 {
@@ -94,9 +84,9 @@ pub unsafe extern "C" fn seek_down_with_timer(controller: *mut u8) -> u32 {
 /// when +0xb4 is zero, stop the +0xb0 timer, reset frequency-change timing,
 /// show the region, clear a nonzero class flag, dispatch virtual slot +0x4c,
 /// then start frequency-change timing with direction 1. Return handled (1).
-/// Deviations: no algorithm changes. Reuse the existing exact-address seams
-/// for unported initialization and direction timing and the class-clear seam.
-/// Target pointer fields remain four-byte words on hosts.
+/// Deviations: no algorithm changes. Reuse the exact-address seam for
+/// unported initialization and the class-clear seam; direction timing calls
+/// the Rust port. Target pointer fields remain four-byte words on hosts.
 ///
 /// # Safety
 /// Same controller/timer/display contracts as `seek_down_with_timer`;

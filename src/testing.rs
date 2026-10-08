@@ -1895,6 +1895,7 @@ pub mod hints {
     pub const CONTROLLER_TIMER_PAIR_CONSTRUCT: usize = 0x8d00_0000;
     pub const TUNING_TIMER_SEQUENCE: usize = 0xb800_0000;
     pub const SEEK_DOWN_WITH_TIMER: usize = 0x4328_0000;
+    pub const FREQUENCY_CHANGE_DIRECTION: usize = 0x4329_0000;
     // 0x9a00_0000: dedicated to cxx/string_object's case-folded
     // resource-construction fixture; it carries the provider-chain head as
     // a raw u32 word, and fixture mappings never unmap.

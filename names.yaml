@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811a938
+    ghidra: FUN_0811a938
+    name: start_frequency_change_direction
+    size: 52
+    sig: "void start_frequency_change_direction(u8 *controller, u8 direction)"
+    module: app/frequency_change_direction
+    status: ported
+    vars: {param_1/r4: controller, param_2/r5: direction, controller_plus_0xb4: pending_direction, controller_plus_0xb8: frequency_change_timer}
+    renames: {FUN_0812c6b0: timer_stop, FUN_0812c63c: timer_start_after, FUN_0812bf4c: timer_restart, DAT_0811a968: delay_ms_3000}
+    notes: >-
+      Raw A32 extent [0x0811a938,0x0811a96c) contains 48 code bytes
+      and the 3000-ms literal at 0x0811a968; the next function starts PUSH.
+      Full aligned raw-word scan finds two plain incoming BLs at 0x0811a9bc
+      and 0x0811abe4, zero predicated BLs. Body has two plain BLs,
+      zero predicated BLs and a tail B. Seek-up/down pass direction 1/2.
+      Stop +0xb8, reload it to program 3000 ms, write direction at +0xb4,
+      reload +0xb8 and restart. Ghidra incorrectly folds the tail callee.
+      Existing Rust timer ports are called directly; the obsolete retail
+      address seam in both seek handlers is removed. No null guard added.
+      Host pointer fields remain u32. Tests exercise real timer helpers,
+      callback replacement of both successive timer pointers, byte-store
+      timing, neighboring-byte preservation and directions 0/1/2/128/255.
+      All 14858 host tests pass and ARM release build succeeds.
+      match.py exits 1: 12 stock instructions versus 26 Rust instructions,
+      including literals. Reloads, delay and STRB ordering agree; LLVM
+      inlines restart into timer_stop, running-state store and TimerOps arm
+      tail BX. Relocations verify timer_stop and timer_start_after BL targets.
+      A non-test host rlib smoke build is blocked by six existing missing
+      helper definitions in prepare_entry_metadata, shared_payload_select_kind
+      and calendar_schedule; host behavioral coverage uses the test build.
   - address: 0x0811abf0
     ghidra: FUN_0811abf0
     name: show_view_layout_marker
