@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08126d80
+    ghidra: FUN_08126d80
+    name: calendar_advance_day
+    size: 44
+    sig: "void calendar_advance_day(u32 *view, u32 delta)"
+    module: ui/calendar_advance_day
+    status: ported
+    vars:
+      param_1/r4: view
+      param_2/r1: delta
+    renames:
+      FUN_0812805c: calendar_change_day
+      FUN_08127720: refresh_calendar_elements
+    notes: >-
+      Raw extent [0x08126d80,0x08126dac) is eleven ARM words before
+      the next independent PUSH. Whole-image aligned decoding verifies
+      two plain inbound BLs at 0x0822cda0 and 0x0822cee0 and zero
+      predicated inbound BLs. Body has one plain BL at 0x08126d94,
+      zero predicated BLs and a tail B at 0x08126da8 to 0x08127720.
+      Callers supply +1 and -1. Add delta modulo 2^32 to day +0x288,
+      call canonical Rust calendar_change_day, reload the possibly
+      reentrantly changed day, and refresh calendar elements with mode
+      zero. The unported refresh helper's raw PUSH saves r0/r1/r2;
+      it stores the saved day at +0x288 and mode zero builds calendar
+      elements through 0x08158b68, sets cache-valid byte +0xec and
+      emits notifications. No existing names entry exists for refresh.
+      Ghidra incorrectly merges the refresh body into this tiny wrapper.
+      Deliberate deviation: C ABI dispatch to verified retailOS refresh
+      address replaces the tail B; hosts require an injected backend.
+      All 14808 host tests and ARM release build pass. Tests cover forward
+      and backward wrap, high-bit arithmetic, zero-delta refresh and
+      reentrant selection. Instruction-level smoke executes stock and
+      linked Rust wrapper words for five cases with external change-day
+      modeled; outputs, restored stack and tail ABI agree. Refresh body
+      and hardware were not executed. Reviewed match.py diff (exit 1)
+      shows eleven stock versus fourteen Rust words: frame setup and
+      literal-address BX replace direct tail B; add, BL, day reload and
+      mode zero remain in order.
   - address: 0x081279a0
     ghidra: FUN_081279a0
     name: singleton_state_noop
