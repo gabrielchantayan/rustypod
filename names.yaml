@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081404b4
+    ghidra: FUN_081404b4
+    name: seconds_time_text
+    size: 80
+    sig: "const u8 *seconds_time_text(const u32 *seconds)"
+    module: time/seconds_time_text
+    status: ported
+    renames:
+      param_1/r0/r5: seconds
+      piVar1/r4: service
+      uStack_1c/sp+4: datetime
+      DAT_08140500: shared_time_text_buffer
+      FUN_08086df0: singleton_state_get
+      FUN_080964cc: unix_seconds_to_datetime
+      vtable+0x84: format
+    notes: >-
+      Raw extent is 80 bytes through 0x08140504: 76 executable bytes and
+      the shared-buffer literal 0x08ad2ce8 at 0x08140500. Next independent
+      function starts at 0x08140504. Two plain outbound BLs, zero predicated
+      BLs, one indirect BLX; two plain inbound BLs at 0x0829b678 and
+      0x0829b758, zero predicated inbound BLs, counted from raw A32 words.
+      Fetch the singleton service, convert unsigned Unix seconds, and call
+      vtable slot 33 with buffer, capacity 32, selector 17 and DateTime.
+      Ignore virtual return and return the shared buffer. Reuse existing
+      Rust callees; host native-pointer layouts and local buffer replace
+      target RAM. Scratch padding remains unspecified as in firmware;
+      incoming r1-r3 are not semantic arguments. Host boundary tests cover
+      unsigned second/minute/hour/day transitions, u32 maximum, shared
+      buffer replacement and both caller word selections. ARM release
+      build and all 14736 host tests pass. match.py reports structural
+      differences but preserves both direct calls and slot 33 dispatch.
+      Actual-source host smoke verifies day rollover and u32 maximum.
+      Corrected second-word caller and removed both formatter-address seams.
   - address: 0x08140514
     ghidra: FUN_08140514
     name: range_context_replace_secondary_owned
@@ -11463,18 +11496,14 @@ functions:
       outgoing BLs, zero predicated BLs; two plain inbound BLs at
       0x0812714c and 0x08127e34, zero predicated inbound BLs.
       Resolve four payload words, copy them, and format the final word
-      through 0x081404b4, returning its text pointer unchanged. Reuse
-      the ported resolver and paired copy. Deliberate deviation: keep
-      the unported time formatter as a verified firmware-address seam.
-      Ghidra's void return is wrong; raw code preserves formatter r0.
-      Host boundary tests use the actual resolver with absent selection.
-      Host suite and ARM release build pass. match.py exits 1 with
-      17 instructions versus 12: two direct calls and a formatter BLX
-      preserve composition and last-word selection; LLVM changes stack
-      placement, adds frame setup and reads the formatter dispatch.
-      No device execution performed.
-      Actual-source host smoke exercises the exported entry with final
-      word 0xffffffff and verifies its formatter's live text pointer.
+      through the ported seconds_time_text, returning its text pointer
+      unchanged. Reuse the ported resolver and paired copy. The obsolete
+      target-address formatter seam has been removed. Ghidra's void return
+      is wrong; raw code preserves formatter r0. Integrated host boundary
+      tests exercise the actual resolver, copy, Unix converter and formatter
+      entry with a host virtual renderer. Host suite and ARM release build
+      pass. Historical indirect-seam match report no longer describes this
+      cutover. No device execution performed.
   - address: 0x0829b804
     ghidra: FUN_0829b804
     name: object_word_payload_process
@@ -163616,37 +163645,28 @@ functions:
       The concrete object type is unrecovered, so the name preserves the
       verified field offset and predicate. Deliberate deviations: none.
 
-  # --- object payload operation dispatch ---
+  # --- second payload word time text ---
   - address: 0x0829b734
     ghidra: FUN_0829b734
     name: object_word_payload_dispatch
     size: 48
-    sig: "u32 object_word_payload_dispatch(u32 *object, u32 discarded_arg1, u32 operation_arg2, u32 operation_arg3)"
+    sig: "const u8 *object_word_payload_dispatch(u32 *object)"
     module: util/object_word_payload_dispatch
     status: ported
     renames:
       param_1/r0: object
-      r1: discarded_arg1
-      r2: operation_arg2
-      r3: operation_arg3
-      "object payload word 1": operation_key
+      sp+20: resolved
+      sp+4: copied
+      sp+8/r0: seconds
     notes: >-
-      Raw osos.dec establishes the exact 48-byte A32 extent from 0x0829b734
-      through 0x0829b760; the next separately linked function starts with
-      push {r4,r5,r6,r7,lr} at 0x0829b764. Whole-image aligned A32
-      branch-immediate decoding finds three inbound plain BL calls at
-      0x08127100, 0x081271f8, and 0x08127e20, with zero predicated inbound BL
-      forms. The body contains three unconditional direct BL instructions:
-      object_word_payload_resolve (0x0829b490), the four-word copy helper
-      (0x08158c94), and unported 0x081404b4. It resolves the object's
-      four-word payload into a stack record, copies it to a second stack
-      record, then passes payload word 1 as the operation key and the first
-      record's address in r1 to 0x081404b4; incoming r2/r3 pass through,
-      while incoming r1 is overwritten. The dispatcher has no recovered
-      semantic identity and remains a target-address host-test seam. Rust's
-      aligned [u32; 4] local replaces the two overlapping stack records
-      without changing their observable contents; no target semantic
-      deviations.
+      Raw extent 0x0829b734..0x0829b764 is 48 bytes. Three plain outgoing
+      BLs and zero predicated BLs. Resolve at sp+20, copy at sp+4, then
+      pass sp+8, the second copied word's address, to seconds_time_text.
+      The earlier operation-key interpretation and r1-r3 signature were
+      incorrect. Reuse the resolver, paired copy and formatter ports;
+      remove the obsolete host echo tests and unported dispatch seams.
+      Integrated tests exercise the real wrapper with absent selection.
+      Host suite and ARM release build pass. No device execution performed.
   - address: 0x0829ae4c
     ghidra: FUN_0829ae4c
     name: object_record_at
@@ -195702,37 +195722,6 @@ functions:
       The concrete object type is unrecovered, so the name preserves the
       verified field offset and predicate. Deliberate deviations: none.
 
-  # --- object payload operation dispatch ---
-  - address: 0x0829b734
-    ghidra: FUN_0829b734
-    name: object_word_payload_dispatch
-    size: 48
-    sig: "u32 object_word_payload_dispatch(u32 *object, u32 discarded_arg1, u32 operation_arg2, u32 operation_arg3)"
-    module: util/object_word_payload_dispatch
-    status: ported
-    renames:
-      param_1/r0: object
-      r1: discarded_arg1
-      r2: operation_arg2
-      r3: operation_arg3
-      "object payload word 1": operation_key
-    notes: >-
-      Raw osos.dec establishes the exact 48-byte A32 extent from 0x0829b734
-      through 0x0829b760; the next separately linked function starts with
-      push {r4,r5,r6,r7,lr} at 0x0829b764. Whole-image aligned A32
-      branch-immediate decoding finds three inbound plain BL calls at
-      0x08127100, 0x081271f8, and 0x08127e20, with zero predicated inbound BL
-      forms. The body contains three unconditional direct BL instructions:
-      object_word_payload_resolve (0x0829b490), the four-word copy helper
-      (0x08158c94), and unported 0x081404b4. It resolves the object's
-      four-word payload into a stack record, copies it to a second stack
-      record, then passes payload word 1 as the operation key and the first
-      record's address in r1 to 0x081404b4; incoming r2/r3 pass through,
-      while incoming r1 is overwritten. The dispatcher has no recovered
-      semantic identity and remains a target-address host-test seam. Rust's
-      aligned [u32; 4] local replaces the two overlapping stack records
-      without changing their observable contents; no target semantic
-      deviations.
   - address: 0x0829ae4c
     ghidra: FUN_0829ae4c
     name: object_record_at
