@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810cb34
+    ghidra: FUN_0810cb34
+    name: view_stop_slideshow_and_dispatch
+    size: 44
+    sig: "u32 view_stop_slideshow_and_dispatch(void *view)"
+    module: app/view_stop_slideshow_and_dispatch
+    status: ported
+    renames:
+      param_1/r4: view
+      "view+0x13c": slideshow_state
+      "vtable+0x158": unresolved_view_dispatch
+    notes: >-
+      Raw A32 words establish 0x0810cb34..0x0810cb5f, followed by the
+      next function's push at 0x0810cb60. Binary-wide decoding finds two
+      inbound plain BL sites at 0x08156454 and 0x081997d4, zero predicated
+      BL sites. The body has one plain BL to slideshow_interval_set at
+      0x081ccaf4, zero predicated BL, and one indirect BLX through vtable
+      slot +0x158. Sets the associated state's interval to zero, then
+      reloads the view vtable, dispatches the unresolved virtual method,
+      ignores its result and returns one. No invented callee seam.
+      Host vtables use native-width pointers at target word indices;
+      other object fields remain u32. Host tests exercise running and
+      stopped timers, ordering, vtable replacement during notification,
+      preserved timer period and ignored virtual return. ARM match shows
+      the same call/load/dispatch/return sequence with an extra frame-pointer
+      setup and wider save set; R_ARM_CALL resolves to slideshow_interval_set.
   - address: 0x0810d768
     ghidra: FUN_0810d768
     name: view_dispatch_and_arm_unless_inhibited
