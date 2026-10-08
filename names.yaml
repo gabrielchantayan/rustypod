@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08117d50
+    ghidra: FUN_08117d50
+    name: error_text_append_bounded
+    size: 172
+    sig: "void error_text_append_bounded(const StringObject *input)"
+    module: app/error_text_append_bounded
+    status: ported
+    renames:
+      param_1/r6: input
+      DAT_08117dc0/r5: error_accumulation_state
+      DAT_08117dc4: error_text
+      r4: accumulated_length_including_nul
+      FUN_08275e20: strlen_safe_plus1
+      FUN_081197dc: error_text_append_power_controller
+      FUN_082a50b0: string_object_c_str
+      FUN_08276a18: string_object_insert_cstr
+    notes: >-
+      Raw extent [0x08117d50,0x08117dfc): 112 code bytes, eight literal
+      bytes and 52 padded message bytes; next real function starts PUSH.
+      Independent aligned A32 scan verifies two incoming plain BLs at
+      0x081180d0 and 0x08119574, zero predicated incoming BLs, five outgoing
+      plain BLs, zero predicated outgoing BLs, and a final tail B to insert.
+      Ghidra incorrectly inlines the insertion implementation. State byte
+      0x089cffb2 suppresses subsequent input access. Sum NULL-safe inclusive
+      lengths of error_text at 0x089d0020 and input using wrapping u32;
+      below 4096 append PowerCntlr then input. At or above 4096 set the
+      suppression byte before either append and replace input with the
+      exact message Too many errors, further errors discarded. (13) plus
+      newline. Allocation failure does not undo the suppression latch.
+      All callees are existing canonical Rust ports, with no new callee seam.
+      Host deviation injects the state pointer and reuses ERROR_TEXT, with
+      native-width StringObject fields and identical static message bytes.
+      All 14861 host tests passed; ARM release build passed. Standalone
+      executable linked against the test-configured real library verifies
+      repeated append, threshold suppression and latched NULL-input return.
+      Non-test host library smoke is blocked by six existing missing helpers;
+      test-configured linkage supplies existing parking_lot with panic=abort.
+      match.py exits 1: 28 original versus 48 Rust instructions including
+      literals. LLVM inlines both inclusive length loops and uses a right
+      shift for the unsigned 4096 comparison. Byte latch, ordered label and
+      source selection, INT_MAX and insertion tail branch remain intact.
+      The adjusted state literal 0x089cffb2 and +110 destination calculation
+      resolve to the original globals; archive zero BLs are relocations.
   - address: 0x0811a938
     ghidra: FUN_0811a938
     name: start_frequency_change_direction
