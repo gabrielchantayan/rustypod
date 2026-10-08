@@ -232391,3 +232391,34 @@ functions:
       Host suite and ARM release build pass. match.py exits 1: two retail
       instructions versus four Rust instructions, with the identical LDRB
       plus frame-pointer push/mov/pop replacing BX LR.
+  - address: 0x08115324
+    ghidra: FUN_08115324
+    name: context_owned_interface_query
+    size: 16
+    sig: "u32 context_owned_interface_query(OwnedInterfaceQueryContext *context)"
+    module: app/context_owned_interface_query
+    status: ported
+    renames:
+      param_1/r0: context
+      r0/loaded: interface
+      r1: query_method
+    notes: >-
+      Raw A32 words e5900430 e5901000 e59110bc e12fff11 establish the
+      true extent [0x08115324,0x08115334); the next function begins PUSH.
+      Independent whole-image aligned scan verifies two plain incoming BLs
+      at 0x0819e260 and 0x082a1abc, zero predicated incoming BLs, zero
+      outgoing plain or predicated BLs and no BLX. Load the interface from
+      context +0x430 and tail-dispatch its vtable slot +0xbc with that
+      interface as receiver. Preserve the full word result; both callers
+      compare it with zero, and 0x082a1ab0 separately normalizes it.
+      Ghidra's void signature is incorrect. Concrete virtual identity and
+      more specific query semantics remain unknown; no callee identity or
+      fixed-address seam is invented. Host repr(C) pointers widen while
+      preserving field and vtable word indices. No target behavioral
+      deviations. Host regression checks zero, one, high-bit and all-ones
+      results, receiver replacement, callback mutations and untouched
+      context storage. Full host suite and ARM release build passed.
+      Direct-entry smoke observed wrapping result zero followed by one,
+      receiver mutation and untouched context storage. match.py exits 1:
+      four original versus seven Rust instructions; identical three LDRs
+      and final BX, with added frame-pointer PUSH/MOV/POP. No device run.
