@@ -16,6 +16,57 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08116dd8
+    ghidra: FUN_08116dd8
+    name: class6000_context_refresh
+    size: 92
+    sig: "void class6000_context_refresh(void *context)"
+    module: app/class6000_context_refresh
+    status: ported
+    renames:
+      param_1/r5: context
+      r4: store
+      FUN_08172124: instance_of_class_6000
+      FUN_08172c6c: refresh_store_cached_properties
+      FUN_08172700: read_class6000_property_604e_raw
+      FUN_08112fd8: apply_context_property_604e
+      FUN_08160254: rtc_binding_refresh
+      FUN_08172a0c: class6000_property_60ac_is_602e
+      FUN_08171a80: class6000_property_6045_i8
+      FUN_081114ec: apply_context_signed_property_6045
+    notes: >-
+      Raw extent [0x08116dd8,0x08116e34) is 92 instruction bytes,
+      not Ghidra 172. Next function loads receiver +0x888 and tail-dispatches
+      slot +0xec. Whole-image aligned A32 scan verifies two incoming plain
+      BLs at 0x08112f88 and 0x08115d28, zero predicated incoming BLs,
+      seven outgoing plain BLs, zero predicated outgoing BLs and final B
+      to 0x081114ec. Ghidra folds that helper and its tail target 0x08116cac
+      into this function. Return without accessing context when singleton
+      class-0x6000 is NULL. Otherwise refresh cached store properties via
+      0x08172c6c, read raw property 0x604e via slot +0xe0 with class 0x6000
+      and kind 0x55693332, apply via 0x08112fd8 (store +0x47c, refresh
+      child +0x430 slot +0x68, notify), reload RTC pointer at +0x88c and
+      call existing rtc_binding_refresh. Write existing property-0x60ac
+      predicate to byte +0x460, read signed property 0x6045 using its
+      existing port, and call stock helper 0x081114ec. That helper stores
+      (signed_value + 2) * 3 at +0x6fc then republishes via 0x08116cac,
+      including a second singleton lookup. Do not reuse the first singleton.
+      Four unported dependencies remain verified stock-address calls;
+      their labels describe observed operations, not invented class names.
+      Host deviations are native-width pointers at fixed offsets and an
+      injectable operation table. No target behavioral deviations.
+      All 14863 host tests passed; ARM release build passed. Tests cover
+      signed-byte boundaries, both predicate values, full-width property
+      replacement, post-setter RTC pointer reload, ordered byte publication,
+      untouched neighbors and absent-store preservation. Standalone public
+      entry smoke observes absent singleton preservation and present
+      singleton property 0x80000001, flag 1, signed -128 and RTC mutation
+      77. No device execution. match.py exits 1 with 43 original versus
+      33 Rust instructions: default extent includes neighboring functions.
+      Reviewed against raw 92-byte extent: lookup guard, ordered calls,
+      RTC load, STRB and final tail dispatch remain. LLVM emits literal
+      BLX for three stock seams and BX for the final seam; direct Rust
+      BLs are unresolved archive relocations, not recursive calls.
   - address: 0x08117d50
     ghidra: FUN_08117d50
     name: error_text_append_bounded
