@@ -553,6 +553,25 @@ pub unsafe extern "C" fn ata_cmd_set_sector_count(cmd: *mut u8, count: u8) {
     set_byte(cmd, SECTOR_COUNT, count);
 }
 
+/// ata_cmd_get_sector_count — original: `FUN_08121334` @ 0x08121334
+/// (8 bytes, ending at the next setter @ 0x0812133c).
+///
+/// Reads the unsigned legacy-taskfile sector-count byte at +0x15:
+/// `ldrb r0, [r0, #0x15]; bx lr`. Raw ARM decoding verifies two plain
+/// BL sites (0x08166368, 0x08283a34), zero predicated BL sites, and a
+/// `bne` tail call at 0x08283a44. Returns all eight bits unchanged,
+/// including zero; the caller at 0x08283a28 maps zero to 0x100 itself.
+/// No NULL guard or deliberate semantic deviations. Volatile access
+/// preserves the single byte load, following the sibling getters.
+///
+/// # Safety
+/// `cmd` must permit reading the byte at +0x15.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_sector_count(cmd: *const u8) -> u8 {
+    cmd.add(SECTOR_COUNT).read_volatile()
+}
+
 /// ata_cmd_set_lba_mid — original: `FUN_0812140c` @ 0x0812140c (8 bytes;
 /// **4 direct `bl` call sites, all unconditional; no predicated `bl`
 /// forms**, verified by decoding the ARM branch words in `osos.dec`).
@@ -1563,6 +1582,22 @@ mod tests {
             let before = block;
             assert_eq!(unsafe { ata_cmd_get_device_head(block.0.as_ptr()) }, device_head);
             assert_eq!(block, before);
+        }
+    }
+
+    #[test]
+    fn sector_count_getter_preserves_zero_and_unsigned_bytes_at_every_alignment() {
+        for alignment in 0..4 {
+            let mut bytes = [0xa5u8; 0x16 + 3];
+            for count in 0..=u8::MAX {
+                bytes[alignment + 0x15] = count;
+                let before = bytes;
+                assert_eq!(
+                    unsafe { ata_cmd_get_sector_count(bytes.as_ptr().add(alignment)) } as u32,
+                    count as u32
+                );
+                assert_eq!(bytes, before);
+            }
         }
     }
 

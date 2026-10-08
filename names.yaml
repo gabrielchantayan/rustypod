@@ -47317,6 +47317,30 @@ functions:
       the LBA28 flows also cap the count at 0x100 (0x082798e4).
       #[inline(never)].
 
+  - address: 0x08121334
+    ghidra: FUN_08121334
+    name: ata_cmd_get_sector_count
+    size: 8
+    sig: "u8 ata_cmd_get_sector_count(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Raw words e5d00015 e12fff1e decode as ldrb r0, [r0, #0x15];
+      bx lr. The next real function is the word setter at 0x0812133c,
+      establishing the complete 8-byte extent. Full-image ARM BL decoding
+      finds two plain calls at 0x08166368 and 0x08283a34, zero predicated
+      BL calls; 0x08283a44 additionally tail-calls via bne.
+      Reads the legacy taskfile sector-count byte written by
+      ata_cmd_set_sector_count, without converting zero to 256.
+      The wrapper at 0x08283a28 performs that conversion itself; the other
+      caller passes the unsigned count to vtable slot +0xa4. No NULL
+      guard or deliberate semantic deviations. Volatile byte access and
+      inline(never) follow the existing getter convention. Host tests cover
+      every byte value at four alignments and unchanged surrounding bytes.
+      match.py preserves the single ldrb at +0x15; LLVM adds a frame
+      prologue and pop return in place of bx lr.
+
   - address: 0x0812133c
     ghidra: FUN_0812133c
     name: ata_cmd_set_opaque_word_3c
