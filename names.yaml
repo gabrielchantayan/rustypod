@@ -228703,3 +228703,39 @@ functions:
       subsequent zero store, and final tail branch. Relocations resolve
       the BLNE to the resident removal wrapper and the B to
       ui_element_invalidate; the wrapper's literal is exactly 0x0828cc00.
+
+  - address: 0x08144cf8
+    ghidra: FUN_08144cf8
+    name: ui_three_item_centered_index
+    size: 100
+    sig: "u32 ui_three_item_centered_index(const void *owner)"
+    module: ui/three_item_centered_index
+    status: ported
+    renames:
+      param_1/r0: owner
+      cVar1/r2: selected_slot
+      r1: owner_base
+      owner+0xa4: selected_slot
+      owner+0x50: slot_one_horizontal
+      owner+0x54: slot_two_horizontal
+      owner+0x58: slot_three_horizontal
+    notes: >-
+      Raw osos.dec words establish extent 0x08144cf8..0x08144d5c,
+      100 bytes ending in bx lr before the next independent push.
+      Whole-image ARM BL decoding verifies two unconditional inbound calls
+      at 0x08145600 and 0x08145fec, zero predicated inbound calls, and
+      zero outgoing BLs of either kind. The carousel update caller moves
+      three horizontal coordinates around 160; return the selected slot
+      1 through 3 only when its horizontal coordinate is exactly 160.
+      Invalid selectors and other coordinates return zero. No callee seam,
+      pointer-width reinterpretation, writes, or behavioral deviations.
+      Rust consolidates the three paths into a selector guard and indexed
+      aligned u32 read at owner+0x4c+selector*4. Host tests exercise every
+      invalid byte selector, exact and adjacent centers, signed extrema,
+      nonselected centered slots, and unchanged owner state. All 14710
+      host tests pass; ARM release build succeeds. Standalone public API
+      smoke passes 1536 selector/coordinate combinations. match.py exits
+      1 with a reviewed structural diff: 25 original versus 14 Rust
+      instructions, an added frame-pointer prologue, a combined unsigned
+      selector guard, one indexed load, comparison with 160, and conditional
+      zero result. No device execution claimed.
