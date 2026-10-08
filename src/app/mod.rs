@@ -1165,6 +1165,7 @@ pub mod state_status_dispatch;
 pub mod event_subscription_rtc_sync;
 pub mod status_value_set;
 pub mod app_command_63800021_dispatch;
+pub mod app_dispatch_if_global_flag;
 pub mod message_selector_read;
 pub mod control_profile_mode_apply;
 pub mod retail_control_profile_apply;
