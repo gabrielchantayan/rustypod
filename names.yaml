@@ -230636,3 +230636,40 @@ functions:
       selection preservation. ARM release builds. match.py exits 1: 36 stock
       versus 51 Rust instructions; LLVM splits empty traversal, duplicates
       clear dispatch and removes dead cursor invalidation. No device run.
+
+  - address: 0x08128948
+    ghidra: FUN_08128948
+    name: input_sequence_item_reset_geometry
+    size: 128
+    sig: "void input_sequence_item_reset_geometry(u32 *item)"
+    module: app/input_sequence_item_reset_geometry
+    status: ported
+    renames:
+      param_1/r4: item
+      r0/r1: owner
+      r3: signed_index
+      r5: zero
+      FUN_0812b080: prid_checked_word_c0
+    notes: >-
+      Raw A32 extent [0x08128948,0x081289c8) is 128 bytes, ending in POP
+      before the next independent PUSH. Whole-image aligned raw BL decoding
+      finds one inbound plain BL at 0x0812a0fc and one BLNE at 0x081294a4;
+      body has one plain BL at 0x081289a0 to the existing checked-base port
+      and zero predicated BLs. Constructor and collection-refresh callers
+      reset item geometry. Clear +0x14/+0x18; store owner+0xc4 times 32 plus
+      twice owner+0xcc at +0x20, owner+0xc8 plus twice owner+0xcc at +0x1c,
+      and owner+0xbc minus owner+0xcc at +0x24. Only with owner byte +0xda
+      clear, store checked owner+0xc0 plus owner+0xc8 times signed item byte
+      +0x10 minus owner+0xcc at +0x28 and clear +0x2c. Nonzero gates preserve
+      both final words. Arithmetic wraps; target pointer fields are u32.
+      Reuses prid_checked_word_c0 without new seams or gated singleton access.
+      Omits scratch-register effects. Host tests cover signed-byte boundaries,
+      wrapping scale/add/subtract/multiply, nonboolean gates and preservation
+      of all unrelated item words. All 14797 host tests pass; ARM release
+      builds. Executable host smoke verifies signed -1 geometry and gate 255
+      preservation using the actual port and checked-base implementation.
+      The crate's unrelated non-test host build has six missing cfg-gated
+      helpers, so smoke linked a temporary rlib built with existing test seams.
+      match.py reports 32 stock versus 33 Rust instructions: extra frame setup,
+      register/load scheduling and the final zero-store order differ; geometry,
+      signed multiply-accumulate, gate and real checked-base BL agree.
