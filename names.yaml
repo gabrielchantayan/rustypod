@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081139c8
+    ghidra: FUN_081139c8
+    name: input_state_status_byte
+    size: 28
+    sig: "u8 input_state_status_byte(void)"
+    module: app/input_state_status_byte
+    status: ported
+    renames:
+      iVar1: input_state_buffer
+      uVar2: status_byte
+    notes: >-
+      Raw words e92d4010 e3a04000 eb0224c5 e3500000 15d04073
+      e1a00004 e8bd8010 establish the true 28-byte extent ending at
+      the independent byte-field setter at 0x081139e4. Whole-image
+      aligned A32 BL decoding finds two inbound plain calls at
+      0x08101504 and 0x081018e0, zero predicated calls, and one outbound
+      plain BL to the already-ported input_state_buffer_get at
+      0x0819ccec. Return zero for null, otherwise the unsigned byte
+      at buffer +0x73 without boolean normalization. Callers branch on
+      zero/nonzero; a stronger flag identity remains unestablished.
+      No new callee seams or behavioral deviations. Host tests cover
+      null, all 256 byte values, alignments, unchanged neighbors, and
+      live reads through the real fixed-address getter. All 14875 host
+      tests pass; ARM release build passes. Executable host smoke maps
+      the firmware page and observes 0, 1, 128, 255, 0. match.py exits 1:
+      LLVM propagates the getter's constant and removes its BL and
+      unreachable null arm, loading a literal 0x08a779bf and performing
+      one unsigned byte read. Intentional constant folding preserves
+      the actual getter contract; frame setup differs. No device run.
   - address: 0x081143b4
     ghidra: FUN_081143b4
     name: stage_progress_reset_and_select
