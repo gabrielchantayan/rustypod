@@ -17563,6 +17563,37 @@ functions:
       when that index changes. Rust uses an ordinary final call instead of
       the ARM tail dispatch and target-width host seams for the ported
       resource-count helper and virtual function pointer.
+  - address: 0x0812fb64
+    ghidra: FUN_0812fb64
+    name: collection_refresh_needed
+    size: 140
+    sig: "u32 collection_refresh_needed(u8 *owner, u32 mode)"
+    module: app/collection_refresh_needed
+    status: ported
+    renames:
+      param_1/r4: owner
+      param_2/r5: mode
+      uStack_1c: demo_datetime
+      local_20: eligible_count
+      DAT_0812fbec: date_gate_override_byte (0x089caf80)
+      "owner+0x3b": cached_day
+      "owner+0x30": comparison_count_a
+      "owner+0x34": comparison_count_b
+      FUN_08284e4c: demo_mode_datetime
+      FUN_08130090: collection_count_eligible_entries
+    notes: >-
+      Raw extent is 140 bytes, 0x0812fb64..0x0812fbf0, including the
+      literal at 0x0812fbec; the next function pushes at 0x0812fbf0.
+      Two plain incoming BLs at 0x081a6c10 and 0x081ca2cc, zero predicated
+      incoming BLs; two plain outgoing BLs and zero predicated outgoing BLs.
+      Always fetches demo datetime. A zero global override and nonzero cached
+      day matching the demo day return zero without traversal. Otherwise
+      counts eligible entries and returns one for unequal owner counts, or
+      for mode zero with a nonzero eligible count. Counts are read after
+      traversal. The override global's broader identity is not established.
+      Both callees use existing Rust ports directly. Rust initializes the
+      datetime local, overwritten by its callee; host-only operation fixtures
+      replace the callees and global without target seams.
   - address: 0x08130090
     ghidra: FUN_08130090
     name: collection_count_eligible_entries
