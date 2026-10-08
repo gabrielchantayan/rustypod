@@ -54200,6 +54200,50 @@ functions:
       fixture verifies the complete parent-to-helper path, including the
       final armed state and 4000 ms delay.
 
+  - address: 0x0811a96c
+    ghidra: FUN_0811a96c
+    name: seek_up_with_timer
+    size: 92
+    sig: "u32 seek_up_with_timer(u8 *controller)"
+    module: app/seek_down_with_timer
+    status: ported
+    renames:
+      param_1/r0/r4: controller
+      param_1_plus_0xb0: tuning timer
+      param_1_plus_0xb4: pending direction
+      param_1_plus_0xbc: tuning class
+      FUN_0803c264: initialize_seek_subsystem (unresolved identity; existing retail seam)
+      FUN_0812c6b0: timer_stop
+      FUN_0811a890: stop_frequency_change_and_start_tuning_timer
+      FUN_0811aa6c: show_tuning_region
+      FUN_0811c564: flag_2c_is_clear
+      FUN_0811bd70: class-clear operation (existing class flag dispatch seam)
+      FUN_0811c178: object_dispatch_entry_dispatch
+      FUN_0811a938: start_frequency_change_direction (existing retail seam)
+    notes: >-
+      Raw A32 words establish [0x0811a96c,0x0811a9c8), ending in
+      pop {r4,pc}; the next real function starts with push {r4,lr}.
+      Six plain and two EQ-predicated outbound BLs. Independent full-image
+      word scan finds one BLNE caller at 0x0811a5d8 and one plain BL caller
+      at 0x0811adb8. The event caller identifies SeekUpWithTimer; the other
+      caller repeats pending direction 1. Initialize only if +0xb4 is zero,
+      stop +0xb0, prepare frequency timing, show the region, clear the class
+      when +0x2c is nonzero, dispatch its target slot +0x4c, then start
+      direction 1 and return 1. Ghidra's extra caller argument is unused.
+      No algorithm deviations or new seams: reuse seek-down's shared
+      control flow and existing retail initialization, direction-timing,
+      and class-clear seams; call all ported callees directly. The up path
+      uses +0x4c, not the down path's +0x50. Host tests cover all class flag
+      values, pending-direction boundaries, both directions, callback order,
+      and pointer reloads after initialization and class clearing.
+      ARM release comparison reports 23 original instructions versus 32
+      Rust listing rows including three literals. LLVM inlines the flag
+      predicate and uses branches/BLX for conditional retail seams.
+      R_ARM_CALL relocations verify timer_stop, frequency preparation,
+      region display, and the +0x4c dispatcher; direction 1 and handled 1
+      remain explicit. Standalone host smoke observes stopped timer, cleared
+      class flag, dispatched class state, and pending direction 1.
+
   - address: 0x0811aa6c
     ghidra: FUN_0811aa6c
     name: show_tuning_region

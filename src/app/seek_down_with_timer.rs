@@ -44,8 +44,9 @@ unsafe fn pointer_at(controller: *const u8, offset: usize) -> *mut u8 {
 }
 
 #[inline(always)]
-unsafe fn seek_down(
+unsafe fn seek_with_timer(
     controller: *mut u8,
+    direction: u8,
     mut initialize: impl FnMut(),
     mut stop: impl FnMut(*mut u8),
     mut prepare: impl FnMut(*mut u8),
@@ -62,7 +63,7 @@ unsafe fn seek_down(
         clear(pointer_at(controller, 0xbc));
     }
     dispatch(pointer_at(controller, 0xbc));
-    start(controller, 2);
+    start(controller, direction);
     1
 }
 
@@ -72,7 +73,7 @@ unsafe fn seek_down(
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn seek_down_with_timer(controller: *mut u8) -> u32 {
-    seek_down(controller,
+    seek_with_timer(controller, 2,
         || initialize_seek_subsystem(),
         |timer| timer_stop(timer),
         |owner| stop_frequency_change_and_start_tuning_timer(owner),
@@ -83,6 +84,39 @@ pub unsafe extern "C" fn seek_down_with_timer(controller: *mut u8) -> u32 {
             clear(class);
         },
         |class| object_dispatch_entry_dispatch_vtable_slot_50(class.cast::<ObjectDispatchSource>()),
+        |owner, direction| start_frequency_change_direction(owner, direction))
+}
+
+/// `seek_up_with_timer` — FUN_0811a96c @ 0x0811a96c, 92 bytes.
+/// Raw extent [0x0811a96c, 0x0811a9c8): six plain and two EQ-predicated
+/// outbound BLs; inbound calls are one BLNE and one plain BL. The next
+/// function begins with push {r4,lr}. Initialize the seek subsystem only
+/// when +0xb4 is zero, stop the +0xb0 timer, reset frequency-change timing,
+/// show the region, clear a nonzero class flag, dispatch virtual slot +0x4c,
+/// then start frequency-change timing with direction 1. Return handled (1).
+/// Deviations: no algorithm changes. Reuse the existing exact-address seams
+/// for unported initialization and direction timing and the class-clear seam.
+/// Target pointer fields remain four-byte words on hosts.
+///
+/// # Safety
+/// Same controller/timer/display contracts as `seek_down_with_timer`;
+/// the class must also satisfy `object_dispatch_entry_dispatch`'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn seek_up_with_timer(controller: *mut u8) -> u32 {
+    seek_with_timer(controller, 1,
+        || initialize_seek_subsystem(),
+        |timer| timer_stop(timer),
+        |owner| stop_frequency_change_and_start_tuning_timer(owner),
+        |owner| show_tuning_region(owner),
+        |class| {
+            let clear = core::ptr::read_volatile(core::ptr::addr_of!(
+                super::class_6280_flag_dispatch::CLASS_6280_FLAG_DISPATCH_OPS.clear));
+            clear(class);
+        },
+        |class| {
+            super::object_dispatch_entry::object_dispatch_entry_dispatch(class.cast::<ObjectDispatchSource>());
+        },
         |owner, direction| start_frequency_change_direction(owner, direction))
 }
 
@@ -104,6 +138,7 @@ mod tests {
             let class = base.add(0x200);
             let replacement = base.add(0x300);
             for pending in [0u8, 1, 2, 255] {
+              for direction in [1u8, 2] {
                 for flag in 0u8..=255 {
                     core::ptr::write_bytes(base, 0, 0x1000);
                     owner.add(0xb0).cast::<u32>().write(base.add(0x400) as usize as u32);
@@ -113,7 +148,7 @@ mod tests {
                     let stage = Cell::new(0);
                     let initialized = Cell::new(false);
                     let cleared = Cell::new(false);
-                    let result = seek_down(owner,
+                    let result = seek_with_timer(owner, direction,
                         || {
                             assert_eq!(stage.get(), 0);
                             initialized.set(true);
@@ -153,11 +188,12 @@ mod tests {
                     assert_eq!(initialized.get(), pending == 0);
                     assert_eq!(cleared.get(), flag != 0);
                     assert_eq!(class.add(0x2c).read(), 0);
-                    assert_eq!(owner.add(0xb4).read(), 2);
+                    assert_eq!(owner.add(0xb4).read(), direction);
                     assert_eq!(stage.get(), 5);
                     let selected = if flag == 0 { class } else { replacement };
                     assert_eq!(selected.add(0x30).cast::<u32>().read(), 0x50);
                 }
+              }
             }
         }
     }
