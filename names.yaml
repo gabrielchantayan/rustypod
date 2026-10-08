@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810f548
+    ghidra: FUN_0810f548
+    name: owner_object_get_or_create
+    size: 164
+    sig: "void *owner_object_get_or_create(void *owner)"
+    module: app/owner_object_get_or_create
+    status: ported
+    vars:
+      param_1/r6: owner
+      piVar1/r5: collection
+      iVar6/r7: count_snapshot
+      iVar5/r4: index
+      local_18: record
+    renames:
+      FUN_0810ed8c: resident_owner_object_collection
+      FUN_082aadd4: operator_new
+      FUN_0810f9f0: object_dispatch_entry_construct
+      vtable_slot_40: record_at_index
+      vtable_slot_1c: append_record_by_reference
+    notes: >-
+      Raw A32 extent [0x0810f548,0x0810f5ec), 164 bytes, next PUSH
+      starts a separate function. Four plain outbound BLs, zero predicated
+      BLs; one BLX and one BLXNE. Two inbound plain BLs at 0x0812e6b4
+      and 0x08290324, zero predicated inbound BLs. Snapshot signed count,
+      return first owner match; otherwise allocate 8-byte record and
+      36-byte dispatch entry. Append by reference only for non-NULL
+      constructor result, reload record before returning object. No added
+      cleanup or NULL-object allocation guard. Reuses existing allocator
+      and constructor ports. Native repr(C) host pointers widen; target
+      fields stay four bytes apart. Host boundary tests, ARM release and
+      executable miss-then-hit smoke pass. match.py exits 1: 41 versus 50
+      instructions, preserving signed guard, slots, allocations and reload.
   - address: 0x0810f92c
     ghidra: FUN_0810f92c
     name: entry_cleanup_unless_type_3
