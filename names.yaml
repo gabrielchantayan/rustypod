@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810c9bc
+    ghidra: FUN_0810c9bc
+    name: view_handle_pause
+    size: 32
+    sig: "u32 view_handle_pause(PauseView *view, u32 event)"
+    module: app/view_handle_pause
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: event
+      "view+0x13c": associated_state
+      "state+0x8e0": pause_gate
+      "vtable+0x13c": handle_play_pause
+    notes: >-
+      Raw words prove extent [0x0810c9bc,0x0810c9dc), followed by
+      the next function's PUSH. Image-wide aligned A32 scan finds zero
+      plain incoming BLs and two BLNEs at 0x08156fe8 and 0x0819a518.
+      No outbound immediate BL (plain or predicated); one conditional
+      tail BX through virtual slot +0x13c. HandlePause callers supply
+      the unchanged event in r1 and ignore the return. Nonzero byte at
+      associated state +0x8e0 returns one without accessing the vtable;
+      zero dispatches with original self/event and preserves the full
+      virtual return. Concrete virtual callee and deeper byte meaning
+      remain unresolved; no invented address seam. Native repr(C)
+      pointers widen on hosts while ARM offsets remain exact. Host tests
+      cover every nonzero byte and zero dispatch with full-width events.
+      ARM match retains the loads and tail BX, adding frame save/restore.
   - address: 0x0810cb34
     ghidra: FUN_0810cb34
     name: view_stop_slideshow_and_dispatch
