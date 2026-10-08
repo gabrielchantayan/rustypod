@@ -231638,3 +231638,25 @@ functions:
       0xff00 at +0x54 with all adjacent halfwords unchanged. match.py
       confirms strh r1,[r0,#84]; LLVM adds a frame-pointer push/mov/pop
       instead of the original bx lr.
+
+  - address: 0x081211a4
+    ghidra: FUN_081211a4
+    name: empty_object_init
+    size: 4
+    sig: "u32 empty_object_init(u32 this)"
+    module: runtime/empty_object_init
+    status: ported
+    vars: {param_1: this}
+    notes: >-
+      Raw word e12fff1e is bx lr; the next independent function at
+      0x081211a8 is the paired empty object destructor. Whole-image A32
+      decoding finds two plain incoming BL instructions at 0x081672f0
+      and 0x0818db84, zero predicated BL instructions, no outgoing calls,
+      and no address-word references. Both callers pass a four-byte stack
+      slot before parser work and later invoke the paired destructor.
+      No initialization stores, memory reads, validation, or resource work;
+      r0 passes through unchanged. The ARM implementation uses naked bx lr
+      to retain the full register-preservation behavior; the host version
+      explicitly returns the incoming pointer word. Tests and a standalone
+      host smoke cover NULL, aligned, unaligned, unmapped, and maximum
+      target pointer words without requiring readable object storage.
