@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081292cc
+    ghidra: FUN_081292cc
+    name: input_sequence_item_release
+    size: 60
+    sig: "void input_sequence_item_release(u32 *item)"
+    module: app/input_sequence_item_release
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      r5: next_node
+      uStack_10: counter_usec
+      FUN_082aad24: operator_delete
+      FUN_08086e24: read_usec_timer_into
+      FUN_0826c5d0: usec_to_millis
+    notes: >-
+      Raw extent is [0x081292cc,0x08129308), fifteen A32 words ending
+      in pop before the next independent push. Whole-image aligned raw
+      BL decoding finds two inbound plain calls at 0x0839bec8 and
+      0x0839bf20, zero predicated inbound calls. Outgoing calls are BLNE
+      at 0x081292dc to operator_delete and plain BLs at 0x081292f4 to
+      read_usec_timer_into and 0x081292fc to usec_to_millis. Ghidra's
+      noreturn delete assumption incorrectly truncates the chain loop.
+      Save node+4 before deleting the non-null node, publish its successor
+      at item+4, and repeat until empty. Sample Timer E once and store
+      truncated unsigned milliseconds at item+12. Other words are preserved.
+      Reuses all three existing ports; migrates the existing collection
+      release ARM caller from its fixed-address seam. Initializes the
+      overwritten timer stack word and omits scratch-register effects.
+      Host tests cover empty, single and three-node chains, poisoned freed
+      links, delete-before-publication ordering, unrelated state, and
+      microsecond truncation boundaries through u32::MAX. All 14796 host
+      tests pass; ARM release builds. Executable smoke drains two poisoned
+      nodes and preserves unrelated words. match.py reports 15 stock versus
+      23 Rust instructions: LLVM uses a plain delete BL under the non-null
+      loop guard, carries the saved successor instead of reloading the
+      just-written owner field, and adds frame/timer initialization.
+      The drain loop, three callee calls and final timestamp store agree.
+
   - address: 0x08129330
     ghidra: FUN_08129330
     name: input_sequence_item_start

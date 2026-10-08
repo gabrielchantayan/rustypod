@@ -427,6 +427,7 @@ pub mod collection_count_eligible_entries;
 pub mod collection_refresh_needed;
 pub mod collection_delete_first_indexed_value;
 pub mod collection_release_first_indexed_value;
+pub mod input_sequence_item_release;
 pub mod class_8900_work_queue;
 pub mod collection_cursor_set_index;
 pub mod collection_item_process_if_limit;

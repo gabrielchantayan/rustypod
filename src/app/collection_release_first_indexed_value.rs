@@ -16,20 +16,19 @@
 //! If byte `+0x28` is clear, return. Otherwise scan signed indices
 //! `[0, *(i32 *)(this + 4))`; the vtable `+0x40` method returns a pointer to a
 //! word containing each value. On the first non-null value, call
-//! `FUN_081292cc`, which drains its linked entries at `+0x04` and stores a new
+//! `input_sequence_item_release`, which drains its linked entries at `+0x04` and stores a new
 //! value at `+0x0c`, then tag-2 `operator_delete` the value.
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_081292cc` has no ledger identity, so ARM calls its verified fixed load
-//! address through a typed operation; host builds use an injectable operation.
+//! ARM calls the ported input-sequence release directly; host builds retain
+//! injectable collection operations for isolated collection tests.
 //! Rust expands the indexed virtual dispatch to preserve target-width vtable
 //! words while keeping host fixtures native-width.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
 
-const RETAIL_RELEASE_INDEXED_VALUE: usize = 0x0812_92cc;
 const COUNT_OFFSET: usize = 4;
 const ENABLED_OFFSET: usize = 0x28;
 
@@ -78,8 +77,7 @@ unsafe fn value_at(collection: *mut u8, index: i32) -> *mut u8 {
 
 #[cfg(target_os = "none")]
 unsafe fn release(value: *mut u8) {
-    let release: unsafe extern "C" fn(*mut u8) = unsafe { core::mem::transmute(RETAIL_RELEASE_INDEXED_VALUE) };
-    unsafe { release(value) }
+    unsafe { crate::app::input_sequence_item_release::input_sequence_item_release(value.cast()) }
 }
 
 #[cfg(not(target_os = "none"))]
