@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123cb4
+    ghidra: FUN_08123cb4
+    name: text_buffer_construct
+    size: 52
+    sig: "u8 *text_buffer_construct(u8 *object, u32 data, u32 capacity, u8 mode)"
+    module: app/text_buffer_construct
+    status: ported
+    vars: {param_1: object, param_2: data, param_3: capacity, param_4: mode}
+    renames: {DAT_08123ce4: TEXT_BUFFER_VTABLE, FUN_08123c20: output_buffer_reset}
+    notes: >-
+      Raw extent [0x08123cb4,0x08123ce8) is 48 instruction bytes plus
+      vtable literal 0x08982fd8; next real boundary is BX LR at 0x08123ce8.
+      Whole-image aligned A32 decoding finds two plain incoming BLs at
+      0x080b54dc and 0x08152390, zero predicated incoming BLs, one plain
+      outgoing BL at 0x08123cd8 to output_buffer_reset and no predicated
+      outgoing BLs. Install vtable, target-width data and capacity, clear
+      both counters, write mode at +20, reset backing data and return object.
+      No behavioral deviations or new seams. Owner constructor now calls
+      this Rust port directly. Host regression covers zero and maximum
+      capacity, high-bit mode, exact object extent and backing neighbors.
+      All 14821 host tests, executable zero-capacity smoke and ARM build pass.
+      match.py exits 1: 12 stock versus 15 Rust instructions; frame setup
+      and independent stores reorder, with vtable literal and reset BL retained.
   - address: 0x08123ce8
     ghidra: FUN_08123ce8
     name: text_buffer_context_destroy
@@ -2288,7 +2311,7 @@ functions:
       return that owner. Ghidra incorrectly reports void and offsets
       relative to the embedded text. Storage initialization now calls
       the ported owned_storage_initialize directly; text construction
-      retains its verified raw-address seam. Host production calls are
+      now calls the ported text_buffer_construct. Host production calls are
       unsupported. Host tests cover exact write extent, nonzero initial
       flags, preserved neighbors and constructor-selected owner identity.
       Host suite and ARM release build passed; executable smoke exercised
