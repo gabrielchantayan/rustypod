@@ -20,6 +20,7 @@ pub mod cxa_guard;
 pub mod cxa_guard_release_veneer;
 pub mod errno;
 pub mod empty_object_destruct;
+pub mod empty_object_init;
 pub mod exit;
 pub mod i2c0_idle;
 pub mod i2c0_configure_and_strobe;
