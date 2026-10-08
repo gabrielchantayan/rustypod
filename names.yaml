@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812b6a8
+    ghidra: FUN_0812b6a8
+    name: profile_members_reset
+    size: 60
+    sig: "void profile_members_reset(ProfileMembers *profile)"
+    module: app/profile_members_reset
+    status: ported
+    vars:
+      param_1/r0/r4: profile
+      r0/member: member
+      r1: virtual_reset
+    renames:
+      profile_plus_0xa8: first
+      profile_plus_0xac: second
+      profile_plus_0xb0: active
+      vtable_plus_0x30: reset
+    notes: >-
+      Raw A32 extent [0x0812b6a8,0x0812b6e4) is 60 executable bytes,
+      ending POP {r4,pc}; next entry is a branch veneer followed by
+      PUSH {r3-r7,lr} at 0x0812b6e8. Whole-image aligned branch-word
+      decoding verifies one plain inbound BL at 0x0812af48 and one
+      predicated BLNE at 0x081299a4. No outbound plain or predicated BL;
+      two register BLXNE calls. Invoke virtual slot +0x30 for non-null
+      members +0xa8 then +0xac, loading the second only after the first
+      callback, then clear active word +0xb0. Member pointers are not
+      cleared by this function. Callers reset profile state or change
+      its selected mode; concrete virtual method identity remains unknown.
+      No existing assigned-address entry or Rust caller seam; no invented
+      callee identity. Deliberate deviations: repr(C) pointers widen on
+      hosts, with ARM offsets compile-time checked; unspecified return
+      registers are discarded. Tests cover all null combinations, callback
+      replacement and clearing of the second member, aliasing, payload
+      reset, opaque-word preservation and post-callback active clearing.
+      All 14778 host tests pass; ARM release build passes. match.py exits
+      1: 18 versus 15 instructions preserve both guarded virtual calls,
+      ordered reload and final clear; LLVM replaces predication with
+      branches and adds frame setup. Actual-source executable smoke clears
+      live payload, observes callback-cleared second member and verifies
+      final active zero and preserved opaque words. No device execution.
+
   - address: 0x0812bc8c
     ghidra: FUN_0812bc8c
     name: six_string_pair_vector_owner_destroy
