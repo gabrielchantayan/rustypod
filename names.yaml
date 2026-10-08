@@ -230872,3 +230872,43 @@ functions:
       reload and observer argument agree; LLVM retains the original
       storage pointer after proving the base constructor returns its input.
       No device execution.
+  - address: 0x08126c4c
+    ghidra: FUN_08126c4c
+    name: calendar_reset_elements
+    size: 180
+    sig: "void calendar_reset_elements(u32 *view)"
+    module: ui/calendar_reset_elements
+    status: ported
+    vars:
+      param_1/r4: view
+      r5: index_then_notification_value
+      r6: last_group_index
+      auStack_28: inclusive_range
+      local_18: range_end
+      local_14: range_start
+    renames:
+      FUN_08158cb0: expand_u32_pair_to_u64_pair
+      FUN_0839c258: observable_element_array_clear
+      FUN_08299d78: opaque_collection_item_count
+      FUN_08299d18: opaque_collection_item_at
+      FUN_08284878: collect_group_elements_in_range
+    notes: >-
+      Raw extent [0x08126c4c,0x08126d00) is 180 bytes: 164 instruction
+      bytes plus four literals before the next independent PUSH. Whole-image
+      aligned ARM decoding verifies two unconditional inbound BLs at
+      0x08228b10 and 0x082362fc, zero predicated inbound BLs, five plain
+      outbound BLs, zero predicated outbound BLs and two virtual BLXs.
+      Build inclusive zero-extended range [0,0x10b6c2], clear the embedded
+      observable array at +0xc0, snapshot signed collection count minus one,
+      and collect matching elements from each indexed group. Reload +0xbc
+      for each lookup. Notify vtable slot +0x58 with VMax then VVal, both
+      carrying 0x369a; raw r5 reload disproves Ghidra's last-item argument.
+      Four callees use existing Rust ports; the verified unported group
+      collector at 0x08284878 remains a fixed-address target seam. Host
+      tests cover empty, singleton, multi-group, signed-negative bounds,
+      collection replacement and ordered notifications. Exported host entry
+      smoke exercises the real clear/count path with an empty collection.
+      ARM build passes; match.py structural diff retains range construction,
+      clear/count, signed indexed loop and two reloaded virtual notifications.
+      LLVM uses BLX for the fixed-address collector and adds scratch zeroing;
+      these are deliberate codegen differences, not semantic changes.
