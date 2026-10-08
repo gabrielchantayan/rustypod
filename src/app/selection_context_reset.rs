@@ -9,9 +9,9 @@
 //! The member's vtable and all unowned bytes remain unchanged.
 //!
 //! Deviations: repr(C) native pointers widen the host model; target offsets
-//! remain exact. The unported value-pair reset is a firmware call on target
-//! and an explicit callback seam on host (never a silent no-op). The empty
-//! context destructor may fold away; no incidental register return is promised.
+//! remain exact. The value-pair reset uses the ported refcounted-handle helpers.
+//! The empty context destructor may fold away; no incidental register return
+//! is promised.
 
 use super::scoped_context::{ScopedContext, scoped_context_construct,
     scoped_context_copy_fields, scoped_context_destroy};
@@ -22,6 +22,8 @@ use crate::cxx::templates::scoped_context_container_delete_enabled_elements;
 unsafe extern "C" {
     fn observable_array_clear(this: *mut crate::cxx::observable_array::ObservableArray);
 }
+use crate::cxx::handle::{RefcountedBody, refcounted_handle_construct,
+    refcounted_handle_copy_assign, refcounted_body_release_dtor};
 
 /// Container head shared by deletion and observable-array clear.
 #[repr(C)]
@@ -46,7 +48,7 @@ pub struct SelectionContextOwner {
     pub flag_42: u8,
     pub unknown_43_73: [u8; 49],
     pub value_state: u32,
-    pub value_pair: u32,
+    pub value_pair: *mut RefcountedBody,
     pub context: ScopedContext,
 }
 
@@ -61,23 +63,32 @@ const _: () = {
     assert!(core::mem::offset_of!(SelectionContextOwner, context) == 0x7c);
 };
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn reset_value_pair(owner: *mut SelectionContextOwner) {
-    let reset: unsafe extern "C" fn(*mut SelectionContextOwner) =
-        core::mem::transmute(0x0812_f6b4usize);
-    reset(owner);
+/// Reset the selected value handle — FUN_0812f6b4 @ 0x0812f6b4.
+///
+/// Raw A32 extent [0x0812f6b4, 0x0812f6ec): 56 bytes. Whole-image
+/// aligned-word decoding finds two plain incoming BLs (0x08125e70,
+/// 0x0812f724), no predicated incoming BLs, and three plain outgoing BLs,
+/// no predicated outgoing BLs. Construct a null temporary handle, assign it
+/// to the member at +0x78 (releasing its previous body), destroy the
+/// temporary, then zero the state word at +0x74.
+///
+/// Deviations: native pointers widen the repr(C) host owner; target member
+/// offsets are asserted above. The Ghidra r1/r2/r3 arguments are not inputs:
+/// the saved r3 stack slot is overwritten by the null-handle constructor.
+/// Incidental r0=0 on return is not exposed by this void API.
+///
+/// # Safety
+/// Owner must be live and its value_pair must satisfy the release helper's
+/// body, mutex, implementation and virtual-destructor requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn selection_value_pair_reset(owner: *mut SelectionContextOwner) {
+    let mut temporary = core::mem::MaybeUninit::<*mut RefcountedBody>::uninit();
+    let source = refcounted_handle_construct(temporary.as_mut_ptr(), 0, 0);
+    refcounted_handle_copy_assign(core::ptr::addr_of_mut!((*owner).value_pair), source);
+    refcounted_body_release_dtor(temporary.as_mut_ptr());
+    (*owner).value_state = 0;
 }
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn reset_value_pair(_owner: *mut SelectionContextOwner) {
-    panic!("selection value-pair reset requires a host callback");
-}
-
-/// Host integration seam for the unported value-pair reset at 0x0812f6b4.
-/// Set before use, with external synchronization; callback must reset the
-/// value pair and value_state exactly as the firmware helper does.
-#[cfg(not(target_os = "none"))]
-pub static mut SELECTION_VALUE_PAIR_RESET: unsafe extern "C" fn(*mut SelectionContextOwner) = reset_value_pair;
 
 /// # Safety
 /// Owner must be live; its array vtable, elements, and context must satisfy
@@ -85,15 +96,6 @@ pub static mut SELECTION_VALUE_PAIR_RESET: unsafe extern "C" fn(*mut SelectionCo
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn selection_context_reset(owner: *mut SelectionContextOwner) {
-    #[cfg(target_os = "none")]
-    let reset = reset_value_pair;
-    #[cfg(not(target_os = "none"))]
-    let reset = core::ptr::read_volatile(core::ptr::addr_of!(SELECTION_VALUE_PAIR_RESET));
-    reset_with(owner, reset);
-}
-
-unsafe fn reset_with(owner: *mut SelectionContextOwner,
-    reset: unsafe extern "C" fn(*mut SelectionContextOwner)) {
     let array = core::ptr::addr_of_mut!((*owner).array);
     scoped_context_container_delete_enabled_elements(array.cast());
     observable_array_clear(array.cast());
@@ -101,7 +103,7 @@ unsafe fn reset_with(owner: *mut SelectionContextOwner,
     (*owner).state_30 = 0;
     (*owner).state_34 = 0;
     (*owner).flag_42 = 0;
-    reset(owner);
+    selection_value_pair_reset(owner);
     let mut temporary = core::mem::MaybeUninit::<ScopedContext>::uninit();
     let source = scoped_context_construct(temporary.as_mut_ptr(), core::ptr::null_mut(), 0);
     scoped_context_copy_fields(core::ptr::addr_of_mut!((*owner).context), source);
@@ -120,15 +122,6 @@ mod tests {
         (*array).len = 0;
     }
 
-    unsafe extern "C" fn reset_pair(owner: *mut SelectionContextOwner) {
-        assert_eq!((*owner).array.count, 0);
-        assert_eq!(((*owner).state_30, (*owner).state_34), (0, 0));
-        assert_eq!(((*owner).flag_3b, (*owner).flag_42), (0, 0));
-        assert_eq!((*owner).context.owner_valid, 0x1234);
-        (*owner).value_state = 0;
-        (*owner).value_pair = 0;
-    }
-
     #[test]
     fn reset_preserves_unowned_bytes_and_context_vtable_for_empty_and_wrapping_counts() {
         let vtable = ObservableArrayClearVtable {
@@ -145,7 +138,7 @@ mod tests {
                 state_30: u32::MAX, state_34: 17,
                 unknown_38_3a: [0xa5; 3], flag_3b: 0xff,
                 unknown_3c_41: [0xa5; 6], flag_42: 0xff,
-                unknown_43_73: [0xa5; 49], value_state: 8, value_pair: 9,
+                unknown_43_73: [0xa5; 49], value_state: 8, value_pair: core::ptr::null_mut(),
                 context: ScopedContext {
                     vtable: core::ptr::null(), owner_valid: 0x1234,
                     owner: core::ptr::dangling_mut(),
@@ -153,8 +146,9 @@ mod tests {
                     registry_token: core::ptr::dangling_mut(), mode: 0xff,
                 },
             };
-            unsafe { reset_with(&mut owner, reset_pair); }
-            assert_eq!((owner.state_30, owner.state_34, owner.value_state, owner.value_pair), (0, 0, 0, 0));
+            unsafe { selection_context_reset(&mut owner); }
+            assert_eq!((owner.state_30, owner.state_34, owner.value_state), (0, 0, 0));
+            assert!(owner.value_pair.is_null());
             assert_eq!((owner.flag_3b, owner.flag_42, owner.context.mode), (0, 0, 0));
             assert_eq!(owner.context.owner_valid, 0);
             assert!(owner.context.owner.is_null());
@@ -168,5 +162,30 @@ mod tests {
             assert_eq!(owner.unknown_3c_41, [0xa5; 6]);
             assert_eq!(owner.unknown_43_73, [0xa5; 49]);
         }
+    }
+
+    #[test]
+    fn value_reset_releases_shared_body_and_preserves_neighboring_fields() {
+        let mut owner: SelectionContextOwner = unsafe { core::mem::zeroed() };
+        let mut body = RefcountedBody {
+            opaque0: 0, refcount: 2, mutex: core::ptr::null_mut(),
+        };
+        owner.prefix = [0xfeed; 6];
+        owner.value_state = u32::MAX;
+        owner.value_pair = &mut body;
+        owner.unknown_43_73 = [0xa5; 49];
+        owner.context.owner_valid = 0x1234;
+        unsafe { selection_value_pair_reset(&mut owner); }
+        assert_eq!(body.refcount, 1);
+        assert!(owner.value_pair.is_null());
+        assert_eq!(owner.value_state, 0);
+        assert_eq!(owner.prefix, [0xfeed; 6]);
+        assert_eq!(owner.unknown_43_73, [0xa5; 49]);
+        assert_eq!(owner.context.owner_valid, 0x1234);
+        owner.value_state = 17;
+        unsafe { selection_value_pair_reset(&mut owner); }
+        assert_eq!(body.refcount, 1);
+        assert!(owner.value_pair.is_null());
+        assert_eq!(owner.value_state, 0);
     }
 }

@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812f6b4
+    ghidra: FUN_0812f6b4
+    name: selection_value_pair_reset
+    size: 56
+    sig: "void selection_value_pair_reset(SelectionContextOwner *owner)"
+    module: app/selection_context_reset
+    status: ported
+    vars: {param_1/r4: owner, uStack_10: temporary_handle}
+    renames:
+      FUN_0839ebc4: refcounted_handle_construct
+      FUN_0839ec70: refcounted_handle_copy_assign
+      FUN_0839cbc0: refcounted_body_release_dtor
+    notes: >-
+      Raw A32 confirms [0x0812f6b4,0x0812f6ec), 56 bytes, ending in
+      e8bd8038 before the next function's e92d4030 prologue. Whole-image
+      aligned-word BL decoding finds two plain inbound calls at 0x08125e70
+      and 0x0812f724, zero predicated inbound calls; three plain outbound
+      calls at 0x0812f6c8, 0x0812f6d4 and 0x0812f6dc, zero predicated
+      outbound calls. Constructs a null temporary refcounted handle,
+      copy-assigns it into owner+0x78 (releasing the old body), destroys the
+      temporary and clears owner+0x74. All three callees reuse existing
+      ports. Ghidra's extra r1/r2/r3 parameters are not inputs: the saved
+      r3 word is overwritten by the constructor. Deliberate deviations:
+      repr(C) host pointers widen, while compile-time target offset checks
+      preserve +0x74/+0x78/+0x7c; incidental r0=0 is not exposed. Existing
+      selection_context_reset now calls this port directly, with its obsolete
+      retail/host callback seam removed. Host tests cover null and repeated
+      reset, shared-body reference decrement, and neighboring-field
+      preservation. Full host suite passed (14764 tests); a throwaway
+      public-API smoke observed refcount 3 to 2, NULL handle, and state 42
+      to 0. ARM release build passed. match.py structural diff reviewed:
+      all three BLs and both member offsets retained, with a larger LLVM
+      stack frame and zero held in r6; relocatable call labels are unresolved
+      in match.py's archive disassembly.
   - address: 0x0812f6ec
     ghidra: FUN_0812f6ec
     name: selection_context_reset
@@ -27,7 +61,7 @@ functions:
     renames:
       FUN_083d10b8: scoped_context_container_delete_enabled_elements
       FUN_08271c84: observable_array_clear
-      FUN_0812f6b4: selection_value_pair_reset_retail
+      FUN_0812f6b4: selection_value_pair_reset
       FUN_08270394: scoped_context_construct
       FUN_08270418: scoped_context_copy_fields
       FUN_08270414: scoped_context_destroy
@@ -38,22 +72,19 @@ functions:
       incoming BLs at 0x0811512c and 0x081304b8, no predicated incoming BLs;
       six plain outgoing BLs and no predicated outgoing BLs. Deletes enabled
       scoped-context elements of the array at +0x18 before clearing the array;
-      zeros flag bytes +0x3b/+0x42 and words +0x30/+0x34; invokes the verified
-      unported helper at 0x0812f6b4, which resets the value-pair member +0x78
+      zeros flag bytes +0x3b/+0x42 and words +0x30/+0x34; invokes the ported
+      selection_value_pair_reset, which resets the refcounted handle +0x78
       and zeros +0x74; constructs a null-owner context and copies its payload
       into +0x7c without changing that member's vtable. No concrete class name
       is inferred. Deliberate deviations: native pointers widen repr(C) host
-      fields, with target offsets checked at compile time; the unported helper
-      remains a firmware call on target and an explicit host callback seam.
+      fields, with target offsets checked at compile time. The obsolete retail
+      and host callback seam is removed; both now call the port directly.
       Host edge tests cover empty, signed and wrapping array counts,
-      reset-before-helper ordering, cleared context, and preserved unowned
+      cleared context and preserved unowned
       fields. A throwaway public-API smoke exercised array clear, state reset,
       context clear, and member-vtable preservation. ARM release build passed.
-      match.py structural diff reviewed: deletion/clear precede state reset,
-      the retained helper is BLX through literal 0x0812f6b4, the null-owner
-      constructor is inlined with its capture callback retained, and the
-      payload-copy call remains. LLVM reorders independent zero stores;
-      the empty destructor folds away. Incidental r0 pass-through is not exposed.
+      The previous match.py review predates the direct helper cutover; the
+      empty destructor folds away. Incidental r0 pass-through is not exposed.
   - address: 0x08130a60
     ghidra: FUN_08130a60
     name: selection_timer_stop
