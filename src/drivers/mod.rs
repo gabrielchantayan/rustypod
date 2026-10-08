@@ -29,6 +29,7 @@ pub mod controller_request_submit_wait;
 pub mod controller_request_wait_response;
 pub mod controller_command_initialize;
 pub mod audio_output_level;
+pub mod audio_output_registers_initialize;
 pub mod cache_address_translate;
 pub mod byte_identity_slot_init;
 pub mod channel_control_enable;
