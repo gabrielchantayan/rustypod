@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812aebc
+    ghidra: FUN_0812aebc
+    name: code_is_0x10_through_0x1f
+    size: 84
+    sig: "u32 code_is_0x10_through_0x1f(u32 code)"
+    module: app/code_is_0x10_through_0x1f
+    status: ported
+    vars: {param_1/r0: code}
+    notes: >-
+      Raw A32 extent [0x0812aebc,0x0812af10), 84 bytes ending BX LR;
+      next real function starts PUSH {r4,lr}. Independent aligned whole-image
+      decoding verifies two plain inbound BLs at 0x081295e0 and 0x08129730,
+      zero predicated inbound BLs and zero outgoing plain or predicated BLs.
+      Return one exactly for all sixteen codes 0x10 through 0x1f, otherwise
+      zero, without truncating the input word. Caller 0x081295a0 classifies
+      input bytes for pending-state and pair processing; no domain identity
+      is inferred. No canonical entry or new callee seam. Deliberate deviation:
+      replace predicated equality chain with unsigned wrapping range check.
+      Host tests cover every byte and high-word/truncation/wrapping cases;
+      all 14780 host tests pass and ARM release build succeeds. Actual-source
+      executable smoke passes 131072 consecutive inputs plus four high-word
+      cases. match.py exits 1: 21 stock versus seven Rust instructions;
+      LLVM emits BIC low nibble, SUB 16, CLZ and LSR 5 for exact full-word
+      membership, with frame setup/restore and no calls. No device execution.
+
   - address: 0x0812b6a8
     ghidra: FUN_0812b6a8
     name: profile_members_reset
