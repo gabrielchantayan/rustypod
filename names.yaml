@@ -228665,3 +228665,41 @@ functions:
       order, inserted zero operation, and returned status remain equivalent.
       Standalone host smoke exercises the exported wrapper's disabled path
       and enabled backend mutation/status path. No device execution claimed.
+  - address: 0x08146c68
+    ghidra: FUN_08146c68
+    name: ui_element_detach_render_context
+    size: 44
+    sig: "UiElement *ui_element_detach_render_context(UiElement *element)"
+    module: ui/element_detach_render_context
+    status: ported
+    vars: {param_1: element, "r4": element, "element + 0x3c": render_context}
+    calls:
+      FUN_0828cc00: render_context_remove_element (unported resident operation)
+      FUN_0826ec9c: ui_element_invalidate
+    notes: >-
+      Raw osos.dec establishes eleven ARM words from 0x08146c68 through
+      0x08146c90, with the next function's push at 0x08146c94. Whole-image
+      ARM BL decoding finds two plain inbound calls at 0x081ddeec and
+      0x0828e618 and zero predicated inbound calls. The body has zero plain
+      BLs, one BLNE at 0x08146c7c to 0x0828cc00, and a tail B at
+      0x08146c90 to 0x0826ec9c. Ghidra incorrectly absorbs the tail target's
+      implementation and reports extra arguments and a paired return.
+      Removes the element from its nonzero context link at +0x3c, clears
+      that link after removal, and invalidates full bounds, returning the
+      element pointer. The resident removal's verified words dispatch slot
+      +0x28 on the collection at context +0x7c using an element stack slot,
+      then invalidate the removed element. No existing names entry defines
+      0x0828cc00; this semantic label describes that verified operation,
+      not a speculative library identity. The port preserves this unported
+      resident call and reuses the ported whole-bounds invalidation.
+      Target-width u32 links preserve layout on hosts. Rust expresses the
+      final tail branch as a call; no algorithmic deviation intended.
+      Standalone host smoke exercised repeated detached calls through the
+      public wrapper with an assertion-based invalidation backend; it proves
+      ordering and pointer return, not resident removal or device execution.
+      All 14708 host tests pass and the ARM release build succeeds.
+      match.py exits 1 with a structural diff: LLVM adds a frame pointer
+      and saves extra registers, but preserves the conditional removal,
+      subsequent zero store, and final tail branch. Relocations resolve
+      the BLNE to the resident removal wrapper and the B to
+      ui_element_invalidate; the wrapper's literal is exactly 0x0828cc00.
