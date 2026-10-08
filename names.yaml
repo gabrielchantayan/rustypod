@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08107364
+    ghidra: FUN_08107364
+    name: audio_output_channel_status_bit21
+    size: 40
+    sig: "uint32_t audio_output_channel_status_bit21(uint8_t *output, uint32_t selector)"
+    module: drivers/audio_output_channel_status_bit21
+    status: ported
+    vars: {param_1/r0: unused_output, param_2/r1: selector, r0: selected_register_then_status}
+    notes: >-
+      Raw A32 extent [0x08107364,0x0810738c) is ten instructions ending
+      with BX LR; the next function starts with LDR and tail-branches
+      after loading a separate global. Full-image aligned decoding finds
+      two plain inbound BLs at 0x082930a4 and 0x08293c8c, zero predicated
+      inbound BLs and zero outbound calls. Selector bit 7 chooses bank
+      0x900 when set, 0xb00 otherwise; low seven bits select a 0x20-byte
+      stride. Higher selector bits and the output object are ignored.
+      Returns register bit 21 as zero or one; hardware meaning remains
+      unidentified. No callee seams. Volatile aligned MMIO read preserves
+      hardware access; host substitutes an isolated full-range array.
+      Tests sweep all 256 selectors, high-bit aliases, neighboring status
+      bits, ignored invalid output pointers and unchanged register words.
+      All 14927 host tests and ARM release build pass. Standalone public
+      entry smoke covers extreme selectors and an invalid ignored pointer.
+      No device execution. match.py exits 1: ten versus twelve instructions;
+      LLVM adds frame setup/restore, defaults the bank before MOVEQ,
+      uses indexed LDR and combines shift/mask. Bank selection, stride,
+      one word read, normalized bit 21 and zero calls are preserved.
   - address: 0x08107914
     ghidra: FUN_08107914
     name: usb_in_endpoint_transfer_rebase
