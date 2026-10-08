@@ -1,7 +1,8 @@
 //! Indexed text-style entry update — retailOS `FUN_0812863c` at 0x0812863c.
 //! True extent: 124 bytes, ending at the next prologue at 0x081286b8.
-//! Raw ARM scan: two plain inbound BLs, zero predicated; two plain outgoing
-//! BLs to the already ported color_copy (0x082720e8), zero predicated.
+//! Raw ARM scan: two plain inbound BLs at 0x08128810 and 0x0812887c,
+//! zero predicated; two plain outgoing BLs at 0x08128684 and 0x081286a4
+//! to the already ported color_copy (0x082720e8), zero predicated.
 //!
 //! Updates nonzero scalar and nonnull optional fields in order: 16-bit value,
 //! font-style byte, foreground RGBA, background RGBA. ORs presence bits 1/2/4/8

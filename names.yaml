@@ -230673,3 +230673,41 @@ functions:
       match.py reports 32 stock versus 33 Rust instructions: extra frame setup,
       register/load scheduling and the final zero-store order differ; geometry,
       signed multiply-accumulate, gate and real checked-base BL agree.
+
+  - address: 0x0812863c
+    ghidra: FUN_0812863c
+    name: indexed_style_entry_update
+    size: 124
+    sig: "void indexed_style_entry_update(u8 *entry, u32 value, const u8 *font_style, const u8 *foreground, const u8 *background)"
+    module: ui/indexed_style_entry_update
+    status: ported
+    renames:
+      param_1/r4: entry
+      param_2/r1: value
+      param_3/r2: font_style
+      param_4/r3: foreground
+      param_5/r5: background
+      "entry+0x14": presence_flags
+    notes: >-
+      Raw aligned A32 decoding establishes [0x0812863c,0x081286b8),
+      124 bytes, ending before the next independent PUSH. Whole-image scan
+      finds two inbound plain BLs at 0x08128810 and 0x0812887c and zero
+      predicated BLs. Body has two plain BLs at 0x08128684 and 0x081286a4
+      to canonical color_copy at 0x082720e8, zero predicated BLs. Constructor
+      0x081287c8 initializes the linked 24-byte entry; renderer 0x081286b8
+      consumes foreground at +8, background at +12 and font style at +18.
+      Nonzero value stores its low halfword at +16 and sets presence bit 1;
+      nonnull font style copies one byte and sets bit 2; nonnull foreground
+      and background copy four ascending bytes and set bits 4 and 8. Existing
+      flags and omitted fields survive. The halfword value's exact meaning
+      remains unverified. Reuses the existing canonical Rust implementation,
+      with no duplicate hook target or seam. Volatile accesses deliberately
+      retain aliased-source ordering; target link fields remain opaque words.
+      All 14799 host tests pass, including omission combinations, truncation,
+      existing flags and exhaustive overlapping source offsets. Executable
+      host smoke verifies zero-after-truncation presence, RGBA updates and
+      forward overlap. ARM release builds. match.py exits 1: 31 stock versus
+      32 Rust instructions; frame-pointer setup, fifth-argument load scheduling,
+      explicit final conditional branch and relocated BL operands differ.
+      Field offsets, presence updates and both colour-copy calls agree.
+      No device execution.
