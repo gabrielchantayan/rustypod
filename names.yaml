@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08130a98
+    ghidra: FUN_08130a98
+    name: virtual_dispatch_zero
+    size: 16
+    sig: "void virtual_dispatch_zero(ZeroDispatchObject *object)"
+    module: app/virtual_dispatch_zero
+    status: ported
+    vars: {param_1: object}
+    renames:
+      r0: object
+      r1: zero_argument
+      r2: virtual_method
+      vtable_plus_0x14c: slot_14c
+    notes: >-
+      Raw A32 extent [0x08130a98,0x08130aa8), four words, ending in BX r2;
+      next entry starts with push {r0-r6,lr}. Independent whole-image decoding
+      verifies two incoming plain BLs at 0x0813094c and 0x081312d8, zero
+      predicated incoming BLs, and no outgoing BLs. Dispatch virtual word 83
+      with the unchanged receiver and zero. Concrete method identity remains
+      unresolved; no fixed-address callee seam. Both direct callers ignore
+      r0, so incidental return contents are not exposed. Host repr(C) pointers
+      widen while retaining vtable word indices. All 14757 host tests and ARM
+      release build pass. Actual-source host smoke clears live receiver state.
+      match.py exits 1: original four instructions retained, with three extra
+      frame setup/restore instructions; final BX r2 remains a tail dispatch.
   - address: 0x081314ac
     ghidra: FUN_081314ac
     name: selection_metric_refresh
