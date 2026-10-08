@@ -52,6 +52,7 @@ pub mod opaque_context_dispatch_forever;
 pub mod draw_state_align_position;
 pub mod framework_sentinel_state_construct;
 pub mod framework_buffer_state_construct;
+pub mod framework_data_span_state_construct;
 pub mod selector_item_high_records_variant_construct;
 pub mod selector_item_middle_records_variant_construct;
 pub mod selector_item_split_records_variant_construct;
