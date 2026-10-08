@@ -465,6 +465,28 @@ pub unsafe extern "C" fn ata_cmd_get_lba_high(cmd: *const u8) -> u8 {
     cmd.add(LBA_HIGH).read_volatile()
 }
 
+/// ata_cmd_get_command — original: `FUN_081211ac` @ 0x081211ac.
+/// True size: 8 bytes, ending at the independent halfword getter at
+/// 0x081211b4. Whole-image A32 decoding verifies two plain BL callers
+/// (0x08090330, 0x082835c0), zero predicated BL callers, one BNE tail
+/// caller (0x0827a310), and no outgoing calls.
+///
+/// Returns the unsigned ATA command register byte at command-block +0x1a.
+/// Raw words `e5d0001a; e12fff1e` are `ldrb r0,[r0,#0x1a]; bx lr`.
+/// The dispatcher at 0x082835b4 compares it with ATA opcodes including
+/// READ DMA (0xc8) and WRITE DMA (0xca). No validation or mutation.
+/// No semantic deviations; volatile access follows the existing field
+/// convention, and a dedicated section preserves an independent BL target.
+///
+/// # Safety
+/// `cmd` must be readable through byte +0x1a; byte alignment suffices.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.ata_cmd_get_command")]
+pub unsafe extern "C" fn ata_cmd_get_command(cmd: *const u8) -> u8 {
+    cmd.add(COMMAND).read_volatile()
+}
+
 /// ata_cmd_get_device_head — original: `FUN_081212d8` @ 0x081212d8
 /// (8 bytes exactly, `0x081212d8..0x081212df`; **4 direct `bl` call
 /// sites, all unconditional, no predicated forms**, verified by decoding
@@ -1652,6 +1674,22 @@ mod tests {
                 assert_eq!(
                     unsafe { ata_cmd_get_sector_count(bytes.as_ptr().add(alignment)) } as u32,
                     count as u32
+                );
+                assert_eq!(bytes, before);
+            }
+        }
+    }
+
+    #[test]
+    fn command_getter_preserves_unsigned_opcodes_at_every_byte_alignment() {
+        for alignment in 0..4 {
+            let mut bytes = [0x5au8; 0x1b + 3];
+            for opcode in 0..=u8::MAX {
+                bytes[alignment + 0x1a] = opcode;
+                let before = bytes;
+                assert_eq!(
+                    unsafe { ata_cmd_get_command(bytes.as_ptr().add(alignment)) } as u32,
+                    opcode as u32
                 );
                 assert_eq!(bytes, before);
             }
