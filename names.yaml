@@ -158733,6 +158733,25 @@ functions:
       calls and two predicated indirect BLX dispatches. The vtable targets
       are runtime data and deliberately remain unnamed; host fixtures widen
       their pointer fields while the ARM path uses target u32 words.
+  - address: 0x081213fc
+    ghidra: FUN_081213fc
+    name: object_byte_0x17
+    size: 8
+    sig: "u8 object_byte_0x17(const u8 *object)"
+    module: util/object_byte_0x17
+    status: ported
+    vars: {param_1/r0: object, "object+0x17": stored_byte}
+    notes: >-
+      Raw words 0xe5d00017 and 0xe12fff1e establish ldrb r0,[r0,#0x17];
+      bx lr, ending at the next real function boundary 0x08121404.
+      Full-image A32 branch decoding finds two incoming plain BL calls,
+      at 0x08166498 and 0x082832d4, and zero predicated BL calls.
+      The body contains no calls. Caller 0x082832bc packs this unsigned
+      byte into result bits 8..15. The concrete object type and field
+      meaning are unrecovered; the offset-based name follows existing
+      object byte accessors. No deliberate deviations or callee seams.
+      ARM release match preserves the exact byte load; LLVM adds a frame
+      pointer prologue and returns via pop {fp, pc} instead of bx lr.
   - address: 0x08121404
     ghidra: FUN_08121404
     name: object_set_byte_0x18
