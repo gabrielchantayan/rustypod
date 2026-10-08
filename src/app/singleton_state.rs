@@ -21,7 +21,7 @@ const SINGLETON_STATE_GLOBALS: *const u8 = 0x089c_fda0 as *const u8;
 /// A 64-bit host cannot store its native pointers in the retailOS 32-bit
 /// globals layout, so the slot is modeled directly rather than as bytes.
 #[cfg(not(target_os = "none"))]
-static mut HOST_SINGLETON_STATE_BASE: *mut u8 = core::ptr::null_mut();
+pub(crate) static mut HOST_SINGLETON_STATE_BASE: *mut u8 = core::ptr::null_mut();
 
 /// singleton_state_base_get — original: `FUN_08127954` @ 0x08127954
 /// (12 bytes).
