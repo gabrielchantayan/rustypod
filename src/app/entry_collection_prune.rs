@@ -6,13 +6,13 @@
 //! calls: plain BL at 0x0810ef80 and BLNE at 0x0812e378.
 //!
 //! Snapshot the signed count at owner word 2. Fetch each entry from the
-//! embedded observable array at word 1, then call stock entry cleanup at
+//! embedded observable array at word 1, then call ported entry cleanup at
 //! 0x0810f92c. Cleanup returns zero for type 3 (retain), and nonzero after
 //! releasing other entries, including NULL (erase). Erasure decrements the
 //! local count without advancing the index; its return value is ignored.
 //!
 //! No target algorithm deviations. Host tests inject array/cleanup operations
-//! into the same loop: the stock cleanup seam is unavailable on the host.
+//! into the same loop; target cleanup calls the ported implementation directly.
 
 #[cfg(target_os = "none")]
 use crate::cxx::{array_element_at::{array_element_at, StridedArray},
@@ -45,11 +45,10 @@ pub unsafe extern "C" fn entry_collection_prune(owner: *mut u32) {
     {
         let remaining = owner.add(2).read();
         let array = owner.add(1);
-        let cleanup: unsafe extern "C" fn(*mut u32, u32) -> u32 =
-            core::mem::transmute(0x0810_f92cusize);
+        let cleanup = super::entry_cleanup_unless_type_3::entry_cleanup_unless_type_3;
         prune_with(remaining as i32, |index| {
             let slot = array_element_at(array.cast::<StridedArray>(), index);
-            cleanup(owner, (slot as *const u32).read())
+            cleanup(owner, (slot as *const u32).read() as usize as *mut u32)
         }, |index| {
             let _ = observable_array_erase_at(array.cast::<ObservableArray>(), index);
         });

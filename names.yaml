@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810f92c
+    ghidra: FUN_0810f92c
+    name: entry_cleanup_unless_type_3
+    size: 112
+    sig: "u32 entry_cleanup_unless_type_3(u32 *owner, u32 *entry)"
+    module: app/entry_cleanup_unless_type_3
+    status: ported
+    vars:
+      param_1/r0: unused_owner
+      param_2/r4: entry
+      entry+4: first_owned_payload
+      entry+8: second_owned_payload
+      entry+12: type_byte
+      entry+16: owned_virtual_object
+    renames:
+      FUN_080e7970: free_wrapper
+    notes: >-
+      Raw A32 establishes [0x0810f92c,0x0810f99c), 112 bytes, ending
+      with a branch back to the success epilogue before the next push.
+      Two inbound plain BLs at 0x0810ef98 and 0x0810f9c4; zero
+      predicated inbound BLs. Three outbound plain BLs to free_wrapper,
+      zero predicated BLs, one BLXNE through virtual slot +4 with object
+      in r0. NULL succeeds; type 3 returns zero unchanged. Otherwise
+      release +4 and +8 with tag 45, clear each after release, invoke
+      the non-NULL +16 object's virtual release, clear +16, then free
+      the entry with tag 45 and return one. Owner is unused. Concrete
+      virtual callee identity is not assumed. Target word indices avoid
+      host pointer-width offset changes. No algorithm deviations; uses
+      existing ported free_wrapper and its heap dispatch. Host tests
+      inject releases to verify order, clear timing, NULL payloads and
+      retained entries; direct exported NULL/type-3 smoke also passes.
+      Host suite and ARM release build pass. match.py exits 1: 28 versus
+      32 instructions; LLVM adds a frame pointer and explicit branches,
+      retaining all three tagged frees, the virtual slot and return values.
   - address: 0x0810f99c
     ghidra: FUN_0810f99c
     name: entry_collection_prune
@@ -28,7 +62,7 @@ functions:
       iVar3/r4: remaining_count
       iVar4/r5: index
       FUN_082a4cf8: array_element_at
-      FUN_0810f92c: entry_cleanup_unless_type_3 (stock seam)
+      FUN_0810f92c: entry_cleanup_unless_type_3
       FUN_08271bec: observable_array_erase_at
     notes: >-
       Raw A32 extent [0x0810f99c,0x0810f9f0) ends with pop; the next
@@ -38,7 +72,8 @@ functions:
       Cleanup at 0x0810f92c retains type 3, otherwise releases the entry
       and returns nonzero (also for NULL). Erase without advancing index;
       ignore erase result and decrement local count. Reuses ported array
-      helpers. Host tests inject operations into the shared loop. ARM match
+      helpers. Host tests inject operations into the shared loop. The cleanup
+      call now uses the ported entry_cleanup_unless_type_3 directly.
   - address: 0x08110be4
     ghidra: FUN_08110be4
     name: associated_object_replace
