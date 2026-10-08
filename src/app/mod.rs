@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod volume_limit_query_results_equal;
+pub use volume_limit_query_results_equal::*;
 pub mod owned_object_query_slot_dc;
 pub use owned_object_query_slot_dc::*;
 pub mod pending_action_timeout_poll;
