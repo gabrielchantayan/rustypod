@@ -228964,3 +228964,48 @@ functions:
       16 LLVM instructions versus 12 original: explicit branch replaces
       BLXNE, receiver is saved only on the release path, frame-pointer setup
       is added, and the final B has a relocation to the ported base symbol.
+
+  - address: 0x08135950
+    ghidra: FUN_08135950
+    name: collection_selection_move_previous
+    size: 156
+    sig: "u32 collection_selection_move_previous(Collection *collection)"
+    module: app/collection_selection_move_previous
+    status: ported
+    renames:
+      param_1/r0: collection
+      r4: previous
+      local_18: item
+      uStack_14/uStack_10: cursor
+      FUN_081ee17c: cursor_init
+      FUN_081ee138: cursor_advance
+      FUN_081ee18c: cursor_invalidate
+      FUN_082a5d34: object_flag_0x8_is_set
+      FUN_082a5d44: object_flag_0x10_is_set
+    notes: >-
+      Raw osos.dec proves extent [0x08135950,0x081359ec), 156 bytes;
+      the next independent function starts with push {r4,r5,r6,lr}.
+      Independent whole-image aligned BL decoding finds two unconditional
+      callers at 0x0828b49c and 0x0828be2c, zero predicated callers.
+      The body contains six unconditional BL instructions, zero predicated
+      BLs: cursor init, two flag predicates, cursor advance, and two exit
+      invalidations. Walk until the first item with byte +0x18 bit 0x10 set,
+      remembering the last preceding item with both bits 0x08 and 0x01 set.
+      If a predecessor exists, set its 0x10 bit then clear the current item's
+      0x10 bit and return 1; otherwise return 0 without writes. Stop at the
+      first marked item even without a predecessor. Preserve unrelated bits
+      and invalidate the cursor on every exit. Existing canonical cursor and
+      predicate ports are reused; no new callee seams. Ghidra's four-argument
+      u64 signature is wrong: saved r1-r3 are scratch slots, and restored r1
+      is not a second result; both callers consume only r0. Deliberate
+      deviations: typed host-width cursor/pointer slots, initialized output
+      scratch, and a volatile cursor-index read retaining final invalidation.
+      Host tests cover empty/unmarked lists, both eligibility bits, first
+      marked stopping, latest eligible predecessor, unrelated bytes/bits,
+      and all 256 predecessor flag combinations. Full host suite passes
+      14721 tests; ARM release builds. Standalone actual-source smoke moves
+      selection backward twice then stops at the boundary. Hardware untested.
+      match.py exits 1 with 53 LLVM versus 39 original instructions: frame
+      setup and explicit branches replace predication, LLVM duplicates the
+      advance call site and combines exit invalidation. Flag writes and
+      predicate order match the original algorithm.
