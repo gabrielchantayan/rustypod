@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081438e0
+    ghidra: FUN_081438e0
+    name: resource_command_unhandled
+    size: 8
+    sig: "u32 resource_command_unhandled(void *object, u32 resource, u32 command, u32 value, u32 *output)"
+    module: app/resource_command_unhandled
+    status: ported
+    vars: {r0: object, r1: resource, r2: command, r3: value, stack_arg_0: output}
+    notes: >-
+      Raw A32 words e3a00000/e12fff1e establish the true extent
+      [0x081438e0,0x081438e8), 8 bytes: mov r0,#0; bx lr.
+      The next independent constant-zero leaf begins at 0x081438e8,
+      before Ghidra's next listed function at 0x08143904. Whole-image
+      aligned ARM word scan finds two incoming plain BLs at 0x0815a794
+      and 0x081b2164, zero predicated BLs. No outgoing calls or callee
+      seams. Both callers use this as an unhandled resource-command
+      fallback, passing four register arguments and a stack output pointer.
+      Return zero without reading arguments or memory or writing output.
+      No behavioral deviations; retain the caller ABI despite Ghidra's
+      void parameter list. Host tests cover extreme command/resource
+      words, unchanged object/output canaries, and NULL, unaligned, and
+      invalid ignored pointers. LLVM may fold identical constant leaves;
+      verify the exported symbol in the ARM archive.
   - address: 0x08144000
     ghidra: FUN_08144000
     name: byte_buffer_destroy
