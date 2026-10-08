@@ -233857,3 +233857,39 @@ functions:
       execution claimed. match.py exits 1: four original instructions versus
       seven Rust listing lines; LLVM adds frame setup/restore and a literal
       register address while retaining one word load, AND 1 and no calls.
+
+  # --- Indexed tagged record construction ---
+  - address: 0x08106cf4
+    ghidra: FUN_08106cf4
+    name: tagged_record_from_liti_index
+    size: 84
+    sig: "void tagged_record_from_liti_index(TaggedRecord *out, const u32 *source, i32 index)"
+    module: cxx/tagged_record_from_liti_index
+    status: ported
+    renames:
+      param_1/r0: out
+      param_2/r1: source
+      param_3/r2: index
+      param_4/r3: unused_saved_word
+      FUN_0826fc2c: tagged_record_init
+      FUN_080525b8: liti_indexed_entry_lookup
+    notes: >-
+      Raw ARM establishes 84 bytes at 0x08106cf4..0x08106d48; the next
+      function starts with push {r4,lr}. There are three outgoing plain BLs,
+      zero predicated BLs, and two incoming plain BLs with zero predicated
+      forms. Initialize out with zero payload and flag, then for nonnegative
+      signed index look up source word zero's object and copy the result
+      and source byte +4, including a zero lookup result. Negative indices
+      do not read source. The saved r3 word is only stack scratch overwritten
+      by the temporary record, not a fourth semantic argument. Reuses both
+      canonical Rust callees without seams. Deliberate codegen deviation:
+      eliminate the temporary tagged_record_init and copy its observable
+      payload/flag directly, retaining source read/output write ordering and
+      untouched output padding. No behavioral deviations. Host tests cover
+      negative extremes, valid indices, count boundary, large positive index,
+      NULL lookup object, preserved padding, and initialization-before-read
+      aliasing. All 14936 host tests and ARM release build passed. Actual-source
+      public-entry smoke passed 256 NULL-object flag values. match.py exits 1:
+      21 original instructions versus 17 Rust instructions, preserving the
+      signed guard and lookup while dropping the temporary initializer/copy;
+      modern LLVM also changes the stack frame. No device execution claimed.
