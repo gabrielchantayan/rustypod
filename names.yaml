@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08114d30
+    ghidra: FUN_08114d30
+    name: app_dispatch_if_global_flag
+    size: 56
+    sig: "uint32_t app_dispatch_if_global_flag(void *receiver)"
+    module: app/app_dispatch_if_global_flag
+    status: ported
+    renames:
+      param_1/r0: receiver
+      pcVar1/r4: shared_flag
+      DAT_08114d5c: shared_flag_address_0x089caf4b
+      DAT_08114d60: resource_id_0x6406
+      DAT_08114d64: resource_kind_string
+    notes: >-
+      Raw extent [0x08114d30,0x08114d68) is 56 bytes: 44 instruction bytes
+      and three literal words. Next independent push is at 0x08114d68.
+      Whole-image A32 word decoding finds two inbound plain BLs at
+      0x0811624c and 0x0819e304, no predicated BLs. Body has zero plain
+      or predicated BLs and one BLXNE through receiver vtable slot +0x58.
+      Read byte 0x089caf4b; if nonzero dispatch (0x53747220,0x6406),
+      ignore the virtual result, then reload and zero-extend the byte.
+      Callback changes are observable, including clearing it to zero.
+      The flag's higher-level meaning and virtual callee identity remain
+      unresolved; no guessed direct callee seam. Deliberate deviations:
+      host storage replaces the fixed global byte and native-width vtable
+      words preserve slot index 22. Host tests cover zero with NULL receiver,
+      high bytes and reentrant changes. Existing Rust caller uses this port.
+      ARM match retains conditional slot dispatch and the final byte reload;
+      LLVM uses a branch around the call rather than predicated loads/BLX.
   - address: 0x08114e08
     ghidra: FUN_08114e08
     name: status_string_resource
@@ -171202,8 +171231,10 @@ functions:
       r5: command_group_none
       r6: command_group_control
       "receiver-vtable+0x58": dispatch
-      FUN_08114d30: dispatch_conditional_app_command
+      FUN_08114d30: app_dispatch_if_global_flag
     notes: >-
+      The 0x08114d30 call now uses the canonical app_dispatch_if_global_flag
+      Rust port; its obsolete fixed-address/host-helper seam is removed.
       Raw osos.dec establishes the exact 196-byte extent
       0x081161d8..0x0811629b, including the literal pool at
       0x0811629c..0x081162b8; `push {r4,r5,r6,lr}` at 0x081162bc begins the
@@ -171212,9 +171243,7 @@ functions:
       between the fourth and fifth calls, then tail-dispatches the seventh
       virtual call. An independent whole-image A32 branch decode finds three
       inbound plain BL sites (0x081115bc, 0x08115cac, and 0x08116354) and
-      zero predicated BL sites. The direct helper remains unported because its
-      global condition is unrelated to this wrapper; it is retained as a
-      fixed-address call on target and as a host seam. Deliberate deviations:
+      zero predicated BL sites. The direct helper is now the canonical Rust port. Deliberate deviations:
       Rust expresses the final tail dispatch as a normal call.
   - address: 0x08114dc0
     ghidra: FUN_08114dc0
@@ -203225,8 +203254,10 @@ functions:
       r5: command_group_none
       r6: command_group_control
       "receiver-vtable+0x58": dispatch
-      FUN_08114d30: dispatch_conditional_app_command
+      FUN_08114d30: app_dispatch_if_global_flag
     notes: >-
+      The 0x08114d30 call now uses the canonical app_dispatch_if_global_flag
+      Rust port; its obsolete fixed-address/host-helper seam is removed.
       Raw osos.dec establishes the exact 196-byte extent
       0x081161d8..0x0811629b, including the literal pool at
       0x0811629c..0x081162b8; `push {r4,r5,r6,lr}` at 0x081162bc begins the
@@ -203235,9 +203266,7 @@ functions:
       between the fourth and fifth calls, then tail-dispatches the seventh
       virtual call. An independent whole-image A32 branch decode finds three
       inbound plain BL sites (0x081115bc, 0x08115cac, and 0x08116354) and
-      zero predicated BL sites. The direct helper remains unported because its
-      global condition is unrelated to this wrapper; it is retained as a
-      fixed-address call on target and as a host seam. Deliberate deviations:
+      zero predicated BL sites. The direct helper is now the canonical Rust port. Deliberate deviations:
       Rust expresses the final tail dispatch as a normal call.
   - address: 0x08114dc0
     ghidra: FUN_08114dc0
