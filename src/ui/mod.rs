@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod target_size_within_limit;
 pub mod tick_input_view;
 pub mod calendar_reset_elements;
 pub mod calendar_change_day;
