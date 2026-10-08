@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08112e44
+    ghidra: FUN_08112e44
+    name: volume_limit_query_results_equal
+    size: 60
+    sig: "u32 volume_limit_query_results_equal(VolumeLimitQueryContext *context)"
+    module: app/volume_limit_query_results_equal
+    status: ported
+    renames:
+      param_1/r0: context
+      context_plus_0x88c: interface
+      interface_vtable_plus_0x88: query_88
+      interface_vtable_plus_0x60: query_60
+      r5: first_result
+      return/r0: results_equal
+    notes: >-
+      Raw A32 words establish extent [0x08112e44,0x08112e80), 60
+      instruction bytes; the next function begins with push. Whole-image
+      aligned decoding finds two inbound plain BLs at 0x08202f50 and
+      0x08202fc8, zero predicated inbound BLs, zero outbound immediate
+      BLs (plain or predicated), and two register BLX calls at 0x08112e58
+      and 0x08112e6c. Query virtual slot +0x88 on context+0x88c's interface,
+      reload the interface and its vtable, query +0x60, and normalize
+      full-word equality to 0 or 1. Caller 0x08202f30 selects
+      GotoScreen_VolumeLimitLock_Unlock on inequality; 0x08202fbc saves
+      the inverted predicate before refreshing the context. No existing
+      names entry at this address; virtual callee identities remain
+      unresolved, with dynamic dispatch retained and no guessed seams.
+      Deliberate deviations: repr(C) native pointers and vtable slots
+      widen on hosts while retaining target field order and word indices.
+      Tests cover zero, one, high-bit and all-ones comparisons, call order,
+      interface replacement and vtable replacement during the first query.
+      All 14885 host tests pass; ARM release and standalone consumer
+      smoke pass. match.py exits 1 with a structural diff: both interface
+      loads, vtable slots and BLX calls match; LLVM adds a frame pointer
+      and replaces conditional moves with sub/clz/lsr equality normalization.
   - address: 0x08112fd8
     ghidra: FUN_08112fd8
     name: apply_context_property_604e
