@@ -232847,3 +232847,47 @@ functions:
       observed wrapping receiver mutation with returned values zero then one.
       match.py exits 1: the same three LDR instructions and final BX appear;
       LLVM adds push {fp,lr}, mov fp,sp and pop {fp,lr}. No device execution.
+
+  - address: 0x08112d08
+    ghidra: FUN_08112d08
+    name: default_indexed_item_owner_bit_3
+    size: 84
+    sig: "u32 default_indexed_item_owner_bit_3(const u8 *receiver, i32 index)"
+    module: app/default_indexed_item_owner_bit_3
+    status: ported
+    vars:
+      param_1: unused_receiver
+      param_2/r4: index_then_saved_result
+      auStack_50: default_query
+      auStack_68: indexed_context
+      uVar1: owner_capability_bit
+    renames:
+      FUN_0813e474: query_object_construct (existing unported firmware seam)
+      FUN_0813b898: indexed_item_context_construct (ported)
+      FUN_082a2db0: scoped_context_owner_byte_8f_bit_3 (ported)
+      FUN_08270414: scoped_context_destroy (ported)
+      FUN_0813e5c4: query_object_destroy_port (ported)
+    notes: >-
+      Raw A32 words establish [0x08112d08,0x08112d5c), 84 bytes:
+      e92d4010 through e8bd8010, then a separate e92d4010 push.
+      Whole-image aligned BL decoding finds two incoming plain BL calls
+      at 0x081154d0 and 0x08115860, zero predicated incoming calls;
+      the body contains five plain BL calls and zero predicated calls.
+      The receiver is overwritten before use. Constructs a default query
+      with id/mode zero, constructs the signed-index context, obtains the
+      validity-gated bit 3 of owner byte +0x8f, destroys context then query,
+      and returns the saved result. Caller 0x081153ec uses this predicate
+      in its property dispatcher, including property 0x63f5. No concrete
+      capability identity is inferred. Reuses all established callee ports
+      and the existing unported query-constructor seam; no new fixed-address
+      seam. Native repr(C) pointers widen host source/context layout; target
+      source allocation is checked as 72 bytes. Host regression exercises
+      negative indices, exact count and large signed boundary, unavailable
+      payloads, isolated bit masks, and cleanup mutation after result capture.
+      Host suite: 14887 passed. ARM release build passed. match.py exit 1:
+      21 original versus 24 Rust instructions; constructor BL becomes BLX
+      through its address literal, three real Rust BLs retain selection,
+      predicate and query destruction, empty context destructor is elided,
+      saved result survives cleanup. Frame layout/register allocation differs.
+      No device execution; constructor/global runtime dependencies are modeled
+      in host tests rather than claiming full firmware execution.
