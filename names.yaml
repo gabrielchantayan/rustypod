@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812252c
+    ghidra: FUN_0812252c
+    name: audio_processing_pair_select
+    size: 152
+    sig: "void audio_processing_pair_select(u32 *state)"
+    module: app/audio_processing_pair_select
+    status: ported
+    vars: {param_1: state, iVar1: channels, uVar2: first_processing_word, uVar3: second_processing_word}
+    renames: {DAT_081225c0: processing_word_table}
+    notes: >-
+      Raw extent [0x0812252c,0x081225c4) is 148 instruction bytes plus
+      literal 0x083e25fc at 0x081225c0; next function starts with LDRH.
+      Whole-image aligned A32 decoding verifies two inbound plain BLs at
+      0x081224ac and 0x08123498, zero predicated inbound BLs, and zero
+      outbound plain or predicated BLs. Callers configure input/output
+      audio rates, 8/16-bit sample widths and mono/stereo channel counts.
+      Select one of eight two-word entries by bits at +4, channels at +8,
+      and whether the Q16 rate ratio at +0x48 equals 0x10000. Store the
+      selected words at +0x9c/+0xa0 and set only byte +0x18 to one.
+      Target uses volatile reads from the original table; no callee
+      identity is inferred from its instruction-like raw words and no
+      new seams are introduced. Host deviation uses verified raw table
+      words and u32 indices preserve target offsets on 64-bit hosts.
+      Regression covers all eight entries, noncanonical inputs, exact
+      equality boundaries, and preservation of every neighboring word.
+      All 14827 host tests and ARM release build passed. Public-entry
+      executable smoke verified unity/non-unity stereo selection and
+      byte-only flag mutation. match.py exits 1: 37 original versus 35
+      Rust instructions; index selection replaces duplicated loads,
+      preserving the table literal, predicates, stores and leaf behavior.
   - address: 0x08123c14
     ghidra: FUN_08123c14
     name: output_buffer_append_suffix
