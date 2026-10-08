@@ -232636,3 +232636,41 @@ functions:
       ADD and unsigned comparison. LLVM preserves tail dispatch using BX
       with the exact 0x08112bf8 literal, adding a frame-pointer prologue.
       No device execution.
+
+  - address: 0x08113680
+    ghidra: FUN_08113680
+    name: selection_state_refresh_playlist_value
+    size: 156
+    sig: "void selection_state_refresh_playlist_value(u32 *state)"
+    module: app/selection_state_refresh_playlist_value
+    status: ported
+    renames:
+      param_1: state
+      iVar2: playlist
+      uVar3: value
+      uVar1: notification_action
+    notes: >-
+      Raw A32 extent 0x08113680..0x0811371c: 140 instruction bytes and
+      16 literal bytes, followed by the next function's push. Two plain
+      direct BL instructions to 0x08066618 and the ported ui_tdat_flagged_plst
+      at 0x080561b4; no predicated BL. Two inbound plain BL sites at
+      0x08114028 and 0x08114918, no predicated inbound calls. Two virtual
+      BLX instructions and a final BX dispatch use vtable slot +0x58.
+      Configure the inner object at state +0x30 with selectors (1,0),
+      reload the inner pointer, obtain its flagged playlist, then load
+      playlist +0x40's payload pointer and zero-extend payload +0x2e's
+      halfword; absent playlist gives zero. Compare against cache +0xf4.
+      Unchanged returns; changed stores before dispatching VMax 0x638a,
+      0x63d2, 0x63d3, reloading the vtable each time. Reuses the existing
+      media-player configuration seam without inventing a callee identity.
+      Deliberate deviations: host-only configuration/dispatch operations
+      retain target-width data pointers; final virtual dispatch expressed
+      as a call with unobserved result (LLVM emits a tail BX). All 14880
+      host tests passed and ARM release build passed. Standalone direct-entry
+      smoke observed cache 0x8001 and the three ordered notifications, then
+      no notifications on an unchanged second invocation. match.py exits 1
+      with a structural diff: same configuration, playlist lookup, conditional
+      halfword read, comparison, cache store and three reloaded virtual
+      dispatches. LLVM adds a frame pointer, uses fixed-address BLX for
+      configuration, and constructs resource constants with MOV/ORR.
+      No device execution.

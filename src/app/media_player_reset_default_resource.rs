@@ -12,7 +12,7 @@ const PLAYER_PENDING: usize = 0x4d6;
 type ConfigureInnerState = unsafe extern "C" fn(*mut u8, u32, u32);
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_configure_inner_state(
+pub(crate) unsafe extern "C" fn firmware_configure_inner_state(
     inner_state: *mut u8,
     first_selector: u32,
     second_selector: u32,
