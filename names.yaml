@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811f074
+    ghidra: FUN_0811f074
+    name: descriptor_handle_present
+    size: 76
+    sig: "u32 descriptor_handle_present(const u32 *owner, u32 selector)"
+    module: app/descriptor_handle_present
+    status: ported
+    vars: {param_1: owner, r1: selector, uVar1: index, uVar2: count, iVar3: payload}
+    renames: {FUN_081d5fe0: descriptor_slot_index, FUN_083d76d8: vector_size_elem4, FUN_083d60bc: handle_deref_or_null_alias_60bc}
+    notes: >-
+      Raw extent [0x0811f074,0x0811f0c0) is 76 bytes, ending before the
+      next PUSH. Whole-image A32 decoding finds two inbound plain BLs at
+      0x081fcc00 and 0x0820874c, three outbound plain BLs, and zero
+      predicated BLs in either direction. Ghidra omits selector r1;
+      the raw callee and both callers confirm it. Selectors below eighteen
+      map through table +0x24+selector*0x24 to a vector index. Reject the
+      UINT32_MAX sentinel and indices outside the unsigned vector count,
+      then test both the handle cell and its payload. Owner+0x14 holds
+      the table; owner+4 holds the vector head. Deliberately inline the
+      three verified helper algorithms without new seams or callee ports.
+      Raw u32 fields preserve host/target layout; wrapping subtraction and
+      ASR preserve reversed vector counts. Tests cover all valid selectors,
+      invalid selectors, sentinel and high-bit indices, last and one-past
+      elements, empty/reversed vectors, null cells and null payloads.
+      All 14848 host tests and ARM release build passed. Direct compiled
+      smoke observed populated=1 and empty=0. match.py exits 1 with 19
+      original versus 25 Rust instructions. Inlining retains selector and
+      sentinel guards, nine-word indexing, unsigned ASR-count comparison,
+      both pointer loads and boolean normalization. LLVM skips the unused
   - address: 0x08121538
     ghidra: FUN_08121538
     name: stream_write_scoped
