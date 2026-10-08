@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod input_sequence_clear_and_reacquire;
 pub mod row_mask_rectangles_collect;
 pub mod code_is_0x10_through_0x1f;
 pub mod code_is_0x14_or_0x1c;

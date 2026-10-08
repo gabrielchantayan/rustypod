@@ -14,11 +14,12 @@
 //! Deliberate deviations: shared mode-transition code replaces three copies;
 //! the empty draw-state destructor is omitted. Collection vtables use native
 //! pointer widths on hosts; owner fields retain target-width u32 offsets.
-//! Unported clear/reacquire, reposition, and commit helpers retain verified
-//! direct-address target seams; host execution panics if those are reached.
+//! Reposition and commit helpers retain verified direct-address target seams;
+//! host execution panics if those are reached. Clear/reacquire uses its Rust port.
 
 use crate::app::input_sequence_find_item::input_sequence_find_item;
 use crate::app::input_sequence_item_acquire::input_sequence_item_acquire;
+use crate::app::input_sequence_clear_and_reacquire::input_sequence_clear_and_reacquire as clear_and_reacquire;
 use crate::app::input_sequence_item_clear_action::input_sequence_item_clear_action;
 use crate::cursor::{cursor_init, cursor_advance, cursor_invalidate, Collection, Cursor};
 use crate::cxx::draw_state::draw_state_construct;
@@ -58,17 +59,6 @@ unsafe fn remove_item(value: *mut CollectionPrefix, item: *mut u8) {
     remove(value, item);
 }
 
-// 0x08129ab4 walks the selected collection, remembers the selected item's
-// index, clears via slot +0x30, and reacquires that item if it was present.
-unsafe fn clear_and_reacquire(state: *mut u8, mode: u32) {
-    #[cfg(target_os = "none")]
-    {
-        let call: unsafe extern "C" fn(*mut u8, u32) = core::mem::transmute(0x0812_9ab4usize);
-        call(state, mode);
-    }
-    #[cfg(not(target_os = "none"))]
-    { let _ = (state, mode); panic!("unported input_sequence_clear_and_reacquire @ 0x08129ab4"); }
-}
 
 // 0x08129330 stores the signed index, updates offsets from the owning
 // sequence and records the current millisecond timestamp.
