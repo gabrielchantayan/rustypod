@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08113994
+    ghidra: FUN_08113994
+    name: context_owned_interface_predicate
+    size: 52
+    sig: "u32 context_owned_interface_predicate(OwnedInterfacePredicateContext *context)"
+    module: app/context_owned_interface_predicate
+    status: ported
+    renames:
+      param_1/r0: context
+      context_plus_0x4cc: gate
+      context_plus_0x430: interface
+      vtable_plus_0x9c: predicate
+      method_result/r0: result
+    notes: >-
+      Raw A32 decoding establishes extent [0x08113994,0x081139c8),
+      followed by the next function's push. Whole-image immediate BL
+      decoding verifies two inbound plain calls at 0x081119f0 and
+      0x0811327c, zero predicated calls. The body has zero immediate
+      BLs and one virtual BLX at 0x081139b0. Nonzero byte +0x4cc
+      returns zero without accessing the interface. Otherwise load
+      interface +0x430, dispatch vtable +0x9c with that receiver, and
+      normalize the entire returned word to zero or one. Callers select
+      property values; domain meaning and concrete virtual callee identity
+      remain unresolved. No guessed seam. Deliberate deviation: repr(C)
+      host pointers widen while preserving target field/slot word indices.
+      Tests cover every nonzero gate byte with a null interface, gate
+      transitions, callback side effects, and full-word normalization.
+      All 14877 host tests pass; ARM release build succeeds. Standalone
+      consumer smoke verifies high-bit normalization and gated null bypass.
+      match.py exits one: LLVM uses an early BX exit and a different
+      frame but preserves offsets +0x4cc, +0x430, +0x9c, BLX and normalization.
   - address: 0x081139c8
     ghidra: FUN_081139c8
     name: input_state_status_byte
