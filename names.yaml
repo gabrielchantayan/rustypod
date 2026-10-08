@@ -231943,3 +231943,37 @@ functions:
       is incorrect. Concrete virtual callee identity and result units are
       unknown, so no fixed callee seam is introduced. Host function pointers
       widen while opaque source words stay u32; target offsets are asserted.
+
+  - address: 0x0811add4
+    ghidra: FUN_0811add4
+    name: radio_volume_timer_reset
+    size: 40
+    sig: "void radio_volume_timer_reset(u8 *controller)"
+    module: app/radio_volume_timer_reset
+    status: ported
+    vars:
+      param_1: controller
+      controller_plus_0xb0: volume_timer
+    renames:
+      FUN_0812c6b0: timer_stop
+      FUN_0812c63c: timer_start_after
+      FUN_0812bf4c: timer_restart
+      DAT_0811adfc: delay_ms_3000
+    notes: >-
+      Raw A32 words establish [0x0811add4,0x0811ae00): 36 instruction
+      bytes plus the 3000 literal at 0x0811adfc, followed by a separate
+      bx lr function at 0x0811ae00. Full aligned raw scan finds one plain
+      inbound BL at 0x0811ab38 and one BLNE at 0x0811a6ac. The body has
+      two plain BLs and one tail B. Radio volume-change and wheel handlers
+      call this to stop the +0xb0 timer, program 3000 ms, and restart it,
+      reloading the timer pointer before each helper. Ghidra incorrectly
+      folds the tail callee and its dependencies into this function. All
+      three callees already have Rust ports; no new dependency seam.
+      Deliberate deviations: return-position Rust call replaces the tail
+      branch; volatile u32 loads retain target pointer layout and reloads
+      on hosts. Host tests cover stopped/running timers and pointer swaps
+      during either stop, proving which timer receives the delay and arm.
+      ARM build and full host suite pass. match.py reports 24 instructions
+      versus 10 original words: stop/start remain calls, restart is inlined
+      into stop, run-state store, and existing arm dispatch. Three +0xb0
+      loads and the 3000 delay are preserved; no identical-symbol fold.

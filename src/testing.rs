@@ -48,6 +48,7 @@ pub mod hints {
     pub const INPUT_SEQUENCE_ITEM_START: usize = 0x4321_0000;
     pub const CONTROLLER_FINISH_STRING_TABLE: usize = 0x4320_0000;
     pub const OWNER_TIMER_STOP: usize = 0x6a71_0000;
+    pub const RADIO_VOLUME_TIMER_RESET: usize = 0x6a72_0000;
     pub const SECONDS_TIME_TEXT: usize = 0x4319_0000;
     pub const CALENDAR_SET_SELECTED_DATE: usize = 0x4318_0000;
     pub const TIMING_NODE_OWNER_DESTROY: usize = 0x4317_0000;
