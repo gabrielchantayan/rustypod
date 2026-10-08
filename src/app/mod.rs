@@ -113,6 +113,7 @@ pub mod named_sequence_play;
 pub mod selected_resource_play;
 pub mod input_state_buffer;
 pub use input_state_buffer::*;
+pub mod input_state_status_byte;
 pub mod recording_interval_seconds;
 pub mod voice_memo_event_state;
 pub mod voice_memo_is_paused;

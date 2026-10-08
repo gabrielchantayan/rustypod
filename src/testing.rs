@@ -3520,6 +3520,8 @@ pub mod hints {
     pub const CG_UNPACK_TAGGED_OPERAND: usize = 0x8fff_0000;
     // Dedicated cxx/object_list_pop_front target-width node fixture; never unmapped.
     pub const OBJECT_LIST_POP_FRONT: usize = 0x53d0_0000;
+    // Fixed firmware buffer page used only by app/input_state_status_byte.
+    pub const INPUT_STATE_STATUS_BYTE: usize = 0x08a7_7000;
 }
 
 /// Maps `len` bytes at `hint` and returns it only if the whole span
