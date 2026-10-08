@@ -35,7 +35,7 @@ unsafe fn retail(operation: Operation) -> usize {
             transmute::<usize, unsafe extern "C" fn(usize, u32, u32)>(0x0812_25f8)(child, callback, context); 0
         }
         Operation::Enable(child) => {
-            transmute::<usize, unsafe extern "C" fn(usize)>(0x0812_2220)(child); 0
+            crate::kernel::event_handler_source_child_enable::event_handler_source_child_enable(child as *mut u8); 0
         }
         Operation::Click => { crate::drivers::piezo::piezo_note_post(500, 2); 0 }
         Operation::Delay(child, delay) => {
