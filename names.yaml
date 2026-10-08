@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081143b4
+    ghidra: FUN_081143b4
+    name: stage_progress_reset_and_select
+    size: 84
+    sig: "usize stage_progress_reset_and_select(void)"
+    module: app/stage_progress_reset_and_select
+    status: ported
+    renames:
+      iVar1: displayed
+      uVar2: selection
+      piVar3: list
+      DAT_08114404: fallback_command_id
+    notes: >-
+      Raw A32 establishes 0x081143b4..0x08114408: 80 instruction bytes
+      plus the 0x0dad0de0 literal at 0x08114404, then the next real PUSH.
+      Independent whole-image BL decoding finds two plain incoming calls
+      at 0x08116430 and 0x081164b8, zero predicated incoming calls.
+      Eight plain outgoing BLs, zero predicated outgoing BLs; tail BX
+      dispatches list vtable slot +4. Reset the stage-progress singleton
+      via its ported getter and constructor, dispatch disk-mode resource
+      0x8ca8, then call 0x08159108. Raw words verify that helper reads
+      [0x089cc790 + 4], returns zero if absent, otherwise calls the ported
+      view_clear_flag_display at 0x08158f38 and returns one. It remains
+      unported and uses the DISPLAY_IF_PRESENT volatile seam with its
+      exact target address. A nonzero result exits; otherwise select
+      controller history without callback, dispatch resource 0x0dad0ddf,
+      command 0x0dad0de0, aux zero, then deliver the returned pointer to
+      node_list_get's virtual slot +4. No guessed virtual callee identity.
+      Preserve raw r0 rather than Ghidra's void signature; incoming r0
+      is unused. Existing NodeList layouts use pointer-width slots on
+      hosts and four-byte slots on ARM. Host tests cover bypass state,
+      null and nonnull selection installation and return preservation.
+      All 14873 host tests and the ARM release build pass. Isolated
+      consumer smoke exercises the exported body with simulated firmware
+      dependencies; no device execution claimed. match.py exits one for
+      the expected structural diff: extra frame registers and an indirect
+      display seam, but matching conditional exit, command arguments,
+      saved selection, list lookup and virtual tail BX. Direct Rust
+      dependencies remain direct BLs; archive addresses require relocation.
   - address: 0x081145f0
     ghidra: FUN_081145f0
     name: context_owned_interface_state
