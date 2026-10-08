@@ -231803,3 +231803,35 @@ functions:
       shrink. match.py exits 1: 21 original versus 26 Rust instructions;
       frame pointer, split byte/index counters and duplicated count call
       replace ADS layout, preserving unsigned loop and virtual slot 0x24.
+
+  - address: 0x0811ee44
+    ghidra: FUN_0811ee44
+    name: owned_interface_destroy
+    size: 44
+    sig: "InterfaceOwner *owned_interface_destroy(InterfaceOwner *owner)"
+    module: app/owned_interface_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: owner
+      param_1[2]/r0: interface
+      DAT_0811ee70: OWNER_VTABLE
+    notes: >-
+      Raw osos.dec establishes 44 executable bytes [0x0811ee44,0x0811ee70),
+      followed by the four-byte literal 0x08982ecc; the next real function
+      starts at 0x0811ee74. Whole-image A32 BL decoding finds two inbound
+      plain BLs at 0x0811ee38 and 0x08224224, zero predicated BLs.
+      The body has zero direct BLs and one BLXNE through the interface
+      vtable slot +0x1c. Both callers are null-guarded deleting wrappers
+      that subsequently tail-branch to 0x082aad24. Restore owner word zero
+      to 0x08982ecc before loading the optional interface at +8; invoke
+      its virtual slot with that interface in r0, then return owner.
+      Neither the +4 state nor the interface pointer is cleared. The class
+      and concrete virtual method identity remain unknown; no fixed-address
+      callee seam is invented. Native repr(C) host pointers widen while
+      preserving field and vtable word order. All 14850 host tests and the
+      ARM release build pass. Production-source smoke verifies callback
+      ordering, retained callback state mutation, and the null path.
+      match.py exits 1: 11 stock instructions versus 16 Rust instructions
+      including the literal. LLVM uses a null-path early return, a larger
+      frame, and an unconditional BLX inside the non-null branch; the
+      restored vtable, +8 member, +0x1c virtual slot and return are preserved.
