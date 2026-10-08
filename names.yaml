@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08142d84
+    ghidra: FUN_08142d84
+    name: coverflow_construct
+    size: 40
+    sig: "void *coverflow_construct(void *storage, u32 argument, u32 first, u32 second, const void *descriptor)"
+    module: ui/coverflow_construct
+    status: ported
+    vars: {param_1/r0: storage, param_2/r1: argument, param_3/r2: first, param_4/r3: second, param_5/stack_arg_0: descriptor}
+    renames: {FUN_08142dac: coverflow_construct_with_table}
+    notes: >-
+      Raw A32 extent [0x08142d84,0x08142dac) is ten words, 40 bytes.
+      Next function begins push {r4,r5,r6,r7,r8,lr}. Whole-image aligned
+      branch-word scan finds two incoming plain BLs at 0x081423d0 and
+      0x081dfef0, zero predicated BLs. One outgoing plain BL at 0x08142da4
+      to 0x08142dac, zero predicated BLs. Insert NULL as the second
+      constructor argument, shifting the four remaining arguments; preserve
+      the returned r0 pointer. Ghidra incorrectly reports void. Callee's
+      Coverflow string and default-table initialization establish complete
+      object construction; other argument meanings remain opaque. Full
+      names.yaml search finds no assigned or callee entry before this port.
+      Retains the verified unported callee at 0x08142dac without inventing
+      an implementation. No target behavioral deviations. Host constructor
+      model exercises default-table selection, NULL descriptor, extreme
+      words, storage canaries and adjusted subobject return. Standalone smoke
+      observes constructor mutation and adjusted return. All 14728 host
+      tests pass and ARM release build passes. match.py reports ten versus
+      fifteen instructions: LLVM uses a frame pointer, separate stack
+      stores and BLX through the correct 0x08142dac literal; argument order,
+      NULL table and untouched returned r0 agree.
   - address: 0x08143000
     ghidra: FUN_08143000
     name: timed_view_stop_invalidate
