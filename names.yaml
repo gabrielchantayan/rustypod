@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08130a60
+    ghidra: FUN_08130a60
+    name: selection_timer_stop
+    size: 56
+    sig: "u32 selection_timer_stop(const SelectionTimerOwner *owner, u32 skip_query)"
+    module: app/selection_timer_stop
+    status: ported
+    vars: {param_1/r4: owner, param_2/r5: skip_query}
+    renames:
+      owner_plus_0xbc: selection
+      owner_plus_0xc0: timer
+      FUN_0812c6b0: timer_stop
+      FUN_08131854: object_bytes_64_or_6c_nonzero
+      FUN_08132670: selection_readiness_query_retail
+    notes: >-
+      Raw A32 extent [0x08130a60,0x08130a98), 56 bytes rather than
+      Ghidra's 64. Next real body is virtual_dispatch_zero. Independent
+      whole-image decoding verifies two plain incoming BLs at 0x08130a40
+      and 0x08131710, no predicated incoming BLs; two plain outgoing BLs,
+      no predicated outgoing BLs, and a BEQ tail call to 0x08132670.
+      Stop timer, return its residual r0 for nonzero skip_query, otherwise
+      return the selection byte predicate when nonzero or reload selection
+      and query readiness. Tail target is ADD r0,r0,#0x4c followed by B
+      0x0815f2f4; Ghidra incorrectly folds its callees into this function.
+      Timer seam calls retail 0x0812c6b0 rather than the void Rust seam,
+      preserving mutex_unlock's residual r0. Both known callers discard it.
+      Host repr(C) pointers widen; retail stop and readiness are injected.
+      No target algorithm changes.
+      Verification: 14758 host tests pass, ARM release build succeeds,
+      actual-source smoke observes readiness 42, blocked 1, skipped 93,
+      and stopped timer state. match.py exits 1 with a structural diff:
+      its default 64-byte window includes eight bytes of the next function.
+      LLVM uses BLX for the fixed timer address, a relocatable predicate BL,
+      and BX for the readiness tail call. It retains both short circuits;
+      the selection reload is folded across the read-only predicate.
   - address: 0x08130a98
     ghidra: FUN_08130a98
     name: virtual_dispatch_zero
