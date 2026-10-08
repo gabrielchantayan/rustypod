@@ -47257,6 +47257,24 @@ functions:
       Not ported only because it is one instruction and its family is
       already represented; trivial to add.
 
+  - address: 0x081212c8
+    ghidra: FUN_081212c8
+    name: ata_cmd_get_extended_aux
+    size: 8
+    sig: "u16 ata_cmd_get_extended_aux(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Raw words e1d005b4 and e12fff1e decode to ldrh r0,[r0,#0x54];
+      bx lr. The next real function is the extended auxiliary setter at
+      0x081212d0. Whole-image A32 branch decoding verifies one plain BL
+      at 0x081662b8 and one BLEQ at 0x08283710; no outgoing calls.
+      Reads the unsigned auxiliary halfword in the extended taskfile;
+      its ATA register meaning remains unresolved. Reuses the aligned
+      volatile halfword helper with no semantic deviations or NULL guard.
+      Host tests cover zero, byte order, bit 15, and the maximum halfword.
+
   - address: 0x081212ac
     ghidra: FUN_081212ac
     name: ata_cmd_set_opaque_48_49
