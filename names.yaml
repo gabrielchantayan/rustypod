@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08127af4
+    ghidra: FUN_08127af4
+    name: member_record_consume
+    size: 148
+    sig: "void member_record_consume(RecordConsumer *owner)"
+    module: app/member_record_consume
+    status: ported
+    vars: {param_1: owner, piVar3: member, piVar2: slot, iVar4: record, FUN_082aad24: operator_delete}
+    notes: >-
+      Raw A32 extent [0x08127af4,0x08127b88) includes 136 code bytes and
+      twelve literal bytes; next independent push at 0x08127b88. Whole-image
+      aligned decoding finds two incoming plain BLs at 0x082182c4 and
+      0x08218348, zero predicated incoming BLs. Outgoing calls: zero plain
+      BLs, one BLNE at 0x08127b74 to ported operator_delete, four virtual
+      BLX calls. Save member +0xfc slot-zero record through vtable +0x40,
+      remove through +0x2c with zero, copy record +8 to owner +0xf8, dispatch
+      Str category 0x53747220 resources 0x36c3 then 0x36c4 through +0x58,
+      reloading tables after callbacks, then delete the saved record.
+      No null guard precedes record dereference. Ghidra incorrectly marks
+      delete noreturn and omits the return. Native pointer fields and vtable
+      slots widen on hosts; target repr(C) offsets are asserted. Incidental
+      scratch-register arguments are omitted. Tests replace deletion only.
+      ARM build and all 14804 host tests pass. Exported-function host smoke
+      observes cached value 42, resources 0x36c3/0x36c4, then saved-record
+      deletion. match.py structural diff (exit 1) preserves four virtual
+      calls and exact target field offsets; LLVM constructs resource IDs
+      with immediates and tail-calls delete, removing the redundant null
+      guard after the required dereference. Delete itself guards null.
+
   - address: 0x0812805c
     ghidra: FUN_0812805c
     name: calendar_change_day
