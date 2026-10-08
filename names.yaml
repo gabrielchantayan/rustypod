@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08129a0c
+    ghidra: FUN_08129a0c
+    name: input_sequence_append_value
+    size: 108
+    sig: "void input_sequence_append_value(u8 *state, u32 value)"
+    module: app/input_sequence_append_value
+    status: ported
+    vars:
+      param_1/r4: state
+      param_2/r5: value
+      state+0xb0: selected_item
+      state+0xb4: action_index
+      state+0xb8: window_index
+      state+0xd4: initial_window_index
+      state+0xd8: window_dirty
+    notes: >-
+      Raw A32 extent [0x08129a0c,0x08129a78) is 108 bytes; the next
+      function begins PUSH. Independent whole-image decoding finds three
+      outgoing plain BLs, zero predicated BLs, and two inbound calls:
+      BLNE at 0x08129700 and BL at 0x08129768. Zero value is a no-op.
+      Dirty windows copy +0xd4 to +0xb8, clear +0xb4, and dispatch 0x2d.
+      Reload selected item and low action-index byte, insert the value with
+      three zero metadata words if selected, then saturating-advance +0xb4.
+      Reuses canonical dispatcher and index ports. Unported 0x0812881c
+      sets an action bit, timestamps, and updates/inserts a sorted action
+      record; raw PUSH and LDRD verify its six-word ABI. It remains a
+      direct-address target seam and panics on hosts. No behavioral
+      deviations; Ghidra's phantom dispatcher r2/r3 arguments are omitted.
+      All 14794 host tests pass; ARM release build succeeds. match.py
+      reports a structural diff: LLVM uses an early zero return, byte
+      index load, literal BLX insertion seam and tail branch to the
+      canonical advance helper; dirty restart and conditional insertion
+      remain intact. Unicorn smoke executes actual linked Rust ARM and raw
+      retail ARM: 75 cases match complete owner bytes for zero/nonzero
+      full-word values, index boundaries, clear/set dirty flags, absent
+      selection and inactive window mode. Selected-item insertion and
+      active-window dispatch are not exercised by this smoke.
+      No on-device execution claimed.
   - address: 0x08129b44
     ghidra: FUN_08129b44
     name: code_is_0x14_or_0x1c
