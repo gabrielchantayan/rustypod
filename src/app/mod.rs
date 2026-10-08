@@ -517,6 +517,7 @@ pub mod controller_transition_volume_post;
 pub mod controller_string_state_reconcile;
 pub mod passkey_digit_complete;
 pub mod passkey_snapshot;
+pub mod selected_entry_string_construct;
 pub mod view_event_prepare_resource_provider;
 pub mod volume_controller_post_commands;
 pub mod volume_controller_post_byte_90_code;
