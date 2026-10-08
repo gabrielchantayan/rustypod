@@ -158,6 +158,22 @@ pub unsafe extern "C" fn class6000_dirp_property_6066_or_default() -> u32 {
     let value = read_typed(store, PROPERTY_KEY_6066, CLASS_ID_6000, RESOURCE_KIND_DIRP);
     if value.is_null() { DEFAULT_PROPERTY_6067 } else { *value }
 }
+/// Tests whether class-0x6000's `"DirP"` property 0x6066 is one of
+/// 0x6071, 0x6072, 0x6078, or 0x6079.
+///
+/// Original: `FUN_08124334` @ `0x08124334`, 52 bytes (13 ARM words);
+/// the next real function starts at `0x08124368`. Raw binary decoding
+/// verifies two unconditional BL callers (0x082988c4, 0x08299050) and
+/// zero predicated BL callers. Calls the existing property getter once,
+/// then compares its full u32 result against the four literals.
+///
+/// Deliberate deviations: Rust expresses the predicated subtraction chain
+/// as a membership comparison; lookup, NULL fallback, and result are unchanged.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class6000_dirp_property_6066_is_6071_6072_6078_6079() -> bool {
+    matches!(class6000_dirp_property_6066_or_default(), 0x6071 | 0x6072 | 0x6078 | 0x6079)
+}
 
 
 #[cfg(test)]
@@ -313,6 +329,31 @@ mod tests {
             CLASS_REGISTRY.vtable = &REGISTRY_VTABLE;
         }
         InstalledStore { _lock: lock, _registry_lock: registry_lock }
+    }
+
+    #[test]
+    fn dirp_membership_checks_full_word_and_rejects_missing_property() {
+        let mut result = 0u32;
+        let result_ptr = core::ptr::addr_of_mut!(result);
+        let mut store = Store { vtable: &STORE_VTABLE };
+        let _installed = install(core::ptr::addr_of_mut!(store), result_ptr);
+
+        for value in 0..=u16::MAX as u32 {
+            unsafe { result_ptr.write(value) };
+            let expected = value == 0x6071 || value == 0x6072
+                || value == 0x6078 || value == 0x6079;
+            assert_eq!(
+                unsafe { class6000_dirp_property_6066_is_6071_6072_6078_6079() },
+                expected,
+                "property {value:#x}",
+            );
+        }
+        for value in [0x0001_6071, 0x8000_6072, 0xffff_6078, 0xffff_6079, u32::MAX] {
+            unsafe { result_ptr.write(value) };
+            assert!(!unsafe { class6000_dirp_property_6066_is_6071_6072_6078_6079() });
+        }
+        unsafe { core::ptr::addr_of_mut!(TYPED_RESULT).write(core::ptr::null_mut()) };
+        assert!(!unsafe { class6000_dirp_property_6066_is_6071_6072_6078_6079() });
     }
 
     #[test]

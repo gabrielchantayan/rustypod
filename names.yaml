@@ -52624,6 +52624,32 @@ functions:
       as a pointer but deliberately uses only its raw low byte here, without
       dereferencing it, matching stock.
 
+  - address: 0x08124334
+    ghidra: FUN_08124334
+    name: class6000_dirp_property_6066_is_6071_6072_6078_6079
+    size: 52
+    sig: "bool class6000_dirp_property_6066_is_6071_6072_6078_6079(void)"
+    module: app/class_6000_property
+    status: ported
+    renames:
+      FUN_08171ba0: class6000_dirp_property_6066_or_default
+      iVar1: property
+      bVar2: matches_property
+    notes: >-
+      Raw extent is 52 bytes, thirteen ARM instructions ending with pop
+      {r4, pc} at 0x08124364; the next real function begins at 0x08124368.
+      Independent decoding of aligned ARM BL words in osos.dec finds two
+      unconditional callers at 0x082988c4 and 0x08299050, with zero
+      predicated BL callers. Calls the existing class-0x6000 typed DirP
+      property-0x6066 getter once and returns true exactly for full-word
+      values 0x6071, 0x6072, 0x6078, and 0x6079. The getter's NULL fallback
+      0x6067 returns false. Callers select name-formatting paths and comma
+      insertion using this predicate; the property's semantic identity
+      remains unestablished, so naming retains verified literals. Rust
+      replaces the predicated subtraction chain with membership comparisons.
+      Host tests exhaust all 16-bit values, reject high-word aliases and
+      u32::MAX, and exercise the missing-property fallback.
+
   - address: 0x08171ba0
     ghidra: FUN_08171ba0
     name: class6000_dirp_property_6066_or_default
