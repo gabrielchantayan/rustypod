@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081145f0
+    ghidra: FUN_081145f0
+    name: context_owned_interface_state
+    size: 16
+    sig: "u32 context_owned_interface_state(OwnedInterfaceStateContext *context)"
+    module: app/context_owned_interface_state
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x430/r0": interface
+      "interface.vtable+0xcc/r1": state_method
+    notes: >-
+      Raw A32 words e5900430 e5901000 e59110cc e12fff11 establish the
+      true extent [0x081145f0,0x08114600); the next independently called
+      function starts with push at 0x08114600. Whole-image word decoding
+      verifies two inbound plain BLs at 0x08115338 and 0x0819e274, zero
+      predicated BLs. Body has no BL or BLX and one BX virtual tail call.
+      Load context+0x430, then interface vtable slot +0xcc, dispatch with
+      the interface as receiver, and return the entire word. Callers
+      distinguish codes 0 through 3; domain meanings and the concrete
+      virtual callee identity remain unresolved. No guessed callee seam.
+      Deliberate deviations: repr(C) host pointers widen while preserving
+      field and vtable word indices; Rust expresses the tail call as a
+      final call without null checks or normalization. ARM match preserves
+      all four original instructions, adding only a frame push/mov/pop.
   - address: 0x08114d30
     ghidra: FUN_08114d30
     name: app_dispatch_if_global_flag
