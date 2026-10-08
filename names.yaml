@@ -231743,3 +231743,34 @@ functions:
       original versus thirteen Rust instructions: LLVM branches instead of
       predication, uses a post-indexed node load, and adds a conditional frame;
       comparison, successor store at +0x30 and payload +8 are preserved.
+  - address: 0x0811f150
+    ghidra: FUN_0811f150
+    name: payload_vector_dispatch
+    size: 84
+    sig: "void payload_vector_dispatch(PayloadVector *owner)"
+    module: app/payload_vector_dispatch
+    status: ported
+    renames:
+      param_1/r0/r5: owner
+      uVar4/r4: index
+      uVar3: count
+      piVar2: object
+      owner_plus_4: vector
+    notes: >-
+      Raw A32 extent [0x0811f150,0x0811f1a4) ends in pop at 0x0811f1a0;
+      next independent push is at 0x0811f1a4. Whole-image word decoding
+      verifies two inbound plain BLs at 0x081f049c and 0x0821b604, zero
+      predicated inbound BLs. Three outbound plain BLs: handle_deref_or_null
+      alias 0x083d60bc twice and vector_size_elem4 at 0x083d76d8 once;
+      zero predicated outbound BLs, one virtual BLX. Iterate unsigned
+      indices, skip null cells/payloads, call object vtable slot 0x24 with
+      this in r0. Reload bounds after callbacks; slot identity is unknown.
+      Reuse existing Rust callees and migrate tree/range dispatch callers.
+      Host fields and slots use native pointer width; host count divides
+      by native slot width. Target loads remain aligned words. LLVM folds
+      the repeated pure handle dereference; no semantic change under the
+      valid-storage contract. All 14847 host tests and ARM release build
+      pass. Production-source smoke proves empty/null skipping and callback
+      shrink. match.py exits 1: 21 original versus 26 Rust instructions;
+      frame pointer, split byte/index counters and duplicated count call
+      replace ADS layout, preserving unsigned loop and virtual slot 0x24.

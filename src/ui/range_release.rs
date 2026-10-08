@@ -14,10 +14,9 @@
 //! inclusive interval retains the operation; otherwise it releases it. A
 //! failed acquire returns zero.
 //!
-//! Deliberate deviations: the three unresolved direct callees retain explicit
-//! operation-shaped seam names rather than invented identities. Target builds
-//! invoke their verified fixed addresses through `blx`; host tests install
-//! recorders. Target pointers remain u32 words, including on 64-bit hosts.
+//! Deliberate deviations: acquire and next retain operation-shaped seams.
+//! Payload dispatch uses its Rust port; host tests use native-width payload
+//! vector fields while the surrounding operation links remain u32 words.
 
 use core::ptr;
 
@@ -28,13 +27,11 @@ const ITEM_INDEX_WORD_FROM_NEXT_RESULT: usize = 1;
 
 pub type RangeOperationAcquire = unsafe extern "C" fn(u32) -> u32;
 pub type RangeOperationNext = unsafe extern "C" fn(u32) -> u32;
-pub type RangeOperationRelease = unsafe extern "C" fn(u32);
 
 #[derive(Clone, Copy)]
 pub struct RangeReleaseOps {
     pub acquire: RangeOperationAcquire,
     pub next: RangeOperationNext,
-    pub release: RangeOperationRelease,
 }
 
 #[cfg(target_os = "none")]
@@ -45,22 +42,16 @@ unsafe extern "C" fn firmware_acquire(source: u32) -> u32 {
 unsafe extern "C" fn firmware_next(operation: u32) -> u32 {
     core::mem::transmute::<usize, RangeOperationNext>(0x0811_f244)(operation)
 }
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_release(operation: u32) {
-    core::mem::transmute::<usize, RangeOperationRelease>(0x0811_f150)(operation)
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_acquire(_source: u32) -> u32 { panic!("range_release requires unresolved FUN_081f0700") }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_next(_operation: u32) -> u32 { panic!("range_release requires unresolved FUN_0811f244") }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_release(_operation: u32) { panic!("range_release requires unresolved FUN_0811f150") }
 
 #[cfg(target_os = "none")]
-pub const DEFAULT_RANGE_RELEASE_OPS: RangeReleaseOps = RangeReleaseOps { acquire: firmware_acquire, next: firmware_next, release: firmware_release };
+pub const DEFAULT_RANGE_RELEASE_OPS: RangeReleaseOps = RangeReleaseOps { acquire: firmware_acquire, next: firmware_next };
 #[cfg(not(target_os = "none"))]
-pub const DEFAULT_RANGE_RELEASE_OPS: RangeReleaseOps = RangeReleaseOps { acquire: missing_acquire, next: missing_next, release: missing_release };
+pub const DEFAULT_RANGE_RELEASE_OPS: RangeReleaseOps = RangeReleaseOps { acquire: missing_acquire, next: missing_next };
 
 pub static mut RANGE_RELEASE_OPS: RangeReleaseOps = DEFAULT_RANGE_RELEASE_OPS;
 
@@ -117,7 +108,7 @@ pub unsafe extern "C" fn range_operation_release_outside_interval(
         }
     }
 
-    (ops().release)(operation);
+    crate::app::payload_vector_dispatch::payload_vector_dispatch(operation as usize as *mut _);
     1
 }
 
@@ -130,7 +121,6 @@ mod tests {
     static mut NEXT_COUNT: usize = 0;
     static mut NEXT_INDEX: usize = 0;
     static mut ACQUIRE_SOURCE: u32 = 0;
-    static mut RELEASED: u32 = 0;
 
     unsafe extern "C" fn acquire(source: u32) -> u32 { ACQUIRE_SOURCE = source; source + 0x100 }
     unsafe extern "C" fn next(_operation: u32) -> u32 {
@@ -138,7 +128,10 @@ mod tests {
         NEXT_INDEX += 1;
         item
     }
-    unsafe extern "C" fn release(operation: u32) { RELEASED = operation; }
+    unsafe extern "C" fn visit(object: *mut u8) {
+        let count = object.cast::<usize>().add(1);
+        count.write(count.read() + 1);
+    }
 
     struct Reset(RangeReleaseOps);
     impl Drop for Reset { fn drop(&mut self) { unsafe { RANGE_RELEASE_OPS = self.0; } } }
@@ -147,13 +140,29 @@ mod tests {
         let base = try_map_u32_slab(hints::RANGE_RELEASE, 0x1000)?;
         unsafe {
             let previous = RANGE_RELEASE_OPS;
-            RANGE_RELEASE_OPS = RangeReleaseOps { acquire, next, release };
-            NEXT_ITEMS = [0; 4]; NEXT_COUNT = 0; NEXT_INDEX = 0; ACQUIRE_SOURCE = 0; RELEASED = 0;
+            RANGE_RELEASE_OPS = RangeReleaseOps { acquire, next };
+            NEXT_ITEMS = [0; 4]; NEXT_COUNT = 0; NEXT_INDEX = 0; ACQUIRE_SOURCE = 0;
             ptr::write_bytes(base, 0, 0x1000);
             let address = base as usize as u32;
             ptr::write((base as *mut u32).add(1), address + 0x400);
             ptr::write((base.add(0x500) as *mut u32).add(10), address + 0x600);
             ptr::write((base.add(0x600) as *mut u32), address + 0x600);
+            let table = base.add(0x800).cast::<usize>();
+            table.add(9).write(visit as *const () as usize);
+            let object = base.add(0x900).cast::<usize>();
+            object.write(table as usize);
+            let cell = base.add(0xa00).cast::<*mut u8>();
+            cell.write(object.cast());
+            let slot = base.add(0xb00).cast::<*mut *mut u8>();
+            slot.write(cell);
+            base.add(0x500).cast::<crate::app::payload_vector_dispatch::PayloadVector>().write(
+                crate::app::payload_vector_dispatch::PayloadVector {
+                    prefix: 0,
+                    vector: crate::cxx::templates::VectorBounds {
+                        begin: slot.cast(), end: slot.add(1).cast(),
+                    },
+                },
+            );
             Some((base, Reset(previous)))
         }
     }
@@ -168,7 +177,7 @@ mod tests {
             ptr::write((base.add(0x714) as *mut u32), 9);
             assert_eq!(range_operation_release_outside_interval(base, 99, 0, 4, 8), 1);
             assert_eq!(ACQUIRE_SOURCE, address + 0x400);
-            assert_eq!(RELEASED, address + 0x500);
+            assert_eq!(base.add(0x900).cast::<usize>().add(1).read(), 1);
             assert_eq!(ptr::read((base.add(0x500) as *const u32).add(12)), address + 0x600);
         }
     }
@@ -181,7 +190,7 @@ mod tests {
             NEXT_ITEMS = [address + 0x700, 0, 0, 0];
             ptr::write(base.add(0x704).cast::<u32>(), 4);
             assert_eq!(range_operation_release_outside_interval(base, 0, 0, 4, 8), 0);
-            assert_eq!(RELEASED, 0);
+            assert_eq!(base.add(0x900).cast::<usize>().add(1).read(), 0);
         }
     }
 
@@ -191,6 +200,7 @@ mod tests {
         unsafe {
             assert_eq!(range_operation_release_outside_interval(base, 0, 1, 4, 8), 1);
             assert_eq!(NEXT_INDEX, 0);
+            assert_eq!(base.add(0x900).cast::<usize>().add(1).read(), 1);
         }
     }
 }
