@@ -368,6 +368,24 @@ pub unsafe extern "C" fn ata_cmd_get_transfer_progress(cmd: *const u8) -> u32 {
     (cmd.add(OPAQUE_WORD_44) as *const u32).read_volatile()
 }
 
+/// ata_cmd_get_opaque_word_40 — original: `FUN_08121470` @ 0x08121470.
+/// True size: 8 bytes, ending at the separate byte getter @ 0x08121478.
+/// Whole-image A32 decoding verifies two incoming plain BL calls
+/// (0x08090320, 0x0813b640), zero predicated BL calls, and no outgoing calls.
+///
+/// Returns the entire command word at +0x40 without validation or mutation:
+/// `ldr r0,[r0,#0x40]; bx lr`. One caller tests it for zero before reporting
+/// command details; the other propagates it after command processing. Its
+/// concrete meaning is unrecovered. No deliberate deviations.
+///
+/// # Safety
+/// `cmd` must be four-byte aligned and readable through byte +0x43.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_opaque_word_40(cmd: *const u8) -> u32 {
+    (cmd.add(OPAQUE_WORD_40) as *const u32).read_volatile()
+}
+
 
 /// ata_cmd_get_device_head — original: `FUN_081212d8` @ 0x081212d8
 /// (8 bytes exactly, `0x081212d8..0x081212df`; **4 direct `bl` call
@@ -1480,6 +1498,17 @@ mod tests {
                 unsafe { ata_cmd_get_transfer_progress(block.0.as_ptr()) },
                 progress
             );
+            assert_eq!(block, before);
+        }
+    }
+
+    #[test]
+    fn opaque_word_40_getter_preserves_all_bits_and_neighbours() {
+        let mut block = poisoned();
+        for value in [0u32, 1, 0x0123_4567, 0x8000_0000, u32::MAX] {
+            block.0[0x40..0x44].copy_from_slice(&value.to_le_bytes());
+            let before = block;
+            assert_eq!(unsafe { ata_cmd_get_opaque_word_40(block.0.as_ptr()) }, value);
             assert_eq!(block, before);
         }
     }
