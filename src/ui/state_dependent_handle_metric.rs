@@ -16,12 +16,12 @@
 //!
 //! # Deliberate deviations
 //!
-//! The retail body calls three small, separately linked state predicates.
-//! Their behavior is recovered directly from their raw ARM instructions and
-//! inlined here rather than creating unverified callee seams. The existing
-//! `handle_deref_or_null` port supplies the verified shared handle operation.
+//! The first and third predicates remain inlined from verified raw ARM.
+//! The second uses the separately linked `ui_state_is_second_metric` port.
+//! The existing `handle_deref_or_null` port supplies the shared handle operation.
 
 use crate::cxx::handle::handle_deref_or_null;
+use super::state_is_second_metric::ui_state_is_second_metric;
 
 const ACTIVE_OFFSET: usize = 0x19;
 const STATE_OFFSET: usize = 0x1a;
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn ui_state_dependent_handle_metric(object: *const StateDe
     if state == 7 || state == 5 || state == 2 {
         total = metric_value(metric_handle_slot(object, FIRST_METRIC_HANDLE));
     }
-    if state == 7 || state == 5 || state == 0 {
+    if ui_state_is_second_metric(object.cast()) != 0 {
         total = total.wrapping_add(metric_value(metric_handle_slot(object, SECOND_METRIC_HANDLE)));
     }
     if state == 7 || state == 5 || state == 1 {
