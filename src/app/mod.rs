@@ -1180,6 +1180,7 @@ pub mod wait_until_idle;
 pub mod input_record_pool;
 pub mod notes_value_demo_mode_dispatch;
 pub mod owner_component_feedback_gate;
+pub mod owner_byte_at_4d3;
 pub mod fixed_string_object_assign;
 pub mod error_text_append_power_controller;
 pub mod error_text_append_bounded;

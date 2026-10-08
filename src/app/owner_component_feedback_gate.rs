@@ -9,8 +9,8 @@
 //! accept the component predicate !slot_ac || slot_b4 || slot_b8, then
 //! return 1 for absent feedback controller or its permission result otherwise.
 //!
-//! Deviations: inline the verified byte getter and component tail wrappers
-//! at 0x08116410, 0x08116904 and 0x08116914; reuse the existing +0xb4
+//! Deviations: reuse the owner byte getter at 0x08116410 and inline component
+//! tail wrappers at 0x08116904 and 0x08116914; reuse the existing +0xb4
 //! wrapper and singleton/getter ports. The unported feedback permission
 //! function remains a typed firmware-address call, not an invented identity.
 //! Host fixtures widen vtable entries and pointer fields with repr(C);
@@ -69,7 +69,7 @@ unsafe fn virtual_result(object: *mut u8, word: usize) -> u32 {
 
 unsafe fn gate(context: *mut FeedbackGateContext, ops: GateOps) -> u32 {
     let owner = (*context).owner;
-    if owner.cast::<u8>().add(0x4d3).read() != 0 { return 0; }
+    if crate::app::owner_byte_at_4d3::owner_byte_at_4d3(owner.cast()) != 0 { return 0; }
     let class = (ops.class_get)();
     if crate::app::class_6600_byte_at_100::class_6600_byte_at_100(class) != 0 {
         return 0;

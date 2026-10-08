@@ -232365,3 +232365,29 @@ functions:
       register allocation differ, unsigned compare is reversed with LS,
       and returns share an epilogue. All four reloads and BLX calls and
       the record_layout_size BL remain in order.
+
+  - address: 0x08116410
+    ghidra: FUN_08116410
+    name: owner_byte_at_4d3
+    size: 8
+    sig: "u8 owner_byte_at_4d3(const u8 *owner)"
+    module: app/owner_byte_at_4d3
+    status: ported
+    renames:
+      param_1/r0: owner
+      owner_plus_0x4d3: owner_byte_at_4d3
+    notes: >-
+      Raw words e5d004d3 e12fff1e establish extent [0x08116410,0x08116418).
+      Next function begins with push {r4,lr} at 0x08116418, not 0x08116410
+      as the older application_mode_transition notes incorrectly state.
+      Independent whole-image A32 scan verifies two incoming plain BLs at
+      0x0819e29c and 0x082897cc, zero predicated incoming BLs and zero
+      outgoing calls. Return the unsigned byte at owner+0x4d3 unchanged;
+      both callers test zero/nonzero, but the domain meaning is unrecovered.
+      No mutation, NULL guard, callees, or behavioral deviations. The ported
+      owner_component_feedback_gate now calls this getter rather than
+      inlining it as its older notes describe. Tests cover every byte value,
+      unchanged surrounding storage and unaligned exact-extent input.
+      Host suite and ARM release build pass. match.py exits 1: two retail
+      instructions versus four Rust instructions, with the identical LDRB
+      plus frame-pointer push/mov/pop replacing BX LR.
