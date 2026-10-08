@@ -47398,6 +47398,31 @@ functions:
       plus `bx lr`. #[inline(never)] and its own link_section preserve an
       independent hook target rather than folding with sibling byte setters.
 
+  - address: 0x081211ac
+    ghidra: FUN_081211ac
+    name: ata_cmd_get_command
+    size: 8
+    sig: "u8 ata_cmd_get_command(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Raw words e5d0001a and e12fff1e decode to ldrb r0,[r0,#0x1a];
+      bx lr. The next independent halfword getter begins at 0x081211b4.
+      Whole-image A32 decoding finds two plain BL callers at 0x08090330
+      and 0x082835c0, zero predicated BL callers, and one BNE tail caller
+      at 0x0827a310; no outgoing calls. Returns the unsigned ATA command
+      register byte, used by the opcode dispatcher at 0x082835b4 for
+      READ DMA (0xc8), WRITE DMA (0xca), and other ATA commands.
+      No NULL guard, validation, mutation, or semantic deviations.
+      Volatile byte access follows the existing command-block convention;
+      inline(never) and a dedicated section preserve the independent target.
+      Host tests cover all 256 opcodes at all four byte alignments and
+      verify that surrounding storage remains unchanged.
+      ARM match.py confirms the same single ldrb at +0x1a; LLVM adds
+      push {fp,lr}, mov fp,sp, and pop {fp,pc} instead of bx lr
+      (16-byte Rust body versus the original 8 bytes).
+
   - address: 0x081211bc
     ghidra: FUN_081211bc
     name: ata_cmd_set_command
