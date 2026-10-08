@@ -1125,6 +1125,7 @@ pub mod output_buffer_reset_with_prefix;
 pub mod output_buffer_append_suffix;
 pub mod text_buffer_construct;
 pub mod output_buffer_write_dictionary_close;
+pub mod output_buffer_write_integer;
 pub mod stream_selection_change;
 pub mod slideshow_delay_set;
 pub mod slideshow_interval_set;

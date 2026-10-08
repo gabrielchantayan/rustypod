@@ -231278,3 +231278,38 @@ functions:
       clear/count, signed indexed loop and two reloaded virtual notifications.
       LLVM uses BLX for the fixed-address collector and adds scratch zeroing;
       these are deliberate codegen differences, not semantic changes.
+
+  - address: 0x08123aa4
+    ghidra: FUN_08123aa4
+    name: output_buffer_write_integer
+    size: 64
+    sig: "void output_buffer_write_integer(OutputBufferState *state, uint32_t value, uint32_t level)"
+    module: app/output_buffer_write_integer
+    status: ported
+    vars: {param_1: state, param_2: value, param_3: level}
+    renames:
+      FUN_08123a54: indent_prepare
+      FUN_0802f768: snprintf
+      FUN_08123c58: output_buffer_append_c_string
+    notes: >-
+      Raw ARM extent [0x08123aa4,0x08123ae4) contains 64 instruction
+      bytes, two plain outgoing BLs and zero predicated BLs, followed by
+      a 28-byte format literal before the next PUSH at 0x08123b00.
+      Two incoming plain BLs at 0x08078bec and 0x080b5800, no predicated
+      incoming BLs. Saves unsigned value from r1 and moves level from r2
+      into r1 for indentation. Formats "%s<integer>%u</integer>\n" into
+      the 512-byte scratch at +0x15 using indentation at +0x215, then
+      tail-branches to 0x08123c58. Ghidra incorrectly merges the tail
+      appender into this function. Reuses existing firmware-bound indentation
+      and append seams. Deliberate deviation: allocation-free fixed-format
+      rendering replaces snprintf because its Rust engine defaults to a
+      no-output placeholder; preserves unsigned decimal conversion,
+      511-byte truncation and NUL termination. Tail B becomes call/return.
+      Host tests cover decimal boundaries including 0x80000000 and UINT_MAX,
+      empty/tab indentation, truncation inside each format component and
+      adjacent-storage preservation.
+      Exported-entrypoint host smoke emits the expected UINT_MAX element
+      with two tabs. Host suite and ARM release build pass. match.py reports
+      the deliberate structural difference: 16 original instructions versus
+      290 Rust instructions, with indentation BLX, inlined fixed-format
+      conversion/copy, and final append dispatch replacing snprintf/tail B.
