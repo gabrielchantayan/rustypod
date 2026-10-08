@@ -11,8 +11,8 @@
 //! Forward this and payload to the existing flag/payload prefix constructor,
 //! replace the returned object's vtable, and return that same pointer. Callers
 //! use a 12-byte stack prefix or an embedded prefix with zero payload.
-//! Deliberate deviations: none at this boundary; reuse the existing callee's
-//! base-constructor seam. The wider class identity remains unestablished.
+//! Deliberate deviations: none; reuse the direct Rust prefix and base ports.
+//! The wider class identity remains unestablished.
 
 use super::vtable_flag_payload_construct::vtable_flag_payload_construct;
 
@@ -38,8 +38,6 @@ mod tests {
 
     #[test]
     fn initializes_prefix_without_touching_padding_or_adjacent_objects() {
-        let _lock = super::super::vtable_flag_payload_construct::tests::TEST_LOCK
-            .lock().unwrap_or_else(|poison| poison.into_inner());
         for payload in [0, 0x1357_9bdf, u32::MAX] {
             let mut words = [0xa5a5_a5a5_u32; 5];
             let object = unsafe { words.as_mut_ptr().add(1).cast::<u8>() };

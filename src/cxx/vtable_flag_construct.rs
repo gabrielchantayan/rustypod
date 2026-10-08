@@ -20,8 +20,7 @@
 //!
 //! # Deliberate deviations
 //!
-//! None. The callee is an existing direct Rust port; its established seam for
-//! the still-unported shared base constructor remains below this boundary.
+//! None. The prefix and shared base constructors are direct Rust ports.
 
 use crate::cxx::vtable_flag_payload_construct::vtable_flag_payload_construct;
 
