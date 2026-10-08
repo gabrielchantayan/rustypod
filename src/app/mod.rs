@@ -415,6 +415,7 @@ pub mod collection_item_find_eligible_at;
 pub mod collection_entry_teardown;
 pub mod collection_entry_action_clear;
 pub mod collection_count_eligible_entries;
+pub mod collection_refresh_needed;
 pub mod collection_delete_first_indexed_value;
 pub mod collection_release_first_indexed_value;
 pub mod class_8900_work_queue;
