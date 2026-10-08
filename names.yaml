@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081114fc
+    ghidra: FUN_081114fc
+    name: media_player_refresh_collection_cache
+    size: 136
+    sig: "void media_player_refresh_collection_cache(void *player)"
+    module: app/media_player_refresh_collection_cache
+    status: ported
+    renames:
+      param_1/r0: player
+      r4: saved_player
+      "player+0x30": inner_state
+      FUN_08111664: media_player_reset_default_resource
+      FUN_08066618: existing firmware_configure_inner_state seam
+    notes: >-
+      Raw extent [0x081114fc,0x08111584) is 136 bytes, ending with a
+      restored-register tail B to 0x08111664 before the next PUSH prologue.
+      Whole-image A32 decoding finds two inbound plain BLs at 0x08114018
+      and 0x08114908, no predicated inbound BLs. Body has ten plain BLs,
+      no predicated BLs. Cache backing +0xc08/+0xc0c via 0x08052034 and
+      0x08051fe4 at player+0x3f8/+0x414; reset, configure selectors (1,7),
+      cache queries 0x08053ea0,0x08053e50,0x08053f70,0x08054140 at
+      +0x3fc,+0x400,+0x404,+0x40c; call 0x080664d0 (sets inner+0xef9),
+      cache 0x08053f38 at +0x408, then reset again. Reload inner pointer
+      before each operation. Ghidra incorrectly folds the final reset into
+      this body and invents extra arguments. No canonical entries exist for
+      the unported queries or mode operation; retain verified addresses.
+      Query helper 0x0808cec4 saves r1 but never consumes that saved input.
+      Host callbacks replace retail dependencies; target reuses reset and
+      configure ports. Tests cover full-width values, wrapping query chains,
+      reset pointer replacement, final invalidation and untouched neighbors.
+      All 14890 host tests, ARM release build and standalone smoke pass.
+      match.py exits 1: cache stores, reloads and order preserved; LLVM
+      emits address BLX calls and relocation-backed reset BL/tail B.
   - address: 0x08112d5c
     ghidra: FUN_08112d5c
     name: media_player_select_and_refresh

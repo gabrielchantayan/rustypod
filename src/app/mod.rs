@@ -2,6 +2,7 @@
 //! context and the small helpers its view classes lean on.
 pub mod root_media_query_is_zero;
 pub mod media_player_refresh_cached_values;
+pub mod media_player_refresh_collection_cache;
 pub mod default_indexed_item_owner_bit_3;
 pub mod media_player_select_and_refresh;
 pub mod volume_limit_query_results_equal;
