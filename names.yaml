@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810c664
+    ghidra: FUN_0810c664
+    name: view_handle_play
+    size: 32
+    sig: "u32 view_handle_play(PauseView *view, u32 event)"
+    module: app/view_handle_play
+    status: ported
+    renames:
+      param_1/r0: view
+      param_2/r1: event
+      "view+0x13c": associated_state
+      "state+0x8e0": pause_gate
+      "vtable+0x13c": handle_play_pause
+      return/r0: result
+    notes: >-
+      Raw words establish [0x0810c664,0x0810c684), ending in BX LR
+      before the next PUSH. Full-image aligned A32 scan finds zero plain
+      incoming BLs and two BLNEs at 0x08156fc0 and 0x0819a4f0; zero
+      outgoing plain or predicated BLs and one conditional tail BX.
+      Both callers identify HandlePlay and supply the unchanged event in
+      r1. Zero associated byte +0x8e0 returns one without vtable access;
+      any nonzero byte dispatches slot +0x13c with original self/event,
+      preserving the full return ignored by both known callers. Concrete
+      virtual target and deeper byte meaning remain unresolved. Reuses
+      existing pause-view repr(C) layout; native host pointers widen,
+      ARM offsets remain exact. Host tests cover zero with null vtable,
+      every nonzero byte and full-width events/results. All 14911 host
+      tests, ARM release build and executable state-mutation smoke pass.
+      match.py exits 1: eight versus twelve instructions; exact offsets
+      and tail BX retained, with explicit branch and frame save/restore.
   - address: 0x0810c9bc
     ghidra: FUN_0810c9bc
     name: view_handle_pause
