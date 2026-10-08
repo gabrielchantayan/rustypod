@@ -8040,6 +8040,33 @@ functions:
       full non-test host builds are blocked by six unrelated missing
       functions in prepare_entry_metadata, shared_payload_select_kind,
       and calendar_schedule.
+  - address: 0x081433a4
+    ghidra: FUN_081433a4
+    name: flag_byte_base_construct
+    size: 32
+    sig: "u32 *flag_byte_base_construct(u32 *storage, u32 flag)"
+    module: app/flag_byte_base_construct
+    status: ported
+    vars:
+      param_1: storage
+      param_2: flag
+      puVar1: object
+    renames:
+      DAT_081433c0: FLAG_BYTE_BASE_VTABLE
+      FUN_08275bb8: framework_object_construct
+    notes: >-
+      Raw extent [0x081433a4,0x081433c4): 28 code bytes plus literal
+      0x08985d70 at 0x081433c0, not Ghidra's 28-byte total. Next function
+      starts with CMP r0,0 at 0x081433c4. Two incoming plain BLs at
+      0x081b9008 and 0x0822515c, no predicated incoming BLs; one outgoing
+      plain BL at 0x081433ac to ported framework_object_construct, no
+      predicated outgoing BLs. Root preserves r0. Installs this base's
+      vtable and stores the low flag byte at +4; padding and derived
+      fields remain untouched. Both derived callers pass zero; class
+      identity and flag meaning remain unknown. No deliberate deviations.
+      Host suite: 14726 passed; ARM release build and standalone base/derived
+      smoke passed. Match exit-1 diff adds LLVM's frame but retains BL,
+      STR, STRB and pointer return. Removed the payload caller's old seam.
   - address: 0x08225148
     ghidra: FUN_08225148
     name: payload_record_construct
@@ -8055,19 +8082,19 @@ functions:
       puVar1: record
     renames:
       DAT_08225174: PAYLOAD_RECORD_VTABLE
-      FUN_081433a4: flag_byte_base_constructor
+      FUN_081433a4: flag_byte_base_construct
     notes: >-
       Raw words verify 44 code bytes plus the vtable literal 0x0899f76c
       at 0x08225174, before the next real function at 0x08225178.
       Two plain incoming BL sites at 0x081d2110 and 0x081d2138, zero
       predicated sites. One plain outgoing BL at 0x0822515c to the
-      unported flag-byte base 0x081433a4, zero predicated outgoing BLs.
+      now-ported flag-byte base 0x081433a4, zero predicated outgoing BLs.
       Calls base with zero flag, uses its returned pointer, installs the
       derived vtable and stores opaque payload words at +8/+12/+16.
-      Base writes byte +4 only; +5..+7 remain untouched. Host seam replaces
-      the verified base address. All 13810 host tests and ARM release build
-      pass. Reviewed match.py exit-1 diff: BL becomes absolute BLX, STM
-      becomes three STRs, LLVM adds a frame; return and store order agree.
+      Base writes byte +4 only; +5..+7 remain untouched. The base is now
+      called directly on target and host, with no replaceable seam.
+      Real-base integration tests pass with extreme payloads and padding.
+      Updated suite: 14726 host tests pass; ARM release build passes.
   - address: 0x0821bd10
     ghidra: FUN_0821bd10
     name: setting_dispatcher_reset
