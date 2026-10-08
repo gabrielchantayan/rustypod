@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod associated_object_replace;
+pub use associated_object_replace::*;
 pub mod playback_position_uncached_get;
 pub mod context_media_query_slot_194;
 pub mod root_media_query_is_zero;

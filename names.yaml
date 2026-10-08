@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08110be4
+    ghidra: FUN_08110be4
+    name: associated_object_replace
+    size: 96
+    sig: "void associated_object_replace(AssociationReceiver *receiver, AssociatedObject *replacement)"
+    module: app/associated_object_replace
+    status: ported
+    renames:
+      param_1: receiver
+      param_2: replacement
+      piVar1: old_association
+    notes: >-
+      Raw A32 extent is [0x08110be4,0x08110c44), followed by a new push.
+      Whole-image decoding finds two inbound plain BLs at 0x08111224 and
+      0x081112c8, zero predicated BLs. Body has zero direct BLs, one BLX,
+      one BLXNE and a final BXNE. Query virtual +0x1c, return if identical,
+      notify old nonnull association at +0x3c, reload receiver state +0x0c,
+      store replacement at state +4, notify new nonnull association at +0x38.
+      No concrete virtual callee identities or fixed-address seams invented.
+      Host repr(C) pointers widen; target word indices remain intact.
+      Tests cover nullable transitions, identity exits, ordering and state
+      redirection during removal. All 14895 host tests and ARM build passed.
+      Direct-entry smoke: attach, identity no-op, detach; notifications 1/1.
+      match.py exit 1: 24 versus 27 instructions, same slots and tail BX;
+      explicit branches replace predication. No device execution.
   - address: 0x08111488
     ghidra: FUN_08111488
     name: playback_position_uncached_get
