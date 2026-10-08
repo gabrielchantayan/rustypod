@@ -15,7 +15,7 @@
 //! Deviations: native-width host pointer at fixed +0x88c offset (unaligned
 //! host access), and an injectable operation table for host execution.
 //! No target deviations.
-//! Four unported helpers remain calls into verified stock code, not ports.
+//! Three unported helpers remain calls into verified stock code, not ports.
 
 use super::class_8900::Class6000;
 
@@ -47,8 +47,6 @@ unsafe extern "C" fn missing_refresh(_: *mut Class6000) { panic!("install store 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_read(_: *mut Class6000) -> u32 { panic!("install property 604e reader") }
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_apply(_: *mut u8, _: u32) { panic!("install property 604e setter") }
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_signed(_: *mut u8, _: i32) { panic!("install property 6045 setter") }
 
 unsafe extern "C" fn read_predicate(store: *mut Class6000) -> bool {
@@ -58,7 +56,7 @@ unsafe extern "C" fn read_predicate(store: *mut Class6000) -> bool {
 #[cfg(not(target_os = "none"))]
 pub static mut CONTEXT_REFRESH_OPS: ContextRefreshOps = ContextRefreshOps {
     lookup: missing_lookup, refresh_store: missing_refresh,
-    read_604e: missing_read, apply_604e: missing_apply,
+    read_604e: missing_read, apply_604e: super::apply_context_property_604e::apply_context_property_604e,
     refresh_rtc: super::rtc_binding_refresh::rtc_binding_refresh,
     read_60ac: read_predicate,
     read_6045: super::class_6000_property_6045_i8::class6000_property_6045_i8,
@@ -100,7 +98,7 @@ pub unsafe extern "C" fn class6000_context_refresh(context: *mut u8) {
         lookup: lookup_store,
         refresh_store: core::mem::transmute(0x0817_2c6cusize),
         read_604e: core::mem::transmute(0x0817_2700usize),
-        apply_604e: core::mem::transmute(0x0811_2fd8usize),
+        apply_604e: super::apply_context_property_604e::apply_context_property_604e,
         refresh_rtc: super::rtc_binding_refresh::rtc_binding_refresh,
         read_60ac: read_predicate,
         read_6045: super::class_6000_property_6045_i8::class6000_property_6045_i8,
