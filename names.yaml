@@ -12302,6 +12302,36 @@ functions:
       NULL. Host repr(C) widens the vtable pointer only. ARM match preserves
       offsets, captured count, one accessor call, byte comparison and early
       return; LLVM uses a prechecked positive count and equality loop bound.
+  - address: 0x081242b0
+    ghidra: FUN_081242b0
+    name: item_display_name_refresh
+    size: 8
+    sig: "void item_display_name_refresh(u8 *item, u32 mode)"
+    module: app/item_display_name_refresh
+    status: ported
+    renames:
+      param_1/r0: item
+      param_2/r1: mode
+      r2: embedded_display_name
+      FUN_08298984: shared_display_name_refresh
+    notes: >-
+      Raw words e280202c ea05d1b2 establish extent 0x081242b0..0x081242b8
+      exclusive; the next real function starts with e92d4070. Whole-image
+      A32 decoding finds two inbound plain BLs at 0x0808e544 and 0x081b2250,
+      zero predicated inbound BLs, and zero outgoing BLs. Compute the
+      embedded string pointer at item byte offset +0x2c and tail-call the
+      raw-verified shared routine at 0x08298984 with item and full-width
+      mode unchanged. No registry entry identifies that destination;
+      retain its retail address, not a guessed Rust callee. Destination
+      clears string via vtable +0xc, generates for mode 0/1, falls back
+      for empty text, and substitutes localized placeholder text. Ghidra
+      incorrectly folds that destination into this adapter's C body.
+      No target behavioral deviations; host seam requires installation.
+      Host suite passes 14815 tests; standalone smoke preserves full-width
+      mode and callee mutations. Release ARM build passes. match.py exits
+      1 with a structural diff: LLVM adds a frame-pointer prologue and
+      restores it before an indirect tail BX to literal 0x08298984;
+      the embedded pointer computation remains add r2,r0,#44.
   - address: 0x08299c6c
     ghidra: FUN_08299c6c
     name: selected_entries_position_status
