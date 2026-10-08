@@ -97236,6 +97236,40 @@ functions:
       after the source probe, clear bytes repeat ordered advance/teardown
       pairs until the source stops, and a status set by advance is first
       observed only on the following pass after its paired teardown.
+  - address: 0x0810c22c
+    ghidra: FUN_0810c22c
+    name: template_binding_name_or_empty_default
+    size: 52
+    sig: "const char *template_binding_name_or_empty_default(void *this)"
+    module: app/template_binding
+    status: ported
+    vars:
+      param_1/r0: this
+      r4: saved_this
+      DAT_0810c258: EMPTY_NAME_MARKER_CSTR_ADDRESS
+      DAT_0810c25c: EMPTY_NAME_DEFAULT_CSTR_ADDRESS
+    notes: >-
+      Raw osos.dec establishes 44 code bytes plus an eight-byte literal
+      pool, extent [0x0810c22c,0x0810c260); the next function begins with
+      push {r4,r5,r6,r7,lr}. Independently decoded two plain inbound BL
+      calls at 0x0810c5a0 and 0x0816c454, zero predicated inbound BL calls.
+      The body has two unconditional BLs to template_binding_name_or_default
+      at 0x081346e4 and strcmp's veneer at 0x08391e38, followed by a
+      conditional tail branch to the base accessor. Literal words resolve
+      to 0x083eb104 and 0x083eb138, both beginning with NUL. Returns the
+      latter pointer for an empty base name; otherwise repeats the base
+      accessor with the saved receiver. Ghidra incorrectly propagates
+      callee bodies into this wrapper. Reuses existing Rust callees and
+      registered app/template_binding module without seams. Host literals
+      model the NUL bytes; target builds preserve both firmware pointers.
+      Rust expresses the conditional tail branch as a second accessor call.
+      Host tests cover empty, NULL payload, inherited sentinel substitution,
+      ordinary names and a nonmatching sentinel prefix.
+      match.py confirms the base-call/comparison/default-or-tail-call split;
+      LLVM inlines strcmp's byte loop, adds a frame-pointer prologue and
+      computes the replacement as marker+0x34. The exported symbol remains
+      separate. Executable host smoke confirms empty and sentinel names
+      become empty defaults while a nonempty name retains its payload pointer.
   - address: 0x081346e4
     ghidra: FUN_081346e4
     name: template_binding_name_or_default

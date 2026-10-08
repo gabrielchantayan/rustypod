@@ -243,6 +243,52 @@ pub unsafe extern "C" fn template_binding_name_or_firmware_default(
     }
 }
 
+/// Firmware empty marker and replacement, verified from raw literal words.
+pub const EMPTY_NAME_MARKER_CSTR_ADDRESS: usize = 0x083eb104;
+pub const EMPTY_NAME_DEFAULT_CSTR_ADDRESS: usize = 0x083eb138;
+#[cfg(not(target_os = "none"))]
+static EMPTY_NAME_MARKER_CSTR: u8 = 0;
+#[cfg(not(target_os = "none"))]
+static EMPTY_NAME_DEFAULT_CSTR: u8 = 0;
+
+/// template_binding_name_or_empty_default — original: `FUN_0810c22c` @
+/// 0x0810c22c. True extent: 52 bytes (44 code + eight literal bytes),
+/// ending at the next function's push at 0x0810c260. Raw ARM scan finds
+/// two plain inbound BL calls, zero predicated inbound BL calls; the body
+/// has two plain BL instructions and one conditional tail B.
+///
+/// Calls the base accessor and compares its result with the empty string
+/// at 0x083eb104. Equality returns the empty default at 0x083eb138;
+/// inequality calls the base accessor again with the original receiver.
+/// Reuses the ported base accessor and strcmp, without dispatch seams.
+///
+/// Deliberate deviations: host literals model the two NUL bytes; target
+/// builds preserve the firmware pointers. Rust expresses the conditional
+/// tail branch as a return of a second base accessor call.
+///
+/// # Safety
+///
+/// `this` must satisfy [`template_binding_name_or_default`]'s contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn template_binding_name_or_empty_default(this: *mut u8) -> *const u8 {
+    #[cfg(target_os = "none")]
+    let marker = EMPTY_NAME_MARKER_CSTR_ADDRESS as *const u8;
+    #[cfg(not(target_os = "none"))]
+    let marker = &EMPTY_NAME_MARKER_CSTR as *const u8;
+    if strcmp(template_binding_name_or_default(this), marker) != 0 {
+        return template_binding_name_or_default(this);
+    }
+    #[cfg(target_os = "none")]
+    {
+        EMPTY_NAME_DEFAULT_CSTR_ADDRESS as *const u8
+    }
+    #[cfg(not(target_os = "none"))]
+    {
+        &EMPTY_NAME_DEFAULT_CSTR
+    }
+}
+
 
 /// ROM address of the one-byte sentinel compared by
 /// [`template_binding_name_or_special_default`] (literal-pool word @
@@ -380,6 +426,47 @@ mod tests {
             (*name).payload = payload;
         }
         object
+    }
+
+    #[test]
+    fn empty_override_replaces_empty_null_and_base_sentinel_names() {
+        #[repr(C)]
+        struct Object {
+            prefix: [u8; NAME_OFFSET],
+            name: StringObject,
+        }
+        let mut empty = [0u8];
+        let mut sentinel = [0x12u8, 0];
+        for payload in [empty.as_mut_ptr(), core::ptr::null_mut(), sentinel.as_mut_ptr()] {
+            let mut object = Object {
+                prefix: [0; NAME_OFFSET],
+                name: StringObject { vtable: core::ptr::null(), payload },
+            };
+            let result = unsafe {
+                template_binding_name_or_empty_default(&mut object as *mut Object as *mut u8)
+            };
+            assert_eq!(result, &EMPTY_NAME_DEFAULT_CSTR as *const u8);
+            assert_eq!(unsafe { result.read() }, 0);
+        }
+    }
+
+    #[test]
+    fn empty_override_preserves_nonempty_and_base_sentinel_prefix_names() {
+        #[repr(C)]
+        struct Object {
+            prefix: [u8; NAME_OFFSET],
+            name: StringObject,
+        }
+        for mut name in [*b"Clock\0", [0x12, b'x', b'y', b'z', b'w', 0]] {
+            let mut object = Object {
+                prefix: [0; NAME_OFFSET],
+                name: StringObject { vtable: core::ptr::null(), payload: name.as_mut_ptr() },
+            };
+            let result = unsafe {
+                template_binding_name_or_empty_default(&mut object as *mut Object as *mut u8)
+            };
+            assert_eq!(result, name.as_ptr());
+        }
     }
 
     #[test]
