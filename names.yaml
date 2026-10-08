@@ -231449,3 +231449,34 @@ functions:
       dispatch; LLVM materializes the getter's fixed source address and
       tail-dispatches with BX. Default match extent includes the next body's
       first instruction; literal pool words also appear in Rust's listing.
+  - address: 0x08121470
+    ghidra: FUN_08121470
+    name: ata_cmd_get_opaque_word_40
+    size: 8
+    sig: "u32 ata_cmd_get_opaque_word_40(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    renames:
+      param_1/r0: cmd
+      "[cmd + 0x40]": opaque_word_40
+    notes: >-
+      Raw osos.dec words e5900040 e12fff1e establish ldr r0,[r0,#0x40];
+      bx lr and the true eight-byte extent 0x08121470..0x08121478. The next
+      real function begins at 0x08121478 with ldrb r0,[r0,#0x1a]; bx lr.
+      Whole-image A32 decoding finds two incoming unconditional plain BL
+      calls at 0x08090320 and 0x0813b640, zero predicated BL calls, and no
+      outgoing calls. The first caller tests the word before reporting ATA
+      command details; the second propagates it after command processing.
+      The field's concrete meaning is not established, so it retains an
+      opaque semantic name rather than an invented status enum. Reads an
+      aligned target-width u32 at byte offset 0x40, with no validation,
+      NULL guard, or mutation. No deliberate deviations. Host coverage
+      checks zero, asymmetric bytes, the high bit, and all bits set while
+      preserving neighbouring bytes.
+      Full host suite passes (14832 tests); ARM release build succeeds.
+      Isolated executable smoke of the verbatim getter returns zero,
+      0x80000001, and 0xffffffff from an exact 68-byte aligned object without
+      mutation. match.py confirms the exported symbol and the same aligned
+      ldr at +0x40; LLVM adds push {fp,lr}; mov fp,sp and returns with
+      pop {fp,pc} instead of bx lr. This frame-pointer codegen difference
+      preserves the getter's behavior.
