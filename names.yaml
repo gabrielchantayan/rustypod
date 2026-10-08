@@ -86725,6 +86725,31 @@ functions:
       background fill, and destructor directly; their documented seams are
       the sole deliberate deviation from the retail direct-call bodies.
 
+  - address: 0x0810e970
+    ghidra: FUN_0810e970
+    name: pair_header_base_construct_with_borrowed_payload
+    size: 80
+    sig: "u32 *pair_header_base_construct_with_borrowed_payload(u32 *base, const u32 *descriptor, u32 tag, u32 context)"
+    module: cxx/pair_header
+    status: ported
+    vars: {param_1/r0: base, param_2/r5: descriptor, param_3/r6: tag, param_4/r7: context, iVar1/r4: object}
+    notes: >-
+      Raw osos.dec verifies 19 instructions and the vtable literal at
+      0x0810e9bc: true extent 80 bytes, next function at 0x0810e9c0.
+      Ghidra's 76 bytes omit the literal. Whole-image ARM branch decoding
+      finds two unconditional BL callers at 0x08198d00 and 0x082101d8,
+      zero predicated BLs, zero tail branches and no aligned address words.
+      Two outgoing unconditional BLs call the ported grand-base constructor
+      0x0813eee0 and borrowed-payload binder 0x0810e6b4. Installs vtable
+      0x08981630, constructs base+4, derives object from result minus four,
+      clears +0xac/+0xb0 and byte +0xb4, binds descriptor with tag/context,
+      and returns object, ignoring binder result. No default zero-fill.
+      Deliberate deviation: existing Rust callees and dependency seams.
+      Host tests cover post-chain ownership clears, zero/full-width tags,
+      descriptor copy, padding/guards and ignored loader result. Smoke uses
+      the real release routine. match.py retains two BLs, vtable, clears and
+      object return; LLVM proves the grand-base port's identity return.
+
   - address: 0x0810e6b4
     ghidra: FUN_0810e6b4
     name: pair_header_base_bind_payload
