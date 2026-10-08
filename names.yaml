@@ -229689,3 +229689,27 @@ functions:
       Ghidra incorrectly includes the tail callee body; owner class unknown.
       Deliberate deviation: return-position Rust call. Host tests cover NULL,
       running, expired callback cancellation, stopped state and owner integrity.
+  - address: 0x08131ddc
+    ghidra: FUN_08131ddc
+    name: selected_entry_string_construct
+    size: 36
+    sig: "void selected_entry_string_construct(StringObject *out, u8 *owner, const SelectedStringEntry *entry)"
+    module: app/selected_entry_string_construct
+    status: ported
+    vars:
+      param_1/r0: out
+      param_2/r1: owner
+      param_3/r2: entry
+      FUN_08277440: string_default_construct
+      fallthrough_08131e00: selected-entry string dispatcher (unported retail boundary)
+    notes: >-
+      Raw A32 words establish 36 bytes through 0x08131e00, including the
+      final NOP. The next independently called function starts at 0x08131e00.
+      One outgoing plain BL to 0x08277440, zero predicated BLs. Two incoming
+      plain BLs at 0x08133014 and 0x08133818, zero predicated BLs. Construct
+      out before falling through with (owner, entry, out). Dispatcher reads
+      kind at entry+4 and routes 0/1/2 to virtual slots +0x168/+0x16c/+0x164;
+      other kinds assign empty. Ghidra incorrectly absorbs the dispatcher.
+      Deliberate deviation: typed retail call instead of physical fallthrough;
+      native host StringObject pointers. Host tests cover poisoned new-object
+      storage, empty/written results, and construction before dispatch.
