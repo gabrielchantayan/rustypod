@@ -229803,3 +229803,32 @@ functions:
       Deliberate deviation: typed retail call instead of physical fallthrough;
       native host StringObject pointers. Host tests cover poisoned new-object
       storage, empty/written results, and construction before dispatch.
+  - address: 0x0812ff38
+    ghidra: FUN_0812ff38
+    name: app_screen_resource_find
+    size: 64
+    sig: "u32 app_screen_resource_find(void *owner, ResourceKind kind, u32 id, void **out)"
+    module: app/app_screen_resource_find
+    status: ported
+    renames:
+      param_1/r0: owner (unused)
+      param_2/r1: kind
+      param_3/r2: id
+      param_4/r3: out
+      uVar1/r5: screen
+      uVar2/r3: cached_position
+      iVar3/r0: found
+      FUN_08173848: app_screen_get
+      FUN_08177944: app_screen_cached_position
+      FUN_0814376c: resource_chain_find_with_selector
+    notes: >-
+      Raw A32 words establish the exact 64-byte extent ending at 0x0812ff78,
+      where the next function pushes its own registers. Whole-image decoding
+      finds two inbound plain BLs at 0x0812fa68 and 0x0812fb20, zero predicated
+      inbound BLs. The body has three plain BLs and zero predicated BLs.
+      Ignore owner, obtain the app screen, read its cached position at +0x2c,
+      resolve (kind, id, position), store the pointer even when NULL, and
+      normalize the return to 0 or 1. All callees reuse existing Rust ports.
+      Deliberate deviations: native-width host pointers; none on target.
+      Host tests exercise present and absent resources, output replacement,
+      non-one provider acceptance, and normalization through the real resolver.
