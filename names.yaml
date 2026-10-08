@@ -2934,6 +2934,34 @@ functions:
       proxy counts 0, 1, 0x80000000, and 0xffffffff and adjacent query data.
       ARM codegen retains the load and a tail branch relocated to
       object_resource_count, with an extra frame-pointer prologue/epilogue.
+  - address: 0x081070a8
+    ghidra: FUN_081070a8
+    name: embedded_handle_construct
+    size: 12
+    sig: "u32 *embedded_handle_construct(u32 *handle, u32 value, u32 tag)"
+    module: app/embedded_handle_construct
+    status: ported
+    vars: {param_1/r0: handle, param_2/r1: value, param_3/r2: tag}
+    notes: >-
+      Raw words e5801000 e5c02004 e12fff1e decode to STR r1,[r0],
+      STRB r2,[r0,#4], BX lr. The next independent BX lr function starts
+      at 0x081070b4, establishing the 12-byte extent. Whole-image aligned
+      A32 branch decoding finds two plain incoming BLs at 0x0814a9fc and
+      0x082c8558, zero predicated incoming BLs, and no outgoing calls.
+      Store the value word and low tag byte, leave bytes +5..7 untouched,
+      and return the unchanged handle pointer in r0. Ghidra incorrectly
+      reports void; both callers consume the returned pointer. The first
+      constructs a handle embedded at owner +20; the second constructs an
+      allocated eight-byte handle. No callee seams or algorithmic deviations.
+      The indexed owner factory now calls this port on target and host,
+      removing its obsolete constructor seam. Host tests cover zero,
+      high-bit and all-ones values, tag truncation, returned identity,
+      adjacent words and padding preservation. No physical-device run.
+      Host suite passes 14932 tests; standalone public-entry smoke and
+      ARM release build pass. match.py exits 1: three original instructions
+      versus five Rust instructions. LLVM adds a frame-pointer save/restore
+      and reverses the independent nonvolatile word and byte stores;
+      offsets, byte truncation, untouched r0, and return remain faithful.
   - address: 0x0814a9c4
     ghidra: FUN_0814a9c4
     name: indexed_handle_owner_create
@@ -2944,7 +2972,7 @@ functions:
     vars: {param_1/r5: mode, param_2/r6: index, puVar1: storage, piVar3/r4: owner}
     renames:
       FUN_082aadd4: operator_new
-      FUN_081070a8: embedded_handle_construct_firmware
+      FUN_081070a8: embedded_handle_construct (ported)
       FUN_08030f44: heap_panic
       FUN_0814a904: indexed_handle_owner_setup_firmware
       DAT_0814aa3c: indexed_handle_owner_vtable_089866e8
@@ -2960,13 +2988,13 @@ functions:
       invokes vtable slot +4 and returns null; any nonzero status retains
       the owner. Preserve word +8 and handle padding +25..27. Raw handle
       constructor preserves r0 despite Ghidra's void signature. Reuse
-      canonical operator_new and heap_panic ports. Unported constructor
-      and setup retain verified firmware-address ABIs; host seams replace
-      firmware calls and virtual destruction. Seven u32 words preserve
+      canonical operator_new, heap_panic, and embedded_handle_construct ports.
+      Only setup retains its verified firmware-address ABI; host seams replace
+      allocation, setup, and virtual destruction. Seven u32 words preserve
       layout on host. Host suite, ARM release build and public-entry smoke
-      pass. match.py exits 1: 30 original versus 40 Rust lines, frame
-      pointer and address BLX calls; initialization, null gate, setup,
-      virtual failure destruction and pointer/null return remain intact.
+      pass. Updated factory match.py exits 1: 30 original versus 39 Rust
+      lines, frame pointer and setup address BLX; initialization, null gate,
+      setup, direct constructor BL, destruction and pointer/null return remain intact.
       No physical-device run or deliberate target algorithmic deviation.
   - address: 0x0813e57c
     ghidra: FUN_0813e57c

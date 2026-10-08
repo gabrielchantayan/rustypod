@@ -64,6 +64,7 @@ pub mod virtual_dispatch_clear_active;
 pub use virtual_dispatch_clear_active::*;
 pub mod base_vtable_value_init;
 pub mod indexed_handle_owner_create;
+pub mod embedded_handle_construct;
 pub mod context_pending_complete;
 pub mod handle_owner_shutdown;
 pub mod buffered_text_owner_data;

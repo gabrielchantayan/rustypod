@@ -10,22 +10,19 @@
 //! then initialize it with the requested mode and index. On zero status,
 //! invoke deleting-destructor slot +4 and return null; otherwise return it.
 //!
-//! Deliberate deviations: unported handle construction (0x081070a8) and
-//! owner setup (0x0814a904) call verified firmware addresses on target;
-//! host-only seams fail loudly unless configured. Host destruction uses
-//! a seam instead of dereferencing a firmware vtable. The object remains
+//! Deliberate deviations: unported owner setup (0x0814a904) calls its
+//! verified firmware address on target; host-only seams fail loudly unless
+//! configured. Handle construction uses the Rust port. Host destruction
+//! uses a seam instead of dereferencing a firmware vtable. The object remains
 //! seven u32 words on every architecture. Untouched word +8 and handle
 //! padding +25..27 remain untouched. No physical-device verification.
 
 pub type Allocate = unsafe extern "C" fn(usize) -> *mut u32;
-pub type HandleConstruct = unsafe extern "C" fn(*mut u32, u32, u32) -> *mut u32;
 pub type OwnerSetup = unsafe extern "C" fn(*mut u32, u32, u32) -> u32;
 pub type Destroy = unsafe extern "C" fn(*mut u32);
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_allocate(_: usize) -> *mut u32 { panic!("configure owner allocator") }
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_construct(_: *mut u32, _: u32, _: u32) -> *mut u32 { panic!("configure handle constructor") }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_setup(_: *mut u32, _: u32, _: u32) -> u32 { panic!("configure owner setup") }
 #[cfg(not(target_os = "none"))]
@@ -33,8 +30,6 @@ unsafe extern "C" fn missing_destroy(_: *mut u32) { panic!("configure owner dest
 
 #[cfg(not(target_os = "none"))]
 pub static mut OWNER_ALLOCATE: Allocate = missing_allocate;
-#[cfg(not(target_os = "none"))]
-pub static mut HANDLE_CONSTRUCT: HandleConstruct = missing_construct;
 #[cfg(not(target_os = "none"))]
 pub static mut OWNER_SETUP: OwnerSetup = missing_setup;
 #[cfg(not(target_os = "none"))]
@@ -57,11 +52,7 @@ pub unsafe extern "C" fn indexed_handle_owner_create(mode: u32, index: u32) -> *
     storage.add(1).write(u32::MAX);
     storage.add(3).write(0);
     storage.add(4).write(0);
-    #[cfg(target_os = "none")]
-    let construct: HandleConstruct = core::mem::transmute(0x0810_70a8usize);
-    #[cfg(not(target_os = "none"))]
-    let construct = HANDLE_CONSTRUCT;
-    let handle = construct(storage.add(5), 0, 0);
+    let handle = crate::app::embedded_handle_construct::embedded_handle_construct(storage.add(5), 0, 0);
     let owner = (handle as usize).wrapping_sub(20) as *mut u32;
     if owner.is_null() {
         crate::heap::veneers::heap_panic();
@@ -97,11 +88,6 @@ mod tests {
         assert_eq!(size, 28);
         STORAGE.as_mut_ptr()
     }
-    unsafe extern "C" fn construct(handle: *mut u32, value: u32, tag: u32) -> *mut u32 {
-        handle.write(value);
-        handle.add(1).cast::<u8>().write(tag as u8);
-        handle
-    }
     unsafe extern "C" fn setup(owner: *mut u32, mode: u32, index: u32) -> u32 {
         assert_eq!(owner.read(), 0x0898_66e8);
         assert_eq!(owner.add(1).read(), u32::MAX);
@@ -125,7 +111,6 @@ mod tests {
         let _guard = LOCK.lock();
         unsafe {
             OWNER_ALLOCATE = allocate;
-            HANDLE_CONSTRUCT = construct;
             OWNER_SETUP = setup;
             OWNER_DESTROY = destroy;
             for status in [0, 1, 0x8000_0000, u32::MAX] {
@@ -147,7 +132,6 @@ mod tests {
                 }
             }
             OWNER_ALLOCATE = missing_allocate;
-            HANDLE_CONSTRUCT = missing_construct;
             OWNER_SETUP = missing_setup;
             OWNER_DESTROY = missing_destroy;
         }
