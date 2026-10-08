@@ -233232,3 +233232,48 @@ functions:
       fully unrolls, cache stores and wrapping sum remain, and the two reset
       calls retain BL then tail B via Rust relocations. Frame/register layout
       differs. No device execution; host operations model runtime dependencies.
+  - address: 0x0810d8a0
+    ghidra: FUN_0810d8a0
+    name: controller_virtual_base_construct
+    size: 212
+    sig: "void *controller_virtual_base_construct(void *this, const uint32_t *vtables, const char *name, uint32_t mode)"
+    module: app/controller_virtual_base_construct
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r1: vtables
+      param_3/r2: name
+      param_4/r3: mode
+      piVar1/r4: constructed_controller
+      FUN_08134db4: silver_controller_construct
+      FUN_081cbbb0: photo_browse_slideshow_get
+      FUN_0825a0c0: lazy_singleton_0x8c_interface_get
+      FUN_0810a7b8: singleton_class_6200
+    notes: >-
+      Raw A32 extent is 0x0810d8a0..0x0810d974, 212 bytes, with no pool.
+      The next function starts with cmp r0,#0. Four unconditional outbound
+      BL instructions, zero predicated BL, and two register BLX calls.
+      Full-image decoding finds two unconditional incoming BLs at
+      0x0815735c and 0x0819a948; the latter is inside a Ghidra-misbounded
+      allocation wrapper that overlaps its separately recovered constructor.
+      Constructs the existing silver-controller base and uses its returned
+      pointer. Installs the primary construction vtable and two virtual-base
+      vtables using signed metadata at primary-12 and primary-16. Stores
+      mode's low byte at +0xb0, values 25 at +0xb4/+0xb8, clears words
+      +0xbc/+0xc0/+0xc4/+0x11c, caches photo-browse at +0x13c, clears
+      bytes +0x140..+0x144 and words +0x148/+0x14c. Registers the first
+      virtual base through media-interface slot 0 and the second through
+      class-0x6200 slot +0x98, reloading metadata after callbacks. No
+      broader class identity or virtual method identity is invented.
+      All four direct dependencies reuse existing ports. Host-only
+      operations and native-width service vtables support isolated fixtures;
+      controller words and construction metadata remain target-width.
+      Host suite: 14904 tests passed. The new edge-case test verifies all
+      touched and untouched bytes, signed virtual offsets, mode truncation,
+      base-constructor pointer replacement, and metadata changes during
+      registration. ARM release build passed. Direct-entry host smoke
+      observed mode 255, value 25, cached browse pointer 0x1234, and both
+      virtual-base registrations. match.py reports 53 original versus 51
+      Rust instructions (exit 1, structural diff): four direct BLs, two
+      indirect BLXs, slot +0x98, state stores and offset reloads remain.
+      Frame/register allocation and load order differ. No device execution.

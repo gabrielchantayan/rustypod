@@ -855,6 +855,7 @@ pub mod media_player_enabled_update;
 pub mod media_player_resource_value;
 pub mod music_selection_state_reset;
 pub mod music_selection_controller_construct;
+pub mod controller_virtual_base_construct;
 pub mod class_9400_current_item_matches_media_player;
 pub mod media_player_queue_refresh;
 pub mod media_player_pending_item;
