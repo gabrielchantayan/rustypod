@@ -306,6 +306,24 @@ pub unsafe extern "C" fn ata_cmd_set_timeout_ms(cmd: *mut u8, timeout_ms: u32) {
     set_word(cmd, TIMEOUT_MS, timeout_ms);
 }
 
+/// ata_cmd_get_extended_aux — original: `FUN_081212c8` @ 0x081212c8.
+/// True extent: 8 bytes, ending at the setter boundary 0x081212d0.
+/// Whole-image A32 decoding verifies one plain BL at 0x081662b8 and
+/// one BLEQ at 0x08283710; no outgoing calls.
+///
+/// Returns the zero-extended auxiliary halfword at command-block +0x54.
+/// Raw words: `e1d005b4` (ldrh r0,[r0,#0x54]), `e12fff1e` (bx lr).
+/// Its ATA register meaning is not established. No validation or semantic
+/// deviations; the existing aligned volatile helper preserves one load.
+///
+/// # Safety
+/// `cmd` must point to readable storage through +0x55 and be halfword aligned.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_extended_aux(cmd: *const u8) -> u16 {
+    half(cmd, EXT_OPAQUE_54)
+}
+
 /// ata_cmd_set_extended_aux — original: `FUN_081212d0` @ 0x081212d0.
 /// True extent: 8 bytes, up to the getter at 0x081212d8. Whole-image
 /// A32 decoding verifies 2 plain BL callers (0x0816630c, 0x0827a2c8),
@@ -1758,6 +1776,22 @@ mod tests {
                     assert_eq!(block.0[other], 0xa5, "values {first:#x}/{second:#x} spilled onto +{other:#x}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn extended_aux_getter_zero_extends_without_reading_neighbor_fields() {
+        #[repr(C, align(2))]
+        struct HalfwordAligned([u8; 0x5a]);
+        let mut storage = HalfwordAligned([0xa5; 0x5a]);
+        // Exercise a block aligned to two bytes but not necessarily four.
+        let cmd = unsafe { storage.0.as_mut_ptr().add(2) };
+        for value in [0u16, 1, 0x00ff, 0x0100, 0x8000, 0xabcd, 0xffff] {
+            unsafe { cmd.add(0x54).cast::<u16>().write(value) };
+            let before = storage.0;
+            let result = unsafe { ata_cmd_get_extended_aux(cmd) } as u32;
+            assert_eq!(result, u32::from(value));
+            assert_eq!(storage.0, before);
         }
     }
 
