@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081446cc
+    ghidra: FUN_081446cc
+    name: timing_node_owner_destroy
+    size: 100
+    sig: "void timing_node_owner_destroy(u32 *owner)"
+    module: app/timing_node_owner
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner+0xc4: first_node
+      owner+0xc8: second_node
+      owner+0xcc: third_node
+      FUN_08273a2c: timing_wheel_remove_global
+    notes: >-
+      Raw words establish [0x081446cc,0x08144730), 100 bytes without
+      literals; next independent entry pushes r4-r8. Two incoming plain
+      BLs at 0x08145e38 and 0x081463a0, zero predicated BLs. Three outgoing
+      plain BLs to canonical timing_wheel_remove_global, two BLXNE virtual
+      calls and one BXNE virtual tail dispatch. Unlink slots +0xc4,+0xc8,
+      +0xcc unconditionally, then reload and destroy non-null slots in
+      reverse order through vtable +4. Initial nodes must be live; slots
+      are not cleared, and callback mutations must affect later dispatch.
+      Host deviation follows existing native destructor callback model;
+      target uses exact 32-bit vtable words. Tests exercise actual wheel
+      removal, reverse destruction, flag preservation, null-after-callback,
+      alias-after-callback and retained slot values.
   - address: 0x08136fc4
     ghidra: FUN_08136fc4
     name: wave_has_small_tagged_descriptor
