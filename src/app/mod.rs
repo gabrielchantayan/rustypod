@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod media_player_refresh_cached_values;
 pub mod default_indexed_item_owner_bit_3;
 pub mod media_player_select_and_refresh;
 pub mod volume_limit_query_results_equal;
