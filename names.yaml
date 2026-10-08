@@ -231570,3 +231570,28 @@ functions:
       observed 0xfe with adjacent bytes unchanged. ARM match.py verifies
       the exported symbol and the same ldrb at +22; LLVM adds a
       frame-pointer push/mov/pop in place of the original bx lr.
+  - address: 0x081212d0
+    ghidra: FUN_081212d0
+    name: ata_cmd_set_extended_aux
+    size: 8
+    sig: "void ata_cmd_set_extended_aux(u8 *cmd, u16 value)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd, param_2: value}
+    notes: >-
+      Raw words e1c015b4 e12fff1e decode as strh r1,[r0,#0x54]; bx lr.
+      True extent ends at the next real function, the byte getter at
+      0x081212d8. Whole-image A32 BL decoding finds two plain calls at
+      0x0816630c and 0x0827a2c8, zero predicated calls, and no outgoing calls.
+      Stores the low halfword at command-block +0x54 without validation.
+      The existing ATA layout labels this extended-taskfile field opaque;
+      auxiliary is intentionally not a claim about its ATA register identity.
+      No callees or new seams. Aligned volatile halfword access preserves the
+      original store; no deliberate semantic deviations. Host tests cover
+      zero, maximum, asymmetric byte values, bit 15, repeated replacement,
+      both legal halfword alignments, and unchanged surrounding bytes.
+      All 14838 host tests pass and the release ARM build succeeds.
+      Standalone smoke compiled the actual setter source and observed
+      0xff00 at +0x54 with all adjacent halfwords unchanged. match.py
+      confirms strh r1,[r0,#84]; LLVM adds a frame-pointer push/mov/pop
+      instead of the original bx lr.

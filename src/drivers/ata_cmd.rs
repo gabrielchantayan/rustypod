@@ -306,6 +306,26 @@ pub unsafe extern "C" fn ata_cmd_set_timeout_ms(cmd: *mut u8, timeout_ms: u32) {
     set_word(cmd, TIMEOUT_MS, timeout_ms);
 }
 
+/// ata_cmd_set_extended_aux — original: `FUN_081212d0` @ 0x081212d0.
+/// True extent: 8 bytes, up to the getter at 0x081212d8. Whole-image
+/// A32 decoding verifies 2 plain BL callers (0x0816630c, 0x0827a2c8),
+/// zero predicated BL callers, and no outgoing calls.
+///
+/// Stores the low halfword of the argument at command-block +0x54,
+/// the opaque auxiliary field in the extended taskfile. Raw words:
+/// `e1c015b4` (strh r1,[r0,#0x54]), `e12fff1e` (bx lr).
+/// No validation or deliberate semantic deviations; volatile aligned
+/// access preserves the single halfword store. The field's ATA meaning
+/// is not established, so it is deliberately not named as a register.
+///
+/// # Safety
+/// `cmd` must point to writable storage through +0x55 and be halfword aligned.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_set_extended_aux(cmd: *mut u8, value: u16) {
+    (cmd.add(EXT_OPAQUE_54) as *mut u16).write_volatile(value);
+}
+
 /// ata_cmd_set_flags — original: `FUN_08121414` @ 0x08121414 (8 bytes;
 /// 19 call sites, binary-scanned).
 ///
@@ -1478,6 +1498,25 @@ mod tests {
     }
 
     // ---- the hot setters -------------------------------------------------
+
+    #[test]
+    fn extended_aux_replaces_both_bytes_without_touching_other_fields() {
+        // Include both legal halfword alignments within a word.
+        #[repr(align(4))]
+        struct Storage([u8; 0x5c]);
+        for displacement in [0, 2] {
+            let mut storage = Storage([0xa5; 0x5c]);
+            for value in [0u16, 1, 0x00ff, 0xff00, 0x8000, 0x1234, 0xffff, 0] {
+                let mut expected = storage.0;
+                let offset = displacement + EXT_OPAQUE_54;
+                expected[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+                unsafe {
+                    ata_cmd_set_extended_aux(storage.0.as_mut_ptr().add(displacement), value);
+                }
+                assert_eq!(storage.0, expected, "value {value:#06x}, alignment {displacement}");
+            }
+        }
+    }
 
     #[test]
     fn each_setter_writes_exactly_its_own_field() {
