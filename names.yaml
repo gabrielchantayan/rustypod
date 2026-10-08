@@ -231688,3 +231688,31 @@ functions:
       initializes the stack output. Host repr(C) pointers widen while
       retaining slot indices. Wrapping subtraction preserves the original
       unsigned add-and-compare, including overflow boundaries.
+
+  - address: 0x0811f6dc
+    ghidra: FUN_0811f6dc
+    name: width_0c_set_clamped
+    size: 40
+    sig: "void width_0c_set_clamped(void *obj, u32 width)"
+    module: ui/width_inset
+    status: ported
+    vars: {param_1: obj, param_2: width}
+    notes: >-
+      Raw extent [0x0811f6dc,0x0811f704) comprises 36 instruction bytes
+      and the 0x0000ffff literal at 0x0811f700; the next real function
+      width_0c_minus_inset starts with LDRH at 0x0811f704. Whole-image
+      aligned A32 decoding verifies one incoming plain BL at 0x081900d8
+      and one predicated BLNE at 0x0818ee8c, with no outgoing BLs of
+      either kind. The BLS at 0x0811f6e4 is a conditional branch, not BL.
+      Clamp the full unsigned width to [128,65535] and write the aligned
+      halfword at obj +0x0c, preserving every other byte. The neighboring
+      existing query reads the same width field. Callers supply a default
+      1024 or a decoded two-byte value; the owning class is unidentified.
+      No new callee seams or deliberate semantic deviations. Host tests
+      cover both clamp boundaries, high-bit and full-width unsigned inputs,
+      unchanged neighboring storage, and compatibility with the width query.
+      All 14844 host tests and the ARM release build passed. Standalone
+      public-entry smoke verifies inputs 0,128,1024,65536,4294967295 and
+      the existing inset query. match.py exits 1 with nine original versus
+      ten Rust instructions: LLVM materializes 65535, merges the clamp
+      stores into one STRH at +12, and adds a frame-pointer prologue/epilogue.
