@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08116d54
+    ghidra: FUN_08116d54
+    name: context_cached_rtc_value_invalidate
+    size: 12
+    sig: "void *context_cached_rtc_value_invalidate(void *context)"
+    module: app/context_cached_rtc_value_invalidate
+    status: ported
+    renames:
+      param_1/r0: context
+      r1: invalid_cached_value
+    notes: >-
+      Raw words e3e01000 e5801738 e12fff1e establish extent
+      [0x08116d54,0x08116d60); next function starts with e92d4010.
+      Whole-image aligned A32 scan finds two incoming plain BLs at
+      0x08202f1c and 0x0820e810, zero predicated incoming BLs and zero
+      outgoing calls. Write 0xffffffff to the aligned word at +0x738.
+      Neighbor 0x08116acc caches the RTC object's virtual slot +0x88
+      result here; 0x08116c64 skips restoration through slot +0x84 when
+      this value is -1, and 0x08116dac compares it with the current value.
+      These observations justify cached RTC value, not a more specific
+      time or selection interpretation. No callees or new seams.
+      Return context to preserve unchanged r0 despite Ghidra's void
+      signature. No target behavioral deviations or host layout changes.
+      All 14864 host tests pass, including full-word replacement across
+      signed boundaries, sentinel idempotence, receiver pass-through and
+      untouched surrounding words. ARM release build passes. Direct-entry
+      host smoke verifies sentinel, neighbors and receiver. match.py exits
+      1: Rust has five instructions versus three, adding frame-pointer
+      push/mov/pop around the identical MVN and STR; no calls. No device
+      execution performed.
   - address: 0x08116dd8
     ghidra: FUN_08116dd8
     name: class6000_context_refresh
