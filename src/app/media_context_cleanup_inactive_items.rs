@@ -7,6 +7,7 @@ use crate::cxx::vtable_predicate_state_flag::{VtablePredicateObject, vtable_pred
 type Get = unsafe extern "C" fn() -> *mut u8;
 type Cleanup = unsafe extern "C" fn(*mut u8) -> u32;
 type Update = unsafe extern "C" fn(*mut u8, u32) -> u32;
+type DispatchUpdate = unsafe extern "C" fn(*mut u8, u32);
 type Predicate = unsafe extern "C" fn(*mut u8) -> u32;
 type FillContext = unsafe extern "C" fn(*mut u8, *mut ScopedContext) -> u32;
 
@@ -17,7 +18,7 @@ pub struct HostOperations {
     pub owner_get: Get,
     pub cleanup: Cleanup,
     pub update_needed: Update,
-    pub update: Update,
+    pub update: DispatchUpdate,
 }
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_get() -> *mut u8 { panic!("install media cleanup host operations") }
@@ -26,9 +27,11 @@ unsafe extern "C" fn missing_cleanup(_: *mut u8) -> u32 { panic!("install media 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_update(_: *mut u8, _: u32) -> u32 { panic!("install media cleanup host operations") }
 #[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_dispatch(_: *mut u8, _: u32) { panic!("install media cleanup host operations") }
+#[cfg(not(target_os = "none"))]
 static mut HOST_OPERATIONS: HostOperations = HostOperations {
     player_get: missing_get, owner_get: missing_get, cleanup: missing_cleanup,
-    update_needed: missing_update, update: missing_update,
+    update_needed: missing_update, update: missing_dispatch,
 };
 /// Install host substitutes for singleton access and retail class-0x9300 operations.
 /// # Safety
@@ -50,9 +53,9 @@ pub unsafe fn set_host_operations(operations: HostOperations) {
 /// remove inactive items, fetch again, query updates with mode zero, and only
 /// on nonzero fetch again and invoke the update helper with mode one.
 ///
-/// Deliberate deviations: unported FUN_0812fb64 and FUN_0812ff28 use verified
-/// fixed-address calls on ARM and explicit host substitutes. Their identity
-/// is not assumed beyond the observed query/update role. Native-pointer host
+/// Deliberate deviations: unported FUN_0812fb64 uses a verified fixed-address
+/// call on ARM and an explicit host substitute. Update dispatch reuses the
+/// ported class_9300_update_dispatch. Native-pointer host
 /// layouts adapt the scoped context prefix for the existing flag predicate.
 /// The incoming r0 is unused; Ghidra's caller-supplied object is not an argument.
 /// # Safety
@@ -62,12 +65,12 @@ pub unsafe fn set_host_operations(operations: HostOperations) {
 #[inline(never)]
 pub unsafe extern "C" fn media_context_cleanup_inactive_items() {
     #[cfg(target_os = "none")]
-    let (player_get, owner_get, cleanup, update_needed, update): (Get, Get, Cleanup, Update, Update) = (
+    let (player_get, owner_get, cleanup, update_needed, update): (Get, Get, Cleanup, Update, DispatchUpdate) = (
         crate::app::singletons::media_player_get,
         crate::app::singletons::singleton_class_9300,
         crate::app::class_9300_remove_inactive_items::class_9300_remove_inactive_items,
         core::mem::transmute(0x0812_fb64usize),
-        core::mem::transmute(0x0812_ff28usize),
+        crate::app::class_9300_update_dispatch::class_9300_update_dispatch,
     );
     #[cfg(not(target_os = "none"))]
     let HostOperations { player_get, owner_get, cleanup, update_needed, update } =
@@ -128,7 +131,7 @@ mod tests {
     unsafe extern "C" fn get_owner() -> *mut u8 { GETS += 1; ptr::null_mut() }
     unsafe extern "C" fn cleanup(_: *mut u8) -> u32 { REMAINING = 0; 1 }
     unsafe extern "C" fn needed(_: *mut u8, mode: u32) -> u32 { assert_eq!(mode, 0); assert_eq!(REMAINING, 0); NEEDED }
-    unsafe extern "C" fn update(_: *mut u8, mode: u32) -> u32 { assert_eq!(mode, 1); UPDATES += 1; 0 }
+    unsafe extern "C" fn update(_: *mut u8, mode: u32) { assert_eq!(mode, 1); UPDATES += 1; }
     unsafe extern "C" fn first(p: *mut u8) -> u32 { (*p.cast::<Player>()).first }
     unsafe extern "C" fn second(p: *mut u8) -> u32 { assert_eq!((*p.cast::<Player>()).first, 0); (*p.cast::<Player>()).second }
     unsafe extern "C" fn valid(_: *mut VtablePredicateObject) -> u32 { 2 }
@@ -172,7 +175,7 @@ mod tests {
                 assert_eq!(GETS, if suppressed { 0 } else if needed_value != 0 { 3 } else { 2 });
             }
             set_host_operations(HostOperations { player_get: missing_get, owner_get: missing_get,
-                cleanup: missing_cleanup, update_needed: missing_update, update: missing_update });
+                cleanup: missing_cleanup, update_needed: missing_update, update: missing_dispatch });
             PLAYER = ptr::null_mut(); CONTEXT_TABLE = &CONTEXT_VTABLE;
         }
     }

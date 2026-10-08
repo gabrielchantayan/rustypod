@@ -1843,6 +1843,35 @@ mod tests {
         guard
     }
 
+    #[test]
+    fn class_9300_dispatch_zero_refreshes_and_all_nonzero_modes_restart_embedded_timer() {
+        let _lock = mock_env();
+        unsafe extern "C" fn refresh(owner: *mut u8) {
+            let value = owner.add(0x34).cast::<u32>().read();
+            owner.add(0x30).cast::<u32>().write(value);
+        }
+        unsafe {
+            use crate::app::class_9300_update_dispatch::{class_9300_update_dispatch, set_host_refresh};
+            let mut owner = [0x5555_5555u32; 0x14c / 4];
+            let base = owner.as_mut_ptr().cast::<u8>();
+            set_host_refresh(Some(refresh));
+            owner[0x34 / 4] = 7;
+            let timer_before = owner[0x44 / 4..].to_vec();
+            class_9300_update_dispatch(base, 0);
+            assert_eq!(owner[0x30 / 4], 7);
+            assert_eq!(&owner[0x44 / 4..], timer_before.as_slice());
+            for mode in [1, 2, 0x8000_0000, u32::MAX] {
+                owner[0x64 / 4] = TIMER_STATE_STOPPED;
+                let prefix = owner[..0x44 / 4].to_vec();
+                class_9300_update_dispatch(base, mode);
+                assert_eq!(owner[0x64 / 4], TIMER_STATE_RUNNING);
+                assert_eq!(&owner[..0x44 / 4], prefix.as_slice());
+                assert_eq!(owner[0x68 / 4], 0x5555_5555);
+            }
+            set_host_refresh(None);
+        }
+    }
+
     static mut CLASS_MUTEX_CELL: u32 = 0;
     static mut PENDING_MUTEX_CELL: u32 = 0;
 

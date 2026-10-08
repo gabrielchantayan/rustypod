@@ -229832,3 +229832,39 @@ functions:
       Deliberate deviations: native-width host pointers; none on target.
       Host tests exercise present and absent resources, output replacement,
       non-one provider acceptance, and normalization through the real resolver.
+
+  - address: 0x0812ff28
+    ghidra: FUN_0812ff28
+    name: class_9300_update_dispatch
+    size: 16
+    sig: "void class_9300_update_dispatch(u8 *this, u32 mode)"
+    module: app/class_9300_update_dispatch
+    status: ported
+    renames:
+      param_1: this
+      param_2: mode
+      FUN_0812bf4c: timer_restart
+      "0x0812fe68": retail class-0x9300 refresh helper (unported)
+    notes: >-
+      Raw words e3510000 0affffcd 12800044 1afff004 establish the
+      16-byte extent ending before push e92d41f0 at 0x0812ff38.
+      Whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x081a6c24 and 0x081ca310, zero predicated BLs. No outbound BLs
+      or BLXs; two conditional tail branches. Mode zero preserves this
+      and branches to 0x0812fe68; every nonzero mode adds 0x44 and
+      branches to ported timer_restart. Ghidra incorrectly merges both
+      callees into this wrapper. Both verified callers discard r0, so
+      expose void rather than their inconsistent leftover register values.
+      Deliberate deviations: verified fixed-address refresh on target,
+      explicit host refresh substitute, existing timer dependency seams.
+      Migrated the media cleanup caller from its fixed-address dispatch.
+      Host suite passed 14760 tests, including zero-mode timer preservation
+      and real timer_restart state transitions for modes 1, 2, high-bit,
+      and all-ones, with owner-prefix and neighboring-word preservation.
+      Standalone source smoke with simulated dependencies refreshed count
+      to 9 and marked the embedded timer running for high-bit mode.
+      ARM release build passed. match.py exits 1: four original versus
+      23 Rust instructions. Zero-mode target remains 0x0812fe68;
+      LLVM inlines timer_restart, retaining +0x44 receiver adjustment,
+      stop call, running-state store at owner+0x64, and indirect arm tail
+      call through the existing TimerOps table. No device execution.
