@@ -148,6 +148,8 @@ pub mod storage_backend_transfer;
 pub mod storage_backend_read;
 /// Extent-list read wrapper that selects operation one @ 0x08136920.
 pub mod storage_extent_read;
+/// Write-enabled extent-list wrapper @ 0x08136a94.
+pub mod storage_extent_write;
 /// Mounted-volume table slot lookup @ 0x082e0e1c.
 pub mod volume_table;
 /// Releases and clears a mounted-volume table slot's owned buffer @ 0x082e04fc.

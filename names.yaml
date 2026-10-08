@@ -228631,3 +228631,37 @@ functions:
       and source preservation. Standalone host smoke verifies early stop,
       zero length, existing count and destination/count aliasing. No device
       or ARM emulation execution was performed.
+  - address: 0x08136a94
+    ghidra: FUN_08136a94
+    name: storage_extent_write
+    size: 68
+    sig: "i32 storage_extent_write(u8 *extent_list, u32 block, u32 count, u32 *completed_blocks, u8 *buffer, u32 flags)"
+    module: fs/storage_extent_write
+    status: ported
+    renames:
+      param_1: extent_list
+      param_2: block
+      param_3: count
+      param_4: completed_blocks
+      param_5: buffer
+      param_6: flags
+      FUN_08136c64: storage_extent_transfer
+    notes: >-
+      Raw words establish the 68-byte extent 0x08136a94..0x08136ad8;
+      the next function begins with push at 0x08136ad8. One outbound plain
+      BL targets 0x08136c64; no predicated BLs occur. Whole-image decoding
+      finds two inbound plain BLs at 0x081bfbd4 and 0x081c0014, zero
+      predicated inbound BLs. Ghidra's void signature omits the real status:
+      nonzero object byte at +0xf9 returns 0x15 without dispatch or output
+      writes; zero forwards all six arguments with operation zero inserted
+      before flags and returns the helper status. Operation zero reaches
+      backend write dispatch at 0x08149e10, unlike the existing operation-one
+      read wrapper. Reuses that wrapper's verified 0x08136c64 raw-address
+      seam rather than inventing a Rust callee identity. Host tests inject
+      a finite behavioral backend; no deliberate target semantic deviations.
+      ARM match.py reports a structural diff (exit 1): LLVM returns from the
+      gate before saving registers, then uses BLX through literal 0x08136c64
+      rather than a direct BL. The +0xf9 byte test, status 21, stack argument
+      order, inserted zero operation, and returned status remain equivalent.
+      Standalone host smoke exercises the exported wrapper's disabled path
+      and enabled backend mutation/status path. No device execution claimed.

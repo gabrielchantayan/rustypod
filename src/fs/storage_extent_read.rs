@@ -46,7 +46,7 @@ unsafe extern "C" fn missing_storage_extent_transfer(
 static mut HOST_STORAGE_EXTENT_TRANSFER: StorageExtentTransfer = missing_storage_extent_transfer;
 
 #[inline(always)]
-unsafe fn storage_extent_transfer(
+pub(super) unsafe fn storage_extent_transfer(
     extent_list: *mut u8,
     block: u32,
     count: u32,
