@@ -418,6 +418,13 @@ pub struct StringObject {
     /// 0x34) and NULLs the word.
     pub payload: *mut u8,
 }
+
+/// StringObject followed by three uninterpreted bytes at ARM +8/+9/+10.
+#[repr(C)]
+pub struct StringObjectWithBytes {
+    pub string: StringObject,
+    pub bytes: [u8; 3],
+}
 /// Two consecutive StringObjects destroyed by
 /// [`string_object_pair_destroy`]. On ARM `first` and `second` occupy
 /// +0x00..+0x07 and +0x08..+0x0f respectively.
@@ -2286,6 +2293,35 @@ pub unsafe extern "C" fn string_object_copy_construct(
         string_object_assign_payload(this, (*source).payload);
     }
     this
+}
+
+/// string_object_with_bytes_copy_construct — original: `FUN_0814237c`
+/// @ 0x0814237c (40 bytes, ending before the push at 0x081423a4).
+///
+/// Raw A32 decoding verifies two inbound plain BLs at 0x08123f98 and
+/// 0x08123fc4, zero predicated inbound BLs, and one internal plain BL
+/// at 0x08142384 to string_object_copy_construct @ 0x082773e0.
+/// Copy-constructs the leading string, then copies bytes +8, +9, +10
+/// sequentially through the returned pointer; r0 remains the return value.
+/// No NULL guards or interpretation of the bytes are added.
+///
+/// Deliberate deviations: uses the existing constructor's modeled vtable
+/// and host-width StringObject fields. repr(C) keeps the trailing bytes
+/// immediately after the string on both host and target. Padding is untouched.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_with_bytes_copy_construct(
+    this: *mut StringObjectWithBytes,
+    source: *const StringObjectWithBytes,
+) -> *mut StringObjectWithBytes {
+    let constructed = string_object_copy_construct(
+        core::ptr::addr_of_mut!((*this).string),
+        core::ptr::addr_of!((*source).string),
+    ) as *mut StringObjectWithBytes;
+    (*constructed).bytes[0] = (*source).bytes[0];
+    (*constructed).bytes[1] = (*source).bytes[1];
+    (*constructed).bytes[2] = (*source).bytes[2];
+    constructed
 }
 
 /// string_object_copy_construct_veneer — original:
@@ -7883,6 +7919,62 @@ pub(crate) mod tests {
     }
 
     // ---- string_object_copy_construct ---------------------------------
+
+    #[test]
+    fn copy_construct_with_bytes_preserves_raw_values_and_padding() {
+        #[repr(C)]
+        struct Fixture { object: StringObjectWithBytes, guard: [u8; 8] }
+        let mut storage = [0xa5u8; 16];
+        let payload = *b"artist\0";
+        let _bench = assign_cstr_bench(storage.as_mut_ptr());
+        for bytes in [[0, 0, 0], [0xff, 0x80, 1], [1, 2, 3]] {
+            let source = StringObjectWithBytes {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: payload.as_ptr() as *mut u8,
+                },
+                bytes,
+            };
+            let mut destination = Fixture {
+                object: StringObjectWithBytes {
+                    string: StringObject {
+                        vtable: core::ptr::null(),
+                        payload: core::ptr::null_mut(),
+                    },
+                    bytes: [0xa5; 3],
+                },
+                guard: [0x5a; 8],
+            };
+            let this = core::ptr::addr_of_mut!(destination.object);
+            assert_eq!(unsafe { string_object_with_bytes_copy_construct(this, &source) }, this);
+            assert_eq!(destination.object.bytes, bytes);
+            assert_eq!(destination.object.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+            assert_eq!(&storage[..payload.len()], &payload);
+            assert_eq!(destination.guard, [0x5a; 8]);
+            assert_eq!(source.bytes, bytes);
+            assert_eq!(source.string.payload, payload.as_ptr() as *mut u8);
+        }
+    }
+
+    #[test]
+    fn copy_construct_with_bytes_self_keeps_payload_and_all_byte_values() {
+        let payload = *b"self\0";
+        for value in 0..=255u8 {
+            let mut object = StringObjectWithBytes {
+                string: StringObject {
+                    vtable: core::ptr::null(),
+                    payload: payload.as_ptr() as *mut u8,
+                },
+                bytes: [value, !value, value.rotate_left(1)],
+            };
+            let expected = object.bytes;
+            let this = core::ptr::addr_of_mut!(object);
+            assert_eq!(unsafe { string_object_with_bytes_copy_construct(this, this) }, this);
+            assert_eq!(object.bytes, expected);
+            assert_eq!(object.string.payload, payload.as_ptr() as *mut u8);
+            assert_eq!(object.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+    }
 
     #[test]
     fn copy_construct_duplicates_the_source_payload_and_returns_this() {
