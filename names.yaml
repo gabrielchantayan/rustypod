@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811abf0
+    ghidra: FUN_0811abf0
+    name: show_view_layout_marker
+    size: 64
+    sig: "u32 show_view_layout_marker(NowPlayingHighlightController *controller)"
+    module: app/view_layout_marker_display
+    status: ported
+    vars: {param_1/r4: controller, uStack_c: message}
+    renames:
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_083d8b04: cxx_string_release
+      vtable+0x11c: display
+    notes: >-
+      Raw A32 extent is 0x0811abf0..0x0811ac30: 60 code bytes and
+      source-pointer literal at 0x0811ac2c, before the next function PUSH.
+      Two plain outbound BLs, zero predicated BLs, one virtual BLX.
+      Constructs a COW string from 0x08900080, dispatches vtable +0x11c,
+      releases the temporary and returns 1. Source bytes are a1 a8 00,
+      not the Chinese string following the first NUL; meaning remains opaque.
+      Callers FUN_0811ac30 and FUN_0811ae04 use initial/event display paths.
+      Omits unused input registers and spurious Ghidra third constructor
+      argument; uses existing canonical COW ports, no new seams.
+      Host uses native-width existing controller/vtable ABI and exact source
+      bytes; target preserves fixed source address and verified +0x11c slot.
+      Regression covers unretained and retained COW ownership, live string
+      during callback, opaque bytes/NUL, and preserved callback state.
+      All 14856 host tests and ARM release build pass. match.py exits 1:
+      15 original versus 21 Rust instructions, with frame-pointer setup,
+      initialized stack slot and synthesized source address. Both direct
+      calls, virtual +0x11c dispatch, cleanup order and constant return agree.
   - address: 0x0811e478
     ghidra: FUN_0811e478
     name: string_resource_view_construct
