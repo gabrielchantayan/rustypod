@@ -425,6 +425,7 @@ pub mod selection_available;
 pub mod class_6280_set_position;
 pub mod class_6280_clear_pending_and_post_resource;
 pub mod class_6280_refresh_ui;
+pub mod class_6280_query_position_provider;
 pub mod class_8900_prid_first_byte;
 pub mod class_8900_prid_60ef_first_byte;
 pub mod class_8900_prid_table_index;

@@ -231920,3 +231920,26 @@ functions:
       instructions including literals; larger frame and fixed-address BLX
       replace ADS direct BL, preserving virtual slot, resource offsets,
       ordering, and the tail branch to the existing base port.
+
+  - address: 0x0811b95c
+    ghidra: FUN_0811b95c
+    name: class_6280_query_position_provider
+    size: 16
+    sig: "uint32_t class_6280_query_position_provider(Class6280ProviderSource *source)"
+    module: app/class_6280_query_position_provider
+    status: ported
+    renames:
+      param_1: source
+      "source+0x88": position_provider
+      "provider.vtable+0x20": query
+    notes: >-
+      Raw words e5900088 e5901000 e5911020 e12fff11 establish the exact
+      16-byte extent ending at 0x0811b96c, where the next function pushes
+      r4/lr. Full aligned raw scan finds two unconditional inbound BLs at
+      0x0811b840 and 0x0828e7dc, zero predicated BLs. The body has no BL
+      and tail-dispatches through BX r1. Loads the position provider from
+      source +0x88 and invokes its virtual slot +0x20 with that provider
+      in r0. Both callers consume the return word; Ghidra's void signature
+      is incorrect. Concrete virtual callee identity and result units are
+      unknown, so no fixed callee seam is introduced. Host function pointers
+      widen while opaque source words stay u32; target offsets are asserted.
