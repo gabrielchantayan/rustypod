@@ -230223,3 +230223,38 @@ functions:
       again. No device execution claimed. match.py exits 1: LLVM emits
       19 versus 10 instructions, adding frame setup and volatile mutex
       copies while retaining three BLs and saving the count across unlock.
+
+  - address: 0x0812c144
+    ghidra: FUN_0812c144
+    name: task_message_route
+    size: 112
+    sig: "void task_message_route(const u32 *message)"
+    module: kernel/task_message
+    status: ported
+    renames:
+      param_1/r7: message
+      iVar3/r4: callback_index
+      local_1c: target_queue
+      DAT_0812c1b0: task_message_router
+      FUN_0812c088: task_message_post
+    notes: >-
+      Raw osos.dec establishes 108 instruction bytes followed by the
+      registry literal 0x089cb268 at 0x0812c1b0; the next real function
+      starts at 0x0812c1b4, giving a 112-byte true extent. Independent
+      aligned A32 BL decoding finds two unconditional direct callers
+      (0x0812c520, 0x0819c864), no predicated callers. The body has
+      one register BLX at 0x0812c170 and one BLNE at 0x0812c194.
+      Walk the signed count at registry +0x10 and callback table at +0x14.
+      Reset the output queue each iteration; stop on the first nonzero
+      callback result, even if its queue is zero. A nonzero output queue
+      invokes canonical task_message_post with registry word zero as reply
+      queue, the original seven-word message, wait zero and flags zero.
+      Count, table and reply queue are reloaded across callbacks. The target
+      uses the original fixed registry; repr(C) pointers widen only on hosts.
+      No new callee seam. All 14773 host tests pass; ARM release build passes.
+      Standalone test-configured host smoke proves reject-to-accept order,
+      output reset, early termination and negative-count NULL-message safety.
+      No device execution claimed. match.py exits 1 with 37 versus 27
+      instructions: LLVM adds frame setup and ordinary branches in place of
+      predication, retaining signed traversal, callback BLX and conditional
+      message posting. The literal is biased to registry +0x10.

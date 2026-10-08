@@ -265,6 +265,62 @@ pub unsafe extern "C" fn task_message_post(
     if result == 0 { 1 } else { unsafe { task_message_pool_release(cell.cast::<ListNode>()); } 0 }
 }
 
+/// Callback registry at 0x089cb268. Pointer fields widen on hosts only;
+/// the target count and callback-table offsets are +0x10 and +0x14.
+#[repr(C)]
+pub struct TaskMessageRouter {
+    pub reply_queue: usize,
+    pub reserved: [u32; 3],
+    pub callback_count: i32,
+    pub callbacks: *const unsafe extern "C" fn(*mut usize, *const u32) -> u32,
+}
+
+/// Host stand-in for the fixed retailOS registry, not a target relocation.
+#[cfg(not(target_os = "none"))]
+pub static mut TASK_MESSAGE_ROUTER: TaskMessageRouter = TaskMessageRouter {
+    reply_queue: 0, reserved: [0; 3], callback_count: 0,
+    callbacks: core::ptr::null(),
+};
+
+/// task_message_route — original `FUN_0812c144` @ **0x0812c144**.
+///
+/// True extent: **112 bytes**, 0x0812c144..0x0812c1b4, including the
+/// four-byte registry literal. Two direct callers, both plain BL; no
+/// predicated BL callers. Body: one BLX callback and one BLNE to
+/// task_message_post. Walk the signed callback count, resetting the output
+/// queue before each callback. Stop at the first nonzero result, posting
+/// the seven-word message only if its output queue is nonzero, with wait
+/// and flags both zero. Reload count/table/reply queue across callbacks.
+///
+/// Deviation: host registry and pointer fields use native-width pointers;
+/// target accesses retain the fixed retailOS registry and its exact layout.
+/// The conditional BL is expressed as an ordinary conditional call.
+///
+/// # Safety
+/// The registry, callback table, callbacks and seven-word message must be
+/// valid for the accesses performed; callers provide synchronization.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_message_route(message: *const u32) {
+    #[cfg(target_os = "none")]
+    let router = 0x089c_b268 as *const TaskMessageRouter;
+    #[cfg(not(target_os = "none"))]
+    let router = core::ptr::addr_of!(TASK_MESSAGE_ROUTER);
+    let mut index = 0i32;
+    while index < core::ptr::addr_of!((*router).callback_count).read_volatile() {
+        let mut target_queue = 0usize;
+        let callbacks = core::ptr::addr_of!((*router).callbacks).read_volatile();
+        if callbacks.add(index as usize).read()(&mut target_queue, message) != 0 {
+            if target_queue != 0 {
+                let reply_queue = core::ptr::addr_of!((*router).reply_queue).read_volatile();
+                task_message_post(reply_queue, target_queue, message, 0, 0);
+            }
+            return;
+        }
+        index += 1;
+    }
+}
+
 /// Raw receive operation at `FUN_0807a2e8` @ 0x0807a2e8. Its identity is
 /// not yet established beyond the observed queue/cell handoff, so this
 /// seam deliberately names only that data flow.
@@ -695,6 +751,64 @@ pub(crate) mod tests {
         core::ptr::addr_of_mut!(ALLOCATION_FAILURES).write_volatile(
             core::ptr::addr_of!(ALLOCATION_FAILURES).read_volatile() + 1,
         );
+    }
+
+    static ROUTE_EVENTS: StdMutex<Vec<u32>> = StdMutex::new(Vec::new());
+
+    unsafe extern "C" fn route_reject(queue: *mut usize, message: *const u32) -> u32 {
+        assert_eq!(queue.read(), 0);
+        ROUTE_EVENTS.lock().push(message.read());
+        queue.write(99);
+        0
+    }
+
+    unsafe extern "C" fn route_accept(queue: *mut usize, message: *const u32) -> u32 {
+        assert_eq!(queue.read(), 0);
+        ROUTE_EVENTS.lock().push(message.add(1).read());
+        queue.write(message.add(2).read() as usize);
+        // Check that the reply queue is loaded after callback execution.
+        core::ptr::addr_of_mut!(TASK_MESSAGE_ROUTER.reply_queue).write(73);
+        u32::MAX
+    }
+
+    #[test]
+    fn route_signed_count_first_acceptance_and_optional_post() {
+        let _guard = OPS_LOCK.lock();
+        let callbacks = [route_reject as unsafe extern "C" fn(*mut usize, *const u32) -> u32,
+            route_accept, route_reject];
+        let saved_ops = unsafe { core::ptr::addr_of!(TASK_MESSAGE_POST_OPS).read() };
+        unsafe {
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write(TaskMessagePostOps {
+                allocate_cell: mock_allocate_cell, queue_send: mock_queue_send,
+                post_with_wait: mock_post_with_wait, allocation_failed: mock_allocation_failed,
+            });
+            MOCK_ALLOCATE = core::ptr::addr_of_mut!(MOCK_CELL.0).cast();
+            MOCK_RESULT = 0;
+            for (count, queue, events, posts) in [
+                (-1, 42, &[][..], &[][..]),
+                (0, 42, &[][..], &[][..]),
+                (1, 42, &[11][..], &[][..]),
+                (3, 0, &[11, 22][..], &[][..]),
+                (3, 42, &[11, 22][..], &[(73, 42, 0, 0)][..]),
+            ] {
+                TASK_MESSAGE_ROUTER = TaskMessageRouter {
+                    reply_queue: 17, reserved: [0; 3], callback_count: count,
+                    callbacks: callbacks.as_ptr(),
+                };
+                ROUTE_EVENTS.lock().clear();
+                CALLS.lock().clear();
+                let message = [11, 22, queue, 44, 55, 66, 77];
+                task_message_route(message.as_ptr());
+                assert_eq!(&*ROUTE_EVENTS.lock(), events);
+                assert_eq!(&*CALLS.lock(), posts);
+                if !posts.is_empty() {
+                    assert_eq!(&MOCK_CELL.0[1..], &message);
+                }
+            }
+            TASK_MESSAGE_ROUTER.callback_count = 0;
+            TASK_MESSAGE_ROUTER.callbacks = core::ptr::null();
+            core::ptr::addr_of_mut!(TASK_MESSAGE_POST_OPS).write(saved_ops);
+        }
     }
 
     unsafe extern "C" fn mock_receive_cell(
