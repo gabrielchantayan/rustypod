@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod range_context_replace_owned;
 pub mod resource_command_unhandled;
 pub mod collection_selection_move_previous;
 pub mod timing_node_owner;
