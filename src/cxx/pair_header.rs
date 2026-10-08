@@ -1135,6 +1135,40 @@ pub unsafe extern "C" fn pair_header_base_bind_payload(
     }
 }
 
+/// pair_header_base_construct_with_borrowed_payload — original:
+/// `FUN_0810e970` @ **0x0810e970** (80 bytes: 19 ARM instructions
+/// and the vtable literal at 0x0810e9bc; next function at 0x0810e9c0).
+///
+/// Raw words verify two unconditional incoming BL call sites, zero
+/// predicated BLs, and two unconditional outgoing BLs. Installs the vtable,
+/// constructs the grand base at +4, derives the object from its result
+/// minus four, clears +0xac/+0xb0 and the byte at +0xb4, then binds the
+/// borrowed descriptor with tag/context. Returns that object, not the
+/// binder's result. Unlike the default constructor, it does not zero
+/// +4..+0x97. Deliberate deviations: calls the existing Rust grand-base
+/// constructor and binder; their documented dependency seams are reused.
+///
+/// # Safety
+/// `base` and the grand-base return minus one word must describe writable,
+/// aligned 0xb8-byte storage. `descriptor` and dependencies must satisfy
+/// [`pair_header_base_bind_payload`]'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn pair_header_base_construct_with_borrowed_payload(
+    base: *mut u32,
+    descriptor: *const u32,
+    tag: u32,
+    context: u32,
+) -> *mut u32 {
+    base.write(PAIR_HEADER_BASE_VTABLE);
+    let object = pair_header_grand_base_construct(base.add(1)).sub(1);
+    object.add(0xac / 4).write(0);
+    object.add(0xb0 / 4).write(0);
+    object.cast::<u8>().add(0xb4).write(0);
+    pair_header_base_bind_payload(object, descriptor, tag, context);
+    object
+}
+
 /// pair_header_construct — original: `FUN_08124a38` @ 0x08124a38
 /// (36 bytes; 90 `bl` call sites, the only copy).
 ///
@@ -2378,6 +2412,55 @@ mod base_bind_payload_tests {
     /// itself; the loader is mocked, so nothing past +0x18 is needed.
     #[repr(align(4))]
     struct Descriptor([u8; 0x18]);
+
+    #[test]
+    fn borrowed_constructor_clears_ownership_after_grand_base_initialization() {
+        let _array_lock = crate::testing::CPP_ARRAY_OPS_TEST_LOCK
+            .lock().unwrap_or_else(|e| e.into_inner());
+        let guard = mock();
+        unsafe extern "C" fn dirty_reset(
+            body: *mut u32, _: u32, _: u32, _: u32, _: u32, _: u32,
+            _: u32, _: u32, _: u32, _: u32, _: u32,
+        ) -> *mut u32 {
+            assert_eq!(body.sub(0x30 / 4).read(), PAIR_HEADER_BASE_VTABLE);
+            let base = body.sub(0x30 / 4);
+            base.add(0xac / 4).write(u32::MAX);
+            base.add(0xb0 / 4).write(u32::MAX);
+            base.cast::<u8>().add(0xb4).write(1);
+            body
+        }
+        unsafe extern "C" fn check_unowned(base: *mut u32) {
+            assert_eq!(base.add(0xac / 4).read(), 0);
+            assert_eq!(base.add(0xb0 / 4).read(), 0);
+            assert_eq!(base.cast::<u8>().add(0xb4).read(), 0);
+        }
+        unsafe {
+            let old_array = core::ptr::addr_of!(PAIR_HEADER_ELEMENT_ARRAY_OPS).read();
+            PAIR_HEADER_ELEMENT_ARRAY_OPS.reset = dirty_reset;
+            PAIR_HEADER_BASE_BIND_PAYLOAD_OPS.release_owned_payload = check_unowned;
+            for tag in [0, u32::MAX] {
+                let mut storage = [0xaaaa_5555; 0xb8 / 4 + 3];
+                let input = storage.as_mut_ptr().add(1);
+                let object = input;
+                let descriptor = [0, 0, 11, 22, 33, 44, 0, 0];
+                LOAD_RESULT = 0xffff_ffff;
+                let result = pair_header_base_construct_with_borrowed_payload(
+                    input, descriptor.as_ptr(), tag, 0x1234_5678,
+                );
+                assert_eq!(result, object);
+                assert_eq!(storage[0], 0xaaaa_5555);
+                assert_eq!(input.read(), PAIR_HEADER_BASE_VTABLE);
+                assert_eq!(object.add(1).read(), 0xaaaa_5555);
+                assert_eq!(core::slice::from_raw_parts(object.add(0x98 / 4), 4),
+                    &descriptor[2..6]);
+                assert_eq!(object.add(0xa8 / 4).read(), tag);
+                assert_eq!(object.add(0xb4 / 4).read(), 0xaaaa_5500);
+                assert_eq!(storage[0xb8 / 4 + 1], 0xaaaa_5555);
+            }
+            core::ptr::addr_of_mut!(PAIR_HEADER_ELEMENT_ARRAY_OPS).write(old_array);
+        }
+        restore(guard);
+    }
 
     #[test]
     fn the_old_payload_is_released_before_anything_is_rebound() {
