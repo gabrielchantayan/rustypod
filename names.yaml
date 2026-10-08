@@ -231499,3 +231499,25 @@ functions:
       ldr at +0x40; LLVM adds push {fp,lr}; mov fp,sp and returns with
       pop {fp,pc} instead of bx lr. This frame-pointer codegen difference
       preserves the getter's behavior.
+  - address: 0x081213f4
+    ghidra: FUN_081213f4
+    name: ata_cmd_get_lba_high
+    size: 8
+    sig: "u8 ata_cmd_get_lba_high(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Raw words e5d00018 e12fff1e decode as ldrb r0,[r0,#0x18]; bx lr.
+      True extent is 0x081213f4..0x081213fc, where the separately called
+      LBA-mid getter begins. Whole-image A32 decoding finds two incoming
+      plain unconditional BL calls, at 0x08166530 and 0x082832e0, and zero
+      predicated BL calls; no outgoing calls. Reads all eight bits of the
+      legacy ATA taskfile LBA-high byte without mutation or validation.
+      The existing LBA28 packer writes bits 16..23 at this offset, and
+      caller 0x082832bc shifts the returned byte left by 16. No semantic
+      deviations; volatile byte access follows the existing module pattern,
+      and inline(never) preserves a real call target. Host tests cover all
+      256 values at four byte alignments and unchanged surrounding memory.
+      ARM match.py verifies the exported symbol and the same ldrb at +24;
+      LLVM adds a frame-pointer push/mov/pop in place of the original bx lr.
