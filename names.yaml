@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08111488
+    ghidra: FUN_08111488
+    name: playback_position_uncached_get
+    size: 32
+    sig: "u32 playback_position_uncached_get(UncachedPlaybackPositionContext *context)"
+    module: app/playback_position_uncached_get
+    status: ported
+    renames:
+      param_1/r0: context
+      "context+0x51a": pending
+      "context+0x51c": pending_position
+      "context+0x888": interface
+      "interface.vtable+0x17c": query
+      return/r0: position
+    notes: >-
+      Raw A32 words e5d0151a e3510000 1590051c 05900888 05901000
+      0591117c 012fff11 e12fff1e establish extent [0x08111488,0x081114a8),
+      32 bytes. Next function begins push {r4,lr}, mov r4,r0 and loads
+      context+0x430. Whole-image aligned decoding verifies two inbound
+      plain BLs at 0x08114454 and 0x08114de0, zero predicated inbound BLs,
+      zero outbound plain/predicated BLs and one conditional BX virtual
+      tail dispatch. Return pending position +0x51c for any nonzero byte
+      +0x51a; otherwise query interface +0x888 via vtable slot +0x17c.
+      Caller 0x08114408 compares the result with a position threshold;
+      caller 0x08114dc0 divides it by 1000 and clamps to duration.
+      Correct Ghidra's void signature to preserve the full returned word.
+      Existing playback_position_get at 0x08113408 confirms the same
+      selection after its separate cache check. Concrete virtual callee
+      identity remains unproven; no guessed fixed-address seam.
+      Deliberate deviations: repr(C) host pointers widen while retaining
+      field order and target word indices; Rust expresses predication as
+      a branch and tail dispatch as a returned call. Tests cover all 255
+      nonzero pending bytes with a null interface, full-word extremes,
+      wrapping receiver mutation and pending/live transitions.
+      All 14893 host tests, ARM release build and standalone consumer
+      smoke pass. match.py exits 1: LLVM retains the exact field loads
+      and virtual slot, adding frame-pointer push/setup/pop and replacing
+      conditional loads/BX with an early conditional return and final BX.
   - address: 0x081114dc
     ghidra: FUN_081114dc
     name: context_media_query_slot_194
