@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812eaf4
+    ghidra: FUN_0812eaf4
+    name: current_value_virtual_dispatch
+    size: 24
+    sig: "void current_value_virtual_dispatch(CurrentValueReceiver *receiver)"
+    module: app/current_value_virtual_dispatch
+    status: ported
+    renames:
+      param_1/r0: receiver
+      r1: signed_current_value
+      r2: virtual_method
+      receiver_plus_0x58: current_value
+      vtable_plus_0x164: dispatch
+    notes: >-
+      Raw extent [0x0812eaf4,0x0812eb0c), six A32 words ending BX r2,
+      followed by PUSH {r4-r6,lr}. Independent whole-image aligned decoding
+      finds two incoming plain BLs at 0x0828b2bc and 0x0828b2c4, zero
+      predicated BLs; body has no BL or BLX. Read word +0x58, sign-extend
+      its low halfword and dispatch virtual slot +0x164 with unchanged
+      receiver. Callers cast to class 0x3b80; no concrete method identity
+      is inferred. Native host pointers widen repr(C) layout; target
+      offsets are compile-time checked. Incidental virtual return values
+      are not exposed. Existing keyed-child caller uses this port directly;
+      obsolete refresh seam and mock-echo test removed. Host edge coverage
+      checks every halfword with three upper-word patterns, callback receiver
+      mutation, and repeated reloads.
+      Full host suite passes (14765 tests); ARM release build passes.
+      Actual-source smoke observes -32768 then 32767 after callback mutation.
+      Reviewed match.py exit-1 diff: seven versus six instructions; LLVM
+      substitutes LDRSH for word-load/shift sign extension, adds frame setup
+      and restore, and preserves +0x58, +0x164 and the final BX r2.
   - address: 0x0812f6b4
     ghidra: FUN_0812f6b4
     name: selection_value_pair_reset
@@ -218445,18 +218476,18 @@ functions:
       0x0dad0345. Resolve via the existing TCDemoMode ports and cast to
       class 0x1580; dereference child +0x34 without a container null guard.
       Null child returns, otherwise cast to 0x3b80 and dispatch only when
-      child and container are nonnull. Verified unregistered helper
-      0x0812eaf4 reads word +0x58, sign-extends its low halfword, loads
+      child and container are nonnull. The Rust current_value_virtual_dispatch
+      port reads word +0x58, sign-extends its low halfword, loads
       vtable slot +0x164 and tail-dispatches with receiver and signed value.
-      Target retains that helper at its raw verified address; no callee
+      Both target and host now use that port directly; no concrete callee
       class identity is invented. Both inbound callers step a value by
       +1 or -1 before refreshing. Deviations: native-pointer repr(C)
       models expand host fields while preserving target word indices;
       host-only operations replace firmware calls, and Rust expresses
       the conditional tail B as a final void call.
       Full host suite and ARM release build pass. Native actual-source
-      smoke covers zero, one, 0x100, UINT32_MAX and absent child;
-      regression also covers rejected child casts. match.py exits 1 with
+      smoke covered zero, one, 0x100, UINT32_MAX and absent child.
+      Obsolete mock-echo regression removed at helper cutover. match.py exits 1 with
       reviewed structural differences: LLVM merges singleton calls,
       computes the second key by adding two, adds a frame pointer,
       removes the redundant container check after its unconditional
