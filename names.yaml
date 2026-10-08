@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08144000
+    ghidra: FUN_08144000
+    name: byte_buffer_destroy
+    size: 32
+    sig: "ByteBuffer *byte_buffer_destroy(ByteBuffer *buffer)"
+    module: heap/byte_buffer_destroy
+    status: ported
+    vars: {param_1/r4: buffer, r0: data}
+    renames: {FUN_080e7970: free_wrapper}
+    notes: >-
+      Raw A32 establishes [0x08144000,0x08144020), 32 bytes; the next
+      function begins with ldr r1,[r0,#24]. Two incoming plain BLs at
+      0x08184d54 and 0x081850ac, zero predicated incoming BLs. Body has
+      zero plain BLs and one BLNE at 0x08144014 to free_wrapper. No
+      aligned image word holds this entry address. Free non-NULL data
+      at word zero with tag 24, preserve all fields, and return buffer.
+      Constructor 0x08143fc0 and append 0x08143f38 establish the
+      data/length/capacity layout. Both callers subsequently delete the
+      returned object. Deviations: host repr(C) data pointer widens;
+      guarded Rust call replaces BLNE and reuses the canonical heap
+      ops dispatch. Host tests cover NULL data with nonzero metadata
+      and live data with zero metadata, retained dangling pointer,
+      exact returned object, and surrounding canaries. Actual-source
+      standalone smoke verifies NULL bypass, return, and unchanged fields.
   - address: 0x081440d8
     ghidra: FUN_081440d8
     name: framework_data_span_state_construct
