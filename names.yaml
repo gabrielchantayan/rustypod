@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081079c8
+    ghidra: FUN_081079c8
+    name: audio_output_channel_flags_set
+    size: 56
+    sig: "void audio_output_channel_flags_set(uint8_t *output)"
+    module: drivers/audio_output_channel_flags_set
+    status: ported
+    vars: {param_1/r0: unused_output, r0: channel, r1: first_bank, r2: control_word, r3: second_bank}
+    renames: {DAT_081079fc: second_bank_0x38400b00}
+    notes: >-
+      Raw A32 extent [0x081079c8,0x08107a00) contains 52 instruction
+      bytes plus the 0x38400b00 literal at 0x081079fc; the next function
+      begins with PUSH. Full-image word decoding verifies two plain
+      inbound BLs at 0x08293aec and 0x08293b28, zero predicated inbound
+      BLs and zero outgoing BLs of either kind. Caller passes an output
+      object that is ignored. For channels 1 through 6, set bit 28
+      at 0x38400900 + channel*0x20 then 0x38400b00 + channel*0x20,
+      preserving all other bits. Hardware flag meaning unidentified.
+      No new seams. Volatile aligned word accesses preserve MMIO order;
+      host substitutes an isolated register array. Tests verify every
+      word, mixed/all-ones/clear initial bits, ignored invalid pointers
+      and idempotence. All 14922 host tests and ARM release build pass.
+      Public-entry smoke verifies twelve flags and adjacent canaries.
+      No device execution. match.py exits 1: 13 versus 41 instructions;
+      LLVM unrolls all six iterations and adds a frame, preserving all
+      twelve ordered read/OR/write sequences with no outgoing calls.
   - address: 0x08107d00
     ghidra: FUN_08107d00
     name: controller_configuration_enable
