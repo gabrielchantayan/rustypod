@@ -229247,3 +229247,39 @@ functions:
       chaining known identity returns. LLVM also schedules the enabled
       byte store before the independent derived-vtable store; there is
       no callback between them. Hardware execution remains untested.
+  - address: 0x081405fc
+    ghidra: FUN_081405fc
+    name: refresh_utc_offset_cache
+    size: 68
+    sig: "void refresh_utc_offset_cache(void)"
+    module: time/refresh_utc_offset_cache
+    status: ported
+    renames:
+      local_c/sp+4: base_utc_offset_minutes
+      local_10/sp+0: daylight_saving_minutes
+      DAT_0814063c: utc_offset_cache (0x089cfddc)
+      FUN_080ab558: current_utc_offset_query
+      FUN_08291e24: daylight_saving_offset_is_nonzero
+    notes: >-
+      Raw A32 extent is 68 bytes, 0x081405fc..0x08140640 exclusive,
+      including the cache-address literal at 0x0814063c. The next real
+      function starts at 0x08140640 with str r1,[r0,#108]; bx lr.
+      Two outgoing plain BL calls and two inbound plain BL sites
+      (0x0812774c, 0x08128430), zero predicated BL calls in either set.
+      Queries both offset outputs and ignores validity; sign-extends
+      the base halfword and daylight byte, adds them and multiplies by
+      60, then stores seconds at cache+4 before calling the existing
+      daylight predicate and storing its low byte at cache+0. Reserved
+      bytes at +1..+3 remain untouched. No arguments are consumed:
+      Ghidra's incoming r2 is merely saved stack padding overwritten
+      by the query. Rust initializes that local instead; host-only
+      service and storage substitutions preserve the device's direct
+      calls and fixed address.
+      Host suite passes 14733 tests; ARM release build passes. Actual-source
+      executable smoke verifies negative offset, ignored invalid query,
+      preserved padding and seconds-store ordering before the predicate.
+      match.py reports a structural diff (exit 1): both calls, signed loads,
+      and cache stores remain; LLVM implements multiply-by-60 using
+      reverse-subtract and shift, initializes both narrow locals, and adds
+      a frame pointer. Its default 64-byte original view excludes the
+      verified four-byte literal pool. Device execution is untested.
