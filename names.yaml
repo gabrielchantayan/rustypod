@@ -230352,3 +230352,42 @@ functions:
       instructions: LLVM adds frame setup and ordinary branches in place of
       predication, retaining signed traversal, callback BLX and conditional
       message posting. The literal is biased to registry +0x10.
+
+  - address: 0x0812a450
+    ghidra: FUN_0812a450
+    name: row_mask_rectangles_collect
+    size: 140
+    sig: "void row_mask_rectangles_collect(RowMaskOwner *owner, void *output)"
+    module: app/row_mask_rectangles_collect
+    status: ported
+    vars:
+      param_1: owner
+      param_2: output
+      local_58: record
+      auStack_54: cursor
+      auStack_4c: rows
+    notes: >-
+      Raw ARM establishes 0x0812a450..0x0812a4dc, with the next function's
+      cmp r0,#18 at 0x0812a4dc. Two inbound unconditional BLs at 0x0812b25c
+      and 0x0812b448; no predicated inbound BLs. Six outgoing unconditional
+      BLs, no predicated outgoing BLs. Zero fifteen row masks; iterate the
+      collection at owner +0xa8 with canonical cursor_init/cursor_advance;
+      accept signed record +0x10 indices 0..14 and overwrite from record +8.
+      Later duplicates replace rather than union, including zero masks.
+      Invalidate the cursor, call stock neighbor-mask expansion 0x0812a388,
+      then stock scaled rectangle extraction 0x0812a504 with owner +0xc8
+      horizontal and +0xc4 vertical scales. Both unported callees are absent
+      from the existing names map; identities follow their raw decoded loops
+      and rectangle allocation/vtable append, not guessed library aliases.
+      Deviations: native host pointers widen repr(C) owner/cursor layouts;
+      array zero initialization replaces the IRAM zero veneer 0x08037db8
+      targeting 0x2200027c (ported memzero_aligned mirror). Host-only explicit
+      injection covers the two stock algorithms. LLVM removes the dead final
+      cursor invalidation and lowers zero initialization to __aeabi_memclr4.
+      All 14783 host tests pass, including empty input, all signed row bytes,
+      duplicate replacement and clearing. Export smoke verifies endpoint mask,
+      expansion before extraction, scale order and output delivery using host
+      seams; no device execution claimed. ARM release builds. match.py exits
+      1 with a structural diff (35 original versus 45 Rust instructions):
+      cursor calls and mask loop remain, negative bytes are rejected by an
+      equivalent unsigned bound, and stock calls use literal-address BLX.
