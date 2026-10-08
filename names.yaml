@@ -231716,3 +231716,30 @@ functions:
       the existing inset query. match.py exits 1 with nine original versus
       ten Rust instructions: LLVM materializes 65535, merges the clamp
       stores into one STRH at +12, and adds a frame-pointer prologue/epilogue.
+  - address: 0x0811f244
+    ghidra: FUN_0811f244
+    name: listener_list_next
+    size: 44
+    sig: "u32 *listener_list_next(u32 *owner)"
+    module: app/listener_list_next
+    status: ported
+    vars: {param_1/r0: owner, puVar2/r2: cursor, puVar1/r1: payload, r3: sentinel}
+    notes: >-
+      Raw A32 extent [0x0811f244,0x0811f270) contains eleven instructions;
+      the next function starts with push {r4,lr} at 0x0811f270. Independent
+      whole-image word decoding verifies two inbound plain BLs at 0x0821af00
+      and 0x0821b5ec, zero predicated inbound BLs, and zero outbound BLs.
+      Owner +0x28 holds a circular listener-list sentinel and +0x30 its cursor.
+      At end return NULL without dereferencing the sentinel or modifying owner.
+      Otherwise save node word zero as the successor and return node +8.
+      Callers initialize the cursor from the sentinel's successor and inspect
+      payload +4/+8 as a signed range key and owner reference. No callee seam.
+      Deliberate deviation: omit the unused stack copy of the sentinel;
+      pointer fields remain u32 on hosts. Tests cover invalid and NULL end
+      markers, repeated exhaustion, multiple nodes, singleton cursor reset,
+      payload mutation, preserved links and unrelated owner words. Full host
+      suite and ARM release build passed. Standalone public-entry smoke printed
+      payload=73 cursor=sentinel exhausted=NULL. match.py exits 1 with eleven
+      original versus thirteen Rust instructions: LLVM branches instead of
+      predication, uses a post-indexed node load, and adds a conditional frame;
+      comparison, successor store at +0x30 and payload +8 are preserved.

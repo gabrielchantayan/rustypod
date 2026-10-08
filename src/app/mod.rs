@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod listener_list_next;
 pub mod text_buffer_context_destroy;
 pub mod indexed_string_bytes_construct;
 pub mod item_display_name_refresh;
