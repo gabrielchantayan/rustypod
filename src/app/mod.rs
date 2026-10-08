@@ -242,6 +242,7 @@ pub use object_deactivate::*;
 pub mod object_mark_initialized;
 pub use object_mark_initialized::*;
 pub mod now_playing_highlight_display;
+pub mod view_layout_marker_display;
 pub mod podcast_highlight_display;
 pub mod video_highlight_display;
 pub mod photo_highlight_display;
