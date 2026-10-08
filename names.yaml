@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0812e738
+    ghidra: FUN_0812e738
+    name: string_object_with_word_and_flag_copy_construct
+    size: 32
+    sig: "StringObjectWithWordAndFlag *string_object_with_word_and_flag_copy_construct(StringObjectWithWordAndFlag *this, const StringObjectWithWordAndFlag *source)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1/r0: this
+      param_2/r4: source
+      FUN_082773e0: string_object_copy_construct
+      source_plus_8: word
+      source_plus_12: flag
+    notes: >-
+      Raw A32 extent [0x0812e738,0x0812e758), eight words ending
+      e8bd8010 before the next function's e92d4010 prologue. Independent
+      whole-image word decoding finds two plain inbound BLs at 0x08123f00
+      and 0x08123f2c, zero predicated inbound BLs. Body has one plain BL
+      at 0x0812e740 to canonical string_object_copy_construct 0x082773e0,
+      zero predicated BLs. Copy-constructs the leading string, copies
+      source word +8 and raw byte +12 through the returned pointer, and
+      returns it unchanged. Caller allocates 16 bytes and chooses virtual
+      insertion slot +0x1c or +0x20 based on the flag. Word semantics
+      remain unknown. Ghidra's void return is incorrect. Deviations:
+      inherits modeled string vtable; repr(C) host pointers widen while
+      target offsets remain +8/+12. Padding is untouched. Tests cover
+      extreme words, non-boolean flags, every self-copy flag, payload
+      preservation, duplication, padding and allocation failure. All
+      14768 host tests and ARM release build pass. match.py exits 1:
+      eight stock versus nine Rust instructions, same BL and ordered
+      +8/+12 loads/stores; LLVM adds frame setup and saves sl/fp.
+      No device execution.
   - address: 0x0812eaf4
     ghidra: FUN_0812eaf4
     name: current_value_virtual_dispatch
