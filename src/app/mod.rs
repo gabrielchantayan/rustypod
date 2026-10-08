@@ -1180,6 +1180,7 @@ pub mod notes_value_demo_mode_dispatch;
 pub mod owner_component_feedback_gate;
 pub mod fixed_string_object_assign;
 pub mod error_text_append_power_controller;
+pub mod error_text_append_bounded;
 pub mod volume_limit_state_set;
 pub mod kind_0x1f_message_post;
 pub mod indexed_record_payload_clear;
