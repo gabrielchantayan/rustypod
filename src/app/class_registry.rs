@@ -6,6 +6,7 @@
 //! | 0x0810dddc | [`registry_observer_base_construct`] | 20 | 24 `bl` |
 //! | 0x0816f70c | [`capacity_four_container_observer_construct`] | 20 | 2 `bl` |
 //! | 0x0810e64c | [`class_registry_construct`] | 96 | 9 `bl` + 1 tail `b` |
+//! | 0x0812d2fc | [`class_registry_construct_forwarder`] | 4 | 2 plain `bl` |
 //! | 0x08135380 | [`registry_container_destruct`] | 72 | 6 `bl` + 16 tail `b` |
 //! | 0x0812d300 | [`registry_dispose`] | 24 | 2 plain `bl` |
 //! | 0x08135110 | [`registry_container_initialize`] | 168 | 4 `bl` + 3 virtual calls |
@@ -804,6 +805,26 @@ pub unsafe extern "C" fn class_registry_construct(registry: *mut Registry) -> *m
     registry
 }
 
+/// Class-registry constructor forwarder — original: `thunk_FUN_0810e64c`
+/// @ `0x0812d2fc`, true extent [0x0812d2fc, 0x0812d300), 4 bytes.
+///
+/// Raw word `0xeaff84d2` tail-branches to `class_registry_construct`
+/// @ 0x0810e64c, preserving the registry argument and constructor result.
+/// Whole-image A32 decoding finds two incoming plain BLs (0x0811cbf4,
+/// 0x0811d168), zero predicated BLs, and zero outgoing BLs.
+/// The next real function starts with PUSH at 0x0812d300.
+///
+/// Deliberate deviation: call the existing Rust constructor rather than
+/// branch to retail code; its documented host representations and seams
+/// remain unchanged. LLVM may implement this forwarding edge as BL/return.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn class_registry_construct_forwarder(
+    registry: *mut Registry,
+) -> *mut Registry {
+    class_registry_construct(registry)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1434,6 +1455,25 @@ mod tests {
             );
             assert_eq!((*ptr::addr_of!(ALLOC_SIZES)).len(), 1, "allocated exactly once");
             assert_eq!(*ptr::addr_of!(OBSERVER_ARGS), std::vec![observer, observer]);
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn forwarded_construction_reuses_observer_and_reinitializes_notifications() {
+        let guard = mock();
+        unsafe {
+            let registry = argument();
+            assert_eq!(class_registry_construct_forwarder(registry), registry);
+            let observer = ptr::read_volatile(observer_cache());
+            assert_eq!((*registry).notify_enabled, 1);
+
+            (*registry).notify_enabled = 0;
+            assert_eq!(class_registry_construct_forwarder(registry), registry);
+            assert_eq!(ptr::read_volatile(observer_cache()), observer);
+            assert_eq!((*registry).notify_enabled, 1);
+            assert_eq!(*ptr::addr_of!(ALLOC_SIZES), std::vec![REGISTRY_OBSERVER_SIZE]);
+            assert_eq!(*ptr::addr_of!(ATTACHED), std::vec![observer]);
         }
         restore(guard);
     }

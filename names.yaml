@@ -54123,6 +54123,28 @@ functions:
       fire-and-forget post arguments, returned status, zero message code,
       and a high-bit message code.
 
+  - address: 0x0812d2fc
+    ghidra: thunk_FUN_0810e64c
+    name: class_registry_construct_forwarder
+    size: 4
+    sig: "Registry *class_registry_construct_forwarder(Registry *registry)"
+    module: app/class_registry
+    status: ported
+    vars: {param_1: registry}
+    renames: {FUN_0810e64c: class_registry_construct}
+    notes: >-
+      Raw word 0xeaff84d2 proves [0x0812d2fc,0x0812d300), exactly four
+      bytes: a tail branch to the ported class_registry_construct at
+      0x0810e64c. Next function begins with push {r4,lr}. Whole-image
+      A32 decoding finds two incoming plain BLs (0x0811cbf4,0x0811d168),
+      zero predicated BLs and zero outgoing BLs. Preserve the registry
+      argument and return the constructor result; no new seam. Host tests
+      cover cold observer creation, warm-cache reuse and notification
+      re-enabling. Deviations: reuse the existing constructor and its host
+      representations/seams. LLVM emits frame setup/teardown before the
+      tail branch instead of a single branch; match.py reports this
+      structural difference. ARM relocation targets class_registry_construct.
+
   - address: 0x081d23f8
     ghidra: FUN_081d23f8
     name: registry_register
