@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod owned_interface_destroy;
 pub mod descriptor_handle_present;
 pub mod payload_vector_dispatch;
 pub mod listener_list_next;
