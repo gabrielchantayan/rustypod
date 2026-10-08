@@ -228925,3 +228925,42 @@ functions:
       the pointer and ownership guards, byte tag and vtable literal,
       shrink-wraps the frame around free_wrapper and replaces the identity
       root tail chain with BX LR. The BL is a relocatable free_wrapper call.
+  - address: 0x081363f8
+    ghidra: FUN_081363f8
+    name: extended_attached_owner_destruct
+    size: 52
+    sig: 'ExtendedAttachedOwner *extended_attached_owner_destruct(ExtendedAttachedOwner *this)'
+    module: cxx/extended_attached_owner_destruct
+    status: ported
+    vars:
+      param_1: this
+      DAT_08136428: derived_vtable
+      r4: attachment_field
+      r0: attachment_or_receiver
+      FUN_081486a8: embedded_array_attached_owner_destruct
+    notes: >-
+      Raw osos.dec establishes [0x081363f8,0x0813642c), 52 bytes:
+      twelve A32 instructions (48 bytes) followed by derived vtable literal
+      0x08984b5c at 0x08136428. The next independent function begins with
+      push {r3,lr} at 0x0813642c. Independent whole-image aligned BL decoding
+      finds two plain inbound calls at 0x0808e57c and 0x0808e5d4, zero
+      predicated inbound BLs. Body has zero plain/predicated BLs, one BLXNE
+      through virtual slot +4, and a tail B to the already ported
+      embedded_array_attached_owner_destruct at 0x081486a8. Install derived
+      vtable, release nonzero attachment at +0x70, then invoke the base with
+      the original receiver and return its result. Do not clear attachment.
+      Caller 0x0808e494 constructs a 120-byte stack object with 0x081363c8
+      and destroys it on both success and failure paths. Ghidra incorrectly
+      incorporates the base destructor beyond the tail branch. Concrete class
+      identity remains unknown; Rust uses a behavior-based name and target-width
+      repr(C) words. Deliberate deviations: ordinary conditional dispatch
+      instead of predication, test closure for virtual release, and direct
+      Rust call to the ported base. Host edge tests cover NULL/non-NULL
+      attachments, derived-vtable visibility before release, callback effects
+      before base teardown, lengths 0/1/u32::MAX, pointer return and unchanged
+      unrelated words. Full host suite and ARM release build pass. Standalone
+      actual-source host smoke completes real base teardown and preserves
+      trailing guards; hardware execution untested. match.py exits 1 with
+      16 LLVM instructions versus 12 original: explicit branch replaces
+      BLXNE, receiver is saved only on the release path, frame-pointer setup
+      is added, and the final B has a relocation to the ported base symbol.
