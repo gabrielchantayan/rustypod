@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08107110
+    ghidra: FUN_08107110
+    name: controller_status_service
+    size: 168
+    sig: "void controller_status_service(uint8_t *context)"
+    module: drivers/controller_status_service
+    status: ported
+    vars: {param_1/r0: context, r4: pending_status, r5: controller_register_base, r6: saved_context}
+    renames: {DAT_081071a8: control_ack_mask, DAT_081071ac: selected_status_mask, DAT_081071b0: grouped_ack_mask, DAT_081071b4: shared_controller_state}
+    notes: >-
+      Raw extent [0x08107110,0x081071b8) contains 152 instruction bytes
+      and four literals; next function begins CMP r2,#0; BXEQ LR.
+      Full-image aligned A32 decoding finds two plain inbound BLs at
+      0x081078e4 and 0x08107900, zero predicated inbound BLs, and two
+      plain outbound BLs at 0x08107158 and 0x08107160, zero predicated.
+      Masks MMIO +4 with 0xe0304, writes when nonzero, snapshots +0x14
+      masked by 0x5320e45f and returns on zero. Bit 6 with zero context
+      byte +0x2b invokes unported stock routines 0x08107dd8(context,1)
+      then 0x08107f1c(context); neither has a ledger identity. Retains
+      verified addresses without speculative names. Acknowledges bit 6,
+      bit 1 and mask 0xa408 separately, writes residual status, then
+      ORs residual into shared word 0x08a09f9c. Ghidra C incorrectly
+      omits intermediate writes; implementation follows raw instructions.
+      Volatile aligned MMIO/shared accesses preserve ordering; host entry
+      explicitly requires hardware while algorithm tests simulate W1C.
+      Four edge tests cover zero masked status with null context, every
+      status bit, nonzero byte suppression, acknowledgement order and
+      recovery-mutated accumulator with retained status snapshot.
+      All 14931 host tests and ARM release build pass. Standalone host
+      algorithm smoke observes recovery before writes 0x40,2,0 and
+      accumulator 0x80. No device execution. match.py exits 1 with
+      38 original versus 50 Rust listing lines including four literals.
+      LLVM uses two BLX address calls, larger frame and combined masks;
+      conditional accesses, acknowledgement order, snapshot and final
+      accumulator read/OR/write are preserved.
   - address: 0x08107364
     ghidra: FUN_08107364
     name: audio_output_channel_status_bit21
