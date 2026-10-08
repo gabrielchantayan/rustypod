@@ -15,14 +15,14 @@ use crate::kernel::csem::{csem_post_deferred, CountingSem};
 use crate::kernel::kobj::{mailbox_slot_post, Mailbox};
 use crate::kernel::sync_mutex::{mutex_lock, mutex_unlock, Mutex};
 
-/// Original: task-message pool mutex @ 0x089cb284. It brackets every
+/// Original: task-message pool mutex @ 0x089cb28c. It brackets every
 /// append to [`TASK_MESSAGE_FREE_LIST`].
 pub static mut TASK_MESSAGE_POOL_MUTEX: Mutex = Mutex {
     sem_cell: core::ptr::null_mut(),
     unused: 0,
 };
 
-/// Original: task-message pool free-list anchor @ 0x089cb28c.
+/// Original: task-message pool free-list anchor @ 0x089cb284.
 pub static mut TASK_MESSAGE_FREE_LIST: ListHead = ListHead {
     head: core::ptr::null_mut(),
     tail: core::ptr::null_mut(),
@@ -35,8 +35,8 @@ pub static mut TASK_MESSAGE_FREE_LIST: ListHead = ListHead {
 /// **5 direct `bl` call sites, all unconditional; 0 predicated `bl` call
 /// sites**, verified by decoding every ARM `B`/`BL` word in `osos.dec`
 /// (0x08110e38, 0x0812c114, 0x0812c28c, 0x0812c5c0, 0x0812c600).
-/// The body locks the task-message pool mutex @ 0x089cb284, appends `cell`
-/// to its free list @ 0x089cb28c through `list_push_back` @ 0x080f1158,
+/// The body locks the task-message pool mutex @ 0x089cb28c, appends `cell`
+/// to its free list @ 0x089cb284 through `list_push_back` @ 0x080f1158,
 /// then tail-branches to `mutex_unlock` @ 0x0807f6a0. Deliberate deviation:
 /// the stock tail branch is expressed as a normal Rust return after unlock;
 /// the mutex is copied through a volatile load so LLVM cannot fold its
@@ -48,6 +48,36 @@ pub unsafe extern "C" fn task_message_pool_release(cell: *mut ListNode) {
     mutex_lock(&mut mutex);
     list_push_back(core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST), cell);
     mutex_unlock(&mut mutex);
+}
+
+/// task_message_pool_count — original: `FUN_0812c414` @ 0x0812c414.
+/// True extent: **48 bytes**, [0x0812c414,0x0812c444), comprising 40
+/// instruction bytes and two literal words. The next function starts
+/// with `mov ip,r0`. Whole-image A32 decoding finds **2 unconditional
+/// inbound BLs** (0x0806186c, 0x0806189c), zero predicated inbound BLs;
+/// the body has **3 unconditional BLs**, zero predicated BLs.
+///
+/// Locks the pool mutex at 0x089cb28c, counts the NULL-terminated chain
+/// rooted at 0x089cb284, unlocks, and returns the saved count. No cycle
+/// guard or head-address NULL guard is added.
+///
+/// Deliberate deviations: reuse the relocated pool globals and canonical
+/// Rust mutex/list ports. Volatile mutex snapshots prevent elimination of
+/// the lock pair from the static's zero initializer; reload before unlock
+/// preserves the original's independent semaphore-cell lookup. Host links
+/// widen naturally through repr(C) fields, not target byte offsets.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn task_message_pool_count() -> u32 {
+    let mutex = core::ptr::addr_of_mut!(TASK_MESSAGE_POOL_MUTEX);
+    let mut snapshot = mutex.read_volatile();
+    mutex_lock(&mut snapshot);
+    let count = crate::util::linked_list_count::singly_linked_list_count(
+        core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST.head).cast(),
+    );
+    let mut snapshot = mutex.read_volatile();
+    mutex_unlock(&mut snapshot);
+    count
 }
 
 /// Operations below `task_message_post` whose identities are not yet known.
@@ -846,6 +876,38 @@ pub(crate) mod tests {
             assert!(core::ptr::eq(TASK_MESSAGE_FREE_LIST.tail, &mut second));
             assert!(core::ptr::eq(first.next, &mut second));
             assert!(second.next.is_null());
+        }
+    }
+
+    #[test]
+    fn pool_count_tracks_empty_singleton_and_pressure_thresholds() {
+        let _guard = OPS_LOCK.lock();
+        let mut nodes: [ListNode; 46] = core::array::from_fn(|_| ListNode {
+            next: core::ptr::null_mut(),
+        });
+        unsafe {
+            let mutex = core::ptr::addr_of_mut!(TASK_MESSAGE_POOL_MUTEX);
+            let list = core::ptr::addr_of_mut!(TASK_MESSAGE_FREE_LIST);
+            let saved_mutex = mutex.read();
+            let saved_list = list.read();
+            mutex.write(Mutex { sem_cell: core::ptr::null_mut(), unused: 0 });
+            for length in [0usize, 1, 40, 41, 45, 46, 0] {
+                for index in 0..length {
+                    nodes[index].next = if index + 1 < length {
+                        nodes.as_mut_ptr().add(index + 1)
+                    } else {
+                        core::ptr::null_mut()
+                    };
+                }
+                list.write(ListHead {
+                    head: if length == 0 { core::ptr::null_mut() } else { nodes.as_mut_ptr() },
+                    // Counting follows head links, never the cached tail.
+                    tail: nodes.as_mut_ptr(),
+                });
+                assert_eq!(task_message_pool_count(), length as u32);
+            }
+            mutex.write(saved_mutex);
+            list.write(saved_list);
         }
     }
     #[test]

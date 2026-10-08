@@ -230193,3 +230193,33 @@ functions:
       No device execution claimed. match.py exits 1 with an eight-versus-nine
       instruction structural diff: saved argument registers are exchanged
       and LLVM adds a frame-pointer instruction, retaining BL then tail B.
+  - address: 0x0812c414
+    ghidra: FUN_0812c414
+    name: task_message_pool_count
+    size: 48
+    sig: u32 task_message_pool_count(void)
+    module: kernel/task_message
+    status: ported
+    vars: {uVar1/r4: count, DAT_0812c43c: pool_mutex, DAT_0812c440: free_list}
+    renames: {FUN_0807f5c4: mutex_lock, FUN_0807a13c: singly_linked_list_count, FUN_0807f6a0: mutex_unlock}
+    notes: >-
+      Raw A32 establishes [0x0812c414,0x0812c444): 40 instruction bytes
+      and literals 0x089cb28c and 0x089cb284; the next function begins
+      mov ip,r0. Whole-image aligned BL decoding finds two unconditional
+      inbound calls at 0x0806186c and 0x0806189c, zero predicated inbound
+      calls. Body has three unconditional BLs and zero predicated BLs.
+      Lock the task-message pool mutex at 0x089cb28c, count the intrusive
+      free chain at 0x089cb284, unlock, and return the saved count.
+      Allocation at 0x0812bf9c and release at 0x0812c1b4 independently
+      confirm these globals; corrected reversed Rust address annotations.
+      Reuses the existing relocated globals and canonical callee ports,
+      with no new seams. Volatile mutex snapshots preserve independent
+      cell lookups and prevent static-initializer lock elimination; host
+      pointers widen via repr(C) fields. No cycle or NULL-head guard.
+      Host tests cover empty, singleton, 40/41 and 45/46 caller pressure
+      thresholds, stale tail and return to empty. All 14772 host tests
+      pass; ARM release build passes. Standalone test-configured host
+      smoke exercises empty, 46 real release/count transitions, and empty
+      again. No device execution claimed. match.py exits 1: LLVM emits
+      19 versus 10 instructions, adding frame setup and volatile mutex
+      copies while retaining three BLs and saving the count across unlock.
