@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08140454
+    ghidra: FUN_08140454
+    name: range_context_set_value_pair
+    size: 16
+    sig: "void range_context_set_value_pair(u32 *context, const u32 *value)"
+    module: app/range_context_set_value_pair
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: value
+      context_plus_0x24: first_value_word
+      context_plus_0x28: second_value_word
+    notes: >-
+      Raw words e8910006 e5801024 e5802028 e12fff1e establish the true
+      16-byte extent [0x08140454,0x08140464); the next independent entry
+      begins with push {r0-r6,lr}. Whole-image aligned A32 decoding counts
+      two plain inbound BLs at 0x081dc68c and 0x081e8698, zero predicated
+      inbound BLs, and zero outgoing calls. Load both source words before
+      storing context words 9 and 10. Callers copy pairs from larger range
+      records; numeric interpretation remains unidentified. No callee seams
+      or pointer-width assumptions are introduced. Volatile aligned accesses
+      preserve overlap and prevent copy-intrinsic substitution; no deliberate
+      behavioral deviations. Host tests cover bit-pattern extremes, untouched
+      neighbors, both overlap directions and self-assignment. All 14738 host
+      tests and the ARM release build pass. Actual-source executable smoke
+      confirms forward overlap. match.py exits 1 with a reviewed structural
+      diff: LLVM splits LDM into two LDRs and adds a frame, retaining both
+      loads before the stores at +0x24/+0x28 with no calls.
   - address: 0x081404b4
     ghidra: FUN_081404b4
     name: seconds_time_text
