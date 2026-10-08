@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const CONTROLLER_FINISH_STRING_TABLE: usize = 0x4320_0000;
     pub const SECONDS_TIME_TEXT: usize = 0x4319_0000;
     pub const CALENDAR_SET_SELECTED_DATE: usize = 0x4318_0000;
     pub const TIMING_NODE_OWNER_DESTROY: usize = 0x4317_0000;

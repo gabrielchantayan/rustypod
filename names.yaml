@@ -229483,3 +229483,43 @@ functions:
       reverse-subtract and shift, initializes both narrow locals, and adds
       a frame pointer. Its default 64-byte original view excludes the
       verified four-byte literal pool. Device execution is untested.
+
+  - address: 0x08134674
+    ghidra: FUN_08134674
+    name: controller_finish_string_table_update
+    size: 84
+    sig: "u32 controller_finish_string_table_update(void)"
+    module: app/string_table
+    status: ported
+    vars:
+      DAT_081346bc: APP_CONTEXT
+      DAT_081346c0: string_table_08a79c10
+      LAB_081346c4: empty_key_cstr
+      local_c: key
+    notes: >-
+      Raw A32 establishes 72 code bytes plus three literal words through
+      0x081346c8, where the next real function opens with push {r4,lr}.
+      Three unconditional outgoing BLs, no predicated BLs; two incoming
+      unconditional BLs at 0x081348ec and 0x08134da0, no predicated callers.
+      Ghidra's 192-byte extent wrongly absorbs adjacent functions and
+      the tail target. No input arguments are consumed. Nonzero application
+      trace depth, including negative values, constructs an empty COW key,
+      calls the existing string_table_copy_current_to_peer port, and releases
+      the key. Always tail-calls the unported helper at 0x08101e9c using
+      the literal table object address 0x08a79c10, not its first word.
+      Raw helper code calls 0x083c4c8c with current and peer maps then
+      tail-calls peer-map clear at 0x083db604. No stronger identity is
+      assigned to that map operation. The helper's raw r0 result is
+      preserved, although both callers discard it. Deviations are the
+      established APP_CONTEXT static model, ordinary local key storage,
+      and a return-position Rust call instead of the tail branch.
+      Host tests cover zero depth without readable table memory and
+      signed depth extremes over a real empty-map fixture.
+      Host suite passes 14746 tests and ARM release build passes.
+      An actual-source host executable additionally exercised the empty
+      map path across signed depth extremes, finalization state change,
+      zero-depth inaccessible-table path, and full-width return value.
+      match.py exits 1 with a structural diff; its stale 192-byte original
+      view includes neighboring functions. LLVM retains the conditional
+      three-BL path, adds a frame pointer, and emits BLX to the fixed
+      final helper rather than a tail B. Device execution is untested.

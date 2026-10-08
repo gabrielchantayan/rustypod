@@ -1097,6 +1097,104 @@ pub unsafe extern "C" fn string_table_copy_current_to_peer(
     }
 }
 
+/// Finish a controller string-table update — `FUN_08134674` @ 0x08134674.
+/// True extent: 84 bytes [0x08134674,0x081346c8), including three literal
+/// words; the next real function opens with push at 0x081346c8. Raw A32
+/// verifies three plain outbound BLs, zero predicated BLs, and two plain
+/// inbound BLs (0x081348ec,0x08134da0), zero predicated inbound BLs.
+///
+/// If application trace depth is nonzero (including negative), construct
+/// an empty COW key, copy the entire current map to its peer, and release
+/// the key. Always tail-dispatch to the still-unported 0x08101e9c helper,
+/// which calls 0x083c4c8c with current and peer maps, then clears the peer.
+/// The map operation's stronger identity is unresolved.
+/// Its raw r0 result is passed through; both observed callers discard it.
+/// No incoming argument is consumed.
+///
+/// Deviations: reuse APP_CONTEXT's established static model, ordinary
+/// locals instead of saved r2/r3 slots, and a return-position Rust call
+/// for the tail branch. The table remains the literal object address,
+/// not a pointer loaded from that object. Host dispatch fails closed.
+/// Host suite: 14746 passed; ARM release build passed. Actual-source host
+/// executable exercised zero depth with an inaccessible table and signed
+/// nonzero extremes with empty maps, including the finalization transition.
+/// match.py reports a structural diff: its stale 192-byte extent includes
+/// neighboring functions. LLVM retains the nonzero gate and three BLs,
+/// adds a frame pointer, and calls the fixed tail target through BLX.
+/// No on-device execution was performed.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn controller_finish_string_table_update() -> u32 {
+    let depth = core::ptr::read_volatile(
+        core::ptr::addr_of!(crate::app::context::APP_CONTEXT.trace_depth));
+    controller_finish_string_table_update_at(depth, 0x08a7_9c10 as *mut u8,
+        firmware_string_table_finish_update)
+}
+
+#[inline(always)]
+unsafe fn controller_finish_string_table_update_at(
+    depth: i32,
+    table: *mut u8,
+    finish: unsafe extern "C" fn(*mut u8) -> u32,
+) -> u32 {
+    if depth != 0 {
+        let mut key = core::ptr::null_mut();
+        crate::cxx::string::cxx_string_from_cstr(&mut key, b"\0".as_ptr());
+        string_table_copy_current_to_peer(table, &mut key);
+        crate::cxx::string::cxx_string_release(&mut key);
+    }
+    finish(table)
+}
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_string_table_finish_update(table: *mut u8) -> u32 {
+    let finish: unsafe extern "C" fn(*mut u8) -> u32 =
+        core::mem::transmute(0x0810_1e9cusize);
+    finish(table)
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn firmware_string_table_finish_update(_: *mut u8) -> u32 {
+    panic!("controller_finish_string_table_update requires retail helper 0x08101e9c")
+}
+
+#[cfg(test)]
+mod controller_finish_tests {
+    use super::*;
+
+    unsafe extern "C" fn inaccessible_table_finish(_: *mut u8) -> u32 {
+        0x8000_0001
+    }
+
+    #[test]
+    fn zero_depth_never_reads_the_table_and_preserves_full_width_result() {
+        unsafe {
+            assert_eq!(controller_finish_string_table_update_at(0,
+                core::ptr::null_mut(), inaccessible_table_finish), 0x8000_0001);
+        }
+    }
+
+    #[test]
+    fn negative_and_positive_depth_accept_empty_current_maps() {
+        use crate::testing::{hints, try_map_u32_slab, note_missing_u32_fixture};
+        let Some(base) = try_map_u32_slab(hints::CONTROLLER_FINISH_STRING_TABLE, 0x1000)
+            else { note_missing_u32_fixture("controller_finish_string_table_update"); return; };
+        unsafe {
+            let table = base.cast::<u32>();
+            core::ptr::write_bytes(table, 0, 0x1000 / 4);
+            let header = table.add(32);
+            header.add(2).write(header as usize as u32);
+            table.add(MAP_HEADER_WORD).write(header as usize as u32);
+            for depth in [i32::MIN, -1, 1, i32::MAX] {
+                assert_eq!(controller_finish_string_table_update_at(depth, base,
+                    inaccessible_table_finish), 0x8000_0001);
+                assert_eq!(table.add(MAP_HEADER_WORD).read(), header as usize as u32);
+                assert_eq!(header.add(2).read(), header as usize as u32);
+            }
+        }
+    }
+}
+
 /// string_table_set_hex — original: `FUN_08101f94` @ 0x08101f94 (84 bytes,
 /// 0x08101f94..0x08101fe8: code through `pop {r4,r5,r6,pc}` @ 0x08101fe4
 /// plus the trailing "%lx" literal word @ 0x08101fe8; the next function's
