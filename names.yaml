@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08107914
+    ghidra: FUN_08107914
+    name: usb_in_endpoint_transfer_rebase
+    size: 136
+    sig: "uint32_t usb_in_endpoint_transfer_rebase(const uint32_t *context, uint32_t endpoint, uint32_t adjust_dma)"
+    module: drivers/usb_in_endpoint_transfer_rebase
+    status: ported
+    vars:
+      param_1/r0: context_then_new_size
+      param_2/r1: endpoint
+      param_3/r2: adjust_dma
+      DAT_08107990: in_endpoint_transfer_size_bank
+      DAT_08107994: in_endpoint_control_bank
+      DAT_08107998: in_endpoint_dma_bank
+    notes: >-
+      Raw A32 establishes 124 instruction bytes through pop at 0x0810798c,
+      followed by literals 0x38400910, 0x38400900, 0x38400914. Next real
+      function begins at 0x0810799c, giving a true 136-byte extent. Two
+      incoming plain BLs at 0x08107ecc and 0x08108168, zero predicated BLs;
+      no outgoing calls or new callee seams. Ghidra's void return is wrong:
+      r0 returns zero for no packets, otherwise saved context word +0x38
+      plus packet size times remaining packets minus one. Endpoint zero
+      uses 64-byte packets and seven old-size bits; others use eleven
+      control bits and nineteen old-size bits. Packet count uses ten bits.
+      Writes new size OR packet count shifted 19 OR bit 29; nonzero
+      adjust_dma subtracts new size minus old size from DIEPDMA. Zero
+      packets only clears DIEPTSIZ. Volatile MMIO preserves access order;
+      host uses isolated registers. Tests cover all nine banks, count
+      boundaries, endpoint-zero special cases, overflow and DMA wrapping,
+      unchanged neighbors and null context on the empty path. All 14925
+      host tests and ARM release build pass. Standalone public-entry smoke
+      returns zero with null context. No device execution. match.py exits
+      one: 31 versus 41 instructions, equivalent masks and ordered accesses,
+      separate zero path, SMULBB for bounded multiplication, no BLs or folds.
   - address: 0x081079c8
     ghidra: FUN_081079c8
     name: audio_output_channel_flags_set
