@@ -18997,6 +18997,39 @@ functions:
       Rust makes the tail dispatch an ordinary final call and uses the
       existing host seam for the unported materialize-and-count target;
       target builds retain the physical vtable dispatch.
+  - address: 0x081113d8
+    ghidra: FUN_081113d8
+    name: counted_utf16_canonical_compose
+    size: 96
+    sig: "void counted_utf16_canonical_compose(unsigned short *text)"
+    module: cxx/counted_utf16_canonical_compose
+    status: identified
+    renames:
+      param_1/r0/r9: text
+      r6: remaining_count
+      r7: pending_unit
+      r8: next_unit
+      r4: read_cursor
+      r5: write_cursor
+      r10: original_end
+    notes: >-
+      Deferred: depends on undecrypted composition tables. Raw A32 words
+      establish extent [0x081113d8,0x08111438), 96 bytes, ending with
+      e8bd87f0 at 0x08111434; the next independent function begins with
+      e241c901 at 0x08111438. Whole-image aligned BL decoding finds one
+      plain inbound BL at 0x08172c14 and one predicated BLNE at 0x081131d0.
+      The body has one plain outgoing BL at 0x0811140c to 0x0809330c,
+      zero predicated outgoing BLs. Counts zero and one return unchanged.
+      Otherwise scan the original counted u16 payload, retaining a pending
+      unit; a zero pair-composition result flushes it and advances the
+      output, while a nonzero result replaces it and decrements the count.
+      Finally store the pending unit and updated count; trailing units are
+      not cleared. Ghidra incorrectly retains the old pending unit after
+      successful composition: raw MOVNE r7,r0 at 0x0811141c proves replacement.
+      Callee literals at 0x08093438 and 0x0809343c point to 0x083ef164
+      and 0x083ef30c, both inside undecrypted [0x083ee1c1,0x083f25ec].
+      Faithful general composition requires those tables; no Rust port,
+      guessed callee seam, or partial Hangul-only implementation is added.
   - address: 0x081131a8
     ghidra: FUN_081131a8
     name: counted_utf16_to_utf8
