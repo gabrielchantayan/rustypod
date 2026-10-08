@@ -829,6 +829,97 @@ pub unsafe extern "C" fn registered_container_view_construct(
     result
 }
 
+/// Container-derived view with a string-backed child and cached geometry.
+#[repr(C)]
+pub struct StringResourceView {
+    pub base: ContainerView,
+    pub text_state: [u32; 6],
+    pub state: u8,
+    pub child_state: u8,
+    pub padding: [u8; 2],
+    pub child_word: u32,
+}
+
+#[repr(C)]
+pub struct StringResourceViewSpec {
+    pub base: ViewSpec,
+    pub string_id: u32,
+}
+
+const _: [u8; 0x108] = [0; core::mem::size_of::<StringResourceView>()];
+const _: [u8; 0x100] = [0; core::mem::offset_of!(StringResourceView, state)];
+const _: [u8; 0x5c] = [0; core::mem::offset_of!(StringResourceViewSpec, string_id)];
+
+/// Initializes the string child, geometry cache, flags and task view registration
+/// through the unported helper at 0x0811e084.
+pub type StringResourceViewInitialize = unsafe extern "C" fn(
+    *mut StringResourceView, *mut u8, u32, u32,
+);
+
+#[cfg(target_os = "none")]
+unsafe extern "C" fn firmware_initialize_string_resource_view(
+    view: *mut StringResourceView, text: *mut u8, mode: u32, option: u32,
+) {
+    let initialize: StringResourceViewInitialize =
+        core::mem::transmute(0x0811_e084usize);
+    initialize(view, text, mode, option);
+}
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn missing_initialize_string_resource_view(
+    _view: *mut StringResourceView, _text: *mut u8, _mode: u32, _option: u32,
+) {
+    panic!("string_resource_view_construct requires initializer 0x0811e084")
+}
+
+pub static mut STRING_RESOURCE_VIEW_INITIALIZE: StringResourceViewInitialize = {
+    #[cfg(target_os = "none")]
+    { firmware_initialize_string_resource_view }
+    #[cfg(not(target_os = "none"))]
+    { missing_initialize_string_resource_view }
+};
+
+/// string_resource_view_construct — FUN_0811e478 @ 0x0811e478.
+/// True size: 104 bytes (96 code, vtable and 'Str ' literals at +0x60/+0x64);
+/// next function starts at 0x0811e4e0. Raw whole-image A32 decoding finds
+/// two plain inbound BLs, zero predicated; body: three plain BLs, zero predicated.
+///
+/// Chains the container constructor with all five arguments, installs vtable
+/// 0x08982d34, clears only byte +0x100, resolves spec+0x5c as a task-local
+/// string resource, then initializes the child with mode equal to
+/// `(spec.flags & 0x600) == 0x200` and the unchanged sixth argument.
+/// Returns the constructed view. Deviations: only the unported initializer
+/// uses a replaceable dispatch slot (firmware address on target, panic on host).
+/// Fixed-width fields preserve ARM layout on hosts; no invented widget identity.
+///
+/// # Safety
+/// `view` is writable for 0x108 bytes, `spec` is readable in full, the container
+/// constructor's requirements hold, and the current task resource context and
+/// installed initializer accept these arguments (including a NULL resource).
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_resource_view_construct(
+    view: *mut StringResourceView,
+    resources: *mut ResourceProvider,
+    controller: *mut u8,
+    parent: *mut u8,
+    spec: *const StringResourceViewSpec,
+    option: u32,
+) -> *mut StringResourceView {
+    let constructed = container_view_construct(
+        view.cast(), resources, controller, parent, core::ptr::addr_of!((*spec).base),
+    ).cast::<StringResourceView>();
+    core::ptr::addr_of_mut!((*constructed).base.vtable).write_volatile(0x0898_2d34);
+    core::ptr::addr_of_mut!((*constructed).state).write_volatile(0);
+    let text = crate::app::resource_chain::resource_chain_find_on_current_task(
+        crate::app::resource_chain::ResourceKind::STRING, (*spec).string_id,
+    );
+    let mode = u32::from(((*spec).base.flags & 0x600) == 0x200);
+    let initialize = core::ptr::addr_of!(STRING_RESOURCE_VIEW_INITIALIZE).read_volatile();
+    initialize(constructed, text, mode, option);
+    constructed
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -984,6 +1075,68 @@ mod tests {
                 destruct_base: stub_destruct_base,
             },
         )
+    }
+
+    #[test]
+    fn string_resource_mode_masks_flags_and_preserves_adjacent_state() {
+        let _lock = OPS_LOCK.lock();
+        let _context_lock = crate::testing::TASK_CTX_BLOCK_TEST_LOCK.lock().unwrap();
+        let _guard = install_stubs();
+        unsafe extern "C" fn empty_context() -> *mut u8 {
+            static mut CONTEXT: [u32; 13] = [0; 13];
+            core::ptr::addr_of_mut!(CONTEXT).cast()
+        }
+        unsafe extern "C" fn initialize(
+            view: *mut StringResourceView, text: *mut u8, mode: u32, option: u32,
+        ) {
+            assert!(text.is_null());
+            assert_eq!((*view).base.vtable, 0x0898_2d34);
+            assert_eq!((*view).state, 0);
+            assert_eq!((*view).child_state, 0xa5);
+            assert_eq!((*view).padding, [0xa5; 2]);
+            assert_eq!((*view).child_word, 0xa5a5_a5a5);
+            // Model the helper's mode-dependent flag effect, not a forwarding echo.
+            let flags = view.cast::<u32>().add(0x48 / 4);
+            flags.write((flags.read() & !0x600) | if mode == 0 { 0x7e00 } else { 0x7a00 });
+            (*view).child_word = option;
+        }
+        struct Restore {
+            context: unsafe extern "C" fn() -> *mut u8,
+            initialize: StringResourceViewInitialize,
+        }
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe {
+                    crate::util::context_field::CURRENT_TASK_CTX_BLOCK = self.context;
+                    STRING_RESOURCE_VIEW_INITIALIZE = self.initialize;
+                }
+            }
+        }
+        unsafe {
+            let _restore = Restore {
+                context: crate::util::context_field::CURRENT_TASK_CTX_BLOCK,
+                initialize: STRING_RESOURCE_VIEW_INITIALIZE,
+            };
+            crate::util::context_field::CURRENT_TASK_CTX_BLOCK = empty_context;
+            STRING_RESOURCE_VIEW_INITIALIZE = initialize;
+            for (flags, expected) in [
+                (0, 0x7e00), (0x200, 0x7a00), (0x400, 0x7e00),
+                (0x600, 0x7e00), (0x8000_0200, 0x8000_7a00),
+            ] {
+                let mut view: StringResourceView = core::mem::zeroed();
+                core::ptr::write_bytes(&mut view, 0xa5, 1);
+                let mut spec: StringResourceViewSpec = core::mem::zeroed();
+                spec.base.flags = flags;
+                spec.string_id = u32::MAX;
+                let result = string_resource_view_construct(
+                    &mut view, core::ptr::null_mut(), core::ptr::null_mut(),
+                    core::ptr::null_mut(), &spec, 0xfedc_ba98,
+                );
+                assert_eq!(result, &mut view as *mut _);
+                assert_eq!(view.base.base.as_ptr().add(0x44).cast::<u32>().read(), expected);
+                assert_eq!(view.child_word, 0xfedc_ba98);
+            }
+        }
     }
 
     #[test]

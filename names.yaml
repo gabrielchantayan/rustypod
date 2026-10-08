@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0811e478
+    ghidra: FUN_0811e478
+    name: string_resource_view_construct
+    size: 104
+    sig: "StringResourceView *string_resource_view_construct(StringResourceView *view, ResourceProvider *resources, void *controller, void *parent, const StringResourceViewSpec *spec, u32 option)"
+    module: ui/container_view
+    status: ported
+    renames:
+      param_1: view
+      param_2: resources
+      param_3: controller
+      param_4: parent
+      in_stack_00000000: spec
+      in_stack_00000004: option
+      puVar1: constructed
+      uVar2: text
+      FUN_08158778: container_view_construct
+      FUN_08272360: resource_chain_find_on_current_task
+      FUN_0811e084: initialize_string_resource_view
+      DAT_0811e4d8: string_resource_view_vtable
+      DAT_0811e4dc: ResourceKind::STRING
+    notes: >-
+      Raw extent is 104 bytes: 96 code through pop at 0x0811e4d4,
+      vtable 0x08982d34 at 0x0811e4d8 and Str tag 0x53747220 at
+      0x0811e4dc; next function begins at 0x0811e4e0. Whole-image A32
+      decoding finds two plain inbound BLs at 0x0811e058 and 0x081b9de0,
+      zero predicated; body has three plain outbound BLs, zero predicated.
+      Forwards five arguments to the ported container constructor, replaces
+      vtable, clears byte +0x100 only, resolves spec+0x5c through the ported
+      current-task string resource lookup, then calls 0x0811e084 with the
+      resource, mode ((spec.flags & 0x600) == 0x200), and unchanged sixth
+      argument. Returns constructed view. Callers allocate 0x108 or derive
+      a larger class. Concrete widget identity remains unrecovered.
+      Only the unported initializer uses STRING_RESOURCE_VIEW_INITIALIZE,
+      calling its verified firmware address on target and panicking on host.
+      Fixed-width fields preserve target layout. Host regression exercises
+      all four masked flag combinations, unrelated high bits, NULL resource,
+      byte-clear boundaries, return identity and full-width option.
+      Standalone host smoke executed the constructor with existing base
+      dependency seams and an empty task resource chain. ARM release build
+      passes. match.py exits 1 with expected structural differences:
+      frame-pointer prologue, CLZ-based equality instead of predicated MOVs,
+      and initializer BLX through the dispatch slot; offsets, literals,
+      ordering and two direct ported calls are preserved.
   - address: 0x0811f074
     ghidra: FUN_0811f074
     name: descriptor_handle_present
