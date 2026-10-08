@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123fe4
+    ghidra: FUN_08123fe4
+    name: indexed_string_bytes_construct
+    size: 40
+    sig: "StringObjectWithBytes *indexed_string_bytes_construct(StringObjectWithBytes *destination, void *owner, usize index)"
+    module: app/indexed_string_bytes_construct
+    status: ported
+    vars: {param_1/r4: destination, param_2/r1: owner, param_3/r2: index}
+    renames:
+      FUN_083d6908: container_element_at_alias_6908
+      FUN_0814237c: string_object_with_bytes_copy_construct
+    notes: >-
+      Raw A32 bytes establish extent 0x08123fe4..0x0812400c (40 bytes);
+      the next function begins with add r2,r0,#0x34. Whole-image word
+      decoding finds two inbound plain BLs at 0x081b23f8 and 0x0829d748,
+      zero predicated inbound BLs. Body has one plain BL at 0x08123ff8
+      to ported container_element_at_alias_6908, zero predicated BLs,
+      and a tail branch at 0x08124008 to the ported constructor at
+      0x0814237c. Selects index from the embedded container at owner+0x6c,
+      copy-constructs the selected string and three uninterpreted bytes,
+      and returns the constructor result without bounds or NULL guards.
+      Ghidra incorrectly inlines the tail callee and reports void return.
+      Deviations inherit host-width pointer fields and the modeled string
+      vtable from existing callees. Host regression covers self-construction,
+      null/non-null payload preservation, raw high-bit bytes, and extreme
+      unsigned indices; isolated smoke copies into distinct storage.
+      Host suite passed 14816 tests; ARM release build passed. match.py
+      shows ten instructions in both bodies: LLVM adds a frame-pointer
+      prologue and folds mov/add, retaining the BL and tail branch shape;
+      unresolved object relocations print as zero targets.
   - address: 0x081242f4
     ghidra: FUN_081242f4
     name: conditional_string_resource_construct

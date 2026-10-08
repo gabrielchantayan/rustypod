@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod indexed_string_bytes_construct;
 pub mod item_display_name_refresh;
 pub mod owned_registry_construct;
 pub mod input_sequence_item_reset_geometry;
