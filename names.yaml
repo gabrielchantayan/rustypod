@@ -232128,3 +232128,51 @@ functions:
       frame changes, explicit conditional branches, inlined flag query,
       BLX retail seams, and the shared mutable clear seam; ordered timer,
       display, dispatch, and final direction-2 operations are preserved.
+  - address: 0x0811a44c
+    ghidra: FUN_0811a44c
+    name: tick_input_view_construct
+    size: 108
+    sig: "TickInputView *tick_input_view_construct(TickInputView *view, ResourceProvider *resources, void *controller, void *parent, const ViewSpec *spec)"
+    module: ui/tick_input_view
+    status: ported
+    vars:
+      r4: view
+      r5: zero
+      in_stack_00000000: spec
+      puVar1: view
+      uVar2: accumulator
+    renames:
+      FUN_0826f26c: view_base_construct
+      FUN_082aadd4: operator_new
+      FUN_081bb450: tick_accumulator_construct
+      FUN_081bb28c: tick_accumulator_set_scale_factor_limit
+      DAT_0811a4b0: tick_input_view_vtable_08981ae4
+      DAT_0811a4b4: backoff_interval_ms_350
+    notes: >-
+      Raw A32 extent [0x0811a44c,0x0811a4b8) contains 100 code
+      bytes and two literal words, 0x08981ae4 and 350. The next real
+      function starts with cmp r0,#0 at 0x0811a4b8. Whole-image
+      word decoding finds incoming plain BLs at 0x0811a044 and
+      0x081b9ed8, none predicated. Body has four plain BLs and zero
+      predicated BLs, correcting the reported count of two. Both
+      callers allocate 0xbc bytes. Construct ViewBase with all five
+      arguments, install derived vtable, clear words +0xa4/+0xa8/+0xb0,
+      allocate and construct a 52-byte tick accumulator with divisor
+      5, mode 1, backoff 350 ms, store its pointer at +0xac, set its
+      scale limit to 16, clear byte +0xb8, and return the view. Word
+      +0xb4 and padding +0xb9..+0xbb remain untouched. No more specific
+      class identity is established. All callees reuse canonical Rust
+      ports; no new seams. Deviations restore Ghidra's omitted arguments
+      and return, discard the unused stacked spec at the four-argument
+      tick constructor, and retain four-byte pointer words on hosts.
+      Host suite passes 14859 tests. Permanent byte-reference tests cover
+      zero and dirty initial state with untouched-byte canaries.
+      Isolated public-entry smoke verifies base construction, owned state,
+      real tick-constructor fields, wrapping deadline and padding.
+      No physical-device execution.
+      ARM release build passes. match.py exits 1 with 25 original
+      versus 29 Rust instructions: LLVM adds a frame pointer, retains
+      the verified base input identity, synthesizes 350 as immediates,
+      and reorders independent instructions. Four BLs, ordered owned
+      state stores, accumulator pointer store, scale-limit call, byte
+      clear, vtable literal and object return are preserved.
