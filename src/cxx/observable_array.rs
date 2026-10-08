@@ -472,6 +472,35 @@ pub unsafe extern "C" fn observable_array_owner_copy_construct(
     owner
 }
 
+/// observable_array_owner_08980dc4_copy_construct — `FUN_0810b390`
+/// @ 0x0810b390. True size: 28 bytes (24 instruction bytes plus the
+/// vtable literal at 0x0810b3a8); next function starts at 0x0810b3ac.
+/// Whole-image aligned A32 decoding verifies two plain incoming BLs
+/// (0x081fa84c, 0x0820b674), zero predicated incoming BLs, and one plain
+/// outgoing BL to observable_array_copy_construct at 0x08271c98.
+///
+/// Copies the observable-array member at destination +4 from `source`,
+/// subtracts four from the returned member pointer, installs owner vtable
+/// 0x08980dc4, and returns the outer pointer. Ghidra loses r1 and the r0
+/// return. Deliberate deviations: none; concrete class identity is unknown.
+///
+/// # Safety
+/// `destination` must be writable, aligned storage for ObservableArrayOwner;
+/// `source` and the growth boundary must satisfy observable_array_copy_construct.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_owner_08980dc4_copy_construct(
+    destination: *mut ObservableArrayOwner,
+    source: *const ObservableArray,
+) -> *mut ObservableArrayOwner {
+    let array = observable_array_copy_construct(
+        core::ptr::addr_of_mut!((*destination).array), source,
+    );
+    let owner = array.cast::<u32>().sub(1).cast::<ObservableArrayOwner>();
+    core::ptr::addr_of_mut!((*owner).vtable).write_volatile(0x0898_0dc4);
+    owner
+}
+
 /// observable_array_clear — original: `FUN_08271c84` @ `0x08271c84`
 /// (20 bytes; **19 `bl` and 57 tail `b` call sites**, all unconditional,
 /// binary-scanned by decoding every B/BL word in `osos.dec`).
@@ -1396,6 +1425,12 @@ mod tests {
 
             // Exercise the owner wrapper through the real member constructor,
             // including empty arrays, with independent outer-object guards.
+            for (construct, vtable) in [
+                (observable_array_owner_copy_construct as unsafe extern "C" fn(
+                    *mut ObservableArrayOwner, *const ObservableArray,
+                ) -> *mut ObservableArrayOwner, 0x089a_6208),
+                (observable_array_owner_08980dc4_copy_construct, 0x0898_0dc4),
+            ] {
             let mut owner_words = [0xa5a5_a5a5u32; 7];
             let owner = unsafe {
                 owner_words.as_mut_ptr().add(1).cast::<ObservableArrayOwner>()
@@ -1405,10 +1440,10 @@ mod tests {
                     destination_words.add(index).write_volatile(0x5a5a_5a5a);
                 }
             }
-            let returned = unsafe { observable_array_owner_copy_construct(owner, &source) };
+            let returned = unsafe { construct(owner, &source) };
             assert_eq!(returned, owner);
             assert_eq!(owner_words, [
-                0xa5a5_a5a5, 0x089a_6208, OBSERVABLE_ARRAY_VTABLE,
+                0xa5a5_a5a5, vtable, OBSERVABLE_ARRAY_VTABLE,
                 count, destination_storage, 0, 0xa5a5_a5a5,
             ]);
             assert_eq!(unsafe { COPY_GROW_RECEIVER }, unsafe {
@@ -1428,6 +1463,7 @@ mod tests {
             assert_eq!(source.len, count);
             assert_eq!(source.storage, source_storage);
             assert_eq!(source.observers, 0xc001_c0de);
+            }
         }
     }
 
