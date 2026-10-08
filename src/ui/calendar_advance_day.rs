@@ -15,12 +15,12 @@ type Refresh = unsafe extern "C" fn(*mut u32, u32, u32);
 const DAY: usize = 0x288 / 4;
 
 #[cfg(target_os = "none")]
-unsafe extern "C" fn refresh_calendar_elements(view: *mut u32, day: u32, mode: u32) {
+pub(super) unsafe extern "C" fn refresh_calendar_elements(view: *mut u32, day: u32, mode: u32) {
     core::mem::transmute::<usize, Refresh>(0x0812_7720usize)(view, day, mode)
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn refresh_calendar_elements(_: *mut u32, _: u32, _: u32) {
+pub(super) unsafe extern "C" fn refresh_calendar_elements(_: *mut u32, _: u32, _: u32) {
     panic!("calendar refresh requires retailOS helper 0x08127720")
 }
 

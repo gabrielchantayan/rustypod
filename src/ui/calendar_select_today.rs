@@ -7,8 +7,8 @@
 //! through 0x081268dc. That helper refreshes calendar elements with mode 1
 //! and dispatches vtable +0x58 with (view, 0x53747220, 0x36df).
 //! Deviations: initialize unused DateTime padding instead of spilling r1-r3;
-//! use the canonical Rust date ports and a verified firmware-address call
-//! for the unported refresh-and-notify helper. Hosts inject that backend.
+//! use the canonical Rust date and refresh-and-notify ports. Hosts inject
+//! the selection backend.
 
 use crate::time::datetime::DateTime;
 use crate::time::current_datetime::current_datetime_to_normalized_record;
@@ -17,15 +17,7 @@ use crate::time::day_number::datetime_day_number;
 type Query = unsafe extern "C" fn(*mut DateTime) -> u32;
 type Select = unsafe extern "C" fn(*mut u32, u32);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn refresh_calendar_day_and_notify(view: *mut u32, day: u32) {
-    core::mem::transmute::<usize, Select>(0x0812_68dcusize)(view, day)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn refresh_calendar_day_and_notify(_: *mut u32, _: u32) {
-    panic!("calendar selection requires retailOS helper 0x081268dc")
-}
+use super::calendar_refresh_notify::refresh_calendar_day_and_notify;
 
 /// Select the current normalized date, irrespective of the previous selection.
 ///

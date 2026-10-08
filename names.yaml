@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081268dc
+    ghidra: FUN_081268dc
+    name: refresh_calendar_day_and_notify
+    size: 52
+    sig: "void refresh_calendar_day_and_notify(u32 *view, u32 day)"
+    module: ui/calendar_refresh_notify
+    status: ported
+    vars:
+      param_1/r0/r4: view
+      param_2/r1: day
+      r3: notify
+    renames:
+      FUN_08127720: refresh_calendar_elements
+    notes: >-
+      Raw extent [0x081268dc,0x08126910) contains eleven ARM instructions
+      (44 bytes) and two literal words (8 bytes), ending at the next real
+      function PUSH. Whole-image aligned decoding finds two plain inbound
+      BLs at 0x08126930 and 0x081272a8, zero predicated inbound BLs.
+      Body has one plain BL at 0x081268e8 to 0x08127720, no predicated
+      BLs, and tail BX r3 at 0x08126904. Refresh calendar elements with
+      (view, day, 1), reload the possibly replaced vtable, then dispatch
+      slot +0x58 with (view, 0x53747220, 0x36df). Reuses the existing
+      verified firmware refresh seam from calendar_advance_day; the
+      calendar_select_today caller now uses this canonical Rust port.
+      Deliberate deviations: native-width vtable slots on hosts, unchanged
+      4-byte slots on ARM; injected refresh backend for host checks.
+      All 14811 host tests and the ARM release build pass. Behavioral
+      regression covers refresh-time vtable replacement, full-width day
+      values including zero and UINT32_MAX, and repeated identical-day
+      notifications. Executable host smoke exercises the public entry for
+      five selections with a modeled external refresh, proving visible
+      selection and notification count after vtable replacement; retailOS
+      refresh and hardware are not executed. match.py exits 1 with a
+      reviewed structural diff: BLX through literal 0x08127720 replaces
+      direct BL, frame setup differs, and 0x36df is assembled with MOV/ORR.
+      Reloaded vtable slot +0x58 and tail BX are preserved.
   - address: 0x08126910
     ghidra: FUN_08126910
     name: calendar_select_today
@@ -39,13 +75,13 @@ functions:
       Only r0 is an argument; saved r1-r3 provide stack DateTime storage.
       Query the normalized current date through the canonical Rust port,
       ignore its status, compute the full Rata Die day number through
-      datetime_day_number, then call verified unported 0x081268dc.
-      Raw decoding of that helper proves refresh_calendar_elements at
-      0x08127720 receives (view, day, 1), followed by virtual slot +0x58
-      with (view, 0x53747220, 0x36df). No existing name or Rust seam
-      existed for 0x081268dc. Deviations: zero-initialize unused DateTime
-      padding instead of register spills; firmware-address C ABI backend
-      on target, injected backend for host behavioral checks.
+      datetime_day_number, then call canonical Rust
+      refresh_calendar_day_and_notify (0x081268dc), which refreshes calendar
+      elements at 0x08127720 with (view, day, 1), followed by virtual slot
+      +0x58 with (view, 0x53747220, 0x36df).
+      Deviations: zero-initialize unused DateTime padding instead of register
+      spills; canonical Rust refresh-and-notify backend on target, injected
+      backend for host behavioral checks.
       Host edge tests cover leap day, years 1 and 65535, full day number
       rather than weekday, false query status and replacing previous
       selections. All 14810 host tests and ARM release build pass.
