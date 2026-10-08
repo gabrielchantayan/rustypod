@@ -96547,8 +96547,9 @@ functions:
       (0x08130af4, 0x081314d4, and 0x08132118), all unconditional, with no
       predicated direct callers. Active objects select handle word +4 according
       to state +0x1a: first for 2/5/7, second for 0/5/7, and third for 1/5/7.
-      The first and third stock predicates remain inlined from verified raw
-      behavior; the second now calls ui_state_is_second_metric. The existing
+      The first stock predicate remains inlined from verified raw behavior;
+      the second and third now call ui_state_is_second_metric and
+      ui_state_is_third_metric respectively. The existing
       handle_deref_or_null port supplies the shared handle access.
 
   # --- Media-player interface status ---
@@ -229642,3 +229643,27 @@ functions:
       adds a frame, uses ORR with 2 and CMP 7 for states 5/7, and CLZ/LSR
       to normalize the zero-state result. Byte offset and normalized return
       are preserved; symbol remains separately exported. No device run.
+
+  - address: 0x0813263c
+    ghidra: FUN_0813263c
+    name: ui_state_is_third_metric
+    size: 28
+    sig: "u32 ui_state_is_third_metric(const u8 *object)"
+    module: ui/state_is_third_metric
+    status: ported
+    renames:
+      param_1/r0: object
+      cVar1: state
+      object_plus_0x1a: state_byte
+    notes: >-
+      Raw A32 words establish [0x0813263c,0x08132658), seven instructions
+      ending with BX LR; the next independent LDRB begins at 0x08132658.
+      Whole-image aligned BL decoding finds two incoming plain BLs at
+      0x0813241c and 0x0813295c, zero predicated incoming BLs, and zero
+      outgoing plain or predicated BLs. Return exactly one for unsigned
+      state byte +0x1a equal to 1/5/7, otherwise zero. The existing metric
+      caller now uses this port. No new callee seams or inferred class identity.
+      Deliberate behavioral deviations: none. Host suite passes 14752 tests;
+      ARM release build passes; actual-source smoke passes 1024 cases.
+      match.py exits 1: seven stock versus ten Rust instructions, with a
+      frame, ORR/CMP for 5/7 and SUB/CLZ/LSR for 1. No calls or device run.
