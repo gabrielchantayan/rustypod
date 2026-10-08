@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08140378
+    ghidra: FUN_08140378
+    name: range_context_notify_receivers
+    size: 84
+    sig: "void range_context_notify_receivers(u32 *context)"
+    module: app/range_context_notify_receivers
+    status: ported
+    renames:
+      param_1/r4: context
+      auStack_48/sp: state
+      context_plus_0x34: first_receiver
+      context_plus_0x38: second_receiver
+      FUN_081f7278: range_state_construct
+    notes: >-
+      Raw A32 extent [0x08140378,0x081403cc) is 84 bytes; the next
+      independent entry begins ldr r0,[pc,#4]. Whole-image word decoding
+      finds one plain inbound BL at 0x081e86a0 and one BLNE at 0x081dd010.
+      Body has one plain BL at 0x08140390, no predicated BLs, and two
+      BLXNE calls. Construct a 64-byte RangeState from context word 7
+      with resolution 1; invoke vtable slot 3 of non-null receivers at
+      words 13 then 14 with the same state. Load the second receiver after
+      the first callback. Ghidra omitted the first callback's state argument.
+      Reuse the canonical constructor and its stock configuration boundary;
+      untouched state words remain uninitialized. No new callee identities.
+      Host tests cover absent/aliased receivers, ordering, shared-state mutation,
+      and replacement/removal/installation of the second receiver. All 14740
+      host tests and ARM release build pass. Direct actual-source smoke with
+      real vtables passes. Reviewed match.py exit-1 diff: 24 vs 21 instructions,
+      frame pointer and explicit branches replace predication; offsets, 64-byte
+      stack allocation, constructor arguments, and both virtual calls remain.
   - address: 0x08140454
     ghidra: FUN_08140454
     name: range_context_set_value_pair
