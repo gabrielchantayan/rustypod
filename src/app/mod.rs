@@ -392,6 +392,7 @@ pub mod class_8780_priority_toggle;
 pub mod class_8780_priority_media_dispatch;
 pub mod class_8780_priority_media_query;
 pub mod class_9300_remove_inactive_items;
+pub mod class_9300_update_dispatch;
 pub mod media_context_cleanup_inactive_items;
 pub mod class_9000_remove_inactive_entries;
 pub mod selection_mode_validate;
