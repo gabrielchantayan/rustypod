@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08112fd8
+    ghidra: FUN_08112fd8
+    name: apply_context_property_604e
+    size: 64
+    sig: "void apply_context_property_604e(void *context, u32 value)"
+    module: app/apply_context_property_604e
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: value
+      context_plus_0x47c: property_604e
+      context_plus_0x430: child
+      child_vtable_plus_0x68: refresh
+      context_vtable_plus_0x58: notify
+      DAT_08113014: notification_tag_436e746c
+      DAT_08113010: notification_event_63fd
+    notes: >-
+      Raw extent [0x08112fd8,0x08113018) is 64 bytes: 56 instruction
+      bytes followed by two literal words; next function loads +0x888.
+      Whole-image aligned A32 decoding verifies two inbound plain BLs
+      at 0x08116e04 and 0x08289b98, zero predicated inbound BLs,
+      zero outbound immediate BLs, one register BLX at 0x08112ff0,
+      and final BX at 0x0811300c. Store the raw class-0x6000 property
+      0x604e at +0x47c, refresh child +0x430 via virtual slot +0x68,
+      reload context vtable, and notify slot +0x58 with 0x436e746c
+      and 0x63fd. Virtual callee identities remain unresolved; no guessed
+      address seams. Existing class6000_context_refresh now calls this port.
+      Deliberate deviations: host repr(C) pointers widen, retaining target
+      field order; final void call preserves the stock tail-dispatch behavior.
+      Tests cover full-word extremes, repeat values, store-before-refresh,
+      callback mutations and vtable replacement. All 14883 host tests pass;
+      ARM release and standalone consumer smoke pass. match.py exits 1:
+      LLVM changes registers/frame and synthesizes 0x63fd, but retains
+      both virtual slots, property store, vtable reload and final tail BX.
   - address: 0x08113994
     ghidra: FUN_08113994
     name: context_owned_interface_predicate

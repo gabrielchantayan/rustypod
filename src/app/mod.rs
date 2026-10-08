@@ -11,6 +11,8 @@ pub mod context_owned_interface_query;
 pub use context_owned_interface_query::*;
 pub mod context_cached_rtc_value_invalidate;
 pub mod class6000_context_refresh;
+pub mod apply_context_property_604e;
+pub use apply_context_property_604e::*;
 pub mod owned_interface_destroy;
 pub mod descriptor_handle_present;
 pub mod payload_vector_dispatch;
