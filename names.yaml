@@ -230161,3 +230161,35 @@ functions:
       literal. LLVM uses literal-load BLX for the drain and a direct relocated
       tail B for the destructor; extra saved registers/frame setup are ABI
       differences, not algorithm changes.
+
+  - address: 0x0812d234
+    ghidra: FUN_0812d234
+    name: file_record_registry_assign
+    size: 32
+    sig: "u32 file_record_registry_assign(Registry *registry, u32 bucket_key, u32 record_key, void *instance)"
+    module: app/registry
+    status: ported
+    vars: {param_1: registry, param_2: bucket_key, param_3: record_key, param_4: instance}
+    notes: >-
+      Raw A32 words establish [0x0812d234,0x0812d254), followed by the
+      next function's push. Whole-image aligned-word branch decoding finds
+      two plain inbound BLs at 0x0811cb90 and 0x0811cfe4, zero predicated
+      inbound BLs and zero inbound tail Bs. Body contains one plain BL to
+      0x0812d160, zero predicated BLs, and a tail B to 0x0810e4f0.
+      Look up the bucket under bucket_key, then replace the existing
+      record_key value and return the assignment flag. Missing records
+      return zero without insertion; NULL replacement values are valid.
+      Missing buckets are not guarded and fault as in stock. Both callees
+      already have canonical ports: vtable_file_record_lookup and
+      registry_assign. No new seam. Ghidra fabricates an inlined three-call
+      body; raw instructions preserve r2/r3 across lookup and restore them
+      as assignment r1/r2. Callers supply registries from object +0x04 and
+      +0x18 respectively. Deviation: direct Rust calls to existing ports.
+      Host tests cover miss, replacement, NULL replacement, key preservation
+      and notification state; all 14771 tests pass. ARM release builds.
+      Standalone public-entrypoint host smoke passes with native container
+      vtable fixtures and the real lookup/assignment ports (test-configured
+      library needed because unrelated host non-test helpers are missing).
+      No device execution claimed. match.py exits 1 with an eight-versus-nine
+      instruction structural diff: saved argument registers are exchanged
+      and LLVM adds a frame-pointer instruction, retaining BL then tail B.

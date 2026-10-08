@@ -368,6 +368,28 @@ pub unsafe extern "C" fn registry_assign(
     1
 }
 
+/// Replaces an existing value in a nested file-record registry.
+///
+/// Original: `FUN_0812d234` @ 0x0812d234, 32 bytes, ending before the
+/// next function at 0x0812d254. Raw-word scan: 2 plain inbound BLs,
+/// 0 predicated inbound BLs; body has 1 plain BL, 0 predicated BLs,
+/// and a tail B. Looks up `bucket_key` through 0x0812d160, then assigns
+/// `record_key` through 0x0810e4f0 and returns its found flag.
+/// No NULL guard: a missing bucket faults in the assignment, as in stock.
+/// Deviation: direct Rust calls to the existing ports; LLVM may inline
+/// the lookup wrapper instead of retaining the stock BL.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn file_record_registry_assign(
+    registry: *mut Registry,
+    bucket_key: u32,
+    record_key: u32,
+    instance: *mut u8,
+) -> u32 {
+    let bucket = crate::app::vtable_set::vtable_file_record_lookup(registry.cast(), bucket_key);
+    registry_assign(bucket.cast(), record_key, instance)
+}
+
 /// registry_assign_at — original: `FUN_0810e460` @ 0x0810e460
 /// (76 bytes; 1 `bl` call site).
 ///
@@ -2469,5 +2491,97 @@ mod tests {
             let block = unsafe { instance_6000_settings_block(this) };
             assert_eq!(block as usize, this as usize + 0x60);
         }
+    }
+}
+
+#[cfg(test)]
+mod nested_assign_tests {
+    use super::*;
+
+    struct Store {
+        entry: RegistryEntry,
+        notifications: u32,
+    }
+
+    unsafe fn store<'a>(registry: *mut Registry) -> &'a mut Store {
+        &mut *((*registry).container[0] as *mut Store)
+    }
+
+    unsafe extern "C" fn index_of(registry: *mut Registry, key: *const u32) -> i32 {
+        if store(registry).entry.class_id == *key { 0 } else { -1 }
+    }
+    unsafe extern "C" fn entry_at(
+        registry: *mut Registry, index: i32, out: *mut RegistryEntry,
+    ) -> *mut RegistryEntry {
+        assert_eq!(index, 0);
+        out.write(store(registry).entry);
+        out
+    }
+    unsafe extern "C" fn assign_at(
+        registry: *mut Registry, index: i32, entry: *const RegistryEntry,
+    ) -> usize {
+        assert_eq!(index, 0);
+        assert_eq!((*registry).notify_enabled, 0);
+        store(registry).entry = *entry;
+        0
+    }
+    unsafe extern "C" fn unused_insert(_: *mut Registry, _: *const RegistryEntry) -> usize {
+        panic!("assignment must not insert")
+    }
+    unsafe extern "C" fn no_pending(_: *mut Registry) -> *mut u8 {
+        core::ptr::null_mut()
+    }
+    unsafe extern "C" fn notify(registry: *mut Registry) -> *mut u8 {
+        assert_eq!((*registry).changed, 1);
+        assert_eq!((*registry).notify_enabled, 1);
+        store(registry).notifications += 1;
+        registry.cast()
+    }
+    const VTABLE: RegistryVtable = RegistryVtable {
+        unresolved_00: [0; 7], insert: unused_insert, unresolved_20: 0,
+        assign_at, unresolved_28: [0; 5], entry_at, unresolved_40: [0; 3],
+        index_of, unresolved_50: [0; 4], has_pending_changes: no_pending,
+        notify_deferred: no_pending, notify_changed: notify,
+    };
+
+    fn registry(store: &mut Store) -> Registry {
+        let mut container = [0; 7];
+        container[0] = store as *mut Store as usize;
+        Registry {
+            vtable: &VTABLE, container, changed: 0, notify_enabled: 1,
+            reserved: [0; 2], observer: core::ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn nested_assignment_preserves_keys_and_notifies_only_on_hit() {
+        let mut old = 1u8;
+        let mut new = 2u8;
+        let mut inner_store = Store {
+            entry: RegistryEntry { class_id: 0xffff_ffff, instance: &mut old },
+            notifications: 0,
+        };
+        let mut inner = registry(&mut inner_store);
+        let mut outer_store = Store {
+            entry: RegistryEntry { class_id: 0, instance: (&mut inner as *mut Registry).cast() },
+            notifications: 0,
+        };
+        let mut outer = registry(&mut outer_store);
+        unsafe {
+            assert_eq!(file_record_registry_assign(&mut outer, 0, 7, &mut new), 0);
+            assert_eq!(inner_store.entry.instance, &mut old as *mut u8);
+            assert_eq!(inner_store.notifications, 0);
+            assert_eq!(inner.changed, 0);
+            assert_eq!(file_record_registry_assign(&mut outer, 0, u32::MAX, &mut new), 1);
+            assert_eq!(inner_store.entry.instance, &mut new as *mut u8);
+            assert_eq!(inner_store.entry.class_id, u32::MAX);
+            assert_eq!(inner_store.notifications, 1);
+            assert_eq!(file_record_registry_assign(&mut outer, 0, u32::MAX, core::ptr::null_mut()), 1);
+            assert!(inner_store.entry.instance.is_null());
+            assert_eq!(inner_store.notifications, 2);
+        }
+        assert_eq!(outer_store.entry.class_id, 0);
+        assert_eq!(outer_store.entry.instance, (&mut inner as *mut Registry).cast());
+        assert_eq!(outer_store.notifications, 0);
     }
 }
