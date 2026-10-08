@@ -16,6 +16,57 @@ pub struct SevenStringSnapshot {
     pub flags: [u8; 4],
 }
 
+#[repr(C)]
+pub struct SevenStringCollection {
+    pub vtable: *const usize,
+}
+
+#[repr(C)]
+pub struct SevenStringSnapshotOwner {
+    pub opaque: [u32; 21],
+    pub collection: SevenStringCollection,
+}
+
+/// seven_string_snapshot_append — FUN_08123d98 @ 0x08123d98.
+/// True extent: 156 bytes, [0x08123d98, 0x08123e34); next word is a PUSH.
+/// Raw A32 scan: two inbound plain BLs, eight outgoing plain BLs,
+/// zero predicated BLs in either direction, one indirect BLX.
+/// Allocate 60 bytes, copy-construct seven strings in returned-pointer order,
+/// copy three raw flag bytes, and dispatch the owner's collection at +0x54
+/// through vtable slot +0x1c with the new snapshot pointer by reference.
+/// No NULL checks, no source refresh, no cleanup after dispatch; byte +0x3b
+/// is untouched. Only r0/r1 are arguments; Ghidra's r2/r3 are unused.
+/// Deviations: repr(C) native pointers widen host snapshots and align the
+/// host collection; allocation uses size_of rather than literal 60 (60 on
+/// ARM). Inherits the existing string-vtable and heap-dispatch models.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn seven_string_snapshot_append(
+    owner: *mut SevenStringSnapshotOwner,
+    source: *const SevenStringSnapshot,
+) {
+    let output = crate::heap::veneers::operator_new(
+        core::mem::size_of::<SevenStringSnapshot>(),
+    ).cast::<StringObject>();
+    let input = core::ptr::addr_of!((*source).strings).cast::<StringObject>();
+    let mut last = string_object_copy_construct(output, input);
+    last = string_object_copy_construct(last.add(1), input.add(1));
+    last = string_object_copy_construct(last.add(1), input.add(2));
+    last = string_object_copy_construct(last.add(1), input.add(3));
+    last = string_object_copy_construct(last.add(1), input.add(4));
+    last = string_object_copy_construct(last.add(1), input.add(5));
+    last = string_object_copy_construct(last.add(1), input.add(6));
+    let mut snapshot = last.sub(6).cast::<SevenStringSnapshot>();
+    (*snapshot).flags[0] = (*source).flags[0];
+    (*snapshot).flags[1] = (*source).flags[1];
+    (*snapshot).flags[2] = (*source).flags[2];
+    let collection = core::ptr::addr_of_mut!((*owner).collection);
+    let append: unsafe extern "C" fn(
+        *mut SevenStringCollection, *mut *mut SevenStringSnapshot,
+    ) = core::mem::transmute(*(*collection).vtable.add(7));
+    append(collection, &mut snapshot);
+}
+
 /// seven_string_snapshot_construct — FUN_08155858 @ 0x08155858.
 /// True extent: 148 bytes, ending before the prologue at 0x081558ec.
 /// Two inbound plain BLs, zero predicated; seven outgoing plain BLs,
@@ -85,6 +136,85 @@ mod tests {
     struct Restore(StringObjectAssignCstrOps);
     impl Drop for Restore {
         fn drop(&mut self) { unsafe { STRING_OBJECT_ASSIGN_CSTR_OPS = self.0; } }
+    }
+
+    static mut SNAPSHOT: core::mem::MaybeUninit<SevenStringSnapshot> =
+        core::mem::MaybeUninit::uninit();
+    static mut RECEIVED: *mut SevenStringSnapshot = core::ptr::null_mut();
+    static mut COLLECTION: *mut SevenStringCollection = core::ptr::null_mut();
+
+    unsafe extern "C" fn allocate_snapshot(
+        _: *mut crate::heap::types::HeapDescriptorDescriptor,
+        size: usize, tag: usize,
+    ) -> *mut u8 {
+        assert_eq!(size, core::mem::size_of::<SevenStringSnapshot>());
+        assert_eq!(tag, 2);
+        let storage = core::ptr::addr_of_mut!(SNAPSHOT).cast::<u8>();
+        core::ptr::write_bytes(storage, 0xa5, size);
+        storage
+    }
+
+    unsafe extern "C" fn append(
+        collection: *mut SevenStringCollection, snapshot: *mut *mut SevenStringSnapshot,
+    ) {
+        assert_eq!(collection, COLLECTION);
+        RECEIVED = *snapshot;
+        // The argument is a mutable pointer slot, not the snapshot itself.
+        *snapshot = core::ptr::null_mut();
+    }
+
+    struct RestoreHeap(crate::heap::veneers::HeapVeneerOps);
+    impl Drop for RestoreHeap {
+        fn drop(&mut self) { unsafe { crate::heap::veneers::HEAP_OPS = self.0; } }
+    }
+
+    #[test]
+    fn appended_snapshot_owns_copies_preserves_padding_and_survives_payload_failure() {
+        let _heap_lock = crate::heap::veneers::tests::mock_heap();
+        let _string_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe {
+            let _heap_restore = RestoreHeap(crate::heap::veneers::HEAP_OPS);
+            crate::heap::veneers::HEAP_OPS.alloc = allocate_snapshot;
+            let _restore = Restore(STRING_OBJECT_ASSIGN_CSTR_OPS);
+            STRING_OBJECT_ASSIGN_CSTR_OPS = StringObjectAssignCstrOps {
+                allocate_payload: allocate, clear_payload: clear,
+            };
+            let mut vtable = [0usize; 8];
+            vtable[7] = append as *const () as usize;
+            let mut owner = SevenStringSnapshotOwner {
+                opaque: [0x12345678; 21],
+                collection: SevenStringCollection { vtable: vtable.as_ptr() },
+            };
+            COLLECTION = core::ptr::addr_of_mut!(owner.collection);
+            let payloads = [b"first\0".as_ptr(), core::ptr::null(), b"\0".as_ptr(),
+                b"artist\0".as_ptr(), b"album\0".as_ptr(), b"title\0".as_ptr(), b"last\0".as_ptr()];
+            let source = SevenStringSnapshot {
+                strings: core::array::from_fn(|i| string(payloads[i] as *mut u8)),
+                flags: [0x80, 0xff, 0x42, 0x19],
+            };
+            for failure in [false, true] {
+                NEXT = 0;
+                FAIL = failure;
+                RECEIVED = core::ptr::null_mut();
+                seven_string_snapshot_append(&mut owner, &source);
+                assert_eq!(RECEIVED, core::ptr::addr_of_mut!(SNAPSHOT).cast());
+                let copied = &*RECEIVED;
+                assert_eq!(copied.flags, [0x80, 0xff, 0x42, 0xa5]);
+                assert_eq!(owner.opaque, [0x12345678; 21]);
+                for i in 0..7 {
+                    assert_eq!(copied.strings[i].vtable, &STRING_OBJECT_VTABLE as *const _);
+                    assert_eq!(source.strings[i].payload, payloads[i] as *mut u8);
+                    if failure || i == 1 || i == 2 {
+                        assert!(copied.strings[i].payload.is_null());
+                    } else {
+                        assert_ne!(copied.strings[i].payload, source.strings[i].payload);
+                        assert_eq!(std::ffi::CStr::from_ptr(copied.strings[i].payload.cast()),
+                            std::ffi::CStr::from_ptr(payloads[i].cast()));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

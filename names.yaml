@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123d98
+    ghidra: FUN_08123d98
+    name: seven_string_snapshot_append
+    size: 156
+    sig: "void seven_string_snapshot_append(SevenStringSnapshotOwner *owner, const SevenStringSnapshot *source)"
+    module: app/seven_string_snapshot
+    status: ported
+    vars: {param_1/r0: owner, param_2/r1/r4: source, r5: collection, local_10: snapshot_pointer}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_082773e0: string_object_copy_construct
+      vtable_slot_1c: append_pointer_by_reference
+    notes: >-
+      Raw A32 extent [0x08123d98,0x08123e34) is 156 bytes, ending in
+      POP before the next independent PUSH. Whole-image aligned BL decoding
+      finds two unconditional inbound calls at 0x08136104 and 0x08136190,
+      zero predicated inbound calls. Body contains eight unconditional BLs
+      (operator_new once, string_object_copy_construct seven times), zero
+      predicated BLs, and one indirect BLX through collection vtable +0x1c.
+      Allocate 60 bytes, deep-copy seven strings through constructor returns,
+      copy raw bytes +0x38..+0x3a, leave +0x3b untouched, and pass a mutable
+      stack pointer slot to the embedded collection at owner+0x54. No source
+      refresh, NULL guard or post-dispatch cleanup. Callers supply snapshots
+      from canonical seven_string_snapshot_construct; r2/r3 are not arguments.
+      Both direct callees are existing canonical ports; no new seams.
+      Deviations inherit modeled string vtable and heap dispatch; repr(C)
+      native pointers widen host snapshots and align the host collection.
+      Allocation uses size_of (60 on ARM). Host tests cover mixed nonempty,
+      NULL and empty payloads, deep-copy ownership, failed payload allocation,
+      raw high-bit flags, unchanged padding/source and mutable pointer dispatch.
+      All 14818 host tests and ARM release build pass. match.py exits 1:
+      39 stock versus 42 Rust instructions, retaining eight BLs, three byte
+      stores, owner+0x54 and indirect slot+0x1c dispatch. LLVM adds a frame
+      pointer and folds known constructor returns to the saved allocation base.
+      Standalone host example could not compile because the crate is staticlib
+      only and its non-test host configuration has existing compilation errors;
+      behavioral execution is provided by the host regression instead.
   - address: 0x08123f4c
     ghidra: FUN_08123f4c
     name: indexed_string_word_flag_construct
