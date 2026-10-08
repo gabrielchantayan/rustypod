@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123c38
+    ghidra: FUN_08123c38
+    name: output_buffer_reset_with_prefix
+    size: 32
+    sig: "void output_buffer_reset_with_prefix(OutputBufferState *state)"
+    module: app/output_buffer_reset_with_prefix
+    status: ported
+    vars: {param_1: state}
+    renames: {FUN_08123c20: output_buffer_reset, DAT_08123c54: firmware_prefix, FUN_08123c58: output_buffer_append_c_string}
+    notes: >-
+      Raw extent [0x08123c38,0x08123c58) contains 28 instruction bytes
+      plus literal 0x083e9365 at 0x08123c54. Next real function starts
+      with PUSH at 0x08123c58; Ghidra incorrectly merges the appender.
+      Whole-image aligned A32 decoding finds two plain incoming BLs at
+      0x080b54e8 and 0x081502c8, zero predicated incoming BLs, one plain
+      outgoing BL at 0x08123c40 to output_buffer_reset, zero predicated
+      outgoing BLs, and a tail B at 0x08123c50 to the independent appender.
+      Reset backing byte and both counters, then append firmware prefix.
+      Raw prefix bytes are ff 2f e1 04 00; preserve the literal pointer
+      without inventing XML text. Reuses OUTPUT_BUFFER_APPEND_C_STRING;
+      no new seam or appender port. Indirect dispatch replaces direct B.
+      Regression covers stale output, zero capacity, strict fit boundary
+      5 versus 6, maximum capacity and untouched neighboring bytes.
+      All 14822 host tests and ARM release build passed. Isolated public
+      entry smoke with reference append exercised capacities 0, 5 and 6.
+      match.py structural diff reviewed: reset BL and prefix literal remain;
+      LLVM loads the seam before reset and emits tail BX with a larger frame.
+      Archive BL relocation is unresolved in disassembly, not recursion.
   - address: 0x08123cb4
     ghidra: FUN_08123cb4
     name: text_buffer_construct
