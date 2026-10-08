@@ -4,6 +4,7 @@ pub mod range_context_replace_owned;
 pub mod range_context_set_value_pair;
 pub mod resource_command_unhandled;
 pub mod collection_selection_move_previous;
+pub mod collection_selection_move_next;
 pub mod timing_node_owner;
 pub mod context_tree_process;
 pub mod string_buffer_state_reset;

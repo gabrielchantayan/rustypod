@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08135894
+    ghidra: FUN_08135894
+    name: collection_selection_move_next
+    size: 188
+    sig: "u32 collection_selection_move_next(Collection *collection)"
+    module: app/collection_selection_move_next
+    status: ported
+    renames:
+      param_1/r0: collection
+      local_14: current
+      local_18: next
+      uStack_10/uStack_c: cursor
+      iVar3/r4: advance_status
+    notes: >-
+      Raw words establish 0x08135894..0x08135950 (188 bytes), ending
+      before the independent previous-selection function prologue. Two
+      incoming unconditional BLs at 0x0828a240 and 0x0828b4a4; seven
+      outgoing unconditional BLs and no predicated BL forms. Finds the first
+      bit-0x10 item, then the first later item with bits 0x08 and 0x01.
+      Clears current bit 0x10 before setting next bit 0x10; no wraparound.
+      First scan requires advance == 1, second accepts any nonzero status.
+      Reuses verified cursor and flag ports. Discards Ghidra scratch arguments;
+      volatile index read retains final invalidation. Host edge tests and
+      direct smoke pass. match.py: 47 stock versus 61 Rust instructions;
   - address: 0x081402fc
     ghidra: FUN_081402fc
     name: owned_handle_replace_if_nonempty
