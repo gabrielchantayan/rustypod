@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081083b8
+    ghidra: FUN_081083b8
+    name: audio_output_registers_initialize
+    size: 76
+    sig: "void audio_output_registers_initialize(void *output)"
+    module: drivers/audio_output_registers_initialize
+    status: ported
+    vars: {param_1/r0: unused_output, r0: controller_register_base, r1: register_value}
+    renames: {DAT_08108400: controller_configuration_0x10001, DAT_38400000: audio_output_controller_registers}
+    notes: >-
+      Raw A32 extent [0x081083b8,0x08108404) is 72 instruction bytes
+      plus literal 0x00010001 at 0x08108400; next function starts with
+      TST r1,#0x80. Two plain inbound BLs at 0x081073b8 and 0x08294a78,
+      zero predicated inbound BLs, zero outgoing BLs of either kind.
+      Caller output pointer is unused. Writes all ones at controller
+      offsets 0x908,0xb08,0x928,0xb48,0x968,0xb88,0x9a8,0xba8,0x9c8,
+      0xbc8 in that order, then 9 at 0x810 and 0x814, then 0x10001 at
+      0x81c. Register bit meanings remain unidentified; no callee seams.
+      Volatile stores preserve MMIO order; host uses an isolated word
+      array. Tests sweep zero, all-ones and mixed initial state, NULL
+      and unreadable ignored output pointers, checking all untouched
+      words. All 14917 host tests and ARM release build pass. Standalone
+      public-entry smoke verifies reset, configuration and adjacent
+      canary. No device execution. match.py exits 1: 18 versus 22
+      instructions; LLVM adds frame setup/restore, rebases to
+      0x38400810 and synthesizes the literal with MOV/ORR, preserving
+      all thirteen store values, addresses and order without calls.
   - address: 0x08109d80
     ghidra: FUN_08109d80
     name: default_sequence_schedule
