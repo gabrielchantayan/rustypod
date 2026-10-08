@@ -230454,8 +230454,8 @@ functions:
       collections and commits alternate items. Owner pointer slots remain
       u32 words; collection vtable/count fields widen naturally on hosts.
       Reuses canonical Rust cursor, item, bounds and drawing ports.
-      Verified unported callees stay direct-address target seams:
-      0x08129ab4 clears/reacquires a selected collection item;
+      Clear/reacquire now calls the canonical Rust port at 0x08129ab4.
+      Remaining unported callees stay direct-address target seams:
       0x08129330 repositions an item and updates its timestamp;
       0x0812a074 copies/repositions alternate items then swaps collections.
       These helpers panic on hosts rather than fabricate behavior.
@@ -230501,3 +230501,35 @@ functions:
       LLVM clears bit 3, subtracts 23 and uses CLZ/LSR to normalize equality,
       equivalent because 23 and 31 differ only in bit 3; frame setup replaces
       the leaf return. The exported ARM symbol is present. No device run.
+  - address: 0x08129ab4
+    ghidra: FUN_08129ab4
+    name: input_sequence_clear_and_reacquire
+    size: 144
+    sig: "void input_sequence_clear_and_reacquire(u8 *state, u32 mode)"
+    module: app/input_sequence_clear_and_reacquire
+    status: ported
+    renames:
+      param_1/r4: state
+      param_2/r7: mode
+      r5: saved_action_index
+      r6: selected_item_found
+      "state+0xa8": primary_collection
+      "state+0xac": alternate_collection
+      "state+0xb0": selected_item
+    notes: >-
+      Raw A32 establishes [0x08129ab4,0x08129b44), 144 bytes; the next
+      independent entry begins CMP r0,#20. Whole-image aligned BL decoding
+      verifies two inbound plain BLs at 0x08129e50 and 0x08129f1c, zero
+      predicated BLs. Body has four plain BLs, zero predicated BLs, one
+      virtual BLX through collection slot +0x30. Walk the entire selected
+      collection, save a matching selection's action byte, reload and clear
+      the collection, then reacquire and store only if a match was observed.
+      The signed byte load followed by AND #255 is represented by a u8 load.
+      Reuses canonical cursor and acquisition ports; dispatcher seam removed.
+      Owner slots remain u32; host vtables widen naturally. All 14791 host
+      tests pass, including empty/missing/NULL/present selections, nonboolean
+      modes and high-bit action bytes saved before clear destroys them.
+      Public-entry host smoke proves full walk, selected clear and absent
+      selection preservation. ARM release builds. match.py exits 1: 36 stock
+      versus 51 Rust instructions; LLVM splits empty traversal, duplicates
+      clear dispatch and removes dead cursor invalidation. No device run.
