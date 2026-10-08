@@ -232176,3 +232176,33 @@ functions:
       and reorders independent instructions. Four BLs, ordered owned
       state stores, accumulator pointer store, scale-limit call, byte
       clear, vtable literal and object return are preserved.
+
+  - address: 0x081197dc
+    ghidra: FUN_081197dc
+    name: error_text_append_power_controller
+    size: 48
+    sig: "void error_text_append_power_controller(void)"
+    module: app/error_text_append_power_controller
+    status: ported
+    renames:
+      DAT_08119804: error_text
+      DAT_08119808: power_controller_label
+      FUN_082a5370: string_object_is_empty
+      FUN_08276a18: string_object_insert_cstr
+    notes: >-
+      Raw extent 0x081197dc..0x0811980c: 40 code bytes plus two literal
+      words; the next function starts with push {r4,r5,r6,r7,lr}.
+      Two incoming plain BLs at 0x08117d94 and 0x08117da0, zero
+      predicated BLs, independently scanned from osos.dec. Body has
+      one plain BL to string_object_is_empty and a conditional tail B
+      to string_object_insert_cstr with INT_MAX. Append PowerCntlr
+      (exact NUL-terminated bytes at 0x083f64d4) only when the global
+      StringObject at 0x089d0020 is nonempty. Both callers belong to
+      the bounded error-text accumulation routine at 0x08117d50.
+      Ghidra inlines the insertion target and its descendants; those
+      are not part of this function. Reuses both canonical Rust ports
+      and their existing allocation boundary. Host-only deviations
+      substitute the fixed global object pointer and exact literal
+      bytes; targets retain the original addresses. Tests cover NULL
+      and empty payloads, UTF-8 end insertion, repeated appends,
+      canaries, and allocation failure preserving the object.
