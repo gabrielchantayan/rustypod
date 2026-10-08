@@ -1146,6 +1146,7 @@ pub mod app_screen_dispatch_94_then_90;
 pub mod image_format_slots_collect_unexcluded;
 pub mod context_handle_request;
 pub mod shared_string_state_construct;
+pub mod owned_handle_replace_if_nonempty;
 pub mod shared_string_state_clear_shared;
 pub mod flagged_pair_shuffle;
 pub mod component_selection_set;
