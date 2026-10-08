@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08129330
+    ghidra: FUN_08129330
+    name: input_sequence_item_start
+    size: 100
+    sig: "void input_sequence_item_start(u32 *item, u32 index)"
+    module: app/input_sequence_item_start
+    status: ported
+    renames:
+      param_1: item
+      param_2: index
+      FUN_0812b080: prid_checked_word_c0
+      FUN_08086e24: read_usec_timer_into
+      FUN_0826c5d0: usec_to_millis
+    notes: >-
+      Raw extent [0x08129330,0x08129394) is 100 bytes. Next entry starts
+      ldr r0,[r0,#4]. Whole-image aligned BL decoding finds one inbound
+      plain BL at 0x0812a0bc and one BLNE at 0x08129ee0. Body has three
+      plain BLs and zero predicated BLs. Stores the low index byte, sets
+      item+0x24 to owner+0xbc minus owner+0xcc, and, only with owner+0xda
+      clear, sets item+0x28 to owner+0xc0 plus owner+0xc8 times signed
+      index minus owner+0xcc. Stores sampled microseconds/1000 at +0x0c.
+      Arithmetic wraps; gated path preserves +0x28. Reuses existing ports.
+      Rust initializes the overwritten timer stack word and omits scratch
+      register effects. Host tests cover signed-byte boundaries, wrapping,
+      nonboolean gates and unrelated-state preservation. ARM release builds;
+      match.py reports 25 stock versus 31 Rust instructions: frame setup,
+      timer initialization and register allocation differ, algorithm matches.
   - address: 0x08129a0c
     ghidra: FUN_08129a0c
     name: input_sequence_append_value
