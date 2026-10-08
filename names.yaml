@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08143000
+    ghidra: FUN_08143000
+    name: timed_view_stop_invalidate
+    size: 44
+    sig: "UiElement *timed_view_stop_invalidate(UiElement *view)"
+    module: ui/timed_view_stop_invalidate
+    status: ported
+    vars: {param_1/r0/r4: view, param_1_plus_0x220: embedded_timer, param_1_plus_0x250: reset_halfword}
+    renames: {FUN_0812c6b0: timer_stop, FUN_0826ec9c: ui_element_invalidate, DAT_08143028: reset_value_0x4d80}
+    notes: >-
+      Raw A32 extent [0x08143000,0x0814302c) is 40 code bytes plus
+      the 0x00004d80 literal at 0x08143028. Next real function begins
+      with push {r4,r5,r6,lr}. Whole-image branch-word scan finds two
+      incoming plain BLs at 0x08143080 and 0x081430a8, zero predicated
+      BLs. Body has one plain BL to timer_stop and a tail B to
+      ui_element_invalidate; Ghidra incorrectly incorporates the latter's
+      body and invents extra arguments. Stop embedded timer at +0x220,
+      store halfword 0x4d80 at +0x250, invalidate bounds, return view.
+      Caller evidence confirms timer identity, not concrete class or the
+      halfword's meaning. Reuses both existing ports without new seams.
+      Only deviation is expressing tail transfer as a return-position call.
+      Host edges cover running, expired and stopped timers, cancellation
+      mutation before reset, hidden-view return and adjacent canaries.
+      All 14727 host tests pass; ARM release build passes. Standalone
+      actual-library smoke passes using cfg(test) for existing host seams.
+      match.py reports 10 versus 12 instructions: frame pointer and
+      synthesized constant differ; relocations verify timer BL and UI tail B.
   - address: 0x081438e0
     ghidra: FUN_081438e0
     name: resource_command_unhandled
