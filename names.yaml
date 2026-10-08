@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08140514
+    ghidra: FUN_08140514
+    name: range_context_replace_secondary_owned
+    size: 8
+    sig: "void range_context_replace_secondary_owned(RangeSecondaryOwnedContext *context, OwnedVirtualMember *replacement)"
+    module: app/range_context_replace_secondary_owned
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: replacement
+      context_plus_0x38: owned
+      FUN_083e73f4: owned_pointer_replace_tail_helper
+    notes: >-
+      Raw words e2800038 ea0a9bb5 establish the true 8-byte extent
+      [0x08140514,0x0814051c). The next independently called function
+      starts with ldr r2,[r0,#0x40] and is called at 0x081dcdac.
+      Full-image aligned raw decoding independently counts two incoming
+      plain BLs at 0x081dcd5c and 0x081dcea4, zero predicated incoming
+      BLs, and zero outgoing BLs. Adds 0x38 and tail-branches to the
+      verified 48-byte helper at 0x083e73f4, ending at 0x083e7424:
+      return on identity, release non-NULL old through vtable slot +4,
+      then store replacement even if the callback mutated the slot.
+      The helper contains one BLXNE and no direct BLs. Both callers
+      obtain replacement from scoped range state. No concrete virtual
+      callee identity is inferred; neither address had its own names entry.
+      Deliberate deviations: inline the verified helper like the existing
+      +0x34 context port; reuse repr(C) owned-member types with host pointer
+      widening; volatile slot accesses preserve callback publication order.
+      Host edge tests cover null, identical unreadable pointers, release
+      ordering, callback mutation, null replacement, and preserved prefix.
+      All 14737 host tests pass; ARM release build passes. Actual-source
+      smoke proves install, identical no-op, and clear with one release.
+      match.py exits 1: Rust expands the tail helper into 14 instructions;
+      +0x38 load/store, identity/null guards, vtable +4 BLX, and final store
+      are preserved, with an additional frame-pointer prologue.
   - address: 0x08140534
     ghidra: FUN_08140534
     name: range_context_replace_owned
