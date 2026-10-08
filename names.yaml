@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08123ce8
+    ghidra: FUN_08123ce8
+    name: text_buffer_context_destroy
+    size: 4
+    sig: "void *text_buffer_context_destroy(void *object)"
+    module: app/text_buffer_context_destroy
+    status: ported
+    vars: {r0: object}
+    notes: >-
+      Raw extent [0x08123ce8,0x08123cec) contains only 0xe12fff1e (BX LR).
+      Preceding return at 0x08123ce0 and literal at 0x08123ce4 are not part
+      of this body; the next function starts with MOV r0,#1 at 0x08123cec.
+      Whole-image aligned ARM decoding finds two plain inbound BLs at
+      0x080b56e0 and 0x080b5954, zero predicated BLs, zero internal BLs,
+      and no aligned address-word references (including Thumb-tagged form).
+      Both callers pass the text-buffer stack context at sp+0x160 and then
+      overwrite r0. Return its pointer unchanged without accessing memory.
+      Ghidra void signature loses the preserved r0 contract. No callees or seams.
+      Distinct text section retains the symbol independently of identical bodies.
+      Host tests cover NULL, unaligned, dangling and high-bit words and unchanged
+      storage/canaries; host suite and ARM release build pass. match.py exits 1:
+      LLVM emits PUSH {fp,lr}; MOV fp,sp; POP {fp,pc} instead of BX LR because
+      of target frame-pointer policy; pointer preservation and no object access agree.
   - address: 0x08123d98
     ghidra: FUN_08123d98
     name: seven_string_snapshot_append
