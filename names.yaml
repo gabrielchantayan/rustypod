@@ -231660,3 +231660,31 @@ functions:
       explicitly returns the incoming pointer word. Tests and a standalone
       host smoke cover NULL, aligned, unaligned, unmapped, and maximum
       target pointer words without requiring readable object storage.
+
+  - address: 0x08120bdc
+    ghidra: FUN_08120bdc
+    name: id3_word_version
+    size: 116
+    sig: "u32 id3_word_version(void *context, Id3WordSource *source, u32 offset)"
+    module: fs/id3_word_version
+    status: ported
+    vars:
+      param_1: context (unused)
+      param_2: source
+      param_3: offset
+      local_c: word
+    notes: >-
+      Raw A32 establishes 0x08120bdc..0x08120c50, including the literal
+      0xb6bbcd00 at 0x08120c4c. Two plain inbound BLs at 0x08167304 and
+      0x0818db98, zero predicated inbound BLs; no outgoing plain or
+      predicated BLs, two register BLXs. Slot +0x14 receives source,
+      its own method address in r1, offset in r2, zero in r3 and on the
+      stack. Only zero status permits slot +0x10(source, output, 4, 1).
+      Only an exact four-byte result and a word in 0x49443300..0x494433fe
+      return the low byte; all other paths return 255. The accepted prefix
+      spells ID3; both callers handle versions 2, 3 and 4. No concrete
+      virtual callee identity is inferred and no fixed-address seam exists.
+      Ghidra's fourth parameter is not an input: the successful read
+      initializes the stack output. Host repr(C) pointers widen while
+      retaining slot indices. Wrapping subtraction preserves the original
+      unsigned add-and-compare, including overflow boundaries.
