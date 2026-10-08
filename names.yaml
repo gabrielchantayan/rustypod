@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08112d5c
+    ghidra: FUN_08112d5c
+    name: media_player_select_and_refresh
+    size: 56
+    sig: "u32 media_player_select_and_refresh(void *player, u32 selector)"
+    module: app/media_player_select_and_refresh
+    status: ported
+    renames:
+      param_1/r0: player
+      r1: selector
+      r4: saved_player
+      return/r0: selection_succeeded
+    notes: >-
+      Raw A32 words establish extent [0x08112d5c,0x08112d94), 56 bytes;
+      next function starts with cmp r0,#4 followed by push. Whole-image
+      decoding finds two inbound plain BLs at 0x08115848 and 0x08115870,
+      no predicated inbound BLs. Three outgoing plain BLs target 0x0811169c,
+      0x081134a8 and 0x08112b9c; none are predicated. Pass player and selector
+      to the first helper, which stores selector at player+0x458 and returns
+      zero or one. On nonzero refresh through the second helper, then return
+      one iff the final helper returns zero. Ghidra loses selector and marks
+      the final helper void; raw code preserves the result of 0x08056298.
+      No canonical entries exist for these callees; retain verified addresses
+      and ABIs without inventing identities. No target behavioral deviations.
+      Host callbacks replace unavailable retail dependencies. Tests cover
+      gate rejection short-circuiting, full-width gate/status normalization,
+      call sequencing and selector preservation. All 14886 host tests and
+      ARM release build pass. match.py exits 1: three calls, early rejection
+      and final zero test are preserved; LLVM uses literal-address BLX and
+      CLZ/LSR normalization instead of direct BL and conditional moves.
+
   - address: 0x08112e44
     ghidra: FUN_08112e44
     name: volume_limit_query_results_equal
