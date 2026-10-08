@@ -230711,3 +230711,43 @@ functions:
       explicit final conditional branch and relocated BL operands differ.
       Field offsets, presence updates and both colour-copy calls agree.
       No device execution.
+
+  - address: 0x08128484
+    ghidra: FUN_08128484
+    name: owned_registry_construct
+    size: 128
+    sig: "OwnedRegistry *owned_registry_construct(OwnedRegistry *storage)"
+    module: app/owned_registry_construct
+    status: ported
+    vars: {param_1: storage, piVar2: base, puVar3: observer}
+    renames:
+      FUN_0813533c: registry_container_construct_default
+      FUN_082aadd4: operator_new
+      FUN_0810dddc: registry_observer_base_construct
+      DAT_081284fc: owned_registry_vtable
+      DAT_08128500: owned_registry_observer_vtable
+    notes: >-
+      Raw words establish [0x08128484,0x08128504): 120 code bytes and
+      two literal words, followed by the next independent PUSH. Full raw
+      ARM B/BL scan verifies two incoming unconditional BLs at 0x08126bfc
+      and 0x0812798c, no predicated BLs or tail branches. Body contains
+      three unconditional BLs, no predicated BLs, and two register BLXs.
+      Constructs the registry at storage+4, installs vtable 0x08982784,
+      sets base+40 active to one, dispatches +0x5c with one, allocates and
+      clears an eight-byte observer, invokes its ported base constructor,
+      installs observer vtable 0x08988d20, reloads the registry vtable,
+      and dispatches +0x54 with the observer still in r1. Ghidra omits
+      that argument. Returns the base result minus four, not a virtual
+      result. Both callers allocate 48 bytes. Runtime vtable targets
+      cannot be identified from cold-image words; original dispatch is
+      retained without invented seams. Typed repr(C) fields and virtual
+      word indices preserve ARM layout while accommodating host pointers.
+      No NULL guards added. Host suite: 14800 passed. Isolated executable
+      smoke exercises enable-before-allocation, changed-vtable dispatch,
+      observer initialization, returned owner, and preserved guard fields.
+      ARM release builds; match.py exits 1 with 30 stock versus 32 Rust
+      instructions, differing register allocation, frame setup and literal
+      presentation. Three direct calls, two BLXs, store order, vtable
+      reload and observer argument agree; LLVM retains the original
+      storage pointer after proving the base constructor returns its input.
+      No device execution.
