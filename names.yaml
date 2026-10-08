@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081402fc
+    ghidra: FUN_081402fc
+    name: owned_handle_replace_if_nonempty
+    size: 48
+    sig: "void owned_handle_replace_if_nonempty(OwnedHandleOwner *owner, void *replacement)"
+    module: app/owned_handle_replace_if_nonempty
+    status: ported
+    renames:
+      param_1/r4: owner
+      r1: replacement
+      owner_plus_0x30: handle
+      FUN_083e73a0: owned_guarded_slot_04_replace
+      FUN_0829bad8: handle_first_word_is_nonzero
+    notes: >-
+      Raw A32 establishes [0x081402fc,0x0814032c), twelve words, 48 bytes;
+      the next independently entered pair-copy body begins with ldm r1.
+      Full-image decoding finds two inbound plain BLs at 0x081dc644 and
+      0x081dcbb4, zero predicated inbound BLs. Body has two plain BLs at
+      0x08140308 and 0x08140310, zero predicated BLs, and a BEQ tail call
+      at 0x08140324. Replace the owned handle at +0x30, then clear it if
+      its first word is zero. Replacement must be non-NULL: the original
+      predicate unconditionally dereferences it. Ghidra omits r1 and
+      incorrectly expands the tail helper into deletion code. Inline the
+      raw-verified four-instruction predicate at 0x0829bad8; no new seam
+      or separate function port. Host repr(C) retains the 48-byte prefix
+      and widens handle pointers. Corrected the existing replacement
+      helper to dispatch the old handle rather than the slot address,
+      as proven by ldr r0,[r0] at 0x083e73a8 and BL at 0x083e73c0.
+      Lifecycle tests cover equal live/empty handles, distinct replacement,
+      ordered disposal, NULL old handle, and prefix preservation. All 14741
+      host tests pass; ARM release build passes. Actual-source standalone
+      smoke with a Box-backed host delete boundary disposes an empty handle
+      and retains a live handle. Reviewed match.py exit-1 diff: 12 versus
+      14 instructions; inline predicate, frame pointer, and explicit branches
+      replace the stock leaf BL and predication, retaining +0x30 access and
+      conditional NULL replacement.
   - address: 0x08140378
     ghidra: FUN_08140378
     name: range_context_notify_receivers

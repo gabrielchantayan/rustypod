@@ -22,6 +22,9 @@
 //! a `repr(C)` one-word slot so host tests can invoke the already ported typed
 //! vtable seam. The target calls the two ported entries directly; their host
 //! implementations use their documented vtable and heap-operation seams.
+//! The raw call at 0x083e73c0 receives the old handle loaded at 0x083e73a8,
+//! not the address of the owning slot. Host fixtures retain that extra
+//! handle-to-object indirection.
 
 use crate::cxx::guarded_vtable_slot_04_dispatch_08157448::{
     guarded_vtable_slot_04_dispatch_08157448, GuardedSlot04Handle08157448,
@@ -46,7 +49,7 @@ pub unsafe extern "C" fn owned_guarded_slot_04_replace(slot: *mut *mut u8, repla
     if !old.is_null() {
         unsafe {
             guarded_vtable_slot_04_dispatch_08157448(
-                slot.cast::<GuardedSlot04Handle08157448>(),
+                old.cast::<GuardedSlot04Handle08157448>(),
             );
             operator_delete(old);
         }
@@ -137,14 +140,15 @@ mod tests {
         install_recording_heap();
         let mut vtable = [0usize, record_callback as usize];
         let mut object = [vtable.as_mut_ptr() as usize];
-        let old = object.as_mut_ptr().cast::<u8>();
+        let mut handle = [object.as_mut_ptr() as usize];
+        let old = handle.as_mut_ptr().cast::<u8>();
         let replacement = 0x5678usize as *mut u8;
         let mut slot = old;
 
         unsafe { owned_guarded_slot_04_replace(&mut slot, replacement) };
 
         assert_eq!(slot, replacement);
-        assert_eq!(unsafe { CALLBACK_OBJECT }, old as usize);
+        assert_eq!(unsafe { CALLBACK_OBJECT }, object.as_mut_ptr() as usize);
         assert_eq!(unsafe { FREED_OBJECT }, old as usize);
         assert_eq!(unsafe { FREED_TAG }, 2);
         restore_heap();
