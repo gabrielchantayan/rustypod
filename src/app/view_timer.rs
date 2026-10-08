@@ -78,6 +78,41 @@ unsafe fn stored_delay(view: *mut u8) -> u32 {
     unsafe { addr_of!((*view.cast::<ViewTimerFields>()).delay).read_volatile() }
 }
 
+/// Dispatches view slot +0x150 and arms a one-tick timer when `inhibited == 0`.
+///
+/// Original: `FUN_0810d768` @ 0x0810d768, 52 bytes
+/// (0x0810d768..0x0810d79c; next function starts with a push).
+/// Verified incoming calls: two `bleq`, zero unconditional `bl`.
+/// The body has one indirect `blx` and one unconditional `bl`. Nonzero
+/// inhibition does not access the view; both paths return 1. The virtual
+/// method's identity is deliberately left unspecified. Its return is ignored,
+/// and the already ported timer helper runs only after it completes.
+///
+/// Deviation: host vtable pointers/slots use native `usize` width, while the
+/// timer fields retain their firmware offsets and 32-bit pointer layout.
+///
+/// # Safety
+///
+/// For zero inhibition, `view` must satisfy `view_timer_start_after` and its
+/// first native pointer must name a vtable with a callable slot at word 84.
+/// That slot takes `view` and must preserve the timer helper's requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn view_dispatch_and_arm_unless_inhibited(
+    view: *mut u8,
+    inhibited: u32,
+) -> u32 {
+    if inhibited == 0 {
+        let vtable = unsafe { view.cast::<*const usize>().read_volatile() };
+        let dispatch: unsafe extern "C" fn(*mut u8) = unsafe {
+            core::mem::transmute(vtable.add(0x150 / 4).read_volatile())
+        };
+        unsafe { dispatch(view) };
+        unsafe { view_timer_start_after(view, 1) };
+    }
+    1
+}
+
 /// view_timer_rearm — original: `FUN_0810e090` @ 0x0810e090 (8 bytes;
 /// seven unconditional `bl` call sites).
 ///
@@ -330,6 +365,55 @@ mod tests {
                 TIMER_STATE_RUNNING,
                 "restart leaves the timer in the retailOS 'run ' state"
             );
+        }
+    }
+
+    unsafe extern "C" fn replace_timer_before_arming(view: *mut u8) {
+        unsafe { set_timer(view, STOP_REPLACEMENT as *mut u8) };
+        unsafe { set_delay(view, 99) };
+        record(Event::Construct(view as usize, 0, 0, 0));
+    }
+
+    #[test]
+    fn inhibited_dispatch_never_dereferences_view() {
+        for flag in [1, 2, 0x80, u32::MAX] {
+            assert_eq!(unsafe {
+                view_dispatch_and_arm_unless_inhibited(core::ptr::null_mut(), flag)
+            }, 1);
+        }
+    }
+
+    #[test]
+    fn virtual_dispatch_replaces_timer_before_one_tick_arm() {
+        let _timer_lock = TIMER_OPS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _view_lock = VIEW_EVENT_OPS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _heap_lock = mock_heap();
+        let Some(fixture) = fixture() else {
+            assert!(note_missing_u32_fixture("app::view_timer"));
+            return;
+        };
+        let mut vtable = [0usize; 85];
+        vtable[84] = replace_timer_before_arming as *const () as usize;
+        unsafe {
+            reset_fixture(fixture, fixture.timer_b.cast());
+            fixture.view.cast::<*const usize>().write(vtable.as_ptr());
+            set_timer(fixture.view.cast(), fixture.timer_a.cast());
+            (*fixture.timer_a).period = 123;
+            let _restore = install_recording_ops();
+            assert_eq!(view_dispatch_and_arm_unless_inhibited(fixture.view.cast(), 0), 1);
+            assert_eq!(stored_delay(fixture.view.cast()), 1);
+            assert_eq!((*fixture.timer_b).period, 1);
+            assert_eq!((*fixture.timer_b).state, TIMER_STATE_RUNNING);
+            assert_eq!((*fixture.timer_a).period, 123);
+            assert_eq!(alloc_log().0, 0);
+            assert_eq!(events(), std::vec![
+                Event::Construct(fixture.view as usize, 0, 0, 0),
+                Event::Stop(fixture.view as usize),
+                Event::Trace(fixture.timer_b as usize),
+                Event::Trace(fixture.timer_b as usize),
+                Event::Trace(fixture.timer_b as usize),
+                Event::Arm(fixture.timer_b as usize),
+            ]);
         }
     }
 
