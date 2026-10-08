@@ -231521,3 +231521,28 @@ functions:
       256 values at four byte alignments and unchanged surrounding memory.
       ARM match.py verifies the exported symbol and the same ldrb at +24;
       LLVM adds a frame-pointer push/mov/pop in place of the original bx lr.
+  - address: 0x081213bc
+    ghidra: FUN_081213bc
+    name: ata_cmd_get_lba_low
+    size: 8
+    sig: "u8 ata_cmd_get_lba_low(const u8 *cmd)"
+    module: drivers/ata_cmd
+    status: ported
+    vars: {param_1: cmd}
+    notes: >-
+      Raw words e5d00016 e12fff1e decode as ldrb r0,[r0,#0x16]; bx lr.
+      True extent is 0x081213bc..0x081213c4, where the next real function
+      stores the same byte with strb r1,[r0,#0x16]; bx lr. Whole-image
+      A32 decoding finds two incoming plain unconditional BL calls,
+      at 0x08166400 and 0x082832c8, and zero predicated BL calls;
+      no outgoing calls. Reads all eight bits of the legacy ATA taskfile
+      LBA-low byte without mutation or validation. The existing LBA28
+      packer writes bits 0..7 at this offset, and caller 0x082832bc
+      uses the result as the low byte of its packed LBA. No semantic
+      deviations; volatile byte access follows the existing module pattern,
+      and inline(never) preserves a real call target. Host tests cover all
+      256 values at four byte alignments and unchanged surrounding memory.
+      A standalone host smoke compiled the actual getter source and
+      observed 0xfe with adjacent bytes unchanged. ARM match.py verifies
+      the exported symbol and the same ldrb at +22; LLVM adds a
+      frame-pointer push/mov/pop in place of the original bx lr.

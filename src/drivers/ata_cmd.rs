@@ -387,6 +387,26 @@ pub unsafe extern "C" fn ata_cmd_get_opaque_word_40(cmd: *const u8) -> u32 {
 }
 
 
+/// ata_cmd_get_lba_low — original: `FUN_081213bc` @ 0x081213bc.
+/// True size: 8 bytes, `0x081213bc..0x081213c4`; the next real entry
+/// stores the same byte with `strb r1,[r0,#0x16]; bx lr`.
+/// Whole-image A32 decoding verifies two incoming plain BL calls
+/// (0x08166400, 0x082832c8), zero predicated BL calls, and no outgoing calls.
+///
+/// Reads all eight bits of the legacy ATA taskfile LBA-low byte at +0x16:
+/// `ldrb r0,[r0,#0x16]; bx lr`. The LBA28 packer stores bits 0..7 here,
+/// and caller 0x082832bc uses the result as the low byte of its packed LBA.
+/// No validation, masking, or mutation. No deliberate semantic deviations;
+/// volatile access follows the command-block convention.
+///
+/// # Safety
+/// `cmd` must be readable through byte +0x16; byte alignment suffices.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ata_cmd_get_lba_low(cmd: *const u8) -> u8 {
+    cmd.add(LBA_LOW).read_volatile()
+}
+
 /// ata_cmd_get_lba_high — original: `FUN_081213f4` @ 0x081213f4.
 /// True size: 8 bytes, `0x081213f4..0x081213fc`; the next real entry
 /// reads the adjacent LBA-mid byte. Whole-image A32 decoding verifies two
@@ -1543,6 +1563,23 @@ mod tests {
             let before = block;
             assert_eq!(unsafe { ata_cmd_get_device_head(block.0.as_ptr()) }, device_head);
             assert_eq!(block, before);
+        }
+    }
+
+    #[test]
+    fn lba_low_getter_preserves_all_bits_at_every_byte_alignment() {
+        for alignment in 0..4 {
+            // End the object at the requested byte; neighbours are poison.
+            let mut bytes = [0xa5u8; 0x17 + 3];
+            for value in 0..=u8::MAX {
+                bytes[alignment + 0x16] = value;
+                let before = bytes;
+                assert_eq!(
+                    unsafe { ata_cmd_get_lba_low(bytes.as_ptr().add(alignment)) } as u32,
+                    value as u32
+                );
+                assert_eq!(bytes, before);
+            }
         }
     }
 
