@@ -2055,6 +2055,8 @@ pub mod hints {
     // raw-u32 player and inner-state fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const MEDIA_PLAYER_RESET_DEFAULT_RESOURCE: usize = 0x9500_0000;
+    // Dedicated to app/media_player_refresh_cached_values.
+    pub const MEDIA_PLAYER_CACHED_VALUES: usize = 0xb610_0000;
     // 0xa700_0000: dedicated to util/inner_state's raw-u32 query-object cache
     // fixture; mappings never unmap, so no other user may share this hint.
     pub const QUERY_OBJECT_ENSURE: usize = 0xa700_0000;

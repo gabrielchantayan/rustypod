@@ -232891,3 +232891,43 @@ functions:
       saved result survives cleanup. Frame layout/register allocation differs.
       No device execution; constructor/global runtime dependencies are modeled
       in host tests rather than claiming full firmware execution.
+
+  - address: 0x081117e4
+    ghidra: FUN_081117e4
+    name: media_player_refresh_cached_values
+    size: 132
+    sig: "void media_player_refresh_cached_values(void *player)"
+    module: app/media_player_refresh_cached_values
+    status: ported
+    renames:
+      param_1/r0: player
+      "[player + 0x30]": inner_state
+      "[player + 0x424]": cached_total
+      FUN_08111664: media_player_reset_default_resource
+      FUN_08066618: configure_inner_state
+    notes: >-
+      Raw osos.dec A32 words establish 132 executable bytes through
+      0x08111868, the next real function's push. Seven unconditional outbound
+      BL instructions, zero predicated BL, and a tail B to 0x08111664.
+      Full-image word decoding independently finds two unconditional inbound
+      BLs at 0x08114010 and 0x08114900, zero predicated callers. Ghidra
+      incorrectly folds the tail-called reset into the recovered body.
+      Verified getter calls at 0x0805200c, 0x08051ff0, 0x08052040 and
+      0x08052028 read inner+0xf00 backing words +0xc04,+0xbfc,+0xc00,+0xc10.
+      Cache them at player+0x418,+0x420,+0x41c,+0x428 and their wrapping
+      sum at +0x424. Reset default resource, configure selectors (2,7),
+      call 0x080542b4 (global inner-state resolver then word +0xf70), cache
+      its result at +0x410, and reset default resource again. No broader
+      identity is invented for the cached values or unported getter callees.
+      Reuses existing Rust reset and firmware configuration seams. Host-only
+      operations model unported calls; target retains verified firmware ABI
+      calls. Tests cover zero values, overflowing unsigned sums, inner-pointer
+      replacement by the first reset, and reset fields cleared after a
+      configuration side effect. All 14888 host tests passed; ARM release
+      build passed. Direct-entry smoke observed total 8, global 0x12345678,
+      two resets, and invalidated active index. match.py exit 1 prints a
+      structural diff: 33 original versus 42 Rust instructions including
+      three literal words; getter BLs become address-based BLX, the loop
+      fully unrolls, cache stores and wrapping sum remain, and the two reset
+      calls retain BL then tail B via Rust relocations. Frame/register layout
+      differs. No device execution; host operations model runtime dependencies.
