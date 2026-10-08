@@ -50743,6 +50743,45 @@ functions:
       match.py (--lib worktree build): same call/store/dispatch shape;
       deltas are the ops-table blx and frame layout, as in the sibling.
 
+  - address: 0x0812e1ec
+    ghidra: FUN_0812e1ec
+    name: temporary_registry_construct
+    size: 156
+    sig: "TemporaryRegistry *temporary_registry_construct(TemporaryRegistry *storage, uint32_t document, uint32_t client)"
+    module: app/temporary_registry_construct
+    status: ported
+    vars: {param_1: storage, param_2: document, param_3: client, piVar3: registry, piVar4: observer}
+    renames:
+      FUN_0813533c: registry_container_construct_default
+      FUN_082aadd4: operator_new
+      FUN_0810dddc: registry_observer_base_construct
+      DAT_0812e27c: temporary_registry_vtable
+      DAT_0812e280: observer_cache_context
+      DAT_0812e284: temporary_registry_observer_vtable
+    notes: >-
+      Raw osos.dec establishes [0x0812e1ec,0x0812e288): 144 code bytes
+      and three literal words. The next function begins with ldr r0 at
+      0x0812e288, before its push. Independently decoded incoming BLs
+      at 0x08119824 and 0x08119b88 are unconditional; zero predicated BLs.
+      Body has three unconditional BLs and three register BLX calls.
+      Both callers construct a 56-byte temporary for note processing.
+      Constructs the existing capacity-four registry base, installs
+      0x089825d4, writes active=1, pending=0, document and client at
+      +0x28/+0x2c/+0x30/+0x34. If the cache at 0x089cffb0+100
+      (0x089d0014) is NULL, allocates eight bytes, runs the ported observer
+      base constructor, installs 0x08988cb8, publishes the pointer before
+      dispatching attach at +0x18. Reloads the cache before registry slot
+      +0x54, then reloads the registry vtable before slot +0x5c with 1.
+      Preserves runtime vtable pointers; cold-image slot words are stale,
+      so no virtual callee identity is asserted. Typed fields and pointer
+      word-indexed slots preserve target offsets without host overlap.
+      Host tests cover cold/warm cache, cache replacement during attach,
+      vtable replacement during install, argument extremes and reserved
+      bytes. Full host suite passes, ARM release builds. match.py reports
+      the same allocation branch, three direct calls, three virtual calls,
+      field offsets and reloads; LLVM uses individual stores instead of
+      STM, folds cache base+100 into its literal, and changes the frame.
+
   - address: 0x08135380
     ghidra: FUN_08135380
     name: registry_container_destruct

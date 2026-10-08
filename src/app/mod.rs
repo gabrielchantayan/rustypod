@@ -315,6 +315,7 @@ pub mod swap_selector_one_two;
 pub mod opaque_object_apply_mode_five;
 pub mod chunked_interface_transfer;
 pub mod registry_display_client_construct;
+pub mod temporary_registry_construct;
 pub mod byte_state_construct;
 pub mod app_boot_metrics_submit;
 pub mod byte_state_set_and_notify;
