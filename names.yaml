@@ -233708,3 +233708,30 @@ functions:
       and normalized bit comparisons; relocations verify the two retained
       BL targets are iram_usec_timer_read_veneer and
       iram_usec_timer_elapsed_veneer. No intentional symbol folding.
+
+  - address: 0x081076f0
+    ghidra: FUN_081076f0
+    name: usb_link_status_bit0
+    size: 16
+    sig: "uint32_t usb_link_status_bit0(uint32_t controller)"
+    module: drivers/usb_link_status_bit0
+    status: ported
+    vars: {r0: ignored_controller_then_link_flag}
+    renames: {DAT_38400808: usb_link_status_register}
+    notes: >-
+      Raw words e3a005e1 e5900808 e2000001 e12fff1e establish the true
+      extent [0x081076f0,0x08107700), followed by PUSH at the next real
+      function boundary. Full-image aligned A32 decoding counts two plain
+      incoming BLs at 0x0829460c and 0x082946a0, zero predicated incoming
+      BLs, and no outgoing calls. Reads the aligned word at 0x38400808
+      once and returns bit 0 as zero or one; ignores the controller passed
+      by FUN_082945cc. Hardware meaning of bit 0 remains unidentified.
+      No new callee seams; reuses the existing USB link-status reader and
+      its host stand-in. No target behavioral deviations or symbol folds.
+      Host edge tests cover unrelated high bits, all low-bit combinations,
+      ignored controller values and unchanged register contents. All 14926
+      host tests and ARM release build passed. Standalone actual-source
+      smoke exercised 256 status values through the public entry. No device
+      execution claimed. match.py exits 1: four original instructions versus
+      seven Rust listing lines; LLVM adds frame setup/restore and a literal
+      register address while retaining one word load, AND 1 and no calls.

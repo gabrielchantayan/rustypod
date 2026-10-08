@@ -24,7 +24,7 @@ pub const fn usb_high_speed_from_status(link_status: u32) -> u32 {
 
 #[cfg(target_arch = "arm")]
 #[inline(always)]
-unsafe fn usb_link_status_read() -> u32 {
+pub(crate) unsafe fn usb_link_status_read() -> u32 {
     USB_LINK_STATUS.read_volatile()
 }
 
@@ -38,7 +38,7 @@ pub(crate) mod host_usb_link_status {
 
 #[cfg(not(target_arch = "arm"))]
 #[inline(always)]
-unsafe fn usb_link_status_read() -> u32 {
+pub(crate) unsafe fn usb_link_status_read() -> u32 {
     core::ptr::addr_of!(host_usb_link_status::WORD).read_volatile()
 }
 

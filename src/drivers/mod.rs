@@ -2,6 +2,7 @@
 pub mod usb_endpoint_packet_size;
 pub mod usb_in_endpoint_transfer_rebase;
 pub mod usb_high_speed_query;
+pub mod usb_link_status_bit0;
 pub mod ata_cmd;
 pub mod ata_command_execute;
 pub mod ata_fast_io_write;
