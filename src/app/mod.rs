@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod entry_cleanup_unless_type_3;
 pub mod entry_collection_prune;
 pub mod associated_object_replace;
 pub use associated_object_replace::*;
