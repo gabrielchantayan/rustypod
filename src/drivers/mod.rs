@@ -31,6 +31,7 @@ pub mod controller_command_initialize;
 pub mod controller_configuration_enable;
 pub mod audio_output_level;
 pub mod audio_output_registers_initialize;
+pub mod audio_output_channel_flags_set;
 pub mod cache_address_translate;
 pub mod byte_identity_slot_init;
 pub mod channel_control_enable;
