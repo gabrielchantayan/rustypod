@@ -230448,3 +230448,30 @@ functions:
       collection virtual calls and signed-byte window repositioning; LLVM
       shares transitions, changes register allocation and emits literal BLX
       for the unported seams, removing the dead cursor invalidation.
+  # --- Input-sequence mode classification ---
+  - address: 0x08129b58
+    ghidra: FUN_08129b58
+    name: input_sequence_mode_is_23_or_31
+    size: 20
+    sig: "u32 input_sequence_mode_is_23_or_31(u32 mode)"
+    module: app/input_sequence_mode
+    status: ported
+    renames:
+      param_1/r0: mode
+    notes: >-
+      Raw words establish the exact extent [0x08129b58,0x08129b6c).
+      CMP r0,#23; CMPNE r0,#31; MOVEQ r0,#1; MOVNE r0,#0; BX lr.
+      The next real function loads the state action index at offset 0xb4.
+      Independent aligned raw BL-immediate decoding finds two plain inbound
+      calls at 0x0812962c and 0x08129720, zero predicated calls; the body
+      has no outgoing calls. Both callers classify an input-sequence mode
+      byte, from state offset 0xa2 or the incoming event. The exact meanings
+      of modes 23 and 31 remain unverified; no callee seam is introduced.
+      Returns exactly one for either full-width value, zero otherwise.
+      Deliberate deviations: none. Host tests exhaust all byte modes and
+      reject high-bit aliases. All 14788 host tests pass; ARM release builds.
+      Executable host smoke confirms both accepted modes, their neighbors,
+      high-byte aliases and u32::MAX. match.py exits 1 with a structural diff:
+      LLVM clears bit 3, subtracts 23 and uses CLZ/LSR to normalize equality,
+      equivalent because 23 and 31 differ only in bit 3; frame setup replaces
+      the leaf return. The exported ARM symbol is present. No device run.
