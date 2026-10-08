@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081070a0
+    ghidra: FUN_081070a0
+    name: liti_handle_class_check
+    size: 8
+    sig: "u32 liti_handle_class_check(const u32 *handle)"
+    module: app/liti_handle_class_check
+    status: ported
+    vars: {param_1/r0: handle, r0_after_load: payload}
+    renames:
+      FUN_08057bb4: liti_field_class_check (ported)
+      FUN_08057c2c: image_library_is_liti_class (ported, transitive)
+    notes: >-
+      Raw words e5900000 eafd42c2 establish LDR r0,[r0] followed by
+      B 0x08057bb4. The next independent constructor starts at 0x081070a8,
+      proving the eight-byte extent. Whole-image aligned A32 decoding
+      finds two plain inbound BLs at 0x08143404 and 0x08224124, zero
+      predicated inbound BLs and zero internal BLs. Both callers test a
+      locally constructed handle before using its payload. Load the
+      target-width handle word and reuse liti_field_class_check: return
+      one iff the non-null payload's word-one pointer names a liti-tagged
+      object, otherwise zero. The handle itself is not null-guarded.
+      No new seam or invented enclosing type. Rust expresses the tail
+      branch as a returning call; pointer cells remain u32 on hosts.
+      Host tests cover null payload, null nested pointer, matching and
+      mismatched tags, adjacent cells and read-only behavior. Host suite
+      passes 14934 tests. Standalone public-entry smoke confirms results
+      0, 0, 1, 0 for null payload, null class, liti and mismatched tag.
+      ARM release build passes. match.py exits 1: the original load and
+      tail branch remain, with a frame-pointer PUSH/MOV/POP added.
+      Archive disassembly verifies R_ARM_JUMP24 to liti_field_class_check;
+      match.py's apparent self-branch is an unresolved archive relocation.
+      No physical-device verification.
   - address: 0x08107110
     ghidra: FUN_08107110
     name: controller_status_service
