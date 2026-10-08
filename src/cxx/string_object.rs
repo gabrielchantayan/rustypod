@@ -419,6 +419,15 @@ pub struct StringObject {
     pub payload: *mut u8,
 }
 
+/// StringObject followed by an uninterpreted word and byte at ARM +8/+12.
+#[repr(C)]
+pub struct StringObjectWithWordAndFlag {
+    pub string: StringObject,
+    pub word: u32,
+    pub flag: u8,
+    pub padding: [u8; 3],
+}
+
 /// StringObject followed by three uninterpreted bytes at ARM +8/+9/+10.
 #[repr(C)]
 pub struct StringObjectWithBytes {
@@ -2293,6 +2302,36 @@ pub unsafe extern "C" fn string_object_copy_construct(
         string_object_assign_payload(this, (*source).payload);
     }
     this
+}
+
+/// string_object_with_word_and_flag_copy_construct — retailOS `FUN_0812e738`
+/// @ 0x0812e738. True extent: 32 bytes, [0x0812e738, 0x0812e758);
+/// the next function begins with push {r4,lr} at 0x0812e758.
+///
+/// Raw A32 words verify two inbound plain BLs (0x08123f00, 0x08123f2c),
+/// zero predicated inbound BLs, one internal plain BL (0x0812e740 to
+/// string_object_copy_construct @ 0x082773e0), and no predicated internal BLs.
+/// Constructs the leading string, copies source word +8 and raw byte +12
+/// through the returned pointer, then returns that pointer unchanged.
+/// The caller allocates 16 bytes and routes the result according to the flag;
+/// its word's meaning is not established. No NULL checks or flag normalization.
+///
+/// Deliberate deviations: inherits the callee's modeled vtable; repr(C)
+/// widens only the string's pointers on hosts. Explicit trailing padding
+/// remains untouched, as in firmware. Ghidra's void return is corrected.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn string_object_with_word_and_flag_copy_construct(
+    this: *mut StringObjectWithWordAndFlag,
+    source: *const StringObjectWithWordAndFlag,
+) -> *mut StringObjectWithWordAndFlag {
+    let constructed = string_object_copy_construct(
+        core::ptr::addr_of_mut!((*this).string),
+        core::ptr::addr_of!((*source).string),
+    ) as *mut StringObjectWithWordAndFlag;
+    (*constructed).word = (*source).word;
+    (*constructed).flag = (*source).flag;
+    constructed
 }
 
 /// string_object_with_bytes_copy_construct — original: `FUN_0814237c`
@@ -7919,6 +7958,65 @@ pub(crate) mod tests {
     }
 
     // ---- string_object_copy_construct ---------------------------------
+
+    #[test]
+    fn copy_construct_word_and_flag_duplicates_string_and_preserves_padding() {
+        let mut storage = [0xa5u8; 16];
+        let payload = *b"record\0";
+        let _bench = assign_cstr_bench(storage.as_mut_ptr());
+        for (word, flag) in [(0, 0), (u32::MAX, 0xff), (0x80000000, 0x80)] {
+            let source = StringObjectWithWordAndFlag {
+                string: StringObject { vtable: core::ptr::null(), payload: payload.as_ptr() as *mut u8 },
+                word, flag, padding: [0x11; 3],
+            };
+            let mut destination = StringObjectWithWordAndFlag {
+                string: StringObject { vtable: core::ptr::null(), payload: core::ptr::null_mut() },
+                word: 0x55555555, flag: 0x55, padding: [0xa5; 3],
+            };
+            let this = core::ptr::addr_of_mut!(destination);
+            assert_eq!(unsafe { string_object_with_word_and_flag_copy_construct(this, &source) }, this);
+            assert_eq!((destination.word, destination.flag), (word, flag));
+            assert_eq!(destination.padding, [0xa5; 3]);
+            assert_eq!(&storage[..payload.len()], &payload);
+            assert_eq!(source.string.payload, payload.as_ptr() as *mut u8);
+            assert_eq!(destination.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+    }
+
+    #[test]
+    fn copy_construct_word_and_flag_self_preserves_payload_and_every_flag() {
+        let payload = *b"self\0";
+        for flag in 0..=255u8 {
+            let mut object = StringObjectWithWordAndFlag {
+                string: StringObject { vtable: core::ptr::null(), payload: payload.as_ptr() as *mut u8 },
+                word: 0xdeadbeef, flag, padding: [0x5a; 3],
+            };
+            let this = core::ptr::addr_of_mut!(object);
+            assert_eq!(unsafe { string_object_with_word_and_flag_copy_construct(this, this) }, this);
+            assert_eq!((object.word, object.flag), (0xdeadbeef, flag));
+            assert_eq!(object.padding, [0x5a; 3]);
+            assert_eq!(object.string.payload, payload.as_ptr() as *mut u8);
+            assert_eq!(object.string.vtable, &STRING_OBJECT_VTABLE as *const _);
+        }
+    }
+
+    #[test]
+    fn copy_construct_word_and_flag_copies_metadata_even_when_allocation_fails() {
+        let payload = *b"record\0";
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        let source = StringObjectWithWordAndFlag {
+            string: StringObject { vtable: core::ptr::null(), payload: payload.as_ptr() as *mut u8 },
+            word: u32::MAX, flag: 0xfe, padding: [0; 3],
+        };
+        let mut destination = StringObjectWithWordAndFlag {
+            string: StringObject { vtable: core::ptr::null(), payload: core::ptr::dangling_mut() },
+            word: 0, flag: 0, padding: [0xa5; 3],
+        };
+        unsafe { string_object_with_word_and_flag_copy_construct(&mut destination, &source); }
+        assert!(destination.string.payload.is_null());
+        assert_eq!((destination.word, destination.flag), (u32::MAX, 0xfe));
+        assert_eq!(destination.padding, [0xa5; 3]);
+    }
 
     #[test]
     fn copy_construct_with_bytes_preserves_raw_values_and_padding() {
