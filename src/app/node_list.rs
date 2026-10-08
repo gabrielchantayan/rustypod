@@ -452,6 +452,100 @@ pub unsafe extern "C" fn node_list_get() -> *mut NodeList {
     object as *mut NodeList
 }
 
+/// Query the current view through two virtual slot +0x14 dispatches.
+///
+/// Original: `FUN_0812f200` @ 0x0812f200, 52 bytes, ending at the
+/// next push @ 0x0812f234. Raw-image count: two incoming plain BLs
+/// (@ 0x0812ee44 and 0x0812ee80), no predicated BLs. The body has
+/// one plain BL to node_list_get, one BLX, and a tail B to 0x08275b9c.
+///
+/// Fetch the list singleton, invoke its slot +0x14 if nonnull, then
+/// invoke the returned object's slot +0x14 with argument zero if nonnull.
+/// Return zero for either null result; otherwise forward the final r0.
+/// The caller tests that result before choosing a notification. Neither
+/// virtual method's concrete identity is assumed from stale RW vtable
+/// bytes. Deliberate deviations: inline the null-safe dispatch thunk
+/// 0x08275b9c and use native-width vtable slots on hosts (four-byte
+/// slots on ARM). Reuse the existing ported singleton accessor.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn node_list_query_current_view() -> usize {
+    query_current_view_with(node_list_get)
+}
+
+#[inline(always)]
+unsafe fn query_current_view_with(
+    get_list: unsafe extern "C" fn() -> *mut NodeList,
+) -> usize {
+    let list = get_list();
+    if list.is_null() {
+        return 0;
+    }
+    let vtable = list.cast::<*const usize>().read();
+    let query: unsafe extern "C" fn(*mut NodeList) -> *mut c_void =
+        core::mem::transmute(vtable.add(5).read());
+    let view = query(list);
+    if view.is_null() {
+        return 0;
+    }
+    let vtable = view.cast::<*const usize>().read();
+    let query: unsafe extern "C" fn(*mut c_void, u32) -> usize =
+        core::mem::transmute(vtable.add(5).read());
+    query(view, 0)
+}
+
+#[cfg(test)]
+mod current_view_query_tests {
+    use super::*;
+
+    static mut LIST: *mut NodeList = core::ptr::null_mut();
+    static mut VIEW: *mut c_void = core::ptr::null_mut();
+    static mut RESULT: usize = 0;
+    static mut CALLS: u32 = 0;
+
+    unsafe extern "C" fn get_list() -> *mut NodeList { LIST }
+    unsafe extern "C" fn get_view(list: *mut NodeList) -> *mut c_void {
+        assert_eq!(list, LIST);
+        CALLS = CALLS * 10 + 1;
+        VIEW
+    }
+    unsafe extern "C" fn query(view: *mut c_void, argument: u32) -> usize {
+        assert_eq!(view, VIEW);
+        assert_eq!(argument, 0);
+        CALLS = CALLS * 10 + 2;
+        RESULT
+    }
+
+    #[test]
+    fn null_receivers_skip_dispatch_and_results_pass_through() {
+        unsafe {
+            let mut list_vtable = [0usize; 6];
+            list_vtable[5] = get_view as *const () as usize;
+            let mut view_vtable = [0usize; 6];
+            view_vtable[5] = query as *const () as usize;
+            let mut list = list_vtable.as_ptr();
+            let mut view = view_vtable.as_ptr();
+            LIST = core::ptr::null_mut();
+            VIEW = core::ptr::null_mut();
+            CALLS = 0;
+            assert_eq!(query_current_view_with(get_list), 0);
+            assert_eq!(CALLS, 0);
+            LIST = (&mut list as *mut *const usize).cast();
+            assert_eq!(query_current_view_with(get_list), 0);
+            assert_eq!(CALLS, 1);
+            VIEW = (&mut view as *mut *const usize).cast();
+            for result in [0, 1, 0x8000_0000, 0xffff_ffff] {
+                RESULT = result;
+                CALLS = 0;
+                assert_eq!(query_current_view_with(get_list), result);
+                assert_eq!(CALLS, 12);
+            }
+            LIST = core::ptr::null_mut();
+            VIEW = core::ptr::null_mut();
+        }
+    }
+}
+
 /// list_count_until_match — original: `FUN_0810fa90` @ 0x0810fa90
 /// (84 bytes).
 ///
