@@ -13,6 +13,7 @@ use crate::kernel::posix_mutex::{posix_mutex_lock, posix_mutex_unlock};
 use crate::kernel::posix_mutex::PosixMutex;
 
 use super::plst_class_check::ui_element_is_plst_class;
+use super::plst_resource_send_update::plst_resource_send_update;
 
 const RESOURCE_MUTEX_ADDRESS: usize = 0x08a7_74c0;
 const RESOURCE_PENDING_OFFSET: usize = 0x0c;
@@ -36,16 +37,6 @@ unsafe extern "C" fn retail_plst_resource_gate(_resource: *mut u8, _mode: u32) -
     0
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_plst_resource_activate(resource: *mut u8, mode: u32) -> u32 {
-    let call: PlstResourceActivate = core::mem::transmute(0x080d_3570usize);
-    call(resource, mode)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_plst_resource_activate(_resource: *mut u8, _mode: u32) -> u32 {
-    0
-}
 
 unsafe extern "C" fn retail_plst_resource_lock(_mutex: *mut PosixMutex) {
     #[cfg(target_os = "none")]
@@ -59,9 +50,9 @@ unsafe extern "C" fn retail_plst_resource_unlock(_mutex: *mut PosixMutex) {
 
 /// Calls outside this one-function port.
 ///
-/// Target builds use the canonical mutex ports and the two verified but
-/// unported call addresses. Host tests replace the boundary to observe order
-/// and arguments without constructing the firmware's global mutex.
+/// Target builds use the canonical mutex and resource-update ports plus the
+/// verified unported gate address. Host tests replace the boundary to observe
+/// order and arguments without constructing the firmware's global mutex.
 #[derive(Clone, Copy)]
 pub struct PlstResourceActivateOps {
     pub lock: PlstResourceMutexOp,
@@ -73,7 +64,7 @@ pub struct PlstResourceActivateOps {
 pub const DEFAULT_PLST_RESOURCE_ACTIVATE_OPS: PlstResourceActivateOps = PlstResourceActivateOps {
     lock: retail_plst_resource_lock,
     gate: retail_plst_resource_gate,
-    activate: retail_plst_resource_activate,
+    activate: plst_resource_send_update,
     unlock: retail_plst_resource_unlock,
 };
 
@@ -100,11 +91,11 @@ fn plst_resource_activate_ops() -> PlstResourceActivateOps {
 /// `0x080d3570(resource, mode)` and returns its status; every rejected state
 /// returns zero after unlocking.
 ///
-/// Deliberate deviations: the two callees have no ported ledger entries, so
-/// their verified addresses remain one narrow operation seam rather than
-/// receiving invented identities. The target seam calls the canonical ported
-/// mutex functions instead of their 4-byte alias veneers at `0x082621a8` and
-/// `0x082621ac`; host seams replace all external effects.
+/// Deliberate deviations: the gate has no ported ledger entry and retains its
+/// verified address rather than receiving an invented identity. Activation
+/// uses the canonical resource-update port. The mutex ports replace the
+/// equivalent alias veneers at `0x082621a8` and `0x082621ac`; host seams
+/// replace all external effects.
 ///
 /// # Safety
 ///
