@@ -236327,3 +236327,41 @@ functions:
       with the expected structural diff: the +4 and +0x38 loads remain;
       LLVM adds a frame-pointer prologue/epilogue and a relocated literal
       for the crate-static holder, replacing the original fixed address.
+
+  - address: 0x080e421c
+    ghidra: FUN_080e421c
+    name: plst_task_complete_tree
+    size: 60
+    sig: "uintptr_t plst_task_complete_tree(u32 *task)"
+    module: ui/plst_task_complete_tree
+    status: ported
+    renames:
+      param_1/r0: task_then_child
+      r1: task_flags
+      r4: cached_next_child
+      task+0x1d: task_flags
+      task+0x20: first_child
+      child+0x08: next_child
+      FUN_08048a0c: plst_task_complete
+    notes: >-
+      Raw A32 establishes [0x080e421c,0x080e4258): fifteen instructions
+      ending with pop {r4,pc} at 0x080e4254, followed by the next real
+      prologue at 0x080e4258. Whole-image aligned BL decoding finds
+      two inbound plain calls at 0x0806127c and recursive 0x080e4244,
+      zero predicated calls. Outbound: one plain recursive BL, zero
+      predicated BLs, and conditional tail branch at 0x080e422c to
+      already-ported plst_task_complete at 0x08048a0c. Ghidra incorrectly
+      folds that callee into the function. Bit 2 takes precedence and
+      returns completion status; otherwise bit 0 walks children at
+      +0x20, caching next at +8 before recursion and ignoring child
+      results. Containers return zero; ordinary leaves preserve r0.
+      No new seams or target behavioral deviations. usize represents
+      mixed pointer/status returns; errors sign-extend on 64-bit hosts.
+      Host suite passes 15071 tests, including three new edge-case tests.
+      Production-entry smoke proves leaf pointer preservation, empty
+      container zero, and bit-2 precedence returning -50 without touching
+      an invalid child. ARM release build passes. Reviewed match.py
+      exit 1: fifteen original versus twenty-one Rust instructions.
+      LLVM delays the frame and explicitly sets container result zero;
+      cached-next recursion, flag precedence, pointer passthrough and
+      completion tail branch remain intact.
