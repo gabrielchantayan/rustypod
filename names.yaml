@@ -234930,3 +234930,35 @@ functions:
       rearranges conditional minima/final precedence. Both remain leaf
       scans with early reusable-slot returns and signed cooldown stores;
       the exported symbol is present, with no intentional fold.
+
+  - address: 0x080fc74c
+    ghidra: FUN_080fc74c
+    name: parse_result_unsupported
+    size: 40
+    sig: "u8 *parse_result_unsupported(u8 *out)"
+    module: app/parse_result_unsupported
+    status: ported
+    vars:
+      param_1: out
+      puVar1: out
+    notes: >-
+      Raw osos.dec establishes the exact extent 0x080fc74c..0x080fc773;
+      the next function starts with push at 0x080fc774. Independent ARM
+      branch decoding finds two unconditional inbound BL sites, 0x080f8b88
+      and 0x080fc3d0, and zero predicated inbound BLs. The body contains
+      one unconditional BL to parse_result_init at 0x08283168, zero
+      predicated BLs, and a tail B to parse_result_init_alias_3134 at
+      0x08283134. Both established ports preserve r0. Clears the four-byte
+      parser result, then overwrites it with status 2, code 5 and detail
+      0x2000, returning out. Callers select this result for unsupported
+      primary or secondary record-resource parser selectors; their r1/r2
+      inputs are unused here. No behavioral deviations: both initializer
+      calls and their volatile byte/byte/halfword writes are retained.
+      Host tests cover every previous byte value, both halfword alignments,
+      surrounding guard bytes, repeated invocation and pointer preservation.
+      All 14987 host tests pass; ARM release build passes. Native smoke
+      observes bytes 02 05 00 20, unchanged guards and the returned pointer.
+      match.py exits 1: LLVM emits 11 versus 10 instructions, adds a frame
+      pointer and reorders argument setup, retaining the BL and tail B.
+      Archive relocation inspection verifies both initializer targets;
+      the exported port is a distinct symbol, with no intentional fold.
