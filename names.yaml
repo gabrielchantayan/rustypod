@@ -44042,6 +44042,33 @@ functions:
       transfer to the already ported mailbox_slot_create; the slot store and
       no-NULL-guard behavior are identical.
 
+  - address: 0x080dad38
+    ghidra: thunk_FUN_0808e294
+    name: stream_mailbox_slot_create_thunk
+    size: 4
+    sig: "void stream_mailbox_slot_create_thunk(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0808e294: mailbox_slot_create
+    notes: >-
+      Raw word 0xeafecd55 is b 0x0808e294, a pure tail-branch alias of
+      the already ported mailbox_slot_create. True extent is four bytes;
+      cmp r1,#0 at 0x080dad3c starts the next real function. Independent
+      decoding of all aligned ARM branch words in osos.dec finds two plain
+      inbound BL calls at 0x082283a4 and 0x08228438, zero predicated BL
+      calls, zero inbound tail branches, and no aligned DATA references;
+      the body has zero internal BL calls. Callers construct a supplied
+      mailbox slot and the StreamCacheReadTask mailbox respectively. The
+      Rust export delegates to the existing constructor, preserving fresh
+      allocation, initialization, unconditional replacement of a populated
+      slot without deleting its old block, and the absence of NULL guards.
+      Host tests exercise empty and populated slots, untouched neighbors,
+      and preservation of the old mailbox. LLVM may intentionally fold this
+      body with mailbox_slot_create_thunk; both exports have identical
+      semantics. No new callee seam or module is needed.
+
   - address: 0x080dad34
     ghidra: thunk_FUN_0808e2b0
     name: mailbox_slot_signal_thunk

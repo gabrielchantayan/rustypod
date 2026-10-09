@@ -318,6 +318,34 @@ pub unsafe extern "C" fn mailbox_slot_create_thunk(slot: *mut *mut Mailbox) {
     mailbox_slot_create(slot);
 }
 
+/// stream_mailbox_slot_create_thunk — original: `thunk_FUN_0808e294` @
+/// 0x080dad38 (true size 4 bytes: `eafecd55` = `b 0x0808e294`).
+///
+/// The next real function starts with `cmp r1, #0` at 0x080dad3c.
+/// Independent raw ARM branch decoding finds two plain inbound BL calls
+/// (0x082283a4 and 0x08228438), zero predicated BL calls, and no tail
+/// branches or aligned address references. There are no internal BL calls.
+/// Forwards the caller-owned slot to the already ported mailbox constructor:
+/// allocates and initializes a new mailbox, then overwrites even a populated
+/// slot without deleting its previous mailbox. Neither pointer is checked.
+///
+/// Deliberate deviation: Rust delegates to the existing port rather than
+/// encoding the stock PC-relative branch. LLVM may fold this identical body
+/// with `mailbox_slot_create_thunk`; either export has the same behavior.
+/// match.py observes a frame-pointer push/mov/pop before the final branch,
+/// rather than the stock single instruction; the frame is restored before
+/// dispatch and the slot argument remains unchanged.
+///
+/// # Safety
+/// `slot` must be writable and aligned; the installed allocator and kernel
+/// create hooks must satisfy [`mailbox_create`]'s contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.stream_mailbox_slot_create_thunk")]
+#[inline(never)]
+pub unsafe extern "C" fn stream_mailbox_slot_create_thunk(slot: *mut *mut Mailbox) {
+    mailbox_slot_create(slot);
+}
+
 /// mailbox_slot_delete — original: `FUN_080a6bec` @ 0x080a6bec
 /// (32 bytes; 28 call sites).
 ///
@@ -755,6 +783,31 @@ pub(crate) mod tests {
             assert_eq!((*slot).state, 0);
             assert_eq!((*slot).id, MOCK_ID);
             assert_eq!(drain().len(), 2, "one alloc + one ROM create");
+        }
+    }
+
+    #[test]
+    fn stream_mailbox_creation_replaces_slot_without_touching_neighbors_or_old_block() {
+        let _guard = mock_hooks();
+        unsafe {
+            let mut old = Mailbox { state: 0x1234, id: 0x5678 };
+            for initial in [core::ptr::null_mut(), core::ptr::addr_of_mut!(old)] {
+                let mut slots = [core::ptr::addr_of_mut!(old), initial,
+                    core::ptr::addr_of_mut!(old)];
+                stream_mailbox_slot_create_thunk(core::ptr::addr_of_mut!(slots[1]));
+                assert_eq!(slots[0], core::ptr::addr_of_mut!(old));
+                assert_eq!(slots[2], core::ptr::addr_of_mut!(old));
+                assert_eq!(slots[1], core::ptr::addr_of_mut!(ALLOC_CELL));
+                assert_eq!((*slots[1]).state, 0);
+                assert_eq!((*slots[1]).id, MOCK_ID);
+                assert_eq!(old.state, 0x1234);
+                assert_eq!(old.id, 0x5678);
+                assert_eq!(drain(), vec![
+                    Call::Alloc(8),
+                    Call::Create { op: 2,
+                        slot: core::ptr::addr_of_mut!(ALLOC_CELL.id) as usize },
+                ]);
+            }
         }
     }
 
