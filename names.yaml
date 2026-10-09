@@ -161991,7 +161991,7 @@ functions:
       param_4/r3: primary_record_count
       param_5: secondary_records
       param_6: secondary_record_count
-      FUN_080edb8c: code_dispatch_lookup
+      FUN_080edb8c: signed_binary_search
       FUN_0839eb8c: vtable_word_callback
     notes: >-
       Raw osos.dec establishes the exact 220-byte extent
@@ -162007,9 +162007,9 @@ functions:
       Lookup failure or an out-of-range primary index dispatches 0x3f. The
       lookup helper's generic binary-search identity and fixed comparator
       addresses are verified from raw ARM, but its comparator identities are
-      deliberately not invented. Rust calls its verified device address and
-      exposes only that boundary as a host-test seam; it also forwards the
-      comparator register through the already ported vtable wrapper.
+      deliberately not invented. Rust now calls ported signed_binary_search;
+      host tests retain a lookup override. It also forwards the comparator
+      register through the already ported vtable wrapper.
   - address: 0x080d9cac
     ghidra: FUN_080d9cac
     name: bit_buffer_copy
@@ -194068,7 +194068,7 @@ functions:
       param_4/r3: primary_record_count
       param_5: secondary_records
       param_6: secondary_record_count
-      FUN_080edb8c: code_dispatch_lookup
+      FUN_080edb8c: signed_binary_search
       FUN_0839eb8c: vtable_word_callback
     notes: >-
       Raw osos.dec establishes the exact 220-byte extent
@@ -194084,9 +194084,9 @@ functions:
       Lookup failure or an out-of-range primary index dispatches 0x3f. The
       lookup helper's generic binary-search identity and fixed comparator
       addresses are verified from raw ARM, but its comparator identities are
-      deliberately not invented. Rust calls its verified device address and
-      exposes only that boundary as a host-test seam; it also forwards the
-      comparator register through the already ported vtable wrapper.
+      deliberately not invented. Rust now calls ported signed_binary_search;
+      host tests retain a lookup override. It also forwards the comparator
+      register through the already ported vtable wrapper.
   - address: 0x080d9cac
     ghidra: FUN_080d9cac
     name: bit_buffer_copy
@@ -236074,3 +236074,29 @@ functions:
       to __aeabi_memset, strlen and __rt_memcpy; the fill symbol is defined
       in the archive. LLVM changes register allocation and adds a frame
       pointer. No terminator, NULL guard or allocation is introduced.
+
+  - address: 0x080edb8c
+    ghidra: FUN_080edb8c
+    name: signed_binary_search
+    size: 100
+    sig: "void *signed_binary_search(const void *key, const void *base, u32 count, u32 stride, int (*compare)(const void *, const void *))"
+    module: util/signed_binary_search
+    status: ported
+    vars: {param_1: key, param_2: base, param_3: count, param_4: stride, param_5: compare, iVar1: midpoint, iVar2: order, iVar3: low, iVar4: element}
+    notes: >-
+      Raw extent [0x080edb8c,0x080edbf0) is 100 bytes; the next entry
+      starts a separate PUSH prologue. Whole-image aligned ARM BL scan
+      finds two incoming plain BL sites at 0x080dc954 and 0x080dc9b8,
+      zero predicated BL sites. Body has zero direct BLs and one BLX r9
+      at 0x080edbc0, invoking the caller-supplied comparator. Inclusive
+      signed bounds start at 0 and wrapping count-1. Midpoint is the
+      arithmetic right shift of the wrapping low+high sum; MLA computes
+      the element address. Negative order lowers high, positive raises
+      low, equality returns the element, exhaustion returns NULL.
+      Deliberate deviation: host base pointers retain native width while
+      index and stride arithmetic remain wrapping 32-bit. Dispatcher
+      now uses this port instead of the fixed firmware helper address.
+      Host tests cover empty/signed-negative bounds, hits and misses,
+      padded records, duplicate midpoint selection and zero stride.
+      Host suite, executable smoke and ARM release build passed.
+      match.py reports 29 versus 25 instructions, preserving ASR, MLA,
