@@ -235215,3 +235215,40 @@ functions:
       inlined/reordered, an LLVM frame, and three volatile indirect BLX
       dispatches replacing the remaining direct BLs. Byte values, setter
       order, and the original-pointer return are retained.
+  - address: 0x080f80b0
+    ghidra: thunk_FUN_080f7d4c
+    name: binding_transfer_parameter_apply
+    size: 4
+    sig: "uint32_t binding_transfer_parameter_apply(const uint8_t *binding, uint32_t parameter)"
+    module: ui/binding_transfer_parameter_apply
+    status: ported
+    vars:
+      r0: binding
+      r1: parameter
+      binding+0x0f: controller
+      binding+0x10: signed_channel
+    notes: >-
+      Raw word eaffff25 is a plain B to 0x080f7d4c. The next real
+      function begins at 0x080f80b4, establishing the four-byte extent.
+      Whole-image aligned A32 BL decoding finds two unconditional inbound
+      calls at 0x081f4824 and 0x081f487c, zero predicated inbound calls,
+      and no outbound BLs. The adapter at 0x080f7d4c moves the parameter
+      to r2, sign-extends byte +0x10 into r1, zero-extends byte +0x0f into
+      r0, and branches to 0x08038000. That veneer is e51ff004 followed
+      by 0x220086c4, the IRAM mirror of osos 0x080086c4, not mask ROM.
+      The backend selects a transfer handle using controller*32+channel*4
+      from table base 0x2200ae7c minus 32; a zero handle returns 0x11.
+      Otherwise it calls 0x08003a00 with the handle and unchanged parameter,
+      mapping zero to zero and nonzero to 0x1f. The parameter's units
+      remain unidentified. Rust inlines the byte adapter, calls the verified
+      IRAM address through an explicit ABI seam, and preserves the backend
+      status rather than Ghidra's erroneous void signature. Callers in
+      0x081f47dc pass 200 and ignore the return. Host edge coverage checks
+      signed channel selection, unsigned controller 255, empty-slot and
+      backend-error status preservation, and unchanged binding storage.
+      Verification: all 15001 host tests pass and the ARM release build
+      succeeds. Standalone host smoke observes controller 255, channel -128,
+      parameter 200, and status 0x1f. match.py exits 1 with one original
+      instruction versus ten Rust instructions: LLVM inlines the adapter,
+      adds a frame, and tail-dispatches via BX to literal 0x220086c4.
+      The unsigned/signed loads and unchanged parameter/status ABI remain.
