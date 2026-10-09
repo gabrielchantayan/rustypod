@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08102db8
+    ghidra: FUN_08102db8
+    name: query_owner_construct
+    size: 68
+    sig: "AttachedStringOwner *query_owner_construct(AttachedStringOwner *this, u32 owner, u32 flag)"
+    module: app/query_owner_construct
+    status: ported
+    vars: {param_1/r0: this, param_2/r1: owner, param_3/r2: flag, r4: this}
+    renames:
+      FUN_08277440: string_default_construct
+      FUN_082aadd4: operator_new
+      FUN_0813e474: query_object_construct
+      DAT_08102df8: attached_string_owner_vtable
+    notes: >-
+      Raw words prove [0x08102db8,0x08102dfc): 64 code bytes plus the
+      0x089806bc literal. Next function starts with PUSH at 0x08102dfc.
+      Two incoming unconditional BLs at 0x08102f18 and 0x08102ff8,
+      zero predicated; three outgoing unconditional BLs and zero predicated.
+      Writes owner at +4, vtable at +0, low flag byte at +8 without
+      clearing +9..+11, constructs the string at +16, allocates 0x48
+      bytes, calls the existing resident query constructor with id/mode
+      zero, stores its return at +12, returns this. Reuses the destructor's
+      AttachedStringOwner representation, widened on hosts, and existing
+      string/heap ports and query seam. No allocation-failure guard.
+      Host tests cover low-byte truncation, untouched padding, empty string,
+      NULL query return and initialization before backend construction.
+      Public-entry host smoke uses real host allocation and the existing
+      query seam. ARM match review preserves +16 string construction,
+      allocation size 72, zero id/mode, +12 attachment store and this return;
+      LLVM combines header stores and uses BLX for the resident constructor.
   - address: 0x08102dfc
     ghidra: FUN_08102dfc
     name: attached_string_owner_destroy

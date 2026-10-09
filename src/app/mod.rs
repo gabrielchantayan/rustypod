@@ -292,6 +292,7 @@ pub mod fixed4_weighted_difference;
 pub mod payload_record_construct;
 pub mod flag_byte_base_construct;
 pub mod message_envelope_construct;
+pub mod query_owner_construct;
 pub mod lazy_singleton_0x68_with_dependency;
 pub mod lazy_singleton_0x4a8;
 pub mod plist_file_load;
