@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fe744
+    ghidra: FUN_080fe744
+    name: record_nested_object_destruct
+    size: 36
+    sig: "NestedObjectRecord* record_nested_object_destruct(NestedObjectRecord* record)"
+    module: cxx/record_nested_object_destruct
+    status: ported
+    renames:
+      param_1/r0: record
+      r4: original_record
+      record_word_1: optional_nested_object
+      r1: nested_vtable_then_slot_1_method
+    notes: >-
+      Raw ARM establishes extent 0x080fe744..0x080fe768, ending in pop
+      {r4,pc}; the next function starts with push {r4,r5,r6,r7,r8,lr}.
+      Whole-image A32 branch decoding finds two plain inbound BLs at
+      0x083cfb38 and 0x083cfb88, zero predicated inbound BLs, zero
+      outbound direct BLs, and one BLXNE at 0x080fe75c. Loads the optional
+      object at record+4 and invokes its vtable slot +4 with that object
+      as receiver. Returns the original record regardless of virtual result;
+      does not clear its pointer or release the record. Virtual identity is
+      unresolved, so no literal-address callee seam is introduced. Host
+      repr(C) fields and vtable words widen while retaining target word
+      indices. Tests cover NULL, repeated dispatch, preserved header and
+      surrounding words, and retained callback mutations. The existing
+      collection_release_first_occupied caller uses this port instead of
+      duplicating its body.
+      ARM release build and 14973 host tests pass. match.py reports 9 stock
+      instructions versus 13 Rust instructions: LLVM branches around the
+      NULL path and adds a frame, retaining word-1 loads, one indirect BLX,
+      original-record preservation across the call, and return of that record.
   - address: 0x080ffa00
     ghidra: FUN_080ffa00
     name: retail_item_count
