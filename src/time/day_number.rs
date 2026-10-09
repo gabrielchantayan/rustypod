@@ -95,6 +95,12 @@ unsafe fn leap_month_correction() -> LeapMonthCorrectionFn {
     core::ptr::read_volatile(core::ptr::addr_of!(LEAP_MONTH_CORRECTION))
 }
 
+#[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
+pub(crate) static DAY_NUMBER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// datetime_day_number — original: `FUN_0807ea68` @ 0x0807ea68
 /// (**148 bytes, 0x0807ea68..0x0807eafc**, including the 365/367
 /// literal-pool words; 25 `bl`, 0 predicated `bl`, 0 `b` — verified by
@@ -144,9 +150,9 @@ mod tests {
 
     use super::*;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
 
-    static SEAM_LOCK: Mutex<()> = Mutex::new(());
+    use super::DAY_NUMBER_TEST_LOCK as SEAM_LOCK;
     static mut CORRECTION_CALLS: u32 = 0;
     static mut LAST_YEAR: u32 = 0;
     static mut LAST_MONTH: u32 = 0;

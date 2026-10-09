@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d890c
+    ghidra: FUN_080d890c
+    name: resource_datetime_day_number
+    size: 60
+    sig: "i32 resource_datetime_day_number(ResourceProvider *head)"
+    module: app/resource_datetime_day_number
+    status: ported
+    renames:
+      param_1/r0: head
+      uVar2/r4: day_number
+      iVar1/r0: calendar_record
+      DAT_080d8940: calendar_resource_id_80aa
+      DAT_080d8944: resource_kind_datetime
+      FUN_0827216c: resource_chain_find
+      FUN_0807ea68: datetime_day_number
+    notes: >-
+      Raw A32 establishes [0x080d890c,0x080d8948), 60 bytes including
+      52 code bytes and two literal words (0x80aa, 0x4474546d).
+      Next real function begins with cmp r0,#44 at 0x080d8948.
+      Whole-image aligned BL decoding finds two plain inbound calls
+      at 0x08140bc0 and 0x0814141c, zero predicated inbound calls.
+      Body has two plain BLs at 0x080d8924 and 0x080d8930, zero
+      predicated BLs. Both raw callers forward the result of 0x081883fc
+      and save the returned day number at receiver +0xe8.
+      NULL head or missing (DtTm,0x80aa) resource returns zero.
+      Otherwise use the existing resource_chain_find and
+      datetime_day_number ports to return Rata Die and update weekday.
+      No new seam, validation, or behavioral deviation. Host tests cover
+      NULL/missing resources, chain fallback, epoch anchors, leap and
+      non-leap century boundaries, and preservation of all fields except
+      weekday. Share the existing day-number tests' mutex to avoid races
+      with their mutable correction seam. All 15098 host tests passed;
+      ARM release build passed. Production-source standalone smoke with
+      actual lookup/conversion/division sources returned 730179 and
+      weekday 2 for 2000-02-29. No device execution claimed.
+      Reviewed match.py exit 1: 13 original code instructions versus
+      15 Rust instructions including the kind literal. LLVM uses an
+      early NULL return, mov/orr for the ID, an fp frame, and a tail
+      branch to datetime_day_number instead of BL/return. Archive
+      relocations verify R_ARM_CALL resource_chain_find and
+      R_ARM_JUMP24 datetime_day_number; both guards and constants match.
+      Optional non-test host rlib smoke build hit six existing cfg-gated
+      helper references in unrelated modules; standalone smoke avoided
+      that limitation.
   - address: 0x080d8cdc
     ghidra: FUN_080d8cdc
     name: block_engine_submit
