@@ -164,8 +164,47 @@ pub unsafe extern "C" fn task_priority_get(task: u32) -> u32 {
     record.add(TASK_PRIORITY_OFFSET).cast::<u32>().read_volatile()
 }
 
+/// Convert a retail task priority to its RTXC priority word.
+///
+/// Original: `FUN_080d7ad0` @ `0x080d7ad0`, true size 8 bytes, ending
+/// before the independent bounds helper at `0x080d7ad8`. Raw words are
+/// `e2600040 e12fff1e` (`rsb r0, r0, #64; bx lr`).
+/// Whole-image A32 decoding finds two plain inbound BL calls, at
+/// `0x080b1694` and `0x082e85bc`, and zero predicated BL calls. There
+/// are no outbound calls. Both callers pass the result to RTXC task
+/// initialization or priority setting.
+///
+/// Subtract the incoming 32-bit priority from 64 modulo 2^32. No range
+/// validation or saturation is performed. Deliberate deviations: none;
+/// the unsigned signature preserves all register bit patterns, including
+/// negative retail priorities represented in two's complement.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub extern "C" fn retail_task_priority_to_rtxc(priority: u32) -> u32 {
+    64u32.wrapping_sub(priority)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retail_priority_conversion_preserves_wrapping_edges() {
+        for (priority, expected) in [
+            (0, 64), (1, 63), (63, 1), (64, 0), (65, u32::MAX),
+            (0xffff_ffc2, 126), // -62: lower bound accepted by mode 2.
+            (u32::MAX, 65), (0x8000_0000, 0x8000_0040),
+            (0x7fff_ffff, 0x8000_0041),
+        ] {
+            assert_eq!(retail_task_priority_to_rtxc(priority), expected);
+        }
+        // Compare every valid mode-2 priority against widened signed arithmetic.
+        for priority in -62i32..=63 {
+            assert_eq!(
+                retail_task_priority_to_rtxc(priority as u32),
+                (64i64 - i64::from(priority)) as u32,
+            );
+        }
+    }
+
     extern crate std;
 
     use super::*;
