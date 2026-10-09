@@ -27,6 +27,7 @@ pub mod fat_to_datetime;
 pub mod datetime_to_mac_epoch;
 pub mod day_number;
 pub mod day_number_day_of_month;
+pub mod month_first_weekday;
 pub mod day_seconds_to_datetime;
 pub mod day_and_seconds_is_before;
 pub mod day_and_seconds_compare;

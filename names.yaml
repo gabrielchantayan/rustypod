@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d6d68
+    ghidra: FUN_080d6d68
+    name: month_first_weekday
+    size: 44
+    sig: "u32 month_first_weekday(u32 day_number)"
+    module: time/month_first_weekday
+    status: ported
+    renames:
+      param_1/r0: day_number
+      uStack_10/sp: date
+      FUN_0807eafc: day_number_to_datetime
+      FUN_0807ea68: datetime_day_number
+    notes: >-
+      Raw extent [0x080d6d68,0x080d6d94) is 44 bytes, not Ghidra's four.
+      Next entry pushes r4-r10,lr. Raw body pushes r1-r3,lr; passes sp
+      to 0x0807eafc; writes one to sp+3; passes sp to 0x0807ea68;
+      loads weekday from sp+8; maps zero to seven; returns. Full-image
+      A32 BL decoding independently finds two plain inbound calls at
+      0x08140fc8 and 0x0829b944, no predicated inbound calls, two plain
+      body calls, and no predicated body calls. Sole argument is the
+      Rata Die day number in r0; incoming r1-r3 are scratch, not arguments.
+      Return the month's first weekday, Monday=1 through Sunday=7.
+      Reuse established day_number_to_datetime seam and ported
+      datetime_day_number. calendar_day_rect now uses the Rust port.
+      Deviation: initialize unused scratch bytes instead of preserving
+      register garbage. Host tests cover first/middle/last days, every
+      weekday, leap years and century boundaries through 2400.
+      Host suite passed 15110 tests; ARM release build passed. Standalone
+      known-date smoke covered 1970-01, 2000-02, 2024-03 and 2024-01.
+      Required match.py call uses the incorrect four-byte Ghidra size;
+      --size 44 confirms conversion, day replacement, weekday reload,
+      and conditional Sunday normalization. LLVM adds initialized scratch
+      and a frame, uses the existing BLX seam and a relocated BL to
+      datetime_day_number. Both match runs print structural diffs (exit 1).
   - address: 0x080d6fe0
     ghidra: FUN_080d6fe0
     name: clock_state_day_of_year
