@@ -237197,3 +237197,24 @@ functions:
       retries, rejected selectors and wrapping. Standalone smoke returned 26
       after two refreshes. ARM match shows three unrolled BLX refreshes,
       equivalent comparisons/tags and an inlined base read. No device run.
+  - address: 0x080d7ad0
+    ghidra: FUN_080d7ad0
+    name: retail_task_priority_to_rtxc
+    size: 8
+    sig: "u32 retail_task_priority_to_rtxc(u32 priority)"
+    module: kernel/task_priority
+    status: ported
+    renames:
+      param_1/r0: priority
+    notes: >-
+      Raw words e2600040 e12fff1e establish the full eight-byte extent
+      0x080d7ad0..0x080d7ad8, before the independent mode-bounds helper.
+      Compute 64 minus priority modulo 2^32 without validation or saturation.
+      Whole-image A32 word decoding verifies two plain inbound BLs at
+      0x080b1694 and 0x082e85bc, zero predicated inbound BLs, and zero
+      outbound calls. Callers pass the converted word to the task-init
+      veneer at 0x08037e30 or task_priority_set at 0x08037ed0.
+      No deliberate semantic deviations. Host edge tests cover the valid
+      signed mode-2 range, zero, 64, underflow and signed extremes.
+      ARM match preserves rsb r0,r0,#64; LLVM adds a frame-pointer
+      prologue and returns via pop rather than bx lr.
