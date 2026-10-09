@@ -7226,6 +7226,32 @@ functions:
       first/last slots, release order, guard preservation and repeated clear.
       ARM match with true size reviewed: same loop and ownership branches,
       existing heap BL targets and indirect zero-fill tail call.
+  - address: 0x08104b88
+    ghidra: FUN_08104b88
+    name: record_payload_destroy
+    size: 40
+    sig: "SlotRecord *record_payload_destroy(SlotRecord *record)"
+    module: heap/record_payload_destroy
+    status: ported
+    vars: {param_1/r4: record, iVar1/r0: payload, param_2/r1: kind}
+    renames: {FUN_080e7970: free_wrapper}
+    notes: >-
+      Raw osos.dec A32 establishes [0x08104b88,0x08104bb0), 40 bytes;
+      the next push/zero-return function begins at 0x08104bb0. One outbound
+      BLNE at 0x08104ba4 targets ported free_wrapper at 0x080e7970.
+      Full-image branch-word scan finds two incoming plain BLs at
+      0x08063ab8 and 0x08063e64, no predicated BLs. Both callers subsequently
+      call operator_delete. Free non-NULL record+8 payload with tag 0 unless
+      byte record+12 is 0x3a, leave fields unchanged, and return record.
+      Ghidra's second argument is spurious: r1 is overwritten before use.
+      Reuse existing repr(C) SlotRecord; native host pointers widen fields,
+      target offsets stay +8/+12. Existing Rust heap seam replaces the stock
+      call; volatile field reads preserve conditional access. Host tests
+      cover all 256 kinds with NULL/non-NULL payloads, tag, field preservation
+      and returned pointer. All 14943 host tests and ARM release build pass.
+      match.py exits 1: LLVM shrink-wraps the frame onto the release path
+      and replaces BLNE with a guarded plain BL; payload and byte offsets,
+      NULL/kind comparisons, tag 0, and preserved return pointer agree.
   - address: 0x081e17d4
     ghidra: FUN_081e17d4
     name: dma_array_pair_release

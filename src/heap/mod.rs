@@ -48,6 +48,7 @@ pub mod init;
 pub mod flagged_pointer_group;
 pub mod indexed_release;
 pub mod fifteen_record_slots_clear;
+pub mod record_payload_destroy;
 pub mod indexed_pair_table_create;
 pub mod heap_poison;
 pub mod fixa_resource;
