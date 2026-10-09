@@ -923,6 +923,38 @@ pub unsafe extern "C" fn path_facade_slot_64(
     guard_dtor_fn()(guard);
     status
 }
+/// Two-C-string adapter for [`path_facade_slot_64`].
+///
+/// Original: `FUN_080f4b1c` @ **0x080f4b1c**, 80 bytes, ending before
+/// the next push at 0x080f4b6c. Whole-image ARM-word decoding verifies two
+/// inbound plain BLs (0x0817177c, 0x081717e0), zero predicated inbound BLs,
+/// and five outbound plain BLs, zero predicated outbound BLs.
+///
+/// Constructs the second path first from incoming r1, then the first path
+/// from saved r0. Invokes slot +0x64 with the first and second objects and
+/// the saved r2 base hint; destroys first, then second, and returns the
+/// operation status unchanged, including allocation-failure paths.
+///
+/// Deliberate deviations: uses typed stack storage instead of argument
+/// spill slots and calls existing ports directly. The slot's concrete
+/// operation remains unidentified; no rename/move semantics are assumed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_64_from_cstrs(
+    first_path: *const u8,
+    second_path: *const u8,
+    base_hint: u32,
+) -> u32 {
+    let mut second_storage = MaybeUninit::<StringObject>::uninit();
+    let mut first_storage = MaybeUninit::<StringObject>::uninit();
+    let second = path_object_construct(second_storage.as_mut_ptr(), second_path);
+    let first = path_object_construct(first_storage.as_mut_ptr(), first_path);
+    let status = path_facade_slot_64(first, second, base_hint);
+    string_object_destroy_veneer(first_storage.as_mut_ptr());
+    string_object_destroy_veneer(second_storage.as_mut_ptr());
+    status
+}
+
 /// path_facade_slot_5c_from_cstr — original: `FUN_08084d28` @
 /// **0x08084d28** (48 bytes; **8 direct `bl` call sites**: 7
 /// unconditional and 1 `blne`, plus 1 tail `b`, verified by decoding every
@@ -1853,6 +1885,101 @@ pub(crate) mod tests {
                 assert_eq!(QUERY_PATH_OBJECT, core::ptr::addr_of_mut!(first));
                 assert_eq!(QUERY_PATH, core::ptr::addr_of_mut!(second).cast());
                 assert_eq!(DTOR_THIS, CTOR_THIS, "the status is saved across guard destruction");
+            }
+        }
+    }
+    static mut PAIR_OBSERVED: std::vec::Vec<std::vec::Vec<u8>> = std::vec::Vec::new();
+    static mut PAIR_FAIL_ALLOCATION: bool = false;
+
+    unsafe fn pair_payload(this: *mut StringObject) -> std::vec::Vec<u8> {
+        if (*this).payload.is_null() {
+            std::vec::Vec::new()
+        } else {
+            std::ffi::CStr::from_ptr((*this).payload.cast()).to_bytes().to_vec()
+        }
+    }
+
+    unsafe extern "C" fn pair_allocate(
+        this: *mut StringObject, size: usize, _flags: u32,
+    ) -> *mut u8 {
+        if PAIR_FAIL_ALLOCATION { return core::ptr::null_mut(); }
+        let storage = std::vec![0u8; size].into_boxed_slice();
+        (*this).payload = std::boxed::Box::into_raw(storage).cast::<u8>();
+        (*this).payload
+    }
+
+    unsafe extern "C" fn pair_release(this: *mut StringObject) {
+        (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).push(pair_payload(this));
+        record(EVENT_STRING_RELEASE);
+        pair_clear(this);
+    }
+
+    unsafe extern "C" fn pair_clear(this: *mut StringObject) {
+        if !(*this).payload.is_null() {
+            let size = std::ffi::CStr::from_ptr((*this).payload.cast()).to_bytes().len() + 1;
+            drop(std::boxed::Box::from_raw(core::ptr::slice_from_raw_parts_mut(
+                (*this).payload, size,
+            )));
+            (*this).payload = core::ptr::null_mut();
+        }
+    }
+
+    unsafe extern "C" fn pair_query(
+        _facade: *mut FacadeObject, first: *mut StringObject, second: *mut StringObject,
+    ) -> u32 {
+        record(EVENT_QUERY);
+        (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).push(pair_payload(first));
+        (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).push(pair_payload(second));
+        QUERY_RESULT
+    }
+
+    #[test]
+    fn cstr_pair_preserves_contents_status_and_reverse_cleanup_on_empty_or_failed_allocation() {
+        use crate::cxx::string_object::{
+            StringObjectAssignCstrOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        };
+        let _path_lock = take_lock();
+        let _assign_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap();
+        let _release_lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        let _restore = unsafe { SeamGuard::new() };
+        let _release_restore = unsafe { StringObjectOpsGuard::new() };
+        struct AssignRestore(StringObjectAssignCstrOps);
+        impl Drop for AssignRestore {
+            fn drop(&mut self) {
+                unsafe { core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write(self.0); }
+            }
+        }
+        unsafe {
+            let _assign_restore = AssignRestore(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CSTR_OPS).read());
+            STRING_OBJECT_ASSIGN_CSTR_OPS = StringObjectAssignCstrOps {
+                allocate_payload: pair_allocate, clear_payload: pair_clear,
+            };
+            STRING_OBJECT_OPS.release_payload = pair_release;
+            for (first, second, fail, status) in [
+                (b"source\0".as_ptr(), b"destination\0".as_ptr(), false, 0),
+                (b"same\0".as_ptr(), b"same\0".as_ptr(), false, 7),
+                (core::ptr::null(), b"\0".as_ptr(), false, 0xffff_ffff),
+                (b"source\0".as_ptr(), b"destination\0".as_ptr(), true, 0xdead_beef),
+            ] {
+                install_recording();
+                PAIR_FAIL_ALLOCATION = fail;
+                (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).clear();
+                MOCK_VTABLE.slots[FACADE_PATH_SLOT_64_INDEX] = pair_query as usize;
+                QUERY_RESULT = status;
+                assert_eq!(path_facade_slot_64_from_cstrs(first, second, 0xffff_ff80), status);
+                let expected = |p: *const u8| {
+                    if fail || p.is_null() { std::vec::Vec::new() }
+                    else { std::ffi::CStr::from_ptr(p.cast()).to_bytes().to_vec() }
+                };
+                let first = expected(first);
+                let second = expected(second);
+                assert_eq!(&*core::ptr::addr_of!(PAIR_OBSERVED),
+                    &[first.clone(), second.clone(), first, second]);
+                assert_eq!(&EVENTS[..EVENT_COUNT], &[
+                    EVENT_GUARD_CTOR, EVENT_FETCH, EVENT_QUERY, EVENT_GUARD_DTOR,
+                    EVENT_STRING_RELEASE, EVENT_STRING_RELEASE,
+                ]);
+                assert_eq!(CTOR_HINT, 0xffff_ff80);
             }
         }
     }

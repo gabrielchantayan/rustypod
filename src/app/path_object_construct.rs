@@ -70,8 +70,8 @@
 //! iTunesDB), 0x08084d38 (the remove wrapper's guard), 0x080890c4,
 //! 0x08089168, 0x080891f0, 0x08090bd4, 0x0809b688, 0x080a8ec0,
 //! 0x080f4ab8 (the [`crate::app::path_exists`] wrapper), 0x080f4b2c /
-//! 0x080f4b3c (the `FUN_080f4b1c` pair — Ghidra shows no r1 write for
-//! the first, a stale-register construction of an empty path),
+//! 0x080f4b3c (the `path_facade_slot_64_from_cstrs` pair — incoming
+//! r1 constructs the second path, then saved r0 constructs the first),
 //! 0x08100980, 0x08117914, 0x0811af80, 0x0811c5bc, 0x08136570,
 //! 0x081a29b0, 0x081a2c54, 0x081afdfc, 0x081b0018, 0x081bc670 and
 //! 0x081bda2c. Every site passes raw two-word storage in r0 and a path
