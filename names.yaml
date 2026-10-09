@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d8840
+    ghidra: FUN_080d8840
+    name: indexed_resource_word
+    size: 32
+    sig: "i32 indexed_resource_word(u32 index, u32 *output)"
+    module: app/indexed_resource_word
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: output
+      DAT_080d885c: indexed_resource_words
+    notes: >-
+      Raw A32 extent is [0x080d8840,0x080d8860): 28 code bytes plus
+      the literal 0x083e250c at 0x080d885c; next real entry is a push.
+      Zero outbound plain or predicated BLs. Whole-image aligned ARM
+      decoding finds two inbound plain BLs at 0x0813e10c and 0x081723c4,
+      zero predicated. NULL output returns -50 before accessing the table;
+      otherwise load table[index], store one word, and return zero.
+      Both callers consume the word as a resource identifier. Table content
+      and bounds are not inferred; the fixed retail address is retained.
+      Index scaling wraps at 32 bits as in ARM lsl #2. No callee seams.
+      Host tests inject aligned table storage into the inlined implementation
+      and exercise NULL, word stride, full-bit values, wrapping, and aliasing.
   - address: 0x080d890c
     ghidra: FUN_080d890c
     name: resource_datetime_day_number

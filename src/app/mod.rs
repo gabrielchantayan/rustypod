@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod indexed_resource_word;
+pub use indexed_resource_word::*;
 pub mod kinded_interface_initialize;
 pub use kinded_interface_initialize::*;
 pub mod controller_event_class;
