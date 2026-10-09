@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080efb94
+    ghidra: FUN_080efb94
+    name: usb_out_endpoint_zero_rearm
+    size: 52
+    sig: "void usb_out_endpoint_zero_rearm(void)"
+    module: drivers/usb_out_endpoint_zero_rearm
+    status: ported
+    vars: {r0: controller_base, r1: register_value_or_saved_dma}
+    renames:
+      DAT_080efbc0: endpoint_zero_receive_size_0x60080040
+      DAT_080efbc4: saved_dma_address_0x08a09f8c
+      _DAT_38400b10: DOEPTSIZ0
+      _DAT_38400b14: DOEPDMA0
+      _DAT_38400b00: DOEPCTL0
+    notes: >-
+      Raw A32 extent [0x080efb94,0x080efbc8) contains 44 instruction
+      bytes and eight literal bytes, followed by the next function PUSH.
+      Whole-image word decoding verifies two incoming plain BLs at
+      0x080817c8 and 0x08108240, zero predicated incoming BLs, and zero
+      outgoing BLs of either kind. No arguments or defined return value.
+      Rearm USB OUT endpoint zero: write size 0x60080040, read the saved
+      DMA word at 0x08a09f8c, clear bit 31 and write DMA, then OR control
+      with 0x88000000. No callee seams. Volatile aligned accesses preserve
+      order; host substitutes isolated storage. Tests cover DMA boundaries,
+      control preservation, neighbors and size-before-DMA-read ordering.
+      All 15048 host tests and ARM release build pass. Public-entry smoke
+      verifies writes, source preservation and repeated rearm. No device
+      execution. match.py exits 1: LLVM adds a frame and rebases MMIO;
+      both masks and ordered accesses remain, with no calls or symbol fold.
   - address: 0x080f10ec
     ghidra: FUN_080f10ec
     name: list_remove
