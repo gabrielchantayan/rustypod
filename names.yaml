@@ -236439,3 +236439,32 @@ functions:
       exercises the entry point. ARM match retains mov r0,#86 but adds
       push {fp,lr}, mov fp,sp, and pop {fp,pc} instead of bx lr.
       Host suite and ARM release build pass; hardware execution not tested.
+
+  - address: 0x080e2f28
+    ghidra: FUN_080e2f28
+    name: settings_dispatch_three_words
+    size: 52
+    sig: "u32 settings_dispatch_three_words(u32 first, u32 second, u32 third)"
+    module: cxx/settings_dispatch_three_words
+    status: ported
+    renames:
+      param_1: first
+      param_2: second
+      param_3: third
+      piVar1: settings
+      FUN_08259928: settings_get
+    notes: >-
+      Raw ARM establishes the 52-byte extent through BX ip at 0x080e2f58;
+      the next function starts at 0x080e2f5c. Two outgoing plain BLs target
+      settings_get at 0x08259928, with no predicated outgoing BLs. Full
+      aligned-image BL decoding finds one plain inbound call at 0x08393620
+      and one BLNE at 0x0839370c. Discard the first lookup, reacquire settings,
+      then tail-dispatch vtable word 4 (+0x10) with the original three words.
+      Preserve the virtual return word rather than Ghidra's inferred void.
+      Virtual method identity and argument meanings remain unresolved.
+      Host vtables use native pointer width at identical word indices.
+      Existing settings_get constructor limitation remains: not hook-ready
+      with its default zeroed object. Host tests cover null/different first
+      results, second-object selection, full-width words and return values.
+      Entry smoke with a fixture getter observes two lookups and state update.
+      All 15075 host tests and ARM release build pass. match.py retains both
