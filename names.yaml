@@ -25762,6 +25762,32 @@ functions:
       arithmetic through a below-4GiB target-width fixture. match.py review
       found the same three loads, scaled subtraction, add, and final subtract;
       LLVM adds a frame and reorders the independent subtraction before ldrh.
+  - address: 0x080f86ac
+    ghidra: FUN_080f86ac
+    name: text_line_address
+    size: 24
+    sig: "u32 text_line_address(const TextLineOffsetLayout *layout, u32 line_index)"
+    module: ui/text_line_address
+    status: ported
+    renames:
+      param_1/r0: layout
+      param_2/r1: line_index
+      r4: saved_layout
+      r1_after_call: line_base
+      r0_after_call: big_endian_line_offset
+    notes: >-
+      Raw osos.dec verifies 24 bytes over 0x080f86ac..0x080f86c4, ending
+      in pop {r4,pc} before the next function push. Whole-image ARM decoding
+      finds two plain inbound BLs at 0x080f85a8 and 0x080f85c0, no predicated
+      inbound BLs, and one plain outbound BL at 0x080f86b4 to the already
+      ported text_line_offset_read_be (0x080f867c). Ghidra omits the live r1
+      line-index argument. Returns the wrapping u32 sum of the indexed
+      big-endian line offset and line base, loaded after the call. Reuses
+      the target-width layout prefix and returns a u32 address rather than
+      a host pointer. All 14996 host tests pass, including indexed slots,
+      endian-asymmetric values and overflow; ARM release builds. match.py
+      shows six stock versus seven Rust instructions: helper BL, post-call
+      load and add retained; LLVM adds a frame and swaps add operands.
   - address: 0x0811e1c4
     ghidra: FUN_0811e1c4
     name: ui_clear_pending_notify
