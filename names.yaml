@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c9cf0
+    ghidra: FUN_080c9cf0
+    name: tt_cmap2_subheader
+    size: 108
+    sig: "const u8 *tt_cmap2_subheader(const u8 *table, u32 char_code)"
+    module: ft/cmap2_subheader
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: char_code
+      r3: subheader_keys
+      r2: selected_subheader
+    notes: >-
+      Raw extent [0x080c9cf0,0x080c9d5c) is 108 executable bytes,
+      ending BX LR; next function starts PUSH at 0x080c9d5c.
+      Whole-image aligned A32 decoding verifies two inbound plain BLs
+      at 0x08394b9c and 0x08394c48, no predicated inbound BLs,
+      and no outgoing plain or predicated BLs. Selects a TrueType
+      format-2 cmap subheader from big-endian keys at table +6.
+      Codes >=0x10000 return NULL without accessing the table.
+      Single-byte codes require an exactly zero key, returning table
+      +0x206. Two-byte codes index by high byte, clear the low three
+      key bits, reject zero, and add the offset to table +0x206.
+      Callers consume firstCode, entryCount, idDelta and idRangeOffset.
+      Full registry scan found no existing entry; no callee seam needed.
+      Native-width host pointers are the only deliberate deviation;
+      byte loads preserve unaligned big-endian access. All 15152 host
+      tests and ARM release build passed. Tests cover odd alignment,
+      exact zero discrimination, flag masking, endian offsets, byte
+      boundaries and unreadable NULL tables for non-BMP codes.
+      Production-source smoke passed five selection/rejection paths.
+      Reviewed match.py exit 1: selection and rejection preserved;
+      LLVM adds a frame and endian-swapped mask literal 0xfffff800.
+      Export remains distinct and makes no calls. No device run claimed.
   - address: 0x080ca12c
     ghidra: FUN_080ca12c
     name: codec_cached_aux_level_set
