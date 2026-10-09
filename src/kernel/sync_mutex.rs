@@ -351,6 +351,25 @@ pub unsafe extern "C" fn mutex_delete_veneer(mutex: *mut Mutex) {
     mutex_delete(mutex);
 }
 
+/// mutex_delete_veneer_d7108 — original: `thunk_FUN_0807f650` @
+/// 0x080d7108 (4 bytes; 2 unconditional plain `bl` callers, zero predicated
+/// `bl` callers: raw-image scan finds 0x081e6a24 and 0x081f4c90).
+///
+/// The entire body is `b 0x0807f650` (`0xeafea150`); the next real entry,
+/// 0x080d710c, branches to mutex_unlock. Passes the mutex unchanged to
+/// [`mutex_delete`], destroying its live semaphore cell before clearing
+/// its pointer, while preserving the unused word. No mutex NULL guard.
+/// Deliberate deviation: a normal Rust call represents the tail branch;
+/// a distinct text section prevents folding with the other delete veneer.
+/// ARM codegen adds a balanced frame-pointer prologue/epilogue before the
+/// tail branch; its R_ARM_JUMP24 relocation targets mutex_delete.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.mutex_delete_veneer_d7108")]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_delete_veneer_d7108(mutex: *mut Mutex) {
+    mutex_delete(mutex);
+}
+
 
 /// A heap-owned object whose only identified members are two mutexes.
 ///
@@ -619,6 +638,55 @@ mod tests {
 
     /// Serializes tests that swap the global ops table / mock state.
     static OPS_LOCK: StdMutex<()> = StdMutex::new(());
+
+    #[test]
+    fn delete_d7108_clears_absent_and_zero_handle_cells_without_freeing() {
+        let _guard = mock_kernel();
+        let mut cell: u32 = 0;
+        for pointer in [core::ptr::null_mut(), &mut cell as *mut u32] {
+            let mut mutex = Mutex { sem_cell: pointer, unused: 0xdeadbeef };
+            unsafe { mutex_delete_veneer_d7108(&mut mutex) };
+            assert!(mutex.sem_cell.is_null());
+            assert_eq!(mutex.unused, 0xdeadbeef);
+            assert_eq!(cell, 0);
+            assert_eq!(calls(), vec![]);
+        }
+    }
+
+    #[test]
+    fn delete_d7108_destroys_before_clear_and_preserves_static_cell() {
+        static mut ACTIVE_MUTEX: *mut Mutex = core::ptr::null_mut();
+        unsafe extern "C" fn observe_delete(kind: u32, cell: *mut u32) {
+            assert_eq!((*ACTIVE_MUTEX).sem_cell, cell);
+            assert_eq!(*cell, 0x1234);
+            record(Call::Delete(kind, cell as usize));
+        }
+        let _guard = mock_kernel();
+        unsafe {
+            let saved = ROM_KERNEL;
+            ROM_KERNEL.sema_delete = observe_delete;
+            for early in [false, true] {
+                CALLS.lock().unwrap().clear();
+                let mut heap_cell = 0x1234;
+                EARLY_SEM_CELL = 0x1234;
+                let cell = if early { core::ptr::addr_of_mut!(EARLY_SEM_CELL) }
+                    else { &mut heap_cell };
+                let mut mutex = Mutex { sem_cell: cell, unused: 0xdeadbeef };
+                ACTIVE_MUTEX = &mut mutex;
+                mutex_delete_veneer_d7108(&mut mutex);
+                assert!(mutex.sem_cell.is_null());
+                assert_eq!(mutex.unused, 0xdeadbeef);
+                assert_eq!(*cell, 0);
+                let mut expected = vec![Call::Delete(1, cell as usize)];
+                if !early { expected.push(Call::Free(cell as usize)); }
+                assert_eq!(calls(), expected);
+                mutex_delete_veneer_d7108(&mut mutex);
+                assert_eq!(calls(), expected);
+            }
+            ACTIVE_MUTEX = core::ptr::null_mut();
+            ROM_KERNEL = saved;
+        }
+    }
 
     #[test]
     fn guarded_state_byte_snapshots_after_wait_before_signal() {
