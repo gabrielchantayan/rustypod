@@ -7,22 +7,21 @@
 //! no tail branches.
 //!
 //! The element has a 49-word slot table at `+0x3ac`. Slot one is materialized
-//! as a 20-byte record `{ unknown, count, byte_len, completed_count, ... }`;
+//! as a `20 + count * 4` byte record `{ unknown, count, byte_len, completed_count, ... }`;
 //! a resource callback fills its items and completion count. Other slots first
 //! materialize slot one, then clone the element's `+0x3b0` source buffer and
 //! hand that clone to an unported population routine.
 
 use crate::app::resource::cache::resource_callback_dispatch;
 use crate::heap::veneers::{free_tag4, malloc_tag4};
+use crate::ui::allocate_slot_record::allocate_slot_record_with;
 
 const SLOT_COUNT: u32 = 49;
 const SLOT_TABLE_WORD: usize = 0xeb;
 const SLOT_SOURCE_WORD: usize = 0xec;
 const HEADER_LINK_WORD: usize = 0x10;
 const HEADER_ITEM_COUNT_OFFSET: usize = 0x2e;
-const SLOT_RECORD_SIZE: usize = 0x14;
 const SLOT_COUNT_WORD: usize = 1;
-const SLOT_BYTES_WORD: usize = 2;
 const SLOT_COMPLETED_COUNT_WORD: usize = 3;
 const BUFFER_SIZE_WORD: usize = 2;
 const SLOT_ONE_CALLBACK: usize = 0x080d_9250;
@@ -132,8 +131,8 @@ unsafe fn write_slot(element: *mut u8, selector: u32, slot: *mut u8) {
 /// text/data extent end at `0x080df290`).
 ///
 /// Rejects selectors >=49 with `-50`. A non-NULL cached slot succeeds without
-/// invoking any callee. Selector one allocates a 20-byte record, stores the
-/// header count and `count * 4`, dispatches callback `0x080d9250` through the
+/// invoking any callee. Selector one allocates a `20 + count * 4` byte record,
+/// stores the header count and total allocation size, dispatches callback `0x080d9250` through the
 /// element's resource root, and retains the record only when its `+0x0c`
 /// completion count equals `+0x04`. Other selectors recursively materialize
 /// slot one, clone the non-NULL `+0x3b0` source buffer, call stock
@@ -143,10 +142,10 @@ unsafe fn write_slot(element: *mut u8, selector: u32, slot: *mut u8) {
 /// plain `bl` calls and no predicated `bl` forms. The function has no NULL or
 /// alignment guard for an in-range `element`, just as the retail ARM does.
 ///
-/// Deliberate deviations: `FUN_080d8cac` and `FUN_080da6a0` are folded into
-/// their recovered allocation/initialization sequences using the already
-/// ported tag-4 allocator. The remaining unported `0x0809ef6c` population
-/// routine is an explicit target seam. The source copy is a volatile byte
+/// Deliberate deviations: slot allocation shares the recovered
+/// `allocate_slot_record` algorithm with this function's allocator boundary.
+/// `FUN_080da6a0` remains folded into its recovered copy sequence. The
+/// remaining unported `0x0809ef6c` population routine is an explicit target seam. The source copy is a volatile byte
 /// loop rather than the stock generic-copy dispatch; it preserves the copied
 /// bytes and avoids an ARM libc memcpy substitution.
 ///
@@ -172,13 +171,10 @@ pub unsafe extern "C" fn materialize_plst_slot(element: *mut u8, selector: u32) 
     let slot = if selector == 1 {
         let header = read_target_word(element, HEADER_LINK_WORD) as usize as *mut u8;
         let count = header.add(HEADER_ITEM_COUNT_OFFSET).cast::<u16>().read() as u32;
-        let slot = (ops.allocate)(SLOT_RECORD_SIZE);
+        let slot = allocate_slot_record_with(count, ops.allocate);
         if slot.is_null() {
             return OUT_OF_MEMORY;
         }
-        write_target_word(slot, SLOT_COMPLETED_COUNT_WORD, 0);
-        write_target_word(slot, SLOT_COUNT_WORD, count);
-        write_target_word(slot, SLOT_BYTES_WORD, count.wrapping_mul(4));
         let root = read_target_word(element, HEADER_LINK_WORD) as usize as *mut u8;
         let status = (ops.callback_dispatch)(root, SLOT_ONE_CALLBACK, slot);
         if status != 0 || read_target_word(slot, SLOT_COMPLETED_COUNT_WORD) != count {
@@ -355,7 +351,7 @@ mod tests {
             assert_eq!(read_slot(element, 1), record);
             assert_eq!(record.cast::<u32>().read(), 0xa5a5_5a5a);
             assert_eq!(read_target_word(record, SLOT_COUNT_WORD), 3);
-            assert_eq!(read_target_word(record, SLOT_BYTES_WORD), 12);
+            assert_eq!(read_target_word(record, 2), 32);
             assert_eq!(read_target_word(record, SLOT_COMPLETED_COUNT_WORD), 3);
             assert_eq!((DISPATCH_CALLS, LAST_ROOT, LAST_CALLBACK, LAST_CONTEXT), (1, bench.base, SLOT_ONE_CALLBACK, record));
             assert_eq!(FREE_CALLS, 0);
