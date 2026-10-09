@@ -26330,6 +26330,34 @@ functions:
       semicolon, line ending, control-Z, or EOF; delimiter_state becomes 1,
       2, or 3 for the latter cases. Calls the shared port of 0x080c850c
       on both host and target; no deliberate algorithm deviations.
+  - address: 0x080c84a4
+    ghidra: FUN_080c84a4
+    name: afm_scan_to_line_end
+    size: 104
+    sig: "u8 *afm_scan_to_line_end(AfmScanner *scanner)"
+    module: util/afm_next_statement_token
+    status: ported
+    renames:
+      param_1/r0: scanner
+      iVar1/r0: line_start
+      "[scanner + 0x0]": cursor
+      "[scanner + 0x8]": end
+      "[scanner + 0xc]": delimiter_state
+      FUN_080c850c: afm_next_non_horizontal_space
+    notes: >-
+      Raw osos.dec words establish the 104-byte extent 0x080c84a4..0x080c850c;
+      the next function begins with ldr r1,[r0,#12]. One outgoing plain BL
+      at 0x080c84ac calls afm_next_non_horizontal_space; zero predicated BLs.
+      Whole-image A32 decoding finds inbound BLNE at 0x080adda8 and plain
+      BL at 0x080b61ac. After the shared whitespace helper, signed state >= 2
+      returns NULL. Otherwise return cursor - 1 and consume through CR/LF
+      (state 2), control-Z or EOF (state 3), ignoring semicolons and NUL.
+      State 1 skips initial byte consumption; negative states remain active.
+      No algorithm deviations; wrapping subtraction preserves address behavior.
+      Removed the obsolete retail/host seam and duplicate test implementation.
+      Host edge tests, full host suite, ARM build and runtime smoke pass.
+      match.py shows LLVM frame setup and branches replacing predication;
+      signed early exit, bounded loop, result and state stores remain intact.
   - address: 0x080c850c
     ghidra: FUN_080c850c
     name: afm_next_non_horizontal_space
