@@ -236690,3 +236690,31 @@ functions:
       All three dependencies remain verified firmware-address seams;
       none has an existing names.yaml entry. Native host pointer fields
       support classifier tests; ARM segment stride is 48 bytes.
+
+  - address: 0x080db71c
+    ghidra: FUN_080db71c
+    name: pmu_timed_mode_status
+    size: 120
+    sig: "i32 pmu_timed_mode_status()"
+    module: drivers/pmu_timed_mode_status
+    status: ported
+    renames:
+      local_18: response
+      iVar4: result
+      iVar3: status
+      puVar1: state
+      uVar2: interval
+    notes: >-
+      Raw A32 extent is 0x080db71c..0x080db794: 112 instruction bytes
+      and two literals, followed by a distinct push at 0x080db794.
+      Two plain inbound BLs at 0x080c9ba0 and 0x08148ef8; six plain
+      outgoing BLs; zero predicated BLs in either direction. Holds semaphore
+      18, calls verified unported preparation routine 0x080bfbec, sleeps
+      80 ticks, and polls saved tick at 0x089cd928 for 80000 microseconds.
+      Queries PMU mode 1 with response initialized to 0xffffffff. Successful
+      queries return signed bits 4..11, mapping 15 to 100; errors return -1.
+      Always clears active word 0x089cd924 before signaling semaphore 18.
+      Deviations: existing Rust semaphore, timer, sleep and PMU ports;
+      typed raw preparation seam; volatile shared state accesses. Host tests
+      cover all 256 signed byte values, untouched responses, query errors,
+      repeated polling with changed ticks, cleanup ordering and adjacent data.
