@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08106a04
+    ghidra: FUN_08106a04
+    name: fill_elements
+    size: 136
+    sig: "void fill_elements(void *context, uint8_t *destination, u32 value, i32 element_width, i32 count)"
+    module: util/fill_elements
+    status: ported
+    vars: {param_1/r0: unused_context, param_2/r1: destination, param_3/r2: value, param_4/r3: element_width, param_5/ip: count, r0_after_reset: element_index}
+    notes: >-
+      Raw extent [0x08106a04,0x08106a8c) is 34 A32 instructions ending
+      in BX LR before the next function's PUSH. Independent whole-image
+      aligned word decoding finds two plain inbound BLs at 0x08106584
+      and 0x081065b0, zero predicated inbound BLs and zero outbound BLs
+      of either kind. Both callers ignore r0 and supply a fill context,
+      destination, value, width and signed element count; the context is
+      unused. Widths 1, 2 and 4 store the low 8, 16 and 32 bits respectively
+      to consecutive elements. Null destination, unsupported width and
+      nonpositive count do not write. No callee seam. Typed volatile stores
+      retain scalar store widths and avoid LLVM libc substitution; Rust
+      separates the loops rather than predicating stores. Callers discard
+      the original scratch-register r0 result, so the signature is void.
+      Host tests sweep supported widths, aligned offsets, counts 0..64,
+      truncation values, canaries, null pointers, invalid widths and signed
+      count boundaries. All 14938 host tests and ARM release build pass.
+      Standalone smoke fills three halfwords and preserves trailing bytes.
+      match.py exits 1: 34 original versus 26 Rust instructions, preserving
+      width dispatch and three scalar loops with no calls. LLVM hoists
+      guards, counts down and adds a frame. No physical-device verification.
   - address: 0x081070a0
     ghidra: FUN_081070a0
     name: liti_handle_class_check

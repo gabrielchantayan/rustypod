@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod fill_elements;
 pub mod owner_buffer_release;
 pub mod wave_has_small_tagged_descriptor;
 pub mod wave_find_chunk;
