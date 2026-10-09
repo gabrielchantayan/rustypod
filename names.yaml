@@ -237973,3 +237973,43 @@ functions:
       evidence for this literal; no comparator identity or Rust seam is
       invented. No Rust implementation, behavior tests, ARM build, or
       match.py parity claim is made for this identified-only deferral.
+
+  - address: 0x080ce550
+    ghidra: FUN_080ce550
+    name: text_scratch_buffer_reserve
+    size: 88
+    sig: "i32 text_scratch_buffer_reserve(u32 *state, u32 required)"
+    module: app/text_scratch_buffer_reserve
+    vars:
+      param_1/r0: state
+      param_2/r1: required
+      "state+0x400e4": capacity
+      "state+0x400e8": buffer
+    renames:
+      FUN_0805d070: free_tag4
+      FUN_0805d1d4: malloc_tag4
+    status: ported
+    notes: >-
+      Raw A32 decoding establishes the 88-byte extent 0x080ce550..0x080ce5a8,
+      where the next independent function starts with push {r4,r5,r6,lr}.
+      The body has two plain BLs and zero predicated BLs. Whole-image word
+      decoding finds two plain inbound BLs at 0x080be3cc and 0x080be558,
+      zero predicated BLs. Caller 0x080be330 uses this buffer for text
+      conversion. Unsigned capacity comparison skips allocation when sufficient;
+      growth frees a nonzero old tag-4 buffer, clears pointer and capacity,
+      and allocates exactly required bytes. NULL allocation returns -108;
+      capacity is updated only on success. With an already NULL pointer,
+      failure retains stale capacity because the original skips both clears.
+      Existing canonical free_tag4 and malloc_tag4 seams are reused.
+      Target-width word indices retain firmware offsets on 64-bit hosts.
+      Host tests cover zero/equal/smaller requests, high-bit unsigned ordering,
+      successful growth, destructive failure, stale NULL-owner capacity,
+      allocation/free ordering and unchanged surrounding words.
+      All 15137 host tests passed; ARM release build succeeded.
+      match.py reports 27 Rust instructions versus 22 original instructions:
+      unsigned skip, guarded free, allocation, pointer store, NULL error -108
+      and success capacity publication are retained. LLVM reverses the two
+      independent zero stores after free; exclusive state ownership makes
+      this unobservable. Existing heap-seam deviations remain unchanged.
+      Standalone host smoke with failing allocation exercised reuse and
+      stale-capacity failure; no device execution is claimed.
