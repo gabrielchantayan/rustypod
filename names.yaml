@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080dad3c
+    ghidra: FUN_080dad3c
+    name: optional_link_allows_dispatch
+    size: 72
+    sig: "u32 optional_link_allows_dispatch(u32 dispatcher, const u32 *optional_link)"
+    module: util/optional_link_allows_dispatch
+    status: ported
+    vars:
+      param_1: dispatcher
+      param_2: optional_link
+      piVar2: link
+      piVar1: association
+    notes: >-
+      Raw A32 extent [0x080dad3c,0x080dad84) is 72 bytes, ending in
+      BX LR at 0x080dad80 before the next independent PUSH at 0x080dad84.
+      Zero outgoing plain or predicated BLs. Whole-image aligned word
+      decoding finds two incoming plain BLs at 0x08046af4 and 0x08047774,
+      zero predicated BLs. Accepts a null optional pair. Otherwise pair[0]
+      must be nonzero and its first word must equal dispatcher; pair[1]
+      must be zero, UINT32_MAX, or a record whose second word equals pair[0].
+      Aligned u32 fields preserve the target pointer layout on hosts.
+      No callee seams or behavioral deviations. Existing Rust caller
+      dispatch_if_optional_link_valid now invokes this port rather than
+      the retail validator address or a host validator replacement.
+      Host matrix covers ownership, missing links, both sentinels, matching
+      and mismatching back-references, and rejection before invalid dereference.
+      Host suite and ARM release build pass. match.py reports 18 original
+      instructions versus 23 Rust instructions: LLVM adds frame setup and
+      lowers the two sentinel comparisons to SUB/CMN and equality to CLZ.
+      Ownership rejection and guarded back-reference load remain intact,
+      with no outgoing BLs. Standalone caller smoke observed accepted and
+      sentinel dispatch results of 91 and mismatched back-reference result 0.
   - address: 0x080dc8d8
     ghidra: FUN_080dc8d8
     name: text_pair_break_action
@@ -95942,9 +95974,9 @@ functions:
       first node word, or zero dispatcher returns zero before validation.
       Otherwise the optional-link validator receives (dispatcher,
       optional_link); a zero result returns zero and a nonzero result
-      tail-dispatches the original four arguments. Both callees remain
-      unported: host tests use seams, while ARM assembly calls their verified
-      retail addresses and preserves the tail-call contract. Ghidra's claimed
+      tail-dispatches the original four arguments. Validation now calls the
+      Rust optional_link_allows_dispatch port on host and ARM. Only the tree
+      dispatcher remains a host seam and a retail ARM tail target. Ghidra's claimed
       larger body is incorrect because it merges this wrapper with
       0x080d189c.
   - address: 0x08046c24
