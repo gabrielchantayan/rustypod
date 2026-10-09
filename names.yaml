@@ -238962,3 +238962,38 @@ functions:
       null arrays and verifies diagnostic and unchanged header. Whole-crate
       non-test host smoke was blocked by existing missing functions in
       prepare_entry_metadata and calendar_schedule. No device execution.
+
+  - address: 0x080beaf8
+    ghidra: FUN_080beaf8
+    name: media_player_apply_context_flag
+    size: 44
+    sig: "u32 media_player_apply_context_flag(const MediaFlagOwner *owner)"
+    module: app/media_player_apply_context_flag
+    status: ported
+    renames:
+      param_1/r4: owner
+      piVar1/r0: player
+      r1: context_then_normalized_flag
+      r2: vtable_then_apply_flag
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw words establish extent 0x080beaf8-0x080beb24 (44 bytes), followed
+      by an independent push prologue. One outgoing plain BL to the already
+      ported media_player_get, zero predicated BLs, and a virtual BX tail
+      dispatch; whole-image raw scanning finds two incoming plain BLs
+      (0x080648b0 and 0x08067a78), zero predicated incoming BLs.
+      Load owner's context pointer at +0xf00, unsigned byte at context
+      +0xb1a, normalize zero to 0 and any nonzero to 1, and invoke player
+      vtable slot +0xc0 (word index 48). Caller 0x08067a58 stores the byte
+      before dispatch; caller 0x0806487c applies it during context refresh.
+      Neither virtual target identity nor flag meaning is guessed.
+      Opaque u32 result preserves raw tail-dispatch r0, unlike Ghidra void.
+      No NULL guards added. Host getter seam and native-pointer vtable
+      retain target word indices; repr(C) owner keeps context at +0xf00.
+      Reuses the singleton port with its documented NOT-HOOK-READY caveat.
+      All 15184 host tests passed, including every byte value and the
+      nonzero-to-zero state transition; isolated real-source smoke confirms
+      flags 0,128,255,0 and previous-state return propagation. ARM release
+      build succeeded. match.py exit 1 reports 11 original versus 12 Rust
+      instructions: same field loads, normalization and BX tail dispatch,
+      with LLVM frame setup and a larger saved-register set. No device run.
