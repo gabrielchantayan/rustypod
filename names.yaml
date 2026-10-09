@@ -235003,3 +235003,46 @@ functions:
       pointer and reorders argument setup, retaining the BL and tail B.
       Archive relocation inspection verifies both initializer targets;
       the exported port is a distinct symbol, with no intentional fold.
+
+  - address: 0x080fae44
+    ghidra: FUN_080fae44
+    name: cache_slot_find
+    size: 124
+    sig: "u32 cache_slot_find(const u8* manager, u32 block)"
+    module: app/cache_slot_find
+    status: ported
+    renames:
+      param_1/r4: manager
+      param_2/r5: block
+      uVar1/r0: index
+      uVar2/r1: result
+      uStack_10: result_record
+    notes: >-
+      Raw A32 words prove extent [0x080fae44, 0x080faec0), 124 bytes
+      without literals, ending in pop before the next real function push.
+      Whole-image decoding finds two plain incoming BLs at 0x080f9950
+      and 0x080f9e9c, zero predicated incoming BLs. Two outgoing plain
+      BLs at 0x080fae60 and 0x080faeb4 call the already ported
+      parse_result_init (0x08283168) and parse_result_destroy
+      (0x08283178); no predicated outgoing BLs. Initialize a local
+      four-byte parser result to zero, snapshot count at manager+0x468,
+      then scan count 60-byte records beginning at +0x46c. A nonzero
+      valid byte at record+0x19 permits comparison of its aligned key
+      word with block & 0xffffff80. Return the first matching index
+      OR 0x80000000, or zero on miss, and destroy the local result.
+      Read/write callers distinguish a resident slot by bit 31 and use
+      cache_slot_select on misses. Deliberate deviations: omit unused
+      r2/r3 arguments (saved r3 only reserves local stack space), use
+      volatile reads for the count snapshot and valid-before-key order,
+      and allow LLVM to remove the empty destructor. Host tests cover
+      empty/count-limited scans, invalid slots, first-match precedence,
+      all low-seven-bit offsets, unsigned extreme keys, unaligned stored
+      keys and manager immutability. Direct host smoke returns 0x80000001
+      for block 0xffffffff and zero for an invalid matching slot.
+      Full host suite passes 14991 tests; ARM release build succeeds.
+      match.py reports 37 Rust versus 31 original instructions: same
+      count snapshot, key mask, valid-byte-before-key scan, 60-byte stride,
+      first-hit flag and zero miss. LLVM strength-reduces record indexing
+      to pointer advancement, adds its frame prologue and initial local
+      zero store, retains the initializer call and removes the empty
+      destructor call. No semantic deviation or new firmware seam.

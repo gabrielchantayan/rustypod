@@ -5,6 +5,7 @@ pub mod scsi_error_recovery_page;
 pub mod scsi_informational_exceptions_page;
 pub mod scsi_vendor_page;
 pub mod cache_slot_select;
+pub mod cache_slot_find;
 pub mod media_state_snapshot_reset;
 pub mod timing_wheel_node_destroy;
 pub mod collection_type_one_prune;
