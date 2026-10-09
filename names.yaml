@@ -238056,3 +238056,39 @@ functions:
       remain. LLVM adds a frame, caches counts and endpoint address,
       and branches instead of predicating coordinate loads. No symbol
       fold or device execution claimed.
+  - address: 0x080ccdf0
+    ghidra: FUN_080ccdf0
+    name: ft_refresh_outline_module
+    size: 32
+    sig: "void ft_refresh_outline_module(FtModuleOwner *owner)"
+    module: ft/refresh_outline_module
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      uVar1/r0: outline_module
+      DAT_080cce0c/r1: outline_module_class
+    notes: >-
+      Raw osos.dec confirms 28 executable bytes at 0x080ccdf0..0x080cce0c
+      plus the literal 0x6f75746c ('outl') at 0x080cce0c; true extent is
+      32 bytes to the next function prologue at 0x080cce10. Whole-image
+      aligned A32 BL decoding verifies two plain incoming calls at
+      0x0804c094 and 0x0808690c, no predicated incoming calls, and one
+      plain outgoing call at 0x080cce00 to the existing port
+      ft_linked_module_find_by_class (0x0804ced4). Pass owner, class and
+      a null cursor; unconditionally store the returned module or zero
+      at owner+0xa4. Callers refresh this cache after renderer insertion
+      or removal. No behavioral deviations; aligned u32 pointer words
+      retain target offsets on hosts. A null owner is invalid because
+      the wrapper unconditionally stores, even though its lookup accepts
+      null. Host regression covers first-match precedence, removal,
+      nonmatching and empty lists, stale-cache clearing and adjacent
+      word preservation. All 15139 host tests passed. Standalone
+      production-source smoke verified selection and clearing after
+      a class change.
+      ARM release build passed. match.py exited 1 with a reviewed
+      structural diff: LLVM adds a frame and saves sl/fp, reorders the
+      zero cursor setup, and prints the literal as an extra line.
+      The class literal, one lookup BL and store at +0xa4 remain.
+      Object relocation confirms R_ARM_CALL to
+      ft_linked_module_find_by_class; the wrapper has its own symbol,
+      with no intentional fold. No device execution claimed.

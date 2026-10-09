@@ -1629,6 +1629,8 @@ pub mod hints {
     // owner, linked-record, and module fixture; mappings never unmap, so no
     // other user may share this hint.
     pub const FT_LINKED_MODULE_FIND_BY_CLASS: usize = 0xee50_0000;
+    // Dedicated to ft/refresh_outline_module; mappings never unmap.
+    pub const FT_REFRESH_OUTLINE_MODULE: usize = 0xee51_0000;
     // 0xdb00_0000: dedicated to app/root_context_f9c_bound's raw-u32
     // root/context fixture; mappings never unmap, so no other user may share it.
     pub const ROOT_CONTEXT_F9C_BOUND: usize = 0xdb00_0000;
