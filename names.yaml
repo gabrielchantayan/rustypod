@@ -236623,3 +236623,33 @@ functions:
       results, second-object selection, full-width words and return values.
       Entry smoke with a fixture getter observes two lookups and state update.
       All 15075 host tests and ARM release build pass. match.py retains both
+
+  - address: 0x080dcb70
+    ghidra: FUN_080dcb70
+    name: af_detect_features
+    size: 192
+    sig: "i32 af_detect_features(u32 *hints, i32 dimension)"
+    module: ft/af_detect_features
+    status: ported
+    renames:
+      param_1: hints
+      param_2: dimension
+      pbVar12: segment
+      pbVar13: segment_end
+      puVar7: point
+    notes: >-
+      Raw A32 extent [0x080dcb70,0x080dcc30) contains two plain BLs,
+      zero predicated BLs, and a tail B to compute-edges at 0x080d908c.
+      BLs at 0x080dcb9c and 0x080dcc1c target compute-segments at
+      0x080e2f5c and link-segments at 0x080d93a4. Two plain inbound
+      BLs at 0x080a7e10 and 0x080a7e30; no predicated inbound BLs.
+      Ghidra incorrectly folds the tail target into this function.
+      Axis occupies seven words at hints+0x30+dimension*0x1c.
+      Capture segment bounds before compute-segments and propagate errors.
+      Clear round bit; follow point next links (+0x20) from segment
+      first (+0x24) to last (+0x28). Consecutive zero low-two-bit point
+      flags stop scanning; otherwise reaching last sets round. Singleton
+      segments remain non-round. Link segments then return compute-edges.
+      All three dependencies remain verified firmware-address seams;
+      none has an existing names.yaml entry. Native host pointer fields
+      support classifier tests; ARM segment stride is 48 bytes.
