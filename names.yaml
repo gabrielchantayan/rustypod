@@ -16,6 +16,55 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c4af4
+    ghidra: FUN_080c4af4
+    name: ata_pio_read_sectors
+    size: 124
+    sig: "u32 ata_pio_read_sectors(AtaCommandDevice *device, u8 *destination, u32 sectors)"
+    module: drivers/ata_pio_read_sectors
+    status: ported
+    renames:
+      param_1/r0/r6: device
+      param_2/r1/r5: destination
+      param_3/r2/r4: sectors
+      DAT_080c4b6c/r7: timeout_ms
+      FUN_0836ce80: ata_operation_state_set
+      FUN_080d7b7c: ata_command_execute
+      FUN_080a988c: retail PIO halfword block reader
+      return/r0: status
+    notes: >-
+      Raw A32 extent [0x080c4af4,0x080c4b70) contains 120 instruction
+      bytes and the 5000-ms literal at 0x080c4b6c. Next real entry
+      0x080c4b70 is the independently entered PIO halfword reader.
+      Whole-image aligned BL decoding finds two plain inbound calls at
+      0x0836c100 and 0x0836c698, no predicated inbound calls, three plain
+      outbound calls and no predicated outbound calls. NULL returns 7
+      before the count check; non-NULL with zero count returns zero.
+      Each sector selects state 5, ignores its return, waits 5000 ms
+      for status 4, then reads 256 halfwords into the destination.
+      Any wait or read failure maps to 0x59, preserving completed sectors.
+      Success advances destination by 512 bytes and decrements count.
+      Both state selection and execution use existing Rust ports.
+      Deliberate deviation: execution r2 and r3 are zero, matching
+      ata_command_prepare; r2 is unused and the status reader overwrites
+      r3 before inspection. The remaining unported reader at 0x080a988c
+      is called through its verified three-argument entry. Raw code reads
+      eight halfwords per loop through 0x080c4b70, then tail-branches to
+      0x0836bf6c; Ghidra's four-argument prototype and inlined status
+      pseudocode are misleading. Host use of this reader panics rather
+      than silently omitting I/O. Two focused host tests pass, covering
+      NULL/count precedence, empty bypass, multi-sector progression,
+      ignored state errors, wait/read errors at each sector and untouched
+      unread storage. ARM release build passes. match.py exit-1 diff
+      reviewed: retains guards, three call stages, status mapping and
+      512-byte loop stride; Rust uses two relocatable BLs and a BLX
+      through the verified reader literal, with a larger frame.
+      Full host suite stops with SIGSEGV in the existing
+      sqlite::error_message::tests::valid_handle_with_no_error_text_maps_its_error_code:
+      its final u32 fixture slot is read as an eight-byte host pointer.
+      Standalone host-library smoke build is blocked by six existing
+      host non-test compilation errors. No device execution.
+
   - address: 0x080c6294
     ghidra: FUN_080c6294
     name: retail_word_index
