@@ -60,6 +60,110 @@ pub unsafe extern "C" fn psh_dimension_append_stem_record(
     error
 }
 
+/// Scales a dimension's stem widths — original `FUN_080d4898` @
+/// 0x080d4898 (144 bytes, next function at 0x080d4928; 2 plain BL sites,
+/// 0 predicated BL sites, both to `ft_mulfix` @ 0x0804d2cc).
+///
+/// Selects a 51-word (0xcc-byte) dimension, reads its count at word 1 and
+/// 16.16 scale at word 50, and scales the width triples starting at word 2.
+/// The first scaled width is the reference: subsequent widths whose signed,
+/// wrapping absolute difference is less than 128 reuse it. Each scaled width
+/// also gets a grid-rounded value `(width + 32) & !63`. Zero count writes
+/// nothing. No deliberate behavioral deviations; word indexing preserves
+/// the target layout on hosts, including ARM's wrapping signed arithmetic.
+///
+/// # Safety
+/// `dimensions` must point to aligned, writable 51-word dimension records;
+/// `dimension` must select a valid record, whose count is at most 16.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn psh_dimension_scale_widths(dimensions: *mut i32, dimension: u32) {
+    let selected = dimensions.add(dimension.wrapping_mul(51) as usize);
+    let mut remaining = *selected.add(1) as u32;
+    let scale = *selected.add(50);
+    if remaining == 0 {
+        return;
+    }
+    let first = selected.add(2);
+    let reference = crate::ft::calc::ft_mulfix(*first, scale);
+    *first.add(1) = reference;
+    *first.add(2) = reference.wrapping_add(32) & !63;
+    remaining = remaining.wrapping_sub(1);
+    let mut width = first.add(3);
+    while remaining != 0 {
+        let mut scaled = crate::ft::calc::ft_mulfix(*width, scale);
+        let difference = scaled.wrapping_sub(reference);
+        let magnitude = if difference < 0 { difference.wrapping_neg() } else { difference };
+        if magnitude < 128 {
+            scaled = reference;
+        }
+        *width.add(1) = scaled;
+        *width.add(2) = scaled.wrapping_add(32) & !63;
+        width = width.add(3);
+        remaining = remaining.wrapping_sub(1);
+    }
+}
+
+#[cfg(test)]
+mod scale_width_tests {
+    use super::psh_dimension_scale_widths;
+
+    #[test]
+    fn empty_dimension_preserves_every_word() {
+        let mut dimensions = [0x12345678; 102];
+        dimensions[52] = 0;
+        let original = dimensions;
+        unsafe { psh_dimension_scale_widths(dimensions.as_mut_ptr(), 1); }
+        assert_eq!(dimensions, original);
+    }
+
+    #[test]
+    fn selected_dimension_snaps_strictly_to_first_and_preserves_inputs() {
+        let mut dimensions = [0x12345678; 102];
+        let widths = [1000, 1127, 1128, 873, 872, 1254, 1380];
+        dimensions[52] = widths.len() as i32;
+        dimensions[101] = 0x10000;
+        for (i, width) in widths.iter().enumerate() {
+            dimensions[53 + i * 3] = *width;
+        }
+        let mut expected = dimensions;
+        for (i, scaled) in [1000i32, 1000, 1128, 1000, 872, 1254, 1380].iter().enumerate() {
+            expected[54 + i * 3] = *scaled;
+            expected[55 + i * 3] = scaled.wrapping_add(32) & !63;
+        }
+        unsafe { psh_dimension_scale_widths(dimensions.as_mut_ptr(), 1); }
+        assert_eq!(dimensions, expected);
+    }
+
+    #[test]
+    fn negative_half_scale_and_grid_ties() {
+        let mut dimension = [0; 51];
+        dimension[1] = 4;
+        dimension[50] = -0x8000;
+        for (i, input) in [64, 320, 576, -64].iter().enumerate() {
+            dimension[2 + i * 3] = *input;
+        }
+        unsafe { psh_dimension_scale_widths(dimension.as_mut_ptr(), 0); }
+        assert_eq!([dimension[3], dimension[6], dimension[9], dimension[12]], [-32, -160, -288, -32]);
+        assert_eq!([dimension[4], dimension[7], dimension[10], dimension[13]], [0, -128, -256, 0]);
+    }
+
+    #[test]
+    fn signed_absolute_minimum_and_rounding_wrap_like_arm() {
+        let mut dimension = [0; 51];
+        dimension[1] = 3;
+        dimension[50] = 0x10000;
+        dimension[2] = i32::MAX;
+        dimension[5] = -1; // difference is MIN; wrapping abs stays negative.
+        dimension[8] = i32::MIN; // difference wraps to 1.
+        unsafe { psh_dimension_scale_widths(dimension.as_mut_ptr(), 0); }
+        for i in 0..3 {
+            assert_eq!(dimension[3 + 3 * i], i32::MAX);
+            assert_eq!(dimension[4 + 3 * i], i32::MIN);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
