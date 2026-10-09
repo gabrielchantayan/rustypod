@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d4b74
+    ghidra: FUN_080d4b74
+    name: t1_builder_close_contour
+    size: 152
+    sig: "void t1_builder_close_contour(T1Builder *builder)"
+    module: ft/t1_builder
+    status: ported
+    renames:
+      param_1: builder
+      psVar1: outline
+      iVar4: point_count
+      iVar6: contour_count
+      iVar7: previous_endpoint
+      piVar2: points
+      piVar3: first_point
+      piVar5: last_point
+    notes: >-
+      Raw A32 extent [0x080d4b74,0x080d4c0c) is 152 executable bytes;
+      next function begins PUSH {r0-r2,r4-r11,lr}. Whole-image aligned
+      decoding verifies two incoming plain BLs at 0x080de6fc and
+      0x080de85c, no predicated incoming BLs, and no outgoing BLs.
+      Type 1 charstring endchar and closepath cases invoke this helper.
+      NULL current outline returns. For signed n_points > 1, compare
+      final point against point zero or one past the preceding signed
+      contour endpoint when n_contours > 1. Remove a duplicate only
+      when both coordinates match and the final tag is exactly one.
+      For positive n_contours store n_points minus one to the final
+      contour endpoint, preserving halfword wrapping. No load_points
+      guard, callee seam or behavioral deviation. Existing repr(C)
+      T1Builder and FtOutline preserve target fields and widen host pointers.
+      Host regression covers multiple contours, either coordinate mismatch,
+      exact tag discrimination, signed endpoints, NULL current outline,
+      nonpositive counts, one point, empty contours and i16 wrapping.
+      All 15119 host tests and ARM release build passed. Production-source
+      smoke verified removal of an on-curve duplicate and retention of
+      tag five, with endpoints one and two. Reviewed match.py exit 1:
+      38 original and 38 Rust instructions; LLVM adds a frame, uses
+      conditional branches for coordinate comparisons, caches counts,
+      and preserves signed indexing, exact tag check and endpoint STRH.
+      No outgoing calls or symbol fold. No device execution claimed.
   - address: 0x080d5090
     ghidra: FUN_080d5090
     name: ascii_comparison_table_initialize

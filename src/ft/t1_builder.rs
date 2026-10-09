@@ -96,6 +96,53 @@ pub unsafe extern "C" fn t1_builder_add_point(
     (*outline).n_points = (*outline).n_points.wrapping_add(1);
 }
 
+/// Type 1 `t1_builder_close_contour` — original: `FUN_080d4b74` @
+/// 0x080d4b74 (152 bytes, ending at the next function at 0x080d4c0c).
+/// Raw A32 decoding verifies two incoming plain BLs at 0x080de6fc and
+/// 0x080de85c, zero predicated BLs, and zero outgoing calls.
+///
+/// If the current outline exists and has more than one point, compare its
+/// final point with the current contour's first point (zero for at most one
+/// contour, otherwise one past the preceding signed contour endpoint).
+/// Remove the duplicate only when its tag is exactly 1. For a positive
+/// contour count, publish the possibly reduced point count minus one as the
+/// final endpoint. Counts and endpoints retain halfword wrapping semantics.
+///
+/// Deliberate deviations: none. Named pointer fields widen on hosts.
+///
+/// # Safety
+/// `builder` must be valid. A non-null current outline must provide the
+/// points, tags and signed contour indices accessed by its counts; no
+/// storage is accessed through those arrays when the corresponding guard
+/// is false.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn t1_builder_close_contour(builder: *mut T1Builder) {
+    let outline = (*builder).current;
+    if outline.is_null() {
+        return;
+    }
+    let count = (*outline).n_points;
+    if count > 1 {
+        let first = if (*outline).n_contours > 1 {
+            *(*outline).contours.offset((*outline).n_contours as isize - 2) as isize + 1
+        } else {
+            0
+        };
+        let start = (*outline).points.offset(first);
+        let end = (*outline).points.offset(count as isize - 1);
+        if (*start).x == (*end).x && (*start).y == (*end).y
+            && *(*outline).tags.offset(count as isize - 1) == 1
+        {
+            (*outline).n_points = count.wrapping_sub(1);
+        }
+    }
+    if (*outline).n_contours > 0 {
+        *(*outline).contours.offset((*outline).n_contours as isize - 1) =
+            (*outline).n_points.wrapping_sub(1);
+    }
+}
+
 /// Firmware load address of the unported Type 1 contour finalizer
 /// `t1_builder_add_contour` @ 0x080c9a6c.
 pub const T1_BUILDER_ADD_CONTOUR_ADDRESS: usize = 0x080c_9a6c;
@@ -378,6 +425,78 @@ mod tests {
             fixture.builder.current = &mut fixture.outline;
             fixture
         }
+    }
+
+    #[test]
+    fn close_contour_removes_only_exact_on_curve_duplicates() {
+        for n_contours in [0, 1, 2, 3] {
+            for tag in [0, 1, 2, 5, 255] {
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1)] {
+                    let mut fixture = Fixture::new(6, 0, 0);
+                    let mut contours = [1i16, 3, 99, 99];
+                    fixture.outline.n_contours = n_contours;
+                    fixture.outline.contours = contours.as_mut_ptr();
+                    for (i, point) in fixture.points.iter_mut().enumerate() {
+                        *point = FtVector { x: i as i32 * 10, y: -(i as i32) };
+                    }
+                    let first = match n_contours { 2 => 2, 3 => 4, _ => 0 };
+                    fixture.points[5] = FtVector {
+                        x: fixture.points[first].x + dx,
+                        y: fixture.points[first].y + dy,
+                    };
+                    fixture.tags[5] = tag;
+                    let points = fixture.points;
+                    let tags = fixture.tags;
+                    let mut expected_contours = contours;
+                    // Independent outline-level reference: slice equality
+                    // and the exact on-curve tag decide duplicate removal.
+                    let retained = if points[first] == points[5] && tag == 1 { 5 } else { 6 };
+                    if n_contours > 0 {
+                        expected_contours[n_contours as usize - 1] = retained - 1;
+                    }
+                    unsafe { t1_builder_close_contour(&mut fixture.builder) };
+                    assert_eq!(fixture.outline.n_points, retained);
+                    assert_eq!(fixture.outline.n_contours, n_contours);
+                    assert_eq!(contours, expected_contours);
+                    assert_eq!(fixture.points, points);
+                    assert_eq!(fixture.tags, tags);
+                    assert_eq!(fixture.builder.parse_state, 0xbe);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn close_contour_empty_signed_counts_and_null_outline() {
+        let mut fixture = Fixture::new(0, 0, 0);
+        fixture.builder.current = core::ptr::null_mut();
+        unsafe { t1_builder_close_contour(&mut fixture.builder) };
+        fixture.builder.current = &mut fixture.outline;
+        fixture.outline.points = core::ptr::null_mut();
+        fixture.outline.tags = core::ptr::null_mut();
+        for count in [i16::MIN, -1, 0, 1] {
+            for n_contours in [-1, 0, 1] {
+                let mut endpoint = 123i16;
+                fixture.outline.n_points = count;
+                fixture.outline.n_contours = n_contours;
+                fixture.outline.contours = &mut endpoint;
+                unsafe { t1_builder_close_contour(&mut fixture.builder) };
+                assert_eq!(fixture.outline.n_points, count);
+                assert_eq!(endpoint, if n_contours > 0 { count.wrapping_sub(1) } else { 123 });
+            }
+        }
+    }
+
+    #[test]
+    fn close_contour_sign_extends_previous_endpoint() {
+        let mut fixture = Fixture::new(2, 1, 0);
+        let mut contours = [-1i16, 99];
+        fixture.outline.n_contours = 2;
+        fixture.outline.contours = contours.as_mut_ptr();
+        fixture.tags[1] = 1;
+        unsafe { t1_builder_close_contour(&mut fixture.builder) };
+        assert_eq!(fixture.outline.n_points, 1);
+        assert_eq!(contours, [-1, 0]);
     }
 
     #[test]
