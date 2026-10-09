@@ -234568,3 +234568,39 @@ functions:
       calendar_schedule. An isolated actual-source executable with injected
       dependencies observes initialized=1, mode=6, four effects and index=20.
       No device execution.
+
+  - address: 0x080fe9ec
+    ghidra: FUN_080fe9ec
+    name: ring_buffer_construct
+    size: 88
+    sig: "u32 *ring_buffer_construct(u32 *ring, u32 capacity)"
+    module: util/ring_buffer_construct
+    status: ported
+    vars: {param_1: ring, param_2: capacity, iVar1: payload}
+    renames:
+      FUN_080eb67c: malloc_wrapper
+      FUN_081b53e4: report_allocation_failure
+      DAT_080fea40: allocation_failure_message
+    notes: >-
+      Raw A32 establishes 84 code bytes and the four-byte nil-NUL descriptor;
+      the next function begins at 0x080fea44 with str r2,[r0,#4]. Full-image
+      branch-word scan finds two inbound plain BLs at 0x08103b3c and 0x08103b48,
+      zero predicated inbound BLs. Outbound calls are one plain BL to the
+      already ported malloc_wrapper and one BLEQ to report_allocation_failure.
+      Allocates capacity bytes with tag 23, stores the allocation at word 1
+      before reporting NULL with code 4 and nil, sets only byte 0 to ownership
+      1, writes capacity at word 2, wrapping capacity-minus-one at word 5,
+      and clears read/write cursors at words 3 and 4. Returns ring unchanged.
+      No capacity validation or allocation retry. Returning reporter mutations
+      of the payload are retained. Target word indexing preserves bytes 1..3
+      and avoids host pointer-width layout changes. Reuses existing heap and
+      diagnostic seams; the diagnostic default is still unported/inert, as in
+      heap_string_reallocate. Two host tests cover zero, non-power-of-two,
+      high-bit and maximal capacities, padding/neighbors, publication ordering
+      and a returning reporter. All 14968 host tests and ARM release build pass.
+      match.py exits 1: 21 original versus 47 Rust instructions; inlined lazy
+      heap initialization and indirect ops calls enlarge the body, while the
+      publish/report/ordered initialization/return sequence is preserved.
+      Isolated actual-source executable using a real host allocation observes
+      ownership 1, preserved padding, capacity 256, zero cursors and mask 255.
+      No device execution.
