@@ -237165,3 +237165,35 @@ functions:
       mock-wiring tests are removed. Host tests cover invalid tags, force
       precedence, missing arrays, unsigned counts, last slot, release order,
       ownership clearing and repeated teardown. No device execution claimed.
+  - address: 0x080d7f24
+    ghidra: FUN_080d7f24
+    name: indexed_span_encode_link
+    size: 96
+    sig: "u32 indexed_span_encode_link(u32 selector, u32 address, u32 initial_start, u32 initial_len)"
+    module: util/indexed_span_encode_link
+    status: ported
+    renames:
+      param_1/r0/r7: selector
+      param_2/r1/r5: address
+      param_3/r2: initial_start
+      param_4/r3: initial_len
+      r4: failed_attempts
+      r6: base
+      local_20: span_start
+      iStack_1c: span_len
+    notes: >-
+      Raw osos.dec confirms the 96-byte A32 extent 0x080d7f24..0x080d7f84,
+      ending in pop at 0x080d7f80 before the next real function. Whole-image
+      word decoding finds two plain inbound BLs at 0x08099b50 and 0x080e4ae4,
+      two plain outbound BLs at 0x080d7f34 and 0x080d7f48, and no predicated
+      BLs. Snapshot the signed-low-halfword-indexed base from table
+      0x08b2f648, stride 0x18c, word one. Refresh the span up to three times
+      through resident 0x080b64fc, passing the full selector in both r0/r1.
+      Preserve incoming r2/r3 when that lookup rejects selectors above three.
+      Unsigned half-open membership returns (address-base)|2, otherwise
+      address|1; span-end addition and base subtraction wrap at 32 bits.
+      Inline the verified base getter at 0x080d7f84; retain the unnamed span
+      lookup as an address-backed call and host seam. Host tests cover bounds,
+      retries, rejected selectors and wrapping. Standalone smoke returned 26
+      after two refreshes. ARM match shows three unrolled BLX refreshes,
+      equivalent comparisons/tags and an inlined base read. No device run.
