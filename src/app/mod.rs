@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod scsi_error_recovery_page;
 pub mod scsi_informational_exceptions_page;
 pub mod cache_slot_select;
 pub mod media_state_snapshot_reset;
