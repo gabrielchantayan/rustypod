@@ -48,6 +48,7 @@ pub mod clock;
 pub mod cp15;
 pub mod clock_config;
 pub mod codec;
+pub mod codec_cached_level;
 pub mod display;
 pub mod internal_display_layers;
 pub mod panel_scale_mode;
