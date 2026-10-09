@@ -17,26 +17,15 @@
 //!
 //! # Deliberate deviation
 //!
-//! `SHA1_Init` and `SHA1_Final` remain stock-entry seams. `SHA1_Update` is
-//! ported locally; its block transform remains an explicit stock-entry seam.
+//! `SHA1_Init` and `SHA1_Update` are ported locally. `SHA1_Final` and the
+//! update block transform remain explicit stock-entry seams.
 
 use super::sha1_update::{sha1_update, Sha1Context};
+use super::sha1_init::sha1_init;
 
-/// Stock `SHA1_Init(context)` entry point.
-pub type Sha1InitFn = unsafe extern "C" fn(*mut Sha1Context);
 /// Stock `SHA1_Final(context, output)` entry point.
 pub type Sha1FinalFn = unsafe extern "C" fn(*mut Sha1Context, *mut u8);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_sha1_init(context: *mut Sha1Context) {
-    let init: Sha1InitFn = unsafe { core::mem::transmute(0x080e_c1bcusize) };
-    unsafe { init(context) };
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_sha1_init(_context: *mut Sha1Context) {
-    panic!("sha1_digest requires SHA1_Init worker 0x080ec1bc")
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_sha1_final(context: *mut Sha1Context, output: *mut u8) {
@@ -49,11 +38,6 @@ unsafe extern "C" fn missing_sha1_final(_context: *mut Sha1Context, _output: *mu
     panic!("sha1_digest requires SHA1_Final worker 0x080efbc8")
 }
 
-/// Active `SHA1_Init` seam. Host tests replace it with an ABI recorder.
-#[cfg(target_os = "none")]
-pub static mut SHA1_INIT: Sha1InitFn = firmware_sha1_init;
-#[cfg(not(target_os = "none"))]
-pub static mut SHA1_INIT: Sha1InitFn = missing_sha1_init;
 
 /// Active `SHA1_Final` seam. Host tests replace it with an ABI recorder.
 #[cfg(target_os = "none")]
@@ -61,10 +45,6 @@ pub static mut SHA1_FINAL: Sha1FinalFn = firmware_sha1_final;
 #[cfg(not(target_os = "none"))]
 pub static mut SHA1_FINAL: Sha1FinalFn = missing_sha1_final;
 
-#[inline(always)]
-unsafe fn sha1_init() -> Sha1InitFn {
-    unsafe { core::ptr::read_volatile(core::ptr::addr_of!(SHA1_INIT)) }
-}
 
 #[inline(always)]
 unsafe fn sha1_final() -> Sha1FinalFn {
@@ -88,7 +68,7 @@ pub unsafe extern "C" fn sha1_digest(input: *const u8, input_len: u32, output: *
     let mut context = core::mem::MaybeUninit::<Sha1Context>::uninit();
     let context = context.as_mut_ptr();
     unsafe {
-        sha1_init()(context);
+        sha1_init(context);
         sha1_update(context, input, input_len);
         sha1_final()(context, output);
     }
@@ -96,84 +76,39 @@ pub unsafe extern "C" fn sha1_digest(input: *const u8, input_len: u32, output: *
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use super::*;
-    use core::ptr;
     use parking_lot::Mutex;
 
     static SHA1_DIGEST_TEST_LOCK: Mutex<()> = Mutex::new(());
-    static mut CALL_SEQUENCE: [u8; 2] = [0; 2];
-    static mut CALL_COUNT: usize = 0;
-    static mut INIT_CONTEXT: *mut Sha1Context = ptr::null_mut();
-    static mut FINAL_CONTEXT: *mut Sha1Context = ptr::null_mut();
-    static mut FINAL_OUTPUT: *mut u8 = ptr::null_mut();
+    static mut OBSERVED: [u32; 88] = [0; 88];
 
-    unsafe fn record_call(kind: u8) {
-        unsafe {
-            CALL_SEQUENCE[CALL_COUNT] = kind;
-            CALL_COUNT += 1;
-        }
+    unsafe extern "C" fn capture_context(context: *mut Sha1Context, _output: *mut u8) {
+        unsafe { OBSERVED = (*context).words };
     }
 
-    unsafe extern "C" fn record_sha1_init(context: *mut Sha1Context) {
-        unsafe {
-            record_call(1);
-            INIT_CONTEXT = context;
-            (*context).words[0] = 0x0123_4567;
-        }
-    }
+    struct FinalReset(Sha1FinalFn);
 
-    unsafe extern "C" fn record_sha1_final(context: *mut Sha1Context, output: *mut u8) {
-        unsafe {
-            record_call(3);
-            FINAL_CONTEXT = context;
-            FINAL_OUTPUT = output;
-        }
-    }
-
-    struct Sha1SeamReset(Sha1InitFn, Sha1FinalFn);
-
-    impl Drop for Sha1SeamReset {
+    impl Drop for FinalReset {
         fn drop(&mut self) {
-            unsafe {
-                SHA1_INIT = self.0;
-                SHA1_FINAL = self.1;
-            }
+            unsafe { SHA1_FINAL = self.0 };
         }
     }
 
     #[test]
-    fn forwards_nonempty_and_empty_inputs_through_one_initialized_context() {
+    fn initializes_and_counts_empty_and_partial_block_inputs() {
         let _guard = SHA1_DIGEST_TEST_LOCK.lock();
-        let saved = unsafe {
-            (
-                core::ptr::read_volatile(core::ptr::addr_of!(SHA1_INIT)),
-                core::ptr::read_volatile(core::ptr::addr_of!(SHA1_FINAL)),
-            )
-        };
-        let _reset = Sha1SeamReset(saved.0, saved.1);
-        unsafe {
-            SHA1_INIT = record_sha1_init;
-            SHA1_FINAL = record_sha1_final;
-        }
-
+        let _reset = FinalReset(unsafe { SHA1_FINAL });
+        unsafe { SHA1_FINAL = capture_context };
         let input = [0x00, 0x80, 0xff];
         let mut output = [0u8; 20];
-        for (input_ptr, input_len) in [(input.as_ptr(), 3), (ptr::null(), 0)] {
-            unsafe {
-                CALL_SEQUENCE = [0; 2];
-                CALL_COUNT = 0;
-                INIT_CONTEXT = ptr::null_mut();
-                FINAL_CONTEXT = ptr::null_mut();
-                FINAL_OUTPUT = ptr::null_mut();
-                sha1_digest(input_ptr, input_len, output.as_mut_ptr());
-                assert_eq!(CALL_SEQUENCE, [1, 3]);
-                assert_eq!(CALL_COUNT, 2);
-                assert_eq!(FINAL_OUTPUT, output.as_mut_ptr());
-                assert_eq!(INIT_CONTEXT, FINAL_CONTEXT);
-                assert_eq!((INIT_CONTEXT as usize) & 3, 0);
-            }
+        for len in [0, 3] {
+            unsafe { sha1_digest(input.as_ptr(), len, output.as_mut_ptr()) };
+            let words = unsafe { OBSERVED };
+            assert_eq!(&words[..5], &[0x67452301, 0xefcdab89, 0x98badcfe,
+                0x10325476, 0xc3d2e1f0]);
+            assert_eq!(words[5], if len == 0 { 0 } else { 0x0080ff });
+            assert_eq!(&words[6..85], &[0; 79]);
+            assert_eq!(&words[85..], &[len, 0, len * 8]);
         }
     }
 }

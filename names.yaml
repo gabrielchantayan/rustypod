@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ec1bc
+    ghidra: FUN_080ec1bc
+    name: sha1_init
+    size: 104
+    sig: "void sha1_init(Sha1Context *context)"
+    module: crypto/sha1_init
+    status: ported
+    vars: {r0: context, r1: state_constant_then_schedule_index, r2: zero, r3: schedule_word_base}
+    renames:
+      param_1: context
+      uVar1: initial_state_word
+      iVar2: schedule_index
+      iVar3: next_schedule_index
+    notes: >-
+      Raw A32 establishes [0x080ec1bc,0x080ec224): 84 instruction bytes
+      ending in BX LR, then five SHA-1 state literals (20 bytes), before
+      the next PUSH. Whole-image decoding finds two incoming plain BLs
+      at 0x080efcac and 0x083691b8, zero predicated incoming BLs, and
+      zero outgoing BLs. Clears words 85, 87, 86, installs standard SHA-1
+      state in words 0..4, then clears all 80 schedule words 5..84.
+      SHA1_Final resets its consumed context with this same initializer.
+      Reuses the aligned 352-byte Sha1Context; sha1_digest now calls the
+      local implementation and its obsolete initialization seam is removed.
+      Deliberate deviation: volatile aligned stores prevent builtin substitution.
+      Host tests cover dirty and uninitialized storage, update/reset, neighbors,
+      and empty/partial-block wrapper inputs. Host suite and ARM build pass.
+      Production-source smoke verifies all words and boundary sentinels.
   - address: 0x080edb20
     ghidra: FUN_080edb20
     name: handle_cell_second_word_or_zero
@@ -144228,10 +144255,10 @@ functions:
       0x080e37a4, and 0x080e37e8; there are no predicated calls or tail-B
       callers. It allocates the 352-byte SHA-1 context, calls SHA1_Init,
       SHA1_Update(context, input, input_len), and SHA1_Final(context, output)
-      in that order with no NULL or length guard. SHA1_Init @ 0x080ec1bc,
-      SHA1_Update @ 0x080f4fd8, and SHA1_Final @ 0x080efbc8 have no existing
-      ledger entries, so target builds retain those stock calls behind volatile
-      seams while host tests record their ABI. Deliberate deviations: the Rust
+      in that order with no NULL or length guard. SHA1_Init @ 0x080ec1bc
+      and SHA1_Update @ 0x080f4fd8 now use local Rust implementations.
+      SHA1_Final @ 0x080efbc8 and the block transform remain stock-entry
+      seams. Deliberate deviations: the Rust
       context is an aligned [u32; 88] rather than raw stack bytes; it has the
       identical 352-byte extent and required word alignment.
 
