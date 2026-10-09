@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080bdb50
+    ghidra: FUN_080bdb50
+    name: load_be32
+    size: 36
+    sig: "u32 load_be32(const u8 *p)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: p
+    notes: >-
+      Raw ARM words establish the exact 36-byte extent 0x080bdb50..0x080bdb74:
+      four LDRB loads at offsets 0,1,2,3, then LSL/ORR shifts 24,16,8,0
+      and BX LR. The next independent byte reader starts at 0x080bdb74;
+      its complete 36-byte body is byte-identical and already mapped to
+      load_be32. Whole-image aligned BL decoding finds two unconditional
+      incoming calls, 0x08056ca0 and 0x08056cac, zero predicated incoming
+      BLs, and no outgoing BLs. Both calls load input words for the
+      eight-round block decryptor at 0x08056c8c. Reuses the existing exported
+      load_be32 rather than duplicating an identical reader. Accepts unaligned
+      input, reads exactly four bytes, and adds no NULL or bounds checks.
+      Deliberate deviation: identical originals share one Rust symbol;
+      no behavioral deviations. Host tests cover all byte values in each
+      lane at all four alignments, extreme words, and source preservation.
   - address: 0x080c0434
     ghidra: FUN_080c0434
     name: ft_cmap_done
