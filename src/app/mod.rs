@@ -824,6 +824,7 @@ pub mod lazy_static_object_08a762a0;
 pub mod lazy_static_object_081491a8;
 pub mod default_interface_root;
 pub mod static_buffer_pool;
+pub mod five_buffer_batch_release;
 pub mod guarded_static_object;
 pub mod event_dispatch_singleton;
 pub mod mecca_io_task;
