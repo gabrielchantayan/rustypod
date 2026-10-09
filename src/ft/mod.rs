@@ -29,6 +29,7 @@ pub mod memory;
 pub mod module;
 pub mod module_callback_dispatch;
 pub mod linked_module_find_by_class;
+pub mod refresh_outline_module;
 pub mod pshinter;
 pub mod pfr_glyph_close_contour;
 pub mod ps_is_whitespace;
