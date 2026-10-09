@@ -61,6 +61,7 @@ pub mod memh_buffer_create;
 pub mod memh_get_len;
 pub mod memh_set_len;
 pub mod memh_resize;
+pub mod array_buffer_set_size;
 pub mod object_destroy_dispatch;
 pub mod object_base_construct;
 pub mod fixa;

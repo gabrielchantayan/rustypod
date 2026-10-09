@@ -2224,6 +2224,9 @@ pub mod hints {
     // 0x5900_0000: dedicated to heap/memh_resize's target-width header and
     // payload fixture; mappings never unmap, so no other user may share it.
     pub const MEMH_RESIZE: usize = 0x5900_0000;
+    // Dedicated to heap/array_buffer_set_size's target-width header and payload.
+    // Mappings never unmap, so no other user may share this hint.
+    pub const ARRAY_BUFFER_SET_SIZE: usize = 0x6001_0000;
     // 0x5700_0000: dedicated to util/mapped_subobject_for_slot's raw-u32
     // context and selected-subobject fixture; mappings never unmap.
     pub const MAPPED_SUBOBJECT_FOR_SLOT: usize = 0x5700_0000;

@@ -237781,3 +237781,43 @@ functions:
       avoids those paths without replacing the production algorithm.
       match.py exited 1 with the reviewed one-versus-four instruction
       structural diff; tail transfer remains. No device run claimed.
+  - address: 0x080d2cbc
+    ghidra: FUN_080d2cbc
+    name: array_buffer_set_size
+    size: 92
+    sig: "i32 array_buffer_set_size(u32 *array, u32 unused, u32 size)"
+    module: heap/array_buffer_set_size
+    status: ported
+    renames:
+      param_1/r4: array
+      param_2/r1: unused
+      param_3/r5: size
+      iVar1/r0: status_or_header
+      FUN_0805d170: memh_buffer_create
+      FUN_0805d270: memh_set_len
+    notes: >-
+      Raw osos.dec verifies the 92-byte instruction extent from 0x080d2cbc
+      through the return at 0x080d2d14; 0x080d2d18 is an independent branch
+      veneer to 0x080744a4. Two outgoing plain BLs at 0x080d2ce4 and
+      0x080d2d00 call the already ported MemH constructor and length setter.
+      Full aligned-word decoding finds two incoming plain BLs at 0x080a6364
+      and 0x080a63a0, both in the array count-adjust path; no predicated BLs
+      in either direction. The cached backing byte size is word 4 (+0x10),
+      and the MemH header pointer is word 6 (+0x18). An equal size returns
+      zero without reading the header. Otherwise a NULL header constructs
+      a zero-filled buffer and stores the returned pointer even on failure;
+      NULL returns -108. An existing header uses memh_set_len and propagates
+      its nonzero status. Only success records the cached size. The second
+      argument is ignored. Target pointers remain u32 words on host.
+      No algorithmic deviations; existing MemH ports retain their documented
+      heap dispatch. Host regressions cover the equal-size bypass, creation
+      success/failure, in-place resize, growth allocation failure, invalid
+      magic, zero-size failure, and preservation of neighboring array words.
+      Required host suite and ARM release build passed. Production-source
+      executable smoke used real low-address mmap allocations with the
+      existing constructor, setter, and memmove: create eight zeroed bytes,
+      grow to 32 preserving payload, then shrink to zero, all successful.
+      match.py exits 1 with 23 retail versus 25 Rust instructions: LLVM
+      adds a frame pointer and reverses constructor/resize block order;
+      both real BL targets, field offsets, status propagation, and the
+      success-only size update are preserved. No device execution claimed.
