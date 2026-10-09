@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod swap_low_two_bits;
 pub mod optional_link_allows_dispatch;
 pub use optional_link_allows_dispatch::*;
 pub mod signed_list_insert_sorted;
