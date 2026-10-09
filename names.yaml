@@ -234131,3 +234131,41 @@ functions:
       Rust instructions, preserving indirect dispatch, callback count reload
       and target offsets +4/+8/+0x34. LLVM removes the redundant byte mask
       and replaces the tail erase with an end-pointer store. No device run.
+
+  - address: 0x0810333c
+    ghidra: FUN_0810333c
+    name: notes_request_construct
+    size: 104
+    sig: "void *notes_request_construct(void *storage, u32 context, u8 mode)"
+    module: app/notes_request_construct
+    status: ported
+    renames:
+      param_1/r0: storage
+      param_2/r1: context
+      param_3/r2: mode
+      FUN_0826bff4: framework_string_pair_construct
+      FUN_0828ae68: instance_of_class_4180
+      FUN_0828a0c0: embedded_request_construct_unported
+      FUN_0815bb54: request_register_unported
+      DAT_0810339c: NOTES_REQUEST_VTABLE
+      DAT_081033a0: NOTES_REQUEST_REGISTRY
+    notes: >-
+      Raw extent [0x0810333c,0x081033a4): 96 instruction bytes and two
+      literal words. Whole-image A32 decoding finds two inbound plain BLs
+      at 0x08178a88 and 0x08178c20, zero predicated BLs; four body plain
+      BLs, zero predicated BLs. Construct the string-pair base with context,
+      install vtable 0x0898071c, construct the embedded request at +0x24
+      with dispatcher +0x4ec, recover its enclosing object from the returned
+      request, clear payload words +0x64/+0x68/+0x6c, store mode +0x70,
+      clear +0x71, and register through 0x0815bb54 with 0x08ad5d44.
+      Existing base and singleton ports are reused; the other two callees
+      remain firmware calls, with no inferred class identity. Host tests
+      cover relocated returns, mode extremes, null singleton address
+      formation, payload clears before registration and untouched padding.
+      Host test suite and ARM release build pass. Standalone actual-source
+      smoke verifies vtable/context, cleared payload, mode and padding.
+      match.py exits 1: 24 original instructions versus 32 Rust listing
+      lines including four literal words. LLVM retains the returned request
+      until the final subtraction, so payload stores use request-relative
+      offsets +0x40/+0x44/+0x48/+0x4c/+0x4d. Firmware callees use BLX;
+      ported callees use direct BL relocations. No device execution.
