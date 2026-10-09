@@ -235133,3 +235133,39 @@ functions:
       changing adjacent bytes. match.py exits 1: both bodies contain 11
       instructions; LLVM uses an early bxeq, an fp frame, and a final BL
       to the nonreturning reset instead of restoring registers and tail B.
+  - address: 0x080f8168
+    ghidra: FUN_080f8168
+    name: ui_mode_state_construct
+    size: 68
+    sig: "void *ui_mode_state_construct(void *state)"
+    module: ui/mode_state_construct
+    status: ported
+    vars:
+      r0/r4: state
+      r1: byte_value
+      FUN_080f7e18: binding_byte_initializer
+      FUN_080f7e10: byte_0e_setter
+      FUN_080f7e08: byte_0d_setter
+      FUN_080f8040: ui_apply_mode_dimensions
+    notes: >-
+      Raw words establish 68 bytes ending at 0x080f81a8, followed by
+      a real function at 0x080f81ac. Four internal plain BL instructions,
+      zero predicated BLs; two inbound plain BLs at 0x081f4bac and
+      0x081f4bc4, zero predicated inbound BLs. Ghidra's no-argument
+      signature is wrong: caller allocation returns the storage in r0,
+      and 0x080f7e18 preserves that pointer while initializing four bytes.
+      Inline those four byte writes, set mode/variant to zero and enable
+      bytes to one, invoke the verified raw byte setters at 0x080f7e10
+      and 0x080f7e08 with 1 and 3, then reuse ui_apply_mode_dimensions.
+      The setters store at +0x0e/+0x0d and tail-branch to 0x080f7cd4;
+      retain raw-address seams without asserting a backend identity.
+      Return the original state, ignoring the dimension applier result.
+      Host coverage checks stale-field clearing, adjacent-byte preservation,
+      binding-refresh side effects, and pointer return semantics.
+      Full host suite passes 14998 tests; ARM release build succeeds.
+      Exported-constructor host smoke with the real dimension port produces
+      dimensions (28,19), binding bytes (3,1), and preserves the pointer.
+      match.py exits 1: 29 versus 17 instructions, with initializer writes
+      inlined/reordered, an LLVM frame, and three volatile indirect BLX
+      dispatches replacing the remaining direct BLs. Byte values, setter
+      order, and the original-pointer return are retained.
