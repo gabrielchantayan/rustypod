@@ -233963,3 +233963,46 @@ functions:
       its last invocation. Controller load is eliminated because the existing
       four_slot_key_index port ignores its context, matching retail behavior.
       LLVM adds frame setup and removes the discarded signal-result spill.
+
+  - address: 0x08104f20
+    ghidra: FUN_08104f20
+    name: active_entry_cancel
+    size: 68
+    sig: "u32 active_entry_cancel(void)"
+    module: app/active_entry_cancel
+    status: ported
+    renames:
+      DAT_08104f60: controller_owner (0x089d0554)
+      controller_owner+1: active_flag
+      controller_owner+4: controller
+      FUN_08259770: event_listener_kind_10_get
+      FUN_08293384: registered_entry_cancel
+    notes: >-
+      Raw ARM establishes 64 instruction bytes at 0x08104f20..0x08104f5f
+      plus the owner literal at 0x08104f60, making the true extent 68 bytes.
+      The next real function begins at 0x08104f64. Independent full-image
+      decoding finds two inbound plain BLs at 0x08105160 and 0x08105308,
+      zero predicated BLs, and no aligned pointer words to this entry.
+      The body has two outbound plain BLs, zero predicated BLs, and one
+      virtual BLX through kind-10 listener vtable slot +0x44. If owner byte
+      +1 is nonzero, get the listener and invoke that slot with the listener
+      as this; then clear the active byte, reload owner word +4, and cancel
+      controller entry 0x81. Always return 1. The neighboring activation
+      routine sets the same byte and invokes slot +0x40; the event caller
+      selects activation for value 1 and cancellation for value 0.
+      Deliberate deviations: reuse existing Rust getter and cancellation
+      ports, retaining the unidentified virtual slot rather than assigning
+      an unsupported callee identity. Host tests inject call boundaries
+      over local word storage; the public host export rejects retail globals.
+      The getter's existing unported constructor dependency means this port
+      is not independently hook-ready. Tests cover inactive storage, all 255
+      nonzero flag values, listener mutations, controller reload ordering,
+      neighboring-byte preservation, and repeated inactive cancellation.
+      All 14942 host tests and the ARM release build passed. Actual-source
+      smoke observed listener, clear, cancellation, and inactive repeat.
+      No device execution. match.py exits 1 with 16 original instructions
+      versus 18 Rust listing lines: LLVM adds frame setup and rebases the
+      owner literal to 0x089d0555, using byte offset 0 and controller offset
+      3 (the effective controller address remains aligned at 0x089d0558).
+      Conditional skip, virtual dispatch, clear-before-reload, entry 0x81,
+      two direct calls, and unconditional return 1 are retained.
