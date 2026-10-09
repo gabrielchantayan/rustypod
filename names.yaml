@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c1050
+    ghidra: FUN_080c1050
+    name: entry_table_finalize_last
+    size: 24
+    sig: "void entry_table_finalize_last(u32 *state, u32 value)"
+    module: util/entry_table_finalize_last
+    status: ported
+    renames:
+      param_1/r0: state
+      param_2/r1: value
+      "state+0x0c": entry_count
+      "state+0x14": entry_data
+    notes: >-
+      Raw A32 words establish 24 bytes ending in bx lr at 0x080c1064;
+      the next function starts at 0x080c1068 with subs ip,r0,#0x100.
+      Whole-image decoding finds two plain incoming BLs at 0x0809c0b4
+      and 0x080cd990, zero predicated incoming BLs and no outgoing calls.
+      If count is nonzero, writes value at data + count*16 - 4 using
+      wrapping target-width arithmetic. Empty tables never load data.
+      Rust caller entry_table_finalize_and_append now uses this port.
+      Void ABI deliberately does not expose incidental r0 contents.
+      Host tests cover empty tables, last-word-only writes and byte-address
+      overflow; caller regression verifies finalization precedes failed append.
+      Host suite and ARM release build passed. Real-source runtime smoke
+      verified last-entry mutation, prior-entry preservation and empty null data.
+      match.py exits 1: six stock versus ten Rust instructions; LLVM uses
+      an early bxeq and frame setup instead of three predicated operations,
+      retaining the count gate, shifted address and final-word store.
+      No intentional symbol folding; no device execution.
   - address: 0x080c14c4
     ghidra: FUN_080c14c4
     name: psh_glyph_load_points
