@@ -93924,11 +93924,9 @@ functions:
       distinct sibling begins with push at 0x08102098. It renders by-value
       r2 as signed decimal into a 512-byte stack buffer, constructs a COW
       string, hands it to FUN_081020ec with table and key, then releases the
-      temporary. That unported helper finds-or-inserts the key in the
-      current index's 0x1c-byte map and in the other `(index + 1) % 2` map,
-      assigning the same value to both. The helper is retained as the
-      STRING_TABLE_ASSIGN_BOTH_OPS volatile seam defaulting to 0x081020ec;
-      sprintf, cxx_string_from_cstr, and cxx_string_release are ported.
+      temporary. The helper now calls the Rust string_table_assign_both port,
+      which finds-or-inserts the key in both selectable maps and assigns
+      the same COW value to each; all recognized callees are direct Rust calls.
       Decoding every aligned ARM B/BL word in osos.dec finds exactly 9
       inbound direct bl calls, all unconditional, and zero b references or
       aligned data-word references. Callers pass C-string addresses in r2,
@@ -234231,3 +234229,29 @@ functions:
       until the final subtraction, so payload stores use request-relative
       offsets +0x40/+0x44/+0x48/+0x4c/+0x4d. Firmware callees use BLX;
       ported callees use direct BL relocations. No device execution.
+
+  - address: 0x081020ec
+    ghidra: FUN_081020ec
+    name: string_table_assign_both
+    size: 68
+    sig: "char **string_table_assign_both(u8 *table, char **key, char **value)"
+    module: app/string_table
+    status: ported
+    vars: {param_1/r0: table, param_2/r1: key, param_3/r2: value, r4: table, r5: value, r6: key}
+    renames:
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8d1c: cxx_string_assign
+      FUN_08101bf4: string_table_peer_map
+    notes: >-
+      Raw ARM establishes the 68-byte extent 0x081020ec..0x08102130;
+      the next function begins with push at 0x08102130. Whole-image word
+      decoding finds two inbound plain BLs at 0x08102080 and 0x081020d4,
+      zero predicated BLs. The body has four plain BLs, no predicated BLs,
+      and a tail B to cxx_string_assign. Finds or inserts key in the
+      selected 0x1c-byte map, assigns value, re-reads the selector through
+      string_table_peer_map, then finds or inserts key and assigns value
+      in the peer map. Returns the peer mapped-value slot. Ghidra wrongly
+      includes the tail callee's internals in its C output. Existing Rust
+      lookup, peer-map, and COW assignment ports replace retail calls;
+      the tail B is expressed as a returned call. Host tests verify both
+      selectors, selector changes during lookup, and COW ownership.

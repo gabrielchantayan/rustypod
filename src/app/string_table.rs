@@ -486,58 +486,37 @@ pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssign
 unsafe fn string_table_assign_ops() -> StringTableAssignOps {
     core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_ASSIGN_OPS))
 }
-/// The unported two-table assignment helper used by
-/// [`string_table_set_both_decimal`]. `FUN_081020ec` writes `value` at
-/// `key` in the selected map and in the other map selected by
-/// `(current_index + 1) % 2`.
-#[derive(Clone, Copy)]
-pub struct StringTableAssignBothOps {
-    /// `FUN_081020ec` @ 0x081020ec — assigns a COW string into both
-    /// active language tables.
-    pub assign: unsafe extern "C" fn(
-        table: *mut u8,
-        key: *mut *mut u8,
-        value: *mut *mut u8,
-    ),
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_table_assign_both(
+/// string_table_assign_both — original: `FUN_081020ec` @ 0x081020ec.
+/// True extent: 68 bytes, ending at the next function's push at 0x08102130.
+/// Raw whole-image decoding finds two inbound unconditional BLs (0x08102080,
+/// 0x081020d4), zero predicated BLs. The body has four unconditional BLs,
+/// zero predicated BLs, and a final tail B to cxx_string_assign.
+///
+/// Finds or inserts the key in the current map, assigns value, then re-reads
+/// the selector through string_table_peer_map and assigns the same value in
+/// the peer map. Returns the peer's mapped-value slot. No NULL guards.
+/// Deliberate deviations: existing Rust ports replace all retail callees;
+/// the final tail branch is expressed as a returned call.
+///
+/// # Safety
+/// table must contain the aligned selector at +0x54 and live selected maps;
+/// key and value must be live COW strings satisfying the map/assignment APIs.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_assign_both(
     table: *mut u8,
     key: *mut *mut u8,
     value: *mut *mut u8,
-) {
-    let assign: unsafe extern "C" fn(*mut u8, *mut *mut u8, *mut *mut u8) =
-        unsafe { core::mem::transmute(0x0810_20ecusize) };
-    unsafe { assign(table, key, value) }
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_table_assign_both(
-    _table: *mut u8,
-    _key: *mut *mut u8,
-    _value: *mut *mut u8,
-) {
-    panic!("string_table_set_both_decimal requires string-table assignment 0x081020ec")
-}
-
-/// Active model of `FUN_081020ec`. The target default reaches the retail
-/// helper; host tests install a recorder until that helper is ported.
-#[cfg(target_os = "none")]
-pub static mut STRING_TABLE_ASSIGN_BOTH_OPS: StringTableAssignBothOps = StringTableAssignBothOps {
-    assign: firmware_string_table_assign_both,
-};
-
-/// Active model of `FUN_081020ec`. The host default reports an accidental
-/// unmocked traversal into the still-unported helper.
-#[cfg(not(target_os = "none"))]
-pub static mut STRING_TABLE_ASSIGN_BOTH_OPS: StringTableAssignBothOps = StringTableAssignBothOps {
-    assign: missing_string_table_assign_both,
-};
-
-#[inline(always)]
-unsafe fn string_table_assign_both_ops() -> StringTableAssignBothOps {
-    core::ptr::read_volatile(core::ptr::addr_of!(STRING_TABLE_ASSIGN_BOTH_OPS))
+) -> *mut *mut u8 {
+    let selector = unsafe { word(table, CURRENT_TABLE_INDEX_WORD) };
+    let current = table.wrapping_add(selector.wrapping_mul(TABLE_STRIDE as u32) as usize);
+    unsafe {
+        let slot = string_table_fallback_value_slot(current, key);
+        crate::cxx::string::cxx_string_assign(slot, value);
+        let peer = string_table_peer_map(table);
+        let slot = string_table_fallback_value_slot(peer, key);
+        crate::cxx::string::cxx_string_assign(slot, value)
+    }
 }
 
 
@@ -593,9 +572,7 @@ pub unsafe extern "C" fn string_table_set_decimal(
 ///
 /// Deliberate deviation: the Rust `sprintf` veneer accepts an explicit
 /// va-list pointer, so `&value` replaces the original variadic r2 word.
-/// `FUN_081020ec` remains a volatile dispatch seam whose target default is
-/// its verified retail load address; the port does not duplicate its
-/// map-insertion implementation.
+/// The two-table assignment now calls the direct Rust port.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_table_set_both_decimal(
@@ -613,7 +590,7 @@ pub unsafe extern "C" fn string_table_set_both_decimal(
     let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
     let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
     unsafe {
-        (string_table_assign_both_ops().assign)(table, key, text);
+        string_table_assign_both(table, key, text);
         crate::cxx::string::cxx_string_release(text);
     }
 }
@@ -1308,7 +1285,6 @@ mod set_decimal_tests {
 
     struct OpsGuard {
         assign: StringTableAssignOps,
-        assign_both: StringTableAssignBothOps,
         engine: PrintfEngineFn,
     }
 
@@ -1316,10 +1292,6 @@ mod set_decimal_tests {
         fn drop(&mut self) {
             unsafe {
                 ptr::write_volatile(ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS), self.assign);
-                ptr::write_volatile(
-                    ptr::addr_of_mut!(STRING_TABLE_ASSIGN_BOTH_OPS),
-                    self.assign_both,
-                );
                 ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), self.engine);
             }
         }
@@ -1398,16 +1370,11 @@ mod set_decimal_tests {
         unsafe {
             let guard = OpsGuard {
                 assign: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_OPS)),
-                assign_both: ptr::read_volatile(ptr::addr_of!(STRING_TABLE_ASSIGN_BOTH_OPS)),
                 engine: ptr::read_volatile(ptr::addr_of!(PRINTF_ENGINE)),
             };
             ptr::write_volatile(
                 ptr::addr_of_mut!(STRING_TABLE_ASSIGN_OPS),
                 StringTableAssignOps { assign: record_assign },
-            );
-            ptr::write_volatile(
-                ptr::addr_of_mut!(STRING_TABLE_ASSIGN_BOTH_OPS),
-                StringTableAssignBothOps { assign: record_assign },
             );
             ptr::write_volatile(ptr::addr_of_mut!(PRINTF_ENGINE), decimal_engine);
             ASSIGNMENT = None;
@@ -1448,37 +1415,6 @@ mod set_decimal_tests {
 
     }
 
-    #[test]
-    fn formats_by_value_decimal_and_assigns_both_tables() {
-        let (_lock, _restore) = install();
-        let _heap = crate::heap::veneers::tests::mock_heap();
-        let _arena = unsafe {
-            ARENA_USED = 0;
-            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
-            let mut active = previous;
-            active.alloc = arena_alloc;
-            active.free = arena_free;
-            active.create = arena_create;
-            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
-            ArenaGuard { ops: previous }
-        };
-        let mut key_data = *b"StartGenius\0";
-        let mut key = key_data.as_mut_ptr();
-
-        for value in [0, 42, -17, i32::MIN] {
-            unsafe {
-                string_table_set_both_decimal(0x1234usize as *mut u8, &mut key, value);
-                assert_eq!(
-                    ASSIGNMENT,
-                    Some((
-                        0x1234,
-                        b"StartGenius".to_vec(),
-                        std::format!("{value}").into_bytes(),
-                    )),
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1684,6 +1620,73 @@ mod set_hex_tests {
             assert_eq!(SEEN_KEY_REFCOUNT, 1);
             assert_eq!(fake.rep.refcount, 0);
             assert_eq!(slot, mapped_value_slot());
+        }
+    }
+
+    static mut BOTH_NODES: [NodeStorage; 2] = [
+        NodeStorage([0; 0x30]), NodeStorage([0; 0x30]),
+    ];
+    static mut BOTH_TABLE: *mut u32 = ptr::null_mut();
+    static mut BOTH_LOOKUPS: usize = 0;
+    static mut CHANGE_SELECTOR: bool = false;
+
+    unsafe extern "C" fn both_map_operation(
+        result: *mut StringTableInsertResult,
+        map: *mut u8,
+        pair: *const StringTableStringPair,
+    ) {
+        let call = BOTH_LOOKUPS;
+        let selector = (*BOTH_TABLE.add(CURRENT_TABLE_INDEX_WORD)) as usize;
+        let expected = if call == 0 { selector } else { (selector + 1) % 2 };
+        assert_eq!(map, BOTH_TABLE.cast::<u8>().add(expected * TABLE_STRIDE));
+        assert_eq!(CStr::from_ptr((*pair).key.cast()).to_bytes(), b"foo");
+        if call == 1 {
+            let first = ptr::addr_of_mut!(BOTH_NODES[0].0).cast::<u8>().add(24)
+                .cast::<*mut u8>();
+            assert_eq!(CStr::from_ptr((*first).cast()).to_bytes(), b"foo");
+        }
+        (*result).node = ptr::addr_of_mut!(BOTH_NODES[call].0).cast::<u8>().add(4);
+        (*result).inserted = 1;
+        BOTH_LOOKUPS += 1;
+        if call == 0 && CHANGE_SELECTOR {
+            *BOTH_TABLE.add(CURRENT_TABLE_INDEX_WORD) ^= 1;
+        }
+    }
+
+    #[test]
+    fn assign_both_preserves_cow_ownership_and_rereads_selector() {
+        let (_lock, _restore) = install();
+        unsafe {
+            STRING_TABLE_MAP_OPS.map_operation = both_map_operation;
+            for selector in [0, 1] {
+                for change in [false, true] {
+                    let mut table = [0u32; 22];
+                    table[CURRENT_TABLE_INDEX_WORD] = selector;
+                    BOTH_TABLE = table.as_mut_ptr();
+                    BOTH_LOOKUPS = 0;
+                    CHANGE_SELECTOR = change;
+                    let mut key_rep = fake_string();
+                    let mut value_rep = fake_string();
+                    let mut key = key_rep.data.as_mut_ptr();
+                    let mut value = value_rep.data.as_mut_ptr();
+                    let first = ptr::addr_of_mut!(BOTH_NODES[0].0).cast::<u8>()
+                        .add(24).cast::<*mut u8>();
+                    let second = ptr::addr_of_mut!(BOTH_NODES[1].0).cast::<u8>()
+                        .add(24).cast::<*mut u8>();
+                    first.write(crate::cxx::string::empty_rep_data());
+                    second.write(crate::cxx::string::empty_rep_data());
+                    assert_eq!(string_table_assign_both(table.as_mut_ptr().cast(),
+                        &mut key, &mut value), second);
+                    assert_eq!(BOTH_LOOKUPS, 2);
+                    assert_eq!(first.read(), value);
+                    assert_eq!(second.read(), value);
+                    assert_eq!(value_rep.rep.refcount, 2);
+                    assert_eq!(key_rep.rep.refcount, 0);
+                    crate::cxx::string::cxx_string_release(first);
+                    crate::cxx::string::cxx_string_release(second);
+                    assert_eq!(value_rep.rep.refcount, 0);
+                }
+            }
         }
     }
 
