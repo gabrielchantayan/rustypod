@@ -21,6 +21,7 @@ pub mod current_unix_timestamp;
 pub mod normalize_day_and_seconds;
 pub mod day_and_seconds_add_seconds;
 pub mod datetime;
+pub mod format_datetime_label;
 /// Packed calendar record to FAT date/time fields @ 0x080aacc0.
 pub mod datetime_to_fat;
 pub mod datetime_to_tm;

@@ -16,6 +16,50 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ca834
+    ghidra: FUN_080ca834
+    name: format_datetime_label
+    size: 256
+    sig: "i32 format_datetime_label(DateTime *datetime, u32 relative, char *destination)"
+    module: time/format_datetime_label
+    status: ported
+    renames:
+      param_1/r0/r6: datetime
+      param_2/r1: relative
+      param_3/r2/r4: destination
+      r5: capacity_40
+      r7: timestamp
+      sp: current_datetime
+    notes: >-
+      Raw extent [0x080ca834,0x080ca934) is 256 bytes: 220 executable
+      bytes through POP PC at 0x080ca90c, then strings and a case-table
+      pointer. Next real PUSH starts at 0x080ca934. Whole-image aligned
+      A32 decoding finds two incoming plain BLs at 0x08264f70 and
+      0x08265434, no predicated BLs or B callers. Body has six plain BLs,
+      no predicated BLs, and a conditional tail B to the existing
+      format_with_default_descriptor at 0x08086d28 for relative == 0.
+      Absolute format is %-m-%-d %-I:%M%1p. Relative requests query the
+      normalized current calendar and compare it to datetime; future
+      dates use %-m-%-d. Otherwise wrapping u32 timestamp subtraction
+      selects %-I:%M%1p below 86400, %a below 604800, or %-m-%-d.
+      Split SUBS/SUBSCS thresholds are 0x14000+0x1180 and
+      0x90000+0x3a80; equality advances to the next format.
+      Weekday output translates every non-NUL byte through the table at
+      runtime 0x083ed1dd and returns zero; other paths return formatter
+      status. No target deviations. Reuses existing calendar/formatter
+      APIs, omitting the timestamp converter's dead r1 argument.
+      The existing floor-record note incorrectly adds the scatter skew:
+      runtime 0x083e2e3e + 0xaed8 is image 0x083edd16, not 0x083f1d16;
+      raw bytes 000000010100b2070400 encode the epoch record outside the
+      undecrypted interval. Case table maps to image 0x083f80b5.
+      Host suite passed 15149 tests, including exact day/week thresholds,
+      future precedence, unsigned table indexing, embedded translated NUL,
+      and termination at the original NUL. Isolated entry smoke exercised
+      absolute, future, equal-time, day-minus-one, and week-boundary paths.
+      ARM release build passed. match.py prints a structural diff (exit 1):
+      LLVM retains query/compare/two timestamp calls, unsigned day/week
+      checks, absolute formatter tail call, and byte translation loop.
+      Different frame layout and ordinary branches replace ADS predication.
   - address: 0x080caa28
     ghidra: FUN_080caa28
     name: earliest_enabled_clock_record
