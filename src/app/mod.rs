@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod media_state_snapshot_reset;
 pub mod collection_type_one_prune;
 pub use collection_type_one_prune::*;
 pub mod app_motor_shutdown;

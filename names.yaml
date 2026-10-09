@@ -234722,3 +234722,37 @@ functions:
       LLVM retains the outer pointer in r4 instead of subtracting four
       from the returned member, adds a frame, and uses separate store and
       return instructions. The symbol remains distinct; no intentional fold.
+
+  - address: 0x080fe6a4
+    ghidra: FUN_080fe6a4
+    name: media_state_snapshot_reset
+    size: 84
+    sig: "void media_state_snapshot_reset(uint8_t *snapshot)"
+    module: app/media_state_snapshot_reset
+    status: ported
+    vars: {param_1: snapshot, r4: snapshot, r5: zero}
+    renames: {thunk_EXT_FUN_2200027c: memzero_aligned}
+    notes: >-
+      Raw A32 extent [0x080fe6a4,0x080fe6f8) is 84 bytes, ending in
+      pop {r4,r5,r6,pc}; next function starts with push {r3,lr}.
+      Whole-image raw word scan finds two incoming plain BLs at
+      0x082068d4 and 0x08206cd0, zero predicated incoming BLs; Ghidra's
+      reported FUN_080db814 caller does not match the raw call locations.
+      Two outgoing plain BLs at 0x080fe6c0 and 0x080fe6cc target the
+      0x08037db8 veneer, with zero predicated BLs. Its literal 0x2200027c
+      is the IRAM mirror of ported memzero_aligned at 0x0800027c.
+      Clears header words +0/+4, four 0x60-byte records at +8, four
+      8-byte records at +0x188, word +0x1a8 and bytes +0x1ac..+0x1af.
+      Sets +0x1b1/+0x1b2 to 0xff and +0x1b3 to zero; +0x1b0 survives.
+      Caller 0x082068c4 fills the output from embedded state at +0x464.
+      Snapshot/record names describe observed structure, not an asserted
+      class identity. Requires word alignment and 0x1b4 writable bytes.
+      Deviation: volatile Rust zero-fill pointer prevents builtin
+      substitution, producing two BLX calls instead of veneer BLs;
+      ignored zero-fill return differs without observable effect.
+      All 14974 host tests pass; standalone actual-source smoke proves
+      cleared bytes, reserved byte, sentinels and both surrounding guards.
+      ARM release build passes. match.py exits 1 with structural diff:
+      LLVM adds a frame, merges four flag bytes into a word store and
+      +0x1b2/+0x1b3 into a halfword store, preserving +0x1b0. The export
+      remains distinct; no intentional fold. No device execution claimed.
