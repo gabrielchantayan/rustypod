@@ -495,6 +495,47 @@ pub unsafe extern "C" fn iap_packet_create(
     core::ptr::null_mut()
 }
 
+/// iap_packet_create_with_compact_payload — FUN_080f6f2c @ 0x080f6f2c.
+/// True extent [0x080f6f2c, 0x080f6f8c): 96 bytes, 24 ARM instructions,
+/// no literals; the next independent function starts with push {r4,lr}.
+/// Raw word decoding verifies three outbound plain BLs, zero predicated
+/// BLs, and two inbound plain BLs (0x0818df18, 0x0818df98), zero predicated.
+///
+/// Allocate 36 bytes, construct the packet, then initialize its compact
+/// reply payload with extra_byte = 0xff when the constructor result is
+/// non-NULL. Return that result unchanged: payload allocation failure does
+/// not destroy the packet or turn the factory result into NULL.
+///
+/// Deliberate deviations: all three callees use their existing Rust ports;
+/// stack arguments become C ABI parameters. Full-width layout selectors
+/// and the original construct-before-NULL-check order are preserved.
+///
+/// # Safety
+/// The allocator must return writable, four-byte-aligned packet storage:
+/// the constructor dereferences its input before the factory's NULL check.
+/// Owner/context must satisfy the packet initializer's contract. The caller
+/// owns the returned packet, including when payload allocation failed.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_create_with_compact_payload(
+    owner: *mut u8,
+    context: *mut u8,
+    lingo_word: u32,
+    command_word: u32,
+    header_kind: u32,
+    header_value: u32,
+    header_data: u32,
+) -> *mut u8 {
+    let packet = iap_packet_construct(operator_new(IAP_PACKET_SIZE));
+    if !packet.is_null() {
+        iap_packet_init_with_compact_payload(
+            packet, owner, context, lingo_word, command_word,
+            header_kind, header_value, header_data, 0xff,
+        );
+    }
+    packet
+}
+
 /// iap_packet_reinit — original: `FUN_080f6efc` @ 0x080f6efc
 /// (**48 bytes, 0x080f6efc..0x080f6f2c** — 12 instructions, no literal
 /// pool. Ghidra's 48 is exact this time: the next function opens at
@@ -997,6 +1038,69 @@ mod tests {
             assert_eq!(packet.add(8).cast::<u32>().read(), 0);
             assert_eq!(packet.add(12).cast::<u16>().read(), 0);
             assert_eq!(alloc_log(), (1, 1, 2));
+        }
+        restore_mocks(guards);
+    }
+
+    static mut COMPACT_PAYLOAD_ALLOCATION: *mut u8 = core::ptr::null_mut();
+
+    unsafe extern "C" fn compact_factory_release(packet: *mut u8) {
+        recording_release(packet);
+        set_alloc_ret(core::ptr::addr_of!(COMPACT_PAYLOAD_ALLOCATION).read());
+    }
+
+    #[test]
+    fn compact_factory_preserves_word_selectors_and_builds_reply_bytes() {
+        let guards = install_mocks();
+        unsafe { IAP_PACKET_OPS.release = compact_factory_release };
+        let owner = 0x1234usize as *mut u8;
+        let context = 0x5678usize as *mut u8;
+        for (lingo, kind, expected) in [
+            (4, 6, &b"\x06\xab\xcd\x12\x34\x56\x78"[..]),
+            (12, 6, &b"\x06\xcd\xff\x12\x34\x56\x78"[..]),
+            (0x104, 6, &b"\x06\xcd\x12\x34\x56\x78"[..]),
+            (0x10c, 0x106, &b"\x06\xcd"[..]),
+        ] {
+            let mut words = [0xa5a5_a5a5u32; 9];
+            let packet = words.as_mut_ptr().cast::<u8>();
+            let mut payload = [0xeeu8; 8];
+            unsafe {
+                COMPACT_PAYLOAD_ALLOCATION = payload.as_mut_ptr();
+                set_alloc_ret(packet);
+                assert_eq!(iap_packet_create_with_compact_payload(
+                    owner, context, lingo, 0x1234_beef, kind, 0x9876_abcd, 0x1234_5678,
+                ), packet);
+                assert_eq!(&payload[..expected.len()], expected);
+                assert_eq!(payload[expected.len()], 0xee);
+                assert_eq!(words[0], 0x1234);
+                assert_eq!(words[1], 0x5678);
+                assert_eq!(packet.add(14).read(), lingo as u8);
+                assert_eq!(packet.add(16).cast::<u16>().read(), 0xbeef);
+                assert_eq!(packet.add(12).cast::<u16>().read(), expected.len() as u16);
+                assert_eq!(words[7..], [0, 0]);
+            }
+        }
+        unsafe { assert_eq!(IAP_PACKET_LIVE_COUNT, 4) };
+        restore_mocks(guards);
+    }
+
+    #[test]
+    fn compact_factory_returns_live_packet_when_payload_allocation_fails() {
+        let guards = install_mocks();
+        let mut words = [0xa5a5_a5a5u32; 9];
+        let packet = words.as_mut_ptr().cast::<u8>();
+        unsafe {
+            IAP_PACKET_OPS.release = compact_factory_release;
+            COMPACT_PAYLOAD_ALLOCATION = core::ptr::null_mut();
+            set_alloc_ret(packet);
+            assert_eq!(iap_packet_create_with_compact_payload(
+                core::ptr::null_mut(), core::ptr::null_mut(), 12, 2, 6, 0x34, 0,
+            ), packet);
+            assert_eq!(words[2], 0);
+            assert_eq!(packet.add(12).cast::<u16>().read(), 0);
+            assert_eq!(packet.add(14).read(), 12);
+            assert_eq!(packet.add(16).cast::<u16>().read(), 2);
+            assert_eq!(IAP_PACKET_LIVE_COUNT, 1);
         }
         restore_mocks(guards);
     }
