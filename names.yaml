@@ -40656,11 +40656,30 @@ functions:
       not this wrapper. The body has no BL instruction, predicated or plain.
       Exactly three direct unconditional BL callers were verified at
       0x0805ca54, 0x080aafe0, and 0x08113808; no predicated BL caller
-      exists. The helper identity is unestablished: the port preserves only
-      its verified ABI, forwarding r0 unchanged and 0x083e8bc8 as r1 to the
-      unported helper. Target code calls address 0x080bd7f8; host tests inject
-      it through a volatile seam. The stock tail branch becomes a normal Rust
-      call, with the returned r0 preserved.
+      exists. The wrapper now calls ported itunes_path_resolve with r0 and
+      the fixed filename at 0x083e8bc8, preserving the resolver status.
+
+  - address: 0x080bd7f8
+    ghidra: FUN_080bd7f8
+    name: itunes_path_resolve
+    size: 168
+    sig: "i32 itunes_path_resolve(u8 *destination, const u8 *filename)"
+    module: app/itunes_path_resolve
+    vars: {param_1: destination, param_2: filename, auStack_1a0: text, local_114: path, auStack_160: workspace}
+    status: ported
+    notes: >-
+      Raw code extent 0x080bd7f8..0x080bd8a0; 28 literal bytes follow,
+      and the next function begins at 0x080bd8bc with push {r2,r3,r4,lr}.
+      Independent A32 word decoding finds eight plain body BLs and one
+      BLNE, and two inbound plain BLs at 0x080634bc and 0x080ab224,
+      no inbound predicated calls. Appends filename to iPod_Control\iTunes\,
+      builds a zero-u16-prefixed path, optionally copies exactly 258 bytes
+      before resolution, then returns the 0x0805a8e4 worker status.
+      Reuses ported string and memory helpers and the shared path-facade
+      worker seam; no invented callee. Filename must fit the original
+      64-byte temporary (43 bytes maximum). Deliberate deviations: unused
+      stack bytes initialized, Rust calls replace IRAM veneers. Host edge
+      tests cover empty and maximum filenames, output guards, NULL output,
 
   - address: 0x08044c10
     ghidra: FUN_08044c10
