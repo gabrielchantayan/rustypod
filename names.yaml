@@ -234648,3 +234648,46 @@ functions:
       R_ARM_CALL confirms the outbound target is ring_buffer_used_bytes.
       Actual-source host smoke reads wrapped ghab, advances cursor to 2,
       and rejects an empty follow-on read without mutation. No device run.
+
+  - address: 0x080fe8dc
+    ghidra: FUN_080fe8dc
+    name: observable_array_owner_0898011c_copy_construct
+    size: 28
+    sig: "ObservableArrayOwner *observable_array_owner_0898011c_copy_construct(ObservableArrayOwner *destination, const ObservableArray *source)"
+    module: cxx/observable_array
+    status: ported
+    renames:
+      param_1/r0: destination
+      param_2/r1: source
+      iVar1/r0: constructed_member
+      DAT_080fe8f4: owner_vtable_0898011c
+      FUN_08271c98: observable_array_copy_construct
+    notes: >-
+      Raw words e92d4010 e2800004 eb05cceb e59f1004 e5201004 e8bd8010
+      followed by literal 0898011c establish 24 instruction bytes plus four
+      literal bytes, true extent 28 bytes. The next independent function
+      begins at 0x080fe8f8 with push {r4,r5,r6,lr}. Whole-image aligned A32
+      branch decoding finds two incoming plain BLs at 0x081fa770 and
+      0x0820b724, zero predicated incoming BLs. The body has one plain BL
+      at 0x080fe8e4 to 0x08271c98, zero predicated BLs. Copy-constructs the
+      observable-array member at destination +4 from source in r1, then
+      STR r1,[r0,#-4]! installs owner vtable 0x0898011c and returns the outer
+      pointer. Ghidra incorrectly drops r1 and declares a void return.
+      Both callers allocate 20 bytes and consume the returned pointer.
+      Concrete class identity is unknown; the semantic owner role and
+      vtable distinguish this constructor from its existing siblings.
+      Reuses the ported observable_array_copy_construct and its existing
+      growth boundary, with no new seam or deliberate semantic deviations.
+      repr(C) target-width fields preserve the four-byte member offset.
+      Extended host regression covers zero, one, and five elements, both
+      vtables, outer return, exact copied span, empty observers, source
+      preservation, and outer/storage guards. All 14971 host tests pass;
+      ARM release build passes. Actual-source standalone empty-array smoke
+      uses the real member/root constructors with supplied growth and
+      zero-byte memmove boundaries; both vtables, guards and return pass.
+      No device execution is claimed. match.py exits 1 with a structural
+      diff: member +4, one constructor BL and literal 0x0898011c remain.
+      R_ARM_CALL verifies observable_array_copy_construct as the BL target.
+      LLVM retains the outer pointer in r4 instead of subtracting four
+      from the returned member, adds a frame, and uses separate store and
+      return instructions. The symbol remains distinct; no intentional fold.

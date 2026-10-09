@@ -501,6 +501,35 @@ pub unsafe extern "C" fn observable_array_owner_08980dc4_copy_construct(
     owner
 }
 
+/// observable_array_owner_0898011c_copy_construct — `FUN_080fe8dc`
+/// @ 0x080fe8dc. True size: 28 bytes (24 instruction bytes plus the
+/// vtable literal at 0x080fe8f4); next function starts at 0x080fe8f8.
+/// Whole-image aligned A32 decoding verifies two plain incoming BLs
+/// (0x081fa770, 0x0820b724), zero predicated incoming BLs, and one plain
+/// outgoing BL to observable_array_copy_construct at 0x08271c98.
+///
+/// Copies the observable-array member at destination +4 from `source`,
+/// subtracts four from the returned member pointer, installs owner vtable
+/// 0x0898011c, and returns the outer pointer. Ghidra loses r1 and the r0
+/// return. Deliberate deviations: none; concrete class identity is unknown.
+///
+/// # Safety
+/// `destination` must be writable, aligned storage for ObservableArrayOwner;
+/// `source` and the growth boundary must satisfy observable_array_copy_construct.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn observable_array_owner_0898011c_copy_construct(
+    destination: *mut ObservableArrayOwner,
+    source: *const ObservableArray,
+) -> *mut ObservableArrayOwner {
+    let array = observable_array_copy_construct(
+        core::ptr::addr_of_mut!((*destination).array), source,
+    );
+    let owner = array.cast::<u32>().sub(1).cast::<ObservableArrayOwner>();
+    core::ptr::addr_of_mut!((*owner).vtable).write_volatile(0x0898_011c);
+    owner
+}
+
 /// observable_array_clear — original: `FUN_08271c84` @ `0x08271c84`
 /// (20 bytes; **19 `bl` and 57 tail `b` call sites**, all unconditional,
 /// binary-scanned by decoding every B/BL word in `osos.dec`).
@@ -1430,6 +1459,7 @@ mod tests {
                     *mut ObservableArrayOwner, *const ObservableArray,
                 ) -> *mut ObservableArrayOwner, 0x089a_6208),
                 (observable_array_owner_08980dc4_copy_construct, 0x0898_0dc4),
+                (observable_array_owner_0898011c_copy_construct, 0x0898_011c),
             ] {
             let mut owner_words = [0xa5a5_a5a5u32; 7];
             let owner = unsafe {
