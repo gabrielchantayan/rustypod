@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e3698
+    ghidra: FUN_080e3698
+    name: pmu_status_notify
+    size: 84
+    sig: "void pmu_status_notify(u32 incoming_r0, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: app/pmu_status_notify
+    status: ported
+    renames:
+      DAT_080e36e8: notification_state_089ca960
+      FUN_082e53d8: pmu_register_0x4b_bit2
+      FUN_082e5b64: pmu_board_version_status_bit
+      FUN_082e5430: register_0x19_bit0
+      FUN_082e5a70: pmu_write_register_0x0c_one
+      FUN_082e572c: pmu_register_0x18_bit0
+      thunk_EXT_FUN_22001edc: iram_usec_timer_read_veneer
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw extent is 0x080e3698..0x080e36ec: 80 instruction bytes and one
+      literal. Two plain inbound BLs at 0x08060940 and 0x080609cc, zero
+      predicated inbound BLs; five plain outgoing BLs, one BLNE, one tail B.
+      Ghidra incorrectly follows the mailbox tail branch into atomic-add.
+      PMU status gates register-0x0c write and timestamp-before-mailbox-post.
+      Preserve the first two retail checks as an inline-assembly ABI pair
+      because the second consumes outgoing r3 on I2C failure. Register-0x19
+      check remains a verified typed retail boundary; other callees reuse
+      existing Rust ports. Host edge cases and ARM release build pass.
   - address: 0x080e86b8
     ghidra: FUN_080e86b8
     name: signed_list_insert_sorted
