@@ -238330,3 +238330,41 @@ functions:
       wrapping SUB/ADD, the +8 store, the r0 result and zero calls.
       The symbol has its own eight-instruction body; no intentional
       fold. No device execution claimed.
+  - address: 0x080c8a60
+    ghidra: FUN_080c8a60
+    name: cff_index_get_pointers
+    size: 156
+    sig: >-
+      i32 cff_index_get_pointers(CffIndex *index, u8 ***out_pointers)
+    module: ft/cff_index
+    status: ported
+    renames:
+      param_1/r4: index
+      param_2/r5: out_pointers
+      local_10: error
+      uVar3/r1: element
+      iVar5/r3: previous_offset
+      iVar2/r0: pointers
+    notes: >-
+      Raw A32 extent 0x080c8a60..0x080c8afc is 156 bytes, with no
+      literal pool. The next function starts with push {r4-r6,lr}.
+      One outbound plain BL at 0x080c8aa0 calls the existing
+      ft_mem_realloc port at 0x082cfc3c; zero predicated BLs.
+      Two inbound plain BLs at 0x0808327c and 0x0809a4cc come from
+      the CFF font and subfont loaders. Clears the output, skips
+      allocation for count zero, otherwise allocates count + 1
+      pointers including the terminal entry. Zero offsets inherit
+      the last nonzero offset, initially one; each pointer is
+      bytes + offset - 1. Allocation error leaves the output null.
+      Ghidra's undefined8 return is incorrect: r0 is the error;
+      r1 is restored from the caller's saved register. Reuses
+      CffIndex and FtStream layouts. Host pointer allocation uses
+      native pointer size; ARM uses four bytes. Volatile allocator
+      function-pointer loading follows adjacent ports. All 15154
+      host tests passed, including leading/interior/all-zero offsets,
+      duplicate offsets, terminal entries, empty index and allocation
+      failure. Standalone production-source smoke returned offsets
+      [0, 4, 4, 4, 16]. ARM release build passed. match.py exited 1:
+      LLVM adds a frame and indirect BLX allocator seam, retaining
+      the empty/error branches, carry-forward loop, unsigned inclusive
+      bound, pointer arithmetic and output commit. No device run.
