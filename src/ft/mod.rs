@@ -14,6 +14,7 @@ pub mod cff_index;
 pub mod cff_parse_fixed;
 pub mod cff_sid;
 pub mod t1_builder;
+pub mod t1_lookup_glyph;
 pub mod t1_pfb_header;
 pub mod conditional_offset;
 pub mod interpolate_delta;

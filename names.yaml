@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e2658
+    ghidra: FUN_080e2658
+    name: t1_lookup_glyph_by_standard_encoding
+    size: 128
+    sig: "int32_t t1_lookup_glyph_by_standard_encoding(const T1GlyphNameDecoder *decoder, uint32_t code)"
+    module: ft/t1_lookup_glyph
+    status: ported
+    vars: {param_1: decoder, param_2: code, pcVar1: name, pcVar2: candidate, uVar4: index}
+    renames: {thunk_FUN_08391e44: strcmp}
+    notes: >-
+      Raw ARM extent 0x080e2658..0x080e26d8 ends in POP before the next
+      PUSH prologue. One outgoing plain BL to strcmp veneer 0x08391e38,
+      zero predicated BLs, one indirect BLX through PSNames slot +0x14.
+      Whole-image word decoding finds two inbound plain BLs at 0x08092ac8
+      and 0x08092ad8 in the Type 1 seac operator, no predicated inbound BL.
+      Codes below 256 map through StandardEncoding (+0x18) u16 SIDs,
+      resolve a name, and scan decoder glyph names for the first exact match.
+      Null entries and unequal first bytes skip comparison; failure is -1.
+      Preserve the initial service-pointer read even for invalid codes and
+      reload count/table during traversal. Native repr(C) host pointers widen;
+      ARM offsets remain +0x554/+0x558/+0x55c and +0x14/+0x18.
+      Reuses ported strcmp, intentionally inlined by LLVM: match.py exit 1,
+      32 original versus 50 Rust instructions, preserving guarded scan and
   - address: 0x080e2d4c
     ghidra: FUN_080e2d4c
     name: free_tag4_if_nonnull_secondary
