@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ef4e8
+    ghidra: FUN_080ef4e8
+    name: ps_is_whitespace
+    size: 36
+    sig: "uint32_t ps_is_whitespace(uint32_t character)"
+    module: ft/ps_is_whitespace
+    status: ported
+    vars: {r0: character_then_boolean_result}
+    renames:
+      param_1: character
+    notes: >-
+      Raw A32 establishes [0x080ef4e8,0x080ef50c): six CMP/CMPNE
+      instructions, MOVEQ one, MOVNE zero, and BX LR; the next function
+      starts with PUSH at 0x080ef50c. Whole-image word decoding finds two
+      incoming plain BLs (0x0808a634 and 0x080a2afc), zero predicated
+      incoming BLs, and zero outgoing BLs of either kind. Type 1 font
+      encoding and charstring dictionary parsers apply this predicate
+      after def/end keywords. Recognizes exactly NUL, TAB, LF, FF, CR,
+      and space; VT is not whitespace. Compares the full 32-bit word,
+      without byte truncation, and returns exactly zero or one. No
+      callees or seams. Host tests cover all byte inputs and wide words;
+      public-entry smoke exercises keyword boundaries, NUL, VT, and
+      nontruncation. Host suite and ARM release build pass. match.py
+      exits 1: LLVM emits an unsigned bound check and a 33-entry jump
+      table instead of predicated comparisons. Only indices 0, 9, 10,
+      12, 13, and 32 select one; all others select zero. The exported
+      symbol remains distinct and call-free. No semantic deviations
+      or device execution.
   - address: 0x080efb94
     ghidra: FUN_080efb94
     name: usb_out_endpoint_zero_rearm
