@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d6fe0
+    ghidra: FUN_080d6fe0
+    name: clock_state_day_of_year
+    size: 88
+    sig: "void clock_state_day_of_year(ClockState *state)"
+    module: time/clock_state
+    status: ported
+    renames:
+      param_1/r5: state
+      sVar3/r4: yday
+      iVar1/r0: leap_year
+      iVar2/r1: month_index
+      r2: month_lengths
+      r3: preceding_month_count
+    notes: >-
+      Raw A32 extent [0x080d6fe0,0x080d7038) is 84 code bytes plus
+      the table pointer literal at 0x080d7034; next function starts
+      with PUSH at 0x080d7038. Ghidra's 84-byte size excludes the literal.
+      Independent aligned whole-image BL decoding finds one plain
+      inbound call at 0x0806ceb8 and one predicated BLNE at 0x0806754c.
+      One outbound plain BL at 0x080d6ff4 targets the already ported
+      is_legacy_leap_year at 0x08074410; no predicated outbound calls.
+      fetch_clock_state also tail-branches here. Read year halfword +0,
+      month byte +2 and day byte +3; sum preceding month lengths onto
+      day minus one, substituting 28 for February in common years,
+      then write only yday halfword +4. Month 0/1 skips all additions;
+      day 0 is not validated. Runtime table 0x089caaa0 is the verified
+      leap-year table at image 0x089d5978 under scatterload skew.
+      Promote the existing private helper to an out-of-line C export
+      and reuse the canonical legacy leap-year port rather than its
+      duplicated unsigned-divide model. Target retains unchecked
+      fixed-address table reads; host uses twelve verified bytes and
+      requires month <= 13. Existing caller remains on this helper.
+      All 15116 host tests and the ARM release build pass. New tests
+      cover zero month/day, every table boundary including month 13,
+      byte-sized day overflow values, year 0/65535, century rules and
+      preservation of every byte outside yday. Standalone production
+      source smoke checked 327680 boundary conversions across all u16
+      years. Reviewed match.py exit 1: 21 original versus 31 Rust
+      instructions; LLVM peels January/February, counts down the remaining
+      loop, preserves one leap-test call and the final STRH, and embeds
+      the original runtime table pointer. No intentional symbol fold
+      or device execution claimed.
   - address: 0x080d87d4
     ghidra: FUN_080d87d4
     name: swap_low_two_bits
