@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod packet_ring_pending_count;
+pub use packet_ring_pending_count::*;
 pub mod utf8_copy_bounded;
 pub mod primary_record_id_lookup;
 pub mod fill_elements;

@@ -41947,6 +41947,35 @@ functions:
       predicated `bl`). Rust uses a loop with volatile byte reads/writes to
       preserve the original ordering when ranges overlap.
 
+  - address: 0x080f1554
+    ghidra: FUN_080f1554
+    name: packet_ring_pending_count
+    size: 36
+    sig: "i32 packet_ring_pending_count(const u32 *ring)"
+    module: util/packet_ring_pending_count
+    status: ported
+    renames:
+      param_1/r0: ring
+      field_0x840: read_index
+      field_0x844: write_index
+    notes: >-
+      Raw A32 words establish the true extent 0x080f1554..0x080f1578;
+      the next function begins with e1a01400 (mov r1,r0,lsl #8).
+      Two inbound plain BLs at 0x080cb7fc and 0x080cc37c, zero predicated
+      BLs, and zero outbound calls. Consumer 0x080cb634 drains until empty;
+      producer 0x080cc298 treats count three as full and selects one of four
+      0x206-byte packet slots. Loads write/read words at +0x844/+0x840,
+      computes wrapping 32-bit write-read+4, then signed remainder modulo
+      four. Negative intermediates retain negative remainders rather than
+      unsigned masking. No callee seams or behavioral deviations.
+      Host tests cover all sixteen valid index pairs, negative remainders,
+      overflow and sign boundaries, and record preservation; all 15037
+      host tests pass. ARM release build passes. Direct-entry host smoke
+      drains a wrapped full ring through counts 3,2,1,0 and returns -3 for
+      read seven/write zero. match.py shows the eight computational
+      instructions unchanged; LLVM adds push/mov frame setup and replaces
+      bx lr with pop returning through pc (11 versus 9 instructions).
+
   - address: 0x080bead8
     ghidra: FUN_080bead8
     name: heap_mutex_creating
