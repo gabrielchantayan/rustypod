@@ -234793,3 +234793,52 @@ functions:
       an explicit zero branch and conditional frame instead of BLNE,
       retaining vtable literal/store, release BL and base tail branch.
       Export remains distinct; no intentional fold or device run claimed.
+
+  - address: 0x080fde38
+    ghidra: FUN_080fde38
+    name: cache_slot_select
+    size: 208
+    sig: "u32 cache_slot_select(u8 *manager)"
+    module: app/cache_slot_select
+    status: ported
+    renames:
+      param_1/r6: manager
+      uVar1/r0: index
+      uVar10/lr: dirty_age
+      uVar6/r4: clean_age
+      uVar5/r3: dirty_index
+      uVar9/r12: clean_index
+      uVar8/r7: cooldown_index
+      iVar7/r5: greatest_cooldown
+      iVar2/r1: record
+      uVar4/r2: age
+    notes: >-
+      Raw osos.dec words establish the 208-byte extent
+      0x080fde38..0x080fdf08, ending in a pop to pc before the next
+      function's push. No literal pool or outgoing plain/predicated BL.
+      Whole-image aligned A32 decoding finds exactly two incoming plain
+      BLs at 0x080f9968 and 0x080f9fb0, zero predicated incoming BLs.
+      Both callers reuse the selected 60-byte block-cache record and
+      process dirty data before replacement. Count is at manager +0x468;
+      records start at +0x480, with unsigned age at +0, dirty byte at +4,
+      valid byte at +5 and notification request at +0x24. A request
+      exactly equal to one plus signed negative age increments the age
+      and competes for greatest updated cooldown strictly above -13.
+      Other records return immediately if invalid or zero-age; otherwise
+      track the smallest unsigned age separately for dirty exactly one
+      and clean exactly zero. Clean takes precedence over dirty, then
+      cooldown, defaulting to index zero. Strict comparisons retain the
+      first tie; UINT_MAX ages cannot beat the minimum-age sentinels.
+      Deliberate deviation: volatile accesses preserve field visitation
+      and cooldown writes using target byte offsets, with no host-width
+      pointer fields or callee seams. Five host tests cover precedence,
+      ties, unsigned ages, sentinel exclusion, cooldown threshold and
+      updates, unknown flag values, empty input and early-return mutation
+      boundaries. Host suite passes 14980 tests; ARM release build passes.
+      Native smoke selects a clean slot over a younger dirty slot and
+      observes preceding cooldown advancement. match.py exits 1 with
+      a structural diff: LLVM emits 57 versus 52 instructions, advances
+      the record pointer by 60, uses an empty-count fast return and
+      rearranges conditional minima/final precedence. Both remain leaf
+      scans with early reusable-slot returns and signed cooldown stores;
+      the exported symbol is present, with no intentional fold.
