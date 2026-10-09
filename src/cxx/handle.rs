@@ -94,6 +94,68 @@ pub unsafe extern "C" fn handle_deref_or_null(slot: *const *const *mut u8) -> *m
     cell.read()
 }
 
+/// handle_cell_second_word_or_zero — retailOS `FUN_080edb20` @ 0x080edb20.
+/// True size: 16 bytes; next function starts at 0x080edb30 with PUSH.
+/// Raw words: e5900000 e3500000 15900004 e12fff1e.
+/// Whole-image A32 decoding verifies two plain incoming BLs (0x081739a8,
+/// 0x08174874), zero predicated incoming BLs, and zero outgoing BLs.
+///
+/// Load the handle cell and return zero if it is NULL; otherwise return
+/// its aligned second u32 word. Both callers pass their owner's +0x18
+/// handle, also resolved by `handle_deref_or_null` for virtual dispatch.
+/// The second word's specific role is not established by those callers.
+///
+/// Deliberate deviations: none on target. Host slot pointers widen
+/// naturally, while the cell's u32 words remain four bytes apart.
+///
+/// # Safety
+/// `slot` must be aligned and readable even when its cell is NULL.
+/// A non-NULL cell must contain two aligned readable u32 words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn handle_cell_second_word_or_zero(slot: *const *const u32) -> u32 {
+    let cell = slot.read();
+    if cell.is_null() {
+        return 0;
+    }
+    cell.add(1).read()
+}
+
+#[cfg(test)]
+mod handle_cell_second_word_tests {
+    use super::handle_cell_second_word_or_zero;
+
+    #[test]
+    fn absent_cell_returns_zero_without_dereferencing_it() {
+        let cell: *const u32 = core::ptr::null();
+        assert_eq!(unsafe { handle_cell_second_word_or_zero(&cell) }, 0);
+    }
+
+    #[test]
+    fn reads_full_second_word_not_payload_pointer_or_next_word() {
+        for value in [0, 1, 0x8000_0000, 0x1234_5678, u32::MAX] {
+            for first in [0, 0xdead_beef] {
+                let words = [first, value, !value];
+                let cell = words.as_ptr();
+                assert_eq!(unsafe { handle_cell_second_word_or_zero(&cell) }, value);
+                assert_eq!(words, [first, value, !value]);
+            }
+        }
+    }
+
+    #[test]
+    fn observes_replacement_of_the_handle_cell() {
+        let first = [7, 19];
+        let second = [11, 23];
+        let mut cell = first.as_ptr();
+        assert_eq!(unsafe { handle_cell_second_word_or_zero(&cell) }, 19);
+        cell = second.as_ptr();
+        assert_eq!(unsafe { handle_cell_second_word_or_zero(&cell) }, 23);
+        cell = core::ptr::null();
+        assert_eq!(unsafe { handle_cell_second_word_or_zero(&cell) }, 0);
+    }
+}
+
 /// Opaque owner prefix with a two-level handle at target offset +0x54.
 /// Pointer fields widen naturally on hosts; the unknown prefix stays 21
 /// target words. Host alignment may pad before `handle`.
