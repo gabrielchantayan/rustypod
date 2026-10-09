@@ -236223,3 +236223,36 @@ functions:
       254-byte bound, delimiter skipping and string lifetime are preserved.
       LLVM splits the initial read from the loop; relocation-free match.py
       labels unresolved calls with the current symbol, not their identities.
+
+  - address: 0x080eb6c8
+    ghidra: FUN_080eb6c8
+    name: global_indirect_transfer_completion_get
+    size: 20
+    sig: "u32 global_indirect_transfer_completion_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_080eb6d8: GLOBAL_INDIRECT_HOLDER
+      return/r0: transfer_completion
+    notes: >-
+      Raw words e59f0008 e5900004 e5900038 e12fff1e confirm 16 instruction
+      bytes followed by literal 0x089d03bc at 0x080eb6d8. True extent is
+      20 bytes through the already-ported variant_compare at 0x080eb6dc,
+      not Ghidra's 16-byte instruction-only size. Whole-image aligned A32
+      branch-immediate decoding finds two plain inbound BLs at 0x08098f0c
+      and 0x080a0d3c, zero predicated BLs, and no outgoing calls. Follow
+      holder +4 and return the full u32 at state +0x38. Multiple-register
+      read/write callers poll bit 0 and acknowledge by writing one to the
+      same word; other bits remain uninterpreted. No input arguments are
+      read despite Ghidra passing a spurious argument in the read caller.
+      Deliberate deviations: reuse the existing packed crate-static holder
+      model rather than the fixed firmware global; use a volatile final
+      load for externally updated completion. No null guards, caching,
+      masking, or acknowledgment writes. Host tests cover zero, completion
+      and non-completion bits, high bits, all bits, neighboring words,
+      repeated updates and republishing the holder pointer. Host test gate
+      and ARM release build passed. Executable smoke observed idle zero
+      then 0x80000001 without acknowledging the word. match.py exits one
+      with the expected structural diff: the +4 and +0x38 loads remain;
+      LLVM adds a frame-pointer prologue/epilogue and a relocated literal
+      for the crate-static holder, replacing the original fixed address.

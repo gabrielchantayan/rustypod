@@ -189,6 +189,31 @@ pub unsafe extern "C" fn global_indirect_transfer_state_get() -> u32 {
     (state.cast::<u32>().add(4)).read()
 }
 
+/// global_indirect_transfer_completion_get — original: `FUN_080eb6c8` @ 0x080eb6c8.
+/// True extent: 20 bytes (16 instruction bytes plus the literal at 0x080eb6d8),
+/// ending at the already-ported `variant_compare` at 0x080eb6dc.
+///
+/// Raw words e59f0008 e5900004 e5900038 e12fff1e follow holder +4 and
+/// return the raw word at state +0x38. Whole-image aligned ARM BL decoding
+/// finds two plain callers (0x08098f0c and 0x080a0d3c), zero predicated
+/// callers, and no outgoing calls. Multiple-register read/write callers poll
+/// bit 0, then acknowledge it by writing one to this same word.
+///
+/// Deliberate deviation: reuse the existing packed crate-static holder model
+/// instead of the firmware global at 0x089d03bc. The final load is volatile
+/// because callers poll externally updated transfer completion. No null
+/// checks, caching, masking, or acknowledgment writes are added.
+///
+/// # Safety
+/// The holder's +4 pointer must reference at least 0x3c readable bytes,
+/// aligned for a `u32` load, and remain valid throughout the call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_indirect_transfer_completion_get() -> u32 {
+    let state = global_indirect_state();
+    (state.cast::<u32>().add(14)).read_volatile()
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -337,6 +362,27 @@ mod tests {
             second[4] = 0xa5a5_5a5a;
             replace_state(second.as_mut_ptr().cast());
             assert_eq!(global_indirect_transfer_state_get(), second[4]);
+            replace_state(old);
+        }
+    }
+
+    #[test]
+    fn transfer_completion_preserves_bits_updates_and_republished_pointer() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut first = [0x1111_1111u32; 16];
+        let mut second = [0x2222_2222u32; 16];
+        unsafe {
+            let old = replace_state(first.as_mut_ptr().cast());
+            for word in [0, 1, 2, 0x8000_0001, u32::MAX] {
+                first[14] = word;
+                assert_eq!(global_indirect_transfer_completion_get(), word);
+                assert_eq!(first[14], word); // Reading must not acknowledge completion.
+                assert_eq!(first[13], 0x1111_1111);
+                assert_eq!(first[15], 0x1111_1111);
+            }
+            second[14] = 0xa5a5_5a5a;
+            replace_state(second.as_mut_ptr().cast());
+            assert_eq!(global_indirect_transfer_completion_get(), 0xa5a5_5a5a);
             replace_state(old);
         }
     }
