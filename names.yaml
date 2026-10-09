@@ -37227,6 +37227,35 @@ functions:
       shape already accepted for calloc_tag4 @ 0x0805d1dc and
       free_tag4 @ 0x0805d070.
 
+  - address: 0x080d2404
+    ghidra: FUN_080d2404
+    name: string_pool_used_bytes
+    size: 36
+    sig: "u32 string_pool_used_bytes(const StringPool *pool)"
+    module: util/string_pool
+    vars: {param_1/r0: pool, r4: pool, r1: unused_bytes}
+    status: ported
+    notes: >-
+      Raw osos.dec verifies nine A32 words through the return at 0x080d2424;
+      the independent branch veneer at 0x080d2428 starts the next function.
+      Whole-image decoding finds two incoming plain BLs at 0x080a64d8 and
+      0x080c5ce4, zero incoming predicated BLs, one outgoing plain BL at
+      0x080d2418 to the ported memh_get_len at 0x0805d0cc, and zero outgoing
+      predicated BLs. Return zero when the blob handle at +0x10 is NULL;
+      otherwise subtract unused bytes at +0x24 from its MemH length modulo
+      2^32. Includes reclaimable bytes until compaction. Callers use the
+      result for compaction sizing and new payload offsets. Reuses the
+      existing StringPool native-pointer host layout, preserving target
+      offsets; no new seam or validation. Tests cover absent handles with
+      nonzero free bytes, empty/full/partly used buffers, high-bit lengths,
+      underflow, and invalid MemH magic with nonzero free bytes.
+      Host suite: 15133 passing tests; ARM release build passes. A standalone
+      host executable using the real Rust library verifies NULL, occupied,
+      fully free, wrapping, and invalid-magic paths. match.py shows the same
+      handle load, NULL gate, MemH call, free-byte load, and subtraction;
+      LLVM adds frame setup and an explicit zero-return branch (12 versus
+      nine retail instructions).
+
   - address: 0x0805d0cc
     ghidra: FUN_0805d0cc
     name: memh_get_len
