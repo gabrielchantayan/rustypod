@@ -654,6 +654,7 @@ pub mod hints {
     // and owned-context raw-u32-pointer fixture.
     pub const LOCKED_OWNED_CONTEXT_DESTROY: usize = 0x7f20_0000;
     pub const QUEUED_MESSAGE_POST: usize = 0x1800_0000;
+    pub const QUEUED_MESSAGE_DESTRUCT: usize = 0x1801_0000;
     pub const VTABLE_SET_ITERATOR_RELEASE: usize = 0x1900_0000;
     pub const VDBE_SERIAL_PUT: usize = 0x1a00_0000;
     // 0x1a10_0000: dedicated to sqlite/vdbe_free_ops's target-layout
