@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c6294
+    ghidra: FUN_080c6294
+    name: retail_word_index
+    size: 80
+    sig: "int32_t retail_word_index(uint32_t value, uint32_t *output)"
+    module: app/retail_word_index
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: output
+      uVar1/r2: index
+      DAT_080c62e0: retail word-table pointer
+    notes: >-
+      Raw A32 words establish extent [0x080c6294,0x080c62e4):
+      76 code bytes and the 0x083e2568 pointer literal at 0x080c62e0.
+      Next real function is the independently ported accessor at
+      0x080c62e4. Whole-image aligned BL decoding finds two plain inbound
+      calls at 0x08051c08 and 0x08179098, zero predicated inbound calls,
+      and zero outbound plain or predicated BLs. NULL output returns
+      -50 before any table read. Otherwise scan exactly 23 aligned u32
+      words in order; first match writes its zero-based index and returns
+      zero. A miss writes UINT32_MAX and returns -50.
+      First caller supplies a halfword identifier and defaults failed
+      lookups to index zero. Second caller supplies a virtual method's
+      result and returns the output word without checking status.
+      No callee seam. Exact table identity is unknown: supplied raw
+      bytes at 0x083e2568 decode as instructions, not a justified semantic
+      identifier table. Preserve the runtime address without embedding
+      or inventing contents; no dependency on the undecrypted region.
+      Host tests inject aligned table storage into the inlined helper,
+      matching the existing indexed_resource_word convention. Production
+      behavior has no deliberate deviations. Tests cover every index,
+      full-width values, duplicates, aliasing, NULL, misses, and exclusion
+      of word 24. All 15171 host tests passed; ARM release build succeeded.
+      Standalone fixed-address mmap smoke exercised the exported function:
+      final index 22, miss -50/UINT32_MAX, NULL after unmapping the table.
+      match.py exit 1 reviewed: LLVM unrolls all 23 comparisons (107
+      instructions versus 19), retaining ordered aligned loads, first-match
+      stores, NULL bypass, and error sentinel. Adds frame-pointer save
+      and restore; no outbound calls. No device execution.
+
   - address: 0x080c6930
     ghidra: FUN_080c6930
     name: pkcs7_get_octet_string
