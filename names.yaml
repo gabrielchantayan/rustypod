@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f4cbc
+    ghidra: FUN_080f4cbc
+    name: fold_upper
+    size: 24
+    sig: "u32 fold_upper(i32 c)"
+    module: util/wstr_casecmp
+    status: ported
+    vars:
+      param_1/r0: c
+      r1: table
+      DAT_080f4cd0: WSTR_FOLD_TABLE
+    notes: >-
+      Raw A32 establishes [0x080f4cbc,0x080f4cd4): 20 instruction
+      bytes including BX LR, then the four-byte literal at 0x080f4cd0,
+      before the next PUSH. Ghidra's 20-byte size excludes the literal;
+      the previous helper documentation incorrectly said 16 bytes.
+      Whole-image branch-word decoding finds two inbound plain BLs at
+      0x0807639c and 0x080763ac, zero predicated inbound BLs and zero
+      outgoing BLs of either kind. EOF (-1) returns 0xffffffff without
+      reading the table; other arguments index a byte by their full
+      signed value, without truncation or range checks.
+      Promoted the existing private helper to an inline-never C export;
+      the wide-string comparator now calls this real hook target.
+      Retains the existing WSTR_FOLD_TABLE seam and recovered Latin-1
+      upper-map default at image 0x083f80b5, rather than the cold literal
+      0x083ed0dd pointing into live soft-float ARM code. Volatile loads
+      preserve explicit accesses; host pointers widen. No new callee.
+      Signed wrapping pointer arithmetic preserves negative non-EOF
+      indices when the installed table has readable prefix storage.
+      Host acceptance passes all 15025 tests, including exhaustive byte
+      mappings and EOF. Production-source smoke verifies EOF with a NULL
+      map, negative -2 indexing, zero and indices 256 and 1025.
+      ARM release build passes. match.py exits 1 with a reviewed structural
+      diff: five stock instructions versus nine Rust instructions plus a
+      literal. EOF bypasses all loads; full-width indexed LDRB remains.
+      LLVM adds a frame and one pointer load for the existing table seam.
   - address: 0x080f4f74
     ghidra: FUN_080f4f74
     name: once_callback
@@ -92294,14 +92330,15 @@ functions:
       AND strlen(s) == n; empty vector -> 0 even against "". Return is
       a 1/0 bool, not a tri-state. Sampled call sites (0x0811de70
       family) match vector<u16> buffers against command/name C strings
-      from object slots - an identifier/verb matcher. Helpers ported in
-      place, private (house precedent): wide_vec_len (FUN_0829db9c @
+      from object slots - an identifier/verb matcher. Helpers originally
+      private: wide_vec_len (FUN_0829db9c @
       0x0829db9c, 24 bytes - ADS out-of-line vector<u16>::size, UNSIGNED
       end>begin guard then (end-begin)>>1 asr, inverted -> 0; since
       promoted to the exported vector_size_elem2_clamped in
       cxx/templates, wide_vec_len delegates) and
-      fold_upper (FUN_080f4cbc @ 0x080f4cbc, 16 bytes - -1 -> 0xffffffff
-      else TABLE[c]). The fold-table literal @ 0x080f4cd0 in the cold
+      exported fold_upper (FUN_080f4cbc @ 0x080f4cbc, 24 bytes including
+      literal - -1 -> 0xffffffff else TABLE[c]). See its standalone entry.
+      The fold-table literal @ 0x080f4cd0 in the cold
       image holds 0x083ed0dd - one byte into __dscalb (0x083ed0dc, live
       soft-float, ported in fp/fp_scalb.rs) - a pre-locale-init
       placeholder, not a usable map (binary-verified: 'c'/'C' fold
