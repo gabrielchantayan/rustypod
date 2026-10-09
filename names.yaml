@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080cab1c
+    ghidra: FUN_080cab1c
+    name: u16_threshold_lookup
+    size: 64
+    sig: "u16 u16_threshold_lookup(u32 key, const U16ThresholdRecord *table, u32 count)"
+    module: util/u16_threshold_lookup
+    status: ported
+    vars:
+      param_1/r0: key
+      param_2/r1: table
+      param_3/r2: high
+      uVar2/r12: low
+      r3: midpoint
+    notes: >-
+      Raw A32 extent [0x080cab1c,0x080cab5c), 64 bytes through POP PC;
+      next independent PUSH begins at 0x080cab5c. Whole-image aligned-word
+      decoding finds two incoming plain BLs at 0x080dc8e8 and 0x080dc900,
+      zero predicated BLs; body has zero outgoing BL or BLX calls.
+      Unsigned upper-bound search over four-byte u16 threshold/value records
+      returns the last qualifying value, selecting the last duplicate.
+      Empty counts and keys below the first threshold read the preceding
+      record's value; no fallback is added. Bounds and offsets wrap at u32.
+      Host byte offsets are sign-extended while pointers retain native width.
+      The caller text_pair_break_action uses an unrecovered table, but this
+      generic lookup accepts caller-supplied records and embeds no table.
+      Host suite passes 15144 tests; ARM release build succeeds. match.py
+      reports 16 original versus 22 Rust instructions: LLVM adds frame setup
+      and an empty-count path; unsigned search, halfword reads, duplicate
   - address: 0x080d36e4
     ghidra: FUN_080d36e4
     name: codec_cached_headphone_level_set
