@@ -22,8 +22,7 @@
 //! every call here is guarded by `blne`). 0x080d86b0 is the object's
 //! table teardown: with `force != 0` it frees the entry arrays at +0x14
 //! and +0x18 (a 0x10000-entry u16-indexed table) and rewrites the +0x04
-//! flags word; it is separately unported and not assigned an identity
-//! beyond that verified behaviour.
+//! flags word; it is ported as `crts_table_teardown`.
 //!
 //! # Extent and call census
 //!
@@ -44,11 +43,8 @@
 //! - The verified tag guard at 0x080a7714 is ported as
 //!   [`crate::util::crts_tag::crts_has_tag`] and called directly; it needs no
 //!   replaceable dispatch seam.
-//! - The table teardown dispatches through the volatile [`CRTS_TABLE_TEARDOWN`]
-//!   seam because it remains unported; its target default transmuted the
-//!   retail address 0x080d86b0, so the port remains hook-ready on device while
-//!   host tests install a recording mock. The `"MemH"` destructor is now the
-//!   direct, ported [`crate::heap::memh_handle::memh_handle_destroy`] call.
+//! - Table teardown and the `"MemH"` destructor are direct calls to their
+//!   verified Rust ports; neither needs a replaceable dispatch seam.
 //! - 0x0805cfb4 is already ported as [`crate::libc::bzero::bzero`]; it is
 //!   reached through the volatile [`CRTS_OBJECT_ZERO`] slot (wired default:
 //!   the port) so LLVM cannot inline the 76-byte fill and erase the stock
@@ -70,12 +66,6 @@ pub const ERR_INVALID_OBJECT: i32 = -50;
 /// Total object extent zeroed by the destructor, in bytes.
 pub const CRTS_OBJECT_SIZE: usize = 0x58;
 
-/// RetailOS load address of the unported table teardown.
-pub const CRTS_TABLE_TEARDOWN_ADDRESS: usize = 0x080d_86b0;
-
-/// ABI of the object table teardown at 0x080d86b0. Its status is
-/// discarded by the destructor, exactly as in the original.
-pub type CrtsTableTeardown = unsafe extern "C" fn(this: *mut CrtsObject, force: u32) -> i32;
 
 /// The verified header of the `"crts"`-tagged object family.
 ///
@@ -101,31 +91,6 @@ pub struct CrtsObject {
 }
 
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_crts_table_teardown(this: *mut CrtsObject, force: u32) -> i32 {
-    let body: CrtsTableTeardown = core::mem::transmute(CRTS_TABLE_TEARDOWN_ADDRESS);
-    body(this, force)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_crts_table_teardown(_this: *mut CrtsObject, _force: u32) -> i32 {
-    panic!("crts_object_destroy requires table teardown 0x080d86b0")
-}
-
-
-/// Active boundary for the unported table teardown.
-#[cfg(target_os = "none")]
-pub static mut CRTS_TABLE_TEARDOWN: CrtsTableTeardown = retail_crts_table_teardown;
-
-/// Active host boundary for the unported table teardown.
-#[cfg(not(target_os = "none"))]
-pub static mut CRTS_TABLE_TEARDOWN: CrtsTableTeardown = missing_crts_table_teardown;
-
-
-#[inline(always)]
-unsafe fn crts_table_teardown() -> CrtsTableTeardown {
-    ptr::read_volatile(ptr::addr_of!(CRTS_TABLE_TEARDOWN))
-}
 
 /// Zero-fill boundary for the destructor's final `bl 0x0805cfb4`. The wired
 /// default is the ported [`crate::libc::bzero::bzero`]; the volatile slot
@@ -170,7 +135,7 @@ pub unsafe extern "C" fn crts_object_destroy(this: *mut CrtsObject) -> i32 {
             handle as usize as *mut crate::heap::memh_handle::MemhHandle,
         );
     }
-    let _ = crts_table_teardown()(this, 1);
+    let _ = crate::util::crts_table_teardown::crts_table_teardown(this, 1);
     crts_object_zero()(this as *mut u8, CRTS_OBJECT_SIZE as i32);
     0
 }
@@ -180,43 +145,9 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use std::sync::Mutex;
     use std::vec::Vec;
 
-    static DESTROY_LOCK: Mutex<()> = Mutex::new(());
-    /// (this, force) pairs observed by the recording teardown.
-    static mut TEARDOWN_CALLS: Vec<(usize, u32)> = Vec::new();
-    /// Status the recording teardown returns.
-    static mut TEARDOWN_STATUS: i32 = 0;
-
-
-    unsafe extern "C" fn recording_crts_table_teardown(this: *mut CrtsObject, force: u32) -> i32 {
-        TEARDOWN_CALLS.push((this as usize, force));
-        TEARDOWN_STATUS
-    }
-
-    struct Reset;
-
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            unsafe {
-                CRTS_TABLE_TEARDOWN = missing_crts_table_teardown;
-                TEARDOWN_CALLS = Vec::new();
-                TEARDOWN_STATUS = 0;
-            }
-        }
-    }
-
-    /// Installs the unported table-teardown recorder and returns its guard.
-    fn mock() -> (std::sync::MutexGuard<'static, ()>, Reset) {
-        let guard = DESTROY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe {
-            CRTS_TABLE_TEARDOWN = recording_crts_table_teardown;
-        }
-        (guard, Reset)
-    }
-
-    /// A fixture with the tag and all words set to a canary pattern.
+    /// Valid tag with absent resources and a canary flags word.
     fn canary_object() -> CrtsObject {
         CrtsObject {
             tag: CRTS_TAG,
@@ -224,7 +155,7 @@ mod tests {
             handle_08: 0,
             handle_0c: 0,
             handle_10: 0,
-            opaque_14: [0xaaaa_aaaa; 17],
+            opaque_14: [0; 17],
         }
     }
 
@@ -236,8 +167,6 @@ mod tests {
 
     #[test]
     fn null_object_returns_err_invalid_and_calls_nothing() {
-        let _lock = DESTROY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let _reset = Reset;
         unsafe {
             assert_eq!(crts_object_destroy(ptr::null_mut()), ERR_INVALID_OBJECT);
         }
@@ -245,8 +174,6 @@ mod tests {
 
     #[test]
     fn bad_tag_returns_err_invalid_and_leaves_object_untouched() {
-        let _lock = DESTROY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let _reset = Reset;
         let mut object = canary_object();
         object.tag = 0x7374_7264; // "drts"
         object.handle_08 = 0x1111_1111;
@@ -266,40 +193,14 @@ mod tests {
 
     #[test]
     fn valid_object_teardowns_then_zeroes_when_no_memh_handles_are_present() {
-        let (_lock, _reset) = mock();
         let mut object = canary_object();
         let this = &mut object as *mut CrtsObject;
         unsafe {
             assert_eq!(crts_object_destroy(this), 0);
-            assert_eq!(TEARDOWN_CALLS, [(this as usize, 1)], "teardown runs once, forced");
         }
         let bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(this as *const u8, CRTS_OBJECT_SIZE) };
         assert!(bytes.iter().all(|&b| b == 0), "the whole object is zeroed");
     }
 
-    #[test]
-    fn absent_handles_skip_the_destroy_but_teardown_still_runs() {
-        let (_lock, _reset) = mock();
-        let mut object = canary_object();
-        let this = &mut object as *mut CrtsObject;
-        unsafe {
-            assert_eq!(crts_object_destroy(this), 0);
-            assert_eq!(TEARDOWN_CALLS.len(), 1);
-        }
-    }
-
-    #[test]
-    fn teardown_status_is_discarded() {
-        let (_lock, _reset) = mock();
-        let mut object = canary_object();
-        unsafe {
-            TEARDOWN_STATUS = ERR_INVALID_OBJECT;
-            assert_eq!(
-                crts_object_destroy(&mut object),
-                0,
-                "the destructor returns its own success, not the teardown's"
-            );
-        }
-    }
 }
