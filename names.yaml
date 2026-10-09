@@ -234032,3 +234032,39 @@ functions:
       3 (the effective controller address remains aligned at 0x089d0558).
       Conditional skip, virtual dispatch, clear-before-reload, entry 0x81,
       two direct calls, and unconditional return 1 are retained.
+
+  - address: 0x08104ad8
+    ghidra: FUN_08104ad8
+    name: descriptor_vector_owner_construct
+    size: 68
+    sig: "void *descriptor_vector_owner_construct(void *object, const void *descriptor)"
+    module: cxx/descriptor_vector_owner_construct
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: descriptor
+      param_3/r2: unused
+      param_4/r3: unused
+      DAT_08104b18: DESCRIPTOR_VECTOR_OWNER_VTABLE_ADDRESS
+      FUN_083e5194: three_word_clear_tenth
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw osos.dec establishes 64 instruction bytes plus the vtable literal
+      0x08980a18 at 0x08104b18; next real function starts at 0x08104b1c.
+      Whole-image A32 decoding finds two inbound plain BLs at 0x08162b50 and
+      0x08280ec8, zero predicated BLs. The body has two plain BLs and no
+      predicated BLs. Install the vtable, clear the three-word vector head
+      at +4/+8/+12, clear state word +48 and flag byte +52, forward-copy
+      the 32-byte descriptor to +16, and return object. Padding +53..+55
+      remains untouched. Callers construct a 0x38-byte polymorphic owner
+      and a derived object; no wider class identity is inferred.
+      Reuse existing Rust clear and IRAM-copy ports. The clear helper leaves
+      r0 unchanged in raw ARM but returns void in Rust, so retain the input
+      object explicitly. Omit unused r2/r3 and the ignored stack argument.
+      Host tests cover descriptor extremes, guards, padding, return identity,
+      and aliased forward-copy block ordering. All 14945 host tests passed;
+      ARM release build passed. Actual-source smoke observed the initialized
+      object and copied descriptor. No device execution. match.py exited 1:
+      16 original instructions versus 18 Rust listing lines, retaining both
+      calls, field offsets, copy length, vtable literal, and returned object.
+      LLVM adds frame setup and reorders the independent state/flag clears.
