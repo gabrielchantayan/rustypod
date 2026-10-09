@@ -517,3 +517,4 @@ pub mod owned_payload_list_remove;
 pub mod segment_index_offset;
 pub mod active_entry_serialized_size;
 pub mod retail_item_count;
+pub mod ring_buffer_construct;
