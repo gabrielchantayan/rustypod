@@ -999,6 +999,7 @@ pub mod path_entry_load_to_heap;
 pub mod path_entry_probe_and_mark_present;
 pub mod playlist_pointer_marker;
 pub mod selection_context_set_slot_label;
+pub mod text_scratch_buffer_reserve;
 pub mod pending_event_take;
 pub mod pending_event_find_link;
 pub mod pending_event_release;
