@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Volume-dependent default allocation-size selection @ 0x080d528c.
+pub mod default_allocation_size;
 /// ID3-prefixed word version reader @ 0x08120bdc.
 pub mod id3_word_version;
 /// Release and rebuild cached storage extents @ 0x08136954.

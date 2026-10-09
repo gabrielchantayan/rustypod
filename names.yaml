@@ -16,6 +16,51 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d528c
+    ghidra: FUN_080d528c
+    name: default_allocation_size
+    size: 172
+    sig: "u32 default_allocation_size(u32 alignment, u32 minimum, u32 volume_units_low, u32 volume_units_high, u32 selector)"
+    module: fs/default_allocation_size
+    status: ported
+    renames:
+      param_1/r0/r7: alignment
+      param_2/r1/r4: minimum
+      param_3/r2/r5: volume_units_low
+      param_4/r3/r6: volume_units_high
+      param_5/stack/r8: selector
+      DAT_080d5334: allocation_size_table
+      FUN_08036f14: __rt_udiv
+    notes: >-
+      Raw extent [0x080d528c,0x080d5338) is 168 executable bytes plus
+      the four-byte table pointer literal; the next function begins with
+      LDRH r2,[r0,#2]. Independent whole-image aligned A32 decoding finds
+      two inbound plain BLs at 0x08088d34 and 0x08088d98, no predicated
+      inbound BLs, and one plain body BL at 0x080d5324 to the canonical
+      ported __rt_udiv. Raw callers supply the fifth stack argument as
+      one and zero respectively, correcting Ghidra's four-argument calls.
+      Below 2^21 volume units choose max(low<<2,minimum<<3); otherwise
+      index paired halfwords at live firmware address 0x08a09ce0 by the
+      bit length of the 64-bit unit count shifted right 22, capped at 14.
+      Zero selector chooses the second halfword, nonzero the first.
+      Shift the halfword left 20, divide by max(alignment,minimum),
+      multiply back, and replace a zero result by that alignment.
+      Preserve 32-bit wrapping shifts and the existing ADS div0 path.
+      No guessed table contents or new callee seam. Structured Rust is
+      the only algorithmic deviation. Host tests cover threshold and
+      power-of-two boundaries, both columns, high-word counts, capped
+      indexing, wrapping shifts, floor rounding and minimum fallback.
+      All 15113 host tests passed; ARM release build passed. Standalone
+      production-source smoke used the real ADS division implementation
+      and verified four small-volume outputs; firmware signal handling
+      was an unexercised trap boundary. The optional whole-crate host
+      rlib build encountered six unrelated cfg-gated helper references.
+      Required match.py exits 1 with a reviewed structural diff: 42
+      original listing instructions versus 48 Rust entries. Threshold,
+      two-word shift loop, capped index, halfword load, shift by 20,
+      unsigned maximum, division, multiply and zero fallback remain.
+      Archive relocation confirms R_ARM_CALL __rt_udiv; the table
+      literal remains 0x08a09ce0. No symbol fold or device run claimed.
   - address: 0x080d6d68
     ghidra: FUN_080d6d68
     name: month_first_weekday
