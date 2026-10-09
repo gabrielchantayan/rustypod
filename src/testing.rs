@@ -39,6 +39,8 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const RING_READ: usize = 0x4364_0000;
+    pub const RING_READ_ALIAS: usize = 0x4365_0000;
     pub const TAGGED_RECORD_FROM_LITI_INDEX: usize = 0x4363_0000;
     pub const LITI_HANDLE_CLASS_CHECK: usize = 0x4362_0000;
     pub const VIEW_STOP_SLIDESHOW_AND_DISPATCH: usize = 0x4361_0000;
