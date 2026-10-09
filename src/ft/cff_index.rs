@@ -254,6 +254,66 @@ pub unsafe extern "C" fn cff_index_get_name(index: *mut CffIndex, element: u32) 
     name
 }
 
+/// cff_index_get_pointers — original `FUN_080c8a60` @ 0x080c8a60.
+/// True extent [0x080c8a60, 0x080c8afc): 156 bytes, no literal pool;
+/// the next function starts with `push {r4-r6,lr}`. Raw A32 words verify
+/// one outbound plain BL to ft_mem_realloc @ 0x082cfc3c, zero predicated
+/// BLs, and two inbound plain BLs at 0x0808327c and 0x0809a4cc.
+///
+/// Clears the output, then, for a nonempty INDEX, allocates count + 1
+/// pointers. Starting with offset 1, each nonzero offset replaces the
+/// carried offset; each entry becomes bytes + carried offset - 1. The
+/// terminal offset is included. Returns the allocation error unchanged.
+///
+/// Deliberate deviations: native pointers and native-sized allocation on
+/// hosts (four-byte pointers on ARM). Ghidra's undefined8 return is rejected:
+/// r0 is the error and the epilogue restores the caller's r1. As in the
+/// neighboring ports, a volatile function-pointer load retains the allocator
+/// seam instead of inlining it.
+///
+/// # Safety
+/// `index`, its stream, and `out_pointers` must be valid. A nonempty index
+/// must contain count + 1 readable offset words, and its stream allocator
+/// must satisfy ft_mem_realloc's contract. Returned pointers need not be
+/// dereferenceable for malformed offsets; pointer arithmetic wraps as on ARM.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn cff_index_get_pointers(
+    index: *mut CffIndex,
+    out_pointers: *mut *mut *mut u8,
+) -> i32 {
+    let memory = (*(*index).stream).memory;
+    *out_pointers = core::ptr::null_mut();
+    if (*index).count == 0 {
+        return 0;
+    }
+    let mut error = 0;
+    let realloc = core::ptr::read_volatile(
+        &(crate::ft::memory::ft_mem_realloc
+            as unsafe extern "C" fn(*mut crate::ft::memory::FtMemory, i32, i32, i32, *mut u8, *mut i32) -> *mut u8),
+    );
+    let pointers = realloc(
+        memory, core::mem::size_of::<*mut u8>() as i32, 0,
+        (*index).count.wrapping_add(1) as i32, core::ptr::null_mut(), &mut error,
+    ).cast::<*mut u8>();
+    if error == 0 {
+        let mut previous_offset = 1;
+        let mut element = 0u32;
+        while element <= (*index).count {
+            let offset = (*index).offsets.add(element as usize).read();
+            if offset != 0 {
+                previous_offset = offset;
+            }
+            pointers.add(element as usize).write(
+                (*index).bytes.wrapping_add(previous_offset.wrapping_sub(1) as usize),
+            );
+            element = element.wrapping_add(1);
+        }
+        *out_pointers = pointers;
+    }
+    error
+}
+
 
 
 
@@ -317,6 +377,59 @@ mod tests {
             memory,
             cursor: ptr::null_mut(),
             limit: ptr::null_mut(),
+        }
+    }
+
+    #[test]
+    fn index_pointers_carry_offsets_and_include_terminal_entry() {
+        use crate::ft::memory::test_memory::{reset, TEST_MEMORY_LOCK};
+        let _guard = TEST_MEMORY_LOCK.lock().expect("shared FreeType arena lock");
+        unsafe {
+            let mut memory = reset(false);
+            let mut stream = test_stream(&mut memory, None);
+            let mut bytes = [0u8; 16];
+            for offsets in [[0, 0, 4, 0, 9], [1, 3, 3, 7, 12], [0, 0, 0, 0, 0]] {
+                let mut offsets = offsets;
+                let mut index = CffIndex {
+                    stream: &mut stream, count: 4, off_size: 1,
+                    _padding: [0; 3], data_offset: 0,
+                    offsets: offsets.as_mut_ptr(), bytes: bytes.as_mut_ptr(),
+                };
+                let mut pointers = ptr::null_mut();
+                assert_eq!(cff_index_get_pointers(&mut index, &mut pointers), 0);
+                let expected = match offsets {
+                    [0, 0, 4, 0, 9] => [0, 0, 3, 3, 8],
+                    [1, 3, 3, 7, 12] => [0, 2, 2, 6, 11],
+                    _ => [0; 5],
+                };
+                for (i, offset) in expected.into_iter().enumerate() {
+                    assert_eq!(*pointers.add(i), bytes.as_mut_ptr().add(offset));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn index_pointers_empty_and_allocation_failure_clear_output() {
+        use crate::ft::memory::test_memory::{reset, alloc_calls, TEST_MEMORY_LOCK};
+        let _guard = TEST_MEMORY_LOCK.lock().expect("shared FreeType arena lock");
+        unsafe {
+            let mut memory = reset(true);
+            let mut stream = test_stream(&mut memory, None);
+            let mut index = CffIndex {
+                stream: &mut stream, count: 0, off_size: 0,
+                _padding: [0; 3], data_offset: 0,
+                offsets: ptr::null_mut(), bytes: ptr::null_mut(),
+            };
+            let mut pointers = ptr::dangling_mut();
+            assert_eq!(cff_index_get_pointers(&mut index, &mut pointers), 0);
+            assert!(pointers.is_null());
+            assert_eq!(alloc_calls(), 0);
+            index.count = 1;
+            pointers = ptr::dangling_mut();
+            assert_eq!(cff_index_get_pointers(&mut index, &mut pointers), 0x40);
+            assert!(pointers.is_null());
+            assert_eq!(alloc_calls(), 1);
         }
     }
 
