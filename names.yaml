@@ -235513,3 +235513,46 @@ functions:
       the sentinel comparison and conditional aligned pointer load remain;
       LLVM adds a frame and uses ORR/CMP rather than two subtractions.
       No device execution performed.
+
+  - address: 0x080f5564
+    ghidra: FUN_080f5564
+    name: lazy_static_object_08ae4848_get
+    size: 96
+    sig: "u8 *lazy_static_object_08ae4848_get(void)"
+    module: app/lazy_static_object_08ae4848
+    status: ported
+    vars:
+      DAT_080f55b0: guard_container (0x08a09d3c)
+      DAT_080f55b4: guard (0x08a09d48)
+      DAT_080f55b8: fixed_object (0x08ae4848)
+      DAT_080f55bc: dso_handle (0x089ca09c)
+      DAT_080f55c0: opaque_shutdown_handler_word (0x080eaf5c)
+      uVar2: constructed_object
+      FUN_082ab31c: cxa_guard_acquire
+      FUN_082ab1c8: cxa_atexit
+      FUN_082ab338: cxa_guard_release
+    notes: >-
+      Raw words establish [0x080f5564,0x080f55c4): 76 instruction bytes
+      followed by five literals, then the next real function's push
+      {r4,r5,r6,lr}. Four outbound plain BL calls, zero predicated BLs.
+      Ghidra's two inbound callers are 0x081bbd18 and 0x081bbd28.
+      The first guard read uses container+12, exactly the guard address
+      passed to acquire and release. If bit zero is clear and acquire
+      accepts, call the unported constructor 0x080f5d5c with fixed object
+      and argument 6; register its returned pointer with the opaque handler
+      word and DSO handle, ignore registration failure, and release.
+      Return the fixed object on every path. Constructor/class identity is
+      not invented. Handler 0x080eaf5c decodes as an instruction inside
+      another sequence, so preserve its word on target rather than inventing
+      a destructor. Host substitutes aligned storage and explicit bindings;
+      unavailable constructor/handler calls fail loudly, never fake success.
+      Tests cover ready guards, nonzero bit-clear acquisition refusal,
+      reentrant construction, constructor-return versus fixed-object identity,
+      ignored registration failure, release ordering, and repeated access.
+      Host suite and ARM release build pass. Fixed-address production-source
+      smoke exercises refused, ready, cold and repeated access using a host
+      constructor boundary and failing registration binding; no device run.
+      match.py exits 1: 33 decoded Rust lines versus 19 original instructions
+      (Rust includes six literal words). Guard branches, constructor argument
+      6, registration-before-release and fixed return are retained; LLVM uses
+      BLX for absolute constructor and volatile runtime bindings.
