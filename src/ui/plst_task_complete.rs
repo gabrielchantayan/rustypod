@@ -25,7 +25,7 @@ const ELEMENT_ACTIVITY_NONZERO_OFFSET: usize = 0x1b0;
 pub type PlstTaskNotify = unsafe extern "C" fn(*mut u8, u32, *mut u32, u32, u32);
 pub type PlstTaskFlaggedHandler = unsafe extern "C" fn(*mut u32);
 pub type PlstTaskDetachChildren = unsafe extern "C" fn(*mut u32, u32);
-pub type PlstTaskRemove = unsafe extern "C" fn(*mut u32, u32, u32);
+pub type PlstTaskRemove = unsafe extern "C" fn(*mut u32, u32, u32) -> usize;
 pub type PlstTaskResourceRelease = unsafe extern "C" fn(*mut u8, *mut u32);
 
 #[cfg(target_os = "none")]
@@ -52,13 +52,6 @@ unsafe extern "C" fn retail_detach_children(task: *mut u32, notify: u32) {
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn retail_detach_children(_: *mut u32, _: u32) {}
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_remove(task: *mut u32, first: u32, second: u32) {
-    let call: PlstTaskRemove = core::mem::transmute(0x080d_a878usize);
-    call(task, first, second)
-}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_remove(_: *mut u32, _: u32, _: u32) {}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_resource_release(resource: *mut u8, task: *mut u32) {
@@ -83,12 +76,12 @@ pub const DEFAULT_PLST_TASK_COMPLETE_OPS: PlstTaskCompleteOps = PlstTaskComplete
     notify: retail_task_notify,
     flagged_handler: retail_flagged_handler,
     detach_children: retail_detach_children,
-    remove: retail_remove,
+    remove: super::remove_task::remove_task,
     resource_release: retail_resource_release,
 };
 
 /// Active dispatch boundary for unported `0x08066bb8`, `0x080d8678`,
-/// `0x080a7b60`, `0x080da878`, and `0x08048eb8`.
+/// `0x080a7b60`, and `0x08048eb8`; removal defaults to the Rust port.
 pub static mut PLST_TASK_COMPLETE_OPS: PlstTaskCompleteOps = DEFAULT_PLST_TASK_COMPLETE_OPS;
 
 #[inline(always)]
@@ -190,7 +183,7 @@ mod tests {
     }
     unsafe extern "C" fn record_flagged(_: *mut u32) { record(2); }
     unsafe extern "C" fn record_detach(_: *mut u32, notify: u32) { assert_eq!(notify, 1); record(3); }
-    unsafe extern "C" fn record_remove(_: *mut u32, first: u32, second: u32) { assert_eq!((first, second), (1, 1)); record(4); }
+    unsafe extern "C" fn record_remove(_: *mut u32, first: u32, second: u32) -> usize { assert_eq!((first, second), (1, 1)); record(4); 0 }
     unsafe extern "C" fn record_release(resource: *mut u8, _: *mut u32) { RESOURCE = resource as usize; record(5); }
 
     struct OpsGuard(PlstTaskCompleteOps);
