@@ -46728,7 +46728,7 @@ functions:
       param_3/r2: payload_out
       param_4/r3: encoded_length_out
       r2_at_callee: zero_mode
-      FUN_080d6d94: indexed_payload_lookup_backend (unported; concrete identity unknown)
+      FUN_080d6d94: indexed_payload_lookup_backend (ported)
     notes: >-
       Raw ARM establishes the exact 24-byte extent
       0x0809e3d0..0x0809e3e8: push {r3,lr}; str r3,[sp]; mov r3,r2;
@@ -46737,17 +46737,14 @@ functions:
       there is no literal pool. It is a wrapper, not a veneer: forwards
       index and entry, shifts its third/fourth ABI arguments into the
       backend's fourth/fifth positions, forces the backend mode argument
-      to zero, and returns the backend status unchanged. The backend's
-      concrete identity is not established; its observed role is an
-      indexed-payload lookup with optional payload/encoded-length outputs.
+      to zero, and returns the backend status unchanged. The backend is now
+      ported and called directly on both host and target.
       Decoding every ARM B/BL word in osos.dec finds exactly 20 direct
       unconditional bl call sites and one unconditional tail b
       (0x08055afc), with zero predicated calls and no aligned or unaligned
-      data-word reference to 0x0809e3d0. Host tests cover a nonzero
-      backend error, u32::MAX entry, output mutation, exact mode-zero
-      forcing, and both NULL optional outputs. On target the still-unported
-      backend is invoked directly at 0x080d6d94; host builds substitute
-      INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review requested.
+      data-word reference to 0x0809e3d0. Real-backend tests cover invalid
+      signed indices, live entries, output clearing, zero-mode rejection,
+      and NULL optional outputs; obsolete mock forwarding tests are removed.
 
   # --- record indexed payload lookup wrapper (app) ---
   - address: 0x08055810
@@ -46853,7 +46850,7 @@ functions:
       param_3/r2: payload_out
       param_4/r3: encoded_length_out
       r2_at_callee: one_mode
-      FUN_080d6d94: indexed_payload_lookup_backend (unported; concrete identity unknown)
+      FUN_080d6d94: indexed_payload_lookup_backend (ported)
     notes: >-
       Raw ARM establishes the exact 24-byte extent
       0x080d6e50..0x080d6e68: push {r3,lr}; str r3,[sp]; mov r3,r2;
@@ -46862,19 +46859,14 @@ functions:
       there is no literal pool. It is a wrapper, not a veneer: forwards
       index and entry, shifts its third/fourth ABI arguments into the
       backend's fourth/fifth positions, forces the backend mode argument
-      to one, and returns the backend status unchanged. The backend's
-      concrete identity is not established; its observed role is an
-      indexed-payload lookup with optional payload/encoded-length outputs.
+      to one, and returns the backend status unchanged. The ported backend
+      is now called directly on both target and host.
       Decoding every ARM B/BL word in osos.dec finds exactly six direct
       unconditional bl call sites at 0x0804437c, 0x080443d0, 0x08044448,
       0x0804449c, 0x080444f0, and 0x083d64b8, with zero predicated calls
-      and no tail branches. Host tests cover a nonzero backend error,
-      u32::MAX entry, output mutation, exact mode-one forcing, and both
-      NULL optional outputs. On target the still-unported backend is invoked
-      directly at 0x080d6d94; host builds substitute
-      INDEXED_PAYLOAD_LOOKUP_BACKEND. match.py structural review found the
-      expected LLVM frame and literal indirect call in place of ADS's
-      direct bl; argument shuffle, mode forcing, and return path match.
+      and no tail branches. Real-backend tests cover mode-one bypass of the
+      word-12 gate, signed count rejection, invalid tags, and NULL outputs.
+      Obsolete mock forwarding tests and the retail-address seam are removed.
 
   # --- BCD datetime -> (days, seconds-of-day) converter (time/civil) ---
   - address: 0x0809e3e8
@@ -237400,3 +237392,34 @@ functions:
       R_ARM_JUMP24 confirms that branch targets mailbox_slot_post,
       despite match.py displaying its unresolved operand as zero.
       No deliberate behavioral deviations; no device execution.
+
+  - address: 0x080d6d94
+    ghidra: FUN_080d6d94
+    name: indexed_payload_lookup_backend
+    size: 188
+    sig: "u32 indexed_payload_lookup_backend(void *index, u32 entry, u32 mode, void **payload_out, u32 *encoded_length_out)"
+    module: app/indexed_payload_lookup
+    status: ported
+    renames:
+      param_1/r4: index
+      param_2/r8: entry
+      param_3/r9: mode
+      param_4/r5: payload_out
+      param_5/r6: encoded_length_out
+      piVar4: selected
+      FUN_080a7714: crts_has_tag
+      FUN_080ac160: pool_entry_is_live
+    notes: >-
+      Raw ARM proves 188 bytes through the return at 0x080d6e4c;
+      the next real function begins with push at 0x080d6e50. Two outbound
+      plain BLs and no predicated BLs; whole-image decoding finds two inbound
+      plain BLs at 0x0809e3e0 and 0x080d6e60, no predicated BLs.
+      Clears outputs, validates tag and word-12-or-mode, accepts entry zero,
+      checks signed one-based bounds and entry liveness, then returns blob
+      base plus offset and encoded length. Errors return -50. Host pointer
+      outputs use native width; embedded target pointers remain u32 and
+      address addition wraps. Host suite: 15109 passed. ARM release build
+      passed. Executable smoke confirmed NULL-index error and cleared outputs.
+      match.py shows 49 versus 47 instructions: equivalent gates, two calls,
+      handle loads and conditional outputs, with LLVM register/frame changes.
+      No device execution.

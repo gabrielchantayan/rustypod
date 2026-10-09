@@ -1,79 +1,61 @@
-//! `indexed_payload_lookup` — original: `FUN_0809e3d0` @ `0x0809e3d0`
-//! (24 bytes).
-//!
-//! Raw ARM decoding establishes the exact extent `0x0809e3d0..0x0809e3e8`:
-//!
-//! ```text
-//! 0809e3d0  push {r3, lr}
-//! 0809e3d4  str  r3, [sp]
-//! 0809e3d8  mov  r3, r2
-//! 0809e3dc  mov  r2, #0
-//! 0809e3e0  bl   0x080d6d94
-//! 0809e3e4  pop  {ip, pc}
-//! ```
-//!
-//! The first instruction of the next separately entered function is the
-//! `push {r4-r8, lr}` at `0x0809e3e8`; there is no literal pool. Decoding
-//! every ARM B/BL word in `osos.dec` finds 20 unconditional plain `bl` call
-//! sites and one unconditional tail `b` site (`0x08055afc`), with no
-//! predicated calls or data-word references. Callers therefore do not gate
-//! this wrapper on flags or NULL checks.
-//!
-//! # Algorithm
-//!
-//! Move the third ABI argument to the fourth argument register, put the
-//! original fourth argument in the fifth stack slot, force the third argument
-//! of `0x080d6d94` to zero, then return that callee's status word unchanged.
-//! The callee's concrete identity is not established: its recovered contract
-//! is an indexed-payload lookup `(index, entry, mode, payload_out,
-//! encoded_length_out) -> status`, and this wrapper selects `mode = 0`.
-//!
-//! # Deliberate deviations
-//!
-//! The unported `0x080d6d94` is reached directly at its retail address on the
-//! device. Host tests replace only that edge with
-//! [`INDEXED_PAYLOAD_LOOKUP_BACKEND`]; the wrapper's register/stack argument
-//! shuffle is represented by the equivalent five-argument call.
+//! Indexed payload lookup and record adapters.
 
-/// ABI of the still-unported indexed-payload backend at `0x080d6d94`.
-pub type IndexedPayloadLookupBackend = unsafe extern "C" fn(
-    index: *mut u8,
-    entry: u32,
-    mode: u32,
-    payload_out: *mut *mut u8,
-    encoded_length_out: *mut u32,
-) -> u32;
+use crate::util::crts_tag::crts_has_tag;
+use crate::util::pool_entry_is_live::pool_entry_is_live;
+use crate::util::string_pool::PoolEntry;
 
-#[cfg(target_os = "none")]
-unsafe fn retail_indexed_payload_lookup_backend(
+/// indexed_payload_lookup_backend — `FUN_080d6d94` @ `0x080d6d94`.
+///
+/// True size: 188 bytes, ending at the next function's push at 0x080d6e50.
+/// Raw words verify two unconditional outbound BLs (crts_has_tag and
+/// pool_entry_is_live), two inbound plain BLs, and no predicated BLs.
+/// Clears length then payload, validates the crts tag and word-12-or-mode,
+/// accepts zero as an empty lookup, then checks the signed one-based index
+/// against word 7. A live entry supplies blob base plus offset and encoded
+/// length; invalid lookups return -50.
+///
+/// Deliberate deviations: target pointer fields remain u32 on hosts, while
+/// payload outputs use native pointers. Address addition wraps at 32 bits.
+///
+/// # Safety
+/// Non-NULL index must be aligned and readable through word 12 if tagged.
+/// Word 2 and word 4 hold target addresses of table/blob address handles.
+/// These handles and the selected entry must be readable on paths using them.
+/// Optional outputs must be writable and not alias input storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn indexed_payload_lookup_backend(
     index: *mut u8,
     entry: u32,
     mode: u32,
     payload_out: *mut *mut u8,
     encoded_length_out: *mut u32,
 ) -> u32 {
-    let backend: IndexedPayloadLookupBackend = core::mem::transmute(0x080d_6d94usize);
-    backend(index, entry, mode, payload_out, encoded_length_out)
+    if !encoded_length_out.is_null() { encoded_length_out.write(0); }
+    if !payload_out.is_null() { payload_out.write(core::ptr::null_mut()); }
+    let words = index.cast::<u32>();
+    if crts_has_tag(words) == 0 || (words.add(12).read() | mode) == 0 {
+        return (-50i32) as u32;
+    }
+    if entry == 0 { return 0; }
+    if (entry as i32) < 0 || (entry as i32) > words.add(7).read() as i32 {
+        return (-50i32) as u32;
+    }
+    let handle = words.add(2).read() as usize as *const u32;
+    let table = handle.read() as usize as *const PoolEntry;
+    let selected = table.add((entry - 1) as usize);
+    if pool_entry_is_live(selected) == 0 { return (-50i32) as u32; }
+    if !payload_out.is_null() {
+        let blob = words.add(4).read() as usize as *const u32;
+        payload_out.write(blob.read().wrapping_add((*selected).blob_offset) as usize as *mut u8);
+    }
+    if !encoded_length_out.is_null() { encoded_length_out.write((*selected).length as u32); }
+    0
 }
-
-/// Host fallback for an unconfigured retail-only dependency.
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_indexed_payload_lookup_backend(
-    _index: *mut u8,
-    _entry: u32,
-    _mode: u32,
-    _payload_out: *mut *mut u8,
-    _encoded_length_out: *mut u32,
-) -> u32 {
-    panic!("indexed_payload_lookup requires backend 0x080d6d94")
-}
-
-/// Host replacement for the still-unported indexed-payload backend.
-#[cfg(not(target_os = "none"))]
-pub static mut INDEXED_PAYLOAD_LOOKUP_BACKEND: IndexedPayloadLookupBackend =
-    missing_indexed_payload_lookup_backend;
 
 /// indexed_payload_lookup — original: `FUN_0809e3d0` @ `0x0809e3d0` (24 bytes).
+/// Calls the ported backend with mode zero; its original single BL and ABI
+/// argument shuffle are represented by a direct five-argument call.
 ///
 /// Looks up `entry` through `index` with the backend's mode forced to zero.
 /// `payload_out`, `encoded_length_out`, and the backend status are forwarded
@@ -92,16 +74,7 @@ pub unsafe extern "C" fn indexed_payload_lookup(
     payload_out: *mut *mut u8,
     encoded_length_out: *mut u32,
 ) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        retail_indexed_payload_lookup_backend(index, entry, 0, payload_out, encoded_length_out)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let backend = core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_PAYLOAD_LOOKUP_BACKEND));
-        backend(index, entry, 0, payload_out, encoded_length_out)
-    }
+    indexed_payload_lookup_backend(index, entry, 0, payload_out, encoded_length_out)
 }
 /// `record_metadata_lookup` — original: `FUN_0805572c` @ `0x0805572c` (56 bytes).
 ///
@@ -120,7 +93,7 @@ pub unsafe extern "C" fn indexed_payload_lookup(
 ///
 /// The record's target ABI fields are read as 32-bit words rather than host
 /// pointers, preserving their four-byte offsets on 64-bit host tests. The
-/// established [`indexed_payload_lookup`] seam supplies its unported backend.
+/// ported [`indexed_payload_lookup`] backend supplies the lookup.
 ///
 /// # Safety
 ///
@@ -162,7 +135,7 @@ pub unsafe extern "C" fn record_metadata_lookup(
 ///
 /// The record's target ABI fields are read as 32-bit words rather than host
 /// pointers, preserving their four-byte offsets on 64-bit host tests. The
-/// established [`indexed_payload_lookup`] seam supplies its unported backend.
+/// ported [`indexed_payload_lookup`] backend supplies the lookup.
 ///
 /// # Safety
 ///
@@ -207,7 +180,7 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x118_word15(
 ///
 /// The record's target ABI fields are read as 32-bit words rather than host
 /// pointers, preserving their four-byte offsets on 64-bit host tests. The
-/// established [`indexed_payload_lookup`] seam supplies its unported backend.
+/// ported [`indexed_payload_lookup`] backend supplies the lookup.
 ///
 /// # Safety
 ///
@@ -249,7 +222,7 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x1c8(
 ///
 /// The record's target ABI fields are read as 32-bit words rather than host
 /// pointers, preserving their four-byte offsets on 64-bit host tests. The
-/// established [`indexed_payload_lookup`] seam supplies its unported backend.
+/// ported [`indexed_payload_lookup`] backend supplies the lookup.
 ///
 /// # Safety
 ///
@@ -304,9 +277,7 @@ pub unsafe extern "C" fn record_indexed_payload_lookup_at_0x278(
 ///
 /// # Deliberate deviations
 ///
-/// The backend's concrete identity remains unestablished. Target builds call
-/// its verified retail address; host tests replace only that edge through
-/// [`INDEXED_PAYLOAD_LOOKUP_BACKEND`].
+/// Calls the ported backend directly; the ABI shuffle becomes a Rust call.
 ///
 /// # Safety
 ///
@@ -321,341 +292,74 @@ pub unsafe extern "C" fn indexed_payload_lookup_mode_one(
     payload_out: *mut *mut u8,
     encoded_length_out: *mut u32,
 ) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        retail_indexed_payload_lookup_backend(index, entry, 1, payload_out, encoded_length_out)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let backend = core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_PAYLOAD_LOOKUP_BACKEND));
-        backend(index, entry, 1, payload_out, encoded_length_out)
-    }
+    indexed_payload_lookup_backend(index, entry, 1, payload_out, encoded_length_out)
 }
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
-
     use super::*;
     use crate::testing::{hints, note_missing_u32_fixture, try_map_u32_slab};
+    use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
-    use std::sync::{Mutex, MutexGuard};
 
-    static BACKEND_LOCK: Mutex<()> = Mutex::new(());
-    static mut SEEN_INDEX: usize = 0;
-    static mut SEEN_ENTRY: u32 = 0;
-    static mut SEEN_MODE: u32 = 1;
-    static mut SEEN_PAYLOAD_OUT: usize = 0;
-    static mut SEEN_LENGTH_OUT: usize = 0;
-    static mut BACKEND_STATUS: u32 = 0;
-    static mut BACKEND_PAYLOAD: *mut u8 = ptr::null_mut();
-    static mut BACKEND_LENGTH: u32 = 0;
-
-    unsafe extern "C" fn recording_backend(
-        index: *mut u8,
-        entry: u32,
-        mode: u32,
-        payload_out: *mut *mut u8,
-        encoded_length_out: *mut u32,
-    ) -> u32 {
-        SEEN_INDEX = index as usize;
-        SEEN_ENTRY = entry;
-        SEEN_MODE = mode;
-        SEEN_PAYLOAD_OUT = payload_out as usize;
-        SEEN_LENGTH_OUT = encoded_length_out as usize;
-        if !payload_out.is_null() {
-            payload_out.write(BACKEND_PAYLOAD);
-        }
-        if !encoded_length_out.is_null() {
-            encoded_length_out.write(BACKEND_LENGTH);
-        }
-        BACKEND_STATUS
-    }
-
-    struct Reset;
-
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            unsafe {
-                INDEXED_PAYLOAD_LOOKUP_BACKEND = missing_indexed_payload_lookup_backend;
-                SEEN_INDEX = 0;
-                SEEN_ENTRY = 0;
-                SEEN_MODE = 1;
-                SEEN_PAYLOAD_OUT = 0;
-                SEEN_LENGTH_OUT = 0;
-                BACKEND_STATUS = 0;
-                BACKEND_PAYLOAD = ptr::null_mut();
-                BACKEND_LENGTH = 0;
+    #[test]
+    fn signed_indices_modes_live_entries_and_optional_outputs() {
+        unsafe {
+            let Some(slab) = try_map_u32_slab(hints::INDEXED_PAYLOAD_BACKEND, 4096) else {
+                note_missing_u32_fixture("indexed_payload_lookup_backend");
+                return;
+            };
+            let w = slab.cast::<u32>();
+            ptr::write_bytes(w, 0, 1024);
+            w.write(CRTS_TAG);
+            w.add(2).write(w.add(16) as usize as u32);
+            w.add(4).write(w.add(17) as usize as u32);
+            w.add(7).write(2);
+            w.add(12).write(1);
+            w.add(16).write(w.add(32) as usize as u32);
+            w.add(17).write(0xffff_fff0);
+            w.add(32).write(0x30);
+            w.add(33).write(7);
+            w.add(34).write(0);
+            w.add(35).write(1);
+            let index = w.cast::<u8>();
+            for (entry, status, address, length) in [
+                (0, 0, 0, 0), (1, 0, 0x20, 7), (2, 0, 0xffff_fff0, 1),
+                (3, 0xffff_ffce, 0, 0), (u32::MAX, 0xffff_ffce, 0, 0),
+                (0x8000_0000, 0xffff_ffce, 0, 0),
+            ] {
+                let mut payload = 1usize as *mut u8;
+                let mut len = 99;
+                assert_eq!(indexed_payload_lookup(index, entry, &mut payload, &mut len), status);
+                assert_eq!(payload as usize, address);
+                assert_eq!(len, length);
             }
+            for (offset, length) in [(0x8000_0000, 1), (0, 0), (0, u32::MAX)] {
+                w.add(32).write(offset);
+                w.add(33).write(length);
+                let mut payload = 1usize as *mut u8;
+                let mut len = 99;
+                assert_eq!(indexed_payload_lookup(index, 1, &mut payload, &mut len), 0xffff_ffce);
+                assert!(payload.is_null());
+                assert_eq!(len, 0);
+            }
+            w.add(12).write(0);
+            assert_eq!(indexed_payload_lookup(index, 0, ptr::null_mut(), ptr::null_mut()), 0xffff_ffce);
+            assert_eq!(indexed_payload_lookup_mode_one(index, 0, ptr::null_mut(), ptr::null_mut()), 0);
+            w.add(32).write(0);
+            w.add(33).write(1);
+            w.add(4).write(0); // Omitted payload must not read the blob handle.
+            let mut len = 99;
+            assert_eq!(indexed_payload_lookup_backend(index, 1, 0x8000_0000, ptr::null_mut(), &mut len), 0);
+            assert_eq!(len, 1);
+            w.add(7).write(u32::MAX);
+            assert_eq!(indexed_payload_lookup_mode_one(index, 1, ptr::null_mut(), ptr::null_mut()), 0xffff_ffce);
+            w.write(0);
+            assert_eq!(indexed_payload_lookup_mode_one(index, 0, ptr::null_mut(), ptr::null_mut()), 0xffff_ffce);
+            let mut payload = 1usize as *mut u8;
+            assert_eq!(indexed_payload_lookup_mode_one(ptr::null_mut(), 0, &mut payload, &mut len), 0xffff_ffce);
+            assert!(payload.is_null());
+            assert_eq!(len, 0);
         }
-    }
-
-    fn arrange(status: u32, payload: *mut u8, length: u32) -> (MutexGuard<'static, ()>, Reset) {
-        let guard = BACKEND_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe {
-            INDEXED_PAYLOAD_LOOKUP_BACKEND = recording_backend;
-            BACKEND_STATUS = status;
-            BACKEND_PAYLOAD = payload;
-            BACKEND_LENGTH = length;
-        }
-        (guard, Reset)
-    }
-
-    #[test]
-    fn forces_mode_zero_and_forwards_outputs_and_status() {
-        let index = 0x1234_5000usize as *mut u8;
-        let expected_payload = 0x7654_3000usize as *mut u8;
-        let (guard, _reset) = arrange(0xffff_ffce, expected_payload, 0x8000_0001);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        let status = unsafe {
-            indexed_payload_lookup(index, u32::MAX, &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0xffff_ffce);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x8000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-        drop(guard);
-    }
-
-    #[test]
-    fn mode_one_forces_mode_and_forwards_outputs_and_status() {
-        let index = 0x0123_4000usize as *mut u8;
-        let expected_payload = 0x7fff_f000usize as *mut u8;
-        let (guard, _reset) = arrange(0xffff_ffce, expected_payload, 0x8000_0001);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        let status = unsafe {
-            indexed_payload_lookup_mode_one(index, u32::MAX, &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0xffff_ffce);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x8000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 1);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-        drop(guard);
-    }
-
-    #[test]
-    fn mode_one_forwards_null_optional_outputs() {
-        let index = 0xffff_f000usize as *mut u8;
-        let (guard, _reset) = arrange(0, ptr::null_mut(), 0);
-
-        let status = unsafe {
-            indexed_payload_lookup_mode_one(index, 0, ptr::null_mut(), ptr::null_mut())
-        };
-
-        assert_eq!(status, 0);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index as usize);
-            assert_eq!(SEEN_ENTRY, 0);
-            assert_eq!(SEEN_MODE, 1);
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
-    }
-
-    #[test]
-    fn forwards_null_optional_outputs() {
-        let index = 0xffff_f000usize as *mut u8;
-        let (guard, _reset) = arrange(0, ptr::null_mut(), 0);
-
-        let status = unsafe { indexed_payload_lookup(index, 0, ptr::null_mut(), ptr::null_mut()) };
-
-        assert_eq!(status, 0);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index as usize);
-            assert_eq!(SEEN_ENTRY, 0);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
-    }
-    #[test]
-    fn record_indexed_payload_lookup_at_0x118_word15_reads_target_words_and_halves_optional_length() {
-        let Some(record) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_118_WORD15, 0x1000) else {
-            assert!(note_missing_u32_fixture("app/indexed_payload_lookup record 0x118 word 15"));
-            return;
-        };
-        let index = unsafe { record.add(0x300) };
-        let expected_payload = unsafe { record.add(0x380) };
-        let (guard, _reset) = arrange(0x8000_0001, expected_payload, 0x8000_0003);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        unsafe {
-            record.cast::<u32>().write(index as usize as u32);
-            record.add(0x3c).cast::<u32>().write(u32::MAX);
-        }
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x118_word15(record.cast(), &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0x8000_0001);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x4000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index.add(0x118) as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x118_word15(record.cast(), ptr::null_mut(), ptr::null_mut())
-        };
-        assert_eq!(status, 0x8000_0001);
-        unsafe {
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
-    }
-
-
-    #[test]
-    fn record_metadata_lookup_reads_target_words_and_halves_optional_length() {
-        let Some(record) = try_map_u32_slab(hints::RECORD_METADATA_LOOKUP, 0x1000) else {
-            assert!(note_missing_u32_fixture("app/indexed_payload_lookup record metadata"));
-            return;
-        };
-        let index = unsafe { record.add(0x300) };
-        let expected_payload = unsafe { record.add(0x380) };
-        let (guard, _reset) = arrange(0xffff_ffce, expected_payload, 0x8000_0003);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        unsafe {
-            record.cast::<u32>().write(index as usize as u32);
-            record.add(0x2c).cast::<u32>().write(u32::MAX);
-        }
-        let status = unsafe {
-            record_metadata_lookup(record.cast(), &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0xffff_ffce);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x4000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index.add(0x118) as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-
-        let status = unsafe {
-            record_metadata_lookup(record.cast(), ptr::null_mut(), ptr::null_mut())
-        };
-        assert_eq!(status, 0xffff_ffce);
-        unsafe {
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
-    }
-
-    #[test]
-    fn record_indexed_payload_lookup_reads_target_words_and_halves_optional_length() {
-        let Some(record) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_1C8, 0x1000) else {
-            assert!(note_missing_u32_fixture("app/indexed_payload_lookup record 0x1c8"));
-            return;
-        };
-        let index = unsafe { record.add(0x300) };
-        let expected_payload = unsafe { record.add(0x380) };
-        let (guard, _reset) = arrange(0x8000_0001, expected_payload, 0x8000_0003);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        unsafe {
-            record.cast::<u32>().write(index as usize as u32);
-            record.add(0x34).cast::<u32>().write(u32::MAX);
-        }
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x1c8(record.cast(), &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0x8000_0001);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x4000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index.add(0x1c8) as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x1c8(record.cast(), ptr::null_mut(), ptr::null_mut())
-        };
-        assert_eq!(status, 0x8000_0001);
-        unsafe {
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
-    }
-    #[test]
-    fn record_indexed_payload_lookup_at_0x278_reads_target_words_and_halves_optional_length() {
-        let Some(record) = try_map_u32_slab(hints::RECORD_INDEXED_PAYLOAD_LOOKUP_278, 0x1000) else {
-            assert!(note_missing_u32_fixture("app/indexed_payload_lookup record 0x278"));
-            return;
-        };
-        let index = unsafe { record.add(0x300) };
-        let expected_payload = unsafe { record.add(0x380) };
-        let (guard, _reset) = arrange(0x8000_0001, expected_payload, 0x8000_0003);
-        let mut payload = ptr::null_mut();
-        let mut encoded_length = 0;
-
-        unsafe {
-            record.cast::<u32>().write(index as usize as u32);
-            record.add(0x40).cast::<u32>().write(u32::MAX);
-        }
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x278(record.cast(), &mut payload, &mut encoded_length)
-        };
-
-        assert_eq!(status, 0x8000_0001);
-        assert_eq!(payload, expected_payload);
-        assert_eq!(encoded_length, 0x4000_0001);
-        unsafe {
-            assert_eq!(SEEN_INDEX, index.add(0x278) as usize);
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_MODE, 0);
-            assert_eq!(SEEN_PAYLOAD_OUT, (&mut payload as *mut *mut u8) as usize);
-            assert_eq!(SEEN_LENGTH_OUT, (&mut encoded_length as *mut u32) as usize);
-        }
-
-        let status = unsafe {
-            record_indexed_payload_lookup_at_0x278(record.cast(), ptr::null_mut(), ptr::null_mut())
-        };
-        assert_eq!(status, 0x8000_0001);
-        unsafe {
-            assert_eq!(SEEN_ENTRY, u32::MAX);
-            assert_eq!(SEEN_PAYLOAD_OUT, 0);
-            assert_eq!(SEEN_LENGTH_OUT, 0);
-        }
-        drop(guard);
     }
 }
