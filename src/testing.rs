@@ -2990,6 +2990,8 @@ pub mod hints {
     // 0x4200_0000: dedicated to ui/text_line_offset_read_be's target-width
     // layout record fixture; mappings never unmap, so no other user may share it.
     pub const UI_TEXT_LINE_OFFSET_READ_BE: usize = 0x4200_0000;
+    // Dedicated to ui/text_line_address's target-width offset fixture.
+    pub const UI_TEXT_LINE_ADDRESS: usize = 0x4460_0000;
     // 0x4300_0000: dedicated to ft/cff_parse_fixed's target-width cursor
     // record and operand fixture; mappings never unmap, so no other user may
     // share this hint.
