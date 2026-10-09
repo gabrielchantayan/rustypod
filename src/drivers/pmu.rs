@@ -314,6 +314,26 @@ pub unsafe extern "C" fn pmu_board_version_status_bit(
 
     ((status_byte as u32 >> ((1 - version_0x11) << 1)) & 1) as u32
 }
+
+/// PMU board-version status veneer — retail `thunk_FUN_082e5b64` at
+/// `0x080d991c`, exactly 4 bytes; 2 plain BL callers, 0 predicated callers.
+///
+/// Raw word `0xea083090` branches to `0x082e5b64`; the next function starts
+/// with `push {r0-r11,lr}` at `0x080d9920`. Tail-calls the generation-selected
+/// PMU status reader, preserving incoming r3's failed-transfer scratch byte.
+///
+/// Deliberate deviation: expose all four incoming ABI words explicitly,
+/// matching the existing target port. No additional transaction or state.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn pmu_board_version_status_bit_veneer(
+    incoming_r0: u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    pmu_board_version_status_bit(incoming_r0, incoming_r1, incoming_r2, incoming_r3)
+}
 /// pmu_register_0x18_bit0 — original: `FUN_082e572c` @ `0x082e572c`
 /// (64 bytes; 5 plain, unconditional callee `bl` instructions; no predicated
 /// calls, binary-verified).
@@ -945,6 +965,27 @@ mod tests {
         assert_eq!(writes, std::vec![(0x73, 1, PMU_BOARD_0X11_STATUS_REGISTER as u8)]);
         assert!(reads.is_empty(), "a failed register write suppresses the read");
         assert_eq!(semaphores, std::vec![(0, 0x11), (0, 5), (1, 5), (1, 0x11)]);
+    }
+
+    #[test]
+    fn board_status_veneer_selects_bits_and_retains_failed_transfer_seed() {
+        for (version, shift) in [(0x0011_ffff, 0), (0x0010_ffff, 2)] {
+            let _board = install_host_cached_board_version(version);
+            for sample in [0u8, 1, 4, 0xff] {
+                let _i2c = install_raw_i2c_for_test(0, 0, sample);
+                assert_eq!(
+                    unsafe { pmu_board_version_status_bit_veneer(0x1234, 0x5678, 0x9abc, !0) },
+                    ((sample >> shift) & 1) as u32,
+                );
+            }
+            for seed in [0u32, 1, 4, 0xffff_fffb, 0xffff_fffe] {
+                let _i2c = install_raw_i2c_for_test(-5, 0, 0xff);
+                assert_eq!(
+                    unsafe { pmu_board_version_status_bit_veneer(!0, !0, !0, seed) },
+                    (seed >> shift) & 1,
+                );
+            }
+        }
     }
 
     #[test]
