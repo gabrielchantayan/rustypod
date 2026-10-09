@@ -506,6 +506,30 @@ pub unsafe extern "C" fn mailbox_slot_signal_thunk(slot: *mut *mut Mailbox) {
     mailbox_slot_signal(slot);
 }
 
+/// mailbox_slot_signal_alias_d7114 — original: `thunk_FUN_0808e2b0`
+/// @ 0x080d7114 (4 bytes, extent 0x080d7114..0x080d7118).
+///
+/// Raw word `eafedc65` is `b 0x0808e2b0`; the next function starts
+/// with `push {r4,lr}`. Full-image ARM BL decoding verifies two plain
+/// callers, at 0x080ac14c and 0x082283d8, and zero predicated BL callers.
+/// Forwards the unchanged slot to [`mailbox_slot_signal`], which reloads
+/// its mailbox, decrements the signed count with wrapping arithmetic, and
+/// wakes the waiter when the resulting signed count is negative.
+///
+/// Deliberate deviations: LLVM may add a frame around the tail call.
+/// A separate text section preserves this entry beside the identical
+/// 0x080dad34 alias; no behavioral deviations or additional NULL guards.
+///
+/// # Safety
+/// `slot` and its installed mailbox must be live, writable, non-NULL,
+/// with the same synchronization requirements as [`mailbox_slot_signal`].
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.mailbox_slot_signal_alias_d7114")]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_slot_signal_alias_d7114(slot: *mut *mut Mailbox) {
+    mailbox_slot_signal(slot);
+}
+
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1120,6 +1144,48 @@ pub(crate) mod tests {
 
             assert_eq!(cell.state, u32::MAX, "the thunk reaches the -1 transition");
             assert_eq!(drain(), vec![Call::Wake(0x2525_0002)]);
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_alias_d7114_reloads_slot_and_preserves_other_blocks() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            let mut first = block(1, 0x7114_0001);
+            let mut second = block(0, 0x7114_0002);
+            let mut slot: *mut Mailbox = &mut first;
+            mailbox_slot_signal_alias_d7114(&mut slot);
+            assert_eq!(first.state, 0);
+            assert_eq!(second.state, 0);
+            assert!(drain().is_empty());
+            slot = &mut second;
+            mailbox_slot_signal_alias_d7114(&mut slot);
+            assert_eq!(first.state, 0);
+            assert_eq!(second.state, u32::MAX);
+            assert_eq!(first.id, 0x7114_0001);
+            assert_eq!(second.id, 0x7114_0002);
+            assert_eq!(slot, &mut second as *mut Mailbox);
+            assert_eq!(drain(), vec![Call::Wake(0x7114_0002)]);
+        }
+    }
+
+    #[test]
+    fn mailbox_slot_signal_alias_d7114_wraps_signed_count_before_wake_decision() {
+        let _guard = mock_csem_wake();
+        unsafe {
+            for (before, after, wakes) in [
+                (i32::MIN as u32, i32::MAX as u32, false),
+                (i32::MAX as u32, (i32::MAX - 1) as u32, false),
+                (u32::MAX, u32::MAX - 1, true),
+            ] {
+                let mut cell = block(before, 0x7114_0003);
+                let mut slot: *mut Mailbox = &mut cell;
+                mailbox_slot_signal_alias_d7114(&mut slot);
+                assert_eq!(cell.state, after);
+                assert_eq!(cell.id, 0x7114_0003);
+                assert_eq!(slot, &mut cell as *mut Mailbox);
+                assert_eq!(drain(), if wakes { vec![Call::Wake(0x7114_0003)] } else { vec![] });
+            }
         }
     }
 
