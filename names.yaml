@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d5090
+    ghidra: FUN_080d5090
+    name: ascii_comparison_table_initialize
+    size: 124
+    sig: "void ascii_comparison_table_initialize(void)"
+    module: util/ascii_comparison_table_initialize
+    status: ported
+    renames:
+      DAT_080d5104: ascii_comparison_eligibility_table
+      DAT_080d5108: ascii_comparison_table_initialized
+      iVar1: entries
+      uVar2: index
+    notes: >-
+      Raw extent 0x080d5090..0x080d510c comprises 116 instruction bytes
+      and literals 0x08a777a8 and 0x089cb1a8. Next real function is
+      lcd_wait_transaction_idle at 0x080d510c. Whole-image aligned A32
+      decoding verifies zero incoming plain BLs and two BLEQs at
+      0x08045340 and 0x08059ca8; zero outgoing BLs, plain or predicated.
+      Clears 128 eligibility bytes, sets space, exclamation, period,
+      digits and ASCII letters to one, then publishes initialized byte
+      one. Both callers use the table for ASCII string-comparison fast
+      paths. No callee seams or initialization guard. Volatile byte
+      writes retain store order and prevent builtin memset substitution;
+      host substitutes native byte globals. Host regression exhaustively
+      checks all ASCII entries after dirty-table initialization with flags
+      zero, one and 255.
+      Full host suite and ARM release build passed. Production-source
+      host smoke verified the exact accepted bytes and final flag after
+      initialization from zero and 255. Reviewed match.py exit 1:
+      LLVM retains the 128-byte clearing loop, unrolls the three marking
+      loops into ordered STRBs, adds an fp frame, preserves both global
+      addresses and the final flag store, and emits no calls.
   - address: 0x080d510c
     ghidra: FUN_080d510c
     name: lcd_wait_transaction_idle

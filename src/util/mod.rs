@@ -49,6 +49,7 @@ pub mod active_entry_last_label;
 pub mod active_entry_table_address;
 pub mod always_succeeds;
 pub mod battery_adc_code_to_millivolts;
+pub mod ascii_comparison_table_initialize;
 pub mod ascii_to_uppercase;
 pub mod ascii_hex_digit_value;
 pub mod ascii_string_to_uppercase;
