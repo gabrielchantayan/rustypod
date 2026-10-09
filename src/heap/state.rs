@@ -142,6 +142,30 @@ pub unsafe extern "C" fn global_indirect_status_get() -> u32 {
     (state.add(STATE_STATUS_OFFSET) as *const u32).read()
 }
 
+/// global_indirect_command_response_get — original: `FUN_080f3c58` @ 0x080f3c58.
+/// True extent: 20 bytes (16 instruction bytes plus the literal at 0x080f3c68),
+/// ending at the independently linked next function, 0x080f3c6c.
+///
+/// Raw words e59f0008 e5900004 e5900020 e12fff1e load holder +4, then
+/// state +0x20, and return. Whole-image ARM BL decoding finds two plain
+/// callers (0x080775d0 and 0x080ee344), zero predicated callers, and no
+/// outgoing calls. The transaction worker copies this raw command response
+/// to its output; card initialization polls its high bit after SEND_OP_COND.
+///
+/// Deliberate deviation: reuse the existing packed crate-static holder model
+/// rather than the fixed firmware global at 0x089d03bc. Preserve every bit
+/// without null checks, caching, or interpreting command-specific fields.
+///
+/// # Safety
+/// The holder's +4 pointer must reference at least 0x24 readable bytes,
+/// aligned for a `u32` load, and remain valid throughout the call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_indirect_command_response_get() -> u32 {
+    let state = global_indirect_state();
+    (state.cast::<u32>().add(8)).read()
+}
+
 /// global_indirect_transfer_state_get — original: `FUN_080f3c6c` @ 0x080f3c6c.
 /// True extent: 20 bytes (16 instruction bytes and the literal at 0x080f3c7c),
 /// ending at the distinct next function, 0x080f3c80.
@@ -185,6 +209,27 @@ mod tests {
         let old = state_slot.read_unaligned();
         state_slot.write_unaligned(state);
         old
+    }
+
+    #[test]
+    fn command_response_preserves_bits_and_rereads_state_and_holder() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut first = [0x1111_1111u32; 10];
+        let mut second = [0x2222_2222u32; 10];
+        first[8] = 0;
+        second[8] = 0x8000_0000;
+
+        unsafe {
+            let old = replace_state(first.as_mut_ptr().cast());
+            assert_eq!(global_indirect_command_response_get(), 0);
+            for value in [1, 0x7fff_ffff, 0x8000_0000, u32::MAX] {
+                first[8] = value;
+                assert_eq!(global_indirect_command_response_get(), value);
+            }
+            replace_state(second.as_mut_ptr().cast());
+            assert_eq!(global_indirect_command_response_get(), 0x8000_0000);
+            replace_state(old);
+        }
     }
 
     #[test]
