@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080eb814
+    ghidra: FUN_080eb814
+    name: scanf_digit_value
+    size: 152
+    sig: "uint32_t scanf_digit_value(uint32_t value, uint32_t format)"
+    module: scanf/scanf_digit_value
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: format_then_range_offset
+    notes: >-
+      Raw A32 bytes establish the true extent 0x080eb814..0x080eb8ac,
+      final bx lr at 0x080eb8a8 and next push prologue at 0x080eb8ac.
+      Whole-image aligned BL decoding finds two plain incoming calls at
+      0x080ee19c and 0x080ee1dc, zero predicated incoming calls, and zero
+      outgoing BLs of either kind. Caller 0x080edc48 uses the result in
+      bounded and unbounded hexadecimal scanf accumulation after validation.
+      Format must equal full-word 0x78: map A..F and a..f to 10..15;
+      otherwise subtract 0x30 with full-word wrapping, even for invalid
+      characters. No callees, seams or behavioral deviations. Arithmetic
+      range conversion replaces branch tables and constant returns.
+      Host suite passes 15064 tests; new tests cover every byte value and
+      format, full-width inputs and wrapping boundaries. ARM release build
+      passes. Production-entry smoke accumulates 09aF7C to 0x09af7c and
+      checks uppercase-format fallback and word wrapping. Reviewed match.py
+      exits 1: 38 original versus 15 Rust instructions. LLVM adds a frame,
+      selects subtraction constants through unsigned range checks and uses
+      a shared addition and pop return.
   - address: 0x080ec1bc
     ghidra: FUN_080ec1bc
     name: sha1_init
