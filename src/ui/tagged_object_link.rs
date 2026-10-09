@@ -19,15 +19,16 @@
 //! count with 32-bit wrapping arithmetic.
 //!
 //! The concrete identities of the two tagged object families and their list
-//! implementations are not recovered. The source membership scan
-//! (0x080e2d70) and insertion (0x0803bbfc) remain volatile firmware
-//! boundaries; removal now uses the ported dynamic-array operation. The stock
+//! implementations are not recovered. Source membership now uses the ported
+//! indexed-object scan; insertion (0x0803bbfc) remains a volatile firmware
+//! boundary, and removal uses the ported dynamic-array operation. The stock
 //! `bzero` calls only clear the temporary records before the pointer words are
 //! written; initialized Rust arrays produce the same records, so the
 //! already-ported bzero has no unnecessary seam here.
 
 use core::ptr;
 use crate::util::dynamic_array_remove::dynamic_array_remove;
+use super::object_state::{indexed_object_offset, IndexedObject};
 
 
 /// First-word tag required by the source guard at 0x080b49a4.
@@ -46,9 +47,9 @@ pub const ERR_LINK_INSERT: i32 = -108;
 /// Prefix of the source tagged-object family consumed by
 /// [`tagged_object_link`].
 ///
-/// `entry_list_words` begins at target offset +0x10. Its concrete layout is
-/// owned by the unported list routines; words preserve the firmware's
-/// four-byte spacing on hosts as well as on the target.
+/// `entry_list_words` begins at target offset +0x10 and contains an
+/// `IndexedObject` header. Words preserve firmware spacing; host scan
+/// fixtures must provide the native pointer slot of `IndexedObject`.
 #[repr(C)]
 pub struct TaggedLinkSource {
     pub tag: u32,
@@ -83,21 +84,41 @@ type SourceContainsTarget = unsafe extern "C" fn(*mut TaggedLinkSource, *mut Tag
 type ListInsert = unsafe extern "C" fn(*mut u8, *const u32) -> u32;
 type ListRemove = unsafe extern "C" fn(*mut u8, u32, u32) -> u32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_source_contains_target(
+/// source_contains_target — `FUN_080e2d70` @ `0x080e2d70`, 88 bytes.
+///
+/// Raw ARM ends with `pop` at 0x080e2dc4; the next function starts at
+/// 0x080e2dc8. One outgoing unconditional BL calls `indexed_object_offset`
+/// at 0x08055ed0; two incoming unconditional BLs are at 0x08048854 and
+/// 0x0805bc70. No predicated BLs in either count.
+///
+/// Scan one-based records in the header at source +0x10, reloading unsigned
+/// count at +0x18 each iteration. Skip null accessor results and return the
+/// first index whose aligned first word equals the target pointer word;
+/// return zero if exhausted. Index increment wraps as on ARM. No tag or null
+/// source guard is added. Host pointers in records remain 32-bit words;
+/// the existing accessor uses a native pointer slot on hosts. No algorithmic
+/// deviations.
+///
+/// # Safety
+/// `source` must contain an aligned, readable `IndexedObject` at +0x10.
+/// Every nonnull accessor result must permit an aligned u32 read. The
+/// target is compared as a word and is never dereferenced.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn source_contains_target(
     source: *mut TaggedLinkSource,
     target: *mut TaggedLinkTarget,
 ) -> u32 {
-    let function: SourceContainsTarget = core::mem::transmute(0x080e_2d70usize);
-    function(source, target)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_source_contains_target(
-    _source: *mut TaggedLinkSource,
-    _target: *mut TaggedLinkTarget,
-) -> u32 {
-    panic!("tagged_object_link requires source membership scan 0x080e2d70")
+    let object = ptr::addr_of!((*source).entry_list_words).cast::<IndexedObject>();
+    let mut index = 1u32;
+    while index <= ptr::addr_of!((*object).element_count).read_volatile() {
+        let record = indexed_object_offset(object, index).cast::<u32>();
+        if !record.is_null() && record.read() == target as usize as u32 {
+            return index;
+        }
+        index = index.wrapping_add(1);
+    }
+    0
 }
 
 #[cfg(target_os = "none")]
@@ -116,10 +137,7 @@ unsafe extern "C" fn ported_list_remove(list: *mut u8, count: u32, index: u32) -
 }
 
 
-#[cfg(target_os = "none")]
-static mut SOURCE_CONTAINS_TARGET: SourceContainsTarget = retail_source_contains_target;
-#[cfg(not(target_os = "none"))]
-static mut SOURCE_CONTAINS_TARGET: SourceContainsTarget = missing_source_contains_target;
+static mut SOURCE_CONTAINS_TARGET: SourceContainsTarget = source_contains_target;
 
 #[cfg(target_os = "none")]
 static mut LIST_INSERT: ListInsert = retail_list_insert;
@@ -368,5 +386,46 @@ mod tests {
         assert_eq!(FIRST_ENTRY_WORD_0.load(Ordering::Relaxed), &mut target as *mut TaggedLinkTarget as usize as u32);
         assert_eq!(FIRST_ENTRY_WORD_1.load(Ordering::Relaxed), 0);
         assert_eq!(SECOND_ENTRY_WORD.load(Ordering::Relaxed), &mut source as *mut TaggedLinkSource as usize as u32);
+    }
+
+    #[test]
+    fn membership_scan_handles_stride_duplicates_and_boundaries() {
+        let _guard = super::super::object_state::INDEXED_OBJECT_STORAGE_BASE_LOCK
+            .lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        #[repr(C)]
+        struct SourceFixture {
+            prefix: [u32; 4],
+            object: IndexedObject,
+        }
+        let mut records = [[7u32, 99], [0, 7], [7, 0], [u32::MAX, 7]];
+        let mut base = records.as_mut_ptr().cast::<u8>();
+        let mut fixture = SourceFixture {
+            prefix: [0; 4],
+            object: IndexedObject {
+                type_tag: super::super::object_state::INDEXED_OBJECT_TAG,
+                element_size: 8,
+                element_count: 4,
+                reserved: [0; 2],
+                storage_ready: 0,
+                storage_pointer_slot: &mut base,
+            },
+        };
+        let source = ptr::addr_of_mut!(fixture).cast::<TaggedLinkSource>();
+        for (word, expected) in [(7u32, 1), (0, 2), (u32::MAX, 4), (99, 0)] {
+            assert_eq!(unsafe { source_contains_target(source, word as usize as *mut TaggedLinkTarget) }, expected);
+        }
+        fixture.object.element_count = 3;
+        assert_eq!(unsafe { source_contains_target(source, u32::MAX as usize as *mut TaggedLinkTarget) }, 0);
+        fixture.object.element_count = 0;
+        fixture.object.storage_pointer_slot = ptr::null();
+        assert_eq!(unsafe { source_contains_target(source, ptr::null_mut()) }, 0);
+        fixture.object.element_count = 4;
+        fixture.object.type_tag = 0;
+        assert_eq!(unsafe { source_contains_target(source, ptr::null_mut()) }, 0);
+        fixture.object.type_tag = super::super::object_state::INDEXED_OBJECT_TAG;
+        fixture.object.element_count = 1;
+        fixture.object.storage_pointer_slot = &mut base;
+        base = ptr::null_mut();
+        assert_eq!(unsafe { source_contains_target(source, ptr::null_mut()) }, 0);
     }
 }

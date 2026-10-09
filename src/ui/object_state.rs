@@ -350,6 +350,10 @@ pub unsafe extern "C" fn indexed_object_storage_base(
 static mut INDEXED_OBJECT_STORAGE_BASE: IndexedObjectStorageBase =
     indexed_object_storage_base;
 
+#[cfg(test)]
+pub(crate) static INDEXED_OBJECT_STORAGE_BASE_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
 #[inline(always)]
 unsafe fn indexed_object_storage_base_fn() -> IndexedObjectStorageBase {
     core::ptr::read_volatile(core::ptr::addr_of!(INDEXED_OBJECT_STORAGE_BASE))
@@ -1674,7 +1678,6 @@ mod tests {
     static OBJECT_PROCESS_REQUEST_LOCK: Mutex<()> = Mutex::new(());
 
 
-    static INDEXED_OBJECT_STORAGE_BASE_LOCK: Mutex<()> = Mutex::new(());
     static SCALED_FIELD_TOTAL_LOCK: Mutex<()> = Mutex::new(());
     static CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
     static BASELINE_CLOCK_SAMPLE_LOCK: Mutex<()> = Mutex::new(());
