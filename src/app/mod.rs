@@ -669,6 +669,7 @@ pub mod transfer_slot_retire;
 pub mod double_buffer;
 pub mod internal_lcd_panel_driver;
 pub mod demo_mode_datetime;
+pub mod resource_datetime_day_number;
 pub mod datetime_adjust;
 pub mod notes_view_reset_resources;
 pub mod notes_view_refresh_resources;
