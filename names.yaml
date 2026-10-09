@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c0434
+    ghidra: FUN_080c0434
+    name: ft_cmap_done
+    size: 52
+    sig: "void ft_cmap_done(FtCMap *cmap)"
+    module: ft/charmap
+    status: ported
+    vars:
+      param_1: cmap
+      iVar1: memory
+    notes: >-
+      Raw A32 words establish 0x080c0434..0x080c0468, followed by a
+      distinct function prologue. Two incoming plain BLs at 0x0804c2c8
+      and 0x0809a764, zero incoming predicated BLs. Zero outgoing BLs;
+      one BLXNE through class->done at +8 and a tail B to the existing
+      ft_mem_free at 0x082cfae8. FreeType cmap destructor: snapshot
+      cmap->charmap.face->memory at face +100, optionally call class
+      done, then release cmap with the saved allocator. Caller
+      0x0804c1f0 creates and registers face charmaps; 0x0809a744
+      destroys the face charmap array. No null-cmap gate is added.
+      Reuses repr(C) FtCMap and FtFace layouts for host pointer widths,
+      casting the existing opaque done slot to its verified signature.
+      Host edge tests cover absent destructor and allocator mutation;
+      a temporary real Box allocation smoke verified destruction and
+      release. Host suite passed 15183 tests; ARM release build passed.
+      match.py reviewed: 13 original versus 15 Rust instructions;
+      LLVM adds a frame pointer and replaces predicated BLX with a
+      conditional branch around BLX, preserving the saved allocator
+      and tail call to ft_mem_free.
+
   - address: 0x080c0608
     ghidra: FUN_080c0608
     name: query_mask_to_backend_mask

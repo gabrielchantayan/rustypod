@@ -11,6 +11,36 @@ use crate::ft::error::{
     FT_ERR_OK,
 };
 use crate::ft::glyph_slot::{FtCMap, FtCharMap, FtFace};
+use crate::ft::memory::ft_mem_free;
+
+/// FreeType `ft_cmap_done` — `FUN_080c0434` @ 0x080c0434, 52 bytes
+/// (0x080c0434..0x080c0468; next function starts with a fresh prologue).
+/// Raw A32 decoding finds two incoming plain BLs at 0x0804c2c8 and
+/// 0x0809a764, zero predicated incoming BLs, and zero outgoing BLs.
+/// The body has one conditional indirect BLXNE and a tail B to
+/// `ft_mem_free` @ 0x082cfae8.
+///
+/// Snapshot the face allocator, invoke the optional cmap class destructor,
+/// then free the cmap with that saved allocator. No null-cmap gate exists:
+/// the original dereferences cmap before the free helper's null check.
+/// Deliberate deviations: typed repr(C) layouts scale pointers on hosts;
+/// the existing opaque `done` slot is cast to its callback signature.
+///
+/// # Safety
+/// `cmap`, its face, class, and allocator must be valid. A non-null `done`
+/// must be callable as `unsafe extern "C" fn(*mut FtCMap)` and must leave
+/// the cmap allocation for the saved allocator to release.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_cmap_done(cmap: *mut FtCMap) {
+    let memory = (*(*cmap).charmap.face).memory;
+    let done = (*(*cmap).clazz).done;
+    if !done.is_null() {
+        let destroy: unsafe extern "C" fn(*mut FtCMap) = core::mem::transmute(done);
+        destroy(cmap);
+    }
+    ft_mem_free(memory, cmap.cast());
+}
 
 /// `FT_CMap_ClassRec` through `char_next`.
 ///
@@ -380,4 +410,89 @@ mod tests {
         assert_eq!(unsafe { ft_set_charmap(&mut face, table[0]) }, FT_ERR_OK);
         assert_eq!(face.charmap, table[0]);
     }
+}
+
+#[cfg(test)]
+mod cmap_done_tests {
+    use super::*;
+    use crate::ft::glyph_slot::FtCMapClass;
+    use crate::ft::memory::FtMemory;
+
+    struct State {
+        cmap: *mut FtCMap,
+        destroyed: bool,
+        freed: bool,
+        expect_destroy: bool,
+    }
+
+    unsafe extern "C" fn unused_alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        panic!("unexpected allocation")
+    }
+
+    unsafe extern "C" fn unused_realloc(
+        _: *mut FtMemory, _: i32, _: i32, _: *mut u8,
+    ) -> *mut u8 {
+        panic!("unexpected reallocation")
+    }
+
+    unsafe extern "C" fn unused_index(_: *mut FtCMap, _: u32) -> u32 { 0 }
+
+    unsafe extern "C" fn destroy(cmap: *mut FtCMap) {
+        let face = (*cmap).charmap.face;
+        let state = &mut *((*(*face).memory).user.cast::<State>());
+        assert_eq!(state.cmap, cmap);
+        assert!(!state.freed);
+        state.destroyed = true;
+        (*cmap).charmap.encoding = 0xdead_beef;
+        // The free must use the snapshot, not reload this now-invalid allocator.
+        (*face).memory = core::ptr::null_mut();
+    }
+
+    unsafe extern "C" fn free(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user.cast::<State>());
+        assert_eq!(block, state.cmap.cast());
+        assert_eq!(state.destroyed, state.expect_destroy);
+        assert!(!state.freed);
+        if state.expect_destroy {
+            assert_eq!((*state.cmap).charmap.encoding, 0xdead_beef);
+        } else {
+            assert_eq!((*state.cmap).charmap.encoding, 7);
+        }
+        state.freed = true;
+    }
+
+    fn exercise(with_destructor: bool) {
+        let mut state = State {
+            cmap: core::ptr::null_mut(), destroyed: false, freed: false,
+            expect_destroy: with_destructor,
+        };
+        let mut memory = FtMemory {
+            user: (&raw mut state).cast(), alloc: unused_alloc,
+            free, realloc: unused_realloc,
+        };
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        face.memory = &raw mut memory;
+        let class = FtCMapClass {
+            size: core::mem::size_of::<FtCMap>() as u32,
+            init: core::ptr::null(),
+            done: if with_destructor { destroy as *const c_void } else { core::ptr::null() },
+            char_index: unused_index,
+        };
+        let mut cmap = FtCMap {
+            charmap: FtCharMap {
+                face: &raw mut face, encoding: 7, platform_id: 0, encoding_id: 0,
+            },
+            clazz: &class,
+        };
+        state.cmap = &raw mut cmap;
+        unsafe { ft_cmap_done(&raw mut cmap); }
+        assert!(state.freed);
+        assert_eq!(state.destroyed, with_destructor);
+    }
+
+    #[test]
+    fn absent_destructor_still_frees_cmap() { exercise(false); }
+
+    #[test]
+    fn destructor_precedes_free_and_allocator_is_snapshotted() { exercise(true); }
 }
