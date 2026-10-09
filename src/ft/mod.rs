@@ -30,6 +30,7 @@ pub mod module;
 pub mod module_callback_dispatch;
 pub mod linked_module_find_by_class;
 pub mod pshinter;
+pub mod pfr_glyph_close_contour;
 pub mod ps_is_whitespace;
 pub mod metrics;
 pub mod smooth_renderer;

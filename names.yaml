@@ -238013,3 +238013,46 @@ functions:
       this unobservable. Existing heap-seam deviations remain unchanged.
       Standalone host smoke with failing allocation exercised reuse and
       stale-capacity failure; no device execution is claimed.
+  - address: 0x080cd1b0
+    ghidra: FUN_080cd1b0
+    name: pfr_glyph_close_contour
+    size: 148
+    sig: "void pfr_glyph_close_contour(uint8_t *glyph)"
+    module: ft/pfr_glyph_close_contour
+    status: ported
+    vars:
+      param_1/r0: glyph
+      r1: current_outline
+      r3: first_point_index
+      r2: last_point_index
+      r4: point_count
+      "glyph+0x24": glyph_loader
+      "glyph+0x28": contour_open
+      "loader+0x34": contour_count
+      "loader+0x36": point_count
+      "loader+0x38": points
+      "loader+0x40": contour_endpoints
+    notes: >-
+      Raw A32 extent [0x080cd1b0,0x080cd244) is 148 executable bytes;
+      next real function starts with PUSH at 0x080cd244. Whole-image
+      aligned BL decoding verifies two plain incoming calls at 0x080c0f0c
+      and 0x080c0f34, no predicated incoming calls, and no outgoing calls.
+      Caller strings identify PFR simple glyph loading; end-glyph and
+      new-contour paths close the preceding contour. Signed halfword
+      counts select point zero or the previous contour endpoint (not
+      endpoint plus one). If last exceeds first and both coordinates
+      match, remove the duplicate final point. Append the remaining
+      endpoint when last is at least first, then clear the open byte.
+      No callee seams or behavioral deviations. Embedded pointers remain
+      u32 words to preserve retail offsets on 64-bit hosts. Host tests
+      cover empty and singleton contours, each coordinate mismatch,
+      duplicate closure, previous endpoints, empty later contours,
+      extreme coordinates and repeated closure. All 15138 host tests
+      passed; ARM release build passed. Standalone production-source
+      smoke verified points=2, contours=1, endpoint=1 and open=0 after
+      duplicate removal. Reviewed match.py exit 1: 37 original versus
+      35 Rust instructions; signed loads, eight-byte point indexing,
+      coordinate comparisons, conditional halfword writes and flag clear
+      remain. LLVM adds a frame, caches counts and endpoint address,
+      and branches instead of predicating coordinate loads. No symbol
+      fold or device execution claimed.

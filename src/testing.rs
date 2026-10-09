@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const PFR_GLYPH_CLOSE_CONTOUR: usize = 0x7031_0000;
     pub const INDEXED_PAYLOAD_BACKEND: usize = 0x436d_0000;
     pub const CRTS_TABLE_TEARDOWN: usize = 0x7020_0000;
     pub const ENABLED_SUBTREE_FIND_IDENTIFIER: usize = 0x7001_0000;
