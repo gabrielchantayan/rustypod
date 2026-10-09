@@ -502,6 +502,35 @@ pub unsafe extern "C" fn store_pmu_register_0x4b_bit2(
     0
 }
 
+/// store_pmu_board_version_status_bit — retail `FUN_080c8890` at
+/// `0x080c8890`, exactly 24 bytes, ending before the next prologue at
+/// `0x080c88a8`. Binary-verified: 2 plain BL callers, 0 predicated callers;
+/// the body contains 1 plain BL and 0 predicated BLs.
+///
+/// Reads the board-selected PMU status bit, stores it through `result`,
+/// and returns zero regardless of the bit or I2C transfer status.
+///
+/// # Deviations
+///
+/// Explicit incoming r1-r3 ABI words preserve the retail callee's failed-I2C
+/// scratch-byte behavior. Its existing Rust implementation ignores r0, so
+/// zero replaces the output pointer in that unused callee argument.
+///
+/// # Safety
+///
+/// `result` must point to an aligned, writable u32.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn store_pmu_board_version_status_bit(
+    result: *mut u32,
+    incoming_r1: u32,
+    incoming_r2: u32,
+    incoming_r3: u32,
+) -> u32 {
+    *result = pmu_board_version_status_bit(0, incoming_r1, incoming_r2, incoming_r3);
+    0
+}
+
 /// pmu_apply_mode_registers — original: `FUN_082e57a8` @ `0x082e57a8`
 /// (44 bytes; 4 plain `bl` call sites, 0 predicated `bl`, binary-verified).
 ///
@@ -1030,6 +1059,33 @@ mod tests {
             0
         );
         assert_eq!(result, 1, "failed transfer preserves incoming r3 bit 2");
+    }
+
+    #[test]
+    fn stored_board_status_overwrites_one_word_and_preserves_failed_transfer_seed() {
+        for (version, shift) in [(0x0011_ffff, 0), (0x0010_ffff, 2)] {
+            let _board = install_host_cached_board_version(version);
+            for (write_status, sample, seed) in [
+                (0, 0u8, !0u32),
+                (0, 1, 4),
+                (0, 4, 1),
+                (0, 0xff, 0),
+                (-5, 0xff, 0),
+                (-5, 0, 1),
+                (-5, 0, 4),
+                (-5, 0, 0xffff_fffb),
+                (-5, 0, 0xffff_fffe),
+            ] {
+                let _i2c = install_raw_i2c_for_test(write_status, 0, sample);
+                let mut words = [0x1234_5678, 0xdead_beef, 0x9abc_def0];
+                let status = unsafe {
+                    store_pmu_board_version_status_bit(&mut words[1], 0x1234, 0x5678, seed)
+                };
+                let source = if write_status == 0 { sample as u32 } else { seed };
+                assert_eq!(status, 0);
+                assert_eq!(words, [0x1234_5678, (source >> shift) & 1, 0x9abc_def0]);
+            }
+        }
     }
 
     #[test]

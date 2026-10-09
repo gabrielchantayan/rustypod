@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c8890
+    ghidra: FUN_080c8890
+    name: store_pmu_board_version_status_bit
+    size: 24
+    sig: "u32 store_pmu_board_version_status_bit(u32 *result, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu
+    status: ported
+    renames:
+      param_1/r4: result
+      uVar1/r0: board_status_bit
+      FUN_082e5b64: pmu_board_version_status_bit
+    notes: >-
+      Raw words establish the exact 24-byte extent 0x080c8890..0x080c88a7;
+      the next real prologue is 0xe92d4ff8 at 0x080c88a8. Independently
+      decoding every aligned ARM BL word finds two plain callers at
+      0x0809e4d8 and 0x082bc5d8, zero predicated callers. The body has
+      one plain BL at 0x080c8898 to the already-ported board-selected PMU
+      status reader, stores its bit through the saved output pointer, and
+      returns zero unconditionally. Explicit incoming r1-r3 preserve the
+      callee's failed-I2C seed behavior; zero substitutes for its unused
+      r0 argument. Both retail callers consume the stored word. Host tests
+      cover both board generations, zero/set/opposite status bits, failed
+      writes with incoming-r3 seeds, and untouched neighboring words.
+      All 15155 host tests pass; ARM release build passes. match.py exits
+      1 with six original versus seven Rust instructions: LLVM adds its
+      frame pointer and larger save set; call/store/zero-return order is
+      retained, and R_ARM_CALL resolves to pmu_board_version_status_bit.
+      Throwaway Unicorn execution of original and compiled ARM wrappers
+      with a stubbed PMU result verifies both bit values, return zero,
+      neighboring words, incoming r1-r3, and restored stack. No device run.
   - address: 0x080c9cf0
     ghidra: FUN_080c9cf0
     name: tt_cmap2_subheader
