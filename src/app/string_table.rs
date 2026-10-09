@@ -433,14 +433,11 @@ pub unsafe extern "C" fn string_table_parse_i32(table: *mut u8, key: *const u32)
 }
 
 
-/// The unported string-table assignment helper used by
-/// [`string_table_set_decimal`](crate::app::string_table::string_table_set_decimal).
-/// `FUN_08101da0` selects the current 0x1c-byte table from `table + 0x54`,
-/// obtains the mapped COW-string slot for `key`, then assigns `value` into it.
+/// Assignment dispatch used by the decimal formatter's host fixtures.
+/// The default calls the Rust peer-map assignment port.
 #[derive(Clone, Copy)]
 pub struct StringTableAssignOps {
-    /// `FUN_08101da0` @ 0x08101da0 — assigns the COW string object at
-    /// `value` to the current table's mapped-value slot for `key`.
+    /// Assigns `value` into the peer map's mapped-value slot for `key`.
     pub assign: unsafe extern "C" fn(
         table: *mut u8,
         key: *mut *mut u8,
@@ -448,39 +445,45 @@ pub struct StringTableAssignOps {
     ),
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_table_assign(
+/// Decimal-formatting dispatch; both host and target defaults use the port.
+pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssignOps {
+    assign: assign_formatted_string,
+};
+
+unsafe extern "C" fn assign_formatted_string(
     table: *mut u8,
     key: *mut *mut u8,
     value: *mut *mut u8,
 ) {
-    let assign: unsafe extern "C" fn(*mut u8, *mut *mut u8, *mut *mut u8) =
-        unsafe { core::mem::transmute(0x0810_1da0usize) };
-    unsafe { assign(table, key, value) }
+    string_table_assign_peer(table, key, value);
 }
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_table_assign(
-    _table: *mut u8,
-    _key: *mut *mut u8,
-    _value: *mut *mut u8,
-) {
-    panic!("string_table_set_decimal requires string-table assignment 0x08101da0")
+/// Assign a COW string into the peer map — `FUN_08101da0` @ 0x08101da0.
+/// True extent: 36 bytes [0x08101da0,0x08101dc4), ending at the next push.
+/// Raw A32 verifies two outbound plain BLs, zero predicated BLs, and a tail
+/// B to cxx_string_assign @ 0x083d8d1c. Two inbound plain BLs occur at
+/// 0x08101d34 and 0x08101d88; no predicated inbound BLs.
+///
+/// Select `(selector + 1) % 2` through string_table_peer_map, obtain the
+/// key's mapped-value slot through string_table_fallback_value_slot, and
+/// return cxx_string_assign(slot, value). Ghidra incorrectly absorbs the
+/// tail target's implementation into this function.
+/// Deliberate deviations: none; reuse the existing Rust callee ports.
+///
+/// # Safety
+/// table must contain a live selector at +0x54 and its selected peer map;
+/// key and value must be live COW strings satisfying the callee contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_assign_peer(
+    table: *mut u8,
+    key: *mut *mut u8,
+    value: *mut *mut u8,
+) -> *mut *mut u8 {
+    let peer = string_table_peer_map(table);
+    let slot = string_table_fallback_value_slot(peer, key);
+    crate::cxx::string::cxx_string_assign(slot, value)
 }
-
-/// Active model of `FUN_08101da0`. The target default reaches the retail
-/// helper; host tests install a recorder until that helper is ported.
-#[cfg(target_os = "none")]
-pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssignOps {
-    assign: firmware_string_table_assign,
-};
-
-/// Active model of `FUN_08101da0`. The host default reports an accidental
-/// unmocked traversal into the still-unported helper.
-#[cfg(not(target_os = "none"))]
-pub static mut STRING_TABLE_ASSIGN_OPS: StringTableAssignOps = StringTableAssignOps {
-    assign: missing_string_table_assign,
-};
 
 #[inline(always)]
 unsafe fn string_table_assign_ops() -> StringTableAssignOps {
@@ -532,8 +535,8 @@ pub unsafe extern "C" fn string_table_assign_both(
 ///
 /// The formatter port takes an explicit va-list pointer rather than C
 /// varargs, so `&number` replaces the original r2 value at the `sprintf`
-/// boundary. `FUN_08101da0` is not ported and remains a volatile dispatch
-/// seam; its target default is the verified retail load address.
+/// boundary. Assignment uses the Rust peer-map port; the formatter retains
+/// its existing volatile dispatch for isolated host formatting fixtures.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_table_set_decimal(
@@ -1232,7 +1235,7 @@ mod controller_finish_tests {
 /// no NULL guard on any argument.
 ///
 /// Unlike its sibling [`string_table_set_decimal`] — which routes through
-/// the current-table assign helper @ 0x08101da0 and takes its number by
+/// the peer-table assign helper @ 0x08101da0 and takes its number by
 /// pointer — this function takes `value` BY VALUE in r2 and stores into
 /// the fallback (default-language) table; sampled callers pass UI-state
 /// keys ("SelectAlbum", "SelectArtist") with selection-handle values.
@@ -2466,6 +2469,41 @@ mod copy_current_to_peer_tests {
 
     #[repr(align(4))]
     struct Table([u8; 0x58]);
+
+    #[test]
+    fn assign_peer_preserves_current_and_handles_shared_self_assignment() {
+        let (_lock, _restore) = install();
+        let mut table = Table([0; 0x58]);
+        let mut node = NodeStorage([0; 0x30]);
+        let mut source = fake_string();
+        let mut key = fake_string();
+        unsafe {
+            let slot = node_value_slot(&mut node);
+            let mut value = source.data.as_mut_ptr();
+            let mut key_value = key.data.as_mut_ptr();
+            for selector in [0u32, 1] {
+                MAP_CALLS.clear();
+                RESULT_NODES.clear();
+                RESULT_NODES.push(slot.cast::<u8>().sub(NODE_VALUE_OFFSET) as usize);
+                table.0.as_mut_ptr().cast::<u32>().add(CURRENT_TABLE_INDEX_WORD).write(selector);
+                slot.write(crate::cxx::string::empty_rep_data());
+                assert_eq!(string_table_assign_peer(table.0.as_mut_ptr(), &mut key_value,
+                    &mut value), slot);
+                assert_eq!(slot.read(), value);
+                assert_eq!(source.rep.refcount, 1);
+                assert_eq!(MAP_CALLS[0].0, table.0.as_mut_ptr().add(
+                    (1 - selector) as usize * TABLE_STRIDE) as usize);
+                MAP_CALLS.clear();
+                assert_eq!(string_table_assign_peer(table.0.as_mut_ptr(), &mut key_value,
+                    slot), slot);
+                assert_eq!(slot.read(), value);
+                assert_eq!(source.rep.refcount, 1);
+                crate::cxx::string::cxx_string_release(slot);
+                assert_eq!(source.rep.refcount, 0);
+                assert_eq!(key.rep.refcount, 0);
+            }
+        }
+    }
 
     #[test]
     fn named_key_copies_current_value_to_selected_peer() {
