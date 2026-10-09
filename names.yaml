@@ -16,6 +16,25 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ffa00
+    ghidra: FUN_080ffa00
+    name: retail_item_count
+    size: 8
+    sig: "u32 retail_item_count(void)"
+    module: util/retail_item_count
+    status: ported
+    renames:
+      r0: item_count
+    notes: >-
+      Raw words e3a000cd and e12fff1e decode to mov r0, #205; bx lr.
+      True extent is 0x080ffa00..0x080ffa08, where the distinct descriptor
+      lookup begins. Independent raw ARM branch decoding finds two plain
+      inbound BLs at 0x0819ae18 and 0x0819ae34, zero predicated inbound BLs,
+      and no outbound calls. Returns the fixed selection item count without
+      reading memory or arguments. The selection_index_adjust caller now
+      calls the Rust getter instead of its former literal-address seam.
+      Host tests cover 204/205 wrap boundaries and extreme signed deltas.
+      ARM match retains mov r0, #205; LLVM adds a frame and returns via pop.
   - address: 0x080ffdf0
     ghidra: FUN_080ffdf0
     name: primary_record_id_lookup
