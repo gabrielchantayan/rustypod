@@ -236843,3 +236843,48 @@ functions:
       LLVM uses BLX through literal 0x080615d4 and preserves the candidate
       in a callee-saved register rather than relying on retail r3 preservation.
       No intentional folding; no device execution.
+
+  - address: 0x080da878
+    ghidra: FUN_080da878
+    name: remove_task
+    size: 120
+    sig: "usize remove_task(u32 *task, u32 release, u32 notify_empty)"
+    module: ui/remove_task
+    status: ported
+    renames:
+      param_1/r0: task
+      param_2/r1: release
+      param_3/r2: notify_empty
+      "task+0x1d": flags
+      "task+0x20": parent
+      "parent+0x24": head
+      "task+0x28": next_or_pool_id
+      FUN_080c5efc: string_pool_release
+    notes: >-
+      Raw words verify extent 0x080da878..0x080da8f0 (120 bytes), followed
+      by an independent push-prologue. Full-image BL decoding finds two
+      inbound plain BLs at 0x08048a90 and 0x080e69f4, zero predicated
+      inbound BLs, and no outbound BLs. Ghidra incorrectly folds both
+      conditional tail targets into this function. Flagged tasks return
+      themselves when release is zero, otherwise tail-release ID at +0x28
+      from the element's string pool at +0xcc. Unflagged tasks unlink
+      themselves from parent+0x24 through next links at +0x28 without
+      clearing their own link, returning the remaining head. With an empty
+      list and nonzero notify_empty, tail target 0x08048b34 zeroes a
+      four-word record, sets its first word to parent, dispatches literal
+      message 0x74646474 to parent->element, and returns the record's
+      first word, ignoring dispatcher status. Deliberate deviation: express
+      this unregistered helper through the ported Tdat dispatcher; do not
+      invent a callee identity. All stored task pointers remain u32 words;
+      usize returns preserve host pointers and target-width status bits.
+      The existing completion seam now defaults to this Rust port.
+      Host suite: 15091 passed. ARM release build passed. match.py exits 1,
+      reporting 30 stock versus 65 Rust listing entries: same flag gate,
+      pool tail release, unlink traversal and head/previous stores; the
+      explicitly expressed dispatch record adds a stack frame and BL.
+      No intentional symbol folding and no device execution. Standalone
+      host release smoke is blocked by six pre-existing missing host callee
+      definitions in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule. An isolated throwaway host-test smoke called
+      the public entry and observed final-task unlink with NULL parent head;
+      the smoke harness was removed after verification.
