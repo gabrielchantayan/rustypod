@@ -386,6 +386,28 @@ pub unsafe extern "C" fn mailbox_slot_post(slot: *mut *mut Mailbox) {
     csem_post(*slot as *mut CountingSem);
 }
 
+/// Mailbox post veneer — original: `thunk_FUN_0808e2a8` @ 0x080d7110.
+///
+/// True size: 4 bytes, extent 0x080d7110..0x080d7114. Raw word
+/// `eafedc64` is `b 0x0808e2a8`; the next word starts the independently
+/// called mailbox-signal veneer. Full-image ARM decoding verifies two
+/// plain inbound BLs (0x082283b8, 0x08228408), zero predicated BLs,
+/// and no outgoing BLs. Passes the slot unchanged to [`mailbox_slot_post`],
+/// which reloads its mailbox, adds one wrapping token, and wakes its
+/// waiter only on the -1-to-zero transition.
+///
+/// Deliberate deviations: Rust expresses the branch as a forwarding call;
+/// LLVM may emit a frame. No added NULL checks or behavioral deviations.
+///
+/// # Safety
+/// The slot and installed mailbox must satisfy [`mailbox_slot_post`]'s
+/// validity and synchronization requirements.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn mailbox_slot_post_veneer(slot: *mut *mut Mailbox) {
+    mailbox_slot_post(slot);
+}
+
 /// Global notification post — original: `FUN_08228400` @ `0x08228400`.
 ///
 /// True extent: 24 bytes (`0x08228400..0x08228418`), comprising five
@@ -902,6 +924,28 @@ pub(crate) mod tests {
     /// A mailbox block seeded with a token count and a waiter id.
     fn block(state: u32, id: u32) -> Mailbox {
         Mailbox { state, id }
+    }
+
+    #[test]
+    fn mailbox_slot_post_veneer_wraps_count_and_wakes_only_at_zero() {
+        let _guard = mock_hooks();
+        unsafe {
+            for (before, after, wakes) in [
+                (0, 1, false),
+                (i32::MAX as u32, i32::MIN as u32, false),
+                (i32::MIN as u32, (i32::MIN + 1) as u32, false),
+                (u32::MAX - 1, u32::MAX, false),
+                (u32::MAX, 0, true),
+            ] {
+                let mut cell = block(before, 0x7110_0001);
+                let mut slot: *mut Mailbox = &mut cell;
+                mailbox_slot_post_veneer(&mut slot);
+                assert_eq!(cell.state, after);
+                assert_eq!(cell.id, 0x7110_0001);
+                assert_eq!(slot, &mut cell as *mut Mailbox);
+                assert_eq!(drain(), if wakes { vec![Call::Wake(0x7110_0001)] } else { vec![] });
+            }
+        }
     }
 
     #[test]

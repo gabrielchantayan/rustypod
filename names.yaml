@@ -237296,3 +237296,38 @@ functions:
       stores. LLVM reorders independent final stores under the exclusive
       access contract; no concurrent publication guarantee is added.
       No device execution; no deliberate semantic deviations.
+
+  - address: 0x080d7110
+    ghidra: thunk_FUN_0808e2a8
+    name: mailbox_slot_post_veneer
+    size: 4
+    sig: "void mailbox_slot_post_veneer(Mailbox **slot)"
+    module: kernel/kobj
+    vars: {param_1: slot}
+    status: ported
+    renames:
+      param_1/r0: slot
+      FUN_0808e2a8: mailbox_slot_post
+    notes: >-
+      Raw word eafedc64 decodes to b 0x0808e2a8. True extent is
+      0x080d7110..0x080d7114; the independently called signal veneer
+      starts at 0x080d7114, followed by push {r4,lr} at 0x080d7118.
+      Full-image ARM BL decoding finds two plain inbound calls at
+      0x082283b8 and 0x08228408, zero predicated calls, and no outgoing
+      BLs. Ghidra incorrectly expands the downstream semaphore body.
+      Both callers post a mailbox slot and then return zero. The target
+      is the existing ported mailbox_slot_post, not a new callee seam:
+      it reloads the slot, adds one wrapping token with interrupt-safe
+      arithmetic, and wakes the waiter only for count -1 becoming zero.
+      Existing global_notification_post intentionally continues calling
+      mailbox_slot_post directly, as documented for its alias bypass.
+      No new module or host-pointer byte offsets. Host regression covers
+      zero, signed overflow, signed minimum, -2 and -1, preserving the
+      slot and waiter id. All 15113 host tests and ARM release build pass.
+      Standalone API smoke verifies -2 to -1 to zero wakes once and a
+      replacement slot wraps signed MAX to MIN without waking.
+      match.py reports the expected structural diff: LLVM emits a
+      push/mov/pop frame before the tail branch. Archive relocation
+      R_ARM_JUMP24 confirms that branch targets mailbox_slot_post,
+      despite match.py displaying its unresolved operand as zero.
+      No deliberate behavioral deviations; no device execution.
