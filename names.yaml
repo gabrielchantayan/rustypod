@@ -234604,3 +234604,47 @@ functions:
       Isolated actual-source executable using a real host allocation observes
       ownership 1, preserved padding, capacity 256, zero cursors and mask 255.
       No device execution.
+
+  - address: 0x080fe8f8
+    ghidra: FUN_080fe8f8
+    name: ring_read
+    size: 92
+    sig: "u32 ring_read(u32 *ring, u8 *destination, u32 length)"
+    module: util/ring_read
+    status: ported
+    renames:
+      param_1/r0/r4: ring
+      param_2/r1/r5: destination
+      param_3/r2/r6: length
+      uVar2: copied_bytes
+      "ring+0x04": data
+      "ring+0x08": capacity
+      "ring+0x0c": read_cursor
+      "ring+0x10": write_cursor
+      "ring+0x14": mask
+      FUN_08297608: ring_buffer_used_bytes
+    notes: >-
+      Raw osos.dec establishes the 92-byte A32 extent 0x080fe8f8..0x080fe950,
+      from push through pop; the next real function begins at 0x080fe954.
+      Full-image aligned branch-word decoding finds exactly two inbound
+      plain BL calls at 0x080bbc90 and 0x08103b24, zero predicated BL calls.
+      One plain outbound BL at 0x080fe908 calls the existing port
+      ring_buffer_used_bytes at 0x08297608. Rejects length above occupied
+      count with return zero and no mutation; otherwise copies bytes from
+      data[read_cursor], updating read_cursor to (read_cursor + 1) & mask
+      after each destination store, then returns one. Zero length succeeds
+      without accessing payload or destination. Target-width word indexing
+      and volatile access preserve data/cursor/mask reloads, including the
+      cursor reload after a potentially aliasing destination store.
+      No deliberate deviations. Callers consume four-byte queued pointers
+      or select between transport rings at +12 and +36. Host reference tests
+      cover all small cursor states, wrap, exact availability, rejection,
+      zero and maximal lengths, unusual capacity/mask arithmetic, unchanged
+      neighbors and source, and destination aliasing the cursor word.
+      All 14971 host tests and the ARM release build pass. match.py exits 1:
+      23 original versus 25 Rust instructions; the availability call and
+      unsigned guard, ordered byte-copy/masked-update loop, and returns are
+      preserved, with a countdown loop and different register/frame setup.
+      R_ARM_CALL confirms the outbound target is ring_buffer_used_bytes.
+      Actual-source host smoke reads wrapped ghab, advances cursor to 2,
+      and rejects an empty follow-on read without mutation. No device run.
