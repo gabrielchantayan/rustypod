@@ -16,6 +16,57 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f6978
+    ghidra: FUN_080f6978
+    name: header_buffer_create
+    size: 92
+    sig: "HeaderBuffer *header_buffer_create(const uint8_t *source, uint32_t length, uint32_t selector, uint32_t context)"
+    module: heap/header_buffer_create
+    status: ported
+    vars:
+      param_1/r5: source
+      param_2/r6: length
+      param_3/r7: selector
+      param_4/r8: context
+      piVar1/r4: owner
+      iVar2/r0: build_result
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_080f6a04: resident_header_buffer_construct
+      FUN_080f68f4: resident_header_buffer_build
+      vtable_slot_4: deleting_destructor
+    notes: >-
+      Raw A32 establishes [0x080f6978,0x080f69d4), 92 bytes; the next
+      PUSH begins header_buffer_release. Three plain BL instructions occur
+      at 0x080f6990, 0x080f6994, and 0x080f69b4, with zero predicated
+      BL instructions and one BLXEQ at 0x080f69c8 through vtable slot +4.
+      Ghidra's reported two-call count is incorrect. Allocate eight bytes
+      using ported tag-2 operator_new, pass its result unconditionally to
+      the resident constructor, and build only for a non-NULL constructor
+      result. Constructor raw words install vtable 0x0898009c, clear
+      allocation +4, and preserve r0. The resident builder copies length
+      bytes into a tag-3 allocation with a 12-byte header containing
+      selector, context, truncated u16 length, and flags 1. Caller
+      0x08105694 masks length to u16. A zero builder result invokes the
+      deleting destructor but returns the same owner pointer, potentially
+      dangling; this behavior is preserved. Both unported callees remain
+      exact resident ABI seams, not guessed implementations. Host pointers
+      and allocation size widen together; ARM retains two-word layout.
+      Tests cover NULL construction, failure cleanup through virtual slot
+      +4, and arbitrary nonzero builder success without destruction.
+      match.py reports 31 Rust instructions versus 23 stock instructions:
+      LLVM uses BLX for resident addresses, explicit conditional branches,
+      a frame pointer, and an address literal. Allocation, constructor,
+      NULL guard, five-argument build, failure dispatch, and owner return
+      retain the original control flow. Exit 1 denotes this reviewed diff.
+      Whole-image branch-word decoding finds two inbound plain BL sites,
+      0x081056f4 and 0x082a9788, and zero predicated inbound BL sites;
+      raw code at the latter also masks length to u16.
+      Host acceptance suite passes all 15014 tests, including three factory
+      edge-case tests. ARM release build passes. A standalone host smoke
+      exercises the exported factory's success and cleanup paths; the
+      temporary smoke source was removed after verification.
+
   - address: 0x080f69d4
     ghidra: FUN_080f69d4
     name: header_buffer_release
