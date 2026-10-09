@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ca12c
+    ghidra: FUN_080ca12c
+    name: codec_cached_aux_level_set
+    size: 72
+    sig: "u32 codec_cached_aux_level_set(u32 level)"
+    module: drivers/codec_cached_level
+    status: ported
+    renames:
+      param_1/r0: level
+      DAT_080ca170: codec_level_state
+      FUN_08093a9c: stock_codec_level_scale
+    notes: >-
+      Raw extent [0x080ca12c,0x080ca174) contains 68 executable bytes
+      and pointer literal 0x089d0ef4; the next real function begins
+      with LDRH r0,[r0]. Whole-image aligned A32 decoding verifies
+      two plain inbound BLs at 0x080b2874 and 0x080ce674, no predicated
+      inbound BLs, and one plain outbound BL at 0x080ca168 to 0x08093a9c,
+      no predicated outbound BLs. Compare the full input with byte +3
+      and skip only if equal and refresh byte +0 is zero. Otherwise
+      cache the low byte before scaling registers 0x1c/0x1d with
+      the full input and margins 11/0. Correct Ghidra's void signature:
+      the skip path clears r0 and the stock scaler explicitly returns zero.
+      Caller 0x080ce660 sets refresh byte +0 before reapplying both
+      cached levels. No canonical entry exists for the stock scaler;
+      reuse the existing codec_cached_level module and its host seam.
+      Deliberate deviations are volatile cache accesses and host storage.
+      Host tests cover changed, unchanged, forced, wide and repeated
+      inputs, untouched adjacent bytes, and cache-before-scaler ordering.
+      Production-source host smoke exercises repeated unchanged-zero calls.
+      Host suite passes all 15149 tests and ARM release build succeeds.
+      Reviewed match.py exit 1 structural diff: LLVM preserves full-word
+      comparison, conditional refresh read, zero skip return, byte store
+      before scaling, and all five scaler arguments. Intentional differences:
+      folded cache pointer 0x089d0ef7, early BXEQ return, frame setup,
+      and BLX through literal 0x08093a9c instead of direct BL.
   - address: 0x080ca834
     ghidra: FUN_080ca834
     name: format_datetime_label
