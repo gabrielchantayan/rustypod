@@ -10,22 +10,14 @@
 //! retains the accessor's weekday rather than reducing it to zero.
 //!
 //! Deviations: constant divisions are expressed in Rust rather than invoking
-//! ADS quotient/remainder ABIs. All ARM arithmetic wraps. The unported
-//! 0x080d6d68 accessor remains a firmware call, not a guessed implementation.
+//! ADS quotient/remainder ABIs. All ARM arithmetic wraps. The month's first
+//! weekday is computed by the canonical Rust port.
 
 use super::rect::{Rect, rect_width, rect_offset};
 
+use crate::time::month_first_weekday::month_first_weekday;
+
 type MonthFirstWeekday = unsafe extern "C" fn(u32) -> u32;
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn month_first_weekday(date: u32) -> u32 {
-    core::mem::transmute::<usize, MonthFirstWeekday>(0x080d_6d68usize)(date)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn month_first_weekday(_date: u32) -> u32 {
-    panic!("calendar_day_rect requires retailOS month-first-weekday accessor 0x080d6d68")
-}
 
 /// Write the calendar cell for a one-based day.
 ///
