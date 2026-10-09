@@ -236126,3 +236126,45 @@ functions:
       padded records, duplicate midpoint selection and zero stride.
       Host suite, executable smoke and ARM release build passed.
       match.py reports 29 versus 25 instructions, preserving ASR, MLA,
+
+  - address: 0x080eda58
+    ghidra: FUN_080eda58
+    name: retail_file_read_line
+    size: 200
+    sig: "uint32_t retail_file_read_line(void *file, StringObject *destination)"
+    module: fs/file_read_line
+    status: ported
+    vars: {param_1/r7: file, param_2/r6: destination, r4: length, r5: line_buffer, local_120: byte, auStack_124: transferred, auStack_1c: temporary_string}
+    renames:
+      FUN_082784b8: retail_file_read
+      FUN_0827735c: string_owner_embedded_init
+      FUN_08276474: string_object_assign_payload
+      FUN_08277484: string_object_destroy
+      "destination vtable+0x0c": clear_payload (dynamic identity)
+    notes: >-
+      Raw osos.dec establishes [0x080eda58,0x080edb20), 200 code bytes;
+      the next real function begins with LDR r0,[r0] at 0x080edb20.
+      Whole-image A32 BL decoding finds two inbound plain BL sites at
+      0x0826c764 and 0x0826c848, zero predicated inbound calls. Outbound
+      calls are three plain BLs, one BLNE at 0x080edb0c, and one BLX r1
+      through destination vtable+0x0c. Clears the destination before the
+      file+0x18 == -1 guard. Skips leading CR/LF, accumulates up to 254
+      bytes, and terminates on EOF status 5, NUL, or a nonempty delimiter.
+      EOF/NUL win over errors and overflow; a delimiter after 254 bytes
+      fails, but EOF/NUL succeeds. Constructs a temporary StringObject,
+      assigns its payload unless self-identical, destroys it, returns one.
+      Other errors/overflow return zero without assigning partial text.
+      Both callers belong to the numeric-pair file loader at 0x0826c714.
+      Reuses existing file and StringObject ports without new seams.
+      Deliberate deviations: typed existing dependencies, native-width
+      StringObject vtable fields, an initialized local byte, and a
+      monomorphized closure for collection rather than register-local code.
+      Tests cover delimiter skipping, high bytes, EOF/NUL precedence,
+      253/254-byte boundaries, overflow and clear-before-invalid-file.
+      The local line buffer uses MaybeUninit, avoiding a redundant clear.
+      Host suite and ARM release build passed; executable collection smoke
+      produced first/second lines while consuming 16 bytes. Reviewed match.py:
+      73 versus 50 instructions; clear/invalid-file guard, EOF/NUL precedence,
+      254-byte bound, delimiter skipping and string lifetime are preserved.
+      LLVM splits the initial read from the loop; relocation-free match.py
+      labels unresolved calls with the current symbol, not their identities.
