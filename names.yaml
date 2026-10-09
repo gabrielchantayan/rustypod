@@ -136582,11 +136582,40 @@ functions:
       list; source failure returns -108, target failure rolls back the source
       insertion and returns -108, while two successes increment both +0x0c
       and +0x08 counters. The object-family and list identities remain
-      unknown. The source membership scan (0x080e2d70), insertion
-      (0x0803bbfc), and removal (0x080646b8) are volatile target-address
-      seams with host recorders. Rust initializes the two temporary records
+      unknown. Source membership now calls the ported source_contains_target;
+      insertion (0x0803bbfc) remains a volatile target-address seam with host
+      recorders, and removal uses dynamic_array_remove. Rust initializes records
       directly rather than retaining the stock bzero calls that only clear
       them before their pointer words are stored.
+
+  # --- Source tagged-object membership scan ---
+  - address: 0x080e2d70
+    ghidra: FUN_080e2d70
+    name: source_contains_target
+    size: 88
+    sig: "u32 source_contains_target(TaggedLinkSource *source, TaggedLinkTarget *target)"
+    module: ui/tagged_object_link
+    status: ported
+    renames:
+      param_1/r5: source
+      param_2/r6: target
+      uVar2/r4: index
+      piVar1/r0: record
+      FUN_08055ed0: indexed_object_offset
+    notes: >-
+      Raw ARM spans 0x080e2d70 through the pop at 0x080e2dc4; the next
+      independently entered function starts at 0x080e2dc8. Exactly one
+      outgoing unconditional BL at 0x080e2d90 calls indexed_object_offset
+      at 0x08055ed0. Exactly two incoming unconditional BLs, at 0x08048854
+      and 0x0805bc70; no predicated BLs in either count. Scans the indexed
+      header at source +0x10 with one-based indices, reloading the unsigned
+      count at +0x18 on every iteration. Null accessor results are skipped;
+      the first aligned record word equal to the target pointer word
+      returns its index, otherwise exhaustion returns zero. Increment wraps
+      at 32 bits. No source tag or null guard is added. Host fixtures use
+      the existing IndexedObject native pointer slot while record pointer
+      words stay u32; there are no algorithmic deviations. The existing
+      tagged_object_link membership seam now defaults to this port.
 
   # --- Halfword-aligned little-endian word load ---
   - address: 0x080539d4
