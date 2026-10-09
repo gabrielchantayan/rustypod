@@ -1,19 +1,16 @@
 //! Display refresh transaction.
 
 use crate::drivers::pwrcon::pwrcon_acquire_clock_2;
+#[cfg(target_os = "none")]
+use crate::drivers::lcd_wait_transaction_idle::lcd_wait_transaction_idle;
 
 const DISPLAY_TRANSACTION_STATE: *mut u32 = 0x3830_0000 as *mut u32;
 const DISPLAY_SERVICE_POINTER: *const u32 = 0x089c_a45c as *const u32;
-const DISPLAY_BUSY_WORD: usize = 0x8c / core::mem::size_of::<u32>();
 const DISPLAY_REFRESHING_WORD: usize = 0x80 / core::mem::size_of::<u32>();
 const DISPLAY_PRESENT_SLOT: usize = 0x0c / core::mem::size_of::<u32>();
 
 type DisplayPresent = unsafe extern "C" fn(u32, u32, u32, u32, u32);
 
-#[cfg(target_os = "none")]
-unsafe fn wait_for_display_idle() {
-    while unsafe { core::ptr::read_volatile(DISPLAY_TRANSACTION_STATE.add(DISPLAY_BUSY_WORD)) } & 3 != 0 {}
-}
 
 #[cfg(target_os = "none")]
 unsafe fn present_display() {
@@ -80,12 +77,12 @@ static mut HOST_DISPLAY_OPS: HostDisplayOps = HostDisplayOps {
 pub unsafe extern "C" fn display_refresh() -> u32 {
     #[cfg(target_os = "none")]
     unsafe {
-        wait_for_display_idle();
+        lcd_wait_transaction_idle();
         pwrcon_acquire_clock_2();
         core::ptr::write(DISPLAY_TRANSACTION_STATE.add(DISPLAY_REFRESHING_WORD), 1);
         present_display();
         core::ptr::write(DISPLAY_TRANSACTION_STATE.add(DISPLAY_REFRESHING_WORD), 0);
-        wait_for_display_idle();
+        lcd_wait_transaction_idle();
     }
 
     #[cfg(not(target_os = "none"))]

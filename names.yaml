@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d510c
+    ghidra: FUN_080d510c
+    name: lcd_wait_transaction_idle
+    size: 24
+    sig: "u32 lcd_wait_transaction_idle(void)"
+    module: drivers/lcd_wait_transaction_idle
+    status: ported
+    renames:
+      DAT_080d5120: lcd_controller_base_literal
+      r1: lcd_controller_base
+      r0: transaction_status
+    notes: >-
+      Raw words e59f100c e591008c e3100003 1afffffc e12fff1e
+      establish 20 instruction bytes plus literal 0x38300000 at
+      0x080d5120. Next real function starts at 0x080d5124 with MOV
+      r1,r1,LSL #28. Whole-image aligned A32 branch decoding finds
+      one plain inbound BL at 0x080c5ddc and one BLNE at 0x080c5e34;
+      zero outbound calls. Poll LCD status 0x3830008c until bits 0
+      and 1 both clear, returning the complete final word in r0.
+      Correct Ghidra's void signature; no writes, timeout or yield.
+      Target uses volatile MMIO; host substitutes an atomic register.
+      Existing display_refresh target waits now call this exported port.
+      Host tests cover each busy bit, both bits, all bits, immediate idle,
+      repeated reads and unmasked high-bit return. Production-source host
+      smoke returned zero for idle. Host suite and ARM release build pass.
+      Reviewed match.py exit 1: LLVM adds an fp frame, folds base plus
+      offset into literal 0x3830008c, and preserves LDR/TST/BNE polling
   - address: 0x080d5244
     ghidra: FUN_080d5244
     name: codec_cached_level_set
