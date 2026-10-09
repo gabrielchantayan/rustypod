@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08102098
+    ghidra: FUN_08102098
+    name: string_table_set_both_decimal_ref
+    size: 84
+    sig: "void string_table_set_both_decimal_ref(u8 *table, char **key, const i32 *decimal)"
+    module: app/string_table
+    status: ported
+    vars: {param_1/r0: table, param_2/r1: key, param_3/r2: decimal, r4: table, r5: key}
+    renames:
+      FUN_0802f724: sprintf
+      FUN_083d8b5c: cxx_string_from_cstr
+      FUN_081020ec: string_table_assign_both
+      FUN_083d8b04: cxx_string_release
+    notes: >-
+      Raw A32 words establish 84 bytes through the next push at 0x081020ec:
+      80 code bytes plus "%d\0" at 0x081020e8. Two inbound unconditional
+      BLs at 0x08125b0c and 0x081f67a8, zero predicated; four outbound plain
+      BLs, zero predicated. Reads the signed input word, formats it in the
+      512-byte stack buffer, constructs a COW string, assigns current and
+      peer tables, and releases the temporary. Uses existing Rust COW/map ports
+      and the real _vsnprintf/mem_putc engine, bypassing sprintf's no-output
+      default engine slot. Deviations: explicit va-list instead of variadic
+      r2, omitted unused allocator-tag stack residue.
+      Host tests cover zero, negative values, signed extrema, both selectors,
+      and retained shared COW ownership.
   - address: 0x08102db8
     ghidra: FUN_08102db8
     name: query_owner_construct

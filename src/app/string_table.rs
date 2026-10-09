@@ -594,6 +594,51 @@ pub unsafe extern "C" fn string_table_set_both_decimal(
         crate::cxx::string::cxx_string_release(text);
     }
 }
+
+/// `string_table_set_both_decimal_ref` — original: `FUN_08102098` @
+/// **0x08102098**. True extent: 84 bytes through the next push at
+/// 0x081020ec: 80 code bytes and the four-byte `"%d\0"` literal.
+/// Whole-image raw ARM decoding finds two inbound plain BLs (0x08125b0c,
+/// 0x081f67a8), zero predicated BLs; the body has four plain BLs and no
+/// predicated BLs. Reads the signed word at `decimal`, formats it into a
+/// 512-byte stack buffer, constructs a COW string, assigns it into the current
+/// and peer tables, then releases the temporary. No NULL guards.
+///
+/// Deliberate deviations: bypass sprintf's default no-output engine slot with
+/// the existing _vsnprintf engine and mem_putc sink, using an explicit va-list
+/// instead of variadic r2. Omit the unused allocator-tag stack residue.
+///
+/// # Safety
+/// `decimal` must be readable and word-aligned; `table` and `key` must satisfy
+/// the string_table_assign_both map and live COW-string requirements.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_set_both_decimal_ref(
+    table: *mut u8,
+    key: *mut *mut u8,
+    decimal: *const i32,
+) {
+    let number = unsafe { decimal.read() };
+    let mut buffer = core::mem::MaybeUninit::<[u8; 512]>::uninit();
+    let buffer = buffer.as_mut_ptr().cast::<u8>();
+    let mut cursor = buffer;
+    unsafe {
+        let sink: crate::printf::printf_helpers::PutcFn = core::mem::transmute(
+            crate::printf::printf_helpers::mem_putc as unsafe extern "C" fn(u8, *mut *mut u8),
+        );
+        crate::printf::printf_core::_vsnprintf(
+            b"%d\0".as_ptr(), sink, (&mut cursor as *mut *mut u8).cast(),
+            &number as *const i32 as *const u32,
+        );
+        cursor.write(0);
+    }
+    let mut text = core::mem::MaybeUninit::<*mut u8>::uninit();
+    let text = unsafe { crate::cxx::string::cxx_string_from_cstr(text.as_mut_ptr(), buffer) };
+    unsafe {
+        string_table_assign_both(table, key, text);
+        crate::cxx::string::cxx_string_release(text);
+    }
+}
 /// `string_table_set_current_hex` — original: `FUN_08101cfc` @
 /// **0x08101cfc** (76 bytes, 0x08101cfc..0x08101d48: code ends with
 /// `pop {r4,r5,pc}` @ 0x08101d44, followed by the `"%lx\0"` literal; the
@@ -1685,6 +1730,69 @@ mod set_hex_tests {
                     crate::cxx::string::cxx_string_release(first);
                     crate::cxx::string::cxx_string_release(second);
                     assert_eq!(value_rep.rep.refcount, 0);
+                }
+            }
+        }
+    }
+
+    unsafe extern "C" fn decimal_both_map_operation(
+        result: *mut StringTableInsertResult,
+        map: *mut u8,
+        pair: *const StringTableStringPair,
+    ) {
+        let call = BOTH_LOOKUPS;
+        let selector = *BOTH_TABLE.add(CURRENT_TABLE_INDEX_WORD) as usize;
+        let index = if call == 0 { selector } else { (selector + 1) % 2 };
+        assert_eq!(map, BOTH_TABLE.cast::<u8>().add(index * TABLE_STRIDE));
+        assert_eq!(CStr::from_ptr((*pair).key.cast()).to_bytes(), b"foo");
+        (*result).node = ptr::addr_of_mut!(BOTH_NODES[call].0).cast::<u8>().add(4);
+        (*result).inserted = 1;
+        BOTH_LOOKUPS += 1;
+    }
+
+    #[test]
+    fn decimal_ref_updates_both_tables_and_retains_shared_value() {
+        let (_lock, _restore) = install();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _arena = unsafe {
+            ARENA_USED = 0;
+            let previous = ptr::read_volatile(ptr::addr_of!(HEAP_OPS));
+            let mut active = previous;
+            active.alloc = arena_alloc;
+            active.free = arena_free;
+            active.create = arena_create;
+            ptr::write_volatile(ptr::addr_of_mut!(HEAP_OPS), active);
+            STRING_TABLE_MAP_OPS.map_operation = decimal_both_map_operation;
+            ArenaGuard { ops: previous }
+        };
+        unsafe {
+            for selector in [0, 1] {
+                for number in [0i32, -1, i32::MIN, i32::MAX] {
+                    ARENA_USED = 0;
+                    let mut table = [0u32; 22];
+                    table[CURRENT_TABLE_INDEX_WORD] = selector;
+                    BOTH_TABLE = table.as_mut_ptr();
+                    BOTH_LOOKUPS = 0;
+                    CHANGE_SELECTOR = false;
+                    let mut key_rep = fake_string();
+                    let mut key = key_rep.data.as_mut_ptr();
+                    let first = ptr::addr_of_mut!(BOTH_NODES[0].0).cast::<u8>()
+                        .add(24).cast::<*mut u8>();
+                    let second = ptr::addr_of_mut!(BOTH_NODES[1].0).cast::<u8>()
+                        .add(24).cast::<*mut u8>();
+                    first.write(crate::cxx::string::empty_rep_data());
+                    second.write(crate::cxx::string::empty_rep_data());
+                    string_table_set_both_decimal_ref(table.as_mut_ptr().cast(), &mut key, &number);
+                    let expected = std::format!("{number}");
+                    assert_eq!(CStr::from_ptr((*first).cast()).to_bytes(), expected.as_bytes());
+                    assert_eq!(first.read(), second.read());
+                    let rep = (*first as *mut crate::cxx::string::StringRep).sub(1);
+                    assert_eq!((*rep).refcount, 1);
+                    assert_eq!(key_rep.rep.refcount, 0);
+                    crate::cxx::string::cxx_string_release(first);
+                    assert_eq!(CStr::from_ptr((*second).cast()).to_bytes(), expected.as_bytes());
+                    assert_eq!((*rep).refcount, 0);
+                    crate::cxx::string::cxx_string_release(second);
                 }
             }
         }
