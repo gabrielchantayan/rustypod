@@ -9,20 +9,18 @@
 //! tail-calls the retail continuation with r0 = 1. The body has five plain
 //! unconditional `bl` instructions (two to 0x080ffa00, then 0x0819ae74,
 //! 0x082040ec, and 0x08203e48), no predicated `bl`, and a final plain `b` to
-//! 0x081bb29c. Deliberate deviation: unknown retail callee identities remain
-//! address-named host seams; target builds use literal veneers so relocated
-//! payload code still reaches the observed addresses.
+//! 0x081bb29c. The item count now uses the verified Rust getter; remaining
+//! unknown retail callee identities retain host seams and literal target
+//! veneers so relocated payload code reaches the observed addresses.
 
 use core::ffi::c_void;
+use super::retail_item_count::retail_item_count;
 
-pub type RetailItemCount = unsafe extern "C" fn() -> u32;
 pub type RetailRefreshSelection = unsafe extern "C" fn(*mut c_void);
 pub type RetailSelectionContext = unsafe extern "C" fn() -> u32;
 pub type RetailSetSelection = unsafe extern "C" fn(u32, u32);
 pub type RetailContinuation = unsafe extern "C" fn(u32) -> u32;
 
-#[cfg(not(target_arch = "arm"))]
-unsafe extern "C" fn missing_count() -> u32 { 0 }
 #[cfg(not(target_arch = "arm"))]
 unsafe extern "C" fn missing_refresh(_: *mut c_void) {}
 #[cfg(not(target_arch = "arm"))]
@@ -32,8 +30,6 @@ unsafe extern "C" fn missing_set_selection(_: u32, _: u32) {}
 #[cfg(not(target_arch = "arm"))]
 unsafe extern "C" fn missing_continuation(value: u32) -> u32 { value }
 
-#[cfg(not(target_arch = "arm"))]
-pub static mut RETAIL_ITEM_COUNT: RetailItemCount = missing_count;
 #[cfg(not(target_arch = "arm"))]
 pub static mut RETAIL_REFRESH_SELECTION: RetailRefreshSelection = missing_refresh;
 #[cfg(not(target_arch = "arm"))]
@@ -53,7 +49,7 @@ pub unsafe extern "C" fn selection_index_adjust(object: *mut c_void, delta: i32)
     }
     let index = object.cast::<u8>().add(0xb0).cast::<u32>();
     *index = (*index).wrapping_add(delta as u32);
-    let count = core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_ITEM_COUNT))();
+    let count = retail_item_count();
     if count <= *index {
         *index = if delta > 0 { 0 } else { count.wrapping_sub(1) };
     }
@@ -78,14 +74,14 @@ selection_index_adjust:
     ldr     r0, [r4, #176]
     add     r0, r0, r5
     str     r0, [r4, #176]
-    bl      retail_080ffa00
+    bl      retail_item_count
     ldr     r1, [r4, #176]
     cmp     r0, r1
     bhi     1f
     cmp     r5, #0
     movgt   r0, #0
     bgt     2f
-    bl      retail_080ffa00
+    bl      retail_item_count
     sub     r0, r0, #1
 2:  str     r0, [r4, #176]
 1:  mov     r0, r4
@@ -98,9 +94,6 @@ selection_index_adjust:
     b       retail_081bb29c
     .size selection_index_adjust, . - selection_index_adjust
 
-retail_080ffa00:
-    ldr     pc, [pc, #-4]
-    .word   0x080ffa00
 retail_0819ae74:
     ldr     pc, [pc, #-4]
     .word   0x0819ae74
@@ -122,11 +115,9 @@ mod tests {
     use std::sync::Mutex;
 
     static LOCK: Mutex<()> = Mutex::new(());
-    static mut COUNT: u32 = 0;
     static mut REFRESHED: bool = false;
     static mut SET: (u32, u32) = (0, 0);
     static mut CONTINUATION_ARG: u32 = 0;
-    unsafe extern "C" fn count() -> u32 { unsafe { COUNT } }
     unsafe extern "C" fn refresh(_: *mut c_void) { unsafe { REFRESHED = true } }
     unsafe extern "C" fn context() -> u32 { 0x2468_ace0 }
     unsafe extern "C" fn set(context: u32, index: u32) { unsafe { SET = (context, index) } }
@@ -135,7 +126,7 @@ mod tests {
     #[test]
     fn zero_delta_preserves_r0_and_skips_retail_calls() {
         let _lock = LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        let mut object = [0u8; 0xb4];
+        let mut object = [0u32; 45];
         unsafe { REFRESHED = false; CONTINUATION_ARG = 0; }
         let returned = unsafe { selection_index_adjust(object.as_mut_ptr().cast(), 0) };
         assert_eq!(returned, object.as_mut_ptr() as usize as u32);
@@ -147,19 +138,29 @@ mod tests {
     fn wraps_positive_and_negative_out_of_range_indices() {
         let _lock = LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         unsafe {
-            RETAIL_ITEM_COUNT = count; RETAIL_REFRESH_SELECTION = refresh;
+            RETAIL_REFRESH_SELECTION = refresh;
             RETAIL_SELECTION_CONTEXT = context; RETAIL_SET_SELECTION = set; RETAIL_CONTINUATION = continuation;
-            COUNT = 3; REFRESHED = false; SET = (0, 0); CONTINUATION_ARG = 0;
+            REFRESHED = false; SET = (0, 0); CONTINUATION_ARG = 0;
         }
-        let mut object = [0u8; 0xb4];
-        unsafe { *(object.as_mut_ptr().add(0xb0).cast::<u32>()) = 2; }
+        let mut object = [0u32; 45];
+        object[44] = 204;
         assert_eq!(unsafe { selection_index_adjust(object.as_mut_ptr().cast(), 1) }, 0xa5a5_5a5a);
-        assert_eq!(unsafe { *(object.as_ptr().add(0xb0).cast::<u32>()) }, 0);
+        assert_eq!(object[44], 0);
         assert_eq!(unsafe { SET }, (0x2468_ace0, 0));
-        unsafe { *(object.as_mut_ptr().add(0xb0).cast::<u32>()) = 0; COUNT = 3; }
+        object[44] = 0;
         unsafe { selection_index_adjust(object.as_mut_ptr().cast(), -1); }
-        assert_eq!(unsafe { *(object.as_ptr().add(0xb0).cast::<u32>()) }, 2);
+        assert_eq!(object[44], 204);
         assert!(unsafe { REFRESHED });
         assert_eq!(unsafe { CONTINUATION_ARG }, 1);
+        // Last valid index stays in range; large positive deltas reset to zero.
+        object[44] = 203;
+        unsafe { selection_index_adjust(object.as_mut_ptr().cast(), 1); }
+        assert_eq!(object[44], 204);
+        object[44] = 1;
+        unsafe { selection_index_adjust(object.as_mut_ptr().cast(), i32::MAX); }
+        assert_eq!(object[44], 0);
+        object[44] = 0;
+        unsafe { selection_index_adjust(object.as_mut_ptr().cast(), i32::MIN); }
+        assert_eq!(object[44], 204);
     }
 }
