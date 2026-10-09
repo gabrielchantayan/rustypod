@@ -20,6 +20,7 @@ pub mod error;
 pub mod face;
 pub mod glyph_slot;
 pub mod glyph_loader;
+pub mod hash;
 pub mod list;
 pub mod memory;
 pub mod module;
