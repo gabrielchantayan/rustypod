@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f5238
+    ghidra: FUN_080f5238
+    name: utf8_copy_bounded
+    size: 168
+    sig: "uint32_t utf8_copy_bounded(uint8_t *destination, const uint8_t *source, uint32_t capacity)"
+    module: util/utf8_copy_bounded
+    status: ported
+    vars:
+      param_1/r0: destination
+      param_2/r1: source
+      param_3/r2: capacity
+      pbVar6/lr: last_lead
+      pbVar5/r5: destination_end
+      iVar4/r2: expected_width
+    notes: >-
+      Raw A32 proves [0x080f5238,0x080f52e0), 168 bytes, ending in
+      POP before the next function PUSH. Whole-image branch-word decoding
+      finds two inbound plain BL sites at 0x0811dd70 and 0x0828fe38,
+      zero predicated inbound BLs, and zero outgoing BLs of either kind.
+      Copy up to capacity bytes through NUL, tracking the last byte not
+      matching continuation mask 0xc0/0x80. Classify that byte as expected
+      width 1/2/3/4 or zero; if its end reaches or exceeds destination end,
+      replace it with NUL. Return copied byte count including NUL when
+      present, not Ghidra's byte pointer. Malformed input is not validated
+      and can remain unterminated. No callee seams. Host pointers widen;
+      volatile byte accesses prevent libc substitution. Five edge tests
+      cover zero capacity, NUL/no padding, multibyte boundaries, malformed
+      input and forward overlap. All 15020 host tests and ARM release build
+      pass. Standalone smoke verifies capacities 0..6 around a three-byte
+      character. match.py exits 1: 42 stock versus 47 Rust instructions;
+      loop, width masks, unsigned boundary and return remain intact.
   - address: 0x080f6978
     ghidra: FUN_080f6978
     name: header_buffer_create

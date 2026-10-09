@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod utf8_copy_bounded;
 pub mod primary_record_id_lookup;
 pub mod fill_elements;
 pub mod owner_buffer_release;
