@@ -35263,6 +35263,34 @@ functions:
       for 0x089d03bc and intentionally adds no null guard, cache, ownership,
       or bit interpretation.
 
+  - address: 0x080f3c58
+    ghidra: FUN_080f3c58
+    name: global_indirect_command_response_get
+    size: 20
+    sig: "u32 global_indirect_command_response_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_080f3c68: global_indirect_holder_literal
+      DAT_089d03bc: global_indirect_holder
+      r0: command_response_word
+    notes: >-
+      Raw words e59f0008 e5900004 e5900020 e12fff1e establish 16
+      instruction bytes plus the literal 0x089d03bc at 0x080f3c68.
+      True extent is 20 bytes through the next real function at 0x080f3c6c.
+      Whole-image aligned ARM BL decoding finds two plain callers at
+      0x080775d0 and 0x080ee344, zero predicated callers, and no outgoing
+      calls. Follow holder +4 and return the raw u32 at state +0x20.
+      The transaction worker copies it to its result output; card
+      initialization polls bit 31 after SEND_OP_COND. No command-specific
+      field interpretation is added. Deliberately reuse the existing
+      packed crate-static holder instead of the fixed firmware global.
+      No null guard or caching. Host tests preserve all bits, distinguish
+      neighboring words, and exercise updates to both state and holder.
+      match.py reports a structural diff: LLVM adds frame setup/return and
+      a crate-static relocation, retaining the holder +4 then state +0x20
+      load chain.
+
   - address: 0x080f3c6c
     ghidra: FUN_080f3c6c
     name: global_indirect_transfer_state_get
