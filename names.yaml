@@ -237928,3 +237928,48 @@ functions:
       setup and local initialization, preserves both calls and the status/length
       short circuit, and omits redundant normalization of the canonical
       comparator's already normalized result. No device execution claimed.
+
+  - address: 0x080ce5a8
+    ghidra: FUN_080ce5a8
+    name: ui_tdat_sorted_plst_array_create
+    size: 120
+    sig: "u32 *ui_tdat_sorted_plst_array_create(const u8 *element, u32 sort_mode)"
+    status: identified
+    vars:
+      param_1/r0/r5: element
+      param_2/r1/r6: sort_mode
+      piVar2/r4: counted_array
+      iVar1: capacity_or_plst
+      iVar3: previous_count
+    renames:
+      FUN_0805d1d4: malloc_tag4
+      FUN_080522d4: ui_tdat_first_plst
+      FUN_08053bd0: ui_plst_next
+    notes: >-
+      Deferred: the supplied raw firmware does not establish a callable
+      comparator. Raw extent is [0x080ce5a8,0x080ce620), 120 bytes including
+      the literal at 0x080ce61c; executable instructions end with pop
+      {r4-r6,pc} at 0x080ce618. The next real function starts mov r0,#0;
+      b 0x080c5dcc at 0x080ce620. Ghidra's 116 bytes omit the required literal.
+      Whole-image aligned ARM-word decoding finds two inbound plain BLs at
+      0x080526e0 and 0x08052704, zero predicated BLs. The body has four
+      outbound plain BLs at 0x080ce5c0, 0x080ce5d8, 0x080ce5f4, and
+      0x080ce610, zero predicated BLs. Allocates wrapping 4*element[0x30/4]+8
+      bytes with malloc_tag4 (8 bytes for NULL), returns NULL on allocation
+      failure, otherwise stores a zero count and appends target-width plst
+      words from ui_tdat_first_plst/ui_plst_next, incrementing the count.
+      Calls the unported word-array sorter at 0x08061d20 with array+4,
+      count, the literal comparator, and sort_mode, then returns the array.
+      Raw LDR at 0x080ce600 resolves to literal 0x080ce61c = 0x0809fee4.
+      The sorter saves that pointer in r9 at 0x08061d2c and invokes it with
+      blx r9 at 0x08061dac, passing compared words in r0/r1 and context in r2.
+      However 0x0809fee4 is ADR r1,0x080a0018 followed by BL 0x08030f64;
+      it overwrites the second compared word and subsequently reads parser
+      state from r5+0x0c and writes through r4+0x24 at 0x0809fef0/0x0809fef4.
+      The preceding parser instructions at 0x0809fed0..0x0809fee0 increment
+      r4+0x4c and set r0 from r10. Ghidra assembly agrees with these raw
+      bytes. names.yaml has no entry for the sorter or literal target.
+      Missing prerequisite is verified comparator-entry/runtime-relocation
+      evidence for this literal; no comparator identity or Rust seam is
+      invented. No Rust implementation, behavior tests, ARM build, or
+      match.py parity claim is made for this identified-only deferral.
