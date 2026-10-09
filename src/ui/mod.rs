@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod packed_surface_span_prepare;
+pub use packed_surface_span_prepare::*;
 pub mod target_size_within_limit;
 pub mod tick_input_view;
 pub mod calendar_reset_elements;
