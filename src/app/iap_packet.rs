@@ -675,6 +675,52 @@ pub unsafe extern "C" fn iap_packet_owner_mode(packet: *const u8) -> u32 {
     mode
 }
 
+/// iap_packet_second_buffer_or_null — FUN_080f6b54 @ 0x080f6b54.
+/// True size: 28 bytes, 0x080f6b54..0x080f6b70, seven ARM instructions;
+/// the next function starts with push {r4-r8,lr}. Two inbound plain BLs
+/// (0x081055a8, 0x0814e440), zero predicated BLs; no outgoing calls.
+///
+/// Return the second-buffer pointer at +0x14 when its u16 length at +0x18
+/// is not 0xffff; otherwise return NULL without reading the pointer field.
+/// Zero length is valid, and all other lengths leave the pointer unchanged.
+/// Deliberate deviations: none; pointer storage remains a target-width u32
+/// even on hosts, and both field reads retain the original alignment.
+///
+/// # Safety
+/// `packet` must provide a readable aligned u16 at +0x18 and, unless that
+/// length is 0xffff, a readable aligned u32 at +0x14. No packet NULL guard.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_second_buffer_or_null(packet: *const u8) -> *mut u8 {
+    let length = packet.add(0x18).cast::<u16>().read();
+    if length == u16::MAX {
+        core::ptr::null_mut()
+    } else {
+        packet.add(0x14).cast::<u32>().read() as usize as *mut u8
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn second_buffer_pointer_gates_only_on_exact_length_sentinel() {
+    for pointer in [0u32, 0x1234_5678, 0xffff_ffff] {
+        let mut packet = [0xa5a5_a5a5u32; 9];
+        packet[5] = pointer;
+        for length in 0..=u16::MAX {
+            packet[6] = 0xa5a5_0000 | u32::from(length);
+            let before = packet;
+            let expected = if length == u16::MAX { 0 } else { pointer };
+            unsafe {
+                assert_eq!(
+                    iap_packet_second_buffer_or_null(packet.as_ptr().cast()) as usize,
+                    expected as usize,
+                );
+            }
+            assert_eq!(packet, before);
+        }
+    }
+}
+
 /// iap_packet_second_buffer_length_or_zero — original: `FUN_080f6e60` @
 /// `0x080f6e60` (**28 bytes, `0x080f6e60..0x080f6e7c`** — 7 instructions,
 /// no literal pool; the next real function starts at `0x080f6e7c` with

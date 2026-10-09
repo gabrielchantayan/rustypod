@@ -235368,3 +235368,35 @@ functions:
       calls, constructor-result check, five stack arguments including 0xff,
       and pointer return remain. LLVM retains the allocation pointer for
       return because the ported constructor is known to return it unchanged.
+  - address: 0x080f6b54
+    ghidra: FUN_080f6b54
+    name: iap_packet_second_buffer_or_null
+    size: 28
+    sig: "u8 *iap_packet_second_buffer_or_null(const u8 *packet)"
+    module: app/iap_packet
+    status: ported
+    renames:
+      param_1/r0/r1: packet
+      r2: second_buffer_length
+      "packet+0x14": second_buffer
+      "packet+0x18": second_buffer_length
+    notes: >-
+      Raw ARM words establish [0x080f6b54,0x080f6b70), seven instructions
+      and no literal pool; the next real function begins with push
+      {r4-r8,lr}. Whole-image ARM branch decoding independently finds two
+      inbound plain BLs at 0x081055a8 and 0x0814e440, zero predicated BLs.
+      The body has no outgoing calls. Load the u16 second-buffer length
+      at +0x18; exactly 0xffff returns NULL without loading +0x14.
+      Otherwise return the aligned target-width pointer word at +0x14,
+      including for zero length. Both callers pair this pointer with the
+      sibling length getter 0x080f6e60 before transport dispatch and packet
+      destruction. Reuse the existing app/iap_packet module; no new seams.
+      Deliberate deviations: none, including no packet NULL guard.
+      Host regression exhausts all 65536 lengths with zero, ordinary and
+      all-bits-set pointer words and verifies packet storage is unchanged.
+      All 15007 host tests pass; ARM release build succeeds. Standalone
+      production-source smoke confirms lengths 0, 0xfffe and 0xffff.
+      match.py exits 1 with nine Rust versus seven original instructions:
+      the sentinel comparison and conditional aligned pointer load remain;
+      LLVM adds a frame and uses ORR/CMP rather than two subtractions.
+      No device execution performed.
