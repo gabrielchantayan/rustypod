@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c14c4
+    ghidra: FUN_080c14c4
+    name: psh_glyph_load_points
+    size: 88
+    sig: "void psh_glyph_load_points(const PshGlyphPointSource *glyph, u32 dimension)"
+    module: ft/psh_glyph_load_points
+    status: ported
+    renames:
+      param_1/r0: glyph
+      param_2/r1: dimension
+      iVar1/r0: remaining
+      iVar2/r2: destination
+      puVar3/r3: source
+      uVar4/lr: coordinate
+    notes: >-
+      Raw A32 extent [0x080c14c4,0x080c151c) is 88 bytes; next entry
+      starts with push {r4,r5,r6,lr}. Independently decoded words contain
+      zero plain and zero predicated outbound BLs. Whole-image aligned BL
+      scanning finds two plain inbound calls at 0x0808ae74 and 0x082e7a18,
+      no predicated inbound calls. Callers initialize the PostScript
+      hinter workspace from an FT_Outline and reload points for each axis.
+      Each 48-byte point clears words 4 and 8 and loads words 9 and 10
+      from outline x/y for zero dimension, y/x for any nonzero dimension.
+      All other words remain unchanged; the workspace count controls the
+      loop rather than the outline's signed point count. No callee seams.
+      Typed repr(C) workspace and existing FtOutline pointer fields widen
+      naturally on hosts, preserving target offsets without low-address
+      fixtures. Valid outline required even for zero count; LLVM elides
+      unused pointer loads on the zero-count path. Host suite and ARM
+      release build pass. Tests cover signed extremes, arbitrary nonzero
+      dimensions, multiple records, untouched words and trailing record,
+      and zero count with inaccessible point buffers. Standalone smoke
+      confirms swapped coordinates and untouched sentinel. match.py exit-1
+      structural diff reviewed: Rust has 29 versus 22 instructions,
+      preserves 48-byte destination and 8-byte source strides, clears the
+      same fields, and uses a branch instead of predicated coordinate
+      loads/stores; neither implementation calls other functions.
+
   - address: 0x080c4af4
     ghidra: FUN_080c4af4
     name: ata_pio_read_sectors
