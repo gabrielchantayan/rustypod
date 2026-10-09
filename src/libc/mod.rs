@@ -16,6 +16,7 @@ pub mod copy_byte_range_returning_end_083e9e50;
 pub mod copy_word_triplets_returning_end;
 pub mod bounded_copy;
 pub mod cstr_copy;
+pub mod space_padded_string_copy;
 pub mod cstr_compare_normalized;
 pub mod cstr_append_bounded;
 pub mod cstr_find_from;

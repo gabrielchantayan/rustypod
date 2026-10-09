@@ -235986,3 +235986,34 @@ functions:
       dependency call (BLX literal 0x08079fc8), surface reload, scaling,
       MLA address arithmetic, edge masks and aligned-end decrement. LLVM
       reorders independent stores and explicitly checks oversized shifts.
+
+  - address: 0x080efcb4
+    ghidra: FUN_080efcb4
+    name: space_padded_string_copy
+    size: 64
+    sig: "void space_padded_string_copy(u8 *dst, const u8 *src, i32 width)"
+    module: libc/space_padded_string_copy
+    status: ported
+    vars: {param_1: dst, param_2: src, param_3: width, iVar1: length}
+    renames: {FUN_08030fe4: memset, FUN_08392478: strlen, FUN_08037db0: __rt_memcpy}
+    notes: >-
+      Raw ARM extent [0x080efcb4,0x080efcf4) is 64 bytes; the next
+      function starts with PUSH at 0x080efcf4. Two outgoing plain BLs
+      at 0x080efccc and 0x080efcd4, zero predicated BLs; two incoming
+      plain BLs at 0x0818cc6c and 0x0818d16c, zero predicated BLs.
+      Fills width bytes with spaces before scanning the entire source,
+      then copies the signed minimum of strlen and width without a NUL
+      store. The final B reaches veneer 0x08037db0, whose raw literal
+      is 0x22000020, the IRAM mirror of ported __rt_memcpy. Callers
+      consume no return. Reuses ported memset, strlen and __rt_memcpy;
+      adjusts ADS memset argument order to the classic Rust helper ABI.
+      Host lengths are narrowed to 32 bits before the signed comparison;
+      negative widths are outside the valid-buffer contract. Host tests
+      cover lengths and widths 0..64, all source/destination alignments,
+      embedded NUL, truncation, padding, source preservation and sentinels.
+      All 15046 host tests, ARM release build and executable smoke passed.
+      match.py reports 17 Rust instructions versus 16 original, retaining
+      fill, strlen, signed clamp and memcpy tail branch. Relocations resolve
+      to __aeabi_memset, strlen and __rt_memcpy; the fill symbol is defined
+      in the archive. LLVM changes register allocation and adds a frame
+      pointer. No terminator, NULL guard or allocation is introduced.
