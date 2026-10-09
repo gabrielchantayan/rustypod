@@ -60,6 +60,38 @@ pub unsafe extern "C" fn codec_cached_level_set(level: u32) -> u32 {
     scale(0x1a, 0x1b, level, 9, 7)
 }
 
+/// Cached auxiliary codec level update, `FUN_080ca12c` at `0x080ca12c`.
+///
+/// True extent: 72 bytes, [0x080ca12c,0x080ca174), comprising 68
+/// executable bytes and the literal 0x089d0ef4. Raw aligned A32 decoding
+/// verifies two plain inbound BLs (0x080b2874, 0x080ce674), no predicated
+/// inbound BLs, and one plain outbound BL (0x080ca168), no predicated BLs.
+/// Compare the full level word with byte +3; skip only if equal and refresh
+/// byte +0 is zero. Otherwise store the low byte before calling the stock
+/// scaler with registers 0x1c/0x1d, the full level, and margins 11/0.
+/// Both paths return zero, correcting Ghidra's void signature.
+/// Deliberate deviations: volatile cache access and the existing host
+/// storage/scaler seam; the scaler itself remains stock code.
+///
+/// # Safety
+/// Requires serialized access to firmware codec state and the stock scaler.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn codec_cached_aux_level_set(level: u32) -> u32 {
+    let state = level_state();
+    if ptr::read_volatile(state.add(3)) as u32 == level
+        && ptr::read_volatile(state) == 0
+    {
+        return 0;
+    }
+    ptr::write_volatile(state.add(3), level as u8);
+    #[cfg(target_os = "none")]
+    let scale: ScaleLevel = core::mem::transmute(0x0809_3a9cusize);
+    #[cfg(not(target_os = "none"))]
+    let scale = ptr::read_volatile(ptr::addr_of!(HOST_SCALE_LEVEL));
+    scale(0x1c, 0x1d, level, 11, 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,10 +99,13 @@ mod tests {
 
     static APPLIED: AtomicU32 = AtomicU32::new(0);
     static LAST_LEVEL: AtomicU32 = AtomicU32::new(0);
+    static CACHE_OFFSET: AtomicU32 = AtomicU32::new(2);
 
     unsafe extern "C" fn observe_apply(first: u32, second: u32, level: u32, upper: u32, lower: u32) -> u32 {
-        assert_eq!((first, second, upper, lower), (0x1a, 0x1b, 9, 7));
-        assert_eq!(ptr::read_volatile(level_state().add(2)), level as u8);
+        let offset = CACHE_OFFSET.load(Ordering::Relaxed) as usize;
+        let expected = if offset == 2 { (0x1a, 0x1b, 9, 7) } else { (0x1c, 0x1d, 11, 0) };
+        assert_eq!((first, second, upper, lower), expected);
+        assert_eq!(ptr::read_volatile(level_state().add(offset)), level as u8);
         LAST_LEVEL.store(level, Ordering::Relaxed);
         APPLIED.fetch_add(1, Ordering::Relaxed);
         0
@@ -80,26 +115,34 @@ mod tests {
     fn unchanged_changed_forced_and_wide_levels_follow_raw_comparison() {
         unsafe {
             HOST_SCALE_LEVEL = observe_apply;
+            for (offset, set) in [
+                (2, codec_cached_level_set as unsafe extern "C" fn(u32) -> u32),
+                (3, codec_cached_aux_level_set as unsafe extern "C" fn(u32) -> u32),
+            ] {
+            CACHE_OFFSET.store(offset as u32, Ordering::Relaxed);
             for refresh in [0, 1, 255] {
                 for cached in [0, 1, 127, 255] {
                     for level in [0, 1, 127, 255, 256, 257, u32::MAX] {
-                        HOST_CODEC_LEVEL_STATE = [refresh, 0x5a, cached, 0xa5];
+                        HOST_CODEC_LEVEL_STATE = [refresh, 0x5a, 0xa5, 0xa5];
+                        HOST_CODEC_LEVEL_STATE[offset] = cached;
                         APPLIED.store(0, Ordering::Relaxed);
-                        assert_eq!(codec_cached_level_set(level), 0);
+                        assert_eq!(set(level), 0);
                         let applies = level != cached as u32 || refresh != 0;
                         assert_eq!(APPLIED.load(Ordering::Relaxed), applies as u32);
                         let state = ptr::read(ptr::addr_of!(HOST_CODEC_LEVEL_STATE));
-                        assert_eq!(state,
-                            [refresh, 0x5a, if applies { level as u8 } else { cached }, 0xa5]);
+                        let mut expected = [refresh, 0x5a, 0xa5, 0xa5];
+                        expected[offset] = if applies { level as u8 } else { cached };
+                        assert_eq!(state, expected);
                         if applies {
                             assert_eq!(LAST_LEVEL.load(Ordering::Relaxed), level);
                         }
                         // A wide input remains unequal to its cached low byte.
-                        assert_eq!(codec_cached_level_set(level), 0);
+                        assert_eq!(set(level), 0);
                         let repeats = refresh != 0 || level > 255;
                         assert_eq!(APPLIED.load(Ordering::Relaxed), applies as u32 + repeats as u32);
                     }
                 }
+            }
             }
             HOST_SCALE_LEVEL = missing_host_scaler;
         }
