@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ffdf0
+    ghidra: FUN_080ffdf0
+    name: primary_record_id_lookup
+    size: 116
+    sig: "u32 primary_record_id_lookup(i32 value, i32 requested, u32 category)"
+    module: util/primary_record_id_lookup
+    status: ported
+    renames:
+      param_1/r0: value
+      param_2/r1: requested
+      param_3/r2: category
+      r4: record_index
+      r5: record
+      r7: primary_table
+      r10: normalized_requested
+      DAT_080ffe64: primary_table (0x083e9d94)
+      FUN_080ffb2c: secondary_record_value_lookup
+      FUN_080ffea0: opaque runtime ID query (not independently named)
+    notes: >-
+      Raw ARM verifies 116 instruction bytes through the pop at 0x080ffe60,
+      then a four-byte literal at 0x080ffe64; next function begins at 0x080ffe68.
+      Two plain inbound BLs (0x080ffcb0, 0x080ffcd4), zero predicated inbound
+      BLs; body has two plain BLs and zero predicated BLs. Scans 205 records
+      of 20 bytes, matching full-width category against +8, signed secondary
+      lookup of +16 against value, and the opaque query of +10 against
+      requested != 0. Returns the first matching +10 ID, reloaded after the
+      query, or zero. Reuses the ported secondary lookup; calls 0x080ffea0
+      directly on target. Host tests inject operations. ARM diff retains the
+      scan and short-circuit order; LLVM uses a countdown and indirect BLX.
   - address: 0x081002cc
     ghidra: FUN_081002cc
     name: indexed_tagged_string_resolve
