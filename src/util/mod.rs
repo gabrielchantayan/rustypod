@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod query_mask_to_backend_mask;
 pub mod sparse_flags_to_compact_mask;
 pub mod u16_threshold_lookup;
 pub mod indexed_span_encode_link;
