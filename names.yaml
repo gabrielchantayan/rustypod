@@ -234280,3 +234280,32 @@ functions:
       lookup, peer-map, and COW assignment ports replace retail calls;
       the tail B is expressed as a returned call. Host tests verify both
       selectors, selector changes during lookup, and COW ownership.
+
+  - address: 0x08101da0
+    ghidra: FUN_08101da0
+    name: string_table_assign_peer
+    size: 36
+    sig: "char **string_table_assign_peer(void *table, char **key, char **value)"
+    module: app/string_table
+    status: ported
+    vars: {param_1/r0: table, param_2/r1: key, param_3/r2: value, r4: value, r3: key}
+    renames:
+      FUN_08101bf4: string_table_peer_map
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8d1c: cxx_string_assign
+    notes: >-
+      Raw A32 establishes 36 bytes through the next independent push at
+      0x08101dc4. Two inbound plain BL sites at 0x08101d34 and 0x08101d88;
+      zero predicated inbound BLs. The body contains two plain BLs, no
+      predicated BLs, and a tail B to cxx_string_assign. Selects the peer
+      map through string_table_peer_map, obtains the mapped-value slot for
+      key, assigns value, and returns that slot. Ghidra incorrectly
+      incorporates the tail callee into its C output. No deliberate
+      semantic deviations; all direct callees reuse existing Rust ports.
+      Host tests cover selectors 0/1 and shared self-assignment ownership;
+      14956 host tests pass. ARM release build passes. match.py reports
+      10 versus 9 instructions: LLVM adds a frame pointer and saves key
+      in r5 rather than relying on the original callee preserving r3;
+      the two-call sequence and final tail branch are retained. No device
+      execution. Standalone host smoke was blocked by six unrelated
+      missing host-only callee definitions in the existing crate.
