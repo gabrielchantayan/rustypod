@@ -13,6 +13,7 @@ pub mod refresh_utc_offset_cache;
 pub mod current_day_and_seconds;
 pub mod current_mac_epoch_seconds;
 pub mod current_mac_epoch_seconds_raw;
+pub mod current_day_range;
 pub mod current_datetime_query;
 pub mod current_datetime;
 pub mod current_unix_timestamp;

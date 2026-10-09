@@ -237218,3 +237218,47 @@ functions:
       signed mode-2 range, zero, 64, underflow and signed extremes.
       ARM match preserves rsb r0,r0,#64; LLVM adds a frame-pointer
       prologue and returns via pop rather than bx lr.
+  - address: 0x080d7278
+    ghidra: FUN_080d7278
+    name: current_day_range_initialize
+    size: 156
+    sig: "void current_day_range_initialize(CurrentDayRange *cache)"
+    module: time/current_day_range
+    status: ported
+    renames:
+      param_1/r4: cache
+      local_20: seconds
+      auStack_1c: calendar
+      local_16: hour
+      local_14: minute
+      local_12: second
+      FUN_0805b070: current_mac_epoch_seconds_raw
+      FUN_08066328: expand_calendar
+      FUN_08048080: collapse_calendar
+    notes: >-
+      Raw ARM decoding verifies 156 bytes, 0x080d7278..0x080d7314,
+      ending in pop {r4,r5,pc}; the next real function starts with
+      ldr r3,[pc,#56]. Five unconditional outgoing BLs, zero predicated
+      outgoing BLs. Whole-image decoding finds zero plain incoming BLs
+      and two BLEQ callers at 0x080aaef8 and 0x080aaf24, both in
+      FUN_080aae88, filling missing range endpoints. A nonzero ready byte
+      skips all work. Otherwise write raw current Macintosh-epoch seconds
+      at +4, expand to seven u16 fields, replace time with midnight,
+      collapse to the low word at +8 and zero +12. Expand the original
+      timestamp again, replace time with 23:59:59, collapse to +16,
+      zero +20 and set ready to one. Bytes +1..+3 remain unchanged.
+      Preserve unported converters as verified address-backed seams:
+      0x08066328 uses runtime day globals at 0x083f50a4/0x083e2e58,
+      writes year/month/day/hour/minute/second/weekday; 0x08048080
+      consumes those halfwords and reads 0x083f50a4. No invented fixed
+      epoch shortcut. Reuse the ported current-time function. Host tests
+      cover leap-day preservation, wrapping seconds, zero high words,
+      all nonzero ready values, and repeated initialization. Standalone
+      exported-API smoke preserves ready=255 and the existing range.
+      ARM release build and 15110 host tests pass. match.py reports
+      structural differences: early BXNE return, larger frame, direct BL
+      to the Rust clock port, four BLX calendar calls using verified
+      address literals, equivalent halfword time overrides and cache
+      stores. LLVM reorders independent final stores under the exclusive
+      access contract; no concurrent publication guarantee is added.
+      No device execution; no deliberate semantic deviations.
