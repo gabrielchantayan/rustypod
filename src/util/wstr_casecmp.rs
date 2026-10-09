@@ -13,9 +13,8 @@
 //! `vector<u16>` buffers and match them against command/name C strings
 //! fetched from object slots — an identifier/verb matcher.
 //!
-//! The first callee is now an exported `cxx/templates` port; the
-//! second stays a private helper here (house precedent for tiny
-//! leaves):
+//! The first callee is an exported `cxx/templates` port; the uppercase
+//! fold is also exported here as a standalone firmware hook target:
 //!
 //! - [`wide_vec_len`] — original: `FUN_0829db9c` @ 0x0829db9c (24
 //!   bytes). The ADS out-of-line `std::vector<u16>::size()`:
@@ -28,9 +27,8 @@
 //!   wrapper below delegates.
 //!
 //! [`vector_size_elem2_clamped`]: crate::cxx::templates::vector_size_elem2_clamped
-//! - [`fold_upper`] — original: `FUN_080f4cbc` @ 0x080f4cbc (16 bytes).
-//!   `cmn r0,#1; ldrne r1,[0x080f4cd0]; ldrbne r0,[r1,r0]; mvneq r0,#0`
-//!   — EOF (-1) maps to 0xffffffff, every other code to `TABLE[c]`.
+//! - [`fold_upper`] — original: `FUN_080f4cbc` @ 0x080f4cbc:
+//!   20 instruction bytes plus a four-byte literal; see its doc header.
 //!
 //! The fold table needs care. The literal-pool word @ 0x080f4cd0 in the
 //! decrypted image holds 0x083ed0dd — one byte into `__dscalb`
@@ -46,8 +44,7 @@
 //! [`WSTR_FOLD_TABLE`] dispatch slot (FP_TRAP_HANDLER precedent)
 //! defaulting to [`DEFAULT_FOLD_TABLE`], a byte-exact copy of the upper
 //! map @ 0x83f80b5. The only other user of the same runtime table is
-//! the in-place narrow-string transformer `FUN_0810b498` @ 0x0810b498
-//! (not ported).
+//! the ported in-place narrow-string transformer `FUN_0810b498`.
 //!
 //! Faithful details:
 //! - The wide fold is truncated to 16 bits (`mov r8,r0,lsl#0x10` /
@@ -102,18 +99,31 @@ static DEFAULT_FOLD_TABLE: [u8; 256] = [
 /// as the firmware's own hook tables.
 pub static mut WSTR_FOLD_TABLE: *const u8 = DEFAULT_FOLD_TABLE.as_ptr();
 
-/// fold_upper — original: `FUN_080f4cbc` @ 0x080f4cbc (16 bytes).
+/// Uppercase table lookup — `FUN_080f4cbc` @ **0x080f4cbc**.
 ///
-/// EOF (-1) maps to 0xffffffff; any other code to `WSTR_FOLD_TABLE[c]`.
-/// The original indexes the map with the full `int` argument — codes
-/// above 0xff read past the 256-entry default copy, exactly as the
-/// original reads past the runtime map.
-unsafe fn fold_upper(c: i32) -> u32 {
+/// True extent: [0x080f4cbc, 0x080f4cd4), 24 bytes (20 code + the
+/// literal at 0x080f4cd0), before the next function's PUSH. Raw A32
+/// decoding finds two inbound plain BLs, at 0x0807639c and 0x080763ac,
+/// zero predicated inbound BLs, and zero outgoing BLs of either kind.
+/// Return 0xffffffff for EOF (-1) without loading the map; otherwise
+/// zero-extend the byte indexed by the full signed argument.
+///
+/// Deliberate deviations: use the existing runtime-configurable
+/// `WSTR_FOLD_TABLE` seam instead of the stock literal slot, defaulting
+/// to the recovered Latin-1 upper map rather than cold-image ARM code.
+/// Volatile loads retain explicit map accesses. Host pointers widen.
+///
+/// # Safety
+/// Unless `c == -1`, the installed table plus signed byte offset `c`
+/// must address a readable byte. No clamping to the 256-byte default.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn fold_upper(c: i32) -> u32 {
     if c == -1 {
         return 0xffff_ffff;
     }
     let table = core::ptr::read_volatile(&raw const WSTR_FOLD_TABLE);
-    table.add(c as usize).read_volatile() as u32
+    table.wrapping_offset(c as isize).read_volatile() as u32
 }
 
 /// wide_vec_len — original: `FUN_0829db9c` @ 0x0829db9c (24 bytes).
@@ -236,6 +246,18 @@ mod tests {
             // ... except the multiplication/division signs and y-diaeresis.
             assert_eq!(fold_upper(0xf7), 0xf7);
             assert_eq!(fold_upper(0xff), 0xff);
+        }
+    }
+
+    #[test]
+    fn fold_preserves_every_byte_outside_uppercase_mapping_spans() {
+        for c in 0..=255i32 {
+            let expected = match c {
+                0x61..=0x7a => (c - 32) as u32,
+                0xe0..=0xfe if c != 0xf7 => (c - 32) as u32,
+                _ => c as u32,
+            };
+            assert_eq!(unsafe { fold_upper(c) }, expected, "code {c:#x}");
         }
     }
 
