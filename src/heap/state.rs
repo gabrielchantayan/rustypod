@@ -142,6 +142,29 @@ pub unsafe extern "C" fn global_indirect_status_get() -> u32 {
     (state.add(STATE_STATUS_OFFSET) as *const u32).read()
 }
 
+/// global_indirect_transfer_state_get — original: `FUN_080f3c6c` @ 0x080f3c6c.
+/// True extent: 20 bytes (16 instruction bytes and the literal at 0x080f3c7c),
+/// ending at the distinct next function, 0x080f3c80.
+///
+/// Raw ARM is `ldr r0,[pc,#8]; ldr r0,[r0,#4]; ldr r0,[r0,#0x10]; bx lr`.
+/// Whole-image decoding finds two plain BL callers (0x080774c8 and
+/// 0x080a0d7c), zero predicated BL callers, and no outgoing calls.
+///
+/// Follows the global holder's +4 pointer and returns the raw transfer-state
+/// word at +0x10. Callers poll masks 0x30 and 0x0f; their bit meanings remain
+/// unspecified. Deliberate deviation: reuse the existing crate-static holder
+/// model rather than the firmware address. No null guard or caching is added.
+///
+/// # Safety
+/// The holder's +4 slot must point to at least 0x14 readable bytes, aligned
+/// for a `u32` load. The published object must remain valid during the call.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn global_indirect_transfer_state_get() -> u32 {
+    let state = global_indirect_state();
+    (state.cast::<u32>().add(4)).read()
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -251,6 +274,24 @@ mod tests {
             assert_eq!(global_indirect_state_word_get(), 0);
             replace_state(second.as_mut_ptr().cast());
             assert_eq!(global_indirect_state_word_get(), u32::MAX);
+            replace_state(old);
+        }
+    }
+
+    #[test]
+    fn transfer_state_get_preserves_bits_and_rereads_state() {
+        let _lock = HOLDER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut first = [0x1111_1111u32; 6];
+        let mut second = [0x2222_2222u32; 6];
+        unsafe {
+            let old = replace_state(first.as_mut_ptr().cast());
+            for word in [0, 0x0f, 0x30, 0x8000_0000, u32::MAX] {
+                first[4] = word;
+                assert_eq!(global_indirect_transfer_state_get(), word);
+            }
+            second[4] = 0xa5a5_5a5a;
+            replace_state(second.as_mut_ptr().cast());
+            assert_eq!(global_indirect_transfer_state_get(), second[4]);
             replace_state(old);
         }
     }

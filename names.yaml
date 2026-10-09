@@ -35263,6 +35263,32 @@ functions:
       for 0x089d03bc and intentionally adds no null guard, cache, ownership,
       or bit interpretation.
 
+  - address: 0x080f3c6c
+    ghidra: FUN_080f3c6c
+    name: global_indirect_transfer_state_get
+    size: 20
+    sig: "u32 global_indirect_transfer_state_get(void)"
+    module: heap/state
+    status: ported
+    renames:
+      DAT_080f3c7c: global_indirect_holder_literal
+      DAT_089d03bc: global_indirect_holder
+      r0: transfer_state_word
+    notes: >-
+      Raw osos.dec words e59f0008 e5900004 e5900010 e12fff1e prove
+      four instructions (16 bytes), followed by literal 0x089d03bc at
+      0x080f3c7c. The true extent through the next real function at
+      0x080f3c80 is 20 bytes. Whole-image ARM BL decoding finds two
+      plain unconditional callers at 0x080774c8 and 0x080a0d7c, zero
+      predicated callers, and no outgoing calls. Follow holder +4 and
+      return the raw word at state +0x10; callers poll masks 0x30 and
+      0x0f without establishing bit meanings. Reuse heap/state's packed
+      crate-static holder model, deliberately replacing the fixed global
+      address without null checks or caching. Host tests verify neighboring
+      words are not selected, preserve all bits, and reread both the word
+      and the holder pointer. match.py confirms the same load chain;
+      LLVM adds frame setup/return and a crate-static relocation.
+
   - address: 0x080879d0
     ghidra: FUN_080879d0
     name: string_pointer_list_join
