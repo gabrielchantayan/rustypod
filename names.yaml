@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0810073c
+    ghidra: FUN_0810073c
+    name: app_motor_shutdown
+    size: 104
+    sig: "void app_motor_shutdown(u8 *owner)"
+    module: app/app_motor_shutdown
+    status: ported
+    vars: {param_1/r4: owner, r5: motor, owner_plus_0x100: active}
+    renames:
+      FUN_08295be0: app_motor_get
+      FUN_08295cbc: request_mode (verified retail seam)
+      FUN_08296ad4: request_drain (verified retail seam)
+      FUN_08100bb4: drain_owner (verified retail seam)
+      FUN_08296010: wait_state_three (verified retail seam)
+      FUN_08296834: request_idle (verified retail seam)
+      FUN_08295fa0: wait_until_idle
+      FUN_08101738: finalize_owner (verified retail seam)
+    notes: >-
+      Raw A32 extent is 104 bytes through the next push at 0x081007a4.
+      Whole-image BL decoding finds one inbound plain BL at 0x08101450
+      and one BLNE at 0x0812563c; eight outbound plain BLs, zero
+      predicated outbound BLs. Skip inactive owner; otherwise get AppMotor,
+      request mode 1, conditionally drain owner work and wait for state 3,
+      request idle, wait until idle, finalize owner, clear active +0x100.
+      Non-predicate return values are ignored. Unported callees retain
+      verified retail addresses; no containing class identity is invented.
+      Raw 0x08101738 saves only r0 and tail-branches at 0x08101778,
+      disproving Ghidra's apparent extra arguments. Existing getter and
+      idle-wait ports are reused with their documented deviations.
+      Not hook-ready with the getter's default unported constructor and
+      crate-static motor: retail seams require a real initialized AppMotor.
+      Host ops must be installed explicitly. Host suite passes 14959 tests;
+      regression covers inactive skip, active bytes 1/0x80/0xff,
+      zero/nonzero/high-bit drain predicates, finalizer observing active
+      before clear, repeat shutdown, and opaque-byte preservation with
+      the real initially-idle wait port. ARM release build passes.
+      Standalone smoke executes shutdown and inactive repeat with simulated
+      synchronization; no device run. match.py exits 1: 39 versus 26
+      instructions, added frame pointer and literal-address BLX calls,
+      retained conditional drain and final clear. Getter is a relocatable
+      BL; LLVM reloads the crate-static motor across the state-three wait.
   - address: 0x08102098
     ghidra: FUN_08102098
     name: string_table_set_both_decimal_ref
