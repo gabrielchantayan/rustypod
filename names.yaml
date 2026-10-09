@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f8160
+    ghidra: FUN_080f8160
+    name: i2s_object_set_enabled
+    size: 8
+    sig: "u32 i2s_object_set_enabled(const u8 *object, u32 enable)"
+    module: drivers/i2s_object_enable
+    status: ported
+    renames:
+      param_1/r0: object
+      r1: enable
+    notes: >-
+      Raw words e5d0001d eafcffaf prove an unsigned byte load at object
+      offset 0x1d followed by a tail branch to 0x08038028. Next real
+      function starts with push at 0x080f8168. Whole-image A32 decoding
+      finds two plain inbound BLs at 0x081f4830 and 0x081f4888, zero
+      predicated BLs. Veneer words e51ff004 2200881c identify the relocated
+      IRAM copy of 0x0800881c, the I2S controller enable/disable core.
+      Both callers pass zero in r1; raw core accepts zero/nonzero state
+      and returns zero. Ghidra omitted r1 and the returned r0. No target
+      behavior deviations; host builds inject the hardware boundary.
+      All 14999 host tests and ARM release build pass. match.py shows
+      the same ldrb and a tail bx to literal 0x2200881c, with LLVM frame
+      setup/teardown instead of the stock direct branch to the veneer.
   - address: 0x080fa698
     ghidra: FUN_080fa698
     name: scsi_caching_page_write
