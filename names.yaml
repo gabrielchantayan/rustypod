@@ -238551,3 +238551,35 @@ functions:
       LLVM adds a frame and indirect BLX allocator seam, retaining
       the empty/error branches, carry-forward loop, unsigned inclusive
       bound, pointer arithmetic and output commit. No device run.
+
+  - address: 0x080c675c
+    ghidra: FUN_080c675c
+    name: condvar_signal_dispatch
+    size: 12
+    sig: "void condvar_signal_dispatch(CondVar *condvar, u32 mode)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      param_1/r0: condvar
+      param_2/r1: mode
+      FUN_080744d8: condvar_signal
+      FUN_0809ecd0: deferred single-shot condvar signal
+      FUN_080f10b8: list_pop_front
+      thunk_FUN_080567fc: rom_svc_22001cbc
+    notes: >-
+      Raw words e3510001 1afeb75c 0aff6159 establish the 12-byte extent
+      0x080c675c..0x080c6768: cmp r1,#1; bne 0x080744d8; beq 0x0809ecd0.
+      The next entry is an independently called mutex-create tail veneer.
+      Independent aligned A32 decoding finds two plain BL callers at
+      0x081af864 and 0x081afc94, zero predicated BL callers, and no outbound
+      BL instructions. Both callers pass mode zero. Only mode exactly one
+      selects deferred wake; all other values signal normally. Both paths
+      pop at most one FIFO waiter from condvar+4; an empty queue is a no-op.
+      Deferred target raw words pop via 0x080f10b8, load node+4, then
+      tail-branch 0x080567fc, the existing alias of rom_svc_22001cbc.
+      Rust expands that unported wrapper using existing list/ROM seams
+      without adding another function port. Normal signal reuses
+      condvar_signal. Ordinary Rust calls replace tail branches and native
+      host pointer fields replace target four-byte words. Host tests cover
+      exact mode selection, FIFO preservation, last-node removal and empty
+      queues; no device run.

@@ -345,6 +345,38 @@ pub unsafe extern "C" fn condvar_signal(condvar: *mut CondVar) {
     }
 }
 
+/// Mode-selecting single-shot signal — `FUN_080c675c` @ 0x080c675c.
+///
+/// True extent: 12 bytes, ending at the independently called mutex-create
+/// veneer @ 0x080c6768. Raw words: e3510001 1afeb75c 0aff6159
+/// (`cmp r1,#1; bne 0x080744d8; beq 0x0809ecd0`). Verified inbound
+/// calls: two plain BL (0x081af864, 0x081afc94), zero predicated BL;
+/// no outbound BL. Mode 1 pops one waiter and schedules its deferred wake;
+/// every other mode uses the normal single-shot signal. Empty queues do nothing.
+///
+/// Deliberate deviations: Rust expands the unported 0x0809ecd0 wrapper
+/// using the existing list-pop and ROM-service seams, rather than adding
+/// another binding. Ordinary Rust calls replace the original tail branches;
+/// queue fields use native-width pointers on hosts (four-byte words on ARM).
+///
+/// # Safety
+/// `condvar` and its linked wait nodes must be valid; the caller holds the
+/// surrounding lock and installs the kernel hooks before use.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn condvar_signal_dispatch(condvar: *mut CondVar, mode: u32) {
+    if mode == 1 {
+        let node = list_pop_front(&mut (*condvar).waiters);
+        if !node.is_null() {
+            crate::kernel::task_lock::rom_svc_22001cbc(
+                (*(node as *mut WaitNode)).object as usize,
+            );
+        }
+    } else {
+        condvar_signal(condvar);
+    }
+}
+
 /// mqueue_receive — original: `FUN_0807f5f4` @ 0x0807f5f4 (92 bytes).
 ///
 /// Locked message-queue consumer: takes the queue's mutex, pops the head
@@ -1400,6 +1432,53 @@ mod tests {
             condvar_signal(&mut cv);
         }
         assert!(take_events().is_empty());
+    }
+
+    unsafe extern "C" fn mock_dispatch_deferred_wake(id: usize) -> usize {
+        state().as_mut().unwrap().events.push(format!("deferred:{id:x}"));
+        0
+    }
+
+    #[test]
+    fn signal_dispatch_preserves_fifo_and_selects_only_exact_mode_one() {
+        let _guard = install(MockState::default());
+        let _rom_guard = crate::kernel::task_lock::tests::OPS_LOCK.lock().unwrap();
+        unsafe {
+            let slot = core::ptr::addr_of_mut!(
+                crate::kernel::task_lock::ROM_KERNEL.rom_svc_22001cbc
+            );
+            let saved = slot.read();
+            slot.write(mock_dispatch_deferred_wake);
+            for mode in [0, 1, 2, u32::MAX] {
+                let mut cv = make_condvar();
+                let mut first = WaitNode { next: null_mut(), object: 0x1234 as *mut u32 };
+                let mut second = WaitNode { next: null_mut(), object: 0x5678 as *mut u32 };
+                list_push_back(&mut cv.waiters, (&mut first as *mut WaitNode).cast());
+                list_push_back(&mut cv.waiters, (&mut second as *mut WaitNode).cast());
+                condvar_signal_dispatch(&mut cv, mode);
+                assert_eq!(cv.waiters.head, (&mut second as *mut WaitNode).cast());
+                assert_eq!(cv.waiters.tail, (&mut second as *mut WaitNode).cast());
+                assert!(first.next.is_null());
+                condvar_signal_dispatch(&mut cv, mode);
+                assert!(cv.waiters.head.is_null());
+                assert!(cv.waiters.tail.is_null());
+                assert!(second.next.is_null());
+                let events = take_events();
+                let wakes = core::mem::take(&mut state().as_mut().unwrap().wakes);
+                if mode == 1 {
+                    assert_eq!(events, Vec::from([
+                        String::from("deferred:1234"), String::from("deferred:5678"),
+                    ]));
+                    assert!(wakes.is_empty());
+                } else {
+                    assert_eq!(wakes, Vec::from([0x1234usize, 0x5678]));
+                }
+                condvar_signal_dispatch(&mut cv, mode);
+                assert!(take_events().is_empty());
+                assert!(state().as_ref().unwrap().wakes.is_empty());
+            }
+            slot.write(saved);
+        }
     }
 
     #[test]
