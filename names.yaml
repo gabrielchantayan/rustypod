@@ -235327,3 +235327,44 @@ functions:
       schedules the +20 load ahead of the first pair's zero stores but
       still after its delete; no intervening external call changes that
       ordering's observable behavior.
+  - address: 0x080f6f2c
+    ghidra: FUN_080f6f2c
+    name: iap_packet_create_with_compact_payload
+    size: 96
+    sig: "u8 *iap_packet_create_with_compact_payload(u8 *owner, u8 *context, u32 lingo_word, u32 command_word, u32 header_kind, u32 header_value, u32 header_data)"
+    module: app/iap_packet
+    status: ported
+    vars:
+      param_1/r0/r5: owner
+      param_2/r1/r6: context
+      param_3/r2/r7: lingo_word
+      param_4/r3/r8: command_word
+      param_5/r9: header_kind
+      param_6/r10: header_value
+      param_7/r11: header_data
+      iVar1/r4: packet
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_080f745c: iap_packet_construct
+      FUN_080f6c58: iap_packet_init_with_compact_payload
+    notes: >-
+      Raw A32 words prove [0x080f6f2c,0x080f6f8c), 96 bytes without
+      literals; the next independent push begins at 0x080f6f8c.
+      Three outbound plain BLs at 0x080f6f50, 0x080f6f54 and 0x080f6f7c,
+      zero predicated BLs. Whole-image raw decoding finds two inbound
+      plain BLs at 0x0818df18 and 0x0818df98, zero predicated BLs.
+      Allocate 36 bytes through tag-2 operator_new, construct before
+      checking NULL, then initialize the compact payload with extra byte
+      0xff and return the packet. Payload allocation failure is ignored:
+      the live packet is returned without destruction. Ghidra incorrectly
+      types the constructor as void; raw constructor words preserve r0.
+      All callees already have ported registry entries and are reused.
+      Deliberate deviations: C ABI parameters replace explicit stack
+      shuffling; full-width selectors and original NULL-check order remain.
+      Host integration covers extended lingo, lingo 12 sentinel, high-word
+      selector distinctions, network byte order, and payload allocation
+      failure. All 15006 host tests pass; ARM release build succeeds.
+      match.py exits 1 with 30 Rust versus 24 stock instructions: three
+      calls, constructor-result check, five stack arguments including 0xff,
+      and pointer return remain. LLVM retains the allocation pointer for
+      return because the ported constructor is known to return it unchanged.
