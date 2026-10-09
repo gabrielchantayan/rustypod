@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f10ec
+    ghidra: FUN_080f10ec
+    name: list_remove
+    size: 108
+    sig: "void list_remove(ListHead *list, ListNode *node)"
+    module: kernel/condvar
+    status: ported
+    renames:
+      param_1/r0: list
+      param_2/r1: node
+      param_3/r2: current (not an input argument)
+      r3: predecessor
+      r12: zero
+    notes: >-
+      Raw A32 verifies [0x080f10ec,0x080f1158), 108 bytes, ending in
+      BX LR before the next list_push_back entry. Whole-image BL decoding
+      finds one plain incoming BL at 0x0807f724 and one BLEQ at 0x0807f734,
+      both in condvar_wait; no outgoing plain or predicated BLs. Two
+      arguments, not Ghidra's three: r2 is loaded from list->head only
+      when node is non-NULL. Null node and empty list return unchanged.
+      Otherwise unlink head or walk predecessors, repair tail, and clear
+      node->next even if not found. Head equal to tail clears both anchors
+      regardless of the removed node's next value. Promotes the existing
+      private implementation to an exported C ABI target with inline(never);
+      existing condvar_wait callers use that same implementation. No seam
+      or allocation. repr(C) pointers widen on host, remain four bytes on
+      ARM. Host tests cover head/middle/tail, singleton, inconsistent
+      singleton successor, absent node with nonzero link, repeated removal,
+      null node and empty-list link preservation. Full host suite passes
+      15040 tests; ARM release build passes. Exact-body standalone smoke
+      exercises middle, tail and singleton transitions. Full non-test host
+      library smoke build is blocked by six pre-existing unresolved helper
+      names in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. match.py reviewed: 27 stock versus 33 Rust
+      instructions; same guards, predecessor loop, tail repair and detached
+      link clearing. LLVM reorders head handling and adds a frame; no calls.
+
   - address: 0x080f4a08
     ghidra: FUN_080f4a08
     name: ft_hash_done

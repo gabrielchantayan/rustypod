@@ -62,10 +62,8 @@
 //!
 //! # Simplifications / deviations
 //!
-//! - `list_remove` (0x080f10ec) is kept private (not `#[no_mangle]`): the
-//!   address sits between the two assigned helper exports and may be ported
-//!   separately; `condvar_wait` needs the logic regardless. Faithful quirk
-//!   kept: a node that is not found still gets its `next` zeroed.
+//! - `list_remove` (0x080f10ec) preserves the stock quirk: a node that
+//!   is not found in a nonempty list still gets its `next` zeroed.
 //! - `waiter_create`'s hook takes no argument; the stock wrapper ignores
 //!   the condvar pointer its caller leaves in r0.
 //! - The ROM service behind `task_yield` (0x22004260, called with r0 = 0)
@@ -268,13 +266,24 @@ pub unsafe extern "C" fn list_push_back(list: *mut ListHead, node: *mut ListNode
     (*node).next = null_mut();
 }
 
-/// list_remove — original: `FUN_080f10ec` @ 0x080f10ec (108 bytes).
+/// list_remove — original: `FUN_080f10ec` @ 0x080f10ec.
 ///
-/// Unlinks `node` from the list, fixing up the tail when needed. A NULL
-/// node or an empty list is a no-op; a node that is never found still gets
-/// its `next` zeroed (faithful to the original). Private on purpose — see
-/// the module header.
-unsafe fn list_remove(list: *mut ListHead, node: *mut ListNode) {
+/// Raw A32 extent [0x080f10ec, 0x080f1158): 108 bytes, ending in `bx lr`
+/// immediately before list_push_back. Two incoming BL sites: plain BL at
+/// 0x0807f724 and BLEQ at 0x0807f734; zero outgoing BLs (plain or predicated).
+/// Walks the singly-linked list, unlinks `node`, and repairs the tail.
+/// A NULL node or empty list is a no-op; an absent node in a nonempty list
+/// still has its next link cleared. Removing the head when it is also the
+/// tail clears both anchors, even if its next link was non-NULL.
+/// Deliberate deviation: repr(C) native pointers widen on the host; target
+/// links and anchor fields remain four-byte words. No algorithm deviation.
+///
+/// # Safety
+/// A non-NULL node must be writable. Unless node is NULL, list must be valid;
+/// reachable nodes must be writable and form a finite, acyclic chain.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn list_remove(list: *mut ListHead, node: *mut ListNode) {
     if node.is_null() || (*list).head.is_null() {
         return;
     }
@@ -940,6 +949,54 @@ mod tests {
                 assert!(list_pop_front(&mut list).is_null());
             }
         }
+    }
+
+    #[test]
+    fn list_remove_singleton_clears_anchors_even_with_successor() {
+        let mut successor = ListNode { next: null_mut() };
+        let mut node = ListNode { next: &mut successor };
+        let mut list = ListHead { head: &mut node, tail: &mut node };
+        unsafe { list_remove(&mut list, &mut node); }
+        assert!(list.head.is_null());
+        assert!(list.tail.is_null());
+        assert!(node.next.is_null());
+        assert!(successor.next.is_null());
+    }
+
+    #[test]
+    fn list_remove_null_and_empty_leave_links_untouched() {
+        let mut successor = ListNode { next: null_mut() };
+        let mut node = ListNode { next: &mut successor };
+        let mut list = ListHead { head: null_mut(), tail: &mut node };
+        unsafe {
+            list_remove(null_mut(), null_mut());
+            list_remove(&mut list, &mut node);
+        }
+        assert!(list.head.is_null());
+        assert_eq!(list.tail, &mut node as *mut ListNode);
+        assert_eq!(node.next, &mut successor as *mut ListNode);
+        list.head = &mut node;
+        unsafe { list_remove(&mut list, null_mut()); }
+        assert_eq!(list.head, &mut node as *mut ListNode);
+        assert_eq!(list.tail, &mut node as *mut ListNode);
+        assert_eq!(node.next, &mut successor as *mut ListNode);
+    }
+
+    #[test]
+    fn list_remove_absent_clears_only_requested_link_and_can_repeat() {
+        let mut tail = ListNode { next: null_mut() };
+        let mut head = ListNode { next: &mut tail };
+        let mut absent = ListNode { next: &mut head };
+        let mut list = ListHead { head: &mut head, tail: &mut tail };
+        unsafe {
+            list_remove(&mut list, &mut absent);
+            list_remove(&mut list, &mut absent);
+        }
+        assert_eq!(list.head, &mut head as *mut ListNode);
+        assert_eq!(list.tail, &mut tail as *mut ListNode);
+        assert_eq!(head.next, &mut tail as *mut ListNode);
+        assert!(tail.next.is_null());
+        assert!(absent.next.is_null());
     }
 
     #[test]
