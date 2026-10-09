@@ -236415,3 +236415,27 @@ functions:
       Typed fields widen the pointer on hosts; tests replace only the fixed
       encoding-table address and exercise duplicates, high-bit SIDs, empty
       and truncated charsets, code 255, full-width invalid codes, and NULL.
+
+  - address: 0x080e3254
+    ghidra: FUN_080e3254
+    name: board_gpio_pin_86
+    size: 8
+    sig: "u32 board_gpio_pin_86(void)"
+    module: drivers/board_gpio_pin_86
+    status: ported
+    renames:
+      return/r0: pin_id
+    notes: >-
+      Raw words e3a00056 and e12fff1e return GPIO pin 0x56 (port 10,
+      bit 6), not its level. True extent is 8 bytes; the next independently
+      called function is cff_lookup_glyph at 0x080e325c. Full aligned ARM
+      BL decoding finds two unconditional callers at 0x080bd960 and
+      0x08393a50, zero predicated callers, and no outgoing calls. The
+      first caller supplies this identifier to the ported gpio_pin_read
+      at 0x0836b6cc; the second compares it with the 0xc8 no-pin sentinel.
+      The board signal role remains unidentified. No behavioral deviations.
+      Host integration tests verify port address and isolated bit-6 reads,
+      neighboring bits, and high-word noise. A standalone host smoke program
+      exercises the entry point. ARM match retains mov r0,#86 but adds
+      push {fp,lr}, mov fp,sp, and pop {fp,pc} instead of bx lr.
+      Host suite and ARM release build pass; hardware execution not tested.
