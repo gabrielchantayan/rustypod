@@ -13,9 +13,8 @@
 //! `afm_scan_token_to_delimiter` skips horizontal whitespace, returns the
 //! first non-whitespace byte's address, then consumes through horizontal
 //! whitespace or an AFM delimiter. It sets the cursor state for semicolon,
-//! line-end, EOF, and control-Z delimiters. Deliberate deviation: its
-//! unported `FUN_080c850c` call is inlined because its raw behavior is fully
-//! recovered and the call's return value is unused.
+//! line-end, EOF, and control-Z delimiters. Its first step calls the shared
+//! `afm_next_non_horizontal_space` port.
 //!
 //! `afm_next_statement_token` advances the cursor to the first token of the
 //! following statement. Its line-end helper remains a retail target on-device
@@ -51,6 +50,44 @@ pub struct AfmScanner {
 
 type ScannerStep = unsafe extern "C" fn(*mut AfmScanner) -> *mut u8;
 
+/// `afm_next_non_horizontal_space` — original: `FUN_080c850c` @ `0x080c850c`.
+/// True extent: 112 bytes, ending at the next function at `0x080c857c`.
+/// Raw A32 words contain zero plain and zero predicated outgoing BLs;
+/// two inbound plain BLs occur at `0x080ade70` and `0x080c84ac`.
+///
+/// Return semicolon without touching the cursor when the signed state is
+/// positive. Otherwise skip spaces/tabs and consume the next byte, returning
+/// `u32::MAX` at EOF. Record semicolon (1), CR/LF (2), or EOF/control-Z (3);
+/// ordinary bytes leave the state unchanged. No deliberate algorithm changes;
+/// repr(C) pointer fields retain target offsets while supporting host pointers.
+///
+/// # Safety
+/// `scanner` must be writable and its `[cursor, end)` range readable.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn afm_next_non_horizontal_space(scanner: *mut AfmScanner) -> u32 {
+    if unsafe { (*scanner).delimiter_state as i32 >= 1 } {
+        return b';' as u32;
+    }
+    loop {
+        let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
+            let cursor = unsafe { (*scanner).cursor };
+            unsafe { (*scanner).cursor = cursor.add(1) };
+            unsafe { cursor.read() as u32 }
+        } else {
+            u32::MAX
+        };
+        match byte {
+            32 | 9 => continue,
+            13 | 10 => unsafe { (*scanner).delimiter_state = 2 },
+            59 => unsafe { (*scanner).delimiter_state = 1 },
+            u32::MAX | 26 => unsafe { (*scanner).delimiter_state = 3 },
+            _ => {}
+        }
+        return byte;
+    }
+}
+
 /// `afm_scan_token_to_delimiter` — original: `FUN_080ade68` @ `0x080ade68`
 /// (128 bytes).
 ///
@@ -61,10 +98,15 @@ type ScannerStep = unsafe extern "C" fn(*mut AfmScanner) -> *mut u8;
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn afm_scan_token_to_delimiter(scanner: *mut AfmScanner) -> *mut u8 {
-    if unsafe { (*scanner).delimiter_state >= 1 } {
+    if unsafe { (*scanner).delimiter_state as i32 >= 1 } {
         return core::ptr::null_mut();
     }
 
+    unsafe { afm_next_non_horizontal_space(scanner) };
+    if unsafe { (*scanner).delimiter_state as i32 >= 1 } {
+        return core::ptr::null_mut();
+    }
+    let token_start = unsafe { (*scanner).cursor.sub(1) };
     loop {
         let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
             let cursor = unsafe { (*scanner).cursor };
@@ -73,34 +115,14 @@ pub unsafe extern "C" fn afm_scan_token_to_delimiter(scanner: *mut AfmScanner) -
         } else {
             u32::MAX
         };
-
         match byte {
-            0x20 | 0x09 => continue,
+            0x20 | 0x09 => return token_start,
             0x0d | 0x0a => unsafe { (*scanner).delimiter_state = 2 },
             0x3b => unsafe { (*scanner).delimiter_state = 1 },
             u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
-            _ => {
-                let token_start = unsafe { (*scanner).cursor.sub(1) };
-                loop {
-                    let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
-                        let cursor = unsafe { (*scanner).cursor };
-                        unsafe { (*scanner).cursor = cursor.add(1) };
-                        unsafe { cursor.read() as u32 }
-                    } else {
-                        u32::MAX
-                    };
-                    match byte {
-                        0x20 | 0x09 => return token_start,
-                        0x0d | 0x0a => unsafe { (*scanner).delimiter_state = 2 },
-                        0x3b => unsafe { (*scanner).delimiter_state = 1 },
-                        u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
-                        _ => continue,
-                    }
-                    return token_start;
-                }
-            }
+            _ => continue,
         }
-        return core::ptr::null_mut();
+        return token_start;
     }
 }
 
@@ -279,33 +301,56 @@ mod tests {
 
     static OPS_LOCK: Mutex<()> = Mutex::new(());
 
-    unsafe fn next_non_horizontal_space(scanner: *mut AfmScanner) -> u32 {
-        if unsafe { (*scanner).delimiter_state >= 1 } {
-            return b';' as u32;
-        }
-
-        loop {
-            let byte = if unsafe { (*scanner).cursor.cast_const() < (*scanner).end } {
-                let byte = unsafe { (*scanner).cursor.read() };
-                unsafe { (*scanner).cursor = (*scanner).cursor.wrapping_add(1) };
-                byte as u32
-            } else {
-                u32::MAX
-            };
-            match byte {
-                32 | 9 => continue,
-                13 | 10 => unsafe { (*scanner).delimiter_state = 2 },
-                59 => unsafe { (*scanner).delimiter_state = 1 },
-                u32::MAX | 0x1a => unsafe { (*scanner).delimiter_state = 3 },
-                _ => {}
+    #[test]
+    fn next_non_space_classifies_every_byte_and_preserves_signed_state() {
+        for state in [0u32, 0x8000_0000, u32::MAX] {
+            for byte in 0u8..=255 {
+                if byte == b' ' || byte == b'\t' { continue; }
+                let mut bytes = [b' ', b'\t', byte, b'X'];
+                let start = bytes.as_mut_ptr();
+                let mut scanner = AfmScanner {
+                    cursor: start, unknown_04: 0x1234,
+                    end: unsafe { start.add(4) }, delimiter_state: state,
+                };
+                assert_eq!(unsafe { afm_next_non_horizontal_space(&mut scanner) }, byte as u32);
+                assert_eq!(scanner.cursor, unsafe { start.add(3) });
+                let expected = match byte {
+                    b';' => 1, b'\r' | b'\n' => 2, 26 => 3, _ => state,
+                };
+                assert_eq!(scanner.delimiter_state, expected);
+                assert_eq!(scanner.unknown_04, 0x1234);
             }
-            return byte;
+        }
+    }
+
+    #[test]
+    fn next_non_space_stops_at_eof_and_latches_positive_states() {
+        let mut bytes = *b" \t ";
+        let start = bytes.as_mut_ptr();
+        for length in 0..=bytes.len() {
+            let end = unsafe { start.add(length) };
+            let mut scanner = AfmScanner {
+                cursor: start, unknown_04: 0, end, delimiter_state: 0,
+            };
+            assert_eq!(unsafe { afm_next_non_horizontal_space(&mut scanner) }, u32::MAX);
+            assert_eq!(scanner.cursor.cast_const(), end);
+            assert_eq!(scanner.delimiter_state, 3);
+        }
+        for state in [1, 2, 3, i32::MAX as u32] {
+            let mut scanner = AfmScanner {
+                cursor: null_mut(), unknown_04: 0,
+                end: core::ptr::null(), delimiter_state: state,
+            };
+            assert_eq!(unsafe { afm_next_non_horizontal_space(&mut scanner) }, b';' as u32);
+            assert!(scanner.cursor.is_null());
+            assert_eq!(scanner.delimiter_state, state);
         }
     }
 
 
+
     unsafe extern "C" fn recovered_scan_to_line_end(scanner: *mut AfmScanner) -> *mut u8 {
-        unsafe { next_non_horizontal_space(scanner) };
+        unsafe { afm_next_non_horizontal_space(scanner) };
         if unsafe { (*scanner).delimiter_state >= 2 } {
             return null_mut();
         }

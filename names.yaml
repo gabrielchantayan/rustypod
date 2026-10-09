@@ -26321,16 +26321,47 @@ functions:
     notes: >-
       Raw osos.dec decoding fixes the 128-byte extent at
       0x080ade68..0x080adee8; 0x080adee8 begins the next function with
-      mov r3,r0. The body has one plain unconditional bl, to the unported
-      0x080c850c, and zero predicated bl instructions. A whole-image A32
+      mov r3,r0. The body has one plain unconditional bl, to
+      afm_next_non_horizontal_space, and zero predicated bl instructions. A whole-image A32
       decode finds four inbound direct plain bl calls at 0x080addb4,
       0x080adddc, 0x080addf4, and 0x080b61b4; no predicated bl forms target
       this address. It skips spaces and tabs, returns the first non-whitespace
       byte, then advances through that token until horizontal whitespace,
       semicolon, line ending, control-Z, or EOF; delimiter_state becomes 1,
-      2, or 3 for the latter cases. Deliberate deviation: the verified
-      behavior of the unported 0x080c850c is inlined because its return value
-      is unused by this function, allowing identical host and target behavior.
+      2, or 3 for the latter cases. Calls the shared port of 0x080c850c
+      on both host and target; no deliberate algorithm deviations.
+  - address: 0x080c850c
+    ghidra: FUN_080c850c
+    name: afm_next_non_horizontal_space
+    size: 112
+    sig: "u32 afm_next_non_horizontal_space(AfmScanner *scanner)"
+    module: util/afm_next_statement_token
+    status: ported
+    renames:
+      param_1/r0: scanner
+      "[scanner + 0x0]": cursor
+      "[scanner + 0x8]": end
+      "[scanner + 0xc]": delimiter_state
+      uVar2/r1: byte
+    notes: >-
+      Raw osos.dec establishes the 112-byte extent 0x080c850c..0x080c857c;
+      the next function starts with mov r1,#99 followed by smulbb.
+      Zero outgoing plain or predicated BL instructions; whole-image A32
+      decoding finds two inbound plain BLs at 0x080ade70 and 0x080c84ac,
+      with no predicated inbound BLs. A signed positive delimiter state
+      returns semicolon without touching the cursor. Otherwise skip spaces
+      and tabs, consume the next byte, and return it, or u32::MAX at EOF.
+      Semicolon sets state 1, CR/LF state 2, EOF/control-Z state 3;
+      other bytes preserve state, including negative states. No algorithm
+      deviations. Uses the existing repr(C) AfmScanner; target pointer fields
+      remain four bytes apart. Existing Rust scanner callers now reuse this
+      real BL target rather than duplicate its body.
+      Host tests sweep all non-horizontal-space bytes with zero and negative
+      states and exercise EOF and latched positive states. ARM release build
+      and cursor smoke pass. match.py reports a structural diff: LLVM uses a
+      jump table for byte classification rather than ADS predicated compares;
+      the signed early exit, bounded byte loop, EOF sentinel and state stores
+      remain present. The exported symbol remains a distinct function.
   - address: 0x083d69d8
     ghidra: FUN_083d69d8
     name: indexed_virtual_value
