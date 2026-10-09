@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fd678
+    ghidra: FUN_080fd678
+    name: scsi_vendor_page_write
+    size: 96
+    sig: "u32 scsi_vendor_page_write(const u8* receiver, u8* output, u32 requested_length)"
+    module: app/scsi_vendor_page
+    status: ported
+    renames:
+      param_1/r0: ignored_receiver
+      param_2/r1: output
+      param_3/r2: requested_length
+    notes: >-
+      Raw ARM words establish extent 0x080fd678..0x080fd6d8: 84 code
+      bytes plus 12 literal bytes, before the next function push. Two plain
+      incoming BLs at 0x080fb170 and 0x080fb228, no predicated incoming BLs,
+      one plain outgoing BL to identified and ported __f2u at 0x083ec90c.
+      Caller 0x080faec0 selects vendor MODE SENSE page 0x20 or all pages
+      0x3f. Writes 20 02, sets byte 0x089cb1fa to 1, copies byte 0x089cb1f9,
+      converts float bits at aligned word 0x089cb200 through ADS __f2u,
+      and stores the low byte. Always writes four bytes, ignoring receiver.
+      Unsigned lengths <= 4 return length + 1 (4 returns 5), else 4.
+      No behavioral deviations; volatile accesses retain width and order.
+      Local-state tests cover short/high lengths, unaligned output, canaries,
+      flag/value alias ordering, truncation, low-byte wrap, NaN and saturation.
+      All 14986 host tests and ARM release build pass. Direct exported-entry
+      smoke with mapped firmware globals confirms lengths 0, 3, 4, 5 and
+      UINT_MAX, flag mutation and low-byte conversion. match.py reports
+      21 stock instructions versus 37 Rust lines including literals:
+      LLVM inlines existing __f2u, retaining truncation/saturation and all
+      ordered accesses; unsigned length selection remains intact.
   - address: 0x080fdaf8
     ghidra: FUN_080fdaf8
     name: scsi_error_recovery_page_write
