@@ -3,6 +3,7 @@
 pub mod counted_dispatch_table_address;
 pub mod counted_dispatch_table_address_946ea4;
 pub mod counted_dispatch_table_address_9586d0;
+pub mod retail_word_index;
 pub mod image_library_buffers_clear;
 pub mod enabled_subtree_find_identifier;
 pub use enabled_subtree_find_identifier::*;
