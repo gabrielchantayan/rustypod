@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c857c
+    ghidra: FUN_080c857c
+    name: indexed_mode_word_804_set
+    size: 32
+    sig: "void indexed_mode_word_804_set(i16 index)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080c8598: MODE_STATE_OBJECT_TABLE
+      object+0x804: mode_word_804
+    notes: >-
+      Raw A32 establishes extent [0x080c857c,0x080c859c), comprising
+      28 instruction bytes and the table literal 0x08b2f648 at 0x080c8598.
+      The next function begins with MOV r1,99 at 0x080c859c. Independent
+      whole-image aligned BL decoding finds one plain caller at 0x080af668
+      and one BLNE caller at 0x080adf1c; zero outgoing plain or predicated
+      BLs. Multiply the signed low halfword index by 99 words, load the
+      selected mode-state object pointer, and overwrite its aligned word
+      +0x804 with one. Concrete field meaning remains unknown. Callers
+      gate this on mode bit 0 or on a queried bit 0x1000, respectively.
+      No bounds or null checks. Reuses MODE_STATE_OBJECT_TABLE with
+      host-only unaligned native-pointer loads retaining target stride
+      0x18c; target loads and stores remain aligned. No new callee seams.
+      Tests cover negative, zero and positive indices, overwrites of
+      zero/one/mixed/all-one values, repeated calls, and preservation of
+      every other object byte. All 15156 host tests and ARM release build
+      passed. Production-source smoke passed indices -32768, -1, 0, 1
+      and 32767, observing one at +0x804 and all other words unchanged.
+      Reviewed match.py exit 1: seven original instructions versus eleven
+      Rust listing entries; LLVM adds frame setup/teardown and a seam
+      load, multiplies by 396 instead of 99 then LSL 2, and retains the
+      selected object load and STR one at +0x804. Symbol is present;
+      no device execution claimed.
   - address: 0x080c8890
     ghidra: FUN_080c8890
     name: store_pmu_board_version_status_bit
