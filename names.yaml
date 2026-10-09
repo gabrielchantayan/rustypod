@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c6930
+    ghidra: FUN_080c6930
+    name: pkcs7_get_octet_string
+    size: 92
+    sig: "ASN1_STRING *pkcs7_get_octet_string(const PKCS7 *message)"
+    module: crypto/pkcs7_get_octet_string
+    status: ported
+    renames:
+      param_1/r0: message
+      message+0x10: type_object
+      message+0x14: content
+      piVar3: other
+    notes: >-
+      Raw A32 extent [0x080c6930,0x080c698c), ending in pop
+      {r4,r5,r6,pc}; next function begins with push {r4,r5,lr}.
+      Whole-image aligned BL decoding finds two plain inbound callers,
+      0x0805fbc0 and 0x080602e4, and no predicated inbound BLs. The body
+      has two plain BLs to the already-ported OBJ_obj2nid at 0x0805f074
+      and no predicated BLs. Return data union word 5 for NID 21;
+      otherwise resolve word 4 again and reject unsigned
+      (nid - 21) <= 5, preserving wrapping behavior for negative NIDs.
+      For other types return ASN1_TYPE word 1 only if its pointer is
+      nonzero and its tag word is 4 (OCTET STRING); otherwise NULL.
+      Both callers use the result as ASN1_STRING storage. No new seam
+      or accessor deviations; inherits the existing OBJ_obj2nid port's
+      documented database deviations. Pointer fields remain u32 words
+      at target offsets on hosts. Host tests cover direct data, all five
+      rejected standard types with an unreadable union pointer, unsigned
+      range boundaries and negative NIDs, NULL other/type/value, and
+      matching and nonmatching ASN1 tags.
+      ARM match.py reviewed: 22 Rust instructions versus 23 original,
+      preserving both resolver calls, direct-data early return, wrapping
+      unsigned range rejection, NULL guard, and conditional tag-4 load.
+      LLVM uses branches instead of the ADS predicated early return.
+      Full host suite: 15161 passed. ARM release build passed. Standalone
+      host runtime smoke passed direct data, rejected NID 26, and other
+      OCTET STRING using the real resolver under host fixture cfg.
   - address: 0x080c857c
     ghidra: FUN_080c857c
     name: indexed_mode_word_804_set
