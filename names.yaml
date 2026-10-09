@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f4f74
+    ghidra: FUN_080f4f74
+    name: once_callback
+    size: 72
+    sig: "u32 once_callback(u32 *control, void (*callback)(void))"
+    module: kernel/once_callback
+    status: ported
+    vars:
+      param_1/r0: control
+      param_2/r1: callback
+      iVar1/r2: previous
+      uVar2/r4: status
+      DAT_080f4fb4: ONCE_CLAIMED
+      DAT_080f4fb8: negative_claimed_state
+    notes: >-
+      Raw words prove extent [0x080f4f74,0x080f4fbc), 64 instruction
+      bytes plus two literals before the next PUSH. Two inbound plain BLs
+      at 0x08086034 and 0x0808b1d0, zero predicated BLs. Body has zero
+      plain/predicated BLs and one indirect BLX r1. Ghidra misses SWP:
+      atomically replace control with 0x4f4e4345; prior 0x4f4e4353 calls
+      callback, prior 0x4f4e4345 succeeds without calling, other states
+      return 0x1a but remain overwritten. Null callback returns 0x1a
+      without accessing control. No waiting or post-callback store.
+      ARM retains SWP; hosts use relaxed AtomicU32 swap. Existing class-3
+      caller now uses this port, retaining its verified resident callback.
+      Four edge tests cover null, invalid states, reentry and concurrency;
+      all 15024 host tests and ARM release build pass. Production-source
+      smoke passes. match.py exits 1: 16 stock versus 21 Rust listing lines;
+      SWP, null guard, state comparisons and indirect callback are retained.
   - address: 0x080f5238
     ghidra: FUN_080f5238
     name: utf8_copy_bounded
@@ -174705,7 +174734,7 @@ functions:
     status: ported
     renames:
       param_1/r0: slot
-      FUN_080f4f74: object_creation_prelude (unported fixed call)
+      FUN_080f4f74: once_callback
       thunk_EXT_FUN_22003d70: kernel_create_dispatch
     notes: >-
       Raw osos.dec words establish the 72-byte extent
@@ -174716,9 +174745,9 @@ functions:
       three inbound plain BL callers (0x080a3d68, 0x081e2278, 0x082e834c).
       It runs the fixed prelude, requests class 3 into slot, and returns zero
       only if the dispatcher returned zero and populated a nonzero handle;
-      otherwise it returns 0x27. Target Rust calls the verified unported
-      prelude and ROM entries through explicit seams; the host default models
-      successful creation.
+      otherwise it returns 0x27. Target Rust uses the ported once_callback
+      prelude with its verified resident callback and dispatcher seam;
+      the host default models successful creation.
 
 
   - address: 0x08089214
@@ -206728,7 +206757,7 @@ functions:
     status: ported
     renames:
       param_1/r0: slot
-      FUN_080f4f74: object_creation_prelude (unported fixed call)
+      FUN_080f4f74: once_callback
       thunk_EXT_FUN_22003d70: kernel_create_dispatch
     notes: >-
       Raw osos.dec words establish the 72-byte extent
@@ -206739,9 +206768,9 @@ functions:
       three inbound plain BL callers (0x080a3d68, 0x081e2278, 0x082e834c).
       It runs the fixed prelude, requests class 3 into slot, and returns zero
       only if the dispatcher returned zero and populated a nonzero handle;
-      otherwise it returns 0x27. Target Rust calls the verified unported
-      prelude and ROM entries through explicit seams; the host default models
-      successful creation.
+      otherwise it returns 0x27. Target Rust uses the ported once_callback
+      prelude with its verified resident callback and dispatcher seam;
+      the host default models successful creation.
 
 
   - address: 0x08089214
