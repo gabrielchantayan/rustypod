@@ -234524,3 +234524,47 @@ functions:
       Standalone public-entry smoke is blocked by six unrelated missing
       host helper definitions in prepare_entry_metadata, shared_payload_select_kind
       and calendar_schedule; no device execution claimed.
+
+  - address: 0x080fea98
+    ghidra: FUN_080fea98
+    name: screen_dependencies_initialize
+    size: 96
+    sig: "void screen_dependencies_initialize(ScreenDependencies *screen)"
+    module: app/screen_dependencies_initialize
+    status: ported
+    renames:
+      param_1/r4: screen
+      piVar1: player
+      uVar2/r5: saved_directory_index
+      iVar3: app_controller
+      FUN_0817ceb4: media_player_get
+      FUN_081eb0c4: singleton_class_8900
+      FUN_081ec290: class_8900_prid_table_index
+      FUN_081ebf1c: language_screen_refresh
+      FUN_081ec31c: class_8900_apply_directory_transition
+      FUN_0817ee04: app_controller_get
+    notes: >-
+      Raw extent 0x080fea98..0x080feaf8 ends before an independent
+      mov r0,0; bx lr entry. Whole-image aligned ARM decoding finds
+      zero plain and two predicated inbound BLs (0x080feda0, 0x080feebc),
+      seven plain outbound BLs, zero predicated outbound BLs and one
+      virtual BLX through player slot +0xec. Cache player at +0xb4,
+      dispatch, reload it for unnamed retail helper 0x0817a2cc; cache
+      class 0x8900 at +0xb0, save its prID index, refresh, reload and
+      apply the saved index, set controller halfword +0x80 to 6 and
+      screen byte +0xb8 to 1. Raw r0 supplies the singleton argument
+      omitted by Ghidra. Callers guard initialization, not this routine.
+      Deviations are native-pointer host fields and injectable dependencies;
+      the unported player helper retains its verified ARM address.
+      Existing singleton constructor limitations remain. Tests exercise
+      callback field replacement, zero, last and 0xffffffff indices,
+      ignored refresh result, flag ordering and exact halfword overwrite.
+      All 14966 host tests pass; ARM release build passes. match.py exits
+      1 with 24 stock versus 27 Rust disassembly lines, including the
+      helper literal. Frame pointer and absolute BLX differ; field reloads,
+      saved r5 index and final writes retain stock structure.
+      Whole-crate host executable build is blocked by six existing missing
+      helpers in prepare_entry_metadata, shared_payload_select_kind and
+      calendar_schedule. An isolated actual-source executable with injected
+      dependencies observes initialized=1, mode=6, four effects and index=20.
+      No device execution.
