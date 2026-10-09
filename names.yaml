@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08102dfc
+    ghidra: FUN_08102dfc
+    name: attached_string_owner_destroy
+    size: 56
+    sig: "AttachedStringOwner *attached_string_owner_destroy(AttachedStringOwner *owner)"
+    module: cxx/attached_string_owner_destroy
+    status: ported
+    vars: {param_1/r4: owner, r0_at_virtual_call: attachment, param_1_plus_4: embedded_string}
+    renames:
+      FUN_08277484: string_object_destroy
+      DAT_08102e30: owner_vtable_089806bc
+      "attachment vtable+0x1c": teardown (concrete identity unresolved)
+    notes: >-
+      Raw words establish [0x08102dfc,0x08102e34): 52 code bytes plus
+      the four-byte 0x089806bc vtable literal, then a distinct PUSH.
+      Independent whole-image aligned A32 BL decoding finds two plain
+      inbound calls at 0x0828abcc and 0x0828adcc, zero predicated inbound
+      calls. The body has one plain BL at 0x08102e24 to ported
+      string_object_destroy (0x08277484), zero predicated direct BLs,
+      and one BLXNE at 0x08102e1c through attachment vtable+0x1c.
+      Installs the owner vtable, NULL-guards attachment at +0x0c,
+      invokes its virtual teardown, destroys the string at +0x10,
+      and subtracts 0x10 from the returned string pointer. Callers use
+      stack objects constructed by 0x08102f08/0x08102ff4. Concrete class
+      and virtual target remain unresolved; no callee seam invented.
+      Native repr(C) pointers/slots widen on hosts, retaining ARM offsets.
+      Tests cover NULL attachment, ordering, virtual mutation, preserved
+      attachment/header, string teardown and enclosing-pointer return.
+      All 14953 host tests and ARM release build pass. Executable native
+      cfg(test) consumer smoke passes; ordinary host builds have six
+      unrelated missing helpers. match.py exits 1: 13 original versus 16
+      Rust listing lines; conditional BLX becomes branch/BLX, frame grows,
   - address: 0x08106a04
     ghidra: FUN_08106a04
     name: fill_elements
