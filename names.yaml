@@ -104610,17 +104610,54 @@ functions:
       field at owner+0x1d0 (alongside a sibling fold through 0x08054b0c),
       so the function aggregates the table's entries into a combined
       mask; the masks' concrete meaning is not recovered. The getter
-      0x080e4e64 stays in retailOS behind the OBJECT_KIND_TABLE boundary:
-      kind==1 with bit 0 of the byte at object+0x18c set returns the
-      override table at literal 0x080e4e84, otherwise the kind switch
-      0x080d8948 returns one of the per-kind tables 0x080d8b68..0x080d8c10
-      (null for kind 0, flagless kind 1, and kinds above 0x2c). The
-      redundant in-loop `ldrdne` reload is an ADS artifact not
+      0x080e4e64 is now ported as object_kind_table; its kind-only fallback
+      0x080d8948 remains behind the KIND_MASK_TABLE boundary. Kind 1 with
+      bit 0 of object+0x18c set returns 0x083e8e58; otherwise the fallback
+      returns a per-kind table (null for kind 0, flagless kind 1, and
+      kinds above 0x2c).
+      The redundant in-loop `ldrdne` reload is an ADS artifact not
       reproduced. match.py (structural, exit 1 expected) shows the same
       null guard, two-accumulator OR fold, 8-byte stride and
       zero-doubleword termination; diffs are the boundary blx and LLVM's
       ldm word pairs in place of ldrd. Rust implementation and focused
       host tests: `src/ui/object_state.rs::object_kind_mask_union`.
+
+  # --- retailOS object-aware kind mask-table selector ---
+  - address: 0x080e4e64
+    ghidra: FUN_080e4e64
+    name: object_kind_table
+    size: 36
+    sig: "const u64 *object_kind_table(const void *object, u32 kind)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1: object
+      param_2: kind
+      FUN_080d8948: kind_mask_table
+      DAT_080e4e84: override_mask_table
+    notes: >-
+      Raw firmware verifies 32 instruction bytes plus the literal at
+      0x080e4e84, followed by the next function at 0x080e4e88. Two incoming
+      plain BL sites at 0x08055dc4 and 0x0809ef94, zero predicated BLs,
+      zero internal BLs. For kind 1, bit 0 of the byte at object+0x18c
+      selects the zero-terminated u64 mask table at 0x083e8e58. All other
+      cases move kind into r0 and tail-branch to the kind-only switch
+      0x080d8948. Ghidra inlines that switch into the selector decompilation;
+      it is not part of this function. The masks' concrete meaning remains
+      unknown. Neither assigned function nor fallback had a names entry
+      before this port. The existing union caller now calls the Rust
+      selector directly; the obsolete OBJECT_KIND_TABLE seam is removed.
+      Deliberate deviation: fallback uses a volatile function-pointer
+      boundary to the unported stock switch. Host tests cover all 256 flag
+      bytes and the union consumer's null and terminated-table cases.
+      ARM release build and all 15068 host tests passed. An isolated ARM
+      emulator ran the linked Rust selector against raw retailOS for 400
+      cases: every kind-1 flag byte, kinds 0..45 except 1, and 0x7fffffff,
+      0x80000000, 0xffffffff with NULL objects for non-kind-1 cases.
+      All returned pointers matched. match.py reported the expected
+      structural diff: same kind comparison, byte load, low-bit test,
+      override literal and fallback, with LLVM frame setup and indirect
+      tail branch through the boundary instead of the stock direct branch.
 
   # --- retailOS UI object state-to-kind mapping ---
   - address: 0x08055e00

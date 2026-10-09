@@ -1422,43 +1422,55 @@ pub unsafe extern "C" fn object_install_field_text(object: *mut u8) -> i32 {
     status
 }
 
-type ObjectKindTable = unsafe extern "C" fn(*const u8, u32) -> *const u64;
+type KindMaskTable = unsafe extern "C" fn(u32) -> *const u64;
 
-/// Calls the stock kind-indexed mask-table getter, which remains in
-/// retailOS.
-///
-/// This is deliberately a boundary rather than a port of 0x080e4e64. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original takes `(object, kind)`: for `kind ==
-/// 1` with bit 0 of the byte at `object + 0x18c` set it returns the override
-/// table pointer at literal 0x080e4e84; otherwise it tail-calls the kind
-/// switch 0x080d8948, which returns one of the per-kind table pointers
-/// 0x080d8b68..0x080d8c10 (null for kinds 0, 1 without the flag, and any
-/// kind above 0x2c).
-unsafe extern "C" fn firmware_object_kind_table(
-    object: *const u8,
-    kind: u32,
-) -> *const u64 {
+/// Unported kind-only table switch at 0x080d8948.
+unsafe extern "C" fn firmware_kind_mask_table(kind: u32) -> *const u64 {
     #[cfg(target_os = "none")]
     {
-        let object_kind_table: ObjectKindTable =
-            core::mem::transmute(0x080e_4e64usize);
-        object_kind_table(object, kind)
+        let lookup: KindMaskTable = core::mem::transmute(0x080d_8948usize);
+        lookup(kind)
     }
-
     #[cfg(not(target_os = "none"))]
     {
-        let _ = (object, kind);
-        core::ptr::null()
+        let _ = kind;
+        panic!("retailOS kind-mask lookup requires firmware or a host fixture");
     }
 }
 
-/// Narrow boundary for the unported 0x080e4e64 dependency.
-static mut OBJECT_KIND_TABLE: ObjectKindTable = firmware_object_kind_table;
+static mut KIND_MASK_TABLE: KindMaskTable = firmware_kind_mask_table;
 
 #[inline(always)]
-unsafe fn object_kind_table_fn() -> ObjectKindTable {
-    core::ptr::read_volatile(core::ptr::addr_of!(OBJECT_KIND_TABLE))
+unsafe fn kind_mask_table_fn() -> KindMaskTable {
+    core::ptr::read_volatile(core::ptr::addr_of!(KIND_MASK_TABLE))
+}
+
+/// object_kind_table — original: `FUN_080e4e64` @ `0x080e4e64`.
+///
+/// True extent: 36 bytes through 0x080e4e88 (32 instruction bytes and the
+/// literal 0x083e8e58 at 0x080e4e84). Raw ARM words verify two incoming
+/// plain BL sites (0x08055dc4, 0x0809ef94), zero predicated BL sites and
+/// zero internal BLs; the fallback is a tail branch to 0x080d8948.
+///
+/// For kind 1 only, reads the byte at object+0x18c and returns the override
+/// mask table if bit 0 is set. Otherwise delegates to the stock kind-only
+/// table switch. The returned table contains zero-terminated u64 masks;
+/// the concrete meaning of the masks remains unknown.
+///
+/// Deliberate deviation: the tail branch uses the existing volatile
+/// function-pointer boundary convention for the unported kind-only switch.
+///
+/// # Safety
+///
+/// For kind 1, object+0x18c must be readable. Other kinds do not access
+/// object. Returned pointers refer to firmware memory, not host allocations.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn object_kind_table(object: *const u8, kind: u32) -> *const u64 {
+    if kind == 1 && object.add(0x18c).read() & 1 != 0 {
+        return 0x083e_8e58usize as *const u64;
+    }
+    kind_mask_table_fn()(kind)
 }
 
 /// object_kind_mask_union — original: `FUN_08055db8` @ `0x08055db8` (72
@@ -1483,8 +1495,8 @@ unsafe fn object_kind_table_fn() -> ObjectKindTable {
 /// entries into a combined mask; the masks' concrete meaning is not
 /// recovered. The redundant `ldrdne r0,r1,[r4,#0x0]` reload inside the
 /// loop is an ADS artifact — the zero test clobbers no register — and is
-/// not reproduced. The table getter stays in retailOS behind the
-/// [`OBJECT_KIND_TABLE`] boundary.
+/// not reproduced. The table getter is [`object_kind_table`]; only its
+/// kind-only fallback remains in retailOS.
 ///
 /// # Safety
 ///
@@ -1496,7 +1508,7 @@ unsafe fn object_kind_table_fn() -> ObjectKindTable {
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn object_kind_mask_union(object: *const u8, kind: u32) -> u64 {
     let mut union: u64 = 0;
-    let mut entry = object_kind_table_fn()(object, kind);
+    let mut entry = object_kind_table(object, kind);
     if !entry.is_null() {
         loop {
             let mask = entry.read();
@@ -3240,18 +3252,9 @@ mod tests {
     }
 
     static KIND_TABLE_LOCK: Mutex<()> = Mutex::new(());
-    static mut KIND_TABLE_CALLS: u32 = 0;
-    static mut KIND_TABLE_OBJECT: usize = 0;
-    static mut KIND_TABLE_KIND: u32 = u32::MAX;
     static mut MOCK_KIND_TABLE: *const u64 = core::ptr::null();
 
-    unsafe extern "C" fn recording_object_kind_table(
-        object: *const u8,
-        kind: u32,
-    ) -> *const u64 {
-        KIND_TABLE_CALLS += 1;
-        KIND_TABLE_OBJECT = object as usize;
-        KIND_TABLE_KIND = kind;
+    unsafe extern "C" fn fixture_kind_mask_table(_kind: u32) -> *const u64 {
         MOCK_KIND_TABLE
     }
 
@@ -3261,8 +3264,8 @@ mod tests {
     impl Drop for KindTableReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(OBJECT_KIND_TABLE)
-                    .write(firmware_object_kind_table);
+                core::ptr::addr_of_mut!(KIND_MASK_TABLE)
+                    .write(firmware_kind_mask_table);
             }
         }
     }
@@ -3272,33 +3275,17 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         unsafe {
-            KIND_TABLE_CALLS = 0;
-            KIND_TABLE_OBJECT = 0;
-            KIND_TABLE_KIND = u32::MAX;
             MOCK_KIND_TABLE = table;
-            core::ptr::addr_of_mut!(OBJECT_KIND_TABLE).write(recording_object_kind_table);
+            core::ptr::addr_of_mut!(KIND_MASK_TABLE).write(fixture_kind_mask_table);
         }
         guard
     }
 
     #[test]
-    fn null_table_returns_zero_and_forwards_both_arguments() {
+    fn null_table_returns_zero_without_accessing_object_for_other_kinds() {
         let _guard = install_recording_kind_table(core::ptr::null());
         let _reset = KindTableReset;
-        let mut object = [0u8; 0x1a0];
-
-        assert_eq!(unsafe { object_kind_mask_union(object.as_mut_ptr(), 7) }, 0);
-        assert_eq!(unsafe { KIND_TABLE_CALLS }, 1, "the getter is called once");
-        assert_eq!(
-            unsafe { KIND_TABLE_OBJECT },
-            object.as_mut_ptr() as usize,
-            "r0 is forwarded untouched to the getter"
-        );
-        assert_eq!(
-            unsafe { KIND_TABLE_KIND },
-            7,
-            "r1 is forwarded untouched to the getter"
-        );
+        assert_eq!(unsafe { object_kind_mask_union(core::ptr::null(), 7) }, 0);
     }
 
     #[test]
@@ -3334,6 +3321,18 @@ mod tests {
             0xffff_0005_0000_000a,
             "the result is the bitwise OR of all entries up to the terminator"
         );
+    }
+
+    #[test]
+    fn kind_one_override_depends_only_on_low_flag_bit() {
+        let _guard = install_recording_kind_table(core::ptr::null());
+        let _reset = KindTableReset;
+        let mut object = [0xffu8; 0x18d];
+        for flag in 0..=u8::MAX {
+            object[0x18c] = flag;
+            let expected = if flag & 1 != 0 { 0x083e_8e58 } else { 0 };
+            assert_eq!(unsafe { object_kind_table(object.as_ptr(), 1) } as usize, expected);
+        }
     }
 
     static FIELD_QUERY_LOCK: Mutex<()> = Mutex::new(());
