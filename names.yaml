@@ -233921,3 +233921,45 @@ functions:
       21 original instructions versus 17 Rust instructions, preserving the
       signed guard and lookup while dropping the temporary initializer/copy;
       modern LLVM also changes the stack frame. No device execution claimed.
+
+  - address: 0x08105024
+    ghidra: FUN_08105024
+    name: five_buffer_batch_release
+    size: 96
+    sig: "void five_buffer_batch_release(const FiveBufferBatch *batch)"
+    module: app/five_buffer_batch_release
+    status: ported
+    renames:
+      param_1/r6: batch
+      r4: entry_index
+      r5: buffer_key
+      DAT_0810507c: controller_owner_0x089d0554
+      DAT_08105080: release_enabled_0x089caf61
+      FUN_08293d4c: registered_entry_signal
+      FUN_08205eb0: static_buffer_pool_get
+      FUN_08205e5c: stock ten-slot buffer-key release
+    notes: >-
+      Raw extent 0x08105024..0x08105084 is 96 bytes: 88 instruction bytes
+      plus two literals. Next real function starts with LDR at 0x08105084.
+      Two inbound plain BLs at 0x08104ee0 and 0x08104f04, zero predicated;
+      three outbound plain BLs at 0x08105038, 0x08105060, 0x08105068,
+      zero predicated. Signal entry 0x81 using owner word +4, read the
+      enable byte, and when nonzero release the first word of five 12-byte
+      records. Reload the batch's +4 table pointer each iteration and capture
+      the key before pool initialization. Ignore call results and preserve
+      batch records. Reuses canonical signal and pool ports. No ledger entry
+      exists for 0x08205e5c; retain that exact stock target rather than port a
+      second function. Its raw 84-byte extent scans ten 12-byte records at
+      0x08ae5734, clearing matched record byte +8 and word +4, returning one
+      on match and zero otherwise. Native repr(C) pointers widen host fixtures
+      only. Tests cover disabled NULL batch, post-signal enable changes,
+      nonzero high-bit enable, table replacement during initialization,
+      captured-key ordering and neighboring occupied-key preservation.
+      All 14940 host tests and ARM release build passed. Standalone actual-source
+      smoke released five selected keys while retaining neighboring key 105.
+      No device execution. match.py exits 1: 22 original instructions versus
+      40 Rust listing lines. LLVM unrolls the five iterations, retains each
+      table reload and key capture, uses BLX for stock release and tail-calls
+      its last invocation. Controller load is eliminated because the existing
+      four_slot_key_index port ignores its context, matching retail behavior.
+      LLVM adds frame setup and removes the discarded signal-result spill.
