@@ -1237,6 +1237,45 @@ pub unsafe extern "C" fn retail_vsnprintf(
     count
 }
 
+/// retail_vsprintf — original: `FUN_080f3c24` @ 0x080f3c24.
+///
+/// True size: 52 bytes (48 instruction bytes and sink literal 0x0807ca58),
+/// through the next function at 0x080f3c58. Verified whole-image ARM BL
+/// count: two plain incoming calls, zero predicated; one plain outgoing
+/// call to conversion core 0x08077c94. Initialize a local output cursor,
+/// format with a 0xffffffff byte budget, append NUL at the final cursor,
+/// and preserve the core's signed return value (Ghidra incorrectly says void).
+///
+/// Deliberate deviations: target Rust uses an indirect call to the verified
+/// firmware core; host builds use the existing RETAIL_VSNPRINTF_ENGINE seam.
+/// The explicit VaList signature is ABI-exact, not a variadic substitution.
+///
+/// # Safety
+/// `buf` must hold all emitted bytes plus NUL; `format` and `args` must
+/// satisfy the firmware conversion core's format and argument contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn retail_vsprintf(
+    buf: *mut u8,
+    format: *const u8,
+    args: VaList,
+) -> i32 {
+    let mut cursor = buf;
+    #[cfg(target_os = "none")]
+    let engine: RetailVsnprintfEngineFn = core::mem::transmute(0x08077c94usize);
+    #[cfg(not(target_os = "none"))]
+    let engine = core::ptr::read_volatile(core::ptr::addr_of!(RETAIL_VSNPRINTF_ENGINE));
+    let count = engine(
+        RETAIL_VSNPRINTF_SINK_ADDRESS,
+        &mut cursor,
+        u32::MAX as usize,
+        format,
+        args,
+    );
+    cursor.write(0);
+    count
+}
+
 /// string_object_format_selected_resource — original: `FUN_08116a38` @
 /// 0x08116a38 (72 bytes: 64 code bytes plus the two 4-byte resource-ID
 /// literals at 0x08116a78 and 0x08116a7c; 3 direct plain `bl` call sites,
@@ -6447,6 +6486,47 @@ pub(crate) mod tests {
 
     /// A distinguishable stand-in for the va_list the original's spill builds.
     const FORMAT_ARGS: VaList = 0x4444_4444 as VaList;
+
+    // Exercise the veneer with real host formatting rather than canned output.
+    // This adapter is test-only: ADS's core is not the retail conversion core.
+    unsafe extern "C" fn host_unbounded_format_engine(
+        _sink: usize,
+        cursor: *mut *mut u8,
+        _maximum: usize,
+        format: *const u8,
+        args: VaList,
+    ) -> i32 {
+        unsafe extern "C" fn emit(byte: u8, context: *mut core::ffi::c_void) {
+            let cursor = context.cast::<*mut u8>();
+            (*cursor).write(byte);
+            *cursor = (*cursor).add(1);
+        }
+        crate::printf::printf_core::_vsnprintf(
+            format, emit, cursor.cast(), args,
+        )
+    }
+
+    #[test]
+    fn retail_vsprintf_terminates_empty_and_expanded_output_without_clobbering_tail() {
+        let _bench = assign_cstr_bench(core::ptr::null_mut());
+        unsafe {
+            core::ptr::addr_of_mut!(RETAIL_VSNPRINTF_ENGINE)
+                .write_volatile(host_unbounded_format_engine);
+        }
+        let arguments = [(-12i32) as u32, 0xabu32];
+        for (format, expected) in [
+            (&b"\0"[..], &b"\0"[..]),
+            (&b"%d:%02x:%%\0"[..], &b"-12:ab:%\0"[..]),
+        ] {
+            let mut buffer = [0xa5; 32];
+            let count = unsafe {
+                retail_vsprintf(buffer.as_mut_ptr(), format.as_ptr(), arguments.as_ptr())
+            };
+            assert_eq!(count, (expected.len() - 1) as i32);
+            assert_eq!(&buffer[..expected.len()], expected);
+            assert_eq!(&buffer[expected.len()..], &[0xa5; 32][expected.len()..]);
+        }
+    }
 
     #[test]
     fn retail_vsnprintf_forwards_engine_arguments_truncates_and_terminates() {

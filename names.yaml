@@ -39993,6 +39993,39 @@ functions:
       injectable RETAIL_VSNPRINTF_ENGINE seam; tests cover forwarding,
       bounded truncation/NUL, count propagation, and the zero-size path.
 
+  - address: 0x080f3c24
+    ghidra: FUN_080f3c24
+    name: retail_vsprintf
+    size: 52
+    sig: "i32 retail_vsprintf(u8 *buf, const u8 *format, VaList args)"
+    module: cxx/string_object
+    status: ported
+    renames:
+      param_1: buf
+      param_2: format
+      param_3: args
+      local_c: cursor
+      DAT_080f3c54: retail_string_sink_descriptor
+      FUN_08077c94: retail_conversion_core
+    notes: >-
+      Raw osos.dec establishes 48 instruction bytes plus sink literal
+      0x0807ca58 at 0x080f3c54. Next function 0x080f3c58 establishes a
+      true extent of 52 bytes. Whole-image aligned ARM BL decoding finds
+      two plain callers at 0x080e7670 and 0x080edc3c, zero predicated
+      callers, and one outgoing plain BL at 0x080f3c40 to 0x08077c94.
+      Call the conversion core with (sink, &cursor, 0xffffffff, format,
+      args), terminate at its final cursor, and preserve its signed r0
+      result. Ghidra's void return is incorrect. Explicit VaList is
+      ABI-exact. Target builds call the verified firmware core indirectly;
+      hosts reuse RETAIL_VSNPRINTF_ENGINE. Host tests use a real ADS
+      formatter adapter for empty output, signed decimal/hex expansion,
+      percent escaping, count and untouched tail. An isolated executable
+      smoke exercised the extracted veneer with a host formatting adapter.
+      ARM match confirms the argument shuffle, unlimited budget, cursor
+      reload and byte termination with r0 preserved; LLVM uses BLX and a
+      frame pointer instead of direct BL and the original spill frame.
+      The symbol remains independent. The conversion core is not ported.
+
   # --- UTC timestamp converted through current calendar offset ---
   - address: 0x08074be0
     ghidra: FUN_08074be0
