@@ -975,6 +975,33 @@ pub unsafe extern "C" fn memh_free_if_nonnull(ptr: *mut u8) {
     }
 }
 
+/// free_tag4_if_nonnull_secondary — original: `FUN_080e2d4c` @
+/// 0x080e2d4c (12 bytes). Raw words: e3500000 1afde8c6 e12fff1e.
+/// Two incoming plain BLs at 0x080dc790 and 0x080dc7b8, zero predicated
+/// BLs; body has zero plain or predicated BLs and one BNE to 0x0805d070.
+/// The next real function begins at 0x080e2d58 with `add r1,r0,#0x14`.
+///
+/// Return immediately for NULL; otherwise release through the existing
+/// tag-4 deallocator. The caller owns clearing its stored pointer. Ghidra
+/// incorrectly follows the tail chain into the heap free implementation.
+/// Deviation: a Rust guarded call replaces the conditional tail branch.
+/// A target-only empty assembly barrier keeps this entry distinct from
+/// [`free_tag4_if_nonnull`] without emitting instructions or changing state.
+///
+/// # Safety
+/// A non-NULL pointer must satisfy [`free_tag4`]'s allocation contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn free_tag4_if_nonnull_secondary(ptr: *mut u8) {
+    #[cfg(target_os = "none")]
+    unsafe {
+        core::arch::asm!("/* secondary tag-4 NULL guard */", options(nomem, nostack, preserves_flags));
+    }
+    if !ptr.is_null() {
+        free_tag4(ptr);
+    }
+}
+
 
 /// calloc_tag4 — original: `FUN_0805d1dc` @ 0x0805d1dc (8 bytes; 23 `bl`
 /// call sites, binary-verified by decoding every B/BL word in osos.dec —
@@ -2180,6 +2207,18 @@ pub(crate) mod tests {
             assert_eq!(LAST_FREE_TAG, 4);
         }
     }
+
+    #[test]
+    fn secondary_tag4_null_release_leaves_heap_uninitialized() {
+        let _lock = mock_heap();
+        unsafe {
+            free_tag4_if_nonnull_secondary(core::ptr::null_mut());
+            free_tag4_if_nonnull_secondary(core::ptr::null_mut());
+            assert_eq!(FREE_CALLS, 0, "NULL is not handed to the heap core");
+            assert_eq!(CREATE_CALLS, 0, "NULL must not initialize the heap");
+        }
+    }
+
 
 
     #[test]
