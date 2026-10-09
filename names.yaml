@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080c065c
+    ghidra: FUN_080c065c
+    name: sparse_flags_to_compact_mask
+    size: 84
+    sig: "u32 sparse_flags_to_compact_mask(u32 flags)"
+    module: util/sparse_flags_to_compact_mask
+    status: ported
+    renames:
+      param_1/r0/r1: flags
+      uVar1/r0: compact_mask
+    notes: >-
+      Raw A32 extent [0x080c065c,0x080c06b0) is 84 bytes; bx lr at
+      0x080c06ac precedes the next function's push. Whole-image aligned
+      BL decoding finds two plain incoming calls at 0x0813dadc and
+      0x0813daec, zero predicated incoming calls and zero outgoing calls.
+      Caller converts state words at +0xe30 and +0xe34 to output masks.
+      Preserve input bits 0..3, 8 and 21; map bits 5, 6 and 15 to bits
+      4, 5 and 7. All other bits are discarded. Flag meanings unknown;
+      bit 8 remains bit 8, not the presumed inverse mapping of 0x080c0608.
+      No callee seams. Deliberate deviation: equivalent masks and shifts
+      replace conditional tests/ORs. Host tests cover every input bit and
+      all 512 supported combinations with unrelated bits clear or set.
+      ARM match.py exit-1 diff reviewed: 21 original versus 12 Rust entries;
+      masks/shifts preserve the mapping, with frame setup and a mask literal.
   - address: 0x080c1050
     ghidra: FUN_080c1050
     name: entry_table_finalize_last
