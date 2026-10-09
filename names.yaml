@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f4a08
+    ghidra: FUN_080f4a08
+    name: ft_hash_done
+    size: 84
+    sig: "void ft_hash_done(FtHash *hash, FtMemory *memory)"
+    module: ft/hash
+    status: ported
+    vars:
+      param_1/r0/r6: hash
+      param_2/r1/r9: memory
+      r4: bucket_cursor
+      r7: signed_capacity
+      r5: bucket_index
+    notes: >-
+      Raw A32 establishes [0x080f4a08,0x080f4a5c), 84 bytes with
+      no literal pool, ending in POP before the hash initializer PUSH.
+      Whole-image decoding finds two inbound plain BLs at 0x08081d80
+      and 0x08081ef4, zero predicated inbound BLs. Two outbound plain
+      BLs at 0x080f4a34 and 0x080f4a50 target the existing ft_mem_free
+      port at 0x082cfae8; zero predicated outbound BLs. Null hash returns;
+      snapshot buckets and capacity, free each bucket and clear its word,
+      reload and free the array, clear its pointer. Signed BLT skips
+      elements for zero or high-bit capacity. Header counters survive.
+      Reuses FtHash and FtMemory; native host header pointer widens,
+      bucket entries remain four-byte ARM words. No new callee seam.
+      Tests cover sparse buckets, release-before-clearing, guards,
+      signed capacity and null inputs. Full host suite passes 15031 tests;
+      ARM release build passes. Real allocator smoke initializes 241 zero
+      buckets and releases the array once, preserving counters. match.py
+      reports 21 stock versus 25 Rust instructions: countdown loop and
+      frame pointer differ, but guards, free calls, clears and reload remain.
   - address: 0x080f4a5c
     ghidra: FUN_080f4a5c
     name: ft_hash_init
