@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod owned_entry_collection_clear;
+pub use owned_entry_collection_clear::*;
 pub mod default_sequence_schedule;
 pub mod view_handle_play;
 pub mod view_handle_pause;

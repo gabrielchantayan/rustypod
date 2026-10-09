@@ -234068,3 +234068,33 @@ functions:
       16 original instructions versus 18 Rust listing lines, retaining both
       calls, field offsets, copy length, vtable literal, and returned object.
       LLVM adds frame setup and reorders the independent state/flag clears.
+  - address: 0x08104a84
+    ghidra: FUN_08104a84
+    name: owned_entry_collection_clear
+    size: 84
+    sig: "OwnedEntry **owned_entry_collection_clear(OwnedEntryCollection *collection)"
+    module: app/owned_entry_collection_clear
+    status: ported
+    vars: {param_1/r5: collection, r4: entry_index, r0_at_dispatch: entry, r1_at_dispatch: virtual_slot_04}
+    notes: >-
+      Raw extent [0x08104a84,0x08104ad8) ends with B 0x083e5140 before
+      the next constructor PUSH. Whole-image aligned A32 decoding verifies
+      two plain inbound BLs at 0x08104b48 and 0x08280e40, zero predicated
+      inbound BLs, zero internal BLs, and one internal BLXNE through slot +4.
+      Callers are the collection destructor and state completion path.
+      Visit non-null entries up to the byte count at +0x34, reloading count
+      and begin after callbacks. Zero count and erase all vector elements;
+      return the post-callback begin pointer. The virtual method identity
+      remains unresolved. Neither this address nor 0x083e5140 had a prior
+      names entry. Raw decoding of 0x083e5140 confirms generic vector range
+      erase; inline its erase-all specialization, omitting inert pointer walks
+      and introducing no callee seam. Pointer fields widen under repr(C) on
+      hosts while retaining ARM field order. Host tests cover null vectors,
+      zero count with a nonempty vector, null slots, maximum byte count,
+      callback count shrink/growth and vector replacement, preserving slots
+      and capacity. All 14948 host tests pass; ARM release build passes.
+      Standalone host smoke observes one callback, null skipping and cleared
+      count/end with the begin return. match.py exits 1: 21 stock versus 25
+      Rust instructions, preserving indirect dispatch, callback count reload
+      and target offsets +4/+8/+0x34. LLVM removes the redundant byte mask
+      and replaces the tail erase with an end-pointer store. No device run.
