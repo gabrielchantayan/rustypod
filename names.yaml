@@ -237636,3 +237636,30 @@ functions:
       match.py shows 49 versus 47 instructions: equivalent gates, two calls,
       handle loads and conditional outputs, with LLVM register/frame changes.
       No device execution.
+
+  - address: 0x080d4898
+    ghidra: FUN_080d4898
+    name: psh_dimension_scale_widths
+    size: 144
+    sig: "void psh_dimension_scale_widths(i32 *dimensions, u32 dimension)"
+    module: ft/pshinter
+    status: ported
+    vars: {param_1: dimensions, param_2: dimension, iVar4: remaining, uVar5: scale, puVar3: width, iVar2: scaled}
+    notes: >-
+      Raw ARM establishes the extent 0x080d4898..0x080d4928, followed
+      immediately by a real argument-shuffling tail-call function. Two
+      unconditional BL sites at 0x080d48c4 and 0x080d48ec call the existing
+      ft_mulfix at 0x0804d2cc; zero predicated BL sites. Caller 0x080c1448
+      selects dimensions zero and one after updating scale fields. Each
+      dimension occupies 51 target words: count at word 1, width triples
+      at word 2, scale at word 50. Scales the first width, snaps subsequent
+      widths to it when signed wrapping absolute difference is below 128,
+      and rounds every result with wrapping (width+32)&~63. Preserves the
+      signed MIN absolute-value behavior. Zero count writes nothing. No
+      behavioral deviations or new callee seams. Host suite: 15123 passed;
+      ARM release build passed. Standalone executable exercised all 16
+      widths, half scaling, strict threshold, and adjacent record retention.
+      match.py reports 36 original versus 99 Rust instructions: LLVM inlines
+      both ft_mulfix sites and hoists scale components; count gate, first
+      width, signed snap comparison, grid rounding, and triple stride remain.
+      No device execution.
