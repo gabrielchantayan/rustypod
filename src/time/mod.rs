@@ -8,6 +8,7 @@ pub mod clock_gettime;
 pub mod wait_clock_gettime;
 pub mod timespec_copy;
 pub mod compare_clock_records;
+pub mod earliest_enabled_clock_record;
 pub mod daylight_saving_offset_is_nonzero;
 pub mod refresh_utc_offset_cache;
 pub mod current_day_and_seconds;

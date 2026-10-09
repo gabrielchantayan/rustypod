@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080caa28
+    ghidra: FUN_080caa28
+    name: earliest_enabled_clock_record
+    size: 92
+    sig: "i32 earliest_enabled_clock_record(void)"
+    module: time/earliest_enabled_clock_record
+    status: ported
+    vars:
+      iVar1/r6: records
+      iVar3/r4: index
+      iVar4/r5: selected
+      iVar2/r0: candidate_or_comparison
+      records+0xe/u8: enabled
+    notes: >-
+      Raw A32 extent [0x080caa28,0x080caa84), 92 bytes including the
+      table-address literal at 0x080caa80; 88 executable bytes end with
+      POP PC at 0x080caa7c. Next real entry starts with LDR then PUSH.
+      Whole-image aligned-word decoding finds two incoming plain BLs at
+      0x08044a4c and 0x080e1d20, zero predicated BLs. Body has one plain BL
+      to the existing port compare_clock_records at 0x0808cde4, no predicated
+      BLs. Scans five 20-byte records at 0x08a662ec, accepting any nonzero
+      enable byte at +14. Selects the first enabled record, replacing it
+      only when comparison returns exactly -1; equal clock keys keep the
+      first index. Returns -1 when none are enabled. No target deviations;
+      host tests use a private pointer-taking core. ARM match.py shows LLVM
+      unrolling the scan into four comparison call sites; relocations all
+      resolve to compare_clock_records. Fixed-RAM entry smoke verifies the
   - address: 0x080cab1c
     ghidra: FUN_080cab1c
     name: u16_threshold_lookup
