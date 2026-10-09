@@ -239026,3 +239026,32 @@ functions:
       build succeeded. match.py exit 1 reports 11 original versus 12 Rust
       instructions: same field loads, normalization and BX tail dispatch,
       with LLVM frame setup and a larger saved-register set. No device run.
+
+  - address: 0x080bdb98
+    ghidra: FUN_080bdb98
+    name: xtea_load_u32_be
+    size: 36
+    sig: "u32 xtea_load_u32_be(const u8 *source)"
+    module: util/xtea_load_u32_be
+    status: ported
+    renames: {param_1/r0: source, r1: high, r2: second, r3: third}
+    notes: >-
+      Raw words establish the complete 36-byte extent 0x080bdb98-0x080bdbbc,
+      ending with bx lr at 0x080bdbb8 before the independent halfword store.
+      Whole-image aligned ARM decoding finds two incoming plain BL sites,
+      0x08056ebc and 0x08056ec8, zero predicated BL sites, and no outgoing calls.
+      Both callers are in the XTEA counter encryptor at 0x08056e44, reading
+      serialized counter words produced by xtea_store_u32_be at 0x080b44a4.
+      Four unsigned byte loads at offsets 0,1,2,3 are combined with shifts
+      24,16,8,0. Accepts unaligned input without NULL or bounds guards.
+      Volatile byte loads preserve access width and order; no deliberate
+      behavioral deviations. Byte-identical sibling 0x080bdb74 is already
+      mapped to load_be32; this entry retains a distinct named text section.
+      Host tests cover extreme and mixed words, every byte value at each
+      position and each alignment, and unchanged source memory. Standalone
+      real-source smoke returns 0xdeadbeef from an unaligned four-byte input.
+      Full host cargo test suite and ARM build-std release build passed.
+      match.py resolves the distinct export and reports nine original versus
+      eleven Rust instructions (exit 1): identical four ordered byte loads
+      and big-endian combination, with LLVM frame setup/return and earlier
+      combination of the first two bytes. No device execution.

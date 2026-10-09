@@ -401,6 +401,7 @@ pub mod store_four_u32_be;
 pub mod store_u32_be;
 pub mod xtea_decrypt_block;
 pub mod xtea_store_u32_be;
+pub mod xtea_load_u32_be;
 pub mod reverse_u32_bytes_into;
 pub mod resource_metadata_lookup;
 pub mod stream_seek;
