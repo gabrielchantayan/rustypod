@@ -72,6 +72,28 @@ pub unsafe extern "C" fn packed_read_u16_be(source: *const u8) -> u32 {
     low | (high << 8)
 }
 
+/// `wire_read_u16_be` — original: `FUN_080c6368` @ 0x080c6368.
+///
+/// True size: 16 bytes, ending with `bx lr` at 0x080c6374; the next
+/// function begins at 0x080c6378. Whole-image ARM BL decoding verifies two
+/// plain callers (0x080e722c and 0x080e7268), zero predicated callers, and
+/// zero outbound calls. Reads two bytes, high byte first, and returns
+/// `source[0] << 8 | source[1]` zero-extended in r0. Both callers decode
+/// halfword fields in the transformed wire buffer of FUN_080e7134.
+/// No deliberate behavioral deviations. A dedicated text section keeps
+/// this firmware entry distinct from the equivalent endian readers.
+///
+/// # Safety
+/// `source` must point to two readable bytes; no alignment is required.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.wire_read_u16_be")]
+#[inline(never)]
+pub unsafe extern "C" fn wire_read_u16_be(source: *const u8) -> u32 {
+    let high = *source as u32;
+    let low = *source.add(1) as u32;
+    low | (high << 8)
+}
+
 /// read_u32_be — original: `FUN_080743b8` @ 0x080743b8 (24 bytes;
 /// 41 `bl` call sites, all unpredicated, counted by decoding every B/BL
 /// word in osos.dec).
@@ -122,6 +144,21 @@ mod tests {
     use super::*;
     use std::vec;
     use std::vec::Vec;
+
+    #[test]
+    fn wire_read_u16_be_all_values_and_alignments() {
+        let mut bytes = [0xa5u8; 8];
+        for value in 0..=u16::MAX {
+            for offset in 0..4 {
+                bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
+                assert_eq!(
+                    unsafe { wire_read_u16_be(bytes.as_ptr().add(offset)) },
+                    value as u32,
+                    "value={value:#06x}, offset={offset}",
+                );
+            }
+        }
+    }
 
     #[test]
     fn packed_read_u16_be_all_values_and_alignments() {
