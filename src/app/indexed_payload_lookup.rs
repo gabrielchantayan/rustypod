@@ -76,6 +76,39 @@ pub unsafe extern "C" fn indexed_payload_lookup(
 ) -> u32 {
     indexed_payload_lookup_backend(index, entry, 0, payload_out, encoded_length_out)
 }
+
+/// indexed_payload_equals — `FUN_080ce690` @ `0x080ce690` (76 bytes).
+///
+/// Raw ARM ends at the next function's push at 0x080ce6dc. Two outbound
+/// plain BLs call indexed_payload_lookup and byte_ranges_equal; no predicated
+/// BLs. Two inbound plain BLs occur in the indexed candidate search.
+/// Returns one only for a successful lookup whose encoded length equals
+/// `len` and whose bytes equal `bytes`. Length is not shifted or decoded.
+///
+/// Deliberate deviations: output locals use native host pointer width.
+/// No algorithmic deviations; failed lookup and unequal length skip all
+/// comparison reads, and entry zero with length zero compares no bytes.
+///
+/// # Safety
+/// `index` must satisfy indexed_payload_lookup's input requirements.
+/// On successful equal-length lookup, `bytes` and the returned payload
+/// must be readable for `len` bytes; NULL is allowed when len is zero.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn indexed_payload_equals(
+    index: *mut u8,
+    entry: u32,
+    bytes: *const u8,
+    len: u32,
+) -> u32 {
+    let mut payload = core::ptr::null_mut();
+    let mut encoded_length = len;
+    if indexed_payload_lookup(index, entry, &mut payload, &mut encoded_length) != 0
+        || encoded_length != len {
+        return 0;
+    }
+    u32::from(crate::libc::byte_ranges_equal::byte_ranges_equal(bytes, payload, len) != 0)
+}
 /// `record_metadata_lookup` — original: `FUN_0805572c` @ `0x0805572c` (56 bytes).
 ///
 /// Raw ARM establishes the exact extent `0x0805572c..0x08055764`: the next
@@ -302,6 +335,53 @@ mod tests {
     use crate::util::crts_tag::CRTS_TAG;
     use core::ptr;
 
+
+    #[test]
+    fn equality_requires_success_exact_encoded_length_and_all_bytes() {
+        unsafe {
+            let Some(slab) = try_map_u32_slab(hints::INDEXED_PAYLOAD_EQUALS, 4096) else {
+                note_missing_u32_fixture("indexed_payload_equals");
+                return;
+            };
+            let w = slab.cast::<u32>();
+            ptr::write_bytes(w, 0, 1024);
+            w.write(CRTS_TAG);
+            w.add(2).write(w.add(16) as usize as u32);
+            w.add(4).write(w.add(17) as usize as u32);
+            w.add(7).write(1);
+            w.add(12).write(1);
+            w.add(16).write(w.add(32) as usize as u32);
+            w.add(17).write(slab.add(256) as usize as u32);
+            w.add(32).write(0);
+            w.add(33).write(4);
+            ptr::copy_nonoverlapping([7u8, 0, 9, 255].as_ptr(), slab.add(256), 4);
+            let index = slab;
+            let mut candidate = [7u8, 0, 9, 255];
+            assert_eq!(indexed_payload_equals(index, 1, candidate.as_ptr(), 4), 1);
+            for i in 0..4 {
+                candidate[i] ^= 1;
+                assert_eq!(indexed_payload_equals(index, 1, candidate.as_ptr(), 4), 0);
+                candidate[i] ^= 1;
+            }
+            // Unreadable comparison input proves both short-circuit paths.
+            for len in [0, 2, 3, 5, u32::MAX] {
+                assert_eq!(indexed_payload_equals(index, 1, ptr::null(), len), 0);
+            }
+            for entry in [2, u32::MAX, 0x8000_0000] {
+                assert_eq!(indexed_payload_equals(index, entry, ptr::null(), 4), 0);
+            }
+            assert_eq!(indexed_payload_equals(index, 0, ptr::null(), 0), 1);
+            assert_eq!(indexed_payload_equals(index, 0, ptr::null(), 1), 0);
+            w.add(33).write(0);
+            assert_eq!(indexed_payload_equals(index, 1, ptr::null(), 0), 0);
+            w.add(33).write(4);
+            w.add(32).write(0x8000_0000);
+            assert_eq!(indexed_payload_equals(index, 1, ptr::null(), 4), 0);
+            w.write(0);
+            assert_eq!(indexed_payload_equals(index, 0, ptr::null(), 0), 0);
+            assert_eq!(indexed_payload_equals(ptr::null_mut(), 0, ptr::null(), 0), 0);
+        }
+    }
     #[test]
     fn signed_indices_modes_live_entries_and_optional_outputs() {
         unsafe {
