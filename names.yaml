@@ -234309,3 +234309,37 @@ functions:
       the two-call sequence and final tail branch are retained. No device
       execution. Standalone host smoke was blocked by six unrelated
       missing host-only callee definitions in the existing crate.
+
+  - address: 0x08101c14
+    ghidra: FUN_08101c14
+    name: string_table_value
+    size: 232
+    sig: "const u32 *string_table_value(u8 *table, const u32 *key)"
+    module: app/string_table
+    status: ported
+    vars: {param_1/r4: table, param_2/r5: key, local_18: node, local_14: header}
+    renames:
+      FUN_08101edc: string_table_has_string
+      FUN_083db55c: string_key_tree_find
+      FUN_083cf848: iterator_equal
+      FUN_083d6f0c: cxx_string_empty
+      FUN_083db69c: string_table_fallback_value_slot
+      FUN_083d8b5c: cxx_string_from_cstr
+    notes: >-
+      Raw extent ends at the independent push at 0x08101cfc: 212 code
+      bytes plus 20 literal bytes. Two inbound plain BLs at 0x08102174
+      and 0x081021a0; nine outbound plain BLs; zero predicated BLs.
+      Membership precedes a repeated current-map lookup, selecting current
+      only for a non-empty hit, otherwise fallback. Neither present returns
+      fixed lazy empty string at 0x089d00e0 guarded by 0x089d00dc.
+      Preserves opaque shutdown-handler word 0x083cddb4 and DSO 0x089ca09c.
+      Host uses native static storage and explicitly rejects opaque shutdown.
+      Host tests cover missing and empty current values, both selectors,
+      selector mutation across find, ready guard and refused acquire;
+      all 14958 host tests pass. ARM release build passes. match.py exits
+      1 with 53 stock versus 80 Rust instructions: ops BLX dispatch,
+      inlined cxa_atexit and eliminated no-op guard release explain the
+      structural differences. Selector reloads and fallback choice remain.
+      Standalone public-entry smoke is blocked by six unrelated missing
+      host helper definitions in prepare_entry_metadata, shared_payload_select_kind
+      and calendar_schedule; no device execution claimed.

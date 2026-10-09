@@ -235,49 +235,95 @@ pub unsafe extern "C" fn string_table_has_string(table: *mut u8, key: *const u32
         && (ops.string_empty)((node as usize + NODE_VALUE_OFFSET) as *const u32) == 0)
         as u32
 }
-/// The unported string-table value lookup called by
-/// [`string_table_parse_i32`]. `FUN_08101c14` selects a non-empty current
-/// table value or the fallback table value, then returns the address of its
-/// COW-string data-pointer word.
+/// Dispatch retained for isolated parser fixtures; defaults to the Rust lookup.
 #[derive(Clone, Copy)]
 pub struct StringTableParseOps {
-    /// `FUN_08101c14` @ 0x08101c14 — resolves `key` in `table` and returns
-    /// the address of the selected mapped COW string's data-pointer word.
     pub lookup: unsafe extern "C" fn(table: *mut u8, key: *const u32) -> *const u32,
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_string_table_value(
-    table: *mut u8,
-    key: *const u32,
-) -> *const u32 {
-    let lookup: unsafe extern "C" fn(*mut u8, *const u32) -> *const u32 =
-        unsafe { core::mem::transmute(0x0810_1c14usize) };
-    unsafe { lookup(table, key) }
+pub static mut STRING_TABLE_PARSE_OPS: StringTableParseOps = StringTableParseOps {
+    lookup: string_table_value,
+};
+
+/// Resolve a localized value — `FUN_08101c14` @ 0x08101c14.
+/// True extent: 232 bytes [0x08101c14,0x08101cfc), including 20 literal
+/// bytes after 212 instruction bytes. Raw whole-image decoding verifies two
+/// inbound plain BLs (0x08102174,0x081021a0), nine outbound plain BLs and
+/// zero predicated BLs in either direction.
+///
+/// Test membership first; if present, repeat the current-map lookup and
+/// select it only for a non-empty hit, otherwise use the fallback map.
+/// Obtain its mapped-value slot through the existing find-or-insert port.
+/// If neither map has a non-empty value, lazily construct and return the
+/// fixed empty string. Reload the selector across every callee boundary.
+///
+/// Deviations: ordinary locals replace spilled r2/r3; allocator-tag residue
+/// is omitted as in cxx_string_from_cstr. The shutdown handler remains the
+/// opaque raw word 0x083cddb4, not an invented destructor identity.
+/// Host static storage uses native pointers; map fixtures retain u32 words.
+/// Opaque shutdown is unavailable on host and explicitly panics if invoked.
+///
+/// # Safety
+/// table, key and their maps must satisfy the existing map/string contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_table_value(table: *mut u8, key: *const u32) -> *const u32 {
+    if string_table_has_string(table, key) == 0 {
+        return string_table_empty_value();
+    }
+    let map = string_table_value_map(table, key, string_table_ops());
+    string_table_fallback_value_slot(map, key.cast()).cast()
+}
+
+#[inline(always)]
+unsafe fn string_table_value_map(
+    table: *mut u8, key: *const u32, ops: StringTableOps,
+) -> *mut u8 {
+    let current = |table: *mut u8| {
+        table.wrapping_add(word(table, CURRENT_TABLE_INDEX_WORD)
+            .wrapping_mul(TABLE_STRIDE as u32) as usize)
+    };
+    let mut node = 0;
+    (ops.find)(&mut node, current(table), key);
+    let header = word(current(table), MAP_HEADER_WORD);
+    if (ops.iter_eq)(&node, &header) == 0
+        && (ops.string_empty)((node as usize + NODE_VALUE_OFFSET) as *const u32) == 0
+    {
+        current(table)
+    } else {
+        table.add(FALLBACK_TABLE_OFFSET)
+    }
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_string_table_value(
-    _table: *mut u8,
-    _key: *const u32,
-) -> *const u32 {
-    panic!("string_table_parse_i32 requires string-table lookup 0x08101c14")
+static mut HOST_EMPTY_VALUE_GUARD: u32 = 0;
+#[cfg(not(target_os = "none"))]
+static mut HOST_EMPTY_VALUE: *mut u8 = core::ptr::null_mut();
+
+#[cfg(not(target_os = "none"))]
+unsafe extern "C" fn unavailable_empty_value_shutdown(_: *mut core::ffi::c_void) {
+    panic!("string-table empty shutdown handler 0x083cddb4 requires retailOS")
 }
 
-/// Active model of the unported `FUN_08101c14` lookup. Target builds retain
-/// the verified firmware call boundary; host tests install a low-address
-/// target-word fixture.
-#[cfg(target_os = "none")]
-pub static mut STRING_TABLE_PARSE_OPS: StringTableParseOps = StringTableParseOps {
-    lookup: firmware_string_table_value,
-};
-
-/// Active model of the unported `FUN_08101c14` lookup. The host default
-/// rejects accidental traversal into the unported COW string-table lookup.
-#[cfg(not(target_os = "none"))]
-pub static mut STRING_TABLE_PARSE_OPS: StringTableParseOps = StringTableParseOps {
-    lookup: missing_string_table_value,
-};
+unsafe fn string_table_empty_value() -> *const u32 {
+    use crate::runtime::cxa_guard::{cxa_guard_acquire, cxa_guard_release};
+    use crate::runtime::shutdown_chain::{cxa_atexit, ShutdownHandlerFn};
+    #[cfg(target_os = "none")]
+    let (guard, value) = (0x089d_00dc as *mut u32, 0x089d_00e0 as *mut *mut u8);
+    #[cfg(not(target_os = "none"))]
+    let (guard, value) = (core::ptr::addr_of_mut!(HOST_EMPTY_VALUE_GUARD),
+        core::ptr::addr_of_mut!(HOST_EMPTY_VALUE));
+    if guard.read_volatile() & 1 == 0 && cxa_guard_acquire(guard) != 0 {
+        let initialized = crate::cxx::string::cxx_string_from_cstr(value, b"\0".as_ptr());
+        #[cfg(target_os = "none")]
+        let handler: ShutdownHandlerFn = core::mem::transmute(0x083c_ddb4usize);
+        #[cfg(not(target_os = "none"))]
+        let handler: ShutdownHandlerFn = unavailable_empty_value_shutdown;
+        cxa_atexit(initialized.cast(), handler, 0x089c_a09c);
+        cxa_guard_release(guard);
+    }
+    value.cast()
+}
 
 #[inline(always)]
 unsafe fn string_table_parse_ops() -> StringTableParseOps {
@@ -396,8 +442,7 @@ unsafe fn scan_unsigned_hex(input: *const u8) -> u32 {
 /// Deliberate deviation: the existing Rust `sscanf` veneer cannot consume its
 /// C-varargs destination (the original passes the local in r2), so this port
 /// inlines the already-ported scanf integer worker's `%x` behavior. The
-/// unported lookup remains the established `read_volatile` ops seam at its
-/// verified target address 0x08101c14.
+/// lookup dispatch defaults to the Rust string_table_value port.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_table_parse_u32_hex(
@@ -423,8 +468,7 @@ pub unsafe extern "C" fn string_table_parse_u32_hex(
 /// Deliberate deviation: the existing Rust `sscanf` veneer cannot consume its
 /// C-varargs destination (the original passes the local in r2), so this port
 /// inlines the already-ported scanf integer worker's `%d` behavior. The
-/// unported lookup remains a `read_volatile` ops seam at its verified target
-/// address 0x08101c14.
+/// lookup dispatch defaults to the Rust string_table_value port.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn string_table_parse_i32(table: *mut u8, key: *const u32) -> u32 {
@@ -1930,7 +1974,7 @@ mod tests {
                 ptr::write_volatile(
                     ptr::addr_of_mut!(STRING_TABLE_PARSE_OPS),
                     StringTableParseOps {
-                        lookup: missing_string_table_value,
+                        lookup: string_table_value,
                     },
                 );
             }
@@ -2081,6 +2125,63 @@ mod tests {
     }
 
     const KEY: u32 = 0xcafe;
+
+    #[test]
+    fn value_selection_distinguishes_missing_empty_and_nonempty_current_values() {
+        let (_guard, _seam) = lock();
+        let Some(f) = Fixture::map() else {
+            assert!(note_missing_u32_fixture("app/string_table")); return;
+        };
+        unsafe {
+            for index in [0, 1] {
+                f.set_index(index);
+                let header = f.addr(if index == 0 { HEADER0 } else { HEADER1 });
+                for (node, expected) in [
+                    (header, MAP2), (f.addr(NODE_B), MAP2),
+                    (f.addr(NODE_A), index as usize * TABLE_STRIDE),
+                ] {
+                    install(&[node]);
+                    assert_eq!(string_table_value_map(f.base, &KEY, string_table_ops()),
+                        f.base.add(expected));
+                }
+            }
+            // A find may change the selector: compare with the new header
+            // and return the newly selected map, not the cached old map.
+            f.set_index(0);
+            install(&[f.addr(NODE_A)]);
+            FIND_SETS_INDEX = Some((f.base, 1));
+            assert_eq!(string_table_value_map(f.base, &KEY, string_table_ops()),
+                f.base.add(MAP1));
+            f.set_index(0);
+            install(&[f.addr(HEADER1)]);
+            FIND_SETS_INDEX = Some((f.base, 1));
+            assert_eq!(string_table_value_map(f.base, &KEY, string_table_ops()),
+                f.base.add(MAP2));
+        }
+    }
+
+    #[test]
+    fn missing_value_returns_static_slot_when_guard_is_ready_or_acquire_is_refused() {
+        let (_guard, _seam) = lock();
+        let Some(f) = Fixture::map() else {
+            assert!(note_missing_u32_fixture("app/string_table")); return;
+        };
+        unsafe {
+            let saved_guard = HOST_EMPTY_VALUE_GUARD;
+            let saved_value = HOST_EMPTY_VALUE;
+            HOST_EMPTY_VALUE = f.base.add(REP_B_SIZE + 4);
+            for guard in [1, 2] {
+                HOST_EMPTY_VALUE_GUARD = guard;
+                install(&[f.addr(HEADER0), f.addr(HEADER2)]);
+                let value = string_table_value(f.base, &KEY);
+                assert_eq!(value, ptr::addr_of!(HOST_EMPTY_VALUE).cast());
+                assert_eq!(value.read(), f.addr(REP_B_SIZE + 4));
+                assert_eq!(HOST_EMPTY_VALUE_GUARD, guard);
+            }
+            HOST_EMPTY_VALUE_GUARD = saved_guard;
+            HOST_EMPTY_VALUE = saved_value;
+        }
+    }
 
     #[test]
     fn hit_current_nonempty_returns_one_without_fallback() {
