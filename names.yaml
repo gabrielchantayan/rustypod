@@ -238092,3 +238092,45 @@ functions:
       Object relocation confirms R_ARM_CALL to
       ft_linked_module_find_by_class; the wrapper has its own symbol,
       with no intentional fold. No device execution claimed.
+  - address: 0x080cc500
+    ghidra: FUN_080cc500
+    name: af_edge_translate_position
+    size: 28
+    sig: "i32 af_edge_translate_position(u32 *hints, const u32 *reference, u32 *edge)"
+    module: ft/edge_translate_position
+    status: ported
+    vars:
+      param_1/r0: ignored_hints
+      param_2/r1: reference_edge
+      param_3/r2: edge
+      r3: reference_original_position
+      edge+4: original_position
+      edge+8: fitted_position
+      reference+4: reference_original_position
+      reference+8: reference_fitted_position
+    notes: >-
+      Raw words establish the complete 28-byte extent
+      [0x080cc500,0x080cc51c), ending in BX LR before the next real
+      function at 0x080cc51c. Independent whole-image aligned A32
+      decoding finds two plain inbound BL sites, 0x080a108c and
+      0x080a1138, zero predicated inbound BLs, and zero outgoing BLs.
+      The caller at 0x080a0e5c traverses 48-byte auto-hinter edge
+      records and sets fitted bit 4 at +12 after translating an edge.
+      Load edge+4, reference+4 and reference+8 before storing
+      edge+8 = edge_original - reference_original + reference_fitted,
+      with wrapping 32-bit arithmetic. Hints is ignored and may be
+      null. Preserve the computed r0 as an i32 return despite
+      Ghidra's void signature; its second decompiled invocation
+      also incorrectly omits the third argument. Named aligned word
+      pointers preserve target offsets on hosts without inventing a
+      full edge structure or forbidding aliasing. No callee seams
+      or algorithmic deviations. Host regression covers signed
+      displacement, overflow, untouched neighboring fields, identical
+      records and overlapping prefixes. All 15142 host tests passed.
+      Production-source smoke verified 343 signed/wrapping translations.
+      ARM release build passed. match.py exited 1 with an expected
+      structural diff: LLVM adds a frame, combines the reference
+      loads into LDMIB, and reorders independent loads. It retains
+      wrapping SUB/ADD, the +8 store, the r0 result and zero calls.
+      The symbol has its own eight-instruction body; no intentional
+      fold. No device execution claimed.
