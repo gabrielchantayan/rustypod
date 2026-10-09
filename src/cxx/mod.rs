@@ -19,6 +19,7 @@ pub use owned_object_handle_construct::*;
 pub mod owned_object_handle_replace;
 pub mod owned_object_handle_release;
 pub mod vtable_object_owner_destruct;
+pub mod record_nested_object_destruct;
 pub mod record_u16_casefold_search;
 pub mod segmented_buffer_state_reset;
 pub mod shared_record_list_owner_construct;

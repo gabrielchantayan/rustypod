@@ -26,19 +26,15 @@
 //! offsets; target builds use the verified ARM offsets.
 
 use crate::heap::veneers::operator_delete;
+use super::record_nested_object_destruct::{record_nested_object_destruct, NestedObjectRecord};
 
 const COLLECTION_ITEM_SLOT: usize = 0x40 / 4;
 type CollectionItemMethod = unsafe extern "C" fn(*mut u8, i32) -> *mut u8;
-type NestedDestructor = unsafe extern "C" fn(*mut u8);
 
 #[cfg(target_os = "none")]
 const COLLECTION_COUNT_OFFSET: usize = 4;
 #[cfg(not(target_os = "none"))]
 const COLLECTION_COUNT_OFFSET: usize = core::mem::size_of::<usize>();
-#[cfg(target_os = "none")]
-const RECORD_NESTED_OFFSET: usize = 4;
-#[cfg(not(target_os = "none"))]
-const RECORD_NESTED_OFFSET: usize = core::mem::size_of::<usize>();
 
 /// Releases only the first occupied record returned by the collection.
 ///
@@ -58,12 +54,7 @@ pub unsafe extern "C" fn collection_release_first_occupied(collection: *mut u8) 
         let method: CollectionItemMethod = unsafe { core::mem::transmute(vtable.add(COLLECTION_ITEM_SLOT).read()) };
         let record = unsafe { method(collection, index) };
         if unsafe { (record as *const u32).read_volatile() } != 0 {
-            let nested = unsafe { (record.add(RECORD_NESTED_OFFSET) as *const *mut u8).read() };
-            if !nested.is_null() {
-                let nested_vtable = unsafe { (nested as *const *const usize).read() };
-                let destruct: NestedDestructor = unsafe { core::mem::transmute(nested_vtable.add(1).read()) };
-                unsafe { destruct(nested) };
-            }
+            unsafe { record_nested_object_destruct(record.cast::<NestedObjectRecord>()) };
             unsafe { operator_delete(record) };
             return;
         }
