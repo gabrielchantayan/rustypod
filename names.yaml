@@ -238609,3 +238609,29 @@ functions:
       host pointer fields replace target four-byte words. Host tests cover
       exact mode selection, FIFO preservation, last-node removal and empty
       queues; no device run.
+
+  - address: 0x080c62fc
+    ghidra: FUN_080c62fc
+    name: counted_dispatch_table_address
+    size: 12
+    sig: "const uint32_t *counted_dispatch_table_address(void)"
+    module: app/counted_dispatch_table_address
+    status: ported
+    renames:
+      DAT_080c6304: counted dispatch-table address literal
+    notes: >-
+      Raw words e59f0000 e12fff1e 0896eda4 establish the 12-byte extent
+      0x080c62fc..0x080c6308, including the literal omitted by Ghidra's
+      eight-byte size. Next function starts with push {r4-r6,lr}.
+      Whole-image aligned A32 decoding finds two plain BL callers at
+      0x080a5b9c and 0x080a5d28, zero predicated BLs, no outbound calls.
+      Returns address 0x0896eda4 itself, never its contents. Both callers
+      pass it in r1 to FUN_080bf640, whose first two table words are a
+      count and a pointer to 12-byte dispatch records. Exact table
+      identity and contents remain unrecovered; no data reconstruction
+      or callee seam. Hosts preserve the opaque firmware address.
+      Regression verifies exact address without firmware backing storage;
+      all 15165 host tests passed and ARM release build succeeded.
+      match.py confirms the address literal and return structure; LLVM
+      adds frame-pointer prologue/epilogue. No behavioral deviations.
+      No device run.
