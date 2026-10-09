@@ -236391,3 +236391,27 @@ functions:
       LLVM delays the frame and explicitly sets container result zero;
       cached-next recursion, flag precedence, pointer passthrough and
       completion tail branch remain intact.
+  - address: 0x080e325c
+    ghidra: FUN_080e325c
+    name: cff_lookup_glyph
+    size: 88
+    sig: "u32 cff_lookup_glyph(const CffFontCharset *font, u32 charcode)"
+    module: ft/cff_lookup_glyph
+    status: ported
+    vars:
+      param_1: font
+      param_2: charcode
+      uVar1: glyph_index
+    notes: >-
+      CFF seac charset lookup. Raw ARM establishes 84 instruction bytes plus
+      the literal at 0x080e32b0, before the next prologue at 0x080e32b4.
+      Two inbound plain BLs at 0x080a1910 and 0x080a1920; no predicated
+      inbound BLs and no outgoing BLs. Charset pointer is +0x488 and unsigned
+      glyph count is +0x0c. Reject NULL charset and codes >=256; fetch a
+      halfword SID from literal-address table 0x0890d2b8 and return the first
+      matching charset index, or 0xffffffff. Zero SID is searchable.
+      Raw bytes at the table address do not match conventional Adobe
+      StandardEncoding; preserve the firmware literal without substitution.
+      Typed fields widen the pointer on hosts; tests replace only the fixed
+      encoding-table address and exercise duplicates, high-bit SIDs, empty
+      and truncated charsets, code 255, full-width invalid codes, and NULL.
