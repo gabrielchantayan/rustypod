@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fdaf8
+    ghidra: FUN_080fdaf8
+    name: scsi_error_recovery_page_write
+    size: 80
+    sig: "u32 scsi_error_recovery_page_write(const u8* receiver, u8* output, u32 requested_length)"
+    module: app/scsi_error_recovery_page
+    status: ported
+    renames:
+      param_1/r0: ignored_receiver
+      param_2/r1: output
+      param_3/r2: requested_length
+    notes: >-
+      Raw A32 proves extent 0x080fdaf8..0x080fdb48, 80 instruction bytes
+      without literals, ending in bx lr before the next function push.
+      Whole-image branch decoding finds two plain incoming BLs at
+      0x080fb0e4 and 0x080fb190, zero predicated incoming BLs and zero
+      outgoing calls. Caller 0x080faec0 selects read/write error-recovery
+      page 1 or all pages 0x3f in its MODE SENSE response builder.
+      Writes 81 0a e0 followed by nine zeros, ignoring receiver. All twelve
+      bytes are written regardless of requested length. Unsigned lengths
+      <= 12 return length + 1, including 13 for length 12; larger lengths
+      return 12. No behavioral deviations or callee seams. Volatile byte
+      stores preserve write width/order and prevent libc substitution.
+      All 14984 host tests and ARM release build pass. Tests cover output
+      alignments, canaries, short lengths, 12/13 and high unsigned lengths.
+      Direct smoke confirms lengths 0, 11, 12, 13 and UINT_MAX. match.py
+      reports 20 stock versus 22 Rust instructions: all twelve byte stores
+      and unsigned selection remain; LLVM adds a frame, moves cmp earlier,
+      and computes length + 1 before conditionally selecting 12.
   - address: 0x080fdde4
     ghidra: FUN_080fdde4
     name: scsi_informational_exceptions_page_write
