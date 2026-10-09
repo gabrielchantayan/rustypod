@@ -237850,3 +237850,41 @@ functions:
       adds a frame pointer and reverses constructor/resize block order;
       both real BL targets, field offsets, status propagation, and the
       success-only size update are preserved. No device execution claimed.
+
+  - address: 0x080d2084
+    ghidra: FUN_080d2084
+    name: image_library_buffers_clear
+    size: 96
+    sig: "void image_library_buffers_clear(ImageLibraryBuffers *library)"
+    module: app/image_library_buffers_clear
+    status: ported
+    vars:
+      param_1/r0/r4: library
+      r5: saved_mutex
+      library_plus_0x9d0: mutex
+      library_plus_0x9d4: first_buffer
+      library_plus_0x9d8: second_buffer
+      library_plus_0x9dc: third_buffer
+    renames:
+      FUN_0807f5c4: mutex_lock
+      FUN_0805d070: free_tag4
+      FUN_0807f6a0: mutex_unlock
+    notes: >-
+      Raw A32 establishes [0x080d2084,0x080d20e4), exactly 96 bytes
+      without literals; the next entry begins LDR at 0x080d20e4.
+      Whole-image aligned BL decoding finds two inbound plain BLs at
+      0x080490fc and 0x0805e0d8, zero predicated BLs. The body contains
+      four plain BLs, zero predicated BLs, and a tail B to mutex_unlock.
+      Saves and locks the mutex at +0x9d0, then frees non-NULL tag-4
+      buffers in offset order +0x9d4, +0x9dc, +0x9d8, clearing each after
+      release returns. Called after image-library entry addition and
+      during destruction; buffer contents remain unidentified. All callees
+      use existing canonical ports, with no new seams. repr(C) native
+      pointer fields preserve target offsets while widening host fixtures.
+      Volatile slot accesses preserve callback-visible ordering and reloads.
+      Tests cover all eight nullable combinations, idempotence, untouched
+      owner state, and callback replacement of current and later slots.
+      Full host suite and ARM release build pass. match.py preserves offsets,
+      release order, conditional stores, and tail unlock; LLVM adds frame
+      setup and materializes zero separately per store. Standalone host
+      executable build is blocked by six unrelated cfg(test)-only callees.
