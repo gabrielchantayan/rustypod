@@ -16,6 +16,59 @@
 base: 0x08000000
 
 functions:
+  - address: 0x081002cc
+    ghidra: FUN_081002cc
+    name: indexed_tagged_string_resolve
+    size: 172
+    sig: "const u8 *indexed_tagged_string_resolve(IndexedTaggedStringOwner *owner, i32 index)"
+    module: app/indexed_tagged_string_resolve
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: index
+      r5: record
+      r4: override_cursor
+      r6: property_key
+      DAT_08100374: property_key_table (0x089ca6e4)
+      FUN_083d5f14: container_element_at_alias_5f14
+      FUN_08171ba0: class6000_dirp_property_6066_or_default
+      FUN_082a1df4: identity accessor (bx lr, r0 passes through)
+      FUN_082a1dec: object_subobject_at_08
+      FUN_08276d64: utf8_strcmp_safe
+      FUN_082a5370: string_object_is_empty
+      tail_082a50b0: string_object_c_str
+      tail_08299da8: tagged_string_resolve
+    notes: >-
+      Raw A32 extent is 0x081002cc..0x08100378: 168 instruction bytes plus
+      the literal at 0x08100374. Next function is ldr r0,[r0,#0x2c]; bx lr.
+      Full-image BL decoding finds two incoming plain calls (0x0810054c,
+      0x08101284), zero predicated calls. Body has seven plain BLs, zero
+      predicated BLs and two tail branches. Signed negative indices and
+      indices at or above owner count return NULL before collection dispatch.
+      NULL indexed elements return NULL. Otherwise select a key from runtime
+      table 0x089ca6e4 using (class6000 property - 0x6067)*8 + 4, then scan
+      the half-open 16-byte string-pair range at record +0x3c/+0x40.
+      First matching UTF-8 key returns its nonempty value; an empty first match
+      stops the scan and resolves the original tagged record, as does no match.
+      Ghidra absorbs the tail callees and invents a third argument; raw ARM
+      preserves r1 for indexed dispatch and never consumes incoming r2.
+      Existing ported callees are reused. The bx-lr identity accessor is
+      eliminated; pair fields express the +8 accessor without an extra call.
+      repr(C) widens host pointers; host-only range fields avoid truncation,
+      while ARM reads the tagged record's original opaque range words.
+      The property table remains a runtime firmware address, with original
+      unchecked wrapping index arithmetic; its contents are not inferred from
+      the same offset in the decrypted file.
+      Verification: 14962 host tests passed, including signed index boundaries,
+      NULL indexed elements, UTF-8 key matching, duplicate-key precedence,
+      NULL/NUL empty values, empty ranges and NULL inline fallback payloads.
+      ARM release build passed. A standalone host executable exercised negative
+      indices, the upper bound and real slot-0x40 indexed NULL dispatch.
+      match.py exited 1 with a reviewed structural diff: ARM retains the signed
+      checks, +0x28 collection, +0x3c/+0x40 range, 16-byte stride, comparator,
+      emptiness predicate and both resolution tails. LLVM folds table arithmetic
+      to property*8 + 0x0899a3b0, skips its load for empty ranges, removes the
+      identity/+8 accessor calls and adds a frame. Export remains distinct.
   - address: 0x08100678
     ghidra: FUN_08100678
     name: collection_type_one_prune
