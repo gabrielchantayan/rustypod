@@ -222,6 +222,24 @@ pub unsafe extern "C" fn mutex_create_veneer(mutex: *mut Mutex) {
     mutex_create(mutex);
 }
 
+/// `mutex_create_io_veneer` — original: `thunk_FUN_080744a4` @ 0x080d2d18
+/// (true extent: 4 bytes; two plain BL callers, zero predicated BL callers).
+///
+/// Raw word `0xeafe85e1` tail-branches to [`mutex_create`] @ 0x080744a4;
+/// the next real function starts at 0x080d2d1c with `push {r1-r3, lr}`.
+/// Callers at 0x081e69ac and 0x081f4b88 initialize a global mutex and an
+/// embedded I/O-task mutex respectively. Creates the semaphore cell and
+/// clears the padding word, with no argument validation or extra state.
+///
+/// Deliberate deviation: Rust delegates to the existing canonical port;
+/// LLVM may add a frame or fold this identical body with the other veneer.
+/// The callee's existing kernel dispatch and early-boot cell model apply.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mutex_create_io_veneer(mutex: *mut Mutex) {
+    mutex_create(mutex);
+}
+
 /// Cell-create thunk @ 0x8056724, inlined: static cell while the heap is
 /// in early boot, otherwise a 4-byte heap allocation; the ROM define
 /// fills *cell with the semaphore handle either way.
@@ -1226,6 +1244,50 @@ mod tests {
             vec![Call::EarlyFlag, Call::Define(1, early_cell() as usize)]
         );
         assert_eq!(unsafe { *m.sem_cell }, MOCK_HANDLE);
+    }
+
+    #[test]
+    fn io_mutex_initialization_shares_early_cell_but_preserves_neighbors() {
+        let _lock = mock_kernel();
+        #[repr(C)]
+        struct Fixture {
+            before: u32,
+            mutex: Mutex,
+            after: u32,
+        }
+        let mut first = Fixture {
+            before: 0x1234_5678,
+            mutex: Mutex { sem_cell: core::ptr::null_mut(), unused: u32::MAX },
+            after: 0x8765_4321,
+        };
+        let mut second = Mutex { sem_cell: 0xdead_beef as *mut u32, unused: 7 };
+        unsafe {
+            EARLY_FLAG_RET = 0xff;
+            mutex_create_io_veneer(&mut first.mutex);
+            mutex_create_io_veneer(&mut second);
+        }
+        assert_eq!(first.mutex.sem_cell, early_cell());
+        assert_eq!(second.sem_cell, first.mutex.sem_cell);
+        assert_eq!((first.mutex.unused, second.unused), (0, 0));
+        assert_eq!((first.before, first.after), (0x1234_5678, 0x8765_4321));
+        assert_eq!(unsafe { *second.sem_cell }, MOCK_HANDLE);
+        assert_eq!(calls(), vec![
+            Call::EarlyFlag, Call::Define(1, early_cell() as usize),
+            Call::EarlyFlag, Call::Define(1, early_cell() as usize),
+        ]);
+
+        unsafe {
+            EARLY_FLAG_RET = 0;
+            mutex_create_io_veneer(&mut first.mutex);
+        }
+        assert_eq!(first.mutex.sem_cell as usize, heap_base());
+        assert_ne!(first.mutex.sem_cell, second.sem_cell);
+        assert_eq!(unsafe { *first.mutex.sem_cell }, MOCK_HANDLE);
+        assert_eq!(first.mutex.unused, 0);
+        assert_eq!((first.before, first.after), (0x1234_5678, 0x8765_4321));
+        assert_eq!(&calls()[4..], &[
+            Call::EarlyFlag, Call::Alloc(4), Call::Define(1, heap_base()),
+        ]);
     }
 
     #[test]

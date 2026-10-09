@@ -237745,3 +237745,39 @@ functions:
       versus 43 Rust disassembly rows; extra frame setup and indirect seam
       calls differ, while gating, pending marking, 12-byte zeroing, message
       constant, fresh guard removal, and byte return remain. No device run.
+
+  - address: 0x080d2d18
+    ghidra: thunk_FUN_080744a4
+    name: mutex_create_io_veneer
+    size: 4
+    sig: "void mutex_create_io_veneer(Mutex *mutex)"
+    module: kernel/sync_mutex
+    status: ported
+    vars:
+      r0: mutex
+    renames:
+      param_1: mutex
+      FUN_080744a4: mutex_create
+    notes: >-
+      Raw word 0xeafe85e1 is an unconditional B to canonical mutex_create
+      at 0x080744a4. True extent is exactly [0x080d2d18,0x080d2d1c);
+      the next real function begins with PUSH {r1-r3,lr}. Independent
+      whole-image aligned A32 decoding finds two inbound plain BLs at
+      0x081e69ac and 0x081f4b88, zero predicated BLs, and no inbound B.
+      The body has zero plain or predicated BL instructions. Callers
+      initialize a global mutex and an embedded I/O-task mutex at +0x3c.
+      Tail transfer preserves the argument and caller return address;
+      the existing Rust mutex_create supplies semaphore-cell creation
+      and padding clearing. No new callee seam or second algorithm.
+      Deliberate deviation: LLVM emits frame setup/teardown before the
+      relocated tail branch, as for the earlier mutex-create veneer.
+      Identical bodies may fold intentionally. Required host suite and
+      ARM release build passed. Regression covers nonzero early flag,
+      shared-cell aliasing, transition to heap allocation, dirty padding,
+      semaphore handle and surrounding-field preservation. Standalone
+      production-source smoke confirmed shared early cell, handle 0x42
+      and both cleared padding words. Optional whole-crate host rlib
+      build failed on six unrelated cfg-gated helpers; isolated smoke
+      avoids those paths without replacing the production algorithm.
+      match.py exited 1 with the reviewed one-versus-four instruction
+      structural diff; tail transfer remains. No device run claimed.
