@@ -202,6 +202,35 @@ pub unsafe extern "C" fn indexed_mode_word_848_set(index: i16) {
     (object.add(0x848) as *mut u32).write(1);
 }
 
+/// indexed_mode_word_804_set — original: `FUN_080c857c` @ `0x080c857c`.
+///
+/// True extent: 32 bytes (28 instruction bytes plus the table literal at
+/// `0x080c8598`); the next function begins at `0x080c859c`.
+/// Verified incoming calls: one plain BL at `0x080af668` and one BLNE at
+/// `0x080adf1c`; zero outgoing plain or predicated BLs. Multiply the signed
+/// low halfword index by 99 words, load its mode-state object pointer, and
+/// overwrite the word at `+0x804` with one. Its concrete meaning is unknown.
+///
+/// Deliberate deviations: reuse the existing replaceable table seam for
+/// literal `0x08b2f648`. Host-only unaligned native-pointer loads preserve
+/// the target's `0x18c` record stride; target accesses remain word-aligned.
+///
+/// # Safety
+///
+/// The table must contain a live object pointer at the signed index's
+/// record, and that object must be writable and word-aligned at `+0x804`.
+/// No bounds or null checks, matching the original.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_mode_word_804_set(index: i16) {
+    let object_slot = mode_state_object_table().offset(index as isize * MODE_STATE_RECORD_STRIDE);
+    #[cfg(target_pointer_width = "32")]
+    let object = (object_slot as *const *mut u8).read();
+    #[cfg(not(target_pointer_width = "32"))]
+    let object = (object_slot as *const *mut u8).read_unaligned();
+    (object.add(0x804) as *mut u32).write(1);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +249,38 @@ mod tests {
     unsafe fn install_object(table: &mut ModeStateTable, index: usize, object: *const u8) {
         (table.0.as_mut_ptr().add(index * MODE_STATE_RECORD_STRIDE as usize) as *mut *const u8)
             .write_unaligned(object);
+    }
+
+    #[test]
+    fn word_804_set_preserves_other_bytes_for_signed_indices_and_overwrites() {
+        let _guard = MODE_STATE_TABLE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut table = ModeStateTable([0; MODE_STATE_RECORD_STRIDE as usize * 3]);
+        let mut objects = [
+            ModeStateObject([0xa5; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]),
+            ModeStateObject([0xa5; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]),
+            ModeStateObject([0xa5; MODE_STATE_FLAG_OFFSET + core::mem::size_of::<u32>()]),
+        ];
+        unsafe {
+            for (slot, object) in objects.iter_mut().enumerate() {
+                install_object(&mut table, slot, object.0.as_mut_ptr());
+            }
+            let previous = MODE_STATE_OBJECT_TABLE;
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE)
+                .write(table.0.as_ptr().add(MODE_STATE_RECORD_STRIDE as usize));
+            for index in [-1i16, 0, 1] {
+                for initial in [0u32, 1, 0xdead_beef, u32::MAX] {
+                    let selected = (index + 1) as usize;
+                    (objects[selected].0.as_mut_ptr().add(0x804) as *mut u32).write(initial);
+                    let mut expected = objects.each_ref().map(|object| object.0);
+                    expected[selected][0x804..0x808].copy_from_slice(&1u32.to_ne_bytes());
+                    indexed_mode_word_804_set(index);
+                    assert_eq!(objects.each_ref().map(|object| object.0), expected);
+                    indexed_mode_word_804_set(index);
+                    assert_eq!(objects.each_ref().map(|object| object.0), expected);
+                }
+            }
+            core::ptr::addr_of_mut!(MODE_STATE_OBJECT_TABLE).write(previous);
+        }
     }
 
     #[test]
