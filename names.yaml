@@ -236718,3 +236718,36 @@ functions:
       typed raw preparation seam; volatile shared state accesses. Host tests
       cover all 256 signed byte values, untouched responses, query errors,
       repeated polling with changed ticks, cleanup ordering and adjacent data.
+
+  - address: 0x080dae7c
+    ghidra: FUN_080dae7c
+    name: kinded_interface_initialize
+    size: 108
+    sig: "i32 kinded_interface_initialize(u8 *object, u32 kind)"
+    module: app/kinded_interface_initialize
+    status: ported
+    vars: {param_1/r4: object, param_2/r5: kind, r0: slot_index, r1: interface_registry, r2: registered_object}
+    renames: {FUN_0805cfb4: bzero, DAT_080daee0: base_size_0xefc, DAT_080daee4: interface_registry_08a12084}
+    notes: >-
+      Raw A32 extent [0x080dae7c,0x080daee8) contains 100 instruction bytes
+      and two literal words; next real function begins with PUSH at 0x080daee8.
+      Whole-image aligned word decoding verifies two plain incoming BLs at
+      0x080585b8 and 0x080586e0, zero predicated incoming BLs. One outgoing
+      plain BL to registered bzero at 0x0805cfb4, zero predicated outgoing BLs.
+      NULL returns -109. Clear 0xefc bytes, store low kind byte at +0, clear
+      bytes +0xef8..+0xefa, scan registry 0x08a12084 slots 0..3 for NULL,
+      store index at +1 and publish object. If all four are occupied, overwrite
+      slot 4 without reading it; no capacity error or extra guard invented.
+      Callers build kind-1 and kind-2 interfaces with subtype data at +0xefc.
+      Deviations: reuse Rust bzero; host registry has native-width pointer
+      cells, target pointer cells retain four-byte spacing. Host tests cover
+      NULL immutability, every first-hole position, full-registry overwrite,
+      low-byte kind truncation, all four alignments and exact clear canaries.
+      Public-entry smoke exercises six sequential registrations including
+      repeated slot-4 reuse and unchanged subtype bytes. No device execution.
+      All 15089 host tests pass; ARM release build passes. match.py exits 1
+      with 25 stock instructions versus 38 Rust listing entries. LLVM unrolls
+      the four-slot search and reorders independent base byte stores; the
+      NULL error, 0xefc clear, first-empty choice and unchecked slot-4 store
+      remain intact. Export is distinct; R_ARM_CALL relocation resolves the
+      single BL to bzero. No intentional symbol folding.
