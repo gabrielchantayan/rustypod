@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d98c4
+    ghidra: FUN_080d98c4
+    name: indexed_mode_word_848_set
+    size: 32
+    sig: "void indexed_mode_word_848_set(i16 index)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      DAT_080d98e0: MODE_STATE_OBJECT_TABLE
+    notes: >-
+      Raw A32 extent [0x080d98c4,0x080d98e4) includes 28 bytes of
+      instructions and the 0x08b2f648 table literal; the next function
+      starts with PUSH at 0x080d98e4. Independent whole-image aligned
+      BL decoding finds one plain caller at 0x080adf64 and one BLNE
+      caller at 0x080adf70, both in 0x080adee8; zero outgoing BLs.
+      Multiply the signed low halfword index by 99 words, load its
+      mode-state object pointer, and overwrite the aligned word +0x848
+      with one. Its concrete meaning is unknown. No bounds or null checks.
+      Reuses the existing MODE_STATE_OBJECT_TABLE seam, not a new callee.
+      Host-only unaligned native-pointer loading preserves the 0x18c
+      target record stride. ARM uses aligned word loads. Host tests cover
+      negative, zero and positive indices, initial zero/one/mixed/all-one
+      values, repeated calls and preservation of every other object byte.
+      All 15093 host tests passed; ARM release build passed. Standalone
+      production-source smoke observed one at +0x848 and unchanged adjacent
+      words. Reviewed match.py exit 1: seven original instructions versus
+      eleven Rust listing entries; LLVM adds frame setup/teardown and the
+      replaceable-seam load, uses SMULBB by 396 instead of 99 then LSL 2,
+      and preserves the selected pointer load and STR one at +0x848.
+      Export remains distinct; no device execution claimed.
   - address: 0x080d991c
     ghidra: thunk_FUN_082e5b64
     name: pmu_board_version_status_bit_veneer
