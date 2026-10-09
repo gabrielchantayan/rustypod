@@ -235076,3 +235076,34 @@ functions:
       to pointer advancement, adds its frame prologue and initial local
       zero store, retains the initializer call and removes the empty
       destructor call. No semantic deviation or new firmware seam.
+
+  - address: 0x080f9db0
+    ghidra: FUN_080f9db0
+    name: storage_reset_if_requested
+    size: 44
+    sig: "void storage_reset_if_requested(const u8 *object)"
+    module: drivers/storage_reset_if_requested
+    status: ported
+    renames:
+      param_1/r0: object
+      object+0x45d: reset_requested
+    notes: >-
+      Raw A32 words establish the 44-byte extent ending at 0x080f9ddc,
+      where a separate B veneer to 0x080fc774 begins. Whole-image BL
+      decoding finds two unconditional incoming calls at 0x08160a50 and
+      0x08160dc4, no predicated incoming calls, and three unconditional
+      outgoing BLs with no predicated BLs. A zero byte at object+0x45d
+      returns; any nonzero byte calls gateway_request_empty_tag4 at
+      0x08047fa8, pmu_powerdown_if_ready at 0x0836b1f0 with zero, and
+      iram_msec_delay_veneer at 0x08037df0 with 10, ignoring both status
+      returns, then tail-branches to system_reset at 0x08367f00.
+      Ghidra incorrectly renders that reset target as an empty infinite
+      loop. All four targets reuse existing named Rust ports; no new seam.
+      Volatile byte access preserves the request observation. Host tests
+      cover zero with nonzero adjacent bytes and all 255 nonzero values,
+      including powerdown-unavailable and delay-error status handling.
+      Full host suite passes 14995 tests and ARM release build succeeds.
+      A temporary exported-function smoke confirms zero returns without
+      changing adjacent bytes. match.py exits 1: both bodies contain 11
+      instructions; LLVM uses an early bxeq, an fp frame, and a final BL
+      to the nonreturning reset instead of restoring registers and tail B.

@@ -100,6 +100,7 @@ pub mod storage_backend_sector_size;
 pub mod storage_backend_validate_status_2;
 pub mod storage_backend_validate_status_3;
 pub mod storage_backend_deactivate;
+pub mod storage_reset_if_requested;
 pub mod system_reset;
 pub mod stream_buffer_context;
 pub mod stream_transfer;
