@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f4a5c
+    ghidra: FUN_080f4a5c
+    name: ft_hash_init
+    size: 76
+    sig: "i32 ft_hash_init(FtHash *hash, FtMemory *memory)"
+    module: ft/hash
+    status: ported
+    vars:
+      param_1/r0/r4: hash
+      param_2/r1/ip: memory
+      local_10/sp+8: error
+    notes: >-
+      Raw A32 words establish [0x080f4a5c,0x080f4aa8), 76 bytes with
+      no literal pool; the next function begins with its own push.
+      One outbound plain BL at 0x080f4a98 targets the existing port
+      ft_mem_realloc at 0x082cfc3c; zero predicated BLs. Two inbound
+      plain BLs at 0x0809888c and 0x080988fc, zero predicated BLs.
+      FreeType BDF hash initialization: limit 80, capacity 241, used
+      zero; allocate and zero 241 four-byte bucket words, store the
+      allocation result even on failure, and return the allocator error.
+      The insert consumer at 0x0807807c checks limit against used,
+      doubles capacity, and rehashes buckets. Ghidra's undefined8
+      return is spurious: the epilogue restores incoming r1.
+      FtHash uses repr(C) with a native host pointer, retaining the
+      target's 16-byte layout and four-byte bucket elements. No new
+      callee seam. Host success and OOM tests pass, including guard
+      preservation and overwriting previous storage without freeing it.
+      Real host allocation smoke confirms 241 zero buckets and release.
+      ARM match.py structural diff reviewed: LLVM inlines ft_mem_realloc,
+      calls ft_mem_qrealloc, and expands the successful 964-byte zero
+      fill into alignment-aware clear helpers; header, unconditional
+      pointer store, and returned allocator error are preserved. LLVM
+      combines limit/capacity stores, changing their order; these are
+      ordinary nonvolatile fields and both precede allocation.
   - address: 0x080f4cbc
     ghidra: FUN_080f4cbc
     name: fold_upper
