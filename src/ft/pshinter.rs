@@ -213,3 +213,139 @@ mod tests {
         }
     }
 }
+
+/// Records a PostScript hint — original `FUN_080c151c` @ 0x080c151c.
+/// True code size: 180 bytes (ends at 0x080c15d0; diagnostic strings follow,
+/// next function at 0x080c1638). Raw words contain 0 plain BL and 0
+/// predicated BL sites; two conditional tail branches reach ft_error_trace.
+///
+/// Rejects an unsigned out-of-range index, skips hints already marked with
+/// flag 4, then marks the hint and links word 5 to the first recorded hint
+/// whose signed intervals overlap, including touching endpoints. Endpoint
+/// addition wraps at 32 bits. Appends the hint to the recorded-pointer array
+/// unless full; the full-array error retains the flag and overlap link.
+///
+/// Deliberate deviations: uses the existing trace sink contract; unused
+/// variadic slots are zero rather than incidental ARM register values.
+/// Pointer fields remain u32 words to preserve the firmware layout on hosts.
+///
+/// # Safety
+/// `table` must contain the target-width header (capacity, recorded count,
+/// hints pointer, unused word, recorded-pointer array). Valid indices select
+/// writable seven-word hints; recorded pointers must select readable hints.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn psh_hint_table_record(table: *mut u32, index: u32) {
+    let capacity = *table;
+    if index >= capacity {
+        crate::ft::trace::ft_error_trace(
+            b"psh_hint_table_record: invalid hint index %d\n\0".as_ptr(), index, 0, 0,
+        );
+        return;
+    }
+    let hint = (*table.add(2) as usize as *mut u32).add(index as usize * 7);
+    let flags = *hint.add(4);
+    if flags & 4 != 0 {
+        return;
+    }
+    *hint.add(4) = flags | 4;
+    *hint.add(5) = 0;
+    let recorded = *table.add(4) as usize as *mut u32;
+    let count = *table.add(1);
+    for slot in 0..count {
+        let previous_address = *recorded.add(slot as usize);
+        let previous = previous_address as usize as *const u32;
+        let start = *hint as i32;
+        let end = start.wrapping_add(*hint.add(1) as i32);
+        let previous_start = *previous as i32;
+        if end >= previous_start
+            && previous_start.wrapping_add(*previous.add(1) as i32) >= start
+        {
+            *hint.add(5) = previous_address;
+            break;
+        }
+    }
+    let count = *table.add(1);
+    if count >= *table {
+        crate::ft::trace::ft_error_trace(
+            b"psh_hint_table_record: too many sorted hints!  BUG!\n\0".as_ptr(), 0, 0, 0,
+        );
+        return;
+    }
+    *table.add(1) = count.wrapping_add(1);
+    *recorded.add(count as usize) = hint as usize as u32;
+}
+
+#[cfg(test)]
+mod record_hint_tests {
+    use super::psh_hint_table_record;
+    use crate::ft::trace::{capture, TEST_TRACE_LOCK};
+
+    #[test]
+    fn interval_boundaries_duplicate_and_error_transitions() {
+        let _guard = TEST_TRACE_LOCK.lock().unwrap();
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::PSH_HINT_TABLE_RECORD, 4096,
+        ) else { return; };
+        unsafe {
+            let table = slab.cast::<u32>();
+            let hints = table.add(16);
+            let recorded = table.add(64);
+            // Candidate interval, two earlier intervals, expected first overlap.
+            let cases = [
+                ((10i32, 5i32), (0i32, 9i32), (16i32, 2i32), None),
+                ((10, 5), (0, 10), (15, 2), Some(0)),
+                ((10, 5), (16, 1), (15, 2), Some(1)),
+                ((-10, 0), (-10, 0), (0, 1), Some(0)),
+                ((i32::MAX, 1), (i32::MIN, -1), (0, 0), Some(0)),
+                ((i32::MAX, 1), (0, 0), (1, 0), None),
+            ];
+            for (candidate, first, second, overlap) in cases {
+                core::ptr::write_bytes(table, 0, 80);
+                *table = 3;
+                *table.add(1) = 2;
+                *table.add(2) = hints as usize as u32;
+                *table.add(4) = recorded as usize as u32;
+                for (i, (start, length)) in [first, second, candidate].iter().enumerate() {
+                    *hints.add(i * 7) = *start as u32;
+                    *hints.add(i * 7 + 1) = *length as u32;
+                    *hints.add(i * 7 + 4) = 0x80;
+                    *hints.add(i * 7 + 5) = 0xdeadbeef;
+                }
+                *recorded = hints as usize as u32;
+                *recorded.add(1) = hints.add(7) as usize as u32;
+                psh_hint_table_record(table, 2);
+                assert_eq!(*table.add(1), 3);
+                assert_eq!(*recorded.add(2), hints.add(14) as usize as u32);
+                assert_eq!(*hints.add(18), 0x84);
+                assert_eq!(*hints.add(19), overlap.map_or(0, |i| hints.add(i * 7) as usize as u32));
+                let snapshot = core::slice::from_raw_parts(table, 80).to_vec();
+                psh_hint_table_record(table, 2); // Already recorded, even when full.
+                assert_eq!(core::slice::from_raw_parts(table, 80), snapshot);
+            }
+            capture::start();
+            let snapshot = core::slice::from_raw_parts(table, 80).to_vec();
+            psh_hint_table_record(table, u32::MAX);
+            assert_eq!(core::slice::from_raw_parts(table, 80), snapshot);
+            // Full-table failure still marks the hint and clears its stale link.
+            *hints.add(18) = 0x80;
+            *hints.add(19) = 0xdeadbeef;
+            psh_hint_table_record(table, 2);
+            assert_eq!(*hints.add(18), 0x84);
+            assert_eq!(*hints.add(19), 0);
+            assert_eq!(*table.add(1), 3);
+            assert_eq!(*recorded.add(3), 0);
+            let calls = capture::finish();
+            assert_eq!(capture::formats(&calls), [
+                "psh_hint_table_record: invalid hint index %d\n",
+                "psh_hint_table_record: too many sorted hints!  BUG!\n",
+            ]);
+            assert_eq!(calls[0].args[0], u32::MAX);
+            // Empty table reports invalid index without accessing its null pointers.
+            *table = 0;
+            *table.add(2) = 0;
+            *table.add(4) = 0;
+            psh_hint_table_record(table, 0);
+        }
+    }
+}
