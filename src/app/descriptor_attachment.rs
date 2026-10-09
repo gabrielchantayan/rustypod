@@ -29,7 +29,7 @@ const OWNER_TAGGED_LIST_OFFSET: usize = 0x48;
 /// Literal pool word at 0x0803c0ec. Its semantic identity is unrecovered.
 const ATTACH_NOTIFY_TAG: u32 = 0x6170_6c69;
 
-/// ABI of unported duplicate finder `FUN_080daa7c`.
+/// ABI of the Rust duplicate finder.
 pub type DescriptorAttachmentFindDuplicate = unsafe extern "C" fn(*mut u8, *mut u32) -> *mut u32;
 /// ABI of unported link allocator `FUN_0808e228`.
 pub type DescriptorAttachmentAllocateLink = unsafe extern "C" fn(*mut u32) -> *mut u32;
@@ -38,16 +38,6 @@ pub type DescriptorAttachmentInitializeLink = unsafe extern "C" fn(*mut u32, *mu
 /// ABI of unported tagged-list walker `FUN_08066bb8`.
 pub type DescriptorAttachmentNotify = unsafe extern "C" fn(*mut u8, u32, *mut u32, u32, u32);
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_find_duplicate(list: *mut u8, descriptor: *mut u32) -> *mut u32 {
-    let find_duplicate: DescriptorAttachmentFindDuplicate = core::mem::transmute(0x080d_aa7cusize);
-    find_duplicate(list, descriptor)
-}
-
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn retail_find_duplicate(_list: *mut u8, _descriptor: *mut u32) -> *mut u32 {
-    ptr::null_mut()
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_allocate_link(owner: *mut u32) -> *mut u32 {
@@ -92,9 +82,8 @@ unsafe extern "C" fn retail_notify(
 
 /// Calls outside this one-function port.
 ///
-/// `names.yaml` has no `ported` entry for `FUN_080daa7c`, `FUN_0808e228`,
-/// `FUN_08093dfc`, or `FUN_08066bb8`; target builds retain those retail
-/// boundaries while host tests install recorders.
+/// The allocator, initializer and notifier retain retail boundaries.
+/// Duplicate lookup uses the Rust port; host tests can replace these operations.
 #[derive(Clone, Copy)]
 pub struct DescriptorAttachmentOps {
     pub find_duplicate: DescriptorAttachmentFindDuplicate,
@@ -104,13 +93,13 @@ pub struct DescriptorAttachmentOps {
 }
 
 pub const DEFAULT_DESCRIPTOR_ATTACHMENT_OPS: DescriptorAttachmentOps = DescriptorAttachmentOps {
-    find_duplicate: retail_find_duplicate,
+    find_duplicate: super::descriptor_find_duplicate::descriptor_find_duplicate,
     allocate_link: retail_allocate_link,
     initialize_link: retail_initialize_link,
     notify: retail_notify,
 };
 
-/// Volatile dispatch boundary for the four unported retail functions.
+/// Volatile dispatch boundary for attachment operations.
 pub static mut DESCRIPTOR_ATTACHMENT_OPS: DescriptorAttachmentOps = DEFAULT_DESCRIPTOR_ATTACHMENT_OPS;
 
 #[inline(always)]
@@ -182,7 +171,7 @@ unsafe fn descriptor_attachment_ops() -> DescriptorAttachmentOps {
 ///
 /// Algorithm: return NULL without side effects if descriptor word 0 differs
 /// from owner word +0x0c. When the descriptor already has a link and owner
-/// flag byte +0x18d has bit 4 set, ask the unported list helper whether an
+/// flag byte +0x18d has bit 4 set, ask the Rust list helper whether an
 /// equivalent link exists; a non-NULL result suppresses attachment. Otherwise
 /// allocate a link, splice it at the descriptor's +0x24 head, initialize it
 /// with `context` and one, then notify the owner list at +0x48 with the raw
@@ -190,9 +179,9 @@ unsafe fn descriptor_attachment_ops() -> DescriptorAttachmentOps {
 /// descriptor +0xbc word into owner +0x1a8. The notification result is
 /// discarded; the allocated link is returned.
 ///
-/// Deliberate deviations: all four callees remain unported and dispatch through
-/// [`DESCRIPTOR_ATTACHMENT_OPS`]; their identities beyond their observed roles
-/// are not claimed. The literal notification tag remains raw because its
+/// Deliberate deviations: three callees remain unported and dispatch through
+/// [`DESCRIPTOR_ATTACHMENT_OPS`]; duplicate lookup defaults to Rust.
+/// The literal notification tag remains raw because its
 /// semantic identity is unrecovered.
 ///
 /// # Safety

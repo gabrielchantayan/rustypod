@@ -143937,9 +143937,9 @@ functions:
       bit 4, allocates/splices/initializes a new link, then notifies owner
       +0x48 with raw tag 0x61706c69. After an attempted allocation only, it
       ORs descriptor +0xbc into owner +0x1a8, including allocation failure.
-      FUN_080daa7c, FUN_0808e228, FUN_08093dfc, and FUN_08066bb8 are
-      unported and represented by volatile target seams; their identities
-      beyond observed roles and the tag's semantic identity are not claimed.
+      Duplicate lookup now uses Rust descriptor_find_duplicate.
+      FUN_0808e228, FUN_08093dfc, and FUN_08066bb8 remain unported
+      volatile seams; the notification tag's semantic identity is not claimed.
 
   # --- deque<T>::back, 4-byte element ---
   - address: 0x083e0044
@@ -236810,3 +236810,36 @@ functions:
       NULL error, 0xefc clear, first-empty choice and unchecked slot-4 store
       remain intact. Export is distinct; R_ARM_CALL relocation resolves the
       single BL to bzero. No intentional symbol folding.
+
+  - address: 0x080daa7c
+    ghidra: FUN_080daa7c
+    name: descriptor_find_duplicate
+    size: 88
+    sig: "u32 *descriptor_find_duplicate(u8 *query, u32 *descriptor)"
+    module: app/descriptor_find_duplicate
+    status: ported
+    vars: {param_1/r4: query, param_2/r1: descriptor, piVar2/r3: link}
+    renames: {FUN_080615d4: parent_chain_contains_query}
+    notes: >-
+      Raw A32 extent [0x080daa7c,0x080daad4) ends at POP before the next
+      function prologue. Whole-image aligned decoding finds two incoming plain
+      BLs at 0x0803c074 and 0x080d1918, zero predicated incoming BLs.
+      One outgoing plain BL at 0x080daab4 targets 0x080615d4.
+      Query byte +0x1d bit zero gates all descriptor access. Scan descriptor
+      word 9 via link word 10; require equal owner words and query in the
+      candidate's parent chain, starting at word 1 rather than candidate.
+      Return first match or NULL. No target behavioral deviations; retain
+      the verified unported parent predicate at 0x080615d4. Host predicate
+      follows independently decoded raw code through BX LR at 0x08061604.
+      All stored pointers remain target-width u32 words. Existing descriptor
+      attachment defaults to this Rust implementation rather than retail.
+      Tests cover disabled flag with NULL descriptor, empty list, owner mismatch
+      with invalid parent, direct and indirect ancestry, first-match precedence,
+      exhausted chains and exclusion of the candidate itself.
+      Host suite and ARM release build pass. Public-entry host smoke finds
+      an ancestor match and rejects it after detachment. match.py exits 1:
+      22 stock instructions versus 27 Rust listing entries; flag gate,
+      owner comparison, parent predicate and next-link loop remain intact.
+      LLVM uses BLX through literal 0x080615d4 and preserves the candidate
+      in a callee-saved register rather than relying on retail r3 preservation.
+      No intentional folding; no device execution.
