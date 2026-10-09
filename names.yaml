@@ -235653,3 +235653,44 @@ functions:
       (Rust includes six literal words). Guard branches, constructor argument
       6, registration-before-release and fixed return are retained; LLVM uses
       BLX for absolute constructor and volatile runtime bindings.
+
+  - address: 0x080f4b1c
+    ghidra: FUN_080f4b1c
+    name: path_facade_slot_64_from_cstrs
+    size: 80
+    sig: "u32 path_facade_slot_64_from_cstrs(const char *first_path, const char *second_path, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    vars:
+      param_1/r0/r6: first_path
+      param_2/r1: second_path
+      param_3/r2/r5: base_hint
+      uStack_20: second_storage
+      uStack_18: first_storage
+      r4: second_object then saved operation status
+    renames:
+      FUN_08279284: path_object_construct
+      FUN_080f4b6c: path_facade_slot_64
+      thunk_FUN_08277484: string_object_destroy_veneer
+    notes: >-
+      Raw ARM words establish [0x080f4b1c,0x080f4b6c), 80 instruction
+      bytes, ending in pop before the next real push prologue. Whole-image
+      branch-word decoding finds two inbound plain BLs at 0x0817177c and
+      0x081717e0, zero predicated inbound BLs. Five outbound plain BLs,
+      zero predicated outbound BLs: two constructors, the existing facade
+      slot-0x64 port, and two destructor veneers. Incoming r1 constructs
+      the second object first; saved r0 constructs the first object next.
+      Call the worker with first object, second object, and saved r2 hint;
+      destroy first then second, returning the saved status verbatim.
+      Ghidra's fourth parameter is only spill storage, not an argument.
+      The operation's concrete semantic identity remains unresolved; no
+      rename/move identity is assumed. Deliberate deviations are typed
+      stack storage and direct existing-port calls, with no new seams.
+      Tests exercise distinct and identical contents, NULL and empty paths,
+      allocation failure, status extremes, and destruction order. All 15026
+      host tests pass and the ARM release build succeeds. A standalone host
+      smoke executes the production adapter with default seams on nonempty
+      and NULL/empty inputs; no device execution was performed. match.py
+      exits 1: LLVM emits 23 instructions versus 20 original, with a larger
+      frame prologue. ARM relocations verify the same five ordered BL
+      targets, argument order, reverse cleanup, and saved status return.
