@@ -70,8 +70,8 @@
 //! ```
 //!
 //! The getter's return value is deliberately ignored (r0 is dead across
-//! the re-copy). The day-of-year helper @ 0x080d6fe0 (52 bytes plus its
-//! table literal @ 0x080d7034 = 0x089caaa0) computes
+//! the re-copy). The day-of-year helper @ 0x080d6fe0 (84 code bytes plus its
+//! table literal @ 0x080d7034 = 0x089caaa0; 88 bytes total) computes
 //! `yday = day - 1 + sum(month_lengths[0..month-1])` over the LEAP-year
 //! table {31,29,31,30,31,30,31,31,30,31,30,31} (runtime 0x089caaa0; image
 //! 0x089d5978 under the scatterload skew, decrypted, contents verified),
@@ -88,21 +88,17 @@
 //!   0x0806418c; host tests install a recording mock in
 //!   [`CLOCK_STATE_GET`]. Same for the shadow record: fixed address
 //!   0x08a662e0 on target, a writable static on host.
-//! - The tail `b` to 0x080d6fe0 is a private `#[inline(never)]` Rust
-//!   call (LLVM emits `bl`), and its leap test `FUN_08074410` is
-//!   inlined as three operations routed through the ported
-//!   `__rt_udivmod` (`runtime/rt_div.rs`) instead of the original's
-//!   `bl 0x08031568`. Observable behavior is identical.
+//! - The tail `b` to 0x080d6fe0 becomes a call to the exported
+//!   [`clock_state_day_of_year`]. Its leap test reuses the ported
+//!   [`super::legacy_leap_year::is_legacy_leap_year`] @ 0x08074410.
 //! - Shadow field reads are volatile so LLVM cannot fold the duplicated
 //!   copies across the getter call; field order matches the listing.
-//! - LLVM peels the helper's first two month iterations into straight-line
-//!   cumulative sums and counts the rest down; the original is one loop.
-//!   Same sums, same out-of-bounds table reads for month > 12, proven by
-//!   the host tests.
+//! - Target month-table reads retain the original runtime address; host
+//!   tests use the verified twelve-byte table and require month <= 13.
 
 use core::ptr;
 
-use crate::runtime::rt_div::__rt_udivmod;
+use super::legacy_leap_year::is_legacy_leap_year;
 
 /// Load address of the unported RTC clock getter `FUN_0806418c`.
 const CLOCK_STATE_GET_ADDRESS: usize = 0x0806_418c;
@@ -115,6 +111,7 @@ pub const STATUS_ZONE_VALID: u8 = 0x02;
 
 /// The leap-year days-in-month table, runtime 0x089caaa0 (module
 /// header): months 1..=12 at indices 0..=11, February stored as 29.
+#[cfg(not(target_os = "none"))]
 const LEAP_DAYS_IN_MONTH: [u8; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /// The 12-byte clock-state record (module header for the layout
@@ -224,26 +221,38 @@ pub unsafe extern "C" fn fetch_clock_state(state: *mut ClockState) {
     clock_state_day_of_year(state);
 }
 
-/// Day-of-year fill — original: `FUN_080d6fe0` @ 0x080d6fe0 (52 bytes
-/// plus the table literal @ 0x080d7034), the tail branch target of
-/// `FUN_080642a4`. `yday = day - 1 + sum(LEAP_DAYS_IN_MONTH[0..month-1])`
-/// with February corrected to 28 in common years; the leap test is
-/// `FUN_08074410` (year % 4 == 0, centuries divided by 100 first).
-/// `#[inline(never)]` keeps it a distinct call for match.py review.
+/// Fill the zero-based day of year: `FUN_080d6fe0` @ 0x080d6fe0.
+///
+/// True extent [0x080d6fe0, 0x080d7038): 84 code bytes and a four-byte
+/// table literal; next function starts with PUSH at 0x080d7038.
+/// One outbound plain BL to is_legacy_leap_year, zero predicated BL.
+/// Inbound BL: one plain at 0x0806ceb8, one predicated BLNE at
+/// 0x0806754c; fetch_clock_state also tail-branches here.
+/// Start at day - 1, add lengths of preceding months, correcting February
+/// to 28 for common years, then store only the low halfword at +4.
+/// Month 0/1 skips the loop; day 0 is not validated.
+/// Deviations: Rust call/return replaces the caller's tail branch; host
+/// uses a copied month table. Target retains unchecked firmware table reads.
+///
+/// # Safety
+/// `state` must point to a writable, aligned ClockState. On host, month
+/// must be <= 13 so preceding-month reads stay within the copied table.
+#[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
-unsafe fn clock_state_day_of_year(state: *mut ClockState) {
+pub unsafe extern "C" fn clock_state_day_of_year(state: *mut ClockState) {
     let mut yday: i16 = (*state).day as i16 - 1;
-    let mut residue: u32 = 0;
-    let quot = __rt_udivmod((*state).year as u32, 100, &mut residue);
-    let year = if residue == 0 { quot } else { (*state).year as u32 };
-    let common = year & 3 != 0;
+    let common = is_legacy_leap_year((*state).year as u32) == 0;
+    #[cfg(target_os = "none")]
+    let month_lengths = 0x089c_aaa0 as *const u8;
+    #[cfg(not(target_os = "none"))]
+    let month_lengths = LEAP_DAYS_IN_MONTH.as_ptr();
     let mut i: i32 = 0;
     while i < (*state).month as i32 - 1 {
         if i == 1 && common {
-            yday += 28;
+            yday = yday.wrapping_add(28);
         } else {
             // Bare ldrb in the original: no bounds check on month.
-            yday += *LEAP_DAYS_IN_MONTH.as_ptr().add(i as usize) as i16;
+            yday = yday.wrapping_add(*month_lengths.add(i as usize) as i16);
         }
         i += 1;
     }
@@ -275,6 +284,39 @@ mod tests {
             minute: 0,
             second: 0,
             status: 0,
+        }
+    }
+
+    #[test]
+    fn day_of_year_boundaries_and_preserved_fields() {
+        for year in [0u16, 1, 4, 100, 400, 1900, 2000, 2009, 65535] {
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let lengths = [31i16, if leap { 29 } else { 28 }, 31, 30, 31, 30,
+                           31, 31, 30, 31, 30, 31];
+            for month in 0..=13u8 {
+                for day in [0u8, 1, 28, 29, 30, 31, 255] {
+                    let mut state = ClockState {
+                        year, month, day, yday: -1234,
+                        utc_offset_quarters: -32, dst_active: 1,
+                        hour: 23, minute: 59, second: 58, status: 0xa5,
+                    };
+                    let before = unsafe {
+                        core::slice::from_raw_parts(
+                            (&state as *const ClockState).cast::<u8>(), 12).to_vec()
+                    };
+                    let preceding = month.saturating_sub(1) as usize;
+                    let expected = day as i16 - 1
+                        + lengths[..preceding].iter().copied().sum::<i16>();
+                    unsafe { clock_state_day_of_year(&mut state) };
+                    assert_eq!(state.yday, expected, "{year}-{month}-{day}");
+                    let after = unsafe {
+                        core::slice::from_raw_parts(
+                            (&state as *const ClockState).cast::<u8>(), 12)
+                    };
+                    assert_eq!(&after[..4], &before[..4]);
+                    assert_eq!(&after[6..], &before[6..]);
+                }
+            }
         }
     }
 
