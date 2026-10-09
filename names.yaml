@@ -235953,3 +235953,36 @@ functions:
       exits 1: LLVM emits 23 instructions versus 20 original, with a larger
       frame prologue. ARM relocations verify the same five ordered BL
       targets, argument order, reverse cleanup, and saved status return.
+
+  - address: 0x080f05e0
+    ghidra: FUN_080f05e0
+    name: packed_surface_span_prepare
+    size: 156
+    sig: "void packed_surface_span_prepare(u32 *state)"
+    module: ui/packed_surface_span_prepare
+    status: ported
+    renames:
+      param_1/r4: state
+      piVar5/r3: surface
+      uVar1/r0: start_bit
+      uVar2/r1: end_bit
+      iVar4/r2: word_distance
+      iVar3/r0: end_mask
+    notes: >-
+      Raw extent 0x080f05e0..0x080f067c (next function starts with push).
+      Two incoming plain BL sites at 0x08074904 and 0x080f2df8, no
+      predicated BL sites; one outgoing plain BL at 0x080f05fc to the
+      identified selector_dispatch_with_word_transform at 0x08079fc8,
+      called with surface[2], state+4, state+8, and 1. Retains that
+      firmware dependency rather than reproducing its unresolved tail
+      transfers or Ghidra erroneous reconstruction. Reloads the surface
+      after dispatch, scales horizontal bounds with ARM low-byte register
+      shifts, computes wrapping row/word address and word distance, then
+      writes MSB-first edge masks. Aligned end decrements distance and
+      leaves the end mask all ones; zero span has distance 0xffffffff.
+      Pointer fields stay u32 on hosts. Host reference edge tests and
+      executable span smoke passed; ARM release build passed. match.py
+      reports 44 Rust instructions versus 39 original, preserving the
+      dependency call (BLX literal 0x08079fc8), surface reload, scaling,
+      MLA address arithmetic, edge masks and aligned-end decrement. LLVM
+      reorders independent stores and explicitly checks oversized shifts.
