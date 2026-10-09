@@ -1312,3 +1312,4 @@ pub mod output_buffer_write_keyed_i64;
 pub mod selection_state_refresh_playlist_value;
 pub mod selection_state_refresh_active_item_value;
 pub mod active_entry_cancel;
+pub mod indexed_tagged_string_resolve;
