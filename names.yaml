@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d87d4
+    ghidra: FUN_080d87d4
+    name: swap_low_two_bits
+    size: 28
+    sig: "u32 swap_low_two_bits(u32 flags)"
+    module: util/swap_low_two_bits
+    status: ported
+    renames:
+      param_1/r0: flags
+      uVar1/r0: swapped_flags
+    notes: >-
+      Raw A32 extent [0x080d87d4,0x080d87f0) is seven instructions,
+      ending with BX LR before PUSH {r4,r5,lr} at the next function.
+      Words: e1a01000 e3110001 e3a00000 13a00002 e3110002 13800001 e12fff1e.
+      Whole-image aligned BL decoding finds two plain inbound sites at
+      0x0812e490 and 0x0812e618, zero predicated inbound calls and zero
+      outbound calls. Swap input bits 0 and 1, discarding all higher bits.
+      Both callers read object word +0x0c and store byte flags. No callee
+      seams, invented flag identities or behavioral deviations.
+      Host tests cover all four low-bit combinations and individual and
+      combined higher bits. All 15104 host tests and ARM release build pass.
+      Production-source smoke checked 131072 conversions against a truth
+      table. Reviewed match.py exit 1: seven original and seven Rust
+      instructions; LLVM adds an fp frame and uses shifts, OR and a final
+      mask instead of predicated TST/MOV/ORR. Export remains out of line
+      and present, with no calls or intentional folds. No device run claimed.
   - address: 0x080d87f0
     ghidra: FUN_080d87f0
     name: enabled_subtree_find_identifier
