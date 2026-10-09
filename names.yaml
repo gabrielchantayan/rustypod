@@ -238635,3 +238635,31 @@ functions:
       match.py confirms the address literal and return structure; LLVM
       adds frame-pointer prologue/epilogue. No behavioral deviations.
       No device run.
+
+  - address: 0x080c62f0
+    ghidra: FUN_080c62f0
+    name: counted_dispatch_table_address_946ea4
+    size: 12
+    sig: "const uint32_t *counted_dispatch_table_address_946ea4(void)"
+    module: app/counted_dispatch_table_address_946ea4
+    status: ported
+    renames:
+      DAT_080c62f8: counted dispatch-table address literal
+    notes: >-
+      Raw words e59f0000 e12fff1e 08946ea4 establish the true 12-byte
+      extent 0x080c62f0..0x080c62fc: eight code bytes plus the literal,
+      followed by the independently verified neighboring accessor.
+      Whole-image aligned A32 decoding finds two plain BL callers at
+      0x080a5b8c and 0x080a5cb0, zero predicated BLs, no outbound calls.
+      Returns address 0x08946ea4 itself, never its contents. Both callers
+      pass it in r1 to FUN_080bf640, whose first two table words are a
+      count and a pointer to 12-byte dispatch records. Exact table
+      identity is unrecovered; the address suffix distinguishes it from
+      counted_dispatch_table_address at 0x080c62fc. No callee seam or
+      data reconstruction. Hosts preserve the opaque firmware address.
+      No behavioral deviations. Regression and standalone host smoke
+      verify the exact address without dereferencing firmware storage;
+      all 15166 host tests passed and ARM release build succeeded.
+      match.py confirms the correct address literal and return structure;
+      LLVM adds frame-pointer prologue/epilogue (structural diff, exit 1).
+      No device execution.

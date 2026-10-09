@@ -1,6 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
 pub mod counted_dispatch_table_address;
+pub mod counted_dispatch_table_address_946ea4;
 pub mod image_library_buffers_clear;
 pub mod enabled_subtree_find_identifier;
 pub use enabled_subtree_find_identifier::*;
