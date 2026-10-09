@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fdde4
+    ghidra: FUN_080fdde4
+    name: scsi_informational_exceptions_page_write
+    size: 84
+    sig: "u32 scsi_informational_exceptions_page_write(const u8* receiver, u8* output, u32 requested_length)"
+    module: app/scsi_informational_exceptions_page
+    status: ported
+    renames:
+      param_1/r0: ignored_receiver
+      param_2/r1: output
+      param_3/r2: requested_length
+    notes: >-
+      Raw A32 verifies extent 0x080fdde4..0x080fde38, 84 instruction bytes
+      without literals, ending in bx lr before the next function push.
+      Whole-image branch decoding finds two plain incoming BLs at 0x080fb154
+      and 0x080fb20c, no predicated incoming BLs, and no outgoing calls.
+      Caller 0x080faec0 selects page 0x1c or all pages 0x3f; its command
+      0x1a path uses a MODE SENSE(6) header. Writes the fixed informational
+      exceptions page 9c 0a 81 02 followed by eight zeros, ignoring receiver.
+      Writes all twelve bytes regardless of requested length. Unsigned
+      lengths <= 12 return length + 1, including 13 for length 12; larger
+      lengths return 12. No behavioral deviations or callee seams. Volatile
+      byte stores retain write width and order without libc substitution.
+      Host tests cover alignments, canaries, short lengths, the 12/13 boundary,
+      and high unsigned lengths. All 14982 host tests and ARM release build
+      pass. Direct smoke probe confirms lengths 0, 11, 12, 13 and UINT_MAX.
+      match.py shows 21 stock versus 23 Rust instructions, retaining every
+      byte store and unsigned result selection; LLVM adds a frame, moves
+      cmp earlier and computes length + 1 before conditionally selecting 12.
   - address: 0x080fe744
     ghidra: FUN_080fe744
     name: record_nested_object_destruct
