@@ -295,6 +295,34 @@ functions:
       LLVM retains the 128-byte clearing loop, unrolls the three marking
       loops into ordered STRBs, adds an fp frame, preserves both global
       addresses and the final flag store, and emits no calls.
+  - address: 0x080c907c
+    ghidra: FUN_080c907c
+    name: lcd_wait_display_idle
+    size: 24
+    sig: "u32 lcd_wait_display_idle(void)"
+    module: drivers/lcd_wait_transaction_idle
+    status: ported
+    renames:
+      DAT_080c9090: lcd_controller_base_literal
+      r1: lcd_controller_base
+      r0: transaction_status
+    notes: >-
+      Raw words e59f100c e591008c e3100003 1afffffc e12fff1e
+      establish 20 instruction bytes plus literal 0x38300000 at
+      0x080c9090. Next real function begins PUSH at 0x080c9094.
+      Whole-image aligned A32 decoding verifies one plain inbound BL
+      at 0x080af6c8 and one BLNE at 0x080af720; no outbound calls.
+      Poll LCD status 0x3830008c until both low busy bits clear,
+      returning the full final word in r0 rather than Ghidra's void.
+      No writes, timeout or scheduler yield. Volatile target MMIO and
+      atomic host storage are deliberate deviations. Reuses the existing
+      identical lcd_wait_transaction_idle polling implementation.
+      Existing display_refresh calls remain on that equivalent port;
+      no new callee seam or module. Host tests exercise each busy bit,
+      repeated polling, immediate idle and unmasked high-bit returns
+      for both exports. Host suite and ARM release build passed.
+      Reviewed match.py exit 1: LDR/TST/BNE polling and r0 return
+      preserved, with an LLVM frame and folded address 0x3830008c.
   - address: 0x080d510c
     ghidra: FUN_080d510c
     name: lcd_wait_transaction_idle

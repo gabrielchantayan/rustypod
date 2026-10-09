@@ -43,6 +43,29 @@ unsafe fn lcd_transaction_status() -> u32 {
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
 pub unsafe extern "C" fn lcd_wait_transaction_idle() -> u32 {
+    wait_for_transaction_idle()
+}
+
+/// lcd_wait_display_idle — original: `FUN_080c907c` @ `0x080c907c`.
+///
+/// True extent: 24 bytes (20 instruction bytes plus the LCD base literal
+/// at `0x080c9090`); next real function begins at `0x080c9094`.
+/// Raw A32 decoding verifies one plain inbound BL at `0x080af6c8` and
+/// one BLNE at `0x080af720`, with no outbound calls.
+///
+/// Poll aligned LCD status at `0x3830008c` until bits 0 and 1 clear,
+/// returning the complete final status left in r0. No writes or timeout.
+/// Deliberate deviations: volatile MMIO, atomic host model, and a u32
+/// return instead of Ghidra's void. Shares the identical polling body with
+/// lcd_wait_transaction_idle; LLVM may intentionally fold the two exports.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn lcd_wait_display_idle() -> u32 {
+    wait_for_transaction_idle()
+}
+
+#[inline(always)]
+unsafe fn wait_for_transaction_idle() -> u32 {
     loop {
         let status = lcd_transaction_status();
         if status & 3 == 0 {
@@ -59,15 +82,16 @@ mod transaction_tests {
 
     #[test]
     fn waits_for_each_busy_bit_and_returns_unmasked_final_status() {
+        for wait in [lcd_wait_transaction_idle, lcd_wait_display_idle] {
         for busy in [0, 1, 2, 3, 0xffff_ffff] {
             HOST_LCD_TRANSACTION_READS.store(0, Ordering::SeqCst);
             HOST_LCD_TRANSACTION_STATUS.store(busy, Ordering::SeqCst);
             if busy == 0 {
-                assert_eq!(unsafe { lcd_wait_transaction_idle() }, 0);
+                assert_eq!(unsafe { wait() }, 0);
                 assert_eq!(HOST_LCD_TRANSACTION_READS.load(Ordering::SeqCst), 1);
                 continue;
             }
-            let worker = std::thread::spawn(|| unsafe { lcd_wait_transaction_idle() });
+            let worker = std::thread::spawn(move || unsafe { wait() });
             let deadline = Instant::now() + Duration::from_secs(5);
             while HOST_LCD_TRANSACTION_READS.load(Ordering::SeqCst) < 2 {
                 if Instant::now() >= deadline {
@@ -80,6 +104,9 @@ mod transaction_tests {
             assert!(!worker.is_finished(), "returned while a busy bit remained set");
             HOST_LCD_TRANSACTION_STATUS.store(0xa5a5_5a5c, Ordering::SeqCst);
             assert_eq!(worker.join().unwrap(), 0xa5a5_5a5c);
+        }
+            HOST_LCD_TRANSACTION_STATUS.store(0xffff_fffc, Ordering::SeqCst);
+            assert_eq!(unsafe { wait() }, 0xffff_fffc);
         }
     }
 }
