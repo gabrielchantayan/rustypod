@@ -9,8 +9,8 @@
 //! only changed masks and mark their backing state dirty.
 //!
 //! Deliberate deviation: host builds inject operations rather than executing
-//! retail addresses. Device builds preserve all six verified retail targets;
-//! Ghidra incorrectly includes the tail callees and reports 184 bytes.
+//! retail addresses. Device builds use five verified retail targets and the
+//! shared Rust classifier. Ghidra includes tail callees and reports 184 bytes.
 
 use core::ptr;
 use super::controller_event_is_enabled::{ControllerEventEnablementOps, DEFAULT_CONTROLLER_EVENT_ENABLEMENT_OPS};
