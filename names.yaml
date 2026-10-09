@@ -16,6 +16,47 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fb2e4
+    ghidra: FUN_080fb2e4
+    name: scsi_geometry_page_write
+    size: 172
+    sig: "u32 scsi_geometry_page_write(const GeometryPageReceiver* receiver, u8* output, u32 requested_length)"
+    module: app/scsi_geometry_page
+    status: ported
+    renames:
+      param_1/r0: receiver
+      param_2/r1: output
+      param_3/r2: requested_length
+      uVar3/r5: first_query_result
+      uVar2: second_query_result_low16
+      uVar1: third_query_result_low8
+    notes: >-
+      Raw osos.dec proves extent 0x080fb2e4..0x080fb390, 172 instruction
+      bytes without literals, ending in pop before the next function push.
+      Whole-image ARM word decoding finds two plain incoming BLs at
+      0x080fb11c and 0x080fb1f0, zero predicated incoming BLs. The body
+      has zero plain or predicated BLs and three register BLX calls through
+      object vtable slots +0x28, +0x24 and +0x5c, in that order.
+      Caller 0x080faec0 selects SCSI MODE SENSE page 6 or all pages 0x3f.
+      Concrete virtual identities are unresolved; no fixed-address seams.
+      Writes 86 0b 01, low16 of the second result big-endian, zero,
+      all32 of the first result big-endian, low8 of the third result,
+      then 02 00. All thirteen bytes are written regardless of length.
+      Unsigned lengths <=13 return length+1, including 13 returning 14;
+      larger lengths return 13. Receiver object and vtable are reloaded
+      before each query, with the third query after the first ten stores.
+      No behavioral deviations. Host repr(C) pointers and slot entries
+      widen while preserving target word indices; volatile reads/stores
+      preserve reloads, byte widths and ordering. Tests cover replacement
+      objects between queries, call/store order, truncation, endian layout,
+      zero/all-one values, output alignments, canaries, short/boundary and
+      high unsigned lengths. All 14988 host tests and ARM release build
+      pass. Standalone native smoke exercises the actual writer for lengths
+      0, 12, 13, 14 and UINT_MAX, verifying full page and guard bytes.
+      match.py exits 1 with 43 stock versus 44 Rust instructions: register
+      allocation and frame pointer differ, while all three virtual slots,
+      object reloads, thirteen byte stores and unsigned selection remain.
+      Export is distinct; no intentional symbol folding.
   - address: 0x080fd678
     ghidra: FUN_080fd678
     name: scsi_vendor_page_write
