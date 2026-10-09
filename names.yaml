@@ -234756,3 +234756,40 @@ functions:
       LLVM adds a frame, merges four flag bytes into a word store and
       +0x1b2/+0x1b3 into a halfword store, preserving +0x1b0. The export
       remains distinct; no intentional fold. No device execution claimed.
+
+  - address: 0x080fe678
+    ghidra: FUN_080fe678
+    name: timing_wheel_node_destroy
+    size: 44
+    sig: "u32 *timing_wheel_node_destroy(u32 *node)"
+    module: app/timing_wheel_node_destroy
+    status: ported
+    renames:
+      param_1/r0/r4: node
+      DAT_080fe6a0: TIMING_WHEEL_NODE_VTABLE (0x089800f8)
+      FUN_082739e0: release_refcounted_value
+      FUN_081384a0: refcounted_base_destroy (tail branch)
+    notes: >-
+      Raw words establish ten instructions (40 bytes) plus the literal at
+      0x080fe6a0, for a true extent of 44 bytes; the next real function
+      begins at 0x080fe6a4. Whole-image aligned branch decoding finds two
+      incoming plain BLs at 0x080fe66c and 0x08153248, zero incoming
+      predicated BLs or tail branches and no aligned DATA references.
+      Body contains zero plain BLs, one BLNE to release_refcounted_value,
+      then a tail B to refcounted_base_destroy. Installs derived vtable,
+      releases non-NULL owned value at +0x1c without clearing its slot,
+      destroys timing-wheel base and returns node. Payload at +0x18 and
+      other non-base fields survive. Uses canonical existing ports, not
+      Ghidra's inlined base teardown or spurious extra parameters.
+      Deliberate deviations: volatile derived-vtable store preserves its
+      visibility before release; final tail-call codegen is not required;
+      existing base port supplies the host scheduler model. Word indices
+      preserve target pointer-field spacing. Host regression covers NULL
+      and non-NULL ownership crossed with linked and unlinked nodes,
+      refcount decrement, successor repair, pointer identity, untouched
+      fields and adjacent canary. Host suite and ARM release build pass.
+      Native host-model smoke verifies NULL ownership, unlinked base,
+      pointer identity and preserved fields. match.py exits 1: LLVM emits
+      an explicit zero branch and conditional frame instead of BLNE,
+      retaining vtable literal/store, release BL and base tail branch.
+      Export remains distinct; no intentional fold or device run claimed.
