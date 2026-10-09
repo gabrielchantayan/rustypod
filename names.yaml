@@ -237130,3 +237130,38 @@ functions:
       boundary, correcting its previously truncated allocation and +8 value.
       Host tests cover zero/nonzero counts, overflow, untouched storage and
       allocation failure. No device execution is claimed.
+
+  - address: 0x080d86b0
+    ghidra: FUN_080d86b0
+    name: crts_table_teardown
+    size: 160
+    sig: "i32 crts_table_teardown(CrtsObject *this, u32 force)"
+    module: util/crts_table_teardown
+    status: ported
+    renames:
+      param_1/r5: this
+      param_2/r4: force
+      r6: entries
+      r7: counts
+      r4_loop: index
+      FUN_080a7714: crts_has_tag
+      FUN_0802edc8: free
+    notes: >-
+      Raw osos.dec verifies the 160-byte extent 0x080d86b0..0x080d874f,
+      ending in pop at 0x080d874c before the next function at 0x080d8750.
+      Whole-image ARM BL decoding finds two inbound plain BLs, at
+      0x0809e1a4 and 0x080e27e4, and zero predicated BL callers. The body
+      has three plain BLs and one BLHI; both callees are existing Rust ports.
+      Reject NULL or wrong crts tag with -50. Unless forced, require flags
+      0x0c. If both +0x14 u32 pointer and +0x18 u16 count arrays exist, scan
+      all 65536 slots and free pointers whose unsigned count exceeds one;
+      free and clear +0x14, then free and clear +0x18. Missing either array
+      preserves both ownership words. Eligible teardown clears flag 0x04
+      and sets 0x40 while preserving all other flags. No behavioral
+      deviations; a volatile pointer retains the existing free port as a
+      call boundary. Host tests use an internal release recorder and a unique
+      low-address slab to preserve target pointer widths. The destructor
+      now directly calls this port; its obsolete retail-address seam and
+      mock-wiring tests are removed. Host tests cover invalid tags, force
+      precedence, missing arrays, unsigned counts, last slot, release order,
+      ownership clearing and repeated teardown. No device execution claimed.
