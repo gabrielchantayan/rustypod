@@ -45176,10 +45176,10 @@ functions:
       five plain bl and no predicated bl. Under the owner-tracked mutex,
       requires the already ported 'plst' class check, flag bit 0 at +0x1ac,
       zero +0x1c, a zero result from unported 0x0806c228(resource+0x0c, 0),
-      and byte +0x1ae == 1 before forwarding (resource, mode) to unported
-      0x080d3570. The two unported callees remain a narrow host-injectable
-      seam rather than receiving invented identities; mutex calls use the
-      canonical port instead of the equivalent alias veneers.
+      and byte +0x1ae == 1 before forwarding (resource, mode) to the canonical
+      plst_resource_send_update port at 0x080d3570. The unported gate retains
+      a narrow host-injectable seam without an invented identity; mutex calls
+      use the canonical port instead of the equivalent alias veneers.
 
   - address: 0x080df114
     ghidra: FUN_080df114
@@ -237702,3 +237702,46 @@ functions:
       both ft_mulfix sites and hoists scale components; count gate, first
       width, signed snap comparison, grid rounding, and triple stride remain.
       No device execution.
+
+  - address: 0x080d3570
+    ghidra: FUN_080d3570
+    name: plst_resource_send_update
+    size: 136
+    sig: "u32 plst_resource_send_update(u8 *resource, u32 force)"
+    module: ui/plst_resource_send_update
+    vars:
+      param_1/r4: resource
+      param_2/r5: force
+      local_18: reply (three aligned words, first byte is result)
+      "resource+0x1ac": flags (bit 1 enables update, bit 3 guards dispatch)
+      "resource+0x1b0": update_enabled
+      "resource+0x618": update_pending
+      DAT_080d35f4: UPDATE_MESSAGE (0x706c7375)
+      FUN_080df384: unported related-resource operation (address-backed seam)
+      FUN_0805cfb4: bzero
+      FUN_0804424c: plst_task_message
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 136 bytes from 0x080d3570 through the literal
+      at 0x080d35f4, with the next independent push-prologue at 0x080d35f8.
+      Full-image ARM-word decoding finds one plain inbound BL at 0x0806cfec
+      and one BLNE at 0x080df448. The body has three plain outbound BL and
+      no predicated BL. Always calls unported 0x080df384(resource,0), then
+      unless forced requires nonzero byte +0x1b0 and flag bit 1. Marks
+      +0x618 pending before testing guard bit 3. If unguarded, sets that
+      bit, bzeroes a 12-byte reply, sends 0x706c7375, clears bit 3 from
+      freshly reloaded flags, and returns reply byte zero. Dispatcher
+      status is ignored. Rejected or guarded updates return zero. The
+      apparent Ghidra u64 return is incidental restored r1, not a second
+      result. Rust uses an aligned three-word reply and canonical bzero
+      and plst_task_message ports. The unported helper retains its verified
+      address without an invented identity, with a replaceable host seam.
+      The existing resource activation port now calls this canonical port.
+      Three host tests cover every flag byte, zero/nonzero enable and force,
+      helper mutations before gating, handler flag changes, and dispatcher
+      rejection. Standalone source-linked host smoke exercised the public
+      entry with injected external operations, including nested dispatch
+      suppression. ARM release build passed. match.py reports 33 original
+      versus 43 Rust disassembly rows; extra frame setup and indirect seam
+      calls differ, while gating, pending marking, 12-byte zeroing, message
+      constant, fresh guard removal, and byte return remain. No device run.
