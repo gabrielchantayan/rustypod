@@ -72,6 +72,7 @@ pub mod gpioic;
 pub mod i2c;
 pub mod interrupts;
 pub mod i2s_object_enable;
+pub mod i2s_object_transfer;
 pub mod lcd_write_register;
 pub mod mailbox_controller_reset;
 pub mod mmio_bit_write;
