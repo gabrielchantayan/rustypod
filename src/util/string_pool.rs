@@ -196,6 +196,76 @@ const _: () = {
     assert!(core::mem::size_of::<PoolEntry>() == 8);
 };
 
+/// `string_pool_used_bytes` — `FUN_080d2404` @ 0x080d2404, 36 bytes.
+///
+/// Raw ARM words end with `pop {r4,pc}` at 0x080d2424; the independent
+/// branch veneer at 0x080d2428 is the next function. One outgoing plain BL
+/// calls memh_get_len @ 0x0805d0cc; no outgoing predicated BLs. Whole-image
+/// decoding finds two incoming plain BLs at 0x080a64d8 and 0x080c5ce4,
+/// and no incoming predicated BLs.
+///
+/// Return zero for a NULL blob handle; otherwise subtract the unused bytes
+/// at +0x24 from the MemH length, modulo 2^32. This includes released bytes
+/// awaiting compaction, not just live entries.
+///
+/// Deliberate deviations: reuse the existing MemH port and StringPool's
+/// native-pointer host layout; the target retains +0x10/+0x24 offsets.
+///
+/// # Safety
+/// `pool` must be a readable StringPool. Its non-NULL payload handle must
+/// point to an aligned, readable MemhBufferHeader, even with invalid magic.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn string_pool_used_bytes(pool: *const StringPool) -> u32 {
+    let header = (*pool).payload.cast::<crate::heap::memh_set_len::MemhBufferHeader>();
+    if header.is_null() {
+        return 0;
+    }
+    crate::heap::memh_get_len::memh_get_len(header)
+        .wrapping_sub((*pool).allocator_state[1])
+}
+
+#[cfg(test)]
+mod used_bytes_tests {
+    use super::*;
+    use crate::heap::memh_handle::MEMH_MAGIC;
+    use crate::heap::memh_set_len::MemhBufferHeader;
+
+    #[test]
+    fn absent_blob_ignores_unused_bytes() {
+        let mut pool: StringPool = unsafe { core::mem::zeroed() };
+        pool.allocator_state[1] = u32::MAX;
+        assert_eq!(unsafe { string_pool_used_bytes(&pool) }, 0);
+    }
+
+    #[test]
+    fn subtracts_free_bytes_with_arm_wrapping_and_memh_validation() {
+        let mut header = MemhBufferHeader {
+            payload: 0,
+            magic: MEMH_MAGIC,
+            capacity: u32::MAX,
+            length: 0,
+        };
+        let mut pool: StringPool = unsafe { core::mem::zeroed() };
+        pool.payload = (&mut header as *mut MemhBufferHeader).cast();
+        for (length, free, expected) in [
+            (0, 0, 0), (32, 12, 20), (32, 32, 0),
+            (0, 1, u32::MAX), (u32::MAX, 0, u32::MAX),
+            (0x8000_0000, 1, 0x7fff_ffff),
+        ] {
+            header.length = length;
+            pool.allocator_state[1] = free;
+            assert_eq!(unsafe { string_pool_used_bytes(&pool) }, expected);
+            assert_eq!(header.length, length);
+            assert_eq!(pool.allocator_state[1], free);
+        }
+        header.magic = 0;
+        header.length = 99;
+        pool.allocator_state[1] = 7;
+        assert_eq!(unsafe { string_pool_used_bytes(&pool) }, u32::MAX - 6);
+    }
+}
+
 /// string_pool_release — original: `FUN_080c5efc` @ 0x080c5efc (176 bytes).
 ///
 /// Drops one reference to the pool entry named by the 1-based `id`. On a
