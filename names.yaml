@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080edb20
+    ghidra: FUN_080edb20
+    name: handle_cell_second_word_or_zero
+    size: 16
+    sig: "uint32_t handle_cell_second_word_or_zero(const uint32_t *const *slot)"
+    module: cxx/handle
+    status: ported
+    vars: {r0: slot_then_cell_then_second_word}
+    renames:
+      param_1: slot
+      uVar1: second_word_or_zero
+    notes: >-
+      Raw words e5900000 e3500000 15900004 e12fff1e establish
+      [0x080edb20,0x080edb30), ending with BX LR before the next PUSH.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x081739a8
+      and 0x08174874, zero incoming predicated BLs, and zero outgoing BLs.
+      Load the handle cell; NULL returns zero, otherwise read cell word one
+      at +4. Both callers pass owner+0x18, also passed to the registered
+      handle_deref_or_null accessor for virtual dispatch. The second word's
+      specific meaning is not established. No callees or new seams.
+      Native host slot pointers widen; cell u32 words retain four-byte spacing.
+      Three edge tests cover NULL cells, full-width values, zero first words,
+      and cell replacement. All 15056 host tests and ARM release build pass.
+      Standalone production-body smoke verifies high-bit and updated words
+      and NULL. match.py exits 1: four stock versus eight Rust instructions;
+      explicit NULL return and frame replace predicated load; no calls.
   - address: 0x080ef4e8
     ghidra: FUN_080ef4e8
     name: ps_is_whitespace
