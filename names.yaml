@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f69d4
+    ghidra: FUN_080f69d4
+    name: header_buffer_release
+    size: 36
+    sig: "void header_buffer_release(HeaderBuffer *owner)"
+    module: heap/header_buffer_release
+    status: ported
+    vars:
+      param_1/r0/r4: owner
+      owner_plus_4/r0: allocation
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec proves the nine-word extent 0x080f69d4..0x080f69f8;
+      the next function loads owner +4 and adds the 12-byte payload header.
+      Words e92d4010 e1a04000 e5900004 e3500000 08bd8010 eb06d0c9
+      e3a00000 e5840004 e8bd8010 establish the NULL early return,
+      tag-3 delete, and clearing only the allocation field after deletion.
+      Whole-image A32 BL decoding finds two inbound plain BLs at 0x080f6920
+      and 0x080f6a48, zero predicated inbound BLs; the body has one plain
+      BL at 0x080f69e8 to the already ported operator_delete_tag3 at
+      0x082aad14 and zero predicated BLs. The builder at 0x080f68f4
+      allocates payload length +12; the non-deleting destructor at
+      0x080f6a34 sets the vtable before release. No new callee seam.
+      Deliberate deviation: repr(C) pointers widen on hosts, while ARM
+      retains vtable +0 and allocation +4. No defined return value.
+      Host tests cover empty ownership, vtable and neighbor preservation,
+      clearing after tag-3 release, and repeated release without double free.
+      Full host suite passes (15011 tests), and the ARM release build passes.
+      A standalone host smoke exercises the empty path with the real port.
+      match.py shows the same load/NULL guard/delete/clear structure; LLVM
+      uses a shared epilogue and saves sl/fp, producing 40 rather than 36 bytes.
+
   - address: 0x080f6af8
     ghidra: FUN_080f6af8
     name: sentinel_buffer_release
