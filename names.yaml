@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080dc8d8
+    ghidra: FUN_080dc8d8
+    name: text_pair_break_action
+    size: 84
+    sig: "u8 text_pair_break_action(u32 left_codepoint, u32 right_codepoint)"
+    status: identified
+    vars:
+      param_1: left_codepoint
+      param_2: right_codepoint
+      uVar1: left_class
+      uVar2: right_class
+    notes: >-
+      Deferred: required tables lie in the undecrypted
+      0x083ee1c1..0x083f25ec region. Raw A32 extent
+      [0x080dc8d8,0x080dc92c) is 84 bytes: 76 bytes of instructions
+      through POP at 0x080dc920 plus two literal words at 0x080dc924
+      and 0x080dc928; the next independent PUSH is at 0x080dc92c.
+      Two outgoing plain BLs at 0x080dc8e8 and 0x080dc900 target
+      0x080cab1c; zero predicated BLs. Whole-image aligned word decoding
+      finds two incoming plain BLs at 0x08262f44 and 0x08263c80,
+      zero predicated BLs. Neither assigned address nor callee already
+      has a names.yaml entry; no Rust seam is created.
+      Raw code at 0x080cab1c performs an unsigned upper-bound search
+      over four-byte records containing a u16 threshold and u16 class,
+      returning the class of the last threshold not above the input.
+      Both inputs use 544 records at 0x083f04e0; their returned classes
+      are masked to 16 bits, then a byte is read from
+      0x083f0d60 + left_class * 29 + right_class.
+      Callers compare consecutive decoded characters and branch on
+      actions 1 and 2 during text layout. The semantic name describes
+      this pairwise break-action lookup without assigning unavailable
+      class or action meanings. In osos.dec all 2176 classification-table
+      bytes and all 841 bytes of the nominal 29-by-29 action matrix are
+      zero placeholders, not recovered table contents. Missing thresholds,
+      classes and action bytes prevent a faithful implementation.
+      No Rust implementation, host tests, ARM build or match.py comparison
+      is claimed. Resume only with recovered tables.
   - address: 0x080df060
     ghidra: FUN_080df060
     name: ft_sbit_decoder_alloc_bitmap
