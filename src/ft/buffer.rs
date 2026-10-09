@@ -174,9 +174,6 @@ unsafe fn buffered_stream_io_context_finalize() -> BufferedStreamIoContextFinali
 pub type BufferedStreamDataContextCreateFn =
     unsafe extern "C" fn(out_context: *mut u32, data: u32, is_input: u32, tag: u32, buffer_size: u32) -> i32;
 
-/// ABI of the unported buffered-stream initializer at `0x080f06f4`.
-pub type BufferedStreamInitializeFn =
-    unsafe extern "C" fn(stream: *mut FtBufferedStream, data: u32, is_input: u32, buffer_size: u32, io_context: u32) -> i32;
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_buffered_stream_data_context_create(
@@ -201,45 +198,88 @@ unsafe extern "C" fn firmware_buffered_stream_data_context_create(
     panic!("ft_buffered_stream_init_data requires data-context constructor 0x0805b764")
 }
 
+/// ABI of the unported signed first-halfword accessor at `0x0805aca8`.
+pub type BufferedStreamDataKindFn = unsafe extern "C" fn(data: u32) -> i32;
+
 #[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_buffered_stream_initialize(
-    stream: *mut FtBufferedStream,
-    data: u32,
-    is_input: u32,
-    buffer_size: u32,
-    io_context: u32,
-) -> i32 {
-    let initialize: BufferedStreamInitializeFn = core::mem::transmute(0x080f06f4usize);
-    initialize(stream, data, is_input, buffer_size, io_context)
+unsafe extern "C" fn firmware_buffered_stream_data_kind(data: u32) -> i32 {
+    let get: BufferedStreamDataKindFn = core::mem::transmute(0x0805aca8usize);
+    get(data)
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_buffered_stream_initialize(
-    _stream: *mut FtBufferedStream,
-    _data: u32,
-    _is_input: u32,
-    _buffer_size: u32,
-    _io_context: u32,
-) -> i32 {
-    panic!("ft_buffered_stream_init_data requires stream initializer 0x080f06f4")
+unsafe extern "C" fn firmware_buffered_stream_data_kind(_data: u32) -> i32 {
+    panic!("buffered stream data kind requires accessor 0x0805aca8")
 }
 
-/// Host-replaceable direct calls retained as volatile seams. The two callees
-/// are absent from `names.yaml`; target builds invoke their verified retailOS
-/// entries.
+/// Host-replaceable unported calls; target defaults reach verified firmware entries.
 pub static mut BUFFERED_STREAM_DATA_CONTEXT_CREATE: BufferedStreamDataContextCreateFn =
     firmware_buffered_stream_data_context_create;
-pub static mut BUFFERED_STREAM_INITIALIZE: BufferedStreamInitializeFn =
-    firmware_buffered_stream_initialize;
+pub static mut BUFFERED_STREAM_DATA_KIND: BufferedStreamDataKindFn =
+    firmware_buffered_stream_data_kind;
 
 #[inline(always)]
 unsafe fn buffered_stream_data_context_create() -> BufferedStreamDataContextCreateFn {
     core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_DATA_CONTEXT_CREATE))
 }
 
-#[inline(always)]
-unsafe fn buffered_stream_initialize() -> BufferedStreamInitializeFn {
-    core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_INITIALIZE))
+/// ft_buffered_stream_initialize — `FUN_080f06f4` @ `0x080f06f4`.
+/// True size: 176 bytes including the tag literal; 2 inbound plain BL calls,
+/// 6 outbound plain BL calls, and no predicated BL calls.
+///
+/// Clears the 48-byte record, installs its tag, mode bytes and I/O context,
+/// and copies the optional data object's first halfword. A zero request means
+/// 128 KiB. Allocates request + 32 bytes, halving after failures at or above
+/// 4096; a failed smaller request returns -108 with the header retained.
+/// Success retains the raw allocation, aligns its start, records the final
+/// capacity, and resets the cursor for input or output mode.
+///
+/// Deviation: the unported signed-halfword accessor at 0x0805aca8 uses a
+/// volatile host seam and verified firmware dispatch on target. Allocation
+/// size arithmetic explicitly wraps at 32 bits, including on host.
+///
+/// # Safety
+/// `stream` must be aligned and writable for 48 bytes. Nonzero `data` must
+/// satisfy the firmware accessor's readable-halfword contract.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_initialize(
+    stream: *mut FtBufferedStream,
+    data: u32,
+    is_input: u32,
+    mut buffer_size: u32,
+    io_context: u32,
+) -> i32 {
+    crate::libc::bzero::bzero(stream.cast(), 48);
+    (*stream).magic = u32::from_le_bytes(*b"ffub");
+    (*stream).is_input = is_input as u8;
+    (*stream).state_reserved[0] = is_input as u8;
+    (*stream).io_context = io_context;
+    if data != 0 {
+        let get = core::ptr::read_volatile(core::ptr::addr_of!(BUFFERED_STREAM_DATA_KIND));
+        core::ptr::addr_of_mut!((*stream).io_reserved).cast::<u16>().write(get(data) as u16);
+    }
+    if buffer_size == 0 {
+        buffer_size = 0x20000;
+    }
+    loop {
+        let alignment = crate::heap::aligned_buffer::aligned_buffer_alignment();
+        let allocation = crate::heap::veneers::malloc_tag4(
+            buffer_size.wrapping_add(alignment) as usize,
+        );
+        if !allocation.is_null() {
+            (*stream).buffer_allocation = allocation as usize as u32;
+            (*stream).buffer_start =
+                crate::heap::aligned_buffer::aligned_buffer_align_up(allocation) as usize as u32;
+            (*stream).io_reserved[1] = buffer_size;
+            ft_buffered_stream_reset_buffer_cursor(stream);
+            return 0;
+        }
+        if buffer_size < 0x1000 {
+            return -108;
+        }
+        buffer_size >>= 1;
+    }
 }
 
 /// ft_buffered_stream_init_data — original: `FUN_08042efc` @ `0x08042efc`
@@ -251,10 +291,10 @@ unsafe fn buffered_stream_initialize() -> BufferedStreamInitializeFn {
 /// context creation succeeds but stream initialization fails, it finalizes the
 /// partially initialized stream. A foreign tag returns -50 without calls.
 ///
-/// Deliberate deviation: the unported context constructor at `0x0805b764` and
-/// stream initializer at `0x080f06f4` are volatile dispatch seams on host and
-/// indirect dispatches to their verified retailOS entries on target. Raw `osos.dec`
-/// decoding confirms the body ends with literal `0x64617461` at `0x08042f64`;
+/// Deliberate deviation: the unported context constructor at `0x0805b764`
+/// remains a volatile dispatch seam; the initializer calls the Rust port.
+/// Raw `osos.dec` decoding confirms the body ends with literal `0x64617461`
+/// at `0x08042f64`.
 /// # Safety
 ///
 /// `stream` must be a valid, aligned writable [`FtBufferedStream`].
@@ -285,7 +325,7 @@ pub unsafe extern "C" fn ft_buffered_stream_init_data(
         return result;
     }
 
-    let result = buffered_stream_initialize()(stream, data, 1, buffer_size, io_context);
+    let result = ft_buffered_stream_initialize(stream, data, 1, buffer_size, io_context);
     if result != 0 {
         ft_buffered_stream_finalize(stream);
     }
@@ -990,140 +1030,137 @@ mod tests {
     }
 }
 
+
 #[cfg(test)]
-mod init_data_tests {
-    use super::{
-        ft_buffered_stream_init_data, BufferedStreamDataContextCreateFn, BufferedStreamInitializeFn,
-        FtBufferedStream, BUFFERED_STREAM_DATA_CONTEXT_CREATE,
-        BUFFERED_STREAM_FINALIZE_TEST_LOCK, BUFFERED_STREAM_INIT_DATA_TEST_LOCK,
-        BUFFERED_STREAM_INITIALIZE, BUFFERED_STREAM_IO_CONTEXT_FINALIZE,
-    };
-    static mut CREATE_RESULT: i32 = 0;
-    static mut INITIALIZE_RESULT: i32 = 0;
-    static mut CREATE_CALLS: usize = 0;
-    static mut INITIALIZE_CALLS: usize = 0;
-    static mut CREATE_ARGS: (u32, u32, u32, u32) = (0, 0, 0, 0);
-    static mut INITIALIZE_CONTEXT: u32 = 0;
+mod initialize_tests {
+    extern crate std;
+    use super::*;
+    use crate::heap::types::HeapDescriptorDescriptor;
+    use crate::heap::veneers::{HeapVeneerOps, HEAP_OPS};
+    use std::vec::Vec;
 
-    unsafe extern "C" fn record_create(
-        out_context: *mut u32,
-        data: u32,
-        is_input: u32,
-        tag: u32,
-        buffer_size: u32,
+    static mut REQUESTS: Vec<usize> = Vec::new();
+    static mut FAILURES: usize = 0;
+    static mut FINALIZED_CONTEXT: u32 = 0;
+
+    unsafe extern "C" fn allocate(
+        _heap: *mut HeapDescriptorDescriptor, size: usize, tag: usize,
+    ) -> *mut u8 {
+        assert_eq!(tag, 4);
+        (*core::ptr::addr_of_mut!(REQUESTS)).push(size);
+        if FAILURES != 0 {
+            FAILURES -= 1;
+            core::ptr::null_mut()
+        } else {
+            // Only pointer arithmetic is performed; this address is not dereferenced.
+            0x12345usize as *mut u8
+        }
+    }
+
+    unsafe extern "C" fn data_kind(_data: u32) -> i32 { -32767 }
+    unsafe extern "C" fn create(
+        out: *mut u32, _data: u32, _input: u32, _tag: u32, _size: u32,
     ) -> i32 {
-        CREATE_CALLS += 1;
-        CREATE_ARGS = (data, is_input, tag, buffer_size);
-        out_context.write(0x1234_5678);
-        CREATE_RESULT
+        out.write(0x76543210);
+        0
+    }
+    unsafe extern "C" fn finalize(context: u32) { FINALIZED_CONTEXT = context; }
+
+    struct Seams(HeapVeneerOps, BufferedStreamDataKindFn,
+        BufferedStreamDataContextCreateFn, BufferedStreamIoContextFinalizeFn);
+    impl Drop for Seams {
+        fn drop(&mut self) {
+            unsafe {
+                HEAP_OPS = self.0;
+                BUFFERED_STREAM_DATA_KIND = self.1;
+                BUFFERED_STREAM_DATA_CONTEXT_CREATE = self.2;
+                BUFFERED_STREAM_IO_CONTEXT_FINALIZE = self.3;
+            }
+        }
+    }
+    unsafe fn install(failures: usize) -> Seams {
+        let saved = Seams(HEAP_OPS, BUFFERED_STREAM_DATA_KIND,
+            BUFFERED_STREAM_DATA_CONTEXT_CREATE, BUFFERED_STREAM_IO_CONTEXT_FINALIZE);
+        HEAP_OPS.alloc = allocate;
+        BUFFERED_STREAM_DATA_KIND = data_kind;
+        BUFFERED_STREAM_DATA_CONTEXT_CREATE = create;
+        BUFFERED_STREAM_IO_CONTEXT_FINALIZE = finalize;
+        (*core::ptr::addr_of_mut!(REQUESTS)).clear();
+        FAILURES = failures;
+        FINALIZED_CONTEXT = 0;
+        saved
+    }
+    fn dirty_stream() -> FtBufferedStream {
+        unsafe { core::mem::transmute([u64::MAX; 6]) }
     }
 
-    unsafe extern "C" fn record_initialize(
-        stream: *mut FtBufferedStream,
-        _data: u32,
-        _is_input: u32,
-        _buffer_size: u32,
-        io_context: u32,
-    ) -> i32 {
-        INITIALIZE_CALLS += 1;
-        INITIALIZE_CONTEXT = io_context;
-        (*stream).magic = u32::from_le_bytes(*b"ffub");
-        (*stream).is_input = 1;
-        INITIALIZE_RESULT
+    #[test]
+    fn default_capacity_alignment_and_output_range() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(0) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe { ft_buffered_stream_initialize(&mut stream, 0, 0x100, 0, 77) }, 0);
+        assert_eq!(stream.magic, 0x62756666);
+        assert_eq!((stream.finalized, stream.is_input, stream.state_reserved), (0, 0, [0, 0]));
+        assert_eq!((stream.io_context, stream.io_reserved), (77, [0, 0x20000]));
+        assert_eq!((stream.buffer_allocation, stream.buffer_start), (0x12345, 0x12360));
+        assert_eq!((stream.cursor, stream.buffer_end), (0x12360, 0x3235f));
+        assert_eq!((stream.position_reserved, stream.cached_position), (0, 0));
+        unsafe { assert_eq!(&*core::ptr::addr_of!(REQUESTS), &[0x20020]); }
     }
 
-    unsafe extern "C" fn ignore_io_context_finalize(_io_context: u32) {}
+    #[test]
+    fn retries_preserve_odd_halving_and_input_header() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(2) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe { ft_buffered_stream_initialize(&mut stream, 1, 0x102, 0x4003, 99) }, 0);
+        assert_eq!((stream.is_input, stream.state_reserved), (2, [2, 0]));
+        assert_eq!(stream.io_reserved, [0x8001, 0x1000]);
+        assert_eq!((stream.cursor, stream.buffer_end), (0x12361, 0x12360));
+        unsafe { assert_eq!(&*core::ptr::addr_of!(REQUESTS), &[0x4023, 0x2021, 0x1020]); }
+    }
 
-    fn stream() -> FtBufferedStream {
-        FtBufferedStream {
-            magic: 0,
-            finalized: 0,
-            is_input: 0,
-            state_reserved: [0; 2],
-            io_context: 0,
-            io_reserved: [0; 2],
-            buffer_allocation: 0,
-            cursor: 0,
-            buffer_start: 0,
-            buffer_end: 0,
-            position_reserved: 0,
-            cached_position: 0,
+    #[test]
+    fn failed_threshold_attempts_smaller_size_and_retains_header() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        for (size, expected) in [(0x1000, &[0x1020, 0x820][..]), (0xfff, &[0x101f][..])] {
+            let _seams = unsafe { install(usize::MAX) };
+            let mut stream = dirty_stream();
+            assert_eq!(unsafe { ft_buffered_stream_initialize(&mut stream, 1, 1, size, 99) }, -108);
+            assert_eq!((stream.magic, stream.io_context, stream.io_reserved), (0x62756666, 99, [0x8001, 0]));
+            assert_eq!((stream.buffer_allocation, stream.buffer_start, stream.cursor, stream.buffer_end), (0, 0, 0, 0));
+            unsafe { assert_eq!(&*core::ptr::addr_of!(REQUESTS), expected); }
         }
     }
 
     #[test]
-    fn foreign_tag_returns_minus_50_without_calling_either_callee() {
-        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
-        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
-        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
-        unsafe {
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
-            BUFFERED_STREAM_INITIALIZE = record_initialize;
-            CREATE_CALLS = 0;
-            INITIALIZE_CALLS = 0;
-        }
-        let mut stream = stream();
-
-        assert_eq!(unsafe { ft_buffered_stream_init_data(1, &mut stream, 0x20000, 0) }, -50);
-        unsafe {
-            assert_eq!(CREATE_CALLS, 0);
-            assert_eq!(INITIALIZE_CALLS, 0);
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
-            BUFFERED_STREAM_INITIALIZE = original_initialize;
-        }
+    fn allocation_size_wraps_at_target_word_width() {
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(0) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe { ft_buffered_stream_initialize(&mut stream, 0, 0, 0xfffffff0, 0) }, 0);
+        assert_eq!(stream.io_reserved[1], 0xfffffff0);
+        assert_eq!(stream.buffer_end, 0x1234f);
+        unsafe { assert_eq!(&*core::ptr::addr_of!(REQUESTS), &[16]); }
     }
 
     #[test]
-    fn context_creation_error_propagates_without_initializing_the_stream() {
-        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
-        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
-        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
-        unsafe {
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
-            BUFFERED_STREAM_INITIALIZE = record_initialize;
-            CREATE_RESULT = -108;
-            CREATE_CALLS = 0;
-            INITIALIZE_CALLS = 0;
-        }
-        let mut stream = stream();
-
-        assert_eq!(unsafe { ft_buffered_stream_init_data(0x89ab_cdef, &mut stream, 0x1000, u32::from_le_bytes(*b"atad")) }, -108);
-        unsafe {
-            assert_eq!(CREATE_CALLS, 1);
-            assert_eq!(INITIALIZE_CALLS, 0);
-            assert_eq!(CREATE_ARGS, (0x89ab_cdef, 1, u32::from_le_bytes(*b"atad"), 0x1000));
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
-            BUFFERED_STREAM_INITIALIZE = original_initialize;
-        }
+    fn data_constructor_cleans_up_after_real_initializer_exhaustion() {
+        let _finalize = BUFFERED_STREAM_FINALIZE_TEST_LOCK.lock();
+        let _create = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
+        let _heap = crate::heap::veneers::tests::mock_heap();
+        let _seams = unsafe { install(usize::MAX) };
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe { ft_buffered_stream_init_data(1, &mut stream, 1, 0x64617461) }, -108);
+        assert_eq!((stream.magic, stream.io_context, stream.io_reserved), (0, 0, [0, 0]));
+        unsafe { assert_eq!(FINALIZED_CONTEXT, 0x76543210); }
     }
 
     #[test]
-    fn initialization_error_finalizes_the_created_input_stream() {
-        let _finalize_lock = BUFFERED_STREAM_FINALIZE_TEST_LOCK.lock();
-        let _lock = BUFFERED_STREAM_INIT_DATA_TEST_LOCK.lock();
-        let original_create = unsafe { BUFFERED_STREAM_DATA_CONTEXT_CREATE };
-        let original_initialize = unsafe { BUFFERED_STREAM_INITIALIZE };
-        let original_finalize = unsafe { BUFFERED_STREAM_IO_CONTEXT_FINALIZE };
-        unsafe {
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = record_create;
-            BUFFERED_STREAM_INITIALIZE = record_initialize;
-            BUFFERED_STREAM_IO_CONTEXT_FINALIZE = ignore_io_context_finalize;
-            CREATE_RESULT = 0;
-            INITIALIZE_RESULT = -7;
-            CREATE_CALLS = 0;
-            INITIALIZE_CALLS = 0;
-        }
-        let mut stream = stream();
-
-        assert_eq!(unsafe { ft_buffered_stream_init_data(3, &mut stream, 0, u32::from_le_bytes(*b"atad")) }, -7);
-        unsafe {
-            assert_eq!(CREATE_CALLS, 1);
-            assert_eq!(INITIALIZE_CALLS, 1);
-            assert_eq!(INITIALIZE_CONTEXT, 0x1234_5678);
-            assert_eq!(stream.magic, 0);
-            BUFFERED_STREAM_DATA_CONTEXT_CREATE = original_create;
-            BUFFERED_STREAM_INITIALIZE = original_initialize;
-            BUFFERED_STREAM_IO_CONTEXT_FINALIZE = original_finalize;
-        }
+    fn foreign_tag_leaves_record_untouched() {
+        let mut stream = dirty_stream();
+        assert_eq!(unsafe { ft_buffered_stream_init_data(1, &mut stream, 1, 0) }, -50);
+        assert_eq!((stream.magic, stream.io_context, stream.cached_position), (u32::MAX, u32::MAX, u64::MAX));
     }
 }
