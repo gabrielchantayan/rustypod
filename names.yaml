@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e2d4c
+    ghidra: FUN_080e2d4c
+    name: free_tag4_if_nonnull_secondary
+    size: 12
+    sig: "void free_tag4_if_nonnull_secondary(void *ptr)"
+    module: heap/veneers
+    vars: {param_1/r0: ptr}
+    renames: {FUN_0805d070: free_tag4}
+    status: ported
+    notes: >-
+      Raw words e3500000 1afde8c6 e12fff1e establish the full 12-byte
+      extent [0x080e2d4c,0x080e2d58); the next real function begins with
+      add r1,r0,#0x14. Whole-image aligned decoding finds two incoming
+      plain BLs at 0x080dc790 and 0x080dc7b8, zero predicated BLs.
+      Body has zero plain or predicated BLs, one BNE to canonical
+      free_tag4 at 0x0805d070. NULL returns before heap initialization;
+      non-NULL releases the unchanged pointer with tag 4. Callers clear
+      their own stored pointers. Ghidra incorrectly follows the tail chain
+      into the heap-free body. No new callee seam. Rust uses a guarded call
+      and an empty target-only assembly barrier to prevent identical-body
+      folding; the barrier emits no instructions. Host NULL regression and
+      full suite pass; ARM build passes. match.py preserves the NULL guard
+      and non-NULL tail branch with LLVM frame setup/teardown. Branch target
+      identity must be read from the relocatable object relocation.
   - address: 0x080e3698
     ghidra: FUN_080e3698
     name: pmu_status_notify
