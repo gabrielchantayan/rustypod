@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f74d4
+    ghidra: FUN_080f74d4
+    name: linked_items_have_clear_associated_flag
+    size: 52
+    sig: "u32 linked_items_have_clear_associated_flag(const u32 *head)"
+    module: app/linked_items_have_clear_associated_flag
+    status: ported
+    renames:
+      param_1/r0: head
+      iVar1/r0: node
+      r1: associated_object_then_flag
+    notes: >-
+      Raw osos.dec verifies 13 ARM instructions, 52 bytes at
+      0x080f74d4..0x080f7508; the next real function starts at
+      0x080f7508 with push {r4,r5,r6,lr}. Load the list head word.
+      For each nonzero node, load its associated pointer at +0x128
+      and the byte at associated+0x2c. Return 1 if that byte is zero;
+      otherwise follow the next pointer at node+0x134. Return 0 at
+      list end. No head-argument or associated-pointer NULL guard.
+      Independently decoded incoming BL references: 2 plain
+      (0x0814296c, 0x0814298c), 0 predicated; outgoing BL count 0.
+      Both callers belong to 0x08142954 and pass owner+0xac.
+      No callee seams. The flag's domain meaning remains unknown.
+      Pointer fields use aligned u32 word reads on both target and
+      host. Deliberate deviations: none. Host coverage includes empty
+      lists, all-nonzero flags including high-bit bytes, a zero at
+      every list position, and early success with an invalid next
+      pointer. Standalone host smoke observed nonzero=0, zero=1,
+      empty=0. ARM release build passed. match.py reports 13 stock
+      instructions versus 18 Rust instructions: identical +0x128
+      word load, +0x2c byte test, +0x134 next load and termination
+      behavior; LLVM adds a frame-pointer prologue/epilogues and
+      rearranges the empty-list check. No outgoing calls in either.
   - address: 0x080f8130
     ghidra: FUN_080f8130
     name: i2s_object_select_transfer
