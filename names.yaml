@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d36e4
+    ghidra: FUN_080d36e4
+    name: codec_cached_headphone_level_set
+    size: 52
+    sig: "u32 codec_cached_headphone_level_set(u32 level)"
+    module: drivers/codec_cached_headphone_level
+    status: ported
+    vars:
+      param_1/r0: level
+      r1: codec_level_state
+      codec_level_state+0: refresh
+      codec_level_state+1: calibration
+      codec_level_state+2: cached_level
+    renames:
+      DAT_080d3714: codec_level_state
+      FUN_0808f9c8: codec_register_pair_level_scale
+    notes: >-
+      Raw extent [0x080d36e4,0x080d3718) is 48 executable bytes plus
+      the literal 0x089d0f04; next function begins PUSH at 0x080d3718.
+      Whole-image aligned decoding finds two plain inbound BL sites,
+      0x080ad4a4 and 0x080cc284, no predicated inbound BLs, and zero
+      plain or predicated outbound BLs. BNE at 0x080d3708 tail-calls
+      0x0808f9c8 with register pair 2/3 and the full level word. Ghidra
+      incorrectly inlines that scaler and reports 160 bytes. Compare
+      the cached byte against the full word; skip only when equal and
+      refresh is zero. Otherwise cache the low byte before scaling.
+      The verified stock scaler uses SMULBB by 59, unsigned division
+      by 242, adds 62 and calibration byte, wraps to a byte, clamps
+      nonzero requests to 48..127, then writes registers 2/3 through
+      0x080da15c. Zero requests use gain zero. Volatile cache accesses
+      and host-only state/scaler seams are deliberate deviations;
+      the scaler is retained at its stock address, not ported here.
+      All 15124 host tests and the ARM release build passed. Standalone
+      smoke exercised suppression, wide input and forced refresh.
+      match.py was run with its default Ghidra size and the verified
+      52-byte extent; both printed expected structural diffs (exit 1).
+      LLVM preserves conditional refresh loading, cache-before-update,
+      register arguments and the stock scaler tail transfer via BX;
+      its frame prologue and literal layout differ from ARM ADS.
   - address: 0x080d4b74
     ghidra: FUN_080d4b74
     name: t1_builder_close_contour
