@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f8130
+    ghidra: FUN_080f8130
+    name: i2s_object_select_transfer
+    size: 48
+    sig: "usize i2s_object_select_transfer(u8 *object, u32 transfer, u32 endpoint)"
+    module: drivers/i2s_object_transfer
+    status: ported
+    renames:
+      param_1/r0: object
+      param_2/r1: transfer
+      param_3/r2: endpoint
+      object+0x1c: controller
+      object+0x1e: endpoint_mode
+    notes: >-
+      Raw A32 extent is 0x080f8130..0x080f8160, 48 bytes, not Ghidra's
+      100 bytes. Two incoming plain BLs at 0x081f480c and 0x081f4864,
+      zero predicated incoming BLs and zero outgoing BLs. Mode zero
+      selects endpoint/controller; mode one selects controller/endpoint.
+      Both tail-branch to verified original configuration routine
+      0x080f7dd4 with transfer in r3. Other modes preserve r0 and object
+      state. The target routine stores the three words, calls the I2S
+      core through 0x08038020 (IRAM 0x220085d8), then clears byte +0x0c
+      and returns zero. Host builds inject this existing boundary.
   - address: 0x080f8160
     ghidra: FUN_080f8160
     name: i2s_object_set_enabled
