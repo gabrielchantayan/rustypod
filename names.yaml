@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080fa698
+    ghidra: FUN_080fa698
+    name: scsi_caching_page_write
+    size: 108
+    sig: "u32 scsi_caching_page_write(const u8* receiver, u8* output, u32 requested_length)"
+    module: app/scsi_caching_page
+    status: ported
+    renames:
+      param_1/r0: ignored_receiver
+      param_2/r1: output
+      param_3/r2: requested_length
+    notes: >-
+      Raw A32 proves extent 0x080fa698..0x080fa704, 108 instruction bytes
+      without literals, ending in bx lr before the next function push.
+      Whole-image branch decoding finds two plain incoming BLs at
+      0x080fb0a8 and 0x080fb138, zero predicated incoming BLs and zero
+      outgoing calls. Caller 0x080faec0 selects SCSI caching page 8 or
+      includes it for all pages 0x3f in its MODE SENSE response builder.
+      Writes 88 12 followed by eighteen zeros, ignoring receiver. All
+      twenty bytes are written regardless of requested length. Unsigned
+      lengths <= 20 return length + 1, including 21 for length 20;
+      larger lengths return 20. No behavioral deviations or callee seams.
+      Volatile byte stores preserve write width/order and prevent libc
+      substitution. All 14993 host tests and ARM release build pass.
+      Tests cover output alignments, canaries, short lengths, 20/21 and
+      high unsigned lengths. Direct-entry smoke verifies lengths 0, 19,
+      20, 21 and UINT_MAX. match.py reports 27 stock versus 29 Rust
+      instructions: all twenty byte stores and unsigned selection remain.
+      LLVM adds a frame, moves cmp earlier, and computes length + 1
+      unconditionally before conditionally selecting 20.
   - address: 0x080fb2e4
     ghidra: FUN_080fb2e4
     name: scsi_geometry_page_write
