@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d87f0
+    ghidra: FUN_080d87f0
+    name: enabled_subtree_find_identifier
+    size: 80
+    sig: "u32 *enabled_subtree_find_identifier(u32 *root, u32 identifier)"
+    module: app/enabled_subtree_find_identifier
+    status: ported
+    renames:
+      param_1/r0: root
+      param_2/r1: identifier
+      iVar2/r4: child
+      iVar1/r0: found
+      FUN_080d87f0: enabled_subtree_find_identifier
+    notes: >-
+      Raw A32 extent [0x080d87f0,0x080d8840) is 80 bytes with no literals;
+      next real function is indexed_resource_word, beginning with CMP r1,#0.
+      Independent whole-image aligned BL decoding finds two plain inbound
+      sites at 0x08094e48 and recursive 0x080d8820, zero predicated.
+      One outbound plain BL at 0x080d8820 calls this function itself;
+      zero predicated outbound calls. Prune nodes and descendants when
+      byte +0x1d bit 0 is clear; otherwise compare identifier word +0x14,
+      then search children +0x20 recursively in sibling +0x08 order.
+      Return the first preorder match or NULL. Caller loads root from
+      context +0x40 and consumes the found node's +0x24 word.
+      No external callee seams, NULL-root guard, cycle guard, or behavioral
+      deviations. Aligned u32 links preserve target layout on hosts.
+      Host edge tests and ARM release build pass; standalone production
+      smoke verifies root match and disabled pruning with invalid children.
+      match.py exit 1: 20 original versus 24 Rust instructions; LLVM adds
+      an fp frame and branch returns, preserving offsets and recursive BL.
   - address: 0x080d8840
     ghidra: FUN_080d8840
     name: indexed_resource_word
