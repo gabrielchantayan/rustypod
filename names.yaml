@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e86b8
+    ghidra: FUN_080e86b8
+    name: signed_list_insert_sorted
+    size: 56
+    sig: "void signed_list_insert_sorted(SignedListNode **link, SignedListNode *node)"
+    module: util/signed_list_insert_sorted
+    status: ported
+    renames:
+      param_1/r0: link_then_current
+      param_2/r1: node
+      r2: insertion_link
+      r3: cached_signed_key
+      r12: current_signed_key
+    notes: >-
+      Raw A32 words establish [0x080e86b8,0x080e86f0), fourteen instructions
+      ending with bx lr at 0x080e86ec; the next function starts with word
+      loads at 0x080e86f0. Independent whole-image aligned BL decoding
+      finds two plain incoming calls at 0x08073ed0 and 0x08073fb0, zero
+      predicated incoming calls, and zero outgoing calls of either kind.
+      Caller 0x08073e48 uses intrusive scanline lists; its first Ghidra
+      call omits the live r1 argument. Walk while current key <= cached
+      node key using signed comparison, then write node.next before
+      publishing node through the selected link slot. Equal keys preserve
+      insertion order. No callees or seams. No target behavioral deviations;
+      repr(C) pointers preserve key +0 and next +4 on ARM and widen on hosts.
+      Host suite passes 15067 tests, including signed extrema, empty/head/
+      middle/tail insertion, equal-key identity order, stale next overwrite
+      and an interior link slot. Independent production-entry smoke yields
+      [-2147483648,-8,-8,7,2147483647] with stable duplicate identities.
+      ARM release build passes. Reviewed match.py exit 1: fourteen original
+      versus twenty-four Rust instructions. LLVM adds a frame, splits empty
+      and tail exits, and delays loading the new key on the empty path;
+      signed traversal, link offset +4 and successor-before-publication
+      stores are preserved.
   - address: 0x080eb814
     ghidra: FUN_080eb814
     name: scanf_digit_value

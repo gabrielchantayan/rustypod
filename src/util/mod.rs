@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod signed_list_insert_sorted;
 pub mod signed_binary_search;
 pub mod packet_ring_pending_count;
 pub use packet_ring_pending_count::*;
