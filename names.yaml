@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080f6af8
+    ghidra: FUN_080f6af8
+    name: sentinel_buffer_release
+    size: 68
+    sig: "u32 sentinel_buffer_release(SentinelBufferOwner *owner)"
+    module: cxx/sentinel_buffer_release
+    status: ported
+    vars: {param_1/r0: owner, r4: saved_owner, r1: buffer, r2: sentinel}
+    notes: >-
+      Raw osos.dec establishes [0x080f6af8,0x080f6b3c), 68 bytes,
+      ending in pop at 0x080f6b38 before an independently entered accessor.
+      Ghidra truncates at 48 bytes because operator_delete is wrongly
+      marked noreturn. Whole-image aligned A32 decoding finds two incoming
+      plain BLs at 0x080f6a64 and 0x080f7428, no predicated incoming BLs,
+      one outgoing plain BL at 0x080f6b24 to the existing tag-2
+      operator_delete port at 0x082aad24, and no predicated outgoing BLs.
+      Return zero unchanged for NULL buffer at +0x14 or u16 sentinel at
+      +0x18 other than 0xffff. Otherwise delete the saved buffer, then clear
+      both fields and return one. Callers prepare or release owner buffers;
+      the enclosing class and wider sentinel meaning remain unidentified.
+      No new callee seam. repr(C) preserves target offsets; host pointer
+      fields widen. Existing heap ops dispatch is the deliberate deviation.
+      Host suite passes 15009 tests, including every non-release sentinel,
+      NULL with the sentinel set, field preservation and repeated release.
+      ARM release build passes. Compiled ARM smoke matches stock across ten
+      NULL/non-NULL and sentinel cases, intercepting the delete boundary and
+      verifying fields are unchanged until deletion. Default match.py uses
+      the truncated 48-byte extent; --size 68 shows 17 stock versus 21 Rust
+      instructions. LLVM changes frame/guards and reverses the two clearing
+      stores; both remain after deletion. Export is distinct, not folded.
   - address: 0x080f74d4
     ghidra: FUN_080f74d4
     name: linked_items_have_clear_associated_flag
