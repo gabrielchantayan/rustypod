@@ -44284,6 +44284,40 @@ functions:
       body with mailbox_slot_create_thunk; both exports have identical
       semantics. No new callee seam or module is needed.
 
+  - address: 0x080d7114
+    ghidra: thunk_FUN_0808e2b0
+    name: mailbox_slot_signal_alias_d7114
+    size: 4
+    sig: "void mailbox_slot_signal_alias_d7114(Mailbox **slot)"
+    module: kernel/kobj
+    status: ported
+    vars: {param_1/r0: slot}
+    renames:
+      FUN_0808e2b0: mailbox_slot_signal
+    notes: >-
+      Raw word eafedc65 is a plain tail branch to 0x0808e2b0,
+      the already-ported mailbox_slot_signal. True extent is
+      0x080d7114..0x080d7118; the next real function starts with
+      e92d4010 (push {r4,lr}). Full-image aligned ARM BL decoding
+      independently finds two plain calls, at 0x080ac14c and
+      0x082283d8, and zero predicated BL calls. Ghidra follows the
+      tail chain into the semaphore implementation; that larger body
+      is not this function. Forward the slot unchanged; the callee
+      reloads its mailbox, decrements its count with signed wrapping
+      semantics, and wakes the waiter when the resulting count is
+      negative. No additional NULL guard or new callee seam.
+      Host tests cover slot replacement, neighboring block and waiter
+      preservation, non-waking positive counts, negative counts, and
+      MIN-to-MAX wrapping without wake. All 15112 host tests and
+      cargo build -Z build-std=core --release pass. Production-source
+      standalone smoke exercises counts 0/-1, slot replacement and
+      MIN-to-MAX with modeled IRQ and gateway boundaries; no device
+      execution claimed. Required match.py exits 1: one stock branch
+      versus four Rust instructions, adding frame setup and teardown.
+      R_ARM_JUMP24 resolves the final tail branch to mailbox_slot_signal.
+      A separate text section keeps this exported alias distinct from
+      the identical 0x080dad34 alias; no intentional folding.
+
   - address: 0x080dad34
     ghidra: thunk_FUN_0808e2b0
     name: mailbox_slot_signal_thunk
