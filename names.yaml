@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e2054
+    ghidra: FUN_080e2054
+    name: controller_event_class
+    size: 212
+    sig: "u32 controller_event_class(u32 event)"
+    module: app/controller_event_class
+    status: ported
+    renames:
+      param_1/r0: event
+      r0_return: input_mask_class
+    notes: >-
+      Raw A32 extent is 0x080e2054..0x080e2128, ending before the next
+      independent PUSH. Zero outgoing plain or predicated BLs; aligned
+      whole-image decoding finds two incoming plain BLs at 0x08172570 and
+      0x08172634, zero predicated. Subtract 0x8214 with wrapping arithmetic,
+      unsigned-check against 43, then dispatch through 44 branch entries.
+      Only indices 35 and 43 (events 0x8237 and 0x823f) return class one;
+      all other u32 inputs return class zero. Callers select controller
+      input masks with this class. Rust deliberately replaces the branch
+      table with equality comparisons, without behavioral deviations.
+      Existing controller query/update defaults use the Rust classifier
+      instead of the obsolete fixed-address wrapper.
+      Host regression covers every table entry, unsigned boundaries and
+      high-bit aliases; public-ABI smoke checks all 65536 low event codes.
+      Host cargo tests and release ARM build pass. match.py confirms the
+      exported symbol and prints an intentional structural diff: LLVM
+      clears bit 3, compares with 0x8237 via subtraction, and uses CLZ
+      to normalize equality, replacing the retail table without calls.
   - address: 0x080e2540
     ghidra: FUN_080e2540
     name: retail_service_manager_notification

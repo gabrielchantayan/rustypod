@@ -9,9 +9,9 @@
 //!
 //! # Deliberate deviations
 //!
-//! Device builds invoke the four verified retail addresses. Host builds use a
-//! volatile operation seam so tests can observe their call order and inputs;
-//! this is the only deliberate deviation.
+//! Device builds invoke three verified retail addresses and the Rust event
+//! classifier. Host builds use a volatile operation seam for call observation;
+//! the default classifier is shared with device builds.
 
 use core::ptr;
 
@@ -30,11 +30,6 @@ unsafe extern "C" fn firmware_event_mask(event: u32) -> u32 {
     unsafe { function(event) }
 }
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_event_class(event: u32) -> u32 {
-    let function: unsafe extern "C" fn(u32) -> u32 = unsafe { core::mem::transmute(0x080e_2054usize) };
-    unsafe { function(event) }
-}
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn firmware_class_zero_mask(input_state: u32) -> u32 {
@@ -56,14 +51,14 @@ unsafe extern "C" fn missing_event_operation(_value: u32) -> u32 {
 #[cfg(target_os = "none")]
 pub const DEFAULT_CONTROLLER_EVENT_ENABLEMENT_OPS: ControllerEventEnablementOps = ControllerEventEnablementOps {
     event_mask: firmware_event_mask,
-    event_class: firmware_event_class,
+    event_class: super::controller_event_class::controller_event_class,
     class_zero_mask: firmware_class_zero_mask,
     class_one_mask: firmware_class_one_mask,
 };
 #[cfg(not(target_os = "none"))]
 pub const DEFAULT_CONTROLLER_EVENT_ENABLEMENT_OPS: ControllerEventEnablementOps = ControllerEventEnablementOps {
     event_mask: missing_event_operation,
-    event_class: missing_event_operation,
+    event_class: super::controller_event_class::controller_event_class,
     class_zero_mask: missing_event_operation,
     class_one_mask: missing_event_operation,
 };

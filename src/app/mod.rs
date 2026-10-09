@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod controller_event_class;
 pub mod pmu_status_notify;
 pub mod lazy_static_object_08ae4848;
 pub mod linked_items_have_clear_associated_flag;
