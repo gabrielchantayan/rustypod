@@ -94,6 +94,21 @@ unsafe fn dispatch_event_code(mapped_code: u32, flag: u32) {
     core::ptr::read_volatile(core::ptr::addr_of!(EVENT_CODE_DISPATCH))(mapped_code, flag);
 }
 
+/// Unflagged event-dispatch veneer at `0x080c6924`
+/// (`thunk_FUN_080873f0`), true size 4 bytes.
+///
+/// Raw word `eaff02b1` tail-branches to `0x080873f0`; the next real entry
+/// is `0x080c6928`. Whole-image aligned A32 decoding finds two inbound plain
+/// BL calls (`0x08060920`, `0x08060948`), zero predicated BL calls, and no
+/// outbound BL. Preserves the event-code word and dispatches with flag zero.
+/// Deliberate deviation: delegates to the existing Rust unflagged entry;
+/// LLVM may fold the identical wrappers rather than retain distinct bodies.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_code_dispatch_unflagged_thunk(event_code: u32) {
+    event_code_dispatch_unflagged(event_code);
+}
+
 /// Clears the worker flag while preserving the event-code word.
 #[cfg_attr(target_os = "none", no_mangle)]
 #[inline(never)]
@@ -195,6 +210,32 @@ mod tests {
             assert_eq!(READY_CALLS, 3);
             assert_eq!(DELAY_CALLS, 2);
             assert_eq!(DISPATCH, (0xa5, 2));
+        }
+    }
+
+    #[test]
+    fn veneer_handles_zero_failed_mapping_and_delayed_readiness() {
+        let _lock = EVENT_CODE_DISPATCH_TEST_LOCK.lock();
+        let _reset = Reset;
+        unsafe {
+            EVENT_CODE_MAP = map_seven;
+            EVENT_CODE_READY = ready_after_two_polls;
+            EVENT_CODE_TASK_DELAY = record_delay;
+            EVENT_CODE_DISPATCH = record_dispatch;
+            event_code_dispatch_unflagged_thunk(0);
+            assert_eq!((MAP_CALLS, READY_CALLS, DELAY_CALLS), (0, 0, 0));
+            assert_eq!(DISPATCH, (0, 0));
+
+            EVENT_CODE_MAP = map_failure;
+            event_code_dispatch_unflagged_thunk(0x17);
+            assert_eq!((READY_CALLS, DELAY_CALLS), (0, 0));
+            assert_eq!(DISPATCH, (0, 0));
+
+            EVENT_CODE_MAP = map_seven;
+            event_code_dispatch_unflagged_thunk(u32::MAX);
+            assert_eq!((MAP_CALLS, MAP_INPUT), (1, u32::MAX));
+            assert_eq!((READY_CALLS, DELAY_CALLS), (3, 2));
+            assert_eq!(DISPATCH, (0xa5, 0));
         }
     }
 

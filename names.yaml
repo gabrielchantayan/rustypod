@@ -45145,6 +45145,29 @@ functions:
       callback dispatch. Ported directly through the already-ported
       semaphore wrappers; no deliberate deviations.
 
+  - address: 0x080c6924
+    ghidra: thunk_FUN_080873f0
+    name: event_code_dispatch_unflagged_thunk
+    size: 4
+    sig: "void event_code_dispatch_unflagged_thunk(u32 event_code)"
+    module: app/event_code_dispatch
+    status: ported
+    renames:
+      param_1/r0: event_code
+      FUN_080873f0: event_code_dispatch_unflagged
+    notes: >-
+      Raw word eaff02b1 is a plain tail branch to 0x080873f0; the next
+      independently callable entry at 0x080c6928 begins with e5900000.
+      True extent is four bytes, not the shared worker shown by Ghidra.
+      Full-image aligned A32 B/BL decoding finds two inbound plain BL
+      calls at 0x08060920 and 0x08060948, zero predicated BL calls, and
+      no outbound BL. Reuses the already-ported unflagged dispatcher,
+      preserving the full event-code word and clearing the worker flag.
+      Host tests cover zero, failed mapping, and delayed readiness.
+      match.py reports the stock single B versus LLVM frame setup and
+      teardown followed by a tail B; the Rust target remains the existing
+      unflagged entry. No behavioral deviation or new address seam.
+
   - address: 0x080c6928
     ghidra: FUN_080c6928
     name: mailbox_slot_post_deferred
