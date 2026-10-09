@@ -16,6 +16,45 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08100678
+    ghidra: FUN_08100678
+    name: collection_type_one_prune
+    size: 120
+    sig: "void collection_type_one_prune(u8 *owner)"
+    module: app/collection_type_one_prune
+    status: ported
+    renames:
+      param_1/r4: owner
+      owner_plus_0x28: collection
+      owner_plus_0x90: cleared_state_byte
+      auStack_24/sp_plus_4: iterator_state
+      local_10/sp_plus_0x18: entry
+      FUN_08155e80: iterator_state_construct
+      FUN_08155d6c: iterator_state_next
+      FUN_08155dc4: iterator_state_seek
+      FUN_08155ec0: iterator_state_cleanup
+      FUN_0839c084: stock collection find-and-remove helper
+    notes: >-
+      Raw ARM establishes 120 bytes through 0x081006f0, where the next
+      distinct push begins. Full-image BL decoding finds two unconditional
+      callers at 0x081011a0 and 0x0810188c, zero predicated callers; the
+      body contains five unconditional BL and zero predicated BL. Clears
+      owner+0x90, constructs the existing five-word iterator on owner+0x28
+      at -2, removes entries whose first byte is exactly 1, clears the entry
+      temporary, and seeks back to -2 after each removal. Cleans up after
+      exhaustion. At 0x081006b8 r1 contains the entry loaded at 0x081006a4;
+      Ghidra incorrectly omits this argument. Raw 0x0839c084 saves r1,
+      passes its address to collection vtable+0x4c, and removes the resulting
+      index via vtable+0x2c unless it equals -1. No existing names entry
+      identifies that helper; Rust retains its stock address rather than
+      inventing an identity or porting a second function. Deliberate
+      deviation: zero-initialized iterator storage owned by its constructor.
+      Host fixtures exercise empty collections, exact byte selection,
+      consecutive removals, compaction/restart, and neighboring owner bytes.
+      ARM build passes. match.py shows the same clear/construct/traverse/
+      compare/remove/reset/seek/cleanup structure, with LLVM loop rotation,
+      extra zero stores and frame registers, and BLX through the literal
+      0x0839c084 instead of the original direct BL.
   - address: 0x0810073c
     ghidra: FUN_0810073c
     name: app_motor_shutdown
