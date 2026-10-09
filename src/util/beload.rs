@@ -1,6 +1,9 @@
 //! Alignment-free big-endian byte accessors.
 //!
-//! - `load_be32` — originals: `FUN_080bdb74` @ 0x080bdb74 (36 bytes;
+//! - `load_be32` — originals: `FUN_080bdb50` @ 0x080bdb50 (36 bytes;
+//!   2 unconditional incoming BL sites at 0x08056ca0 and 0x08056cac,
+//!   zero predicated incoming BL and zero outgoing BL, raw-word verified;
+//!   next function starts at 0x080bdb74), `FUN_080bdb74` @ 0x080bdb74 (36 bytes;
 //!   6 direct `bl` call sites, all unconditional, in the XTEA state
 //!   decryptor @ 0x080e7134), `FUN_081f3b30` @ 0x081f3b30 (36 bytes;
 //!   4 call sites, binary-scanned, all in the format-header parser
@@ -9,7 +12,16 @@
 //!   is SQLite's `sqlite3Get4byte` — the b-tree page-header reader.
 //!   All assemble the four input bytes as `p[0]<<24 | p[1]<<16 |
 //!   p[2]<<8 | p[3]`; the 0x080bdb74 instruction order differs but has
-//!   the same result. One Rust symbol serves all three; all addresses hook it.
+//!   the same result. One Rust symbol serves all four; all addresses hook it.
+//!   The 0x080bdb50 copy supplies two input words to the eight-round block
+//!   decryptor @ 0x08056c8c and is byte-identical to 0x080bdb74.
+//!   Deliberate deviation: identical firmware copies share one Rust symbol;
+//!   no behavioral deviations, NULL guard, or alignment requirement.
+//!   Verification for 0x080bdb50: 15,188 host tests passed; ARM release build
+//!   passed. match.py resolves `load_be32` and reports 9 stock versus 11 Rust
+//!   instructions: LLVM adds frame setup/return and reorders ordinary byte
+//!   loads, retaining four byte accesses and the big-endian combination.
+//!   Standalone real-source smoke returned 0xdeadbeef from unaligned input.
 //! - `store_be32` — original: `FUN_083816cc` @ 0x083816cc (32 bytes;
 //!   38 `bl` call sites). SQLite's `sqlite3Put4byte`, the write twin of
 //!   the above: four `strb`s, most significant byte first.
@@ -363,6 +375,29 @@ mod tests {
         assert_eq!(unsafe { load_be32([0xff, 0xff, 0xff, 0xff].as_ptr()) }, u32::MAX);
         assert_eq!(unsafe { load_be32([0x80, 0, 0, 1].as_ptr()) }, 0x8000_0001);
         assert_eq!(unsafe { load_be32([0, 0, 0, 1].as_ptr()) }, 1);
+    }
+
+    #[test]
+    fn load_be32_covers_every_byte_lane_at_every_alignment() {
+        #[repr(align(4))]
+        struct Input([u8; 8]);
+        for offset in 0..4 {
+            for lane in 0..4 {
+                for byte in 0..=255u8 {
+                    let mut input = Input([0xa5; 8]);
+                    let mut word = [0x12, 0x34, 0x56, 0x78];
+                    word[lane] = byte;
+                    input.0[offset..offset + 4].copy_from_slice(&word);
+                    let before = input.0;
+                    assert_eq!(
+                        unsafe { load_be32(input.0.as_ptr().add(offset)) },
+                        u32::from_be_bytes(word),
+                        "offset={offset}, lane={lane}, byte={byte}"
+                    );
+                    assert_eq!(input.0, before);
+                }
+            }
+        }
     }
 
     #[test]
