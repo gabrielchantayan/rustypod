@@ -1,5 +1,7 @@
 //! Query mask translation and backend assignment.
 
+use crate::util::query_mask_to_backend_mask::query_mask_to_backend_mask;
+
 /// query_object_set_masks — `FUN_0813d064` @ `0x0813d064`.
 /// True extent: 52 bytes, ending at the independent wrapper `0x0813d098`,
 /// not Ghidra's reported 68. Raw A32 decoding finds two plain BLs and zero
@@ -11,10 +13,11 @@
 /// all other bits. Load the backend pointer from query +0x40, store the
 /// first translated mask at backend +0xe30 and the second at +0xe34,
 /// then return zero. Callers supply (0x32, 0) or a literal mask and zero.
-/// The converter uses only r0/r1 and preserves the original's saved r3.
+/// The original converter uses only r0/r1 and preserves its caller's saved r3;
+/// Rust uses the normal C ABI instead of relying on that register detail.
 ///
-/// Deliberate deviation: inline the verified pure converter and trivial
-/// setter rather than create two firmware seams. Query pointers stay u32
+/// Deliberate deviation: call the shared Rust converter and inline the
+/// trivial setter rather than create a setter seam. Query pointers stay u32
 /// on hosts; there is no validation, dereference through a proxy, or merge.
 ///
 /// # Safety
@@ -23,12 +26,8 @@
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn query_object_set_masks(query: *const u8, first: u32, second: u32) -> u32 {
-    let translate = |mask: u32| {
-        (mask & 0x0020_000f) | ((mask & 0x30) << 1)
-            | ((mask & 0x40) << 2) | ((mask & 0x80) << 8)
-    };
-    let second = translate(second);
-    let first = translate(first);
+    let second = query_mask_to_backend_mask(second);
+    let first = query_mask_to_backend_mask(first);
     let backend = query.add(0x40).cast::<u32>().read() as usize as *mut u8;
     backend.add(0xe30).cast::<u32>().write(first);
     backend.add(0xe34).cast::<u32>().write(second);
