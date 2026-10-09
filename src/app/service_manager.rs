@@ -4,6 +4,7 @@
 //!
 //! | address | name | size | `bl` sites |
 //! |---|---|---|---|
+//! | 0x080e2540 | [`retail_service_manager_notification`] | 180 | 2 direct |
 //! | 0x08165520 | [`service_manager_instance`] | 24 | 17 direct |
 //! | 0x08165558 | [`service_manager_initialization_state_get`] | 36 | 6 direct |
 //! | 0x081391ec | [`service_manager_instance_veneer`] | 4 | **213** |
@@ -656,8 +657,8 @@ mod secondary_handler_has_events_get_tests {
 /// initialization-state get, and 0x080e2540) plus one predicated `blge`
 /// (`heap_panic`); full-image A32 decoding finds three inbound plain `bl`
 /// sites (0x08190fa8, 0x08191018, 0x081925f4) and no predicated inbound
-/// calls. Deliberate deviation: the unported 0x080e2540 notification routine
-/// is an explicit host seam; the target build calls its retail address.
+/// calls. The target notification is now the Rust port; host callers retain
+/// the existing notification interception seam for isolated manager tests.
 ///
 /// # Safety
 ///
@@ -698,8 +699,8 @@ pub unsafe extern "C" fn service_manager_secondary_handler_initialize(
 /// or state 2 if none does. Constructed status does not affect the result.
 ///
 /// Deliberate deviations: omit dead incoming r1/r2 and unused stack bytes;
-/// reuse the holder statics and notification host seam documented above.
-/// On target, notification still calls the verified retail address 0x080e2540.
+/// reuse the holder statics and host notification interception seam.
+/// On target, notification calls the Rust retail_service_manager_notification.
 ///
 /// # Safety
 /// `slot_table` must address three aligned, readable/writable eight-word
@@ -728,15 +729,13 @@ pub unsafe extern "C" fn service_manager_notification_update(slot_table: *mut u3
         }
         if statuses & 1 != 0 { 3 } else { 2 }
     };
-    invoke_unported_service_manager_notification(notification_state);
+    invoke_service_manager_notification(notification_state);
 }
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn invoke_unported_service_manager_notification(notification_state: i32) {
-    let routine: unsafe extern "C" fn(i32) =
-        core::mem::transmute(0x080e_2540usize);
-    routine(notification_state);
+unsafe fn invoke_service_manager_notification(notification_state: i32) {
+    retail_service_manager_notification(notification_state);
 }
 
 #[cfg(not(target_os = "none"))]
@@ -750,8 +749,91 @@ static mut SERVICE_MANAGER_NOTIFICATION: unsafe extern "C" fn(i32) =
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn invoke_unported_service_manager_notification(notification_state: i32) {
+unsafe fn invoke_service_manager_notification(notification_state: i32) {
     core::ptr::read_volatile(core::ptr::addr_of!(SERVICE_MANAGER_NOTIFICATION))(notification_state);
+}
+
+/// Configure the service-manager's PMU/GPIO notification state.
+///
+/// Original: FUN_080e2540 @ 0x080e2540, 180 bytes (176 code plus the
+/// 3300 literal), ending at the independent function at 0x080e25f4.
+/// Raw A32 words verify two inbound plain BLs (0x080cb6cc, 0x08194078),
+/// eight outbound plain BLs, and no predicated BLs in either direction.
+/// State 1 writes PMU value zero and configures pin 200 four times as
+/// output-low. States 2/3 write PMU value 3300 and configure that same pin
+/// with modes 0, 1, 0, 1, always level zero. Other states do nothing.
+/// Returns the original state. Repeated writes are deliberate, not deduplicated.
+/// Deviations: collapse duplicate branch code and redundant saved constants;
+/// reuse the verified Rust PMU and GPIO callees. The generic inner routine
+/// permits host trace tests without touching hardware and allocates nothing.
+///
+/// # Safety
+/// Requires the PMU semaphore/I2C subsystem and GPIO hardware to be usable.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn retail_service_manager_notification(state: i32) -> i32 {
+    notification_sequence(
+        state,
+        |value| crate::drivers::pmu::pmu_write_register_0x39_scaled_value(value),
+        |pin, mode, level| {
+            crate::drivers::gpio_cmd::gpio_pin_configure(pin, mode, level);
+        },
+    )
+}
+
+#[inline(always)]
+fn notification_sequence(
+    state: i32,
+    mut write_pmu: impl FnMut(u32),
+    mut configure_gpio: impl FnMut(u32, u32, i32),
+) -> i32 {
+    if !(1..=3).contains(&state) {
+        return state;
+    }
+    let mode = u32::from(state == 1);
+    write_pmu(if state == 1 { 0 } else { 3300 });
+    configure_gpio(200, mode, 0);
+    configure_gpio(200, 1, 0);
+    configure_gpio(200, mode, 0);
+    configure_gpio(200, 1, 0);
+    state
+}
+
+#[cfg(test)]
+mod notification_sequence_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[derive(Debug, PartialEq)]
+    enum Write { Pmu(u32), Gpio(u32, u32, i32) }
+
+    #[test]
+    fn preserves_state_and_ordered_repeated_hardware_writes() {
+        for state in [i32::MIN, -1, 0, 1, 2, 3, 4, 200, i32::MAX] {
+            let writes = RefCell::new(std::vec::Vec::new());
+            let result = notification_sequence(
+                state,
+                |value| writes.borrow_mut().push(Write::Pmu(value)),
+                |pin, mode, level| writes.borrow_mut().push(Write::Gpio(pin, mode, level)),
+            );
+            let expected = match state {
+                1 => std::vec![Write::Pmu(0), Write::Gpio(200, 1, 0),
+                    Write::Gpio(200, 1, 0), Write::Gpio(200, 1, 0), Write::Gpio(200, 1, 0)],
+                2 | 3 => std::vec![Write::Pmu(3300), Write::Gpio(200, 0, 0),
+                    Write::Gpio(200, 1, 0), Write::Gpio(200, 0, 0), Write::Gpio(200, 1, 0)],
+                _ => std::vec![],
+            };
+            assert_eq!(result, state);
+            assert_eq!(writes.into_inner(), expected, "state={state}");
+        }
+    }
+
+    #[test]
+    fn exported_entry_preserves_unknown_states_without_hardware() {
+        for state in [i32::MIN, -1, 0, 4, i32::MAX] {
+            assert_eq!(unsafe { retail_service_manager_notification(state) }, state);
+        }
+    }
 }
 
 #[cfg(test)]
