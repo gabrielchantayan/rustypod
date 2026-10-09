@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080d8cdc
+    ghidra: FUN_080d8cdc
+    name: block_engine_submit
+    size: 56
+    sig: "void block_engine_submit(u32 *context, u32 block_address)"
+    module: drivers/block_engine_submit
+    status: ported
+    renames:
+      param_1/r0: context
+      param_2/r1: block_address
+      DAT_38000000: ENGINE_COMMAND_STATUS
+      DAT_38000080: ENGINE_ENABLE
+      DAT_38000084: ENGINE_BLOCK_ADDRESS
+      DAT_3800008c: ENGINE_BLOCK_LENGTH
+    notes: >-
+      Raw A32 words establish [0x080d8cdc,0x080d8d14), 14 instructions
+      without literals; the next function starts with PUSH at 0x080d8d14.
+      Whole-image aligned BL decoding independently finds two plain inbound
+      calls at 0x080861c0 and 0x08086268, zero predicated inbound calls,
+      and zero outgoing calls. Caller 0x08086178 pads a 64-byte digest
+      block and passes its context as the block address at both sites.
+      Peripheral identity remains unverified. Write 1 to 0x38000080,
+      block_address to 0x38000084, and 64 to 0x3800008c; write context
+      word +0x48 to 0x38000000 and poll bit 0 until clear, then replace
+      context word +0x48 with 10. Ghidra C incorrectly moves the block
+      address write after polling; the port preserves raw instruction order.
+      No callee seam, validation, timeout, or target behavioral deviation.
+      Inlined register-access closures allow deterministic host tests of
+      immediate completion, unrelated high status bits, repeated busy samples,
+      exact write/poll ordering, and untouched adjacent context words.
+      All 15094 host tests passed and ARM release build passed. Standalone
+      production-source smoke used mapped register memory to verify volatile
+      register values and context replacement; no device execution claimed.
+      Reviewed match.py exit 1: 14 original versus 18 Rust instructions.
+      LLVM adds frame setup/teardown and forms an additional register base;
+      ordered writes, context load, bit-zero busy loop, and final store match.
+      Export remains a real function with no outgoing calls.
   - address: 0x080d98c4
     ghidra: FUN_080d98c4
     name: indexed_mode_word_848_set
