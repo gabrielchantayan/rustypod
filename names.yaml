@@ -238781,3 +238781,37 @@ functions:
       match.py resolves the distinct exported symbol and confirms the
       correct literal and return structure; LLVM adds frame-pointer
       prologue/epilogue (structural diff, exit 1).
+
+  - address: 0x080c151c
+    ghidra: FUN_080c151c
+    name: psh_hint_table_record
+    size: 180
+    sig: "void psh_hint_table_record(u32 *table, u32 index)"
+    module: ft/pshinter
+    status: ported
+    vars: {param_1: table, param_2: index, piVar4: hint, piVar3: recorded, piVar8: previous, uVar5: count}
+    notes: >-
+      Raw ARM code ends at 0x080c15d0; diagnostic strings occupy the
+      following bytes, next real function starts at 0x080c1638. Verified
+      0 plain BL and 0 predicated BL instructions, contrary to Ghidra's
+      reported two calls: conditional BLS and BCS tail branches target
+      ft_error_trace at 0x0804d17c, not its inlined logger callees.
+      Header words 0/1/2/4 hold capacity, recorded count, seven-word hints
+      pointer, and recorded-pointer array. Rejects unsigned invalid index;
+      flag 4 makes recording idempotent. Sets flag, clears word 5, then
+      links the first previously recorded hint whose signed intervals
+      overlap inclusively, with wrapping endpoint addition. Appends the
+      pointer and increments count; full-array error retains flag/link.
+      Caller 0x080b0dd4 records mask-selected hints, then any omitted hints.
+      Uses the existing trace seam; unused variadic slots are zero instead
+      of incidental register contents. Target pointer words stay u32 on hosts.
+      Host regression covers disjoint/touching intervals, first-match
+      precedence, negative coordinates, overflow, duplicates and error
+      mutations. All 15174 host tests passed; ARM release build succeeded.
+      match.py exit 1 reports 45 original versus 56 Rust instructions:
+      signed overlap loop, marker/link stores, unsigned bounds and count
+      checks, pointer append and two diagnostic tail paths are preserved.
+      Isolated real-source runtime smoke exercises invalid index 17 with
+      null arrays and verifies diagnostic and unchanged header. Whole-crate
+      non-test host smoke was blocked by existing missing functions in
+      prepare_entry_metadata and calendar_schedule. No device execution.
