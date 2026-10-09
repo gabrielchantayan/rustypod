@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const ENTRY_TABLE_FINALIZE_LAST: usize = 0x60c1_0000;
     pub const PSH_HINT_TABLE_RECORD: usize = 0x7033_0000;
     pub const PKCS7_GET_OCTET_STRING: usize = 0x7032_0000;
     pub const PFR_GLYPH_CLOSE_CONTOUR: usize = 0x7031_0000;
