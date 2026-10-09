@@ -59,6 +59,7 @@ pub mod checked_byte_block_forwarder;
 pub mod mailbox_task_construct;
 pub mod mailbox_task_destroy;
 pub mod clone_slot_source;
+pub mod allocate_slot_record;
 pub mod coordinate_origin;
 pub mod coordinate_owner_mirror;
 pub mod coordinate_owner_swap_surface;

@@ -44742,7 +44742,7 @@ functions:
       param_2/r1/r7: selector
       iVar3/r4: slot
       iVar4/r8: slot_table_entry
-      FUN_080d8cac: allocate_slot_record_inlined
+      FUN_080d8cac: allocate_slot_record
       FUN_0806b604: resource_callback_dispatch
       FUN_0805d070: free_tag4
       FUN_080da6a0: clone_slot_source_inlined
@@ -44754,14 +44754,14 @@ functions:
       code/literal extent is 216 bytes. Decoding every ARM B/BL word finds
       exactly 7 inbound calls: 7 plain bl, no predicated bl, and no tail
       branches. Selectors >=49 return -50 before touching element. A cached
-      +0x3ac selector word returns success. Selector 1 allocates a 20-byte
-      record with count from element->header(+0x40)+0x2e, dispatches
+      +0x3ac selector word returns success. Selector 1 allocates a
+      20 + count * 4 byte record with count from element->header(+0x40)+0x2e, dispatches
       callback 0x080d9250 through resource_callback_dispatch, and retains
       the record only if record+0x0c equals record+0x04; failures release it.
       Other selectors recurse through slot 1, clone the element+0x3b0 source
-      buffer, call unported 0x0809ef6c, then cache the clone. The two small
-      allocation helpers are inlined from their verified bodies; target
-      builds use existing malloc_tag4/free_tag4 and resource_callback_dispatch.
+      buffer, call unported 0x0809ef6c, then cache the clone.
+      Slot record allocation shares the verified allocate_slot_record algorithm;
+      the clone helper remains inlined. Target builds use existing malloc_tag4/free_tag4 and resource_callback_dispatch.
       The unported population routine remains behind PLST_SLOT_MATERIALIZE_OPS;
       its target seam calls the known real entry 0x0809ef6c, never an
       invented identity. The clone uses a volatile byte copy rather than the
@@ -236980,3 +236980,30 @@ functions:
       and calendar_schedule. An isolated throwaway host-test smoke called
       the public entry and observed final-task unlink with NULL parent head;
       the smoke harness was removed after verification.
+
+  - address: 0x080d8cac
+    ghidra: FUN_080d8cac
+    name: allocate_slot_record
+    size: 48
+    sig: "u8 *allocate_slot_record(u32 count)"
+    module: ui/allocate_slot_record
+    status: ported
+    renames:
+      param_1/r4: count
+      iVar1/r0: record
+      iVar2/r5: allocation_size
+      FUN_0805d1d4: malloc_tag4
+    notes: >-
+      Raw words establish the exact 48-byte extent 0x080d8cac..0x080d8cdc;
+      the next function starts with mov r3,#1 and hardware register writes.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x080dc4f8
+      and 0x080df1fc, zero predicated BLs. The body has one plain BL at
+      0x080d8cc0 to the already ported malloc_tag4 at 0x0805d1d4.
+      Allocate count * 4 + 20 bytes with wrapping 32-bit arithmetic.
+      On success write zero at +12, count at +4 and the total allocation
+      size at +8, leaving all other words untouched; failure returns NULL.
+      Rust supplies ABI saves and uses the named allocator. The existing
+      PLST materializer shares the inline algorithm through its allocator
+      boundary, correcting its previously truncated allocation and +8 value.
+      Host tests cover zero/nonzero counts, overflow, untouched storage and
+      allocation failure. No device execution is claimed.
