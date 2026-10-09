@@ -235285,3 +235285,45 @@ functions:
       instruction versus ten Rust instructions: LLVM inlines the adapter,
       adds a frame, and tail-dispatches via BX to literal 0x220086c4.
       The unsigned/signed loads and unchanged parameter/status ABI remain.
+  - address: 0x080f7420
+    ghidra: FUN_080f7420
+    name: iap_packet_release
+    size: 60
+    sig: "void iap_packet_release(void *packet)"
+    module: app/iap_packet
+    status: ported
+    vars:
+      param_1/r0/r4: packet
+      r5: zero
+      FUN_080f6af8: resident sentinel-owned secondary-buffer cleanup
+      FUN_082aad14: operator_delete_tag3
+    notes: >-
+      Raw osos.dec proves the 15-word extent 0x080f7420..0x080f745c,
+      where the next real packet constructor begins. Outgoing calls are
+      one plain BL (0x080f7428 to 0x080f6af8) and two BLNE (0x080f7434
+      and 0x080f744c to 0x082aad14). A whole-image raw ARM branch scan
+      independently finds two plain inbound BL at 0x080f73c0 and
+      0x080f74b4, and zero predicated inbound BL. First runs resident
+      secondary cleanup, then tag-3 deletes each nonzero pointer at +8
+      and +20 and zeros its pointer/u16 length pair at +8/+12 and +20/+24.
+      Other metadata and padding remain unchanged. The unregistered
+      0x080f6af8 helper is verified from its complete 68-byte raw body:
+      nonzero +20 with length 0xffff is tag-2 deleted, +20/+24 cleared,
+      and one returned; otherwise returns zero. Ghidra incorrectly claims
+      its delete never returns and omits the post-delete clearing.
+      Deliberate deviations: helper remains a resident ABI seam with a
+      required host replacement; tag-3 delete uses the existing Rust heap
+      port; conditional BLs become guarded calls; target pointer words
+      stay u32 on hosts. IAP_PACKET_OPS.release now defaults to the real
+      port, replacing the obsolete no-op. Earlier packet ledger notes
+      describing an unported release/no-op default are superseded here.
+      Host parity covers null/non-null buffer combinations, sentinel and
+      adjacent lengths, cleanup ordering, repeat release, and metadata
+      preservation. All 15004 host tests pass; ARM release build succeeds.
+      Exported-entry smoke observes secondary cleanup and exact pair
+      clearing with metadata preserved. match.py exits 1: 19 Rust versus
+      15 stock instructions, with an indirect BLX to resident 0x080f6af8,
+      LLVM frame, guarded tag-3 calls and identical field widths. LLVM
+      schedules the +20 load ahead of the first pair's zero stores but
+      still after its delete; no intervening external call changes that
+      ordering's observable behavior.

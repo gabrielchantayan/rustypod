@@ -63,7 +63,7 @@
 //! The constructor and destructor also bump a live-packet counter at the
 //! global word 0x089ccc24 (up in 0x080f745c, down in 0x080f74ac).
 
-use crate::heap::veneers::{operator_delete, operator_new};
+use crate::heap::veneers::{operator_delete, operator_delete_tag3, operator_new};
 
 /// Allocation size of an iAP packet — the `mov r0, #0x24` feeding
 /// `operator_new` in [`iap_packet_create`].
@@ -75,8 +75,7 @@ pub const IAP_PACKET_SIZE: usize = 0x24;
 /// width meaningful.
 pub const LINGO_EXTENDED_INTERFACE: u8 = 0x04;
 
-/// Indirect dispatch for this cluster's unported payload-release helper (the
-/// house pattern — see `drivers/display_layer.rs` and `heap/alloc_core.rs`).
+/// Release dispatch for this cluster; defaults to the real port.
 #[derive(Clone, Copy)]
 pub struct IapPacketOps {
     /// `FUN_080f7420` @ 0x080f7420: the payload release helper. Runs the
@@ -84,26 +83,77 @@ pub struct IapPacketOps {
     /// +0x14 through tag-3 `operator_delete` @ 0x082aad14, and zeroes both
     /// pointer/length pairs. No NULL guard on `packet` itself.
     ///
-    /// Default: no-op, releases nothing.
+    /// Default: [`iap_packet_release`].
     pub release: unsafe extern "C" fn(packet: *mut u8),
 }
 
 
-unsafe extern "C" fn release_stub(_packet: *mut u8) {}
-
-/// Wired default for the unported release helper.
+/// Wired default for the ported release helper.
 pub(crate) const DEFAULT_IAP_PACKET_OPS: IapPacketOps = IapPacketOps {
-    release: release_stub,
+    release: iap_packet_release,
 };
 
 /// The active release op. Host tests swap in a recording mock and restore.
 pub static mut IAP_PACKET_OPS: IapPacketOps = DEFAULT_IAP_PACKET_OPS;
 
-/// Volatile read so LLVM cannot fold the default stub in and delete the
-/// dispatch (the `alloc_core.rs` rationale).
+/// Volatile read so host heap/packet integration tests can replace dispatch.
 #[inline(always)]
 unsafe fn iap_packet_ops() -> IapPacketOps {
     core::ptr::read_volatile(core::ptr::addr_of!(IAP_PACKET_OPS))
+}
+
+/// Resident conditional secondary-buffer cleanup @ 0x080f6af8.
+/// Raw code returns zero without changes unless +20 is nonzero and +24 is
+/// 0xffff; otherwise tag-2 deletes +20, clears +20/+24, and returns one.
+pub type IapSecondaryRelease = unsafe extern "C" fn(*mut u8) -> u32;
+
+#[cfg(not(target_os = "none"))]
+pub static mut IAP_SECONDARY_RELEASE: Option<IapSecondaryRelease> = None;
+
+/// iap_packet_release — FUN_080f7420 @ 0x080f7420, true size 60 bytes,
+/// ending at the independently decoded constructor boundary 0x080f745c.
+/// Outgoing calls: one plain BL to 0x080f6af8 and two predicated BLNE to
+/// 0x082aad14. Inbound: two plain BL, zero predicated (0x080f73c0,
+/// 0x080f74b4), independently counted from every raw ARM branch word.
+///
+/// First runs sentinel-owned secondary-buffer cleanup, then tag-3 deletes
+/// each remaining nonzero buffer (+8 then +20), clearing its pointer and
+/// u16 length immediately after deletion. Other fields and padding survive.
+/// Deliberate deviations: resident 0x080f6af8 stays an ABI seam (hosts must
+/// install it); tag-3 deletion uses the existing heap port; predicated calls
+/// become guarded calls. Pointer fields remain target-width u32 on hosts.
+///
+/// # Safety
+/// `packet` must be writable, four-byte-aligned storage for a 36-byte packet
+/// whose buffers satisfy the resident cleanup and heap ownership contracts.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn iap_packet_release(packet: *mut u8) {
+    #[cfg(target_os = "none")]
+    let secondary: IapSecondaryRelease = core::mem::transmute(0x080f_6af8usize);
+    #[cfg(not(target_os = "none"))]
+    let secondary = core::ptr::addr_of!(IAP_SECONDARY_RELEASE).read()
+        .expect("install resident iAP secondary-buffer cleanup");
+    release_buffers(packet, |packet| { secondary(packet); }, |buffer| {
+        operator_delete_tag3(buffer as usize as *mut u8);
+    });
+}
+
+#[inline(always)]
+unsafe fn release_buffers(
+    packet: *mut u8,
+    secondary: impl FnOnce(*mut u8),
+    mut delete: impl FnMut(u32),
+) {
+    secondary(packet);
+    let payload = packet.add(8).cast::<u32>().read();
+    if payload != 0 { delete(payload); }
+    packet.add(8).cast::<u32>().write(0);
+    packet.add(12).cast::<u16>().write(0);
+    let second = packet.add(20).cast::<u32>().read();
+    if second != 0 { delete(second); }
+    packet.add(20).cast::<u32>().write(0);
+    packet.add(24).cast::<u16>().write(0);
 }
 
 /// The live-packet counter (original: the word @ 0x089ccc24, held in the
@@ -188,9 +238,9 @@ pub unsafe extern "C" fn iap_packet_construct(packet: *mut u8) -> *mut u8 {
 ///
 /// # Deliberate deviations
 ///
-/// The unported release helper still uses [`IAP_PACKET_OPS`]'s volatile
-/// dispatch seam. The original returns `(success, owner)` in r0/r1; Rust's
-/// C ABI exposes only the observed r0 success flag.
+/// Release uses the existing packet operations table, defaulting to the real
+/// port. The original returns `(success, owner)` in r0/r1; Rust's C ABI
+/// exposes only the observed r0 success flag.
 ///
 /// # Safety
 ///
@@ -270,8 +320,8 @@ pub unsafe extern "C" fn iap_packet_init(
 ///
 /// # Deviations
 ///
-/// - The release helper @ 0x080f7420 is not ported; the call dispatches
-///   through [`IAP_PACKET_OPS`]'s `release` hook.
+/// - Release uses the existing operations table, defaulting to
+///   [`iap_packet_release`].
 /// - On target the counter is the real word @ 0x089ccc24 (the stock
 ///   constructor increments it, so the port must decrement that same
 ///   word); host builds decrement the stand-in static
@@ -415,8 +465,7 @@ pub unsafe extern "C" fn iap_packet_init_with_compact_payload(
 /// - `operator_new` (0x082aadd4) and `operator_delete` (0x082aad24) are
 ///   ported and called directly.
 /// - The destructor (0x080f74ac) is ported — [`iap_packet_destruct`] —
-///   and called directly; only its payload-release helper @ 0x080f7420
-///   still dispatches, through [`IAP_PACKET_OPS`]'s `release` hook.
+///   and called directly; payload release defaults to [`iap_packet_release`].
 /// - The initializer is now ported directly as [`iap_packet_init`].
 ///
 /// # Safety
@@ -965,5 +1014,66 @@ mod tests {
             assert_eq!(IAP_PACKET_LIVE_COUNT, u32::MAX);
         }
         restore_mocks(guards);
+    }
+}
+
+#[cfg(test)]
+mod release_tests {
+    extern crate std;
+    use super::*;
+    use std::cell::RefCell;
+    use std::vec::Vec;
+
+
+    #[test]
+    fn release_preserves_metadata_and_observes_secondary_cleanup() {
+        for payload in [0u32, 0x1234] {
+            for second in [0u32, 0x5678] {
+                for length in [0u16, 1, 0xfffe, 0xffff] {
+                    let mut words = [0xa5a5_a5a5u32; 9];
+                    let packet = words.as_mut_ptr().cast::<u8>();
+                    let events = RefCell::new(Vec::new());
+                    unsafe {
+                        packet.add(8).cast::<u32>().write(payload);
+                        packet.add(12).cast::<u16>().write(0xffff);
+                        packet.add(20).cast::<u32>().write(second);
+                        packet.add(24).cast::<u16>().write(length);
+                        let mut expected = words;
+                        expected[2] = 0;
+                        expected[3] &= 0xffff_0000;
+                        expected[5] = 0;
+                        expected[6] &= 0xffff_0000;
+                        release_buffers(packet, |p| {
+                            events.borrow_mut().push((2, 0));
+                            if second != 0 && length == 0xffff {
+                                events.borrow_mut().push((2, second));
+                                p.add(20).cast::<u32>().write(0);
+                                p.add(24).cast::<u16>().write(0);
+                            }
+                        }, |buffer| {
+                            if buffer == payload {
+                                assert_eq!(packet.add(12).cast::<u16>().read(), 0xffff);
+                            } else {
+                                assert_eq!(packet.add(8).cast::<u32>().read(), 0);
+                                assert_eq!(packet.add(12).cast::<u16>().read(), 0);
+                            }
+                            events.borrow_mut().push((3, buffer));
+                        });
+                        assert_eq!(words, expected);
+                        let mut expected_events = std::vec![(2, 0)];
+                        if second != 0 && length == 0xffff {
+                            expected_events.push((2, second));
+                        }
+                        if payload != 0 { expected_events.push((3, payload)); }
+                        if second != 0 && length != 0xffff {
+                            expected_events.push((3, second));
+                        }
+                        assert_eq!(*events.borrow(), expected_events);
+                        release_buffers(packet, |_| {}, |_| panic!("double release"));
+                        assert_eq!(words, expected);
+                    }
+                }
+            }
+        }
     }
 }
