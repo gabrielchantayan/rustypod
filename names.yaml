@@ -51549,6 +51549,32 @@ functions:
       a u32 target word, preserving its +0x30 address on 32-bit ARM and a
       64-bit host. match.py reports the expected structural diff: LLVM inlines
       the root getter model and branches around the non-returning heap_panic.
+  - address: 0x080c6368
+    ghidra: FUN_080c6368
+    name: wire_read_u16_be
+    size: 16
+    sig: "u32 wire_read_u16_be(const u8 *source)"
+    module: util/be_read
+    status: ported
+    vars:
+      param_1/r0: source
+      r1: high_byte
+      r0/return: decoded_halfword
+    notes: >-
+      Raw ARM words e5d01000 e5d00001 e1800401 e12fff1e establish the
+      exact 16-byte extent 0x080c6368..0x080c6378; the next function
+      starts with ldr r0,[pc,#16] at 0x080c6378. Reads two unaligned
+      bytes, high byte first, and returns source[0]<<8 | source[1],
+      zero-extended in r0. No callees. Whole-image ARM BL decoding
+      finds two plain inbound calls at 0x080e722c and 0x080e7268 and
+      zero predicated calls. Both callers are in FUN_080e7134 and
+      decode halfword fields from its transformed wire buffer.
+      No behavioral deviations; a dedicated text section preserves the
+      distinct exported entry among equivalent endian readers.
+      Host tests cover every u16 value at all four byte alignments.
+      match.py confirms identical ldrb/ldrb/orr operations; LLVM adds
+      a frame-pointer prologue and returns with pop instead of bx lr.
+
   - address: 0x081f3aa0
     ghidra: FUN_081f3aa0
     name: mov_atom_tree_has_offsets
