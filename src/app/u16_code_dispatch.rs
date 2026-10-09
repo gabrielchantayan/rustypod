@@ -11,10 +11,10 @@
 //! secondary record and dispatches its zero-terminated word sequence followed
 //! by the original `0xffff` sentinel.
 //!
-//! Deliberate deviations: the unrecovered binary-search helper at `0x080edb8c`
-//! is represented by a host replacement seam; device builds call its verified
-//! address. Rust passes the helper's saved/restored comparator register as the
-//! vtable wrapper's fourth argument, preserving the retail forwarding.
+//! Deliberate deviations: host tests may replace the ported binary-search
+//! helper to isolate dispatch behavior. Rust passes the helper's saved/restored
+//! comparator register as the vtable wrapper's fourth argument, preserving
+//! the retail forwarding.
 
 use crate::cxx::vtable_word_callback::vtable_word_callback;
 
@@ -42,32 +42,24 @@ type CodeDispatchLookup = unsafe extern "C" fn(
     compare: usize,
 ) -> *mut CodeDispatchRecord;
 
-#[cfg(target_os = "none")]
-unsafe fn retail_code_dispatch_lookup(
+unsafe extern "C" fn ported_code_dispatch_lookup(
     query: *mut u32,
     records: *mut u8,
     record_count: u32,
     record_size: u32,
     compare: usize,
 ) -> *mut CodeDispatchRecord {
-    let lookup: CodeDispatchLookup = unsafe { core::mem::transmute(0x080e_db8cusize) };
-    unsafe { lookup(query, records, record_count, record_size, compare) }
+    let comparator = unsafe { core::mem::transmute::<usize, crate::strto::strtod::BsearchCmpFn>(compare) };
+    unsafe {
+        crate::util::signed_binary_search::signed_binary_search(
+            query.cast(), records, record_count, record_size, comparator,
+        ).cast()
+    }
 }
 
+/// Host override for isolating dispatch tests; defaults to the real search.
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_code_dispatch_lookup(
-    _query: *mut u32,
-    _records: *mut u8,
-    _record_count: u32,
-    _record_size: u32,
-    _compare: usize,
-) -> *mut CodeDispatchRecord {
-    panic!("u16_code_dispatch requires lookup helper 0x080edb8c")
-}
-
-/// Host replacement for the unrecovered binary-search helper at `0x080edb8c`.
-#[cfg(not(target_os = "none"))]
-pub static mut CODE_DISPATCH_LOOKUP: CodeDispatchLookup = missing_code_dispatch_lookup;
+pub static mut CODE_DISPATCH_LOOKUP: CodeDispatchLookup = ported_code_dispatch_lookup;
 
 unsafe fn code_dispatch_lookup(
     query: *mut u32,
@@ -78,7 +70,7 @@ unsafe fn code_dispatch_lookup(
 ) -> *mut CodeDispatchRecord {
     #[cfg(target_os = "none")]
     {
-        unsafe { retail_code_dispatch_lookup(query, records, record_count, record_size, compare) }
+        unsafe { ported_code_dispatch_lookup(query, records, record_count, record_size, compare) }
     }
     #[cfg(not(target_os = "none"))]
     {
