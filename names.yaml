@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080e2540
+    ghidra: FUN_080e2540
+    name: retail_service_manager_notification
+    size: 180
+    sig: "i32 retail_service_manager_notification(i32 state)"
+    module: app/service_manager
+    status: ported
+    vars: {param_1: state, uVar1: mode}
+    renames:
+      FUN_082e5468: pmu_write_register_0x39_scaled_value
+      FUN_0836b5b0: gpio_pin_configure
+    notes: >-
+      Raw A32 extent is 0x080e2540..0x080e25f4: 176 code bytes plus the
+      3300 literal at 0x080e25f0, before the next independent function.
+      Whole-image aligned word decoding finds two inbound plain BLs at
+      0x080cb6cc and 0x08194078, eight outbound plain BLs, and no predicated
+      BLs in either direction. State 1 writes PMU value zero then configures
+      GPIO 200 with modes 1,1,1,1. States 2/3 write value 3300 then modes
+      0,1,0,1. All GPIO levels are zero; repeated writes remain ordered.
+      Other states have no effects; every state returns unchanged. Reuses
+      existing ported PMU/GPIO callees. Duplicate code and saved constants
+      are collapsed; the allocation-free generic sequence supports host
+      trace tests. Existing manager tests retain their host-only interception.
   - address: 0x080e2658
     ghidra: FUN_080e2658
     name: t1_lookup_glyph_by_standard_encoding
