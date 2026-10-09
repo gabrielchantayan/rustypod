@@ -1,4 +1,4 @@
-//! Alignment-free big-endian 32-bit accessors.
+//! Alignment-free big-endian byte accessors.
 //!
 //! - `load_be32` — originals: `FUN_080bdb74` @ 0x080bdb74 (36 bytes;
 //!   6 direct `bl` call sites, all unconditional, in the XTEA state
@@ -37,6 +37,27 @@ pub unsafe extern "C" fn load_be32(p: *const u8) -> u32 {
         | (p.add(1).read() as u32) << 16
         | (p.add(2).read() as u32) << 8
         | p.add(3).read() as u32
+}
+
+/// store_be16 — original: `FUN_080bdbbc` @ `0x080bdbbc` (20 bytes;
+/// 2 inbound plain unconditional BL sites, 0 predicated; no outgoing BL).
+///
+/// The five ARM words mask bits 15..8, shift them down, store that byte at
+/// `p`, store bits 7..0 at `p + 1`, then return. The next real function
+/// starts at 0x080bdbd0. Upper bits of `value` are discarded; no alignment
+/// is required. Both callers serialize halfwords in XTEA state processing
+/// at 0x080e7158 and 0x080e7194.
+///
+/// Deliberate deviations: none. Volatile byte stores preserve the original
+/// high-byte-first access order under LLVM optimization.
+///
+/// # Safety
+/// `p` must point to two writable bytes.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn store_be16(p: *mut u8, value: u32) {
+    p.write_volatile((value >> 8) as u8);
+    p.add(1).write_volatile(value as u8);
 }
 
 /// store_be32 — original: `FUN_083816cc` @ 0x083816cc (32 bytes;
@@ -342,6 +363,20 @@ mod tests {
         assert_eq!(unsafe { load_be32([0xff, 0xff, 0xff, 0xff].as_ptr()) }, u32::MAX);
         assert_eq!(unsafe { load_be32([0x80, 0, 0, 1].as_ptr()) }, 0x8000_0001);
         assert_eq!(unsafe { load_be32([0, 0, 0, 1].as_ptr()) }, 1);
+    }
+
+    #[test]
+    fn store_be16_truncates_and_preserves_boundaries_at_every_alignment() {
+        for off in 1..=4 {
+            for value in [0, 1, 0xff, 0x100, 0x8001, 0xffff,
+                          0x1234_abcd, 0xffff_0000, u32::MAX] {
+                let mut buf = [0xa5u8; 8];
+                unsafe { store_be16(buf.as_mut_ptr().add(off), value) };
+                let mut expected = [0xa5u8; 8];
+                expected[off..off + 2].copy_from_slice(&(value as u16).to_be_bytes());
+                assert_eq!(buf, expected, "off={off}, value={value:#010x}");
+            }
+        }
     }
 
     #[test]

@@ -150929,6 +150929,35 @@ functions:
       tests cover byte order, values with high bits set, every valid alignment,
       and surrounding-byte preservation. Deliberate deviations: none.
 
+  # --- XTEA state halfword big-endian writer ---
+  - address: 0x080bdbbc
+    ghidra: FUN_080bdbbc
+    name: store_be16
+    size: 20
+    sig: "void store_be16(u8 *p, u32 value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: p
+      param_2/r1: value
+      r2: high_byte
+    notes: >-
+      Raw osos.dec words e2012cff e1a02422 e5c02000 e5c01001 e12fff1e
+      establish the exact 20-byte body ending at bx lr at 0x080bdbcc;
+      the next real function starts at 0x080bdbd0 with ldr r2,[r0,#0x1c].
+      AND r2,r1,#0xff00 and LSR r2,r2,#8 extract bits 15..8, then
+      two STRB instructions store that byte and bits 7..0 at p and p+1.
+      Upper value bits are ignored and the destination may be unaligned.
+      An independent scan of every aligned ARM immediate BL word finds
+      exactly two inbound plain unconditional calls, at 0x080e7158 and
+      0x080e7194, and zero predicated calls. The body has no outgoing BL.
+      Both sites serialize halfwords in XTEA state routine FUN_080e7134.
+      The Rust port uses volatile byte stores to preserve high-byte-first
+      access order, without introducing guards, allocation, or callee seams.
+      Host tests cover all alignments modulo four, upper-bit truncation,
+      byte order, zero and maximum values, and surrounding-byte preservation.
+      Deliberate deviations: none. Codegen review is structural, not exact.
+
   # --- Runtime-global callback dispatch ---
   - address: 0x080b1a28
     ghidra: FUN_080b1a28
