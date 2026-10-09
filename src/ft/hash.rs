@@ -1,4 +1,4 @@
-//! FreeType hash-table initialization — `FUN_080f4a5c` @ 0x080f4a5c.
+//! FreeType hash-table initialization and teardown.
 //! True extent [0x080f4a5c, 0x080f4aa8): 76 bytes, no literal pool.
 //! Raw A32 decoding verifies one outbound plain BL (ft_mem_realloc at
 //! 0x082cfc3c), zero predicated BLs, and two inbound plain BLs, both from
@@ -13,7 +13,7 @@
 //! LLVM inlines ft_mem_realloc and emits alignment-aware zero-fill helpers;
 //! it also combines/reorders the two nonvolatile limit/capacity stores.
 
-use crate::ft::memory::{ft_mem_realloc, FtMemory};
+use crate::ft::memory::{ft_mem_free, ft_mem_realloc, FtMemory};
 
 /// Sixteen bytes on ARM; native pointer width on hosts.
 #[repr(C)]
@@ -43,8 +43,47 @@ pub unsafe extern "C" fn ft_hash_init(hash: *mut FtHash, memory: *mut FtMemory) 
     error
 }
 
+/// FreeType hash teardown — `FUN_080f4a08` @ 0x080f4a08.
+/// True extent [0x080f4a08, 0x080f4a5c): 84 bytes, no literal pool.
+/// Raw ARM words verify two outbound plain BLs to ft_mem_free at
+/// 0x080f4a34 and 0x080f4a50, zero predicated BLs; two inbound plain
+/// BLs at 0x08081d80 and 0x08081ef4, zero predicated BLs.
+///
+/// A null hash returns immediately. Snapshot the buckets and capacity,
+/// free each bucket in order and clear its word, then reload and free the
+/// bucket array and clear its pointer. Limit, capacity, and used survive.
+/// The ARM BLT treats capacity as signed: zero or negative skips the loop.
+/// Deliberate deviation: repr(C) keeps the header pointer native on hosts,
+/// but bucket entries remain four-byte ARM addresses. Existing ft_mem_free
+/// is called directly; no new allocator seam is introduced.
+///
+/// # Safety
+/// A non-null hash must be writable. A positive signed capacity requires
+/// that many writable bucket words; each nonzero word and the bucket array
+/// must satisfy ft_mem_free's allocator contract. Callbacks must not
+/// invalidate the hash or bucket storage before its final release.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_hash_done(hash: *mut FtHash, memory: *mut FtMemory) {
+    if hash.is_null() {
+        return;
+    }
+    let buckets = (*hash).buckets;
+    let capacity = (*hash).capacity as i32;
+    let mut index = 0i32;
+    while index < capacity {
+        let slot = buckets.add(index as usize);
+        ft_mem_free(memory, (*slot as usize) as *mut u8);
+        *slot = 0;
+        index += 1;
+    }
+    ft_mem_free(memory, (*hash).buckets.cast());
+    (*hash).buckets = core::ptr::null_mut();
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use crate::ft::error::FT_ERR_OUT_OF_MEMORY;
 
@@ -106,5 +145,74 @@ mod tests {
         assert!(hash.buckets.is_null());
         assert_eq!(fixture.storage, [0xa5a5a5a5; 243]);
         assert_eq!(previous, 0x12345678);
+    }
+
+    struct Teardown {
+        buckets: *mut u32,
+        calls: std::vec::Vec<usize>,
+    }
+
+    unsafe extern "C" fn release(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user as *mut Teardown);
+        if block == state.buckets.cast() {
+            // Every element is cleared before the array is released.
+            assert_eq!(core::slice::from_raw_parts(state.buckets, 4), &[0; 4]);
+        } else {
+            let index = if block as usize == 0x1234 { 0 } else { 2 };
+            assert_eq!(*state.buckets.add(index), block as usize as u32);
+            if index == 2 { assert_eq!(*state.buckets, 0); }
+        }
+        state.calls.push(block as usize);
+    }
+
+    #[test]
+    fn teardown_frees_sparse_buckets_in_order_then_array_and_preserves_header() {
+        let mut storage = [0xfeedface, 0x1234, 0, 0x5678, 0, 0xdeadbeef];
+        let buckets = unsafe { storage.as_mut_ptr().add(1) };
+        let mut state = Teardown { buckets, calls: std::vec::Vec::new() };
+        let mut memory = FtMemory {
+            user: (&mut state as *mut Teardown).cast(), alloc, free: release, realloc,
+        };
+        let mut hash = FtHash { limit: 80, capacity: 4, used: 2, buckets };
+        unsafe { ft_hash_done(&mut hash, &mut memory); }
+        assert_eq!(state.calls, [0x1234, 0x5678, buckets as usize]);
+        assert_eq!(storage, [0xfeedface, 0, 0, 0, 0, 0xdeadbeef]);
+        assert!(hash.buckets.is_null());
+        assert_eq!((hash.limit, hash.capacity, hash.used), (80, 4, 2));
+    }
+
+    unsafe extern "C" fn release_array_only(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user as *mut Teardown);
+        assert_eq!(block, state.buckets.cast());
+        assert_eq!(*state.buckets, 0xfeedface);
+        state.calls.push(block as usize);
+    }
+
+    #[test]
+    fn nonpositive_signed_capacity_skips_elements_but_releases_array() {
+        for capacity in [0, 0x80000000, u32::MAX] {
+            let mut word = 0xfeedface;
+            let mut state = Teardown { buckets: &mut word, calls: std::vec::Vec::new() };
+            let mut memory = FtMemory {
+                user: (&mut state as *mut Teardown).cast(),
+                alloc, free: release_array_only, realloc,
+            };
+            let mut hash = FtHash { limit: 80, capacity, used: 2, buckets: &mut word };
+            unsafe { ft_hash_done(&mut hash, &mut memory); }
+            assert_eq!(state.calls, [&mut word as *mut u32 as usize]);
+            assert!(hash.buckets.is_null());
+            assert_eq!((hash.limit, hash.capacity, hash.used), (80, capacity, 2));
+        }
+    }
+
+    #[test]
+    fn null_hash_and_empty_null_array_do_not_dereference_allocator() {
+        unsafe { ft_hash_done(core::ptr::null_mut(), core::ptr::null_mut()); }
+        let mut hash = FtHash {
+            limit: 80, capacity: 0, used: 0, buckets: core::ptr::null_mut(),
+        };
+        unsafe { ft_hash_done(&mut hash, core::ptr::null_mut()); }
+        assert_eq!((hash.limit, hash.capacity, hash.used), (80, 0, 0));
+        assert!(hash.buckets.is_null());
     }
 }
