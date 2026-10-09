@@ -55117,6 +55117,39 @@ functions:
       the empty cxa_guard_release call deleted; the node_list_get
       precedent) and LLVM's register allocation.
 
+  - address: 0x0810351c
+    ghidra: FUN_0810351c
+    name: queued_message_destruct
+    size: 52
+    sig: "QueuedMessage *queued_message_destruct(QueuedMessage *message)"
+    module: app/queued_message
+    status: ported
+    renames:
+      param_1/r0/r4: message
+      DAT_0810354c: QUEUED_MESSAGE_VTABLE
+      message[2]: payload
+      FUN_08275bc8: framework_object_destruct
+    notes: >-
+      Raw words establish 48 bytes of code followed by the vtable literal
+      0x08980744 at 0x0810354c; the next real entry is 0x08103550.
+      Binary-wide A32 scan finds two incoming plain BLs at 0x08103500 and
+      0x081e9e74, zero predicated BLs. The body has no direct BL, one
+      BLXNE at 0x0810353c through payload vtable slot +4, and a tail B
+      to 0x08275bc8, raw-verified as the bare BX LR root destructor.
+      Stores the derived envelope vtable before reading payload at +8,
+      conditionally dispatches its destructor with payload in r0, then
+      returns the original envelope. Does not clear payload or kind and
+      does not free envelope storage. Reuses the existing QueuedMessage
+      layout; native host callback pointers use repr(C) while ARM slots
+      remain +0/+4. Deliberately inlines the empty root-destructor tail.
+      Host edge tests cover NULL payload, return identity, vtable-store
+      ordering, exactly one dynamic destruction, unchanged payload link,
+      and retention of callback mutations.
+      ARM match.py confirms the vtable store, NULL guard, +4 virtual
+      dispatch and return-this path. LLVM uses an early conditional
+      return and unconditional BLX on the non-null path, omits the empty
+      base tail, and uses its normal frame/register allocation.
+
   - address: 0x08103550
     ghidra: FUN_08103550
     name: message_arena_alloc

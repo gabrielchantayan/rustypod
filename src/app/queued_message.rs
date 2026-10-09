@@ -257,6 +257,102 @@ pub unsafe extern "C" fn queued_message_construct_word(
     message
 }
 
+/// `FUN_0810351c` @ **0x0810351c**: 52 bytes through 0x08103550
+/// (48 code bytes and the vtable literal at 0x0810354c).
+/// Raw A32 scan: two incoming plain BLs (0x08103500, 0x081e9e74),
+/// zero predicated BLs. Body: zero direct BLs, one BLXNE through slot +4.
+///
+/// Install the envelope vtable, invoke the non-null payload's virtual
+/// destructor, and return the envelope unchanged. Neither the payload link
+/// nor the kind is cleared, and this non-deleting destructor frees no envelope.
+///
+/// Deliberate deviations: inline the tail branch to the verified bare BX LR
+/// root destructor at 0x08275bc8. Native host pointers in repr(C) vtables
+/// preserve dispatch without truncating function pointers; ARM slots are +0/+4.
+///
+/// # Safety
+/// `message` must be a live writable QueuedMessage. A non-null payload must
+/// start with a readable u32 vtable address whose +4 destructor slot is valid
+/// for that payload. The callback must not invalidate the envelope storage.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn queued_message_destruct(
+    message: *mut QueuedMessage,
+) -> *mut QueuedMessage {
+    unsafe {
+        core::ptr::addr_of_mut!((*message).vtable).write_volatile(QUEUED_MESSAGE_VTABLE);
+        let payload = (*message).payload;
+        if !payload.is_null() {
+            let vtable = payload.cast::<u32>().read() as usize as *const PayloadDestructorVtable;
+            ((*vtable).destruct)(payload);
+        }
+    }
+    message
+}
+
+#[repr(C)]
+struct PayloadDestructorVtable {
+    slot_00: u32,
+    destruct: unsafe extern "C" fn(*mut u8),
+}
+
+#[cfg(test)]
+mod destruct_tests {
+    use super::*;
+
+    #[test]
+    fn null_payload_preserves_kind_and_returns_envelope() {
+        let mut message = QueuedMessage {
+            vtable: 0, kind: u32::MAX, payload: core::ptr::null_mut(),
+        };
+        let address = core::ptr::addr_of_mut!(message);
+        assert_eq!(unsafe { queued_message_destruct(address) }, address);
+        assert_eq!(message.vtable, QUEUED_MESSAGE_VTABLE);
+        assert_eq!(message.kind, u32::MAX);
+        assert!(message.payload.is_null());
+    }
+
+    #[repr(C)]
+    struct Payload {
+        vtable: u32,
+        envelope: *mut QueuedMessage,
+        calls: u32,
+        observed_vtable: u32,
+    }
+
+    unsafe extern "C" fn destruct_payload(payload: *mut u8) {
+        let payload = unsafe { &mut *payload.cast::<Payload>() };
+        payload.calls += 1;
+        payload.observed_vtable = unsafe { (*payload.envelope).vtable };
+        // A real virtual callback can modify the envelope. Do not restore fields.
+        unsafe { (*payload.envelope).kind = 0x1234 };
+    }
+
+    #[test]
+    fn dispatches_once_after_vtable_store_and_preserves_callback_changes() {
+        let Some(slab) = crate::testing::try_map_u32_slab(
+            crate::testing::hints::QUEUED_MESSAGE_DESTRUCT, 4096,
+        ) else {
+            crate::testing::note_missing_u32_fixture("queued_message_destruct");
+            return;
+        };
+        let table = slab.cast::<PayloadDestructorVtable>();
+        unsafe { table.write(PayloadDestructorVtable { slot_00: 0, destruct: destruct_payload }) };
+        let mut message = QueuedMessage { vtable: 7, kind: 0x16, payload: core::ptr::null_mut() };
+        let address = core::ptr::addr_of_mut!(message);
+        let mut payload = Payload {
+            vtable: table as usize as u32, envelope: address, calls: 0, observed_vtable: 0,
+        };
+        let payload_address = core::ptr::addr_of_mut!(payload).cast::<u8>();
+        message.payload = payload_address;
+        assert_eq!(unsafe { queued_message_destruct(address) }, address);
+        assert_eq!(payload.calls, 1);
+        assert_eq!(payload.observed_vtable, QUEUED_MESSAGE_VTABLE);
+        assert_eq!(message.kind, 0x1234);
+        assert_eq!(message.payload, payload_address);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The poster: `queued_message_post` @ 0x08110fdc
 // ---------------------------------------------------------------------------
