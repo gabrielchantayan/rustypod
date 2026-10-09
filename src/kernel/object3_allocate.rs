@@ -8,14 +8,13 @@
 pub const OBJECT_CREATE_FAILED: u32 = 0x27;
 const OBJECT_CLASS: u32 = 3;
 type ObjectCreationCallback = unsafe extern "C" fn();
-type ObjectCreationPrelude = unsafe extern "C" fn(*mut u32, ObjectCreationCallback) -> u32;
 type KernelCreateDispatch = unsafe extern "C" fn(u32, *mut u32) -> u32;
 
 /// The two fixed calls made by [`kernel_object3_allocate`].
 ///
-/// `creation_prelude` is the otherwise-unported `FUN_080f4f74` call with its
-/// stock literal arguments. `create` is the ROM dispatcher reached through
-/// osos veneer `0x08037e70`.
+/// `creation_prelude` runs the ported atomic once control with its stock
+/// literal arguments. `create` is the dispatcher reached through osos
+/// veneer `0x08037e70`.
 #[derive(Clone, Copy)]
 pub struct Object3AllocateOps {
     pub creation_prelude: unsafe extern "C" fn() -> u32,
@@ -24,9 +23,8 @@ pub struct Object3AllocateOps {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn stock_creation_prelude() -> u32 {
-    let prelude: ObjectCreationPrelude = core::mem::transmute(0x080f4f74usize);
     let callback: ObjectCreationCallback = core::mem::transmute(0x08080330usize);
-    prelude(0x08a096fcusize as *mut u32, callback)
+    crate::kernel::once_callback::once_callback(0x08a096fcusize as *mut u32, Some(callback))
 }
 
 #[cfg(not(target_os = "none"))]
@@ -67,10 +65,10 @@ fn ops() -> Object3AllocateOps {
 /// Runs the stock object-creation prelude, asks the ROM create dispatcher for
 /// class 3 into `slot`, then succeeds only when both the dispatcher status and
 /// resulting handle are nonzero; otherwise returns `0x27`. Deliberate
-/// deviation: the unported prelude and mask-ROM dispatcher are explicit
-/// function-pointer seams. Target defaults call their verified stock entries;
-/// the host default models a successful dispatcher and leaves the prelude
-/// inert.
+/// deviation: the dispatcher remains an explicit function-pointer seam.
+/// Target prelude uses the ported once control and the verified resident
+/// callback; host defaults leave the fixed-address prelude inert and model
+/// successful dispatch.
 #[inline(never)]
 #[cfg_attr(target_os = "none", no_mangle)]
 pub unsafe extern "C" fn kernel_object3_allocate(slot: *mut u32) -> u32 {
