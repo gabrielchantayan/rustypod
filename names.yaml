@@ -48755,22 +48755,63 @@ functions:
       param_4/r3: tag
       local_1c: io_context
       FUN_0805b764: data-backed I/O-context constructor (unported)
-      FUN_080f06f4: buffered-stream initializer (unported)
+      FUN_080f06f4: ft_buffered_stream_initialize
       FUN_08042cfc: ft_buffered_stream_finalize
     notes: >-
       Raw osos.dec decoding verifies the 104-byte body from push at
       0x08042efc through the `data` literal at 0x08042f64; the next real
       function starts with push at 0x08042f68. The tag mismatch path returns
       -50. A matching tag creates an input I/O context through unported
-      0x0805b764, then initializes the target stream through unported
-      0x080f06f4. An initializer error finalizes the stream only after a
+      0x0805b764, then initializes the target stream through the Rust port
+      ft_buffered_stream_initialize. An initializer error finalizes the stream only after a
       successful context creation. Full binary B/BL decoding finds four
       inbound plain bl callers at 0x08063aa0, 0x08063f28, 0x080aaffc, and
       0x080b4cbc. Its outbound calls are two plain bl (0x0805b764 and
-      0x080f06f4) and one conditional blne (0x08042cfc). The two unported
-      callees remain volatile host seams and indirect dispatches to their
-      verified retailOS entries on target; their broader identities are not
-      inferred.
+      0x080f06f4) and one conditional blne (0x08042cfc). Only the unported
+      context constructor remains a volatile host seam and indirect dispatch
+      to its verified retailOS entry on target.
+
+  - address: 0x080f06f4
+    ghidra: FUN_080f06f4
+    name: ft_buffered_stream_initialize
+    size: 176
+    sig: "i32 ft_buffered_stream_initialize(FtBufferedStream *stream, u32 data, u32 is_input, u32 buffer_size, u32 io_context)"
+    module: ft/buffer
+    status: ported
+    vars:
+      param_1/r5: stream
+      param_2/r8: data
+      param_3/r7: is_input
+      param_4/r4: buffer_size
+      param_5/r9: io_context
+      iVar4/r6: status
+      FUN_0805cfb4: bzero
+      FUN_0805aca8: signed first-halfword accessor (unported)
+      FUN_081a81bc: aligned_buffer_alignment
+      FUN_0805d1d4: malloc_tag4
+      FUN_081a8188: aligned_buffer_align_up
+      FUN_08076b30: ft_buffered_stream_reset_buffer_cursor
+    notes: >-
+      Raw words establish 0x080f06f4..0x080f07a4, including the buff tag
+      literal at 0x080f07a0; the next function begins with ldr at 0x080f07a4.
+      Two inbound plain BL calls at 0x08042f4c and 0x08042fb8; six outbound
+      plain BL calls and zero predicated BL calls. Clears 48 bytes, stores
+      mode in bytes +5/+6 and context at +8, and optionally copies the signed
+      first-halfword accessor's low 16 bits to +12. Zero capacity defaults to
+      0x20000. Allocates capacity+32 with tag 4; failure halves capacities
+      at or above 0x1000, otherwise returns -108 retaining the header.
+      Success records the allocation, 32-byte-aligned start and capacity,
+      then resets the input/output cursor range. Deviations: the unported
+      accessor at 0x0805aca8 uses a volatile seam, with verified firmware
+      dispatch on target; size addition wraps at target u32 width on host.
+      Host tests cover retry thresholds, odd halving, mode truncation,
+      header retention, target-width overflow and constructor cleanup.
+      The full host suite and six focused tests pass; ARM release builds.
+      An isolated host executable exercises the production initializer,
+      bzero and alignment helpers with a controlled allocator failure.
+      match.py exits 1: LLVM folds the alignment query to 32, splits the
+      first allocation from the retry loop, and emits 47 instructions
+      versus 43 original; STRH, retry threshold and success stores remain.
 
 
   - address: 0x0813b714
