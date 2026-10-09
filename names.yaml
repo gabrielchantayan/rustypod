@@ -237888,3 +237888,43 @@ functions:
       release order, conditional stores, and tail unlock; LLVM adds frame
       setup and materializes zero separately per store. Standalone host
       executable build is blocked by six unrelated cfg(test)-only callees.
+
+  - address: 0x080ce690
+    ghidra: FUN_080ce690
+    name: indexed_payload_equals
+    size: 76
+    sig: "u32 indexed_payload_equals(void *index, u32 entry, const u8 *bytes, u32 len)"
+    module: app/indexed_payload_lookup
+    status: ported
+    vars:
+      param_1/r0: index
+      param_2/r1: entry
+      param_3/r2/r5: bytes
+      param_4/r3/r4: len
+      local_18: encoded_length
+      local_14: payload
+    renames:
+      FUN_0809e3d0: indexed_payload_lookup
+      thunk_FUN_0805d018: byte_ranges_equal
+    notes: >-
+      Raw osos.dec establishes the 76-byte extent [0x080ce690,0x080ce6dc),
+      ending with pop at 0x080ce6d8 before the next function's push.
+      Two outbound unconditional BLs at 0x080ce6a4 and 0x080ce6c4 target
+      the existing indexed_payload_lookup and byte_ranges_equal ports.
+      Whole-image aligned-word decoding finds two inbound plain BLs,
+      at 0x080cb3dc and 0x080cb408 in the indexed candidate search,
+      and no predicated BLs in either direction. Requires lookup status
+      zero and exact encoded-length equality before comparing all len bytes;
+      no length decoding or shift. Normalizes equality to one, else zero.
+      Entry zero with length zero succeeds without dereferencing bytes.
+      Native-width pointer output locals are the only deliberate deviation.
+      Host regressions cover embedded NUL, every mismatch position, unequal
+      lengths including UINT_MAX, invalid signed/out-of-range indices,
+      dead entries, invalid tags, NULL index, and zero-entry empty lookup.
+      Full host suite and ARM release build pass. Production-source executable
+      smoke with a low-address mmap fixture returned equal=1, mismatch=0,
+      wrong_len=0, empty=1 using both real callees. match.py reports a structural
+      diff (exit 1): 19 original versus 23 Rust instructions; LLVM adds frame
+      setup and local initialization, preserves both calls and the status/length
+      short circuit, and omits redundant normalization of the canonical
+      comparator's already normalized result. No device execution claimed.
