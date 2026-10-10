@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806fb74
+    ghidra: FUN_0806fb74
+    name: crypto_store_key_index
+    size: 88
+    sig: "i32 crypto_store_key_index(usize *entries, u32 kind, u8 *key)"
+    module: crypto/store_key_index
+    status: ported
+    vars:
+      param_1/r0: entries
+      param_2/r1: kind
+      param_3/r2: key
+      local_c/stack_ac: lookup_entry_kind
+      local_8/stack_b0: lookup_entry_value
+      local_74/stack_44: kind_1_key
+      local_ac/stack_0c: kind_2_key
+    renames:
+      FUN_0836954c: namespace_provider_find
+    notes: >-
+      Raw extent [0x0806fb74,0x0806fbcc) is 88 bytes; next entry
+      begins PUSH {r4,lr}. Independent whole-image A32 word scan finds
+      two incoming plain BLs at 0x0806fbd4 and 0x0806ff74, no predicated
+      incoming calls, one outgoing plain BL at 0x0806fbc0 to 0x0836954c,
+      and no predicated outgoing calls. Reject unsupported kinds with -1;
+      Ghidra incorrectly reports void. Kinds 1 and 2 construct a temporary
+      StoreEntry whose value points to an inner-object pointer; inner word
+      5 or 2 respectively holds key. Raw comparator 0x08093830 confirms
+      kind dispatch to 0x08070dac or 0x0806f160. Reuses the existing port
+      namespace_provider_find without introducing a callee seam. Unused
+      stack padding is omitted, unused inner fields remain uninitialized,
+      and host pointer fields widen consistently with the canonical provider
+      and StoreEntry models. Tests cover first duplicate, kind separation,
+      hits, misses, empty/null providers and unsigned kind boundaries.
+      Full host suite passes 15423 tests; ARM release build passes.
+      Standalone Rust runtime smoke using the real port and provider lookup
+      passes both nested-key hits, misses and invalid-kind rejection.
+      match.py exit 1 reviewed: 22 stock and 22 Rust instructions; same
+      kind gates, nested-pointer construction, key offsets and single BL,
+      with a smaller stack frame and LLVM frame pointer.
   - address: 0x0806fbf4
     ghidra: FUN_0806fbf4
     name: crypto_store_entry_find
