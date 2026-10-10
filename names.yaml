@@ -43663,6 +43663,36 @@ functions:
       private by address because names.yaml has no verified identity, while
       hosts model it with free_wrapper because they cannot represent target
       allocator registries.
+  - address: 0x0807f254
+    ghidra: FUN_0807f254
+    name: system_root_get
+    size: 24
+    sig: "void *system_root_get(void)"
+    module: app/context_scope
+    status: ported
+    vars: {r0: root}
+    renames:
+      DAT_0807f268: APP_ROOT_OBJECT
+      FUN_08030f44: heap_panic
+    notes: >-
+      Raw words establish [0x0807f254,0x0807f26c): 20 instruction bytes
+      plus the 0x089ca674 literal at 0x0807f268. The next real entry
+      begins ldr r0,[pc,#0]; b at 0x0807f26c. Independently decoding
+      whole-image aligned A32 BL words finds two plain incoming calls,
+      0x080c634c and 0x080c635c, and zero predicated incoming calls.
+      The body has one plain BL to canonical heap_panic at 0x08030f44
+      and zero predicated BLs. Return the root pointer unchanged when
+      non-NULL; NULL is fatal. Ghidra's void signature loses the live r0
+      return consumed by both callers. Deliberate deviation: reuse the
+      shared volatile APP_ROOT_OBJECT model of the runtime slot.
+      service_context_get now calls this separately linked port twice.
+      Host tests cover changing non-NULL pointers without dereferencing
+      them and the isolated NULL raise/exit/terminate sequence.
+      match.py preserves the load/compare/non-NULL return structure;
+      LLVM adds a frame only on the fatal path. Archive relocation
+      R_ARM_CALL at +0x18 resolves to heap_panic, and the literal's
+      R_ARM_ABS32 resolves to APP_ROOT_OBJECT, not the image slot.
+
   - address: 0x0807f5c4
     name: mutex_lock
     size: 8
@@ -53838,11 +53868,10 @@ functions:
       inbound calls are plain, unconditional BL instructions (0x0825b714,
       0x0825b71c, and 0x082a1b94); zero are predicated. The first root walk
       asserts a non-NULL service context, then the second independently reads
-      and returns it. Rust uses context_scope's existing volatile
-      APP_ROOT_OBJECT model for the unported root getter and reads the field as
-      a u32 target word, preserving its +0x30 address on 32-bit ARM and a
-      64-bit host. match.py reports the expected structural diff: LLVM inlines
-      the root getter model and branches around the non-returning heap_panic.
+      and returns it. Rust calls the ported system_root_get twice, using
+      context_scope's existing volatile APP_ROOT_OBJECT model, and reads
+      the field as a u32 target word, preserving its +0x30 address on
+      32-bit ARM and a 64-bit host.
   - address: 0x080c6368
     ghidra: FUN_080c6368
     name: wire_read_u16_be
