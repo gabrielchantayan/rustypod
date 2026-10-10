@@ -94,6 +94,26 @@ unsafe fn dispatch_event_code(mapped_code: u32, flag: u32) {
     core::ptr::read_volatile(core::ptr::addr_of!(EVENT_CODE_DISPATCH))(mapped_code, flag);
 }
 
+/// Secondary unflagged event-dispatch veneer at load address `0x0809eab4`
+/// (`thunk_FUN_080873f0`), true size 4 bytes.
+///
+/// Raw word `eaffa24d` branches to `0x080873f0`; the next real function
+/// starts with PUSH at `0x0809eab8`. Whole-image aligned A32 decoding finds
+/// one plain inbound BL (`0x080609b0`) and one BLEQ (`0x080609dc`).
+/// There are no outgoing plain or predicated BL instructions.
+///
+/// Preserve the event-code word and tail-dispatch through the canonical
+/// unflagged entry, which maps nonzero events, waits for readiness, and
+/// dispatches with flag zero. Deliberate deviation: reuse the Rust entry;
+/// LLVM may fold this wrapper with the identical `0x080c6924` veneer.
+/// Verified ARM release codegen folds the two veneers into one 16-byte body
+/// with frame setup/teardown and an `R_ARM_JUMP24` to the canonical entry.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn event_code_dispatch_unflagged_secondary_thunk(event_code: u32) {
+    event_code_dispatch_unflagged(event_code);
+}
+
 /// Unflagged event-dispatch veneer at `0x080c6924`
 /// (`thunk_FUN_080873f0`), true size 4 bytes.
 ///
@@ -234,6 +254,31 @@ mod tests {
             EVENT_CODE_MAP = map_seven;
             event_code_dispatch_unflagged_thunk(u32::MAX);
             assert_eq!((MAP_CALLS, MAP_INPUT), (1, u32::MAX));
+            assert_eq!((READY_CALLS, DELAY_CALLS), (3, 2));
+            assert_eq!(DISPATCH, (0xa5, 0));
+        }
+    }
+
+    #[test]
+    fn secondary_veneer_skips_rejected_events_and_waits_before_dispatch() {
+        let _lock = EVENT_CODE_DISPATCH_TEST_LOCK.lock();
+        let _reset = Reset;
+        unsafe {
+            EVENT_CODE_MAP = map_seven;
+            EVENT_CODE_READY = ready_after_two_polls;
+            EVENT_CODE_TASK_DELAY = record_delay;
+            EVENT_CODE_DISPATCH = record_dispatch;
+            event_code_dispatch_unflagged_secondary_thunk(0);
+            assert_eq!((MAP_CALLS, READY_CALLS, DELAY_CALLS), (0, 0, 0));
+            assert_eq!(DISPATCH, (0, 0));
+
+            EVENT_CODE_MAP = map_failure;
+            event_code_dispatch_unflagged_secondary_thunk(0x17);
+            assert_eq!((READY_CALLS, DELAY_CALLS), (0, 0));
+            assert_eq!(DISPATCH, (0, 0));
+
+            EVENT_CODE_MAP = map_seven;
+            event_code_dispatch_unflagged_secondary_thunk(5);
             assert_eq!((READY_CALLS, DELAY_CALLS), (3, 2));
             assert_eq!(DISPATCH, (0xa5, 0));
         }

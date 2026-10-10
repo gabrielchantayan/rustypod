@@ -16,6 +16,25 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809eab4
+    ghidra: thunk_FUN_080873f0
+    name: event_code_dispatch_unflagged_secondary_thunk
+    size: 4
+    sig: "void event_code_dispatch_unflagged_secondary_thunk(u32 event_code)"
+    module: app/event_code_dispatch
+    status: ported
+    vars: {param_1/r0: event_code}
+    renames: {FUN_080873f0: event_code_dispatch_unflagged}
+    notes: >-
+      Raw A32 word eaffa24d branches to canonical ported unflagged entry
+      0x080873f0. True extent [0x0809eab4,0x0809eab8) is four bytes; the
+      next real function opens with PUSH at 0x0809eab8. Whole-image aligned
+      instruction decoding finds one plain inbound BL at 0x080609b0 and
+      one predicated BLEQ at 0x080609dc, with no outgoing BL of either kind.
+      Preserve the event-code word, map nonzero events, wait for readiness,
+      and dispatch with flag zero through the existing Rust implementation.
+      No new retail seams. Deliberate deviation: LLVM may fold this body
+      with the identical event_code_dispatch_unflagged_thunk at 0x080c6924.
   - address: 0x080a1f50
     ghidra: FUN_080a1f50
     name: ft_glyphslot_done
