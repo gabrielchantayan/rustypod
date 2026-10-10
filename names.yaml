@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08074f4c
+    ghidra: FUN_08074f4c
+    name: ft_mem_strdup
+    size: 88
+    sig: "char *ft_mem_strdup(FtMemory *memory, const char *source)"
+    module: ft/memory
+    status: ported
+    vars: {param_1/r4: memory, param_2/r6: source, iVar1/r5: length, iVar2/r4: copy, local_18: error}
+    renames: {FUN_08392478: strlen, FUN_082cfaa4: ft_mem_alloc, thunk_EXT_FUN_22000020: __rt_memcpy}
+    notes: >-
+      Raw A32 words establish [0x08074f4c,0x08074fa4), 88 instruction
+      bytes with no literals; the next entry begins with cmp r1, #1.
+      Three outbound plain BLs at 0x08074f5c, 0x08074f70, 0x08074f90,
+      zero predicated BLs. Two incoming plain BLs at 0x08082a20 and
+      0x08082a4c in the CFF face initializer duplicate a style suffix
+      or "Regular". Measures source, allocates length + 1 via ft_mem_alloc
+      with a local error, and on success copies length bytes then stores NUL.
+      Returns the allocation even on error; no NULL-source guard.
+      Verified 0x08037db0 veneer words e51ff004/22000020 target the IRAM
+      mirror of ported __rt_memcpy at 0x08000020. All callees already ported.
+      Deviations: removes Ghidra's spurious r2/r3 arguments (saved r3
+      merely occupies the overwritten local error slot), uses native host
+      pointers and wrapping u32 allocation-size arithmetic. Host tests cover
+      empty/nonempty strings, high-bit bytes, first-NUL termination,
+      independent storage, allocation padding, and allocation failure.
+      ARM release build and all 15408 host tests passed. Executable smoke
+      duplicated "Regular" and preserved the following 24 sentinel bytes.
+      match.py reports 24 Rust versus 22 original instructions: three BLs,
+      allocation-error branch, copy, and indexed NUL store retained.
+      LLVM splits the epilogue and uses __rt_memcpy's unchanged destination
+      return for the success-path NUL store and function result.
+
   - address: 0x08075914
     ghidra: FUN_08075914
     name: crypto_ex_data_implementation_ensure

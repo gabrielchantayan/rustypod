@@ -147,6 +147,36 @@ pub unsafe extern "C" fn ft_mem_alloc(
     block
 }
 
+/// Duplicate a NUL-terminated string using FreeType's zero-filled allocator.
+/// Original: `FUN_08074f4c` @ 0x08074f4c, 88 bytes ending at the next
+/// entry at 0x08074fa4. Three outbound plain BLs, zero predicated BLs;
+/// two incoming plain BLs in the CFF face initializer.
+///
+/// Measure source, allocate length + 1 with a local error, and only on
+/// success copy the payload and append NUL. Allocation failure returns
+/// the allocator's result without writing it. No NULL-source guard.
+/// Deviations: discard Ghidra's spurious r2/r3 parameters; use native host
+/// pointers, but retain wrapping 32-bit allocation-size arithmetic.
+///
+/// # Safety
+/// `source` must be readable through its NUL. `memory` must satisfy
+/// [`ft_mem_alloc`], returning disjoint storage for the requested size.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_mem_strdup(
+    memory: *mut FtMemory,
+    source: *const u8,
+) -> *mut u8 {
+    let length = crate::libc::strlen::strlen(source) as u32;
+    let mut error = FT_ERR_OK;
+    let copy = ft_mem_alloc(memory, length.wrapping_add(1) as i32, &mut error);
+    if error == FT_ERR_OK {
+        crate::libc::rt_memcpy::__rt_memcpy(copy, source, length as usize);
+        *copy.add(length as usize) = 0;
+    }
+    copy
+}
+
 /// ft_mem_free (FreeType `ft_mem_free`, ftutil.c) — original:
 /// `FUN_082cfae8` @ 0x082cfae8 (16 bytes; 255 `bl` + 12 tail `b` call
 /// sites, the busiest routine in the FreeType build after the trace
@@ -456,6 +486,46 @@ mod tests {
     use super::test_memory::*;
     use super::*;
     use std::vec;
+
+
+    #[test]
+    fn strdup_copies_through_first_nul_into_independent_storage() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            for source in [
+                &b"\0ignored"[..],
+                &b"Regular\0ignored"[..],
+                &b"\xff\x80A\0ignored"[..],
+            ] {
+                let mut memory = reset(false);
+                let copy = ft_mem_strdup(&mut memory, source.as_ptr());
+                let length = source.iter().position(|&byte| byte == 0).unwrap();
+                assert!(!copy.is_null());
+                assert_eq!(core::slice::from_raw_parts(copy, length + 1),
+                           &source[..length + 1]);
+                // The arena poisons its alignment padding: neither copying
+                // trailing source bytes nor clearing beyond size is allowed.
+                if (length + 1) % 8 != 0 {
+                    assert_eq!(*copy.add(length + 1), 0xa5);
+                }
+                if length != 0 {
+                    *copy = 0x42;
+                    assert_eq!(source[0], if length == 7 { b'R' } else { 0xff });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strdup_allocation_failure_returns_null_for_empty_and_nonempty_strings() {
+        let _guard = TEST_MEMORY_LOCK.lock().unwrap();
+        unsafe {
+            for source in [&b"\0"[..], &b"Regular\0"[..]] {
+                let mut memory = reset(true);
+                assert!(ft_mem_strdup(&mut memory, source.as_ptr()).is_null());
+            }
+        }
+    }
 
     #[test]
     fn highpow2_rounds_down_to_a_power_of_two() {        assert_eq!(ft_highpow2(0), 0);
