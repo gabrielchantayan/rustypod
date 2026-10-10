@@ -240650,3 +240650,36 @@ functions:
       ARM match review: LLVM unrolls the three-token search and inlines strcpy
       including its aligned-word and byte paths; strlen remains a BL target.
       No algorithmic deviations; mnemonic identity is not expected.
+
+  - address: 0x0809d98c
+    ghidra: FUN_0809d98c
+    name: linked_item_index_build
+    size: 176
+    sig: "int32_t linked_item_index_build(uint32_t *collection)"
+    module: app/linked_item_index_build
+    status: ported
+    vars: {param_1/r4: collection, r0: index, r5: status, r6: allocation_size, r1: node, r2: copied_count}
+    renames: {FUN_0805d1d4: malloc_tag4, FUN_0805d070: free_tag4}
+    notes: >-
+      Raw A32 establishes 176 instruction bytes from 0x0809d98c through
+      0x0809da38; the next function begins with cmp r0,#7 at 0x0809da3c.
+      Two outgoing plain BLs at 0x0809d9b8 and 0x0809da28, zero predicated
+      BLs. Whole-image aligned decoding finds two incoming plain BLs at
+      0x08050db0 and 0x08055668, zero predicated BLs. Callers search the cached
+      pointer array by item identifier or by the pair at item +0x110/+0x114.
+      If collection +0x900 is nonzero, return success unchanged. Otherwise
+      allocate wrapping count*4+16 bytes with heap tag 4; preserve word zero,
+      store allocation size at +4 and copied count at +8, and copy pointers
+      from the +0x28 list via node +4 into entries starting at +12. Stop after
+      one excess entry, before reading its next pointer. Unequal counts free
+      the allocation, clear the cache, and return -50. Allocation failure
+      clears the cache and returns -108. Exact counts publish the cache.
+      Existing malloc_tag4 and free_tag4 ports are reused; no new callee seam.
+      Host fixtures preserve four-byte pointer words in a unique low-address
+      slab. Tests cover cache reuse, allocation failure, empty/exact/short/
+      excess/cyclic lists, preserved header and spare words, and mismatch free.
+      Host suite and ARM release build pass. match.py reports 44 original
+      versus 46 Rust instructions: LLVM retains the loop counter in a register,
+      uses indexed stores, adds a frame pointer, and reorders header stores.
+      Both heap calls, unsigned excess check, statuses and publication remain.
+      Deliberate deviation is existing heap dispatch rather than direct BLs.
