@@ -64,6 +64,7 @@ pub mod stream_skip;
 pub mod system;
 pub mod selection;
 pub mod sfnt;
+pub mod post_names;
 pub mod sbit_decoder;
 pub mod trace;
 pub mod trig;

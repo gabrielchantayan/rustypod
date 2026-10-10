@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080911cc
+    ghidra: FUN_080911cc
+    name: sfnt_load_post_names
+    size: 128
+    sig: "i32 sfnt_load_post_names(PostNamesFace *face)"
+    module: ft/post_names
+    status: ported
+    vars: {param_1: face, uVar3: stream, iVar2: format, iVar1: error}
+    notes: >-
+      Raw extent [0x080911cc,0x0809124c) is 128 bytes: 124 instruction
+      bytes and the post tag literal at 0x08091248. Next entry starts
+      with push. Three outgoing plain BLs, zero predicated BLs, one
+      indirect BLX; two incoming plain BLs at 0x080b2168 and 0x080b21d0.
+      Locate post via face+0x1f8 with tag 0x706f7374, stream from +0x68,
+      NULL length output. Snapshot format +0x1d0 before skipping 32
+      bytes with existing ft_stream_skip. Formats 0x20000 and 0x28000
+      dispatch to verified post format 2.0 and 2.5 loaders at 0x080893a0
+      and 0x080895c0; neither address has an existing names entry.
+      Other formats return 3. Store loaded byte +0x260 even on loader
+      errors, but not on locate or skip errors. Partial repr(C) face
+      widens host pointers; target offsets preserved. Firmware-only
+      loaders retain typed fixed-address seams; host tests inject
+      their behavior. Full host suite and release ARM build passed.
+      Tests cover real stream bounds, unsupported formats, early
+      errors and loaded-state transitions on format-loader errors.
+      Standalone exported-entry smoke compiled with host test seams
+      verifies error 3, stream position 39 and loaded flag 1 after
+      successful table lookup and header skip.
+      match.py exit 1 reviewed: 31 original versus 56 Rust instructions.
+      LLVM inlines stream seek, uses BLX for firmware loaders, merges
+      format checks, and retains format snapshot and final loaded store.
+      No device run.
   - address: 0x08091434
     ghidra: FUN_08091434
     name: parse_fixed_array
