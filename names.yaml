@@ -240216,3 +240216,44 @@ functions:
       Reuses the ported worker without a new seam or behavioral deviations.
       Host tests exercise the real calendar builder with zone validity
       transitions, unrelated status bits, negative offset and active DST.
+
+  - address: 0x080a6314
+    ghidra: FUN_080a6314
+    name: dynamic_array_resize
+    size: 164
+    sig: "i32 dynamic_array_resize(u32 *array, i32 change)"
+    module: util/dynamic_array_resize
+    status: ported
+    renames:
+      param_1/r4: array
+      param_2/r1: change
+      iVar6/r6: new_length
+      uVar5/r5: required_bytes
+      uVar1: capacity_bytes
+      uVar4/r2: delta_bytes
+      uVar3/r1: growth_increment
+      iVar2/r0: status
+      FUN_080d2cbc: array_buffer_set_size
+    notes: >-
+      Raw A32 extent 0x080a6314..0x080a63b8 is 164 bytes; next entry is
+      independently targeted from 0x0814ec68, 0x0814f754 and 0x0814f760.
+      Two outgoing plain BLs at 0x080a6364 and 0x080a63a0 call the already
+      ported array_buffer_set_size; two inbound plain BLs at 0x0803bc4c and
+      0x08058ad4, zero predicated BLs in either direction.
+      Adds signed change to length and multiplies by element size with
+      wrapping u32 arithmetic. Growth increments capacity by the larger of
+      delta bytes and capacity, capped at 65536 unless delta exceeds that
+      limit. Failed speculative growth retries exact required bytes.
+      Shrink preserves capacity minus prior used bytes. Errors leave length
+      and used bytes unchanged; success commits both. Existing Rust backing
+      resize replaces direct retail calls, with no algorithmic deviations.
+      Migrates dynamic_array_remove off its retail-address seam.
+      Host tests exercise real MemH sizing for capped and large growth,
+      failed speculation with successful exact retry, failure atomicity,
+      spare-capacity shrink, and target-width arithmetic wrapping.
+      Full host suite passes 15252 tests; ARM release build succeeds.
+      match.py reports 39 versus 41 instructions with equivalent growth,
+      fallback, shrink and commit branches (exit 1 structural diff).
+      Compiled ARM emulation exercises in-capacity growth, u32 wrap and
+      zero-width shrink through the real backing-size callee. Standalone
+      host smoke is blocked by six unrelated non-test symbol errors.

@@ -11,9 +11,10 @@
 //! beyond the current length.
 //! The retail implementation dispatches the shift through an unresolved global
 //! mover and tail-branches to `0x080a6314`. Rust uses a volatile overlap-safe
-//! byte move and calls that still-unported adjustment boundary; those are
-//! deliberate implementation deviations only.
+//! byte move and calls the Rust size-adjustment port rather than tail-branching;
+//! these are deliberate implementation deviations only.
 
+#[cfg(test)]
 use core::ptr;
 
 const ELEMENT_SIZE_WORD: usize = 1;
@@ -69,7 +70,10 @@ pub unsafe extern "C" fn dynamic_array_remove(array: *mut u32, mut count: u32, i
         array.add(BUSY_WORD).write(array.add(BUSY_WORD).read().wrapping_sub(1));
     }
 
-    array_resize_fn()(array, count.wrapping_neg() as i32)
+    #[cfg(not(test))]
+    { super::dynamic_array_resize::dynamic_array_resize(array, count.wrapping_neg() as i32) as u32 }
+    #[cfg(test)]
+    { array_resize_fn()(array, count.wrapping_neg() as i32) as u32 }
 }
 
 #[inline(always)]
@@ -90,24 +94,13 @@ unsafe fn dynamic_array_element(array: *mut u32, index: u32) -> *mut u8 {
     storage.add(index.wrapping_sub(1).wrapping_mul(array.add(ELEMENT_SIZE_WORD).read()) as usize)
 }
 
-type ArrayResize = unsafe extern "C" fn(*mut u32, i32) -> u32;
+#[cfg(test)]
+type ArrayResize = unsafe extern "C" fn(*mut u32, i32) -> i32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn retail_array_resize(array: *mut u32, change: i32) -> u32 {
-    let function: ArrayResize = core::mem::transmute(0x080a_6314usize);
-    function(array, change)
-}
+#[cfg(test)]
+static mut ARRAY_RESIZE: ArrayResize = super::dynamic_array_resize::dynamic_array_resize;
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_array_resize(_array: *mut u32, _change: i32) -> u32 {
-    panic!("dynamic_array_remove requires capacity adjustment 0x080a6314")
-}
-
-#[cfg(target_os = "none")]
-static mut ARRAY_RESIZE: ArrayResize = retail_array_resize;
-#[cfg(not(target_os = "none"))]
-static mut ARRAY_RESIZE: ArrayResize = missing_array_resize;
-
+#[cfg(test)]
 #[inline(always)]
 unsafe fn array_resize_fn() -> ArrayResize {
     ptr::read_volatile(ptr::addr_of!(ARRAY_RESIZE))
@@ -129,13 +122,13 @@ mod tests {
     static RESIZE_RESULT: AtomicU32 = AtomicU32::new(0);
     static LAST_CHANGE: AtomicI32 = AtomicI32::new(0);
 
-    unsafe extern "C" fn mock_array_resize(array: *mut u32, change: i32) -> u32 {
+    unsafe extern "C" fn mock_array_resize(array: *mut u32, change: i32) -> i32 {
         LAST_CHANGE.store(change, Ordering::Relaxed);
         let length = array.add(LENGTH_WORD).read().wrapping_add(change as u32);
         let element_size = array.add(1).read();
         array.add(LENGTH_WORD).write(length);
         array.add(USED_BYTES_WORD).write(length.wrapping_mul(element_size));
-        RESIZE_RESULT.load(Ordering::Relaxed)
+        RESIZE_RESULT.load(Ordering::Relaxed) as i32
     }
 
     unsafe fn install_mock() {
