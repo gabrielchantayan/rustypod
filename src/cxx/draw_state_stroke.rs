@@ -160,13 +160,13 @@ pub unsafe extern "C" fn draw_state_stroke_rect(this: *mut u8, rect: *const Rect
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use parking_lot::Mutex;
 
-    static OPS_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static OPS_LOCK: Mutex<()> = Mutex::new(());
     const GUARD: u8 = 0xa5;
 
     #[derive(Clone, Copy, Debug, PartialEq)]

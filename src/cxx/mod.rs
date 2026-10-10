@@ -58,6 +58,7 @@ pub use container_front_word_or_minus_one::*;
 pub mod record68_array_construct;
 pub mod opaque_context_dispatch_forever;
 pub mod draw_state_align_position;
+pub mod draw_state_beveled_rect;
 pub mod framework_sentinel_state_construct;
 pub mod framework_buffer_state_construct;
 pub mod framework_data_span_state_construct;

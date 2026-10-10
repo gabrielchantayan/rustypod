@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808d9e4
+    ghidra: FUN_0808d9e4
+    name: draw_state_beveled_rect
+    size: 140
+    sig: "u64 draw_state_beveled_rect(u8 *state, const Rect *rect, u32 alternate_background, u32 normal_border)"
+    module: cxx/draw_state_beveled_rect
+    status: ported
+    vars:
+      param_1: state
+      param_2: rect
+      param_3: alternate_background
+      param_4: normal_border
+      local_20: inset.top
+      puStack_1c: inset.left
+      iStack_18: inset.bottom
+      iStack_14: inset.right
+    notes: >-
+      Raw words establish 128 code bytes through the pop at 0x0808da60,
+      followed by literals 0x089cc8c0, 0x089cc8c4, 0x089cc8d0; next real
+      prologue 0x0808da70 gives 140 bytes. Whole-image scan finds two plain
+      inbound BLs at 0x0815bed0 and 0x0815c6d8, zero predicated inbound BLs.
+      Seven plain outgoing BLs, zero predicated: background setter,
+      background fill, outline, rect_inset, two alternate border targets,
+      foreground setter. All reuse existing named Rust ports. Selects
+      background by full-word nonzero flag, fills and strokes original bounds,
+      captures bounds only afterwards, insets by one, uses reversed border
+      for zero r3 and normal border otherwise, then resets foreground.
+      The final pop returns inset top/left in r0/r1, retained as u64 despite
+      callers ignoring the result. Runtime palette addresses use volatile
+      host-configurable slots with exact firmware defaults. Host coverage
+      includes both flag branches and high-bit flags, point/overshoot/inverted
+      rectangles, wrapping coordinates, final colors/current point and return.
+      match.py reports 37 Rust instructions against 32 original; reviewed
+      seven calls, branch selection, post-draw copy, inset and return pair.
+      Differences are frame setup and palette indirection, not algorithm.
   - address: 0x0808e0e8
     ghidra: FUN_0808e0e8
     name: trace_buffer_primary_entry_is_state_one
