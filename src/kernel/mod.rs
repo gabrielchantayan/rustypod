@@ -19,6 +19,7 @@ pub mod gateway_service39;
 pub mod gateway_service5;
 pub mod gateway_service19;
 pub mod gateway_wake;
+pub mod gateway_wake_checked;
 pub mod gateway_service29;
 pub mod gateway_request_blocking;
 pub mod irq;

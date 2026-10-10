@@ -242151,3 +242151,28 @@ functions:
       rather than the original direct tail B; the byte store still
       precedes dispatch and uses the exact 0x089ca550 literal.
       No device execution performed.
+  - address: 0x080860e4
+    ghidra: FUN_080860e4
+    name: gateway_wake_object_checked
+    size: 36
+    sig: "u32 gateway_wake_object_checked(const u32 *object_slot)"
+    module: kernel/gateway_wake_checked
+    status: ported
+    renames:
+      param_1/r0: object_slot
+      param_1_deref/r0: object
+      thunk_EXT_FUN_22004368: gateway_wake_object
+      return/r0: status
+    notes: >-
+      Raw words e92d4010 e5900000 e3500000 03a0001a 08bd8010 ebfec76a
+      e1b00000 13a00014 e8bd8010 prove a 36-byte extent; the next real
+      prologue begins at 0x08086108. One internal unconditional BL to
+      0x08037ea8 and no predicated BLs. Full-image aligned ARM BL decoding
+      finds two inbound plain calls at 0x080c9870 and 0x080cdf00, with no
+      predicated inbound calls. Loads the slot's first u32; zero returns
+      0x1a without dispatch, otherwise zero gateway status returns zero and
+      every nonzero status becomes 0x14. No NULL guard. The verified veneer
+      reaches IRAM 0x22004368, mirrored at osos 0x08004368. Deliberate
+      deviation: reuse the ported gateway_wake_object and its established
+      dispatcher seam rather than branch into IRAM. Host tests exercise
+      empty ids, high-bit ids, and zero/nonzero unsigned gateway statuses.
