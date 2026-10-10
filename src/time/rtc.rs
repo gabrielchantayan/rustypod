@@ -286,6 +286,38 @@ pub unsafe extern "C" fn rtc_context_set_configuration_b88(
     }
 }
 
+/// rtc_context_set_configuration_b3d — original `FUN_080677e4` @
+/// 0x080677e4; true extent 36 bytes through the literal at 0x08067804,
+/// next real function at 0x08067808 (32 instruction bytes).
+/// Whole-image A32 decoding verifies two incoming plain BLs at 0x081718dc
+/// and 0x081720b8, zero incoming predicated BLs, zero outgoing BLs of
+/// either kind, and a conditional tail B to [`rtc_context_mark_dirty`].
+///
+/// Compare the sign-extended configuration byte at +0xb3d with the full
+/// i32 value. On mismatch, store the low byte, reload the owner's context
+/// pointer, and mark that context dirty. Equality preserves existing dirtiness.
+/// Deliberate deviations: the field's product meaning remains unrecovered;
+/// its configuration name retains the offset. Native host pointers widen
+/// only the owner's tail; Rust calls the existing dirty port directly.
+/// # Safety
+/// Owner must contain a valid context pointer at +0xf00, writable through
+/// +0xb90. No NULL or bounds checks are added.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_set_configuration_b3d(
+    owner: *mut RtcContextOwner,
+    value: i32,
+) {
+    let context = unsafe { (*owner).rtc_context as *mut RtcContext };
+    let configuration = unsafe { context.cast::<u8>().add(0xb3d) };
+    if unsafe { configuration.read() } as i8 as i32 != value {
+        unsafe {
+            configuration.write(value as u8);
+            rtc_context_mark_dirty((*owner).rtc_context as *mut RtcContext);
+        }
+    }
+}
+
 /// Mirror word's halfword at `0x089ca58c + 4`, updated with the nested RTC
 /// context's +0xb1c halfword.
 #[cfg(target_os = "none")]
@@ -957,6 +989,39 @@ mod tests {
         assert_eq!(context.reserved_to_dirty, [0x3c; 0x1f]);
         assert_eq!(context.reserved_to_status, [0xa5; 0xb14]);
         assert_eq!(context.status, 0x7f);
+    }
+
+    #[test]
+    fn configuration_b3d_sign_extends_and_compares_before_truncating() {
+        let mut context: RtcContext = unsafe { core::mem::zeroed() };
+        let mut owner = RtcContextOwner {
+            reserved: [0x19; 0xf00],
+            rtc_context: &context,
+        };
+        for old in 0..=255u8 {
+            let signed = old as i8 as i32;
+            for value in [signed, old as i32, signed + 256, signed - 256,
+                          (old.wrapping_add(1)) as i8 as i32, i32::MIN, i32::MAX] {
+                for dirty in [0, 1, 0x7e, 0xff] {
+                    unsafe {
+                        let bytes = (&mut context as *mut RtcContext).cast::<u8>();
+                        core::ptr::write_bytes(bytes, 0xa5, 0xb91);
+                        bytes.add(0xb3d).write(old);
+                        bytes.add(0xb90).write(dirty);
+                        let mut expected = [0xa5; 0xb91];
+                        expected[0xb3d] = old;
+                        expected[0xb90] = dirty;
+                        if signed != value {
+                            expected[0xb3d] = value as u8;
+                            expected[0xb90] = 1;
+                        }
+                        rtc_context_set_configuration_b3d(&mut owner, value);
+                        assert_eq!(core::slice::from_raw_parts(bytes, 0xb91), &expected);
+                        assert_eq!(owner.reserved, [0x19; 0xf00]);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
