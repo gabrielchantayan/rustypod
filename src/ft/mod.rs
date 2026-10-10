@@ -39,6 +39,7 @@ pub mod ps_is_whitespace;
 pub mod metrics;
 pub mod smooth_renderer;
 pub mod outline;
+pub mod outline_direction;
 pub mod offset_buffer;
 pub mod service;
 pub mod select_metrics;
