@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080890f0
+    ghidra: FUN_080890f0
+    name: path_facade_slot_6c
+    size: 100
+    sig: "u32 path_facade_slot_6c(StringObject *path_object, u8 *first_output, u8 *second_output, u8 *third_output, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path_object (saved in r5)
+      param_2/r1: first_output (saved in r6)
+      param_3/r2: second_output (saved in r7)
+      param_4/r3: third_output (saved in r4, stacked for virtual call)
+      param_5: base_hint (incoming stack word)
+      piVar1: facade
+      uVar2: saved status
+      auStack_24: scoped InterfaceGuard storage
+      FUN_08206e40: path_probe_guard_construct via existing seam
+      FUN_0818a0bc: facade_for_selector via existing seam
+      FUN_08206e6c: path_probe_guard_destroy via existing seam
+    notes: >-
+      Raw A32 extent [0x080890f0,0x08089154) is 100 bytes with no literals.
+      Next boundary is a distinct push. Whole-image decoding finds two plain
+      incoming BLs at 0x080890d8 and 0x0813ae20, zero predicated BLs.
+      Body has three plain BLs, zero predicated BLs and one BLX through
+      facade slot +0x6c. Guard scopes selector-1 dispatch of path and three
+      opaque outputs; status survives cleanup unchanged. Caller uses three
+      12-byte outputs with slot +0x70; virtual identity remains unknown.
+      Typed guard and native-width vtable slots reuse established seams.
+      Host suite passes 15346 tests; outputs, aliasing and error cleanup
+      covered. Standalone host smoke yields [1,2,3], status 0x80000015,
+      guard released. ARM release builds. match.py exit 1 reviewed:
+      25 original versus 33 Rust instructions; seam BLX loads and frame
+      differ, while +0x6c dispatch, fifth argument and saved return agree.
   - address: 0x08089264
     ghidra: FUN_08089264
     name: path_facade_slot_7c

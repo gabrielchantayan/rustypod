@@ -850,6 +850,45 @@ pub unsafe extern "C" fn path_facade_slot_80_from_cstr(
     status
 }
 
+/// path_facade_slot_6c — original: `FUN_080890f0` @ 0x080890f0.
+///
+/// Raw A32 proves [0x080890f0,0x08089154), 100 bytes with no literals:
+/// pop at +0x60 precedes the next function's push. Whole-image word
+/// decoding finds two incoming plain BLs (0x080890d8, 0x0813ae20), zero
+/// predicated BLs; the body has three plain BLs and one indirect BLX.
+///
+/// Constructs a guard using the fifth argument, selects facade 1, invokes
+/// slot +0x6c with the path and three output pointers, destroys the guard
+/// on success or failure, and returns the saved full-width status.
+/// Callers copy three 12-byte results to another facade's slot +0x70;
+/// their concrete representation and the virtual operation remain unknown.
+/// Deliberate deviations: typed guard storage replaces the stack frame;
+/// existing seams and native-width vtable word indices support host tests.
+///
+/// # Safety
+/// The facade must implement slot +0x6c with this ABI. Path and output
+/// storage must satisfy that operation's contract; guard seams must agree.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_6c(
+    path_object: *mut StringObject,
+    first_output: *mut u8,
+    second_output: *mut u8,
+    third_output: *mut u8,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let operation: unsafe extern "C" fn(
+        *mut FacadeObject, *mut StringObject, *mut u8, *mut u8, *mut u8,
+    ) -> u32 = core::mem::transmute((*(*facade).vtable).slots[0x6c / 4]);
+    let status = operation(facade, path_object, first_output, second_output, third_output);
+    guard_dtor_fn()(guard);
+    status
+}
+
 /// path_facade_slot_7c — original: `FUN_08089264` @ 0x08089264.
 ///
 /// Raw A32 proves an 80-byte extent [0x08089264,0x080892b4), ending
@@ -2315,6 +2354,69 @@ pub(crate) mod tests {
                     &[before.to_vec(), after.to_vec()]);
                 assert_eq!(CTOR_HINT, 0xdead_beef);
             }
+        }
+    }
+
+    unsafe extern "C" fn slot_6c_scope_construct(
+        this: *mut InterfaceGuard, hint: u32,
+    ) -> *mut InterfaceGuard {
+        CTOR_THIS = this;
+        (*this).words = [0, hint, 0, 1];
+        this
+    }
+
+    unsafe extern "C" fn slot_6c_scope_destroy(this: *mut InterfaceGuard) -> *mut InterfaceGuard {
+        assert_eq!(this, CTOR_THIS);
+        assert_eq!((*this).words[3], 2, "operation ran while guard was live");
+        (*this).words[3] = 0;
+        DTOR_THIS = this;
+        this
+    }
+
+    unsafe extern "C" fn slot_6c_write_outputs(
+        _facade: *mut FacadeObject, path: *mut StringObject,
+        first: *mut u8, second: *mut u8, third: *mut u8,
+    ) -> u32 {
+        assert_eq!((*CTOR_THIS).words[3], 1);
+        (*CTOR_THIS).words[3] = 2;
+        if (*path).payload.is_null() { return 0x8000_0015; }
+        for (output, byte) in [(first, 0x11), (second, 0x22), (third, 0x33)] {
+            for index in 0..12 { *output.add(index) = byte; }
+        }
+        (*CTOR_THIS).words[1]
+    }
+
+    #[test]
+    fn slot_6c_preserves_output_aliases_and_cleans_up_even_on_failure() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            PATH_PROBE_GUARD_CTOR = slot_6c_scope_construct;
+            PATH_PROBE_GUARD_DTOR = slot_6c_scope_destroy;
+            MOCK_VTABLE.slots[0x6c / 4] = slot_6c_write_outputs as usize;
+            let mut payload = [0u8; 1];
+            let mut path = StringObject {
+                vtable: core::ptr::null(), payload: payload.as_mut_ptr(),
+            };
+            for status in [0, 7, 0xffff_ffff] {
+                let mut outputs = [[0xa5u8; 14]; 3];
+                assert_eq!(path_facade_slot_6c(&mut path,
+                    outputs[0].as_mut_ptr().add(1), outputs[1].as_mut_ptr().add(1),
+                    outputs[2].as_mut_ptr().add(1), status), status);
+                for (output, byte) in outputs.iter().zip([0x11, 0x22, 0x33]) {
+                    assert_eq!(output[0], 0xa5);
+                    assert_eq!(&output[1..13], &[byte; 12]);
+                    assert_eq!(output[13], 0xa5);
+                }
+                let mut alias = [0u8; 12];
+                let p = alias.as_mut_ptr();
+                assert_eq!(path_facade_slot_6c(&mut path, p, p, p, status), status);
+                assert_eq!(alias, [0x33; 12], "outputs retain operation write order");
+            }
+            path.payload = core::ptr::null_mut();
+            assert_eq!(path_facade_slot_6c(&mut path, core::ptr::null_mut(),
+                core::ptr::null_mut(), core::ptr::null_mut(), 0), 0x8000_0015);
         }
     }
 }
