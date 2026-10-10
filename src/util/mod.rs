@@ -1,4 +1,5 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod vector_axis_classify;
 pub mod payload_u16_be_store;
 pub mod bytes16_to_upper_hex;
 pub mod scan_be_word_range;
