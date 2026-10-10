@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08089264
+    ghidra: FUN_08089264
+    name: path_facade_slot_7c
+    size: 80
+    sig: "u32 path_facade_slot_7c(StringObject *path_object, u8 *output, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path_object (saved in r4)
+      param_2/r1: output (saved in r5; callers consume its first byte)
+      param_3/r2: base_hint
+      param_4/r3: dead spill, not a semantic argument
+      piVar1: facade
+      uVar2: saved status
+      uStack_20: scoped InterfaceGuard storage
+      FUN_08206e40: path_probe_guard_construct via existing seam
+      FUN_0818a0bc: facade_for_selector via existing seam
+      FUN_08206e6c: path_probe_guard_destroy via existing seam
+    notes: >-
+      Raw A32 establishes [0x08089264,0x080892b4), 80 bytes without
+      literals; next real function starts with push at 0x080892b4.
+      Whole-image aligned decoding finds two incoming plain BLs at
+      0x08117984 and 0x0813addc, zero predicated BLs. Body contains three
+      plain BLs, zero predicated BLs and one indirect BLX through +0x7c.
+      Constructs a scoped guard using r2, selects facade 1, dispatches
+      saved path and output, releases guard on every status, returns saved
+      status verbatim. Virtual identity remains unclassified. Typed storage
+      replaces dead spills; native-width slots retain target word indices.
+      Existing seams reused. Host tests pass; standalone production-body
+      smoke verifies byte output, saved high-bit error and scope release.
+      ARM release builds. Reviewed match.py exit 1: 20 versus 29 instructions;
+      seam BLX loads replace direct BLs; slot, arguments and cleanup preserved.
   - address: 0x0808ca54
     ghidra: FUN_0808ca54
     name: tt_cmap12_next
