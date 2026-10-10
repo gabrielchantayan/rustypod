@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a960c
+    ghidra: FUN_080a960c
+    name: store_response_u32_be
+    size: 32
+    sig: "void store_response_u32_be(uint8_t *dst, uint32_t value)"
+    module: util/beload
+    status: ported
+    renames:
+      param_1/r0: dst
+      param_2/r1: value
+      r2: shifted_byte
+    notes: >-
+      Raw osos.dec verifies the true 32-byte extent 0x080a960c..0x080a962c:
+      three MOV/LSR and STRB pairs, STRB of r1, then BX LR at 0x080a9628.
+      The next real function starts with PUSH at 0x080a962c. Whole-image
+      ARM branch decoding counts two unconditional incoming BLs at
+      0x080fd07c and 0x080fd0b0, zero predicated incoming BLs, and zero
+      outgoing BLs. Both sites in FUN_080fcf64 serialize response words
+      at buffer offsets 0x28 and 0x2c. Writes four big-endian bytes without
+      alignment, NULL, or bounds guards. No callees or new seams.
+      Deliberate deviations: volatile stores preserve byte width and order;
+      a dedicated text section prevents merging with existing helpers.
+      All 15226 host tests pass, including all byte alignments, byte-lane
+      extrema, and untouched neighbors. ARM release build passes. match.py
+      resolves the distinct symbol and shows the same seven shift/store
+      instructions with LLVM frame setup and POP return replacing BX LR.
+      Standalone real-source smoke writes 01234567 and 89abcdef at the
+      response offsets and verifies every surrounding byte is unchanged.
   - address: 0x080a9eec
     ghidra: FUN_080a9eec
     name: tt_cmap4_next_segment
