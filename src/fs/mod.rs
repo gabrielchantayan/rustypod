@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// HFS volume encoding bitmap update @ 0x0806d8ac.
+pub mod hfs_volume_mark_encoding;
 /// Conditional unique record-ID collection @ 0x0806df48.
 pub mod record_id_collect;
 /// Selector-one path marker and mode initialization @ 0x080741d0.

@@ -16,6 +16,42 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806d8ac
+    ghidra: FUN_0806d8ac
+    name: hfs_volume_mark_encoding
+    size: 76
+    sig: "void hfs_volume_mark_encoding(u32 *volume, u32 encoding)"
+    module: fs/hfs_volume_mark_encoding
+    status: ported
+    vars:
+      param_1/r0: volume
+      param_2/r1: encoding_then_lower_mask
+      r2: one_then_upper_mask
+      r3: old_lower_bitmap
+      r12: old_upper_bitmap
+    notes: >-
+      Raw A32 extent [0x0806d8ac,0x0806d8f8), 76 bytes, ends BX LR;
+      next real entry begins PUSH {r4,r5,r6,lr}. Whole-image word scan
+      finds one incoming plain BL at 0x08057fa0 and one predicated BLNE
+      at 0x0805d6cc; no outgoing plain or predicated BLs. Callers create
+      or rename catalog records on HFS+ volumes (signature 0x482b).
+      Mask encoding to seven bits; values >=48 fall back to bit zero.
+      ARM register LSL makes indices 32..47 produce zero, not wrap.
+      OR the mask into aligned volume word +0x180 and its arithmetic
+      sign extension into +0x184, so index 31 sets all upper bits.
+      Ghidra incorrectly renders ASR as unsigned and omits the rename
+      caller second argument; raw setup loads r1. Omit unreachable
+      0x98/0x8c comparisons after masking; do not repair firmware behavior.
+      Volatile aligned word accesses retain both loads before both stores.
+      Host fixtures retain four-byte words. No callee seams, allocation,
+      null guard, or undecrypted-region dependency. Two tests cover every
+      seven-bit encoding, initial bitmap states, sentinels, accumulation,
+      shift boundaries, sign extension, aliases and all-bits input.
+      Standalone smoke passes. Parallel host suite crashed with SIGSEGV;
+      serial suite passes all 15437 tests; targeted tests pass. ARM release
+      build passes. match.py exits 1: 16 Rust versus 19 stock instructions,
+      removing dead comparisons, gating LSL at 32, folding ASR into ORR,
+      adding a frame pointer, and retaining memory access order; no calls.
   - address: 0x0806df48
     ghidra: FUN_0806df48
     name: record_id_collect
