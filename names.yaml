@@ -240683,3 +240683,30 @@ functions:
       uses indexed stores, adds a frame pointer, and reorders header stores.
       Both heap calls, unsigned excess check, statuses and publication remain.
       Deliberate deviation is existing heap dispatch rather than direct BLs.
+
+  - address: 0x0809cae8
+    ghidra: FUN_0809cae8
+    name: ft_face_record_select
+    size: 72
+    sig: "FtFaceRecord *ft_face_record_select(FtFaceRecord *record, u32 selector)"
+    module: ft/face_record_select
+    status: ported
+    vars: {param_1: record, param_2: selector}
+    notes: >-
+      Raw ARM decode establishes 72 instruction bytes ending at 0x0809cb30;
+      the next real function starts at 0x0809cb5c after 44 bytes of literals
+      and assertion text. Two incoming plain BLs at 0x08392c38/0x08392c4c,
+      no predicated incoming BLs, zero outgoing BLs, one BEQ tail call to
+      ported ft_panic at 0x0804e154. Ghidra incorrectly absorbs unrelated
+      assertion-following code and invents a u64 result. Copy face words
+      +0x19c/+0x1a0 and source (+0x1e0) word +0x14 to record +0x18/+0x1c/
+      +0x14; selector zero chooses source +0x18, otherwise +0x1c, stored
+      at record +0x10. Zero selected data asserts at line 48 with filename
+      address 0x0890de4c. Unknown format-specific field identities remain
+      neutral rather than guessed. Normal return preserves r0. Typed host
+      pointers widen; target offset assertions enforce the original layout.
+      Host suite and ARM release build passed; standalone source smoke
+      exercised both choices with zero unselected data and preserved guards.
+      match.py exit 1: 18 original versus 23 Rust instructions, same loads/
+      stores and zero assertion branch. LLVM selects the load offset, and
+      uses a framed BL to the diverging panic instead of a conditional tail B.
