@@ -239217,3 +239217,35 @@ functions:
       ordered slot calls, ordered clearing stores, and final free dispatch.
       Extra instructions come from LLVM framing and existing free's volatile
       heap dispatch. No device execution; host cannot verify IRQ atomicity.
+
+  - address: 0x080b6bec
+    ghidra: FUN_080b6bec
+    name: storage_memory_capacity_enabled
+    size: 8
+    sig: "u32 storage_memory_capacity_enabled(void)"
+    module: fs/storage_memory_capacity_enabled
+    status: ported
+    renames:
+      return/r0: enabled
+    notes: >-
+      Raw words e3a00001 e12fff1e are mov r0,#1; bx lr, establishing
+      the exact extent 0x080b6bec..0x080b6bf4. The next function starts
+      with push and has independent direct callers at 0x0805c388,
+      0x0805c3bc, 0x0805c580, and 0x0805c5b0. Whole-image aligned ARM
+      decoding finds two inbound plain unconditional BLs at 0x080d6bc0
+      and 0x0815226c, zero predicated BLs, no outgoing calls, and no
+      aligned pointer references. Returns the word 1 without memory access.
+      The first caller gates a storage adjustment on shared-context memory
+      size in MiB and this result; the second stores its low byte at
+      object+0x318 beside memory MiB at +0x31c. The concrete memory region
+      remains unidentified; the semantic name describes observed use only.
+      No callee seams or deliberate deviations. The u32 ABI preserves
+      both full-word and byte consumers. Host tests cover exact word/byte
+      values and the consumer gate at zero and one-MiB boundaries.
+      All 15194 host tests passed; ARM build-std release build passed.
+      Native actual-source smoke returned word 1 and byte 1. LLVM folds
+      the exported 16-byte symbol into .text.always_succeeds. The requested
+      match.py invocation cannot find the alias label; comparing the
+      confirmed always_succeeds body instead reports two original versus
+      four Rust instructions (exit 1): LLVM adds frame push/setup/pop while
+      retaining mov r0,#1 and return. No physical-device execution.
