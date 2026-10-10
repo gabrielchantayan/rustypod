@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067bb8
+    ghidra: FUN_08067bb8
+    name: ui_element_word_pair_set
+    size: 12
+    sig: "void ui_element_word_pair_set(uint32_t *element, uint32_t first, uint32_t second)"
+    module: ui/ui_element_word_pair_set
+    status: ported
+    renames:
+      param_1/r0: element
+      param_2/r1: first
+      param_3/r2: second
+      element+0x4c: first_word
+      element+0x50: second_word
+    notes: >-
+      Raw words e580104c e5802050 e12fff1e prove the 12-byte extent
+      [0x08067bb8,0x08067bc4); the next function starts with e92d4070.
+      Independent whole-image aligned A32 decoding finds two incoming plain
+      BLs at 0x08058994 and 0x08068f48, zero predicated incoming BLs,
+      and no outgoing BLs. Store first at +0x4c, then second at +0x50.
+      Both callers initialize a newly obtained UI element with second zero;
+      the latter preserves first across element recreation. Field meanings
+      beyond these word stores remain unestablished; no callee seam is needed.
+      No deliberate behavioral deviations; fixed u32 indices preserve the
+      target layout on hosts. Callers ignore unchanged r0 and reload pointers.
+      Host suite passes 15454 tests; standalone recreation smoke verifies
+      restored first, cleared second and intact neighbors. ARM release build
+      passes. match.py shows the same two stores, with LLVM frame setup and
+      pop return instead of bx lr (five instructions versus three).
   - address: 0x08067c70
     ghidra: FUN_08067c70
     name: item_store_counted_string
