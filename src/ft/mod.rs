@@ -70,5 +70,6 @@ pub mod trig;
 pub mod word_cursor;
 pub mod too_many_hints;
 pub mod truetype_module_callback;
+pub mod tt_zone_from_outline;
 pub mod tuple_scalar;
 pub mod types;

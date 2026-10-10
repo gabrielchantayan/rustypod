@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08093234
+    ghidra: FUN_08093234
+    name: tt_zone_from_outline
+    size: 76
+    sig: "void tt_zone_from_outline(u8 *zone, const u8 *glyph_load, u32 point_offset, u32 contour_offset)"
+    module: ft/tt_zone_from_outline
+    status: ported
+    vars:
+      param_1/r0: zone
+      param_2/r1: glyph_load
+      param_3/r2: point_offset
+      param_4/r3: contour_offset
+      r12: count_or_cursor
+    notes: >-
+      Raw ARM establishes [0x08093234,0x08093280), 76 bytes; next entry
+      begins with push. Zero outgoing plain or predicated BLs. Whole-image
+      ARM immediate decoding finds two incoming plain BLs, 0x080cc218 and
+      0x080d8f3c, and zero predicated incoming BLs. Callers pass glyph-load
+      records at loader+0x34 and loader+0x14 respectively and add four phantom
+      points afterward. Zone +8/+10 receive outline point/contour counts
+      minus offsets, truncated to u16. Zone +12/+16 receive extra_points
+      (+20) and points (+4) plus point_offset*8; +20 receives tags (+8)
+      plus point_offset; +24 receives contours (+12) plus contour_offset*2.
+      Addresses remain u32 on hosts; arithmetic wraps and sequential
+      raw-pointer accesses preserve overlap. No callee seams or behavioral
+      deviations. Host edge tests cover count underflow, address overflow,
+      large offsets, preserved fields, and overlapping records. Full host
+      test gate and release ARM build pass. Standalone executable smoke
+      verifies counts, all four cursors, and preserved prefix. match.py
+      shows 21 versus 19 instructions: identical 18-instruction computation,
+      with LLVM frame push/mov and pop replacing the original bx lr.
   - address: 0x0809867c
     ghidra: FUN_0809867c
     name: bdf_append_comment
