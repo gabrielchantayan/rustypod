@@ -39,6 +39,60 @@ const _: [u8; 0x48] = [0; core::mem::size_of::<BufferState>()];
 /// it in must initialize this single model before using it.
 pub static mut BUFFER_STATES: [BufferState; 2] = [EMPTY_BUFFER_STATE; 2];
 
+/// Initialization byte at `0x08a0e180`, modeled on hosts for queue tests.
+#[cfg(not(target_os = "none"))]
+pub static mut BUFFER_STATES_INITIALIZED: u8 = 0;
+
+/// buffer_state_get_entry — original: `FUN_0809ae44` @ `0x0809ae44`.
+///
+/// True extent: 88 bytes through `0x0809ae9c`, comprising 80 instruction
+/// bytes and two literals. Verified zero outgoing plain/predicated BLs;
+/// two incoming plain BLs (`0x081c0d70`, `0x081c1688`), no predicated BLs.
+/// An unset initialization byte returns 1 without touching output. Otherwise
+/// clear output, select record one only for selector == 1, and require a
+/// nonnegative index strictly below both signed capacity and signed count.
+/// Return 6 on rejection, or copy the entry word and return 0.
+///
+/// Deliberate deviation: hosts reuse BUFFER_STATES, the existing shared BSS
+/// model, and model the readiness byte. Firmware reads both original fixed
+/// addresses. Volatile accesses preserve load/store ordering; no locking.
+///
+/// # Safety
+/// When initialized, output must be writable and aligned. The selected
+/// record must contain every entry admitted by its count and capacity.
+/// Shared state must not be concurrently mutated.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn buffer_state_get_entry(output: *mut u32, index: i32, selector: u32) -> u32 {
+    #[cfg(target_os = "none")]
+    let initialized = core::ptr::read_volatile(0x08a0_e180 as *const u8);
+    #[cfg(not(target_os = "none"))]
+    let initialized = core::ptr::read_volatile(core::ptr::addr_of!(BUFFER_STATES_INITIALIZED));
+    if initialized == 0 {
+        return 1;
+    }
+    core::ptr::write_volatile(output, 0);
+    #[cfg(target_os = "none")]
+    let first = 0x08b1_c858 as *const BufferState;
+    #[cfg(not(target_os = "none"))]
+    let first = core::ptr::addr_of!(BUFFER_STATES).cast::<BufferState>();
+    let state = if selector == 1 { first.add(1) } else { first };
+    if index < 0 {
+        return 6;
+    }
+    let capacity = core::ptr::read_volatile(core::ptr::addr_of!((*state).capacity)) as i32;
+    if index >= capacity {
+        return 6;
+    }
+    let count = core::ptr::read_volatile(core::ptr::addr_of!((*state).item_count)) as i32;
+    if index >= count {
+        return 6;
+    }
+    let entry = core::ptr::read_volatile(core::ptr::addr_of!((*state).entries).cast::<u32>().add(index as usize));
+    core::ptr::write_volatile(output, entry);
+    0
+}
+
 /// buffer_state_is_full — original: `FUN_0807595c` @ `0x0807595c` (36 bytes).
 ///
 /// Selects buffer state zero except for selector exactly one, which selects
@@ -115,6 +169,43 @@ mod tests {
                 assert_eq!(buffer_state_is_full(0), expected, "state zero: {item_count:#x}, {capacity:#x}");
                 assert_eq!(buffer_state_is_full(1), expected, "state one: {item_count:#x}, {capacity:#x}");
             }
+        }
+    }
+
+    #[test]
+    fn entry_lookup_preserves_disabled_output_and_checks_signed_bounds() {
+        let _guard = BUFFER_STATE_TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        unsafe {
+            BUFFER_STATES_INITIALIZED = 0;
+            let mut output = 0xfeed_beef;
+            assert_eq!(buffer_state_get_entry(&mut output, 0, 0), 1);
+            assert_eq!(output, 0xfeed_beef);
+            assert_eq!(buffer_state_get_entry(core::ptr::null_mut(), i32::MIN, 1), 1);
+            BUFFER_STATES_INITIALIZED = 0x80;
+            for &(count, capacity, index, expected) in &[
+                (16, 16, -1, 6), (16, 16, i32::MIN, 6),
+                (16, 16, i32::MAX, 6), (0, 16, 0, 6),
+                (16, 0, 0, 6), (3, 16, 3, 6), (16, 3, 3, 6),
+                (u32::MAX, 16, 0, 6), (16, 0x8000_0000, 0, 6),
+                (16, 16, 15, 0), (1, 1, 0, 0),
+            ] {
+                set_state(0, count, capacity);
+                let state = core::ptr::addr_of_mut!(BUFFER_STATES).cast::<BufferState>();
+                (*state).entries = [0x8765_4321; 16];
+                output = 0xfeed_beef;
+                assert_eq!(buffer_state_get_entry(&mut output, index, 0), expected);
+                assert_eq!(output, if expected == 0 { 0x8765_4321 } else { 0 });
+            }
+            set_state(0, 16, 16);
+            set_state(1, 16, 16);
+            let states = core::ptr::addr_of_mut!(BUFFER_STATES).cast::<BufferState>();
+            (*states).entries[0] = 0;
+            (*states.add(1)).entries[0] = u32::MAX;
+            for selector in [0, 1, 2, 0x8000_0000, u32::MAX] {
+                assert_eq!(buffer_state_get_entry(&mut output, 0, selector), 0);
+                assert_eq!(output, if selector == 1 { u32::MAX } else { 0 });
+            }
+            BUFFER_STATES_INITIALIZED = 0;
         }
     }
 }
