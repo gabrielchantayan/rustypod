@@ -18,6 +18,7 @@ pub mod cff_lookup_glyph;
 pub mod cff_pshinter_callback;
 pub mod cff_index;
 pub mod cff_parse_fixed;
+pub mod cff_parse_integer;
 pub mod cff_sid;
 pub mod t1_builder;
 pub mod t1_lookup_glyph;

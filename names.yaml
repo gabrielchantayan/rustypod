@@ -148472,7 +148472,7 @@ functions:
       param_1/r0: range
       param_1[0]/r0: range.start
       param_1[1]/r1: range.end
-      FUN_080a1b68: compact_token_value
+      FUN_080a1b68: cff_parse_integer
       FUN_0804d2cc: fixed_product
       FUN_08087bf8: packed_decimal_value
     notes: >-
@@ -148486,10 +148486,10 @@ functions:
       B/BL word in osos.dec finds exactly seven inbound direct calls, all
       unconditional bl and no predicated forms: 0x08087ed8, 0x080bfdac,
       0x080bfdbc, 0x080bfdcc, 0x080bfddc, 0x080bfdec, and 0x080bfdf8.
-      The three helpers remain unported; target builds retain direct calls to
-      their verified load addresses, while host tests install deterministic
-      seams to prove marker routing, Q16 conversion, multiplier, and exact
-      range forwarding. No deliberate behavioral deviations.
+      The integer helper now calls ft/cff_parse_integer directly on all
+      targets. The other two helpers retain verified retail addresses on ARM
+      and typed host seams. Host tests cover signed integer scaling and
+      truncation through the real integer port. No behavioral deviations.
   - address: 0x080c9ff8
     ghidra: FUN_080c9ff8
     name: string_pool_intern_counted
@@ -157839,8 +157839,8 @@ functions:
       predicated BL forms. Byte 30 tail-branches to the separately linked CFF
       real parser at 0x08087bf8 with r2=0; other CFF DICT operands call the
       integer parser at 0x080a1b68 and shift its result into 16.16 form.
-      Rust uses typed host/target seams for those verified unported callees and
-      models the real-parser tail transfer as a normal call.
+      Rust calls ft/cff_parse_integer directly; only the real parser retains
+      a typed host/target seam and a normal call in place of its tail transfer.
   # --- UTF-16 NUL terminator consumer ---
   - address: 0x08087b7c
     ghidra: FUN_08087b7c
@@ -189935,8 +189935,8 @@ functions:
       predicated BL forms. Byte 30 tail-branches to the separately linked CFF
       real parser at 0x08087bf8 with r2=0; other CFF DICT operands call the
       integer parser at 0x080a1b68 and shift its result into 16.16 form.
-      Rust uses typed host/target seams for those verified unported callees and
-      models the real-parser tail transfer as a normal call.
+      Rust calls ft/cff_parse_integer directly; only the real parser retains
+      a typed host/target seam and a normal call in place of its tail transfer.
   # --- UTF-16 NUL terminator consumer ---
   - address: 0x08087b7c
     ghidra: FUN_08087b7c
@@ -240455,3 +240455,46 @@ functions:
       entry/table hold counters. ARM build succeeds; match.py reports
       23 original versus 28 Rust instructions with the same four direct
       calls, slot +0x98 BLX, conditional clear and final guard release.
+
+  - address: 0x080a1b68
+    ghidra: FUN_080a1b68
+    name: cff_parse_integer
+    size: 188
+    sig: "u32 cff_parse_integer(const u8 *cursor, const u8 *limit)"
+    module: ft/cff_parse_integer
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: limit
+      uVar2/r3: token
+      pbVar1/r2: payload
+      uVar3/r12: value
+    notes: >-
+      Raw A32 words establish 188 bytes from 0x080a1b68 through bx lr at
+      0x080a1c20; the next real function begins with push at 0x080a1c24.
+      Independent whole-image BL decoding finds two plain inbound sites,
+      0x08090410 and 0x080d4044, zero predicated inbound sites, and zero
+      outbound BLs. Conditional BLT at 0x080a1bdc is a branch, not BL.
+      Decode CFF DICT integer operands without advancing the cursor.
+      Token 28 is signed big-endian i16 (Ghidra misses the sign extension);
+      29 returns all four big-endian bytes. Other tokens below 247 subtract
+      139, including noncanonical low tokens. Tokens 247..250 yield
+      108 + 256*(token-247) + payload; 251..255 yield
+      -108 - 256*(token-251) - payload, including noncanonical 255.
+      The first byte is read regardless of limit. Multibyte payloads are
+      read only when cursor + encoded size is at most the exclusive limit;
+      otherwise return zero. Preserve u32 return bits and unsigned address
+      comparisons. No deliberate deviations for nonwrapping input addresses.
+      Both existing Rust callers now use this port directly; obsolete
+      integer callbacks and the incomplete host decoder are removed.
+      Host suite passes 15266 tests. Standalone host execution observes
+      -32768 for 1c8000, INT_MIN for 1d80000000, 0x12345678 for
+      1d12345678, -1387 for ffff, -139 for 00, and zero for truncated
+      1cff. Edge tests exhaust all short-token payload values, exercise
+      signed wide boundaries at offsets 0..3, and every truncation length.
+      ARM release build succeeds. match.py reports a structural diff
+      (47 original instructions versus 53 Rust lines including a literal):
+      the unsigned limit checks, signed halfword extension, big-endian
+      word assembly and positive/negative compact branches remain intact.
+      LLVM adds a frame and folds compact-token base constants; no calls
+      or builtin substitutions appear.
