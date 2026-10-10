@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08086024
+    ghidra: FUN_08086024
+    name: kernel_object4_allocate
+    size: 72
+    sig: "u32 kernel_object4_allocate(u32 *slot)"
+    module: kernel/object4_allocate
+    status: ported
+    vars:
+      param_1/r0: slot
+      r4: saved_slot
+      iVar1/r0: dispatch_status
+    renames:
+      DAT_08086064: empty_creation_callback_epilogue
+      DAT_08086068: object4_once_control
+    notes: >-
+      Raw A32 extent [0x08086024,0x0808606c) is 72 bytes, including
+      two literals after 64 instruction bytes. Next real boundary is PUSH
+      at 0x0808606c. Two outgoing plain BLs target once_callback at
+      0x080f4f74 and kernel_create_dispatch at 0x08037e70; zero predicated
+      BLs. Whole-image decoding finds two plain incoming BLs at 0x080a3d6c
+      and 0x080c9750, zero predicated incoming BLs. Claim 0x08a09700,
+      ignore once status, dispatch class 4 into slot, return zero only for
+      zero dispatch status and nonzero handle; otherwise 0x27, without
+      reading slot on dispatch failure. Callback literal 0x0807b194 is
+      e8bd8010, a bare POP consuming the stock once frame with no side
+      effects. An ABI-safe empty Rust callback replaces it; the discarded
+      first-claim once result changes from 14 to zero. Hosts use local
+      atomic control. Reuses existing once and kernel-dispatch ports.
+      Host suite and ARM release build pass. Actual-source consumer smoke
+      passes success, empty handle and null-slot dispatch failure.
+      match.py exit 1 reviewed: 16 original versus 20 Rust listing rows;
+      both calls, conditional handle load and 0x27 failure remain.
   - address: 0x08086dd0
     ghidra: FUN_08086dd0
     name: retail_word_at
