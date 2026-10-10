@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080890a8
+    ghidra: FUN_080890a8
+    name: path_facade_slot_6c_from_cstr
+    size: 72
+    sig: "u32 path_facade_slot_6c_from_cstr(const u8 *path, u8 *first_output, u8 *second_output, u8 *third_output, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path
+      param_2/r1: first_output (saved in r4)
+      param_3/r2: second_output (saved in r5)
+      param_4/r3: third_output (saved in r6)
+      param_5: base_hint (saved in r7)
+      uStack_1c: temporary StringObject storage
+      uVar1: saved status
+      FUN_08279284: path_object_construct
+      FUN_080890f0: path_facade_slot_6c
+      thunk_FUN_08277484: string_object_destroy_veneer at 0x082792fc
+    notes: >-
+      Raw A32 words establish [0x080890a8,0x080890f0), 72 bytes without
+      literals, ending with pop before a distinct push. Whole-image aligned
+      branch decoding finds two incoming plain BLs at 0x0805a9b8 and
+      0x0813be34, zero predicated BLs. Three outgoing plain BLs at
+      0x080890c4, 0x080890d8 and 0x080890e4, zero predicated BLs. Constructs
+      a temporary path, dispatches three opaque outputs with the fifth-word
+      hint, destroys that temporary and returns saved u32 status. Ghidra's
+      undefined8 return is spurious: pop restores r1, not a second result.
+      Typed storage and direct existing ports replace stack spills. Host
+      suite passes 15347 tests; covers aliased outputs, sentinels, null/empty
+      paths, allocation failure, mutated-path release and full-width errors.
+      Standalone host smoke reports outputs [1,2,3], status 0x80000015,
+      guard destroyed and path released. ARM release build succeeds.
+      match.py exit 1 reviewed: 18 versus 23 instructions, preserving three
+      BLs, fifth stack argument and status across teardown; frame differs.
   - address: 0x080890f0
     ghidra: FUN_080890f0
     name: path_facade_slot_6c
