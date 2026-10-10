@@ -120,6 +120,147 @@ pub unsafe extern "C" fn rtc_context_mark_dirty(context: *mut RtcContext) {
     unsafe { (*context).dirty = 1 };
 }
 
+/// rtc_context_set_configuration_mode — FUN_08067678 @ 0x08067678.
+/// True extent [0x08067678, 0x0806770c): 148 bytes. Whole-image raw
+/// decoding finds two incoming plain BLs (0x081709b8, 0x081cfdd0), no
+/// predicated incoming BLs, two outgoing plain BLs, no predicated BLs,
+/// two virtual BLX calls and one virtual tail BX.
+///
+/// Encode mode as bytes +0x1c = (mode != 0), +0x8e = (mode == 2).
+/// Skip all writes and player access when the first byte matches and
+/// either it is zero or the second byte matches. Comparisons use exact
+/// byte values, not truthiness. Otherwise store both normalized bytes,
+/// mark the reloaded context dirty, and get the canonical media player.
+/// Query slot +0x1a4; if zero, call +0x78 with 3, then reload and call +0x88.
+///
+/// Deliberate deviations: virtual tail dispatch is a normal Rust call;
+/// host vtable entries widen to native usize while retaining word indices.
+/// Product meaning of the two configuration bytes and slots is unrecovered.
+/// Tests inject only the singleton getter; shipped code uses its existing
+/// canonical port (including that port's documented constructor limitation).
+///
+/// # Safety
+/// Owner and nested context must be valid writable objects. The player
+/// must have callable slots +0x1a4, +0x78 and +0x88 with the ABIs below.
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn rtc_context_set_configuration_mode(
+    owner: *const RtcContextOwner, mode: u32,
+) {
+    rtc_context_set_configuration_mode_with(owner, mode, || unsafe {
+        crate::app::singletons::media_player_get()
+    });
+}
+
+#[inline(always)]
+unsafe fn rtc_context_set_configuration_mode_with(
+    owner: *const RtcContextOwner, mode: u32, get_player: impl FnOnce() -> *mut u8,
+) {
+    use core::ptr;
+    let context = ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut u8;
+    let enabled = (mode != 0) as u8;
+    let alternate = (mode == 2) as u8;
+    let previous = context.add(0x1c).read();
+    if previous == enabled && (previous == 0 || context.add(0x8e).read() == alternate) {
+        return;
+    }
+    context.add(0x1c).write(enabled);
+    let context = ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut u8;
+    context.add(0x8e).write(alternate);
+    rtc_context_mark_dirty(ptr::read(ptr::addr_of!((*owner).rtc_context)) as *mut RtcContext);
+    let player = get_player();
+    let table = player.cast::<*const usize>().read();
+    let query: unsafe extern "C" fn(*mut u8) -> u32 =
+        core::mem::transmute(table.add(0x1a4 / 4).read());
+    if query(player) != 0 {
+        return;
+    }
+    let table = player.cast::<*const usize>().read();
+    let set: unsafe extern "C" fn(*mut u8, u32) =
+        core::mem::transmute(table.add(0x78 / 4).read());
+    set(player, 3);
+    let table = player.cast::<*const usize>().read();
+    let finish: unsafe extern "C" fn(*mut u8) =
+        core::mem::transmute(table.add(0x88 / 4).read());
+    finish(player);
+}
+
+#[cfg(test)]
+mod configuration_mode_tests {
+    use super::*;
+
+    #[repr(C)]
+    struct Player {
+        table: *const usize,
+        replacement: *const usize,
+        query_result: u32,
+        events: u32,
+    }
+    unsafe extern "C" fn query(player: *mut u8) -> u32 {
+        let player = &mut *player.cast::<Player>();
+        player.events = player.events * 10 + 1;
+        player.query_result
+    }
+    unsafe extern "C" fn set(player: *mut u8, value: u32) {
+        assert_eq!(value, 3);
+        let player = &mut *player.cast::<Player>();
+        player.events = player.events * 10 + 2;
+        player.table = player.replacement;
+    }
+    unsafe extern "C" fn finish(player: *mut u8) {
+        let player = &mut *player.cast::<Player>();
+        player.events = player.events * 10 + 3;
+    }
+
+    #[test]
+    fn exact_bytes_normalization_dirty_and_virtual_transitions() {
+        for first in [0, 1, 2, 255] {
+            for second in [0, 1, 2, 255] {
+                for mode in [0, 1, 2, 3, u32::MAX] {
+                    for query_result in [0, 1, u32::MAX] {
+                        let mut context = [0x5au32; 0xb94 / 4];
+                        let bytes = unsafe {
+                            core::slice::from_raw_parts_mut(context.as_mut_ptr().cast::<u8>(), 0xb94)
+                        };
+                        bytes[0x1c] = first;
+                        bytes[0x8e] = second;
+                        bytes[0xb90] = 0xa5;
+                        let mut expected = bytes.to_vec();
+                        let unchanged = first == (mode != 0) as u8
+                            && (first == 0 || second == (mode == 2) as u8);
+                        if !unchanged {
+                            expected[0x1c] = (mode != 0) as u8;
+                            expected[0x8e] = (mode == 2) as u8;
+                            expected[0xb90] = 1;
+                        }
+                        let owner = RtcContextOwner {
+                            reserved: [0; 0xf00], rtc_context: bytes.as_ptr().cast(),
+                        };
+                        let mut table = [0usize; 0x1a8 / 4];
+                        let mut replacement = table;
+                        table[0x1a4 / 4] = query as *const () as usize;
+                        table[0x78 / 4] = set as *const () as usize;
+                        // Only the replacement has a valid final slot.
+                        replacement[0x88 / 4] = finish as *const () as usize;
+                        let mut player = Player {
+                            table: table.as_ptr(), replacement: replacement.as_ptr(),
+                            query_result, events: 0,
+                        };
+                        unsafe {
+                            rtc_context_set_configuration_mode_with(&owner, mode, || {
+                                assert!(!unchanged, "unchanged mode accessed player");
+                                assert_eq!(bytes[0xb90], 1, "dirty before player access");
+                                (&mut player as *mut Player).cast()
+                            });
+                        }
+                        assert_eq!(bytes, expected.as_slice());
+                        assert_eq!(player.events, if unchanged { 0 } else if query_result != 0 { 1 } else { 123 });
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 /// rtc_context_set_configuration_byte — original: `FUN_08067af4` @
 /// 0x08067af4 (44 bytes; next real function begins at 0x08067b20; 4 verified
