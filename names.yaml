@@ -240087,3 +240087,24 @@ functions:
       ExitFrame (including callback/free paths); the tag gate, error exits,
       frame entry, cursor comparison and mismatch result remain intact.
       No physical-device execution.
+
+  - address: 0x080a6af8
+    ghidra: FUN_080a6af8
+    name: current_utc_offset_is_valid
+    size: 12
+    sig: "int32_t current_utc_offset_is_valid(void)"
+    module: time/utc_offset
+    status: ported
+    vars: {FUN_080ab558: current_utc_offset_query}
+    notes: >-
+      Raw words e3a01000 e3a00000 ea001294 establish the exact extent
+      [0x080a6af8,0x080a6b04); the next function starts with PUSH.
+      Two unconditional inbound BL sites at 0x08171aec and 0x081722e0,
+      zero predicated inbound BL sites, zero outgoing BL instructions.
+      Clears both nullable output arguments and tail-branches to the existing
+      current_utc_offset_query at 0x080ab558, preserving its r0 validity
+      result. Ghidra incorrectly inlines the tail worker and declares void;
+      caller 0x08171ae4 branches on the returned zone-valid status.
+      Reuses the ported worker without a new seam or behavioral deviations.
+      Host tests exercise the real calendar builder with zone validity
+      transitions, unrelated status bits, negative offset and active DST.
