@@ -41,7 +41,7 @@ pub static mut TEXT_WIDTH_RECORD_DISPATCH_RESULT: RecordDispatchResult = zero_re
 
 #[cfg(target_arch = "arm")]
 extern "C" {
-    fn retail_text_width_metric_table_resolve(metric_context: *mut u8, table: *mut *mut u8);
+    pub(crate) fn retail_text_width_metric_table_resolve(metric_context: *mut u8, table: *mut *mut u8);
 }
 
 /// Sums the advances of every permissively decoded codepoint before the NUL.

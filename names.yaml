@@ -16105,12 +16105,10 @@ functions:
       The callee resolves metrics via 0x0809e224, decodes a positive signed
       count via 0x0807a0c8, and sums advances via 0x08080f18 with flag bit 3.
       Ghidra's void return is wrong: r0 passes through and the caller at
-      0x08263910 consumes it. No target behavioral deviations; the verified
-      firmware callee remains unported and hosts install a typed seam.
-      Host behavioral fixture covers counted multibyte prefixes, nonpositive
-      signed counts, high flag bytes, negative results, and unchanged state.
-      match.py shows matching field loads, embedded context address, stack
-      arguments and return, with LLVM using BLX to literal 0x0807b1f4.
+      0x08263910 consumes it. Now calls the Rust counted accumulator directly,
+      omitting the unused sixth argument and removing the obsolete host seam.
+      Accumulator integration test exercises the real adapter's flag-byte load.
+      Historical match.py result used BLX to literal 0x0807b1f4 before migration.
 
   - address: 0x0826435c
     ghidra: FUN_0826435c
@@ -242711,3 +242709,35 @@ functions:
       instructions, two BL relocations, same volatile ordering, timeout and
       result mapping. LLVM rebases MMIO to 0x38700008, combines the control
       mask and synthesizes 5000 rather than loading its literal.
+
+  - address: 0x0807b1f4
+    ghidra: FUN_0807b1f4
+    name: counted_text_width_accumulator
+    size: 96
+    sig: "i32 counted_text_width_accumulator(u32 renderer, const u8 *text, i32 count, void *context, u32 flags)"
+    module: util/counted_text_width_accumulator
+    status: ported
+    renames:
+      param_1/r0: unused_renderer
+      param_2/r1: text
+      param_3/r2: count
+      param_4/r3: metric_context
+      param_5: layout_flags
+      local_2c: metric_table
+      iVar3/r5: width
+    notes: >-
+      Raw extent [0x0807b1f4,0x0807b254) is 96 bytes; the next entry pushes
+      r4/r5/r6/lr. Whole-image aligned ARM decoding finds two plain inbound
+      BLs at 0x0826318c and 0x082632ac, zero predicated inbound BLs, and three
+      plain outbound BLs at 0x0807b214/224/234, zero predicated outbound BLs.
+      Resolves metrics even for nonpositive counts; positive signed counts
+      decode exactly that many permissive UTF-8 sequences, including NUL and
+      invalid leads, and sum signed advances with wrapping arithmetic.
+      Masks flags to bit 3. Reuses existing decoder and result dispatcher
+      ports and metric resolver veneer/host seams. Renderer and caller sixth
+      argument are unused. Host tests cover prefixes, multibyte sequences,
+      embedded NUL, invalid leads, signed bounds, overflow and flags.
+      Host suite passed 15386 tests; ARM release build passed. Public-entry
+      smoke observed -33 across embedded NUL and zero for i32::MIN.
+      match.py exit 1: 24 original versus 31 Rust instructions; relocations
+      verify the same three calls, signed entry guard, flag mask and add loop.
