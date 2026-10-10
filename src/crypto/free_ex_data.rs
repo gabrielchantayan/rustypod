@@ -18,7 +18,7 @@
 //!
 //! # Deliberate deviations
 //!
-//! `FUN_08075914` is not ported. Target builds call its verified entry; host
+//! Target builds use the ported ex-data implementation initializer; host
 //! builds model the singleton and its implementation slot with
 //! [`CRYPTO_EX_DATA_OPS`]. The target tail branch is an ordinary returning
 //! call because Rust functions return normally.
@@ -92,12 +92,10 @@ pub unsafe extern "C" fn crypto_free_ex_data(
     #[cfg(target_os = "none")]
     {
         const SINGLETON_OBJECT: *const u32 = 0x08a0_e9e0 as *const u32;
-        const INITIALIZE_ADDRESS: usize = 0x0807_5914;
 
         let mut vtable = unsafe { core::ptr::read_volatile(SINGLETON_OBJECT) };
         if vtable == 0 {
-            let initialize: unsafe extern "C" fn() = unsafe { core::mem::transmute(INITIALIZE_ADDRESS) };
-            unsafe { initialize() };
+            unsafe { super::ex_data_implementation::crypto_ex_data_implementation_ensure() };
             vtable = unsafe { core::ptr::read_volatile(SINGLETON_OBJECT) };
         }
         let free_ex_data_word = unsafe { core::ptr::read_volatile((vtable as usize as *const u32).add(5)) };
