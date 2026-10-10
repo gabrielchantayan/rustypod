@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067614
+    ghidra: FUN_08067614
+    name: rtc_context_set_configuration_b35
+    size: 36
+    sig: "u32 rtc_context_set_configuration_b35(RtcContextOwner *owner, u32 value)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: value
+      r2: context
+      r3: previous
+      FUN_0805e66c: rtc_context_mark_dirty
+    notes: >-
+      Raw words e92d4010 e5902f00 e5d23b35 e1530001 15c21b35 15900f00
+      1bffdc0e e3a00000 e8bd8010 establish the true 36-byte extent
+      [0x08067614,0x08067638); the next real function starts with push.
+      Whole-image A32 decoding finds one inbound plain BL at 0x081a3f24
+      and one inbound BLNE at 0x081a4d78, not two unconditional calls.
+      The body has zero outgoing plain BLs and one outgoing BLNE to
+      canonical rtc_context_mark_dirty at 0x0805e66c. Compare the unsigned
+      byte at nested context +0xb35 with the full u32; on mismatch store
+      the low byte, reload the owner context and mark +0xb90 dirty.
+      Always return zero. Both recovered callers pass one in voice-memo
+      paths, but the field's product meaning remains unrecovered.
+      Deliberate deviation: direct Rust call to the existing dirty marker.
+      Reuse the registered time/rtc module and target-correct owner layout.
+      Host regression exhausts prior byte values with equality, changed
+      bytes, high bits and u32::MAX, preserving surrounding storage and
+      checking all returns. Actual-source executable smoke verifies equal,
+      truncated-equal and changed-byte transitions.
+      Host suite passes 15459 tests; ARM build-std release build passes.
+      match.py prints a structural diff (exit 1): LLVM replaces predicated
+      writes/call with an equality branch and shrink-wraps the stack frame.
+      The full-word comparison, byte store, owner-pointer reload, dirty call
+      and constant-zero return remain intact; R_ARM_CALL relocation verifies
+      rtc_context_mark_dirty as the generated BL target.
   - address: 0x08067678
     ghidra: FUN_08067678
     name: rtc_context_set_configuration_mode
