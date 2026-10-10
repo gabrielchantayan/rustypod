@@ -1,4 +1,5 @@
 //! Low-level hardware drivers (S5L8702 peripherals, MMIO).
+pub mod peripheral_control_bit8_set_inverted;
 pub mod block_engine_submit;
 pub mod usb_endpoint_packet_size;
 pub mod usb_in_endpoint_transfer_rebase;
