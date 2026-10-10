@@ -49532,6 +49532,31 @@ functions:
       Host test covers equal and changed byte values (including 0xff),
       return values, dirty marking, and adjacent-byte preservation.
 
+  # --- RTC context configuration-word setter (time/rtc) ---
+  - address: 0x08067b20
+    ghidra: FUN_08067b20
+    name: rtc_context_set_configuration_word
+    size: 44
+    sig: "u32 rtc_context_set_configuration_word(RtcContextOwner *owner, u32 value)"
+    module: time/rtc
+    vars: {param_1: owner, param_2: value}
+    status: ported
+    notes: >-
+      Raw words e92d4010 e5902f00 e5923b74 e1530001 03a00000 08bd8010
+      e5821b74 e5900f00 ebffdac9 e3a00001 e8bd8010 establish the true
+      44-byte extent; the next real function starts at 0x08067b4c.
+      Whole-image A32 BL decoding finds two inbound plain calls at
+      0x08112f48 and 0x0816f77c, zero predicated calls, and one outgoing
+      plain BL to canonical rtc_context_mark_dirty at 0x0805e66c.
+      Compare the full word at nested context +0xb74; equal values return
+      zero without writes, changed values store the full word, reload the
+      owner context, mark +0xb90 dirty, and return one. The field's product
+      meaning remains unrecovered; its descriptive name avoids guessed units.
+      Deliberate deviation: direct Rust call to the existing dirty marker;
+      the opaque context field is accessed by aligned word index.
+      Host regression covers equality, high-bit and low-bit changes, zero,
+      u32::MAX, dirty-state preservation, and surrounding storage.
+
   # --- RTC context handle (time/rtc) ---
   - address: 0x08056124
     ghidra: FUN_08056124
