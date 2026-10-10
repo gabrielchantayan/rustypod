@@ -16,6 +16,46 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08075e04
+    ghidra: FUN_08075e04
+    name: curve_scan_reflected
+    size: 140
+    sig: "uint32_t curve_scan_reflected(uint32_t *state, int32_t degree, uintptr_t subdivide, int32_t lower, int32_t upper)"
+    module: ui/curve_scan_reflected
+    status: ported
+    vars:
+      param_1/r5: state
+      param_2/r1: degree
+      param_3/r2: subdivide
+      param_4/r3: lower
+      param_5/stack: upper
+      r4: original_control_points
+      r6: pending_start
+    notes: >-
+      Raw A32 establishes [0x08075e04,0x08075e90), 140 bytes, ending
+      with POP before the next independent PUSH. Whole-image word scan
+      verifies two incoming plain BLs at 0x080ec3f8 and 0x080ecf84,
+      zero predicated BLs; one outgoing plain BL at 0x08075e5c to
+      0x080f0424, zero outgoing predicated BLs. Callers supply quadratic
+      degree 2 or cubic degree 3 and subdivision callbacks. Negate Y
+      words 1,3,5 of state word-14 control-point link and word 7 for
+      signed degree > 2; scan with negative upper as lower and negative
+      lower as upper. If byte 0x5a changes nonzero to zero, negate word
+      5 of the current state word-23 span link. Negate the saved first
+      Y again, reloading its current value, not the advanced point link.
+      Ghidra incorrectly declares void; raw epilogue preserves callee r0.
+      Callee 0x080f0424 has no existing names entry or Rust port; its
+      verified ascending curve scan stays at the retail address through
+      a typed seam, with internal host dependency injection. Target-width
+      pointer fields and wrapping negation preserve ABI and INT_MIN.
+      No other algorithm deviations. Host tests cover signed degree
+      boundaries, coordinate extrema, consumed and retained start flags,
+      changed point/span links and error return preservation. Full host
+      suite passes 15405 tests; executable source smoke and ARM release
+      build pass. match.py exit 1 reviewed: 35 stock versus 41 Rust
+      instructions. LLVM uses a frame pointer, groups independent loads,
+      replaces the BL with BLX through a literal 0x080f0424 and uses a
+      branch for span negation; signed gate and return value are preserved.
   - address: 0x08075e90
     ghidra: FUN_08075e90
     name: packed_surface_bounds_clip
