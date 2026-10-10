@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const LINKED_ITEM_INDEX_BUILD: usize = 0x60ac_0000;
     pub const PSH_DIMENSION_DONE: usize = 0x60ab_0000;
     pub const PSH_MASK_TABLE_DONE: usize = 0x60aa_0000;
     pub const PSH_DIMENSION_LAST_OR_APPEND: usize = 0x60a9_0000;
