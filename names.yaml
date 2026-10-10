@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a1f50
+    ghidra: FUN_080a1f50
+    name: ft_glyphslot_done
+    size: 108
+    sig: "void ft_glyphslot_done(FtGlyphSlot *slot)"
+    module: ft/glyph_slot
+    status: ported
+    vars:
+      param_1/r4: slot
+      puVar1/r5: driver
+      uVar2/r6: memory
+    renames:
+      FUN_082cf9e4: ft_glyphslot_free_bitmap
+      FUN_0804c8f4: opaque_record_destroy_and_release
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw aligned A32 words establish [0x080a1f50,0x080a1fbc), 108 bytes;
+      the next function starts with a distinct nine-register push. Three
+      outgoing plain BLs at 0x080a1f7c,0x080a1f9c,0x080a1fb0 and zero
+      predicated BLs; one BLXNE through driver class done_slot at +0x44.
+      Whole-image decoding finds two plain incoming BLs at 0x0804c404 and
+      0x0804d464, no predicated incoming BLs. Callers unlink a glyph slot
+      or unwind slot initialization failure, then separately free the slot.
+      Snapshot driver and allocator, invoke optional done_slot, release
+      bitmap, destroy and clear loader unless module flag 0x200 is set,
+      then release and clear internal. Internal is reloaded after callbacks.
+      Reuses all three existing Rust callees; no new fixed-address seams
+      or target behavioral deviations. Existing opaque loader destructor
+      retains its unported contents-cleanup seam. Host tests cover eight
+      callback/ownership/no-outline combinations, internal replacement,
+      saved allocator and cleanup order; non-null loader contents are not
+      exercised on host. All 15264 host tests and release ARM build pass.
+      Standalone smoke proves owned bitmap then internal release and pointer
+      clearing with no-outline loader preservation, using a test-configured
+      host rlib because ordinary host builds have unrelated missing helpers.
+      match.py shows 27 versus 30 instructions: same three direct calls,
+      optional callback and reload/store order; LLVM replaces word flag test
+      with a byte test and adds frame setup. Structural diff exit 1 reviewed.
   - address: 0x080a2268
     ghidra: FUN_080a2268
     name: usb_endpoint_status_control_mask
