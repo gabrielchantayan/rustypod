@@ -239695,3 +239695,40 @@ functions:
       the two stores instead of the resident initializer tail branch, retaining
       the eight-byte allocation and unchanged return pointer. The archive BL
       operand is unresolved in match.py's disassembly. No physical-device execution.
+
+  - address: 0x080ac424
+    ghidra: FUN_080ac424
+    name: swap_three_u16_be_in_place
+    size: 68
+    sig: "u32 swap_three_u16_be_in_place(u8 *record)"
+    module: util/be_read
+    status: ported
+    renames:
+      param_1/r0: record
+      r4: record
+      uVar1: decoded_halfword
+      FUN_0807439c: read_u16_be
+    notes: >-
+      Raw A32 words establish [0x080ac424,0x080ac468), 68 bytes, ending
+      in pop {r4,pc} at 0x080ac464; the next function starts with push {lr}.
+      Whole-image aligned ARM BL decoding finds two unconditional callers
+      at 0x081c8d04 and 0x081c8d50, no predicated callers, and three
+      unconditional outbound BLs at 0x080ac42c, 0x080ac440, 0x080ac454,
+      all to the already ported read_u16_be at 0x0807439c. No predicated
+      outbound BLs. Decode byte-packed big-endian halfwords at offsets
+      0, 2, 4 and immediately store each low byte then high byte in place.
+      FUN_081c8abc copies 12-byte records before calling this conversion;
+      the trailing six bytes are untouched. Preserve the final decoded
+      halfword in r0 as a u32 return despite Ghidra's void declaration;
+      both callers ignore it. No deliberate behavioral deviations.
+      Existing util/be_read module needs no new registration or seam.
+      Host regression exhausts all u16 values in each field at alignments
+      0..3, checks the return and all surrounding bytes. Full host tests
+      and ARM build-std release build passed. Actual-source host executable
+      verified a mixed-field 12-byte record, unchanged tail, and 0xfffe
+      return. match.py exits 1 with a structural diff: 17 original versus
+      18 Rust instructions, with LLVM's frame-pointer prologue and different
+      shift/store scheduling. All three calls and six byte stores remain;
+      archive relocations confirm all three R_ARM_CALL targets read_u16_be,
+      not the misleading self-target displayed for unresolved operands.
+      No physical-device execution.

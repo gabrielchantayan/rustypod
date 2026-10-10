@@ -94,6 +94,36 @@ pub unsafe extern "C" fn wire_read_u16_be(source: *const u8) -> u32 {
     low | (high << 8)
 }
 
+/// `swap_three_u16_be_in_place` — original: `FUN_080ac424` @ 0x080ac424.
+///
+/// True size: 68 bytes, through `pop {r4,pc}` at 0x080ac464; the next
+/// function starts at 0x080ac468. Whole-image ARM BL decoding verifies two
+/// plain callers (0x081c8d04, 0x081c8d50), zero predicated callers, and three
+/// outbound plain BLs to [`read_u16_be`] (zero predicated outbound BLs).
+/// Decode the halfwords at offsets 0, 2, and 4 in order, writing each back
+/// low byte first. The callers copy 12-byte records before converting just
+/// these six bytes. Return the last decoded halfword, preserving the raw
+/// function's r0 even though Ghidra declares void and both callers ignore it.
+/// No deliberate behavioral deviations.
+///
+/// # Safety
+/// `record` must point to six readable and writable bytes. No alignment is
+/// required; bytes beyond the first six are neither read nor written.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn swap_three_u16_be_in_place(record: *mut u8) -> u32 {
+    let first = read_u16_be(record);
+    *record = first as u8;
+    *record.add(1) = (first >> 8) as u8;
+    let second = read_u16_be(record.add(2));
+    *record.add(2) = second as u8;
+    *record.add(3) = (second >> 8) as u8;
+    let third = read_u16_be(record.add(4));
+    *record.add(4) = third as u8;
+    *record.add(5) = (third >> 8) as u8;
+    third
+}
+
 /// read_u32_be — original: `FUN_080743b8` @ 0x080743b8 (24 bytes;
 /// 41 `bl` call sites, all unpredicated, counted by decoding every B/BL
 /// word in osos.dec).
@@ -144,6 +174,30 @@ mod tests {
     use super::*;
     use std::vec;
     use std::vec::Vec;
+
+    #[test]
+    fn swaps_three_halfwords_at_every_alignment_and_preserves_record_tail() {
+        for value in 0..=u16::MAX {
+            for offset in 0..4 {
+                let mut bytes = [0xa5u8; 16];
+                let fields = [value, value.rotate_left(5), !value];
+                for (index, field) in fields.iter().enumerate() {
+                    bytes[offset + index * 2..offset + index * 2 + 2]
+                        .copy_from_slice(&field.to_be_bytes());
+                }
+                let mut expected = bytes;
+                for (index, field) in fields.iter().enumerate() {
+                    expected[offset + index * 2..offset + index * 2 + 2]
+                        .copy_from_slice(&field.to_le_bytes());
+                }
+                let result = unsafe {
+                    swap_three_u16_be_in_place(bytes.as_mut_ptr().add(offset))
+                };
+                assert_eq!(result, fields[2] as u32);
+                assert_eq!(bytes, expected, "value={value:#06x}, offset={offset}");
+            }
+        }
+    }
 
     #[test]
     fn wire_read_u16_be_all_values_and_alignments() {
