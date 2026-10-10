@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08098704
+    ghidra: FUN_08098704
+    name: bdf_list_ensure_capacity
+    size: 136
+    sig: "i32 bdf_list_ensure_capacity(BdfList *list, i32 minimum)"
+    module: ft/bdf_list
+    status: ported
+    vars:
+      param_1/r4: list
+      param_2/r1: minimum
+      iVar1/r1: capacity
+      iVar3/r5: grown_capacity
+      local_10: error
+    renames:
+      FUN_082cfc3c: ft_mem_realloc
+    notes: >-
+      Raw A32 extent [0x08098704,0x0809878c) is 136 bytes with no
+      literals; next function opens with push. Two inbound plain BLs
+      at 0x0808fd8c and 0x0808fe44, one outbound plain BL at
+      0x08098770 to existing ft_mem_realloc; zero predicated BLs.
+      Grow BDF token-pointer storage once by capacity + (capacity >> 1)
+      + 4, capped at 0x1fffffff on signed wrap/excess. Full capacity
+      returns 0x40; store allocator result even on failure and commit
+      capacity only on success. Count survives; minimum only gates growth.
+      Native host header pointers via repr(C), four-byte token words;
+      return r0 only, since the original restores r1. Host suite passes
+      15291 tests; real API smoke and ARM release build pass. match.py
+      exit 1 reviewed: 34 instructions each, equivalent signed gates,
+      saturation, allocator call and conditional capacity store.
   - address: 0x0809a2a4
     ghidra: FUN_0809a2a4
     name: cff_subfont_done
