@@ -243774,3 +243774,42 @@ functions:
       fixed formatting replaces the general formatter BL with decimal loops
       and division helpers. High-byte/middle-byte/low-halfword extraction,
       dot writes, final NUL and character-count return remain observable.
+  # --- intrusive linked-list lookup or tail recycling ---
+  - address: 0x0806d8f8
+    ghidra: FUN_0806d8f8
+    name: linked_list_find_or_recycle
+    size: 60
+    sig: "i32 linked_list_find_or_recycle(u32 key, LinkedListHeader *list, u8 **output)"
+    module: util/linked_list_find_and_promote
+    status: ported
+    renames:
+      param_1/r0/r5: key
+      param_2/r1/r4: list
+      param_3/r2/r6: output
+      list_plus_0x10: back
+      entry_plus_0x0c: key
+      entry_plus_0x14: payload_start
+      FUN_08053850: linked_list_find_and_promote
+      FUN_08058b60: move_entry_to_front
+    notes: >-
+      Raw osos.dec gives 15 ARM words from push at 0x0806d8f8 through pop
+      at 0x0806d930. The next independent function starts with push at
+      0x0806d934, confirming the true 60-byte extent. Independent whole-image
+      aligned A32 BL decoding finds two inbound plain calls at 0x081bfe38
+      and 0x081bff9c, zero predicated inbound calls, two outbound plain calls
+      at 0x0806d908 to linked_list_find_and_promote and 0x0806d928 to
+      move_entry_to_front, and zero predicated outbound calls. A lookup hit
+      returns zero with its payload and promotion supplied by the existing
+      lookup port. A miss reads list back at +0x10, writes entry +0x14 to
+      output, stores key at entry +0x0c, promotes that entry and returns -123.
+      The miss path requires a nonempty list; even key 0xffffffff takes the
+      recycle path. Deliberate deviations: use established Rust callees and
+      repr(C) named pointer fields for native-width host fixtures, retaining
+      exact ARM offsets; no allocation or extra guards. Host tests cover
+      middle-entry hits, tail recycling, link repair, preserved fields and
+      a single-entry sentinel request. Full host suite and ARM release build
+      pass. Standalone executable smoke observes hit=0, miss=-123 and a
+      subsequent hit=0 after retagging. match.py exits 1 with 15 stock versus
+      18 Rust instructions: frame setup and separate return blocks differ,
+      while both calls, the conditional hit exit, tail/payload/key offsets,
+      store ordering and -123 miss return are retained.
