@@ -240498,3 +240498,32 @@ functions:
       word assembly and positive/negative compact branches remain intact.
       LLVM adds a frame and folds compact-token base constants; no calls
       or builtin substitutions appear.
+
+  - address: 0x0809fbc8
+    ghidra: FUN_0809fbc8
+    name: cstr_expand_three_tokens
+    size: 172
+    sig: "char *cstr_expand_three_tokens(const char *source, char *dst, uint32_t capacity)"
+    module: libc/cstr_expand_three_tokens
+    status: ported
+    vars: {param_1: source, param_2: dst, param_3: capacity, puVar2: expansion_table, iVar3: reserve, pcVar5: output, uVar4: token_index}
+    renames: {FUN_08392478: strlen, FUN_08030ff4: strcpy, DAT_0809fc70: expansion_table_address}
+    notes: >-
+      Raw words establish 168 instruction bytes at 0x0809fbc8..0x0809fc70,
+      followed by the table-address literal; the next real PUSH prologue is
+      0x0809fc74, giving a 172-byte span. Two plain outgoing BLs and zero
+      predicated BLs. Runtime table at 0x089cb224 contains three string pointers:
+      each string's first byte is the token, the rest is its replacement.
+      Table contents are not inferred from the raw bytes at that address.
+      The XML key/string formatter at 0x08123834 passes a 512-byte buffer.
+      Reserve strlen(table[0]), compare output against dst+capacity-reserve
+      unsigned, copy first matching replacement or one ordinary byte, then
+      terminate and return dst. No per-replacement bound check or NULL guard.
+      Host tests cover alignments, exact reserved boundaries, high bytes,
+      empty replacements, and duplicate-token first-match precedence.
+      Host-only table injection uses native-width pointers; ARM reads the
+      exact stock table with four-byte pointer spacing. Volatile loads preserve
+      the source read before the limit check and the output terminator scan.
+      ARM match review: LLVM unrolls the three-token search and inlines strcpy
+      including its aligned-word and byte paths; strlen remains a BL target.
+      No algorithmic deviations; mnemonic identity is not expected.

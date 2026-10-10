@@ -20,6 +20,7 @@ pub mod space_padded_string_copy;
 pub mod cstr_compare_normalized;
 pub mod cstr_append_bounded;
 pub mod cstr_find_from;
+pub mod cstr_expand_three_tokens;
 pub mod bzero;
 pub mod zero_unwritten_suffix;
 pub mod halfword_load;
