@@ -73,10 +73,12 @@ pub unsafe extern "C" fn record_dispatch_result(
 extern crate std;
 
 #[cfg(test)]
+pub(crate) static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     static mut CALL: (*mut u8, u32, u32, u32, u32) = (core::ptr::null_mut(), 0, 0, 0, 0);
     static mut DISPATCH_RESULT: u32 = 0;
     static mut RECORD_VALUE: i16 = 0;
