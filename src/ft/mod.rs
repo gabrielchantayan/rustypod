@@ -49,6 +49,7 @@ pub mod pshinter;
 pub mod psh_glyph_load_points;
 pub mod pfr_glyph_close_contour;
 pub mod ps_is_whitespace;
+pub mod t42_is_whitespace;
 pub mod ps_skip_literal_string;
 pub mod metrics;
 pub mod smooth_renderer;
