@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod signed_word_insertion_sort;
+pub use signed_word_insertion_sort::*;
 pub mod signed_set_insert_backward;
 pub use signed_set_insert_backward::*;
 pub mod low_byte_highest_set_bit;
