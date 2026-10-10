@@ -105,6 +105,119 @@ pub unsafe extern "C" fn linked_list_find_and_promote(
     -123
 }
 
+/// `linked_list_find_or_recycle` — original: `FUN_0806d8f8` @ 0x0806d8f8.
+/// True extent: 60 bytes, ending before the independent push at 0x0806d934.
+/// Two inbound plain BLs (0x081bfe38, 0x081bff9c), no predicated BLs;
+/// two outbound plain BLs to lookup and promotion, no predicated BLs.
+///
+/// Return zero and the matching payload on a lookup hit. On a miss, return
+/// the tail's payload, replace its key, promote it to the front, and return
+/// -123. The miss path requires a nonempty list; no NULL guards are added.
+/// Deliberate deviations: calls the existing Rust ports instead of retail
+/// addresses; named repr(C) fields preserve ARM offsets with wider host pointers.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.linked_list_find_or_recycle")]
+#[inline(never)]
+pub unsafe extern "C" fn linked_list_find_or_recycle(
+    key: u32,
+    list: *mut LinkedListHeader,
+    output: *mut *mut u8,
+) -> i32 {
+    if unsafe { linked_list_find_and_promote(key, list, output) } == 0 {
+        return 0;
+    }
+    let entry = unsafe { (*list).back };
+    unsafe {
+        *output = (*entry).payload_start.as_mut_ptr();
+        (*entry).key = key;
+        move_entry_to_front(list, entry);
+    }
+    -123
+}
+
+#[cfg(test)]
+mod recycle_tests {
+    use super::*;
+
+    fn entry(key: u32) -> LinkedListEntry {
+        LinkedListEntry {
+            next: ptr::null_mut(), previous: ptr::null_mut(),
+            state: 0x11, key, payload_state: 0x22, payload_start: [],
+        }
+    }
+
+    #[test]
+    fn hit_promotes_without_retagging_or_recycling_tail() {
+        let mut entries = [entry(7), entry(8), entry(9)];
+        let a = entries.as_mut_ptr();
+        unsafe {
+            (*a).next = a.add(1);
+            (*a.add(1)).previous = a;
+            (*a.add(1)).next = a.add(2);
+            (*a.add(2)).previous = a.add(1);
+            let mut list = LinkedListHeader {
+                state_0: 0, state_4: 0, state_8: 0, front: a, back: a.add(2),
+            };
+            let mut output = ptr::null_mut();
+            assert_eq!(linked_list_find_or_recycle(8, &mut list, &mut output), 0);
+            assert_eq!(output, (*a.add(1)).payload_start.as_mut_ptr());
+            assert_eq!(list.front, a.add(1));
+            assert_eq!(list.back, a.add(2));
+            assert!((*a.add(1)).previous.is_null());
+            assert_eq!((*a.add(1)).next, a);
+            assert_eq!((*a).previous, a.add(1));
+            assert_eq!((*a).next, a.add(2));
+            assert_eq!((*a.add(2)).previous, a);
+            assert_eq!(entries.map(|e| e.key), [7, 8, 9]);
+        }
+    }
+
+    #[test]
+    fn miss_retags_tail_and_preserves_other_entry_fields() {
+        let mut entries = [entry(7), entry(8), entry(9)];
+        let a = entries.as_mut_ptr();
+        unsafe {
+            (*a).next = a.add(1);
+            (*a.add(1)).previous = a;
+            (*a.add(1)).next = a.add(2);
+            (*a.add(2)).previous = a.add(1);
+            let mut list = LinkedListHeader {
+                state_0: 1, state_4: 2, state_8: 3, front: a, back: a.add(2),
+            };
+            let mut output = ptr::null_mut();
+            assert_eq!(linked_list_find_or_recycle(42, &mut list, &mut output), -123);
+            assert_eq!(output, (*a.add(2)).payload_start.as_mut_ptr());
+            assert_eq!(list.front, a.add(2));
+            assert_eq!(list.back, a.add(1));
+            assert!((*a.add(2)).previous.is_null());
+            assert_eq!((*a.add(2)).next, a);
+            assert_eq!((*a).previous, a.add(2));
+            assert_eq!((*a).next, a.add(1));
+            assert_eq!((*a.add(1)).previous, a);
+            assert!((*a.add(1)).next.is_null());
+            assert_eq!((list.state_0, list.state_4, list.state_8), (1, 2, 3));
+            assert_eq!(((*a.add(2)).state, (*a.add(2)).payload_state), (0x11, 0x22));
+            assert_eq!(entries.map(|e| e.key), [7, 8, 42]);
+        }
+    }
+
+    #[test]
+    fn sentinel_key_recycles_single_entry_even_when_key_already_matches() {
+        let mut node = entry(u32::MAX);
+        let mut list = LinkedListHeader {
+            state_0: 0, state_4: 0, state_8: 0, front: &mut node, back: &mut node,
+        };
+        let mut output = ptr::null_mut();
+        assert_eq!(unsafe { linked_list_find_or_recycle(u32::MAX, &mut list, &mut output) }, -123);
+        assert_eq!(output, node.payload_start.as_mut_ptr());
+        assert_eq!(list.front, ptr::addr_of_mut!(node));
+        assert_eq!(list.back, ptr::addr_of_mut!(node));
+        assert!(node.next.is_null());
+        assert!(node.previous.is_null());
+        assert_eq!(node.key, u32::MAX);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
