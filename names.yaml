@@ -239312,3 +239312,40 @@ functions:
       confirmed always_succeeds body instead reports two original versus
       four Rust instructions (exit 1): LLVM adds frame push/setup/pop while
       retaining mov r0,#1 and return. No physical-device execution.
+
+  - address: 0x080b4df4
+    ghidra: FUN_080b4df4
+    name: scan_be_word_range
+    size: 108
+    sig: "u32 scan_be_word_range(const u8 *data, i32 remaining, u32 *skipped, u32 lower, u32 upper)"
+    module: util/scan_be_word_range
+    status: ported
+    renames:
+      param_1: data
+      param_2: remaining
+      param_3: skipped
+      param_4: lower
+      param_5: upper
+      uVar1: word
+    notes: >-
+      Raw A32 words establish the exact extent 0x080b4df4..0x080b4e60
+      (exclusive); the next function has an independent push prologue.
+      Whole-image aligned BL decoding finds two incoming unconditional calls
+      at 0x0808ea54 and 0x081b0568, zero incoming predicated calls, and zero
+      outgoing plain or predicated BLs. Initializes skipped to zero and scans
+      overlapping four-byte big-endian words for an unsigned inclusive range.
+      The signed wrapping remaining-minus-four gate is strictly positive:
+      the final four-byte window is excluded, while i32::MIN through
+      i32::MIN+3 still enter the scan. Returns zero at the first match and
+      one on exhaustion, updating skipped after every rejected window.
+      The wrapper at 0x0808ea4c supplies identical bounds; the other caller
+      uses the result and skipped count to advance a video input buffer.
+      No callee seams. Retains the existing registered Rust implementation;
+      deliberate deviation is from_be_bytes instead of shift/OR assembly,
+      with no behavioral deviation. Host tests cover unsigned inclusive and
+      reversed bounds, unaligned overlapping windows, excluded tails, short
+      and signed lengths, signed subtraction wrap, and output/input aliasing.
+      Host suite and ARM build-std release build passed. Native actual-source
+      smoke passed 22692 reference comparisons. match.py exits 1 with 27 stock
+      versus 34 Rust instructions: the same bytewise scan and strict length
+      gate, larger frame, and byte-swap assembly. No physical-device execution.
