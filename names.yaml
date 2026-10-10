@@ -242961,3 +242961,30 @@ functions:
       both source reads before the table loads. Two nibble loads, two
       byte stores, one BLX, zero-result failure, and wrapping LSL remain;
       emitted literal remains 0x08977f8b.
+  - address: 0x080763e4
+    ghidra: FUN_080763e4
+    name: storage_firmware_entry
+    size: 116
+    sig: "i32 storage_firmware_entry(u32 entry_type, u32 identifier, u32 *sector, u32 *sector_count)"
+    module: drivers/storage_firmware_entry
+    status: ported
+    renames:
+      param_1/r5: entry_type
+      param_2/r6: identifier
+      param_3/r7: sector
+      param_4/r8: sector_count
+      r4: device
+      local_20: partition_start
+      auStack_24: partition_length
+      auStack_1c: entry_flags
+      FUN_081f1b2c: storage_device_get
+      FUN_0814decc: locked_callback_predicate
+    notes: >-
+      Raw A32 extent is 0x080763e4..0x08076458, 116 bytes with no
+      literals; next function starts with PUSH at 0x08076458. Independent
+      aligned raw-word scan finds two plain inbound BLs at 0x08064ad0 and
+      0x08064bf4, zero predicated. Body has four plain outbound BLs, zero
+      predicated. Gets device 0; NULL returns 2. Ignores locked predicate
+      result, obtains firmware partition through unported 0x080b3fdc,
+      and resolves type/identifier through unported 0x08079a58 on success.
+      Errors pass through; host requires explicit operations, no fallback.

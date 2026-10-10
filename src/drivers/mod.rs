@@ -118,6 +118,7 @@ pub mod storage_device_operations;
 pub mod status_gate_ready;
 pub mod storage_buffer_extent;
 pub mod storage_device_get;
+pub mod storage_firmware_entry;
 pub mod storage_backend_prepare;
 pub mod storage_backend_sector_size;
 pub mod storage_backend_validate_status_2;
