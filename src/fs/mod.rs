@@ -186,3 +186,5 @@ pub mod path_drive_index;
 pub mod drive_ready;
 /// Volume-prefixed music-library path construction @ 0x0806b4a0.
 pub mod music_path_resolve;
+/// Bounded file-prefix reader @ 0x080962f0.
+pub mod file_read_prefix;
