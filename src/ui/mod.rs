@@ -181,6 +181,7 @@ pub mod plst_task_message;
 pub mod plst_counted_string;
 pub mod plst_file_element_create;
 pub mod plst_apply_counted_string;
+pub mod item_store_counted_string;
 pub mod plst_element_load_item;
 pub mod plst_element_teardown;
 pub mod empty_destructor_0806715c;

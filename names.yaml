@@ -16,6 +16,40 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067c70
+    ghidra: FUN_08067c70
+    name: item_store_counted_string
+    size: 44
+    sig: "int item_store_counted_string(CountedStringItem *item, const uint16_t *counted)"
+    module: ui/item_store_counted_string
+    status: ported
+    renames:
+      param_1/r0/r4: item
+      param_2/r1: counted
+      r5: store_status
+      item+0x0: owner
+      item+0x28: string_id
+      FUN_080be81c: string_pool_store_counted
+      FUN_080444d4: retail item string-flag refresh (unported seam)
+    notes: >-
+      Raw A32 establishes [0x08067c70,0x08067c9c), 44 bytes, no literals;
+      the next function starts with strb r1,[r0,#0xe3c]. Whole-image decoding
+      finds two incoming plain BLs at 0x080462b8 and 0x08067c50, no predicated
+      incoming BLs, two outgoing plain BLs and no predicated outgoing BLs.
+      Store counted UTF-16 in owner+0xc0 using item+0x28 as the replacement
+      id slot; call 0x080444d4 unconditionally and preserve store status.
+      Raw refresh reads that id through 0x080d6e50, halves byte length, scans
+      with argument 0x1d through 0x08059c68, and replaces flag bit 3 at +0x15.
+      Ghidra's extra refresh arguments are incoming scratch registers used
+      only as stack output storage, not meaningful inputs. Reuse the ported
+      string_pool_store_counted; retain the refresh retail address through a
+      volatile seam. repr(C) widens the owner pointer on hosts only.
+      Host tests cover replacement and NULL clearing across success and error
+      statuses with post-store refresh and return preservation. ARM machine-code
+      smoke confirms +0xc0/+0x28 argument formation, store-before-refresh order,
+      and status preservation for 0, -50, INT_MIN and INT_MAX. match.py reports
+      15 versus 11 instructions: frame-pointer setup and the volatile indirect
+      refresh call/literal replace the direct BL; the core sequence is retained.
   - address: 0x08067cac
     ghidra: FUN_08067cac
     name: rtc_context_set_configuration_b88
