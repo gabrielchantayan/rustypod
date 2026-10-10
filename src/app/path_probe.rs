@@ -816,6 +816,40 @@ pub unsafe extern "C" fn path_facade_slot_60(
     status
 }
 
+/// path_facade_slot_80_from_cstr — original: `FUN_08090bc0` @ 0x08090bc0.
+///
+/// Raw A32 establishes [0x08090bc0,0x08090bf8), 56 bytes: push
+/// {r2-r6,lr} through pop {r2-r6,pc}, immediately before the next
+/// function's push. Whole-image word decoding finds one incoming plain BL
+/// at 0x08047484 and one predicated BL at 0x080474bc. The body has three
+/// plain BLs (0x08279284, 0x08090bf8, 0x082792fc), zero predicated BLs.
+///
+/// Constructs a path object from the C string, invokes the guarded facade
+/// slot +0x80 with the full-width value and base hint, destroys the original
+/// stack storage, and returns the operation status unchanged.
+/// Deliberate deviations: typed storage replaces the r2/r3 spill slots;
+/// incoming r3 is dead. Calls existing ports directly without new seams.
+/// The virtual operation remains unidentified; no filesystem semantics
+/// beyond the verified slot dispatch are assumed.
+///
+/// # Safety
+/// `path` must satisfy the path constructor's C-string contract, and the
+/// configured facade and guard boundaries must satisfy `path_facade_slot_80`.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_80_from_cstr(
+    path: *const u8,
+    value: u32,
+    base_hint: u32,
+) -> u32 {
+    let mut storage = MaybeUninit::<StringObject>::uninit();
+    let storage = storage.as_mut_ptr();
+    let path_object = path_object_construct(storage, path);
+    let status = path_facade_slot_80(path_object, value, base_hint);
+    string_object_destroy_veneer(storage);
+    status
+}
+
 /// path_facade_slot_80 — original: `FUN_08090bf8` @ 0x08090bf8.
 ///
 /// Raw A32 extent is 80 bytes, ending with pop at 0x08090c44 before the
@@ -2145,6 +2179,65 @@ pub(crate) mod tests {
                     EVENT_STRING_RELEASE, EVENT_STRING_RELEASE,
                 ]);
                 assert_eq!(CTOR_HINT, 0xffff_ff80);
+            }
+        }
+    }
+
+    unsafe extern "C" fn cstr_slot_80_query(
+        _facade: *mut FacadeObject, path: *mut StringObject, value: u32,
+    ) -> u32 {
+        assert_eq!((*CTOR_THIS).words[3], 1, "guard is live");
+        assert_eq!(value, 0x8000_0100, "value must not be narrowed");
+        (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).push(pair_payload(path));
+        // Mutation must reach the temporary's eventual release, not a second
+        // reconstruction from the input C string.
+        if !(*path).payload.is_null() {
+            *(*path).payload = b'X';
+        }
+        (*CTOR_THIS).words[3] = 2;
+        QUERY_RESULT
+    }
+
+    #[test]
+    fn cstr_slot_80_releases_mutated_temporary_on_errors_and_allocation_failure() {
+        use crate::cxx::string_object::{
+            StringObjectAssignCstrOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        };
+        let _path_lock = take_lock();
+        let _assign_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap();
+        let _release_lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        let _restore = unsafe { SeamGuard::new() };
+        let _release_restore = unsafe { StringObjectOpsGuard::new() };
+        struct AssignRestore(StringObjectAssignCstrOps);
+        impl Drop for AssignRestore {
+            fn drop(&mut self) {
+                unsafe { core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write(self.0); }
+            }
+        }
+        unsafe {
+            let _assign_restore = AssignRestore(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CSTR_OPS).read());
+            STRING_OBJECT_ASSIGN_CSTR_OPS = StringObjectAssignCstrOps {
+                allocate_payload: pair_allocate, clear_payload: pair_clear,
+            };
+            STRING_OBJECT_OPS.release_payload = pair_release;
+            for (path, fail, status, before, after) in [
+                (b"path\0".as_ptr(), false, 0, &b"path"[..], &b"Xath"[..]),
+                (b"path\0".as_ptr(), false, 0x8000_0000, &b"path"[..], &b"Xath"[..]),
+                (b"\0".as_ptr(), false, u32::MAX, &b""[..], &b""[..]),
+                (core::ptr::null(), false, 7, &b""[..], &b""[..]),
+                (b"path\0".as_ptr(), true, 0x15, &b""[..], &b""[..]),
+            ] {
+                install_recording();
+                PAIR_FAIL_ALLOCATION = fail;
+                (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).clear();
+                PATH_PROBE_GUARD_CTOR = slot_60_scope_construct;
+                PATH_PROBE_GUARD_DTOR = slot_80_scope_destroy;
+                MOCK_VTABLE.slots[0x80 / 4] = cstr_slot_80_query as usize;
+                QUERY_RESULT = status;
+                assert_eq!(path_facade_slot_80_from_cstr(path, 0x8000_0100, 0xdead_beef), status);
+                assert_eq!(&*core::ptr::addr_of!(PAIR_OBSERVED),
+                    &[before.to_vec(), after.to_vec()]);
+                assert_eq!(CTOR_HINT, 0xdead_beef);
             }
         }
     }
