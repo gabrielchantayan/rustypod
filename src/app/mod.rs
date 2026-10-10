@@ -526,6 +526,7 @@ pub mod component_gate_rearm_continue;
 pub mod settings_value_scale;
 pub mod range_value_to_u8;
 pub mod buffer_refill_request;
+pub mod database_read_context_destroy;
 pub mod buffer_transfer_initialize;
 pub mod buffer_transfer_submit;
 pub mod buffer_transfer_submit_byte;
