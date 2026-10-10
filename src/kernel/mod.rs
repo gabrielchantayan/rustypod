@@ -34,6 +34,7 @@ pub mod mutex_handoff;
 pub mod posix_mutex;
 pub mod object4_slot_delete;
 pub mod object3_allocate;
+pub mod object4_allocate;
 pub mod once_callback;
 pub mod resource_op;
 pub mod ready_wait;
