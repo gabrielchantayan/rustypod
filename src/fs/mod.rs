@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Selector-one path marker and mode initialization @ 0x080741d0.
+pub mod path_selector_initialize;
 /// Constant storage memory-capacity gate @ 0x080b6bec.
 pub mod storage_memory_capacity_enabled;
 /// Volume-dependent default allocation-size selection @ 0x080d528c.

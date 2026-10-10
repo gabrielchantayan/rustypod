@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080741d0
+    ghidra: FUN_080741d0
+    name: path_selector_initialize
+    size: 32
+    sig: "uintptr_t path_selector_initialize(uint32_t selector, uint8_t *mode, StringObject *path)"
+    module: fs/path_selector_initialize
+    status: ported
+    vars:
+      param_1: selector
+      param_2: mode
+      param_3: path
+      DAT_080741ec: path_marker
+      FUN_0827639c: string_object_assign_cstr
+    notes: >-
+      Raw words establish 28 code bytes plus the four-byte literal before
+      the next real function at 0x080741f0, for a true extent of 32 bytes.
+      Two incoming plain BLs at 0x08074218 and 0x082752e4; no predicated
+      incoming BLs and no outgoing BLs. Selector 1 writes mode byte 4 and
+      tail-branches to the already ported string_object_assign_cstr_returning_this
+      at 0x08279300, with path and source 0x083ecb3c. Raw source bytes are
+      01 00, not an empty string. Other selectors return unchanged without
+      touching either output. Ghidra skips the returning wrapper and reports
+      its underlying assignment callee instead. Rust uses static marker bytes
+      and a native-width mixed integer/pointer return for host fidelity.
+      Host tests cover inactive selectors, NULL inactive outputs, exact byte
+      writes, successful marker assignment, and allocation failure. Structural
+      match retains the early return, mode write, assignment, and path return;
+      LLVM uses an ordinary BL with a saved path rather than a conditional
+      tail branch. No undecrypted-region dependency.
+
   - address: 0x08074f4c
     ghidra: FUN_08074f4c
     name: ft_mem_strdup
