@@ -926,30 +926,36 @@ pub unsafe extern "C" fn baseline_clock_sample(interface: u32) -> i64 {
 }
 
 
-/// Calls the stock sampled-clock getter, which remains in retailOS.
+/// scoped_scaled_capacity_sample — original: `FUN_0809b60c` @ 0x0809b60c.
 ///
-/// This is deliberately a boundary rather than a port of 0x0809b60c. Host
-/// tests replace the one function pointer below; ARM builds call its fixed
-/// firmware load address. The original constructs a temporary stack object
-/// around interface `interface` (0x08206e40), reads its current sample via
-/// 0x08296f18, destroys the object (0x08206e6c), and returns the sample
-/// zero-extended to 64 bits in r0:r1.
-unsafe extern "C" fn firmware_clock_sample(interface: u32) -> i64 {
-    #[cfg(target_os = "none")]
-    {
-        let clock_sample: ClockSample = core::mem::transmute(0x0809_b60cusize);
-        clock_sample(interface)
-    }
-
-    #[cfg(not(target_os = "none"))]
-    {
-        let _ = interface;
-        0
-    }
+/// Raw ARM verifies 56 bytes, ending at the next prologue at 0x0809b644,
+/// three plain BL instructions and zero predicated BLs. Two incoming plain
+/// BLs, zero predicated. Constructs a 16-byte interface guard using the
+/// caller's hint, queries its resolved owner with owner_scaled_capacity_query,
+/// destroys the guard, and zero-extends the saved u32 result into r0:r1.
+/// The clock consumer uses this as a sample; no concrete clock unit is assumed.
+///
+/// Deliberate deviations: reuse the existing replaceable guard seams; the
+/// host owner/vtable layout uses native pointers, while the guard retains
+/// four firmware words. Unused incoming r1-r3 spills are not reproduced.
+///
+/// # Safety
+/// The hint must resolve to an owner accepted by owner_scaled_capacity_query,
+/// and the guard constructor/destructor must establish and release its scope.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn scoped_scaled_capacity_sample(interface: u32) -> i64 {
+    let mut storage = core::mem::MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = baseline_guard_construct_fn()(storage.as_mut_ptr(), interface);
+    let owner = (*guard).words[1] as usize
+        as *mut crate::app::facade_registry_walk::RegistryNode;
+    let sample = crate::app::owner_scaled_capacity_query::owner_scaled_capacity_query(owner);
+    baseline_guard_destroy_fn()(guard);
+    i64::from(sample)
 }
 
-/// Narrow boundary for the unported 0x0809b60c dependency.
-static mut CLOCK_SAMPLE: ClockSample = firmware_clock_sample;
+/// Replaceable call target for the ported 0x0809b60c getter.
+static mut CLOCK_SAMPLE: ClockSample = scoped_scaled_capacity_sample;
 
 #[inline(always)]
 unsafe fn clock_sample_fn() -> ClockSample {
@@ -1779,6 +1785,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn scoped_capacity_sample_zero_extends_virtual_result_before_teardown() {
+        use crate::app::facade_registry_walk::{RegistryFacade, RegistryNode};
+        let _lock = crate::app::path_probe::tests::PATH_PROBE_TEST_LOCK
+            .lock().unwrap_or_else(|p| p.into_inner());
+        let slab = crate::testing::try_map_u32_slab(
+            crate::testing::hints::SCOPED_SCALED_CAPACITY_SAMPLE, 4096,
+        ).expect("32-bit owner fixture");
+        install_recording_baseline_clock_sample_port();
+        let _reset = BaselineClockSamplePortReset;
+        unsafe extern "C" fn query(facade: *mut RegistryFacade) -> u32 {
+            record_baseline_port_event(BASELINE_EVENT_ACCESSOR);
+            (*facade).opaque_04
+        }
+        unsafe extern "C" fn destroy(guard: *mut InterfaceGuard) -> *mut InterfaceGuard {
+            // Teardown may invalidate the owner: the return must already be saved.
+            let owner = (*guard).words[1] as usize as *mut RegistryNode;
+            (*(*owner).facade).opaque_04 = 0;
+            recording_baseline_guard_destroy(guard)
+        }
+        let table = [0usize, 0, 0, query as *const () as usize];
+        let mut facade = RegistryFacade {
+            vtable: table.as_ptr() as usize, opaque_04: 0,
+            kind_08: 1, pad_09: [0; 3],
+        };
+        unsafe {
+            let owner = slab.cast::<RegistryNode>();
+            owner.write(RegistryNode {
+                opaque_00: [0; 2], facade: &mut facade, opaque_0c: [0; 3],
+                opaque_18: 0, state_19: 0, pad_1a: [0; 2],
+            });
+            BASELINE_PORT_GUARD_INTERFACE = owner as usize as u32;
+            core::ptr::addr_of_mut!(PATH_PROBE_GUARD_DTOR).write(destroy);
+            for value in [0, 1, 0x8000_0000, u32::MAX] {
+                BASELINE_PORT_EVENT_COUNT = 0;
+                facade.opaque_04 = value;
+                assert_eq!(scoped_scaled_capacity_sample(7), i64::from(value));
+                assert_eq!(BASELINE_PORT_EVENTS, [1, 2, 3]);
+                assert_eq!(facade.opaque_04, 0);
+            }
+        }
+    }
+
 
     unsafe extern "C" fn recording_baseline_clock_sample(interface: u32) -> i64 {
         BASELINE_SAMPLE_CALLS += 1;
@@ -1825,7 +1874,7 @@ mod tests {
     impl Drop for ClockSampleReset {
         fn drop(&mut self) {
             unsafe {
-                core::ptr::addr_of_mut!(CLOCK_SAMPLE).write(firmware_clock_sample);
+                core::ptr::addr_of_mut!(CLOCK_SAMPLE).write(scoped_scaled_capacity_sample);
             }
         }
     }
