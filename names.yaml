@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b0d7c
+    ghidra: FUN_080b0d7c
+    name: hint_axis_done
+    size: 88
+    sig: "void hint_axis_done(HintAxis *axis, FtMemory *memory)"
+    module: ft/hint_axis
+    status: ported
+    vars:
+      param_1/r4: axis
+      param_2/r6: memory
+      r5: zero
+    notes: >-
+      Raw A32 establishes [0x080b0d7c,0x080b0dd4), followed by a fresh
+      push prologue. Three outgoing plain BLs at 0x080b0d90, 0x080b0dac,
+      and 0x080b0dbc call the existing ft_mem_free at 0x082cfae8;
+      zero predicated BLs. The reported two-call count is incorrect.
+      Caller 0x082e7914 cleans two ten-word per-axis outline hint records.
+      Producer 0x080b0dd4 allocates 28-byte hints at word 2, a split
+      index allocation at word 3 (word 4 aliases its second half), and
+      a 16-byte-element work buffer at word 6. Release work, indices,
+      then hints, clearing the associated fields after each callback.
+      Only the first eight words are cleared; the trailing two survive.
+      Native host pointer width is the sole representation deviation.
+      Host tests cover all eight partial-allocation combinations,
+      callback-visible state, trailing preservation, and repeated cleanup.
+      Full host suite: 15213 passed. ARM release build passed. Standalone
+      smoke released three real allocations and safely repeated cleanup.
+      match.py: 23 Rust instructions versus 22 stock, structural diff
+      exit 1; three BLs remain, with frame-pointer setup and store reordering.
   - address: 0x080b19dc
     ghidra: FUN_080b19dc
     name: ps_skip_literal_string
