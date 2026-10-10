@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Conditional unique record-ID collection @ 0x0806df48.
+pub mod record_id_collect;
 /// Selector-one path marker and mode initialization @ 0x080741d0.
 pub mod path_selector_initialize;
 /// Constant storage memory-capacity gate @ 0x080b6bec.

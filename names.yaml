@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806df48
+    ghidra: FUN_0806df48
+    name: record_id_collect
+    size: 132
+    sig: "void record_id_collect(const u32 *record, u32 *ids)"
+    module: fs/record_id_collect
+    status: ported
+    vars:
+      param_1/r0: record
+      param_2/r1: ids
+      r2: id
+      r3: blocker_or_tag_delta_or_count
+      r0: tag_or_index
+      r12: always_zero
+      lr: existing_id
+    notes: >-
+      Raw A32 extent [0x0806df48,0x0806dfcc), 132 bytes, ends in POP PC;
+      the next function starts PUSH {r4-r8,lr}. Whole-image word decoding
+      finds two incoming plain BLs at 0x0804339c and 0x080e7374, no
+      predicated incoming BLs, and no outgoing plain or predicated BLs.
+      Ghidra's indirect-call warnings are misdecoded stack-pop returns.
+      Append the record's +0xb0 word uniquely to a count-prefixed u32 list
+      when ID >=2, +0xb4 is zero, and the +0x80 halfword is zero or
+      0x191..=0x195. The first caller walks records linked through +4;
+      the second collects an ID before checking an .aa filename against
+      the same list. Concrete record type and tag meanings remain unknown.
+      No callee seams, allocation, capacity check, or null-record guard.
+      Omit dead r12 condition and original stack frame; volatile aligned
+      accesses retain order and the count reload after writing the ID.
+      Host fixtures use target-width words, not native pointer offsets.
+      Host suite and ARM release build pass; standalone smoke verifies
+      append, repeated duplicate suppression, tag rejection, and an intact
+      trailing sentinel. match.py exits 1 with 31 Rust versus 33 stock
+      instructions: LLVM combines the ID guard as unsigned ID <2, compares
+      the wrapping tag delta against 5, retains the duplicate-search loop
+      and append/count-reload stores, and changes frame/register allocation.
+      No outgoing calls or builtin substitutions appear in the Rust body.
   - address: 0x0806f258
     ghidra: FUN_0806f258
     name: namespace_provider_entry_value
