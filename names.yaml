@@ -22719,9 +22719,34 @@ functions:
       signed UTC and DST minute offsets, applies both signed input minute
       adjustments, commits a 20-byte calendar record with mask 0x180,
       conditionally notifies the callback table's +0x0c slot, then converts
-      and applies the result with mask 0x3f. FUN_08056800, FUN_080985f4, and
-      the callback have no names.yaml identities; the device port dispatches
-      to their verified retail addresses/table, while host tests inject them.
+      and applies the result. Calendar setters now call the ported
+      calendar_update_fields and calendar_apply_datetime outside tests;
+      the optional callback uses verified device RAM. Tests inject operations.
+  - address: 0x080985f4
+    ghidra: FUN_080985f4
+    name: calendar_apply_datetime
+    size: 116
+    sig: "u32 calendar_apply_datetime(const u8 *datetime)"
+    module: time/calendar_apply_datetime
+    status: ported
+    renames:
+      param_1/r4: datetime
+      auStack_1c/sp+4: calendar_update_record
+      DAT_08098664: calendar_notification_table
+    notes: >-
+      Raw osos.dec verifies 0x080985f4..0x08098668, including the literal
+      at 0x08098664; 0x08098668 starts the next independent function.
+      Two inbound plain BLs at 0x080dc488 and 0x08199480, no predicated BLs.
+      Two outbound plain BLs to 0x08037db8 and 0x08056800, no predicated
+      BLs, and one indirect BLXNE at 0x08098654. Zero a 20-byte record,
+      copy input bytes 0..4 to +2..+6 and the aligned halfword +6 to +8,
+      apply all seven fields with mask 0x7f, optionally invoke callback
+      table 0x089ca300 slot +8, and return zero. Caller r1 is ignored.
+      Deviations: Rust stack zeroing replaces the ported IRAM memzero
+      veneer; volatile byte reads prevent LLVM memcpy substitution.
+      calendar_update_fields is called directly. Host notification
+      slot substitutes for fixed RAM. Tests cover zero/max fields, ignored
+      padding, preserved initializer fields, and notification after commit.
   - address: 0x0811190c
     ghidra: FUN_0811190c
     name: selection_state_apply_index_and_dispatch

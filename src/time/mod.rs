@@ -1,6 +1,7 @@
 //! Time library (mktime/localtime/gmtime).
 pub mod civil;
 pub mod calendar_schedule;
+pub mod calendar_apply_datetime;
 pub mod calendar_update_fields;
 pub mod calendar_week_index;
 pub mod clock_state;
