@@ -45,6 +45,7 @@ pub mod attribute_list_upsert;
 pub mod cached_context_ensure;
 pub mod tagged_reference_retain;
 pub mod store_lookup;
+pub mod store_key_index;
 pub mod opaque_context_cleanup;
 pub mod collection_context_destroy;
 pub mod obj_bsearch;
