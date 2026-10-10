@@ -15,6 +15,12 @@ use super::tdat_class_check::ui_element_is_tdat_class;
 /// rather than stock firmware. Aligned u32 fields preserve target offsets on
 /// hosts; no allocation, node-class validation, or cycle detection is added.
 ///
+/// Verification: independent whole-image A32 decoding confirms both incoming
+/// BLs and the sole outgoing BL, with no predicated BLs. Host suite, ARM
+/// release build, and executable single-node smoke pass. match.py reports
+/// 12 stock versus 14 Rust instructions: frame setup and loop predication
+/// differ, while the class gate, +0x28 head, +0x20 clear, and +4 link remain.
+///
 /// # Safety
 /// A non-NULL element must be aligned and readable through +7. A 'tdat'
 /// element must additionally be readable through +0x2b. Its list must be
