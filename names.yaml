@@ -239976,3 +239976,42 @@ functions:
       +0x34 is R_ARM_CALL psh_dimension_append_stem_record; the displayed
       self-call is unresolved archive relocation, not recursion.
       No physical-device execution.
+  - address: 0x080a8ee0
+    ghidra: FUN_080a8ee0
+    name: path_facade_slot_60
+    size: 68
+    sig: "u32 path_facade_slot_60(StringObject *path_object, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path_object
+      param_2/r1: base_hint
+      piVar1: facade
+      uVar2: status
+      uStack_18: guard
+      FUN_08206e40: path_probe_guard_construct
+      FUN_0818a0bc: facade_for_selector
+      FUN_08206e6c: path_probe_guard_destroy
+    notes: >-
+      Raw ARM establishes 68 bytes from 0x080a8ee0 through pop at
+      0x080a8f20; the next distinct function starts at 0x080a8f24.
+      Whole-image A32 decoding finds two plain inbound BLs at 0x080a8ec8
+      and 0x081ef284, zero predicated inbound BLs. The body has three
+      unconditional direct BLs and one register BLX. Constructs a scoped
+      interface guard with base_hint, fetches facade selector 1, invokes
+      slot +0x60 with the saved path object, destroys the guard, and
+      returns the operation status. Ghidra's r2/r3 arguments are spill
+      artifacts overwritten by construction. The virtual operation's
+      identity remains unproven; the structural name is deliberate.
+      Reuses existing typed guard/facade seams and device defaults, with
+      native-width host vtable slots. Host tests cover mutation under the
+      scope and cleanup for zero, 0x15, and full-width error statuses,
+      preserving the result across teardown. All 15230 host tests passed;
+      ARM release build passed. Isolated standalone execution of the actual
+      function source confirmed mutation while held, error 0x15 preservation,
+      and scope release. A full-crate host example was unavailable because
+      the crate exports only staticlib and its non-test host build has six
+      unrelated unresolved symbols. match.py shows 17 versus 26 instructions:
+      guard frame, +0x60 dispatch, result save, cleanup, and return are retained;
+      volatile existing seams use BLX instead of direct BL, plus frame-pointer
+      setup. No physical-device execution.
