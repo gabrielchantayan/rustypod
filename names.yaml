@@ -243394,3 +243394,47 @@ functions:
       in sqlite error_message's no-error-text fixture, whose final u32
       pErr slot is read as a native-width pointer beyond the fixture end.
 
+  - address: 0x080704f8
+    ghidra: FUN_080704f8
+    name: crypto_collection_context_destroy
+    size: 124
+    sig: "void crypto_collection_context_destroy(usize *context)"
+    module: crypto/collection_context_destroy
+    status: ported
+    vars: {param_1/r0: context, uVar4/r7: entries, iVar3/r4: index, uVar1/r6: entry}
+    renames:
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+      FUN_08369618: namespace_provider_destroy
+      FUN_083697ac: namespace_provider_each_then_destroy
+      FUN_080439e0: crypto_free_ex_data
+      FUN_08043994: traced_free
+    notes: >-
+      Raw osos.dec extent is 124 bytes, 0x080704f8..0x08070574: 120
+      instruction bytes plus callback literal at 0x08070570. Next real
+      function begins with push at 0x08070574. Whole-image A32 decoding
+      finds one plain inbound BL at 0x080af360 and one BLNE at 0x082d4860;
+      the body has seven plain BL instructions, zero predicated BLs,
+      and a tail B to traced_free. NULL returns. Capture collection +0x08,
+      reload signed count every iteration, fetch entry, call its verified
+      prepare service at 0x0806f228 (ignore result), then destroy service
+      at 0x0806f1f8. Destroy that collection, drain collection +0x04 using
+      callback literal 0x080e0a40, release class-4 ex-data at +0x3c, and
+      free the context. The callback is not a function entry at its naive
+      image address: applying the documented +0xaed8 image/runtime skew
+      gives 0x080eb918, whose raw 56-byte body dispatches tags 1 and 2
+      to 0x08070c04 and 0x0806f174, then tail-frees the tagged entry.
+      No guessed callback identity or replacement implementation. Existing
+      ported callees are reused; only unported stock services get host
+      hooks. Host slots are pointer-sized, including first-collection
+      indexed loads, to match existing collection-destroy layout; target
+      uses the existing namespace_provider_at accessor and four-byte slots.
+      Final tail call is an ordinary returning Rust call. Tests cover NULL,
+      absent/zero/negative counts, count mutation during prepare, ignored
+      prepare failure, skipped null second-collection entries, ordered
+      releases, and unchanged context fields. Full host suite: 15421 passed.
+      ARM release build passes. Standalone host execution verifies class-4
+      ex-data mutation precedes owner release and is retained. match.py
+      exits 1 with expected frame/register changes and BLX stock-address
+      calls; signed-count loop, +0x04/+0x08/+0x3c fields, class 4, and final
+      release structure remain intact.
