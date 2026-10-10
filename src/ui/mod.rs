@@ -5,6 +5,8 @@ pub use object_activity_history::*;
 pub mod remove_task;
 pub mod packed_surface_span_prepare;
 pub use packed_surface_span_prepare::*;
+pub mod packed_surface_bounds_clip;
+pub use packed_surface_bounds_clip::*;
 pub mod target_size_within_limit;
 pub mod tick_input_view;
 pub mod calendar_reset_elements;
