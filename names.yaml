@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808799c
+    ghidra: FUN_0808799c
+    name: bdf_list_done
+    size: 52
+    sig: void bdf_list_done(BdfList *list)
+    module: ft/bdf_list
+    status: ported
+    vars:
+      param_1: list
+      r4: saved_list
+      r0: memory_then_zero
+      r1: tokens_then_zero
+    renames:
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw A32 extent [0x0808799c,0x080879d0) is 52 bytes; POP PC
+      precedes the next distinct PUSH. One outgoing plain BL at 0x080879b4
+      targets existing ft_mem_free. Two incoming plain BLs at 0x08082284
+      and 0x080d37f8; no incoming or outgoing predicated BLs. The latter
+      caller feeds this same record to token splitter 0x0808fc94 and
+      existing BdfList capacity growth 0x08098704. Null memory preserves
+      all fields; otherwise free tokens and clear the complete header after
+      callback return. Native host pointers and omission of the redundant
+      tokens zero store are deliberate deviations. Host edge tests and full
+      suite pass; ARM build-std release passes. Standalone source smoke frees
+      heap tokens, clears fields, and repeats destruction safely. match.py
+      exit 1 reviewed: 13 versus 15 instructions; same allocator BL and
+      +0/+4/+8/+12 stores, different frame and separate STRs instead of STM.
   - address: 0x08088aac
     ghidra: FUN_08088aac
     name: usb_frame_number
