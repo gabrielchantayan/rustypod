@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08084a14
+    ghidra: FUN_08084a14
+    name: x509_attribute_first_value
+    size: 144
+    sig: "const u32 *x509_attribute_first_value(const u32 *attributes, i32 nid)"
+    module: crypto/obj_dat
+    status: ported
+    vars: {param_1/r7: attributes, param_2/r1: nid, iVar1/r6: object, iVar5/r4: index, puVar2/r5: attribute}
+    notes: >-
+      Raw A32 establishes 0x08084a14..0x08084aa4; the next function starts
+      with mov r3,r0. Full-image decoding finds two inbound plain BL sites
+      at 0x0805fd14 and 0x0806044c, zero predicated BL callers, five outbound
+      plain BL instructions, and zero predicated outbound BLs. Resolve the
+      NID with obj_nid2obj, scan attributes using namespace_provider_count
+      and namespace_provider_at, and compare OIDs with obj_cmp. The first
+      equal OID returns null for a nonzero single discriminator or zero
+      value count; otherwise tail-dispatch element zero. Null value stacks
+      return count -1 and reach the null-safe accessor. Host layouts use
+      native X509_ATTRIBUTE and ASN1_OBJECT pointer fields and the existing
+      native comparator; ARM retains offsets +0/+4/+8 and the raw obj_cmp
+      seam. match.py exits 1: LLVM splits the initial loop gate and adds a
+      frame pointer, preserving signed gates, callee calls, first-match
+      short circuit, and final tail branch. Host tests cover OID identity,
+      duplicate precedence, single/empty/null values and signed counts.
   - address: 0x08086024
     ghidra: FUN_08086024
     name: kernel_object4_allocate

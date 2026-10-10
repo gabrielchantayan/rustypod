@@ -721,6 +721,59 @@ pub unsafe extern "C" fn obj_nid2obj(nid: i32) -> *mut Asn1Object {
     crate::kernel::diag_ring_record::diag_ring_record(8, 0x67, 0x65, 0, 0);
     core::ptr::null_mut()
 }
+/// An X509_ATTRIBUTE's object, single-value discriminator, and value union.
+/// Native pointers keep host fixtures valid; ARM fields remain at +0, +4, +8.
+#[repr(C)]
+pub struct X509Attribute {
+    pub object: *const Asn1Object,
+    pub single: i32,
+    pub values: *const u32,
+}
+
+/// x509_attribute_first_value — `FUN_08084a14` @ 0x08084a14, 144 bytes.
+///
+/// Raw A32 establishes the extent 0x08084a14..0x08084aa4, where the next
+/// function begins. Two inbound plain BL sites (0x0805fd14, 0x0806044c),
+/// five outbound plain BL instructions, and zero predicated BLs.
+/// Resolve the NID before checking the attribute stack, then scan with a
+/// freshly read signed count. The first equal OID wins: single-valued or
+/// empty attributes return null; otherwise return value-stack element zero.
+/// A null value stack has count -1, so still reaches the null-safe accessor.
+///
+/// Deviations: the final tail branch is a returning Rust call. Host builds
+/// use native X509Attribute/ASN1_OBJECT fields and the existing native OID
+/// comparator; ARM uses the ported raw-word obj_cmp seam. Provider stacks
+/// retain the existing accessor's pointer-at-byte-4 host representation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn x509_attribute_first_value(
+    attributes: *const u32,
+    nid: i32,
+) -> *const u32 {
+    use crate::cxx::object_flags::{namespace_provider_at, namespace_provider_count};
+
+    let object = obj_nid2obj(nid);
+    if object.is_null() || attributes.is_null() {
+        return core::ptr::null();
+    }
+    let mut index = 0i32;
+    while namespace_provider_count(attributes) > index {
+        let attribute = namespace_provider_at(attributes, index as u32).cast::<X509Attribute>();
+        #[cfg(target_os = "none")]
+        let order = crate::crypto::obj_cmp::obj_cmp((*attribute).object.cast(), object.cast());
+        #[cfg(not(target_os = "none"))]
+        let order = obj_cmp((*attribute).object, object);
+        if order == 0 {
+            if (*attribute).single != 0 || namespace_provider_count((*attribute).values) == 0 {
+                return core::ptr::null();
+            }
+            return namespace_provider_at((*attribute).values, 0);
+        }
+        index = index.wrapping_add(1);
+    }
+    core::ptr::null()
+}
+
 /// obj_nid2ln — original: `FUN_0805ee68` @ 0x0805ee68 (176 bytes: 168
 /// bytes of code plus literal-pool words @ 0x0805ef10 and @ 0x0805ef14;
 /// Ghidra reports 168 and drops the pool; next function starts at
@@ -874,6 +927,63 @@ mod tests {
         let guard = LHASH_TEST_LOCK.lock();
         unsafe { HOST_NID_OBJS = objects.as_mut_ptr() };
         guard
+    }
+
+    #[test]
+    fn attribute_lookup_preserves_first_match_and_signed_stack_gates() {
+        use crate::cxx::object_flags::namespace_provider_count;
+
+        // The provider accessor stores a native table pointer at byte four.
+        unsafe fn stack(storage: &mut [usize; 2], count: i32, table: *const *const u32) -> *const u32 {
+            let words = storage.as_mut_ptr().cast::<u32>();
+            words.write(count as u32);
+            words.add(1).cast::<*const *const u32>().write_unaligned(table);
+            words
+        }
+
+        let mut objects = [object(0, OID_A), object(1, OID_B)];
+        let guard = with_nid_objects(&mut objects);
+        let mut duplicate = object(99, OID_B);
+        let values = [11u32, 22u32];
+        let value_table = [values.as_ptr(), unsafe { values.as_ptr().add(1) }];
+        let mut value_storage = [0usize; 2];
+        let mut attribute_storage = [0usize; 2];
+        unsafe {
+            let value_stack = stack(&mut value_storage, 2, value_table.as_ptr());
+            let miss = X509Attribute { object: &objects[0], single: 0, values: value_stack };
+            let mut first = X509Attribute { object: &duplicate, single: 0, values: value_stack };
+            let later = X509Attribute { object: &objects[1], single: 0, values: value_stack };
+            let table = [
+                (&miss as *const X509Attribute).cast::<u32>(),
+                (&first as *const X509Attribute).cast::<u32>(),
+                (&later as *const X509Attribute).cast::<u32>(),
+            ];
+            let attributes = stack(&mut attribute_storage, 3, table.as_ptr());
+            assert_eq!(x509_attribute_first_value(attributes, 1), values.as_ptr());
+            // Matching uses DER identity, not NID or object-pointer identity.
+            duplicate.length = 0;
+            assert_eq!(x509_attribute_first_value(attributes, 1), values.as_ptr());
+            duplicate.length = 1;
+            first.single = -1;
+            assert!(x509_attribute_first_value(attributes, 1).is_null());
+            first.single = 0;
+            value_storage.as_mut_ptr().cast::<i32>().write(0);
+            assert!(x509_attribute_first_value(attributes, 1).is_null());
+            first.values = core::ptr::null();
+            assert!(x509_attribute_first_value(attributes, 1).is_null());
+            first.values = value_stack;
+            value_storage.as_mut_ptr().cast::<i32>().write(-1);
+            assert_eq!(namespace_provider_count(value_stack), -1);
+            assert_eq!(x509_attribute_first_value(attributes, 1), values.as_ptr());
+            attribute_storage.as_mut_ptr().cast::<i32>().write(1);
+            assert!(x509_attribute_first_value(attributes, 1).is_null());
+            for count in [0, -1, i32::MIN] {
+                attribute_storage.as_mut_ptr().cast::<i32>().write(count);
+                assert!(x509_attribute_first_value(attributes, 1).is_null());
+            }
+            assert!(x509_attribute_first_value(core::ptr::null(), 1).is_null());
+        }
+        clear(guard);
     }
 
 
