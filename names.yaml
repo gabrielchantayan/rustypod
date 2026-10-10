@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b5a44
+    ghidra: FUN_080b5a44
+    name: outline_direction
+    size: 164
+    sig: "int32_t outline_direction(int32_t dx, int32_t dy)"
+    module: ft/outline_direction
+    status: ported
+    vars: {param_1/r0: dx, param_2/r1: dy, r2: direction}
+    notes: >-
+      Raw A32 establishes [0x080b5a44,0x080b5ae8), ending in pop
+      {r4,pc}; the next independent entry returns zero with mov/bx.
+      Zero outgoing plain or predicated BLs. Whole-image aligned word
+      decoding finds two incoming plain BLs at 0x080bf4bc and 0x080bf4e8,
+      no predicated incoming BLs. Caller 0x080bf20c constructs outline
+      point links and classifies incoming/outgoing signed coordinate
+      differences, comparing opposite codes and refining oblique edges
+      with angles. Strict 12:1 dominance returns signed horizontal 1
+      or vertical 2, otherwise 4; equality and zero are oblique.
+      Preserve wrapping negation/scaling, including i32 extremes.
+      Deliberate deviation: shared quadrant comparisons instead of
+      duplicated branches; no behavioral deviations or callee seams.
+      Host edge tests and full host suite pass; ARM release build passes.
+      Raw-instruction interpreter versus compiled Rust smoke passes
+      76305 coordinate pairs. match.py exit-1 structural diff reviewed:
   - address: 0x080bd694
     ghidra: FUN_080bd694
     name: database_read_context_destroy
