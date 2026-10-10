@@ -239175,3 +239175,45 @@ functions:
       LLVM adds frame setup and an explicit NULL branch, preserving the
       global load, callback load at +0x28, indirect BX tail dispatch and
       0x11 fallback. The export resolves distinctly in the ARM archive.
+
+  - address: 0x080b8300
+    ghidra: FUN_080b8300
+    name: thread_context_release
+    size: 116
+    sig: "void thread_context_release(u32 *context)"
+    module: kernel/thread_context_release
+    status: ported
+    renames:
+      param_1/r4: context
+      context+0x188: references
+      context+0x200: flags
+      context+0x208: owned_buffer
+      context+0x228: class3_slot
+      context+0x22c: class4_slot
+    notes: >-
+      Raw osos.dec establishes 116 bytes at 0x080b8300..0x080b8373,
+      followed by an independent push at 0x080b8374. Three plain outbound
+      BLs call free (0x0802edc8), kernel_object4_slot_delete (0x0809c79c),
+      and kernel_slot_create (0x080a3cf0); zero predicated outbound BLs.
+      A final plain B tail-calls free. Whole-image aligned decoding finds
+      two plain inbound BLs (0x080cdf08, 0x082e820c), zero predicated.
+      Writes CPSR control 0x93, decrements +0x188 with wrapping arithmetic,
+      then writes 0x13 unconditionally. Only a zero result cleans up.
+      Unless flags bit 3 is set, frees and clears +0x208. Runs both existing
+      slot ports at +0x22c and +0x228, ignoring statuses; clears +0x18c and
+      +0 before freeing context. Ghidra incorrectly expands the final free.
+      Deliberate deviations: direct Rust calls replace retail calls and
+      tail branch; host omits privileged CPSR writes and adapts the existing
+      native-usize class-3 slot through a copied u32 selector. ARM preserves
+      the original field address. Host edge tests exercise underflow,
+      final and nonfinal counts, owned and borrowed buffers, NULL buffers,
+      cleanup ordering, and ignored errors from the real zero-slot callees.
+      All 15193 host tests passed. ARM build-std release build passed.
+      Standalone actual-source host smoke (test cfg because unrelated host
+      non-test modules have unresolved functions) observed 0 -> 0xffffffff,
+      2 -> 1, and 0xffffffff -> 0xfffffffe with other fields unchanged.
+      match.py exit 1 reports 29 original versus 42 Rust instructions:
+      preserves CPSR writes around decrement, zero gate, ownership gate,
+      ordered slot calls, ordered clearing stores, and final free dispatch.
+      Extra instructions come from LLVM framing and existing free's volatile
+      heap dispatch. No device execution; host cannot verify IRQ atomicity.
