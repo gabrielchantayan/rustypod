@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080776b0
+    ghidra: FUN_080776b0
+    name: signed_word_insertion_sort
+    size: 76
+    sig: "void signed_word_insertion_sort(uint32_t count, int32_t *words)"
+    module: util/signed_word_insertion_sort
+    status: ported
+    vars:
+      param_1/r0: count
+      param_2/r1: words
+      r3: index
+      r2: cursor
+      r4: current_word_address
+      lr: previous_word
+      r12: current_word
+    notes: >-
+      Raw A32 verifies [0x080776b0,0x080776fc), 76 bytes, ending in
+      POP {r4,pc}; next real function compares object fields at +4.
+      Whole-image word scan finds two incoming plain BLs at 0x080db4a0
+      and 0x080db4ac, zero predicated BLs. Zero outgoing plain or
+      predicated BLs; no callee seams. Signed ascending insertion sort
+      swaps adjacent words backwards, including equals, until current
+      exceeds previous or cursor reaches zero. Outer count comparison is
+      unsigned. Counts zero and one perform no pointer access. Verified
+      caller sorts two coordinate arrays before selecting medians;
+      additional Ghidra caller edges lack raw incoming BL evidence.
+      No deliberate algorithm or ABI deviations. Host tests cover all
+      arrays of length zero through six over signed extrema, -1, 0, 1,
+      boundary preservation, null pointers for zero/one, and longer sorted,
+      reverse and duplicate runs. Standalone smoke exercises the real entry.
+      ARM release build passes. match.py exit 1 reviewed: 19 stock versus
+      25 Rust instructions; LLVM retains the current value in a register,
+      adds an early count gate and frame pointer, and reverses store order
+      for ordinary memory. Signed strict-greater break, equal-word swaps,
+      backward traversal and unsigned count semantics remain intact.
   - address: 0x08078258
     ghidra: FUN_08078258
     name: ipod_serial_nid_ensure
