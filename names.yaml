@@ -16,6 +16,29 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809c7ec
+    ghidra: FUN_0809c7ec
+    name: payload_u16_be_store
+    size: 56
+    sig: "i32 payload_u16_be_store(u8 *const *handle, u32 value)"
+    module: util/payload_u16_be_store
+    status: ported
+    vars: {param_1/r0: handle, param_2/r1: value, r4: status, r2: swapped_low_byte}
+    renames: {FUN_080eda28: store_u16_le_last_byte}
+    notes: >-
+      Raw A32 words establish [0x0809c7ec,0x0809c824), 56 bytes;
+      next function opens with PUSH at 0x0809c824. Whole-image aligned
+      BL decoding finds one plain incoming BL at 0x0805a564 and one
+      predicated BLNE at 0x0805a13c. Body has one plain outgoing BL
+      at 0x0809c818 to canonical store_u16_le_last_byte, no predicated BLs.
+      NULL handle returns -50 without loading; otherwise dereference its
+      first pointer and store value's low halfword big-endian at payload+8,
+      returning zero. No payload NULL check. Callers use MemH payloads;
+      the precise field identity remains neutral. Reuses the existing
+      byte-store port without a seam. Typed host pointer widens deliberately.
+      Host tests exhaust low halfwords at all four byte alignments with
+      high-word noise and guards. Host suite, standalone unaligned/NULL
+      smoke and ARM release build pass. match.py exit 1: 14 versus 16
   - address: 0x0809ea24
     ghidra: FUN_0809ea24
     name: peripheral_bank_pair_set
