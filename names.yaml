@@ -16,6 +16,28 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807f310
+    ghidra: FUN_0807f310
+    name: packet_ring_next_index
+    size: 16
+    sig: "u32 packet_ring_next_index(u32 index)"
+    module: app/packet_ring_next_index
+    status: ported
+    vars: {param_1/r0: index_then_next}
+    notes: >-
+      Raw A32 extent [0x0807f310,0x0807f320) contains ADD, CMP,
+      MOVEQ and BX LR; the next function starts with PUSH. Complete
+      aligned firmware scan verifies two incoming plain BLs at 0x080cb7f0
+      and 0x080cc4c4, zero predicated incoming BLs and zero outgoing BLs.
+      Callers advance consumer +0x840 and producer +0x844 indices for
+      four packet slots of stride 0x206. Increment modulo 2^32 and reset
+      only result four to zero, not a general modulo-four operation.
+      No callees, seams or behavioral deviations. Host tests cover the
+      ring cycle, out-of-range inputs and 32-bit overflow; executable
+      source smoke verifies nine boundary inputs. Full host suite and
+      ARM release build pass. match.py exit 1 reviewed: four original
+      versus six Rust instructions; LLVM adds a frame and uses SUBS
+      plus MOVNE to select the same zero-or-increment result.
   - address: 0x0807f320
     ghidra: FUN_0807f320
     name: indexed_record_insert
