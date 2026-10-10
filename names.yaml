@@ -1025,6 +1025,40 @@ functions:
       load, multiplies by 396 instead of 99 then LSL 2, and retains the
       selected object load and STR one at +0x804. Symbol is present;
       no device execution claimed.
+  - address: 0x0809e4d0
+    ghidra: FUN_0809e4d0
+    name: pmu_feedback_status_refresh
+    size: 128
+    sig: "void pmu_feedback_status_refresh(u32 unused, u32 incoming_r1, u32 incoming_r2, u32 incoming_r3)"
+    module: drivers/pmu_feedback_status_refresh
+    status: ported
+    renames:
+      local_10: board_status_bit
+      local_14: register_0x4b_bit2
+      local_18: notification_snapshot
+      DAT_0809e544: feedback_status_enable
+      DAT_0809e548: feedback_status_active
+      DAT_0809e54c: event_callback_block
+      FUN_082bc9ec: feedback_level_mode_set
+    notes: >-
+      Raw extent is 128 bytes: 116 instruction bytes through return at
+      0x0809e540, then three literals; next prologue is at 0x0809e550.
+      Three plain outbound BLs, zero predicated BLs, one BLXNE callback;
+      inbound one plain BL and one BLEQ. Queries board PMU status then
+      register 0x4b bit 2, publishes their OR conjoined with enable word
+      0x089ca98c at 0x089ca980, applies inverse feedback mode, reloads
+      state, and notifies event 15 through callback at 0x089ca5e4.
+      Retains both retail PMU wrappers in one ARM assembly island to
+      preserve scratch-register inheritance on failed I2C reads; uses
+      existing feedback_level_mode_set Rust port. Host tests cover the
+      truth table, short-circuit enable access, reentrant mode application,
+      and callback snapshot isolation. Full host suite and ARM release
+      build pass. match.py exits 1: LLVM emits a larger frame, BLX literal
+      calls for the retail wrappers, branch-based boolean normalization,
+      and an R_ARM_CALL to feedback_level_mode_set; publication, inverse
+      mode, state reload, and event 15 callback remain in order. A standalone
+      host smoke exercises active publication, mode-side mutation, snapshot
+      isolation, and disabled short-circuit. No device execution claimed.
   - address: 0x080c8890
     ghidra: FUN_080c8890
     name: store_pmu_board_version_status_bit

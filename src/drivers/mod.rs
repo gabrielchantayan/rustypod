@@ -94,6 +94,7 @@ pub mod piezo;
 pub mod notify_wait_enter;
 pub mod pwrcon;
 pub mod pmu;
+pub mod pmu_feedback_status_refresh;
 pub mod pmu_timed_mode_status;
 pub mod pmu_status_class;
 pub mod pmu_operation_retry;
