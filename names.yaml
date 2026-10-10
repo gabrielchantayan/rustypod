@@ -239802,3 +239802,38 @@ functions:
       Its apparent self-branch is an unresolved archive relocation;
       objdump -dr verifies R_ARM_JUMP24 mailbox_slot_post at +0x20.
       No physical-device execution.
+
+  - address: 0x080aa408
+    ghidra: FUN_080aa408
+    name: refcounted_buffer_owner_destroy
+    size: 72
+    sig: "void refcounted_buffer_owner_destroy(u32 *owner)"
+    module: heap/refcounted_buffer_owner_destroy
+    status: ported
+    vars: {param_1/r0: owner, r4: saved_owner}
+    renames:
+      FUN_0805a14c: memh_handle_release
+      FUN_080df290: memh_free_if_nonnull
+      FUN_0805d070: free_tag4
+    notes: >-
+      Raw A32 establishes 72 bytes through the tail B at 0x080aa44c;
+      the next function starts at 0x080aa450 with push {r4,lr}.
+      Whole-image aligned B/BL decoding finds one plain BL at 0x08044688,
+      one BLNE at 0x08044718, and one BEQ tail entry at 0x08044914.
+      Body contains five plain BLs, zero predicated BLs, and one tail B.
+      NULL returns immediately. Releases MemH slots pointed to by words
+      +0x18/+0x1c, frees nullable buffers +0x20/+0x24/+0x28, clears word
+      zero, then frees the owner with tag 4. Constructor 0x08044628 allocates
+      0x44 bytes and sets the reference count at +4; 0x08044900 decrements
+      it and tail-enters destruction at zero. Wider object identity remains
+      unknown. Ghidra incorrectly expands the heap-free tail chain.
+      All callees reuse existing ported seams. Deliberate deviation:
+      Rust does not guarantee final tail dispatch; target pointers remain
+      u32 words on hosts. Host tests cover NULL owner/slots/buffers, every
+      buffer mask, shared handle final release, surviving and saturated
+      counts, first-word clearing, and preservation of remaining words.
+      Host suite passed 15222 tests; ARM release build passed. match.py
+      reports 21 versus 18 instructions with equivalent ordered releases,
+      null guard, first-word clear, and tail free; LLVM adds frame-pointer
+      setup and different register saves. Archive call operands retain
+      unresolved relocations. No physical-device execution.
