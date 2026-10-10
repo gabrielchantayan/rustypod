@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080677e4
+    ghidra: FUN_080677e4
+    name: rtc_context_set_configuration_b3d
+    size: 36
+    sig: "void rtc_context_set_configuration_b3d(RtcContextOwner *owner, i32 value)"
+    module: time/rtc
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_2/r1: value
+      r2: context
+      r3: previous_signed_configuration_byte
+      owner+0xf00: rtc_context
+      context+0xb3d: configuration_b3d
+      context+0xb90: dirty
+    notes: >-
+      Raw words e5902f00 e59f3014 e19330d2 e1530001 15c21b3d
+      15900f00 1affdb9a e12fff1e and literal 00000b3d establish
+      extent [0x080677e4,0x08067808), 36 bytes including the literal;
+      Ghidra reports 32 instruction bytes. Next setter starts at 0x08067808.
+      Whole-image A32 decoding finds two plain incoming BLs at 0x081718dc
+      and 0x081720b8, no predicated incoming BLs and no outgoing BLs.
+      Both raw callers pass a signed cached byte from +0x60. Conditional
+      tail BNE targets canonical rtc_context_mark_dirty at 0x0805e66c.
+      Compare signed byte +0xb3d with full i32; on mismatch store low byte,
+      reload owner pointer and mark dirty. Equality preserves dirtiness.
+      Product meaning remains unrecovered; reuse RTC layout and dirty port.
+      Host pointers widen only the owner tail. Host suite, ARM build and
+      actual-source smoke pass. match.py exits 1: LLVM adds a frame and
+      equal early return, constructs the offset without a literal, and
+      retains signed load, full-width comparison, byte store, pointer
+      reload and dirty tail branch (12 versus 8 instructions).
   - address: 0x08067ad8
     ghidra: FUN_08067ad8
     name: rtc_context_set_configuration_b8a
