@@ -1,5 +1,6 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod object_backend_set_control_byte;
 pub mod tdat_node_clear_state;
 pub mod plst_reference_state_refresh;
 pub mod curve_scan_reflected;
