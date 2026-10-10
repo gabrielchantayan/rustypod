@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a6828
+    ghidra: FUN_080a6828
+    name: ancestor_order_byte
+    size: 48
+    sig: "u32 ancestor_order_byte(AncestorOrderNode *node)"
+    module: app/ancestor_order_byte
+    status: ported
+    vars: {param_1/r4: node, iVar1/r0: matched}
+    renames: {FUN_08275b9c: object_cast_to_class, FUN_08030f44: heap_panic}
+    notes: >-
+      Raw A32 words establish [0x080a6828,0x080a6858), 48 instruction
+      bytes without literals; next function starts with PUSH {r4-r6,lr}.
+      Independently decoded two plain BLs and zero predicated BLs in the
+      body; whole-image word scan finds two incoming plain BLs at
+      0x0826dc3c and 0x0826dcf8, zero predicated incoming BLs.
+      Cast the initial node and successive parents at +0x34 to class
+      0x1180. Return the first successful cast result's unsigned byte
+      at +0xe8, not a boolean; exhausted chains call canonical heap_panic.
+      Ghidra incorrectly declares void and omits the conditional LDRB
+      return. Caller 0x0826db98 compares values for UI insertion ordering.
+      Reuse canonical object_cast_to_class and heap_panic without new
+      callee seams. Structured loop replaces conditional return; repr(C)
+      node pointer fields widen only on hosts. No initial NULL guard or
+      cycle detection is added.
+      Host edge tests and an executable rejected-child/parent smoke pass;
+      ARM release build passes. match.py shows 14 Rust instructions versus
+      12 stock: explicit success branch and larger frame replace predicated
+      LDRB/POP, preserving class id, parent stride, byte offset and fatal path.
   - address: 0x080a92c4
     ghidra: FUN_080a92c4
     name: psh_mask_table_done
