@@ -241557,3 +241557,34 @@ functions:
       including literals: LLVM uses two BLX calls, a larger frame and
       base-relative second-table writes; flag check, both 72-byte clears,
       count/capacity writes and publication order remain intact.
+  - address: 0x0809041c
+    ghidra: FUN_0809041c
+    name: cff_parser_init
+    size: 40
+    sig: "void cff_parser_init(u32 *parser, u32 object_code, u32 object_address)"
+    module: ft/cff_parser_init
+    status: ported
+    renames:
+      param_1/r0/r4: parser
+      param_2/r1/r5: object_code
+      param_3/r2/r6: object_address
+      parser_plus_0x190: operand_stack_top
+    notes: >-
+      Raw osos.dec confirms ten ARM words at 0x0809041c..0x08090444;
+      next function starts with push {r3-r5,lr} at 0x08090444. Whole-image
+      ARM-word decoding finds two inbound plain BLs at 0x0809a30c and
+      0x0809a41c, zero predicated BLs. One outbound plain BL at 0x08090430
+      calls veneer 0x08037db8; raw literal 0x2200027c is the IRAM mirror
+      of ported memzero_aligned at 0x0800027c. Clear 412 bytes, set +400
+      to parser+12, store object-code namespace at +404 and destination
+      address at +408. DICT consumer 0x08087d70 uses the namespace for
+      handler lookup and destination for field writes; caller supplies
+      namespaces 0x1000/0x2000. Deviations: volatile Rust zero-fill function
+      pointer prevents builtin substitution; its differing return is unused.
+      Host records retain u32 target words. Tests cover dirty-state reset,
+      zero namespace, NULL/full-width destination, stack cursor and canaries.
+      Host suite passes 15323 tests; ARM release build succeeds. Standalone
+      public-entry smoke confirms clearing and final fields with canaries.
+      match.py exits 1: ten stock instructions versus nineteen Rust entries
+      including a literal. LLVM uses BLX, a larger frame and separate stores
+      instead of STM; clear length and all three final writes are preserved.

@@ -21,6 +21,7 @@ pub mod cff_pshinter_callback;
 pub mod cff_index;
 pub mod cff_subfont;
 pub mod cff_parse_fixed;
+pub mod cff_parser_init;
 pub mod cff_parse_integer;
 pub mod cff_sid;
 pub mod t1_builder;
