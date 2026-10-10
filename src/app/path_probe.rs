@@ -787,6 +787,39 @@ pub unsafe extern "C" fn path_facade_slot_68(
     status
 }
 
+/// path_facade_slot_60 — original: `FUN_080a8ee0` @ **0x080a8ee0**.
+/// True extent: 68 bytes, ending before the distinct push at 0x080a8f24.
+/// Raw A32 decoding verifies **2 plain inbound BLs, 0 predicated BLs**:
+/// 0x080a8ec8 and 0x081ef284. The body has three direct BLs and one BLX.
+///
+/// Constructs the 16-byte scoped interface guard with `base_hint`, fetches
+/// selector 1, calls facade vtable slot +0x60 with the original path object,
+/// destroys the guard even for an error status, and returns that status.
+/// Deliberate deviations: the unidentified virtual operation keeps a
+/// structural name; existing guard/facade seams retain their device defaults
+/// and host test boundaries. Native-width vtable slots model host pointers.
+/// The spilled r2/r3 values are not arguments: construction overwrites them.
+///
+/// # Safety
+/// `path_object` must satisfy the selected facade operation's path contract;
+/// the configured guard and facade boundaries must return valid objects.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_60(
+    path_object: *mut StringObject,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let operation: unsafe extern "C" fn(*mut FacadeObject, *mut StringObject) -> u32 =
+        core::mem::transmute((*(*facade).vtable).slots[0x60 / 4]);
+    let status = operation(facade, path_object);
+    guard_dtor_fn()(guard);
+    status
+}
+
 /// path_facade_slot_54 — original: `FUN_08089214` @ **0x08089214** (80
 /// bytes; **3 plain `bl` call sites and 0 predicated `bl` call sites**,
 /// verified by decoding the raw `osos.dec` A32 words: the body runs through
@@ -1339,6 +1372,58 @@ pub(crate) mod tests {
         vtable: core::ptr::null(),
         payload: core::ptr::null_mut(),
     };
+
+    unsafe extern "C" fn slot_60_scope_construct(
+        guard: *mut InterfaceGuard, hint: u32,
+    ) -> *mut InterfaceGuard {
+        CTOR_THIS = guard;
+        (*guard).words = [0, 0, hint, 1];
+        guard
+    }
+
+    unsafe extern "C" fn slot_60_mutate_path(
+        _facade: *mut FacadeObject, path: *mut StringObject,
+    ) -> u32 {
+        // A path mutation is legal only while the scoped guard is held.
+        assert_eq!((*CTOR_THIS).words[3], 1);
+        (*path).payload = core::ptr::null_mut();
+        (*CTOR_THIS).words[3] = 2;
+        QUERY_RESULT
+    }
+
+    unsafe extern "C" fn slot_60_scope_destroy(
+        guard: *mut InterfaceGuard,
+    ) -> *mut InterfaceGuard {
+        assert_eq!((*guard).words[3], 2);
+        (*guard).words[3] = 0;
+        // Teardown must not replace the saved operation result.
+        QUERY_RESULT = 0x1234;
+        DTOR_THIS = guard;
+        core::ptr::null_mut()
+    }
+
+    #[test]
+    fn slot_60_mutates_path_inside_scope_and_cleans_up_errors() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            PATH_PROBE_GUARD_CTOR = slot_60_scope_construct;
+            PATH_PROBE_GUARD_DTOR = slot_60_scope_destroy;
+            MOCK_VTABLE.slots[0x60 / 4] = slot_60_mutate_path as usize;
+            for status in [0, 0x15, u32::MAX] {
+                let mut payload = [0u8; 8];
+                let mut path = StringObject {
+                    vtable: core::ptr::null(), payload: payload.as_mut_ptr(),
+                };
+                QUERY_RESULT = status;
+                DTOR_THIS = core::ptr::null_mut();
+                assert_eq!(path_facade_slot_60(&mut path, 0), status);
+                assert!(path.payload.is_null(), "the slot performed its mutation");
+                assert_eq!(DTOR_THIS, CTOR_THIS, "scope released on success and errors");
+            }
+        }
+    }
 
     #[test]
     fn call_order_is_guard_fetch_query_unguard() {
