@@ -189,13 +189,9 @@ pub const FACADE_PATH_SLOT_68: usize = 0x68;
 pub const FACADE_PATH_SLOT_68_INDEX: usize = FACADE_PATH_SLOT_68 / 4;
 
 
-/// The modeled facade vtable extent: every slot up to and including the
-/// unclassified operation at +0x68. Only slots
-/// [`FACADE_PATH_PROBE_SLOT_INDEX`], [`FACADE_PATH_SLOT_5C_INDEX`], and
-/// [`FACADE_PATH_SLOT_64_INDEX`] have recovered call signatures; the rest
-/// are held as raw words (the StringIdRecordVtable serialized-slots
-/// precedent).
-pub const FACADE_VTABLE_SLOTS: usize = FACADE_PATH_SLOT_68_INDEX + 1;
+/// The modeled facade vtable extent through the unclassified operation at
+/// +0x80. Native-width slots retain target word indices on host.
+pub const FACADE_VTABLE_SLOTS: usize = 0x80 / 4 + 1;
 
 /// The 16-byte scoped interface guard — exactly the original's r0-r3
 /// spill frame. Layout (from the constructor/destructor bodies):
@@ -820,6 +816,42 @@ pub unsafe extern "C" fn path_facade_slot_60(
     status
 }
 
+/// path_facade_slot_80 — original: `FUN_08090bf8` @ 0x08090bf8.
+///
+/// Raw A32 extent is 80 bytes, ending with pop at 0x08090c44 before the
+/// next function's push at 0x08090c48. Whole-image word decoding verifies
+/// two incoming plain BLs (0x08090be0, 0x0813adfc), zero predicated BLs.
+/// The body has three plain BLs, zero predicated BLs and one indirect BLX.
+///
+/// Constructs an interface guard using incoming r2, selects facade 1,
+/// dispatches slot +0x80 with the saved path and full-width value, destroys
+/// the guard even on error, and returns the operation status unchanged.
+/// Deliberate deviations: the virtual operation remains unclassified, so
+/// its name is structural; typed storage replaces the r0-r3 spill frame.
+/// Incoming r3 is dead. Reuses existing guard/facade seams and native-width
+/// vtable word indices, without introducing a callee identity or seam.
+///
+/// # Safety
+/// The configured facade must provide a valid +0x80 operation accepting
+/// this path object and value, and the guard boundaries must be compatible.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_80(
+    path_object: *mut StringObject,
+    value: u32,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let operation: unsafe extern "C" fn(*mut FacadeObject, *mut StringObject, u32) -> u32 =
+        core::mem::transmute((*(*facade).vtable).slots[0x80 / 4]);
+    let status = operation(facade, path_object, value);
+    guard_dtor_fn()(guard);
+    status
+}
+
 /// path_facade_slot_54 — original: `FUN_08089214` @ **0x08089214** (80
 /// bytes; **3 plain `bl` call sites and 0 predicated `bl` call sites**,
 /// verified by decoding the raw `osos.dec` A32 words: the body runs through
@@ -1421,6 +1453,54 @@ pub(crate) mod tests {
                 assert_eq!(path_facade_slot_60(&mut path, 0), status);
                 assert!(path.payload.is_null(), "the slot performed its mutation");
                 assert_eq!(DTOR_THIS, CTOR_THIS, "scope released on success and errors");
+            }
+        }
+    }
+
+    unsafe extern "C" fn slot_80_store_value(
+        facade: *mut FacadeObject, path: *mut StringObject, value: u32,
+    ) -> u32 {
+        assert_eq!(facade, core::ptr::addr_of_mut!(MOCK_FACADE));
+        assert_eq!((*CTOR_THIS).words[3], 1, "operation requires live guard");
+        assert_eq!(FETCH_SELECTOR, 1);
+        // Consumer-visible mutation, including the high bytes of r2.
+        core::ptr::copy_nonoverlapping(value.to_le_bytes().as_ptr(), (*path).payload, 4);
+        (*CTOR_THIS).words[3] = 2;
+        QUERY_RESULT
+    }
+
+    unsafe extern "C" fn slot_80_scope_destroy(
+        guard: *mut InterfaceGuard,
+    ) -> *mut InterfaceGuard {
+        CTOR_HINT = (*guard).words[2];
+        slot_60_scope_destroy(guard)
+    }
+
+    #[test]
+    fn slot_80_preserves_full_value_and_releases_scope_on_error() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            PATH_PROBE_GUARD_CTOR = slot_60_scope_construct;
+            PATH_PROBE_GUARD_DTOR = slot_80_scope_destroy;
+            MOCK_VTABLE.slots[0x80 / 4] = slot_80_store_value as usize;
+            for (value, hint, status) in [
+                (0, 0, 0), (0xff, 1, 0x15),
+                (0x8000_0100, 0xdead_beef, 0x8000_0000),
+                (u32::MAX, u32::MAX, u32::MAX),
+            ] {
+                let mut payload = [0xa5u8; 8];
+                let mut path = StringObject {
+                    vtable: core::ptr::null(), payload: payload.as_mut_ptr(),
+                };
+                QUERY_RESULT = status;
+                DTOR_THIS = core::ptr::null_mut();
+                assert_eq!(path_facade_slot_80(&mut path, value, hint), status);
+                assert_eq!(&payload[..4], &value.to_le_bytes());
+                assert_eq!(&payload[4..], &[0xa5; 4]);
+                assert_eq!(CTOR_HINT, hint, "hint survives until teardown");
+                assert_eq!(DTOR_THIS, CTOR_THIS);
             }
         }
     }
