@@ -15,6 +15,7 @@ pub mod calc;
 pub mod charmap;
 pub mod cmap2_subheader;
 pub mod cmap4_next_segment;
+pub mod cmap12_next;
 pub mod cff_builder;
 pub mod cff_lookup_glyph;
 pub mod cff_pshinter_callback;
