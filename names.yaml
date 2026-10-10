@@ -16,6 +16,32 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807f564
+    ghidra: FUN_0807f564
+    name: owner_entry_append
+    size: 60
+    sig: "void owner_entry_append(OwnerEntry *entry)"
+    module: app/owner_entry_append
+    status: ported
+    vars: {param_1/r1: entry, iVar1/r0: owner, r2: old_tail}
+    notes: >-
+      Raw extent [0x0807f564,0x0807f5a0) is 60 bytes; next entry
+      loads its global owner before initializing fields and tail-branching.
+      Complete aligned A32 word scan verifies two inbound plain BLs at
+      0x0805e660 and 0x0806a788, zero predicated inbound BLs, zero outgoing
+      BLs and a final B to 0x080e2d28. Clear entry next, capture old tail
+      as previous, update head or old tail next, publish tail, increment
+      owner count modulo 2^32. Verified unported tail helper retains its
+      exact retail address: it loads owner +0x900, conditionally calls
+      0x08049580 with that value, then clears owner +0x900 after the call.
+      Ghidra incorrectly incorporates tail-helper behavior into this body.
+      Native repr(C) pointers widen on hosts; target offsets remain exact.
+      Host tests cover empty/nonempty lists, stale links, count wrap and
+      publication before helper-side mutation. Standalone source smoke
+      verifies two-node forward/back links, wrap and post-publication calls.
+      ARM release build passes. match.py exit 1 reviewed: 15 stock versus
+      19 Rust listing lines, matching stores and conditional links; LLVM
+      removes duplicate tail load and uses a frame plus BX address literal.
   - address: 0x080847b4
     ghidra: FUN_080847b4
     name: ex_data_class_table_ensure
