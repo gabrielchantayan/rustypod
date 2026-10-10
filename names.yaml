@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807a378
+    ghidra: FUN_0807a378
+    name: directory_visit
+    size: 20
+    sig: "void directory_visit(DirectoryVisitor visitor, const uint8_t *path, uint32_t continuation)"
+    module: app/directory_visit
+    status: ported
+    vars:
+      param_1/r0: visitor
+      param_2/r1: path
+      param_3/r2: continuation
+      r3: zero_exclusion_mask
+    notes: >-
+      Raw A32 verifies [0x0807a378,0x0807a38c), five instructions;
+      next independent function loads object+0x3c, ORs six, stores it,
+      returns one and ends with BX LR. Zero outgoing plain/predicated
+      BLs; tail B to stock directory walker 0x08093f70. Whole-image
+      word scan finds two incoming plain BLs at 0x08117660 and
+      0x08117864, zero predicated BLs. Swap visitor/path, preserve
+      continuation, clear exclusion mask. Reuses existing iTunes walker
+      signature and host seam; Ghidra incorrectly absorbs walker body.
+      Host edge tests cover empty path, flagged entries and callback stop.
+      Serialized host suite passes 15388 tests; parallel suite SIGSEGVs.
+      ARM release build passes. match.py exit 1 reviewed: frame setup
+      and literal-loaded BX replace direct B; argument reorder preserved.
   - address: 0x0807b1c0
     ghidra: FUN_0807b1c0
     name: glyph_advance
