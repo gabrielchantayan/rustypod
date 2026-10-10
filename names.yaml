@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807f3e8
+    ghidra: FUN_0807f3e8
+    name: signed_set_insert_backward
+    size: 144
+    sig: "u32 signed_set_insert_backward(BackwardSignedSet *set, i32 value)"
+    module: util/signed_set_insert_backward
+    status: ported
+    vars: {param_1: set, param_2: value, iVar3: index, iVar4: base, uVar2: allocation_cursor}
+    notes: >-
+      Raw extent [0x0807f3e8,0x0807f478) ends with BX LR before the next
+      function PUSH. Complete aligned A32 scan finds two incoming plain BLs
+      at 0x080c624c and 0x080c6260, zero predicated incoming BLs and zero
+      outgoing BLs. Caller inserts range start and one-past-range-end values.
+      End pointer +0x24 points past the ascending signed array; count +0x34
+      determines its backward-growing base. Scan from end for value <= key;
+      equality returns zero without mutation. Otherwise rotate smaller values
+      toward end, decrement allocation cursor +0x28 modulo 2^32 by four,
+      and compare unsigned against limit +0x2c. Cursor <= limit sets error
+      +0x30 to 0x62 and returns one, retaining shifts and cursor decrement
+      without increasing count or writing the additional preceding word.
+      Success increments count and prepends the displaced value. No seams
+      or target deviations; repr(C) end pointer widens on hosts while cursor
+      and limit remain firmware u32s. Host tests cover insertion positions,
+      duplicates, signed extremes, empty failure, equality/below-limit failure,
+      preserved failure mutations and unsigned cursor wrap. Full host suite
+      and ARM release build pass. Standalone smoke confirms sorted unique
+      growth and failure mutations. match.py exit 1 reviewed: 36 stock versus
+      37 Rust instructions; matching signed scan, rotation, unsigned capacity
+      branch and field offsets. LLVM uses a frame, descending pointer traversal
+      and a shared return.
   - address: 0x0807f564
     ghidra: FUN_0807f564
     name: owner_entry_append
