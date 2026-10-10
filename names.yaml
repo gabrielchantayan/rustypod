@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a3b4c
+    ghidra: FUN_080a3b4c
+    name: resource_record_extent
+    size: 220
+    sig: "i32 resource_record_extent(const u8 *const *table_slot, u32 record_offset, u32 payload_only, u32 *out_size, const u8 **out_address)"
+    module: util/resource_record_extent
+    status: ported
+    vars:
+      param_1: table_slot
+      param_2: record_offset
+      param_3: payload_only
+      param_4: out_size
+      param_5: out_address
+    renames:
+      FUN_080ed748: read_u32_le
+    notes: >-
+      Raw extent [0x080a3b4c,0x080a3c28) is 220 bytes; next function
+      begins with push {r4,r5,r6,lr}. Whole-image ARM decoding finds two
+      inbound plain BLs at 0x0805a348 and 0x0805b060, no predicated BLs
+      or aligned address references. Eight outbound plain BLs all target
+      read_u32_le at 0x080ed748, four on each mutually exclusive size path.
+      NULL table_slot or two NULL outputs returns -50 without access.
+      Zero offset selects +12; otherwise use the supplied byte offset.
+      Size is the record's first big-endian word. Nonzero payload_only
+      subtracts 20 with u32 wrapping and advances the returned address by 20.
+      Size output precedes address output; either output is optional.
+      Deliberate deviation: collapse four redundant ordinary-data reads
+      into one existing read_u32_le plus swap_bytes. Native pointer slots
+      permit host fixtures and remain four bytes on ARM.
   - address: 0x080a3c28
     ghidra: FUN_080a3c28
     name: psh_dimension_done
