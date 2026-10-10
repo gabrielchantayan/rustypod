@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809ea24
+    ghidra: FUN_0809ea24
+    name: peripheral_bank_pair_set
+    size: 52
+    sig: "void peripheral_bank_pair_set(u32 selector, u32 first, u32 second)"
+    module: drivers/peripheral_bank_pair_set
+    status: ported
+    vars: {param_1/r0: selector, param_2/r1: first, param_3/r2: second, r3: registers, r12: zero}
+    renames: {DAT_0809ea54: peripheral_registers_0x39660000}
+    notes: >-
+      Raw A32 extent [0x0809ea24,0x0809ea58) contains 48 instruction bytes
+      and the register-base literal at 0x0809ea54; the next function opens
+      with PUSH. Independent whole-image aligned decoding finds two plain
+      inbound BLs at 0x081b0888 and 0x081b089c, zero predicated inbound BLs,
+      and zero outbound BLs of either kind. Zero selects offsets 0x2c..0x38;
+      every nonzero selector selects 0x3c..0x48. Write first, zero, second,
+      zero in order. Callers supply paired object words from +0x74/+0x78;
+      precise peripheral/register meanings remain unidentified. No callee
+      seams. Deliberate deviations: volatile MMIO writes and isolated host
+      storage. Host edge tests and executable source smoke verify both banks,
+      high-bit selectors, word preservation and adjacent sentinels. Host suite
+      and ARM release build pass. match.py exits 1: LLVM selects a bank offset
+      and emits four ordered stores instead of eight predicated stores,
+      adding frame setup and address literals; no calls are introduced.
   - address: 0x0809eab4
     ghidra: thunk_FUN_080873f0
     name: event_code_dispatch_unflagged_secondary_thunk
