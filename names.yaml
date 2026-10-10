@@ -25862,6 +25862,35 @@ functions:
       +0x1f0. Deliberate deviation: Rust performs the tail branch as a normal
       call; target pointer slots use word indices so their four-byte layout
       survives 64-bit host fixtures.
+  - address: 0x080846f4
+    ghidra: FUN_080846f4
+    name: hash_table_bucket_chain_visitor
+    size: 104
+    sig: "void hash_table_bucket_chain_visitor(u8 *table, u32 mode, void (*mode_zero_callback)(u32), void (*callback)(u32, u32), u32 context)"
+    module: cxx/hash_table_bucket_chain_visitor
+    status: ported
+    renames:
+      param_1/r0: table
+      param_2/r1: mode
+      param_3/r2: mode_zero_callback
+      param_4/r3: callback
+      param_5/[sp]: context
+      iVar1/r4: bucket_index
+      puVar2/r0: node
+      r5: cached_successor
+      uVar3/r0: value
+    notes: >-
+      Raw A32 words establish 104 bytes at 0x080846f4..0x0808475b;
+      e8bd87f0 returns at 0x08084758 and e92d4010 starts the next real
+      function at 0x0808475c. Whole-image decoding finds two inbound plain
+      BLs at 0x082d7bcc/0x082d7be8 and zero predicated inbound BLs.
+      Outbound plain/predicated BL counts are both zero; two unconditional
+      register BLX calls occur at 0x08084734/0x0808473c. Traverses buckets
+      in descending signed index order and chains forward, caching next
+      before callbacks. Count is captured once; bucket pointer reloads per
+      bucket. Mode zero selects one argument; all other modes pass context.
+      Host tests cover empty buckets, signed count boundaries, nonzero modes,
+      successor caching and table mutation. Deliberate deviations: none.
   - address: 0x082d7bb8
     ghidra: FUN_082d7bb8
     name: hash_table_visit
@@ -25882,9 +25911,8 @@ functions:
       inbound BL calls, and one outbound plain BL to FUN_080846f4 at
       0x080846f4. It forwards table and callback to that resident
       bucket-chain visitor with mode=0, the mode-one callback NULL, and
-      context=0. FUN_080846f4 has no names.yaml entry and remains a
-      fixed-address target seam; host tests verify mode, NULL mode-one
-      callback, zero context, and forwarding for null/non-null table values.
+      context=0. Calls the ported hash_table_bucket_chain_visitor directly;
+      behavioral host tests exercise traversal through this wrapper.
       Deliberate deviations: none.
   - address: 0x082d7bd4
     ghidra: FUN_082d7bd4
@@ -25906,10 +25934,9 @@ functions:
       calls at 0x08073394 and 0x080733a4, zero predicated inbound BL calls,
       and one outbound plain BL to FUN_080846f4 at 0x080846f4. It forwards
       table, callback, and context to that resident bucket-chain visitor with
-      mode=1 and the mode-zero callback NULL. FUN_080846f4 has no names.yaml
-      entry and remains a fixed-address target seam; host tests verify mode,
-      NULL callback, and forwarding for null/non-null table values and zero/
-      u32::MAX contexts. Deliberate deviations: none.
+      mode=1 and the mode-zero callback NULL. Calls the ported visitor
+      directly; behavioral host tests exercise traversal and context delivery
+      through this wrapper. Deliberate deviations: none.
   - address: 0x082b14b0
     ghidra: FUN_082b14b0
     name: short_filename_byte_is_rejected

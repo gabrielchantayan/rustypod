@@ -457,6 +457,7 @@ pub mod handler_list_construct;
 pub mod handle;
 pub mod refcounted_allocation_handle_release;
 pub mod hash_table_bucket_slot;
+pub mod hash_table_bucket_chain_visitor;
 pub mod hash_table_visit;
 pub mod hash_table_visit_with_context;
 pub mod handle_callback_dispatch;
