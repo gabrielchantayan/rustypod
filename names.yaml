@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08070574
+    ghidra: FUN_08070574
+    name: crypto_store_lookup
+    size: 168
+    sig: "i32 crypto_store_lookup(StoreLookup *state, u32 kind, u32 key, u32 *output)"
+    module: crypto/store_lookup
+    status: ported
+    vars:
+      param_1: state
+      param_2: kind
+      param_3: key
+      param_4: output
+      iVar6: owner
+      iVar4: index
+      puVar5: entry
+      local_28: temporary_entry
+    notes: >-
+      Raw extent 0x08070574..0x0807061c is 168 bytes; next entry starts
+      with push {r4,r5,r6,lr}. Whole-image A32 scan verifies two incoming
+      unconditional BLs at 0x0806fee8 and 0x080ebc98, five outgoing
+      unconditional BLs, and zero predicated BLs. Cache search 0x0806fbcc
+      forwards kind/key to 0x0806fb74; provider dispatcher 0x0806f1c8
+      forwards r0-r3 to method +0x18. Both remain explicit firmware seams.
+      Reuses namespace_provider_count, namespace_provider_at and
+      crypto_tagged_reference_retain. Cache hits preserve cursor; provider
+      errors save the negative result; success/exhaustion reset cursor.
+      Host repr(C) owner pointers widen, while tagged entries remain u32 pairs.
+      Host tests cover cache precedence, misses, positive non-one results,
+      errors, cursor boundaries and null providers. ARM match shows equivalent
+      gates, loop, two-word copy and retain, with BLX firmware seams.
   - address: 0x08070c1c
     ghidra: FUN_08070c1c
     name: x509_get_ext_by_nid
