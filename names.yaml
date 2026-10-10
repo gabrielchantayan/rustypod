@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809a2a4
+    ghidra: FUN_0809a2a4
+    name: cff_subfont_done
+    size: 48
+    sig: "void cff_subfont_done(FtMemory *memory, CffSubfont *subfont)"
+    module: ft/cff_subfont
+    status: ported
+    vars:
+      param_1/r5: memory
+      param_2/r4: subfont
+    renames:
+      FUN_08087bac: cff_index_done
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw A32 extent [0x0809a2a4,0x0809a2d4) is 48 bytes; next
+      function starts with push {r4-r11,lr}. Two outgoing plain BLs at
+      0x0809a2b8 and 0x0809a2c4 call existing cff_index_done and
+      ft_mem_free ports. Whole-image decoding finds two incoming plain
+      BLs at 0x08082d74 and 0x08082dd4; no predicated BLs.
+      Null subfont returns; otherwise destroy the local-subroutine INDEX
+      at +0x214, reload and free the pointer table at +0x230 with the
+      supplied allocator, then clear that pointer. Dictionaries and count
+      at +0x22c survive. Producer 0x0809a2d4 creates the INDEX, copies
+      its count and calls cff_index_get_pointers with the +0x230 slot.
+      Deliberate deviations: native host pointers with asserted ARM
+      offsets; volatile function-pointer loads preserve existing seams.
+      Host tests cover null and inactive records, callback replacement
+      of the table during index release, preserved fields and repeats.
+      Full host suite passes 15288 tests; ARM release build passes.
+      Standalone host smoke releases a real Box table and repeats cleanup.
+      match.py exit 1 reviewed: 12 retail versus 19 Rust instructions;
+      frame setup and indirect BLX calls differ, cleanup order is retained.
   - address: 0x0809a744
     ghidra: FUN_0809a744
     name: ft_face_done_charmaps
