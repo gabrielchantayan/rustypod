@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080847b4
+    ghidra: FUN_080847b4
+    name: ex_data_class_table_ensure
+    size: 108
+    sig: "u32 ex_data_class_table_ensure(void)"
+    module: crypto/ex_data_class_table
+    status: ported
+    vars: {bVar3/r4: success, iVar1/r5: singleton, iVar2/r0: table}
+    renames:
+      FUN_08043b94: resource_op_dispatch
+    notes: >-
+      Raw extent 0x080847b4..0x08084820 includes 96 bytes of code and
+      three literal words; the next function starts with PUSH at 0x08084820.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x080782e4
+      and 0x08084474, zero predicated incoming BLs. Three outgoing plain
+      BLs at 0x080847cc, 0x080847e8 and 0x08084808; no predicated BLs.
+      Acquire resource 2 (op 9), initialize singleton 0x08a0e9e0 word +8
+      using the stock lhash constructor 0x082d7d08 only when zero,
+      store the result including failure, release (op 10), return 0 or 1.
+      Constructor argument words 0x0806a740 and 0x080e9a94 remain opaque.
+      Target calls stock resource_op_dispatch; host reuses its ported seam
+      and substitutes storage and constructor.
+      Tests cover failure then retry, existing handles including 0xffffffff,
+      acquire-side initialization and publication before release.
+      All 15363 host tests pass. Source-linked smoke proves failure retry,
+      publication of a real low-address allocation, reuse and lock release.
+      ARM release build passes. match.py reports 33 Rust instructions versus
+      24 stock code instructions (its default omits the stock literal pool).
+      Reviewed conditional constructor, result store, normalized return and
+      both lock operations: structure preserved; absolute stock calls use
+      BLX through registers rather than BL, with an additional frame pointer.
   - address: 0x0808487c
     ghidra: FUN_0808487c
     name: fnt_font_done
