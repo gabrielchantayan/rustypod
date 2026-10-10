@@ -40285,6 +40285,45 @@ functions:
       MODE_STATE_OBJECT_TABLE target-global seam; no bounds or null checks
       are present in the original or port.
 
+  - address: 0x080b64fc
+    ghidra: FUN_080b64fc
+    name: indexed_mode_range
+    size: 72
+    sig: "i32 indexed_mode_range(i16 index, u32 selector, u32 *output)"
+    module: ui/mode_state
+    status: ported
+    renames:
+      param_1/r0: index
+      param_2/r1: selector
+      param_3/r2: output
+      DAT_080b6544: MODE_STATE_OBJECT_TABLE
+      piVar1: record
+      iVar2: range
+    notes: >-
+      Raw A32 extent [0x080b64fc,0x080b6548) is 68 instruction bytes
+      plus the 0x08b2f648 table literal; the next function starts with
+      LDR r2,[r1,#16]. Whole-image aligned BL decoding finds two plain
+      incoming calls at 0x080394e0 and 0x080d7f48, no predicated incoming
+      calls, and zero outgoing calls. SMULBB selects signed low-halfword
+      index times 0x18c. Unsigned selectors above three return -251 without
+      writing output or dereferencing the loaded object pointer. Otherwise
+      output[0] is record word +4 plus object word +0xa48+selector*0x14,
+      wrapping at 32 bits; output[1] is object word +0xa44+selector*0x14.
+      The first caller uses the address as a write destination; the second
+      checks an address against the returned address/length interval.
+      Reuses the existing MODE_STATE_OBJECT_TABLE seam; no callee seams.
+      Host records use native pointers followed by a u32 base, retaining
+      target record stride with unaligned pointer reads; target fields
+      remain four bytes apart. Output store/load ordering permits object
+      aliasing. Tests cover signed indices, all four selectors, wrapping,
+      output sentinels, aliasing, and invalid unsigned selectors with null
+      object/output pointers.
+      match.py reports an expected structural diff: LLVM multiplies the
+      signed index directly by 396 rather than 99 then shifting, loads the
+      replaceable table seam, and branches early for invalid selectors
+      (eliding the unused nonvolatile record load). Valid-path offsets,
+      wrapping addition, store/load order, and return values are preserved.
+
   # --- indexed UI mode-state status ---
   - address: 0x080db5b4
     ghidra: FUN_080db5b4

@@ -231,6 +231,46 @@ pub unsafe extern "C" fn indexed_mode_word_804_set(index: i16) {
     (object.add(0x804) as *mut u32).write(1);
 }
 
+/// indexed_mode_range — original: `FUN_080b64fc` @ `0x080b64fc`.
+///
+/// True extent: 72 bytes (68 instruction bytes and the table literal at
+/// `0x080b6544`), ending at the next function's `0x080b6548` entry.
+/// Verified incoming calls: two plain BLs at `0x080394e0` and `0x080d7f48`,
+/// no predicated BLs; zero outgoing plain or predicated BLs.
+/// Select the signed index's 0x18c-byte mode record. For selectors 0..=3,
+/// write the record's base plus the object's range offset at
+/// `0xa48 + selector * 0x14`, then its length at `0xa44 + selector * 0x14`.
+/// Address addition wraps at 32 bits. Other selectors return -251 without
+/// touching the output or dereferencing the object.
+///
+/// Deliberate deviations: reuse MODE_STATE_OBJECT_TABLE for 0x08b2f648.
+/// Host records hold a native pointer followed by a u32 base (at +8 rather
+/// than target +4); unaligned host pointer reads retain the 0x18c stride.
+///
+/// # Safety
+///
+/// The selected record must be readable even for invalid selectors. Valid
+/// selectors require aligned readable object words and two writable output
+/// words. Output may alias the object; the original store/load order is kept.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn indexed_mode_range(index: i16, selector: u32, output: *mut u32) -> i32 {
+    let record = mode_state_object_table().offset(index as isize * MODE_STATE_RECORD_STRIDE);
+    #[cfg(target_pointer_width = "32")]
+    let object = (record as *const *const u8).read();
+    #[cfg(not(target_pointer_width = "32"))]
+    let object = (record as *const *const u8).read_unaligned();
+    if selector > 3 {
+        return -251;
+    }
+    let range = object.add(selector as usize * 0x14);
+    let offset = (range.add(0xa48) as *const u32).read();
+    let base = (record.add(core::mem::size_of::<*const u8>()) as *const u32).read();
+    output.write(base.wrapping_add(offset));
+    output.add(1).write((range.add(0xa44) as *const u32).read());
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,6 +279,47 @@ mod tests {
     use std::sync::Mutex;
 
     static MODE_STATE_TABLE_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn mode_range_signed_indices_selectors_wrapping_and_aliasing() {
+        let _guard = MODE_STATE_TABLE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let mut table = ModeStateTable([0; MODE_STATE_RECORD_STRIDE as usize * 3]);
+        let mut objects = [[0u32; 0xac0 / 4]; 3];
+        unsafe {
+            let previous = MODE_STATE_OBJECT_TABLE;
+            for slot in 0..3 {
+                install_object(&mut table, slot, objects[slot].as_ptr() as *const u8);
+                (table.0.as_mut_ptr().add(slot * MODE_STATE_RECORD_STRIDE as usize
+                    + core::mem::size_of::<*const u8>()) as *mut u32).write(0xffff_fff0 + slot as u32);
+                for selector in 0..4 {
+                    objects[slot][(0xa44 + selector * 0x14) / 4] = 0x100 * slot as u32 + selector as u32;
+                    objects[slot][(0xa48 + selector * 0x14) / 4] = 0x20 + selector as u32;
+                }
+            }
+            MODE_STATE_OBJECT_TABLE = table.0.as_ptr().add(MODE_STATE_RECORD_STRIDE as usize);
+            for index in [-1i16, 0, 1] {
+                for selector in 0..4u32 {
+                    let mut output = [0xdead_beef; 4];
+                    assert_eq!(indexed_mode_range(index, selector, output.as_mut_ptr().add(1)), 0);
+                    assert_eq!(output, [0xdead_beef, 0x10 + (index + 1) as u32 + selector,
+                        0x100 * (index + 1) as u32 + selector, 0xdead_beef]);
+                }
+            }
+            // The first output store overwrites the length before it is read.
+            let length = objects[1].as_mut_ptr().add(0xa44 / 4);
+            assert_eq!(indexed_mode_range(0, 0, length), 0);
+            assert_eq!([length.read(), length.add(1).read()], [0x11, 0x11]);
+            // Invalid selectors accept a null object and never access output.
+            install_object(&mut table, 1, core::ptr::null());
+            for selector in [4, 0x8000_0000, u32::MAX] {
+                let mut output = [0x1234_5678, 0xabcdef01];
+                assert_eq!(indexed_mode_range(0, selector, output.as_mut_ptr()), -251);
+                assert_eq!(output, [0x1234_5678, 0xabcdef01]);
+                assert_eq!(indexed_mode_range(0, selector, core::ptr::null_mut()), -251);
+            }
+            MODE_STATE_OBJECT_TABLE = previous;
+        }
+    }
 
     #[repr(align(8))]
     struct ModeStateTable([u8; MODE_STATE_RECORD_STRIDE as usize * 3]);
