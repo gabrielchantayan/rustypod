@@ -675,6 +675,7 @@ pub mod event_uses_alternate_handler;
 pub mod registration_handle_current_status;
 pub mod registration_handle_try_select_current_record;
 pub mod configured_path_prefix_matches;
+pub mod configured_path_suffix_digit;
 pub mod encoded_field_prefix_size;
 pub mod firmware_query_low_byte;
 pub mod pmu_mode_status_available;

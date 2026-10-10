@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809a7e4
+    ghidra: FUN_0809a7e4
+    name: configured_path_suffix_digit
+    size: 88
+    sig: "int configured_path_suffix_digit(const char *path, u32 *digit)"
+    module: app/configured_path_suffix_digit
+    status: ported
+    renames:
+      param_1/r6: path
+      param_2/r4: digit
+      r5: configured_path_record
+      DAT_0809a83c: configured_path_record
+      FUN_0803105c: strncmp
+    notes: >-
+      Raw ARM words establish 88 instruction bytes at 0x0809a7e4..0x0809a83c,
+      followed by the four-byte record-address literal 0x089ca3a4. The next
+      real function is the branch veneer at 0x0809a840 to 0x08256904; the
+      next push prologue is at 0x0809a844. Two incoming plain BL calls at
+      0x0806b4ec and 0x080ccb64, no incoming predicated BLs. One outgoing
+      plain BL at 0x0809a804 to the existing strncmp port (0x0803105c),
+      no outgoing predicated BLs. Compares path against record +8 for
+      record +0x14 minus two bytes, returning one for equality and zero
+      otherwise (Ghidra incorrectly inferred void). Only on equality and
+      non-NULL output, reloads length and stores path[length-2] minus ASCII
+      zero if in 0..6, otherwise zero. No leading slash removal or suffix
+      validation beyond that byte. Target retains fixed u32 record fields;
+      hosts use a native-pointer configuration seam. Volatile indirect
+      comparator call prevents inlining. Full host suite passed 15283 tests;
+      standalone executable smoke verified match, mismatch output preservation,
+      and invalid-digit normalization. ARM release build passed. match.py
+      exits 1 with a structural diff: larger frame and indirect BLX replace
+      direct BL, branches replace predication, but record field reads,
+      length reload, unsigned checks and conditional output store agree.
   - address: 0x0809bb88
     ghidra: FUN_0809bb88
     name: jpeg_submit_buffer_pair
