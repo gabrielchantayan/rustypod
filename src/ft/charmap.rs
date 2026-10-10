@@ -13,6 +13,39 @@ use crate::ft::error::{
 use crate::ft::glyph_slot::{FtCMap, FtCharMap, FtFace};
 use crate::ft::memory::ft_mem_free;
 
+/// FreeType face charmap cleanup — `FUN_0809a744` @ 0x0809a744.
+/// True extent 0x0809a744..0x0809a798: 84 bytes, ending before a new
+/// push prologue. Two outgoing plain BLs (ft_cmap_done at 0x0809a764,
+/// ft_mem_free at 0x0809a788), two incoming plain BLs, no predicated BLs.
+///
+/// Destroy each cmap in ascending order, reload the table before clearing
+/// its slot, and recheck the signed count after each callback. Release the
+/// current table with the supplied allocator, then clear table and count.
+/// The active charmap is untouched; non-positive counts skip destruction.
+/// Deliberate deviation: existing repr(C) fields widen pointers on hosts.
+///
+/// # Safety
+/// `face` must be valid and each visited table entry must be a valid cmap
+/// for `ft_cmap_done`. Callbacks must leave the current table writable at
+/// the visited index and valid for the subsequent count. A non-null final
+/// table must belong to `memory` and its free callback must be valid.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn ft_face_done_charmaps(
+    face: *mut FtFace,
+    memory: *mut crate::ft::memory::FtMemory,
+) {
+    let mut index = 0i32;
+    while index < (*face).num_charmaps {
+        ft_cmap_done((*(*face).charmaps.offset(index as isize)).cast());
+        *(*face).charmaps.offset(index as isize) = core::ptr::null_mut();
+        index += 1;
+    }
+    ft_mem_free(memory, (*face).charmaps.cast());
+    (*face).charmaps = core::ptr::null_mut();
+    (*face).num_charmaps = 0;
+}
+
 /// FreeType `ft_cmap_done` — `FUN_080c0434` @ 0x080c0434, 52 bytes
 /// (0x080c0434..0x080c0468; next function starts with a fresh prologue).
 /// Raw A32 decoding finds two incoming plain BLs at 0x0804c2c8 and
@@ -495,4 +528,141 @@ mod cmap_done_tests {
 
     #[test]
     fn destructor_precedes_free_and_allocator_is_snapshotted() { exercise(true); }
+}
+
+#[cfg(test)]
+mod face_done_charmaps_tests {
+    extern crate std;
+    use super::*;
+    use crate::ft::glyph_slot::FtCMapClass;
+    use crate::ft::memory::FtMemory;
+    use std::boxed::Box;
+    use std::vec::Vec;
+
+    struct State {
+        face: *mut FtFace,
+        table: *mut *mut c_void,
+        replacement: *mut *mut c_void,
+        events: Vec<u32>,
+    }
+
+    unsafe extern "C" fn alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        panic!("unexpected allocation")
+    }
+
+    unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 {
+        panic!("unexpected reallocation")
+    }
+
+    unsafe extern "C" fn index(_: *mut FtCMap, _: u32) -> u32 { 0 }
+
+    unsafe extern "C" fn destroy(cmap: *mut FtCMap) {
+        let face = (*cmap).charmap.face;
+        let state = &mut *((*(*face).memory).user.cast::<State>());
+        state.events.push((*cmap).charmap.encoding);
+        if !state.replacement.is_null() {
+            (*face).charmaps = state.replacement;
+            (*face).num_charmaps = 1;
+        }
+    }
+
+    unsafe extern "C" fn free_cmap(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user.cast::<State>());
+        let cmap = block.cast::<FtCMap>();
+        state.events.push(10 + (*cmap).charmap.encoding);
+        drop(Box::from_raw(cmap));
+    }
+
+    unsafe extern "C" fn free_table(memory: *mut FtMemory, block: *mut u8) {
+        let state = &mut *((*memory).user.cast::<State>());
+        assert_eq!(block, state.table.cast());
+        assert_eq!((*state.face).charmaps, state.table);
+        for i in 0..(*state.face).num_charmaps {
+            assert!((*state.table.offset(i as isize)).is_null());
+        }
+        state.events.push(100);
+    }
+
+    fn exercise(replace: bool) {
+        let mut face: FtFace = unsafe { core::mem::zeroed() };
+        let mut state = State {
+            face: &raw mut face, table: core::ptr::null_mut(),
+            replacement: core::ptr::null_mut(), events: Vec::new(),
+        };
+        let mut cmap_memory = FtMemory {
+            user: (&raw mut state).cast(), alloc, free: free_cmap, realloc,
+        };
+        let mut table_memory = FtMemory {
+            user: (&raw mut state).cast(), alloc, free: free_table, realloc,
+        };
+        face.memory = &raw mut cmap_memory;
+        let class = FtCMapClass {
+            size: core::mem::size_of::<FtCMap>() as u32,
+            init: core::ptr::null(), done: destroy as *const c_void, char_index: index,
+        };
+        let mut table = [core::ptr::null_mut::<c_void>(); 2];
+        for (i, slot) in table.iter_mut().enumerate() {
+            *slot = Box::into_raw(Box::new(FtCMap {
+                charmap: FtCharMap {
+                    face: &raw mut face, encoding: i as u32,
+                    platform_id: 0, encoding_id: 0,
+                },
+                clazz: &class,
+            })).cast();
+        }
+        let mut replacement = [table[0], table[1]];
+        let first = table[0];
+        face.charmap = first.cast();
+        face.charmaps = table.as_mut_ptr();
+        face.num_charmaps = 2;
+        if replace {
+            state.replacement = replacement.as_mut_ptr();
+            state.table = replacement.as_mut_ptr();
+        } else {
+            state.table = table.as_mut_ptr();
+        }
+        unsafe { ft_face_done_charmaps(&raw mut face, &raw mut table_memory); }
+        assert!(face.charmaps.is_null());
+        assert_eq!(face.num_charmaps, 0);
+        assert_eq!(face.charmap, first.cast());
+        if replace {
+            assert_eq!(state.events, [0, 10, 100]);
+            assert_eq!(table[0], first);
+            assert!(replacement[0].is_null());
+            unsafe { drop(Box::from_raw(table[1].cast::<FtCMap>())); }
+        } else {
+            assert_eq!(state.events, [0, 10, 1, 11, 100]);
+            assert!(table.iter().all(|slot| slot.is_null()));
+        }
+    }
+
+    #[test]
+    fn destroys_in_order_then_releases_table_with_supplied_allocator() { exercise(false); }
+
+    #[test]
+    fn callback_table_and_count_changes_are_reloaded() { exercise(true); }
+
+    #[test]
+    fn non_positive_counts_skip_entries_but_release_non_null_table() {
+        for count in [0, -1, i32::MIN] {
+            let mut face: FtFace = unsafe { core::mem::zeroed() };
+            let mut table = [core::ptr::null_mut::<c_void>()];
+            let mut state = State {
+                face: &raw mut face, table: table.as_mut_ptr(),
+                replacement: core::ptr::null_mut(), events: Vec::new(),
+            };
+            let mut memory = FtMemory {
+                user: (&raw mut state).cast(), alloc, free: free_table, realloc,
+            };
+            face.charmaps = table.as_mut_ptr();
+            face.num_charmaps = count;
+            unsafe { ft_face_done_charmaps(&raw mut face, &raw mut memory); }
+            assert_eq!(state.events, [100]);
+            assert!(face.charmaps.is_null());
+            assert_eq!(face.num_charmaps, 0);
+            // A cleared face is inert even with no allocator.
+            unsafe { ft_face_done_charmaps(&raw mut face, core::ptr::null_mut()); }
+            assert_eq!(state.events, [100]);
+        }
+    }
 }
