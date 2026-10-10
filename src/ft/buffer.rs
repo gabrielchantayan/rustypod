@@ -604,6 +604,40 @@ pub unsafe extern "C" fn ft_buffered_stream_reset_buffer_cursor(
     }
 }
 
+/// ft_buffered_stream_set_mode — original: `FUN_0808cd90` @ `0x0808cd90`.
+/// True extent: 84 bytes, ending at the next function at `0x0808cde4`.
+/// Verified outbound calls: one plain BL to flush and one predicated BLEQ
+/// to reset; two inbound plain BLs and no predicated inbound BLs.
+///
+/// An unchanged mode succeeds without flushing. A nonzero byte at +6 forbids
+/// switching to output mode (returns -61). Otherwise flush the old mode,
+/// propagate errors, then store the low byte of the requested mode and reset
+/// its cursor range. Comparison and restriction use the full u32 request.
+/// Deliberate deviations: none; both callees reuse their existing Rust ports.
+///
+/// # Safety
+/// `stream` must be a valid, aligned writable buffered-stream record with
+/// a backing I/O context suitable for the existing flush implementation.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn ft_buffered_stream_set_mode(
+    stream: *mut FtBufferedStream,
+    mode: u32,
+) -> i32 {
+    if u32::from((*stream).is_input) == mode {
+        return 0;
+    }
+    if (*stream).state_reserved[0] != 0 && mode == 0 {
+        return -61;
+    }
+    let result = ft_buffered_stream_flush(stream);
+    if result == 0 {
+        (*stream).is_input = mode as u8;
+        ft_buffered_stream_reset_buffer_cursor(stream);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -611,6 +645,7 @@ mod tests {
     use super::{
         buffered_stream_tell, ft_buffered_stream_buffered_bytes, ft_buffered_stream_finalize,
         ft_buffered_stream_flush, ft_buffered_stream_get_size, ft_buffered_stream_reset_buffer_cursor,
+        ft_buffered_stream_set_mode,
         BackingStreamSeekFn, BackingStreamSizeFn, BackingStreamTellFn, BackingStreamWriteFn,
         BufferedStreamIoContextFinalizeFn, FtBufferedStream, BACKING_STREAM_SEEK,
         BACKING_STREAM_SIZE, BACKING_STREAM_TELL, BACKING_STREAM_TELL_TEST_LOCK,
@@ -1001,6 +1036,71 @@ mod tests {
             assert_eq!(FINALIZE_CALLS, 1);
             assert_eq!(FINALIZE_CONTEXT, 0xfeed_cafe);
         }
+    }
+
+    #[test]
+    fn mode_unchanged_precedes_output_restriction_and_preserves_range() {
+        for mode in [0, 1, 255] {
+            let mut stream = stream(mode, 0x123, 0x100, 0x145);
+            stream.state_reserved = [0xff, 0xa5];
+            assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, mode as u32) }, 0);
+            assert_eq!((stream.cursor, stream.buffer_end), (0x123, 0x145));
+            assert_eq!(stream.state_reserved, [0xff, 0xa5]);
+        }
+        let mut stream = stream(1, 0x123, 0x100, 0x145);
+        stream.state_reserved[0] = 2;
+        assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 0) }, -61);
+        assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (1, 0x123, 0x145));
+    }
+
+    #[test]
+    fn mode_switch_flushes_old_output_then_resets_new_input() {
+        let _seams = install_finalizer();
+        unsafe { WRITE_TRANSFERRED = 0x20; }
+        let mut stream = stream(0, 0x120, 0x100, 0x17f);
+        stream.io_reserved[1] = 0x80;
+        assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 1) }, 0);
+        assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (1, 0x101, 0x100));
+        unsafe { assert_eq!(WRITE_CALLS, 1); }
+    }
+
+    #[test]
+    fn mode_switch_keeps_old_mode_on_flush_error_and_short_write() {
+        let _seams = install_finalizer();
+        for (error, transferred, expected) in [(-17, 0x20, -17), (0, 0x1f, -34)] {
+            unsafe {
+                WRITE_RESULT = error;
+                WRITE_TRANSFERRED = transferred;
+            }
+            let mut stream = stream(0, 0x120, 0x100, 0x17f);
+            stream.io_reserved[1] = 0x80;
+            assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 1) }, expected);
+            assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (0, 0x100, 0x17f));
+        }
+    }
+
+    #[test]
+    fn mode_switch_uses_full_request_before_byte_truncation() {
+        let _seams = install_finalizer();
+        let mut stream = stream(1, 0x102, 0x100, 0x105);
+        stream.cached_position = 0x500;
+        stream.io_reserved[1] = 0x80;
+        stream.state_reserved = [1, 0xa5];
+        assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 256) }, 0);
+        assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (0, 0x100, 0x17f));
+        assert_eq!(stream.state_reserved, [1, 0xa5]);
+        unsafe { assert_eq!(SEEK_POSITION, 0x502); }
+
+        stream.is_input = 1;
+        stream.cursor = 0x102;
+        stream.buffer_end = 0x105;
+        stream.state_reserved[0] = 0;
+        unsafe { SEEK_RESULT = -19; }
+        assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 0) }, -19);
+        assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (1, 0x102, 0x105));
+        unsafe { SEEK_RESULT = 0; }
+        assert_eq!(unsafe { ft_buffered_stream_set_mode(&mut stream, 0) }, 0);
+        assert_eq!((stream.is_input, stream.cursor, stream.buffer_end), (0, 0x100, 0x17f));
     }
 
     #[test]
