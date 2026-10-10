@@ -48,13 +48,13 @@ pub static mut GLOBAL_SLOT_8_CALLBACK_TARGET: *mut GlobalSlot8CallbackTarget = c
 
 #[cfg(target_os = "none")]
 #[inline(always)]
-unsafe fn global_slot_8_callback_target() -> *mut GlobalSlot8CallbackTarget {
+pub(crate) unsafe fn global_slot_8_callback_target() -> *mut GlobalSlot8CallbackTarget {
     read_volatile(GLOBAL_SLOT_8_CALLBACK_TARGET_ADDRESS as *const *mut GlobalSlot8CallbackTarget)
 }
 
 #[cfg(not(target_os = "none"))]
 #[inline(always)]
-unsafe fn global_slot_8_callback_target() -> *mut GlobalSlot8CallbackTarget {
+pub(crate) unsafe fn global_slot_8_callback_target() -> *mut GlobalSlot8CallbackTarget {
     read_volatile(addr_of!(GLOBAL_SLOT_8_CALLBACK_TARGET))
 }
 
@@ -76,12 +76,14 @@ pub unsafe extern "C" fn global_slot_8_callback_dispatch(event_code: u32) -> u32
 }
 
 #[cfg(test)]
+pub(crate) static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use core::sync::atomic::{AtomicU32, Ordering};
 
     static EVENT: AtomicU32 = AtomicU32::new(0);
-    static TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     unsafe extern "C" fn record_event(event_code: u32) -> u32 {
         EVENT.store(event_code, Ordering::Relaxed);
