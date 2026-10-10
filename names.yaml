@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08075e90
+    ghidra: FUN_08075e90
+    name: packed_surface_bounds_clip
+    size: 220
+    sig: "uint32_t packed_surface_bounds_clip(uint32_t *state, const int32_t *clip)"
+    module: ui/packed_surface_bounds_clip
+    status: ported
+    vars:
+      param_1/r0: state
+      param_2/r1: clip
+      r3: surface_top
+      r2: surface_left
+      r4: surface_bottom
+      r12: surface_right
+      r5: translated_left
+      r6: translated_right
+      r7: translated_top
+    notes: >-
+      Raw A32 establishes [0x08075e90,0x08075f6c), 220 bytes, ending
+      in BX LR before the next function's PUSH. Whole-image word scan
+      verifies two incoming plain BLs at 0x080748f0 and 0x080f2df0,
+      zero incoming predicated BLs and zero outgoing BLs of either kind.
+      State words 3..6 and surface words 5..8 are QuickDraw bounds;
+      state word 7 is the 32-bit surface pointer. Optionally intersect
+      local bounds, translate by surface top/left with wrapping adds,
+      clamp to surface bounds, return signed positive width and height.
+      Empty/inverted bounds are retained. No algorithm or ABI deviations;
+      shifted clip aliases preserve horizontal-first access order.
+      Host edge/reference tests pass (15404 full-suite tests), including
+      signed extrema, overflow, null/empty/inverted clips and overlap.
+      Executable smoke and ARM release build pass. match.py exit 1:
+      55 stock versus 59 Rust instructions. LLVM adds a frame pointer,
+      retains coordinates in registers, combines bottom intersection
+      with translation, and computes both positivity predicates before
+      AND; signed conditions, wrapping adds and final bounds agree.
   - address: 0x080776b0
     ghidra: FUN_080776b0
     name: signed_word_insertion_sort
