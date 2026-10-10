@@ -14,7 +14,7 @@
 //! the original restores r1, not a meaningful second return value. LLVM
 //! may inline the existing ft_mem_realloc wrapper; no new allocator seam.
 
-use crate::ft::memory::{ft_mem_realloc, FtMemory};
+use crate::ft::memory::{ft_mem_free, ft_mem_realloc, FtMemory};
 
 #[repr(C)]
 pub struct BdfList {
@@ -53,10 +53,108 @@ pub unsafe extern "C" fn bdf_list_ensure_capacity(list: *mut BdfList, minimum: i
     error
 }
 
+/// BDF token-list destruction — FUN_0808799c @ 0x0808799c.
+/// True extent [0x0808799c, 0x080879d0): 52 bytes, ending in POP PC;
+/// the next function begins with PUSH. Raw words verify one outgoing
+/// plain BL to ft_mem_free (0x082cfae8), two incoming plain BLs
+/// (0x08082284, 0x080d37f8), and no predicated BLs.
+///
+/// A null allocator leaves the entire list untouched. Otherwise release
+/// tokens through the saved allocator, then clear tokens, capacity, count,
+/// and memory, including any changes made by the release callback.
+/// Deliberate deviations: native host pointers use the existing repr(C)
+/// BdfList; target fields remain at +0, +4, +8, +12. Omit the original's
+/// redundant second zero store to tokens; no behavioral deviation.
+///
+/// # Safety
+/// `list` must be writable. For non-null tokens and memory, the allocator
+/// must satisfy ft_mem_free's contract. Callbacks must leave `list` valid.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn bdf_list_done(list: *mut BdfList) {
+    let memory = (*list).memory;
+    if memory.is_null() {
+        return;
+    }
+    ft_mem_free(memory, (*list).tokens.cast());
+    (*list).tokens = core::ptr::null_mut();
+    (*list).capacity = 0;
+    (*list).count = 0;
+    (*list).memory = core::ptr::null_mut();
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use crate::ft::error::{FT_ERR_INVALID_ARGUMENT, FT_ERR_OUT_OF_MEMORY};
+
+    #[test]
+    fn done_without_allocator_preserves_all_fields() {
+        let mut token = 0xdeadbeef;
+        let mut list = BdfList {
+            tokens: &mut token, capacity: -7, count: 19, memory: core::ptr::null_mut(),
+        };
+        unsafe { bdf_list_done(&mut list); }
+        assert_eq!(list.tokens, &mut token as *mut u32);
+        assert_eq!((list.capacity, list.count, token), (-7, 19, 0xdeadbeef));
+        assert!(list.memory.is_null());
+    }
+
+    #[test]
+    fn done_with_null_tokens_clears_header_without_accessing_allocator() {
+        let mut list = BdfList {
+            tokens: core::ptr::null_mut(), capacity: 8, count: 3,
+            memory: core::ptr::without_provenance_mut(1),
+        };
+        unsafe { bdf_list_done(&mut list); }
+        assert!(list.tokens.is_null() && list.memory.is_null());
+        assert_eq!((list.capacity, list.count), (0, 0));
+        unsafe { bdf_list_done(&mut list); }
+        assert_eq!((list.capacity, list.count), (0, 0));
+    }
+
+    #[test]
+    fn done_releases_live_storage_before_clearing_callback_changes() {
+        struct ReleaseState {
+            list: *mut BdfList,
+            storage: Option<std::boxed::Box<[u32; 4]>>,
+            observed: Option<(i32, i32)>,
+        }
+        unsafe extern "C" fn free_list(memory: *mut FtMemory, block: *mut u8) {
+            let state = &mut *((*memory).user as *mut ReleaseState);
+            let storage = state.storage.take().unwrap();
+            assert_eq!(block, storage.as_ptr() as *mut u8);
+            assert_eq!((*state.list).memory, memory);
+            state.observed = Some(((*state.list).capacity, (*state.list).count));
+            drop(storage);
+            (*state.list).tokens = core::ptr::without_provenance_mut(4);
+            (*state.list).capacity = -1;
+            (*state.list).count = -2;
+            (*state.list).memory = core::ptr::null_mut();
+        }
+        let mut state = ReleaseState {
+            list: core::ptr::null_mut(),
+            storage: Some(std::boxed::Box::new([11, 22, 33, 44])),
+            observed: None,
+        };
+        let mut memory = FtMemory {
+            user: (&mut state as *mut ReleaseState).cast(),
+            alloc: allocate, free: free_list, realloc: resize,
+        };
+        let mut list = BdfList {
+            tokens: state.storage.as_mut().unwrap().as_mut_ptr(),
+            capacity: 4, count: 3, memory: &mut memory,
+        };
+        state.list = &mut list;
+        unsafe { bdf_list_done(&mut list); }
+        assert_eq!(state.observed, Some((4, 3)));
+        assert!(state.storage.is_none());
+        assert!(list.tokens.is_null() && list.memory.is_null());
+        assert_eq!((list.capacity, list.count), (0, 0));
+        unsafe { bdf_list_done(&mut list); }
+        assert_eq!(state.observed, Some((4, 3)));
+    }
 
     struct Fixture {
         words: [u32; 32],
