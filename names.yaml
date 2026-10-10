@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ad5c8
+    ghidra: FUN_080ad5c8
+    name: af_glyph_hints_save
+    size: 112
+    sig: "void af_glyph_hints_save(const AfGlyphHintsPrefix *hints, FtOutline *outline)"
+    module: ft/glyph_hints_save
+    status: ported
+    vars:
+      param_1/r0: hints
+      param_2/r1: outline
+      r2: point
+      r3: vector
+      lr: point_end
+      hints+0x1c: point_count
+      hints+0x20: points
+      point+0x00: flags
+      point+0x10: fitted_x
+      point+0x14: fitted_y
+    notes: >-
+      Raw A32 establishes [0x080ad5c8,0x080ad638), 112 bytes, followed
+      by an independent push prologue. Zero outgoing plain or predicated
+      BLs; two incoming plain BLs at 0x080a7eb4 and 0x080b5cfc, zero
+      predicated incoming BLs. Both callers finish per-axis auto-hinting.
+      Copy fitted coordinates from 40-byte points into outline vectors;
+      flag bit 0 maps to conic tag 0, otherwise bit 1 maps to cubic tag 2,
+      otherwise on-curve tag 1. Retain wrapping count-times-40 endpoint
+      arithmetic and unsigned address comparison. Reuse FtOutline and
+      FtVector; repr(C) pointer fields widen on hosts. No callee seams or
+      algorithmic deviations. Host tests cover all 65536 flag patterns,
+      signed coordinates, untouched source and outline metadata, output
+      sentinels, and zero/wrapped-zero extents with null buffers. Full
+      host suite and ARM release build pass. Standalone smoke verifies
+      tags 1/0/2/0/1, fitted coordinates, and untouched trailing output.
+      match.py exits 1 with 28 original and 28 Rust instructions: LLVM
+      adds frame setup and an early empty-range return, computes tags
+      with conditional moves, and retains aligned coordinate loads,
+      halfword flag load, byte tag store and unsigned 40-byte scan.
   - address: 0x080b0d7c
     ghidra: FUN_080b0d7c
     name: hint_axis_done
