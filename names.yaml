@@ -239489,3 +239489,40 @@ functions:
       11 Rust instructions, with the same conditional current-ID call,
       unsigned bound and indexed store; LLVM uses <=79 instead of <80,
       a larger frame and a separate shift. No physical-device execution.
+
+  - address: 0x080b3eac
+    ghidra: FUN_080b3eac
+    name: linked_list_new
+    size: 20
+    sig: "LinkedListAnchor *linked_list_new(void)"
+    module: util/linked_list_append
+    status: ported
+    vars: {puVar1: anchor}
+    renames:
+      FUN_082aadd4: operator_new
+      FUN_08280164: resident_linked_list_anchor_initialize
+    notes: >-
+      Raw A32 words prove [0x080b3eac,0x080b3ec0), exactly 20 bytes:
+      push, mov r0,#8, BL operator_new, pop, B 0x08280164. Ghidra's
+      36-byte extent incorrectly includes part of the independent function
+      beginning at 0x080b3ec0. Whole-image aligned branch decoding finds
+      two incoming plain BLs at 0x081c1d1c and 0x081c7dec, zero predicated
+      incoming BLs, one outgoing plain BL and zero predicated outgoing BLs.
+      The initializer's four raw words at 0x08280164 clear words zero and
+      one and return with r0 unchanged; allocation failure is not guarded.
+      Callers append nodes through linked_list_append at 0x0828013c and
+      read the head through 0x08280114. Existing LinkedListAnchor repr(C)
+      u32 fields preserve the eight-byte target layout on 64-bit hosts.
+      Deliberate deviation: inline the verified two-store initializer
+      instead of adding another function port or callee seam; call the
+      already ported tag-2 operator_new. No new module or caller migration
+      is needed. Host regression covers dirty storage, untouched adjacent
+      words and the empty-list rejection of a zero node. Native actual-source
+      smoke passed 256 dirty-allocation and empty-list cases using a real
+      host allocator. Full x86_64 host tests and ARM build-std release build
+      passed. Requested match.py command exits 1 and includes the erroneous
+      36-byte Ghidra extent; corrected --size 20 comparison shows five stock
+      versus eight Rust instructions. LLVM uses a frame pointer and inlines
+      the two stores instead of the resident initializer tail branch, retaining
+      the eight-byte allocation and unchanged return pointer. The archive BL
+      operand is unresolved in match.py's disassembly. No physical-device execution.
