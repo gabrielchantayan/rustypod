@@ -164,7 +164,7 @@ pub unsafe extern "C" fn path_exists(path: *const u8, flags: u32) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
     use super::*;
     use crate::cxx::string_object::tests::STRING_OBJECT_OPS_TEST_LOCK;
@@ -177,7 +177,7 @@ mod tests {
     /// [`STRING_OBJECT_OPS_TEST_LOCK`], which every test here also
     /// holds — this module's lock is always acquired FIRST, so the two
     /// locks can never be taken in opposite orders.
-    static PATH_EXISTS_TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static PATH_EXISTS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Restores both seams and the StringObject release slot on drop,
     /// even when a test panics (the templates.rs OpsGuard precedent).

@@ -241742,3 +241742,43 @@ functions:
       relocation verifies R_ARM_CALL scan_be_word_range; the displayed
       zero BL destination is an unresolved archive relocation, not
       recursion. Symbol remains distinct; no intentional folding.
+  - address: 0x0808dac4
+    ghidra: FUN_0808dac4
+    name: empty_path_record_probe
+    size: 56
+    sig: "u32 empty_path_record_probe(u16 *record)"
+    module: app/empty_path_record_probe
+    status: ported
+    vars:
+      param_1/r4: record
+      record_plus_2: path
+      r1: sign-extended low flag byte
+    renames:
+      FUN_08030ff4: strcpy
+      FUN_080f4aa8: path_exists
+      DAT_0808daf8: empty_path_literal_083e8ba8
+    notes: >-
+      Raw osos.dec establishes [0x0808dac4,0x0808dafc), 52 instruction
+      bytes plus the four-byte 0x083e8ba8 literal at 0x0808daf8. The next
+      function starts with cmp r0,#0 at 0x0808dafc. The literal points to
+      a NUL byte, not an undecrypted dependency. Whole-image aligned A32
+      decoding finds two inbound plain BLs at 0x0806e4bc and 0x080a74e8,
+      zero predicated inbound BLs. One outbound plain BL at 0x0808dadc
+      targets ported strcpy; zero predicated outbound BLs; the final B
+      targets ported path_exists at 0x080f4aa8. Clears record's leading
+      halfword, copies an empty C string to record+2, reloads the low flag
+      byte with signed extension, and returns the path-exists status.
+      Callers subsequently pass the record to the file-open wrapper.
+      Ghidra incorrectly absorbs the tail target's scoped path object
+      and reports phantom r1/r2/r3 arguments. Deviations: a Rust empty
+      C-string constant replaces the literal's address identity. LLVM
+      folds strcpy to a single terminating-byte store and the known-zero
+      flag reload to zero; match.py (exit 1, structural diff reviewed)
+      shows strh, strb at +2, and a tail B to path_exists, with the crate
+      frame prologue. Host tests cover dirty flag values, adjacent-byte
+      preservation, and a minimum-size record. All 15334 host tests pass;
+      ARM release build passes. Standalone host smoke observes
+      [0000,ab00,1234] and status 0 using real callees with host test-cfg
+      defaults; non-test host rlib compilation is blocked by four existing
+      missing host helpers in unrelated modules. No device run performed.
+
