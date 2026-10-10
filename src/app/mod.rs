@@ -1,5 +1,7 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod owner_entry_append;
+pub use owner_entry_append::{owner_entry_append, OwnerEntry};
 pub mod linked_item_index_build;
 pub mod pixel_format_bits_per_pixel;
 pub mod ancestor_order_byte;
