@@ -241653,3 +241653,40 @@ functions:
       structural diff: 17 stock versus 19 Rust instructions, two lookups,
       wrapping byte-count multiply, and an inlined bcopy lowered to
       __aeabi_memmove rather than a tail B to the BSD adapter.
+
+  - address: 0x0808ea4c
+    ghidra: FUN_0808ea4c
+    name: scan_be_word
+    size: 16
+    sig: "u32 scan_be_word(const u8 *data, i32 remaining, u32 *skipped, u32 word)"
+    module: util/scan_be_word
+    status: ported
+    renames:
+      param_1: data
+      param_2: remaining
+      param_3: skipped
+      param_4: word
+      FUN_080b4df4: scan_be_word_range
+    notes: >-
+      Raw A32 extent is 0x0808ea4c..0x0808ea5c exclusive; the next function
+      starts with mov r0,r1 and tail-branches to 0x0828c534. Whole-image
+      aligned decoding verifies two incoming plain BLs, zero predicated
+      BLs, one outgoing plain BL at 0x0808ea54, and zero outgoing
+      predicated BLs. Stores r3 as the fifth stack argument and calls
+      the established scan_be_word_range at 0x080b4df4 with identical
+      bounds, preserving r0 as the return value. Ghidra's void/no-argument
+      prototype is incorrect. Searches overlapping big-endian words for
+      exact equality, returns zero on a match or one on exhaustion, and
+      writes the skipped-window count. Preserves the strict signed
+      wrapping remaining-minus-four gate, excluded final window, and
+      output/input aliasing. No new callee seam or behavioral deviation;
+      Rust delegates using the normal five-argument ABI.
+      All 15330 host tests pass, including exact unsigned matches,
+      excluded tails, short/signed/wrapping lengths, and aliased output.
+      Actual-source executable smoke passed 16900 reference comparisons.
+      ARM build-std release succeeds. match.py exits 1: four stock versus
+      seven Rust instructions, with the same fifth-argument store and
+      single BL but a larger frame-pointer prologue/epilogue. Object
+      relocation verifies R_ARM_CALL scan_be_word_range; the displayed
+      zero BL destination is an unresolved archive relocation, not
+      recursion. Symbol remains distinct; no intentional folding.
