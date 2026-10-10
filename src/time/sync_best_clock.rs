@@ -34,6 +34,12 @@ const RTC_WRITE_ADDRESS: usize = 0x0806_e7e4;
 const CLOCK_CHANGED_ADDRESS: usize = 0x0805_caa8;
 const CLOCK_SOURCE_COUNT: usize = 5;
 const CLOCK_SOURCE_SIZE: usize = 20;
+const CLOCK_SOURCE_STORAGE_COUNT: usize = 6;
+
+#[cfg(not(target_os = "none"))]
+#[repr(C, align(4))]
+#[derive(Clone, Copy)]
+pub struct ClockSourceStorage(pub [[u8; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
 
 type RtcWriteFn = unsafe extern "C" fn(mode: u32, source: *const ClockState) -> i32;
 type ClockChangedFn = unsafe extern "C" fn();
@@ -44,7 +50,7 @@ unsafe extern "C" fn missing_rtc_write(_mode: u32, _source: *const ClockState) -
 unsafe extern "C" fn missing_clock_changed() {}
 
 #[cfg(not(target_os = "none"))]
-pub static mut CLOCK_SOURCES: [[u8; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_COUNT] = [[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_COUNT];
+pub static mut CLOCK_SOURCES: ClockSourceStorage = ClockSourceStorage([[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
 #[cfg(not(target_os = "none"))]
 pub static mut CURRENT_CLOCK: ClockState = ClockState { year: 0, month: 0, day: 0, yday: 0, utc_offset_quarters: 0, dst_active: 0, hour: 0, minute: 0, second: 0, status: 0 };
 #[cfg(not(target_os = "none"))]
@@ -134,6 +140,39 @@ pub unsafe extern "C" fn sync_best_clock_source() -> bool {
     matches_current
 }
 
+/// Replace a clock source: `FUN_08067504` @ `0x08067504`, 116 bytes
+/// (`0x08067504..0x08067578`, including the literal at 0x08067574).
+/// Raw-word decoding finds two plain BL callers and no predicated callers;
+/// the body contains four plain BLs and one BLNE to the day-of-year helper.
+///
+/// Reject unsigned indices >= 6 before reading the input. Under semaphore 4,
+/// copy all 20 bytes, recompute day-of-year only for a nonzero month, set
+/// status (+11) and validity (+14) to one, synchronize the best source, and
+/// release the semaphore. All callee results are deliberately ignored.
+/// Deviations: reuse the ported memcpy veneer, day-of-year and synchronization
+/// implementations; host storage is explicitly word-aligned and includes the
+/// sixth slot, which the existing five-slot synchronization scan excludes.
+///
+/// # Safety
+/// For index < 6, source must address 20 readable, word-aligned bytes and must
+/// not overlap the destination slot. Firmware globals require serialization.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn clock_source_replace(index: u32, source: *const u8) -> i32 {
+    if index >= CLOCK_SOURCE_STORAGE_COUNT as u32 { return -1; }
+    rom_sem_wait(4);
+    let destination = sources().add(index as usize * CLOCK_SOURCE_SIZE);
+    crate::libc::iram_veneers::iram_memcpy_veneer(destination, source, CLOCK_SOURCE_SIZE);
+    if ptr::read(destination.add(2)) != 0 {
+        super::clock_state::clock_state_day_of_year(destination.cast());
+    }
+    ptr::write(destination.add(11), 1);
+    ptr::write(destination.add(14), 1);
+    sync_best_clock_source();
+    rom_sem_signal(4);
+    0
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -150,7 +189,7 @@ mod tests {
     unsafe extern "C" fn no_op_semaphore(_semaphore: usize) -> usize { 0 }
 
 
-    struct Fixture { _lock: MutexGuard<'static, ()>, write: RtcWriteFn, changed: ClockChangedFn, rom: crate::kernel::task_lock::RomThunkOps, sources: [[u8; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_COUNT], current: ClockState, selected: i32 }
+    struct Fixture { _lock: MutexGuard<'static, ()>, write: RtcWriteFn, changed: ClockChangedFn, rom: crate::kernel::task_lock::RomThunkOps, sources: ClockSourceStorage, current: ClockState, selected: i32 }
     unsafe fn install() -> Fixture {
         let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rom = ptr::read_volatile(ptr::addr_of!(crate::kernel::task_lock::ROM_KERNEL));
@@ -159,15 +198,65 @@ mod tests {
         installed_rom.rom_sem_wait = no_op_semaphore;
         installed_rom.rom_sem_signal = no_op_semaphore;
         ptr::write_volatile(ptr::addr_of_mut!(crate::kernel::task_lock::ROM_KERNEL), installed_rom);
-        RTC_WRITE = record_write; CLOCK_CHANGED = record_changed; CLOCK_SOURCES = [[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_COUNT]; WRITES.store(0, Ordering::Relaxed); NOTIFICATIONS.store(0, Ordering::Relaxed);
+        RTC_WRITE = record_write; CLOCK_CHANGED = record_changed; CLOCK_SOURCES = ClockSourceStorage([[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]); WRITES.store(0, Ordering::Relaxed); NOTIFICATIONS.store(0, Ordering::Relaxed);
         fixture
     }
     impl Drop for Fixture { fn drop(&mut self) { unsafe { RTC_WRITE = self.write; CLOCK_CHANGED = self.changed; ptr::write_volatile(ptr::addr_of_mut!(crate::kernel::task_lock::ROM_KERNEL), self.rom); CLOCK_SOURCES = self.sources; CURRENT_CLOCK = self.current; SELECTED_CLOCK_SOURCE = self.selected; } } }
     fn record(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> [u8; CLOCK_SOURCE_SIZE] { let mut r = [0; CLOCK_SOURCE_SIZE]; r[0..2].copy_from_slice(&year.to_le_bytes()); r[2] = month; r[3] = day; r[8] = hour; r[9] = minute; r[10] = second; r[14] = 1; r }
 
     #[test]
-    fn selects_oldest_valid_source_and_updates_different_current_clock() { unsafe { let _fixture = install(); CLOCK_SOURCES[0] = record(2025, 1, 2, 3, 0, 0); CLOCK_SOURCES[1] = record(2024, 12, 31, 23, 59, 59); CURRENT_CLOCK = ClockState { year: 2020, month: 1, day: 1, yday: 0, utc_offset_quarters: -8, dst_active: 1, hour: 0, minute: 0, second: 0, status: 3 }; assert!(!sync_best_clock_source()); assert_eq!(SELECTED_CLOCK_SOURCE, 1); assert_eq!((CURRENT_CLOCK.year, CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.hour), (2024, 12, 31, 23)); assert_eq!((CURRENT_CLOCK.utc_offset_quarters, CURRENT_CLOCK.dst_active, CURRENT_CLOCK.status), (-8, 1, 3)); assert_eq!(WRITES.load(Ordering::Relaxed), 1); assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 1); } }
+    fn selects_oldest_valid_source_and_updates_different_current_clock() { unsafe { let _fixture = install(); CLOCK_SOURCES.0[0] = record(2025, 1, 2, 3, 0, 0); CLOCK_SOURCES.0[1] = record(2024, 12, 31, 23, 59, 59); CURRENT_CLOCK = ClockState { year: 2020, month: 1, day: 1, yday: 0, utc_offset_quarters: -8, dst_active: 1, hour: 0, minute: 0, second: 0, status: 3 }; assert!(!sync_best_clock_source()); assert_eq!(SELECTED_CLOCK_SOURCE, 1); assert_eq!((CURRENT_CLOCK.year, CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.hour), (2024, 12, 31, 23)); assert_eq!((CURRENT_CLOCK.utc_offset_quarters, CURRENT_CLOCK.dst_active, CURRENT_CLOCK.status), (-8, 1, 3)); assert_eq!(WRITES.load(Ordering::Relaxed), 1); assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 1); } }
 
     #[test]
     fn publishes_negative_one_without_calls_when_no_source_is_valid() { unsafe { let _fixture = install(); assert!(!sync_best_clock_source()); assert_eq!(SELECTED_CLOCK_SOURCE, -1); assert_eq!(WRITES.load(Ordering::Relaxed), 0); assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 0); } }
+
+    #[test]
+    fn replace_rejects_unsigned_out_of_range_without_reading_source() {
+        unsafe {
+            let _fixture = install();
+            for index in [6, 7, u32::MAX] {
+                assert_eq!(clock_source_replace(index, ptr::null()), -1);
+            }
+            assert_eq!(CLOCK_SOURCES.0, [[0; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
+            assert_eq!(WRITES.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn replace_preserves_payload_and_zero_month_day_of_year_in_sixth_slot() {
+        unsafe {
+            let _fixture = install();
+            let mut input = ClockSourceStorage([[0xa5; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
+            input.0[0][2] = 0;
+            assert_eq!(clock_source_replace(5, input.0[0].as_ptr()), 0);
+            let mut expected = input.0[0];
+            expected[11] = 1; expected[14] = 1;
+            assert_eq!(CLOCK_SOURCES.0[5], expected);
+            assert_eq!(CLOCK_SOURCES.0[..5], [[0; CLOCK_SOURCE_SIZE]; 5]);
+            assert_eq!(SELECTED_CLOCK_SOURCE, -1);
+            assert_eq!(WRITES.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn replace_recomputes_leap_day_and_synchronizes_current_clock() {
+        unsafe {
+            let _fixture = install();
+            let mut input = ClockSourceStorage([[0x5a; CLOCK_SOURCE_SIZE]; CLOCK_SOURCE_STORAGE_COUNT]);
+            input.0[0] = record(2000, 3, 1, 12, 34, 56);
+            input.0[0][4..6].copy_from_slice(&(-123i16).to_le_bytes());
+            input.0[0][12..20].fill(0x5a);
+            assert_eq!(clock_source_replace(0, input.0[0].as_ptr()), 0);
+            let mut expected = input.0[0];
+            expected[4..6].copy_from_slice(&60i16.to_le_bytes());
+            expected[11] = 1; expected[14] = 1;
+            assert_eq!(CLOCK_SOURCES.0[0], expected);
+            assert_eq!(CLOCK_SOURCES.0[1..], [[0; CLOCK_SOURCE_SIZE]; 5]);
+            assert_eq!(CURRENT_CLOCK.yday, 60);
+            assert_eq!((CURRENT_CLOCK.year, CURRENT_CLOCK.month, CURRENT_CLOCK.day), (2000, 3, 1));
+            assert_eq!(SELECTED_CLOCK_SOURCE, 0);
+            assert_eq!(WRITES.load(Ordering::Relaxed), 1);
+            assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 1);
+        }
+    }
 }
