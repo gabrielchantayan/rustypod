@@ -774,6 +774,78 @@ pub unsafe extern "C" fn x509_attribute_first_value(
     core::ptr::null()
 }
 
+/// Certificate prefix: retail's first word points to its certificate-info.
+#[repr(C)]
+pub struct X509ExtensionOwner {
+    pub info: *const X509ExtensionInfo,
+}
+
+/// Certificate-info prefix through the extension stack at target offset +0x24.
+/// Native pointer alignment widens this prefix on hosts only.
+#[repr(C)]
+pub struct X509ExtensionInfo {
+    pub preceding_words: [u32; 9],
+    pub extensions: *const u32,
+}
+
+/// Only the first field of an X509_EXTENSION is inspected by this search.
+#[repr(C)]
+pub struct X509ExtensionPrefix {
+    pub object: *const Asn1Object,
+}
+
+#[cfg(target_os = "none")]
+const _: [u8; 0x24] = [0; core::mem::offset_of!(X509ExtensionInfo, extensions)];
+
+/// x509_get_ext_by_nid — `FUN_08070c1c` @ 0x08070c1c, **12 bytes**.
+///
+/// Raw words are two loads (`[r0]`, then `[r0,#0x24]`) and a tail branch
+/// to 0x080713a4; the next real entry is 0x08070c28. Ghidra's 164-byte
+/// decompilation incorrectly absorbs the search worker. Whole-image decode
+/// finds two inbound plain BLs (0x0807775c, 0x080b245c), no predicated BLs,
+/// and no outgoing BLs in this wrapper.
+///
+/// Load the certificate's extension stack, resolve the requested NID, and
+/// find the first DER-equal extension after `last`. Return -2 for unresolved
+/// NID, -1 for no match. The worker snapshots the signed stack count once.
+///
+/// Deviations: inline the verified workers at 0x080713a4 and 0x080713d8
+/// rather than introduce a new firmware seam. Native pointer fields on hosts
+/// and the native OID comparator follow the adjacent attribute port; ARM
+/// retains the target layout and existing raw-word comparator.
+///
+/// # Safety
+/// `owner` and its info pointer must be valid, non-null readable objects.
+/// Any non-null extension stack and its entries must satisfy the existing
+/// provider accessor and ASN1_OBJECT contracts.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn x509_get_ext_by_nid(
+    owner: *const X509ExtensionOwner,
+    nid: i32,
+    last: i32,
+) -> i32 {
+    use crate::cxx::object_flags::{namespace_provider_at, namespace_provider_count};
+
+    let extensions = (*(*owner).info).extensions;
+    let object = obj_nid2obj(nid);
+    if object.is_null() { return -2; }
+    if extensions.is_null() { return -1; }
+    let mut index = last.wrapping_add(1);
+    if index < 0 { index = 0; }
+    let count = namespace_provider_count(extensions);
+    while index < count {
+        let extension = namespace_provider_at(extensions, index as u32).cast::<X509ExtensionPrefix>();
+        #[cfg(target_os = "none")]
+        let order = crate::crypto::obj_cmp::obj_cmp((*extension).object.cast(), object.cast());
+        #[cfg(not(target_os = "none"))]
+        let order = obj_cmp((*extension).object, object);
+        if order == 0 { return index; }
+        index = index.wrapping_add(1);
+    }
+    -1
+}
+
 /// obj_nid2ln — original: `FUN_0805ee68` @ 0x0805ee68 (176 bytes: 168
 /// bytes of code plus literal-pool words @ 0x0805ef10 and @ 0x0805ef14;
 /// Ghidra reports 168 and drops the pool; next function starts at
@@ -982,6 +1054,43 @@ mod tests {
                 assert!(x509_attribute_first_value(attributes, 1).is_null());
             }
             assert!(x509_attribute_first_value(core::ptr::null(), 1).is_null());
+        }
+        clear(guard);
+    }
+
+    #[test]
+    fn certificate_extension_search_handles_duplicates_and_signed_start() {
+        let mut objects = [object(0, OID_A), object(1, OID_B), object(2, OID_C)];
+        let guard = with_nid_objects(&mut objects);
+        let duplicate = object(99, OID_B);
+        let entries = [
+            X509ExtensionPrefix { object: &objects[0] },
+            X509ExtensionPrefix { object: &duplicate },
+            X509ExtensionPrefix { object: &objects[1] },
+        ];
+        let table = entries.each_ref().map(|entry| (entry as *const X509ExtensionPrefix).cast::<u32>());
+        let mut storage = [0usize; 2];
+        let stack = storage.as_mut_ptr().cast::<u32>();
+        let mut info = X509ExtensionInfo { preceding_words: [0; 9], extensions: stack };
+        let owner = X509ExtensionOwner { info: &info };
+        unsafe {
+            stack.write(3);
+            stack.add(1).cast::<*const *const u32>().write_unaligned(table.as_ptr());
+            for (last, expected) in [
+                (i32::MIN, 1), (-2, 1), (-1, 1), (0, 1), (1, 2),
+                (2, -1), (3, -1), (i32::MAX, 1),
+            ] {
+                assert_eq!(x509_get_ext_by_nid(&owner, 1, last), expected);
+            }
+            assert_eq!(x509_get_ext_by_nid(&owner, 2, -1), -1);
+            for count in [0, -1, i32::MIN] {
+                stack.write(count as u32);
+                assert_eq!(x509_get_ext_by_nid(&owner, 1, -1), -1);
+            }
+            info.extensions = core::ptr::null();
+            assert_eq!(x509_get_ext_by_nid(&owner, 1, -1), -1);
+            objects[1].nid = 0;
+            assert_eq!(x509_get_ext_by_nid(&owner, 1, -1), -2);
         }
         clear(guard);
     }
