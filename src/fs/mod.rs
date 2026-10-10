@@ -1,5 +1,7 @@
 //! Filesystem-layer helpers (path handling, FAT-facing utilities,
 //! HFS B-tree node access).
+/// Constant storage memory-capacity gate @ 0x080b6bec.
+pub mod storage_memory_capacity_enabled;
 /// Volume-dependent default allocation-size selection @ 0x080d528c.
 pub mod default_allocation_size;
 /// ID3-prefixed word version reader @ 0x08120bdc.
