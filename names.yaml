@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08086dd0
+    ghidra: FUN_08086dd0
+    name: retail_word_at
+    size: 32
+    sig: "int32_t retail_word_at(uint32_t index, uint32_t *output)"
+    module: app/retail_word_at
+    status: ported
+    vars:
+      param_1/r0: index_then_word_then_status
+      param_2/r1: output
+      r2: retail_word_table
+    renames:
+      DAT_08086dec: retail_word_table_pointer
+    notes: >-
+      Raw A32 extent [0x08086dd0,0x08086df0) is 32 bytes: seven
+      instructions (28 bytes) and the 0x083e2568 literal at 0x08086dec.
+      Next real entry is PUSH at 0x08086df0. Whole-image aligned decoding
+      verifies two incoming plain BLs at 0x08066f64 and 0x081894e0,
+      zero predicated incoming BLs and zero outgoing plain/predicated BLs.
+      NULL output returns -50 without a table read; otherwise copy one
+      aligned word using wrapping 32-bit index scaling and return zero.
+      Same runtime table as retail_word_index; contents and bounds are not
+      invented from raw instruction bytes. No callees or target deviations.
+      Host tests cover full-width values, stride, wrapping, aliasing and NULL.
+      All 15355 host tests and ARM release build pass. Fixed-address production
+      smoke passes final-word, wrapping, aliasing and NULL-after-unmap checks.
+      match.py exit 1 reviewed: seven original versus twelve Rust listing
+      rows; same table address, load/store and status, explicit shift,
+      early NULL return and added frame setup. No outgoing calls.
   - address: 0x0808799c
     ghidra: FUN_0808799c
     name: bdf_list_done
