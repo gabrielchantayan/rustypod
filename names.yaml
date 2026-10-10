@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067678
+    ghidra: FUN_08067678
+    name: rtc_context_set_configuration_mode
+    size: 148
+    sig: "void rtc_context_set_configuration_mode(RtcContextOwner *owner, u32 mode)"
+    module: time/rtc
+    status: ported
+    renames:
+      param_1/r0: owner
+      param_2/r1: mode
+      r3: context
+      r4: media_player
+      context+0x1c: enabled
+      context+0x8e: alternate
+      FUN_0805e66c: rtc_context_mark_dirty
+      FUN_0817ceb4: media_player_get
+    notes: >-
+      Raw extent [0x08067678,0x0806770c), 148 bytes; next real
+      entry is STRB/BX LR. Whole-image A32 decoding finds two incoming
+      plain BLs at 0x081709b8 and 0x081cfdd0, zero predicated incoming
+      BLs, two outgoing plain BLs to the canonical dirty marker and player
+      getter, zero predicated outgoing BLs, two virtual BLX and a tail BX.
+      Normalize mode into +0x1c=(mode!=0), +0x8e=(mode==2). Exact-byte
+      equality skips changes; disabled equality ignores stale +0x8e.
+      Otherwise write both bytes, reload owner context and mark dirty.
+      Query player slot +0x1a4; when zero dispatch +0x78 with 3 then
+      reload vtable and dispatch +0x88. Product meaning remains unrecovered.
+      Reuse existing RTC layout and canonical seams; singleton constructor
+      limitation remains documented in media_player_get. Host vtable slots
+      widen by word index. Tests cover nonboolean bytes, arbitrary modes,
+      dirty preservation, nonzero query results and vtable replacement.
+      Host suite passes 15458 tests; ARM release build passes. Isolated
+      actual-source smoke uses a supplied singleton boundary and exercises
+      changed and unchanged mode 2 through native virtual callbacks.
+      match.py exits 1: 40 versus 37 instructions, CLZ mode normalization
+      and frame setup differ; byte comparisons/stores, pointer reloads,
+      both direct calls, virtual query and final tail dispatch remain.
   - address: 0x080677e4
     ghidra: FUN_080677e4
     name: rtc_context_set_configuration_b3d
