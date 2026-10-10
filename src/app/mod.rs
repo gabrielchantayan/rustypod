@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod global_mailbox_post;
 pub mod global_observer_get;
 pub mod media_player_apply_context_flag;
 pub mod counted_dispatch_table_address;

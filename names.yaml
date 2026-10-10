@@ -239732,3 +239732,46 @@ functions:
       archive relocations confirm all three R_ARM_CALL targets read_u16_be,
       not the misleading self-target displayed for unresolved operands.
       No physical-device execution.
+  - address: 0x080aac00
+    ghidra: FUN_080aac00
+    name: global_mailbox_post
+    size: 28
+    sig: "void global_mailbox_post(void)"
+    module: app/global_mailbox_post
+    status: ported
+    vars:
+      DAT_080aac18: global_object_cell
+    renames:
+      DAT_080aac18: global_object_cell_089caed0
+      FUN_0808e2a8: mailbox_slot_post
+      "[object + 0x14]": mailbox
+    notes: >-
+      Raw words e59f0010 e5900000 e3500000 12800014 1aff8da4
+      e12fff1e establish six instructions, followed by literal 089caed0.
+      True extent 0x080aac00..0x080aac1c is 28 bytes, not Ghidra's
+      24 instruction bytes; the next function begins with e1a00b00.
+      Whole-image A32 branch decoding finds two plain inbound BLs at
+      0x080609b4 and 0x080609ec, zero predicated inbound BLs, and zero
+      outbound BLs. Loads the object from 0x089caed0, returns if null,
+      otherwise conditionally tail-branches to mailbox_slot_post with
+      the address of its mailbox pointer slot at +0x14. The callee is
+      already ported; raw words e5900000 eaff213d confirm its dereference
+      and tail branch to csem_post. Ghidra folds this callee and its
+      atomic/wake implementation into the assigned function. Callers
+      notify after event-mask bits 0x20 and 0x40; wider object identity
+      remains unknown. No new callee seam. Deliberate deviations:
+      Rust branching replaces ARM predication, host builds substitute
+      a native-pointer global cell, and a repr(C) view retains target
+      field offsets with native host pointer alignment. Void return
+      matches both callers, which ignore r0; only the null path has a
+      specified r0 value (zero). Host coverage checks absence, current
+      object/slot reload, count overflow, and preservation of opaque
+      fields and waiter IDs.
+      Host suite and ARM release build passed. Standalone host smoke
+      exercised null, live, and removed global objects through real
+      csem_post, observing count 41 -> 42 with no absent-object change.
+      match.py reports the expected frame-pointer prologue/epilogue
+      difference: global load, null guard, +0x14 slot address, tail post.
+      Its apparent self-branch is an unresolved archive relocation;
+      objdump -dr verifies R_ARM_JUMP24 mailbox_slot_post at +0x20.
+      No physical-device execution.
