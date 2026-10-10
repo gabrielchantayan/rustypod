@@ -73,6 +73,18 @@ mod tests {
     }
 
     #[test]
+    fn wrapping_signed_lengths_still_examine_the_first_window() {
+        let data = [0x12, 0x34, 0x56, 0x78];
+        for len in i32::MIN..=i32::MIN + 3 {
+            let mut skipped = 99;
+            let result = unsafe {
+                scan_be_word_range(data.as_ptr(), len, &mut skipped, 0x12345678, 0x12345678)
+            };
+            assert_eq!((result, skipped), (0, 0), "length {len}");
+        }
+    }
+
+    #[test]
     fn inclusive_unsigned_bounds_and_reversed_range() {
         let data = [0x80, 0, 0, 1, 0];
         for (lower, upper, expected) in [
