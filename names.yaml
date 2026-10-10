@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a65cc
+    ghidra: FUN_080a65cc
+    name: bytes16_to_upper_hex
+    size: 64
+    sig: "void bytes16_to_upper_hex(const u8 *source, u8 *destination)"
+    module: util/bytes16_to_upper_hex
+    status: ported
+    vars:
+      param_1/r5: source
+      param_2/r6: destination
+      iVar1/r4: index
+    renames:
+      FUN_0802f724: sprintf
+      DAT_080a6608: UPPER_HEX_BYTE_FORMAT
+    notes: >-
+      Raw A32 extent [0x080a65cc,0x080a660c) includes 60 instruction bytes
+      and the literal 0x08977f64 at 0x080a6608. Next function starts at
+      0x080a660c. Whole-image word scan finds two incoming plain BLs at
+      0x0804b448 and 0x0804b454, zero predicated incoming BLs; body has
+      one plain BL to canonical sprintf at 0x0802f724, no predicated BLs.
+      Runtime format maps with scatter skew 0xaed8 to image 0x08982e3c,
+      whose bytes are 25 30 32 58 00 (%02X). Null source is a no-op;
+      otherwise format 16 bytes at two-byte strides and terminate at 32.
+      Deliberately inline fixed-format sprintf, preserving per-iteration
+      NUL writes and overlapping-buffer behavior; no new callee seam.
   - address: 0x080a6828
     ghidra: FUN_080a6828
     name: ancestor_order_byte
