@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b1b50
+    ghidra: FUN_080b1b50
+    name: controller_mode_select
+    size: 48
+    sig: "void controller_mode_select(u32 mode)"
+    module: drivers/controller_mode_select
+    status: ported
+    vars: {param_1/r0: mode, r1: controller_register_base, _DAT_3c400018: mode_register}
+    notes: >-
+      Raw A32 words establish [0x080b1b50,0x080b1b80), twelve instructions;
+      the next real entry starts with push {r4,r5,r6,lr}. Whole-image raw
+      decoding finds two incoming plain BLs at 0x0836e158 and 0x0836e1cc,
+      zero predicated incoming BLs and no outgoing BLs of either kind.
+      Modes 0, 1 and 2 overwrite MMIO word 0x3c400018 with 0x400, 0x600
+      and zero respectively; all other u32 inputs return without access.
+      The first caller uses mode 0 or 2 during transitions; the second
+      clears registers at 0x3c400000/+4 and then selects mode 0. Peripheral
+      identity is intentionally not inferred. No existing assigned-address
+      mapping or Rust register seam exists, and no callee seam is needed.
+      Volatile writes preserve MMIO semantics; host builds use a backing
+      word. Host tests cover full-word replacement, invalid unsigned
+      boundaries and retention across invalid transitions. Standalone entry
+      smoke observes all three encodings and invalid-mode retention.
+      Full host tests and ARM release build pass. match.py reports twelve
+      Rust instructions versus twelve stock instructions: LLVM uses an
+      unsigned range guard and three-word lookup table instead of the
+      stock comparison chain, followed by the same single MMIO store.
   - address: 0x080b43e8
     ghidra: FUN_080b43e8
     name: global_observer_get

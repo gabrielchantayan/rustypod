@@ -35,6 +35,7 @@ pub mod controller_request_wait_response;
 pub mod controller_command_initialize;
 pub mod controller_configuration_enable;
 pub mod controller_status_service;
+pub mod controller_mode_select;
 pub mod audio_output_level;
 pub mod audio_output_registers_initialize;
 pub mod audio_output_channel_flags_set;
