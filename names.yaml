@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b4bd0
+    ghidra: FUN_080b4bd0
+    name: itunes_directory_visit
+    size: 44
+    sig: "void itunes_directory_visit(DirectoryVisitor visitor, uint32_t continuation)"
+    module: app/itunes_directory_visit
+    status: ported
+    vars: {param_1/r0: visitor, param_2/r1: continuation, r3: exclusion_mask}
+    notes: >-
+      Raw words establish 20 code bytes ending in a tail B to 0x08093f70,
+      followed by the 24-byte iPod_Control/iTunes/ literal; next independent
+      entry is 0x080b4bfc. Zero outgoing plain or predicated BLs; two incoming
+      plain BLs at 0x08113818 and 0x08114d8c, no predicated BLs. Ghidra
+      erroneously attributes the directory walker body to this wrapper.
+      Reorders visitor/continuation into r1/r2 and supplies path and zero
+      exclusion mask. The unported walker calls a seven-argument visitor,
+      stops on zero, and otherwise passes continuation to 0x0808ce5c.
+      Neither assigned address nor walker had an existing names entry.
+      Rust uses its own static path and a host walker seam; target retains
+      the stock walker. Host suite: 15204 passed. Temporary host edge test
+      and executable smoke verified flagged entry delivery and callback stop.
+      ARM release build passed. match.py shows the same argument reorder and
+      zero mask, with a restored frame and literal-loaded BX to 0x08093f70
+      instead of the original direct B; the static path has a linker relocation.
   - address: 0x080b5a44
     ghidra: FUN_080b5a44
     name: outline_direction

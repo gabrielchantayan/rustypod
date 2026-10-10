@@ -1347,3 +1347,4 @@ pub mod screen_dependencies_initialize;
 pub mod parse_result_unsupported;
 pub mod descriptor_find_duplicate;
 pub mod global_slot_28_callback_dispatch;
+pub mod itunes_directory_visit;
