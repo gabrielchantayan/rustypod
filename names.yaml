@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a92c4
+    ghidra: FUN_080a92c4
+    name: psh_mask_table_done
+    size: 100
+    sig: "void psh_mask_table_done(uint32_t *table, FtMemory *memory)"
+    module: ft/pshinter
+    status: ported
+    vars:
+      param_1: table
+      param_2: memory
+      puVar1: mask
+      iVar2: remaining_capacity
+    notes: >-
+      Raw A32 words establish [0x080a92c4, 0x080a9328), with POP PC
+      at 0x080a9324 and a fresh PUSH at 0x080a9328. Two outgoing plain
+      BLs at 0x080a92e8 and 0x080a9314 target the already-ported
+      ft_mem_free at 0x082cfae8; no predicated outgoing BLs. Whole-image
+      decoding finds two incoming plain BLs at 0x080a3c38 and 0x080a3c44,
+      no predicated incoming BLs. The caller destroys two mask tables in
+      a PostScript hint dimension. Snapshot capacity at header word 1
+      and array at word 2; free each four-word record's buffer at word 2
+      and clear words 2, 0, 1, 3. Reload and free the array, then clear
+      header words 2, 0, 1. Active count at word 0 does not bound cleanup.
+      No NULL-header guard or new allocator seam. Target pointers remain
+      u32 words following existing pshinter conventions. Host tests cover
+      capacities 0..3, every partial-buffer combination, callback-visible
+      state, untouched trailing storage, and repeated cleanup. ARM match
+      shows the same capacity loop, 16-byte stride, two free calls and
+      final array reload; LLVM reorders adjacent zero stores with no
+      intervening observable callback and uses a larger register frame.
+
   - address: 0x080a960c
     ghidra: FUN_080a960c
     name: store_response_u32_be

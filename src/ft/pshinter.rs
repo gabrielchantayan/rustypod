@@ -1,5 +1,112 @@
 use crate::ft::memory::{ft_mem_realloc, FtMemory};
 
+/// Release a PostScript hint mask table — FUN_080a92c4 @ 0x080a92c4.
+/// True extent [0x080a92c4, 0x080a9328): 100 bytes; the next word is a
+/// fresh PUSH prologue. Two plain BLs to ft_mem_free @ 0x082cfae8, zero
+/// predicated BLs; two incoming plain BLs in FUN_080a3c28.
+///
+/// Snapshot capacity (word 1) and the record array (word 2). For every
+/// allocated four-word mask, free its byte buffer at word 2, then clear
+/// words 2, 0, 1, and 3. Reload and free the header's array pointer, then
+/// clear header words 2, 0, and 1. Active count does not limit cleanup.
+/// Deliberate deviation: Rust replaces register/post-index addressing;
+/// target pointers remain u32 words, matching this module's existing ABI.
+/// The existing allocator port may inline its null-guarded callback.
+///
+/// # Safety
+/// `table` is a writable three-word header; its capacity-sized record array
+/// is writable and all non-null buffers belong to `memory`. Callbacks must
+/// keep the header and record storage alive until their final release.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn psh_mask_table_done(table: *mut u32, memory: *mut FtMemory) {
+    let mut remaining = table.add(1).read();
+    let mut mask = (table.add(2).read() as usize) as *mut u32;
+    while remaining != 0 {
+        crate::ft::memory::ft_mem_free(memory, (mask.add(2).read() as usize) as *mut u8);
+        mask.add(2).write(0);
+        mask.write(0);
+        mask.add(1).write(0);
+        mask.add(3).write(0);
+        mask = mask.add(4);
+        remaining -= 1;
+    }
+    crate::ft::memory::ft_mem_free(memory, (table.add(2).read() as usize) as *mut u8);
+    table.add(2).write(0);
+    table.write(0);
+    table.add(1).write(0);
+}
+
+#[cfg(test)]
+mod mask_table_done_tests {
+    extern crate std;
+    use super::*;
+
+    struct Recorder {
+        table: *mut u32,
+        records: *mut u32,
+        calls: std::vec::Vec<(usize, [u32; 3], [u32; 12])>,
+    }
+    unsafe extern "C" fn free(memory: *mut FtMemory, block: *mut u8) {
+        let recorder = &mut *((*memory).user as *mut Recorder);
+        let header = [recorder.table.read(), recorder.table.add(1).read(),
+                      recorder.table.add(2).read()];
+        let mut records = [0; 12];
+        records.copy_from_slice(core::slice::from_raw_parts(recorder.records, 12));
+        recorder.calls.push((block as usize, header, records));
+    }
+    unsafe extern "C" fn alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        panic!("cleanup must not allocate")
+    }
+    unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 {
+        panic!("cleanup must not reallocate")
+    }
+
+    #[test]
+    fn capacity_cleanup_preserves_callback_state_and_trailing_storage() {
+        use crate::testing::{hints, try_map_u32_slab};
+        let Some(slab) = try_map_u32_slab(hints::PSH_MASK_TABLE_DONE, 0x1000) else { return; };
+        unsafe {
+            let records = slab.cast::<u32>();
+            let base = records as usize as u32;
+            for capacity in 0..=3 {
+                for present in 0..8 {
+                    let mut state = [0u32; 12];
+                    for i in 0..3 {
+                        state[i * 4..i * 4 + 4].copy_from_slice(&[
+                            11 + i as u32, 21 + i as u32,
+                            if present & (1 << i) != 0 { base + 128 + i as u32 * 16 } else { 0 },
+                            31 + i as u32,
+                        ]);
+                    }
+                    core::ptr::copy_nonoverlapping(state.as_ptr(), records, 12);
+                    let mut header = [0, capacity, base, 0xabcdef01];
+                    let original = [0, capacity, base];
+                    let mut expected = std::vec::Vec::new();
+                    for i in 0..capacity as usize {
+                        if state[i * 4 + 2] != 0 {
+                            expected.push((state[i * 4 + 2] as usize, original, state));
+                        }
+                        state[i * 4..i * 4 + 4].fill(0);
+                    }
+                    expected.push((base as usize, original, state));
+                    let mut recorder = Recorder { table: header.as_mut_ptr(), records,
+                        calls: std::vec::Vec::new() };
+                    let mut memory = FtMemory {
+                        user: (&mut recorder as *mut Recorder).cast(), alloc, free, realloc,
+                    };
+                    psh_mask_table_done(header.as_mut_ptr(), &mut memory);
+                    assert_eq!(recorder.calls, expected, "capacity {capacity}, mask {present}");
+                    assert_eq!(header, [0, 0, 0, 0xabcdef01]);
+                    assert_eq!(core::slice::from_raw_parts(records, 12), &state);
+                    psh_mask_table_done(header.as_mut_ptr(), core::ptr::null_mut());
+                    assert_eq!(recorder.calls, expected);
+                }
+            }
+        }
+    }
+}
+
 /// Selects the last stem record, appending one if empty — FUN_080a9328
 /// @ 0x080a9328, true extent 68 bytes through 0x080a936c.
 /// Raw A32 decoding: two inbound plain BLs (0x080cd950, 0x080d9ce4),
