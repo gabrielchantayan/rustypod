@@ -394,6 +394,34 @@ pub unsafe extern "C" fn trace_buffer_entry_state_get(selector: u32) -> u8 {
     state
 }
 
+/// trace_buffer_primary_entry_is_state_one — original: `FUN_0808e0e8`
+/// @ `0x0808e0e8`. True size: 72 bytes, next function at `0x0808e130`.
+/// Whole-image raw A32 decoding verifies two inbound plain BLs
+/// (0x08093f8c, 0x081178d8), three outbound plain BLs, no predicated BLs.
+///
+/// Acquire global slot zero with an initially NULL guard, snapshot whether
+/// its byte at +0x0c equals exactly one, release any acquired entry lock,
+/// and return the normalized result. No deliberate deviations; native host
+/// pointer layouts follow the existing registry and counted-mutex ports.
+///
+/// # Safety
+/// The global registry must resolve slot zero to a readable entry.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn trace_buffer_primary_entry_is_state_one() -> u32 {
+    let mut entry_guard: *mut CountedMutex = core::ptr::null_mut();
+    let entry = trace_buffer_slot_acquire(
+        trace_buffer_get().cast::<TraceBuffer>(),
+        0,
+        core::ptr::addr_of_mut!(entry_guard),
+    );
+    let result = (entry.cast::<u8>().add(0x0c).read() == 1) as u32;
+    if !entry_guard.is_null() {
+        mutex_unlock_counted(entry_guard);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -497,6 +525,51 @@ mod tests {
                     assert_eq!(buffer.entries_lock.hold_count, 0);
                     assert_eq!(TRACE_STATIC_WORDS[2], 0);
                 }
+            }
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn primary_state_one_checks_exact_byte_and_balances_slot_zero_lock() {
+        let guard = reset();
+        unsafe {
+            let mut entry = trace_buffer_entry();
+            let mut other = trace_buffer_entry();
+            other.opaque_00[3] = 1;
+            let mut buffer = initialized_trace_buffer();
+            buffer.entries[0] = ptr::addr_of_mut!(entry);
+            buffer.entries[1] = ptr::addr_of_mut!(other);
+            TRACE_STATIC_GUARD = 1;
+            TRACE_BUFFER_CACHE = ptr::addr_of_mut!(buffer).cast();
+            for state in 0..=255u8 {
+                entry.opaque_00[3] = 0xffff_ff00 | u32::from(state);
+                assert_eq!(trace_buffer_primary_entry_is_state_one(), u32::from(state == 1));
+                assert_eq!(entry.access_lock.hold_count, 0);
+                assert_eq!(other.access_lock.hold_count, 0);
+                assert_eq!(buffer.entries_lock.hold_count, 0);
+                assert_eq!(TRACE_STATIC_WORDS[2], 0);
+            }
+        }
+        restore(guard);
+    }
+
+    #[test]
+    fn primary_state_one_fallback_does_not_release_unowned_lock() {
+        let guard = reset();
+        unsafe {
+            let mut fallback = trace_buffer_entry();
+            fallback.access_lock.hold_count = 7;
+            let mut buffer = initialized_trace_buffer();
+            DEFAULT_ENTRY_RESULT = ptr::addr_of_mut!(fallback);
+            TRACE_BUFFER_DEFAULT_ENTRY_ACCESSOR = recording_default_entry;
+            TRACE_STATIC_GUARD = 1;
+            TRACE_BUFFER_CACHE = ptr::addr_of_mut!(buffer).cast();
+            for state in [0u8, 1, 2, 0x80, 0xff] {
+                fallback.opaque_00[3] = 0xaabb_cc00 | u32::from(state);
+                assert_eq!(trace_buffer_primary_entry_is_state_one(), u32::from(state == 1));
+                assert_eq!(fallback.access_lock.hold_count, 7);
+                assert_eq!(buffer.entries_lock.hold_count, 0);
             }
         }
         restore(guard);
