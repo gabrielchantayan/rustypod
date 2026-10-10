@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067504
+    ghidra: FUN_08067504
+    name: clock_source_replace
+    size: 116
+    sig: "i32 clock_source_replace(u32 index, const u8 *source)"
+    module: time/sync_best_clock
+    status: ported
+    renames:
+      param_1/r4: index
+      param_2/r5: source
+      iVar1/r4: destination
+      DAT_08067574: clock_sources
+      thunk_EXT_FUN_22003fd0: rom_sem_wait
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+      FUN_080d6fe0: clock_state_day_of_year
+      FUN_080e1d18: sync_best_clock_source
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw extent [0x08067504,0x08067578) comprises 112 instruction bytes
+      and the 0x08a662ec table pointer at 0x08067574; the next function
+      begins with LDR at 0x08067578. Whole-image aligned A32 BL decoding
+      finds two plain callers at 0x08065dec and 0x080684f8 and no predicated
+      callers. Body has four plain BLs and one BLNE. Reject unsigned index
+      >=6 with -1; otherwise wait on semaphore 4, copy 20 bytes into the
+      indexed slot, recompute day-of-year if month is nonzero, set bytes
+      +11/+14 to one, synchronize and signal semaphore 4, returning zero.
+      Reuse existing ported callees without new seams. Host storage gains
+      word alignment and sixth slot; synchronization still scans five slots.
+      Host tests cover null invalid input, leap-day synchronization, payload
+      preservation, and sixth-slot zero-month day-of-year preservation.
   - address: 0x08067614
     ghidra: FUN_08067614
     name: rtc_context_set_configuration_b35
