@@ -8,26 +8,21 @@
 //! plain `bl` sites (`0x081d3d78`, `0x081d3f98`, `0x081d56b0`, and
 //! `0x081d5890`) reach this entry; no predicated inbound calls were found.
 //! It seeds a 14-byte text buffer with its four incoming argument words, asks
-//! the unrecovered reader to fill it, then scans that text with the retail
+//! the bounded file-prefix reader to fill it, then scans that text with the retail
 //! format at `0x083e8ba4` into `value`. Its success result is the reader's
 //! result; the scan result is deliberately ignored.
 //!
 //! # Deliberate deviations
 //!
-//! The reader at `0x080962f0` has no recovered semantic identity in
-//! `names.yaml`; target builds call its verified retailOS address and host
-//! builds use a narrow callback seam. Rust returns normally after the scan
-//! rather than reproducing the original stack frame and register saves.
+//! Target builds call the ported bounded file-prefix reader directly; host
+//! builds retain a callback seam for isolated scan tests. Rust returns normally
+//! after the scan rather than reproducing the original register saves.
 
-/// ABI of the unported text reader at `0x080962f0`.
+/// ABI of the bounded file-prefix reader at `0x080962f0`.
 pub type DevicePropertyReadText = unsafe extern "C" fn(*mut u8, *mut u8, u32) -> u32;
 /// ABI of the retail `sscanf` call at `0x0802f92c` for this one output argument.
 pub type ScanInteger = unsafe extern "C" fn(*const u8, *const u8, *mut i32) -> i32;
 
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_device_property_read_text(_property: *mut u8, _text: *mut u8, _capacity: u32) -> u32 {
-    0
-}
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_scan_integer(_text: *const u8, _format: *const u8, _value: *mut i32) -> i32 {
@@ -36,15 +31,10 @@ unsafe extern "C" fn missing_scan_integer(_text: *const u8, _format: *const u8, 
 
 /// Host seams for the two retailOS calls.
 #[cfg(not(target_os = "none"))]
-pub static mut DEVICE_PROPERTY_READ_TEXT: DevicePropertyReadText = missing_device_property_read_text;
+pub static mut DEVICE_PROPERTY_READ_TEXT: DevicePropertyReadText = crate::fs::file_read_prefix::retail_file_read_prefix;
 #[cfg(not(target_os = "none"))]
 pub static mut SCAN_INTEGER: ScanInteger = missing_scan_integer;
 
-#[cfg(target_os = "none")]
-#[inline(always)]
-unsafe fn device_property_read_text_target() -> DevicePropertyReadText {
-    core::mem::transmute(0x0809_62f0usize)
-}
 
 #[cfg(target_os = "none")]
 #[inline(always)]
@@ -68,7 +58,7 @@ pub unsafe extern "C" fn device_property_read_integer(
     }
 
     #[cfg(target_os = "none")]
-    let read = unsafe { device_property_read_text_target()(property, text.as_mut_ptr(), 14) };
+    let read = unsafe { crate::fs::file_read_prefix::retail_file_read_prefix(property, text.as_mut_ptr(), 14) };
     #[cfg(not(target_os = "none"))]
     let read = unsafe { DEVICE_PROPERTY_READ_TEXT(property, text.as_mut_ptr(), 14) };
 

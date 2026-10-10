@@ -241121,3 +241121,50 @@ functions:
       in both bodies: LLVM uses a countdown and post-increment pointer,
       omits the redundant high-byte mask before STRH, and changes the frame.
       Zero-count handling and the scalar halfword load/swap/store loop remain.
+
+  - address: 0x080962f0
+    ghidra: FUN_080962f0
+    name: retail_file_read_prefix
+    size: 192
+    sig: "u32 retail_file_read_prefix(u8 *path, u8 *buffer, u32 capacity)"
+    module: fs/file_read_prefix
+    status: ported
+    renames:
+      param_1: path
+      param_2: buffer
+      param_3: capacity
+      local_68: length
+      local_6c: transferred
+      auStack_64: file
+      local_48: open_status
+      FUN_08278dc4: silver_controller_transition_addon_construct_from_cstr
+      FUN_082a5418: ft_platform_file_length
+      FUN_082784b8: retail_file_read
+      FUN_08278f60: silver_controller_transition_addon_destroy
+    notes: >-
+      Raw ARM words establish 192 code bytes through the branch at
+      0x080963ac; the next real function starts with a push at 0x080963b0.
+      Five outbound plain BL sites at 0x08096320, 0x0809633c, 0x0809636c,
+      0x08096388 and 0x080963a4; no predicated outbound BLs. Whole-image
+      aligned word decoding finds two inbound plain BLs at 0x080a7454
+      and 0x081d5298, with no predicated inbound BLs. Constructs an 84-byte
+      stack-owned file object with (path, 1, 0, 0x400, 1, 0), rejects
+      nonzero status at file+0x1c or a failed length query, and reads
+      min(length, capacity). A successful nonzero transfer suffices even
+      when short; nonempty data receives no terminator. Empty files succeed,
+      writing one NUL only when capacity is nonzero. Nonempty files with
+      zero capacity still call read and fail when it transfers zero bytes.
+      Every path destroys the object. Reuses all four existing Rust ports
+      under their canonical names without introducing resident-address seams.
+      The device-property integer caller now calls this port on target.
+      Deliberate deviations are merged destructor paths, ordinary Rust
+      register saves, and private monomorphized host-fixture operations.
+      The file storage retains target word layout; the production entry
+      requires the resident subsystem, not the native-pointer host model.
+      Host tests cover truncation, short reads, untouched tails, empty files,
+      zero capacity, open/length/read errors and zero transfers. Host suite
+      and ARM release build pass. Standalone public-entry smoke with fixture
+      callees verifies capacities 0..6. match.py exits 1 with 48 instructions
+      in each body; constructor arguments, status/length checks, unsigned
+      minimum, empty-file NUL branch and teardown remain, while LLVM merges
+      destructor calls and computes the read-success predicate without branches.
