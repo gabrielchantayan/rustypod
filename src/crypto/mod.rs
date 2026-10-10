@@ -128,3 +128,4 @@ pub mod sha1_update_context;
 pub mod ensure_initialized;
 
 pub mod encoded_buffer_allocate;
+pub mod conf_section_find;

@@ -243190,3 +243190,40 @@ functions:
       is unreachable: seed is below 2^16, each update is at most
       65535 * 33 + 255 = 2162910, and masking bits 16..22 restores a
       value below 2^16. No outgoing calls are introduced.
+  - address: 0x080733bc
+    ghidra: FUN_080733bc
+    name: conf_section_find
+    size: 44
+    sig: "ConfigurationValue *conf_section_find(const Configuration *configuration, const uint8_t *section, uint32_t unused, void *spill_value)"
+    module: crypto/conf_section_find
+    status: ported
+    renames:
+      param_1/r0: configuration
+      param_2/r1: section
+      param_3/r2: unused
+      param_4/r3: spill_value
+      local_10: key
+    notes: >-
+      Raw A32 extent 0x080733bc..0x080733e8 is 44 bytes; successor begins
+      with a distinct PUSH. Independent whole-image raw-word scan finds
+      two incoming plain BLs at 0x0807c028 and 0x0807c1e8, no predicated
+      incoming BLs, and one outgoing plain BL at 0x080733e0 to the
+      already-ported lh_retrieve at 0x082d7e0c. No new callee seam.
+      CMP/CMPNE and MOVEQ return NULL for NULL configuration or section.
+      Otherwise the stack key holds section, NULL name, and the incoming
+      r3 spill word; table is loaded from configuration +8. Preserve r3
+      explicitly rather than assuming callbacks ignore the third word.
+      Ghidra's void return is wrong: raw code leaves lh_retrieve's r0
+      intact and both callers test it for NULL. repr(C) pointer fields
+      preserve target layout while allowing native host pointer widths.
+      Tests cover NULL short circuits, content-based section retrieval
+      versus named values, empty section, misses, and retrieval counters.
+      Required host suite and ARM release build passed. Isolated runtime
+      smoke using the actual Rust lookup and lh_retrieve sources passed
+      section hit, missing bucket, and NULL configuration (one hit and
+      one miss). Full-crate non-test host smoke is blocked by pre-existing
+      missing host workers in prepare_entry_metadata, shared_payload_select_kind,
+      and calendar_schedule. match.py exits 1 with 11 original versus 19
+      Rust instructions: LLVM adds a frame pointer and explicit stack
+      stores, retains both NULL guards, table +8 load, three key words
+      including r3, one BL to lh_retrieve, and unchanged return pointer.
