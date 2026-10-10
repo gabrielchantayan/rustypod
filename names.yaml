@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809114c
+    ghidra: FUN_0809114c
+    name: ata_taskfile_pack_28bit
+    size: 48
+    sig: "void ata_taskfile_pack_28bit(u8 *command, u32 lba, u32 sector_count, u32 device_flags)"
+    module: drivers/ata_taskfile_pack_28bit
+    status: ported
+    vars: {param_1/r0: command, param_2/r1: lba, param_3/r2: sector_count, param_4/r3: device_flags}
+    notes: >-
+      Raw ARM words establish [0x0809114c,0x0809117c), 48 bytes, ending
+      after bx lr at the independently entered extended packer. Zero
+      outgoing plain or predicated BLs. Whole-image raw BL decoding finds
+      two incoming plain BLs at 0x0836c618 and 0x0836cfe8, no predicated
+      incoming BLs. Read/write callers select non-EXT opcodes and limit
+      each transfer to 256 sectors. Clear byte 5, store count low byte at
+      6, LBA low three bytes at 7/8/9, and the low byte of
+      (lba >> 24) OR device_flags OR 0x40 at 10. Preserve bytes 0..4 and
+      opcode byte 11. No LBA nibble mask, validation, new seams, or deliberate
+      behavioral deviations. Host tests cover alignment, untouched fields,
+      count truncation including 256 encoding as zero, every LBA high byte,
+      and flag truncation. Full host suite and ARM release build pass.
+      Direct-entry smoke packs READ DMA with 256 sectors. match.py exit 1
+      reviewed: 12 original versus 14 Rust instructions; LLVM reorders
+      independent stores and adds frame setup/teardown, retaining all six
+      byte stores, shifts, ORs, and zero calls.
   - address: 0x0809117c
     ghidra: FUN_0809117c
     name: ata_taskfile_pack_48bit
