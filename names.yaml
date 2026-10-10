@@ -243265,3 +243265,35 @@ functions:
       Rust instructions: LLVM adds a frame pointer and explicit stack
       stores, retains both NULL guards, table +8 load, three key words
       including r3, one BL to lh_retrieve, and unchanged return pointer.
+
+  - address: 0x08070960
+    ghidra: FUN_08070960
+    name: resource_digest_compare
+    size: 60
+    sig: "i32 resource_digest_compare(u8 *left, u8 *right)"
+    module: app/resource_digest_compare
+    status: ported
+    vars: {param_1/r0/r4: left, param_2/r1/r5: right}
+    renames: {FUN_08070884: resource_load_dispatch, FUN_08030f64: memcmp}
+    notes: >-
+      Raw A32 words establish [0x08070960,0x0807099c), 60 instruction
+      bytes without literals; next function starts with PUSH {r4-r7,lr}.
+      Two outgoing plain BLs at 0x08070974 and 0x08070984 both call the
+      canonical ported resource_load_dispatch at 0x08070884; no predicated
+      BLs. Independent aligned whole-image scan finds two incoming plain
+      BLs at 0x0806fc74 and 0x0807109c, no predicated incoming BLs.
+      Prepare left then right with selector -1 and payload 0, ignoring
+      returns, then tail-branch at 0x08070998 to canonical ported memcmp
+      at 0x08030f64 with left+0x3c, right+0x3c, length 20. Callers use
+      zero as equality. Preserve exact unsigned-byte signed difference,
+      not just its sign. No new seams or behavioral deviations; LLVM
+      chooses the call/return shape. Host tests cover every digest byte,
+      opposite later mismatches, both signs, surrounding-state exclusion,
+      equality and aliased states with initialized preparation flags.
+      Host suite passed all 15415 tests. Isolated runtime smoke used the
+      actual dispatcher and comparison ports with a preparation callback
+      that populated both digests, then verified final-byte difference
+      -126. ARM release build passed. match.py exits 1 with 15 original
+      versus 16 Rust instructions: LLVM adds a frame pointer and changes
+      register allocation, retaining both preparation calls, +60 digest
+      offsets, length 20 and the final memcmp tail branch.
