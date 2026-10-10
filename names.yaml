@@ -241613,3 +241613,43 @@ functions:
       match.py exits 1: ten stock instructions versus nineteen Rust entries
       including a literal. LLVM uses BLX, a larger frame and separate stores
       instead of STM; clear length and all three final writes are preserved.
+
+  - address: 0x0808ea6c
+    ghidra: FUN_0808ea6c
+    name: dynamic_array_move_elements
+    size: 68
+    sig: "void dynamic_array_move_elements(const IndexedObject *object, u32 first, u32 last, i32 displacement)"
+    module: util/dynamic_array_move_elements
+    status: ported
+    renames:
+      param_1: object
+      param_2: first
+      param_3: last
+      param_4: displacement
+      uVar1: destination
+      uVar2: source
+      FUN_080512cc: indexed_object_element
+      FUN_08042cbc: bcopy
+    notes: >-
+      Raw osos.dec establishes the 68-byte extent 0x0808ea6c..0x0808eab0,
+      where the next function begins with push {r4,r5,r6,lr}. Independent
+      A32 word decoding finds one inbound plain BL at 0x08064720 and one
+      predicated BLNE at 0x08058b10, with no inbound B. The body contains
+      two unconditional BLs to indexed_object_element at 0x080512cc,
+      then a tail B to bcopy at 0x08042cbc. Resolve first+displacement as
+      destination before resolving first as source; copy the inclusive
+      (last-first+1)*element_size byte span with 32-bit wrapping arithmetic.
+      No additional range checks. Deliberate deviations: direct established
+      Rust callees replace retail addresses and the IRAM memmove gateway;
+      IndexedObject uses native host pointers while preserving target layout.
+      Existing dynamic_array_remove retains its separate raw-u32 mover;
+      its unrelated header/lookup model is not changed by this single port.
+      Host tests cover overlapping shifts both ways, odd/word strides,
+      singleton and identity moves, and a wrapping zero-byte span.
+      All 15327 host tests pass; ARM release build succeeds. Isolated
+      production-source executable smoke verifies both overlap directions.
+      Whole-crate non-test host smoke is blocked by existing missing
+      host-cfg helpers in unrelated modules. match.py exits 1 with a
+      structural diff: 17 stock versus 19 Rust instructions, two lookups,
+      wrapping byte-count multiply, and an inlined bcopy lowered to
+      __aeabi_memmove rather than a tail B to the BSD adapter.
