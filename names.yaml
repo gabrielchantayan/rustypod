@@ -240733,3 +240733,36 @@ functions:
       match.py exit 1: 18 original versus 23 Rust instructions, same loads/
       stores and zero assertion branch. LLVM selects the load offset, and
       uses a framed BL to the diverging panic instead of a conditional tail B.
+
+  - address: 0x0809c6fc
+    ghidra: FUN_0809c6fc
+    name: crypto_cached_context_ensure
+    size: 92
+    sig: "u32 crypto_cached_context_ensure(u32 *object, u32 context)"
+    module: crypto/cached_context_ensure
+    status: ported
+    vars: {param_1: object, param_2: context, uVar1: result}
+    renames:
+      FUN_08043b94: resource_op_dispatch
+      FUN_08062218: cached_context_initialize
+    notes: >-
+      Raw ARM words verify the exact 92-byte extent 0x0809c6fc..0x0809c757;
+      the next real function begins at 0x0809c758 with push {r2,r3,lr}.
+      Two incoming unconditional BL sites at 0x080cb934 and 0x080cbc94,
+      zero predicated incoming BLs. The body has three plain BLs and zero
+      predicated BLs: acquire resource 9, conditionally initialize, release
+      resource 9. Inspect object word +0x50 only after acquire; if already
+      nonzero return 1, otherwise call 0x08062218 with object/context and
+      preserve its entire u32 result through release, including failure zero.
+      The initializer populates +0x50; its name describes only that verified
+      role, not an inferred crypto algorithm or type. No existing names entry
+      exists for the initializer. Deviations: use the ported resource dispatcher
+      with its existing descriptor hooks and an absolute target function
+      pointer for the unported initializer; host tests replace only the latter.
+      Word indexing preserves four-byte target field spacing. Host suite:
+      15276 passed. ARM release build passed. Standalone actual-source smoke
+      verified lock-time publication, recheck, skipped initialization, unlock,
+      and adjacent guards. match.py exit 1: 23 original versus 26 Rust
+      instructions, same acquire/check/conditional initializer/release shape;
+      LLVM adds a frame pointer and calls the initializer with literal BLX
+      instead of direct BL, retaining the verified 0x08062218 literal.
