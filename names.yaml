@@ -242825,3 +242825,33 @@ functions:
       smoke observed -33 across embedded NUL and zero for i32::MIN.
       match.py exit 1: 24 original versus 31 Rust instructions; relocations
       verify the same three calls, signed entry guard, flag mask and add loop.
+
+  - address: 0x08078a78
+    ghidra: FUN_08078a78
+    name: controller_pins_initialize
+    size: 200
+    sig: "u32 controller_pins_initialize(void)"
+    module: drivers/controller_pins_initialize
+    status: ported
+    renames: {puVar1: controller}
+    notes: >-
+      Raw extent 0x08078a78..0x08078b40 comprises 192 code bytes and literals
+      0x3c200000 and 240000; the next function pushes r4-r7/lr at 0x08078b40.
+      Whole-image aligned A32 decoding verifies two inbound plain BL calls
+      at 0x0836db54 and 0x0836dba4, zero predicated calls. Five outbound plain
+      BL instructions call existing gpio_pin_configure four times and
+      iram_msec_delay_veneer once. Configures GPIO 0x72/function 2, waits 1 ms,
+      then configures 0x73..0x75/function 2. At controller base 0x3c200000,
+      clears control bits 0..19 and 22 in four separate read/write pairs,
+      writes status 7 at +0x14, sets command bit 0 at +0x10, writes timer
+      240000 at +8, then separately asserts control bits 20 and 21.
+      Returns zero regardless of callee results. Volatile accesses preserve
+      MMIO ordering; host builds reuse existing controller/GPIO/timer seams.
+      Host tests cover all-zero/all-one and alternating control bits,
+      unrelated registers, command preservation, and repeated initialization.
+      Host suite and ARM release build passed. Public-entry smoke observed
+      control 0xffb00000, timer 240000, status 7 and timer sample 1500 usec.
+      match.py exit 1 reports 48 original versus 52 Rust instructions:
+      frame-pointer setup and synthesized constants differ; all separate
+      MMIO accesses and five calls remain. ARM relocations verify existing
+      GPIO and millisecond-delay targets.

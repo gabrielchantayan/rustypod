@@ -39,6 +39,7 @@ pub mod ata_pio_write_byte;
 pub mod ata_pio_write_halfword;
 pub mod clear_controller_state_and_delay;
 pub mod controller_mode_set_and_settle;
+pub mod controller_pins_initialize;
 pub mod controller_request_submit_wait;
 pub mod controller_request_wait_response;
 pub mod controller_command_initialize;
