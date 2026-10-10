@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08070c1c
+    ghidra: FUN_08070c1c
+    name: x509_get_ext_by_nid
+    size: 12
+    sig: "i32 x509_get_ext_by_nid(const X509ExtensionOwner *owner, i32 nid, i32 last)"
+    module: crypto/obj_dat
+    status: ported
+    vars:
+      param_1: owner
+      param_2: nid
+      param_3: last
+      iVar1: extensions
+      iVar2: object
+      iVar3: count
+      puVar4: extension
+      iVar5: order
+    notes: >-
+      Raw words e5900000 e5900024 ea0001de load certificate-info, load its
+      extension stack at +0x24, and tail-branch to 0x080713a4. The next real
+      entry at 0x08070c28 establishes 12 bytes, not Ghidra's merged 164.
+      Whole-image decode finds two incoming plain BLs at 0x0807775c and
+      0x080b245c, zero predicated incoming BLs and zero outgoing BLs.
+      Callers use NIDs 85 and 82 with last=-1. Raw worker 0x080713a4
+      resolves the already ported obj_nid2obj before checking the stack;
+      worker 0x080713d8 snapshots namespace_provider_count, clamps signed
+      wrapping last+1 to zero, and scans with namespace_provider_at and
+      the already ported obj_cmp at 0x0805eb74. Returns -2 for unresolved
+      NID, -1 for no match, otherwise the first DER-equal extension index.
+      Both workers are deliberately inlined in this one export, avoiding
+      a new firmware seam. Host pointer fields widen via repr(C); ARM
+      retains the extension-stack offset +0x24. Regression covers DER
+      identity independent of NID, duplicates, continuation, signed start
+      overflow, misses, signed empty counts, null stack, and unresolved
+      NID precedence. All 15413 host tests pass; release ARM build passes.
+      Required match.py exits 1 with a structural diff, using the false
+      Ghidra extent by default. Rust retains the two loads plus the verified
+      workers' lookup, clamp, count snapshot, comparison loop and sentinels.
+
   - address: 0x080741d0
     ghidra: FUN_080741d0
     name: path_selector_initialize
