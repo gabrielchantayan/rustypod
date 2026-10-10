@@ -240828,3 +240828,36 @@ functions:
       13 original versus 17 Rust instructions; all three calls, the +0x0c
       byte load, and release-before-return are retained. LLVM adds a frame
       pointer and uses stack+4 for the guard.
+  - address: 0x0809b60c
+    ghidra: FUN_0809b60c
+    name: scoped_scaled_capacity_sample
+    size: 56
+    sig: "i64 scoped_scaled_capacity_sample(u32 interface)"
+    module: ui/object_state
+    status: ported
+    renames:
+      param_1/r0: interface
+      local_1c: resolved_owner
+      uVar1/r4: sample
+      FUN_08206e40: path_probe_guard_construct
+      FUN_08296f18: owner_scaled_capacity_query
+      FUN_08206e6c: path_probe_guard_destroy
+    notes: >-
+      Raw words establish fourteen instructions at 0x0809b60c..0x0809b640,
+      followed by the distinct push prologue at 0x0809b644. Three outgoing
+      plain BLs at 0x0809b618, 0x0809b624 and 0x0809b630; no predicated BLs.
+      Whole-image aligned BL decoding finds two incoming unconditional BLs,
+      at 0x08055fbc and 0x081957dc, no predicated callers. Construct a
+      four-word interface guard using the input hint, query its resolved
+      owner, destroy the guard, and return the saved u32 zero-extended in
+      r0:r1. Reuses existing guard seams and the actual scaled-capacity port;
+      removes the old fixed-address/host-zero clock boundary. Host owner and
+      vtable fields widen natively; guard words retain target width. Unused
+      incoming argument spills are omitted. Edge tests use a mapped owner
+      and real virtual query, exercising zero, high-bit and maximum results
+      with owner invalidation during teardown. All 15280 host tests and ARM
+      release build pass. match.py exits 1: LLVM uses indirect guard seams,
+      a relocated direct owner query, altered frame/register allocation,
+      and preserves query-before-destroy and zero high return word. A
+      standalone host smoke is limited by the crate's staticlib-only output
+      and existing non-test host missing helpers in metadata/calendar ports.
