@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809a744
+    ghidra: FUN_0809a744
+    name: ft_face_done_charmaps
+    size: 84
+    sig: "void ft_face_done_charmaps(FtFace *face, FtMemory *memory)"
+    module: ft/charmap
+    status: ported
+    vars:
+      param_1/r5: face
+      param_2/r7: memory
+      iVar1/r4: index
+    notes: >-
+      Raw A32 extent [0x0809a744,0x0809a798) is 84 bytes; next function
+      starts with a distinct push prologue. Two outgoing plain BLs at
+      0x0809a764 and 0x0809a788 target existing ft_cmap_done (0x080c0434)
+      and ft_mem_free (0x082cfae8). Two incoming plain BLs at 0x0807c364
+      and 0x080f4f1c; no incoming or outgoing predicated BLs. Destroy
+      face charmaps in ascending order, reload table before clearing each
+      slot and reload signed count after callbacks. Free the current table
+      with the supplied allocator, clear table then count; active charmap
+      is untouched. Non-positive counts skip entry destruction. Existing
+      repr(C) FtFace scales pointers on hosts; no new seams or null gates.
+      Three host tests cover ordered destruction, distinct allocators,
+      callback replacement of table/count, non-positive counts and repeat
+      cleanup. Host suite passed 15286 tests; ARM release build passed.
+      Temporary heap smoke freed two real Box cmaps and their Box table.
+      match.py reviewed: 21 original versus 25 Rust instructions; LLVM
+      adds a frame pointer and initial signed count gate, retains both calls
+      and callback reloads, and reverses the final independent field stores.
   - address: 0x0809a7e4
     ghidra: FUN_0809a7e4
     name: configured_path_suffix_digit
