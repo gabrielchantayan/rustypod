@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b19dc
+    ghidra: FUN_080b19dc
+    name: ps_skip_literal_string
+    size: 76
+    sig: "void ps_skip_literal_string(const u8 **cursor, const u8 *limit)"
+    module: ft/ps_skip_literal_string
+    status: ported
+    renames:
+      param_1/r0: cursor
+      param_2/r1: limit
+      pcVar2/r2: current
+      iVar3/r3: depth
+      cVar1/ip: byte
+    notes: >-
+      Raw firmware establishes [0x080b19dc,0x080b1a28), ending with
+      str r2,[r0] and bx lr before the next independent literal-load entry.
+      Whole-image A32 decoding verifies two incoming plain BLs at
+      0x080a9548 and 0x080cdaf8, zero predicated incoming BLs and zero
+      outgoing BLs of either kind. Callers extract or skip FreeType
+      PostScript tokens, passing a cursor at the opening parenthesis.
+      Counts nested parentheses with wrapping u32 depth and skips exactly
+      one byte after backslash; NUL is ordinary data. Stops after the close
+      that reduces depth to zero or when the unsigned cursor reaches the
+      limit. A trailing backslash preserves the stock limit-plus-one cursor
+      without reading the escaped byte. Native host pointer width is the
+      only representation deviation; ARM cursor storage remains four bytes.
+      No callee seams are needed and no prior assigned-address entry exists.
+      Host tests cover nesting, escaped delimiters and backslash, embedded
+      NUL, missing close, unmatched close, truncated escape, and cursors at
+      or beyond the limit, plus all 3125 five-byte delimiter combinations
+      at every limit. Full host suite passes all 15212 tests.
+      ARM release build and standalone entry smoke pass (nested escaped
+      string stops at offset 9; final backslash stops at offset 3).
+      match.py finds the exported symbol and reports 26 Rust instructions
+      versus 19 stock instructions, exit 1 for structural differences.
+      LLVM adds a frame-pointer prologue and branches in place of ADS
+      predication; the unsigned bound check, wrapping nesting loop,
+      escaped-byte skip, final cursor store and call-free structure remain.
   - address: 0x080b1b50
     ghidra: FUN_080b1b50
     name: controller_mode_select
