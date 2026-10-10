@@ -1,6 +1,5 @@
-//! Message-queue node delivery and recycling — the consumer-side accept
-//! step of the locked message queues drained by `mqueue_receive`
-//! (kernel/condvar.rs), and the pool return path.
+//! Message-queue receive, node delivery, and recycling — the consumer-side
+//! operations of locked message queues and the pool return path.
 //!
 //! - `mqueue_deliver` — original: `FUN_080b4a88` @ 0x080b4a88 (84 bytes;
 //!   2 call sites: `mqueue_receive` @ 0x0807f63c and the wrapper loop @
@@ -50,10 +49,8 @@
 //! kernel/condvar.rs; +4 holds the owner-pool pointer. `QueuePool` models
 //! the full 0x48-byte header laid out by `queue_pool_init`: the recycler
 //! touches +0x00..+0x28; the delivery side (+0x2c mutex, +0x34 condvar,
-//! +0x40 queue anchor — condvar.rs's `LockedQueue` view of the same
-//! block) belongs to the receive path. Byte offsets are exact on the
-//! 32-bit target only; host tests go through field accesses (same caveat
-//! as condvar.rs).
+//! +0x40 queue anchor) belongs to the receive paths. Byte offsets are exact
+//! on the 32-bit target only; host tests use repr(C) field accesses.
 //!
 //! # Dispatch design
 //!
@@ -66,10 +63,6 @@
 //! own mock tables. `read_volatile` prevents LLVM from constant-folding
 //! the table (see sync_sem.rs).
 //!
-//! Wiring note for condvar.rs: `CONDVAR_HOOKS.deliver` (stock
-//! 0x080b4a88) is `mqueue_deliver` — install it there when the kernel
-//! modules get wired; the hook types the node as `*mut ListNode`, cast
-//! at install time.
 
 use crate::kernel::condvar::{
     condvar_bind, condvar_signal, list_pop_front, list_push_back, CondVar, ListHead, ListNode,
@@ -117,14 +110,11 @@ pub struct QueuePool {
     pub persist_cv: *mut CondVar,
     /// +0x28: init-zeroed, untouched by this module.
     pub _x28: u32,
-    /// +0x2c: delivery-side mutex (sync_mutex.rs `Mutex`, 8 bytes on
-    /// target). condvar.rs's `LockedQueue.mutex` word at +0x2c is this
-    /// mutex's `sem_cell`.
+    /// +0x2c: delivery-side mutex (sync_mutex.rs `Mutex`, 8 bytes on target).
     pub mutex: Mutex,
     /// +0x34: delivery-side condvar, bound to the mutex at +0x2c.
     pub deliver_cv: CondVar,
-    /// +0x40: delivered-message queue anchor (`LockedQueue`'s +0x40 view
-    /// of the same block).
+    /// +0x40: delivered-message queue anchor.
     pub queue: ListHead,
 }
 
@@ -176,6 +166,39 @@ pub static mut MQUEUE_HOOKS: MqueueHooks = DEFAULT_MQUEUE_HOOKS;
 #[inline(always)]
 fn hooks() -> MqueueHooks {
     unsafe { core::ptr::read_volatile(core::ptr::addr_of!(MQUEUE_HOOKS)) }
+}
+
+/// mqueue_receive — original: `FUN_0807f5f4` @ 0x0807f5f4.
+///
+/// Raw A32 extent [0x0807f5f4, 0x0807f650): 92 bytes; the next push
+/// starts condvar_destroy. Two incoming plain BLs (0x0812c268, 0x08296778),
+/// no predicated BL callers. Four outgoing plain BLs, none predicated:
+/// sem_wait, list_pop_front, sem_signal, mqueue_deliver.
+/// Locks around each pop, unlocks before delivery, skips rejected nodes,
+/// and returns 0 on acceptance or 2 when the queue is empty.
+/// Deliberate deviations: semaphore calls use the existing real-default
+/// MQUEUE_HOOKS seam; list and delivery calls use real ports directly.
+/// Native repr(C) pointers widen on hosts; target fields remain 32-bit.
+///
+/// # Safety
+/// `pool` must be valid, its queue well formed, and its nodes valid for
+/// delivery/recycling. Outputs must hold two u32 words and one node pointer.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn mqueue_receive(
+    pool: *mut QueuePool, out_data: *mut u32, out_node: *mut *mut QueueNode,
+) -> u32 {
+    loop {
+        (hooks().sem_wait)((*pool).mutex.sem_cell);
+        let node = list_pop_front(core::ptr::addr_of_mut!((*pool).queue)) as *mut QueueNode;
+        (hooks().sem_signal)((*pool).mutex.sem_cell);
+        if node.is_null() {
+            return 2;
+        }
+        if mqueue_deliver(node, out_data, out_node) != 0 {
+            return 0;
+        }
+    }
 }
 
 /// mqueue_receive_wait — original: `FUN_0807a2e8` @ **0x0807a2e8**.
@@ -476,6 +499,74 @@ mod tests {
             valid,
             persistent,
         }
+    }
+
+    #[test]
+    fn receive_empty_preserves_outputs() {
+        let _guard = mock_hooks();
+        let mut pool = empty_pool();
+        let mut sentinel = node(1, 1);
+        let mut out = &mut sentinel as *mut QueueNode;
+        let mut data = [0xdead_beef, 0xcafe_babe];
+        assert_eq!(unsafe { mqueue_receive(&mut pool, data.as_mut_ptr(), &mut out) }, 2);
+        assert_eq!(data, [0xdead_beef, 0xcafe_babe]);
+        assert_eq!(out, &mut sentinel as *mut QueueNode);
+        assert_eq!(drain(), vec![
+            Call::SemWait(pool.mutex.sem_cell as usize),
+            Call::SemSignal(pool.mutex.sem_cell as usize),
+        ]);
+    }
+
+    #[test]
+    fn receive_recycles_rejected_nodes_and_stops_at_acceptance() {
+        let _guard = mock_hooks_real_recycle();
+        let mut pool = empty_pool();
+        let mut rejected = node(0, 0);
+        let mut accepted = node(7, 9);
+        let mut remaining = node(1, 1);
+        rejected.owner = &mut pool;
+        let mut data = [0xdead_beef; 2];
+        let mut out = null_mut();
+        unsafe {
+            for n in [&mut rejected, &mut accepted, &mut remaining] {
+                list_push_back(&mut pool.queue, n as *mut QueueNode as *mut ListNode);
+            }
+            assert_eq!(mqueue_receive(&mut pool, data.as_mut_ptr(), &mut out), 0);
+        }
+        assert_eq!(data, accepted.data);
+        assert_eq!(out, &mut accepted as *mut QueueNode);
+        assert_eq!(pool.queue.head, &mut remaining as *mut QueueNode as *mut ListNode);
+        assert_eq!(pool.queue.tail, pool.queue.head);
+        assert_eq!(pool.free.head, &mut rejected as *mut QueueNode as *mut ListNode);
+        assert_eq!(pool.free.tail, pool.free.head);
+        assert!(accepted.next.is_null());
+        let lock = pool.mutex.sem_cell as usize;
+        assert_eq!(drain(), vec![
+            Call::SemWait(lock), Call::SemSignal(lock),
+            Call::SemWait(pool.lock as usize),
+            Call::CvSignal(core::ptr::addr_of!(pool.notify) as usize),
+            Call::SemSignal(pool.lock as usize),
+            Call::SemWait(lock), Call::SemSignal(lock),
+        ]);
+    }
+
+    #[test]
+    fn receive_rejected_only_drains_queue_without_copying_payload() {
+        let _guard = mock_hooks_real_recycle();
+        let mut pool = empty_pool();
+        let mut rejected = node(0, 0);
+        rejected.owner = &mut pool;
+        let mut data = [0xdead_beef, 0xcafe_babe];
+        let mut out = &mut rejected as *mut QueueNode;
+        unsafe {
+            list_push_back(&mut pool.queue, out as *mut ListNode);
+            assert_eq!(mqueue_receive(&mut pool, data.as_mut_ptr(), &mut out), 2);
+        }
+        assert_eq!(data, [0xdead_beef, 0xcafe_babe]);
+        assert!(out.is_null());
+        assert!(pool.queue.head.is_null());
+        assert!(pool.queue.tail.is_null());
+        assert_eq!(pool.free.head, &mut rejected as *mut QueueNode as *mut ListNode);
     }
 
     fn empty_cv() -> CondVar {
