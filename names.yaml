@@ -240015,3 +240015,38 @@ functions:
       guard frame, +0x60 dispatch, result save, cleanup, and return are retained;
       volatile existing seams use BLX instead of direct BL, plus frame-pointer
       setup. No physical-device execution.
+
+  - address: 0x080a88c4
+    ghidra: FUN_080a88c4
+    name: ft_variation_tuple_scalar
+    size: 212
+    sig: "i32 ft_variation_tuple_scalar(const FtVariationBlend *blend, u32 flags, const i32 *peaks, const i32 *starts, const i32 *ends)"
+    module: ft/tuple_scalar
+    status: ported
+    vars: {param_1: blend, param_2: flags, param_3: peaks, param_4: starts, param_5: ends}
+    notes: >-
+      Raw ARM extent 0x080a88c4..0x080a8998, next boundary is a push
+      prologue. Two unconditional BL words at 0x080a8940 and 0x080a8990,
+      both targeting existing ft_muldiv at 0x0804d1a8; no predicated BLs.
+      FreeType variation tuple scalar used by cvar and gvar callers
+      0x0809cfcc and 0x080d2f48. Blend prefix contains axis count at +0
+      and normalized-coordinate pointer at +4 on ARM. Start at Q16.16
+      unity; skip zero peaks, reject zero coordinates or opposite signs.
+      Without flag 0x4000 multiply by wrapping absolute coordinate,
+      deliberately not coordinate/peak. With the flag require strict
+      start < coordinate < end; below peak use (coordinate-start) /
+      (peak-start), otherwise (end-coordinate) / (end-peak), each scaled
+      by 65536 through FT_MulDiv before multiplying the accumulator.
+      Ghidra omits the first call's r2 denominator; raw predicated SUBs
+      prove both spans. All subtraction and negation wrap as on ARM.
+      Host prefix uses native pointers under repr(C), target layout is
+      unchanged. Four host tests cover inactive axes, null unused arrays,
+      signs, MIN negation, out-of-range magnitudes, strict boundaries,
+      both slopes, peak unity, rounding and multi-axis multiplication.
+      Host suite and ARM release build passed. Standalone execution of
+      actual port and arithmetic source returned 0x4000 for a two-axis
+      intermediate tuple. match.py reports 53 original versus 127 Rust
+      instructions: LLVM inlines FT_MulDiv and its division loop; the
+      axis loop, sign rejection, open bounds and both span selections
+      remain. Structural diff is intentional, not an exact code match.
+      No physical-device execution.
