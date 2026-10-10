@@ -276,6 +276,30 @@ pub unsafe extern "C" fn rtc_context_mask_words(words: *mut u32, byte_len: u32) 
     }
 }
 
+/// rtc_context_mask_record_words — original: `FUN_08067eb4` @ 0x08067eb4.
+/// True extent: 72 bytes (68 instruction bytes and the four-byte literal);
+/// 2 incoming plain BL sites, 0 predicated; 1 outgoing plain BL.
+///
+/// XOR each complete aligned word with `!context_field[1] ^ 0xa425_3891`.
+/// Both recovered callers transform 32-byte records. Trailing bytes are
+/// untouched; the context is fetched and its second word read even for
+/// lengths below four. Deliberate deviations: none. The body is identical
+/// to rtc_context_mask_words; LLVM may fold their exported entry addresses.
+///
+/// # Safety
+/// `words` must be aligned and readable/writable for `byte_len >> 2` words.
+/// The current RTC context must provide an aligned eight-byte field.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn rtc_context_mask_record_words(words: *mut u32, byte_len: u32) {
+    let context_word = unsafe { rtc_context_field().add(4).cast::<u32>().read_volatile() };
+    let mask = !context_word ^ 0xa425_3891;
+    for index in 0..(byte_len >> 2) {
+        let word = unsafe { words.add(index as usize) };
+        unsafe { word.write_volatile(word.read_volatile() ^ mask) };
+    }
+}
+
 /// rtc_static_time_pair — original: `FUN_08056130` @ 0x08056130 (28 bytes).
 ///
 /// Copy the firmware's read-only fallback `(day_count, seconds_of_day)` pair
@@ -937,6 +961,39 @@ mod tests {
             assert_eq!(actual, expected, "byte_len={byte_len}");
         }
 
+        drop(_reset);
+        drop(guard);
+    }
+
+    #[test]
+    fn rtc_context_mask_record_words_preserves_tails_and_uses_current_second_word() {
+        let mut context = [0xdead_beefu32; 24];
+        let guard = install_current_context(context.as_mut_ptr().cast());
+        let _reset = ContextSourceReset;
+        for key in [0, u32::MAX, 0x1b2c_3d4e, 0xa425_3891] {
+            context[RTC_CONTEXT_FIELD_OFFSET / 4 + 1] = key;
+            for byte_len in 0..=35u32 {
+                let original = [
+                    0x0123_4567, 0x89ab_cdef, 0, u32::MAX, 0x55aa_aa55,
+                    0xfeed_beef, 0x1357_9bdf, 0x2468_ace0, 0xc001_d00d,
+                ];
+                let mut actual = original;
+                let mut expected = original;
+                for (index, word) in expected.iter_mut().enumerate() {
+                    if index * 4 + 4 <= byte_len as usize {
+                        *word = (*word ^ 0xa425_3891) ^ !key;
+                    }
+                }
+                unsafe { rtc_context_mask_record_words(actual.as_mut_ptr(), byte_len) };
+                assert_eq!(actual, expected, "key={key:#x}, byte_len={byte_len}");
+                unsafe { rtc_context_mask_record_words(actual.as_mut_ptr(), byte_len) };
+                assert_eq!(actual, original, "the XOR transform must be its own inverse");
+            }
+        }
+        // No complete words: the destination need not be dereferenceable.
+        for byte_len in 0..4 {
+            unsafe { rtc_context_mask_record_words(core::ptr::null_mut(), byte_len) };
+        }
         drop(_reset);
         drop(guard);
     }
