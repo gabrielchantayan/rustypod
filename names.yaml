@@ -55946,6 +55946,41 @@ functions:
       existing __rt_udivmod out-pointer wrapper; host tests cover every
       residue and large unsigned inputs.
 
+  - address: 0x08079a28
+    ghidra: FUN_08079a28
+    name: fixed16_sqrt
+    size: 28
+    sig: "i32 fixed16_sqrt(i32 x)"
+    module: util/fixed
+    status: identified
+    vars: {param_1: x}
+    notes: >-
+      Q16.16 square root via reciprocal of inverse square root, NOT ported.
+      Raw osos.dec words at 0x08079a28..0x08079a40 are e3500000,
+      d3a00000, e92d4010, d8bd8010, ebfff1c5, e8bd4010, eafff1ef.
+      The next real function begins at 0x08079a44 with e2623020
+      (mul_shift_i32), confirming the true extent is 28 bytes. Signed
+      x <= 0 returns zero; positive x calls fixed16_rsqrt at 0x08076154,
+      restores r4/lr, then tail-branches to fixed16_recip at 0x08076204.
+      Only r0 is an argument; Ghidra's extra parameters are artifacts of
+      following the reciprocal's computed division jump. Independent
+      aligned ARM BL decoding over the raw image finds two inbound plain
+      BL sites (0x0824c0d0, 0x0824c280), zero inbound predicated BL sites,
+      one outgoing plain BL (0x08079a38), and zero outgoing predicated
+      BL sites; the outgoing tail B at 0x08079a40 is not a BL. Both
+      callers use this result in Q16.16 distance attenuation, alongside
+      the squared distance and fixed16_mul. Blocker verified 2026-10-10:
+      fixed16_rsqrt loads its eight u16 seeds through the literal
+      0x080761fc = 0x083f18b2; all 16 seed bytes are zero in osos.dec,
+      inside the unavailable 0x083ee1c1..0x083f25ec region (exclusive
+      end, 17451 bytes, all zero). Its ldr at 0x08076178 and indexed
+      ldrh at 0x08076188 establish the direct dependency. The existing
+      Rust fixed16_recip is ported, but fixed16_rsqrt remains identified
+      without a Rust implementation. Recover the seed table before
+      porting; do not replace this rounded/truncated composition with
+      a mathematical square root or invent seeds. No Rust seam or
+      partial implementation was added.
+
   - address: 0x08079a44
     ghidra: FUN_08079a44
     name: mul_shift_i32
