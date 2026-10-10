@@ -51944,6 +51944,27 @@ functions:
       day byte. Deliberate deviation: MaybeUninit represents the uninitialized
       scratch record, and the port invokes the established volatile
       day_number_to_datetime seam rather than its direct retailOS BL.
+  - address: 0x080b3fd0
+    ghidra: FUN_080b3fd0
+    name: counted_dispatch_table_address_93e508
+    size: 12
+    sig: "const u32 *counted_dispatch_table_address_93e508(void)"
+    module: app/counted_dispatch_table_address_93e508
+    status: ported
+    renames:
+      return/r0: counted_dispatch_table
+    notes: >-
+      Raw words e59f0000 e12fff1e 0893e508 establish the 12-byte extent
+      0x080b3fd0..0x080b3fdc: ldr r0,[pc,#0]; bx lr; then the literal
+      at 0x080b3fd8. The next real function begins with push {r1-r11,lr}
+      at 0x080b3fdc. Full-image aligned A32 decoding finds two inbound
+      plain BLs at 0x080a5b64 and 0x080a5c44, zero predicated BLs, and
+      no outbound calls. Both callers pass the returned address in r1
+      to FUN_080bf640, which consumes a count and a pointer to 12-byte
+      dispatch records. The table's exact identity and contents remain
+      unrecovered. Returns the literal address without reading table
+      memory; not a branch veneer. No callee seam or host backing storage.
+      Deliberate deviations: none; hosts return the same opaque address.
   - address: 0x080c6080
     ghidra: FUN_080c6080
     name: mov_atom_node_destroy
