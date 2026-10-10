@@ -46620,6 +46620,52 @@ functions:
       Rust byte loops deliberately retain the retail copy granularity rather
       than synthesizing a bulk-copy callee.
 
+  - address: 0x0809ef6c
+    ghidra: FUN_0809ef6c
+    name: sort_plst_slot
+    size: 124
+    sig: "void sort_plst_slot(u8 *element, u8 *slot, u32 selector)"
+    status: identified
+    renames:
+      param_1/r0/r5: element
+      param_2/r1/r6: slot
+      param_3/r2/r7: selector
+      iStack_30/r4: kind_mask_table
+      FUN_080e4e64: object_kind_table
+      FUN_08055b70: retail_enum_to_bitset
+      FUN_0805c220: tdat_element_addref_counters
+      FUN_08061d20: retail_word_sort
+      FUN_0806c0b8: tdat_element_release_counters
+    notes: >-
+      BLOCKED: no faithful Rust comparator contract can be established from
+      the supplied firmware. Raw osos.dec confirms 116 instruction bytes
+      at 0x0809ef6c..0x0809efe8, then two literal words; the next real
+      function begins at 0x0809eff0, giving a complete extent of 124 bytes.
+      Independent decoding of all aligned ARM BL words finds two incoming
+      plain BLs (0x080dc578 and 0x080df27c), zero predicated incoming BLs,
+      and five outgoing plain BLs (0x0809ef94, 0x0809efa8, 0x0809efc0,
+      0x0809efd4, 0x0809efdc), zero predicated outgoing BLs.
+      Counts zero and one return without invoking any callee. Larger slots
+      obtain the selector's object_kind_table, substitute literal 0x083e8bd8
+      if NULL, and construct a context containing element+0x08's word,
+      the table pointer, and the byte at enum-to-bitset output+0x08.
+      The function brackets sorting slot+0x10's slot+0x0c words with the
+      already ported addref/release routines on element+0x0c.
+      The callback literal at 0x0809efec is exactly 0x080d8814,
+      not an inferred function entry. Raw word 0xea000005 there branches
+      to 0x080d8830 inside the separately entered recursive routine at
+      0x080d87f0. It skips that routine's push {r4,r5,lr}, r5 argument
+      capture, and r4 initialization. The reached code consumes r4/r5 and
+      returns with pop {r4,r5,pc}, incompatible with the sorter's ordinary
+      three-argument callback invocation. Ghidra's assembly agrees with
+      these instruction words; CodeGraph supplies no definition of
+      FUN_080d8814. The fallback table literal also points at raw
+      instruction 0xe8bd8070 (pop {r4,r5,r6,pc}) at 0x083e8bd8 rather
+      than a verified mask table. A corrected firmware image or independently
+      verified callback/table relocation evidence is required. Do not guess
+      replacement addresses, create an invented comparator seam, or mark
+      this function ported.
+
   - address: 0x080df1b8
     ghidra: FUN_080df1b8
     name: materialize_plst_slot
