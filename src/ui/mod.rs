@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod curve_scan_reflected;
+pub use curve_scan_reflected::*;
 pub mod object_activity_history;
 pub use object_activity_history::*;
 pub mod remove_task;
