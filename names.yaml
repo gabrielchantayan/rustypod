@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806b438
+    ghidra: FUN_0806b438
+    name: pending_release_get
+    size: 8
+    sig: "u32 pending_release_get(const u8 *state)"
+    module: app/pending_release_get
+    status: ported
+    vars:
+      param_1/r0: state
+      state+0xb91: pending_release
+      return/r0: pending_release_byte
+    notes: >-
+      Raw words e5d00b91 e12fff1e establish extent
+      [0x0806b438,0x0806b440), eight bytes; next real function
+      begins PUSH at 0x0806b440. Whole-image aligned A32 decoding
+      finds two plain incoming BLs at 0x08068e14 and 0x0806e728,
+      zero predicated incoming BLs, and zero outgoing BLs.
+      Read and zero-extend byte +0xb91 without modifying the object
+      or normalizing to Boolean. Both callers load the state object
+      from owner+0xf00 and compare the result with zero. Field name
+      follows application_shutdown, now using this canonical getter.
+      No callees, seams, allocation, null guard, or semantic deviations.
+      Host tests cover all byte values, unchanged state, neighboring
+      fields and unaligned bases. Standalone exported-body smoke
+      verifies 0, 1, 128 and 255. Full host suite and ARM release
+      build pass. match.py exits 1: LLVM adds frame-pointer PUSH/MOV
+      and returns through POP PC; the single LDRB at +0xb91 remains
+      unchanged. Export remains a real symbol and BL target.
   - address: 0x0806b440
     ghidra: FUN_0806b440
     name: file_descriptor_export

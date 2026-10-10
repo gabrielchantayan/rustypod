@@ -122,7 +122,7 @@ pub unsafe extern "C" fn application_shutdown(owner: *mut u8) {
     let ops = ptr::read_volatile(ptr::addr_of!(APPLICATION_SHUTDOWN_OPS));
     let state = owner.add(STATE_SLOT).cast::<*mut u8>().read();
 
-    if state.add(PENDING_RELEASE).read() != 0 {
+    if super::pending_release_get::pending_release_get(state) != 0 {
         (ops.pending_release_cleanup)(owner);
         state.add(PENDING_RELEASE).write(0);
     }
