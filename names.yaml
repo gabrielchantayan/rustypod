@@ -244088,3 +244088,29 @@ functions:
       bytes would invent behavior. Faithful porting requires recovered
       runtime contents and initialization/relocation of this 256-byte
       map. No Rust implementation, module, tests, or fake seam is added.
+
+  - address: 0x08067d68
+    ghidra: FUN_08067d68
+    name: object_backend_set_control_byte
+    size: 20
+    sig: "void object_backend_set_control_byte(void *object, u32 value)"
+    module: ui/object_backend_set_control_byte
+    status: ported
+    vars: {param_1/r0: object, param_2/r1: value, r2: saved_value}
+    renames: {FUN_08051dc4: object_backend_for_kind}
+    notes: >-
+      Raw words e1a02001 e52de004 ebffa813 e5c02f4d e49df004 establish
+      the 20-byte extent before the next function at 0x08067d7c.
+      Resolve the kind-1 backend or kind-2 proxy using the existing
+      object_backend_for_kind, then store value's low byte at +0xf4d.
+      No null guard or boolean normalization. The field's higher-level
+      meaning is unknown; callers supply 1 and 0. Whole-image ARM decoding
+      finds two inbound plain BL calls at 0x0822a4b4 and 0x0822a564 and no
+      predicated callers. The body has one plain BL to 0x08051dc4 and no
+      predicated BL. Rust preserves value in a callee-saved register
+      instead of relying on the resolver preserving r2. Host tests cover
+      direct and proxy writes, clearing, truncation, and preservation of
+      other bytes. Existing resolver host-width proxy fixtures are retained;
+      firmware pointers remain 32-bit. ARM match.py shows the same call
+      and byte store with a frame-pointer prologue, r4 instead of r2, and
+      a relocation placeholder for the resolver call (structural diff exit 1).
