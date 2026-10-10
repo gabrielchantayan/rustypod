@@ -242372,3 +242372,48 @@ functions:
       codegen uses unsigned CMP against 4, conditional zero, error 26,
       and a frame, preserving a real exported function symbol.
       No device execution performed.
+  - address: 0x08081aa8
+    ghidra: FUN_08081aa8
+    name: attribute_list_upsert
+    size: 180
+    sig: "i32 attribute_list_upsert(usize **attributes, i32 nid, i32 value_type, usize value)"
+    module: crypto/attribute_list_upsert
+    status: ported
+    vars:
+      param_1: attributes
+      param_2: nid
+      param_3: value_type
+      param_4: value
+      iVar4: index
+      puVar2: attribute
+      uVar1: replacement
+    renames:
+      FUN_0806f0a4: attribute_create
+      FUN_0806f148: attribute_free
+    notes: >-
+      Raw bytes establish 0x08081aa8..0x08081b5c, exactly 180 bytes;
+      the next function starts with movs r2,r1 at 0x08081b5c.
+      Full aligned A32 BL scan finds two incoming plain BLs at
+      0x0805fd3c and 0x0805fd7c, nine outgoing plain BLs, and no
+      predicated BLs in either direction. Lazily create a stack, scan
+      its signed count for the first attribute whose object NID matches,
+      free it before constructing and storing a replacement, or append
+      a constructed attribute when no match exists. Return 1 even when
+      construction or insertion fails. The constructor at 0x0806f0a4
+      allocates via descriptor 0x0891f6ac, stores OBJ_nid2obj(nid), zero,
+      and a stack containing an ASN1_TYPE initialized with type/value.
+      The destructor at 0x0806f148 is ldr r1,[pc]; b 0x0803b3a4 with
+      the same descriptor, not Ghidra's spurious decompiled body.
+      Both unported attribute operations use fixed-address device calls
+      and host injection seams; all existing stack/object ports are reused.
+      Host slots are pointer-sized as in the existing push port, with
+      host-only count/value/set layout adapters. Existing factory and
+      OBJ_obj2nid deviations are inherited. Host tests cover first-match
+      duplicate replacement, destruction-before-construction, failed
+      replacement storing NULL, empty/unmatched append, and NULL append.
+      Host suite: 15367 passed. ARM release build passed. Executable
+      smoke observed return=1, count=1, sorted=0, entry=0 after a NULL
+      constructor result. match.py reports 45 original versus 54 Rust
+      instructions: lazy allocation, signed scan, separate replace/append
+      paths and constant success preserved; LLVM adds a frame and uses
+      BLX for the fixed-address create/free calls.
