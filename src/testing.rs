@@ -39,6 +39,7 @@ extern crate std;
 /// six files. Each region is at most 0x0100_0000 wide, so neighbours cannot
 /// overlap.
 pub mod hints {
+    pub const HASH_TABLE_BUCKET_CHAIN_VISITOR: usize = 0x71fe_0000;
     pub const FNT_FONT_DONE: usize = 0x60ad_0000;
     pub const CFF_PARSER_INIT: usize = 0x70ff_0000;
     pub const SCOPED_SCALED_CAPACITY_SAMPLE: usize = 0x70fe_0000;
