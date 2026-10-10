@@ -242343,3 +242343,32 @@ functions:
       conditional accesses and the post-call primary reload. No deliberate
       behavioral deviations. Host tests exhaust relevant flag combinations,
       unrelated high bits, signed mode boundaries and short-object paths.
+  - address: 0x08084310
+    ghidra: FUN_08084310
+    name: clock_id_validate
+    size: 28
+    sig: "i32 clock_id_validate(i32 clock_id)"
+    module: time/clock_id_validate
+    status: ported
+    renames:
+      param_1/r0: clock_id
+      uVar1/r0: error
+    notes: >-
+      Raw words e3500000 13500001 13500002 13500003 03a00000
+      13a0001a e12fff1e prove a 28-byte extent; the next independent
+      prologue e92d4070 starts at 0x0808432c. Whole-image aligned A32
+      decoding finds two inbound plain BLs at 0x082c3748 and 0x082c37bc,
+      zero predicated inbound BLs and zero outgoing BLs of either kind.
+      Caller evidence identifies a clock dispatch-table ID validator.
+      IDs 0..3 return zero; all other 32-bit values return error 26.
+      Deliberate deviation: unsigned range check replaces the original
+      predicated equality chain, without behavioral differences.
+      clock_gettime now calls this port on target and host; its old
+      fixed-address seam and duplicate host validation are removed.
+      Host tests cover all valid slots, invalid boundaries, negative IDs,
+      signed extrema and low-byte combinations with high-bit prefixes.
+      Host suite and ARM release build pass. Standalone host execution
+      checks valid IDs and signed boundaries. match.py exits 1: reviewed
+      codegen uses unsigned CMP against 4, conditional zero, error 26,
+      and a frame, preserving a real exported function symbol.
+      No device execution performed.
