@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806fbf4
+    ghidra: FUN_0806fbf4
+    name: crypto_store_entry_find
+    size: 176
+    sig: "StoreEntry *crypto_store_entry_find(usize *entries, StoreEntry *key)"
+    module: crypto/store_entry_find
+    status: ported
+    vars:
+      param_1/r0/r5: entries
+      param_2/stack_8: key
+      r4: index
+      local_18/stack_0: entry
+    renames:
+      FUN_0836954c: namespace_provider_find
+      FUN_08369864: namespace_provider_at
+      FUN_08369780: namespace_provider_count
+      FUN_08070960: resource_digest_compare
+    notes: >-
+      Raw extent [0x0806fbf4,0x0806fca4) is 176 bytes; next function
+      begins PUSH {r3,lr}. Independent whole-image A32 BL scan finds
+      two incoming plain calls at 0x080703b4 and 0x08070494, no
+      predicated incoming calls, six outgoing plain BL instructions
+      and no predicated outgoing calls. Find the first table match;
+      non-kind-1 keys return that entry directly. Kind 1 scans forward
+      within the comparator-equal run for equal prepared resource digests,
+      stopping at the signed count boundary or comparator mismatch.
+      Comparator 0x08093830 remains an explicit address-bound seam;
+      no existing names entry or Rust implementation was found. Reload
+      key after comparison. Ghidra's u64 result is incorrect: r1 is a
+      scratch stack POP, while callers consume only r0. Host words widen
+      consistently with namespace_provider_find; StoreEntry uses repr(C).
+      Host tests cover duplicate selection, first match, run boundary,
+      exhaustion, non-kind-1 direct return, absent key and null table.
+      Full host suite and ARM release build pass. Standalone C runtime
+      smoke links the test-configured host static library and verifies
+      identity hit and empty miss. match.py exit 1 reviewed: 44 stock
+      versus 57 Rust instructions, retaining gates and loop; LLVM uses
+      a frame pointer, accessor tail branch and BLX literal 0x08093830.
   - address: 0x08070574
     ghidra: FUN_08070574
     name: crypto_store_lookup
