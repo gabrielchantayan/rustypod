@@ -3,6 +3,7 @@ pub mod formatted_message;
 pub mod format_bounded_byte;
 pub mod format_field_padding;
 pub mod write_nul_padding;
+pub mod write_hex_bytes;
 pub mod format_buffer;
 pub mod format_with_descriptor;
 pub mod format_repeat_literal;

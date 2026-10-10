@@ -242885,3 +242885,44 @@ functions:
       frame-pointer setup and synthesized constants differ; all separate
       MMIO accesses and five calls remain. ARM relocations verify existing
       GPIO and millisecond-delay targets.
+  - address: 0x080779a0
+    ghidra: FUN_080779a0
+    name: write_hex_bytes
+    size: 120
+    sig: "int32_t write_hex_bytes(WriteBytes writer, void *context, const uint8_t *source, uint32_t length)"
+    module: printf/write_hex_bytes
+    status: ported
+    vars:
+      r7: writer
+      r9: context
+      r4: cursor
+      r5: end
+      r6: length
+      r8: nibble_table
+      local_20: pair
+    notes: >-
+      Raw A32 extent is 0x080779a0..0x08077a17: 116 instruction bytes plus
+      the literal at 0x08077a14; next real function PUSH is at 0x08077a18.
+      Independently scanned incoming BLs: two plain at 0x080eb9d4 and
+      0x080eba34, zero predicated. Body has zero direct BLs and one plain
+      indirect BLX r7. Caller 0x080eb990 emits a prefix and encodes either
+      supplied bytes or serialized bytes. Reuses the existing WriteBytes
+      callback ABI, with no invented firmware callee seam. NULL context
+      skips source reads and writer calls; each byte otherwise emits high
+      then low nibble lookups in one two-byte call. Zero callback result
+      stops with -1; all nonzero results succeed. Return is length LSL 1,
+      including wrapping. Table pointer is 0x08977f8b. Supplied raw bytes
+      are 1d 01 a4 e3 21 8f 0d 04 42 00 00 50 b6 cf 0d 04, not ASCII;
+      no assumed hexadecimal alphabet is substituted. Target retains the
+      firmware table; host deliberately relocates its exact raw bytes.
+      Host tests cover all 256 byte values, zero context, empty input,
+      wrapping return counts, first/middle/last callback failures, nonzero
+      callback success, and callback mutation of subsequent source bytes.
+      Host suite passed 15394 tests; ARM release build passed. Standalone
+      public-entry smoke returned 6 and bytes 01 a4 00 50 04 1d for input
+      12 ab f0. match.py exit 1 reviewed: 29 original versus 37 Rust
+      instructions; LLVM adds a frame pointer, checks empty length early,
+      uses a countdown rather than end-pointer comparison, and schedules
+      both source reads before the table loads. Two nibble loads, two
+      byte stores, one BLX, zero-result failure, and wrapping LSL remain;
+      emitted literal remains 0x08977f8b.
