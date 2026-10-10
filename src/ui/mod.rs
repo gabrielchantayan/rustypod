@@ -1,5 +1,7 @@
 //! retailOS UI / graphics layer — the geometry primitives the drawing
 //! and view code is built on.
+pub mod object_activity_history;
+pub use object_activity_history::*;
 pub mod remove_task;
 pub mod packed_surface_span_prepare;
 pub use packed_surface_span_prepare::*;
