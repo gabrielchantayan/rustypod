@@ -16,6 +16,30 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807b1c0
+    ghidra: FUN_0807b1c0
+    name: glyph_advance
+    size: 52
+    sig: "i32 glyph_advance(u8 *renderer, u32 codepoint, u8 *metric_context, u32 layout_flags)"
+    module: util/glyph_advance
+    status: ported
+    vars:
+      param_1/r0: unused_renderer
+      param_2/r1: codepoint
+      param_3/r2: metric_context
+      param_4/r3: layout_flags
+      local_18: metric_table
+    notes: >-
+      Raw A32 words verify the extent [0x0807b1c0,0x0807b1f4);
+      the next entry begins with a distinct PUSH. Two plain outbound BLs
+      target 0x0809e224 and 0x08080f18; no predicated outbound BLs.
+      Resolves the metric table, then returns the signed dispatch result
+      for one codepoint with only layout flag bit 3. Ghidra's void return
+      is wrong: callers 0x0808f684 and the right-alignment loop in
+      0x082631fc consume r0. Reuses the existing metric resolver veneer
+      and host seam, and calls ported record_dispatch_result directly.
+      Rust initializes the resolver output to null rather than the saved
+      incoming flags; the resolver writes it on every return path.
   - address: 0x0807f310
     ghidra: FUN_0807f310
     name: packet_ring_next_index
