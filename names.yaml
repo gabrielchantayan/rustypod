@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080aabe0
+    ghidra: FUN_080aabe0
+    name: jpeg_ack_interrupt
+    size: 32
+    sig: "void jpeg_ack_interrupt(uint32_t mask)"
+    module: jpeg/ack_interrupt
+    status: ported
+    vars:
+      param_1/r0: mask
+      DAT_080aabf8: jpeg_decoder_state
+      state+0x02: interrupt_observed
+      DAT_080aabfc: interrupt_ack_register
+    notes: >-
+      Raw words establish [0x080aabe0,0x080aac00), 24 instruction bytes
+      and two literal words; Ghidra's 24-byte size excludes the literals.
+      The next independent function starts at 0x080aac00. Whole-image A32
+      decoding finds one plain incoming BL at 0x0807d0d8 and one BLNE at
+      0x0807d098, both passing 2; zero outgoing BLs of either kind.
+      Set byte 0x08a0a79e to 1, then write the unmodified mask to MMIO
+      0x39660000. The exact event meaning of the state byte is unknown.
+      No callee seams or algorithmic deviations; host storage replaces
+      fixed RAM and MMIO. Tests cover every prior flag byte, zero/high-bit/
+      arbitrary masks, neighboring-byte preservation and repeated calls.
+      Full host suite: 15220 passed. ARM release build passed. Standalone
+      smoke observed state [11,22,1,44] and acknowledgement 2. match.py
+      exit 1: LLVM adds frame setup and synthesizes the MMIO address,
+      retaining the ordered byte store followed by the full word store.
   - address: 0x080ad52c
     ghidra: FUN_080ad52c
     name: af_glyph_hints_done
