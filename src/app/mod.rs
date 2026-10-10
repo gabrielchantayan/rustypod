@@ -481,6 +481,7 @@ pub mod resource_registration_reset;
 pub mod resource_load_dispatch;
 pub mod resource_digest_compare;
 pub mod resource_selector_index;
+pub mod resource_handler_selector_index;
 pub mod resource_record_find;
 pub mod resource_slot_acquire;
 pub mod resource_slot_table_initialize;

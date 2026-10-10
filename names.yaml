@@ -243297,3 +243297,41 @@ functions:
       versus 16 Rust instructions: LLVM adds a frame pointer and changes
       register allocation, retaining both preparation calls, +60 digest
       offsets, length 20 and the final memcmp tail branch.
+
+  - address: 0x080706f4
+    ghidra: FUN_080706f4
+    name: resource_handler_selector_index
+    size: 76
+    sig: "i32 resource_handler_selector_index(i32 selector)"
+    module: app/resource_handler_selector_index
+    status: ported
+    renames:
+      param_1/r0: selector
+      local_1c: selector_key
+      DAT_08070740: handler_selector_globals (0x08a0eab4)
+      FUN_0836954c: namespace_provider_find
+    notes: >-
+      Raw A32 instructions occupy [0x080706f4,0x08070740), 76 bytes.
+      The literal at 0x08070740 is 0x08a0eab4, and the next real function
+      starts with PUSH at 0x08070744. Independent whole-image BL-word
+      decoding finds two plain incoming calls at 0x080702cc and 0x08070924,
+      zero predicated incoming calls. The body has one plain outgoing BL
+      at 0x08070724 to canonical ported namespace_provider_find, no
+      predicated outgoing BLs. Unsigned selector-1 <=6 maps selectors
+      1..7 to 0..6. Others pass a stack-local selector address to the
+      provider loaded from global +4 (0x08a0eab8); NULL or lookup -1
+      returns -1, otherwise add seven with wrapping arithmetic.
+      Host uses private provider storage and the existing pointer-sized
+      provider layout; device slots remain four bytes. Host tests cover
+      range boundaries, signed extremes, NULL, actual selector comparisons,
+      zero and negative selectors, first duplicate, misses, empty tables,
+      and built-in precedence over registered entries. Host suite and ARM
+      release build passed. Independent test-configured host executable
+      verified outputs -1,0,6,-1,-1,-1,-1 for 0,1,7,8,-1,MIN,MAX.
+      A normal host archive build is blocked by pre-existing missing
+      prepare_metadata, extract_metadata, configure_shared_payload_kind,
+      and notify_calendar_change bindings. match.py exits 1: 19 original
+      versus 21 Rust instructions including the literal, retaining direct
+      range, provider NULL check, stack key, one lookup BL, -1 guard and
+      +7 adjustment. LLVM delays the frame until the lookup path and
+      loads the provider word directly rather than global base plus four.
