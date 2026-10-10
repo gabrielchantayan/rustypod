@@ -22,6 +22,30 @@ pub struct LinkedListAnchor {
     pub tail: u32,
 }
 
+/// Allocate an empty intrusive-list anchor — `FUN_080b3eac` @ 0x080b3eac.
+///
+/// True extent: 20 bytes, [0x080b3eac, 0x080b3ec0), not Ghidra's 36.
+/// Whole-image A32 decoding verifies two incoming plain BLs (0x081c1d1c,
+/// 0x081c7dec), zero predicated incoming BLs, and one outgoing plain BL
+/// to operator_new @ 0x082aadd4. Allocate eight bytes, then tail-transfer
+/// to 0x08280164, which clears the head and tail and preserves r0.
+///
+/// Deliberate deviations: inline the verified two-store initializer rather
+/// than introducing another port/seam; reuse the existing tag-2 allocator.
+/// Target-width fields preserve the eight-byte layout on hosts. As in stock,
+/// allocation failure is not checked: the allocator must return writable,
+/// word-aligned storage, or execution faults.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn linked_list_new() -> *mut LinkedListAnchor {
+    let anchor = unsafe { crate::heap::veneers::operator_new(8) }.cast::<LinkedListAnchor>();
+    unsafe {
+        core::ptr::addr_of_mut!((*anchor).head).write(0);
+        core::ptr::addr_of_mut!((*anchor).tail).write(0);
+    }
+    anchor
+}
+
 /// Appends `node` to `anchor`, returning zero on success and one for a null
 /// node. Every nonzero `anchor.tail` must be a writable node whose first word
 /// is its next-link field; as in retailOS, `anchor` is not NULL-checked.
@@ -60,6 +84,19 @@ mod tests {
 
     fn slab() -> Option<*mut u32> {
         (*SLAB).map(|address| address as *mut u32)
+    }
+
+    #[test]
+    fn new_clears_dirty_anchor_without_touching_neighbor_words() {
+        let _guard = crate::heap::veneers::tests::mock_heap();
+        let mut words = [0x1234_5678, u32::MAX, 0x89ab_cdef, 0xa5a5_a5a5];
+        let storage = unsafe { words.as_mut_ptr().add(1) };
+        crate::heap::veneers::tests::set_alloc_ret(storage.cast());
+        let anchor = unsafe { linked_list_new() };
+        assert_eq!(anchor.cast::<u32>(), storage);
+        assert_eq!(words, [0x1234_5678, 0, 0, 0xa5a5_a5a5]);
+        assert_eq!(unsafe { linked_list_append(anchor, 0) }, 1);
+        assert_eq!(words, [0x1234_5678, 0, 0, 0xa5a5_a5a5]);
     }
 
     #[test]
