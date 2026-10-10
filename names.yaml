@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806f530
+    ghidra: FUN_0806f530
+    name: namespace_provider_slot_at_checked
+    size: 60
+    sig: "const u32 *namespace_provider_slot_at_checked(const u32 *const *provider_slot, i32 index)"
+    module: cxx/object_flags
+    status: ported
+    vars:
+      param_1/r0/r4: provider_slot
+      param_2/r1/r5: index
+      r0: providers_or_count_or_entry
+    renames:
+      FUN_08369780: namespace_provider_count
+      FUN_08369864: namespace_provider_at
+    notes: >-
+      Raw A32 extent [0x0806f530,0x0806f56c) is 60 bytes; the next
+      real function begins PUSH {r4,r5,r6,lr}. Whole-image word decoding
+      finds two incoming plain BLs at 0x080750ec and 0x080753f4,
+      no predicated incoming BLs, one outgoing plain BL at 0x0806f544
+      to 0x08369780, and no predicated outgoing BLs. Success uses
+      predicated tail BGE at 0x0806f560 to 0x08369864. Reject null
+      slot, signed count <= index, or negative index; otherwise reload
+      the provider pointer and return the indexed entry. Null providers
+      have signed count -1. Reuses both canonical ported accessors.
+      Host pointer fields widen using their existing fixture convention.
+      Rust expresses the tail dispatch as a returning call; LLVM emits
+      a tail B. Host tests cover signed extremes, empty and negative
+      counts, first/last/null entries, null slot and null provider.
+      Full host suite passes 15425 tests; ARM release build passes.
+      Standalone runtime smoke compiles the actual three accessor bodies
+      and verifies first/last values plus negative, upper-bound and null
+      rejection. match.py exit 1 reviewed: 15 stock versus 18 Rust
+      instructions, preserving null guard, count BL, both signed gates,
+      slot reload and accessor tail B. LLVM swaps independent signed
+      gates and adds a frame pointer.
   - address: 0x0806fb74
     ghidra: FUN_0806fb74
     name: crypto_store_key_index

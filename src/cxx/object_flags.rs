@@ -1019,6 +1019,80 @@ pub unsafe extern "C" fn namespace_provider_slot_at(
     }
 }
 
+/// namespace_provider_slot_at_checked — original: `FUN_0806f530` @
+/// `0x0806f530` (60 bytes, `0x0806f530..0x0806f56c`; next function
+/// begins with `push {r4,r5,r6,lr}`). Raw A32 decoding verifies two
+/// incoming plain BLs (`0x080750ec`, `0x080753f4`), one outgoing plain
+/// BL to [`namespace_provider_count`], and no predicated BLs. The success
+/// path uses a predicated tail B to [`namespace_provider_at`], not a BL.
+///
+/// Returns null for a null slot, an index not below the signed count, or
+/// a negative index. Otherwise reloads the provider pointer from the slot
+/// and returns its indexed entry. A null provider has count -1.
+///
+/// Deliberate deviations: Rust uses a returning accessor call instead of
+/// the ARM tail branch; host slots and accessor tables use the existing
+/// pointer-width fixture convention. Target pointer fields remain 4 bytes.
+///
+/// # Safety
+/// A non-null slot must be readable. Its provider must satisfy the count
+/// accessor's contract and, for an accepted index, the table accessor's.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_slot_at_checked(
+    provider_slot: *const *const u32,
+    index: i32,
+) -> *const u32 {
+    if provider_slot.is_null() {
+        return core::ptr::null();
+    }
+    let providers = provider_slot.read_volatile();
+    if namespace_provider_count(providers) <= index || index < 0 {
+        return core::ptr::null();
+    }
+    namespace_provider_at(provider_slot.read_volatile(), index as u32)
+}
+
+#[cfg(test)]
+mod checked_provider_slot_tests {
+    use super::namespace_provider_slot_at_checked;
+    use core::ptr;
+
+    #[test]
+    fn signed_bounds_and_entry_identity() {
+        let first = 0x1234u32;
+        let last = 0x5678u32;
+        let table = [&first as *const u32, ptr::null(), &last as *const u32];
+        // Existing accessor layout: count at +0, host table pointer at +4.
+        let mut providers = [0u32; 4];
+        unsafe {
+            ptr::write_unaligned(providers.as_mut_ptr().add(1).cast::<*const *const u32>(), table.as_ptr());
+        }
+        let slot = providers.as_ptr();
+        for count in [i32::MIN, -1, 0, 1, 3] {
+            providers[0] = count as u32;
+            for index in [i32::MIN, -2, -1, 0, 1, 2, 3, i32::MAX] {
+                let expected = if index >= 0 && index < count {
+                    table[index as usize]
+                } else {
+                    ptr::null()
+                };
+                assert_eq!(unsafe { namespace_provider_slot_at_checked(&slot, index) }, expected,
+                    "count={count}, index={index}");
+            }
+        }
+    }
+
+    #[test]
+    fn absent_slot_and_provider() {
+        let slot = ptr::null();
+        for index in [i32::MIN, -2, -1, 0, i32::MAX] {
+            assert!(unsafe { namespace_provider_slot_at_checked(ptr::null(), index) }.is_null());
+            assert!(unsafe { namespace_provider_slot_at_checked(&slot, index) }.is_null());
+        }
+    }
+}
+
 /// namespace_provider_set — original: `FUN_083697f8` @ `0x083697f8`
 /// (24 bytes, `0x083697f8..0x08369810`; the next independently linked
 /// function begins with `ldr r2,[r0,#16]` at `0x08369810`). Verified inbound
