@@ -333,6 +333,7 @@ pub mod queue_match_and_promote;
 pub mod queue_remove_source_tail_index;
 pub mod queue_refresh_and_match_kind_two;
 pub mod dynamic_array_remove;
+pub mod dynamic_array_resize;
 pub mod unique_word_array_insert;
 pub mod hash_table_bucket_insert_node;
 pub mod introsort_u32_range;
