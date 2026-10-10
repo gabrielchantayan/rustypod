@@ -243882,3 +243882,43 @@ functions:
       18 Rust instructions: frame setup and separate return blocks differ,
       while both calls, the conditional hit exit, tail/payload/key offsets,
       store ordering and -123 miss return are retained.
+
+  - address: 0x0806c1f8
+    ghidra: FUN_0806c1f8
+    name: ui_tdat_clear_node_state
+    size: 48
+    sig: "void ui_tdat_clear_node_state(const u8 *element)"
+    module: ui/tdat_node_clear_state
+    status: ported
+    renames:
+      param_1/r0/r2: element
+      iVar1/r0: node
+      element_plus_0x28: node_list_head
+      node_plus_0x04: successor
+      node_plus_0x20: state
+      FUN_0806aa3c: ui_element_is_tdat_class
+    notes: >-
+      Raw aligned A32 words establish the exact 48-byte extent from
+      0x0806c1f8 through POP {pc} at 0x0806c224; the next real function
+      begins with PUSH at 0x0806c228. Independent whole-image BL decoding
+      finds two incoming plain calls at 0x0806c1bc and 0x0806d6d8, no
+      predicated incoming calls, and one outgoing plain call at 0x0806c200
+      to the already-ported ui_element_is_tdat_class at 0x0806aa3c, with
+      no predicated outgoing calls. Reject NULL or a non-tdat element;
+      otherwise read its list head at +0x28, clear each node's state word
+      at +0x20, and follow the successor word at +4 until NULL. Caller
+      0x0806c1a4 separately resets the plst list; this function does not.
+      Deliberate deviation: call the existing Rust class predicate directly
+      rather than stock firmware. Aligned u32 pointer words retain target
+      offsets on hosts. No allocation, cycle detection or node-class gate.
+      The implementation, module registration and unique low-address
+      fixture hint already existed; this entry completes the missing ledger.
+      Host tests cover NULL, short wrong-class objects, an empty list,
+      rejected populated lists, multiple reachable nodes, unreachable nodes,
+      preserved links and neighboring words, and repeat resets. Standalone
+      single-node execution confirms state clearing and preserved neighbors
+      and head.
+      Full x86_64 host suite and ARM build-std release build pass.
+      match.py exits 1 with 12 stock versus 14 Rust instructions:
+      frame setup, register selection and loop predication differ,
+      while the class gate, +0x28 head, +0x20 clear and +4 link remain.
