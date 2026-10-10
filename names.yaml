@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808487c
+    ghidra: FUN_0808487c
+    name: fnt_font_done
+    size: 84
+    sig: "void fnt_font_done(u32 *face)"
+    module: ft/fnt_font
+    status: ported
+    vars: {param_1/r5: face, iVar1/r4: font, uVar2/r7: memory, r6: zero}
+    renames:
+      FUN_0804fcb8: ft_stream_release_frame
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw A32 extent [0x0808487c,0x080848d0) is 84 bytes; POP PC precedes
+      the next PUSH. Two plain outgoing BLs at 0x080848b0 and 0x080848c4
+      call ft_mem_free, plus BLNE at 0x080848a4 to ft_stream_release_frame.
+      Whole-image word decoding finds two incoming plain BLs at 0x0807ee04
+      and 0x080c03e8, no predicated incoming BLs. FNT loader 0x080848d0
+      validates versions 0x200/0x300 and transfers the frame to font +0xa4.
+      Snapshot face font +0x84 and memory +0x64; release non-null frame
+      through stream +0x68, free offsets +0xac, clear offsets, free font,
+      clear face font. Native temporary frame slot bridges the stream API
+      on hosts; target slots remain four-byte aligned words. Tests cover
+      absent resources, disk/memory streams, callback-visible clearing,
+      allocator mutation and untouched words. All 15362 host tests pass;
+      ARM release build succeeds. match.py reports 27 Rust vs 21 stock
+      instructions: inlined stream release retains conditional frame free
+      and two final free calls. Source-linked standalone smoke with existing
+      seam behavior proves offsets/font release and repeated teardown inert.
   - address: 0x08084a14
     ghidra: FUN_08084a14
     name: x509_attribute_first_value
