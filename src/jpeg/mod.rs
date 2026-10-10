@@ -16,6 +16,7 @@
 //!
 //! [`source`] ports the consumer end of the double buffer.
 pub mod ack_interrupt;
+pub mod submit_buffer_pair;
 pub mod source;
 pub mod stream_read_byte;
 pub mod stream_read_u16;
