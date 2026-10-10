@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a63b8
+    ghidra: FUN_080a63b8
+    name: peripheral_control_bit8_set_inverted
+    size: 36
+    sig: "u32 peripheral_control_bit8_set_inverted(u32 value)"
+    module: drivers/peripheral_control_bit8_set_inverted
+    status: ported
+    vars: {param_1/r0: value, r1: control_word, r2: peripheral_base}
+    renames: {DAT_080a63d8: peripheral_base_0x38900000}
+    notes: >-
+      Raw words establish 32 instruction bytes followed by the register-base
+      literal at 0x080a63d8; true extent is 36 bytes through 0x080a63db.
+      The next real function begins at 0x080a63dc with MOV and a tail B.
+      Whole-image aligned A32 decoding finds two plain inbound BLs at
+      0x0814ec68 and 0x0814f760, no predicated inbound BLs, and no outgoing
+      BLs of either kind. Read 0x38900008, clear bit 8, set it only for zero
+      input, write back preserving all other bits, and return zero. The
+      peripheral and bit hardware meanings remain unidentified; the caller
+      at 0x0814ec68 supplies zero during a larger initialization sequence.
+      No callee seams. Deliberate deviations: volatile MMIO accesses and
+      isolated host storage. Host tests cover repeated zero/nonzero changes,
+      high-bit inputs, prior bit states, other bits and neighboring words.
+      Host suite and ARM release build pass. Real-source smoke verifies
+      zero, seven and high-bit inputs. match.py exits 1: LLVM adds a frame,
+      uses the absolute register address and compares before reading MMIO;
+      the same single read, BIC, conditional ORR, single write and zero
+      return remain, with no outgoing calls.
   - address: 0x080a63f8
     ghidra: FUN_080a63f8
     name: pixel_format_bits_per_pixel
