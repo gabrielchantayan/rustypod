@@ -172,16 +172,51 @@ pub unsafe extern "C" fn clock_source_replace(index: u32, source: *const u8) -> 
     rom_sem_signal(4);
     0
 }
+/// Commit a clock state: `FUN_0806748c` @ `0x0806748c`.
+/// True extent 120 bytes [0x0806748c,0x08067504): 116 code bytes and
+/// the current-clock literal. Six plain outbound BLs and one BLEQ;
+/// two plain inbound BLs (0x08056878, 0x080fac48), no predicated callers.
+/// Copy the 12-byte input, convert ordinal day only when month is zero,
+/// wait on semaphore 3, and write RTC mode 0. On success publish zone,
+/// DST and status bytes. Always notify, synchronize sources, and signal.
+/// Deviations: reuse ported callees and existing volatile RTC/notifier seams;
+/// omit Ghidra's spurious r1/r2/r3 arguments and ignored synchronization r0.
+///
+/// # Safety
+/// Input must contain 12 readable bytes; a zero month requires a valid
+/// ordinal day for its year. Shared clock globals require serialization.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn clock_state_commit(source: *const ClockState) {
+    #[repr(C, align(4))]
+    struct Scratch(ClockState);
+    let mut scratch = Scratch(ptr::read_unaligned(source));
+    let state = ptr::addr_of_mut!(scratch.0);
+    if (*state).month == 0 {
+        super::ordinal_day_to_month_day::ordinal_day_to_month_day(state.cast());
+    }
+    rom_sem_wait(3);
+    if rtc_write()(0, state) == 0 {
+        let current = current_clock();
+        (*current).utc_offset_quarters = (*state).utc_offset_quarters;
+        (*current).dst_active = (*state).dst_active;
+        (*current).status = (*state).status;
+    }
+    clock_changed()();
+    sync_best_clock_source();
+    rom_sem_signal(3);
+}
+
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
 
     use super::*;
     use core::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
+    pub(super) static TEST_LOCK: Mutex<()> = Mutex::new(());
     static WRITES: AtomicU32 = AtomicU32::new(0);
     static NOTIFICATIONS: AtomicU32 = AtomicU32::new(0);
     unsafe extern "C" fn record_write(_mode: u32, _source: *const ClockState) -> i32 { WRITES.fetch_add(1, Ordering::Relaxed); 0 }
@@ -189,8 +224,8 @@ mod tests {
     unsafe extern "C" fn no_op_semaphore(_semaphore: usize) -> usize { 0 }
 
 
-    struct Fixture { _lock: MutexGuard<'static, ()>, write: RtcWriteFn, changed: ClockChangedFn, rom: crate::kernel::task_lock::RomThunkOps, sources: ClockSourceStorage, current: ClockState, selected: i32 }
-    unsafe fn install() -> Fixture {
+    pub(crate) struct Fixture { _lock: MutexGuard<'static, ()>, write: RtcWriteFn, changed: ClockChangedFn, rom: crate::kernel::task_lock::RomThunkOps, sources: ClockSourceStorage, current: ClockState, selected: i32 }
+    pub(crate) unsafe fn install() -> Fixture {
         let lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let rom = ptr::read_volatile(ptr::addr_of!(crate::kernel::task_lock::ROM_KERNEL));
         let fixture = Fixture { _lock: lock, write: RTC_WRITE, changed: CLOCK_CHANGED, rom, sources: CLOCK_SOURCES, current: CURRENT_CLOCK, selected: SELECTED_CLOCK_SOURCE };
@@ -203,6 +238,49 @@ mod tests {
     }
     impl Drop for Fixture { fn drop(&mut self) { unsafe { RTC_WRITE = self.write; CLOCK_CHANGED = self.changed; ptr::write_volatile(ptr::addr_of_mut!(crate::kernel::task_lock::ROM_KERNEL), self.rom); CLOCK_SOURCES = self.sources; CURRENT_CLOCK = self.current; SELECTED_CLOCK_SOURCE = self.selected; } } }
     fn record(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> [u8; CLOCK_SOURCE_SIZE] { let mut r = [0; CLOCK_SOURCE_SIZE]; r[0..2].copy_from_slice(&year.to_le_bytes()); r[2] = month; r[3] = day; r[8] = hour; r[9] = minute; r[10] = second; r[14] = 1; r }
+    unsafe extern "C" fn reject_write(_mode: u32, _source: *const ClockState) -> i32 { -6 }
+
+    #[test]
+    fn commit_preserves_input_and_only_publishes_metadata_on_success() {
+        unsafe {
+            let _fixture = install();
+            for status in [0, -6] {
+                CURRENT_CLOCK = ClockState { year: 1999, month: 12, day: 31, yday: 364, utc_offset_quarters: 4, dst_active: 0, hour: 23, minute: 59, second: 58, status: 2 };
+                RTC_WRITE = if status == 0 { record_write } else { reject_write };
+                let input = ClockState { year: 2024, month: 2, day: 29, yday: 59, utc_offset_quarters: -8, dst_active: 1, hour: 1, minute: 2, second: 3, status: 0x81 };
+                clock_state_commit(&input);
+                assert_eq!((CURRENT_CLOCK.year, CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.yday, CURRENT_CLOCK.hour, CURRENT_CLOCK.minute, CURRENT_CLOCK.second), (1999, 12, 31, 364, 23, 59, 58));
+                let expected = if status == 0 { (-8, 1, 0x81) } else { (4, 0, 2) };
+                assert_eq!((CURRENT_CLOCK.utc_offset_quarters, CURRENT_CLOCK.dst_active, CURRENT_CLOCK.status), expected);
+                assert_eq!(input.month, 2);
+                assert_eq!(SELECTED_CLOCK_SOURCE, -1);
+            }
+            assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 2);
+        }
+    }
+
+    unsafe extern "C" fn publish_write(mode: u32, source: *const ClockState) -> i32 {
+        assert_eq!(mode, 0);
+        CURRENT_CLOCK = *source;
+        0
+    }
+
+    #[test]
+    fn commit_converts_ordinal_without_mutating_source_and_skips_nonzero_month() {
+        unsafe {
+            let _fixture = install();
+            RTC_WRITE = publish_write;
+            for (year, ordinal, month, day) in [(2023, 59, 3, 1), (2024, 59, 2, 29), (2024, 365, 12, 31), (2024, 0, 1, 1)] {
+                let input = ClockState { year, month: 0, day: 0, yday: ordinal, utc_offset_quarters: -4, dst_active: 1, hour: 3, minute: 4, second: 5, status: 3 };
+                clock_state_commit(&input);
+                assert_eq!((CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.yday), (month, day, ordinal));
+                assert_eq!((input.month, input.day), (0, 0));
+            }
+            let input = ClockState { year: 2024, month: 7, day: 9, yday: -1, utc_offset_quarters: 0, dst_active: 0, hour: 0, minute: 0, second: 0, status: 0 };
+            clock_state_commit(&input);
+            assert_eq!((CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.yday), (7, 9, -1));
+        }
+    }
 
     #[test]
     fn selects_oldest_valid_source_and_updates_different_current_clock() { unsafe { let _fixture = install(); CLOCK_SOURCES.0[0] = record(2025, 1, 2, 3, 0, 0); CLOCK_SOURCES.0[1] = record(2024, 12, 31, 23, 59, 59); CURRENT_CLOCK = ClockState { year: 2020, month: 1, day: 1, yday: 0, utc_offset_quarters: -8, dst_active: 1, hour: 0, minute: 0, second: 0, status: 3 }; assert!(!sync_best_clock_source()); assert_eq!(SELECTED_CLOCK_SOURCE, 1); assert_eq!((CURRENT_CLOCK.year, CURRENT_CLOCK.month, CURRENT_CLOCK.day, CURRENT_CLOCK.hour), (2024, 12, 31, 23)); assert_eq!((CURRENT_CLOCK.utc_offset_quarters, CURRENT_CLOCK.dst_active, CURRENT_CLOCK.status), (-8, 1, 3)); assert_eq!(WRITES.load(Ordering::Relaxed), 1); assert_eq!(NOTIFICATIONS.load(Ordering::Relaxed), 1); } }

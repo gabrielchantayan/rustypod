@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806748c
+    ghidra: FUN_0806748c
+    name: clock_state_commit
+    size: 120
+    sig: "void clock_state_commit(const ClockState *source)"
+    module: time/sync_best_clock
+    status: ported
+    renames:
+      param_1/r0: source
+      uStack_10/uStack_c/uStack_8: scratch
+      DAT_08067500: current_clock
+      thunk_EXT_FUN_22000020: iram_memcpy_veneer
+      FUN_080d7038: ordinal_day_to_month_day
+      thunk_EXT_FUN_22003fd0: rom_sem_wait
+      FUN_0806e7e4: rtc_write
+      FUN_0805caa8: clock_changed
+      FUN_080e1d18: sync_best_clock_source
+      thunk_EXT_FUN_220042b4: rom_sem_signal
+    notes: >-
+      Raw extent [0x0806748c,0x08067504) has 116 instruction bytes and
+      current-clock literal 0x08a662e0 at 0x08067500; next function is PUSH.
+      Independent whole-image BL decoding finds two plain callers at
+      0x08056878 and 0x080fac48, no predicated callers; six plain outbound
+      BLs and one BLEQ. Copy twelve bytes, convert ordinal day if month
+      is zero, wait semaphore 3, write RTC mode 0, publish zone/DST/status
+      only on zero status. Always notify, synchronize sources, and signal.
+      Reuse existing RTC/notifier seams and ported ordinal/sync helpers.
+      Deviations: aligned local with unaligned-safe input copy; omit false
+      Ghidra arguments and ignored synchronization argument. Calendar caller
+      now uses the port directly. Tests cover ordinal boundaries, explicit
+      month bypass, input preservation and success/failure publication.
+      Host suite: 15464 passing tests. ARM release build passed. match.py
+      reports 61 Rust instructions versus 29 original instructions: input
+      byte assembly replaces memcpy, conditional ordinal call and metadata
+      stores remain, fixed-address RTC/notifier calls use BLX and semaphore
+      calls dispatch through existing kernel ops. Executable host smoke
+      verifies leap-day conversion, unchanged source and published metadata.
   - address: 0x08067504
     ghidra: FUN_08067504
     name: clock_source_replace
