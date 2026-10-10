@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08088aac
+    ghidra: FUN_08088aac
+    name: usb_frame_number
+    size: 20
+    sig: "uint32_t usb_frame_number(void)"
+    module: drivers/usb_frame_number
+    status: ported
+    vars: {r0: link_status_then_frame_number}
+    renames: {_DAT_38400808: usb_link_status}
+    notes: >-
+      Raw A32 extent [0x08088aac,0x08088ac0) is five instructions;
+      next real routine starts with CMP and a computed jump table,
+      despite its omission from the Ghidra assembly listing. Full-image
+      aligned word decoding verifies two plain inbound BLs at 0x08107b9c
+      and 0x08107d50, zero predicated inbound BLs and zero outgoing BLs.
+      Read USB status 0x38400808 once and extract bits 8 through 21.
+      Callers save the counter at transfer start and compute elapsed frames
+      modulo 0x4000, dividing by eight in high-speed mode. Reuses the existing
+      inlined volatile USB status read; no new callee seams or target
+      behavioral deviations. Host tests cover counter boundaries, wrap,
+      every individual status bit and unrelated flags. Full host suite and
+      release ARM build pass; standalone smoke verifies five boundary words.
+      match.py structural diff reviewed: five original versus nine listing
+      lines, one aligned load and no calls; LLVM uses shift/mask extraction,
+      frame setup/restore and an address literal instead of two shifts.
   - address: 0x080890a8
     ghidra: FUN_080890a8
     name: path_facade_slot_6c_from_cstr
