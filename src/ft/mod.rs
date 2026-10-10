@@ -9,6 +9,7 @@ pub mod edge_translate_position;
 pub mod arith;
 pub mod buffer;
 pub mod bdf_list;
+pub mod bdf_comments;
 pub mod buffer_skip;
 pub mod calc;
 pub mod charmap;
