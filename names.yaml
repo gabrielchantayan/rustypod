@@ -63251,6 +63251,46 @@ functions:
       LLVM rotating the cache-hit exit to the top of the function.
 
 
+  - address: 0x0806e488
+    ghidra: FUN_0806e488
+    name: singleton_class_8c00_ready_dispatch
+    size: 28
+    sig: "void singleton_class_8c00_ready_dispatch(void)"
+    module: app/singletons
+    status: identified
+    renames:
+      FUN_081a5500: singleton_class_8c00
+    notes: >-
+      Honest deferral: raw A32 words at 0x0806e488..0x0806e4a4
+      are e92d4010 eb04dc1b e5d00069 e3500000 18bd4010
+      1affb5a1 e8bd8010. The next independent prologue is
+      e92d40f0 at 0x0806e4a4, establishing the true 28-byte extent.
+      There is one internal plain BL at 0x0806e48c to
+      singleton_class_8c00 (0x081a5500), zero internal predicated
+      BL, and a conditional tail BNE at 0x0806e49c to 0x0805bb28.
+      Independent whole-image branch-word decoding finds two inbound
+      plain BL sites (0x081a0f2c and 0x081ea5e4), zero inbound
+      predicated BL, and the plain-B thunk at 0x081bb29c.
+      The gate ignores incoming arguments, loads the singleton's
+      unsigned ready byte at +0x69, returns when zero, and restores
+      the caller's LR before tail-dispatching when nonzero. Ghidra's
+      C incorrectly incorporates the downstream controller chain
+      into this function; its reported two call sites are inbound,
+      not two calls in this body.
+      Faithful cutover is blocked by the existing singleton getter's
+      default class_8c00 zeroing constructor in src/app/singletons.rs,
+      rather than retail FUN_081a71fc, which initializes +0x69 to one.
+      Reusing that default silently takes the return path instead of
+      retail's ready dispatch. The tail target 0x0805bb28 has no
+      names.yaml entry or established Rust port; its raw body calls
+      0x081f50b4 at 0x0805bb54, 0x081b1068 at 0x0805bb6c,
+      0x081fd610 at 0x0805bb84, 0x081fd61c at 0x0805bb90, and
+      0x081f507c at 0x0805bba4, and tail-dispatches to 0x081b111c
+      or 0x08087554. These dependencies are also recorded by the
+      existing identified thunk at 0x081bb29c. No guessed controller
+      identity, partial Rust body, zeroing fallback, or new callee
+      seam is introduced.
+
   - address: 0x081bb29c
     ghidra: thunk_FUN_0806e488
     name: singleton_class_8c00_ready_gate
