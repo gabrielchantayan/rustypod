@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808e0e8
+    ghidra: FUN_0808e0e8
+    name: trace_buffer_primary_entry_is_state_one
+    size: 72
+    sig: "u32 trace_buffer_primary_entry_is_state_one(void)"
+    module: app/trace_buffer
+    status: ported
+    vars: {local_10: entry_guard, cVar1: entry_state, r5: result}
+    renames:
+      FUN_0814a08c: trace_buffer_get
+      FUN_0814a130: trace_buffer_slot_acquire
+      FUN_0809449c: mutex_unlock_counted
+    notes: >-
+      Raw extent is 72 bytes, ending at the next function at 0x0808e130.
+      Whole-image decoding verifies two inbound plain BLs at 0x08093f8c
+      and 0x081178d8, three outbound plain BLs, and no predicated BLs.
+      Acquire global slot zero with a NULL guard, snapshot whether byte
+      entry+0x0c equals exactly one, release any acquired entry lock, return
+      normalized zero or one. Reuses existing Rust callees without new seams.
+      No deliberate behavioral deviations; host layouts follow existing
+      registry ports. Tests cover all state bytes, slot zero, balanced locks,
+      and unowned fallback locks. ARM match has 18 instructions per version;
+      LLVM uses predicated unlock, CLZ normalization, omits dead guard clear.
+      Instruction smoke passed 512 scenarios per version, including mutation
+      during unlock to verify the pre-unlock snapshot.
   - address: 0x0808e194
     ghidra: FUN_0808e194
     name: peripheral_control_select
