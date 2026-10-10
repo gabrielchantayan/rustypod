@@ -150,6 +150,8 @@ pub mod error_status;
 pub mod block_window;
 /// Block-size alignment check and opaque storage-backend transfer @ 0x08077444.
 pub mod storage_transfer;
+/// Initializes and writes a chain of B-tree map nodes @ 0x080819d8.
+pub mod btree_map_nodes;
 /// Chunks a block transfer through a cleared, aligned temporary buffer @ 0x080f086c.
 pub mod storage_transfer_chunked;
 /// Opaque storage-backend dispatch through vtable slot three @ 0x08149e10.

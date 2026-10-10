@@ -242417,3 +242417,35 @@ functions:
       instructions: lazy allocation, signed scan, separate replace/append
       paths and constant success preserved; LLVM adds a frame and uses
       BLX for the fixed-address create/free calls.
+
+  - address: 0x080819d8
+    ghidra: FUN_080819d8
+    name: storage_write_btree_map_nodes
+    size: 208
+    sig: "i32 storage_write_btree_map_nodes(const StorageTransferGeometry *geometry, u32 first_block, u32 previous_node, u32 node_count, u32 node_size, u8 *buffer)"
+    module: fs/btree_map_nodes
+    status: ported
+    vars: {param_1: geometry, param_2: first_block, param_3: previous_node, param_4: node_count, param_5: node_size, param_6: buffer}
+    notes: >-
+      Raw ARM extent ends at the next prologue at 0x08081aa8, 208 bytes.
+      Two incoming unconditional BL calls at 0x0807cec8 and 0x0807cf50,
+      no incoming predicated BLs; seven outgoing unconditional BLs.
+      Initialize a zeroed B-tree map node (kind 2, height 0, one record),
+      record start 14 and free-space start (node_size-6) truncated to u16.
+      Write a chain with big-endian forward node links, terminating at zero,
+      advancing disk blocks by node_size>>9 and stopping on first error.
+      Zero count still initializes the buffer. Preserve 32-bit wrapping and
+      the counter's bit-16 clearing; counts above 65535 may not terminate.
+      Reuses ported IRAM memzero, byte swaps, unaligned store and aligned
+      storage transfer; no new firmware-address seam. Rust store ABI is
+      pointer-first and byte swaps may inline. Exposes r0 status only;
+      original pop restores saved r1, not Ghidra's claimed return pair.
+      Host suite passed 15371 tests, including four map-node edge tests.
+      ARM release build passed. match.py reports 52 stock versus 62 Rust
+      instructions: header setup, forward-link/terminator split, first-error
+      exit, size>>9 block advance and bit-16 counter clearing preserved.
+      Executable smoke (test-configured host library) returned 0x50 for a
+      misaligned transfer and observed link 41, kind 2, one record, offsets
+      506 and 14. Ordinary host library builds are independently blocked
+      by missing host definitions in prepare_entry_metadata,
+      shared_payload_select_kind and calendar_schedule.
