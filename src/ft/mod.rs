@@ -22,6 +22,7 @@ pub mod cff_sid;
 pub mod t1_builder;
 pub mod t1_lookup_glyph;
 pub mod t1_pfb_header;
+pub mod t1_check_header;
 pub mod conditional_offset;
 pub mod interpolate_delta;
 pub mod error;

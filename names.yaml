@@ -240050,3 +240050,40 @@ functions:
       axis loop, sign rejection, open bounds and both span selections
       remain. Structural diff is intentional, not an exact code match.
       No physical-device execution.
+
+  - address: 0x080a8318
+    ghidra: FUN_080a8318
+    name: t1_check_header
+    size: 152
+    sig: "i32 t1_check_header(FtStream *stream, const u8 *signature, u32 length)"
+    module: ft/t1_check_header
+    status: ported
+    vars: {param_1/r5: stream, param_2/r6: signature, param_3/r7: length, local_1c: tag, uStack_20: segment_size, iVar1/r4: error}
+    renames: {FUN_0804fce8: ft_stream_seek, FUN_0807d4d4: t1_read_pfb_segment_header, FUN_0804edb0: ft_stream_enter_frame, FUN_08030f64: memcmp, FUN_0804ef8c: ft_stream_exit_frame}
+    notes: >-
+      Raw words establish 38 ARM instructions (152 bytes), ending at the
+      distinct indirect-dispatch entry 0x080a83b0. Six outgoing unconditional
+      BL instructions at 0x080a832c, 0x080a8344, 0x080a8368, 0x080a837c,
+      0x080a8394 and 0x080a83a4; no predicated BL. Independent whole-image
+      word decoding finds two incoming unconditional BL at 0x080805c0 and
+      0x080805e4, both in the Type 1 parser initializer, checking the
+      %!PS-AdobeFont and %!FontType signatures. Seeks to zero, reads the
+      PFB segment header, and leaves position after that header only for
+      ASCII tag 0x8001; all other tags rewind. The declared segment size is
+      ignored. Enters a length-byte frame, compares with memcmp, returns
+      literal 2 for mismatch, and exits the frame on either comparison
+      result. Earlier stream errors return unchanged without exiting an
+      unentered frame. All five distinct callees use their existing ports;
+      no new seams. Deviations: dead incoming r3 stack word is omitted;
+      helper error input is explicitly zero because ReadShort overwrites it
+      before use. Native-pointer repr(C) FtStream preserves ARM +0x20
+      cursor layout without imposing host byte offsets. Five host tests
+      cover plain/PFB signatures, binary/end-tag rewind, ignored segment
+      size, truncated headers/frames, zero-length frames, and cleanup.
+      Full host suite passed (15239 tests); ARM release build passed.
+      Throwaway host smoke observed match=0, mismatch=2, pos=10 and cleared
+      frame pointers through the real ports. match.py reports 38 original
+      versus 80 Rust instructions, exit 1: LLVM inlines both seeks and
+      ExitFrame (including callback/free paths); the tag gate, error exits,
+      frame entry, cursor comparison and mismatch result remain intact.
+      No physical-device execution.
