@@ -239349,3 +239349,37 @@ functions:
       smoke passed 22692 reference comparisons. match.py exits 1 with 27 stock
       versus 34 Rust instructions: the same bytewise scan and strict length
       gate, larger frame, and byte-swap assembly. No physical-device execution.
+
+  - address: 0x080b4bfc
+    ghidra: FUN_080b4bfc
+    name: task_local_store
+    size: 36
+    sig: "void task_local_store(u32 task_id, u32 value)"
+    module: kernel/task_local
+    status: ported
+    renames:
+      param_1: task_id
+      param_2: value
+      DAT_080b4c1c: task_local_slots
+      thunk_EXT_FUN_22003eb0: current_task_id
+    notes: >-
+      Raw A32 words establish 32 code bytes plus the table literal at
+      0x080b4c1c, giving a true 36-byte extent ending at the independent
+      push prologue at 0x080b4c20. Whole-image aligned BL decoding finds two
+      incoming plain calls at 0x080a3e94 and 0x080b16c8, no predicated
+      incoming calls. The body has zero outgoing plain BLs and one BLEQ
+      to the verified current_task_id veneer at 0x08037e60. Resolves ID
+      zero once, then stores the preserved value into the aligned u32
+      table at 0x08adc180 only for unsigned IDs below 80. The adjacent
+      getter uses the same table; task_local_for_current_task constructs
+      and caches its local object here. Zero clears a slot; a resolved
+      zero writes slot zero; invalid IDs leave the table untouched.
+      Existing Rust caller now invokes the port, removing its raw-address
+      store helper and host store callback. Deliberate deviations are the
+      host-only table/current-ID seam, volatile shared-table access, and a
+      direct call to the existing verified current_task_id Rust port.
+      Host edge tests and ARM release build passed. Actual-source native
+      smoke passed 2240 word comparisons. match.py exits 1: 8 stock versus
+      11 Rust instructions, with the same conditional current-ID call,
+      unsigned bound and indexed store; LLVM uses <=79 instead of <80,
+      a larger frame and a separate shift. No physical-device execution.
