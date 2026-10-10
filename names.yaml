@@ -16,6 +16,43 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806b440
+    ghidra: FUN_0806b440
+    name: file_descriptor_export
+    size: 72
+    sig: "i32 file_descriptor_export(const u8 *object, u8 *output)"
+    module: app/file_descriptor_export
+    status: ported
+    vars:
+      param_1/r0: object
+      param_2/r1: output
+      r3: descriptor_kind
+      object+0x16: initialized
+      object+0x0c: descriptor_kind
+      object+0xc0: embedded_descriptor
+      FUN_080e2e20: stock_descriptor_converter
+    notes: >-
+      Raw A32 extent is 0x0806b440..0x0806b488 (72 bytes), including
+      literals 0xb9b6b3bb and 0xf90302f9. Next entry begins PUSH at
+      0x0806b488; Ghidra's 64 bytes omit the literal pool. Whole-image
+      aligned decoding finds two plain incoming BLs at 0x0806a920 and
+      0x082a3814, no predicated incoming BLs, and no outgoing BLs.
+      Conditional tail B at 0x0806b474 reaches 0x080e2e20; Ghidra
+      incorrectly expands that converter into this function. Require byte
+      +0x16 exactly one and tag FILE (0x46494c45) or MFIL (0x4d46494c),
+      otherwise return -50 without touching output. Forward tag,
+      object+0xc0 and output to the stock converter and return its status.
+      Neither address had an existing names entry. Converter remains a
+      verified fixed-address firmware seam, not an invented implementation.
+      Host accepted exports fail without retailOS; private core tests cover
+      the gate using a supplied boundary. Rust equality replaces equivalent
+      wrapping comparisons; LLVM frame and tail-call selection may differ.
+      Host tests cover rejected state bytes and adjacent tag boundaries;
+      standalone exported smoke verifies rejection and unchanged output.
+      Full host suite and ARM release build pass. match.py prints a
+      structural diff: byte gate, two tag comparisons, descriptor +0xc0,
+      preserved converter return and -50 rejection remain; LLVM uses BX
+      through literal 0x080e2e20 instead of the stock conditional tail B.
   - address: 0x0806d7dc
     ghidra: FUN_0806d7dc
     name: plst_reference_state_refresh
