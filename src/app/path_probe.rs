@@ -850,6 +850,41 @@ pub unsafe extern "C" fn path_facade_slot_80_from_cstr(
     status
 }
 
+/// path_facade_slot_6c_from_cstr — original: `FUN_080890a8` @ 0x080890a8.
+///
+/// Raw A32 extent [0x080890a8,0x080890f0) is 72 bytes without literals;
+/// the next entry starts with push. Two incoming plain BLs at 0x0805a9b8
+/// and 0x0813be34, zero predicated BLs. Three outgoing plain BLs, zero
+/// predicated BLs: path construction, slot +0x6c worker, string destruction.
+/// Constructs a temporary path from the C string, passes three opaque
+/// outputs and the fifth-argument base hint to the worker, destroys the
+/// same temporary on every status, and returns the saved u32 status.
+/// Deliberate deviations: typed native-width storage replaces argument
+/// spills; Ghidra's undefined8 return is rejected because r1 is merely
+/// restored by pop, not a second result. Existing ports are called directly.
+///
+/// # Safety
+/// `path` must satisfy the path constructor's C-string contract; outputs
+/// and configured facade must satisfy `path_facade_slot_6c`'s contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_6c_from_cstr(
+    path: *const u8,
+    first_output: *mut u8,
+    second_output: *mut u8,
+    third_output: *mut u8,
+    base_hint: u32,
+) -> u32 {
+    let mut storage = MaybeUninit::<StringObject>::uninit();
+    let storage = storage.as_mut_ptr();
+    let path_object = path_object_construct(storage, path);
+    let status = path_facade_slot_6c(
+        path_object, first_output, second_output, third_output, base_hint,
+    );
+    string_object_destroy_veneer(storage);
+    status
+}
+
 /// path_facade_slot_6c — original: `FUN_080890f0` @ 0x080890f0.
 ///
 /// Raw A32 proves [0x080890f0,0x08089154), 100 bytes with no literals:
@@ -2417,6 +2452,64 @@ pub(crate) mod tests {
             path.payload = core::ptr::null_mut();
             assert_eq!(path_facade_slot_6c(&mut path, core::ptr::null_mut(),
                 core::ptr::null_mut(), core::ptr::null_mut(), 0), 0x8000_0015);
+        }
+    }
+
+    unsafe extern "C" fn cstr_slot_6c_query(
+        facade: *mut FacadeObject, path: *mut StringObject,
+        first: *mut u8, second: *mut u8, third: *mut u8,
+    ) -> u32 {
+        (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).push(pair_payload(path));
+        if !(*path).payload.is_null() { *(*path).payload = b'X'; }
+        slot_6c_write_outputs(facade, path, first, second, third)
+    }
+
+    #[test]
+    fn cstr_slot_6c_owns_mutated_path_and_preserves_aliases_on_error() {
+        use crate::cxx::string_object::{
+            StringObjectAssignCstrOps, STRING_OBJECT_ASSIGN_CSTR_OPS,
+        };
+        let _path_lock = take_lock();
+        let _assign_lock = crate::testing::STRING_OBJECT_ASSIGN_CSTR_TEST_LOCK.lock().unwrap();
+        let _release_lock = STRING_OBJECT_OPS_TEST_LOCK.lock().unwrap();
+        let _restore = unsafe { SeamGuard::new() };
+        let _release_restore = unsafe { StringObjectOpsGuard::new() };
+        struct AssignRestore(StringObjectAssignCstrOps);
+        impl Drop for AssignRestore {
+            fn drop(&mut self) {
+                unsafe { core::ptr::addr_of_mut!(STRING_OBJECT_ASSIGN_CSTR_OPS).write(self.0); }
+            }
+        }
+        unsafe {
+            let _assign_restore = AssignRestore(core::ptr::addr_of!(STRING_OBJECT_ASSIGN_CSTR_OPS).read());
+            STRING_OBJECT_ASSIGN_CSTR_OPS = StringObjectAssignCstrOps {
+                allocate_payload: pair_allocate, clear_payload: pair_clear,
+            };
+            STRING_OBJECT_OPS.release_payload = pair_release;
+            for (path, fail, status, before, after) in [
+                (b"path\0".as_ptr(), false, 0, &b"path"[..], &b"Xath"[..]),
+                (b"path\0".as_ptr(), false, 0xffff_ffff, &b"path"[..], &b"Xath"[..]),
+                (b"\0".as_ptr(), false, 7, &b""[..], &b""[..]),
+                (core::ptr::null(), false, 7, &b""[..], &b""[..]),
+                (b"path\0".as_ptr(), true, 7, &b""[..], &b""[..]),
+            ] {
+                install_recording();
+                PAIR_FAIL_ALLOCATION = fail;
+                (*core::ptr::addr_of_mut!(PAIR_OBSERVED)).clear();
+                PATH_PROBE_GUARD_CTOR = slot_6c_scope_construct;
+                PATH_PROBE_GUARD_DTOR = slot_6c_scope_destroy;
+                MOCK_VTABLE.slots[0x6c / 4] = cstr_slot_6c_query as usize;
+                let mut output = [0xa5u8; 14];
+                let p = output.as_mut_ptr().add(1);
+                let result = path_facade_slot_6c_from_cstr(path, p, p, p, status);
+                let empty = fail || path.is_null() || *path == 0;
+                assert_eq!(result, if empty { 0x8000_0015 } else { status });
+                assert_eq!(&output[1..13], &[if empty { 0xa5 } else { 0x33 }; 12]);
+                assert_eq!((output[0], output[13]), (0xa5, 0xa5));
+                assert_eq!(&*core::ptr::addr_of!(PAIR_OBSERVED),
+                    &[before.to_vec(), after.to_vec()]);
+                assert_eq!(DTOR_THIS, CTOR_THIS);
+            }
         }
     }
 }
