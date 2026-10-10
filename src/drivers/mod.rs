@@ -9,6 +9,7 @@ pub mod usb_out_endpoint_zero_rearm;
 pub mod usb_high_speed_query;
 pub mod usb_link_status_bit0;
 pub mod ata_cmd;
+pub mod ata_dma_configure;
 pub mod ata_command_execute;
 pub mod ata_pio_read_sectors;
 pub mod ata_fast_io_write;

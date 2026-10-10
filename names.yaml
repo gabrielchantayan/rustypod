@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080922c8
+    ghidra: FUN_080922c8
+    name: ata_dma_configure
+    size: 156
+    sig: "void ata_dma_configure(const AtaCommandDevice *device, u32 buffer_address, u32 sectors, u32 write, u32 alternate)"
+    module: drivers/ata_dma_configure
+    status: ported
+    vars:
+      param_1/r0: device
+      param_2/r1: buffer_address
+      param_3/r2: sectors
+      param_4/r3: write
+      param_5/stack: alternate
+      r12: ata_registers
+    notes: >-
+      Raw extent [0x080922c8,0x08092364) is 156 bytes: 152 instruction
+      bytes and the 0x38700000 literal at 0x08092360. Next function starts
+      at 0x08092364. Raw whole-image ARM branch decoding finds two incoming
+      plain BLs at 0x0836c668 and 0x0836d03c, zero predicated callers,
+      zero tail callers and zero outgoing BLs. No callee seams.
+      Callers select sector read and write DMA respectively. Mask buffer
+      bit 31; program direction-specific address/count or alternate +0x88.
+      Set wrapping (sectors << 9) - 1 at +0x34. Device halfword +0x24
+      selects control flags 0x408 or 0x60c; clear 0x180, select bit 0x10,
+      and optionally set (never implicitly clear) bit 0x1000.
+      Preserve separate volatile MMIO updates. Hosts substitute a RAM bank.
+      Host suite, edge-case reference tests, release ARM build and standalone
+      exported-entry write/alternate zero-count smoke pass. No device run.
+      match.py exit 1 reviewed: 38 original versus 43 Rust instructions.
+      LLVM rebases MMIO to 0x38700018 and merges address stores; count,
+      direction, halfword mode and separate control updates remain intact.
   - address: 0x080931e0
     ghidra: FUN_080931e0
     name: tt_translate_array
