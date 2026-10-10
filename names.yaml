@@ -242087,3 +242087,38 @@ functions:
       31 versus 26 listed instructions (including two Rust literal words),
       scalar geometry transfers instead of LDM/STM, the same single call,
       index reloads, stores, and unsigned wrap. No device run performed.
+  - address: 0x08087830
+    ghidra: FUN_08087830
+    name: wheel_change_notify
+    size: 20
+    sig: "void wheel_change_notify(void)"
+    module: kernel/wheel_change_notify
+    status: ported
+    renames:
+      DAT_08087840: wheel_change_pending
+      FUN_080618d0: wheel_input_dispatch
+    notes: >-
+      Raw words e59f1008 e3a00001 e5c10000 eaff6823 establish 16
+      instruction bytes followed by literal 0x089ca550 at 0x08087840;
+      the next independent PUSH starts at 0x08087844, giving a true
+      extent of 20 bytes. Whole-image aligned A32 B/BL decoding finds
+      zero plain BL callers and two BLEQ callers at 0x0809e5e0 and
+      0x0809e610. No outgoing BL: 0x0808783c tail-branches to the
+      unported 0x080618d0 wheel input dispatch. Set the pending byte
+      unconditionally to 1 before dispatch, including repeated calls.
+      Ghidra incorrectly incorporates the tail target and invents four
+      arguments; the target overwrites r0/r1 before using them and
+      callers consume no return value. The target chooses sample latch
+      versus a Weel message with two zero payload words using byte
+      0x089ca866. Rust retains
+      that exact firmware target rather than duplicating its body.
+      Deliberate deviations: volatile publication and host-injected
+      pending storage/dispatch. Host tests cover all prior byte values,
+      consumer clearing and repeated publication, and untouched neighbors.
+      Host suite passes (15352 tests) and ARM release build passes.
+      A standalone host execution smoke verifies publication, consumption,
+      and republication with intact neighboring bytes. match.py exits 1:
+      Rust uses a frame and BX through the exact 0x080618d0 literal
+      rather than the original direct tail B; the byte store still
+      precedes dispatch and uses the exact 0x089ca550 literal.
+      No device execution performed.
