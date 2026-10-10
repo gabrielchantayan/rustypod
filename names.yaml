@@ -240799,3 +240799,32 @@ functions:
       instructions, same acquire/check/conditional initializer/release shape;
       LLVM adds a frame pointer and calls the initializer with literal BLX
       instead of direct BL, retaining the verified 0x08062218 literal.
+
+  - address: 0x0809b644
+    ghidra: FUN_0809b644
+    name: trace_buffer_entry_state_get
+    size: 52
+    sig: "u8 trace_buffer_entry_state_get(u32 selector)"
+    module: app/trace_buffer
+    status: ported
+    vars: {param_1: selector, local_10: entry_guard, uVar1: state, uVar2: buffer, iVar3: entry}
+    renames:
+      FUN_0814a08c: trace_buffer_get
+      FUN_0814a130: trace_buffer_slot_acquire
+      FUN_08206e9c: counted_mutex_guard_release
+    notes: >-
+      Raw words establish 52 bytes through 0x0809b678, the next real
+      function boundary. Two incoming plain BL sites at 0x08051de8 and
+      0x080faab8, zero predicated incoming BLs; three outgoing plain BLs,
+      zero predicated outgoing BLs. Initialize a NULL entry guard, resolve
+      the selector through the global trace registry, read the byte at
+      entry+0x0c, release the guard, and return the unnormalized state.
+      Both callers pass selector zero; one translates states 1 and 2 to
+      1 and 3, the other caches the byte. No new seams or deliberate
+      deviations; inherited accessor/resolver adaptations remain unchanged.
+      Host tests exhaust all byte values for selectors 0 and 6 and cover
+      NULL slots, selector 7, u32::MAX, and fallback lock ownership.
+      Host suite: 15279 passed. ARM release build passed. match.py exit 1:
+      13 original versus 17 Rust instructions; all three calls, the +0x0c
+      byte load, and release-before-return are retained. LLVM adds a frame
+      pointer and uses stack+4 for the guard.
