@@ -86,6 +86,29 @@ pub unsafe extern "C" fn store_be32(p: *mut u8, value: u32) {
     p.add(3).write(value as u8);
 }
 
+/// store_response_u32_be — original: `FUN_080a960c` @ 0x080a960c.
+///
+/// True extent: 32 bytes, 0x080a960c..0x080a962c; `bx lr` at 0x080a9628
+/// precedes the next function's push. Raw ARM words verify two unconditional
+/// incoming BLs (0x080fd07c, 0x080fd0b0), zero predicated incoming BLs, and
+/// zero outgoing BLs. Both callers write response fields at +0x28 and +0x2c.
+/// Split `value` into four bytes, most significant first, and write precisely
+/// those bytes at `dst`, without alignment, NULL, or bounds checks.
+/// Deliberate deviation: volatile byte stores retain the original access width
+/// and order; a dedicated text section keeps this distinct from store_be32.
+///
+/// # Safety
+/// `dst` must point to at least four writable bytes, at any byte alignment.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[cfg_attr(target_os = "none", link_section = ".text.store_response_u32_be")]
+#[inline(never)]
+pub unsafe extern "C" fn store_response_u32_be(dst: *mut u8, value: u32) {
+    dst.write_volatile((value >> 24) as u8);
+    dst.add(1).write_volatile((value >> 16) as u8);
+    dst.add(2).write_volatile((value >> 8) as u8);
+    dst.add(3).write_volatile(value as u8);
+}
+
 /// store_u32_be_bytes — original: `FUN_08046b1c` @ 0x08046b1c (40 bytes;
 /// 3 recovered decompiler call sites).
 ///
@@ -353,6 +376,21 @@ pub unsafe extern "C" fn unpack_be64(src: *const u8) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn response_word_preserves_neighbors_at_every_alignment() {
+        let values = [0, u32::MAX, 0x0123_4567, 0x89ab_cdef,
+            0x8000_0000, 0x0080_0000, 0x0000_8000, 0x0000_0080];
+        for offset in 4..8 {
+            for value in values {
+                let mut bytes = [0xa5u8; 12];
+                let mut expected = bytes;
+                expected[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+                unsafe { store_response_u32_be(bytes.as_mut_ptr().add(offset), value) };
+                assert_eq!(bytes, expected, "offset {offset}, value {value:#010x}");
+            }
+        }
+    }
 
     #[test]
     fn assembles_big_endian() {
