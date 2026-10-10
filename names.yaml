@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806d7dc
+    ghidra: FUN_0806d7dc
+    name: plst_reference_state_refresh
+    size: 156
+    sig: "u32 plst_reference_state_refresh(u8 *element, u32 force)"
+    module: ui/plst_reference_state_refresh
+    status: ported
+    vars:
+      param_1/r0/r4: element
+      param_2/r1/r7: force
+      r5: shared_resource_mutex
+      r6: old_state
+      r2: references
+      element+0x1ae: reference_state
+      element+0x1b2: has_references
+      element+0x1b8: references
+    notes: >-
+      Raw extent [0x0806d7dc,0x0806d878) is 156 bytes: 148 instruction
+      bytes plus mutex 0x08a774c0 and notification key 0x72667363 literals.
+      Next real entry starts PUSH at 0x0806d878. Whole-image A32 scan finds
+      two incoming plain BLs at 0x0806c32c and 0x080e5bec, three outgoing
+      plain BLs, no predicated BLs, and an unlock tail B. Refresh cached
+      PLST reference-validation state under shared resource mutex; state 6
+      prevents recursive re-entry, state 1 is the no-reference default.
+      Notify parent+0xbac only for an old nonzero state differing from the
+      full u32 validator result, then return unlock status. Ghidra's third
+      input is spurious; consumed r2 is loaded from element+0x1b8.
+      Reuse canonical mutex ports via verified veneers. Unported 0x08048e54
+      validator and 0x08066bb8 walker retain verified addresses behind ops;
+      host execution requires installed boundaries. Tests cover caching,
+      forcing, absent references, recursion, truncation, zero results,
+      notification precedence and unchanged neighboring bytes. Serial host
+      suite, ARM release build and standalone exported-body smoke pass.
   - address: 0x0806d8ac
     ghidra: FUN_0806d8ac
     name: hfs_volume_mark_encoding
