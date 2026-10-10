@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0806f258
+    ghidra: FUN_0806f258
+    name: namespace_provider_entry_value
+    size: 16
+    sig: "u32 namespace_provider_entry_value(const u32 *entry)"
+    module: cxx/object_flags
+    status: ported
+    vars:
+      param_1/r0: entry
+      return/r0: value_word
+    notes: >-
+      Raw A32 words e3500000 15900004 03a00000 e12fff1e establish
+      extent [0x0806f258,0x0806f268), 16 bytes; next function independently
+      reads the first word with its own null guard. Whole-image decoding
+      finds two incoming plain BLs at 0x080750f0 and 0x08075490, zero
+      predicated incoming BLs, and zero outgoing plain or predicated BLs.
+      Both callers obtain the entry from namespace_provider_slot_at_checked.
+      The formatting caller separately reads its first word and passes this
+      second word to its value formatter. Returns zero for null, otherwise
+      the aligned u32 at +4; concrete value type remains unestablished.
+      No callee seams or layout deviations; volatile access preserves the
+      single firmware load. Host fixtures retain four-byte words.
+      Host suite passes 15427 tests; ARM release build passes. Standalone
+      smoke executes the actual accessor body for null, high-bit, changed
+      zero and all-bits values. match.py exits 1: six Rust instructions
+      versus four stock, adding push/mov frame setup and replacing BX LR
+      with POP; CMP, LDRNE at +4 and MOVEQ zero remain unchanged.
   - address: 0x0806f530
     ghidra: FUN_0806f530
     name: namespace_provider_slot_at_checked

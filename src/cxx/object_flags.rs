@@ -1019,6 +1019,53 @@ pub unsafe extern "C" fn namespace_provider_slot_at(
     }
 }
 
+/// namespace_provider_entry_value — original: `FUN_0806f258` @
+/// `0x0806f258` (16 bytes, `0x0806f258..0x0806f268`; the next real
+/// function is a separate null-safe first-word accessor).
+/// Raw words: `e3500000 15900004 03a00000 e12fff1e`.
+/// Verified calls: two incoming plain BLs at `0x080750f0` and
+/// `0x08075490`, zero predicated incoming BLs, and zero outgoing BLs.
+///
+/// Returns zero for a null provider entry; otherwise returns its aligned
+/// 32-bit value word at +0x04. Both callers obtain the entry through
+/// namespace_provider_slot_at_checked; the formatting caller reads the
+/// first word separately and passes this value to its value formatter.
+/// The concrete value type is not established, so its bits remain u32.
+///
+/// Deliberate deviations: none in layout or behavior. Volatile access
+/// preserves the single firmware load; host fixtures also use u32 words.
+///
+/// # Safety
+/// A non-null entry must point to at least two readable, aligned u32 words.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn namespace_provider_entry_value(entry: *const u32) -> u32 {
+    if entry.is_null() {
+        0
+    } else {
+        entry.add(1).read_volatile()
+    }
+}
+
+#[cfg(test)]
+mod provider_entry_value_tests {
+    use super::namespace_provider_entry_value;
+
+    #[test]
+    fn null_entry_returns_zero() {
+        assert_eq!(unsafe { namespace_provider_entry_value(core::ptr::null()) }, 0);
+    }
+
+    #[test]
+    fn returns_only_second_word_without_changing_entry() {
+        for value in [0, 1, 0x8000_0000, 0xffff_ffff, 0x1234_5678] {
+            let entry = [!value, value, 0xa5a5_5a5a];
+            assert_eq!(unsafe { namespace_provider_entry_value(entry.as_ptr()) }, value);
+            assert_eq!(entry, [!value, value, 0xa5a5_5a5a]);
+        }
+    }
+}
+
 /// namespace_provider_slot_at_checked — original: `FUN_0806f530` @
 /// `0x0806f530` (60 bytes, `0x0806f530..0x0806f56c`; next function
 /// begins with `push {r4,r5,r6,lr}`). Raw A32 decoding verifies two
