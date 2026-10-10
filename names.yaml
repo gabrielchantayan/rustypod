@@ -69769,6 +69769,31 @@ functions:
       Ghidra's void prototype omits the unchanged r0 return value. Deliberate
       deviations: none. Host tests cover byte-lane extremes, return-pointer
       preservation, and an interior record with unchanged neighbouring words.
+  - address: 0x0807fefc
+    ghidra: FUN_0807fefc
+    name: bswap_two_u32s_inplace
+    size: 68
+    sig: "u32 *bswap_two_u32s_inplace(u32 *record)"
+    module: util/bswap_two_u32s_inplace
+    status: ported
+    renames:
+      param_1/r0: record
+      uVar1/r1: word
+      r2: swapped_lanes
+      r3: byte_lane
+    notes: >-
+      Raw osos.dec confirms 17 ARM words from 0x0807fefc through bx lr at
+      0x0807ff3c; the next independent function begins with a register-save
+      prologue at 0x0807ff40, establishing the true size as 68 bytes.
+      Two repeated aligned load, shift/mask/OR, and store sequences reverse
+      each u32's byte lanes without exchanging word order. Raw branch-word
+      decoding finds zero plain incoming BLs and two predicated blne calls,
+      at 0x080be374 and 0x080e4ecc; the leaf has no outgoing BLs.
+      Both callers conditionally convert two-word stack records based on
+      the receiver byte at +0x400e3. Ghidra's void prototype omits the
+      unchanged r0 pointer return. Deliberate deviations: none. Host tests
+      cover independent words, byte-lane boundaries, unchanged neighbors,
+      and return-pointer preservation.
   - address: 0x080b4318
     ghidra: FUN_080b4318
     name: string_pool_read
