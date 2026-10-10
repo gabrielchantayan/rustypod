@@ -243922,3 +243922,39 @@ functions:
       match.py exits 1 with 12 stock versus 14 Rust instructions:
       frame setup, register selection and loop predication differ,
       while the class gate, +0x28 head, +0x20 clear and +4 link remain.
+
+  - address: 0x0806c16c
+    ghidra: FUN_0806c16c
+    name: plst_resource_reset
+    size: 56
+    sig: "void plst_resource_reset(u32 *element)"
+    module: ui/plst_resource_reset
+    status: ported
+    renames:
+      param_1/r4: element
+      FUN_080613e0: ui_element_is_plst_class
+      FUN_0806b604: resource_callback_dispatch
+      DAT_0806c1a0: RESOURCE_CALLBACK
+    notes: >-
+      Raw words verify 52 instruction bytes through pop at 0x0806c19c,
+      plus callback literal 0x080cc284 at 0x0806c1a0; the next real
+      prologue starts at 0x0806c1a4, making the full extent 56 bytes.
+      Two outbound plain BLs, zero predicated BLs. Whole-image decoding
+      finds two inbound plain BLs at 0x08048224 and 0x0806c1dc and zero
+      predicated BLs. NULL or wrong-class elements are untouched. A plst
+      element dispatches its resource at +0x40 with the exact callback
+      literal and NULL context, ignores status, reloads +0x40 after the
+      callback, and clears the reloaded resource word +0x14. No NULL guard
+      is added to that final resource access. No semantic identity is
+      invented for the callback. The port reuses the existing class check
+      and callback dispatcher, with a volatile dispatcher seam for host
+      execution. Tests cover short invalid objects, NULL, success and
+      negative/positive failure statuses, replacement during dispatch,
+      and preservation of neighboring words. Host suite passes 15442
+      tests; ARM release build passes. match.py exits 1: 13 stock versus
+      18 Rust instructions, with a larger frame and indirect seam call,
+      while preserving the class gate, callback literal, resource reload,
+      and unconditional +0x14 clear.
+      Standalone host execution of the production reset, predicate and
+      resource dispatcher confirms a callback returning 9 still leaves
+      +0x14 cleared while its neighboring +0x18 mutation survives.
