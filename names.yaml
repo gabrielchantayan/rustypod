@@ -40659,6 +40659,27 @@ functions:
       exists. The wrapper now calls ported itunes_path_resolve with r0 and
       the fixed filename at 0x083e8bc8, preserving the resolver status.
 
+  - address: 0x080bd7ec
+    ghidra: FUN_080bd7ec
+    name: counted_dispatch_table_address_96bc48
+    size: 12
+    sig: "const u32 *counted_dispatch_table_address_96bc48(void)"
+    module: app/counted_dispatch_table_address_96bc48
+    vars: {DAT_080bd7f4: counted_dispatch_table_address}
+    status: ported
+    notes: >-
+      Raw words e59f0000/e12fff1e load the literal 0x0896bc48 into r0
+      and return without dereferencing it. Executable size is 8 bytes;
+      true extent including the literal is 12 bytes, ending at the next
+      function's push at 0x080bd7f8. Full-image aligned A32 decoding
+      verifies two inbound plain BLs at 0x080a5b94 and 0x080a5cfc,
+      zero predicated BLs, and no body BLs. Both callers supply the result
+      as r1 to 0x080bf640, whose first two table words are a count and
+      a pointer to 12-byte dispatch records. Specific table identity and
+      contents remain unrecovered; no callee seam is required. No deliberate
+      deviations: host calls return the same opaque target address without
+      accessing firmware memory.
+
   - address: 0x080bd7f8
     ghidra: FUN_080bd7f8
     name: itunes_path_resolve
