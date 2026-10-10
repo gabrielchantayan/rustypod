@@ -242988,3 +242988,42 @@ functions:
       result, obtains firmware partition through unported 0x080b3fdc,
       and resolves type/identifier through unported 0x08079a58 on success.
       Errors pass through; host requires explicit operations, no fallback.
+  - address: 0x08075fc0
+    ghidra: FUN_08075fc0
+    name: masked_djb2_hash
+    size: 48
+    sig: "uint32_t masked_djb2_hash(const uint8_t *bytes, int32_t length)"
+    module: util/masked_djb2_hash
+    status: ported
+    vars:
+      param_1/r0: bytes
+      param_2/r1: length
+      r2: index
+      r3: hash
+      r12: byte
+      DAT_08075fec: seed
+    notes: >-
+      Raw A32 extent 0x08075fc0..0x08075ff0 is 48 bytes: 44 instruction
+      bytes and the seed literal 0x00001505 at 0x08075fec. Next real
+      function starts with PUSH at 0x08075ff0. Independent raw-word scan
+      finds two plain incoming BLs at 0x080b25e4 and 0x080cb39c, zero
+      predicated BLs, and zero outgoing BLs. The loop opcode bafffff8
+      is BLT (conditional B), not a link instruction. Hash-table insertion
+      and lookup callers pass bytes and length in r0/r1; extra arguments
+      in Ghidra's lookup decompilation are spurious. Seed is 5381; each
+      unsigned byte updates hash = (hash * 33 + byte) & 0xff80ffff with
+      32-bit wrapping. Mask clears bits 16..22 after each step, not only
+      at return. Signed nonpositive lengths return the seed without reads.
+      No callee seams or semantic deviations. Host tests cover signed
+      nonpositive lengths with NULL, alignments 0..3, lengths 0..1024,
+      all byte values, embedded NUL, wrapping, prefix bounds, and
+      per-step masking. Standalone runtime smoke returns 48551 for
+      bytes 65, 0, 66, 255 and 5381 for NULL with length -1.
+      Required host suite and ARM release build passed. match.py exit 1
+      reviewed: 11 stock instructions versus 19 Rust listing rows.
+      LLVM uses an early signed-length return, a frame pointer, postindexed
+      byte reads, and a countdown loop. Multiply/add and per-step mask
+      remain. Emitted mask 0x7f80ffff additionally clears bit 31, which
+      is unreachable: seed is below 2^16, each update is at most
+      65535 * 33 + 255 = 2162910, and masking bits 16..22 restores a
+      value below 2^16. No outgoing calls are introduced.
