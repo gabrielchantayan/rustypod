@@ -242208,3 +242208,28 @@ functions:
       deviation: reuse the ported gateway_wake_object and its established
       dispatcher seam rather than branch into IRAM. Host tests exercise
       empty ids, high-bit ids, and zero/nonzero unsigned gateway statuses.
+  - address: 0x08085f54
+    ghidra: FUN_08085f54
+    name: object_filtered_status_code
+    size: 144
+    sig: "u32 object_filtered_status_code(const u8 *object, i32 query_mode)"
+    module: util/object_filtered_status_code
+    status: ported
+    renames:
+      param_1: object
+      param_2: query_mode
+      iVar1: status
+    notes: >-
+      Raw ARM decoding establishes 0x08085f54..0x08085fe4, ending before
+      the next push {r4,lr} prologue. Two inbound plain BLs at 0x080d406c
+      and 0x080db7e4; no predicated inbound BLs. One outbound plain BL at
+      0x08085f80 to the already-ported object_flag_status_code at
+      0x080eeb7c; no predicated outbound BLs. Primary bit 2 requires
+      +0x2c bit 2 to allow either mode. Zero mode selects 1, 2 or 0 from
+      primary bit 3 and +0x30 bits 5 and 7. Nonzero mode filters the callee
+      status using primary bit 3, status 2 and +0x30 bit 1. Callers apply
+      additional +0x28 masks only for zero mode; no stronger object type
+      identity is established. Aligned volatile word reads preserve
+      conditional accesses and the post-call primary reload. No deliberate
+      behavioral deviations. Host tests exhaust relevant flag combinations,
+      unrelated high bits, signed mode boundaries and short-object paths.
