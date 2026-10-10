@@ -33213,6 +33213,36 @@ functions:
       workspace words; the fixed-address worker is a host-replaceable seam
       that fails closed off-device.
 
+  - address: 0x080b42e4
+    ghidra: FUN_080b42e4
+    name: path_timestamp
+    size: 52
+    sig: "u32 path_timestamp(u8 *counted_path)"
+    module: app/path_timestamp
+    status: ported
+    renames:
+      param_1/r0/r4: counted_path
+      auStack_50/sp: workspace (18 aligned u32 words, 72 bytes)
+      local_48/sp+8: timestamp
+      thunk_EXT_FUN_2200027c: memzero_aligned via IRAM veneer 0x08037db8
+      FUN_0805a8e4: PATH_FACADE_RESOLVE_COUNTED_IMPL (existing unresolved worker seam)
+    notes: >-
+      Raw osos.dec establishes the exact 0x080b42e4..0x080b4318 extent:
+      thirteen ARM words, ending with pop {r4,pc}, immediately followed by
+      the next function's push {r4-r10,lr}. Independently decoded BL words
+      at 0x080b42f8 and 0x080b4308 give two plain calls and no predicated
+      calls. Clear 72 workspace bytes, call the counted-path resolver with
+      a NULL optional result, then return the u32 at workspace +8, ignoring
+      status. Caller 0x080d8f8c applies timezone corrections in seconds.
+      Deviations: initialized u32 array replaces the ported IRAM zero-fill
+      helper; shared fixed-address resolver seam emits an indirect BLX.
+      Host tests cover partial failure without timestamp and full-width
+      timestamps returned despite resolver errors.
+      ARM match.py reports 18 versus 13 instructions: __aeabi_memclr4
+      clears the same 72 bytes, BLX calls the resolver, and the final
+      [sp,#8] load remains unconditional. Standalone host smoke returned
+      0x87654321 despite resolver status -43.
+
   # --- counted byte string -> facade probe + conditional slot dispatch ---
   - address: 0x0805a84c
     ghidra: FUN_0805a84c
