@@ -242672,3 +242672,42 @@ functions:
       LLVM uses a frame, bounded 0x3601 bit-mask shift and CLZ equality
       for space instead of predicated comparisons; wide words select the
       exact-space result. Export remains distinct and has no BL calls.
+
+  - address: 0x0807d770
+    ghidra: FUN_0807d770
+    name: ata_dma_transfer_wait
+    size: 96
+    sig: "u32 ata_dma_transfer_wait(AtaCommandDevice *device)"
+    module: drivers/ata_dma_transfer_wait
+    status: ported
+    renames:
+      param_1/r0/r5: device
+      DAT_0807d7c8/r4: ata_registers
+      DAT_0807d7cc/r1: timeout_ms
+      FUN_0836ce80: ata_operation_state_set
+      FUN_080d7b7c: ata_command_execute
+      return/r0: status
+    notes: >-
+      Raw A32 extent [0x0807d770,0x0807d7d0) is 96 bytes: 88 instruction
+      bytes plus the ATA base 0x38700000 and 5000-ms literals. The next
+      real entry at 0x0807d7d0 starts push {r4,lr}. Independent aligned
+      word decoding finds two unconditional outbound BLs at 0x0807d794
+      and 0x0807d7b8, zero predicated BLs. Inbound BLs at 0x0836c684 and
+      0x0836d058 are both unconditional. Read/write callers configure DMA
+      through ata_dma_configure before this shared start/wait path.
+      Volatile read/write-back acknowledges +0x10, writes command 1 at
+      +0x08, selects operation state 1 and ignores its return, writes
+      command 2, clears bits 12/3/2 in the freshly read +0x18 control,
+      and executes with 5000-ms timeout. Status 3 returns zero; every
+      other result returns 0x59. Both callees reuse existing Rust ports.
+      Deliberate deviations: host RAM MMIO and zero execution r2/r3;
+      r2 is unused and the status reader overwrites r3 before inspection.
+      Host tests cover control changes during waiting, untouched registers,
+      bit masks and all result classes. Full host suite: 15386 passed.
+      ARM release build passed. Throwaway public-entry harness smoke with
+      real Rust callees observed completion/abort/error returns 0/0x59/0x59,
+      command 2 and control 0xffffeff3; no device execution.
+      match.py exit 1 structural diff reviewed: 22 original versus 27 Rust
+      instructions, two BL relocations, same volatile ordering, timeout and
+      result mapping. LLVM rebases MMIO to 0x38700008, combines the control
+      mask and synthesizes 5000 rather than loading its literal.
