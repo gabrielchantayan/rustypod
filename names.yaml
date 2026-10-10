@@ -243335,3 +243335,32 @@ functions:
       range, provider NULL check, stack key, one lookup BL, -1 guard and
       +7 adjustment. LLVM delays the frame until the lookup path and
       loads the provider word directly rather than global base plus four.
+  - address: 0x0807061c
+    ghidra: FUN_0807061c
+    name: x509_store_new
+    size: 144
+    sig: "u32 *x509_store_new(void)"
+    module: crypto/x509_store_new
+    status: ported
+    vars: {puVar1: store, uVar2: allocation}
+    notes: >-
+      Raw extent 0x0807061c..0x080706ac includes 140 instruction bytes
+      and the comparator literal 0x08088958. Next entry loads object+0x0c.
+      Whole-image decode finds two incoming plain BLs at 0x080aeee0 and
+      0x082d45e4, no predicated incoming BLs. Four outgoing plain BLs,
+      no predicated outgoing BLs: traced_alloc, ata_handle_factory,
+      ata_call_with_zero, crypto_new_ex_data. Existing factory naming is
+      historical; these objects are comparator-backed cache/lookup stacks.
+      Allocate 76 bytes, set cache flag one and both stack pointers, clear
+      words 3..14, initialize class-4 ex-data at word 15, set references
+      at word 17 to one and depth at word 18 to zero. Only outer allocation
+      failure returns NULL; nested NULLs and ex-data failure are retained.
+      Reuses existing Rust seams with target-width word fields. Host tests
+      cover both nested first-allocation failures, outer failure, ex-data
+      result independence and ex-data field preservation. ARM build passes.
+      match.py exits 1: LLVM coalesces twelve cleared words into memclr4,
+      retaining allocation guard, factory calls, class-4 initialization and
+      final state. Full parallel host suite encounters an unrelated SIGSEGV
+      in sqlite error_message's no-error-text fixture, whose final u32
+      pErr slot is read as a native-width pointer beyond the fixture end.
+
