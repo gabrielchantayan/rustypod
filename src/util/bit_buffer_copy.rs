@@ -3,40 +3,33 @@
 //! Raw `osos.dec` establishes the 192-byte extent from 0x080d9cac through
 //! `pop {r3-r9,pc}` at 0x080d9d68; 0x080d9d6c starts the next function.
 //! Whole-image A32 decoding finds four incoming plain `bl` calls and no
-//! predicated `bl` calls. The body makes three plain `bl` calls, to unported
-//! helpers at 0x080cd984, 0x080a9328, and 0x0808ab4c, and no predicated calls.
+//! predicated `bl` calls. The body makes three plain `bl` calls, to
+//! 0x080cd984, the ported stem-record selector, and 0x0808ab4c.
 //!
 //! Algorithm: prepare the destination state, select its bit cursor, ensure
 //! capacity for the requested bit count, store that count in cursor word zero,
 //! then copy source bits MSB-first into the cursor's byte buffer MSB-first.
-//! Deliberate deviation: unported callees retain only address-based names;
-//! target builds call their fixed addresses while host tests install ABI seams.
+//! Deliberate deviation: the two remaining unported callees use fixed target
+//! addresses and host ABI seams; cursor selection reuses the Rust stem selector.
 
 #[cfg(not(target_os = "none"))]
 use core::ptr::addr_of;
 
 const RETAIL_BIT_BUFFER_PREPARE: usize = 0x080c_d984;
-const RETAIL_BIT_BUFFER_SELECT_CURSOR: usize = 0x080a_9328;
 const RETAIL_BIT_BUFFER_ENSURE_CAPACITY: usize = 0x0808_ab4c;
 
 pub type BitBufferPrepare = unsafe extern "C" fn(*mut u32, u32, u32, *mut u32) -> u32;
-pub type BitBufferSelectCursor = unsafe extern "C" fn(*mut u32, u32, *mut *mut u32, *mut u32) -> u32;
 pub type BitBufferEnsureCapacity = unsafe extern "C" fn(*mut u32, u32, u32) -> u32;
 
 #[cfg(not(target_os = "none"))]
 #[derive(Clone, Copy)]
 pub struct BitBufferCopyOps {
     pub prepare: BitBufferPrepare,
-    pub select_cursor: BitBufferSelectCursor,
     pub ensure_capacity: BitBufferEnsureCapacity,
 }
 
 #[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_prepare(_state: *mut u32, _arg: u32, _context: u32, _cursor: *mut u32) -> u32 {
-    panic!("install bit-buffer copy host operations before copying bits")
-}
-#[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_select_cursor(_state: *mut u32, _context: u32, _out: *mut *mut u32, _fallback: *mut u32) -> u32 {
     panic!("install bit-buffer copy host operations before copying bits")
 }
 #[cfg(not(target_os = "none"))]
@@ -47,7 +40,6 @@ unsafe extern "C" fn missing_ensure_capacity(_cursor: *mut u32, _bits: u32, _con
 #[cfg(not(target_os = "none"))]
 pub static mut BIT_BUFFER_COPY_OPS: BitBufferCopyOps = BitBufferCopyOps {
     prepare: missing_prepare,
-    select_cursor: missing_select_cursor,
     ensure_capacity: missing_ensure_capacity,
 };
 
@@ -62,16 +54,6 @@ unsafe fn prepare(state: *mut u32, arg: u32, context: u32, cursor: *mut u32) -> 
     unsafe { core::ptr::read_volatile(addr_of!(BIT_BUFFER_COPY_OPS.prepare))(state, arg, context, cursor) }
 }
 
-#[inline(always)]
-unsafe fn select_cursor(state: *mut u32, context: u32, out: *mut *mut u32, fallback: *mut u32) -> u32 {
-    #[cfg(target_os = "none")]
-    {
-        let helper: BitBufferSelectCursor = unsafe { core::mem::transmute(RETAIL_BIT_BUFFER_SELECT_CURSOR) };
-        return unsafe { helper(state, context, out, fallback) };
-    }
-    #[cfg(not(target_os = "none"))]
-    unsafe { core::ptr::read_volatile(addr_of!(BIT_BUFFER_COPY_OPS.select_cursor))(state, context, out, fallback) }
-}
 
 #[inline(always)]
 unsafe fn ensure_capacity(cursor: *mut u32, bits: u32, context: u32) -> u32 {
@@ -104,9 +86,15 @@ pub unsafe extern "C" fn bit_buffer_copy(
     let result = unsafe { prepare(state, destination as usize as u32, context, destination) };
     if result != 0 { return result; }
 
-    let mut cursor = destination;
-    let result = unsafe { select_cursor(state.add(3), context, &mut cursor, destination) };
-    if result != 0 { return result; }
+    let mut cursor_address = 0;
+    let result = unsafe {
+        crate::ft::pshinter::psh_dimension_last_or_append_stem_record(
+            state.add(3), context as usize as *mut crate::ft::memory::FtMemory,
+            &mut cursor_address,
+        )
+    };
+    if result != 0 { return result as u32; }
+    let cursor = cursor_address as usize as *mut u32;
     let result = unsafe { ensure_capacity(cursor, bit_count, context) };
     if result != 0 { return result; }
 
@@ -140,24 +128,19 @@ mod tests {
 
     static LOCK: Mutex<()> = Mutex::new(());
     static SLAB: LazyLock<Option<usize>> = LazyLock::new(|| try_map_u32_slab(hints::BIT_BUFFER_COPY, 0x1000).map(|p| p as usize));
-    static mut CURSOR: *mut u32 = core::ptr::null_mut();
     static mut PREPARE_RESULT: u32 = 0;
-    static mut SELECT_RESULT: u32 = 0;
     static mut ENSURE_RESULT: u32 = 0;
     static mut ENSURE_ARGS: (u32, u32) = (0, 0);
 
     unsafe extern "C" fn record_prepare(_state: *mut u32, _arg: u32, _context: u32, _cursor: *mut u32) -> u32 { unsafe { PREPARE_RESULT } }
-    unsafe extern "C" fn record_select(_state: *mut u32, _context: u32, out: *mut *mut u32, _fallback: *mut u32) -> u32 {
-        unsafe { out.write(CURSOR); SELECT_RESULT }
-    }
     unsafe extern "C" fn record_ensure(_cursor: *mut u32, bits: u32, context: u32) -> u32 {
         unsafe { ENSURE_ARGS = (bits, context); ENSURE_RESULT }
     }
 
     fn install() {
         unsafe {
-            BIT_BUFFER_COPY_OPS = BitBufferCopyOps { prepare: record_prepare, select_cursor: record_select, ensure_capacity: record_ensure };
-            PREPARE_RESULT = 0; SELECT_RESULT = 0; ENSURE_RESULT = 0; ENSURE_ARGS = (0, 0);
+            BIT_BUFFER_COPY_OPS = BitBufferCopyOps { prepare: record_prepare, ensure_capacity: record_ensure };
+            PREPARE_RESULT = 0; ENSURE_RESULT = 0; ENSURE_ARGS = (0, 0);
         }
     }
 
@@ -168,7 +151,7 @@ mod tests {
         install();
         let cursor = slab as *mut u32;
         let output = unsafe { (slab as *mut u8).add(0x100) };
-        unsafe { cursor.write(0); cursor.add(1).write(0); cursor.add(2).write(output as usize as u32); cursor.add(3).write(0); output.write(0xaa); CURSOR = cursor; }
+        unsafe { cursor.write(0); cursor.add(1).write(0); cursor.add(2).write(output as usize as u32); cursor.add(3).write(1); cursor.add(4).write(1); cursor.add(5).write(cursor as usize as u32); output.write(0xaa); }
         let source = [0xac];
         assert_eq!(unsafe { bit_buffer_copy(cursor, source.as_ptr(), 3, 5, cursor, 0x77) }, 0);
         assert_eq!(unsafe { output.read() }, 0x62);
@@ -183,7 +166,7 @@ mod tests {
         install();
         let cursor = slab as *mut u32;
         let output = unsafe { (slab as *mut u8).add(0x100) };
-        unsafe { cursor.write(0x99); cursor.add(1).write(0); cursor.add(2).write(output as usize as u32); cursor.add(3).write(0); output.write(0xaa); CURSOR = cursor; ENSURE_RESULT = 0x15; }
+        unsafe { cursor.write(0x99); cursor.add(1).write(0); cursor.add(2).write(output as usize as u32); cursor.add(3).write(1); cursor.add(4).write(1); cursor.add(5).write(cursor as usize as u32); output.write(0xaa); ENSURE_RESULT = 0x15; }
         let source = [0xff];
         assert_eq!(unsafe { bit_buffer_copy(cursor, source.as_ptr(), 0, 8, cursor, 0) }, 0x15);
         assert_eq!(unsafe { cursor.read() }, 0x99);

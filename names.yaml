@@ -164240,7 +164240,7 @@ functions:
       param_5: destination
       param_6: context
       FUN_080cd984: bit_buffer_prepare_unported
-      FUN_080a9328: bit_buffer_select_cursor_unported
+      FUN_080a9328: psh_dimension_last_or_append_stem_record
       FUN_0808ab4c: bit_buffer_ensure_capacity_unported
     notes: >-
       Raw osos.dec establishes the exact 192-byte extent from 0x080d9cac
@@ -164250,10 +164250,10 @@ functions:
       predicated BL callers, and three plain internal BL calls (0x080d9ccc,
       0x080d9ce4, 0x080d9cfc). It prepares state, selects a cursor, ensures
       capacity, stores bit_count in cursor word zero, then copies source bits
-      MSB-first into cursor word +2's byte buffer. The three unported helpers
-      have no stronger established identities: target Rust calls their verified
-      fixed addresses and host tests use ABI seams. Cursor byte pointers remain
-      u32 target words on hosts.
+      MSB-first into cursor word +2's byte buffer. The selector now reuses
+      psh_dimension_last_or_append_stem_record. The remaining two unported
+      helpers use fixed target addresses and host ABI seams. Cursor byte
+      pointers remain u32 target words on hosts.
   - address: 0x080d9a98
     ghidra: FUN_080d9a98
     name: cff_invoke_pshinter_module_callback
@@ -196317,7 +196317,7 @@ functions:
       param_5: destination
       param_6: context
       FUN_080cd984: bit_buffer_prepare_unported
-      FUN_080a9328: bit_buffer_select_cursor_unported
+      FUN_080a9328: psh_dimension_last_or_append_stem_record
       FUN_0808ab4c: bit_buffer_ensure_capacity_unported
     notes: >-
       Raw osos.dec establishes the exact 192-byte extent from 0x080d9cac
@@ -196327,10 +196327,10 @@ functions:
       predicated BL callers, and three plain internal BL calls (0x080d9ccc,
       0x080d9ce4, 0x080d9cfc). It prepares state, selects a cursor, ensures
       capacity, stores bit_count in cursor word zero, then copies source bits
-      MSB-first into cursor word +2's byte buffer. The three unported helpers
-      have no stronger established identities: target Rust calls their verified
-      fixed addresses and host tests use ABI seams. Cursor byte pointers remain
-      u32 target words on hosts.
+      MSB-first into cursor word +2's byte buffer. The selector now reuses
+      psh_dimension_last_or_append_stem_record. The remaining two unported
+      helpers use fixed target addresses and host ABI seams. Cursor byte
+      pointers remain u32 target words on hosts.
   - address: 0x080d9a98
     ghidra: FUN_080d9a98
     name: cff_invoke_pshinter_module_callback
@@ -239908,3 +239908,40 @@ functions:
       null guard, first-word clear, and tail free; LLVM adds frame-pointer
       setup and different register saves. Archive call operands retain
       unresolved relocations. No physical-device execution.
+
+  - address: 0x080a9328
+    ghidra: FUN_080a9328
+    name: psh_dimension_last_or_append_stem_record
+    size: 68
+    sig: "i32 psh_dimension_last_or_append_stem_record(u32 *records, FtMemory *memory, u32 *out_record)"
+    module: ft/pshinter
+    status: ported
+    renames:
+      param_1/r0: records
+      param_2/r1: memory
+      param_3/r2: out_record
+      local_10/stack: record
+      FUN_080b089c: psh_dimension_append_stem_record
+    notes: >-
+      Raw A32 establishes the 68-byte extent 0x080a9328..0x080a936c;
+      the next function starts with push {r3-r9,lr}. Whole-image decoding
+      finds two inbound plain BLs at 0x080cd950 and 0x080d9ce4, zero
+      predicated inbound BLs, one outbound plain BL at 0x080a9354 to the
+      already ported append routine, and zero predicated outbound BLs.
+      Returns the last 16-byte record when count is nonzero without mutating
+      the array. Otherwise appends one and propagates its status and output,
+      including NULL on allocation failure. Ghidra's fourth argument is
+      spurious: both paths overwrite the stack output before reading it.
+      Deliberate deviations are Rust branching instead of predication and
+      explicit wrapping u32 address arithmetic on hosts. The existing
+      bit_buffer_copy caller now uses the port instead of a resident seam.
+      Host tests exercise last-record selection, address overflow, first
+      append, repeat selection without clearing, and real allocation failure.
+      Host suite passed 15228 tests; ARM release build passed. Standalone
+      host execution exercised first allocation, repeat selection without
+      clearing, and allocation failure using the real port and memory layer.
+      match.py reports 18 versus 17 instructions: LLVM uses an explicit empty
+      branch and frame pointer rather than predication. Archive relocation at
+      +0x34 is R_ARM_CALL psh_dimension_append_stem_record; the displayed
+      self-call is unresolved archive relocation, not recursion.
+      No physical-device execution.

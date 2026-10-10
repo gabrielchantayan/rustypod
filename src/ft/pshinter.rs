@@ -1,5 +1,84 @@
 use crate::ft::memory::{ft_mem_realloc, FtMemory};
 
+/// Selects the last stem record, appending one if empty — FUN_080a9328
+/// @ 0x080a9328, true extent 68 bytes through 0x080a936c.
+/// Raw A32 decoding: two inbound plain BLs (0x080cd950, 0x080d9ce4),
+/// one outbound plain BL to psh_dimension_append_stem_record, no predicated
+/// BLs. Nonempty arrays return base + count * 16 - 16 without mutation;
+/// empty arrays return the append status and its output, including NULL on
+/// failure. Deliberate deviations: Rust branches replace ARM predication;
+/// target addresses remain u32 on hosts. Ghidra's fourth argument is spurious:
+/// the stack slot is overwritten on both paths before it is read.
+///
+/// # Safety
+/// `records` is a readable three-word header and `out_record` is writable.
+/// Empty arrays must satisfy psh_dimension_append_stem_record's contract.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn psh_dimension_last_or_append_stem_record(
+    records: *mut u32, memory: *mut FtMemory, out_record: *mut u32,
+) -> i32 {
+    let count = *records;
+    let mut record = 0;
+    let error = if count != 0 {
+        record = (*records.add(2)).wrapping_add(count.wrapping_mul(16)).wrapping_sub(16);
+        0
+    } else {
+        psh_dimension_append_stem_record(records, memory, &mut record)
+    };
+    *out_record = record;
+    error
+}
+
+#[cfg(test)]
+mod last_or_append_tests {
+    use super::*;
+
+    #[test]
+    fn existing_records_use_wrapping_target_addresses_and_preserve_header() {
+        for count in [1u32, 2, 0x1000_0000, u32::MAX] {
+            let mut header = [count, 0xdead_beef, 0xffff_fff8];
+            let original = header;
+            let mut output = 7;
+            assert_eq!(unsafe { psh_dimension_last_or_append_stem_record(header.as_mut_ptr(), core::ptr::null_mut(), &mut output) }, 0);
+            assert_eq!(output, 0xffff_fff8u32.wrapping_add(count.wrapping_mul(16)).wrapping_sub(16));
+            assert_eq!(header, original);
+        }
+    }
+
+    #[test]
+    fn empty_array_appends_once_then_reuses_record_and_reports_growth_failure() {
+        use crate::testing::{hints, try_map_u32_slab};
+        let Some(slab) = try_map_u32_slab(hints::PSH_DIMENSION_LAST_OR_APPEND, 0x1000) else { return; };
+        unsafe {
+            let records = slab.cast::<u32>();
+            for i in 0..8 { records.add(i).write(0xa5a5_a5a5); }
+            let base = records as usize as u32;
+            let mut header = [0, 2, base];
+            let mut output = 7;
+            assert_eq!(psh_dimension_last_or_append_stem_record(header.as_mut_ptr(), core::ptr::null_mut(), &mut output), 0);
+            assert_eq!(header, [1, 2, base]);
+            assert_eq!(output, base);
+            assert_eq!(core::slice::from_raw_parts(records, 8), &[0, 0xa5a5_a5a5, 0xa5a5_a5a5, 0, 0xa5a5_a5a5, 0xa5a5_a5a5, 0xa5a5_a5a5, 0xa5a5_a5a5]);
+            records.write(42);
+            assert_eq!(psh_dimension_last_or_append_stem_record(header.as_mut_ptr(), core::ptr::null_mut(), &mut output), 0);
+            assert_eq!(header, [1, 2, base]);
+            assert_eq!(records.read(), 42);
+            // Exercise the real append and allocator failure path.
+            unsafe extern "C" fn fail_alloc(_: *mut FtMemory, _: i32) -> *mut u8 { core::ptr::null_mut() }
+            unsafe extern "C" fn free(_: *mut FtMemory, _: *mut u8) {}
+            unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 { core::ptr::null_mut() }
+            let mut memory = FtMemory { user: core::ptr::null_mut(), alloc: fail_alloc, free, realloc };
+            header = [0, 0, 0];
+            output = 7;
+            assert_eq!(psh_dimension_last_or_append_stem_record(header.as_mut_ptr(), &mut memory, &mut output), crate::ft::error::FT_ERR_OUT_OF_MEMORY);
+            assert_eq!(header, [0, 0, 0]);
+            assert_eq!(output, 0);
+            assert_eq!(records.read(), 42);
+        }
+    }
+}
+
 /// Appends a blank 16-byte stem record — original `FUN_080b089c` @
 /// 0x080b089c (160 bytes; 1 plain `bl`, 0 predicated `bl`; 3 direct `bl`
 /// caller sites).
