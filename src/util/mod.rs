@@ -1,4 +1,6 @@
 //! retailOS-native utility functions (CRC, itoa, byte swaps, ...).
+pub mod paired_slot_tables_initialize;
+pub use paired_slot_tables_initialize::*;
 pub mod vector_axis_classify;
 pub mod payload_u16_be_store;
 pub mod bytes16_to_upper_hex;

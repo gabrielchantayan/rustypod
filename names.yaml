@@ -241451,3 +241451,44 @@ functions:
       LLVM splits magnitude signs into branches and duplicates comparison
       paths; signed strict thresholds, wrapping ADD/LSL arithmetic,
       horizontal-first priority and all five result codes remain.
+
+  - address: 0x08090c48
+    ghidra: FUN_08090c48
+    name: paired_slot_tables_initialize
+    size: 108
+    sig: "u32 paired_slot_tables_initialize(void)"
+    module: util/paired_slot_tables_initialize
+    status: ported
+    vars:
+      pcVar1/r4: initialized_flag
+      iVar2/r0: slot_table
+      DAT_08090ca8: initialized_flag_at_08a0e180
+      DAT_08090cac: first_slot_table_at_08b1c858
+      DAT_08090cb0: second_slot_table_at_08b1c8a0
+    renames:
+      thunk_EXT_FUN_2200027c: memzero_aligned
+    notes: >-
+      Raw A32 extent [0x08090c48,0x08090cb4) is 108 bytes: 96 bytes
+      of instructions and three address literals. The next real function
+      begins with PUSH at 0x08090cb4. Whole-image aligned raw decoding
+      finds two inbound plain BLs at 0x081c1024 and 0x081c178c and no
+      predicated inbound BLs. Two outbound plain BLs at 0x08090c68 and
+      0x08090c88 target 0x08037db8, with no predicated outbound BLs.
+      That verified veneer targets the IRAM mirror of already-ported
+      memzero_aligned at 0x0800027c, not mask ROM. If flag byte at
+      0x08a0e180 is nonzero, return 2 without accessing tables. Otherwise
+      clear each adjacent 72-byte table at 0x08b1c858 and 0x08b1c8a0,
+      write count zero at +0x40 and capacity 16 at +0x44, then publish
+      flag 1 and return 0. Consumer 0x0807ba80 drains both tables while
+      their +0x40 counts are positive; callers initialize shared state
+      during object construction and setup. No synchronization is added.
+      Deliberate deviations: host-owned globals replace fixed RAM, and a
+      volatile zero-fill function pointer prevents builtin substitution.
+      Host tests cover dirty tables, neighboring sentinels, preservation
+      of later updates, and every nonzero flag with an inaccessible table.
+      Required host suite and ARM release build pass. Standalone public
+      entry smoke returns 0 initially and 2 on 100 repeated calls.
+      match.py exits 1 with 24 stock instructions versus 32 Rust entries
+      including literals: LLVM uses two BLX calls, a larger frame and
+      base-relative second-table writes; flag check, both 72-byte clears,
+      count/capacity writes and publication order remain intact.
