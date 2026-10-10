@@ -13,10 +13,9 @@
 //! tick deadlines, scale factor, remainder, input divisor, bound, and flags.
 //!
 //! The tick helper `0x081bb384` is now ported as
-//! [`crate::drivers::timer::tick_millis`]. The mode query `0x080562ec` and
-//! observer getter `0x080b43e8` are not yet ported (confirmed against
-//! `names.yaml`). Target builds invoke those retail entry points directly;
-//! host tests install the equivalent operation table.
+//! [`crate::drivers::timer::tick_millis`]. The mode query `0x080562ec` is
+//! not yet ported. Target builds call it directly and use the ported
+//! global observer getter; host tests install the equivalent operation table.
 //!
 //! The module also carries the constructor's step sibling
 //! [`tick_accumulator_step`] (`0x081bb3a0`), which gates one call of the
@@ -69,7 +68,6 @@ pub struct TickAccumulatorOps {
 }
 
 const RETAIL_SYSTEM_MODE_ENABLED: usize = 0x0805_62ec;
-const RETAIL_OBSERVER_GETTER: usize = 0x080b_43e8;
 const RETAIL_TICK_UPDATE: usize = 0x081b_b2a0;
 
 
@@ -95,9 +93,7 @@ struct RetailObserverVtable {
 
 #[cfg(target_os = "none")]
 unsafe extern "C" fn retail_register(accumulator: *mut *mut TickAccumulator) {
-    let observer_getter: unsafe extern "C" fn() -> *mut RetailObserver =
-        core::mem::transmute(RETAIL_OBSERVER_GETTER);
-    let observer = observer_getter();
+    let observer = crate::app::global_observer_get::global_observer_get().cast::<RetailObserver>();
     ((*(*observer).vtable).register)(observer, accumulator);
 }
 

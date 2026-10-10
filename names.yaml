@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080b43e8
+    ghidra: FUN_080b43e8
+    name: global_observer_get
+    size: 88
+    sig: "ObservableArray *global_observer_get(void)"
+    module: app/global_observer_get
+    status: ported
+    vars: {DAT_080b4430: global_observer_guard, DAT_080b4434: global_observer_storage,
+      DAT_080b4438: dso_handle, DAT_080b443c: opaque_shutdown_handler_word,
+      uVar2: initialized_object, iVar1: acquired}
+    notes: >-
+      Raw osos.dec establishes [0x080b43e8,0x080b4440): 72 code bytes
+      and four literal words before the next independent bx lr entry.
+      Whole-image A32 decoding finds two incoming plain BLs at 0x081bb4e4
+      and 0x081bb51c, zero predicated incoming BLs; four outgoing plain
+      BLs and zero predicated outgoing BLs. Tests guard bit zero at
+      0x089cc89c, calls ported cxa_guard_acquire, constructs fixed storage
+      0x08a79d84 through ported observable_array_construct, registers the
+      constructor return through ported cxa_atexit with handler word
+      0x08266e54 and key 0x089ca09c, then calls ported cxa_guard_release.
+      All paths return fixed storage; registration failure is ignored.
+      Handler word is an interior BL to 0x082a8ba0, followed by stack-local
+      operations; its identity is deliberately not invented. Target retains
+      the exact word, host execution of the handler is unsupported. Host
+      backing replaces fixed addresses, with local registration/release
+      bindings following lazy_static_object.rs. Both Rust target callers
+      now use this getter. Host tests cover first/repeated use, re-entry,
+      registration failure and nonzero even guards. Full host tests and ARM
+      release build passed. Standalone host smoke exercised the real constructor
+      and shutdown chain with native allocation. match.py structural diff
+      preserves both guard branches and four calls (two indirect bindings).
   - address: 0x080b4bd0
     ghidra: FUN_080b4bd0
     name: itunes_directory_visit

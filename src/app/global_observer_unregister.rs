@@ -11,12 +11,10 @@
 //!
 //! **20 direct `bl` call sites, all unconditional and no predicated `bl`**,
 //! verified by decoding every ARM B/BL word in `work/firmware/osos.dec`.
-//! Deliberate deviation: `FUN_080b43e8` remains in retailOS, so target builds
-//! call its fixed address while host tests install a getter seam.
+//! Target builds use the ported global-observer getter; host tests retain
+//! their observer fixture seam.
 
 use core::ptr::{addr_of, addr_of_mut};
-
-const RETAIL_GLOBAL_OBSERVER_GETTER: usize = 0x080b_43e8;
 
 /// Opaque global observer whose first word is its vtable.
 #[repr(C)]
@@ -34,7 +32,7 @@ pub struct GlobalObserverVtable {
     pub unregister: unsafe extern "C" fn(*mut GlobalObserver, *mut *mut u8),
 }
 
-/// ABI of the still-unported global-observer getter at `0x080b43e8`.
+/// ABI of the ported global-observer getter.
 pub type GlobalObserverGetter = unsafe extern "C" fn() -> *mut GlobalObserver;
 
 /// Host seam for the global observer getter.
@@ -45,8 +43,7 @@ pub struct GlobalObserverUnregisterOps {
 
 #[cfg(target_os = "none")]
 unsafe fn retail_global_observer() -> *mut GlobalObserver {
-    let getter: GlobalObserverGetter = core::mem::transmute(RETAIL_GLOBAL_OBSERVER_GETTER);
-    getter()
+    crate::app::global_observer_get::global_observer_get().cast()
 }
 
 #[cfg(not(target_os = "none"))]
@@ -59,7 +56,7 @@ unsafe extern "C" fn missing_global_observer() -> *mut GlobalObserver {
 pub const DEFAULT_GLOBAL_OBSERVER_UNREGISTER_OPS: GlobalObserverUnregisterOps =
     GlobalObserverUnregisterOps { get_observer: missing_global_observer };
 
-/// Host-side getter seam. Callers on the target always use `0x080b43e8`.
+/// Host-side getter seam. Target callers use the ported getter directly.
 #[cfg(not(target_os = "none"))]
 pub static mut GLOBAL_OBSERVER_UNREGISTER_OPS: GlobalObserverUnregisterOps =
     DEFAULT_GLOBAL_OBSERVER_UNREGISTER_OPS;
