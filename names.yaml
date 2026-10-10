@@ -16,6 +16,33 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a2268
+    ghidra: FUN_080a2268
+    name: usb_endpoint_status_control_mask
+    size: 24
+    sig: "uint32_t usb_endpoint_status_control_mask(void)"
+    module: drivers/usb_endpoint_status_control_mask
+    status: ported
+    vars: {r0: link_status_then_control_mask}
+    renames: {_DAT_38400808: usb_link_status}
+    notes: >-
+      Raw A32 extent [0x080a2268,0x080a2280) is six instructions,
+      24 bytes without literals; next routine starts with LDR then PUSH.
+      Full-image aligned word decoding verifies two plain inbound BLs
+      at 0x08081704 and 0x080a78b0, zero predicated inbound BLs and
+      zero outgoing BLs. Read USB link status at 0x38400808 once;
+      bit 8 clear returns 0x20000000, set returns 0x10000000.
+      Other status bits are ignored. Both callers OR the result into
+      endpoint control words in the 0x900/0xb00 banks; hardware flag
+      meanings remain unidentified. Reuses the existing inlined volatile
+      USB status read, with no new firmware callee seams or target
+      behavioral deviations. Host uses the shared isolated status word.
+      Host tests cover both branches, unrelated bits and unchanged status;
+      standalone host smoke exercises four boundary/mixed values.
+      Host suite and release ARM build pass. match.py reports six original
+      versus nine Rust listing lines: LLVM adds frame setup/restore and
+      a register-address literal, defaults to 0x10000000 and conditionally
+      selects 0x20000000. One aligned read, bit-8 test and no calls remain.
   - address: 0x080a3b4c
     ghidra: FUN_080a3b4c
     name: resource_record_extent
