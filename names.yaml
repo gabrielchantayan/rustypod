@@ -239143,3 +239143,35 @@ functions:
       eleven Rust instructions (exit 1): identical four ordered byte loads
       and big-endian combination, with LLVM frame setup/return and earlier
       combination of the first two bytes. No device execution.
+
+  - address: 0x080bb444
+    ghidra: FUN_080bb444
+    name: global_slot_28_callback_dispatch
+    size: 40
+    sig: "u32 global_slot_28_callback_dispatch(u32 argument)"
+    module: app/global_slot_28_callback_dispatch
+    status: ported
+    renames:
+      param_1/r0/r2: argument
+      DAT_080bb468: runtime_global_target (0x089ca95c)
+      "target+0x28": callback
+    notes: >-
+      Raw bytes establish extent 0x080bb444..0x080bb46c: nine A32 words
+      plus the literal at 0x080bb468, not the Ghidra 36-byte code-only size.
+      Next real function begins at 0x080bb46c. Whole-image aligned decoding
+      finds two plain inbound BLs at 0x08369ab4 and 0x08369b84 and zero
+      predicated BLs. Body has no direct BL and one indirect BXNE tail call.
+      Returns 0x11 for NULL global at 0x089ca95c; otherwise passes the opaque
+      argument to the callback at object+0x28 and returns its result.
+      Both call sites are in FUN_08369a6c; callback identity is unrecovered.
+      Reuses the adjacent slot-eight global pointer seam, including a shared
+      host-test lock. repr(C) places this callback at +0x28 on host and ARM.
+      No callback NULL guard is added. Host transition tests cover absent,
+      present, and cleared globals, extreme arguments, callback counts and
+      unchanged prefix words. Real-source smoke observed absent=17,
+      present(42)=43, present(MAX)=0, cleared=17. No device execution.
+      All 15192 host tests and the ARM build-std release build passed.
+      match.py exit 1 reports nine original versus twelve Rust instructions:
+      LLVM adds frame setup and an explicit NULL branch, preserving the
+      global load, callback load at +0x28, indirect BX tail dispatch and
+      0x11 fallback. The export resolves distinctly in the ARM archive.
