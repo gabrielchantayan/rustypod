@@ -850,6 +850,43 @@ pub unsafe extern "C" fn path_facade_slot_80_from_cstr(
     status
 }
 
+/// path_facade_slot_7c — original: `FUN_08089264` @ 0x08089264.
+///
+/// Raw A32 proves an 80-byte extent [0x08089264,0x080892b4), ending
+/// with pop before the next function's push. Whole-image decoding verifies
+/// two incoming plain BLs (0x08117984, 0x0813addc), zero predicated BLs.
+/// The body has three plain BLs, zero predicated BLs and one indirect BLX.
+///
+/// Constructs a scoped interface guard using base_hint, selects facade 1,
+/// invokes slot +0x7c with path and output, destroys the guard on every
+/// status, and returns the saved status unchanged. Callers consume output's
+/// first byte; the concrete virtual operation remains unclassified.
+/// Deliberate deviations: typed storage replaces dead argument spills
+/// (including r3); existing seams and native-width vtable word indices
+/// preserve the target layout without inventing a virtual callee identity.
+///
+/// # Safety
+/// The configured facade must provide a valid +0x7c operation accepting
+/// this path and output storage; their full contracts belong to that
+/// operation. Guard boundaries must be compatible.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn path_facade_slot_7c(
+    path_object: *mut StringObject,
+    output: *mut u8,
+    base_hint: u32,
+) -> u32 {
+    let mut guard = MaybeUninit::<InterfaceGuard>::uninit();
+    let guard = guard.as_mut_ptr();
+    guard_ctor_fn()(guard, base_hint);
+    let facade = facade_fetch_fn()(guard, FACADE_SELECTOR);
+    let operation: unsafe extern "C" fn(*mut FacadeObject, *mut StringObject, *mut u8) -> u32 =
+        core::mem::transmute((*(*facade).vtable).slots[0x7c / 4]);
+    let status = operation(facade, path_object, output);
+    guard_dtor_fn()(guard);
+    status
+}
+
 /// path_facade_slot_80 — original: `FUN_08090bf8` @ 0x08090bf8.
 ///
 /// Raw A32 extent is 80 bytes, ending with pop at 0x08090c44 before the
@@ -1535,6 +1572,45 @@ pub(crate) mod tests {
                 assert_eq!(&payload[4..], &[0xa5; 4]);
                 assert_eq!(CTOR_HINT, hint, "hint survives until teardown");
                 assert_eq!(DTOR_THIS, CTOR_THIS);
+            }
+        }
+    }
+
+    unsafe extern "C" fn slot_7c_read_byte(
+        _facade: *mut FacadeObject, path: *mut StringObject, output: *mut u8,
+    ) -> u32 {
+        assert_eq!((*CTOR_THIS).words[3], 1, "read requires live guard");
+        // Model a byte-producing virtual operation, not its unknown identity.
+        output.write((*path).payload.read());
+        (*CTOR_THIS).words[3] = 2;
+        QUERY_RESULT
+    }
+
+    #[test]
+    fn slot_7c_byte_output_and_error_status_survive_scope_release() {
+        let _lock = take_lock();
+        let _restore = unsafe { SeamGuard::new() };
+        unsafe {
+            install_recording();
+            PATH_PROBE_GUARD_CTOR = slot_60_scope_construct;
+            PATH_PROBE_GUARD_DTOR = slot_80_scope_destroy;
+            MOCK_VTABLE.slots[0x7c / 4] = slot_7c_read_byte as usize;
+            for (byte, hint, status) in [
+                (0, 0, 0), (1, 1, 0x15),
+                (0x80, 0x8000_0000, 0x8000_0000),
+                (0xff, u32::MAX, u32::MAX),
+            ] {
+                let mut payload = [byte; 8];
+                let mut path = StringObject {
+                    vtable: core::ptr::null(), payload: payload.as_mut_ptr(),
+                };
+                let mut output = [0xa5; 4];
+                QUERY_RESULT = status;
+                DTOR_THIS = core::ptr::null_mut();
+                assert_eq!(path_facade_slot_7c(&mut path, output.as_mut_ptr(), hint), status);
+                assert_eq!(output, [byte, 0xa5, 0xa5, 0xa5]);
+                assert_eq!(CTOR_HINT, hint);
+                assert_eq!(DTOR_THIS, CTOR_THIS, "scope released even on error");
             }
         }
     }
