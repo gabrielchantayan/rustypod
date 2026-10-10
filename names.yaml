@@ -241302,3 +241302,40 @@ functions:
       in each body; constructor arguments, status/length checks, unsigned
       minimum, empty-file NUL branch and teardown remain, while LLVM merges
       destructor calls and computes the read-success predicate without branches.
+
+  - address: 0x08091504
+    ghidra: FUN_08091504
+    name: vector_axis_classify
+    size: 92
+    sig: "i32 vector_axis_classify(i32 dx, i32 dy)"
+    module: util/vector_axis_classify
+    status: ported
+    vars:
+      param_1/r0: dx
+      param_2/r1: dy
+      iVar2/r3: x_magnitude
+      iVar3/r12: y_magnitude
+      uVar1/r2: direction_code
+    notes: >-
+      Raw A32 words establish the true extent [0x08091504, 0x08091560),
+      ending with LDR pc,[sp],#4 before the next function's PUSH.
+      Zero outbound plain or predicated BLs; whole-image aligned decoding
+      finds two inbound plain BLs at 0x0808ad94 and 0x0808adcc, no
+      predicated inbound BLs. The caller classifies incoming and outgoing
+      contour-coordinate deltas and stores signed direction bytes.
+      Take wrapping signed magnitudes; if x > wrapping(12*y), return
+      -2 for negative dx or +2 otherwise. Else if y > wrapping(12*x),
+      return +1 for negative dy or -1 otherwise; return 4 otherwise.
+      Comparisons are strict signed ARM CMP/BLE comparisons, including
+      INT_MIN and multiplication overflow; horizontal classification
+      takes precedence. No callee seams or resident-address calls.
+      Deliberate deviations are LLVM register allocation, frame setup
+      and sign-path duplication only. Host tests cover zero, all signs,
+      strict 12:1 boundaries, signed overflow and horizontal precedence.
+      All 15309 host tests pass; ARM release build passes. A standalone
+      executable compares the public entry against an instruction-level
+      wrapping reference for 166049 small-grid and pseudorandom vectors.
+      match.py exits 1: 23 stock instructions versus 44 Rust instructions.
+      LLVM splits magnitude signs into branches and duplicates comparison
+      paths; signed strict thresholds, wrapping ADD/LSL arithmetic,
+      horizontal-first priority and all five result codes remain.
