@@ -322,6 +322,7 @@ pub mod record_min_heap_sift_up;
 pub mod record_priority_is_greater;
 pub mod resource_record_find_nth;
 pub mod resource_record_find_and_decode;
+pub mod resource_record_extent;
 pub mod resource_query_account;
 pub mod raster_profile;
 pub mod raster_span_setup;
