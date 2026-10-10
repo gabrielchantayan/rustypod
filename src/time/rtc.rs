@@ -278,7 +278,9 @@ pub unsafe extern "C" fn rtc_context_mask_words(words: *mut u32, byte_len: u32) 
 
 /// rtc_context_mask_record_words — original: `FUN_08067eb4` @ 0x08067eb4.
 /// True extent: 72 bytes (68 instruction bytes and the four-byte literal);
-/// 2 incoming plain BL sites, 0 predicated; 1 outgoing plain BL.
+/// 2 incoming plain BL sites (0x0827efcc, 0x0827f840), 0 predicated;
+/// 1 outgoing plain BL at 0x08067ec0, 0 predicated. The next real function
+/// begins at 0x08067efc after the literal at 0x08067ef8.
 ///
 /// XOR each complete aligned word with `!context_field[1] ^ 0xa425_3891`.
 /// Both recovered callers transform 32-byte records. Trailing bytes are
@@ -994,6 +996,29 @@ mod tests {
         for byte_len in 0..4 {
             unsafe { rtc_context_mask_record_words(core::ptr::null_mut(), byte_len) };
         }
+        drop(_reset);
+        drop(guard);
+    }
+
+    #[test]
+    fn rtc_context_mask_record_words_snapshots_key_before_overlapping_writes() {
+        let mut context = [0x1357_9bdfu32; 24];
+        let key_index = RTC_CONTEXT_FIELD_OFFSET / 4 + 1;
+        context[key_index] = 0x0123_4567;
+        let original = context;
+        let mask = !original[key_index] ^ 0xa425_3891;
+        let guard = install_current_context(context.as_mut_ptr().cast());
+        let _reset = ContextSourceReset;
+
+        // The first store overwrites the key itself. Subsequent words must
+        // still use the original key, as the retail r2/ip snapshot does.
+        unsafe { rtc_context_mask_record_words(context.as_mut_ptr().add(key_index), 15) };
+        let mut expected = original;
+        for word in &mut expected[key_index..key_index + 3] {
+            *word ^= mask;
+        }
+        assert_eq!(context, expected);
+
         drop(_reset);
         drop(guard);
     }

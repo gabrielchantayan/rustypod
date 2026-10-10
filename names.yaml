@@ -49610,6 +49610,31 @@ functions:
       reference. ABI: words in r0, byte_len in r1; no return value or null
       checks. Port deviation: none.
 
+  # --- RTC context record word masking (time/rtc) ---
+  - address: 0x08067eb4
+    ghidra: FUN_08067eb4
+    name: rtc_context_mask_record_words
+    size: 72
+    sig: "void rtc_context_mask_record_words(u32 *words, u32 byte_len)"
+    module: time/rtc
+    vars: {param_1/r4: words, param_2/r5: byte_len, uVar4/r2: context_word, uVar3/r1: word_index, DAT_08067ef8: fixed_mask}
+    status: ported
+    notes: >-
+      Raw osos.dec establishes 68 instruction bytes at 0x08067eb4..0x08067ef8,
+      followed by the 0xa4253891 literal; the next real function starts at
+      0x08067efc, giving a true extent of 72 bytes. A whole-image aligned ARM
+      BL decode finds two incoming plain calls at 0x0827efcc and 0x0827f840,
+      zero predicated calls. The sole outgoing call is plain BL at
+      0x08067ec0 to the existing rtc_context_field port at 0x080561a4.
+      Snapshot the field's second aligned word, complement it, then XOR it
+      and the fixed mask into each of byte_len >> 2 aligned destination
+      words. Ignore trailing bytes; fetch and read the context even when
+      no complete words are requested. Both recovered callers mask 32-byte
+      records. No null checks or return value. Host coverage includes
+      partial lengths, changing keys, inversion, and destination overlap
+      with the key itself. Deliberate deviations: none; the identical
+      sibling rtc_context_mask_words body may be folded by LLVM.
+
   # --- PMU two-value selector (drivers/pmu) ---
   - address: 0x082bc55c
     ghidra: FUN_082bc55c
