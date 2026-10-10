@@ -243958,3 +243958,43 @@ functions:
       Standalone host execution of the production reset, predicate and
       resource dispatcher confirms a callback returning 9 still leaves
       +0x14 cleared while its neighboring +0x18 mutation survives.
+
+  - address: 0x0806b86c
+    ghidra: FUN_0806b86c
+    name: casefold_low_byte
+    size: 20
+    sig: "u32 casefold_low_byte(u32 character)"
+    module: util/casefold_low_byte
+    status: identified
+    vars:
+      param_1/r0: character
+      r1: table
+      DAT_0806b87c: CASEFOLD_LOW_BYTE_TABLE_ADDRESS
+    notes: >-
+      BLOCKED: raw osos.dec verifies four ARM instructions, e59f1008
+      e20000ff e7d10000 e12fff1e, at 0x0806b86c through 0x0806b878.
+      The four-byte literal 0x083ed1dd at 0x0806b87c belongs to this
+      function; the next real function starts with PUSH at 0x0806b880.
+      True extent is [0x0806b86c,0x0806b880), 20 bytes including the pool,
+      rather than Ghidra's 16 instruction bytes. Independently decoding
+      aligned immediate ARM BL words across the raw image finds two
+      inbound plain BLs, at 0x0810b470 and 0x0810b47c, zero predicated
+      inbound BLs, and zero outgoing BLs of either kind. The algorithm
+      zero-extends table[character & 0xff]; unlike unicode_casefold_byte
+      at 0x08276fbc, it always truncates the input before indexing.
+      Both callers are in the narrow-string comparison at 0x0810b444,
+      which substitutes an empty string for NULL, compares mapped bytes,
+      returns their first difference, and stops on equal mapped zero.
+      Its terminator behavior contradicts the static table bytes:
+      raw table[0] is 0xf0, table[0x41] is 0x2c, table[0x61] is zero,
+      and table[0xff] is 0x27. The base points into ARM trap-control
+      code followed by unrelated data, not a recovered case-fold map.
+      Existing identified unicode_casefold_byte metadata records the
+      same unresolved runtime table and initialization/relocation.
+      The ported WSTR_FOLD_TABLE seam instead models the distinct
+      0x083ed0dd upper-map literal with a 0x083f80b5 default; no evidence
+      establishes that it supplies this 0x083ed1dd map. Reusing that
+      seam, assuming ASCII or Latin-1 folding, or copying cold-image
+      bytes would invent behavior. Faithful porting requires recovered
+      runtime contents and initialization/relocation of this 256-byte
+      map. No Rust implementation, module, tests, or fake seam is added.
