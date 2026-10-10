@@ -16,6 +16,35 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08091434
+    ghidra: FUN_08091434
+    name: parse_fixed_array
+    size: 208
+    sig: "i32 parse_fixed_array(u8 **cursor, const u8 *end, i32 capacity, i32 *values, i32 exponent)"
+    module: util/parse_fixed_array
+    status: ported
+    renames:
+      param_1/r0/r8: cursor
+      param_2/r1/r6: end
+      param_3/r2/r9: capacity
+      param_4/r3/r10: values
+      param_5/stack/r11: exponent
+      r7: initial_byte
+      r5: closing_delimiter
+      r4: count
+    notes: >-
+      Raw extent [0x08091434,0x08091504) is 208 bytes. Next entry starts
+      with cmp r0,#0. Two inbound plain BLs at 0x080b81cc and 0x080d47cc;
+      two outbound plain BLs at 0x0809149c and 0x080914d4; no predicated BLs.
+      Optional square/brace arrays parse bounded 16.16 values with a decimal
+      exponent; unbracketed input parses at most one. Preserve the frozen
+      initial-byte delimiter comparison and resulting no-progress parses.
+      Reuse the Rust whitespace skipper. Decimal parser at 0x0808e2e8 remains
+      a typed verified-address seam; hosts explicitly supply it.
+      Standalone smoke checks comment skipping, exponent, bounded repeated
+      delimiter parsing and cursor writeback. ARM release build passes.
+      match.py exit 1 reviewed: 52 versus 57 instructions; LLVM uses BLX for
+      the decimal seam, retaining signed capacity checks and the frozen byte.
   - address: 0x080922c8
     ghidra: FUN_080922c8
     name: ata_dma_configure
