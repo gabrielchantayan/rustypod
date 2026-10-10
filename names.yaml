@@ -16,6 +16,37 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a3c28
+    ghidra: FUN_080a3c28
+    name: psh_dimension_done
+    size: 64
+    sig: "void psh_dimension_done(uint32_t *dimension, FtMemory *memory)"
+    module: ft/pshinter
+    status: ported
+    vars:
+      param_1/r4: dimension
+      param_2/r5: memory
+    renames:
+      FUN_080a92c4: psh_mask_table_done
+      FUN_082cfae8: ft_mem_free
+    notes: >-
+      Raw A32 extent [0x080a3c28,0x080a3c68) is 64 bytes, ending in
+      POP PC; the next function clears three counts and ends with BX LR
+      at 0x080a3c78. Three outgoing plain BLs at 0x080a3c38,
+      0x080a3c44 and 0x080a3c50, zero predicated outgoing BLs.
+      Whole-image word decoding finds two incoming plain BLs at
+      0x082e7808 and 0x082e7814, zero predicated incoming BLs.
+      Destroy counters mask table at word 6, regular mask table at
+      word 3, then reload and free stems at word 2; clear words 2,0,1.
+      Reuse existing callee ports without new seams or NULL-record guards.
+      Stored pointers remain u32 on hosts. Host tests cover partial
+      allocations, callback-visible ordering, callback replacement of
+      the stem pointer, empty allocations, trailing storage and repeats.
+      All 15256 host tests and ARM release build pass. Direct-source
+      smoke verifies release order and repeated cleanup. match.py exits 1:
+      17 versus 16 instructions; frame setup and final zero-store order
+      differ without intervening callbacks. Relocations retain both mask
+      table calls and the final ft_mem_free call in original order.
   - address: 0x080a63b8
     ghidra: FUN_080a63b8
     name: peripheral_control_bit8_set_inverted

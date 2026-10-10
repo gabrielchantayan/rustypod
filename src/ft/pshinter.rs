@@ -1,5 +1,125 @@
 use crate::ft::memory::{ft_mem_realloc, FtMemory};
 
+/// Destroy a PostScript hint dimension — FUN_080a3c28 @ 0x080a3c28.
+/// True extent [0x080a3c28, 0x080a3c68): 64 bytes; the next function
+/// clears three counts and returns. Three outgoing plain BLs (two to
+/// psh_mask_table_done, one to ft_mem_free), zero predicated BLs; two
+/// incoming plain BLs at 0x082e7808 and 0x082e7814.
+///
+/// Destroy the counters mask table at word 6, then the regular mask table
+/// at word 3. Reload and free the stem array at word 2, then clear stem
+/// pointer, count, and capacity in that order. Deliberate deviations:
+/// Rust word indexing replaces ARM offsets; stored pointers stay u32 on
+/// hosts. Existing allocator and mask-table ports are reused unchanged.
+///
+/// # Safety
+/// `dimension` is a writable nine-word record satisfying both mask-table
+/// cleanup contracts. Non-null allocations belong to `memory`; callbacks
+/// must keep the dimension alive throughout cleanup.
+#[inline(never)]
+#[cfg_attr(target_os = "none", no_mangle)]
+pub unsafe extern "C" fn psh_dimension_done(dimension: *mut u32, memory: *mut FtMemory) {
+    psh_mask_table_done(dimension.add(6), memory);
+    psh_mask_table_done(dimension.add(3), memory);
+    crate::ft::memory::ft_mem_free(memory, (dimension.add(2).read() as usize) as *mut u8);
+    dimension.add(2).write(0);
+    dimension.write(0);
+    dimension.add(1).write(0);
+}
+
+#[cfg(test)]
+mod dimension_done_tests {
+    extern crate std;
+    use super::*;
+
+    struct Recorder {
+        dimension: *mut u32,
+        replacement: u32,
+        calls: std::vec::Vec<(usize, [u32; 9])>,
+    }
+    unsafe extern "C" fn free(memory: *mut FtMemory, block: *mut u8) {
+        let recorder = &mut *((*memory).user as *mut Recorder);
+        let mut snapshot = [0; 9];
+        snapshot.copy_from_slice(core::slice::from_raw_parts(recorder.dimension, 9));
+        recorder.calls.push((block as usize, snapshot));
+        if recorder.replacement != 0 {
+            recorder.dimension.add(2).write(recorder.replacement);
+            recorder.replacement = 0;
+        }
+    }
+    unsafe extern "C" fn alloc(_: *mut FtMemory, _: i32) -> *mut u8 {
+        panic!("cleanup must not allocate")
+    }
+    unsafe extern "C" fn realloc(_: *mut FtMemory, _: i32, _: i32, _: *mut u8) -> *mut u8 {
+        panic!("cleanup must not reallocate")
+    }
+
+    #[test]
+    fn destroys_both_tables_before_reloading_stems_and_is_repeatable() {
+        use crate::testing::{hints, try_map_u32_slab};
+        let slab = try_map_u32_slab(hints::PSH_DIMENSION_DONE, 0x1000)
+            .expect("target-width dimension fixture");
+        unsafe {
+            let regular = slab.cast::<u32>();
+            let counters = regular.add(4);
+            let base = slab as usize as u32;
+            for present in 0..8 {
+                let mut dimension = [
+                    7, 9, if present & 1 != 0 { base + 128 } else { 0 },
+                    0, 1, base,
+                    0, 1, base + 16,
+                    0xabcdef01,
+                ];
+                let mut state = [0u32; 9];
+                state.copy_from_slice(&dimension[..9]);
+                regular.write(11);
+                regular.add(1).write(12);
+                regular.add(2).write(if present & 2 != 0 { base + 144 } else { 0 });
+                regular.add(3).write(13);
+                counters.write(21);
+                counters.add(1).write(22);
+                counters.add(2).write(if present & 4 != 0 { base + 160 } else { 0 });
+                counters.add(3).write(23);
+                let replacement = base + 176;
+                let mut expected = std::vec::Vec::new();
+                if present & 4 != 0 {
+                    expected.push(((base + 160) as usize, state));
+                    state[2] = replacement;
+                }
+                expected.push(((base + 16) as usize, state));
+                state[2] = replacement;
+                state[6..9].fill(0);
+                if present & 2 != 0 {
+                    expected.push(((base + 144) as usize, state));
+                }
+                expected.push((base as usize, state));
+                state[3..6].fill(0);
+                expected.push((replacement as usize, state));
+                let mut recorder = Recorder {
+                    dimension: dimension.as_mut_ptr(), replacement,
+                    calls: std::vec::Vec::new(),
+                };
+                let mut memory = FtMemory {
+                    user: (&mut recorder as *mut Recorder).cast(), alloc, free, realloc,
+                };
+                psh_dimension_done(dimension.as_mut_ptr(), &mut memory);
+                assert_eq!(recorder.calls, expected, "presence bits {present}");
+                assert_eq!(dimension, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0xabcdef01]);
+                assert_eq!(core::slice::from_raw_parts(regular, 8), &[0; 8]);
+                psh_dimension_done(dimension.as_mut_ptr(), core::ptr::null_mut());
+                assert_eq!(recorder.calls, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_allocations_clear_counts_without_touching_memory() {
+        let mut dimension = [7, 9, 0, 5, 0, 0, 3, 0, 0, 0xabcdef01];
+        unsafe { psh_dimension_done(dimension.as_mut_ptr(), core::ptr::null_mut()); }
+        assert_eq!(dimension, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0xabcdef01]);
+    }
+}
+
 /// Release a PostScript hint mask table — FUN_080a92c4 @ 0x080a92c4.
 /// True extent [0x080a92c4, 0x080a9328): 100 bytes; the next word is a
 /// fresh PUSH prologue. Two plain BLs to ft_mem_free @ 0x082cfae8, zero
