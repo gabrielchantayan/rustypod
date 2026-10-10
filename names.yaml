@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080903ac
+    ghidra: FUN_080903ac
+    name: low_byte_highest_set_bit
+    size: 52
+    sig: "u32 low_byte_highest_set_bit(u32 value)"
+    module: util/low_byte_highest_set_bit
+    status: ported
+    renames:
+      param_1/r0: value (saved in r2)
+      sVar1/r0: index (zero-extended wrapping halfword)
+      uVar2/r1: mask
+    notes: >-
+      Raw A32 establishes [0x080903ac,0x080903e0), thirteen words;
+      bx lr at 0x080903dc precedes a separate empty return at 0x080903e0
+      and a zero-return leaf at 0x080903e4. Independent whole-image aligned
+      BL decoding finds two incoming plain BLs at 0x080ce108 and 0x080ce124,
+      zero predicated incoming BLs and no outgoing BLs. Caller loads
+      halfwords from object +0x24/+0x26 and consumes full-width r0.
+      Scans only bits 7..0, returning their highest set index or 65535;
+      Ghidra's signed short return loses the actual zero-extension.
+      No new callee seams or deliberate behavioral deviations. Host tests
+      exhaust all halfwords and cover high-word contamination. Standalone
+      smoke confirms zero, single bits, high-only words and all ones.
+      ARM build succeeds. match.py exits 1: LLVM unrolls thirteen stock
+      instructions into twenty-eight, retaining descending bit priority,
   - address: 0x08090bc0
     ghidra: FUN_08090bc0
     name: path_facade_slot_80_from_cstr
