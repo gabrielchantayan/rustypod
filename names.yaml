@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080931e0
+    ghidra: FUN_080931e0
+    name: tt_translate_array
+    size: 84
+    sig: "void tt_translate_array(u32 count, FtVector *points, i32 x_delta, i32 y_delta)"
+    module: ft/tt_translate_array
+    status: ported
+    vars:
+      param_1/r0: count
+      param_2/r1: points
+      param_3/r2: x_delta
+      param_4/r3: y_delta
+      r12: x_index_then_y_cursor
+      lr: coordinate
+    notes: >-
+      Raw A32 establishes [0x080931e0,0x08093234), 84 bytes, ending in
+      pop pc before the independently ported zone initializer. Zero outgoing
+      plain or predicated BLs. Whole-image immediate decoding finds zero
+      incoming plain BLs and two BLNEs at 0x080813fc and 0x080e24d8;
+      Ghidra's four caller edges are not supported by raw BL words.
+      First caller rounds the first phantom point's X to a 64-unit grid
+      and translates the complete zone by the difference with zero Y delta.
+      Second passes a point suffix and independent X/Y offsets.
+      Translate X then Y in separate unsigned-count loops, skipping zero
+      deltas and wrapping coordinates modulo 2^32. Reuses repr(C) FtVector
+      with eight-byte stride on both ARM and host; no callee seams or
+      behavioral deviations. Host tests cover empty/null and maximum-count
+      zero-delta paths, independent axes, signed extremes, overflow, prefix
+      bounds and canaries against a wide-arithmetic reference.
+      Full host suite and release ARM build pass. Standalone direct-entry
+      smoke verifies wrapping, Y-only translation, preserved suffix and
+      null zero-delta behavior. match.py exit 1 reviewed: 21 original versus
+      22 Rust instructions; LLVM adds frame setup, replaces predicated
+      indexed loops with decrementing post-index loops, preserving both
+      delta/count gates, pass order and eight-byte stride. No device run.
   - address: 0x08093234
     ghidra: FUN_08093234
     name: tt_zone_from_outline
