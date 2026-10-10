@@ -16,6 +16,54 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0808ca54
+    ghidra: FUN_0808ca54
+    name: tt_cmap12_next
+    size: 220
+    sig: "void tt_cmap12_next(TtCMap12 *cmap)"
+    module: ft/cmap12_next
+    status: ported
+    vars:
+      param_1/r0: cmap
+      r2: char_code
+      r3: group
+      r6: group_count
+      r12: start_code
+      lr: end_code
+      r4: start_glyph
+      cmap+0x10: table
+      cmap+0x14: flags
+      cmap+0x18: valid
+      cmap+0x1c: current_char
+      cmap+0x20: current_glyph
+      cmap+0x24: current_group
+      cmap+0x28: group_count
+    notes: >-
+      Raw A32 extent [0x0808ca54,0x0808cb30) is 220 bytes. The next
+      function is a separate BX LR leaf at 0x0808cb30, followed by
+      MOV r0,0; BX LR at 0x0808cb34. Binary-wide aligned decoding
+      finds two incoming plain BLs at 0x080d7d48 and 0x08394984,
+      zero incoming predicated BLs, and zero outgoing plain or
+      predicated BLs. BLS at 0x0808cb14 is a branch, not a call.
+      Both callers use grouped big-endian start/end/startGlyph records
+      at table+16, identifying the format-12 cached character iterator.
+      Advance from current_char+1 and current_group, clamp to each
+      group's start, skip zero glyphs using wrapping u32 arithmetic,
+      and cache the first nonzero glyph with its character and group.
+      A current character of 0xffffffff or exhausted groups clears
+      only validity, retaining cached fields and padding. Success
+      does not set validity. No callees or new seams. Native repr(C)
+      host pointers are the only representation deviation. Host tests
+      cover gaps, empty ranges, zero glyphs, wrapping glyph arithmetic,
+      unsigned characters, sentinel and out-of-range groups, retained
+      cache, and success with validity initially zero.
+      Full host suite passed 15344 tests; ARM build-std release passed.
+      Real-library host smoke yielded (11,1), (50,20), (51,21), then
+      exhausted with cache retained. match.py exit 1 reviewed: 55 original
+      versus 67 Rust instructions. LLVM uses a larger frame, byte-swap
+      masks and rotations, hoists the table pointer, and emits separate
+      success stores. ARM offsets +0x10/+0x18/+0x1c/+0x20/+0x24/+0x28,
+      unsigned scan, zero-glyph loop, and exhaustion byte store agree.
   - address: 0x0808d9e4
     ghidra: FUN_0808d9e4
     name: draw_state_beveled_rect
