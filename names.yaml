@@ -240861,3 +240861,43 @@ functions:
       and preserves query-before-destroy and zero high return word. A
       standalone host smoke is limited by the crate's staticlib-only output
       and existing non-test host missing helpers in metadata/calendar ports.
+
+  - address: 0x0809ae44
+    ghidra: FUN_0809ae44
+    name: buffer_state_get_entry
+    size: 88
+    sig: "u32 buffer_state_get_entry(u32 *output, i32 index, u32 selector)"
+    module: runtime/buffer_state
+    status: ported
+    vars:
+      param_1/r0: output
+      param_2/r1: index
+      param_3/r2: selector
+      DAT_0809ae94: buffer_states_initialized
+      DAT_0809ae98: paired_buffer_states
+      r3: selected_record
+      selected_record_plus_0x40: item_count
+      selected_record_plus_0x44: capacity
+    notes: >-
+      Raw ARM words establish 80 instruction bytes and two four-byte
+      literals at 0x0809ae94 and 0x0809ae98; the next real function pushes
+      registers at 0x0809ae9c, making the true extent 88 bytes. Zero outgoing
+      plain or predicated BLs. Independent whole-image aligned BL decoding
+      finds two incoming plain BLs at 0x081c0d70 and 0x081c1688, no predicated
+      callers. Read the initialization byte directly at 0x08a0e180 (not a
+      pointer slot). If zero, return 1 without touching output. Otherwise
+      clear output, select the second 0x48-byte record at 0x08b1c858 only
+      when selector is exactly one, then require index >= 0 and signed
+      capacity > index and signed item_count > index. Return 6 on rejection,
+      otherwise load the indexed u32 entry, write output, and return zero.
+      Callers consume queue entries, including virtual object pointers;
+      this routine does not dereference entries or remove them. No callee
+      seams. Firmware uses original fixed globals; hosts reuse the existing
+      BUFFER_STATES model and model the readiness byte. Volatile accesses
+      preserve access order. Tests cover disabled output preservation and
+      NULL output, signed extremes, both bounds, exact selector one, zero
+      entries and maximum entry words. Host suite, executable lookup smoke,
+      and ARM release build pass. match.py exits 1: LLVM replaces chained
+      predication with branches, adds a frame, and selects count/capacity
+      offsets separately; signed checks, ordered output writes, original
+      fixed addresses and absence of calls remain intact.
