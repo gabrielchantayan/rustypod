@@ -1,5 +1,6 @@
 //! retailOS application/UI framework glue — the global application
 //! context and the small helpers its view classes lean on.
+pub mod pixel_format_bits_per_pixel;
 pub mod ancestor_order_byte;
 pub mod global_mailbox_post;
 pub mod global_observer_get;

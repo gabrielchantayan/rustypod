@@ -438,12 +438,11 @@ pub unsafe extern "C" fn pair_header_base_construct_with_owned_payload(
 /// Host/test and target dispatch for the three unported dependencies of the
 /// pooled owned-payload initializer @ 0x0810e6f8.
 ///
-/// These exact ABI shapes come from the three direct calls at 0x0810e73c,
-/// 0x0810e77c, and 0x0810e7a4/0x0810e7c8. Their deeper identities remain
-/// deliberately unspecified.
+/// These exact ABI shapes come from the direct calls at 0x0810e77c and
+/// 0x0810e7a4/0x0810e7c8. Their deeper identities remain deliberately
+/// unspecified. Pixel-format depth uses the Rust port of 0x080a63f8 directly.
 #[derive(Clone, Copy)]
 pub struct PairHeaderBasePooledOwnedPayloadOps {
-    pub bits_per_pixel: unsafe extern "C" fn(format: u32) -> u32,
     pub allocate_from_pool: unsafe extern "C" fn(pool: u32, byte_count: u32, tag: u32) -> *mut u8,
     pub allocate: unsafe extern "C" fn(byte_count: u32, tag: u32) -> *mut u8,
     pub initialize_payload: unsafe extern "C" fn(
@@ -455,13 +454,6 @@ pub struct PairHeaderBasePooledOwnedPayloadOps {
         base: *mut u32,
         context: u32,
     ),
-}
-
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_pooled_payload_bits_per_pixel(format: u32) -> u32 {
-    let bits_per_pixel: unsafe extern "C" fn(u32) -> u32 =
-        core::mem::transmute(0x080a_63f8usize);
-    bits_per_pixel(format)
 }
 
 #[cfg(target_os = "none")]
@@ -506,11 +498,6 @@ unsafe extern "C" fn firmware_initialize_pooled_payload(
 }
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_pooled_payload_bits_per_pixel(_format: u32) -> u32 {
-    panic!("pair_header_base_initialize_pooled_owned_payload requires 0x080a63f8")
-}
-
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_allocate_pooled_payload(
     _pool: u32,
     _byte_count: u32,
@@ -540,7 +527,6 @@ unsafe extern "C" fn missing_initialize_pooled_payload(
 #[cfg(target_os = "none")]
 pub static mut PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS: PairHeaderBasePooledOwnedPayloadOps =
     PairHeaderBasePooledOwnedPayloadOps {
-        bits_per_pixel: firmware_pooled_payload_bits_per_pixel,
         allocate_from_pool: firmware_allocate_pooled_payload,
         allocate: firmware_allocate_payload,
         initialize_payload: firmware_initialize_pooled_payload,
@@ -549,7 +535,6 @@ pub static mut PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS: PairHeaderBasePooledOw
 #[cfg(not(target_os = "none"))]
 pub static mut PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS: PairHeaderBasePooledOwnedPayloadOps =
     PairHeaderBasePooledOwnedPayloadOps {
-        bits_per_pixel: missing_pooled_payload_bits_per_pixel,
         allocate_from_pool: missing_allocate_pooled_payload,
         allocate: missing_allocate_payload,
         initialize_payload: missing_initialize_pooled_payload,
@@ -605,7 +590,8 @@ pub unsafe extern "C" fn pair_header_base_initialize_pooled_owned_payload(
     base.add(0xa4 / 4).write(fourth);
     base.add(0xa8 / 4).write(tag);
     base.cast::<u8>().add(0xb4).write(1);
-    let bits_per_pixel = (ops.bits_per_pixel)(decoder_argument);
+    let bits_per_pixel =
+        crate::app::pixel_format_bits_per_pixel::pixel_format_bits_per_pixel(decoder_argument);
     let row_bits = fourth
         .wrapping_sub(second)
         .wrapping_mul(bits_per_pixel)
@@ -2581,10 +2567,6 @@ mod pooled_owned_payload_tests {
     static mut ALLOC_ARGS: [u32; 2] = [0; 2];
     static mut INITIALIZE_ARGS: [usize; 7] = [0; 7];
 
-    unsafe extern "C" fn bits_per_pixel(_format: u32) -> u32 {
-        16
-    }
-
     unsafe extern "C" fn pool_allocation(pool: u32, byte_count: u32, tag: u32) -> *mut u8 {
         POOL_ARGS = [pool, byte_count, tag];
         core::ptr::null_mut()
@@ -2625,7 +2607,6 @@ mod pooled_owned_payload_tests {
             let old = core::ptr::addr_of!(PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS).read_volatile();
             core::ptr::addr_of_mut!(PAIR_HEADER_BASE_POOLED_OWNED_PAYLOAD_OPS).write_volatile(
                 PairHeaderBasePooledOwnedPayloadOps {
-                    bits_per_pixel,
                     allocate_from_pool: pool_allocation,
                     allocate: allocation,
                     initialize_payload: initialize,
@@ -2641,7 +2622,7 @@ mod pooled_owned_payload_tests {
             pair_header_base_initialize_pooled_owned_payload(
                 object,
                 descriptor.as_ptr(),
-                0x1020_3040,
+                0x2065,
                 0xcafe_f00d,
                 0x9abc_def0,
             );
@@ -2657,7 +2638,7 @@ mod pooled_owned_payload_tests {
                     descriptor.as_ptr() as usize,
                     0x1000,
                     8,
-                    0x1020_3040,
+                    0x2065,
                     object as usize,
                     0x9abc_def0,
                 ]

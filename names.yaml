@@ -16,6 +16,34 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a63f8
+    ghidra: FUN_080a63f8
+    name: pixel_format_bits_per_pixel
+    size: 196
+    sig: "u32 pixel_format_bits_per_pixel(u32 format)"
+    module: app/pixel_format_bits_per_pixel
+    status: ported
+    vars: {param_1: format, puVar1: normalized_format, puVar2: comparison_scratch}
+    notes: >-
+      Raw osos.dec establishes 188 instruction bytes through 0x080a64b0,
+      followed by literals 0x555 and 0xc420 at 0x080a64b4/0x080a64b8;
+      the next function begins at 0x080a64bc, making the true extent 196 bytes.
+      Independent whole-image ARM-word decoding finds two incoming plain BLs
+      at 0x0810e73c and 0x0810e864, no incoming predicated BLs, and no outgoing
+      plain or predicated BLs. Both callers derive aligned image row strides.
+      Clears only bit 0x2000. Codes 1/2/4 return themselves; 8/0x64 return 8;
+      0x65/0x555/0x565/0x1444/0xc420/0xc422 return 16; 0x1888/0xd444
+      return 32; all others return zero. Rust uses exact matches instead of
+      signed comparison partitions, retaining all high-word rejection behavior.
+      The pooled owned-payload initializer calls this port directly instead of
+      using a target-address or host-panic depth seam. Host tests exhaust all
+      65536 low-word inputs and cover unrelated high bits and signed extremes.
+      Host suite and ARM release build pass. Production-source smoke covers
+      flagged 16/32-bit formats and high-word rejection. match.py reports
+      60 Rust instructions versus 47 stock instructions: LLVM repartitions the
+      comparisons and adds a frame, but retains the flag clear, exact code
+      checks, depth returns, zero fallback and absence of outgoing calls.
+
   - address: 0x080a65cc
     ghidra: FUN_080a65cc
     name: bytes16_to_upper_hex
