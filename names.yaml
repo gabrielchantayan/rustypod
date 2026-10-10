@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0807f320
+    ghidra: FUN_0807f320
+    name: indexed_record_insert
+    size: 200
+    sig: "i32 indexed_record_insert(u32 *owner, u32 index, const void *record)"
+    module: app/indexed_record_insert
+    status: ported
+    vars:
+      param_1/r4: owner
+      param_2/r5: index
+      param_3/r9: record
+      r6: replacement
+      r8: record_size
+      r7: result
+    renames:
+      FUN_0805d1dc: calloc_tag4
+      FUN_0805d0f4: bcopy_guarded
+      FUN_0805d070: free_tag4
+      FUN_08042cbc: bcopy
+      thunk_EXT_FUN_22000188: iram_memcpy_veneer
+    notes: >-
+      Raw A32 verifies the 200-byte extent ending at 0x0807f3e8, the next
+      function's ldr r3,[r0,#52]. Incoming calls are plain BL at 0x08059200
+      and BLNE at 0x080595b4; Ghidra folds the first into an earlier caller.
+      Body has four plain BLs and one BLNE. Count at owner+0x10, capacity
+      at +0x14, target-width storage pointer at +0x70. Grow by three using
+      zeroed tag-4 allocation, preserve owner on -108 allocation failure,
+      clamp unsigned index to count, overlap-safe shift of 20-byte records,
+      then copy the incoming record and increment count. Deviations: reuse
+      established Rust callee ports; retain u32 wrapping arithmetic and
+      target-width owner words on hosts. Host suite passed 15379 tests;
+      executable host smoke verified clamped append and overlapping prepend.
   - address: 0x0807f3e8
     ghidra: FUN_0807f3e8
     name: signed_set_insert_backward
