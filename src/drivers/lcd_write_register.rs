@@ -204,29 +204,25 @@ pub unsafe extern "C" fn lcd_write_register(register_index: u32, value: u32) {
     unsafe { lcd_write_value(value) };
 }
 
-/// ABI of the unported display-mode query at `0x080a3f48`.
+/// Host-test ABI for the LCD mode query.
+#[cfg(not(target_os = "none"))]
 pub type LcdCommandModeFn = unsafe extern "C" fn() -> u32;
 
-#[cfg(target_os = "none")]
-unsafe extern "C" fn firmware_lcd_command_mode() -> u32 {
-    let mode: LcdCommandModeFn = core::mem::transmute(0x080a3f48usize);
-    mode()
-}
-
+/// Host-replaceable mode source; device builds call the Rust port directly.
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn firmware_lcd_command_mode() -> u32 {
-    panic!("lcd_begin_command_transaction requires display-mode query 0x080a3f48")
-}
-
-/// Host-replaceable direct call to the unported display-mode query.
-///
-/// `FUN_080a3f48` is absent from `names.yaml`; target builds call its verified
-/// retailOS entry while host tests substitute a deterministic mode source.
-pub static mut LCD_COMMAND_MODE: LcdCommandModeFn = firmware_lcd_command_mode;
+pub static mut LCD_COMMAND_MODE: LcdCommandModeFn =
+    super::lcd_command_mode_get::lcd_command_mode_get;
 
 #[inline(always)]
+#[cfg(not(target_os = "none"))]
 unsafe fn lcd_command_mode() -> u32 {
     core::ptr::read_volatile(core::ptr::addr_of!(LCD_COMMAND_MODE))()
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+unsafe fn lcd_command_mode() -> u32 {
+    super::lcd_command_mode_get::lcd_command_mode_get()
 }
 
 /// lcd_begin_command_transaction — original: `FUN_080dbdb8` @ `0x080dbdb8`

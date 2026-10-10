@@ -138269,17 +138269,17 @@ functions:
       Raw ARM confirms Ghidra's 100-byte extent: 0x080dbdb8..0x080dbe18
       saves LCD control +0x00 in r5, polls status +0x1c until bit 1 is set,
       calls the already-ported 1-us iram_usec_delay_veneer
-      (0x08037ef0), then calls the unported FUN_080a3f48. Modes 0/1 store
+      (0x08037ef0), then calls lcd_command_mode_get (0x080a3f48). Modes 0/1 store
       (saved_control & 0x80000007) | 0xc20; modes 2/3 instead use 0xda8;
       every other value returns the saved word without a store. The literal
       0x38300000 at 0x080dbe1c is its pool, and the separately linked paired
       restore helper begins at 0x080dbe20. Full-image decoding of every ARM
       B/BL immediate finds exactly seven inbound direct BL calls, all
       unconditional (zero predicated): 0x080bb500, 0x080bb540, 0x080dbee4,
-      0x080ddd38, 0x080e3344, 0x080e61cc, and 0x080e696c. FUN_080a3f48 is
-      absent from names.yaml and its identity is not inferred; target builds
-      call that verified address while host tests replace it through the
-      LCD_COMMAND_MODE seam. Deliberate deviation: target MMIO loads/stores
+      0x080ddd38, 0x080e3344, 0x080e61cc, and 0x080e696c. Target builds
+      call the Rust lcd_command_mode_get port while host tests replace it
+      through the LCD_COMMAND_MODE seam. Deliberate deviation: target
+      MMIO loads/stores
       remain volatile; host tests use atomic controller words. Focused tests
       cover modes 0..3, unsupported modes, preservation of the exact saved
       value, and blocking until command-ready.
@@ -240257,3 +240257,42 @@ functions:
       Compiled ARM emulation exercises in-capacity growth, u32 wrap and
       zero-width shrink through the real backing-size callee. Standalone
       host smoke is blocked by six unrelated non-test symbol errors.
+
+  # --- Cached GPIO-selected LCD command mode ---
+  - address: 0x080a3f48
+    ghidra: FUN_080a3f48
+    name: lcd_command_mode_get
+    size: 72
+    sig: "u32 lcd_command_mode_get(void)"
+    module: drivers/lcd_command_mode_get
+    status: ported
+    renames:
+      DAT_080a3f8c/r4: lcd_mode_cache (0x089cab64)
+      local_c/[sp+4]: low_pin_level
+      local_10/[sp]: high_pin_level
+      FUN_0836b6cc: gpio_pin_read
+    notes: >-
+      Raw extent is 72 bytes at 0x080a3f48..0x080a3f8f: 68 instruction
+      bytes and the cache-address literal. The next real function begins
+      at 0x080a3f90 with push {r4-r11,lr}. Full-image ARM word decoding
+      finds two unconditional inbound BLs at 0x080a9850 and 0x080dbdd8,
+      zero predicated BLs. Two unconditional outbound BLs at 0x080a3f64
+      and 0x080a3f70 call the already-ported gpio_pin_read at 0x0836b6cc.
+      Cache sentinel 4 samples pins 0x34 and 0x35 in that order, stores
+      low | (high << 1), then reloads the cache. All non-sentinel values
+      pass through, including unsupported modes. No arguments: Ghidra
+      misidentifies saved scratch r2/r3 as inputs, but both stack slots
+      are overwritten by the verified GPIO callee. Deliberate deviations
+      are volatile cache accesses and zero-initialized scratch locals;
+      hosts use a cache word and the existing GPIO data fixture.
+      lcd_begin_command_transaction now calls the Rust port on-device,
+      retaining only its host-test mode substitution. Host tests cover
+      all four sampled modes, retention after GPIO changes, unrelated
+      GPIO bits, and non-sentinel full-width cache values. ARM release
+      code has two GPIO calls, sentinel branch, combine/store and final
+      reload; match.py prints a structural diff (17 original instructions
+      versus 21 Rust lines, including the literal), with changed frame
+      setup and reversed local-slot allocation.
+      Full host suite passes 15254 tests; ARM release build succeeds.
+      Standalone host smoke runs the actual query and GPIO port, samples
+      mode 3, clears the GPIO fixture, and observes cached mode 3 again.
