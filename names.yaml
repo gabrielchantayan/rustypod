@@ -16,6 +16,31 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080bd694
+    ghidra: FUN_080bd694
+    name: database_read_context_destroy
+    size: 56
+    sig: "void database_read_context_destroy(uint32_t *context)"
+    module: app/database_read_context_destroy
+    status: ported
+    vars: {param_1/r0: context, r4: saved_context}
+    renames: {FUN_0805d070: free_tag4}
+    notes: >-
+      Raw A32 establishes 52 instruction bytes plus the 0x8018 literal at
+      0x080bd6c8, ending at the next function's sub r0,r0,#100 at 0x080bd6cc.
+      Ghidra's report omits the literal and its C incorrectly follows the
+      final tail branch into heap internals. NULL returns immediately;
+      otherwise free nonzero target-width pointers at +4 and +0x8018 in
+      order, then free the context, all through canonical free_tag4 at
+      0x0805d070. No field clearing or virtual dispatch. Body contains zero
+      plain BLs, two BLNEs, and one tail B. Whole-image aligned A32 decoding
+      finds two incoming plain BLs at 0x0806416c and 0x0809ea9c, no predicated
+      incoming BLs. The allocating caller at 0x0809ea58 and database-opening
+      caller at 0x08063e9c establish the read-context ownership role.
+      Deliberate deviation: Rust does not guarantee the final tail call;
+      existing heap dispatch is retained. Host tests cover NULL, all four
+      optional-buffer combinations, owner release, and absence of writes.
+
   - address: 0x080bdb50
     ghidra: FUN_080bdb50
     name: load_be32
