@@ -243603,3 +243603,52 @@ functions:
       Hosts reuse the existing helper seam. The tag-two caller now uses
       this symbol on both target and host. Tests exercise NULL delegation
       and actual owned-allocation destruction through the engine boundary.
+  - address: 0x0806f0a4
+    ghidra: FUN_0806f0a4
+    name: x509_attribute_create
+    size: 164
+    sig: "uintptr_t *x509_attribute_create(int nid, int kind, uintptr_t payload)"
+    module: crypto/x509_attribute_create
+    status: ported
+    vars:
+      param_1: nid
+      param_2: kind
+      param_3: payload
+      puVar1: attribute
+      iVar4: value
+      iVar3: stack_or_append_status
+    renames:
+      DAT_0806f144: ATTRIBUTE_DESCRIPTOR
+      FUN_0803b468: parameter_descriptor_value
+      FUN_0805ef18: obj_nid2obj
+      FUN_08369778: ata_call_with_zero
+      FUN_0803a550: global_parameter_descriptor_value
+      FUN_083697f0: namespace_provider_push
+      FUN_0803a55c: attribute_value_set
+      FUN_0803b3a4: typed_allocation_release_helper
+      FUN_0803a544: release_opaque_allocation_089062ec
+    notes: >-
+      Raw A32 establishes 164 bytes, including the descriptor literal at
+      0x0806f144; the next real function begins at 0x0806f148. Whole-image
+      branch decoding finds two plain inbound BLs at 0x08081ae0 and
+      0x08081b28, no predicated inbound BLs. Body has seven plain BLs and
+      one BLNE. Allocate an attribute, store the resolved OID (even NULL),
+      clear its single-value discriminator and allocate its value stack.
+      Allocate and append one ASN.1 value, then set its type and payload
+      using the unported, raw-verified setter at 0x0803a55c. On any failure
+      release the attribute before releasing a non-NULL unattached value.
+      Existing allocation, OID, stack, append and release ports are reused.
+      Resolver context is zero because these descriptors do not use r3:
+      runtime descriptor 0x0891f6ac is type 1, size 12, and 0x089062ec is
+      type 0; raw image addresses include the documented +0xaed8 skew.
+      Host slots are pointer-sized; ARM slots remain +0/+4/+8.
+      Existing attribute_list_upsert now calls this port on device and
+      defaults its host construction seam to the same port.
+      Tests cover every allocation/append failure, cleanup ordering,
+      NULL OID continuation, append-before-initialization and ownership.
+      Full x86_64 host suite and ARM build-std release build pass.
+      Standalone execution of the constructor algorithm with owned host
+      storage confirms NULL OID continuation and an initialized appended
+      value. match.py exits 1 with expected frame/register differences,
+      linked-call relocations and a BLX to the exact setter address;
+      initialization fields, success gates and ordered cleanup are retained.

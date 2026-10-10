@@ -42,6 +42,7 @@
 pub mod add_lock;
 pub mod x509_store_new;
 pub mod attribute_list_upsert;
+pub mod x509_attribute_create;
 pub mod cached_context_ensure;
 pub mod tagged_reference_retain;
 pub mod store_lookup;

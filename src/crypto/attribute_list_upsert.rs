@@ -8,10 +8,10 @@
 //! Free that attribute before constructing and storing its replacement. If no
 //! match exists, construct and append. Ignore failures and always return 1.
 //!
-//! Deviations: unported attribute create/free routines are direct firmware
-//! calls on device and injectable host seams. Reuse the existing stack factory,
-//! push and object-to-NID ports. Host stack/attribute slots are pointer-sized,
-//! matching the existing push fixture convention; count/value/set accessors
+//! Deviations: the unported attribute free routine is a direct firmware
+//! call on device and an injectable host seam. Reuse the ported constructor,
+//! stack factory, push and object-to-NID ports. Host stack/attribute slots are
+//! pointer-sized, matching the existing push fixture convention; count/value/set accessors
 //! use that layout on hosts because their existing ports use target offsets.
 
 use super::obj_dat::{obj_obj2nid, Asn1Object};
@@ -22,25 +22,20 @@ pub type AttributeCreate = unsafe extern "C" fn(i32, i32, usize) -> *mut usize;
 pub type AttributeFree = unsafe extern "C" fn(*mut usize);
 
 #[cfg(not(target_os = "none"))]
-unsafe extern "C" fn missing_create(_: i32, _: i32, _: usize) -> *mut usize {
-    panic!("attribute_list_upsert requires attribute constructor 0x0806f0a4")
-}
-#[cfg(not(target_os = "none"))]
 unsafe extern "C" fn missing_free(_: *mut usize) {
     panic!("attribute_list_upsert requires attribute destructor 0x0806f148")
 }
 #[cfg(not(target_os = "none"))]
-pub static mut ATTRIBUTE_CREATE: AttributeCreate = missing_create;
+pub static mut ATTRIBUTE_CREATE: AttributeCreate = super::x509_attribute_create::x509_attribute_create;
 #[cfg(not(target_os = "none"))]
 pub static mut ATTRIBUTE_FREE: AttributeFree = missing_free;
 
 #[inline(always)]
 unsafe fn create(nid: i32, value_type: i32, value: usize) -> *mut usize {
     #[cfg(target_os = "none")]
-    let call: AttributeCreate = core::mem::transmute(0x0806_f0a4usize);
+    { super::x509_attribute_create::x509_attribute_create(nid, value_type, value) }
     #[cfg(not(target_os = "none"))]
-    let call = core::ptr::addr_of!(ATTRIBUTE_CREATE).read_volatile();
-    call(nid, value_type, value)
+    { core::ptr::addr_of!(ATTRIBUTE_CREATE).read_volatile()(nid, value_type, value) }
 }
 #[inline(always)]
 unsafe fn free(attribute: *mut usize) {
@@ -108,7 +103,7 @@ mod tests {
     }
     struct Reset;
     impl Drop for Reset {
-        fn drop(&mut self) { unsafe { ATTRIBUTE_CREATE = missing_create; ATTRIBUTE_FREE = missing_free; } }
+        fn drop(&mut self) { unsafe { ATTRIBUTE_CREATE = super::super::x509_attribute_create::x509_attribute_create; ATTRIBUTE_FREE = missing_free; } }
     }
     #[test]
     fn replace_first_duplicate_and_preserve_other_entries_even_on_create_failure() {
