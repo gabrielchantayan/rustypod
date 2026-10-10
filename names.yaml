@@ -47480,7 +47480,7 @@ functions:
       persistent (+0x11 byte) hands the node to the consumer, transient
       recycles it; return 1. No NULL guard on node (recycle guards its
       own). 2 callers (mqueue_receive @ 0x0807f63c, loop @ 0x0807a330).
-      This IS CONDVAR_HOOKS.deliver. match.py 5/30 prefix, structure
+      Called directly by kernel/mqueue mqueue_receive. match.py 5/30 prefix, structure
       identical.
 
   - address: 0x080ed958
@@ -242474,3 +242474,33 @@ functions:
       506 and 14. Ordinary host library builds are independently blocked
       by missing host definitions in prepare_entry_metadata,
       shared_payload_select_kind and calendar_schedule.
+
+  - address: 0x0807f5f4
+    ghidra: FUN_0807f5f4
+    name: mqueue_receive
+    size: 92
+    sig: "u32 mqueue_receive(QueuePool *pool, u32 *out_data, QueueNode **out_node)"
+    module: kernel/mqueue
+    status: ported
+    confidence: high
+    vars:
+      param_1/r4: pool
+      param_2/r7: out_data
+      param_3/r8: out_node
+      iVar1/r6: dequeued_node
+    notes: >-
+      Raw A32 body [0x0807f5f4, 0x0807f650), with the next push starting
+      condvar_destroy. Independently scanned incoming calls: two plain BLs
+      at 0x0812c268 and 0x08296778, zero predicated BLs. Four outgoing plain
+      BLs and zero predicated BLs: sem_wait 0x08056510, list_pop_front
+      0x080f10b8, sem_signal 0x08056710, mqueue_deliver 0x080b4a88.
+      Locks pool+0x2c around a pop at pool+0x40, unlocks before delivery,
+      retries rejected nodes, returns 0 on acceptance and 2 on empty.
+      Replaces the old condvar implementation whose semaphore and delivery
+      defaults were stubs. Uses QueuePool and QueueNode repr(C) fields and
+      existing real-default MQUEUE_HOOKS semaphore seams; no new address seam.
+      Host suite passed 15374 tests, including output preservation on empty,
+      rejected-only exhaustion and rejected-then-persistent acceptance with
+      real delivery and recycling. ARM release build passed. match.py reports
+      23 stock versus 71 Rust instructions: list and delivery inline, hooks
+      use BLX; lock/pop/unlock ordering, retry and result paths remain intact.

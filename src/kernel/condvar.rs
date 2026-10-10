@@ -29,10 +29,8 @@
 //! object (`ldr r0, [node, #4]`, tail branch to stock 0x080567f8); an
 //! empty queue is a no-op.
 //!
-//! Also in the range: `mqueue_receive` (0x0807f5f4), a locked message-queue
-//! consumer over a different struct (mutex handle @ +0x2c, queue anchor @
-//! +0x40) that pops nodes until the external deliver helper (0x080b4a88)
-//! accepts one; `condvar_init`/`condvar_destroy` (0x0807f680/0x0807f650);
+//! Also in the range: `mqueue_receive` (0x0807f5f4), now implemented in
+//! kernel/mqueue.rs; `condvar_init`/`condvar_destroy` (0x0807f680/0x0807f650);
 //! the semaphore-signal veneer `rtxc_semaphore_signal` (0x0807f6a0, the
 //! name the heap link contract in heap/wrappers.rs expects); and the two
 //! yield wrappers `task_yield`/`task_yield_thunk` (0x0807f670/0x0807f6a8)
@@ -74,10 +72,8 @@
 //! - `condvar_wait`'s double unlink on the timeout path (the node is
 //!   removed once unconditionally and again when the sleep timed out) is
 //!   deliberate in the original and is preserved.
-//! - Struct fields are pointer-width, so byte offsets (+0x2c/+0x40 in
-//!   `LockedQueue`, +0x04/+0x08 in `CondVar`) are exact only on the
-//!   32-bit target; host tests go through field accesses and are
-//!   layout-independent.
+//! - Struct fields are pointer-width, so CondVar's +0x04/+0x08 offsets
+//!   are exact only on the 32-bit target; host tests use field accesses.
 
 use crate::kernel::{
     csem::csem_wake,
@@ -88,8 +84,6 @@ use core::ptr::null_mut;
 
 /// Return code: operation completed (signaled / node delivered).
 pub const CONDVAR_OK: i32 = 0;
-/// `mqueue_receive` return code: queue empty.
-pub const CONDVAR_EMPTY: i32 = 2;
 /// `condvar_wait` return code: zero timeout or the sleep timed out.
 pub const CONDVAR_TIMEOUT: i32 = 3;
 
@@ -126,22 +120,6 @@ pub struct CondVar {
     pub waiters: ListHead,
 }
 
-/// Locked message queue consumed by `mqueue_receive` (0x0807f5f4). Only
-/// the words the original touches are modelled; the pads stand in for the
-/// owner struct's other fields.
-#[repr(C)]
-pub struct LockedQueue {
-    /// +0x00..+0x2c: owner fields, not used here.
-    _pad_0x00: [u32; 11],
-    /// +0x2c: mutex handle (a semaphore slot pointer), passed by value to
-    /// the sem_wait/sem_signal hooks around every pop.
-    pub mutex: *mut u32,
-    /// +0x30..+0x40: owner fields, not used here.
-    _pad_0x30: [u32; 4],
-    /// +0x40/+0x44: queue anchor (nodes are `ListNode`-linked; the deliver
-    /// hook reads the payload at node+8).
-    pub queue: ListHead,
-}
 
 /// Kernel/ROM services the layer depends on. See the module header for the
 /// default-stub policy; every member cites the stock address it routes to.
@@ -173,14 +151,6 @@ pub struct CondvarHooks {
     /// Stock 0x080568fc: ROM service 0x22004260 called with r0 = 0
     /// (yield-like; exact RTXC service unidentified).
     pub task_yield: unsafe extern "C" fn(),
-    /// Stock 0x080b4a88: deliver a dequeued queue node. Copies the 8-byte
-    /// payload at node+8 to `out_data`, stores the node (or NULL) to
-    /// `*out_node`, returns nonzero when the node was accepted.
-    pub deliver: unsafe extern "C" fn(
-        node: *mut ListNode,
-        out_data: *mut u32,
-        out_node: *mut *mut ListNode,
-    ) -> u32,
 }
 
 unsafe extern "C" fn missing_object_create() -> *mut u32 {
@@ -197,13 +167,6 @@ unsafe extern "C" fn missing_waiter_delete(_handle: *mut u32) {}
 unsafe extern "C" fn missing_waiter_wake(_handle: *mut u32) {}
 unsafe extern "C" fn missing_sem_op(_slot: *mut u32) {}
 unsafe extern "C" fn missing_task_yield() {}
-unsafe extern "C" fn missing_deliver(
-    _node: *mut ListNode,
-    _out_data: *mut u32,
-    _out_node: *mut *mut ListNode,
-) -> u32 {
-    1
-}
 
 /// Hook table for the kernel/ROM dependencies. Replace before first use on
 /// target; host tests install mocks via `core::ptr::addr_of_mut!`.
@@ -217,7 +180,6 @@ pub static mut CONDVAR_HOOKS: CondvarHooks = CondvarHooks {
     sem_wait: missing_sem_op,
     sem_signal: missing_sem_op,
     task_yield: missing_task_yield,
-    deliver: missing_deliver,
 };
 
 /// Reads the hook table. Volatile so LLVM cannot constant-fold the loads
@@ -377,32 +339,6 @@ pub unsafe extern "C" fn condvar_signal_dispatch(condvar: *mut CondVar, mode: u3
     }
 }
 
-/// mqueue_receive — original: `FUN_0807f5f4` @ 0x0807f5f4 (92 bytes).
-///
-/// Locked message-queue consumer: takes the queue's mutex, pops the head
-/// node, drops the mutex, and hands the node to the deliver hook. Nodes
-/// the deliver hook rejects (return 0) are skipped; the loop retries until
-/// a node is accepted (returns `CONDVAR_OK`) or the queue runs dry
-/// (returns `CONDVAR_EMPTY`).
-#[cfg_attr(target_os = "none", no_mangle)]
-pub unsafe extern "C" fn mqueue_receive(
-    queue: *mut LockedQueue,
-    out_data: *mut u32,
-    out_node: *mut *mut ListNode,
-) -> i32 {
-    let h = hooks();
-    loop {
-        (h.sem_wait)((*queue).mutex);
-        let node = list_pop_front(&mut (*queue).queue);
-        (h.sem_signal)((*queue).mutex);
-        if node.is_null() {
-            return CONDVAR_EMPTY;
-        }
-        if (h.deliver)(node, out_data, out_node) != 0 {
-            return CONDVAR_OK;
-        }
-    }
-}
 
 /// condvar_destroy — original: `FUN_0807f650` @ 0x0807f650 (32 bytes).
 ///
@@ -591,8 +527,6 @@ mod tests {
     struct MockState {
         events: Vec<String>,
         wakes: Vec<usize>,
-        deliver_calls: usize,
-        deliver_rcs: Vec<u32>,
         wait_rc: u32,
         pop_on_wait: bool,
         wait_condvar: *mut CondVar,
@@ -680,23 +614,6 @@ mod tests {
         state().as_mut().unwrap().events.push("yield".into());
     }
 
-    unsafe extern "C" fn mock_deliver(
-        node: *mut ListNode,
-        out_data: *mut u32,
-        out_node: *mut *mut ListNode,
-    ) -> u32 {
-        let mut g = state();
-        let s = g.as_mut().unwrap();
-        s.deliver_calls += 1;
-        s.events.push(format!("deliver:{:x}", node as usize));
-        out_data.write(0xd00d);
-        out_node.write(node);
-        if s.deliver_rcs.is_empty() {
-            1
-        } else {
-            s.deliver_rcs.remove(0)
-        }
-    }
 
     struct DirectKernelGuard {
         kobj: KobjHooks,
@@ -862,7 +779,6 @@ mod tests {
         sem_wait: mock_sem_wait,
         sem_signal: mock_sem_signal,
         task_yield: mock_task_yield,
-        deliver: mock_deliver,
     };
 
     fn install(mock: MockState) -> MutexGuard<'static, ()> {
@@ -888,17 +804,6 @@ mod tests {
         }
     }
 
-    fn make_queue() -> LockedQueue {
-        LockedQueue {
-            _pad_0x00: [0; 11],
-            mutex: null_mut(),
-            _pad_0x30: [0; 4],
-            queue: ListHead {
-                head: null_mut(),
-                tail: null_mut(),
-            },
-        }
-    }
 
     // ---- list helpers ------------------------------------------------
 
@@ -1491,61 +1396,6 @@ mod tests {
         assert!(take_events().is_empty());
     }
 
-    // ---- mqueue_receive -------------------------------------------------
-
-    #[test]
-    fn mqueue_receive_empty_returns_2_after_lock_cycle() {
-        let _guard = install(MockState::default());
-        let mut queue = make_queue();
-        queue.mutex = 0x7000usize as *mut u32;
-        let mut out_data = 0u32;
-        let mut out_node: *mut ListNode = null_mut();
-        unsafe {
-            let rc = mqueue_receive(&mut queue, &mut out_data, &mut out_node);
-            assert_eq!(rc, CONDVAR_EMPTY);
-        }
-        assert_eq!(
-            take_events(),
-            Vec::from([
-                String::from("sem_wait:7000"),
-                String::from("sem_signal:7000"),
-            ])
-        );
-    }
-
-    #[test]
-    fn mqueue_receive_retries_until_deliver_accepts() {
-        let mut mock = MockState::default();
-        mock.deliver_rcs = std::vec![0, 1];
-        let _guard = install(mock);
-        let mut queue = make_queue();
-        queue.mutex = 0x7000usize as *mut u32;
-        let mut nodes: Vec<Box<ListNode>> =
-            (0..2).map(|_| Box::new(ListNode { next: null_mut() })).collect();
-        let mut out_data = 0u32;
-        let mut out_node: *mut ListNode = null_mut();
-        unsafe {
-            for n in nodes.iter_mut() {
-                list_push_back(&mut queue.queue, &mut **n);
-            }
-            let rc = mqueue_receive(&mut queue, &mut out_data, &mut out_node);
-            assert_eq!(rc, CONDVAR_OK);
-            assert_eq!(out_data, 0xd00d);
-            assert_eq!(out_node, &mut *nodes[1] as *mut ListNode);
-            assert!(queue.queue.head.is_null());
-            assert!(queue.queue.tail.is_null());
-            let events = take_events();
-            // Two lock/pop/unlock cycles, two deliver calls.
-            assert_eq!(state().as_mut().unwrap().deliver_calls, 2);
-            assert_eq!(events[0], "sem_wait:7000");
-            assert_eq!(events[1], "sem_signal:7000");
-            assert!(events[2].starts_with("deliver:"));
-            assert_eq!(events[3], "sem_wait:7000");
-            assert_eq!(events[4], "sem_signal:7000");
-            assert!(events[5].starts_with("deliver:"));
-            assert_eq!(events.len(), 6);
-        }
-    }
 
     // ---- veneers ---------------------------------------------------------
 
