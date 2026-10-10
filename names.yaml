@@ -241817,3 +241817,33 @@ functions:
       defaults; non-test host rlib compilation is blocked by four existing
       missing host helpers in unrelated modules. No device run performed.
 
+  - address: 0x0808cd90
+    ghidra: FUN_0808cd90
+    name: ft_buffered_stream_set_mode
+    size: 84
+    module: ft/buffer
+    status: ported
+    sig: "i32 ft_buffered_stream_set_mode(FtBufferedStream *stream, u32 mode)"
+    args:
+      r0: stream
+      r1: mode
+    renames:
+      param_1: stream
+      param_2: mode
+      iVar1: result
+      FUN_08042d68: ft_buffered_stream_flush
+      FUN_08076b30: ft_buffered_stream_reset_buffer_cursor
+    notes: >-
+      Raw osos.dec verifies 21 ARM words in [0x0808cd90,0x0808cde4).
+      The next function begins with push {lr}. Outbound calls are one plain
+      BL at 0x0808cdc8 and one BLEQ at 0x0808cdd8. Two inbound plain BLs
+      occur at 0x08042fec and 0x08043288; no predicated inbound BLs.
+      Reader requests mode 1, writer mode 0. Equal full-width mode succeeds;
+      byte +6 forbids a changed request of zero with -61. Flush old mode,
+      propagate failure, otherwise store the low request byte at +5 and
+      reset the new cursor range. No deliberate deviations or new seams.
+      Host edge tests and ARM release build pass. match.py exits 1: LLVM
+      emits 24 instructions versus 21, with branches replacing predication,
+      two calls and the same state/error flow. Standalone host smoke using
+      real callees confirms output-to-input reset and restricted output.
+      No device run performed.
