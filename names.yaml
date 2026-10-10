@@ -16,6 +16,49 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080a9eec
+    ghidra: FUN_080a9eec
+    name: tt_cmap4_next_segment
+    size: 148
+    sig: "int32_t tt_cmap4_next_segment(TtCMap4 *cmap, uint32_t segment)"
+    module: ft/cmap4_next_segment
+    status: ported
+    vars:
+      param_1/r0: cmap
+      param_2/r1: segment
+      r2: segment_count
+      r4: table
+      r3: array_cursor
+      cmap+0x20: segment_count
+      cmap+0x24: current_segment
+      cmap+0x28: start_code
+      cmap+0x2c: end_code
+      cmap+0x30: delta
+      cmap+0x34: glyph_array
+    notes: >-
+      Raw A32 extent [0x080a9eec,0x080a9f80) is 148 bytes; next function
+      starts with PUSH {r4-r6,lr}. Whole-image aligned decoding verifies
+      two incoming plain BLs at 0x0808639c and 0x080d4ef4, zero predicated
+      incoming BLs, and zero outgoing plain or predicated BLs. Callers
+      implement format-4 character iteration and lookup: big-endian
+      endCode/startCode/idDelta/idRangeOffset arrays identify the format.
+      Scan segments from the supplied unsigned index, caching end/start
+      and signed delta before checking the range offset. Raw LDRSB at
+      0x080a9f2c proves signed idDelta, unlike Ghidra's unsigned CONCAT11.
+      Skip offset 0xffff; otherwise cache the index and NULL for zero
+      offset or the glyph array relative to the offset word. Return 0
+      on selection, -1 on exhaustion; exhaustion retains the last scanned
+      metrics but preserves the previous selected index and pointer.
+      No callee seams. Reuses FtCMap prefix; repr(C) native host pointers
+      are the only representation deviation. Host edge tests cover signed
+      extrema, big-endian fields, self-relative pointers, skipped segments,
+      exhaustion and unsigned out-of-range indices. Full host suite:
+      15225 passed. ARM release build passed. Standalone smoke selected
+      segment 1, range 66..90, delta -2, resolved glyph 5, then exhausted.
+      match.py exit 1: 37 original versus 58 Rust instructions; LLVM
+      precomputes array bases, uses shifts for sign extension and byte
+      rearrangement for the offset, retaining the scan, sentinel test,
+      cached ARM offsets and zero/nonzero pointer selection.
   - address: 0x080aabe0
     ghidra: FUN_080aabe0
     name: jpeg_ack_interrupt
