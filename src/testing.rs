@@ -40,6 +40,7 @@ extern crate std;
 /// overlap.
 pub mod hints {
     pub const ENTRY_TABLE_FINALIZE_LAST: usize = 0x60c1_0000;
+    pub const REFCOUNTED_BUFFER_OWNER_DESTROY: usize = 0x6b7f_0000;
     pub const PSH_HINT_TABLE_RECORD: usize = 0x7033_0000;
     pub const PKCS7_GET_OCTET_STRING: usize = 0x7032_0000;
     pub const PFR_GLYPH_CLOSE_CONTOUR: usize = 0x7031_0000;

@@ -57,6 +57,7 @@ pub mod fixa_resource;
 pub mod managed_handle;
 pub mod memh_handle;
 pub mod memh_handle_release;
+pub mod refcounted_buffer_owner_destroy;
 pub mod memh_buffer_create;
 pub mod memh_get_len;
 pub mod memh_set_len;
