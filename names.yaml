@@ -16,6 +16,36 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08090bc0
+    ghidra: FUN_08090bc0
+    name: path_facade_slot_80_from_cstr
+    size: 56
+    sig: "u32 path_facade_slot_80_from_cstr(const u8 *path, u32 value, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path
+      param_2/r1: value (saved in r4)
+      param_3/r2: base_hint (saved in r5)
+      param_4/r3: dead spill word, not an argument
+      uStack_18/uStack_14: temporary StringObject storage
+      uVar1: status
+      FUN_08279284: path_object_construct
+      FUN_08090bf8: path_facade_slot_80
+      thunk_FUN_08277484: string_object_destroy_veneer at 0x082792fc
+    notes: >-
+      Raw A32 establishes [0x08090bc0,0x08090bf8), 56 bytes without literals;
+      next real function starts with push at 0x08090bf8. Whole-image aligned
+      BL decoding finds one incoming plain BL at 0x08047484 and one
+      predicated BL at 0x080474bc. Three outgoing plain BLs, zero predicated.
+      Constructs a path object, dispatches guarded facade slot +0x80 with
+      full-width value and base hint, destroys original storage on every
+      status, and returns saved status. Concrete virtual semantics remain
+      unidentified. Typed storage replaces argument spills; r3 is dead.
+      Existing ports are called directly with no new seams. Host suite passes
+      15322 tests. ARM release builds. Reviewed match.py exit 1: 14 original
+      versus 18 Rust instructions; three calls, argument flow, cleanup and
+      saved result preserved, with LLVM frame setup differences.
   - address: 0x08090bf8
     ghidra: FUN_08090bf8
     name: path_facade_slot_80
