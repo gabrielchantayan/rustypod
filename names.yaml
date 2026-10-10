@@ -16,6 +16,41 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08090bf8
+    ghidra: FUN_08090bf8
+    name: path_facade_slot_80
+    size: 80
+    sig: "u32 path_facade_slot_80(StringObject *path_object, u32 value, u32 base_hint)"
+    module: app/path_probe
+    status: ported
+    renames:
+      param_1/r0: path_object (saved in r4)
+      param_2/r1: value (full-width word saved in r5)
+      param_3/r2: base_hint (guard constructor argument)
+      param_4/r3: dead spill word, not a semantic argument
+      piVar1: facade
+      uVar2: status
+      uStack_20: guard storage
+      FUN_08206e40: path_probe_guard_construct via existing seam
+      FUN_0818a0bc: facade_for_selector via existing seam
+      FUN_08206e6c: path_probe_guard_destroy via existing seam
+    notes: >-
+      Raw A32 proves [0x08090bf8,0x08090c48), 80 instruction bytes without
+      literals; next real function begins with push at 0x08090c48.
+      Whole-image aligned word decoding finds two incoming plain BLs at
+      0x08090be0 and 0x0813adfc, zero predicated incoming BLs. Body has
+      three plain BLs, zero predicated BLs, and one indirect BLX.
+      Constructs a scoped guard using r2, fetches selector 1, invokes
+      facade slot +0x80 with path and full-width value, destroys the guard
+      on every status, and returns saved status verbatim. Concrete virtual
+      semantics remain unresolved; no attribute identity is assumed.
+      Typed storage replaces argument spills; native-width slots use target
+      word indices. Existing seams retained. Host suite passes 15321 tests;
+      standalone production-body smoke proves full-width path mutation,
+      error status preservation and guard release. ARM release builds.
+      Reviewed match.py exit 1: 20 original versus 29 Rust instructions;
+      seam loads replace direct BLs with BLX, while slot +0x80, argument
+      order, cleanup and saved result remain intact. No device run claimed.
   - address: 0x0809114c
     ghidra: FUN_0809114c
     name: ata_taskfile_pack_28bit
