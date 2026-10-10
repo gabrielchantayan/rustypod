@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x080ad52c
+    ghidra: FUN_080ad52c
+    name: af_glyph_hints_done
+    size: 156
+    sig: "void af_glyph_hints_done(AfGlyphHints *hints)"
+    module: ft/glyph_hints_done
+    status: ported
+    vars:
+      param_1/r5: hints
+      r8: memory
+      r6: axis_index
+      r4: axis
+      r7: zero
+      hints+0x00: memory
+      hints+0x18: point_capacity
+      hints+0x1c: point_count
+      hints+0x20: points
+      hints+0x24: contour_capacity
+      hints+0x28: contour_count
+      hints+0x2c: contours
+      hints+0x30: axes
+    notes: >-
+      Raw A32 extent [0x080ad52c,0x080ad5c8), 156 bytes; next word
+      is a fresh push prologue. Four outgoing plain BLs at 0x080ad564,
+      0x080ad57c, 0x080ad598, 0x080ad5b0 target the existing ft_mem_free
+      at 0x082cfae8; zero predicated BLs. Two incoming plain BLs at
+      0x080dd294 and 0x082b32a0; zero predicated incoming BLs. Null hints
+      or memory is inert. Snapshot memory, release segments then edges
+      for each seven-word axis, then contours and points; retain callback
+      state ordering and finally clear memory. Five header words, each
+      axis's final word, and trailing data survive. Native host pointers
+      are the sole representation deviation; no new callee seams.
+      Tests cover all 64 partial-allocation masks, callback-visible state,
+      null inputs, untouched words and repeated cleanup. Full host suite:
+      15217 passed. ARM release build passed. Throwaway smoke released six
+      real allocations and repeated cleanup safely. match.py exit 1:
+      39 original versus 48 Rust instructions; LLVM unrolls the two-axis
+      loop into six frees, retaining target offsets and callback ordering.
   - address: 0x080ad5c8
     ghidra: FUN_080ad5c8
     name: af_glyph_hints_save
