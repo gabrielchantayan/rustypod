@@ -16,6 +16,39 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809bb88
+    ghidra: FUN_0809bb88
+    name: jpeg_submit_buffer_pair
+    size: 232
+    sig: "void jpeg_submit_buffer_pair(const u32 *buffers, u32 *descriptors)"
+    module: jpeg/submit_buffer_pair
+    status: ported
+    vars: {param_1/r0: buffers, param_2/r1: descriptors, r7: selector, r8: decoder_state, r12: enabled}
+    renames: {DAT_0809bc5c: decoder_state, DAT_0809bc60: buffer_registers, DAT_0809bc64: bank_registers, DAT_0809bc68: command_registers, DAT_0809bc6c: command_base}
+    notes: >-
+      Raw A32 extent [0x0809bb88,0x0809bc70) is 232 bytes: 212
+      instruction bytes followed by five literals; next function opens with
+      PUSH. Independent whole-image aligned BL decoding finds two plain
+      incoming BLs at 0x08089f40 and 0x0808a0cc, zero predicated incoming
+      BLs, and zero outgoing BLs of either kind. Existing JPEG source and
+      acknowledgement ports identify global state 0x08a0a79c. Clear byte
+      zero, program descriptor word three and its wrapping +0x200 extent
+      into 0x39660018/1c, set control to three and copy buffers words five
+      and six into both banks. State word +0x58 selects zero versus nonzero
+      bank; descriptors +0x10/+0x24 receive that value and wrapping +8.
+      Poll 0x39650014 bit 16, write (selector << 30) | 0x80, then for
+      both five-word descriptors poll 0x39641808 bit one and issue
+      0x20341 | (nonzero << 19) and 0x31 | (nonzero << 3). Finally
+      XOR selector with one. Precise register meanings remain unidentified.
+      No callee seams. Deliberate deviations are volatile accesses and
+      isolated host RAM/MMIO storage; target-width word layout is unchanged.
+      Host edge tests cover nonboolean selectors, wrapping arithmetic,
+      zero/high-bit flags, neighboring storage and consecutive submissions.
+      Full host suite, standalone executable submission smoke and ARM
+      release build pass. match.py exits one with a structural diff:
+      LLVM unrolls the two-command loop, retains all three readiness polls
+      and ordered stores, and introduces no calls (53 original instructions
+      versus 66 disassembly lines including six Rust literal words).
   - address: 0x0809c7ec
     ghidra: FUN_0809c7ec
     name: payload_u16_be_store
