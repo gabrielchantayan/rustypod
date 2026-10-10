@@ -76,6 +76,23 @@ pub unsafe extern "C" fn current_utc_offset_query(
     valid
 }
 
+/// Query whether the current UTC offset is valid without retrieving offsets.
+///
+/// Original: `FUN_080a6af8` @ 0x080a6af8, exactly 12 bytes through
+/// 0x080a6b04 (the next function's push). Raw words are e3a01000,
+/// e3a00000, ea001294: zero both output pointers and tail-dispatch to
+/// `current_utc_offset_query` @ 0x080ab558, preserving its r0 result.
+/// Two plain inbound BL sites (0x08171aec, 0x081722e0), zero predicated
+/// inbound BL sites; zero outgoing BL instructions and one tail branch.
+/// No deliberate behavioral deviations; reuse the existing ported query.
+/// ARM match: LLVM adds an fp/lr frame and reverses the two zero moves;
+/// the final R_ARM_JUMP24 relocation still targets current_utc_offset_query.
+#[cfg_attr(target_os = "none", no_mangle)]
+#[inline(never)]
+pub unsafe extern "C" fn current_utc_offset_is_valid() -> i32 {
+    current_utc_offset_query(core::ptr::null_mut(), core::ptr::null_mut())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +155,44 @@ mod tests {
         assert_eq!(valid, 0);
         assert_eq!(QUERY_COUNT.load(Ordering::Relaxed), 2);
         unsafe { install(saved) };
+    }
+
+    unsafe extern "C" fn real_calendar_query(record: *mut CalendarQueryRecord) -> i32 {
+        crate::time::current_datetime_query::current_datetime_query(
+            (*record).bytes.as_mut_ptr(),
+        ) as i32
+    }
+
+    unsafe extern "C" fn calendar_get(_force: u32, state: *mut super::super::clock_state::ClockState) -> i32 {
+        (*state).year = 2024;
+        (*state).month = 1;
+        (*state).day = 1;
+        // RTC date validity must not override the shadow's zone-valid bit.
+        (*state).status = 0xff;
+        0
+    }
+
+    #[test]
+    fn zone_validity_uses_only_shadow_zone_bit_across_transitions() {
+        use super::super::clock_state::{
+            CLOCK_STATE_GET, CLOCK_STATE_SHADOW, CLOCK_STATE_TEST_LOCK,
+        };
+        let _query_guard = QUERY_LOCK.lock();
+        let _clock_guard = CLOCK_STATE_TEST_LOCK.lock();
+        unsafe {
+            let saved_query = install(real_calendar_query);
+            let saved_get = ptr::replace(ptr::addr_of_mut!(CLOCK_STATE_GET), calendar_get);
+            let saved_shadow = ptr::read(ptr::addr_of!(CLOCK_STATE_SHADOW));
+            // Nonzero signed offset and active DST do not themselves imply validity.
+            CLOCK_STATE_SHADOW.utc_offset_quarters = -32;
+            CLOCK_STATE_SHADOW.dst_active = 1;
+            for status in [0, 1, 2, 3, 0xfd, 0xff, 0] {
+                CLOCK_STATE_SHADOW.status = status;
+                assert_eq!(current_utc_offset_is_valid(), i32::from(status & 2 != 0));
+            }
+            ptr::write(ptr::addr_of_mut!(CLOCK_STATE_SHADOW), saved_shadow);
+            ptr::write(ptr::addr_of_mut!(CLOCK_STATE_GET), saved_get);
+            install(saved_query);
+        }
     }
 }
