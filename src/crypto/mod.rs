@@ -46,6 +46,7 @@ pub mod cached_context_ensure;
 pub mod tagged_reference_retain;
 pub mod store_lookup;
 pub mod opaque_context_cleanup;
+pub mod collection_context_destroy;
 pub mod obj_bsearch;
 pub mod obj_cmp;
 pub mod asn1_integer_set;
