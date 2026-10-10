@@ -16,6 +16,38 @@
 base: 0x08000000
 
 functions:
+  - address: 0x08067ad8
+    ghidra: FUN_08067ad8
+    name: rtc_context_set_configuration_b8a
+    size: 28
+    sig: "void rtc_context_set_configuration_b8a(RtcContextOwner *owner, u32 value)"
+    module: time/rtc
+    status: ported
+    vars:
+      param_1/r0: owner
+      param_2/r1: value
+      r2: context
+      r3: previous_configuration_byte
+      owner+0xf00: rtc_context
+      context+0xb8a: configuration_b8a
+      context+0xb90: dirty
+    notes: >-
+      Raw words e5902f00 e5d23b8a e1530001 15c21b8a 15900f00
+      1affdade e12fff1e establish extent [0x08067ad8,0x08067af4),
+      28 bytes; the next independent setter starts at 0x08067af4.
+      Whole-image aligned A32 decoding finds two plain incoming BLs
+      at 0x08171998 and 0x081728f8, zero predicated incoming BLs,
+      and zero outgoing plain or predicated BLs. Conditional tail BNE
+      reaches canonical rtc_context_mark_dirty at 0x0805e66c.
+      Compare unsigned byte +0xb8a with full u32, store low byte on
+      mismatch, reload owner context pointer and mark dirty; equal values
+      preserve existing dirty state. Field product meaning is unrecovered.
+      Caller 0x08171998 passes a normalized byte; 0x081728f8 passes
+      the cached byte in r1. Ghidra omits the second argument there.
+      Reuse RTC owner layout and dirty port; host pointers widen only
+      the owner tail. Host suite, ARM release build and actual-source
+      standalone smoke pass. match.py exits 1: LLVM adds a frame and
+      an equal early return; byte store and owner pointer reload remain.
   - address: 0x08067bb8
     ghidra: FUN_08067bb8
     name: ui_element_word_pair_set
