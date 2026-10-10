@@ -242643,3 +242643,32 @@ functions:
       real delivery and recycling. ARM release build passed. match.py reports
       23 stock versus 71 Rust instructions: list and delivery inline, hooks
       use BLX; lock/pop/unlock ordering, retry and result paths remain intact.
+
+  - address: 0x0807d918
+    ghidra: FUN_0807d918
+    name: t42_is_whitespace
+    size: 36
+    sig: "uint32_t t42_is_whitespace(uint32_t character)"
+    module: ft/t42_is_whitespace
+    status: ported
+    vars: {r0: character_then_boolean_result}
+    renames: {param_1: character}
+    notes: >-
+      Raw A32 establishes [0x0807d918,0x0807d93c): six CMP/CMPNE
+      instructions, MOVEQ one, MOVNE zero, and BX LR; the next real
+      function starts with PUSH at 0x0807d93c. Complete aligned firmware
+      decoding verifies two incoming plain BLs at 0x080a9c70 and
+      0x080c4ef4, zero predicated incoming BLs, and zero outgoing BLs.
+      Type 42 encoding and charstring parsers test the byte following
+      def/end keywords. Accepts exactly NUL, TAB, LF, FF, CR, and space;
+      rejects VT and compares all 32 input bits without truncation.
+      Returns exactly zero or one. No callees, seams or semantic deviations.
+      Bounded bit-mask implementation avoids LLVM folding with the
+      equivalent Type 1 ps_is_whitespace export. Host tests cover every
+      byte and wide/negative words; public-entry source smoke covers
+      keyword boundaries, NUL, VT and nontruncation. Full host suite and
+      ARM release build pass. No device execution.
+      match.py exit 1 reviewed: nine stock versus twelve Rust instructions.
+      LLVM uses a frame, bounded 0x3601 bit-mask shift and CLZ equality
+      for space instead of predicated comparisons; wide words select the
+      exact-space result. Export remains distinct and has no BL calls.
