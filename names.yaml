@@ -1340,6 +1340,43 @@ functions:
       Reviewed match.py exit 1: selection and rejection preserved;
       LLVM adds a frame and endian-swapped mask literal 0xfffff800.
       Export remains distinct and makes no calls. No device run claimed.
+  - address: 0x08093a9c
+    ghidra: FUN_08093a9c
+    name: codec_level_scale
+    size: 92
+    sig: "u32 codec_level_scale(u32 first_reg, u32 second_reg, u32 level, u32 upper_margin, u32 lower_margin)"
+    module: drivers/codec_cached_level
+    status: ported
+    renames:
+      param_1/r0: first_reg
+      param_2/r1: second_reg_unused
+      param_3/r2: level_signed_low_halfword
+      param_4/r3: upper_margin
+      param_5/stack: lower_margin
+      DAT_08093af4: codec_level_state
+      FUN_080da644: stock_codec_write_duplicate_gain
+    notes: >-
+      Raw extent [0x08093a9c,0x08093af8) is 88 executable bytes plus
+      literal 0x089d0ef4; next function starts LDRH r2,[r0,#6]. Whole-image
+      aligned A32 decoding verifies two plain inbound BLs at 0x080ca168
+      and 0x080d5280, no predicated inbound BLs, one plain outbound BL at
+      0x08093ae8 to 0x080da644, and no predicated outbound BLs. Compute
+      floor=-60-lower_margin with word wrapping, signed low-halfword
+      product of level and 12-floor-upper_margin, arithmetic shift by 8,
+      then add floor and calibration byte +1. Wrap to signed byte before
+      clamping to [-60,12], mask to seven bits, write and return zero.
+      second_reg is unused; raw writer ORs first_reg with 0x80 and sends
+      duplicate gain bytes to codec I2C slave 0x4a. No canonical writer
+      entry exists; retain typed fixed-address call, not another port.
+      Both cached Rust callers now call this port directly. Volatile state
+      access and host-only writer seam are deliberate deviations. Host
+      edge tests and production-source smoke passed; ARM release built.
+      All 15301 host tests passed. Reviewed match.py exit 1: LLVM uses MUL
+      and LSR instead of SMULBB and ASR, preserving product bits 8..15
+      which alone survive the signed-byte wrap. Upper input bits cannot
+      change those bits. Clamp order is reversed but equivalent; frame
+      setup, folded calibration pointer 0x089d0ef5 and indirect BLX to
+      0x080da644 are intentional. Hardware I2C was not exercised.
   - address: 0x080ca12c
     ghidra: FUN_080ca12c
     name: codec_cached_aux_level_set
@@ -1350,7 +1387,7 @@ functions:
     renames:
       param_1/r0: level
       DAT_080ca170: codec_level_state
-      FUN_08093a9c: stock_codec_level_scale
+      FUN_08093a9c: codec_level_scale
     notes: >-
       Raw extent [0x080ca12c,0x080ca174) contains 68 executable bytes
       and pointer literal 0x089d0ef4; the next real function begins
@@ -1363,14 +1400,14 @@ functions:
       the full input and margins 11/0. Correct Ghidra's void signature:
       the skip path clears r0 and the stock scaler explicitly returns zero.
       Caller 0x080ce660 sets refresh byte +0 before reapplying both
-      cached levels. No canonical entry exists for the stock scaler;
-      reuse the existing codec_cached_level module and its host seam.
+      cached levels. The scaler is now ported in codec_cached_level;
+      both cached callers use it directly with a host writer seam.
       Deliberate deviations are volatile cache accesses and host storage.
       Host tests cover changed, unchanged, forced, wide and repeated
       inputs, untouched adjacent bytes, and cache-before-scaler ordering.
       Production-source host smoke exercises repeated unchanged-zero calls.
       Host suite passes all 15149 tests and ARM release build succeeds.
-      Reviewed match.py exit 1 structural diff: LLVM preserves full-word
+      Before scaler cutover, match.py exit 1 showed preserved full-word
       comparison, conditional refresh read, zero skip return, byte store
       before scaling, and all five scaler arguments. Intentional differences:
       folded cache pointer 0x089d0ef7, early BXEQ return, frame setup,
@@ -1650,7 +1687,7 @@ functions:
     renames:
       param_1/r0: level
       DAT_080d5288: codec_level_state
-      FUN_08093a9c: stock_codec_level_scale
+      FUN_08093a9c: codec_level_scale
     notes: >-
       Raw extent [0x080d5244,0x080d528c) comprises 68 executable bytes
       and the pointer literal 0x089d0ef4; the next function starts with
@@ -1659,18 +1696,18 @@ functions:
       inbound BLs, and one outbound plain BL at 0x080d5280 to 0x08093a9c.
       Compare the full input word with state byte +2; skip only when
       equal and refresh byte +0 is zero. Otherwise store the low byte
-      before calling the unported stock scaler with 0x1a,0x1b,level,9,7.
+      before calling the Rust scaler with 0x1a,0x1b,level,9,7.
       Raw scaler returns zero and writes a clamped signed gain encoded
       in seven bits through 0x080da644 to codec I2C address 0x4a.
       Ghidra's void return is corrected to u32: the skip path explicitly
       clears r0 and the apply path preserves the scaler's zero result.
       The caller at 0x080ce660 forces reapplication by setting byte +0.
-      No canonical entry or Rust seam exists for 0x08093a9c; retain a
-      fixed-address stock call rather than port another function.
+      The scaler at 0x08093a9c is now ported in this module; both cached
+      callers use it directly and share a host-only writer seam.
       Volatile cache accesses preserve write-before-call ordering.
       Host tests cover refresh flags, unchanged and changed inputs,
       truncation without truncating the comparison, and repeated updates.
-      Reviewed match.py structural diff: LLVM retains the full-word
+      Before scaler cutover, match.py showed preserved full-word
       comparison, conditional refresh read, zero fast return, byte store,
       and five scaler arguments. It folds the cache pointer to +2 and
       uses BLX through literal 0x08093a9c instead of the stock direct BL;
