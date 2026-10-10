@@ -40,6 +40,7 @@
 //! [`bn_ucmp`] ports its unsigned magnitude comparison from the same
 //! file.
 pub mod add_lock;
+pub mod x509_store_new;
 pub mod attribute_list_upsert;
 pub mod cached_context_ensure;
 pub mod tagged_reference_retain;
