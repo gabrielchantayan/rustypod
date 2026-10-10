@@ -16,6 +16,44 @@
 base: 0x08000000
 
 functions:
+  - address: 0x0809867c
+    ghidra: FUN_0809867c
+    name: bdf_append_comment
+    size: 136
+    sig: "i32 bdf_append_comment(BdfCommentFont *font, const u8 *source, i32 length)"
+    module: ft/bdf_comments
+    status: ported
+    vars:
+      param_1/r4: font
+      param_2/r7: source
+      param_3/r5: length
+      local_18: error
+      iVar1/r6: destination
+      uVar2: old_comments
+    renames:
+      FUN_082cfc3c: ft_mem_realloc
+      thunk_EXT_FUN_22000020: __rt_memcpy
+    notes: >-
+      Raw A32 words establish [0x0809867c,0x08098704), 136 bytes,
+      no literal pool; the next entry begins with push. Two outbound
+      unconditional BLs at 0x080986b8 and 0x080986e0, zero predicated BLs.
+      BDF start and glyph parsers call this for COMMENT text. Resize
+      font comments (+0x54) from comments_len (+0x58) to old length
+      plus source length plus one, using memory at +0x4088 and item
+      size one. Store allocator result unconditionally. On zero error,
+      copy source bytes, append LF (not NUL), then reload and increment
+      comments_len. The 0x08037db0 veneer targets IRAM 0x22000020,
+      the mirror of ported __rt_memcpy at 0x08000020; no new seam.
+      Deviations: repr(C) host pointers are native width; untouched
+      target regions use word-array padding. Return only r0 error,
+      since the original restores r1 rather than returning undefined8.
+      Host suite passes 15293 tests, including empty/repeated/binary
+      comments, no trailing NUL, sentinels, allocation failure, and
+      invalid old count. Standalone API smoke produces first LF LF
+      last LF with length 12. ARM release build passes. match.py exit
+      1 reviewed: 34 instructions each, same allocator/copy calls,
+      error gate, unconditional pointer store, LF and length updates;
+      LLVM changes register allocation and frame setup.
   - address: 0x08098704
     ghidra: FUN_08098704
     name: bdf_list_ensure_capacity
