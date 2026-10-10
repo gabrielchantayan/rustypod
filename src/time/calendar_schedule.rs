@@ -15,11 +15,9 @@
 //! resulting seconds back to a packed date/time, and applies that record with
 //! mask `0x3f`.
 //!
-//! Deliberate deviations: setters `FUN_08056800` and `FUN_080985f4`, and the
-//! optional callback at `DAT_080dc498 + 0x0c`, have no names.yaml identities.
-//! Device builds call their verified retail addresses/table directly; tests
-//! inject these opaque operations. The already ported date/time and UTC seams
-//! are called directly outside tests.
+//! Deliberate deviations: the optional callback at +0x0c uses verified
+//! device RAM; tests inject the scheduling operations. Calendar setters and
+//! date/time and UTC seams call their existing Rust ports outside tests.
 
 use core::ptr;
 
@@ -30,6 +28,7 @@ use super::utc_offset::current_utc_offset_query;
 
 const CALENDAR_RECORD_SIZE: usize = 20;
 const CALENDAR_SET_MASK: u32 = 0x180;
+#[cfg(test)]
 const CALENDAR_APPLY_MASK: u32 = 0x3f;
 const BASE_UTC_OFFSET_OFFSET: usize = 10;
 const DAYLIGHT_SAVING_OFFSET: usize = 12;
@@ -38,10 +37,9 @@ type CalendarSet = unsafe extern "C" fn(*mut u8, u32);
 type CalendarApply = unsafe extern "C" fn(*mut u8, u32);
 type CalendarNotification = unsafe extern "C" fn();
 
-#[cfg(target_os = "none")]
+#[cfg(not(test))]
 unsafe fn set_calendar(record: *mut u8, mask: u32) {
-    let set: CalendarSet = core::mem::transmute(0x0805_6800usize);
-    set(record, mask);
+    super::calendar_update_fields::calendar_update_fields(record, mask);
 }
 
 #[cfg(target_os = "none")]
@@ -53,10 +51,9 @@ unsafe fn notify_calendar_change() {
     }
 }
 
-#[cfg(target_os = "none")]
-unsafe fn apply_calendar(record: *mut u8, mask: u32) {
-    let apply: CalendarApply = core::mem::transmute(0x0809_85f4usize);
-    apply(record, mask);
+#[cfg(not(test))]
+unsafe fn apply_calendar(record: *mut u8) {
+    super::calendar_apply_datetime::calendar_apply_datetime(record);
 }
 
 #[cfg(test)]
@@ -162,7 +159,7 @@ pub unsafe extern "C" fn schedule_calendar_update(minute_adjustment: i32, second
         set_calendar(calendar.as_mut_ptr(), CALENDAR_SET_MASK);
         notify_calendar_change();
         unix_seconds_to_datetime(scheduled, current.as_mut_ptr().cast());
-        apply_calendar(current.as_mut_ptr(), CALENDAR_APPLY_MASK);
+        apply_calendar(current.as_mut_ptr());
     }
     1
 }
