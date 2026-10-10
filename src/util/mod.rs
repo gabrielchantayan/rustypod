@@ -485,6 +485,7 @@ pub mod utf16_nul_terminator_consume;
 pub mod utf16_next_whitespace_delimited_range;
 pub mod utf16_utf8_byte_len;
 pub mod utf8_next_codepoint_permissive;
+pub mod counted_text_width_accumulator;
 pub mod utf8_codepoint_count_permissive;
 pub mod utoa;
 pub mod video_engine;
